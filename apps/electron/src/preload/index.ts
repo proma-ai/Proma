@@ -327,6 +327,18 @@ export interface ElectronAPI {
     getMe: () => Promise<CloudAuthIpcResponse>
     /** 获取认证状态 */
     getAuthState: () => Promise<CloudAuthState>
+    /** 邮箱验证 */
+    verifyEmail: (data: { email: string; code: string }) => Promise<CloudAuthIpcResponse>
+    /** 忘记密码 */
+    forgotPassword: (data: { email: string }) => Promise<CloudAuthIpcResponse>
+    /** 重置密码 */
+    resetPassword: (data: { email: string; code: string; password: string }) => Promise<CloudAuthIpcResponse>
+    /** 重发验证码 */
+    resendCode: (data: { email: string }) => Promise<CloudAuthIpcResponse>
+    /** 获取 Google OAuth 状态 */
+    getGoogleOAuthStatus: () => Promise<{ configured: boolean }>
+    /** 打开 Google 登录（系统浏览器） */
+    openGoogleLogin: () => Promise<CloudAuthIpcResponse>
     /** 订阅认证状态变化（返回清理函数） */
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => () => void
   }
@@ -683,6 +695,24 @@ const electronAPI: ElectronAPI = {
     },
     getAuthState: () => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AUTH_STATE)
+    },
+    verifyEmail: (data: { email: string; code: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.VERIFY_EMAIL, data)
+    },
+    forgotPassword: (data: { email: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.FORGOT_PASSWORD, data)
+    },
+    resetPassword: (data: { email: string; code: string; password: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.RESET_PASSWORD, data)
+    },
+    resendCode: (data: { email: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.RESEND_CODE, data)
+    },
+    getGoogleOAuthStatus: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_GOOGLE_OAUTH_STATUS)
+    },
+    openGoogleLogin: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.OPEN_GOOGLE_LOGIN)
     },
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => {
       const listener = (_: unknown, state: CloudAuthState): void => callback(state)

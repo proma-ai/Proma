@@ -7,6 +7,15 @@
 import { atom } from 'jotai'
 import type { CloudUserInfo } from '@proma/shared'
 
+/** 认证视图类型 */
+export type CloudAuthView =
+  | 'login'
+  | 'register'
+  | 'verify-email'
+  | 'forgot-password'
+  | 'reset-password'
+  | 'pending'
+
 /** Cloud 用户信息 */
 export const cloudUserAtom = atom<CloudUserInfo | null>(null)
 
@@ -14,10 +23,13 @@ export const cloudUserAtom = atom<CloudUserInfo | null>(null)
 export const cloudAuthLoadingAtom = atom<boolean>(true)
 
 /** 当前认证视图 */
-export const cloudAuthViewAtom = atom<'login' | 'register'>('login')
+export const cloudAuthViewAtom = atom<CloudAuthView>('login')
 
 /** 认证错误信息 */
 export const cloudAuthErrorAtom = atom<string | null>(null)
+
+/** 认证流程中的邮箱（用于验证/重置密码页面间传递） */
+export const cloudAuthEmailAtom = atom<string>('')
 
 /** 是否已认证（派生 atom） */
 export const isCloudAuthenticatedAtom = atom<boolean>(

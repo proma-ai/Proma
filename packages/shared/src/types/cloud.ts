@@ -12,6 +12,7 @@ export interface CloudUserInfo {
   name: string
   image?: string | null
   avatar?: string | null
+  status: 'PENDING' | 'APPROVED' | 'DISABLED'
 }
 
 /** Cloud 认证状态快照 */
@@ -36,6 +37,14 @@ export const CLOUD_IPC_CHANNELS = {
   REFRESH_TOKEN: 'cloud:auth:refresh-token',
   GET_ME: 'cloud:auth:get-me',
   GET_AUTH_STATE: 'cloud:auth:get-state',
+  // 邮箱验证 / 密码重置
+  VERIFY_EMAIL: 'cloud:auth:verify-email',
+  FORGOT_PASSWORD: 'cloud:auth:forgot-password',
+  RESET_PASSWORD: 'cloud:auth:reset-password',
+  RESEND_CODE: 'cloud:auth:resend-code',
+  // Google OAuth
+  GET_GOOGLE_OAUTH_STATUS: 'cloud:auth:google-oauth-status',
+  OPEN_GOOGLE_LOGIN: 'cloud:auth:open-google-login',
   // 认证状态变化推送通道（主进程 → 渲染进程）
   AUTH_STATE_CHANGED: 'cloud:auth:state-changed',
   // 后续阶段的通道预留

@@ -17,7 +17,15 @@ import {
   isApiError,
 } from '@proma/cloud'
 import type { TokenStorage, CloudApiClient, AuthApi } from '@proma/cloud'
-import type { LoginRequest, RegisterRequest, CloudUser } from '@proma/cloud'
+import type {
+  LoginRequest,
+  RegisterRequest,
+  CloudUser,
+  VerifyEmailRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  ResendCodeRequest,
+} from '@proma/cloud'
 import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 
@@ -154,6 +162,7 @@ function toUserInfo(user: CloudUser): CloudUserInfo {
     name: user.name,
     image: user.image,
     avatar: user.avatar,
+    status: user.status,
   }
 }
 
@@ -209,6 +218,11 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
   try {
     const result = await getAuthApi().login(data)
 
+    // PENDING 状态：不保存认证，返回用户信息供渲染进程判断
+    if (result.user.status === 'PENDING') {
+      return { success: false, error: '请先验证邮箱', user: toUserInfo(result.user) }
+    }
+
     // 保存 token
     cachedAccessToken = result.token
     if (result.refreshToken) {
@@ -231,21 +245,11 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
 /** 注册 */
 export async function register(data: RegisterRequest): Promise<CloudAuthIpcResponse> {
   try {
-    const result = await getAuthApi().register(data)
+    await getAuthApi().register(data)
 
-    // 保存 token
-    cachedAccessToken = result.token
-    if (result.refreshToken) {
-      cachedRefreshToken = result.refreshToken
-    }
-    saveTokensToFile()
-
-    // 缓存用户信息
-    cachedUser = toUserInfo(result.user)
-
-    broadcastAuthStateChanged()
-
-    return { success: true, user: cachedUser }
+    // 注册成功后不保存 token、不设置认证状态
+    // 用户需要先验证邮箱，再通过登录流程进入
+    return { success: true }
   } catch (error) {
     const message = isApiError(error) ? error.message : '注册失败，请稍后重试'
     return { success: false, error: message }
@@ -280,5 +284,96 @@ export function getAuthState(): CloudAuthState {
   return {
     isAuthenticated: cachedAccessToken !== null && cachedUser !== null,
     user: cachedUser,
+  }
+}
+
+/** 邮箱验证 */
+export async function verifyEmail(data: VerifyEmailRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    await getAuthApi().verifyEmail(data)
+    return { success: true }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '验证失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 忘记密码 */
+export async function forgotPassword(data: ForgotPasswordRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    await getAuthApi().forgotPassword(data)
+    return { success: true }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '发送失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 重置密码 */
+export async function resetPassword(data: ResetPasswordRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    await getAuthApi().resetPassword(data)
+    return { success: true }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '重置失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 重发验证码 */
+export async function resendCode(data: ResendCodeRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    await getAuthApi().resendCode(data)
+    return { success: true }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '发送失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 获取 Google OAuth 状态 */
+export async function getGoogleOAuthStatus(): Promise<{ configured: boolean }> {
+  try {
+    return await getAuthApi().getGoogleOAuthStatus()
+  } catch {
+    return { configured: false }
+  }
+}
+
+/** 打开 Google 登录（系统浏览器） */
+export async function openGoogleLogin(): Promise<CloudAuthIpcResponse> {
+  try {
+    const { shell } = await import('electron')
+    const { getCloudApiConfig } = await import('@proma/cloud')
+    const config = getCloudApiConfig()
+    const loginUrl = getAuthApi().getGoogleLoginUrl(config.baseUrl, 'proma://oauth/callback')
+    await shell.openExternal(loginUrl)
+    return { success: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Google 登录打开失败'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * 处理 OAuth 回调（deep-link: proma://oauth/callback?token=...）
+ */
+export async function handleOAuthCallback(token: string, refreshToken?: string): Promise<CloudAuthIpcResponse> {
+  try {
+    cachedAccessToken = token
+    if (refreshToken) {
+      cachedRefreshToken = refreshToken
+    }
+    saveTokensToFile()
+
+    const user = await getAuthApi().getMe()
+    cachedUser = toUserInfo(user)
+    broadcastAuthStateChanged()
+
+    return { success: true, user: cachedUser }
+  } catch (error) {
+    tokenStorage.clearTokens()
+    const message = isApiError(error) ? error.message : '获取用户信息失败'
+    return { success: false, error: message }
   }
 }

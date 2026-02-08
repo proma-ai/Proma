@@ -4,7 +4,7 @@
  * 根据认证状态决定显示内容：
  * - local 模式 → 直接渲染子组件
  * - cloud + 加载中 → 加载动画
- * - cloud + 未认证 → 登录/注册页
+ * - cloud + 未认证 → 登录/注册/验证/重置等页面
  * - cloud + 已认证 → 渲染子组件
  */
 
@@ -16,8 +16,13 @@ import {
   cloudAuthLoadingAtom,
   cloudAuthViewAtom,
 } from '@/atoms/cloud-auth'
+import type { CloudAuthView } from '@/atoms/cloud-auth'
 import { LoginPage } from './LoginPage'
 import { RegisterPage } from './RegisterPage'
+import { VerifyEmailPage } from './VerifyEmailPage'
+import { ForgotPasswordPage } from './ForgotPasswordPage'
+import { ResetPasswordPage } from './ResetPasswordPage'
+import { PendingPage } from './PendingPage'
 
 interface CloudAuthGateProps {
   children: React.ReactNode
@@ -30,6 +35,16 @@ export function CloudAuthGate({ children }: CloudAuthGateProps): React.ReactElem
   }
 
   return <CloudAuthGuard>{children}</CloudAuthGuard>
+}
+
+/** 视图映射 */
+const AUTH_VIEWS: Record<CloudAuthView, React.ComponentType> = {
+  'login': LoginPage,
+  'register': RegisterPage,
+  'verify-email': VerifyEmailPage,
+  'forgot-password': ForgotPasswordPage,
+  'reset-password': ResetPasswordPage,
+  'pending': PendingPage,
 }
 
 /** 内部组件：仅在 cloud 模式下渲染，避免 local 模式订阅不必要的 atoms */
@@ -50,9 +65,18 @@ function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
     )
   }
 
-  // 未认证 → 显示登录/注册页
+  // 未认证 → 显示对应认证页面
   if (!user) {
-    return view === 'register' ? <RegisterPage /> : <LoginPage />
+    const AuthPage = AUTH_VIEWS[view] || LoginPage
+    return (
+      <div className="flex min-h-full flex-col bg-background">
+        {/* Electron 窗口拖动区域 */}
+        <div className="h-8 app-drag-region shrink-0" />
+        <div className="flex flex-1 items-center justify-center px-4">
+          <AuthPage />
+        </div>
+      </div>
+    )
   }
 
   // 已认证 → 渲染子组件

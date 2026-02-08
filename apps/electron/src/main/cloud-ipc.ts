@@ -7,7 +7,14 @@
 
 import { ipcMain } from 'electron'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
-import type { LoginRequest, RegisterRequest } from '@proma/cloud'
+import type {
+  LoginRequest,
+  RegisterRequest,
+  VerifyEmailRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  ResendCodeRequest,
+} from '@proma/cloud'
 import {
   initCloudAuthService,
   login,
@@ -15,6 +22,12 @@ import {
   logout,
   getMe,
   getAuthState,
+  verifyEmail,
+  forgotPassword,
+  resetPassword,
+  resendCode,
+  getGoogleOAuthStatus,
+  openGoogleLogin,
 } from './lib/cloud-auth-service'
 
 /**
@@ -60,6 +73,52 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     CLOUD_IPC_CHANNELS.GET_AUTH_STATE,
     async () => {
       return getAuthState()
+    },
+  )
+
+  // ===== 邮箱验证 / 密码重置 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.VERIFY_EMAIL,
+    async (_, data: VerifyEmailRequest) => {
+      return verifyEmail(data)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.FORGOT_PASSWORD,
+    async (_, data: ForgotPasswordRequest) => {
+      return forgotPassword(data)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.RESET_PASSWORD,
+    async (_, data: ResetPasswordRequest) => {
+      return resetPassword(data)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.RESEND_CODE,
+    async (_, data: ResendCodeRequest) => {
+      return resendCode(data)
+    },
+  )
+
+  // ===== Google OAuth =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_GOOGLE_OAUTH_STATUS,
+    async () => {
+      return getGoogleOAuthStatus()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.OPEN_GOOGLE_LOGIN,
+    async () => {
+      return openGoogleLogin()
     },
   )
 

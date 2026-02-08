@@ -52,13 +52,17 @@
   * {
     @apply border-border;
   }
+  html, body, #root {
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
   }
 }
 
 /* Draggable title bar region for Electron window */
-.titlebar-drag-region {
+.titlebar-drag-region,
+.app-drag-region {
   -webkit-app-region: drag;
   app-region: drag;
 }
