@@ -10,10 +10,13 @@ import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
+import { migrateFlowSessions } from './lib/flow-migration'
 import { initAutoUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { isCloudMode } from '@proma/cloud'
 import { registerCloudIpcHandlers } from './cloud-ipc'
+import { registerSyncIpcHandlers } from './sync-ipc'
+import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
 
 const PROTOCOL_NAME = 'proma'
@@ -194,6 +197,9 @@ if (!gotTheLock) {
     // 同步默认 Skills 模板到 ~/.proma/default-skills/
     seedDefaultSkills()
 
+    // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
+    migrateFlowSessions()
+
     // Create application menu
     const menu = createApplicationMenu()
     Menu.setApplicationMenu(menu)
@@ -204,6 +210,8 @@ if (!gotTheLock) {
     // Cloud 模式：注册 Cloud IPC 处理器
     if (isCloudMode()) {
       await registerCloudIpcHandlers()
+      // 同步服务依赖 Cloud 认证，在 Cloud IPC 初始化后注册
+      registerSyncIpcHandlers()
     }
 
     // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
@@ -228,6 +236,13 @@ if (!gotTheLock) {
     // 生产环境下初始化自动更新
     if (app.isPackaged && mainWindow) {
       initAutoUpdater(mainWindow)
+    }
+
+    // Cloud 模式：窗口就绪后自动执行增量同步
+    if (isCloudMode() && mainWindow) {
+      mainWindow.once('ready-to-show', () => {
+        scheduleAutoSync(mainWindow!)
+      })
     }
 
     app.on('activate', () => {
