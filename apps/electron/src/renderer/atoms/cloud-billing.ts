@@ -10,6 +10,8 @@ import type {
   PaymentTier,
   PaymentMethod,
   OrderRecord,
+  SubscriptionTier,
+  SubscriptionStatusResponse,
 } from '@proma/shared'
 
 // ===== 账单状态 =====
@@ -45,15 +47,26 @@ export const selectedPaymentMethodAtom = atom<PaymentMethod>('wechat')
 /** 订单列表 */
 export const orderHistoryAtom = atom<OrderRecord[]>([])
 
+// ===== 订阅状态 =====
+
+/** 订阅档位列表 */
+export const subscriptionTiersAtom = atom<SubscriptionTier[]>([])
+
+/** 当前订阅汇总 */
+export const subscriptionStatusAtom = atom<SubscriptionStatusResponse | null>(null)
+
 // ===== 派生 Atoms =====
 
-/** 余额显示（格式化后的字符串） */
+/** 余额显示（格式化后的字符串，包含订阅额度） */
 export const creditsDisplayAtom = atom<string>((get) => {
   const billing = get(billingInfoAtom)
   if (!billing) return '$0.00'
   const credits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
-  if (isNaN(credits)) return '$0.00'
-  return `$${credits.toFixed(2)}`
+  const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
+    ? parseFloat(billing.subscriptionQuotaRemaining)
+    : (billing.subscriptionQuotaRemaining ?? 0)
+  const total = (isNaN(credits) ? 0 : credits) + (isNaN(subRemaining) ? 0 : subRemaining)
+  return `$${total.toFixed(2)}`
 })
 
 // ===== 初始化函数 =====

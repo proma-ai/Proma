@@ -96,6 +96,63 @@ export interface BillingInfo {
   usedQuotaMonthly: number
   usedQuota: number
   discountLevel: number
+  /** 订阅额度汇总 */
+  subscriptionQuotaTotal: number
+  subscriptionQuotaUsed: number
+  subscriptionQuotaRemaining: number
+  hasActiveSubscription: boolean
+}
+
+// ===== 订阅相关类型 =====
+
+/** 订阅订单状态 */
+export type SubscriptionOrderStatus = 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
+
+/** 订阅档位 */
+export interface SubscriptionTier {
+  id: string       // lite/standard/pro/max
+  name: string     // Lite/Standard/Pro/Max
+  quota_usd: number // 额度 (USD)
+  amount_cny: number // 价格 (分)
+}
+
+/** 订阅档位列表响应 */
+export interface SubscriptionTiersResponse {
+  tiers: SubscriptionTier[]
+}
+
+/** 订阅订单记录 */
+export interface SubscriptionOrderRecord {
+  id: string
+  tier: string
+  tier_name: string
+  quota: number
+  used_quota: number
+  remaining_quota: number
+  amount: number
+  order_no: string
+  status: SubscriptionOrderStatus
+  start_at: string
+  expires_at: string
+  paid_at: string | null
+  created_at: string
+}
+
+/** 当前订阅汇总 */
+export interface SubscriptionStatusResponse {
+  has_active: boolean
+  total_quota: number
+  total_used: number
+  total_remaining: number
+  subscriptions: SubscriptionOrderRecord[]
+}
+
+/** 创建订阅微信支付响应 */
+export interface CreateSubscriptionWechatResponse {
+  order_no: string
+  code_url: string
+  amount: number
+  expire_at: string
 }
 
 /** 余额检查响应 */
@@ -259,4 +316,10 @@ export const CLOUD_IPC_CHANNELS = {
   CREATE_API_KEY: 'cloud:api-keys:create',
   UPDATE_API_KEY: 'cloud:api-keys:update',
   DELETE_API_KEY: 'cloud:api-keys:delete',
+  // 订阅相关
+  GET_SUBSCRIPTION_TIERS: 'cloud:subscription:get-tiers',
+  GET_SUBSCRIPTION_CURRENT: 'cloud:subscription:get-current',
+  CREATE_SUBSCRIPTION_WECHAT: 'cloud:subscription:create-wechat',
+  GET_SUBSCRIPTION_ORDER_STATUS: 'cloud:subscription:order-status',
+  GET_SUBSCRIPTION_HISTORY: 'cloud:subscription:history',
 } as const

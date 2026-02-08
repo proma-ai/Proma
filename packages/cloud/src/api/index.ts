@@ -25,3 +25,6 @@ export type { ModelsApi } from './models'
 
 export { createApiKeysApi } from './api-keys'
 export type { ApiKeysApi } from './api-keys'
+
+export { createSubscriptionApi } from './subscription'
+export type { SubscriptionApi } from './subscription'

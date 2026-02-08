@@ -9,9 +9,10 @@ import { BrowserWindow } from 'electron'
 import {
   createBillingApi,
   createPaymentApi,
+  createSubscriptionApi,
   isApiError,
 } from '@proma/cloud'
-import type { BillingApi, PaymentApi } from '@proma/cloud'
+import type { BillingApi, PaymentApi, SubscriptionApi } from '@proma/cloud'
 import type {
   BillingInfo,
   CheckBalanceResponse,
@@ -23,6 +24,10 @@ import type {
   QueryExternalBalanceResponse,
   TransferCreditsResponse,
   BillingIpcResponse,
+  SubscriptionTiersResponse,
+  SubscriptionStatusResponse,
+  SubscriptionOrderRecord,
+  CreateSubscriptionWechatResponse,
 } from '@proma/shared'
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { getApiClient, setQuotaExceededHandler } from './cloud-auth-service'
@@ -31,6 +36,7 @@ import { getApiClient, setQuotaExceededHandler } from './cloud-auth-service'
 
 let billingApi: BillingApi | null = null
 let paymentApi: PaymentApi | null = null
+let subscriptionApi: SubscriptionApi | null = null
 
 function getBillingApi(): BillingApi {
   if (!billingApi) {
@@ -44,6 +50,13 @@ function getPaymentApi(): PaymentApi {
     paymentApi = createPaymentApi(getApiClient())
   }
   return paymentApi
+}
+
+function getSubscriptionApi(): SubscriptionApi {
+  if (!subscriptionApi) {
+    subscriptionApi = createSubscriptionApi(getApiClient())
+  }
+  return subscriptionApi
 }
 
 // ===== 额度不足广播 =====
@@ -167,6 +180,58 @@ export async function queryExternalBalance(apiKey: string): Promise<BillingIpcRe
 export async function transferCredits(apiKey: string, amount: number): Promise<BillingIpcResponse<TransferCreditsResponse>> {
   try {
     const data = await getPaymentApi().transferCredits(apiKey, amount)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+// ===== 订阅相关 =====
+
+/** 获取订阅档位列表 */
+export async function getSubscriptionTiers(): Promise<BillingIpcResponse<SubscriptionTiersResponse>> {
+  try {
+    const data = await getSubscriptionApi().getTiers()
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 获取当前活跃订阅 */
+export async function getSubscriptionCurrent(): Promise<BillingIpcResponse<SubscriptionStatusResponse>> {
+  try {
+    const data = await getSubscriptionApi().getCurrent()
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 创建订阅微信支付 */
+export async function createSubscriptionWechat(tierId: string): Promise<BillingIpcResponse<CreateSubscriptionWechatResponse>> {
+  try {
+    const data = await getSubscriptionApi().createWechatPayment(tierId)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 查询订阅订单状态 */
+export async function getSubscriptionOrderStatus(orderNo: string): Promise<BillingIpcResponse<SubscriptionOrderRecord>> {
+  try {
+    const data = await getSubscriptionApi().getOrderStatus(orderNo)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 获取订阅历史 */
+export async function getSubscriptionHistory(): Promise<BillingIpcResponse<SubscriptionOrderRecord[]>> {
+  try {
+    const data = await getSubscriptionApi().getHistory()
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }

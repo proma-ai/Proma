@@ -1,7 +1,7 @@
 # electron-builder 配置
 # 文档: https://www.electron.build/configuration/configuration
 
-appId: com.proma.app
+appId: cool.proma.app
 productName: Proma
 copyright: Copyright © 2024-2025 Proma
 
@@ -77,6 +77,7 @@ mac:
 
 # DMG 配置
 dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
   contents:
     - x: 130
       y: 220
@@ -111,6 +112,8 @@ win:
 
 # NSIS 安装程序配置
 nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+  differentialPackage: false
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
@@ -120,6 +123,5 @@ nsis:
 # 发布配置
 # ============================================
 publish:
-  provider: github
-  owner: ErlichLiu
-  repo: Proma
+  provider: generic
+  url: https://api.proma.cool/api/v1/updates/

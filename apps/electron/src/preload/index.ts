@@ -58,6 +58,10 @@ import type {
   ApiKeyCreateResponse,
   ApiKeyCreateParams,
   ApiKeyUpdateParams,
+  SubscriptionTiersResponse,
+  SubscriptionStatusResponse,
+  SubscriptionOrderRecord,
+  CreateSubscriptionWechatResponse,
   SyncState,
   SyncResult,
   SyncProgressEvent,
@@ -408,6 +412,22 @@ export interface ElectronAPI {
     update: (keyId: string, params: ApiKeyUpdateParams) => Promise<BillingIpcResponse<ApiKeyResponse>>
     /** 删除 API Key */
     delete: (keyId: string) => Promise<BillingIpcResponse<void>>
+  }
+
+  // ===== Cloud 订阅相关 =====
+
+  /** Cloud 订阅 API */
+  cloudSubscription: {
+    /** 获取订阅档位列表 */
+    getTiers: () => Promise<BillingIpcResponse<SubscriptionTiersResponse>>
+    /** 获取当前活跃订阅 */
+    getCurrent: () => Promise<BillingIpcResponse<SubscriptionStatusResponse>>
+    /** 创建订阅微信支付 */
+    createWechatPayment: (tierId: string) => Promise<BillingIpcResponse<CreateSubscriptionWechatResponse>>
+    /** 查询订阅订单状态 */
+    getOrderStatus: (orderNo: string) => Promise<BillingIpcResponse<SubscriptionOrderRecord>>
+    /** 获取订阅历史 */
+    getHistory: () => Promise<BillingIpcResponse<SubscriptionOrderRecord[]>>
   }
 
   // ===== 数据同步相关 =====
@@ -872,6 +892,25 @@ const electronAPI: ElectronAPI = {
     },
     delete: (keyId: string) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.DELETE_API_KEY, keyId)
+    },
+  },
+
+  // Cloud 订阅
+  cloudSubscription: {
+    getTiers: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_TIERS)
+    },
+    getCurrent: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_CURRENT)
+    },
+    createWechatPayment: (tierId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_SUBSCRIPTION_WECHAT, tierId)
+    },
+    getOrderStatus: (orderNo: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_ORDER_STATUS, orderNo)
+    },
+    getHistory: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY)
     },
   },
 

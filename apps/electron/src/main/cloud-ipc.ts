@@ -42,6 +42,11 @@ import {
   verifyVip,
   queryExternalBalance,
   transferCredits,
+  getSubscriptionTiers,
+  getSubscriptionCurrent,
+  createSubscriptionWechat,
+  getSubscriptionOrderStatus,
+  getSubscriptionHistory,
 } from './lib/cloud-billing-service'
 import {
   initOfficialChannel,
@@ -280,5 +285,42 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key 处理器')
+  // ===== 订阅相关 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_TIERS,
+    async () => {
+      return getSubscriptionTiers()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_CURRENT,
+    async () => {
+      return getSubscriptionCurrent()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.CREATE_SUBSCRIPTION_WECHAT,
+    async (_, tierId: string) => {
+      return createSubscriptionWechat(tierId)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_ORDER_STATUS,
+    async (_, orderNo: string) => {
+      return getSubscriptionOrderStatus(orderNo)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY,
+    async () => {
+      return getSubscriptionHistory()
+    },
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 处理器')
 }

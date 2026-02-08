@@ -24,6 +24,7 @@ export {
   createPaymentApi,
   createModelsApi,
   createApiKeysApi,
+  createSubscriptionApi,
 } from './api/index'
 export type {
   CloudApiClient,
@@ -37,4 +38,5 @@ export type {
   PaymentApi,
   ModelsApi,
   ApiKeysApi,
+  SubscriptionApi,
 } from './api/index'

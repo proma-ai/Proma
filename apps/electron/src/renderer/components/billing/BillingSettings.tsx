@@ -2,7 +2,7 @@
  * BillingSettings - 账单设置主页
  *
  * 显示在设置面板的"账单"tab 中（仅 Cloud 模式）
- * 包含：余额卡片 + Tabs（立即充值 / 从 DeepClaude 迁移） + 订单历史
+ * 包含：余额卡片 + Tabs（订阅计划 / 立即充值 / 从 DeepClaude 迁移） + 订单历史
  */
 
 import * as React from 'react'
@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BalanceCard } from './BalanceCard'
 import { RechargeTab } from './RechargeTab'
 import { TransferTab } from './TransferTab'
+import { SubscriptionTab } from './SubscriptionTab'
 import { OrderHistory } from './OrderHistory'
 import {
   billingInfoAtom,
@@ -20,6 +21,8 @@ import {
   isVipAtom,
   discountLevelAtom,
   orderHistoryAtom,
+  subscriptionTiersAtom,
+  subscriptionStatusAtom,
 } from '@/atoms/cloud-billing'
 
 export function BillingSettings(): React.ReactElement {
@@ -30,6 +33,8 @@ export function BillingSettings(): React.ReactElement {
   const setIsVip = useSetAtom(isVipAtom)
   const setDiscountLevel = useSetAtom(discountLevelAtom)
   const setOrders = useSetAtom(orderHistoryAtom)
+  const setSubTiers = useSetAtom(subscriptionTiersAtom)
+  const setSubStatus = useSetAtom(subscriptionStatusAtom)
 
   /** 加载账单信息 */
   const refreshBilling = React.useCallback(async () => {
@@ -57,10 +62,24 @@ export function BillingSettings(): React.ReactElement {
     }
   }, [setOrders])
 
+  /** 加载订阅档位和当前订阅 */
+  const refreshSubscription = React.useCallback(async () => {
+    const [tiersResult, currentResult] = await Promise.all([
+      window.electronAPI.cloudSubscription.getTiers(),
+      window.electronAPI.cloudSubscription.getCurrent(),
+    ])
+    if (tiersResult.success && tiersResult.data) {
+      setSubTiers(tiersResult.data.tiers)
+    }
+    if (currentResult.success && currentResult.data) {
+      setSubStatus(currentResult.data)
+    }
+  }, [setSubTiers, setSubStatus])
+
   /** 刷新全部数据 */
   const refreshAll = React.useCallback(async () => {
-    await Promise.all([refreshBilling(), refreshTiers(), refreshOrders()])
-  }, [refreshBilling, refreshTiers, refreshOrders])
+    await Promise.all([refreshBilling(), refreshTiers(), refreshOrders(), refreshSubscription()])
+  }, [refreshBilling, refreshTiers, refreshOrders, refreshSubscription])
 
   // 初始加载
   React.useEffect(() => {
@@ -82,12 +101,17 @@ export function BillingSettings(): React.ReactElement {
       {/* 余额卡片 */}
       <BalanceCard />
 
-      {/* Tabs：充值 / 迁移 */}
-      <Tabs defaultValue="recharge" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="recharge">立即充值</TabsTrigger>
+      {/* Tabs：订阅 / 充值 / 迁移 */}
+      <Tabs defaultValue="subscription" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="subscription">订阅计划</TabsTrigger>
+          <TabsTrigger value="recharge">余额充值</TabsTrigger>
           <TabsTrigger value="transfer">从 DeepClaude 迁移</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="subscription" className="space-y-6 mt-4">
+          <SubscriptionTab onSubscriptionComplete={refreshAll} />
+        </TabsContent>
 
         <TabsContent value="recharge" className="space-y-6 mt-4">
           <RechargeTab
