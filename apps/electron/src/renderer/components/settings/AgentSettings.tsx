@@ -278,7 +278,7 @@ ${skillList}
     )
   }
 
-  const serverEntries = Object.entries(mcpConfig.servers)
+  const serverEntries = Object.entries(mcpConfig.servers ?? {})
 
   // 列表视图
   return (

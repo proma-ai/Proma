@@ -58,9 +58,27 @@ export function buildSystemPromptAppend(ctx: SystemPromptContext): string {
 - 会话目录: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/sessions/${ctx.sessionId}/
 
 ### MCP 配置格式
-mcp.json 结构：
-\`{servers: { "名称": { type, command/url, args, env, headers, enabled }}}\`
-其中 stdio 类型使用 command/args/env，http/sse 类型使用 url/headers。
+mcp.json 的顶层 key 必须是 \`servers\`（不是 mcpServers），示例：
+\`\`\`json
+{
+  "servers": {
+    "my-stdio-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"],
+      "env": { "API_KEY": "xxx" },
+      "enabled": true
+    },
+    "my-http-server": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer xxx" },
+      "enabled": true
+    }
+  }
+}
+\`\`\`
+**重要：顶层 key 是 \`servers\`，绝对不要写成 \`mcpServers\` 或其他名称。**
 
 ### Skill 格式
 每个 Skill 是 skills/{slug}/ 目录下的 SKILL.md 文件：

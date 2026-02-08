@@ -291,7 +291,8 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
 
   try {
     const raw = readFileSync(mcpPath, 'utf-8')
-    return JSON.parse(raw) as WorkspaceMcpConfig
+    const parsed = JSON.parse(raw) as Partial<WorkspaceMcpConfig>
+    return { servers: parsed.servers ?? {} }
   } catch (error) {
     console.error('[Agent 工作区] 读取 MCP 配置失败:', error)
     return { servers: {} }
