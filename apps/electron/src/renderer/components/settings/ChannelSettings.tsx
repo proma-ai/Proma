@@ -8,10 +8,10 @@
 
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { Plus, Pencil, Trash2, ExternalLink } from 'lucide-react'
+import { Plus, Pencil, Trash2, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { PROVIDER_LABELS } from '@proma/shared'
+import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel } from '@proma/shared'
 import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom } from '@/atoms/agent-atoms'
@@ -118,6 +118,10 @@ export function ChannelSettings(): React.ReactElement {
     )
   }
 
+  // 分离官方渠道和用户渠道
+  const officialChannel = channels.find((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
+  const userChannels = channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID)
+
   // Anthropic 渠道（已启用）
   const anthropicChannels = channels.filter(
     (c) => c.provider === 'anthropic' && c.enabled
@@ -137,20 +141,31 @@ export function ChannelSettings(): React.ReactElement {
           </Button>
         }
       >
-        <SettingsCard>
-          <PromaProviderCard />
-        </SettingsCard>
+        {/* 官方渠道（始终排在第一位） */}
+        {officialChannel && (
+          <SettingsCard>
+            <OfficialChannelRow
+              channel={officialChannel}
+              onEdit={() => {
+                setEditingChannel(officialChannel)
+                setViewMode('edit')
+              }}
+              onToggle={() => handleToggle(officialChannel)}
+            />
+          </SettingsCard>
+        )}
+
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
-        ) : channels.length === 0 ? (
+        ) : userChannels.length === 0 && !officialChannel ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-12 text-center">
               还没有配置任何渠道，点击上方"添加渠道"开始
             </div>
           </SettingsCard>
-        ) : (
+        ) : userChannels.length > 0 ? (
           <SettingsCard>
-            {channels.map((channel) => (
+            {userChannels.map((channel) => (
               <ChannelRow
                 key={channel.id}
                 channel={channel}
@@ -163,7 +178,7 @@ export function ChannelSettings(): React.ReactElement {
               />
             ))}
           </SettingsCard>
-        )}
+        ) : null}
       </SettingsSection>
 
       {/* 区块二：Agent 供应商 */}
@@ -171,9 +186,6 @@ export function ChannelSettings(): React.ReactElement {
         title="Agent 供应商"
         description="选择一个 Anthropic 兼容格式的渠道作为 Agent 模式的默认供应商"
       >
-        <SettingsCard>
-          <PromaProviderCard />
-        </SettingsCard>
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
         ) : anthropicChannels.length === 0 ? (
@@ -293,23 +305,43 @@ function AgentProviderRow({ channel, selected, onSelect }: AgentProviderRowProps
   )
 }
 
-// ===== Proma 官方供应商推广卡片 =====
+// ===== 官方渠道行子组件 =====
 
-function PromaProviderCard(): React.ReactElement {
-  const handleDownload = (): void => {
-    window.open('http://proma.cool/download', '_blank')
-  }
+interface OfficialChannelRowProps {
+  channel: Channel
+  onEdit: () => void
+  onToggle: () => void
+}
+
+function OfficialChannelRow({ channel, onEdit, onToggle }: OfficialChannelRowProps): React.ReactElement {
+  const enabledCount = channel.models.filter((m) => m.enabled).length
 
   return (
     <SettingsRow
-      label="Proma"
+      label="Proma 官方"
       icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
-      description="Proma 官方供应｜稳定｜靠谱｜丝滑｜简单｜优惠套餐"
+      description={`官方供应商 · ${enabledCount} 个模型可用`}
+      className="group"
     >
-      <Button size="sm" variant="outline" className="gap-1.5" onClick={handleDownload}>
-        <ExternalLink size={13} />
-        <span>下载后启动</span>
-      </Button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onEdit}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+          title="查看"
+        >
+          <Pencil size={14} />
+        </button>
+        <span
+          className="p-1.5 text-muted-foreground/40"
+          title="官方渠道不可删除"
+        >
+          <Shield size={14} />
+        </span>
+        <Switch
+          checked={channel.enabled}
+          onCheckedChange={onToggle}
+        />
+      </div>
     </SettingsRow>
   )
 }

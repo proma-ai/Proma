@@ -21,6 +21,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
+import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 
 /** 当前配置版本 */
 const CONFIG_VERSION = 1
@@ -127,6 +128,68 @@ function decryptKey(encryptedKey: string): string {
 }
 
 /**
+ * 同步 Proma 官方渠道
+ *
+ * - 若 proma-official 不存在 → 创建
+ * - 若已存在 → 更新模型列表（保留用户对单个模型的 enabled 状态）
+ */
+export function syncOfficialChannel(models: ChannelModel[]): void {
+  const config = readConfig()
+  const index = config.channels.findIndex((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
+
+  if (index === -1) {
+    // 创建官方渠道
+    const channel: Channel = {
+      id: PROMA_OFFICIAL_CHANNEL_ID,
+      name: 'Proma 官方',
+      provider: 'proma',
+      baseUrl: '',
+      apiKey: '',
+      models,
+      enabled: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    config.channels.push(channel)
+    writeConfig(config)
+    console.log(`[渠道管理] 已创建官方渠道，共 ${models.length} 个模型`)
+  } else {
+    // 更新模型：保留用户的 enabled 状态
+    const existing = config.channels[index]
+    const enabledMap = new Map<string, boolean>()
+    for (const m of existing.models) {
+      enabledMap.set(m.id, m.enabled)
+    }
+
+    const updatedModels = models.map((m) => ({
+      ...m,
+      enabled: enabledMap.has(m.id) ? enabledMap.get(m.id)! : m.enabled,
+    }))
+
+    config.channels[index] = {
+      ...existing,
+      models: updatedModels,
+      updatedAt: Date.now(),
+    }
+    writeConfig(config)
+    console.log(`[渠道管理] 已更新官方渠道模型，共 ${updatedModels.length} 个`)
+  }
+}
+
+/**
+ * 移除 Proma 官方渠道（登出时调用）
+ */
+export function removeOfficialChannel(): void {
+  const config = readConfig()
+  const index = config.channels.findIndex((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
+  if (index !== -1) {
+    config.channels.splice(index, 1)
+    writeConfig(config)
+    console.log('[渠道管理] 已移除官方渠道')
+  }
+}
+
+/**
  * 获取所有渠道
  *
  * 返回的渠道中 apiKey 保持加密状态。
@@ -213,6 +276,11 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
  * 删除渠道
  */
 export function deleteChannel(id: string): void {
+  // 官方渠道不可删除
+  if (id === PROMA_OFFICIAL_CHANNEL_ID) {
+    throw new Error('Proma 官方渠道不可删除')
+  }
+
   const config = readConfig()
   const index = config.channels.findIndex((c) => c.id === id)
 
@@ -259,6 +327,8 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 
   try {
     switch (channel.provider) {
+      case 'proma':
+        return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
         return await testAnthropic(channel.baseUrl, apiKey)
       case 'openai':
@@ -373,6 +443,8 @@ async function testGoogle(baseUrl: string, apiKey: string): Promise<ChannelTestR
 export async function testChannelDirect(input: FetchModelsInput): Promise<ChannelTestResult> {
   try {
     switch (input.provider) {
+      case 'proma':
+        return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
         return await testAnthropic(input.baseUrl, input.apiKey)
       case 'openai':
@@ -406,6 +478,8 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
 export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsResult> {
   try {
     switch (input.provider) {
+      case 'proma':
+        return { success: false, message: '官方渠道模型由服务端管理', models: [] }
       case 'anthropic':
         return await fetchAnthropicModels(input.baseUrl, input.apiKey)
       case 'openai':

@@ -229,6 +229,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
  * 当模型 ID 无法匹配时，按供应商类型回退。
  */
 const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
+  proma: PromaLogo,
   anthropic: ClaudeLogo,
   openai: OpenAILogo,
   deepseek: DeepSeekLogo,

@@ -135,6 +135,23 @@ export interface BillingIpcResponse<T = unknown> {
   error?: string
 }
 
+// ===== Cloud 模型相关类型 =====
+
+/** Cloud 模型配置（单个模型） */
+export interface CloudModelConfig {
+  id: string
+  name: string
+  icon: string
+  provider: string
+  supportsReasoning?: boolean
+}
+
+/** Cloud 模型分组（按供应商分组） */
+export interface CloudModelGroup {
+  provider: { id: string; name: string; icon: string }
+  models: CloudModelConfig[]
+}
+
 /** Cloud IPC 通道常量（用于主进程和渲染进程通信） */
 export const CLOUD_IPC_CHANNELS = {
   // 认证相关
@@ -169,4 +186,10 @@ export const CLOUD_IPC_CHANNELS = {
   TRANSFER_CREDITS: 'cloud:payment:transfer-credits',
   // 额度不足推送通道（主进程 → 渲染进程）
   QUOTA_EXCEEDED: 'cloud:billing:quota-exceeded',
+  // 余额变动推送通道（主进程 → 渲染进程，如对话扣费后）
+  BILLING_CHANGED: 'cloud:billing:changed',
+  // 官方渠道同步
+  SYNC_OFFICIAL_CHANNEL: 'cloud:channel:sync-official',
+  // 官方渠道更新推送通道（主进程 → 渲染进程）
+  OFFICIAL_CHANNEL_UPDATED: 'cloud:channel:official-updated',
 } as const

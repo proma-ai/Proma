@@ -10,6 +10,7 @@ import type { ProviderAdapter } from './types.ts'
 import { AnthropicAdapter } from './anthropic-adapter.ts'
 import { OpenAIAdapter } from './openai-adapter.ts'
 import { GoogleAdapter } from './google-adapter.ts'
+import { PromaAdapter } from './proma-adapter.ts'
 
 // 导出所有类型和工具
 export * from './types.ts'
@@ -20,9 +21,11 @@ export * from './url-utils.ts'
 export { AnthropicAdapter } from './anthropic-adapter.ts'
 export { OpenAIAdapter } from './openai-adapter.ts'
 export { GoogleAdapter } from './google-adapter.ts'
+export { PromaAdapter } from './proma-adapter.ts'
 
 /** 供应商适配器注册表 */
 const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
+  ['proma', new PromaAdapter()],         // Proma 官方
   ['anthropic', new AnthropicAdapter()],
   ['openai', new OpenAIAdapter()],
   ['deepseek', new OpenAIAdapter()],      // DeepSeek 使用 OpenAI 兼容协议

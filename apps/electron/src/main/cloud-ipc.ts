@@ -42,6 +42,10 @@ import {
   queryExternalBalance,
   transferCredits,
 } from './lib/cloud-billing-service'
+import {
+  initOfficialChannel,
+  refreshOfficialModels,
+} from './lib/cloud-channel-service'
 
 /**
  * 注册 Cloud IPC 处理器
@@ -54,6 +58,9 @@ export async function registerCloudIpcHandlers(): Promise<void> {
 
   // 初始化账单服务（注册 402 回调）
   initBillingService()
+
+  // 初始化官方渠道（认证成功后拉取模型列表）
+  await initOfficialChannel()
 
   // ===== 认证相关 =====
 
@@ -138,6 +145,15 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
+  // ===== 官方渠道同步 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.SYNC_OFFICIAL_CHANNEL,
+    async () => {
+      return refreshOfficialModels()
+    },
+  )
+
   // ===== 账单相关 =====
 
   ipcMain.handle(
@@ -214,5 +230,5 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单处理器')
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道处理器')
 }

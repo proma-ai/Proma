@@ -12,8 +12,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import { CHAT_IPC_CHANNELS } from '@proma/shared'
+import { CHAT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
 import type { ChatSendInput, ChatMessage, GenerateTitleInput, FileAttachment } from '@proma/shared'
 import {
   getAdapter,
@@ -22,6 +23,8 @@ import {
 } from '@proma/core'
 import type { ImageAttachmentData } from '@proma/core'
 import { listChannels, decryptApiKey } from './channel-manager'
+import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getCloudApiConfig } from '@proma/cloud'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
@@ -167,6 +170,32 @@ function filterHistory(
   return filtered
 }
 
+// ===== Proma 官方渠道错误处理 =====
+
+/**
+ * 从 streamSSE 抛出的错误消息中提取 HTTP 状态码
+ *
+ * 错误格式固定为: `{providerType} API 错误 ({status}): {body}`
+ */
+function extractHttpStatus(errorMessage: string): number {
+  const match = errorMessage.match(/\((\d{3})\)/)
+  return match ? parseInt(match[1]) : 0
+}
+
+/** 向所有窗口广播额度不足事件 */
+function broadcastQuotaExceeded(): void {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED)
+  })
+}
+
+/** 向所有窗口广播余额变动事件（对话扣费后） */
+function broadcastBillingChanged(): void {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
+  })
+}
+
 // ===== 核心流式函数 =====
 
 /**
@@ -196,16 +225,34 @@ export async function sendMessage(
     return
   }
 
-  // 2. 解密 API Key
+  // 2. 获取 API Key 和 Base URL
   let apiKey: string
-  try {
-    apiKey = decryptApiKey(channelId)
-  } catch {
-    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
-      conversationId,
-      error: '解密 API Key 失败',
-    })
-    return
+  let baseUrl: string
+
+  if (channel.provider === 'proma') {
+    // 官方渠道：使用 auth token + cloud API base URL
+    const token = getAuthToken()
+    if (!token) {
+      webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+        conversationId,
+        error: '未登录 Cloud 账户',
+      })
+      return
+    }
+    apiKey = token
+    baseUrl = getCloudApiConfig().baseUrl
+  } else {
+    // 用户渠道：解密 API Key，使用渠道自身 baseUrl
+    try {
+      apiKey = decryptApiKey(channelId)
+    } catch {
+      webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+        conversationId,
+        error: '解密 API Key 失败',
+      })
+      return
+    }
+    baseUrl = channel.baseUrl
   }
 
   // 3. 追加用户消息到 JSONL
@@ -235,44 +282,85 @@ export async function sendMessage(
   let accumulatedReasoning = ''
 
   try {
-    // 7. 获取适配器 + 构建请求 + 执行流式 SSE
+    // 7. 获取适配器
     const adapter = getAdapter(channel.provider)
-    const request = adapter.buildStreamRequest({
-      baseUrl: channel.baseUrl,
-      apiKey,
-      modelId,
-      history: enrichedHistory,
-      userMessage: enrichedUserMessage,
-      systemMessage,
-      attachments,
-      readImageAttachments: getImageAttachmentData,
-      thinkingEnabled,
-    })
 
-    const { content, reasoning } = await streamSSE({
-      request,
-      adapter,
-      signal: controller.signal,
-      onEvent: (event) => {
-        switch (event.type) {
-          case 'chunk':
-            accumulatedContent += event.delta
-            webContents.send(CHAT_IPC_CHANNELS.STREAM_CHUNK, {
-              conversationId,
-              delta: event.delta,
-            })
-            break
-          case 'reasoning':
-            accumulatedReasoning += event.delta
-            webContents.send(CHAT_IPC_CHANNELS.STREAM_REASONING, {
-              conversationId,
-              delta: event.delta,
-            })
-            break
-          // done 事件在外部处理
+    /** 构建并执行流式请求 */
+    const executeStream = async (key: string) => {
+      const request = adapter.buildStreamRequest({
+        baseUrl,
+        apiKey: key,
+        modelId,
+        history: enrichedHistory,
+        userMessage: enrichedUserMessage,
+        systemMessage,
+        attachments,
+        readImageAttachments: getImageAttachmentData,
+        thinkingEnabled,
+      })
+
+      return streamSSE({
+        request,
+        adapter,
+        signal: controller.signal,
+        onEvent: (event) => {
+          switch (event.type) {
+            case 'chunk':
+              accumulatedContent += event.delta
+              webContents.send(CHAT_IPC_CHANNELS.STREAM_CHUNK, {
+                conversationId,
+                delta: event.delta,
+              })
+              break
+            case 'reasoning':
+              accumulatedReasoning += event.delta
+              webContents.send(CHAT_IPC_CHANNELS.STREAM_REASONING, {
+                conversationId,
+                delta: event.delta,
+              })
+              break
+          }
+        },
+      })
+    }
+
+    // 执行流式请求（proma 渠道支持 401 刷新重试 + 402 额度不足处理）
+    let content = ''
+    let reasoning = ''
+
+    try {
+      const result = await executeStream(apiKey)
+      content = result.content
+      reasoning = result.reasoning
+    } catch (streamError) {
+      if (channel.provider === 'proma' && streamError instanceof Error) {
+        const status = extractHttpStatus(streamError.message)
+
+        if (status === 402) {
+          // 额度不足：广播事件触发充值对话框，然后继续抛出显示错误
+          broadcastQuotaExceeded()
+          throw streamError
         }
-      },
-    })
+
+        if (status === 401) {
+          // Token 过期：尝试刷新后重试一次
+          const newToken = await tryRefreshAuthToken()
+          if (newToken) {
+            accumulatedContent = ''
+            accumulatedReasoning = ''
+            const retryResult = await executeStream(newToken)
+            content = retryResult.content
+            reasoning = retryResult.reasoning
+          } else {
+            throw streamError
+          }
+        } else {
+          throw streamError
+        }
+      } else {
+        throw streamError
+      }
+    }
 
     // 8. 保存 assistant 消息
     const assistantMsgId = randomUUID()
@@ -298,6 +386,11 @@ export async function sendMessage(
       model: modelId,
       messageId: assistantMsgId,
     })
+
+    // 9. Proma 官方渠道对话完成后通知渲染进程刷新余额
+    if (channel.provider === 'proma') {
+      broadcastBillingChanged()
+    }
   } catch (error) {
     // 被中止的请求：保存已输出的部分内容，通知前端停止
     if (controller.signal.aborted) {
@@ -388,19 +481,32 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     return null
   }
 
-  // 解密 API Key
+  // 获取 API Key 和 Base URL
   let apiKey: string
-  try {
-    apiKey = decryptApiKey(channelId)
-  } catch {
-    console.warn('[标题生成] 解密 API Key 失败')
-    return null
+  let baseUrl: string
+
+  if (channel.provider === 'proma') {
+    const token = getAuthToken()
+    if (!token) {
+      console.warn('[标题生成] 未登录 Cloud 账户')
+      return null
+    }
+    apiKey = token
+    baseUrl = getCloudApiConfig().baseUrl
+  } else {
+    try {
+      apiKey = decryptApiKey(channelId)
+    } catch {
+      console.warn('[标题生成] 解密 API Key 失败')
+      return null
+    }
+    baseUrl = channel.baseUrl
   }
 
   try {
     const adapter = getAdapter(channel.provider)
     const request = adapter.buildTitleRequest({
-      baseUrl: channel.baseUrl,
+      baseUrl,
       apiKey,
       modelId,
       prompt: TITLE_PROMPT + userMessage,

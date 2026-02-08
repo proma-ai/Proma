@@ -379,6 +379,12 @@ export interface ElectronAPI {
     transferCredits: (apiKey: string, amount: number) => Promise<BillingIpcResponse<TransferCreditsResponse>>
     /** 订阅额度不足事件（返回清理函数） */
     onQuotaExceeded: (callback: () => void) => () => void
+    /** 订阅余额变动事件（对话扣费后，返回清理函数） */
+    onBillingChanged: (callback: () => void) => () => void
+    /** 同步官方渠道（拉取最新模型列表） */
+    syncOfficialChannel: () => Promise<BillingIpcResponse<void>>
+    /** 订阅官方渠道更新事件（返回清理函数） */
+    onOfficialChannelUpdated: (callback: () => void) => () => void
   }
 }
 
@@ -795,6 +801,19 @@ const electronAPI: ElectronAPI = {
       const listener = (): void => callback()
       ipcRenderer.on(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED, listener) }
+    },
+    onBillingChanged: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(CLOUD_IPC_CHANNELS.BILLING_CHANGED, listener)
+      return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.BILLING_CHANGED, listener) }
+    },
+    syncOfficialChannel: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.SYNC_OFFICIAL_CHANNEL)
+    },
+    onOfficialChannelUpdated: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener)
+      return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener) }
     },
   },
 }

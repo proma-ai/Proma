@@ -22,6 +22,7 @@ export {
   createAuthApi,
   createBillingApi,
   createPaymentApi,
+  createModelsApi,
 } from './api/index'
 export type {
   CloudApiClient,
@@ -33,4 +34,5 @@ export type {
   AuthApi,
   BillingApi,
   PaymentApi,
+  ModelsApi,
 } from './api/index'

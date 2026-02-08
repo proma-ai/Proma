@@ -15,6 +15,7 @@ import {
   createApiClient,
   createAuthApi,
   isApiError,
+  getCloudApiConfig,
 } from '@proma/cloud'
 import type { TokenStorage, CloudApiClient, AuthApi } from '@proma/cloud'
 import type {
@@ -208,6 +209,60 @@ function getAuthApi(): AuthApi {
 // ===== 公开 API =====
 
 /**
+ * 获取当前 access token（供官方渠道使用）
+ *
+ * @returns 明文 access token，未登录时返回 null
+ */
+export function getAuthToken(): string | null {
+  return cachedAccessToken
+}
+
+/** Token 刷新响应 */
+interface RefreshTokenData {
+  access_token: string
+  refresh_token?: string
+}
+
+/**
+ * 尝试刷新 access token
+ *
+ * 使用 refresh token 直接调用后端刷新接口（不经过 CloudApiClient，
+ * 避免 client 内部 401 处理逻辑的干扰）。
+ *
+ * @returns 新的 access token，刷新失败时返回 null
+ */
+export async function tryRefreshAuthToken(): Promise<string | null> {
+  if (!cachedRefreshToken) return null
+
+  try {
+    const config = getCloudApiConfig()
+    const response = await fetch(`${config.baseUrl}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: cachedRefreshToken }),
+    })
+
+    if (!response.ok) {
+      console.warn('[Cloud Auth] Token 刷新失败:', response.status)
+      return null
+    }
+
+    const data = (await response.json()) as RefreshTokenData
+    cachedAccessToken = data.access_token
+    if (data.refresh_token) {
+      cachedRefreshToken = data.refresh_token
+    }
+    saveTokensToFile()
+
+    console.log('[Cloud Auth] Token 刷新成功')
+    return cachedAccessToken
+  } catch (error) {
+    console.warn('[Cloud Auth] Token 刷新失败:', error)
+    return null
+  }
+}
+
+/**
  * 初始化 Cloud 认证服务
  *
  * 启动时调用：从文件恢复 token，尝试获取用户信息
@@ -275,6 +330,13 @@ export async function register(data: RegisterRequest): Promise<CloudAuthIpcRespo
 /** 登出 */
 export async function logout(): Promise<CloudAuthIpcResponse> {
   tokenStorage.clearTokens()
+  // 清理官方渠道（延迟导入避免循环依赖）
+  try {
+    const { cleanupOfficialChannel } = await import('./cloud-channel-service')
+    cleanupOfficialChannel()
+  } catch {
+    // 清理失败不影响登出
+  }
   broadcastAuthStateChanged()
   return { success: true }
 }

@@ -9,6 +9,7 @@
  * 支持的 AI 供应商类型
  */
 export type ProviderType =
+  | 'proma'
   | 'anthropic'
   | 'openai'
   | 'deepseek'
@@ -20,10 +21,14 @@ export type ProviderType =
   | 'qwen'
   | 'custom'
 
+/** Proma 官方渠道固定 ID */
+export const PROMA_OFFICIAL_CHANNEL_ID = 'proma-official'
+
 /**
  * 各供应商的默认 Base URL
  */
 export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
+  proma: '',
   anthropic: 'https://api.anthropic.com',
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com',
@@ -40,6 +45,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
  * 供应商显示名称
  */
 export const PROVIDER_LABELS: Record<ProviderType, string> = {
+  proma: 'Proma 官方',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   deepseek: 'DeepSeek',

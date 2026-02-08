@@ -192,6 +192,55 @@ function BillingInitializer(): null {
     return cleanup
   }, [user, setBillingInfo, setBillingLoading, setQuotaExceededDialog])
 
+  // 订阅余额变动事件（对话扣费后自动刷新）
+  useEffect(() => {
+    if (!isCloudMode() || !user) return
+
+    const unsubBillingChanged = window.electronAPI.cloudBilling.onBillingChanged(() => {
+      window.electronAPI.cloudBilling.getBilling().then((result) => {
+        if (result.success && result.data) {
+          setBillingInfo(result.data)
+        }
+      }).catch(() => {
+        // 刷新失败不影响使用
+      })
+    })
+
+    return unsubBillingChanged
+  }, [user, setBillingInfo])
+
+  return null
+}
+
+/**
+ * Cloud 官方渠道初始化组件
+ *
+ * 仅在 Cloud 模式 + 已认证时：
+ * - 触发同步官方渠道（拉取模型列表）
+ * - 订阅官方渠道更新事件，刷新渠道列表
+ */
+function OfficialChannelInitializer(): null {
+  const user = useAtomValue(cloudUserAtom)
+
+  useEffect(() => {
+    if (!isCloudMode() || !user) return
+
+    // 登录后同步官方渠道
+    window.electronAPI.cloudBilling.syncOfficialChannel().catch((err) => {
+      console.warn('[官方渠道] 同步失败:', err)
+    })
+
+    // 订阅官方渠道更新事件（主进程初始化完成后会广播）
+    const unsubOfficialChannel = window.electronAPI.cloudBilling.onOfficialChannelUpdated(() => {
+      // 渠道更新后，依赖 listChannels 的组件会在下次渲染时刷新
+      console.log('[官方渠道] 收到更新通知')
+    })
+
+    return () => {
+      unsubOfficialChannel()
+    }
+  }, [user])
+
   return null
 }
 
@@ -200,6 +249,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <ThemeInitializer />
     <CloudAuthInitializer />
     <BillingInitializer />
+    <OfficialChannelInitializer />
     <AgentSettingsInitializer />
     <UpdaterInitializer />
     <App />
