@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -42,6 +42,8 @@ import type {
   SkillMeta,
   WorkspaceCapabilities,
   FileEntry,
+  CloudAuthState,
+  CloudAuthIpcResponse,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -309,6 +311,24 @@ export interface ElectronAPI {
       progress?: { percent: number; transferred: number; total: number }
       error?: string
     }) => void) => () => void
+  }
+
+  // ===== Cloud 认证相关 =====
+
+  /** Cloud 认证 API（始终暴露，handler 仅在 cloud 模式注册） */
+  cloudAuth: {
+    /** 登录 */
+    login: (data: { email: string; password: string }) => Promise<CloudAuthIpcResponse>
+    /** 注册 */
+    register: (data: { email: string; password: string; name: string }) => Promise<CloudAuthIpcResponse>
+    /** 登出 */
+    logout: () => Promise<CloudAuthIpcResponse>
+    /** 获取当前用户 */
+    getMe: () => Promise<CloudAuthIpcResponse>
+    /** 获取认证状态 */
+    getAuthState: () => Promise<CloudAuthState>
+    /** 订阅认证状态变化（返回清理函数） */
+    onAuthStateChanged: (callback: (state: CloudAuthState) => void) => () => void
   }
 }
 
@@ -644,6 +664,30 @@ const electronAPI: ElectronAPI = {
       const listener = (_event: Electron.IpcRendererEvent, status: Parameters<typeof callback>[0]): void => callback(status)
       ipcRenderer.on('updater:status-changed', listener)
       return () => { ipcRenderer.removeListener('updater:status-changed', listener) }
+    },
+  },
+
+  // Cloud 认证
+  cloudAuth: {
+    login: (data: { email: string; password: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.LOGIN, data)
+    },
+    register: (data: { email: string; password: string; name: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.REGISTER, data)
+    },
+    logout: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.LOGOUT)
+    },
+    getMe: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_ME)
+    },
+    getAuthState: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AUTH_STATE)
+    },
+    onAuthStateChanged: (callback: (state: CloudAuthState) => void) => {
+      const listener = (_: unknown, state: CloudAuthState): void => callback(state)
+      ipcRenderer.on(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener)
+      return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener) }
     },
   },
 }

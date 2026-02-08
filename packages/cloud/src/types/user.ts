@@ -3,6 +3,8 @@
  * 参考 proma-frontend/src/types/user.ts，适配 Proma Electron 风格
  */
 
+import type { CloudUserInfo } from '@proma/shared'
+
 /** 用户角色 */
 export type UserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN'
 
@@ -12,13 +14,8 @@ export type UserStatus = 'PENDING' | 'APPROVED' | 'DISABLED'
 /** 计费模式 */
 export type BillingMode = 'PREPAID' | 'SUBSCRIPTION'
 
-/** Cloud 用户信息 */
-export interface CloudUser {
-  id: string
-  email: string
-  name: string
-  image?: string | null
-  avatar?: string | null
+/** Cloud 用户完整信息（扩展基础用户信息） */
+export interface CloudUser extends CloudUserInfo {
   role: UserRole
   status: UserStatus
   billingMode: BillingMode

@@ -24,6 +24,12 @@ import {
   workspaceFilesVersionAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
+import {
+  cloudUserAtom,
+  cloudAuthLoadingAtom,
+  initializeCloudAuth,
+} from './atoms/cloud-auth'
+import { isCloudMode } from './lib/mode'
 import './styles/globals.css'
 
 /**
@@ -136,9 +142,34 @@ function UpdaterInitializer(): null {
   return null
 }
 
+/**
+ * Cloud 认证初始化组件
+ *
+ * 仅在 Cloud 模式下从主进程恢复认证状态并订阅变化。
+ * Local 模式下不执行任何操作。
+ */
+function CloudAuthInitializer(): null {
+  const setUser = useSetAtom(cloudUserAtom)
+  const setLoading = useSetAtom(cloudAuthLoadingAtom)
+
+  useEffect(() => {
+    if (!isCloudMode()) {
+      // local 模式直接结束加载
+      setLoading(false)
+      return
+    }
+
+    const cleanup = initializeCloudAuth(setUser, setLoading)
+    return cleanup
+  }, [setUser, setLoading])
+
+  return null
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeInitializer />
+    <CloudAuthInitializer />
     <AgentSettingsInitializer />
     <UpdaterInitializer />
     <App />

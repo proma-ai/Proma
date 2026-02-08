@@ -1,0 +1,284 @@
+/**
+ * Cloud 认证服务（主进程）
+ *
+ * 功能：
+ * - Token 持久化：safeStorage 加密 → ~/.proma/cloud-auth.json
+ * - 内存缓存 + 文件持久化双层架构
+ * - TokenStorage 接口适配 @proma/cloud API client
+ * - 认证状态变化时广播到所有渲染进程窗口
+ */
+
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { safeStorage, BrowserWindow } from 'electron'
+import { getCloudAuthPath } from './config-paths'
+import {
+  createApiClient,
+  createAuthApi,
+  isApiError,
+} from '@proma/cloud'
+import type { TokenStorage, CloudApiClient, AuthApi } from '@proma/cloud'
+import type { LoginRequest, RegisterRequest, CloudUser } from '@proma/cloud'
+import type { CloudUserInfo, CloudAuthState, CloudAuthIpcResponse } from '@proma/shared'
+import { CLOUD_IPC_CHANNELS } from '@proma/shared'
+
+// ===== 持久化数据结构 =====
+
+/** 持久化到文件的认证数据 */
+interface PersistedAuthData {
+  /** 加密后的 access token (base64) */
+  accessToken: string
+  /** 加密后的 refresh token (base64) */
+  refreshToken: string
+}
+
+// ===== 内存缓存 =====
+
+let cachedAccessToken: string | null = null
+let cachedRefreshToken: string | null = null
+let cachedUser: CloudUserInfo | null = null
+let apiClient: CloudApiClient | null = null
+let authApi: AuthApi | null = null
+
+// ===== Token 加密/解密 =====
+
+function encryptToken(token: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.warn('[Cloud Auth] safeStorage 加密不可用，将以明文存储')
+    return token
+  }
+  const encrypted = safeStorage.encryptString(token)
+  return encrypted.toString('base64')
+}
+
+function decryptToken(encrypted: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return encrypted
+  }
+  try {
+    const buffer = Buffer.from(encrypted, 'base64')
+    return safeStorage.decryptString(buffer)
+  } catch (error) {
+    console.error('[Cloud Auth] 解密 token 失败:', error)
+    throw new Error('解密 token 失败')
+  }
+}
+
+// ===== 文件持久化 =====
+
+function loadTokensFromFile(): void {
+  const path = getCloudAuthPath()
+  if (!existsSync(path)) return
+
+  try {
+    const raw = readFileSync(path, 'utf-8')
+    const data = JSON.parse(raw) as PersistedAuthData
+
+    if (data.accessToken) {
+      cachedAccessToken = decryptToken(data.accessToken)
+    }
+    if (data.refreshToken) {
+      cachedRefreshToken = decryptToken(data.refreshToken)
+    }
+
+    console.log('[Cloud Auth] 已从文件恢复 token')
+  } catch (error) {
+    console.error('[Cloud Auth] 读取认证文件失败:', error)
+    // 文件损坏则清除
+    clearPersistedTokens()
+  }
+}
+
+function saveTokensToFile(): void {
+  if (!cachedAccessToken) return
+
+  const path = getCloudAuthPath()
+  const data: PersistedAuthData = {
+    accessToken: encryptToken(cachedAccessToken),
+    refreshToken: cachedRefreshToken ? encryptToken(cachedRefreshToken) : '',
+  }
+
+  try {
+    writeFileSync(path, JSON.stringify(data, null, 2))
+  } catch (error) {
+    console.error('[Cloud Auth] 保存认证文件失败:', error)
+  }
+}
+
+function clearPersistedTokens(): void {
+  const path = getCloudAuthPath()
+  if (existsSync(path)) {
+    try {
+      unlinkSync(path)
+    } catch {
+      // 忽略删除失败
+    }
+  }
+}
+
+// ===== TokenStorage 适配器 =====
+
+const tokenStorage: TokenStorage = {
+  getToken: () => cachedAccessToken,
+  setToken: (token: string) => {
+    cachedAccessToken = token
+    saveTokensToFile()
+  },
+  getRefreshToken: () => cachedRefreshToken,
+  setRefreshToken: (token: string) => {
+    cachedRefreshToken = token
+    saveTokensToFile()
+  },
+  clearTokens: () => {
+    cachedAccessToken = null
+    cachedRefreshToken = null
+    cachedUser = null
+    clearPersistedTokens()
+  },
+}
+
+// ===== 广播认证状态变化 =====
+
+function broadcastAuthStateChanged(): void {
+  const state = getAuthState()
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, state)
+  })
+}
+
+// ===== CloudUser → CloudUserInfo 转换 =====
+
+function toUserInfo(user: CloudUser): CloudUserInfo {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    image: user.image,
+    avatar: user.avatar,
+  }
+}
+
+// ===== 获取 API 实例 =====
+
+function getApiClient(): CloudApiClient {
+  if (!apiClient) {
+    apiClient = createApiClient({
+      tokenStorage,
+      onAuthFailed: () => {
+        console.log('[Cloud Auth] 认证失败，清除状态')
+        cachedUser = null
+        broadcastAuthStateChanged()
+      },
+    })
+  }
+  return apiClient
+}
+
+function getAuthApi(): AuthApi {
+  if (!authApi) {
+    authApi = createAuthApi(getApiClient())
+  }
+  return authApi
+}
+
+// ===== 公开 API =====
+
+/**
+ * 初始化 Cloud 认证服务
+ *
+ * 启动时调用：从文件恢复 token，尝试获取用户信息
+ */
+export async function initCloudAuthService(): Promise<void> {
+  loadTokensFromFile()
+
+  // 有 token 则尝试获取用户信息验证 token 有效性
+  if (cachedAccessToken) {
+    try {
+      const user = await getAuthApi().getMe()
+      cachedUser = toUserInfo(user)
+      console.log('[Cloud Auth] 会话恢复成功:', cachedUser.email)
+    } catch (error) {
+      console.warn('[Cloud Auth] 会话恢复失败，token 可能已过期:', error)
+      // token 无效，清除
+      tokenStorage.clearTokens()
+    }
+  }
+}
+
+/** 登录 */
+export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    const result = await getAuthApi().login(data)
+
+    // 保存 token
+    cachedAccessToken = result.token
+    if (result.refreshToken) {
+      cachedRefreshToken = result.refreshToken
+    }
+    saveTokensToFile()
+
+    // 缓存用户信息
+    cachedUser = toUserInfo(result.user)
+
+    broadcastAuthStateChanged()
+
+    return { success: true, user: cachedUser }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '登录失败，请稍后重试'
+    return { success: false, error: message }
+  }
+}
+
+/** 注册 */
+export async function register(data: RegisterRequest): Promise<CloudAuthIpcResponse> {
+  try {
+    const result = await getAuthApi().register(data)
+
+    // 保存 token
+    cachedAccessToken = result.token
+    if (result.refreshToken) {
+      cachedRefreshToken = result.refreshToken
+    }
+    saveTokensToFile()
+
+    // 缓存用户信息
+    cachedUser = toUserInfo(result.user)
+
+    broadcastAuthStateChanged()
+
+    return { success: true, user: cachedUser }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '注册失败，请稍后重试'
+    return { success: false, error: message }
+  }
+}
+
+/** 登出 */
+export async function logout(): Promise<CloudAuthIpcResponse> {
+  tokenStorage.clearTokens()
+  broadcastAuthStateChanged()
+  return { success: true }
+}
+
+/** 获取当前用户信息 */
+export async function getMe(): Promise<CloudAuthIpcResponse> {
+  if (!cachedAccessToken) {
+    return { success: false, error: '未登录' }
+  }
+
+  try {
+    const user = await getAuthApi().getMe()
+    cachedUser = toUserInfo(user)
+    return { success: true, user: cachedUser }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '获取用户信息失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 获取认证状态 */
+export function getAuthState(): CloudAuthState {
+  return {
+    isAuthenticated: cachedAccessToken !== null && cachedUser !== null,
+    user: cachedUser,
+  }
+}

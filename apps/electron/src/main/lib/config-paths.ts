@@ -303,6 +303,15 @@ export function seedDefaultSkills(): void {
 }
 
 /**
+ * 获取 Cloud 认证数据文件路径
+ *
+ * @returns ~/.proma/cloud-auth.json
+ */
+export function getCloudAuthPath(): string {
+  return join(getConfigDir(), 'cloud-auth.json')
+}
+
+/**
  * 获取指定 Agent 会话的工作路径
  *
  * 在工作区目录下创建以 sessionId 命名的子文件夹，

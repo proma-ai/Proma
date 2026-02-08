@@ -8,6 +8,8 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { initAutoUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
+import { isCloudMode } from '@proma/cloud'
+import { registerCloudIpcHandlers } from './cloud-ipc'
 
 let mainWindow: BrowserWindow | null = null
 // 标记是否真正要退出应用（用于区分关闭窗口和退出应用）
@@ -118,6 +120,11 @@ app.whenReady().then(async () => {
 
   // Register IPC handlers
   registerIpcHandlers()
+
+  // Cloud 模式：注册 Cloud IPC 处理器
+  if (isCloudMode()) {
+    await registerCloudIpcHandlers()
+  }
 
   // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
   if (process.platform === 'darwin' && app.dock) {

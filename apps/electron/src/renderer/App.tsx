@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { AppShell } from './components/app-shell/AppShell'
 import { TooltipProvider } from './components/ui/tooltip'
+import { CloudAuthGate } from './components/cloud-auth'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
@@ -9,7 +10,9 @@ export default function App(): React.ReactElement {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <AppShell contextValue={contextValue} />
+      <CloudAuthGate>
+        <AppShell contextValue={contextValue} />
+      </CloudAuthGate>
     </TooltipProvider>
   )
 }
