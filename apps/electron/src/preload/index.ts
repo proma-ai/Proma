@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -54,6 +54,9 @@ import type {
   VerifyVipResponse,
   QueryExternalBalanceResponse,
   TransferCreditsResponse,
+  SyncState,
+  SyncResult,
+  SyncProgressEvent,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -349,6 +352,8 @@ export interface ElectronAPI {
     getGoogleOAuthStatus: () => Promise<{ configured: boolean }>
     /** 打开 Google 登录（系统浏览器） */
     openGoogleLogin: () => Promise<CloudAuthIpcResponse>
+    /** 更新用户档案（Cloud 模式） */
+    updateProfile: (data: { name?: string; image?: string }) => Promise<CloudAuthIpcResponse>
     /** 订阅认证状态变化（返回清理函数） */
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => () => void
   }
@@ -385,6 +390,22 @@ export interface ElectronAPI {
     syncOfficialChannel: () => Promise<BillingIpcResponse<void>>
     /** 订阅官方渠道更新事件（返回清理函数） */
     onOfficialChannelUpdated: (callback: () => void) => () => void
+  }
+
+  // ===== 数据同步相关 =====
+
+  /** 数据同步 API */
+  sync: {
+    /** 执行全量同步（首次使用） */
+    fullSync: () => Promise<SyncResult>
+    /** 执行增量同步 */
+    incrementalSync: () => Promise<SyncResult>
+    /** 加载更多历史对话（每次 5 个） */
+    pullMore: () => Promise<SyncResult>
+    /** 获取同步状态 */
+    getSyncState: () => Promise<SyncState>
+    /** 订阅同步进度事件（返回清理函数） */
+    onSyncProgress: (callback: (event: SyncProgressEvent) => void) => () => void
   }
 }
 
@@ -758,6 +779,9 @@ const electronAPI: ElectronAPI = {
     openGoogleLogin: () => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.OPEN_GOOGLE_LOGIN)
     },
+    updateProfile: (data: { name?: string; image?: string }) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.UPDATE_PROFILE, data)
+    },
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => {
       const listener = (_: unknown, state: CloudAuthState): void => callback(state)
       ipcRenderer.on(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener)
@@ -814,6 +838,27 @@ const electronAPI: ElectronAPI = {
       const listener = (): void => callback()
       ipcRenderer.on(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener) }
+    },
+  },
+
+  // 数据同步
+  sync: {
+    fullSync: () => {
+      return ipcRenderer.invoke(SYNC_IPC_CHANNELS.FULL_SYNC)
+    },
+    incrementalSync: () => {
+      return ipcRenderer.invoke(SYNC_IPC_CHANNELS.INCREMENTAL_SYNC)
+    },
+    pullMore: () => {
+      return ipcRenderer.invoke(SYNC_IPC_CHANNELS.PULL_MORE)
+    },
+    getSyncState: () => {
+      return ipcRenderer.invoke(SYNC_IPC_CHANNELS.GET_SYNC_STATE)
+    },
+    onSyncProgress: (callback: (event: SyncProgressEvent) => void) => {
+      const listener = (_: unknown, event: SyncProgressEvent): void => callback(event)
+      ipcRenderer.on(SYNC_IPC_CHANNELS.SYNC_PROGRESS, listener)
+      return () => { ipcRenderer.removeListener(SYNC_IPC_CHANNELS.SYNC_PROGRESS, listener) }
     },
   },
 }

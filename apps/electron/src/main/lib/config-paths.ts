@@ -312,6 +312,15 @@ export function getCloudAuthPath(): string {
 }
 
 /**
+ * 获取同步状态文件路径
+ *
+ * @returns ~/.proma/sync-state.json
+ */
+export function getSyncStatePath(): string {
+  return join(getConfigDir(), 'sync-state.json')
+}
+
+/**
  * 获取指定 Agent 会话的工作路径
  *
  * 在工作区目录下创建以 sessionId 命名的子文件夹，

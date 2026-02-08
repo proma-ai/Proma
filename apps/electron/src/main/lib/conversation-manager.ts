@@ -14,6 +14,7 @@ import {
   getConversationMessagesPath,
 } from './config-paths'
 import { deleteConversationAttachments, deleteAttachment } from './attachment-service'
+import { markConversationDirty } from './sync-service'
 import type { ConversationMeta, ChatMessage, RecentMessagesResult } from '@proma/shared'
 
 /**
@@ -102,6 +103,7 @@ export function createConversation(
   getConversationsDir()
 
   console.log(`[对话管理] 已创建对话: ${meta.title} (${meta.id})`)
+  markConversationDirty(meta.id)
   return meta
 }
 
@@ -183,6 +185,7 @@ export function appendMessage(id: string, message: ChatMessage): void {
   try {
     const line = JSON.stringify(message) + '\n'
     appendFileSync(filePath, line, 'utf-8')
+    markConversationDirty(id)
   } catch (error) {
     console.error(`[对话管理] 追加消息失败 (${id}):`, error)
     throw new Error('追加消息失败')
@@ -238,6 +241,7 @@ export function updateConversationMeta(
   writeIndex(index)
 
   console.log(`[对话管理] 已更新对话: ${updated.title} (${updated.id})`)
+  markConversationDirty(updated.id)
   return updated
 }
 
@@ -302,6 +306,7 @@ export function deleteMessage(conversationId: string, messageId: string): ChatMe
   }
 
   saveConversationMessages(conversationId, filtered)
+  markConversationDirty(conversationId)
   console.log(`[对话管理] 已删除消息: ${messageId} (对话 ${conversationId})`)
   return filtered
 }

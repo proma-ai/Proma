@@ -429,15 +429,24 @@ function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachm
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    window.electronAPI
-      .readAttachment(attachment.localPath)
-      .then((base64) => {
-        setImageSrc(`data:${attachment.mediaType};base64,${base64}`)
-      })
-      .catch((error) => {
-        console.error('[MessageAttachmentImage] 读取附件失败:', error)
-      })
-  }, [attachment.localPath, attachment.mediaType])
+    // 云端附件：直接使用 URL
+    if (attachment.url) {
+      setImageSrc(attachment.url)
+      return
+    }
+
+    // 本地附件：通过 IPC 读取 base64
+    if (attachment.localPath) {
+      window.electronAPI
+        .readAttachment(attachment.localPath)
+        .then((base64) => {
+          setImageSrc(`data:${attachment.mediaType};base64,${base64}`)
+        })
+        .catch((error) => {
+          console.error('[MessageAttachmentImage] 读取附件失败:', error)
+        })
+    }
+  }, [attachment.localPath, attachment.mediaType, attachment.url])
 
   if (!imageSrc) {
     return (

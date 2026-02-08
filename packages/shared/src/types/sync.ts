@@ -5,11 +5,26 @@
  * 核心原则：Local-first，本地 JSONL 为唯一真实数据源。
  */
 
-import type { ChatMessage, ConversationMeta } from './chat'
+// ===== 远端 API 数据格式（proma-api MySQL 侧） =====
 
-// ===== 远端 API 数据格式（MySQL 侧） =====
+/**
+ * 远端对话（GET /conversations 列表项）
+ *
+ * 对应 proma-frontend 的 ConversationListItem
+ */
+export interface RemoteConversationListItem {
+  id: string
+  title: string
+  modelId: string | null
+  updatedAt: string           // ISO 8601
+  messageCount?: number
+}
 
-/** 远端对话（MySQL API 返回格式） */
+/**
+ * 远端对话详情（GET /conversations/{id}）
+ *
+ * 对应 proma-frontend 的 Conversation
+ */
 export interface RemoteConversation {
   id: string
   title: string
@@ -20,55 +35,86 @@ export interface RemoteConversation {
   isPinned: boolean
   pinnedAt: string | null
   folderId: string | null
-  createdAt: string   // ISO 8601 DATETIME
-  updatedAt: string   // ISO 8601 DATETIME
+  createdAt: string           // ISO 8601
+  updatedAt: string           // ISO 8601
 }
 
-/** 远端消息（MySQL API 返回格式） */
+/**
+ * 远端消息（GET /conversations/{id}/messages）
+ *
+ * 对应 proma-frontend 的 ChatMessage
+ */
 export interface RemoteMessage {
   id: string
-  conversationId: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  reasoning: string | null
+  createdAt: string           // ISO 8601
   model: string | null
+  reasoning: string | null
   attachments: RemoteAttachment[] | null
   toolCalls: RemoteToolCall[] | null
   inputTokens: number | null
   outputTokens: number | null
-  createdAt: string   // ISO 8601 DATETIME
+  stopped?: boolean
 }
 
-/** 远端附件格式 */
+/**
+ * 远端附件格式（OSS URL 方式）
+ *
+ * 对应 proma-frontend 的 OSSFileUIPart
+ */
 export interface RemoteAttachment {
-  url: string
-  type: string
-  name?: string
+  type: string                // MIME 类型或 "file"
+  url: string                 // 签名 URL 或 CDN URL
+  mediaType: string
+  filename?: string
+  ossPath?: string            // OSS 对象路径，用于动态签名
   size?: number
 }
 
-/** 远端工具调用格式 */
+/**
+ * 远端工具调用搜索来源
+ *
+ * 对应 proma-frontend 的 SearchSource
+ */
+export interface RemoteSearchSource {
+  title: string
+  url: string
+  content: string
+}
+
+/**
+ * 远端工具调用信息
+ *
+ * 对应 proma-frontend 的 ToolCallInfo
+ * 目前主要是 tavily_search，但保持通用结构
+ */
 export interface RemoteToolCall {
   id: string
   name: string
-  result: {
+  arguments: Record<string, unknown>
+  status: 'pending' | 'executing' | 'success' | 'error'
+  result?: {
     query: string
-    answer: string
-    sources: Array<{
-      url: string
-      title: string
-      content: string
-    }>
+    answer?: string
+    sources: RemoteSearchSource[]
+  } | {
+    error: string
   }
-  status: string
-  arguments: Record<string, string>
 }
 
-/** 远端分页响应 */
-export interface RemotePaginatedResponse<T> {
-  items: T[]
+// ===== 远端 API 响应格式 =====
+
+/** 对话列表响应 */
+export interface RemoteConversationListResponse {
+  conversations: RemoteConversationListItem[]
   nextCursor: string | null
-  hasMore: boolean
+}
+
+/** 消息列表响应 */
+export interface RemoteMessagesResponse {
+  messages: RemoteMessage[]
+  nextCursor: string | null
 }
 
 // ===== 同步状态追踪 =====
@@ -77,7 +123,7 @@ export interface RemotePaginatedResponse<T> {
 export interface ConversationSyncInfo {
   /** 本地最后更新时间 */
   localUpdatedAt: number
-  /** 远端最后更新时间 */
+  /** 远端最后更新时间（ISO 字符串转为 timestamp） */
   remoteUpdatedAt: number
   /** 上次成功同步时间 */
   lastSyncedAt: number
@@ -129,14 +175,6 @@ export interface SyncResult {
   error?: string
 }
 
-// ===== 数据转换工具类型 =====
-
-/** 远端 → 本地 转换后的对话元数据 */
-export type ConvertedConversationMeta = ConversationMeta
-
-/** 远端 → 本地 转换后的消息 */
-export type ConvertedChatMessage = ChatMessage
-
 // ===== 同步 IPC 通道常量 =====
 
 export const SYNC_IPC_CHANNELS = {
@@ -146,6 +184,8 @@ export const SYNC_IPC_CHANNELS = {
   INCREMENTAL_SYNC: 'sync:incremental',
   /** 获取同步状态 */
   GET_SYNC_STATE: 'sync:get-state',
+  /** 加载更多历史对话 */
+  PULL_MORE: 'sync:pull-more',
   /** 同步进度推送（主进程 → 渲染进程） */
   SYNC_PROGRESS: 'sync:progress',
 } as const
