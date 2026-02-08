@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { safeStorage, BrowserWindow } from 'electron'
 import { getCloudAuthPath } from './config-paths'
+import { updateUserProfile } from './user-profile-service'
 import {
   createApiClient,
   createAuthApi,
@@ -170,6 +171,19 @@ function toUserInfo(user: CloudUser): CloudUserInfo {
   }
 }
 
+/** 将 Cloud 用户信息同步到本地 user-profile.json（离线回退） */
+function syncCloudUserToLocalProfile(user: CloudUserInfo): void {
+  try {
+    updateUserProfile({
+      userName: user.name,
+      avatar: user.image || user.avatar || undefined,
+    })
+    console.log('[Cloud Auth] 已同步 Cloud 用户档案到本地')
+  } catch (error) {
+    console.warn('[Cloud Auth] 同步本地用户档案失败:', error)
+  }
+}
+
 // ===== 获取 API 实例 =====
 
 /**
@@ -275,6 +289,7 @@ export async function initCloudAuthService(): Promise<void> {
     try {
       const user = await getAuthApi().getMe()
       cachedUser = toUserInfo(user)
+      syncCloudUserToLocalProfile(cachedUser)
       console.log('[Cloud Auth] 会话恢复成功:', cachedUser.email)
     } catch (error) {
       console.warn('[Cloud Auth] 会话恢复失败，token 可能已过期:', error)
@@ -303,6 +318,7 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
 
     // 缓存用户信息
     cachedUser = toUserInfo(result.user)
+    syncCloudUserToLocalProfile(cachedUser)
 
     broadcastAuthStateChanged()
 
@@ -446,12 +462,30 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
 
     const user = await getAuthApi().getMe()
     cachedUser = toUserInfo(user)
+    syncCloudUserToLocalProfile(cachedUser)
     broadcastAuthStateChanged()
 
     return { success: true, user: cachedUser }
   } catch (error) {
     tokenStorage.clearTokens()
     const message = isApiError(error) ? error.message : '获取用户信息失败'
+    return { success: false, error: message }
+  }
+}
+
+/** 更新 Cloud 用户档案 */
+export async function updateCloudProfile(data: { name?: string; image?: string }): Promise<CloudAuthIpcResponse> {
+  if (!cachedAccessToken) {
+    return { success: false, error: '未登录' }
+  }
+
+  try {
+    const user = await getAuthApi().updateProfile(data)
+    cachedUser = toUserInfo(user)
+    broadcastAuthStateChanged()
+    return { success: true, user: cachedUser }
+  } catch (error) {
+    const message = isApiError(error) ? error.message : '更新档案失败'
     return { success: false, error: message }
   }
 }

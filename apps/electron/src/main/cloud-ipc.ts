@@ -28,6 +28,7 @@ import {
   resendCode,
   getGoogleOAuthStatus,
   openGoogleLogin,
+  updateCloudProfile,
 } from './lib/cloud-auth-service'
 import {
   initBillingService,
@@ -142,6 +143,15 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     CLOUD_IPC_CHANNELS.OPEN_GOOGLE_LOGIN,
     async () => {
       return openGoogleLogin()
+    },
+  )
+
+  // ===== 用户档案更新 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.UPDATE_PROFILE,
+    async (_, data: { name?: string; image?: string }) => {
+      return updateCloudProfile(data)
     },
   )
 

@@ -3,10 +3,13 @@
  *
  * 顶部：用户档案编辑（头像 + 用户名）
  * 下方：语言等通用设置
+ *
+ * Cloud 模式 + 已登录：从 Cloud 用户信息显示，更新时同步 Cloud API + 本地
+ * Local 模式：完全本地
  */
 
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { Camera, ImagePlus } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
@@ -18,6 +21,8 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover'
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { cloudUserAtom, isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
+import { isCloudMode } from '@/lib/mode'
 import { cn } from '@/lib/utils'
 
 /** emoji-mart 选择回调的 emoji 对象类型 */
@@ -32,16 +37,48 @@ interface EmojiMartEmoji {
 
 export function GeneralSettings(): React.ReactElement {
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
+  const cloudUser = useAtomValue(cloudUserAtom)
+  const isCloudAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
-  const [nameInput, setNameInput] = React.useState(userProfile.userName)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  /** Cloud 模式 + 已登录 */
+  const useCloudProfile = isCloudMode() && isCloudAuthenticated && cloudUser !== null
+
+  /** 当前显示的用户名 */
+  const displayName = useCloudProfile ? cloudUser.name : userProfile.userName
+
+  /** 当前显示的头像 */
+  const displayAvatar = useCloudProfile
+    ? (cloudUser.image || cloudUser.avatar || userProfile.avatar)
+    : userProfile.avatar
+
+  const [nameInput, setNameInput] = React.useState(displayName)
+
+  /** displayName 变化时同步 nameInput */
+  React.useEffect(() => {
+    if (!isEditingName) {
+      setNameInput(displayName)
+    }
+  }, [displayName, isEditingName])
 
   /** 更新头像 */
   const handleAvatarChange = async (avatar: string): Promise<void> => {
     try {
-      const updated = await window.electronAPI.updateUserProfile({ avatar })
-      setUserProfile(updated)
+      if (useCloudProfile) {
+        // Cloud 模式：先更新远端，同时更新本地
+        const [cloudResult] = await Promise.all([
+          window.electronAPI.cloudAuth.updateProfile({ image: avatar }),
+          window.electronAPI.updateUserProfile({ avatar }),
+        ])
+        if (!cloudResult.success) {
+          console.error('[通用设置] Cloud 更新头像失败:', cloudResult.error)
+        }
+      } else {
+        const updated = await window.electronAPI.updateUserProfile({ avatar })
+        setUserProfile(updated)
+      }
       setShowEmojiPicker(false)
     } catch (error) {
       console.error('[通用设置] 更新头像失败:', error)
@@ -68,8 +105,19 @@ export function GeneralSettings(): React.ReactElement {
     if (!trimmed) return
 
     try {
-      const updated = await window.electronAPI.updateUserProfile({ userName: trimmed })
-      setUserProfile(updated)
+      if (useCloudProfile) {
+        // Cloud 模式：先更新远端，同时更新本地
+        const [cloudResult] = await Promise.all([
+          window.electronAPI.cloudAuth.updateProfile({ name: trimmed }),
+          window.electronAPI.updateUserProfile({ userName: trimmed }),
+        ])
+        if (!cloudResult.success) {
+          console.error('[通用设置] Cloud 更新用户名失败:', cloudResult.error)
+        }
+      } else {
+        const updated = await window.electronAPI.updateUserProfile({ userName: trimmed })
+        setUserProfile(updated)
+      }
       setIsEditingName(false)
     } catch (error) {
       console.error('[通用设置] 更新用户名失败:', error)
@@ -81,7 +129,7 @@ export function GeneralSettings(): React.ReactElement {
     if (e.key === 'Enter') {
       handleSaveName()
     } else if (e.key === 'Escape') {
-      setNameInput(userProfile.userName)
+      setNameInput(displayName)
       setIsEditingName(false)
     }
   }
@@ -99,7 +147,7 @@ export function GeneralSettings(): React.ReactElement {
             <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
               <PopoverTrigger asChild>
                 <div className="relative group/avatar cursor-pointer">
-                  <UserAvatar avatar={userProfile.avatar} size={64} />
+                  <UserAvatar avatar={displayAvatar} size={64} />
                   {/* 编辑覆盖层 */}
                   <div
                     className={cn(
@@ -168,12 +216,12 @@ export function GeneralSettings(): React.ReactElement {
               ) : (
                 <button
                   onClick={() => {
-                    setNameInput(userProfile.userName)
+                    setNameInput(displayName)
                     setIsEditingName(true)
                   }}
                   className="text-lg font-semibold text-foreground hover:text-primary transition-colors text-left"
                 >
-                  {userProfile.userName}
+                  {displayName}
                 </button>
               )}
               <p className="text-[12px] text-foreground/40 mt-0.5">

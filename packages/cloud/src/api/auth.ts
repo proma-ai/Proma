@@ -94,6 +94,12 @@ export function createAuthApi(client: CloudApiClient) {
       const response = await client.get<WelcomeBonusInfo>('/auth/welcome-bonus')
       return response.data
     },
+
+    /** 更新用户档案 */
+    updateProfile: async (data: { name?: string; image?: string }): Promise<CloudUser> => {
+      const response = await client.patch<CloudUser>('/user/profile', data)
+      return response.data
+    },
   }
 }
 

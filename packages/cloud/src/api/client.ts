@@ -47,6 +47,8 @@ export interface CloudApiClient {
   post: <T>(path: string, body?: unknown, options?: RequestInit) => Promise<ApiResponse<T>>
   /** 发起 PUT 请求 */
   put: <T>(path: string, body?: unknown, options?: RequestInit) => Promise<ApiResponse<T>>
+  /** 发起 PATCH 请求 */
+  patch: <T>(path: string, body?: unknown, options?: RequestInit) => Promise<ApiResponse<T>>
   /** 发起 DELETE 请求 */
   del: <T>(path: string, options?: RequestInit) => Promise<ApiResponse<T>>
 }
@@ -256,6 +258,13 @@ export function createApiClient(options?: {
       request<T>(path, {
         ...options,
         method: 'PUT',
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+
+    patch: <T>(path: string, body?: unknown, options?: RequestInit) =>
+      request<T>(path, {
+        ...options,
+        method: 'PATCH',
         body: body ? JSON.stringify(body) : undefined,
       }),
 

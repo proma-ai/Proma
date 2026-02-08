@@ -179,6 +179,8 @@ export const CLOUD_IPC_CHANNELS = {
   // Google OAuth
   GET_GOOGLE_OAUTH_STATUS: 'cloud:auth:google-oauth-status',
   OPEN_GOOGLE_LOGIN: 'cloud:auth:open-google-login',
+  // 用户档案更新
+  UPDATE_PROFILE: 'cloud:auth:update-profile',
   // 认证状态变化推送通道（主进程 → 渲染进程）
   AUTH_STATE_CHANGED: 'cloud:auth:state-changed',
   // 账单相关
