@@ -47,6 +47,16 @@ import {
   initOfficialChannel,
   refreshOfficialModels,
 } from './lib/cloud-channel-service'
+import {
+  listApiKeys,
+  createApiKey,
+  updateApiKey,
+  deleteApiKey,
+} from './lib/cloud-api-keys-service'
+import type {
+  ApiKeyCreateParams,
+  ApiKeyUpdateParams,
+} from '@proma/shared'
 
 /**
  * 注册 Cloud IPC 处理器
@@ -240,5 +250,35 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道处理器')
+  // ===== API Key 管理 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.LIST_API_KEYS,
+    async () => {
+      return listApiKeys()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.CREATE_API_KEY,
+    async (_, params: ApiKeyCreateParams) => {
+      return createApiKey(params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.UPDATE_API_KEY,
+    async (_, keyId: string, params: ApiKeyUpdateParams) => {
+      return updateApiKey(keyId, params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.DELETE_API_KEY,
+    async (_, keyId: string) => {
+      return deleteApiKey(keyId)
+    },
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key 处理器')
 }

@@ -147,6 +147,56 @@ export interface SystemApiKeyResponse {
   createdAt: string
 }
 
+// ===== 用户 API Key 管理相关类型 =====
+
+/** API Key 类型 */
+export type ApiKeyType = 'SYSTEM' | 'CUSTOM'
+
+/** API Key 状态 */
+export type ApiKeyStatus = 'ACTIVE' | 'DISABLED' | 'EXPIRED'
+
+/** API Key 响应 */
+export interface ApiKeyResponse {
+  id: string
+  name: string
+  description: string | null
+  key: string
+  type: ApiKeyType
+  status: ApiKeyStatus
+  expiresAt: string | null
+  lastUsedAt: string | null
+  totalCost: number | string
+  requestCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** 创建 API Key 的响应（包含实际 key，仅在创建时返回一次） */
+export interface ApiKeyCreateResponse {
+  id: string
+  name: string
+  description: string | null
+  key: string
+  type: ApiKeyType
+  status: ApiKeyStatus
+  expiresAt: string | null
+  createdAt: string
+}
+
+/** 创建 API Key 的请求参数 */
+export interface ApiKeyCreateParams {
+  name: string
+  description?: string
+  expiresAt?: string
+}
+
+/** 更新 API Key 的请求参数 */
+export interface ApiKeyUpdateParams {
+  name?: string
+  description?: string
+  status?: ApiKeyStatus
+}
+
 /** Cloud 模型配置（单个模型） */
 export interface CloudModelConfig {
   id: string
@@ -204,4 +254,9 @@ export const CLOUD_IPC_CHANNELS = {
   SYNC_OFFICIAL_CHANNEL: 'cloud:channel:sync-official',
   // 官方渠道更新推送通道（主进程 → 渲染进程）
   OFFICIAL_CHANNEL_UPDATED: 'cloud:channel:official-updated',
+  // API Key 管理
+  LIST_API_KEYS: 'cloud:api-keys:list',
+  CREATE_API_KEY: 'cloud:api-keys:create',
+  UPDATE_API_KEY: 'cloud:api-keys:update',
+  DELETE_API_KEY: 'cloud:api-keys:delete',
 } as const

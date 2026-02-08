@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { cn } from '@/lib/utils'
-import { Settings, Radio, Palette, Info, Plug, CreditCard } from 'lucide-react'
+import { Settings, Radio, Palette, Info, Plug, CreditCard, KeyRound } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { SettingsTab } from '@/atoms/settings-tab'
@@ -20,6 +20,7 @@ import { AppearanceSettings } from './AppearanceSettings'
 import { AboutSettings } from './AboutSettings'
 import { AgentSettings } from './AgentSettings'
 import { BillingSettings } from '@/components/billing/BillingSettings'
+import { ApiKeysSettings } from './ApiKeysSettings'
 import { isCloudMode } from '@/lib/mode'
 
 /** 设置 Tab 定义 */
@@ -41,6 +42,9 @@ const AGENT_TAB: TabItem = { id: 'agent', label: '配置', icon: <Plug size={16}
 /** Cloud 模式专属 Tab */
 const BILLING_TAB: TabItem = { id: 'billing', label: '账单', icon: <CreditCard size={16} /> }
 
+/** Cloud 模式专属 Tab - API Key 管理 */
+const API_TAB: TabItem = { id: 'api', label: 'API', icon: <KeyRound size={16} /> }
+
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
   { id: 'appearance', label: '外观', icon: <Palette size={16} /> },
@@ -58,6 +62,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <AgentSettings />
     case 'billing':
       return <BillingSettings />
+    case 'api':
+      return <ApiKeysSettings />
     case 'appearance':
       return <AppearanceSettings />
     case 'about':
@@ -77,6 +83,7 @@ export function SettingsPanel(): React.ReactElement {
     }
     if (isCloudMode()) {
       result.push(BILLING_TAB)
+      result.push(API_TAB)
     }
     result.push(...TAIL_TABS)
     return result

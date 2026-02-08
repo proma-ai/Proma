@@ -54,6 +54,10 @@ import type {
   VerifyVipResponse,
   QueryExternalBalanceResponse,
   TransferCreditsResponse,
+  ApiKeyResponse,
+  ApiKeyCreateResponse,
+  ApiKeyCreateParams,
+  ApiKeyUpdateParams,
   SyncState,
   SyncResult,
   SyncProgressEvent,
@@ -390,6 +394,20 @@ export interface ElectronAPI {
     syncOfficialChannel: () => Promise<BillingIpcResponse<void>>
     /** 订阅官方渠道更新事件（返回清理函数） */
     onOfficialChannelUpdated: (callback: () => void) => () => void
+  }
+
+  // ===== Cloud API Key 管理相关 =====
+
+  /** Cloud API Key 管理 API */
+  cloudApiKeys: {
+    /** 获取 API Keys 列表 */
+    list: () => Promise<BillingIpcResponse<ApiKeyResponse[]>>
+    /** 创建 API Key */
+    create: (params: ApiKeyCreateParams) => Promise<BillingIpcResponse<ApiKeyCreateResponse>>
+    /** 更新 API Key */
+    update: (keyId: string, params: ApiKeyUpdateParams) => Promise<BillingIpcResponse<ApiKeyResponse>>
+    /** 删除 API Key */
+    delete: (keyId: string) => Promise<BillingIpcResponse<void>>
   }
 
   // ===== 数据同步相关 =====
@@ -838,6 +856,22 @@ const electronAPI: ElectronAPI = {
       const listener = (): void => callback()
       ipcRenderer.on(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener) }
+    },
+  },
+
+  // Cloud API Key 管理
+  cloudApiKeys: {
+    list: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.LIST_API_KEYS)
+    },
+    create: (params: ApiKeyCreateParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_API_KEY, params)
+    },
+    update: (keyId: string, params: ApiKeyUpdateParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.UPDATE_API_KEY, keyId, params)
+    },
+    delete: (keyId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.DELETE_API_KEY, keyId)
     },
   },
 
