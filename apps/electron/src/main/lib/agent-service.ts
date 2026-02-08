@@ -593,11 +593,16 @@ export async function runAgent(
         if (!entry.enabled) continue
 
         if (entry.type === 'stdio' && entry.command) {
+          // 合并系统 PATH 到 MCP 服务器环境，确保 npx/node 等工具可被找到
+          const mergedEnv: Record<string, string> = {
+            ...(process.env.PATH && { PATH: process.env.PATH }),
+            ...entry.env,
+          }
           mcpServers[name] = {
             type: 'stdio',
             command: entry.command,
             ...(entry.args && entry.args.length > 0 && { args: entry.args }),
-            ...(entry.env && Object.keys(entry.env).length > 0 && { env: entry.env }),
+            ...(Object.keys(mergedEnv).length > 0 && { env: mergedEnv }),
           }
         } else if ((entry.type === 'http' || entry.type === 'sse') && entry.url) {
           mcpServers[name] = {

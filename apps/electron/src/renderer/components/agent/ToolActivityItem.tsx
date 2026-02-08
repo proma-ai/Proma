@@ -341,9 +341,11 @@ interface ActivityGroupRowProps {
   index?: number
   animate?: boolean
   onOpenDetails?: (activity: ToolActivity) => void
+  detailsId?: string | null
+  onCloseDetails?: () => void
 }
 
-function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails }: ActivityGroupRowProps): React.ReactElement {
+function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, detailsId, onCloseDetails }: ActivityGroupRowProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(true)
   const { parent, children } = group
 
@@ -370,6 +372,7 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails }: 
   return (
     <div
       className={cn(
+        'w-full',
         animate && 'animate-in fade-in slide-in-from-left-2 duration-200 fill-mode-both',
       )}
       style={animate ? { animationDelay: delay } : undefined}
@@ -378,7 +381,7 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails }: 
         type="button"
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          'w-full flex items-center gap-2 pl-1 text-[13px] rounded-md hover:text-foreground transition-colors cursor-pointer',
+          'w-full flex items-center gap-2 pl-1 text-left text-[13px] rounded-md hover:text-foreground transition-colors cursor-pointer',
           SIZE.row,
         )}
       >
@@ -418,13 +421,17 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails }: 
           )}
         >
           {children.map((child, ci) => (
-            <ActivityRow
-              key={child.toolUseId}
-              activity={child}
-              index={ci}
-              animate={animate}
-              onOpenDetails={onOpenDetails}
-            />
+            <React.Fragment key={child.toolUseId}>
+              <ActivityRow
+                activity={child}
+                index={ci}
+                animate={animate}
+                onOpenDetails={onOpenDetails}
+              />
+              {detailsId === child.toolUseId && (
+                <ActivityDetails activity={child} onClose={onCloseDetails ?? (() => {})} />
+              )}
+            </React.Fragment>
           ))}
         </div>
       )}
@@ -561,17 +568,15 @@ export function ToolActivityList({ activities, animate = false }: ToolActivityLi
       {grouped.map((item, i) => {
         if (isActivityGroup(item)) {
           return (
-            <React.Fragment key={item.parent.toolUseId}>
-              <ActivityGroupRow
-                group={item}
-                index={i}
-                animate={animate}
-                onOpenDetails={handleOpenDetails}
-              />
-              {detailsId && item.children.some((c) => c.toolUseId === detailsId) && detailActivity && (
-                <ActivityDetails activity={detailActivity} onClose={() => setDetailsId(null)} />
-              )}
-            </React.Fragment>
+            <ActivityGroupRow
+              key={item.parent.toolUseId}
+              group={item}
+              index={i}
+              animate={animate}
+              onOpenDetails={handleOpenDetails}
+              detailsId={detailsId}
+              onCloseDetails={() => setDetailsId(null)}
+            />
           )
         }
 

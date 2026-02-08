@@ -110,10 +110,11 @@ export function extractToolStarts(
     toolIndex.register(toolBlock.id, toolBlock.name, toolBlock.input)
 
     // 确定父级：SDK 的 parent_tool_use_id 是权威来源
+    // 推断仅适用于非 Task 工具 — 并行 Task 是同级关系，不应互相嵌套
     let parentToolUseId: string | undefined
     if (sdkParentToolUseId) {
       parentToolUseId = sdkParentToolUseId
-    } else if (activeParentTools && activeParentTools.size === 1) {
+    } else if (toolBlock.name !== 'Task' && activeParentTools && activeParentTools.size === 1) {
       const [singleActiveParent] = activeParentTools
       if (toolBlock.id !== singleActiveParent) {
         parentToolUseId = singleActiveParent
@@ -275,7 +276,7 @@ function detectBackgroundEvents(
   const events: AgentEvent[] = []
 
   // 后台 Task 检测
-  if (entry.name === 'Task' && !isError && resultStr) {
+  if (entry.name === 'Task' && !isError && resultStr && entry.input.run_in_background === true) {
     const agentIdMatch = resultStr.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
     if (agentIdMatch?.[1]) {
       const intentValue = entry.input._intent
