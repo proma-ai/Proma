@@ -28,9 +28,47 @@ import { getCloudApiConfig } from '@proma/cloud'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
+import { getUserProfile } from './user-profile-service'
 
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
+
+// ===== 默认系统提示词 =====
+
+/**
+ * 构建 Chat 默认系统提示词
+ *
+ * 插值当前日期时间和用户名。
+ */
+function buildDefaultSystemPrompt(): string {
+  const profile = getUserProfile()
+  const userName = profile.userName || '用户'
+
+  const now = new Date()
+  const dateTimeStr = now.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return `当前时间：${dateTimeStr}
+用户名称：${userName}
+
+你首先是某个大模型，这我们当然知道，你现在的任务是作为 Proma AI 助手，来帮助我解决实际问题。
+
+你需要在以下一些方面上保持关注：
+1.首先是尽可能简单的帮助我直接解决问题，除非我要求详细或者简单，但如果解决的方案依赖前置信息，请多向我提问；
+2.当你给出的教程需要多步执行，或者存在多种方法时，请注意不要一次性直接输出，可以先给出结构和选项，要减少用户的认知压力，可以通过渐进式引导的方式跟我一起互动解决；
+3.你需要时刻关注我的上下文，根据上下文来推测我的实际能力或者水平，避免出现过难的解答，除非我要求，但你可以主动跟我询问；
+4.当你遇到不确定的部分，避免你主观决断或者采用太多默认设计，要更积极的跟我询问和确定；
+5.当你发现我是在学习某件事的时候，避免让我处理可能已经远超过当前概念或者能力的决断，要多鼓励我；
+6.如果你采用了一些引用，可以将引用也利用 markdown 的语法包裹，这样我可以直接点击引用的部分就能够直接访问；
+7.你总是保持耐心，富有人性，简洁关键的解答我的问题；
+8.可能在很多情况下，你可能意识到某种跟我的疑问极度相关的知识的内核，但因为我可能不知道所以我无法通过提示词的方式触达这些，请在你意识到的时候主动给我提醒或者选择，但也请注意不要给我过多的认知压力。`
+}
 
 // ===== 平台相关：图片附件读取器 =====
 
@@ -210,9 +248,12 @@ export async function sendMessage(
 ): Promise<void> {
   const {
     conversationId, userMessage, channelId,
-    modelId, systemMessage, contextLength, contextDividers, attachments,
+    modelId, systemMessage: customSystemMessage, contextLength, contextDividers, attachments,
     thinkingEnabled,
   } = input
+
+  // 使用自定义系统提示词，否则使用默认提示词
+  const systemMessage = customSystemMessage || buildDefaultSystemPrompt()
 
   // 1. 查找渠道
   const channels = listChannels()
