@@ -3,12 +3,12 @@
  *
  * 分为两个区块：
  * 1. 聊天渠道 — 所有渠道列表 + 添加/编辑/删除
- * 2. Agent 供应商 — 仅 Anthropic 渠道，radio 选择默认 Agent 渠道
+ * 2. Agent 供应商 — Anthropic 渠道 + Proma 官方渠道，radio 选择默认 Agent 渠道
  */
 
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { Plus, Pencil, Trash2, Shield } from 'lucide-react'
+import { Plus, Pencil, Trash2, Shield, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -122,10 +122,15 @@ export function ChannelSettings(): React.ReactElement {
   const officialChannel = channels.find((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
   const userChannels = channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID)
 
-  // Anthropic 渠道（已启用）
-  const anthropicChannels = channels.filter(
-    (c) => c.provider === 'anthropic' && c.enabled
+  // Agent 供应商渠道（Anthropic 兼容 + Proma 官方，已启用）
+  const agentProviderChannels = channels.filter(
+    (c) => (c.provider === 'anthropic' || c.provider === 'proma') && c.enabled
   )
+  // 官方渠道排在最前
+  const sortedAgentProviders = [
+    ...agentProviderChannels.filter((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID),
+    ...agentProviderChannels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID),
+  ]
 
   // 列表视图
   return (
@@ -188,21 +193,31 @@ export function ChannelSettings(): React.ReactElement {
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
-        ) : anthropicChannels.length === 0 ? (
+        ) : sortedAgentProviders.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-8 text-center">
-              暂无可用的 Anthropic 兼容格式渠道，请先在上方添加 Anthropic 渠道并启用
+              暂无可用的 Agent 供应商，请先在上方添加 Anthropic 渠道并启用，或登录 Proma 官方账户
             </div>
           </SettingsCard>
         ) : (
           <SettingsCard>
-            {anthropicChannels.map((channel) => (
-              <AgentProviderRow
-                key={channel.id}
-                channel={channel}
-                selected={agentChannelId === channel.id}
-                onSelect={() => handleSelectAgentProvider(channel.id)}
-              />
+            {sortedAgentProviders.map((channel) => (
+              channel.id === PROMA_OFFICIAL_CHANNEL_ID ? (
+                <AgentOfficialProviderRow
+                  key={channel.id}
+                  channel={channel}
+                  selected={agentChannelId === channel.id}
+                  onSelect={() => handleSelectAgentProvider(channel.id)}
+                  onRefresh={loadChannels}
+                />
+              ) : (
+                <AgentProviderRow
+                  key={channel.id}
+                  channel={channel}
+                  selected={agentChannelId === channel.id}
+                  onSelect={() => handleSelectAgentProvider(channel.id)}
+                />
+              )
             ))}
           </SettingsCard>
         )}
@@ -301,6 +316,74 @@ function AgentProviderRow({ channel, selected, onSelect }: AgentProviderRowProps
           />
         )}
       </button>
+    </SettingsRow>
+  )
+}
+
+// ===== Agent 官方供应商行子组件 =====
+
+interface AgentOfficialProviderRowProps {
+  channel: Channel
+  selected: boolean
+  onSelect: () => void
+  onRefresh: () => void
+}
+
+function AgentOfficialProviderRow({ channel, selected, onSelect, onRefresh }: AgentOfficialProviderRowProps): React.ReactElement {
+  const enabledCount = channel.models.filter((m) => m.enabled).length
+  const [refreshing, setRefreshing] = React.useState(false)
+
+  const handleRefresh = async (): Promise<void> => {
+    setRefreshing(true)
+    try {
+      await window.electronAPI.syncOfficialChannel()
+      onRefresh()
+    } catch (error) {
+      console.error('[渠道设置] 刷新官方渠道失败:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Proma 官方"
+      icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
+      description={`官方供应商 · ${enabledCount} 个模型可用`}
+      className="group"
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+          title="刷新模型列表"
+        >
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+        <span
+          className="p-1.5 text-muted-foreground/40"
+          title="官方渠道"
+        >
+          <Shield size={14} />
+        </span>
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex items-center justify-center w-5 h-5 rounded-full border-2 transition-colors"
+          style={{
+            borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+          }}
+        >
+          {selected && (
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: 'hsl(var(--primary))' }}
+            />
+          )}
+        </button>
+      </div>
     </SettingsRow>
   )
 }

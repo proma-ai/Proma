@@ -140,7 +140,9 @@ export function AgentView(): React.ReactElement {
       const channel = channels.find((c) => c.id === agentChannelId && c.enabled)
       if (!channel) return
 
-      const firstModel = channel.models.find((m) => m.enabled)
+      // Agent 优先使用 agentModels，回退到 models
+      const modelList = channel.agentModels ?? channel.models
+      const firstModel = modelList.find((m) => m.enabled)
       if (!firstModel) return
 
       setAgentModelId(firstModel.id)
@@ -811,6 +813,7 @@ export function AgentView(): React.ReactElement {
                       filterChannelId={agentChannelId}
                       externalSelectedModel={externalSelectedModel}
                       onModelSelect={handleModelSelect}
+                      useAgentModels
                     />
                     <ContextUsageBadge
                       inputTokens={contextStatus.inputTokens}

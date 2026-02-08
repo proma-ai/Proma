@@ -137,6 +137,16 @@ export interface BillingIpcResponse<T = unknown> {
 
 // ===== Cloud 模型相关类型 =====
 
+/** System API Key 响应（Agent SDK 使用 pk_xxx 格式 key 走后端代理） */
+export interface SystemApiKeyResponse {
+  id: string
+  key: string      // pk_xxx 格式
+  name: string
+  type: 'SYSTEM' | 'CUSTOM'
+  status: 'ACTIVE' | 'DISABLED' | 'EXPIRED'
+  createdAt: string
+}
+
 /** Cloud 模型配置（单个模型） */
 export interface CloudModelConfig {
   id: string

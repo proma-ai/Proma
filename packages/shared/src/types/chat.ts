@@ -21,6 +21,8 @@ export interface FileAttachment {
   localPath: string
   /** 文件大小（字节） */
   size: number
+  /** 云端附件 URL（从远端同步的附件，优先于 localPath 展示） */
+  url?: string
 }
 
 /** 保存附件输入 */
@@ -52,6 +54,42 @@ export interface FileDialogResult {
   }>
 }
 
+// ===== 工具调用相关 =====
+
+/** 工具调用搜索结果来源 */
+export interface ToolCallSource {
+  /** 来源 URL */
+  url: string
+  /** 来源标题 */
+  title: string
+  /** 来源内容摘要 */
+  content: string
+}
+
+/** 工具调用结果 */
+export interface ToolCallResult {
+  /** 查询内容 */
+  query: string
+  /** AI 生成的答案摘要 */
+  answer: string
+  /** 搜索结果来源列表 */
+  sources: ToolCallSource[]
+}
+
+/** 工具调用信息（存储在消息的 toolCalls 字段中） */
+export interface ToolCallInfo {
+  /** 工具调用唯一标识 */
+  id: string
+  /** 工具名称（如 tavily_search） */
+  name: string
+  /** 工具调用结果 */
+  result: ToolCallResult
+  /** 执行状态 */
+  status: 'success' | 'error'
+  /** 调用参数 */
+  arguments: Record<string, string>
+}
+
 // ===== 消息相关 =====
 
 /**
@@ -79,6 +117,12 @@ export interface ChatMessage {
   stopped?: boolean
   /** 文件附件列表 */
   attachments?: FileAttachment[]
+  /** 输入 Token 数量（云端同步字段） */
+  inputTokens?: number
+  /** 输出 Token 数量（云端同步字段） */
+  outputTokens?: number
+  /** 工具调用信息列表（云端同步字段） */
+  toolCalls?: ToolCallInfo[]
 }
 
 // ===== 对话相关 =====
@@ -128,6 +172,12 @@ export interface ConversationMeta {
   createdAt: number
   /** 更新时间戳 */
   updatedAt: number
+  /** 系统提示词（云端同步字段） */
+  systemMessage?: string
+  /** 关联的 Prompt ID（云端同步字段） */
+  promptId?: string
+  /** 置顶文件夹 ID（云端同步字段） */
+  folderId?: string
 }
 
 // ===== 消息发送 =====

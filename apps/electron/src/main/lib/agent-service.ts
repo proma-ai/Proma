@@ -18,9 +18,9 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { writeFileSync, mkdirSync, cpSync, readdirSync, statSync, existsSync, symlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import { AGENT_IPC_CHANNELS } from '@proma/shared'
+import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentStreamEvent, AgentGenerateTitleInput, AgentSaveFilesInput, AgentSavedFile, AgentCopyFolderInput } from '@proma/shared'
 import {
   ToolIndex,
@@ -29,6 +29,9 @@ import {
   type ContentBlock,
 } from '@proma/shared'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
+import { getSystemApiKey } from './cloud-channel-service'
+import { getAuthToken } from './cloud-auth-service'
+import { getCloudApiConfig } from '@proma/cloud'
 import {
   getAdapter,
   fetchTitle,
@@ -470,11 +473,16 @@ export async function runAgent(
 
   let apiKey: string
   try {
-    apiKey = decryptApiKey(channelId)
+    if (channel.provider === 'proma') {
+      // 官方渠道：使用 system API key（pk_xxx），走后端代理
+      apiKey = await getSystemApiKey()
+    } else {
+      apiKey = decryptApiKey(channelId)
+    }
   } catch {
     webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
       sessionId,
-      error: '解密 API Key 失败',
+      error: channel.provider === 'proma' ? '获取 System API Key 失败，请检查登录状态' : '解密 API Key 失败',
     })
     return
   }
@@ -486,8 +494,14 @@ export async function runAgent(
     ...process.env,
     ANTHROPIC_API_KEY: apiKey,
   }
-  // 自定义 Base URL 时注入 ANTHROPIC_BASE_URL
-  if (channel.baseUrl && channel.baseUrl !== DEFAULT_ANTHROPIC_URL) {
+
+  if (channel.provider === 'proma') {
+    // 官方渠道：ANTHROPIC_BASE_URL 为 cloud root URL（去掉 /api/v1）
+    // SDK 自动拼接 /v1/messages → POST {cloudRootUrl}/v1/messages
+    const cloudBaseUrl = getCloudApiConfig().baseUrl
+    sdkEnv.ANTHROPIC_BASE_URL = cloudBaseUrl.replace(/\/api\/v1\/?$/, '')
+  } else if (channel.baseUrl && channel.baseUrl !== DEFAULT_ANTHROPIC_URL) {
+    // 自定义 Base URL 时注入 ANTHROPIC_BASE_URL
     sdkEnv.ANTHROPIC_BASE_URL = channel.baseUrl
   } else {
     // 确保不会残留上一次的 Base URL
@@ -791,6 +805,13 @@ export async function runAgent(
 
     webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
 
+    // Proma 官方渠道对话完成后通知渲染进程刷新余额
+    if (channel.provider === 'proma') {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
+      })
+    }
+
     // 异步生成标题（不阻塞 stream complete 响应）
     autoGenerateTitle(sessionId, userMessage, channelId, modelId || 'claude-sonnet-4-5-20250929', webContents)
   } catch (error) {
@@ -868,10 +889,32 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
       return null
     }
 
-    const apiKey = decryptApiKey(channelId)
+    // 获取 API Key 和 Base URL
+    let apiKey: string
+    let baseUrl: string
+
+    if (channel.provider === 'proma') {
+      // 官方渠道：使用 auth token + cloud API base URL（标题生成走 Provider 适配器）
+      const token = getAuthToken()
+      if (!token) {
+        console.warn('[Agent 标题生成] 未登录 Cloud 账户')
+        return null
+      }
+      apiKey = token
+      baseUrl = getCloudApiConfig().baseUrl
+    } else {
+      try {
+        apiKey = decryptApiKey(channelId)
+      } catch {
+        console.warn('[Agent 标题生成] 解密 API Key 失败')
+        return null
+      }
+      baseUrl = channel.baseUrl
+    }
+
     const adapter = getAdapter(channel.provider)
     const request = adapter.buildTitleRequest({
-      baseUrl: channel.baseUrl,
+      baseUrl,
       apiKey,
       modelId,
       prompt: TITLE_PROMPT + userMessage,

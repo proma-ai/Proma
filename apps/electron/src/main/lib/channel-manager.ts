@@ -177,6 +177,41 @@ export function syncOfficialChannel(models: ChannelModel[]): void {
 }
 
 /**
+ * 同步 Proma 官方渠道的 Agent 专用模型列表
+ *
+ * 仅更新 proma-official 的 agentModels 字段，保留用户 enabled 状态。
+ * 若渠道不存在则静默跳过（等 syncOfficialChannel 先创建）。
+ */
+export function syncOfficialAgentModels(models: ChannelModel[]): void {
+  const config = readConfig()
+  const index = config.channels.findIndex((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
+
+  if (index === -1) {
+    console.warn('[渠道管理] 官方渠道不存在，跳过 Agent 模型同步')
+    return
+  }
+
+  const existing = config.channels[index]
+  const enabledMap = new Map<string, boolean>()
+  for (const m of existing.agentModels ?? []) {
+    enabledMap.set(m.id, m.enabled)
+  }
+
+  const updatedModels = models.map((m) => ({
+    ...m,
+    enabled: enabledMap.has(m.id) ? enabledMap.get(m.id)! : m.enabled,
+  }))
+
+  config.channels[index] = {
+    ...existing,
+    agentModels: updatedModels,
+    updatedAt: Date.now(),
+  }
+  writeConfig(config)
+  console.log(`[渠道管理] 已更新官方渠道 Agent 模型，共 ${updatedModels.length} 个`)
+}
+
+/**
  * 移除 Proma 官方渠道（登出时调用）
  */
 export function removeOfficialChannel(): void {

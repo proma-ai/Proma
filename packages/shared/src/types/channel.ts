@@ -88,6 +88,8 @@ export interface Channel {
   apiKey: string
   /** 可用模型列表 */
   models: ChannelModel[]
+  /** Agent 专用模型列表（仅 Proma 官方渠道使用） */
+  agentModels?: ChannelModel[]
   /** 是否启用 */
   enabled: boolean
   /** 创建时间戳 */

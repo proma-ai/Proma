@@ -22,3 +22,6 @@ export type { PaymentApi } from './payment'
 
 export { createModelsApi } from './models'
 export type { ModelsApi } from './models'
+
+export { createApiKeysApi } from './api-keys'
+export type { ApiKeysApi } from './api-keys'

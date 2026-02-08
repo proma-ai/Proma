@@ -27,14 +27,16 @@ import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
 
 /** 从渠道列表构建扁平化的模型选项 */
-function buildModelOptions(channels: Channel[], filterChannelId?: string): ModelOption[] {
+function buildModelOptions(channels: Channel[], filterChannelId?: string, useAgentModels?: boolean): ModelOption[] {
   const options: ModelOption[] = []
 
   for (const channel of channels) {
     if (!channel.enabled) continue
     if (filterChannelId && channel.id !== filterChannelId) continue
 
-    for (const model of channel.models) {
+    const modelList = (useAgentModels && channel.agentModels) ? channel.agentModels : channel.models
+
+    for (const model of modelList) {
       if (!model.enabled) continue
 
       options.push({
@@ -72,12 +74,15 @@ interface ModelSelectorProps {
   externalSelectedModel?: { channelId: string; modelId: string } | null
   /** 外部选择回调 */
   onModelSelect?: (option: ModelOption) => void
+  /** 使用 Agent 专用模型列表（仅 Proma 官方渠道） */
+  useAgentModels?: boolean
 }
 
 export function ModelSelector({
   filterChannelId,
   externalSelectedModel,
   onModelSelect,
+  useAgentModels,
 }: ModelSelectorProps = {}): React.ReactElement {
   const [internalSelectedModel, setInternalSelectedModel] = useAtom(selectedModelAtom)
   const currentConversationId = useAtomValue(currentConversationIdAtom)
@@ -102,7 +107,7 @@ export function ModelSelector({
     }
   }, [open])
 
-  const modelOptions = React.useMemo(() => buildModelOptions(channels, filterChannelId), [channels, filterChannelId])
+  const modelOptions = React.useMemo(() => buildModelOptions(channels, filterChannelId, useAgentModels), [channels, filterChannelId, useAgentModels])
   const grouped = React.useMemo(() => groupByChannel(modelOptions), [modelOptions])
 
   // 搜索过滤

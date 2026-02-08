@@ -23,3 +23,6 @@ export * from './agent'
 
 // Cloud 模式相关类型
 export * from './cloud'
+
+// 数据同步相关类型
+export * from './sync'
