@@ -18,9 +18,17 @@ import * as esbuild from 'esbuild'
 const isWatch = process.argv.includes('--watch')
 
 // 从环境变量读取 API 地址（Bun 自动加载 .env）
-const PROMA_API_URL = process.env.PROMA_API_URL || 'http://localhost:8000/api/v1'
+const PROMA_API_URL = process.env.PROMA_API_URL || 'https://api.proma.cool/api/v1'
 
 console.log(`[build:main] PROMA_API_URL = ${PROMA_API_URL}`)
+
+// 安全检查：防止误用 localhost 地址打包分发
+if (PROMA_API_URL.includes('localhost') && !process.env.ALLOW_LOCALHOST) {
+  console.error('[build:main] 错误：不允许使用 localhost 地址构建分发包！')
+  console.error('[build:main] 请在 .env 中设置正确的 PROMA_API_URL')
+  console.error('[build:main] 如确需本地调试，请设置环境变量 ALLOW_LOCALHOST=1')
+  process.exit(1)
+}
 
 const buildOptions: esbuild.BuildOptions = {
   entryPoints: ['src/main/index.ts'],

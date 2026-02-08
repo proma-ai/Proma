@@ -12,7 +12,7 @@ export interface CloudApiConfig {
 
 /** 默认 API 配置 */
 const DEFAULT_CONFIG: CloudApiConfig = {
-  baseUrl: 'http://localhost:8000/api/v1',
+  baseUrl: 'https://api.proma.cool/api/v1',
   timeout: 30_000,
 }
 

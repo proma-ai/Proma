@@ -120,7 +120,7 @@ interface AgentModelItem {
 export async function fetchAndSyncAgentModels(): Promise<void> {
   try {
     const config = getCloudApiConfig()
-    // baseUrl 类似 http://localhost:8000/api/v1，取根域名部分
+    // baseUrl 类似 https://api.proma.cool/api/v1，取根域名部分
     const rootUrl = config.baseUrl.replace(/\/api\/v\d+$/, '')
 
     const response = await fetch(`${rootUrl}/v1/agent_models`, {
