@@ -19,11 +19,12 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.1.21",
+      "version": "0.4.0",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.37",
         "@emoji-mart/data": "^1.2.1",
         "@emoji-mart/react": "^1.1.1",
+        "@proma/cloud": "workspace:*",
         "@proma/core": "workspace:*",
         "@proma/shared": "workspace:*",
         "@proma/ui": "workspace:*",
@@ -80,6 +81,16 @@
         "tailwindcss": "^3.4.17",
         "typescript": "^5.0.0",
         "vite": "^6.0.3",
+      },
+    },
+    "packages/cloud": {
+      "name": "@proma/cloud",
+      "version": "0.1.0",
+      "dependencies": {
+        "@proma/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^5.0.0",
       },
     },
     "packages/core": {
@@ -323,6 +334,8 @@
     "@npmcli/move-file": ["@npmcli/move-file@2.0.1", "", { "dependencies": { "mkdirp": "^1.0.4", "rimraf": "^3.0.2" } }, "sha512-mJd2Z5TjYWq/ttPLLGqArdtnC74J6bOzg4rMDnN+p1xTacZ2yPRCk2y0oSWQtygLR9YVQXgOcONrwtnk3JupxQ=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
+
+    "@proma/cloud": ["@proma/cloud@workspace:packages/cloud"],
 
     "@proma/core": ["@proma/core@workspace:packages/core"],
 

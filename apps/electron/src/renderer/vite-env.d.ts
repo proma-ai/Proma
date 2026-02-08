@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+// Vite define 注入的全局常量
+/** 应用版本号 */
+declare const __APP_VERSION__: string
+/** 应用运行模式: 'local' | 'cloud' */
+declare const __PROMA_MODE__: 'local' | 'cloud'
+
 // CSS 模块类型声明
 declare module '*.css' {
   const content: Record<string, string>

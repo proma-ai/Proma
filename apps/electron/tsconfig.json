@@ -11,6 +11,7 @@
   },
   "include": ["src/**/*"],
   "references": [
+    { "path": "../../packages/cloud" },
     { "path": "../../packages/core" },
     { "path": "../../packages/shared" },
     { "path": "../../packages/ui" }

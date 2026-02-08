@@ -1,0 +1,23 @@
+{
+  "name": "@proma/cloud",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Cloud mode infrastructure for Proma commercial features",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts",
+    "./api": "./src/api/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@proma/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    __PROMA_MODE__: JSON.stringify(process.env.PROMA_MODE || 'local'),
   },
   root: resolve(__dirname, 'src/renderer'),
   base: './',
