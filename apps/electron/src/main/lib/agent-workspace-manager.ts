@@ -8,7 +8,7 @@
  * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -150,6 +150,9 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
   // 创建工作区目录
   getAgentWorkspacePath(slug)
 
+  // 创建 SDK plugin manifest（SDK 需要此文件发现 skills）
+  ensurePluginManifest(slug, name)
+
   // 复制默认 Skills 模板
   copyDefaultSkills(slug)
 
@@ -216,6 +219,8 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
   const existing = index.workspaces.find((w) => w.slug === 'default')
 
   if (existing) {
+    // 迁移兼容：确保已有默认工作区包含 plugin manifest 和 skills
+    ensurePluginManifest(existing.slug, existing.name)
     return existing
   }
 
@@ -231,11 +236,45 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
   // 创建工作区目录
   getAgentWorkspacePath('default')
 
+  // 创建 SDK plugin manifest
+  ensurePluginManifest('default', '默认工作区')
+
+  // 复制默认 Skills 模板
+  copyDefaultSkills('default')
+
   index.workspaces.push(workspace)
   writeIndex(index)
 
   console.log('[Agent 工作区] 已创建默认工作区')
   return workspace
+}
+
+// ===== Plugin Manifest（SDK 插件发现） =====
+
+/**
+ * 确保工作区包含 .claude-plugin/plugin.json 清单
+ *
+ * SDK 需要此文件才能将工作区识别为合法插件，
+ * 进而发现 skills/ 目录下的 Skill。
+ */
+export function ensurePluginManifest(workspaceSlug: string, workspaceName: string): void {
+  const wsPath = getAgentWorkspacePath(workspaceSlug)
+  const pluginDir = join(wsPath, '.claude-plugin')
+  const manifestPath = join(pluginDir, 'plugin.json')
+
+  if (existsSync(manifestPath)) return
+
+  if (!existsSync(pluginDir)) {
+    mkdirSync(pluginDir, { recursive: true })
+  }
+
+  const manifest = {
+    name: `proma-workspace-${workspaceSlug}`,
+    version: '1.0.0',
+  }
+
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+  console.log(`[Agent 工作区] 已创建 plugin manifest: ${workspaceSlug}`)
 }
 
 // ===== MCP 配置管理 =====
@@ -343,7 +382,7 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
   const skills = getWorkspaceSkills(workspaceSlug)
 
-  const mcpServers = Object.entries(mcpConfig.servers).map(([name, entry]) => ({
+  const mcpServers = Object.entries(mcpConfig.servers ?? {}).map(([name, entry]) => ({
     name,
     enabled: entry.enabled,
     type: entry.type,

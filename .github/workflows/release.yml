@@ -1,7 +1,7 @@
 # GitHub Actions: 自动打包分发
 #
-# 触发条件：推送 v* tag（如 v0.1.22）
-# 构建所有平台产物并发布到 GitHub Releases
+# 触发条件：推送 v* tag（如 v0.4.0）
+# 构建 macOS 和 Windows 产物并发布到 GitHub Releases
 #
 # 所需 GitHub Secrets（macOS 签名/公证，可选）:
 # - MAC_CERTS: Base64 编码的 macOS Developer ID Application 证书 (.p12)
@@ -29,10 +29,10 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
-          - os: ubuntu-latest
-            platform: linux
+            vendor_platforms: "--platform darwin-arm64 --platform darwin-x64"
           - os: windows-latest
             platform: win
+            vendor_platforms: "--platform win32-x64"
 
     runs-on: ${{ matrix.os }}
 
@@ -53,8 +53,8 @@ jobs:
       - name: 安装依赖
         run: bun install
 
-      - name: 下载各平台 Bun 二进制
-        run: bun run build:vendor
+      - name: 下载 Bun 二进制
+        run: bun run scripts/download-bun.ts ${{ matrix.vendor_platforms }}
         working-directory: apps/electron
 
       # macOS 代码签名准备
@@ -94,13 +94,6 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --mac --publish always
-        working-directory: apps/electron
-
-      - name: 打包并发布 (Linux)
-        if: matrix.platform == 'linux'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --linux --publish always
         working-directory: apps/electron
 
       - name: 打包并发布 (Windows)

@@ -257,6 +257,9 @@ export interface ElectronAPI {
   /** 订阅 Agent 流式错误事件 */
   onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => () => void
 
+  /** 订阅 Agent 标题自动更新事件 */
+  onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
+
   // ===== Agent 附件 =====
 
   /** 保存文件到 Agent session 工作目录 */
@@ -575,6 +578,13 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: { sessionId: string; error: string }): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_ERROR, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_ERROR, listener) }
+  },
+
+  // 标题自动更新通知
+  onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => {
+    const listener = (_: unknown, data: { sessionId: string; title: string }): void => callback(data)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener) }
   },
 
   // 工作区文件变化通知

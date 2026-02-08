@@ -4,6 +4,8 @@
 
 [English version README.md](./README.en.md)
 
+![Proma 海报](https://img.erlich.fun/personal-blog/uPic/pb.png)
+
 ### 并行运行的商业版本
 同时 Proma 也支持商业的版本，如果你需要未来更多的**云端功能**｜**稳定靠谱的 API** ｜**更划算省心的订阅包**｜**简单的使用体验**，也欢迎支持 Proma 的商业版本：https://proma.cool/download 即可下载使用。
 

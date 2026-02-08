@@ -15,6 +15,7 @@ import {
   MessageLoading,
   MessageResponse,
   StreamingIndicator,
+  UserMessageContent,
 } from '@/components/ai-elements/message'
 import {
   Conversation,
@@ -191,7 +192,7 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
             </div>
           )}
           {messageText && (
-            <MessageResponse>{messageText}</MessageResponse>
+            <UserMessageContent>{messageText}</UserMessageContent>
           )}
         </MessageContent>
       </Message>

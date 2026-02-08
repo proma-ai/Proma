@@ -28,12 +28,16 @@ import {
   extractToolResults,
   type ContentBlock,
 } from '@proma/shared'
-import { decryptApiKey, getChannelById } from './channel-manager'
+import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
+import {
+  getAdapter,
+  fetchTitle,
+} from '@proma/core'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
-import { getWorkspaceMcpConfig } from './agent-workspace-manager'
+import { getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
 import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-builder'
 
 /** 活跃的 AbortController 映射（sessionId → controller） */
@@ -521,6 +525,8 @@ export async function runAgent(
   const accumulatedEvents: AgentEvent[] = []
   // SDK 确认的实际模型（从 system init 消息获取）
   let resolvedModel = modelId || 'claude-sonnet-4-5-20250929'
+  // 收集 stderr 输出用于错误诊断（声明在 try 之前，确保 catch 可访问）
+  const stderrChunks: string[] = []
 
   try {
     // 6. 动态导入 SDK（避免在 esbuild 打包时出问题）
@@ -543,9 +549,6 @@ export async function runAgent(
 
     console.log(`[Agent 服务] 启动 SDK — CLI: ${cliPath}, Bun: ${bunPath}, 模型: ${modelId || 'claude-sonnet-4-5-20250929'}, resume: ${existingSdkSessionId ?? '无'}`)
 
-    // 收集 stderr 输出用于错误诊断
-    const stderrChunks: string[] = []
-
     // 安全：--env-file=/dev/null 阻止 Bun 自动加载用户项目中的 .env 文件
     const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null'
 
@@ -560,6 +563,9 @@ export async function runAgent(
         workspaceSlug = ws.slug
         workspace = ws
         console.log(`[Agent 服务] 使用 session 级别 cwd: ${agentCwd} (${ws.name}/${sessionId})`)
+
+        // 迁移兼容：确保已有工作区包含 SDK plugin manifest（否则 skills 不可发现）
+        ensurePluginManifest(ws.slug, ws.name)
 
         // 迁移兼容：旧会话在 workspace 级别 cwd 下创建，resume 在新 cwd 下会失败
         // 检测：有 sdkSessionId 但 session 目录为空（刚创建）→ 清除 sdkSessionId，回填历史上下文
@@ -583,7 +589,7 @@ export async function runAgent(
     const mcpServers: Record<string, Record<string, unknown>> = {}
     if (workspaceSlug) {
       const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
-      for (const [name, entry] of Object.entries(mcpConfig.servers)) {
+      for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
         if (!entry.enabled) continue
 
         if (entry.type === 'stdio' && entry.command) {
@@ -779,6 +785,9 @@ export async function runAgent(
     }
 
     webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
+
+    // 异步生成标题（不阻塞 stream complete 响应）
+    autoGenerateTitle(sessionId, userMessage, channelId, modelId || 'claude-sonnet-4-5-20250929', webContents)
   } catch (error) {
     if (controller.signal.aborted) {
       console.log(`[Agent 服务] 会话 ${sessionId} 已被用户中止`)
@@ -828,80 +837,81 @@ export async function runAgent(
   }
 }
 
+/** 标题生成 Prompt */
+const TITLE_PROMPT = '根据用户的第一条消息，生成一个简短的对话标题（10字以内）。只输出标题，不要有任何其他内容、标点符号或引号。\n\n用户消息：'
+
+/** 标题最大长度 */
+const MAX_TITLE_LENGTH = 20
+
+/** 默认会话标题（用于判断是否需要自动生成） */
+const DEFAULT_SESSION_TITLE = '新 Agent 会话'
+
 /**
  * 生成 Agent 会话标题
  *
- * 直接发起 Anthropic Messages API 非流式请求，根据用户首条消息生成简短标题。
+ * 使用 Provider 适配器系统，支持 Anthropic / OpenAI / Google 等所有渠道。
  * 任何错误返回 null，不影响主流程。
  */
 export async function generateAgentTitle(input: AgentGenerateTitleInput): Promise<string | null> {
   const { userMessage, channelId, modelId } = input
 
   try {
-    // 1. 获取渠道信息 + 解密 API Key
-    const channel = getChannelById(channelId)
+    const channels = listChannels()
+    const channel = channels.find((c) => c.id === channelId)
     if (!channel) {
       console.warn('[Agent 标题生成] 渠道不存在:', channelId)
       return null
     }
 
     const apiKey = decryptApiKey(channelId)
-
-    // 2. 规范化 Base URL
-    let baseUrl = channel.baseUrl || 'https://api.anthropic.com'
-    // 去尾部斜线
-    baseUrl = baseUrl.replace(/\/+$/, '')
-    // 若只有域名无路径，补 /v1
-    try {
-      const parsed = new URL(baseUrl)
-      if (parsed.pathname === '/' || parsed.pathname === '') {
-        baseUrl = `${baseUrl}/v1`
-      }
-    } catch {
-      // URL 解析失败，保持原值
-    }
-
-    // 3. 发起 Anthropic Messages API 非流式请求
-    const prompt = `根据用户的第一条消息，生成一个简短的对话标题（10字以内）。只输出标题文本。\n\n用户消息：${userMessage}`
-
-    const response = await fetch(`${baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'Authorization': `Bearer ${apiKey}`,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        max_tokens: 50,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+    const adapter = getAdapter(channel.provider)
+    const request = adapter.buildTitleRequest({
+      baseUrl: channel.baseUrl,
+      apiKey,
+      modelId,
+      prompt: TITLE_PROMPT + userMessage,
     })
 
-    if (!response.ok) {
-      console.warn(`[Agent 标题生成] API 请求失败: ${response.status} ${response.statusText}`)
-      return null
-    }
+    const title = await fetchTitle(request, adapter)
+    if (!title) return null
 
-    const data = await response.json() as {
-      content?: Array<{ type: string; text?: string }>
-    }
+    const cleaned = title.trim().replace(/^["'""''「《]+|["'""''」》]+$/g, '').trim()
+    const result = cleaned.slice(0, MAX_TITLE_LENGTH) || null
 
-    // 4. 解析响应，清理引号并截断
-    const rawTitle = data.content?.[0]?.text?.trim()
-    if (!rawTitle) return null
-
-    // 去除首尾引号
-    const cleaned = rawTitle.replace(/^["'「《]+|["'」》]+$/g, '')
-    // 截断到 20 字符
-    const title = cleaned.length > 20 ? cleaned.slice(0, 20) : cleaned
-
-    console.log(`[Agent 标题生成] 生成标题: "${title}"`)
-    return title
+    console.log(`[Agent 标题生成] 生成标题: "${result}"`)
+    return result
   } catch (error) {
     console.warn('[Agent 标题生成] 生成失败:', error)
     return null
+  }
+}
+
+/**
+ * Agent 流完成后自动生成标题
+ *
+ * 在主进程侧检测：如果会话标题仍为默认值，说明是首次对话完成，
+ * 自动调用标题生成并推送 TITLE_UPDATED 事件给渲染进程。
+ * 不受组件生命周期影响，解决用户切换页面后标题不生成的问题。
+ */
+async function autoGenerateTitle(
+  sessionId: string,
+  userMessage: string,
+  channelId: string,
+  modelId: string,
+  webContents: WebContents,
+): Promise<void> {
+  try {
+    const meta = getAgentSessionMeta(sessionId)
+    if (!meta || meta.title !== DEFAULT_SESSION_TITLE) return
+
+    const title = await generateAgentTitle({ userMessage, channelId, modelId })
+    if (!title) return
+
+    updateAgentSessionMeta(sessionId, { title })
+    webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, { sessionId, title })
+    console.log(`[Agent 服务] 自动标题生成完成: "${title}"`)
+  } catch (error) {
+    console.warn('[Agent 服务] 自动标题生成失败:', error)
   }
 }
 

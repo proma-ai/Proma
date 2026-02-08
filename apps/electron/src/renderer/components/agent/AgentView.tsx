@@ -43,7 +43,7 @@ import {
 } from '@/atoms/agent-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
-import type { AgentSendInput, AgentStreamEvent, AgentMessage, AgentGenerateTitleInput, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
+import type { AgentSendInput, AgentStreamEvent, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
 
 /** 将 File 对象转为 base64 字符串 */
 function fileToBase64(file: File): Promise<string> {
@@ -131,9 +131,6 @@ export function AgentView(): React.ReactElement {
   React.useEffect(() => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
-
-  // 首条消息标题生成相关 ref（支持多会话并行）
-  const pendingTitleRef = React.useRef<Map<string, AgentGenerateTitleInput>>(new Map())
 
   // 渠道已选但模型未选时，自动选择第一个可用模型
   React.useEffect(() => {
@@ -238,25 +235,6 @@ export function AgentView(): React.ReactElement {
         } else {
           finalize()
         }
-
-        // 首条消息回复完成后，生成会话标题
-        const titleInput = pendingTitleRef.current.get(data.sessionId)
-        if (titleInput) {
-          pendingTitleRef.current.delete(data.sessionId)
-          window.electronAPI.generateAgentTitle(titleInput).then((title) => {
-            if (!title) return
-            window.electronAPI
-              .updateAgentSessionTitle(data.sessionId, title)
-              .then(() => {
-                // 刷新会话列表以更新侧边栏标题
-                window.electronAPI
-                  .listAgentSessions()
-                  .then(setAgentSessions)
-                  .catch(console.error)
-              })
-              .catch(console.error)
-          }).catch(console.error)
-        }
       }
     )
 
@@ -287,10 +265,19 @@ export function AgentView(): React.ReactElement {
       }
     )
 
+    // 监听主进程自动标题生成完成事件
+    const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(() => {
+      window.electronAPI
+        .listAgentSessions()
+        .then(setAgentSessions)
+        .catch(console.error)
+    })
+
     return () => {
       cleanupEvent()
       cleanupComplete()
       cleanupError()
+      cleanupTitleUpdated()
     }
   }, [setStreamingStates, setCurrentMessages, setAgentSessions, setAgentStreamErrors])
 
@@ -321,15 +308,6 @@ export function AgentView(): React.ReactElement {
         createdAt: Date.now(),
       }
       setCurrentMessages((prev) => [...prev, tempUserMsg])
-
-      // 首条消息标题生成
-      if (agentModelId) {
-        pendingTitleRef.current.set(currentSessionId, {
-          userMessage: prompt.message,
-          channelId: agentChannelId,
-          modelId: agentModelId,
-        })
-      }
 
       // 发送消息
       const input: AgentSendInput = {
@@ -610,16 +588,6 @@ export function AgentView(): React.ReactElement {
     }
     setCurrentMessages((prev) => [...prev, tempUserMsg])
 
-    // 首条消息：记录标题生成输入（发送前历史为空）
-    const isFirstMessage = currentMessages.length === 0
-    if (isFirstMessage && agentModelId) {
-      pendingTitleRef.current.set(currentSessionId, {
-        userMessage: text || pendingFiles.map((f) => f.filename).join(', '),
-        channelId: agentChannelId,
-        modelId: agentModelId,
-      })
-    }
-
     const input: AgentSendInput = {
       sessionId: currentSessionId,
       userMessage: finalMessage,
@@ -639,7 +607,7 @@ export function AgentView(): React.ReactElement {
         return map
       })
     })
-  }, [inputContent, pendingFiles, pendingFolderRefs, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, setStreamingStates, setCurrentMessages, setPendingFiles, currentMessages, setAgentStreamErrors])
+  }, [inputContent, pendingFiles, pendingFolderRefs, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, setStreamingStates, setCurrentMessages, setPendingFiles, setAgentStreamErrors])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {

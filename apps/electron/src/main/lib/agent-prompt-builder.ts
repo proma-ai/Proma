@@ -125,7 +125,7 @@ export function buildDynamicContext(ctx: DynamicContext): string {
 
     // MCP 服务器列表
     const mcpConfig = getWorkspaceMcpConfig(ctx.workspaceSlug)
-    const serverEntries = Object.entries(mcpConfig.servers)
+    const serverEntries = Object.entries(mcpConfig.servers ?? {})
     if (serverEntries.length > 0) {
       wsLines.push('MCP 服务器:')
       for (const [name, entry] of serverEntries) {

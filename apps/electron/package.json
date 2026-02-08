@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -11,6 +11,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c blue,green \"bun run dev:vite\" \"bun run dev:electron\"",
+    "dev:split": "concurrently -k -n vite,electron -c blue,green --hide 0 \"bun run dev:vite\" \"bun run dev:electron\"",
     "dev:vite": "vite dev",
     "dev:electron": "bun run build:main && bun run build:preload && bun run build:resources && sleep 2 && concurrently -k -n main,preload,app -c yellow,magenta,cyan \"bun run watch:main\" \"bun run watch:preload\" \"bunx electronmon .\"",
     "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --outfile=dist/main.cjs --external:electron --external:@anthropic-ai/claude-agent-sdk --external:electron-updater",

@@ -312,6 +312,10 @@ export const AGENT_IPC_CHANNELS = {
   /** 在系统文件管理器中显示文件 */
   SHOW_IN_FOLDER: 'agent:show-in-folder',
 
+  // 标题自动生成通知（主进程 → 渲染进程推送）
+  /** 标题已更新（首次对话完成后自动生成） */
+  TITLE_UPDATED: 'agent:title-updated',
+
   // 工作区配置变化通知（主进程 → 渲染进程推送）
   /** 工作区能力变化（MCP/Skills 文件监听触发） */
   CAPABILITIES_CHANGED: 'agent:capabilities-changed',
