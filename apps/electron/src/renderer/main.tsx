@@ -29,6 +29,12 @@ import {
   cloudAuthLoadingAtom,
   initializeCloudAuth,
 } from './atoms/cloud-auth'
+import {
+  billingInfoAtom,
+  billingLoadingAtom,
+  quotaExceededDialogAtom,
+  initializeBilling,
+} from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
 import './styles/globals.css'
 
@@ -166,10 +172,34 @@ function CloudAuthInitializer(): null {
   return null
 }
 
+/**
+ * Cloud 账单初始化组件
+ *
+ * 仅在 Cloud 模式 + 已认证时：
+ * - 获取账单信息
+ * - 订阅额度不足事件
+ */
+function BillingInitializer(): null {
+  const setBillingInfo = useSetAtom(billingInfoAtom)
+  const setBillingLoading = useSetAtom(billingLoadingAtom)
+  const setQuotaExceededDialog = useSetAtom(quotaExceededDialogAtom)
+  const user = useAtomValue(cloudUserAtom)
+
+  useEffect(() => {
+    if (!isCloudMode() || !user) return
+
+    const cleanup = initializeBilling(setBillingInfo, setBillingLoading, setQuotaExceededDialog)
+    return cleanup
+  }, [user, setBillingInfo, setBillingLoading, setQuotaExceededDialog])
+
+  return null
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeInitializer />
     <CloudAuthInitializer />
+    <BillingInitializer />
     <AgentSettingsInitializer />
     <UpdaterInitializer />
     <App />

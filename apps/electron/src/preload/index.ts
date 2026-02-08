@@ -44,6 +44,16 @@ import type {
   FileEntry,
   CloudAuthState,
   CloudAuthIpcResponse,
+  BillingIpcResponse,
+  BillingInfo,
+  CheckBalanceResponse,
+  PaymentTiersResponse,
+  CreateWechatPaymentResponse,
+  CreateStripePaymentResponse,
+  OrderRecord,
+  VerifyVipResponse,
+  QueryExternalBalanceResponse,
+  TransferCreditsResponse,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -341,6 +351,34 @@ export interface ElectronAPI {
     openGoogleLogin: () => Promise<CloudAuthIpcResponse>
     /** 订阅认证状态变化（返回清理函数） */
     onAuthStateChanged: (callback: (state: CloudAuthState) => void) => () => void
+  }
+
+  // ===== Cloud 账单/支付相关 =====
+
+  /** Cloud 账单 API（始终暴露，handler 仅在 cloud 模式注册） */
+  cloudBilling: {
+    /** 获取账单信息 */
+    getBilling: () => Promise<BillingIpcResponse<BillingInfo>>
+    /** 检查余额 */
+    checkBalance: () => Promise<BillingIpcResponse<CheckBalanceResponse>>
+    /** 获取套餐列表 */
+    getTiers: () => Promise<BillingIpcResponse<PaymentTiersResponse>>
+    /** 创建微信支付 */
+    createWechatPayment: (tierId: string) => Promise<BillingIpcResponse<CreateWechatPaymentResponse>>
+    /** 创建 Stripe 支付 */
+    createStripePayment: (tierId: string) => Promise<BillingIpcResponse<CreateStripePaymentResponse>>
+    /** 查询订单状态 */
+    getOrderStatus: (orderNo: string) => Promise<BillingIpcResponse<OrderRecord>>
+    /** 获取订单历史 */
+    getOrders: () => Promise<BillingIpcResponse<OrderRecord[]>>
+    /** VIP 验证 */
+    verifyVip: (apiKey: string) => Promise<BillingIpcResponse<VerifyVipResponse>>
+    /** 查询外部（DeepClaude）余额 */
+    queryExternalBalance: (apiKey: string) => Promise<BillingIpcResponse<QueryExternalBalanceResponse>>
+    /** 迁移外部额度 */
+    transferCredits: (apiKey: string, amount: number) => Promise<BillingIpcResponse<TransferCreditsResponse>>
+    /** 订阅额度不足事件（返回清理函数） */
+    onQuotaExceeded: (callback: () => void) => () => void
   }
 }
 
@@ -718,6 +756,45 @@ const electronAPI: ElectronAPI = {
       const listener = (_: unknown, state: CloudAuthState): void => callback(state)
       ipcRenderer.on(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.AUTH_STATE_CHANGED, listener) }
+    },
+  },
+
+  // Cloud 账单/支付
+  cloudBilling: {
+    getBilling: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_BILLING)
+    },
+    checkBalance: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CHECK_BALANCE)
+    },
+    getTiers: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_TIERS)
+    },
+    createWechatPayment: (tierId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_WECHAT_PAYMENT, tierId)
+    },
+    createStripePayment: (tierId: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_STRIPE_PAYMENT, tierId)
+    },
+    getOrderStatus: (orderNo: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_ORDER_STATUS, orderNo)
+    },
+    getOrders: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_ORDERS)
+    },
+    verifyVip: (apiKey: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.VERIFY_VIP, apiKey)
+    },
+    queryExternalBalance: (apiKey: string) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.QUERY_EXTERNAL_BALANCE, apiKey)
+    },
+    transferCredits: (apiKey: string, amount: number) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.TRANSFER_CREDITS, apiKey, amount)
+    },
+    onQuotaExceeded: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED, listener)
+      return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED, listener) }
     },
   },
 }

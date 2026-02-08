@@ -28,6 +28,113 @@ export interface CloudAuthIpcResponse {
   error?: string
 }
 
+// ===== 账单/支付相关类型 =====
+
+/** 支付方式 */
+export type PaymentMethod = 'wechat' | 'stripe'
+
+/** 支付渠道（后端返回） */
+export type PaymentChannel = 'WECHAT' | 'STRIPE'
+
+/** 计费模式 */
+export type BillingMode = 'PREPAID' | 'SUBSCRIPTION'
+
+/** 订单状态 */
+export type OrderStatusType = 'PENDING' | 'PAID' | 'COMPLETED' | 'FAILED' | 'EXPIRED' | 'REFUNDED'
+
+/** 支付套餐 */
+export interface PaymentTier {
+  id: string
+  name: string
+  credits: number
+  amount_cny: number
+  amount_usd: number
+  original_cny: number
+  original_usd: number
+  has_discount: boolean
+}
+
+/** 套餐列表响应 */
+export interface PaymentTiersResponse {
+  tiers: PaymentTier[]
+  discount_level: number
+  is_vip: boolean
+}
+
+/** 微信支付创建响应 */
+export interface CreateWechatPaymentResponse {
+  order_no: string
+  code_url: string
+  amount: number
+  expire_at: string
+}
+
+/** Stripe 支付创建响应 */
+export interface CreateStripePaymentResponse {
+  order_no: string
+  checkout_url: string
+}
+
+/** 订单记录 */
+export interface OrderRecord {
+  order_no: string
+  status: OrderStatusType
+  tier: string
+  amount: number
+  credits: number
+  payment_channel: PaymentChannel
+  created_at: string
+  paid_at: string | null
+  completed_at: string | null
+}
+
+/** 账单信息 */
+export interface BillingInfo {
+  billingMode: BillingMode
+  credits: number
+  monthlyQuota: number
+  usedQuotaMonthly: number
+  usedQuota: number
+  discountLevel: number
+}
+
+/** 余额检查响应 */
+export interface CheckBalanceResponse {
+  sufficient: boolean
+  message: string
+  credits: number
+  billingMode: BillingMode
+}
+
+/** VIP 验证响应 */
+export interface VerifyVipResponse {
+  success: boolean
+  discount_level: number
+  message: string
+}
+
+/** 外部余额查询响应 */
+export interface QueryExternalBalanceResponse {
+  credits: number
+  usedQuota: number
+  remainQuotaInUsd: number
+}
+
+/** 额度迁移响应 */
+export interface TransferCreditsResponse {
+  success: boolean
+  message: string
+  newBalance?: number
+  credits?: number
+}
+
+/** 账单 IPC 通用响应 */
+export interface BillingIpcResponse<T = unknown> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
 /** Cloud IPC 通道常量（用于主进程和渲染进程通信） */
 export const CLOUD_IPC_CHANNELS = {
   // 认证相关
@@ -47,5 +154,19 @@ export const CLOUD_IPC_CHANNELS = {
   OPEN_GOOGLE_LOGIN: 'cloud:auth:open-google-login',
   // 认证状态变化推送通道（主进程 → 渲染进程）
   AUTH_STATE_CHANGED: 'cloud:auth:state-changed',
-  // 后续阶段的通道预留
+  // 账单相关
+  GET_BILLING: 'cloud:billing:get',
+  CHECK_BALANCE: 'cloud:billing:check-balance',
+  GET_TIERS: 'cloud:billing:get-tiers',
+  // 支付相关
+  CREATE_WECHAT_PAYMENT: 'cloud:payment:create-wechat',
+  CREATE_STRIPE_PAYMENT: 'cloud:payment:create-stripe',
+  GET_ORDER_STATUS: 'cloud:payment:order-status',
+  GET_ORDERS: 'cloud:payment:orders',
+  VERIFY_VIP: 'cloud:payment:verify-vip',
+  // 额度迁移
+  QUERY_EXTERNAL_BALANCE: 'cloud:payment:query-external-balance',
+  TRANSFER_CREDITS: 'cloud:payment:transfer-credits',
+  // 额度不足推送通道（主进程 → 渲染进程）
+  QUOTA_EXCEEDED: 'cloud:billing:quota-exceeded',
 } as const

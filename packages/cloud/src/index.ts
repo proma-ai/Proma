@@ -20,6 +20,8 @@ export {
   createApiClient,
   isApiError,
   createAuthApi,
+  createBillingApi,
+  createPaymentApi,
 } from './api/index'
 export type {
   CloudApiClient,
@@ -29,4 +31,6 @@ export type {
   QuotaExceededHandler,
   AuthFailedHandler,
   AuthApi,
+  BillingApi,
+  PaymentApi,
 } from './api/index'

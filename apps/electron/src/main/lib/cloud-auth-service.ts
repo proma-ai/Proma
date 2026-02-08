@@ -47,6 +47,9 @@ let cachedUser: CloudUserInfo | null = null
 let apiClient: CloudApiClient | null = null
 let authApi: AuthApi | null = null
 
+/** 额度不足回调（由 billing service 注册，避免循环依赖） */
+let quotaExceededHandler: (() => void) | null = null
+
 // ===== Token 加密/解密 =====
 
 function encryptToken(token: string): string {
@@ -168,10 +171,23 @@ function toUserInfo(user: CloudUser): CloudUserInfo {
 
 // ===== 获取 API 实例 =====
 
-function getApiClient(): CloudApiClient {
+/**
+ * 注册额度不足回调
+ *
+ * 由 billing service 调用，避免 auth service 反向依赖 billing
+ */
+export function setQuotaExceededHandler(handler: () => void): void {
+  quotaExceededHandler = handler
+}
+
+/** 获取共享的 API Client（供 billing service 复用） */
+export function getApiClient(): CloudApiClient {
   if (!apiClient) {
     apiClient = createApiClient({
       tokenStorage,
+      onQuotaExceeded: () => {
+        quotaExceededHandler?.()
+      },
       onAuthFailed: () => {
         console.log('[Cloud Auth] 认证失败，清除状态')
         cachedUser = null

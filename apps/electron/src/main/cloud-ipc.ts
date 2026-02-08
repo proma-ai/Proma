@@ -2,7 +2,7 @@
  * Cloud IPC 处理器
  *
  * 仅在 PROMA_MODE=cloud 时注册。
- * 内部调用 cloud-auth-service 的函数。
+ * 内部调用 cloud-auth-service 和 cloud-billing-service 的函数。
  */
 
 import { ipcMain } from 'electron'
@@ -29,6 +29,19 @@ import {
   getGoogleOAuthStatus,
   openGoogleLogin,
 } from './lib/cloud-auth-service'
+import {
+  initBillingService,
+  getBilling,
+  checkBalance,
+  getTiers,
+  createWechatPayment,
+  createStripePayment,
+  getOrderStatus,
+  getOrders,
+  verifyVip,
+  queryExternalBalance,
+  transferCredits,
+} from './lib/cloud-billing-service'
 
 /**
  * 注册 Cloud IPC 处理器
@@ -38,6 +51,9 @@ import {
 export async function registerCloudIpcHandlers(): Promise<void> {
   // 初始化认证服务（恢复 token + 验证）
   await initCloudAuthService()
+
+  // 初始化账单服务（注册 402 回调）
+  initBillingService()
 
   // ===== 认证相关 =====
 
@@ -122,5 +138,81 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证处理器')
+  // ===== 账单相关 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_BILLING,
+    async () => {
+      return getBilling()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.CHECK_BALANCE,
+    async () => {
+      return checkBalance()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_TIERS,
+    async () => {
+      return getTiers()
+    },
+  )
+
+  // ===== 支付相关 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.CREATE_WECHAT_PAYMENT,
+    async (_, tierId: string) => {
+      return createWechatPayment(tierId)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.CREATE_STRIPE_PAYMENT,
+    async (_, tierId: string) => {
+      return createStripePayment(tierId)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_ORDER_STATUS,
+    async (_, orderNo: string) => {
+      return getOrderStatus(orderNo)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_ORDERS,
+    async () => {
+      return getOrders()
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.VERIFY_VIP,
+    async (_, apiKey: string) => {
+      return verifyVip(apiKey)
+    },
+  )
+
+  // ===== 额度迁移 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.QUERY_EXTERNAL_BALANCE,
+    async (_, apiKey: string) => {
+      return queryExternalBalance(apiKey)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.TRANSFER_CREDITS,
+    async (_, apiKey: string, amount: number) => {
+      return transferCredits(apiKey, amount)
+    },
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单处理器')
 }

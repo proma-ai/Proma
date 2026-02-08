@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { cn } from '@/lib/utils'
-import { Settings, Radio, Palette, Info, Plug } from 'lucide-react'
+import { Settings, Radio, Palette, Info, Plug, CreditCard } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { SettingsTab } from '@/atoms/settings-tab'
@@ -19,6 +19,8 @@ import { GeneralSettings } from './GeneralSettings'
 import { AppearanceSettings } from './AppearanceSettings'
 import { AboutSettings } from './AboutSettings'
 import { AgentSettings } from './AgentSettings'
+import { BillingSettings } from '@/components/billing/BillingSettings'
+import { isCloudMode } from '@/lib/mode'
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -36,6 +38,9 @@ const BASE_TABS: TabItem[] = [
 /** Agent 模式专属 Tab */
 const AGENT_TAB: TabItem = { id: 'agent', label: '配置', icon: <Plug size={16} /> }
 
+/** Cloud 模式专属 Tab */
+const BILLING_TAB: TabItem = { id: 'billing', label: '账单', icon: <CreditCard size={16} /> }
+
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
   { id: 'appearance', label: '外观', icon: <Palette size={16} /> },
@@ -51,6 +56,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <ChannelSettings />
     case 'agent':
       return <AgentSettings />
+    case 'billing':
+      return <BillingSettings />
     case 'appearance':
       return <AppearanceSettings />
     case 'about':
@@ -62,12 +69,17 @@ export function SettingsPanel(): React.ReactElement {
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom)
   const appMode = useAtomValue(appModeAtom)
 
-  // Agent 模式时在渠道后插入 Agent Tab
+  // Agent 模式时在渠道后插入 Agent Tab，Cloud 模式插入 Billing Tab
   const tabs = React.useMemo(() => {
+    const result = [...BASE_TABS]
     if (appMode === 'agent') {
-      return [...BASE_TABS, AGENT_TAB, ...TAIL_TABS]
+      result.push(AGENT_TAB)
     }
-    return [...BASE_TABS, ...TAIL_TABS]
+    if (isCloudMode()) {
+      result.push(BILLING_TAB)
+    }
+    result.push(...TAIL_TABS)
+    return result
   }, [appMode])
 
   return (

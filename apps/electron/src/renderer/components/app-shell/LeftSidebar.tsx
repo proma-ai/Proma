@@ -51,6 +51,7 @@ import {
 } from '@/components/ui/context-menu'
 import type { ActiveView } from '@/atoms/active-view'
 import type { ConversationMeta, AgentSessionMeta, WorkspaceCapabilities } from '@proma/shared'
+import { SidebarCreditIndicator } from '@/components/billing/SidebarCreditIndicator'
 
 interface SidebarItemProps {
   icon: React.ReactNode
@@ -508,6 +509,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </button>
         </div>
       )}
+
+      {/* Cloud 模式：侧边栏余额指示器 */}
+      <div className="px-3">
+        <SidebarCreditIndicator />
+      </div>
 
       {/* 底部设置 */}
       <div className="px-3 pb-3">
