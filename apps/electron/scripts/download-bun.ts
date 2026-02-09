@@ -16,7 +16,7 @@
  * --force: 强制重新下载（即使已存在）
  */
 
-import { existsSync, mkdirSync, chmodSync, rmSync, createWriteStream, readFileSync } from 'fs'
+import { existsSync, mkdirSync, chmodSync, rmSync, createWriteStream, readFileSync, readdirSync, renameSync } from 'fs'
 import { join, dirname } from 'path'
 import { createHash } from 'crypto'
 import type { PlatformArch, BunDownloadInfo } from '@proma/shared'
@@ -106,7 +106,7 @@ async function calculateChecksum(filePath: string): Promise<string> {
 }
 
 /**
- * 解压 zip 文件
+ * 解压 zip 文件（跨平台：Unix 用 unzip，Windows 用 PowerShell）
  */
 async function extractZip(zipPath: string, destDir: string, binaryName: string): Promise<string> {
   console.log(`  解压中: ${zipPath}`)
@@ -116,17 +116,43 @@ async function extractZip(zipPath: string, destDir: string, binaryName: string):
     mkdirSync(destDir, { recursive: true })
   }
 
-  // 使用 Bun.spawn 调用 unzip 命令
-  const proc = Bun.spawn(['unzip', '-o', '-j', zipPath, '-d', destDir], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
+  const isWindows = process.platform === 'win32'
 
-  const exitCode = await proc.exited
+  if (isWindows) {
+    // Windows：PowerShell Expand-Archive 解压到临时目录，再扁平化移动
+    const extractTemp = join(dirname(destDir), '.extract-temp')
+    if (existsSync(extractTemp)) {
+      rmSync(extractTemp, { recursive: true })
+    }
+    mkdirSync(extractTemp, { recursive: true })
 
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text()
-    throw new Error(`解压失败: ${stderr}`)
+    const proc = Bun.spawn([
+      'powershell', '-NoProfile', '-Command',
+      `Expand-Archive -Path '${zipPath}' -DestinationPath '${extractTemp}' -Force`,
+    ], { stdout: 'pipe', stderr: 'pipe' })
+
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      const stderr = await new Response(proc.stderr).text()
+      rmSync(extractTemp, { recursive: true })
+      throw new Error(`解压失败: ${stderr}`)
+    }
+
+    // Bun zip 内部结构为 bun-{platform}/{binaryName}，扁平化到 destDir
+    flattenDir(extractTemp, destDir)
+    rmSync(extractTemp, { recursive: true })
+  } else {
+    // Unix：unzip -o -j 直接扁平化解压
+    const proc = Bun.spawn(['unzip', '-o', '-j', zipPath, '-d', destDir], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      const stderr = await new Response(proc.stderr).text()
+      throw new Error(`解压失败: ${stderr}`)
+    }
   }
 
   const binaryPath = join(destDir, binaryName)
@@ -138,6 +164,20 @@ async function extractZip(zipPath: string, destDir: string, binaryName: string):
 
   console.log(`  已解压到: ${destDir}`)
   return binaryPath
+}
+
+/**
+ * 递归扁平化目录：将所有文件移动到 destDir
+ */
+function flattenDir(srcDir: string, destDir: string): void {
+  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = join(srcDir, entry.name)
+    if (entry.isDirectory()) {
+      flattenDir(srcPath, destDir)
+    } else {
+      renameSync(srcPath, join(destDir, entry.name))
+    }
+  }
 }
 
 /**
@@ -245,7 +285,7 @@ async function getBunVersion(): Promise<string> {
  */
 function parseArgs(): { platforms: PlatformArch[]; force: boolean } {
   const args = process.argv.slice(2)
-  let platforms: PlatformArch[] = [...TARGET_PLATFORMS]
+  const specified: PlatformArch[] = []
   let force = false
 
   for (let i = 0; i < args.length; i++) {
@@ -257,7 +297,7 @@ function parseArgs(): { platforms: PlatformArch[]; force: boolean } {
         console.error(`支持的平台：${TARGET_PLATFORMS.join(', ')}`)
         process.exit(1)
       }
-      platforms = [platform]
+      specified.push(platform)
       i++
     } else if (arg === '--force') {
       force = true
@@ -268,7 +308,7 @@ Bun 二进制下载脚本
 用法：bun run scripts/download-bun.ts [选项]
 
 选项：
-  --platform <arch>  只下载指定平台（默认下载所有平台）
+  --platform <arch>  只下载指定平台，可多次指定（默认下载所有平台）
                      支持：${TARGET_PLATFORMS.join(', ')}
   --force           强制重新下载（即使已存在）
   --help, -h        显示帮助信息
@@ -277,7 +317,7 @@ Bun 二进制下载脚本
     }
   }
 
-  return { platforms, force }
+  return { platforms: specified.length > 0 ? specified : [...TARGET_PLATFORMS], force }
 }
 
 /**
