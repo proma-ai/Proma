@@ -697,10 +697,18 @@ export async function runAgent(
       const msg = sdkMessage as SDKMessage
       console.log(`[Agent 服务] 收到 SDK 消息: type=${msg.type}`)
 
-      // 从 system init 消息中捕获 SDK 确认的模型
-      if (msg.type === 'system' && 'model' in msg && typeof msg.model === 'string') {
-        resolvedModel = msg.model
-        console.log(`[Agent 服务] SDK 确认模型: ${resolvedModel}`)
+      // 从 system init 消息中捕获 SDK 确认的模型 + 诊断 skills
+      if (msg.type === 'system' && 'subtype' in msg && msg.subtype === 'init') {
+        const initMsg = msg as { model?: string; skills?: string[]; tools?: string[]; plugins?: Array<{ name: string; path: string }>; slash_commands?: string[] }
+        if (typeof initMsg.model === 'string') {
+          resolvedModel = initMsg.model
+          console.log(`[Agent 服务] SDK 确认模型: ${resolvedModel}`)
+        }
+        // 诊断：Skills 发现情况
+        console.log(`[Agent 服务][诊断] SDK init skills: ${JSON.stringify(initMsg.skills)}`)
+        console.log(`[Agent 服务][诊断] SDK init plugins: ${JSON.stringify(initMsg.plugins)}`)
+        console.log(`[Agent 服务][诊断] SDK init tools 包含 Skill: ${initMsg.tools?.includes('Skill')}`)
+        console.log(`[Agent 服务][诊断] SDK init slash_commands: ${JSON.stringify(initMsg.slash_commands)}`)
       }
 
       // 捕获 SDK session_id 用于后续 resume（参考 craft-agents-oss）

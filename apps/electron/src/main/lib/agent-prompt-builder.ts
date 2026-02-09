@@ -155,13 +155,15 @@ export function buildDynamicContext(ctx: DynamicContext): string {
       }
     }
 
-    // Skills 列表
+    // Skills 列表（SDK plugin 机制下 skill 名称带 plugin 前缀）
     const skills = getWorkspaceSkills(ctx.workspaceSlug)
     if (skills.length > 0) {
+      const pluginPrefix = `proma-workspace-${ctx.workspaceSlug}`
       wsLines.push('Skills:')
       for (const skill of skills) {
+        const qualifiedName = `${pluginPrefix}:${skill.slug}`
         const desc = skill.description ? `: ${skill.description}` : ''
-        wsLines.push(`- ${skill.slug}${desc}`)
+        wsLines.push(`- ${qualifiedName}${desc}`)
       }
     }
 
