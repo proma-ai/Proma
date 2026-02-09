@@ -155,16 +155,56 @@ function findArtifacts(version: string): Array<{ file: string; config: FileConfi
   return artifacts
 }
 
+// 大文件阈值：超过 10MB 使用分片上传
+const MULTIPART_THRESHOLD = 10 * 1024 * 1024
+
+// 文件扩展名 → Content-Type 映射
+const MIME_TYPES: Record<string, string> = {
+  ".exe": "application/octet-stream",
+  ".dmg": "application/octet-stream",
+  ".zip": "application/zip",
+  ".yml": "text/yaml",
+}
+
 // ============================================
 // 上传逻辑
 // ============================================
 
 async function uploadFile(client: OSS, localPath: string, ossPath: string): Promise<boolean> {
   try {
-    console.log(`  📤 上传: ${path.basename(localPath)}`)
+    const fileName = path.basename(localPath)
+    const localSize = fs.statSync(localPath).size
+    const ext = path.extname(localPath).toLowerCase()
+    const mime = MIME_TYPES[ext] || "application/octet-stream"
+
+    console.log(`  📤 上传: ${fileName} (${(localSize / 1024 / 1024).toFixed(1)} MB)`)
     console.log(`     → ${ossPath}`)
-    await client.put(ossPath, localPath)
-    console.log(`  ✅ 完成`)
+
+    if (localSize > MULTIPART_THRESHOLD) {
+      // 大文件：分片上传
+      await client.multipartUpload(ossPath, localPath, {
+        headers: { "Content-Type": mime },
+        progress: (p: number) => {
+          process.stdout.write(`\r     进度: ${(p * 100).toFixed(1)}%`)
+        },
+      })
+      console.log("") // 换行
+    } else {
+      // 小文件：直接上传
+      await client.put(ossPath, localPath, {
+        headers: { "Content-Type": mime },
+      })
+    }
+
+    // 校验 OSS 文件大小
+    const head = await client.head(ossPath)
+    const remoteSize = Number(head.res.headers["content-length"])
+    if (remoteSize !== localSize) {
+      console.error(`  ❌ 大小不匹配！本地: ${localSize}, OSS: ${remoteSize}`)
+      return false
+    }
+
+    console.log(`  ✅ 完成 (校验通过)`)
     return true
   } catch (error) {
     console.error(`  ❌ 失败: ${error}`)
