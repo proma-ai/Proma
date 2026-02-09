@@ -9,9 +9,10 @@ import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, Zap, Crown, Rocket, Flame, Clock } from 'lucide-react'
+import { Loader2, Zap, Crown, Rocket, Flame, Clock, Star } from 'lucide-react'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
@@ -44,6 +45,19 @@ const TIER_LABELS: Record<string, string> = {
   standard: '日常使用',
   pro: '高频使用',
   max: '重度使用',
+}
+
+/** 推荐档位 */
+const RECOMMENDED_TIER = 'standard'
+
+/** 汇率：1 USD = 7 CNY */
+const USD_TO_CNY_RATE = 7
+
+/** 计算折扣百分比（按 7:1 汇率换算的等价原价 vs 实际价格） */
+function calcDiscount(tier: SubscriptionTier): number {
+  const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE * 100 // 等价原价（分）
+  if (equivalentCny <= 0) return 0
+  return Math.round((1 - tier.amount_cny / equivalentCny) * 100)
 }
 
 function formatDate(dateStr: string): string {
@@ -182,15 +196,42 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <div className="grid grid-cols-2 gap-3">
           {tiers.map((tier: SubscriptionTier) => {
             const isSelected = selectedTier === tier.id
+            const isRecommended = tier.id === RECOMMENDED_TIER
+            const discount = calcDiscount(tier)
+            const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE // 等价原价（元）
+            const actualCny = tier.amount_cny / 100
+
             return (
               <Card
                 key={tier.id}
-                className={`cursor-pointer transition-all hover:shadow-md ${
-                  isSelected ? 'ring-2 ring-primary shadow-md' : ''
-                }`}
+                className={cn(
+                  'relative cursor-pointer transition-all hover:shadow-md',
+                  isSelected && 'ring-2 ring-primary shadow-md',
+                  isRecommended && !isSelected && 'ring-1 ring-primary/50 shadow-sm',
+                  isRecommended && 'bg-primary/[0.03] dark:bg-primary/[0.06]'
+                )}
                 onClick={() => setSelectedTier(tier.id)}
               >
-                <CardContent className="py-4 text-center">
+                {/* 推荐角标 */}
+                {isRecommended && (
+                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-10">
+                    <Badge className="bg-primary text-primary-foreground text-xs px-2.5 py-0.5 shadow-sm">
+                      <Star size={10} className="mr-1 fill-current" />
+                      推荐
+                    </Badge>
+                  </div>
+                )}
+
+                {/* 折扣角标 */}
+                {discount > 0 && (
+                  <div className="absolute -top-1.5 -right-1.5 z-10">
+                    <span className="inline-flex items-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 shadow-sm">
+                      -{discount}%
+                    </span>
+                  </div>
+                )}
+
+                <CardContent className={cn('py-4 text-center', isRecommended && 'pt-6')}>
                   <div className="flex justify-center mb-2 text-primary">
                     {TIER_ICONS[tier.id]}
                   </div>
@@ -198,11 +239,24 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                   <p className="text-xs text-muted-foreground mb-2">
                     {TIER_LABELS[tier.id] ?? ''}
                   </p>
-                  <p className="text-2xl font-bold text-primary">
-                    ¥{tier.amount_cny / 100}
-                  </p>
-                  <p className="text-xs text-muted-foreground">/月</p>
-                  <p className="text-sm font-medium mt-1">
+
+                  {/* 价格区域 */}
+                  <div className="space-y-0.5">
+                    {discount > 0 && (
+                      <p className="text-sm text-muted-foreground line-through">
+                        ¥{equivalentCny}
+                      </p>
+                    )}
+                    <p className={cn(
+                      'text-2xl font-bold',
+                      isRecommended ? 'text-primary' : 'text-foreground'
+                    )}>
+                      ¥{actualCny}
+                    </p>
+                    <p className="text-xs text-muted-foreground">/月</p>
+                  </div>
+
+                  <p className="text-sm font-medium mt-1.5">
                     ${tier.quota_usd} 额度
                   </p>
                 </CardContent>
@@ -217,6 +271,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <p>· 订阅有效期 31 天，到期后未使用额度清零</p>
         <p>· 支持重复购买，新额度独立计算，优先消耗先购买的额度</p>
         <p>· 订阅额度仅限应用内使用，API 调用请使用预充值余额</p>
+        <p>· 折扣基于 1 USD = 7 CNY 的汇率换算</p>
       </div>
 
       {/* 支付按钮 */}
