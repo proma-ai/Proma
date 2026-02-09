@@ -271,19 +271,19 @@ export function GeneralSettings(): React.ReactElement {
       {/* 账户区域 - 仅 Cloud 模式 + 已登录时显示 */}
       {useCloudProfile && (
         <SettingsSection
-          title="账户"
-          description="Cloud 账户信息"
+          title="Proma 账户"
+          description="Proma 账户信息"
         >
           <SettingsCard>
             <SettingsRow
               label="邮箱"
-              description="当前登录的 Cloud 账户"
+              description="当前登录的 Proma 账户"
             >
               <span className="text-[13px] text-foreground/60">{cloudUser.email}</span>
             </SettingsRow>
             <SettingsRow
               label="登出"
-              description="退出当前 Cloud 账户"
+              description="退出当前 Proma 账户"
             >
               <AlertDialog>
                 <AlertDialogTrigger asChild>
