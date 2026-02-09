@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Camera, ImagePlus } from 'lucide-react'
+import { Camera, ImagePlus, LogOut } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import {
@@ -19,6 +19,18 @@ import {
   SettingsRow,
 } from './primitives'
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover'
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from '../ui/alert-dialog'
+import { buttonVariants } from '../ui/button'
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { cloudUserAtom, isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
@@ -134,6 +146,15 @@ export function GeneralSettings(): React.ReactElement {
     }
   }
 
+  /** 登出 Cloud 账户 */
+  const handleLogout = async (): Promise<void> => {
+    try {
+      await window.electronAPI.cloudAuth.logout()
+    } catch (error) {
+      console.error('[通用设置] 登出失败:', error)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* 用户档案区域 */}
@@ -246,6 +267,58 @@ export function GeneralSettings(): React.ReactElement {
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>
+
+      {/* 账户区域 - 仅 Cloud 模式 + 已登录时显示 */}
+      {useCloudProfile && (
+        <SettingsSection
+          title="账户"
+          description="Cloud 账户信息"
+        >
+          <SettingsCard>
+            <SettingsRow
+              label="邮箱"
+              description="当前登录的 Cloud 账户"
+            >
+              <span className="text-[13px] text-foreground/60">{cloudUser.email}</span>
+            </SettingsRow>
+            <SettingsRow
+              label="登出"
+              description="退出当前 Cloud 账户"
+            >
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px]',
+                      'text-destructive hover:bg-destructive/10 transition-colors'
+                    )}
+                  >
+                    <LogOut className="size-3.5" />
+                    登出
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认登出</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      登出后将返回登录页面，你的本地数据不会被删除。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      className={cn(buttonVariants({ variant: 'destructive' }))}
+                      onClick={handleLogout}
+                    >
+                      确认登出
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsSection>
+      )}
     </div>
   )
 }
