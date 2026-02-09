@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -10,8 +10,10 @@ import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
+import { stopAllAgents } from './lib/agent-service'
+import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
-import { initAutoUpdater } from './lib/updater/auto-updater'
+import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { isCloudMode } from '@proma/cloud'
 import { registerCloudIpcHandlers } from './cloud-ipc'
@@ -26,10 +28,53 @@ let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 
 /**
+ * 检查窗口是否在可用显示器范围内
+ * 处理外接显示器断开后窗口位于不可见区域的情况
+ */
+function ensureWindowOnScreen(win: BrowserWindow): void {
+  const bounds = win.getBounds()
+  const displays = screen.getAllDisplays()
+  // 检查窗口中心点是否在任一显示器范围内
+  const centerX = bounds.x + bounds.width / 2
+  const centerY = bounds.y + bounds.height / 2
+  const isOnScreen = displays.some((display) => {
+    const { x, y, width, height } = display.workArea
+    return centerX >= x && centerX <= x + width && centerY >= y && centerY <= y + height
+  })
+  if (!isOnScreen) {
+    // 窗口不在任何屏幕内，移动到主显示器居中位置
+    const primary = screen.getPrimaryDisplay()
+    const { x, y, width, height } = primary.workArea
+    win.setBounds({
+      x: x + Math.round((width - bounds.width) / 2),
+      y: y + Math.round((height - bounds.height) / 2),
+      width: bounds.width,
+      height: bounds.height,
+    })
+    console.log('[窗口] 窗口已重新定位到主显示器')
+  }
+}
+
+/** 显示并聚焦主窗口，恢复 Dock 图标，确保窗口在可见区域 */
+function showAndFocusMainWindow(): void {
+  if (!mainWindow) return
+  ensureWindowOnScreen(mainWindow)
+  if (process.platform === 'darwin') {
+    app.dock?.show()
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/**
  * Get the appropriate app icon path for the current platform
  */
 function getIconPath(): string {
-  const resourcesDir = join(__dirname, '../resources')
+  // resources 在 build:resources 阶段被复制到 dist/ 下，与 main.cjs 同级
+  const resourcesDir = join(__dirname, 'resources')
 
   if (process.platform === 'darwin') {
     return join(resourcesDir, 'icon.icns')
@@ -264,6 +309,11 @@ if (!gotTheLock) {
   app.on('before-quit', () => {
     // 标记正在退出，让 close 事件不再阻止关闭
     isQuitting = true
+    // 中止所有活跃的 Agent 和 Chat 子进程
+    stopAllAgents()
+    stopAllGenerations()
+    // 清理更新器定时器
+    cleanupUpdater()
     // 停止工作区文件监听
     stopWorkspaceWatcher()
     // Clean up system tray before quitting

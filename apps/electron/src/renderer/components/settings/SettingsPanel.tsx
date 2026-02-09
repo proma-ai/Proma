@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { SettingsTab } from '@/atoms/settings-tab'
 import { appModeAtom } from '@/atoms/app-mode'
+import { hasUpdateAtom } from '@/atoms/updater'
 import { ChannelSettings } from './ChannelSettings'
 import { GeneralSettings } from './GeneralSettings'
 import { AppearanceSettings } from './AppearanceSettings'
@@ -74,6 +75,7 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
 export function SettingsPanel(): React.ReactElement {
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom)
   const appMode = useAtomValue(appModeAtom)
+  const hasUpdate = useAtomValue(hasUpdateAtom)
 
   // Agent 模式时在渠道后插入 Agent Tab，Cloud 模式插入 Billing Tab
   const tabs = React.useMemo(() => {
@@ -110,6 +112,9 @@ export function SettingsPanel(): React.ReactElement {
             >
               {tab.icon}
               <span>{tab.label}</span>
+              {tab.id === 'about' && hasUpdate && (
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+              )}
             </button>
           ))}
         </nav>

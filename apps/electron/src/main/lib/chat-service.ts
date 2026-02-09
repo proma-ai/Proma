@@ -494,6 +494,17 @@ export function stopGeneration(conversationId: string): void {
   }
 }
 
+/** 中止所有活跃的聊天流（应用退出时调用） */
+export function stopAllGenerations(): void {
+  if (activeControllers.size === 0) return
+  console.log(`[聊天服务] 正在中止所有活跃对话 (${activeControllers.size} 个)...`)
+  for (const [conversationId, controller] of activeControllers) {
+    controller.abort()
+    console.log(`[聊天服务] 已中止对话: ${conversationId}`)
+  }
+  activeControllers.clear()
+}
+
 // ===== 标题生成 =====
 
 /** 标题生成 Prompt */

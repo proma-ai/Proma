@@ -9,6 +9,8 @@ import { autoUpdater } from 'electron-updater'
 import type { BrowserWindow } from 'electron'
 import type { UpdateStatus } from './updater-types'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
+import { stopAllAgents } from '../agent-service'
+import { stopAllGenerations } from '../chat-service'
 
 /** 当前更新状态 */
 let currentStatus: UpdateStatus = { status: 'idle' }
@@ -56,9 +58,22 @@ export async function downloadUpdate(): Promise<void> {
   }
 }
 
-/** 退出并安装更新 */
+/** 退出并安装更新（先清理所有子进程） */
 export function installUpdate(): void {
+  console.log('[更新] 准备安装更新，正在清理子进程...')
+  stopAllAgents()
+  stopAllGenerations()
+  cleanupUpdater()
+  console.log('[更新] 子进程已清理，执行 quitAndInstall')
   autoUpdater.quitAndInstall()
+}
+
+/** 清理更新器资源（定时器等） */
+export function cleanupUpdater(): void {
+  if (checkInterval) {
+    clearInterval(checkInterval)
+    checkInterval = null
+  }
 }
 
 /**

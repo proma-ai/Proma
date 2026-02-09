@@ -31,6 +31,7 @@ import {
   workspaceCapabilitiesVersionAtom,
 } from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { hasUpdateAtom } from '@/atoms/updater'
 import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
 import {
   AlertDialog,
@@ -141,6 +142,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const selectedModel = useAtomValue(selectedModelAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
+  const hasUpdate = useAtomValue(hasUpdateAtom)
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -522,6 +524,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           label="设置"
           active={activeItem === 'settings'}
           onClick={() => handleItemClick('settings')}
+          suffix={hasUpdate ? <span className="w-2 h-2 rounded-full bg-red-500" /> : undefined}
         />
       </div>
 

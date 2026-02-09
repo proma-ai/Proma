@@ -983,6 +983,17 @@ export function stopAgent(sessionId: string): void {
   }
 }
 
+/** 中止所有活跃的 Agent 会话（应用退出时调用） */
+export function stopAllAgents(): void {
+  if (activeControllers.size === 0) return
+  console.log(`[Agent 服务] 正在中止所有活跃会话 (${activeControllers.size} 个)...`)
+  for (const [sessionId, controller] of activeControllers) {
+    controller.abort()
+    console.log(`[Agent 服务] 已中止会话: ${sessionId}`)
+  }
+  activeControllers.clear()
+}
+
 /**
  * 保存文件到 Agent session 工作目录
  *

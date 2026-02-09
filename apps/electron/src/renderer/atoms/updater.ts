@@ -26,6 +26,12 @@ export interface UpdateStatus {
 /** 更新状态 atom */
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 
+/** 是否有可用更新（available 或 downloaded 状态） */
+export const hasUpdateAtom = atom((get) => {
+  const { status } = get(updateStatusAtom)
+  return status === 'available' || status === 'downloaded'
+})
+
 /** updater 是否可用 */
 export const updaterAvailableAtom = atom<boolean>(() => {
   return !!window.electronAPI?.updater

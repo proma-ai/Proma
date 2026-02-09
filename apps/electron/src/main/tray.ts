@@ -1,4 +1,4 @@
-import { Tray, Menu, app, nativeImage } from 'electron'
+import { Tray, Menu, app, nativeImage, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -9,11 +9,25 @@ let tray: Tray | null = null
  * 所有平台统一使用 Template 图标
  */
 function getTrayIconPath(): string {
-  const resourcesDir = join(__dirname, '../resources/proma-logos')
-  // 使用 Template 图标：
-  // - macOS: 系统自动根据 DPI 选择 @1x/@2x/@3x，并根据菜单栏主题调整颜色
-  // - Windows/Linux: 直接使用白色图标
+  // resources 在 build:resources 阶段被复制到 dist/ 下，与 main.cjs 同级
+  const resourcesDir = join(__dirname, 'resources/proma-logos')
   return join(resourcesDir, 'iconTemplate.png')
+}
+
+/** 显示主窗口并恢复 Dock 图标 */
+function showMainWindow(): void {
+  const windows = BrowserWindow.getAllWindows()
+  if (windows.length === 0) return
+  const mainWindow = windows[0]
+  // macOS 需要先恢复 Dock 图标，否则窗口可能无法正常显示
+  if (process.platform === 'darwin') {
+    app.dock?.show()
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
 }
 
 /**
@@ -46,18 +60,7 @@ export function createTray(): Tray | null {
     const contextMenu = Menu.buildFromTemplate([
       {
         label: '显示 Proma',
-        click: () => {
-          // 显示/聚焦主窗口
-          const windows = require('electron').BrowserWindow.getAllWindows()
-          if (windows.length > 0) {
-            const mainWindow = windows[0]
-            if (mainWindow.isMinimized()) {
-              mainWindow.restore()
-            }
-            mainWindow.show()
-            mainWindow.focus()
-          }
-        }
+        click: () => showMainWindow()
       },
       {
         type: 'separator'
@@ -74,14 +77,16 @@ export function createTray(): Tray | null {
 
     // 点击行为：显示/隐藏窗口
     tray.on('click', () => {
-      const windows = require('electron').BrowserWindow.getAllWindows()
+      const windows = BrowserWindow.getAllWindows()
       if (windows.length > 0) {
         const mainWindow = windows[0]
         if (mainWindow.isVisible()) {
           mainWindow.hide()
+          if (process.platform === 'darwin') {
+            app.dock?.hide()
+          }
         } else {
-          mainWindow.show()
-          mainWindow.focus()
+          showMainWindow()
         }
       }
     })
