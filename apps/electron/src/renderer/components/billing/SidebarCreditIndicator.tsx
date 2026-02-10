@@ -44,15 +44,27 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
   // 橙色：总余额不足 或 订阅额度耗尽
   const showWarning = isLow || subLow
 
+  // 颜色优先级：警告橙色 > 订阅金色 > 默认灰色
+  const colorClass = showWarning
+    ? 'text-orange-500'
+    : hasSubscription
+      ? 'text-amber-500'
+      : 'text-muted-foreground'
+
   return (
     <button
       onClick={handleClick}
       className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted/50 titlebar-no-drag"
     >
-      <Wallet size={16} className={showWarning ? 'text-orange-500' : 'text-muted-foreground'} />
-      <span className={showWarning ? 'text-orange-500 font-medium' : 'text-muted-foreground'}>
+      <Wallet size={16} className={colorClass} />
+      <span className={`${colorClass} ${(showWarning || hasSubscription) ? 'font-medium' : ''}`}>
         {credits}
       </span>
+      {hasSubscription && (
+        <span className="ml-auto text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500">
+          Pro
+        </span>
+      )}
     </button>
   )
 }

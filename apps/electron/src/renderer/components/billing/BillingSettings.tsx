@@ -104,7 +104,7 @@ export function BillingSettings(): React.ReactElement {
       {/* Tabs：订阅 / 充值 / 迁移 */}
       <Tabs defaultValue="subscription" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="subscription">订阅计划</TabsTrigger>
+          <TabsTrigger value="subscription">订阅计划(更划算)</TabsTrigger>
           <TabsTrigger value="recharge">余额充值</TabsTrigger>
           <TabsTrigger value="transfer">从 DeepClaude 迁移</TabsTrigger>
         </TabsList>

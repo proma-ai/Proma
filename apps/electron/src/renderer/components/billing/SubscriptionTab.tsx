@@ -155,7 +155,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
       {/* 当前活跃订阅 */}
       {subStatus && subStatus.has_active && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">当前订阅</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">当前订阅(支持随时叠加订阅)</h3>
           {subStatus.subscriptions.map((sub) => {
             const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
             const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
@@ -191,7 +191,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
       {/* 订阅档位选择 */}
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-muted-foreground">
-          {subStatus?.has_active ? '续订 / 叠加额度' : '选择订阅计划'}
+          {subStatus?.has_active ? '续订 / 叠加额度' : '选择订阅计划(推荐从低档位开始使用，支持随时叠加)'}
         </h3>
         <div className="grid grid-cols-2 gap-3">
           {tiers.map((tier: SubscriptionTier) => {
