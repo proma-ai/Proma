@@ -47,6 +47,7 @@ function createDefaultSyncState(): SyncState {
   return {
     lastFullSyncAt: null,
     lastPullAt: null,
+    lastDownloadAllAt: null,
     conversations: {},
   }
 }
@@ -363,13 +364,6 @@ export async function incrementalSync(
     result.pulledConversations = pullResult.conversations
     result.pulledMessages = pullResult.messages
 
-    notifyProgress(webContents, { phase: 'pushing', progress: 50, message: '正在推送本地变更...' })
-
-    // 2. 推送本地变更（仅推送远端已有的对话）
-    const pushResult = await pushLocalChanges(client, syncState)
-    result.pushedConversations = pushResult.conversations
-    result.pushedMessages = pushResult.messages
-
     syncState.lastPullAt = Date.now()
     writeSyncState(syncState)
 
@@ -378,10 +372,10 @@ export async function incrementalSync(
     notifyProgress(webContents, {
       phase: 'done',
       progress: 100,
-      message: `同步完成：拉取 ${result.pulledConversations} 个对话，推送 ${result.pushedConversations} 个对话`,
+      message: `同步完成：拉取 ${result.pulledConversations} 个对话`,
     })
 
-    console.log(`[同步] 增量同步完成: 拉取 ${result.pulledConversations} 对话/${result.pulledMessages} 消息, 推送 ${result.pushedConversations} 对话/${result.pushedMessages} 消息`)
+    console.log(`[同步] 增量同步完成: 拉取 ${result.pulledConversations} 对话/${result.pulledMessages} 消息`)
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : '未知错误'
     result.error = errorMsg
@@ -487,6 +481,109 @@ export async function pullMoreConversations(
     result.error = errorMsg
     notifyProgress(webContents, { phase: 'error', progress: 0, message: '加载历史对话失败', error: errorMsg })
     console.error('[同步] 加载更多失败:', error)
+  }
+
+  return result
+}
+
+/**
+ * 从云端下载全部对话（用户手动触发）
+ *
+ * 分页遍历所有远端对话，跳过本地已存在的对话（按 ID 匹配），
+ * 将新对话的详情和消息写入本地。
+ */
+export async function downloadAllConversations(
+  client: CloudApiClient,
+  webContents: WebContents | null,
+): Promise<SyncResult> {
+  const result: SyncResult = {
+    success: false,
+    pulledConversations: 0,
+    pulledMessages: 0,
+    pushedConversations: 0,
+    pushedMessages: 0,
+  }
+
+  try {
+    notifyProgress(webContents, { phase: 'pulling', progress: 0, message: '正在获取云端对话列表...' })
+
+    const localIndex = readLocalIndex()
+    const localIds = new Set(localIndex.conversations.map((c) => c.id))
+    const syncState = readSyncState()
+    const now = Date.now()
+
+    // 分页遍历所有远端对话
+    let cursor: string | undefined
+    let totalProcessed = 0
+
+    while (true) {
+      const path = buildPath('/conversations', { cursor, limit: 20 })
+      const res = await client.get<RemoteConversationListResponse>(path)
+      const items = res.data.conversations
+
+      if (items.length === 0) break
+
+      for (const item of items) {
+        totalProcessed++
+
+        // 跳过本地已存在的对话
+        if (localIds.has(item.id)) continue
+
+        try {
+          notifyProgress(webContents, {
+            phase: 'pulling',
+            progress: Math.min(90, totalProcessed * 2),
+            message: `正在下载对话: ${item.title}`,
+          })
+
+          const detail = await client.get<RemoteConversation>(`/conversations/${item.id}`)
+          const remoteMessages = await fetchAllMessages(client, item.id)
+
+          // 转换并写入本地
+          const localMeta = remoteConversationToLocal(detail.data)
+          const convertedMessages = remoteMessages.map(remoteMessageToLocal)
+
+          saveConversationMessages(item.id, convertedMessages)
+          localIndex.conversations.push(localMeta)
+          localIds.add(item.id)
+
+          result.pulledConversations++
+          result.pulledMessages += convertedMessages.length
+
+          syncState.conversations[item.id] = {
+            localUpdatedAt: new Date(detail.data.updatedAt).getTime(),
+            remoteUpdatedAt: new Date(detail.data.updatedAt).getTime(),
+            lastSyncedAt: now,
+            syncStatus: 'synced',
+          }
+        } catch (error) {
+          console.warn(`[同步] 下载对话失败 (${item.id}):`, error)
+        }
+      }
+
+      if (!res.data.nextCursor) break
+      cursor = res.data.nextCursor
+    }
+
+    if (result.pulledConversations > 0) {
+      writeLocalIndex(localIndex)
+    }
+    syncState.lastDownloadAllAt = Date.now()
+    writeSyncState(syncState)
+
+    result.success = true
+
+    const message = result.pulledConversations > 0
+      ? `下载完成：${result.pulledConversations} 个对话，${result.pulledMessages} 条消息`
+      : '所有云端对话已在本地，无需下载'
+
+    notifyProgress(webContents, { phase: 'done', progress: 100, message })
+    console.log(`[同步] 下载全部: ${result.pulledConversations} 对话, ${result.pulledMessages} 消息`)
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : '未知错误'
+    result.error = errorMsg
+    notifyProgress(webContents, { phase: 'error', progress: 0, message: '下载全部对话失败', error: errorMsg })
+    console.error('[同步] 下载全部失败:', error)
   }
 
   return result
@@ -682,7 +779,7 @@ export function scheduleAutoSync(window: import('electron').BrowserWindow): void
       const result = await incrementalSync(client, webContents)
 
       if (result.success) {
-        console.log(`[自动同步] 完成: 拉取 ${result.pulledConversations} 对话/${result.pulledMessages} 消息, 推送 ${result.pushedConversations} 对话/${result.pushedMessages} 消息`)
+        console.log(`[自动同步] 完成: 拉取 ${result.pulledConversations} 对话/${result.pulledMessages} 消息`)
       } else {
         console.warn('[自动同步] 失败:', result.error)
       }

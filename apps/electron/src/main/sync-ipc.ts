@@ -9,7 +9,7 @@ import { ipcMain } from 'electron'
 import { SYNC_IPC_CHANNELS } from '@proma/shared'
 import type { SyncState, SyncResult } from '@proma/shared'
 import { getApiClient } from './lib/cloud-auth-service'
-import { fullSync, incrementalSync, pullMoreConversations, getSyncState } from './lib/sync-service'
+import { fullSync, incrementalSync, pullMoreConversations, downloadAllConversations, getSyncState } from './lib/sync-service'
 
 /**
  * 注册 Sync IPC 处理器
@@ -49,6 +49,15 @@ export function registerSyncIpcHandlers(): void {
     async (event): Promise<SyncResult> => {
       const client = getApiClient()
       return pullMoreConversations(client, event.sender)
+    }
+  )
+
+  // 从云端下载全部对话
+  ipcMain.handle(
+    SYNC_IPC_CHANNELS.DOWNLOAD_ALL_CONVERSATIONS,
+    async (event): Promise<SyncResult> => {
+      const client = getApiClient()
+      return downloadAllConversations(client, event.sender)
     }
   )
 

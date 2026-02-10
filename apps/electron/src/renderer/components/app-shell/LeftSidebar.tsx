@@ -10,8 +10,9 @@
 
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, CloudDownload, Info, Check, CircleAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { isCloudMode } from '@/lib/mode'
 import { ModeSwitcher } from './ModeSwitcher'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
@@ -32,6 +33,8 @@ import {
 } from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { hasUpdateAtom } from '@/atoms/updater'
+import { isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
+import { isSyncingAtom, hasDownloadedAllAtom, downloadAllStatusAtom } from '@/atoms/sync-atoms'
 import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
 import {
   AlertDialog,
@@ -53,6 +56,12 @@ import {
 import type { ActiveView } from '@/atoms/active-view'
 import type { ConversationMeta, AgentSessionMeta, WorkspaceCapabilities } from '@proma/shared'
 import { SidebarCreditIndicator } from '@/components/billing/SidebarCreditIndicator'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface SidebarItemProps {
   icon: React.ReactNode
@@ -143,6 +152,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
   const hasUpdate = useAtomValue(hasUpdateAtom)
+  const isAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
+  const isSyncing = useAtomValue(isSyncingAtom)
+  const [hasDownloadedAll, setHasDownloadedAll] = useAtom(hasDownloadedAllAtom)
+  const [downloadAllStatus, setDownloadAllStatus] = useAtom(downloadAllStatusAtom)
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -206,6 +219,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       .catch(console.error)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setConversations, setCurrentConversationId, setUserProfile, setAgentSessions])
+
+  // Cloud 模式：检查是否已执行过"下载全部对话"
+  React.useEffect(() => {
+    if (!isCloudMode() || !isAuthenticated) return
+    window.electronAPI.sync
+      .getSyncState()
+      .then((state) => {
+        if (state.lastDownloadAllAt) {
+          setHasDownloadedAll(true)
+        }
+      })
+      .catch(console.error)
+  }, [isAuthenticated, setHasDownloadedAll])
 
   /** 处理导航项点击 */
   const handleItemClick = (item: SidebarItemId): void => {
@@ -334,6 +360,27 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setCurrentAgentSessionId(id)
     setActiveView('conversations')
     setActiveItem('all-chats')
+  }
+
+  /** 从云端下载全部对话 */
+  const handleDownloadAll = async (): Promise<void> => {
+    try {
+      setDownloadAllStatus('idle')
+      const result = await window.electronAPI.sync.downloadAllConversations()
+      if (result.success) {
+        setDownloadAllStatus('success')
+        setHasDownloadedAll(true)
+        // 3 秒后重置状态
+        setTimeout(() => setDownloadAllStatus('idle'), 3000)
+      } else {
+        setDownloadAllStatus('error')
+        setTimeout(() => setDownloadAllStatus('idle'), 5000)
+      }
+    } catch (error) {
+      console.error('[侧边栏] 下载全部对话失败:', error)
+      setDownloadAllStatus('error')
+      setTimeout(() => setDownloadAllStatus('idle'), 5000)
+    }
   }
 
   /** 重命名 Agent 会话标题 */
@@ -487,6 +534,54 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           ))
         )}
       </div>
+
+      {/* Cloud 模式：从云端下载全部对话按钮 / 完成反馈 */}
+      {mode === 'chat' && isCloudMode() && isAuthenticated && (
+        /* 未下载过：显示下载按钮；已下载过：仅在反馈中时短暂显示 */
+        (!hasDownloadedAll || downloadAllStatus !== 'idle') ? (
+          <div className="px-3 pb-1">
+            {downloadAllStatus === 'success' ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-[12px] text-green-600 dark:text-green-400">
+                <Check size={14} />
+                <span>下载完成</span>
+              </div>
+            ) : downloadAllStatus === 'error' ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-[12px] text-destructive">
+                <CircleAlert size={14} />
+                <span>下载失败，请稍后重试</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleDownloadAll}
+                  disabled={isSyncing}
+                  className={cn(
+                    'flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[12px] transition-colors titlebar-no-drag',
+                    isSyncing
+                      ? 'text-foreground/30 cursor-not-allowed'
+                      : 'text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70'
+                  )}
+                >
+                  <CloudDownload size={14} className={isSyncing ? 'animate-pulse' : ''} />
+                  <span>{isSyncing ? '正在下载...' : '从云端下载全部对话'}</span>
+                </button>
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex-shrink-0 p-1 text-foreground/30 cursor-help">
+                        <Info size={13} />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[200px] text-xs">
+                      目前暂不提供对话上传，仅支持下载，架构完成升级后将考虑支持此功能
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
+          </div>
+        ) : null
+      )}
 
       {/* Agent 模式：工作区能力指示器 */}
       {mode === 'agent' && capabilities && (

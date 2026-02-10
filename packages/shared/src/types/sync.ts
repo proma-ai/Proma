@@ -141,6 +141,8 @@ export interface SyncState {
   lastFullSyncAt: number | null
   /** 上次增量拉取时间 */
   lastPullAt: number | null
+  /** 上次"下载全部对话"完成时间（null = 从未执行） */
+  lastDownloadAllAt: number | null
   /** 每个对话的同步信息 */
   conversations: Record<string, ConversationSyncInfo>
 }
@@ -186,6 +188,8 @@ export const SYNC_IPC_CHANNELS = {
   GET_SYNC_STATE: 'sync:get-state',
   /** 加载更多历史对话 */
   PULL_MORE: 'sync:pull-more',
+  /** 从云端下载全部对话 */
+  DOWNLOAD_ALL_CONVERSATIONS: 'sync:download-all-conversations',
   /** 同步进度推送（主进程 → 渲染进程） */
   SYNC_PROGRESS: 'sync:progress',
 } as const

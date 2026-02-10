@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Camera, ImagePlus, LogOut } from 'lucide-react'
+import { Camera, ImagePlus, LogOut, CloudDownload, Check, CircleAlert } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import {
@@ -34,6 +34,7 @@ import { buttonVariants } from '../ui/button'
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { cloudUserAtom, isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
+import { isSyncingAtom, downloadAllStatusAtom } from '@/atoms/sync-atoms'
 import { isCloudMode } from '@/lib/mode'
 import { cn } from '@/lib/utils'
 
@@ -51,6 +52,8 @@ export function GeneralSettings(): React.ReactElement {
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
   const cloudUser = useAtomValue(cloudUserAtom)
   const isCloudAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
+  const isSyncing = useAtomValue(isSyncingAtom)
+  const [downloadAllStatus, setDownloadAllStatus] = useAtom(downloadAllStatusAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
@@ -152,6 +155,25 @@ export function GeneralSettings(): React.ReactElement {
       await window.electronAPI.cloudAuth.logout()
     } catch (error) {
       console.error('[通用设置] 登出失败:', error)
+    }
+  }
+
+  /** 从云端下载全部对话 */
+  const handleDownloadAll = async (): Promise<void> => {
+    try {
+      setDownloadAllStatus('idle')
+      const result = await window.electronAPI.sync.downloadAllConversations()
+      if (result.success) {
+        setDownloadAllStatus('success')
+        setTimeout(() => setDownloadAllStatus('idle'), 3000)
+      } else {
+        setDownloadAllStatus('error')
+        setTimeout(() => setDownloadAllStatus('idle'), 5000)
+      }
+    } catch (error) {
+      console.error('[通用设置] 下载全部对话失败:', error)
+      setDownloadAllStatus('error')
+      setTimeout(() => setDownloadAllStatus('idle'), 5000)
     }
   }
 
@@ -275,6 +297,36 @@ export function GeneralSettings(): React.ReactElement {
           description="Proma 账户信息"
         >
           <SettingsCard>
+            <SettingsRow
+              label="下载云端对话"
+              description="将云端所有对话下载到本地，已存在的对话将跳过"
+            >
+              {downloadAllStatus === 'success' ? (
+                <span className="flex items-center gap-1.5 text-[13px] text-green-600 dark:text-green-400">
+                  <Check className="size-3.5" />
+                  下载完成
+                </span>
+              ) : downloadAllStatus === 'error' ? (
+                <span className="flex items-center gap-1.5 text-[13px] text-destructive">
+                  <CircleAlert className="size-3.5" />
+                  下载失败
+                </span>
+              ) : (
+                <button
+                  onClick={handleDownloadAll}
+                  disabled={isSyncing}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] transition-colors',
+                    isSyncing
+                      ? 'text-foreground/30 cursor-not-allowed'
+                      : 'text-primary hover:bg-primary/10'
+                  )}
+                >
+                  <CloudDownload className="size-3.5" />
+                  {isSyncing ? '正在下载...' : '下载全部'}
+                </button>
+              )}
+            </SettingsRow>
             <SettingsRow
               label="邮箱"
               description="当前登录的 Proma 账户"
