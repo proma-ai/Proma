@@ -14,15 +14,11 @@ function getTrayIconPath(): string {
   return join(resourcesDir, 'iconTemplate.png')
 }
 
-/** 显示主窗口并恢复 Dock 图标 */
+/** 显示主窗口 */
 function showMainWindow(): void {
   const windows = BrowserWindow.getAllWindows()
   if (windows.length === 0) return
   const mainWindow = windows[0]
-  // macOS 需要先恢复 Dock 图标，否则窗口可能无法正常显示
-  if (process.platform === 'darwin') {
-    app.dock?.show()
-  }
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
   }
@@ -75,20 +71,9 @@ export function createTray(): Tray | null {
 
     tray.setContextMenu(contextMenu)
 
-    // 点击行为：显示/隐藏窗口
+    // 点击行为：始终弹出菜单（与右键一致）
     tray.on('click', () => {
-      const windows = BrowserWindow.getAllWindows()
-      if (windows.length > 0) {
-        const mainWindow = windows[0]
-        if (mainWindow.isVisible()) {
-          mainWindow.hide()
-          if (process.platform === 'darwin') {
-            app.dock?.hide()
-          }
-        } else {
-          showMainWindow()
-        }
-      }
+      tray?.popUpContextMenu()
     })
 
     console.log('System tray created')

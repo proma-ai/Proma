@@ -55,13 +55,10 @@ function ensureWindowOnScreen(win: BrowserWindow): void {
   }
 }
 
-/** 显示并聚焦主窗口，恢复 Dock 图标，确保窗口在可见区域 */
+/** 显示并聚焦主窗口，确保窗口在可见区域 */
 function showAndFocusMainWindow(): void {
   if (!mainWindow) return
   ensureWindowOnScreen(mainWindow)
-  if (process.platform === 'darwin') {
-    app.dock?.show()
-  }
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
   }
@@ -144,14 +141,11 @@ function createWindow(): void {
   })
 
   // macOS: 点击关闭按钮时隐藏窗口而不是退出（除非正在退出应用）
-  // 开发模式下直接关闭以简化调试
-  if (process.platform === 'darwin' && !isDev) {
+  if (process.platform === 'darwin') {
     mainWindow.on('close', (event) => {
       if (!isQuitting) {
         event.preventDefault()
         mainWindow?.hide()
-        // 隐藏 Dock 图标，让应用完全进入后台
-        app.dock?.hide()
       }
     })
   }
@@ -298,10 +292,9 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
-    // 开发模式下或非 macOS：关闭所有窗口时退出应用
-    // 生产模式 macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
-    const isDev = !app.isPackaged
-    if (process.platform !== 'darwin' || isDev) {
+    // 非 macOS：关闭所有窗口时退出应用
+    // macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
+    if (process.platform !== 'darwin') {
       app.quit()
     }
   })

@@ -10,6 +10,7 @@ import { useAtom } from 'jotai'
 import {
   SettingsSection,
   SettingsCard,
+  SettingsRow,
   SettingsSegmentedControl,
 } from './primitives'
 import { themeModeAtom, updateThemeMode } from '@/atoms/theme'
@@ -21,6 +22,12 @@ const THEME_OPTIONS = [
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
 ]
+
+/** 根据平台返回缩放快捷键提示 */
+const isMac = navigator.userAgent.includes('Mac')
+const ZOOM_HINT = isMac
+  ? '使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小'
+  : '使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小'
 
 export function AppearanceSettings(): React.ReactElement {
   const [themeMode, setThemeMode] = useAtom(themeModeAtom)
@@ -44,6 +51,10 @@ export function AppearanceSettings(): React.ReactElement {
           value={themeMode}
           onValueChange={handleThemeChange}
           options={THEME_OPTIONS}
+        />
+        <SettingsRow
+          label="界面缩放"
+          description={ZOOM_HINT}
         />
       </SettingsCard>
     </SettingsSection>

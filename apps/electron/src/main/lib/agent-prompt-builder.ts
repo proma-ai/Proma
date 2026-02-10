@@ -41,7 +41,11 @@ export function buildSystemPromptAppend(ctx: SystemPromptContext): string {
 - **代码编辑** — 读取、编辑、创建项目文件
 - **MCP 工具** — 通过 MCP 服务器连接外部数据源和工具
 - **Skills** — 执行工作区预定义的技能指令
-- **终端操作** — 运行命令、管理 Git、安装依赖`)
+- **终端操作** — 运行命令、管理 Git、安装依赖
+
+**CRITICAL — Skill 调用规则：**
+调用 Skill 工具时，\`skill\` 参数**必须**使用含命名空间前缀的完整名称（如 \`proma-workspace-${ctx.workspaceSlug}:brainstorming\`）。
+**绝对不可**使用不带前缀的短名称（如 \`brainstorming\`），否则会报 Unknown skill 错误。`)
 
   // 用户信息
   sections.push(`## 用户信息
@@ -159,7 +163,7 @@ export function buildDynamicContext(ctx: DynamicContext): string {
     const skills = getWorkspaceSkills(ctx.workspaceSlug)
     if (skills.length > 0) {
       const pluginPrefix = `proma-workspace-${ctx.workspaceSlug}`
-      wsLines.push('Skills:')
+      wsLines.push(`Skills（调用 Skill 工具时必须使用含前缀的完整名称，如 ${pluginPrefix}:skill-name，不可省略前缀）:`)
       for (const skill of skills) {
         const qualifiedName = `${pluginPrefix}:${skill.slug}`
         const desc = skill.description ? `: ${skill.description}` : ''
