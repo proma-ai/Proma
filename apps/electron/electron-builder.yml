@@ -28,8 +28,8 @@ files:
   - package.json
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
   - "!node_modules/@proma/**"
-  # 排除所有平台的 ripgrep，会在平台特定配置中添加正确的版本
-  - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/**/*"
+  # 排除 SDK（由 extraResources 单独处理，避免硬链接冲突）
+  - "!node_modules/@anthropic-ai/claude-agent-sdk/**"
 
 # 通用额外资源：将 SDK 复制到 app/node_modules 中供运行时 require 解析
 extraResources:
