@@ -64,8 +64,12 @@ export function installUpdate(): void {
   stopAllAgents()
   stopAllGenerations()
   cleanupUpdater()
-  console.log('[更新] 子进程已清理，执行 quitAndInstall')
-  autoUpdater.quitAndInstall()
+  console.log('[更新] 子进程已清理，延迟执行 quitAndInstall')
+  // 延迟调用 quitAndInstall，让 IPC handler 先返回响应
+  // 否则渲染进程等待 IPC 响应会阻塞退出流程
+  setImmediate(() => {
+    autoUpdater.quitAndInstall(false, true)
+  })
 }
 
 /** 清理更新器资源（定时器等） */
