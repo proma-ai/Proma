@@ -35,6 +35,7 @@ import { userProfileAtom } from '@/atoms/user-profile'
 import { hasUpdateAtom } from '@/atoms/updater'
 import { isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
 import { isSyncingAtom, hasDownloadedAllAtom, downloadAllStatusAtom } from '@/atoms/sync-atoms'
+import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
 import {
   AlertDialog,
@@ -156,6 +157,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const isSyncing = useAtomValue(isSyncingAtom)
   const [hasDownloadedAll, setHasDownloadedAll] = useAtom(hasDownloadedAllAtom)
   const [downloadAllStatus, setDownloadAllStatus] = useAtom(downloadAllStatusAtom)
+  const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -619,7 +621,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           label="设置"
           active={activeItem === 'settings'}
           onClick={() => handleItemClick('settings')}
-          suffix={hasUpdate ? <span className="w-2 h-2 rounded-full bg-red-500" /> : undefined}
+          suffix={
+            (hasUpdate || hasEnvironmentIssues) ? (
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+            ) : undefined
+          }
         />
       </div>
 

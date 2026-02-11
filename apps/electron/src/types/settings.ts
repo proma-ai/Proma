@@ -4,6 +4,8 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
+import type { EnvironmentCheckResult } from '@proma/shared'
+
 /** 主题模式 */
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -20,6 +22,12 @@ export interface AppSettings {
   agentModelId?: string
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string
+  /** 是否已完成 Onboarding 流程 */
+  onboardingCompleted?: boolean
+  /** 是否跳过了环境检测 */
+  environmentCheckSkipped?: boolean
+  /** 最后一次环境检测结果（缓存） */
+  lastEnvironmentCheck?: EnvironmentCheckResult
 }
 
 /** 设置 IPC 通道 */

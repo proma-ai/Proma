@@ -5,14 +5,22 @@
  */
 
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
-import { RefreshCw, Download, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { RefreshCw, Download, Loader2, CheckCircle2, AlertCircle, Info } from 'lucide-react'
+import type { EnvironmentCheckResult } from '@proma/shared'
 import {
   SettingsSection,
   SettingsCard,
   SettingsRow,
 } from './primitives'
 import { updateStatusAtom, updaterAvailableAtom, checkForUpdates, installUpdate } from '@/atoms/updater'
+import {
+  environmentCheckResultAtom,
+  hasEnvironmentIssuesAtom,
+} from '@/atoms/environment'
+import { EnvironmentCheckCard } from '@/components/environment/EnvironmentCheckCard'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 
 /** 从 package.json 构建时由 Vite define 注入 */
 declare const __APP_VERSION__: string
@@ -138,6 +146,118 @@ function StatusText({ status, version, error }: {
   }
 }
 
+/** 环境检测卡片 */
+function EnvironmentCard(): React.ReactElement {
+  const hasIssues = useAtomValue(hasEnvironmentIssuesAtom)
+  const setEnvironmentResult = useSetAtom(environmentCheckResultAtom)
+  const [result, setResult] = React.useState<EnvironmentCheckResult | null>(null)
+  const [isChecking, setIsChecking] = React.useState(false)
+
+  // 初始化时加载缓存的检测结果
+  React.useEffect(() => {
+    window.electronAPI.getSettings().then((settings) => {
+      if (settings.lastEnvironmentCheck) {
+        setResult(settings.lastEnvironmentCheck)
+        setEnvironmentResult(settings.lastEnvironmentCheck)
+      }
+    })
+  }, [])
+
+  // 执行环境检测
+  const handleCheck = async () => {
+    setIsChecking(true)
+    try {
+      const checkResult = await window.electronAPI.checkEnvironment()
+      setResult(checkResult)
+      setEnvironmentResult(checkResult)
+    } catch (error) {
+      console.error('[环境检测] 检测失败:', error)
+    } finally {
+      setIsChecking(false)
+    }
+  }
+
+  // Node.js 检测状态
+  const nodejsStatus = !result
+    ? 'checking'
+    : result.nodejs.installed && result.nodejs.meetsMinimum
+      ? result.nodejs.meetsRecommended
+        ? 'success'
+        : 'warning'
+      : 'error'
+
+  // Git 检测状态
+  const gitStatus = !result
+    ? 'checking'
+    : result.git.installed && result.git.meetsRequirement
+      ? 'success'
+      : 'error'
+
+  return (
+    <SettingsCard>
+      <div className="p-4 border-b">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium">环境检测</h3>
+            {hasIssues && <Badge variant="destructive">!</Badge>}
+          </div>
+          <button
+            onClick={handleCheck}
+            disabled={isChecking}
+            className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
+          >
+            {isChecking ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {isChecking ? '检测中...' : '重新检查'}
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Agent 模式需要 Node.js 和 Git 支持
+        </p>
+      </div>
+
+      <div className="p-4 space-y-3">
+        {/* Node.js 检测卡片 */}
+        <EnvironmentCheckCard
+          name="Node.js"
+          status={nodejsStatus}
+          version={result?.nodejs.version}
+          requirement="推荐 22 LTS，最低 18 LTS"
+          downloadUrl={result?.nodejs.downloadUrl || 'https://nodejs.org/'}
+          statusText={
+            result && nodejsStatus === 'warning'
+              ? `v${result.nodejs.version} (建议升级到 22 LTS 以获得最佳体验)`
+              : undefined
+          }
+        />
+
+        {/* Git 检测卡片 */}
+        <EnvironmentCheckCard
+          name="Git"
+          status={gitStatus}
+          version={result?.git.version}
+          requirement="版本 >= 2.0"
+          downloadUrl={result?.git.downloadUrl || 'https://git-scm.com/'}
+        />
+
+        {/* Windows 提示 */}
+        {result?.platform === 'win32' && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription className="text-xs">
+              <strong>Windows 用户建议：</strong>
+              安装时请选择默认路径（C:\Program Files\...），并确保勾选"添加到 PATH"选项
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
+    </SettingsCard>
+  )
+}
+
 export function AboutSettings(): React.ReactElement {
   return (
     <SettingsSection
@@ -171,6 +291,9 @@ export function AboutSettings(): React.ReactElement {
 
       {/* 自动更新卡片（updater 不可用时不渲染） */}
       <UpdateCard />
+
+      {/* 环境检测卡片 */}
+      <EnvironmentCard />
     </SettingsSection>
   )
 }

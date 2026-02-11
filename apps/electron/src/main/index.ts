@@ -55,9 +55,12 @@ function ensureWindowOnScreen(win: BrowserWindow): void {
   }
 }
 
-/** 显示并聚焦主窗口，确保窗口在可见区域 */
+/** 显示并聚焦主窗口，确保窗口在可见区域；若窗口已销毁则重新创建 */
 function showAndFocusMainWindow(): void {
-  if (!mainWindow) return
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
   ensureWindowOnScreen(mainWindow)
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
@@ -140,12 +143,14 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // macOS: 点击关闭按钮时隐藏窗口而不是退出（除非正在退出应用）
+  // macOS: 点击关闭按钮时隐藏窗口+应用，而不是退出
+  // 同时隐藏应用（类似 Cmd+H），确保点击 Dock 图标时 macOS 能正确触发 activate 事件
   if (process.platform === 'darwin') {
     mainWindow.on('close', (event) => {
       if (!isQuitting) {
         event.preventDefault()
         mainWindow?.hide()
+        app.hide()
       }
     })
   }
@@ -285,8 +290,12 @@ if (!gotTheLock) {
     }
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
+      // 直接检查 mainWindow 引用，避免 getAllWindows() 包含 DevTools 等其他窗口导致误判
+      if (!mainWindow || mainWindow.isDestroyed()) {
         createWindow()
+      } else {
+        // 窗口已存在但可能被隐藏（macOS 关闭按钮 = hide），重新显示
+        showAndFocusMainWindow()
       }
     })
   })

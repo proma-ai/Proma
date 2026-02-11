@@ -407,7 +407,7 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, de
         )}
 
         {children.length > 0 && (
-          <span className="shrink-0 text-[10px] text-muted-foreground/40 tabular-nums">
+          <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums">
             {children.filter((c) => c.done).length}/{children.length}
           </span>
         )}

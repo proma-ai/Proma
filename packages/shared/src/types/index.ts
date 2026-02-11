@@ -26,3 +26,6 @@ export * from './cloud'
 
 // 数据同步相关类型
 export * from './sync'
+
+// 环境检测相关类型
+export * from './environment'

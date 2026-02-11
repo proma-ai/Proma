@@ -1,14 +1,73 @@
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
+import { OnboardingView } from './components/onboarding/OnboardingView'
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
+import { environmentCheckResultAtom } from './atoms/environment'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
+  const setEnvironmentResult = useSetAtom(environmentCheckResultAtom)
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [showOnboarding, setShowOnboarding] = React.useState(false)
+
+  // 初始化：检查 onboarding 状态和环境
+  React.useEffect(() => {
+    const initialize = async () => {
+      try {
+        // 1. 获取设置，检查是否需要 onboarding
+        const settings = await window.electronAPI.getSettings()
+
+        // 2. 执行环境检测（无论是否完成 onboarding）
+        const envResult = await window.electronAPI.checkEnvironment()
+        setEnvironmentResult(envResult)
+
+        // 3. 判断是否显示 onboarding
+        if (!settings.onboardingCompleted) {
+          setShowOnboarding(true)
+        }
+      } catch (error) {
+        console.error('[App] 初始化失败:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    initialize()
+  }, [setEnvironmentResult])
+
+  // 完成 onboarding 回调
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false)
+  }
+
+  // 加载中状态
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">正在初始化...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 显示 onboarding 界面
+  if (showOnboarding) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <OnboardingView onComplete={handleOnboardingComplete} />
+      </TooltipProvider>
+    )
+  }
+
   // Placeholder context value
   const contextValue: AppShellContextType = {}
 
+  // 显示主界面
   return (
     <TooltipProvider delayDuration={200}>
       <CloudAuthGate>

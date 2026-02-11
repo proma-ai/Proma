@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -36,6 +36,7 @@ import type {
   SkillMeta,
   WorkspaceCapabilities,
   FileEntry,
+  EnvironmentCheckResult,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -58,6 +59,7 @@ import {
   updateConversationMeta,
   deleteConversation,
   deleteMessage,
+  truncateMessagesFrom,
   updateContextDividers,
 } from './lib/conversation-manager'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
@@ -70,6 +72,7 @@ import {
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { checkEnvironment } from './lib/environment-checker'
 import {
   listAgentSessions,
   createAgentSession,
@@ -305,6 +308,23 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 从指定消息开始截断（包含该消息）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.TRUNCATE_MESSAGES_FROM,
+    async (
+      _,
+      conversationId: string,
+      messageId: string,
+      preserveFirstMessageAttachments?: boolean,
+    ): Promise<ChatMessage[]> => {
+      return truncateMessagesFrom(
+        conversationId,
+        messageId,
+        preserveFirstMessageAttachments ?? false,
+      )
+    }
+  )
+
   // 更新上下文分隔线
   ipcMain.handle(
     CHAT_IPC_CHANNELS.UPDATE_CONTEXT_DIVIDERS,
@@ -415,6 +435,21 @@ export function registerIpcHandlers(): void {
       win.webContents.send(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, isDark)
     })
   })
+
+  // ===== 环境检测相关 =====
+
+  // 执行环境检测
+  ipcMain.handle(
+    ENVIRONMENT_IPC_CHANNELS.CHECK,
+    async (): Promise<EnvironmentCheckResult> => {
+      const result = await checkEnvironment()
+      // 自动保存检测结果到设置
+      await updateSettings({
+        lastEnvironmentCheck: result,
+      })
+      return result
+    }
+  )
 
   // ===== Agent 会话管理相关 =====
 

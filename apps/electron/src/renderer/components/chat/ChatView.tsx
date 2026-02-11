@@ -18,10 +18,12 @@ import { MessageSquare, AlertCircle, X } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
 import { ChatMessages } from './ChatMessages'
 import { ChatInput } from './ChatInput'
+import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import {
   currentConversationIdAtom,
   currentConversationAtom,
   currentMessagesAtom,
+  streamingAtom,
   streamingStatesAtom,
   selectedModelAtom,
   conversationsAtom,
@@ -34,7 +36,7 @@ import {
   chatStreamErrorsAtom,
   currentChatErrorAtom,
 } from '@/atoms/chat-atoms'
-import type { PendingAttachment, ConversationStreamState } from '@/atoms/chat-atoms'
+import type { ConversationStreamState } from '@/atoms/chat-atoms'
 import type {
   ChatSendInput,
   GenerateTitleInput,
@@ -60,6 +62,8 @@ export function ChatView(): React.ReactElement {
   const setHasMoreMessages = useSetAtom(hasMoreMessagesAtom)
   const setChatStreamErrors = useSetAtom(chatStreamErrorsAtom)
   const chatError = useAtomValue(currentChatErrorAtom)
+  const isStreaming = useAtomValue(streamingAtom)
+  const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
 
   // 首条消息标题生成相关 ref（支持多对话并行）
   const pendingTitleRef = React.useRef<Map<string, GenerateTitleInput>>(new Map())
@@ -68,6 +72,10 @@ export function ChatView(): React.ReactElement {
   const currentConvIdRef = React.useRef(currentConversationId)
   React.useEffect(() => {
     currentConvIdRef.current = currentConversationId
+  }, [currentConversationId])
+
+  React.useEffect(() => {
+    setInlineEditingMessageId(null)
   }, [currentConversationId])
 
   // 加载当前对话最近消息 + 上下文分隔线
@@ -230,9 +238,33 @@ export function ChatView(): React.ReactElement {
     setChatStreamErrors,
   ])
 
+  const syncContextDividers = React.useCallback(async (
+    conversationId: string,
+    messages: { id: string }[],
+    currentDividers: string[],
+  ): Promise<string[]> => {
+    const messageIdSet = new Set(messages.map((msg) => msg.id))
+    const newDividers = currentDividers.filter((id) => messageIdSet.has(id))
+    if (newDividers.length !== currentDividers.length) {
+      setContextDividers(newDividers)
+      await window.electronAPI.updateContextDividers(conversationId, newDividers)
+    }
+    return newDividers
+  }, [setContextDividers])
+
   /** 发送消息 */
-  const handleSend = async (content: string): Promise<void> => {
+  const handleSend = React.useCallback(async (
+    content: string,
+    options?: {
+      attachments?: FileAttachment[]
+      consumePendingAttachments?: boolean
+      messageCountBeforeSend?: number
+      contextDividersOverride?: string[]
+    },
+  ): Promise<void> => {
     if (!currentConversationId || !selectedModel) return
+
+    const consumePending = options?.consumePendingAttachments ?? true
 
     // 清除当前对话的错误消息
     setChatStreamErrors((prev) => {
@@ -243,7 +275,8 @@ export function ChatView(): React.ReactElement {
     })
 
     // 判断是否为第一条消息（发送前历史为空）
-    const isFirstMessage = currentMessages.length === 0
+    const messageCountBeforeSend = options?.messageCountBeforeSend ?? currentMessages.length
+    const isFirstMessage = messageCountBeforeSend === 0
     if (isFirstMessage && content) {
       pendingTitleRef.current.set(currentConversationId, {
         userMessage: content,
@@ -252,37 +285,41 @@ export function ChatView(): React.ReactElement {
       })
     }
 
-    // 获取当前待发送附件的快照
-    const currentAttachments = [...pendingAttachments]
+    let savedAttachments: FileAttachment[] = options?.attachments ?? []
 
-    // 保存附件到磁盘（通过 IPC）
-    const savedAttachments: FileAttachment[] = []
-    for (const att of currentAttachments) {
-      const base64Data = window.__pendingAttachmentData?.get(att.id)
-      if (!base64Data) continue
+    if (consumePending) {
+      // 获取当前待发送附件的快照
+      const currentAttachments = [...pendingAttachments]
 
-      try {
-        const input: AttachmentSaveInput = {
-          conversationId: currentConversationId,
-          filename: att.filename,
-          mediaType: att.mediaType,
-          data: base64Data,
+      // 保存附件到磁盘（通过 IPC）
+      savedAttachments = []
+      for (const att of currentAttachments) {
+        const base64Data = window.__pendingAttachmentData?.get(att.id)
+        if (!base64Data) continue
+
+        try {
+          const input: AttachmentSaveInput = {
+            conversationId: currentConversationId,
+            filename: att.filename,
+            mediaType: att.mediaType,
+            data: base64Data,
+          }
+          const result = await window.electronAPI.saveAttachment(input)
+          savedAttachments.push(result.attachment)
+        } catch (error) {
+          console.error('[ChatView] 保存附件失败:', error)
         }
-        const result = await window.electronAPI.saveAttachment(input)
-        savedAttachments.push(result.attachment)
-      } catch (error) {
-        console.error('[ChatView] 保存附件失败:', error)
       }
-    }
 
-    // 清理 pending 附件和临时缓存
-    for (const att of currentAttachments) {
-      if (att.previewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(att.previewUrl)
+      // 清理 pending 附件和临时缓存
+      for (const att of currentAttachments) {
+        if (att.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(att.previewUrl)
+        }
+        window.__pendingAttachmentData?.delete(att.id)
       }
-      window.__pendingAttachmentData?.delete(att.id)
+      setPendingAttachments([])
     }
-    setPendingAttachments([])
 
     // 初始化当前对话的流式状态
     setStreamingStates((prev) => {
@@ -298,7 +335,7 @@ export function ChatView(): React.ReactElement {
       channelId: selectedModel.channelId,
       modelId: selectedModel.modelId,
       contextLength,
-      contextDividers,
+      contextDividers: options?.contextDividersOverride ?? contextDividers,
       attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
       thinkingEnabled: thinkingEnabled || undefined,
     }
@@ -324,7 +361,68 @@ export function ChatView(): React.ReactElement {
         return map
       })
     })
-  }
+  }, [
+    currentConversationId,
+    selectedModel,
+    currentMessages.length,
+    pendingAttachments,
+    contextLength,
+    contextDividers,
+    thinkingEnabled,
+    setChatStreamErrors,
+    setPendingAttachments,
+    setStreamingStates,
+    setCurrentMessages,
+  ])
+
+  /** 从某条消息起截断（包含该条） */
+  const truncateFromMessage = React.useCallback(async (
+    messageId: string,
+    preserveFirstMessageAttachments = false,
+  ): Promise<{
+    targetAttachments: FileAttachment[]
+    messageCountBeforeSend: number
+    contextDividersAfterTruncate: string[]
+  }> => {
+    if (!currentConversationId) {
+      return {
+        targetAttachments: [],
+        messageCountBeforeSend: 0,
+        contextDividersAfterTruncate: [],
+      }
+    }
+
+    const target = currentMessages.find((msg) => msg.id === messageId)
+    const targetIndex = currentMessages.findIndex((msg) => msg.id === messageId)
+    const targetAttachments = target?.attachments ?? []
+    const updatedMessages = await window.electronAPI.truncateMessagesFrom(
+      currentConversationId,
+      messageId,
+      preserveFirstMessageAttachments,
+    )
+    setCurrentMessages(updatedMessages)
+    setHasMoreMessages(false)
+    if (inlineEditingMessageId && inlineEditingMessageId !== messageId) {
+      const stillExists = updatedMessages.some((msg) => msg.id === inlineEditingMessageId)
+      if (!stillExists) {
+        setInlineEditingMessageId(null)
+      }
+    }
+    const contextDividersAfterTruncate = await syncContextDividers(currentConversationId, updatedMessages, contextDividers)
+    return {
+      targetAttachments,
+      messageCountBeforeSend: targetIndex >= 0 ? targetIndex : updatedMessages.length,
+      contextDividersAfterTruncate,
+    }
+  }, [
+    currentConversationId,
+    currentMessages,
+    contextDividers,
+    setCurrentMessages,
+    setHasMoreMessages,
+    inlineEditingMessageId,
+    syncContextDividers,
+  ])
 
   /** 停止生成 */
   const handleStop = (): void => {
@@ -351,20 +449,85 @@ export function ChatView(): React.ReactElement {
         messageId
       )
       setCurrentMessages(updatedMessages)
-
-      // 如果删除的消息有对应的分隔线，也删除分隔线
-      if (contextDividers.includes(messageId)) {
-        const newDividers = contextDividers.filter((id) => id !== messageId)
-        setContextDividers(newDividers)
-        await window.electronAPI.updateContextDividers(
-          currentConversationId,
-          newDividers
-        )
+      if (inlineEditingMessageId === messageId) {
+        setInlineEditingMessageId(null)
       }
+      await syncContextDividers(currentConversationId, updatedMessages, contextDividers)
     } catch (error) {
       console.error('[ChatView] 删除消息失败:', error)
     }
   }
+
+  /** 重新发送：从该用户消息分叉后，直接重发 */
+  const handleResendMessage = React.useCallback(async (message: { id: string; content: string }): Promise<void> => {
+    if (!currentConversationId || isStreaming) return
+
+    try {
+      const truncated = await truncateFromMessage(message.id, true)
+      await handleSend(message.content, {
+        attachments: truncated.targetAttachments,
+        consumePendingAttachments: false,
+        messageCountBeforeSend: truncated.messageCountBeforeSend,
+        contextDividersOverride: truncated.contextDividersAfterTruncate,
+      })
+    } catch (error) {
+      console.error('[ChatView] 重新发送失败:', error)
+    }
+  }, [currentConversationId, isStreaming, truncateFromMessage, handleSend])
+
+  /** 开始原地编辑 */
+  const handleStartInlineEdit = React.useCallback((message: { id: string }): void => {
+    if (isStreaming) return
+    setInlineEditingMessageId(message.id)
+  }, [isStreaming])
+
+  /** 取消原地编辑 */
+  const handleCancelInlineEdit = React.useCallback((): void => {
+    setInlineEditingMessageId(null)
+  }, [])
+
+  /** 提交原地编辑并重发（删除该消息及其后续） */
+  const handleSubmitInlineEdit = React.useCallback(async (
+    message: { id: string; content: string },
+    payload: InlineEditSubmitPayload,
+  ): Promise<void> => {
+    if (!currentConversationId || isStreaming) return
+    const trimmed = payload.content.trim()
+    if (!trimmed && payload.keepExistingAttachments.length === 0 && payload.newAttachments.length === 0) return
+
+    try {
+      const truncated = await truncateFromMessage(message.id, true)
+      const keepLocalPathSet = new Set(payload.keepExistingAttachments.map((att) => att.localPath))
+      const removedOldAttachments = truncated.targetAttachments.filter(
+        (att) => !keepLocalPathSet.has(att.localPath),
+      )
+      for (const removed of removedOldAttachments) {
+        await window.electronAPI.deleteAttachment(removed.localPath)
+      }
+
+      const newSavedAttachments: FileAttachment[] = []
+      for (const newAttachment of payload.newAttachments) {
+        const input: AttachmentSaveInput = {
+          conversationId: currentConversationId,
+          filename: newAttachment.filename,
+          mediaType: newAttachment.mediaType,
+          data: newAttachment.data,
+        }
+        const result = await window.electronAPI.saveAttachment(input)
+        newSavedAttachments.push(result.attachment)
+      }
+
+      await handleSend(trimmed, {
+        attachments: [...payload.keepExistingAttachments, ...newSavedAttachments],
+        consumePendingAttachments: false,
+        messageCountBeforeSend: truncated.messageCountBeforeSend,
+        contextDividersOverride: truncated.contextDividersAfterTruncate,
+      })
+      setInlineEditingMessageId(null)
+    } catch (error) {
+      console.error('[ChatView] 原地编辑重发失败:', error)
+    }
+  }, [currentConversationId, isStreaming, truncateFromMessage, handleSend])
 
   /** 清除上下文（toggle 最后消息的分隔线） */
   const handleClearContext = React.useCallback((): void => {
@@ -433,6 +596,11 @@ export function ChatView(): React.ReactElement {
       {/* 中间：消息区域 */}
       <ChatMessages
         onDeleteMessage={handleDeleteMessage}
+        onResendMessage={handleResendMessage}
+        onStartInlineEdit={handleStartInlineEdit}
+        onSubmitInlineEdit={handleSubmitInlineEdit}
+        onCancelInlineEdit={handleCancelInlineEdit}
+        inlineEditingMessageId={inlineEditingMessageId}
         onDeleteDivider={handleDeleteDivider}
         onLoadMore={handleLoadMore}
       />

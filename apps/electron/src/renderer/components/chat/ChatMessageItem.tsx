@@ -2,7 +2,7 @@
  * ChatMessageItem - 单条消息渲染
  *
  * 使用 ai-elements 原语组合渲染消息。
- * 支持复制、删除操作，并排模式。
+ * 支持复制、删除、重新发送、原地编辑操作，并排模式。
  *
  * - assistant 消息：头像 + Reasoning 折叠 + Markdown 内容 + 操作按钮
  * - user 消息：右对齐气泡 + 可折叠长文本 + 操作按钮
@@ -11,7 +11,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Trash2 } from 'lucide-react'
+import { Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -31,10 +31,15 @@ import {
 } from '@/components/ai-elements/reasoning'
 import { CopyButton } from './CopyButton'
 import { DeleteMessageDialog } from './DeleteMessageDialog'
+import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
 import { getModelLogo } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import type { ChatMessage } from '@proma/shared'
+import type { InlineEditSubmitPayload } from './InlineEditForm'
+
+// 重导出供外部使用
+export type { InlineEditSubmitPayload } from './InlineEditForm'
 
 /**
  * 格式化消息时间（简略写法）
@@ -71,6 +76,16 @@ interface ChatMessageItemProps {
   messageIndex?: number
   /** 删除消息回调 */
   onDeleteMessage?: (messageId: string) => Promise<void>
+  /** 重新发送用户消息 */
+  onResendMessage?: (message: ChatMessage) => Promise<void>
+  /** 开始原地编辑用户消息 */
+  onStartInlineEdit?: (message: ChatMessage) => void
+  /** 原地编辑发送 */
+  onSubmitInlineEdit?: (message: ChatMessage, payload: InlineEditSubmitPayload) => Promise<void>
+  /** 取消原地编辑 */
+  onCancelInlineEdit?: () => void
+  /** 是否处于原地编辑态 */
+  isInlineEditing?: boolean
   /** 是否并排模式（用户消息不右对齐） */
   isParallelMode?: boolean
 }
@@ -80,6 +95,11 @@ export function ChatMessageItem({
   isStreaming = false,
   isLastAssistant = false,
   onDeleteMessage,
+  onResendMessage,
+  onStartInlineEdit,
+  onSubmitInlineEdit,
+  onCancelInlineEdit,
+  isInlineEditing = false,
   isParallelMode = false,
 }: ChatMessageItemProps): React.ReactElement {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
@@ -97,6 +117,12 @@ export function ChatMessageItem({
       setDeleteDialogOpen(false)
     }
   }
+
+  /** 原地编辑提交 */
+  const handleInlineEditSubmit = React.useCallback((payload: InlineEditSubmitPayload): void => {
+    if (!onSubmitInlineEdit) return
+    void onSubmitInlineEdit(message, payload)
+  }, [message, onSubmitInlineEdit])
 
   // 并排模式下，user 消息不使用 from="user" 以避免右对齐
   const messageFrom = isParallelMode ? 'assistant' : message.role
@@ -158,12 +184,18 @@ export function ChatMessageItem({
               ) : null}
             </>
           ) : (
-            /* 用户消息 - 附件 + 可折叠文本 */
+            /* 用户消息 - 附件 + 可折叠文本 / 原地编辑 */
             <>
-              {message.attachments && message.attachments.length > 0 && (
+              {!isInlineEditing && message.attachments && message.attachments.length > 0 && (
                 <MessageAttachments attachments={message.attachments} />
               )}
-              {message.content && (
+              {isInlineEditing ? (
+                <InlineEditForm
+                  message={message}
+                  onSubmit={handleInlineEditSubmit}
+                  onCancel={() => onCancelInlineEdit?.()}
+                />
+              ) : message.content && (
                 <UserMessageContent>{message.content}</UserMessageContent>
               )}
             </>
@@ -171,9 +203,25 @@ export function ChatMessageItem({
         </MessageContent>
 
         {/* 操作按钮（非 streaming 时显示，hover 时可见） */}
-        {(message.content || (message.attachments && message.attachments.length > 0)) && !isStreaming && (
+        {(message.content || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
           <MessageActions className="pl-[46px] mt-0.5">
             <CopyButton content={message.content} />
+            {message.role === 'user' && onResendMessage && (
+              <MessageAction
+                tooltip="重新发送"
+                onClick={() => { void onResendMessage(message) }}
+              >
+                <RotateCcw className="size-3.5" />
+              </MessageAction>
+            )}
+            {message.role === 'user' && onStartInlineEdit && (
+              <MessageAction
+                tooltip="编辑后重发"
+                onClick={() => onStartInlineEdit(message)}
+              >
+                <Pencil className="size-3.5" />
+              </MessageAction>
+            )}
             {onDeleteMessage && (
               <MessageAction
                 tooltip="删除"

@@ -307,6 +307,49 @@ export function deleteMessage(conversationId: string, messageId: string): ChatMe
 }
 
 /**
+ * 从指定消息开始截断对话（包含该消息）
+ *
+ * 常用于“重新发送”场景：删除目标消息及其后的所有消息，
+ * 让对话从该点重新分叉。
+ *
+ * @param conversationId 对话 ID
+ * @param messageId 截断起点消息 ID（包含）
+ * @param preserveFirstMessageAttachments 是否保留起点消息的附件文件
+ * @returns 截断后的消息列表（起点之前的消息）
+ */
+export function truncateMessagesFrom(
+  conversationId: string,
+  messageId: string,
+  preserveFirstMessageAttachments = false,
+): ChatMessage[] {
+  const messages = getConversationMessages(conversationId)
+  const startIndex = messages.findIndex((msg) => msg.id === messageId)
+
+  if (startIndex === -1) {
+    console.warn(`[对话管理] 截断起点消息不存在: ${messageId}`)
+    return messages
+  }
+
+  const kept = messages.slice(0, startIndex)
+  const removed = messages.slice(startIndex)
+
+  // 删除被截断消息关联的附件文件
+  removed.forEach((msg, idx) => {
+    if (!msg.attachments || msg.attachments.length === 0) return
+    // 允许保留起点消息的附件（用于“重发”复用）
+    if (idx === 0 && preserveFirstMessageAttachments) return
+
+    msg.attachments.forEach((attachment) => {
+      deleteAttachment(attachment.localPath)
+    })
+  })
+
+  saveConversationMessages(conversationId, kept)
+  console.log(`[对话管理] 已从消息截断: ${messageId} (对话 ${conversationId})`)
+  return kept
+}
+
+/**
  * 更新对话的上下文分隔线
  *
  * @param conversationId 对话 ID

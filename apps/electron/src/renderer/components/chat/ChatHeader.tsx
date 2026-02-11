@@ -77,9 +77,9 @@ export function ChatHeader(): React.ReactElement | null {
   }
 
   return (
-    <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px] titlebar-no-drag">
+    <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px] titlebar-drag-region">
       {editing ? (
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input
             ref={inputRef}
             value={editTitle}
@@ -107,14 +107,20 @@ export function ChatHeader(): React.ReactElement | null {
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={startEdit}
-          className="group flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors truncate flex-1 min-w-0"
-        >
-          <span className="truncate">{conversation.title}</span>
-          <Pencil className="size-3 opacity-40 group-hover:opacity-70 transition-opacity flex-shrink-0" />
-        </button>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="truncate text-sm font-medium text-foreground">
+            {conversation.title}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={startEdit}
+            className="titlebar-no-drag p-1 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="编辑标题"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        </div>
       )}
 
       {/* 置顶按钮 */}
@@ -125,7 +131,7 @@ export function ChatHeader(): React.ReactElement | null {
             variant="ghost"
             size="icon"
             className={cn(
-              'h-8 w-8 flex-shrink-0',
+              'h-8 w-8 flex-shrink-0 titlebar-no-drag',
               isPinned && 'bg-accent text-accent-foreground'
             )}
             onClick={handleTogglePin}
@@ -146,7 +152,7 @@ export function ChatHeader(): React.ReactElement | null {
             variant="ghost"
             size="icon"
             className={cn(
-              'h-8 w-8 flex-shrink-0',
+              'h-8 w-8 flex-shrink-0 titlebar-no-drag',
               parallelMode && 'bg-accent text-accent-foreground'
             )}
             onClick={() => setParallelMode(!parallelMode)}

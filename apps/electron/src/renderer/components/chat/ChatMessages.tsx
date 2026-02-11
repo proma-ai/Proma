@@ -16,6 +16,7 @@ import * as React from 'react'
 import { useAtomValue } from 'jotai'
 import { MessageSquare, Loader2 } from 'lucide-react'
 import { ChatMessageItem, formatMessageTime } from './ChatMessageItem'
+import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import { ParallelChatMessages } from './ParallelChatMessages'
 import {
   Message,
@@ -120,6 +121,16 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
 interface ChatMessagesProps {
   /** 删除消息回调 */
   onDeleteMessage?: (messageId: string) => Promise<void>
+  /** 重新发送消息回调 */
+  onResendMessage?: (message: ChatMessage) => Promise<void>
+  /** 开始原地编辑消息 */
+  onStartInlineEdit?: (message: ChatMessage) => void
+  /** 提交原地编辑 */
+  onSubmitInlineEdit?: (message: ChatMessage, payload: InlineEditSubmitPayload) => Promise<void>
+  /** 取消原地编辑 */
+  onCancelInlineEdit?: () => void
+  /** 当前正在编辑的消息 ID */
+  inlineEditingMessageId?: string | null
   /** 删除分隔线回调 */
   onDeleteDivider?: (messageId: string) => void
   /** 加载更多历史消息回调 */
@@ -142,6 +153,11 @@ function EmptyState(): React.ReactElement {
 
 export function ChatMessages({
   onDeleteMessage,
+  onResendMessage,
+  onStartInlineEdit,
+  onSubmitInlineEdit,
+  onCancelInlineEdit,
+  inlineEditingMessageId,
   onDeleteDivider,
   onLoadMore,
 }: ChatMessagesProps): React.ReactElement {
@@ -230,6 +246,11 @@ export function ChatMessages({
         contextDividers={contextDividers}
         onDeleteDivider={onDeleteDivider}
         onDeleteMessage={onDeleteMessage}
+        onResendMessage={onResendMessage}
+        onStartInlineEdit={onStartInlineEdit}
+        onSubmitInlineEdit={onSubmitInlineEdit}
+        onCancelInlineEdit={onCancelInlineEdit}
+        inlineEditingMessageId={inlineEditingMessageId}
         loadingMore={loadingMore}
       />
     )
@@ -260,6 +281,11 @@ export function ChatMessages({
                   isLastAssistant={false}
                   allMessages={messages}
                   onDeleteMessage={onDeleteMessage}
+                  onResendMessage={onResendMessage}
+                  onStartInlineEdit={onStartInlineEdit}
+                  onSubmitInlineEdit={onSubmitInlineEdit}
+                  onCancelInlineEdit={onCancelInlineEdit}
+                  isInlineEditing={msg.id === inlineEditingMessageId}
                 />
                 {/* 分隔线 */}
                 {dividerSet.has(msg.id) && (

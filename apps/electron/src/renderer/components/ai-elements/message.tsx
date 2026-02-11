@@ -132,7 +132,7 @@ export function MessageContent({
 
 type MessageActionsProps = ComponentProps<'div'>
 
-/** 操作按钮容器（复制、删除等），默认隐藏，hover 显示 */
+/** 操作按钮容器（复制、删除等），默认显示淡色，hover 时加深 */
 export function MessageActions({
   className,
   children,
@@ -141,7 +141,7 @@ export function MessageActions({
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200',
+        'flex items-center gap-2.5 text-muted-foreground/60 hover:text-muted-foreground/90 transition-colors duration-200',
         className
       )}
       {...props}

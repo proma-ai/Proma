@@ -21,6 +21,8 @@ export function getSettings(): AppSettings {
   if (!existsSync(filePath)) {
     return {
       themeMode: DEFAULT_THEME_MODE,
+      onboardingCompleted: false,
+      environmentCheckSkipped: false,
     }
   }
 
@@ -32,11 +34,16 @@ export function getSettings(): AppSettings {
       agentChannelId: data.agentChannelId,
       agentModelId: data.agentModelId,
       agentWorkspaceId: data.agentWorkspaceId,
+      onboardingCompleted: data.onboardingCompleted ?? false,
+      environmentCheckSkipped: data.environmentCheckSkipped ?? false,
+      lastEnvironmentCheck: data.lastEnvironmentCheck,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
     return {
       themeMode: DEFAULT_THEME_MODE,
+      onboardingCompleted: false,
+      environmentCheckSkipped: false,
     }
   }
 }

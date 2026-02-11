@@ -38,11 +38,13 @@ export function DeleteMessageDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>确认删除</AlertDialogTitle>
-          <AlertDialogDescription className="space-y-2">
-            <p>删除后无法恢复。</p>
-            <p className="text-yellow-600 dark:text-yellow-500">
-              提示：建议同时删除对话对（用户消息和对应的助手回复），否则可能因数据结构变化导致模型无法正常返回对话。
-            </p>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>删除后无法恢复。</p>
+              <p className="text-yellow-600 dark:text-yellow-500">
+                提示：建议同时删除对话对（用户消息和对应的助手回复），否则可能因数据结构变化导致模型无法正常返回对话。
+              </p>
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

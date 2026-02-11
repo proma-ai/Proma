@@ -332,6 +332,8 @@ export const CHAT_IPC_CHANNELS = {
   STOP_GENERATION: 'chat:stop-generation',
   /** 删除消息 */
   DELETE_MESSAGE: 'chat:delete-message',
+  /** 从指定消息开始截断后续消息（包含该消息） */
+  TRUNCATE_MESSAGES_FROM: 'chat:truncate-messages-from',
   /** 更新上下文分隔线 */
   UPDATE_CONTEXT_DIVIDERS: 'chat:update-context-dividers',
   /** 生成对话标题 */

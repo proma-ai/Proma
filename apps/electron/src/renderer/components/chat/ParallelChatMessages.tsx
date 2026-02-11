@@ -13,6 +13,7 @@ import { Fragment, useMemo, useRef, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { ChatMessageItem, formatMessageTime } from './ChatMessageItem'
+import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import { ContextDivider } from '@/components/ai-elements/context-divider'
 import {
   Message,
@@ -46,6 +47,11 @@ interface ParallelChatMessagesProps {
   contextDividers?: string[]
   onDeleteDivider?: (messageId: string) => void
   onDeleteMessage?: (messageId: string) => Promise<void>
+  onResendMessage?: (message: ChatMessage) => Promise<void>
+  onStartInlineEdit?: (message: ChatMessage) => void
+  onSubmitInlineEdit?: (message: ChatMessage, payload: InlineEditSubmitPayload) => Promise<void>
+  onCancelInlineEdit?: () => void
+  inlineEditingMessageId?: string | null
   /** 是否正在加载更多历史消息 */
   loadingMore?: boolean
 }
@@ -117,6 +123,11 @@ interface MessageColumnProps {
   messages: ChatMessage[]
   allMessages: ChatMessage[]
   onDeleteMessage?: (messageId: string) => Promise<void>
+  onResendMessage?: (message: ChatMessage) => Promise<void>
+  onStartInlineEdit?: (message: ChatMessage) => void
+  onSubmitInlineEdit?: (message: ChatMessage, payload: InlineEditSubmitPayload) => Promise<void>
+  onCancelInlineEdit?: () => void
+  inlineEditingMessageId?: string | null
   side: 'user' | 'assistant'
   /** streaming 相关 - 仅 assistant 列需要 */
   streaming?: boolean
@@ -128,6 +139,11 @@ function MessageColumn({
   messages,
   allMessages,
   onDeleteMessage,
+  onResendMessage,
+  onStartInlineEdit,
+  onSubmitInlineEdit,
+  onCancelInlineEdit,
+  inlineEditingMessageId,
   side,
   streaming = false,
   streamingContent = '',
@@ -166,6 +182,11 @@ function MessageColumn({
             message={message}
             allMessages={allMessages}
             onDeleteMessage={onDeleteMessage}
+            onResendMessage={onResendMessage}
+            onStartInlineEdit={onStartInlineEdit}
+            onSubmitInlineEdit={onSubmitInlineEdit}
+            onCancelInlineEdit={onCancelInlineEdit}
+            isInlineEditing={message.id === inlineEditingMessageId}
             isParallelMode
           />
         ))}
@@ -214,6 +235,11 @@ export function ParallelChatMessages({
   contextDividers = [],
   onDeleteDivider,
   onDeleteMessage,
+  onResendMessage,
+  onStartInlineEdit,
+  onSubmitInlineEdit,
+  onCancelInlineEdit,
+  inlineEditingMessageId,
   loadingMore = false,
 }: ParallelChatMessagesProps): React.ReactElement {
   // 分段消息
@@ -231,7 +257,6 @@ export function ParallelChatMessages({
     () => messages.filter((m) => m.role === 'assistant'),
     [messages]
   )
-
   // 如果没有分隔线，使用简单的两列布局
   if (segments.length <= 1) {
     return (
@@ -256,6 +281,11 @@ export function ParallelChatMessages({
               messages={userMessages}
               allMessages={messages}
               onDeleteMessage={onDeleteMessage}
+              onResendMessage={onResendMessage}
+              onStartInlineEdit={onStartInlineEdit}
+              onSubmitInlineEdit={onSubmitInlineEdit}
+              onCancelInlineEdit={onCancelInlineEdit}
+              inlineEditingMessageId={inlineEditingMessageId}
               side="user"
             />
           </div>
@@ -271,6 +301,11 @@ export function ParallelChatMessages({
               messages={assistantMessages}
               allMessages={messages}
               onDeleteMessage={onDeleteMessage}
+              onResendMessage={onResendMessage}
+              onStartInlineEdit={onStartInlineEdit}
+              onSubmitInlineEdit={onSubmitInlineEdit}
+              onCancelInlineEdit={onCancelInlineEdit}
+              inlineEditingMessageId={inlineEditingMessageId}
               side="assistant"
               streaming={streaming}
               streamingContent={streamingContent}
@@ -312,6 +347,11 @@ export function ParallelChatMessages({
                   messages={segment.userMessages}
                   allMessages={messages}
                   onDeleteMessage={onDeleteMessage}
+                  onResendMessage={onResendMessage}
+                  onStartInlineEdit={onStartInlineEdit}
+                  onSubmitInlineEdit={onSubmitInlineEdit}
+                  onCancelInlineEdit={onCancelInlineEdit}
+                  inlineEditingMessageId={inlineEditingMessageId}
                   side="user"
                 />
               </div>
@@ -329,6 +369,11 @@ export function ParallelChatMessages({
                   messages={segment.assistantMessages}
                   allMessages={messages}
                   onDeleteMessage={onDeleteMessage}
+                  onResendMessage={onResendMessage}
+                  onStartInlineEdit={onStartInlineEdit}
+                  onSubmitInlineEdit={onSubmitInlineEdit}
+                  onCancelInlineEdit={onCancelInlineEdit}
+                  inlineEditingMessageId={inlineEditingMessageId}
                   side="assistant"
                   streaming={index === segments.length - 1 ? streaming : false}
                   streamingContent={index === segments.length - 1 ? streamingContent : ''}
