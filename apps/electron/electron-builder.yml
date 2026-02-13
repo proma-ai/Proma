@@ -26,17 +26,13 @@ npmRebuild: false
 files:
   - dist/**/*
   - package.json
+  # 包含 SDK 到 app.asar/app 目录中（与 dist 和 package.json 同级）
+  - node_modules/@anthropic-ai/claude-agent-sdk/**/*
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
   - "!node_modules/@proma/**"
-  # 排除 SDK（由 extraResources 单独处理，避免硬链接冲突）
-  - "!node_modules/@anthropic-ai/claude-agent-sdk/**"
 
-# 通用额外资源：将 SDK 复制到 app/node_modules 中供运行时 require 解析
+# 通用额外资源
 extraResources:
-  - from: node_modules/@anthropic-ai/claude-agent-sdk
-    to: app/node_modules/@anthropic-ai/claude-agent-sdk
-    filter:
-      - "**/*"
   # 默认 Skills 模板（首次启动时同步到 ~/.proma/default-skills/）
   - from: default-skills
     to: default-skills
@@ -65,11 +61,6 @@ mac:
         - x64
   # macOS 额外资源
   extraResources:
-    # Claude Agent SDK（必须包含，否则 macOS 打包后找不到）
-    - from: node_modules/@anthropic-ai/claude-agent-sdk
-      to: app/node_modules/@anthropic-ai/claude-agent-sdk
-      filter:
-        - "**/*"
     # Bun 二进制（download-bun.ts 使用 darwin-${arch} 命名）
     - from: "vendor/bun/darwin-${arch}"
       to: "vendor/bun"
@@ -106,11 +97,6 @@ win:
         - x64
   # Windows 额外资源
   extraResources:
-    # Claude Agent SDK（必须包含，否则 Windows 打包后找不到）
-    - from: node_modules/@anthropic-ai/claude-agent-sdk
-      to: app/node_modules/@anthropic-ai/claude-agent-sdk
-      filter:
-        - "**/*"
     # Bun 二进制
     - from: "vendor/bun/win32-${arch}"
       to: "vendor/bun"

@@ -5,6 +5,7 @@
  * 仅在打包后的生产环境中工作。
  */
 
+import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { BrowserWindow } from 'electron'
 import type { UpdateStatus } from './updater-types'
@@ -64,11 +65,14 @@ export function installUpdate(): void {
   stopAllAgents()
   stopAllGenerations()
   cleanupUpdater()
-  console.log('[更新] 子进程已清理，延迟执行 quitAndInstall')
-  // 延迟调用 quitAndInstall，让 IPC handler 先返回响应
-  // 否则渲染进程等待 IPC 响应会阻塞退出流程
+  console.log('[更新] 子进程已清理，准备退出并安装')
+
+  // 延迟调用 quit，让 IPC handler 先返回响应
+  // 使用 app.quit() 触发正常的退出流程，macOS 上会正确处理 isQuitting 标志
+  // autoInstallOnAppQuit = true 配置会在退出时自动安装更新
   setImmediate(() => {
-    autoUpdater.quitAndInstall(false, true)
+    console.log('[更新] 调用 app.quit() 触发退出')
+    app.quit()
   })
 }
 
