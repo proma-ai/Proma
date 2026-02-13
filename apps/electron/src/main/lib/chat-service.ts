@@ -29,6 +29,8 @@ import { appendMessage, updateConversationMeta, getConversationMessages } from '
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
 import { getUserProfile } from './user-profile-service'
+import { getFetchFn } from './proxy-fetch'
+import { getEffectiveProxyUrl } from './proxy-settings-service'
 
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
@@ -299,7 +301,10 @@ export async function sendMessage(
     baseUrl = channel.baseUrl
   }
 
-  // 3. 追加用户消息到 JSONL
+  // 3. 先读取历史消息（在追加用户消息之前，避免 adapter 重复发送当前消息）
+  const fullHistory = getConversationMessages(conversationId)
+
+  // 4. 追加用户消息到 JSONL
   const userMsg: ChatMessage = {
     id: randomUUID(),
     role: 'user',
@@ -309,11 +314,8 @@ export async function sendMessage(
   }
   appendMessage(conversationId, userMsg)
 
-  // 4. 从磁盘读取完整消息历史（不依赖前端传入，确保上下文完整）
-  const fullHistory = getConversationMessages(conversationId)
+  // 5. 过滤历史并提取文档附件文本
   const filteredHistory = filterHistory(fullHistory, contextDividers, contextLength)
-
-  // 5. 提取文档附件文本，注入到消息内容中
   const enrichedHistory = await enrichHistoryWithDocuments(filteredHistory)
   const enrichedUserMessage = await enrichMessageWithDocuments(userMessage, attachments)
 
@@ -328,6 +330,10 @@ export async function sendMessage(
   try {
     // 7. 获取适配器
     const adapter = getAdapter(channel.provider)
+
+    // 8. 获取代理配置
+    const proxyUrl = await getEffectiveProxyUrl()
+    const fetchFn = getFetchFn(proxyUrl)
 
     /** 构建并执行流式请求 */
     const executeStream = async (key: string) => {
@@ -347,6 +353,7 @@ export async function sendMessage(
         request,
         adapter,
         signal: controller.signal,
+        fetchFn,
         onEvent: (event) => {
           switch (event.type) {
             case 'chunk':
@@ -406,7 +413,7 @@ export async function sendMessage(
       }
     }
 
-    // 8. 保存 assistant 消息（空内容不保存）
+    // 9. 保存 assistant 消息（空内容不保存）
     const assistantMsgId = randomUUID()
     if (content.trim()) {
       const assistantMsg: ChatMessage = {
@@ -435,7 +442,7 @@ export async function sendMessage(
       messageId: content.trim() ? assistantMsgId : undefined,
     })
 
-    // 9. Proma 官方渠道对话完成后通知渲染进程刷新余额
+    // 10. Proma 官方渠道对话完成后通知渲染进程刷新余额
     if (channel.provider === 'proma') {
       broadcastBillingChanged()
     }
@@ -531,6 +538,7 @@ const MAX_TITLE_LENGTH = 20
  */
 export async function generateTitle(input: GenerateTitleInput): Promise<string | null> {
   const { userMessage, channelId, modelId } = input
+  console.log('[标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
   // 查找渠道
   const channels = listChannels()
@@ -571,12 +579,19 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
       prompt: TITLE_PROMPT + userMessage,
     })
 
-    const title = await fetchTitle(request, adapter)
-    if (!title) return null
+    const proxyUrl = await getEffectiveProxyUrl()
+    const fetchFn = getFetchFn(proxyUrl)
+    const title = await fetchTitle(request, adapter, fetchFn)
+    if (!title) {
+      console.warn('[标题生成] API 返回空标题')
+      return null
+    }
 
     // 截断到最大长度并清理引号
     const cleaned = title.trim().replace(/^["'""'']+|["'""'']+$/g, '').trim()
-    return cleaned.slice(0, MAX_TITLE_LENGTH) || null
+    const result = cleaned.slice(0, MAX_TITLE_LENGTH) || null
+    console.log('[标题生成] 成功生成标题:', result)
+    return result
   } catch (error) {
     console.warn('[标题生成] 请求失败:', error)
     return null

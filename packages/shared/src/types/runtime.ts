@@ -55,6 +55,20 @@ export interface BunRuntimeStatus {
 }
 
 /**
+ * Node.js 运行时状态
+ */
+export interface NodeRuntimeStatus {
+  /** 是否可用 */
+  available: boolean
+  /** Node.js 版本号 */
+  version: string | null
+  /** Node.js 可执行路径 */
+  path: string | null
+  /** 错误信息（如果不可用）*/
+  error: string | null
+}
+
+/**
  * Git 运行时状态
  */
 export interface GitRuntimeStatus {
@@ -83,13 +97,59 @@ export interface GitRepoStatus {
 }
 
 /**
+ * Git Bash 运行时状态（Windows 平台）
+ */
+export interface GitBashStatus {
+  /** 是否可用 */
+  available: boolean
+  /** bash.exe 可执行路径 */
+  path: string | null
+  /** Bash 版本号 */
+  version: string | null
+  /** 错误信息（如果不可用）*/
+  error: string | null
+}
+
+/**
+ * WSL 运行时状态（Windows 平台）
+ */
+export interface WslStatus {
+  /** 是否可用 */
+  available: boolean
+  /** WSL 版本（1 或 2）*/
+  version: 1 | 2 | null
+  /** 默认 WSL 发行版 */
+  defaultDistro: string | null
+  /** 已安装的发行版列表 */
+  distros: string[]
+  /** 错误信息（如果不可用）*/
+  error: string | null
+}
+
+/**
+ * Shell 环境状态（Windows 平台特有）
+ */
+export interface ShellEnvironmentStatus {
+  /** Git Bash 状态 */
+  gitBash: GitBashStatus
+  /** WSL 状态 */
+  wsl: WslStatus
+  /** 推荐使用的 Shell 环境 */
+  recommended: 'git-bash' | 'wsl' | null
+}
+
+/**
  * 完整运行时状态
  */
 export interface RuntimeStatus {
+  /** Node.js 运行时状态 */
+  node: NodeRuntimeStatus
   /** Bun 运行时状态 */
   bun: BunRuntimeStatus
   /** Git 运行时状态 */
   git: GitRuntimeStatus
+  /** Shell 环境状态（仅 Windows 平台）*/
+  shell?: ShellEnvironmentStatus
   /** Shell 环境变量是否已加载（仅 macOS 相关）*/
   envLoaded: boolean
   /** 初始化时间戳 */
@@ -102,10 +162,14 @@ export interface RuntimeStatus {
 export interface RuntimeInitOptions {
   /** 是否跳过 Shell 环境加载（用于测试或特殊场景）*/
   skipEnvLoad?: boolean
+  /** 是否跳过 Node.js 检测 */
+  skipNodeDetection?: boolean
   /** 是否跳过 Bun 检测 */
   skipBunDetection?: boolean
   /** 是否跳过 Git 检测 */
   skipGitDetection?: boolean
+  /** 是否跳过 Shell 环境检测（仅 Windows）*/
+  skipShellDetection?: boolean
 }
 
 /**

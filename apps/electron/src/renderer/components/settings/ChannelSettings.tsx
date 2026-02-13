@@ -2,8 +2,8 @@
  * ChannelSettings - 渠道配置页
  *
  * 分为两个区块：
- * 1. 聊天渠道 — 所有渠道列表 + 添加/编辑/删除
- * 2. Agent 供应商 — Anthropic 渠道 + Proma 官方渠道，radio 选择默认 Agent 渠道
+ * 1. 渠道管理 — 所有渠道列表 + 添加/编辑/删除（渠道同时用于 Chat 和 Agent）
+ * 2. Agent 供应商 — 从已启用的 Anthropic 渠道中选择默认 Agent 供应商（支持 Proma 官方渠道）
  */
 
 import * as React from 'react'
@@ -30,12 +30,14 @@ export function ChannelSettings(): React.ReactElement {
   const [, setAgentModelId] = useAtom(agentModelIdAtom)
 
   /** 加载渠道列表 */
-  const loadChannels = React.useCallback(async () => {
+  const loadChannels = React.useCallback(async (): Promise<Channel[]> => {
     try {
       const list = await window.electronAPI.listChannels()
       setChannels(list)
+      return list
     } catch (error) {
       console.error('[渠道设置] 加载渠道列表失败:', error)
+      return []
     } finally {
       setLoading(false)
     }
@@ -77,7 +79,9 @@ export function ChannelSettings(): React.ReactElement {
         await window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined })
       }
 
-      await loadChannels()
+      // 加载最新渠道列表并检查是否需要自动选择
+      const updatedChannels = await loadChannels()
+      await checkAndAutoSelectAgentChannel(updatedChannels)
     } catch (error) {
       console.error('[渠道设置] 切换渠道状态失败:', error)
     }
@@ -94,11 +98,39 @@ export function ChannelSettings(): React.ReactElement {
     }
   }
 
+  /** 检查并自动选择 Agent 渠道 */
+  const checkAndAutoSelectAgentChannel = async (channels: Channel[]): Promise<void> => {
+    // 获取可用的 Anthropic 渠道
+    const availableAnthropicChannels = channels.filter(
+      (c) => c.provider === 'anthropic' && c.enabled
+    )
+
+    // 如果当前没有选择 Agent 渠道，或当前选择的渠道不可用，自动选择第一个可用渠道
+    const currentAgentChannel = agentChannelId
+      ? channels.find((c) => c.id === agentChannelId)
+      : null
+    const shouldAutoSelect =
+      !agentChannelId || // 没有选择
+      !currentAgentChannel || // 选择的渠道不存在
+      !currentAgentChannel.enabled || // 选择的渠道已禁用
+      currentAgentChannel.provider !== 'anthropic' // 选择的不是 Anthropic 渠道
+
+    if (shouldAutoSelect && availableAnthropicChannels.length > 0) {
+      const firstChannel = availableAnthropicChannels[0]
+      if (firstChannel) {
+        await handleSelectAgentProvider(firstChannel.id)
+      }
+    }
+  }
+
   /** 表单保存回调 */
-  const handleFormSaved = (): void => {
+  const handleFormSaved = async (): Promise<void> => {
     setViewMode('list')
     setEditingChannel(null)
-    loadChannels()
+
+    // 加载最新渠道列表并检查是否需要自动选择
+    const updatedChannels = await loadChannels()
+    await checkAndAutoSelectAgentChannel(updatedChannels)
   }
 
   /** 取消表单 */
@@ -135,10 +167,10 @@ export function ChannelSettings(): React.ReactElement {
   // 列表视图
   return (
     <div className="space-y-8">
-      {/* 区块一：聊天渠道 */}
+      {/* 区块一：渠道管理 */}
       <SettingsSection
-        title="聊天渠道供应商"
-        description="管理 AI 对话的供应商连接，配置 API Key 和可用模型"
+        title="渠道管理"
+        description="管理 AI 供应商连接，配置 API Key 和可用模型。Anthropic 渠道同时可用于 Agent 模式"
         action={
           <Button size="sm" onClick={() => setViewMode('create')}>
             <Plus size={16} />
@@ -189,7 +221,7 @@ export function ChannelSettings(): React.ReactElement {
       {/* 区块二：Agent 供应商 */}
       <SettingsSection
         title="Agent 供应商"
-        description="选择一个 Anthropic 兼容格式的渠道作为 Agent 模式的默认供应商"
+        description="选择 Agent 模式的默认供应商，上方已启用的 Anthropic 兼容渠道会自动出现在此列表"
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -240,6 +272,7 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
   const description = [
     PROVIDER_LABELS[channel.provider],
     enabledCount > 0 ? `${enabledCount} 个模型已启用` : undefined,
+    channel.provider === 'anthropic' ? '可用于 Agent' : undefined,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -336,7 +369,7 @@ function AgentOfficialProviderRow({ channel, selected, onSelect, onRefresh }: Ag
   const handleRefresh = async (): Promise<void> => {
     setRefreshing(true)
     try {
-      await window.electronAPI.syncOfficialChannel()
+      await window.electronAPI.cloudBilling.syncOfficialChannel()
       onRefresh()
     } catch (error) {
       console.error('[渠道设置] 刷新官方渠道失败:', error)
@@ -349,7 +382,7 @@ function AgentOfficialProviderRow({ channel, selected, onSelect, onRefresh }: Ag
     <SettingsRow
       label="Proma 官方"
       icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
-      description={`官方供应商 · ${enabledCount} 个模型可用`}
+      description={`官方供应商 · ${enabledCount} 个模型可用 · 稳定可靠 · 可用于 Agent`}
       className="group"
     >
       <div className="flex items-center gap-2">

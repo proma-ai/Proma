@@ -123,47 +123,48 @@ export function ChatHeader(): React.ReactElement | null {
         </div>
       )}
 
-      {/* 置顶按钮 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              'h-8 w-8 flex-shrink-0 titlebar-no-drag',
-              isPinned && 'bg-accent text-accent-foreground'
-            )}
-            onClick={handleTogglePin}
-          >
-            <Pin className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>{isPinned ? '取消置顶' : '置顶对话'}</p>
-        </TooltipContent>
-      </Tooltip>
+      {/* 右上角按钮组 — 绝对定位，与 Agent 侧统一 */}
+      <div className="absolute right-2.5 top-2.5 z-10 flex items-center gap-1 titlebar-no-drag">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'h-7 w-7',
+                isPinned && 'bg-accent text-accent-foreground'
+              )}
+              onClick={handleTogglePin}
+            >
+              <Pin className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{isPinned ? '取消置顶' : '置顶对话'}</p>
+          </TooltipContent>
+        </Tooltip>
 
-      {/* 并排模式切换 - 始终显示，避免编辑时高度跳动 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              'h-8 w-8 flex-shrink-0 titlebar-no-drag',
-              parallelMode && 'bg-accent text-accent-foreground'
-            )}
-            onClick={() => setParallelMode(!parallelMode)}
-          >
-            <Columns2 className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>{parallelMode ? '关闭并排模式' : '并排模式'}</p>
-        </TooltipContent>
-      </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'h-7 w-7',
+                parallelMode && 'bg-accent text-accent-foreground'
+              )}
+              onClick={() => setParallelMode(!parallelMode)}
+            >
+              <Columns2 className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{parallelMode ? '关闭并排模式' : '并排模式'}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   )
 }

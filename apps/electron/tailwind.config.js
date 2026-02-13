@@ -41,9 +41,28 @@ export default {
           foreground: 'hsl(var(--popover-foreground))',
         },
       },
+      keyframes: {
+        'slide-in-from-top': {
+          from: { transform: 'translateY(-100%)' },
+          to: { transform: 'translateY(0)' },
+        },
+        'slide-in-from-bottom': {
+          from: { transform: 'translateY(100%)' },
+          to: { transform: 'translateY(0)' },
+        },
+        'slide-out-to-right': {
+          from: { transform: 'translateX(0)' },
+          to: { transform: 'translateX(100%)' },
+        },
+      },
+      animation: {
+        'in': 'slide-in-from-top 0.3s ease-out',
+        'out': 'slide-out-to-right 0.2s ease-in',
+      },
     },
   },
   plugins: [
     require('@tailwindcss/typography'),
+    require('tailwindcss-animate'),
   ],
 }

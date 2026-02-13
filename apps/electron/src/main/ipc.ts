@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -37,6 +37,10 @@ import type {
   WorkspaceCapabilities,
   FileEntry,
   EnvironmentCheckResult,
+  ProxyConfig,
+  SystemProxyDetectResult,
+  GitHubRelease,
+  GitHubReleaseListOptions,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -73,6 +77,8 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { checkEnvironment } from './lib/environment-checker'
+import { getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
+import { detectSystemProxy } from './lib/system-proxy-detector'
 import {
   listAgentSessions,
   createAgentSession,
@@ -80,7 +86,7 @@ import {
   updateAgentSessionMeta,
   deleteAgentSession,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
+import { runAgentWithRetry, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
 import {
   listAgentWorkspaces,
@@ -95,6 +101,11 @@ import {
   getAgentWorkspace,
   deleteWorkspaceSkill,
 } from './lib/agent-workspace-manager'
+import {
+  getLatestRelease,
+  listReleases as listGitHubReleases,
+  getReleaseByTag,
+} from './lib/github-release-service'
 
 /**
  * 注册 IPC 处理器
@@ -451,6 +462,32 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== 代理配置相关 =====
+
+  // 获取代理配置
+  ipcMain.handle(
+    PROXY_IPC_CHANNELS.GET_SETTINGS,
+    async (): Promise<ProxyConfig> => {
+      return getProxySettings()
+    }
+  )
+
+  // 更新代理配置
+  ipcMain.handle(
+    PROXY_IPC_CHANNELS.UPDATE_SETTINGS,
+    async (_, config: ProxyConfig): Promise<void> => {
+      await saveProxySettings(config)
+    }
+  )
+
+  // 检测系统代理
+  ipcMain.handle(
+    PROXY_IPC_CHANNELS.DETECT_SYSTEM,
+    async (): Promise<SystemProxyDetectResult> => {
+      return detectSystemProxy()
+    }
+  )
+
   // ===== Agent 会话管理相关 =====
 
   // 获取 Agent 会话列表
@@ -580,11 +617,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 发送 Agent 消息（触发 Agent SDK 流式响应）
+  // 发送 Agent 消息（触发 Agent SDK 流式响应，带自动重试）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {
-      await runAgent(input, event.sender)
+      await runAgentWithRetry(input, event.sender)
     }
   )
 
@@ -731,6 +768,32 @@ export function registerIpcHandlers(): void {
       }
 
       shell.showItemInFolder(safePath)
+    }
+  )
+
+  // ===== GitHub Release =====
+
+  // 获取最新 Release
+  ipcMain.handle(
+    GITHUB_RELEASE_IPC_CHANNELS.GET_LATEST_RELEASE,
+    async (): Promise<GitHubRelease | null> => {
+      return getLatestRelease()
+    }
+  )
+
+  // 获取 Release 列表
+  ipcMain.handle(
+    GITHUB_RELEASE_IPC_CHANNELS.LIST_RELEASES,
+    async (_, options?: GitHubReleaseListOptions): Promise<GitHubRelease[]> => {
+      return listGitHubReleases(options)
+    }
+  )
+
+  // 获取指定版本的 Release
+  ipcMain.handle(
+    GITHUB_RELEASE_IPC_CHANNELS.GET_RELEASE_BY_TAG,
+    async (_, tag: string): Promise<GitHubRelease | null> => {
+      return getReleaseByTag(tag)
     }
   )
 

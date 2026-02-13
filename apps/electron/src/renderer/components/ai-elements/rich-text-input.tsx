@@ -162,6 +162,8 @@ interface RichTextInputProps {
   placeholder?: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 自动聚焦触发器（当此值变化时自动聚焦，通常传入对话 ID） */
+  autoFocusTrigger?: string | null
   className?: string
 }
 
@@ -179,6 +181,7 @@ export function RichTextInput({
   placeholder = '有什么可以帮助到你的呢？',
   className,
   disabled = false,
+  autoFocusTrigger,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
@@ -326,7 +329,7 @@ export function RichTextInput({
     }
   }, [editor, disabled])
 
-  // 自动聚焦
+  // 自动聚焦：组件挂载时 + autoFocusTrigger 变化时
   useEffect(() => {
     if (editor && !disabled) {
       const timer = setTimeout(() => {
@@ -334,7 +337,7 @@ export function RichTextInput({
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [editor, disabled])
+  }, [editor, disabled, autoFocusTrigger])
 
   return (
     <div

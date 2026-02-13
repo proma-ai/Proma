@@ -32,6 +32,8 @@ import {
   streamingAtom,
   thinkingEnabledAtom,
   pendingAttachmentsAtom,
+  currentConversationIdAtom,
+  currentConversationDraftAtom,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
@@ -63,11 +65,12 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
-  const [content, setContent] = React.useState('')
+  const [content, setContent] = useAtom(currentConversationDraftAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const streaming = useAtomValue(streamingAtom)
   const [thinkingEnabled, setThinkingEnabled] = useAtom(thinkingEnabledAtom)
   const [pendingAttachments, setPendingAttachments] = useAtom(pendingAttachmentsAtom)
+  const currentConversationId = useAtomValue(currentConversationIdAtom)
   const [isDragOver, setIsDragOver] = React.useState(false)
 
   const canSend = (content.trim().length > 0 || pendingAttachments.length > 0)
@@ -252,6 +255,7 @@ export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): R
                 : '请先选择模型'
             }
             disabled={!selectedModel}
+            autoFocusTrigger={currentConversationId}
           />
 
           {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}

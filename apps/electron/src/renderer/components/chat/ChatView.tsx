@@ -120,7 +120,7 @@ export function ChatView(): React.ReactElement {
       updater: (prev: ConversationStreamState) => ConversationStreamState
     ): void => {
       setStreamingStates((prev) => {
-        const current = prev.get(convId) ?? { streaming: false, content: '', reasoning: '' }
+        const current = prev.get(convId) ?? { streaming: false, content: '', reasoning: '', model: undefined }
         const next = updater(current)
         const map = new Map(prev)
         map.set(convId, next)
@@ -180,19 +180,25 @@ export function ChatView(): React.ReactElement {
 
         // 第一条消息回复完成后，生成对话标题
         const titleInput = pendingTitleRef.current.get(event.conversationId)
+        console.log('[ChatView] 流式完成 - conversationId:', event.conversationId, 'titleInput:', titleInput)
         if (titleInput) {
           pendingTitleRef.current.delete(event.conversationId)
+          console.log('[ChatView] 开始生成标题:', titleInput)
           window.electronAPI.generateTitle(titleInput).then((title) => {
+            console.log('[ChatView] 标题生成结果:', title)
             if (!title) return
             window.electronAPI
               .updateConversationTitle(event.conversationId, title)
               .then((updated) => {
+                console.log('[ChatView] 标题更新成功:', updated.title)
                 setConversations((prev) =>
                   prev.map((c) => (c.id === updated.id ? updated : c))
                 )
               })
               .catch(console.error)
-          }).catch(console.error)
+          }).catch((error) => {
+            console.error('[ChatView] 标题生成失败:', error)
+          })
         }
       }
     )
@@ -277,7 +283,9 @@ export function ChatView(): React.ReactElement {
     // 判断是否为第一条消息（发送前历史为空）
     const messageCountBeforeSend = options?.messageCountBeforeSend ?? currentMessages.length
     const isFirstMessage = messageCountBeforeSend === 0
+    console.log('[ChatView] 发送消息 - isFirstMessage:', isFirstMessage, 'messageCountBeforeSend:', messageCountBeforeSend, 'conversationId:', currentConversationId)
     if (isFirstMessage && content) {
+      console.log('[ChatView] 设置待生成标题:', { conversationId: currentConversationId, userMessage: content.slice(0, 50) })
       pendingTitleRef.current.set(currentConversationId, {
         userMessage: content,
         channelId: selectedModel.channelId,
@@ -324,7 +332,12 @@ export function ChatView(): React.ReactElement {
     // 初始化当前对话的流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
-      map.set(currentConversationId, { streaming: true, content: '', reasoning: '' })
+      map.set(currentConversationId, {
+        streaming: true,
+        content: '',
+        reasoning: '',
+        model: selectedModel.modelId,
+      })
       return map
     })
 

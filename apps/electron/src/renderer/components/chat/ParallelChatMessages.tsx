@@ -28,7 +28,7 @@ import {
   ReasoningTrigger,
   ReasoningContent,
 } from '@/components/ai-elements/reasoning'
-import { selectedModelAtom } from '@/atoms/chat-atoms'
+import { streamingModelAtom } from '@/atoms/chat-atoms'
 import { getModelLogo } from '@/lib/model-logo'
 import type { ChatMessage } from '@proma/shared'
 
@@ -149,7 +149,7 @@ function MessageColumn({
   streamingContent = '',
   streamingReasoning = '',
 }: MessageColumnProps): React.ReactElement {
-  const selectedModel = useAtomValue(selectedModelAtom)
+  const streamingModel = useAtomValue(streamingModelAtom)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // 消息加载后自动滚动到底部（两列都滚到最新消息）
@@ -194,11 +194,11 @@ function MessageColumn({
         {side === 'assistant' && (streaming || streamingContent || streamingReasoning) && (
           <Message from="assistant">
             <MessageHeader
-              model={selectedModel?.modelId}
+              model={streamingModel}
               time={formatMessageTime(Date.now())}
               logo={
                 <img
-                  src={getModelLogo(selectedModel?.modelId ?? '')}
+                  src={getModelLogo(streamingModel ?? '')}
                   alt="AI"
                   className="size-[35px] rounded-[25%] object-cover"
                 />

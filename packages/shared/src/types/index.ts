@@ -15,6 +15,9 @@ export * from './runtime'
 // 渠道（AI 供应商）相关类型
 export * from './channel'
 
+// 代理配置相关类型
+export * from './proxy'
+
 // Chat 相关类型
 export * from './chat'
 
@@ -29,3 +32,6 @@ export * from './sync'
 
 // 环境检测相关类型
 export * from './environment'
+
+// GitHub Release 相关类型
+export * from './github'

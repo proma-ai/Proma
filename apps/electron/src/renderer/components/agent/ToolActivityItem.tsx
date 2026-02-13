@@ -28,8 +28,8 @@ import {
   Loader2,
   Circle,
   ChevronRight,
-  ArrowUpRight,
   MessageCircleDashed,
+  Plus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -290,6 +290,8 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
 
   const delay = animate && index < SIZE.staggerLimit ? `${index * 30}ms` : '0ms'
 
+  const canExpand = !!onOpenDetails && activity.done && !!(activity.result || Object.keys(activity.input).length > 0)
+
   return (
     <div
       className={cn(
@@ -299,9 +301,26 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
       )}
       style={animate ? { animationDelay: delay } : undefined}
     >
-      <StatusIcon status={status} toolName={activity.toolName} />
-
-      <span className="shrink-0 text-foreground/80">{activity.toolName}</span>
+      {canExpand ? (
+        <button
+          type="button"
+          className="group/expand shrink-0 flex items-center gap-2 cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); onOpenDetails(activity) }}
+        >
+          <span className={cn(SIZE.icon, 'relative flex items-center justify-center')}>
+            <span className="transition-opacity duration-150 group-hover/expand:opacity-0">
+              <StatusIcon status={status} toolName={activity.toolName} />
+            </span>
+            <Plus className={cn(SIZE.icon, 'absolute text-foreground/60 opacity-0 transition-opacity duration-150 group-hover/expand:opacity-100')} />
+          </span>
+          <span className="shrink-0 text-foreground/80 group-hover/expand:text-foreground transition-colors duration-150">{activity.toolName}</span>
+        </button>
+      ) : (
+        <>
+          <StatusIcon status={status} toolName={activity.toolName} />
+          <span className="shrink-0 text-foreground/80">{activity.toolName}</span>
+        </>
+      )}
 
       {diffStats && <DiffBadges stats={diffStats} />}
 
@@ -319,16 +338,6 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
         <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">
           {formatElapsed(activity.elapsedSeconds)}
         </span>
-      )}
-
-      {onOpenDetails && activity.done && (activity.result || Object.keys(activity.input).length > 0) && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onOpenDetails(activity) }}
-          className="shrink-0 p-0.5 rounded opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-muted/80"
-        >
-          <ArrowUpRight className="size-3 text-muted-foreground" />
-        </button>
       )}
     </div>
   )
@@ -442,16 +451,32 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, de
 // ===== 详情面板 =====
 
 function ActivityDetails({ activity, onClose }: { activity: ToolActivity; onClose: () => void }): React.ReactElement {
+  const [copied, setCopied] = React.useState(false)
+
+  const handleCopy = (): void => {
+    const parts: string[] = [`[${activity.toolName}]`]
+    if (Object.keys(activity.input).length > 0) {
+      parts.push('输入:\n' + formatInput(activity.input))
+    }
+    if (activity.result) {
+      parts.push('结果:\n' + (activity.result.length > 2000 ? activity.result.slice(0, 2000) + '\n… [截断]' : activity.result))
+    }
+    navigator.clipboard.writeText(parts.join('\n\n')).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
   return (
-    <div className="mt-1 rounded-md border border-border/40 bg-muted/20 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+    <div className="mt-1 rounded-md border border-border/40 bg-muted/20 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300 ease-out">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/30">
         <span className="text-[11px] font-medium text-foreground/50">{activity.toolName}</span>
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleCopy}
           className="text-[11px] text-foreground/40 hover:text-foreground transition-colors"
         >
-          收起
+          {copied ? '已复制' : '复制'}
         </button>
       </div>
 
@@ -592,7 +617,8 @@ export function ToolActivityList({ activities, animate = false }: ToolActivityLi
                   activity={activity}
                   index={i}
                   animate={animate}
-                  onOpenDetails={handleOpenDetails}
+                  // 不传递 onOpenDetails，TodoWrite/TaskCreate 不支持点击展开详情
+                  // 因为它们已经有专属的 TodoList 展示
                 />
                 <TodoList items={todos} />
               </React.Fragment>

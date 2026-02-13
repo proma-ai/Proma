@@ -46,6 +46,13 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
+  /** 重试状态 */
+  retrying?: {
+    attempt: number
+    maxAttempts: number
+    delaySeconds: number
+    reason: string
+  }
 }
 
 /** 从 ToolActivity 派生状态 */
@@ -95,7 +102,12 @@ function mergeTodoWrites(activities: ToolActivity[]): ToolActivity[] {
  * 每层内 TodoWrite 合并去重并置底。
  */
 export function groupActivities(activities: ToolActivity[]): Array<ActivityGroup | ToolActivity> {
-  const processed = mergeTodoWrites(activities)
+  // 过滤幽灵条目：tool_progress 创建的空 input 条目，完成后仍无内容
+  const filtered = activities.filter((a) => {
+    if (a.done && Object.keys(a.input).length === 0 && !a.result) return false
+    return true
+  })
+  const processed = mergeTodoWrites(filtered)
 
   const parentIds = new Set<string>()
   for (const a of processed) {
@@ -187,6 +199,12 @@ export const agentStreamingModelAtom = atom<string | undefined>((get) => {
   return get(agentStreamingStatesAtom).get(currentId)?.model
 })
 
+export const agentRetryingAtom = atom<AgentStreamState['retrying'] | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.retrying
+})
+
 export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
   const states = get(agentStreamingStatesAtom)
   const ids = new Set<string>()
@@ -205,7 +223,8 @@ export function applyAgentEvent(
 ): AgentStreamState {
   switch (event.type) {
     case 'text_delta':
-      return { ...prev, content: prev.content + event.text }
+      // 开始接收文本 - 清除重试状态（重试成功）
+      return { ...prev, content: prev.content + event.text, retrying: undefined }
 
     case 'text_complete':
       return prev
@@ -220,6 +239,8 @@ export function applyAgentEvent(
               ? { ...t, input: event.input, intent: event.intent || t.intent, displayName: event.displayName || t.displayName }
               : t
           ),
+          // 开始工具调用 - 清除重试状态（重试成功）
+          retrying: undefined,
         }
       }
       return {
@@ -233,6 +254,8 @@ export function applyAgentEvent(
           done: false,
           parentToolUseId: event.parentToolUseId,
         }],
+        // 开始工具调用 - 清除重试状态（重试成功）
+        retrying: undefined,
       }
     }
 
@@ -298,6 +321,17 @@ export function applyAgentEvent(
     case 'compact_complete':
       return { ...prev, isCompacting: false }
 
+    case 'retrying':
+      return {
+        ...prev,
+        retrying: {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delaySeconds: event.delaySeconds,
+          reason: event.reason,
+        },
+      }
+
     default:
       return prev
   }
@@ -334,3 +368,31 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
   if (!currentId) return null
   return get(agentStreamErrorsAtom).get(currentId) ?? null
 })
+
+/**
+ * Agent 会话输入框草稿 Map — 以 sessionId 为 key
+ * 用于在切换会话时保留输入框内容
+ */
+export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
+
+/** 当前 Agent 会话的草稿内容（派生读写原子） */
+export const currentAgentSessionDraftAtom = atom<string>(
+  (get) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return ''
+    return get(agentSessionDraftsAtom).get(currentId) ?? ''
+  },
+  (get, set, newDraft: string) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return
+    set(agentSessionDraftsAtom, (prev) => {
+      const map = new Map(prev)
+      if (newDraft.trim() === '') {
+        map.delete(currentId)
+      } else {
+        map.set(currentId, newDraft)
+      }
+      return map
+    })
+  }
+)

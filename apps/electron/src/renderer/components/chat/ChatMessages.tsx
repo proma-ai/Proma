@@ -44,9 +44,9 @@ import {
   streamingAtom,
   streamingContentAtom,
   streamingReasoningAtom,
+  streamingModelAtom,
   contextDividersAtom,
   parallelModeAtom,
-  selectedModelAtom,
   hasMoreMessagesAtom,
   currentConversationIdAtom,
 } from '@/atoms/chat-atoms'
@@ -177,7 +177,7 @@ export function ChatMessages({
   })
   const contextDividers = useAtomValue(contextDividersAtom)
   const parallelMode = useAtomValue(parallelModeAtom)
-  const selectedModel = useAtomValue(selectedModelAtom)
+  const streamingModel = useAtomValue(streamingModelAtom)
   const hasMore = useAtomValue(hasMoreMessagesAtom)
   const currentConversationId = useAtomValue(currentConversationIdAtom)
 
@@ -301,11 +301,11 @@ export function ChatMessages({
             {(streaming || smoothContent || smoothReasoning) && (
               <Message from="assistant">
                 <MessageHeader
-                  model={selectedModel?.modelId}
+                  model={streamingModel}
                   time={formatMessageTime(Date.now())}
                   logo={
                     <img
-                      src={getModelLogo(selectedModel?.modelId ?? '')}
+                      src={getModelLogo(streamingModel ?? '')}
                       alt="AI"
                       className="size-[35px] rounded-[25%] object-cover"
                     />

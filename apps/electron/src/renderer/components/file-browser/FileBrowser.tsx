@@ -22,7 +22,6 @@ import {
   ChevronDown,
   Trash2,
   RefreshCw,
-  X,
   ExternalLink,
   FolderSearch,
 } from 'lucide-react'
@@ -51,10 +50,9 @@ interface ContextMenuState {
 
 interface FileBrowserProps {
   rootPath: string
-  onClose?: () => void
 }
 
-export function FileBrowser({ rootPath, onClose }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -153,7 +151,7 @@ export function FileBrowser({ rootPath, onClose }: FileBrowserProps): React.Reac
   return (
     <div className="flex flex-col h-full bg-background">
       {/* 顶部工具栏 */}
-      <div className="flex items-center gap-1 px-3 h-[48px] border-b flex-shrink-0">
+      <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
         <span className="text-xs text-muted-foreground truncate flex-1" title={rootPath}>
           {breadcrumb}
         </span>
@@ -165,7 +163,7 @@ export function FileBrowser({ rootPath, onClose }: FileBrowserProps): React.Reac
           onClick={() => window.electronAPI.openFile(rootPath).catch(console.error)}
           title="在 Finder 中打开"
         >
-          <FolderOpen className="size-3.5" />
+          <ExternalLink className="size-3.5" />
         </Button>
         <Button
           type="button"
@@ -177,17 +175,6 @@ export function FileBrowser({ rootPath, onClose }: FileBrowserProps): React.Reac
         >
           <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
         </Button>
-        {onClose && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 flex-shrink-0"
-            onClick={onClose}
-          >
-            <X className="size-3.5" />
-          </Button>
-        )}
       </div>
 
       {/* 文件树 */}

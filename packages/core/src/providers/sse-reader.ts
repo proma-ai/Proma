@@ -23,6 +23,8 @@ export interface StreamSSEOptions {
   onEvent: StreamEventCallback
   /** AbortSignal 用于取消请求 */
   signal?: AbortSignal
+  /** 自定义 fetch 函数（代理等场景下由调用方注入） */
+  fetchFn?: typeof globalThis.fetch
 }
 
 /** streamSSE 的返回结果 */
@@ -46,10 +48,10 @@ export interface StreamSSEResult {
  * 7. 返回完整内容
  */
 export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const { request, adapter, onEvent, signal } = options
+  const { request, adapter, onEvent, signal, fetchFn = fetch } = options
 
-  // 1. 发起请求
-  const response = await fetch(request.url, {
+  // 1. 发起请求（支持通过 fetchFn 注入代理）
+  const response = await fetchFn(request.url, {
     method: 'POST',
     headers: request.headers,
     body: request.body,
@@ -122,19 +124,47 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
 export async function fetchTitle(
   request: ProviderRequest,
   adapter: ProviderAdapter,
+  fetchFn: typeof globalThis.fetch = fetch,
 ): Promise<string | null> {
   try {
-    const response = await fetch(request.url, {
+    console.log('[fetchTitle] 发送请求:', {
+      url: request.url,
+      provider: adapter.providerType,
+      bodyPreview: request.body.slice(0, 200),
+    })
+
+    const response = await fetchFn(request.url, {
       method: 'POST',
       headers: request.headers,
       body: request.body,
     })
 
-    if (!response.ok) return null
+    console.log('[fetchTitle] 收到响应:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'unknown')
+      console.warn('[fetchTitle] 请求失败:', {
+        status: response.status,
+        error: errorText.slice(0, 500),
+      })
+      return null
+    }
 
     const data: unknown = await response.json()
-    return adapter.parseTitleResponse(data)
-  } catch {
+    console.log('[fetchTitle] 解析响应体:', {
+      provider: adapter.providerType,
+      dataPreview: JSON.stringify(data).slice(0, 500),
+    })
+
+    const title = adapter.parseTitleResponse(data)
+    console.log('[fetchTitle] 解析标题结果:', { title })
+    return title
+  } catch (error) {
+    console.error('[fetchTitle] 异常:', error)
     return null
   }
 }

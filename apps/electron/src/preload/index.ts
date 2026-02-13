@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -66,6 +66,10 @@ import type {
   SyncResult,
   SyncProgressEvent,
   EnvironmentCheckResult,
+  ProxyConfig,
+  SystemProxyDetectResult,
+  GitHubRelease,
+  GitHubReleaseListOptions,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -213,6 +217,17 @@ export interface ElectronAPI {
   /** 执行环境检测 */
   checkEnvironment: () => Promise<EnvironmentCheckResult>
 
+  // ===== 代理配置相关 =====
+
+  /** 获取代理配置 */
+  getProxySettings: () => Promise<ProxyConfig>
+
+  /** 更新代理配置 */
+  updateProxySettings: (config: ProxyConfig) => Promise<void>
+
+  /** 检测系统代理 */
+  detectSystemProxy: () => Promise<SystemProxyDetectResult>
+
   // ===== 流式事件订阅（返回清理函数） =====
 
   /** 订阅内容片段事件 */
@@ -295,6 +310,12 @@ export interface ElectronAPI {
 
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
+
+  /** 订阅工作区能力变化事件 */
+  onCapabilitiesChanged: (callback: () => void) => () => void
+
+  /** 订阅工作区文件变化事件 */
+  onWorkspaceFilesChanged: (callback: () => void) => () => void
 
   // ===== Agent 附件 =====
 
@@ -460,6 +481,15 @@ export interface ElectronAPI {
     /** 订阅同步进度事件（返回清理函数） */
     onSyncProgress: (callback: (event: SyncProgressEvent) => void) => () => void
   }
+
+  // ===== GitHub Release 相关 =====
+
+  /** 获取最新 Release */
+  getLatestRelease: () => Promise<GitHubRelease | null>
+  /** 列出所有 Release */
+  listReleases: (options?: GitHubReleaseListOptions) => Promise<GitHubRelease[]>
+  /** 根据 tag 获取 Release */
+  getReleaseByTag: (tag: string) => Promise<GitHubRelease | null>
 }
 
 /**
@@ -632,6 +662,19 @@ const electronAPI: ElectronAPI = {
   // 环境检测
   checkEnvironment: () => {
     return ipcRenderer.invoke(ENVIRONMENT_IPC_CHANNELS.CHECK)
+  },
+
+  // 代理配置
+  getProxySettings: () => {
+    return ipcRenderer.invoke(PROXY_IPC_CHANNELS.GET_SETTINGS)
+  },
+
+  updateProxySettings: (config: ProxyConfig) => {
+    return ipcRenderer.invoke(PROXY_IPC_CHANNELS.UPDATE_SETTINGS, config)
+  },
+
+  detectSystemProxy: () => {
+    return ipcRenderer.invoke(PROXY_IPC_CHANNELS.DETECT_SYSTEM)
   },
 
   // 流式事件订阅
@@ -969,6 +1012,19 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on(SYNC_IPC_CHANNELS.SYNC_PROGRESS, listener)
       return () => { ipcRenderer.removeListener(SYNC_IPC_CHANNELS.SYNC_PROGRESS, listener) }
     },
+  },
+
+  // GitHub Release
+  getLatestRelease: () => {
+    return ipcRenderer.invoke(GITHUB_RELEASE_IPC_CHANNELS.GET_LATEST_RELEASE)
+  },
+
+  listReleases: (options) => {
+    return ipcRenderer.invoke(GITHUB_RELEASE_IPC_CHANNELS.LIST_RELEASES, options)
+  },
+
+  getReleaseByTag: (tag) => {
+    return ipcRenderer.invoke(GITHUB_RELEASE_IPC_CHANNELS.GET_RELEASE_BY_TAG, tag)
   },
 }
 

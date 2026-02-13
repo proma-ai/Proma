@@ -1,28 +1,16 @@
 /**
  * AgentHeader — Agent 会话头部
  *
- * 显示会话标题（可点击编辑）+ 文件浏览器切换按钮。
+ * 显示会话标题（可点击编辑）。
  * 参照 ChatHeader 的编辑模式。
  */
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Pencil, Check, X, FolderOpen } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
+import { Pencil, Check, X } from 'lucide-react'
 import { currentAgentSessionAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 
-interface AgentHeaderProps {
-  onToggleFileBrowser: () => void
-  fileBrowserOpen: boolean
-}
-
-export function AgentHeader({ onToggleFileBrowser, fileBrowserOpen }: AgentHeaderProps): React.ReactElement | null {
+export function AgentHeader(): React.ReactElement | null {
   const session = useAtomValue(currentAgentSessionAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const [editing, setEditing] = React.useState(false)
@@ -107,27 +95,6 @@ export function AgentHeader({ onToggleFileBrowser, fileBrowserOpen }: AgentHeade
           <Pencil className="size-3 opacity-40 group-hover:opacity-70 transition-opacity flex-shrink-0" />
         </button>
       )}
-
-      {/* 文件浏览器切换 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              'h-8 w-8 flex-shrink-0',
-              fileBrowserOpen && 'bg-accent text-accent-foreground'
-            )}
-            onClick={onToggleFileBrowser}
-          >
-            <FolderOpen className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>{fileBrowserOpen ? '关闭文件浏览器' : '打开文件浏览器'}</p>
-        </TooltipContent>
-      </Tooltip>
     </div>
   )
 }

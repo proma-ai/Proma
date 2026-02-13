@@ -139,6 +139,15 @@ export function getUserProfilePath(): string {
 }
 
 /**
+ * 获取代理配置文件路径
+ *
+ * @returns ~/.proma/proxy-settings.json
+ */
+export function getProxySettingsPath(): string {
+  return join(getConfigDir(), 'proxy-settings.json')
+}
+
+/**
  * 获取 Agent 会话索引文件路径
  *
  * @returns ~/.proma/agent-sessions.json

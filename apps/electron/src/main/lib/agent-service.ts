@@ -16,11 +16,12 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { writeFileSync, mkdirSync, cpSync, readdirSync, statSync, existsSync, symlinkSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs'
+import { cp, readdir, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { app, BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
+import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentStreamEvent, AgentGenerateTitleInput, AgentSaveFilesInput, AgentSavedFile, AgentCopyFolderInput } from '@proma/shared'
 import {
   ToolIndex,
@@ -36,6 +37,8 @@ import {
   getAdapter,
   fetchTitle,
 } from '@proma/core'
+import { getFetchFn } from './proxy-fetch'
+import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath } from './config-paths'
@@ -45,6 +48,138 @@ import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-bui
 
 /** 活跃的 AbortController 映射（sessionId → controller） */
 const activeControllers = new Map<string, AbortController>()
+
+// ===== 错误重试机制 =====
+
+/** 重试配置 */
+const RETRY_CONFIG = {
+  /** 最大重试次数 */
+  maxAttempts: 3,
+  /** 初始延迟（秒） */
+  initialDelaySeconds: 1,
+  /** 延迟倍数（指数退避） */
+  delayMultiplier: 2,
+  /** 初始响应超时（毫秒） - 用于检测网络连接问题 */
+  initialResponseTimeoutMs: 30000, // 30 秒
+  /** 流式输出超时（毫秒） - 用于检测连接中断（仅当没有活跃工具时） */
+  streamingTimeoutMs: 60000, // 60 秒
+  /** 工具执行超时（毫秒） - 工具执行时的宽松超时 */
+  toolExecutionTimeoutMs: 300000, // 5 分钟
+} as const
+
+/**
+ * 判断错误是否可重试
+ *
+ * 可重试的错误类型：
+ * - 网络错误（连接失败、超时、DNS 解析失败）
+ * - API 临时错误（429, 500, 502, 503, 504）
+ * - MCP 服务器启动失败（stderr 包含 MCP 相关错误）
+ * - SDK 无响应超时（我们主动触发的超时）
+ *
+ * 不可重试的错误：
+ * - 认证错误（401, 403, Invalid API key）
+ * - 参数错误（400, 422）
+ * - 用户主动中止（AbortError）
+ * - 工作区配置问题
+ */
+function isRetryableError(error: unknown, stderrOutput: string): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  const stack = error instanceof Error ? error.stack?.toLowerCase() || '' : ''
+
+  // 用户主动中止 - 不重试（注意：超时触发的 abort 会被标记为 isTimeoutAborted，不会走到这里）
+  if (message.includes('abort') && !message.includes('timeout')) return false
+
+  // 认证错误 - 不重试
+  if (
+    message.includes('401') ||
+    message.includes('403') ||
+    message.includes('unauthorized') ||
+    message.includes('forbidden') ||
+    message.includes('invalid api key') ||
+    message.includes('authentication')
+  ) {
+    return false
+  }
+
+  // 参数错误 - 不重试
+  if (message.includes('400') || message.includes('422') || message.includes('invalid request')) {
+    return false
+  }
+
+  // 超时错误 - 重试（包括我们主动触发的超时）
+  if (message.includes('etimedout') || message.includes('timeout') || message.includes('无响应超时')) {
+    return true
+  }
+
+  // 网络错误 - 重试
+  const networkErrors = [
+    'econnrefused',
+    'enotfound',
+    'eai_again',
+    'enetunreach',
+    'ehostunreach',
+    'fetch failed',
+    'socket hang up',
+    'network error',
+    'connect timeout',
+  ]
+  if (networkErrors.some((err) => message.includes(err) || stack.includes(err))) {
+    return true
+  }
+
+  // API 临时错误 - 重试
+  const retryableStatuses = ['429', '500', '502', '503', '504']
+  if (retryableStatuses.some((status) => message.includes(status))) {
+    return true
+  }
+
+  // MCP 服务器启动失败 - 重试（但限制次数，避免配置错误导致无限重试）
+  if (stderrOutput.toLowerCase().includes('mcp') && (
+    message.includes('spawn') ||
+    message.includes('enoent') ||
+    stderrOutput.includes('error')
+  )) {
+    return true
+  }
+
+  // 其他未知错误 - 默认不重试（保守策略）
+  return false
+}
+
+/**
+ * 提取错误的简短描述（用于重试通知）
+ */
+function getErrorReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+
+  // 超时错误（优先检测，包括我们自己抛出的超时错误）
+  if (message.includes('ETIMEDOUT') || message.toLowerCase().includes('timeout') || message.includes('无响应超时')) {
+    return 'SDK 响应超时'
+  }
+
+  // 网络错误
+  if (message.toLowerCase().includes('econnrefused')) return '连接被拒绝'
+  if (message.toLowerCase().includes('enotfound')) return 'DNS 解析失败'
+  if (message.toLowerCase().includes('fetch failed')) return '网络请求失败'
+
+  // API 错误
+  if (message.includes('429')) return 'API 速率限制'
+  if (message.includes('500')) return '服务器内部错误'
+  if (message.includes('502')) return '网关错误'
+  if (message.includes('503')) return '服务不可用'
+  if (message.includes('504')) return '网关超时'
+
+  // 截断过长的消息
+  const maxLength = 50
+  return message.length > maxLength ? message.slice(0, maxLength) + '...' : message
+}
+
+/**
+ * 延迟指定秒数（异步）
+ */
+function delay(seconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+}
 
 /**
  * 解析 SDK cli.js 路径
@@ -97,13 +232,30 @@ function resolveSDKCliPath(): string {
 }
 
 /**
- * 获取 Bun 运行时路径
+ * 获取 Agent SDK 运行时可执行文件
  *
- * 优先使用 runtime-init 检测到的路径，降级为 'bun'（依赖 PATH）。
+ * 优先级策略：
+ * 1. Node.js（用户已安装，无需额外依赖）
+ * 2. Bun（开发环境或打包版本可能包含）
+ * 3. 降级到字符串 'node'（依赖系统 PATH）
+ *
+ * @returns { type: 'node' | 'bun', path: string }
  */
-function getBunExecutablePath(): string {
+function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
   const status = getRuntimeStatus()
-  return status?.bun?.path ?? 'bun'
+
+  // 优先使用 Node.js（用户已安装）
+  if (status?.node?.available && status.node.path) {
+    return { type: 'node', path: status.node.path }
+  }
+
+  // 降级到 Bun
+  if (status?.bun?.available && status.bun.path) {
+    return { type: 'bun', path: status.bun.path }
+  }
+
+  // 最后降级到字符串 'node'（依赖 PATH）
+  return { type: 'node', path: 'node' }
 }
 
 /**
@@ -453,13 +605,113 @@ function buildContextPrompt(sessionId: string, currentUserMessage: string): stri
 }
 
 /**
- * 运行 Agent 并流式推送事件到渲染进程
+ * 运行 Agent 并流式推送事件到渲染进程（带自动重试）
+ *
+ * 包装原 runAgent 函数，添加智能重试机制：
+ * - 检测可恢复的错误（网络中断、API 临时故障、MCP 服务器启动失败）
+ * - 指数退避重试（1s → 2s → 4s）
+ * - 实时通知 UI 重试状态
+ * - 达到上限后停止，避免无限重试
  */
-export async function runAgent(
+export async function runAgentWithRetry(
   input: AgentSendInput,
   webContents: WebContents,
 ): Promise<void> {
+  let attempt = 0
+  const stderrChunks: string[] = []
+
+  while (attempt < RETRY_CONFIG.maxAttempts) {
+    attempt++
+
+    try {
+      // 尝试运行 Agent
+      await runAgentInternal(input, webContents, stderrChunks)
+      // 成功完成 - 退出重试循环
+      return
+    } catch (error) {
+      const stderrOutput = stderrChunks.join('').trim()
+      const isRetryable = isRetryableError(error, stderrOutput)
+
+      // 最后一次尝试失败 - 不再重试
+      if (attempt >= RETRY_CONFIG.maxAttempts) {
+        console.error(`[Agent 服务] 重试失败，已达到最大次数 (${RETRY_CONFIG.maxAttempts})`)
+        // 错误已在 runAgentInternal 中发送给 UI，这里直接返回
+        return
+      }
+
+      // 不可重试的错误 - 立即失败
+      if (!isRetryable) {
+        console.log(`[Agent 服务] 错误不可重试，停止尝试: ${error instanceof Error ? error.message : error}`)
+        return
+      }
+
+      // 可重试 - 延迟后重试
+      const delaySeconds = RETRY_CONFIG.initialDelaySeconds * Math.pow(RETRY_CONFIG.delayMultiplier, attempt - 1)
+      const reason = getErrorReason(error)
+
+      console.log(
+        `[Agent 服务] 遇到可恢复错误，准备重试 (${attempt}/${RETRY_CONFIG.maxAttempts}): ${reason}`,
+      )
+
+      // 发送重试事件给 UI
+      const retryEvent: AgentEvent = {
+        type: 'retrying',
+        attempt,
+        maxAttempts: RETRY_CONFIG.maxAttempts,
+        delaySeconds,
+        reason,
+      }
+      webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+        sessionId: input.sessionId,
+        event: retryEvent,
+      } as AgentStreamEvent)
+
+      // 等待后重试
+      await delay(delaySeconds)
+
+      // 清空 stderr 缓冲区（避免上一次的错误干扰判断）
+      stderrChunks.length = 0
+    }
+  }
+}
+
+/**
+ * 运行 Agent 并流式推送事件到渲染进程（内部实现）
+ *
+ * 原 runAgent 逻辑，改名为 runAgentInternal，供重试包装器调用。
+ */
+async function runAgentInternal(
+  input: AgentSendInput,
+  webContents: WebContents,
+  stderrChunks: string[],
+): Promise<void> {
   const { sessionId, userMessage, channelId, modelId, workspaceId } = input
+
+  // 0. Windows 平台：检查 Shell 环境可用性
+  if (process.platform === 'win32') {
+    const runtimeStatus = getRuntimeStatus()
+    const shellStatus = runtimeStatus?.shell
+
+    if (shellStatus && !shellStatus.gitBash?.available && !shellStatus.wsl?.available) {
+      const errorMsg = `Windows 平台需要 Git Bash 或 WSL 环境才能运行 Agent。
+
+当前状态：
+- Git Bash: ${shellStatus.gitBash?.error || '未检测到'}
+- WSL: ${shellStatus.wsl?.error || '未检测到'}
+
+解决方案：
+1. 安装 Git for Windows（推荐）: https://git-scm.com/download/win
+2. 或启用 WSL: https://learn.microsoft.com/zh-cn/windows/wsl/install
+
+安装完成后请重启应用。`
+
+      webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+        sessionId,
+        error: errorMsg,
+      })
+      return
+    }
+  }
 
   // 1. 获取渠道信息并解密 API Key
   const channel = getChannelById(channelId)
@@ -470,6 +722,11 @@ export async function runAgent(
     })
     return
   }
+
+  // Proma 官方渠道默认使用 opus 模型
+  const defaultModel = channel.provider === 'proma'
+    ? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL
+    : 'claude-sonnet-4-5-20250929'
 
   let apiKey: string
   try {
@@ -507,6 +764,41 @@ export async function runAgent(
     // 确保不会残留上一次的 Base URL
     delete sdkEnv.ANTHROPIC_BASE_URL
   }
+  // 代理配置：SDK 通过子进程运行，注入 HTTPS_PROXY 环境变量
+  const proxyUrl = await getEffectiveProxyUrl()
+  if (proxyUrl) {
+    sdkEnv.HTTPS_PROXY = proxyUrl
+    sdkEnv.HTTP_PROXY = proxyUrl
+  }
+
+  // Windows 平台：配置 Shell 环境（Git Bash / WSL）
+  if (process.platform === 'win32') {
+    const runtimeStatus = getRuntimeStatus()
+    const shellStatus = runtimeStatus?.shell
+
+    if (shellStatus) {
+      // 优先使用 Git Bash
+      if (shellStatus.gitBash?.available && shellStatus.gitBash.path) {
+        sdkEnv.CLAUDE_CODE_SHELL = shellStatus.gitBash.path
+        console.log(`[Agent 服务] 配置 Shell 环境: Git Bash (${shellStatus.gitBash.path})`)
+      }
+      // 降级到 WSL
+      else if (shellStatus.wsl?.available) {
+        sdkEnv.CLAUDE_CODE_SHELL = 'wsl'
+        console.log(
+          `[Agent 服务] 配置 Shell 环境: WSL ${shellStatus.wsl.version} (${shellStatus.wsl.defaultDistro})`,
+        )
+      }
+      // 无可用环境
+      else {
+        console.warn('[Agent 服务] Windows 平台未检测到可用的 Shell 环境（Git Bash / WSL）')
+        console.warn('[Agent 服务] Agent 的 Bash 工具可能无法正常工作')
+      }
+
+      // 性能优化：跳过登录 shell，加速 Bash 执行
+      sdkEnv.CLAUDE_BASH_NO_LOGIN = '1'
+    }
+  }
 
   // 2.5 读取已有的 SDK session ID（用于 resume 衔接上下文）
   const sessionMeta = getAgentSessionMeta(sessionId)
@@ -538,9 +830,19 @@ export async function runAgent(
   let accumulatedText = ''
   const accumulatedEvents: AgentEvent[] = []
   // SDK 确认的实际模型（从 system init 消息获取）
-  let resolvedModel = modelId || 'claude-sonnet-4-5-20250929'
-  // 收集 stderr 输出用于错误诊断（声明在 try 之前，确保 catch 可访问）
-  const stderrChunks: string[] = []
+  let resolvedModel = modelId || defaultModel
+  // stderrChunks 从外部传入（供重试判断使用）
+  // 运行环境信息（声明在 try 之前，供 catch 块使用）
+  let agentExec: { type: 'node' | 'bun'; path: string } | undefined
+  let agentCwd: string | undefined
+  let workspaceSlug: string | undefined
+  let workspace: import('@proma/shared').AgentWorkspace | undefined
+  // 超时检测变量（声明在 try 之前，供 catch 块使用）
+  let lastActivityTime = Date.now()
+  let inactivityTimer: NodeJS.Timeout | null = null
+  let receivedFirstMessage = false // 是否已收到第一条消息（用于检测初始连接问题）
+  let activeToolCount = 0 // 当前正在执行的工具数量
+  let isTimeoutAborted = false // 是否因超时而中止（区分用户主动中止）
 
   try {
     // 6. 动态导入 SDK（避免在 esbuild 打包时出问题）
@@ -548,7 +850,7 @@ export async function runAgent(
 
     // 7. 构建 SDK query（通过 env 注入认证信息）
     const cliPath = resolveSDKCliPath()
-    const bunPath = getBunExecutablePath()
+    agentExec = getAgentExecutable()
 
     // 路径验证
     if (!existsSync(cliPath)) {
@@ -561,15 +863,20 @@ export async function runAgent(
     // 确保 ripgrep 可用（打包环境下创建 symlink）
     ensureRipgrepAvailable(cliPath)
 
-    console.log(`[Agent 服务] 启动 SDK — CLI: ${cliPath}, Bun: ${bunPath}, 模型: ${modelId || 'claude-sonnet-4-5-20250929'}, resume: ${existingSdkSessionId ?? '无'}`)
+    console.log(
+      `[Agent 服务] 启动 SDK — CLI: ${cliPath}, 运行时: ${agentExec.type} (${agentExec.path}), 模型: ${modelId || defaultModel}, resume: ${existingSdkSessionId ?? '无'}`,
+    )
 
-    // 安全：--env-file=/dev/null 阻止 Bun 自动加载用户项目中的 .env 文件
+    // 安全：阻止运行时自动加载用户项目中的 .env 文件
+    // Bun: --env-file=/dev/null
+    // Node.js: 默认不会加载 .env，无需特殊处理
     const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null'
+    const executableArgs = agentExec.type === 'bun' ? [`--env-file=${nullDevice}`] : []
 
     // 确定 Agent 工作目录：优先使用 session 级别路径
-    let agentCwd = homedir()
-    let workspaceSlug: string | undefined
-    let workspace: import('@proma/shared').AgentWorkspace | undefined
+    agentCwd = homedir()
+    workspaceSlug = undefined
+    workspace = undefined
     if (workspaceId) {
       const ws = getAgentWorkspace(workspaceId)
       if (ws) {
@@ -655,9 +962,9 @@ export async function runAgent(
       prompt: finalPrompt,
       options: {
         pathToClaudeCodeExecutable: cliPath,
-        executable: bunPath as 'bun',
-        executableArgs: [`--env-file=${nullDevice}`],
-        model: modelId || 'claude-sonnet-4-5-20250929',
+        executable: agentExec.type,
+        executableArgs,
+        model: modelId || defaultModel,
         maxTurns: 30,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
@@ -690,8 +997,60 @@ export async function runAgent(
 
     console.log(`[Agent 服务] SDK query 已创建，开始遍历消息流...`)
 
+    // 智能超时检测：根据当前状态动态调整超时时间
+    lastActivityTime = Date.now()
+    receivedFirstMessage = false
+    activeToolCount = 0
+
+    const resetInactivityTimer = (): void => {
+      lastActivityTime = Date.now()
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer)
+      }
+
+      // 根据当前状态选择超时时间
+      let timeoutMs: number
+      let timeoutReason: string
+
+      if (!receivedFirstMessage) {
+        // 阶段 1：等待初始响应（检测网络连接问题）
+        timeoutMs = RETRY_CONFIG.initialResponseTimeoutMs
+        timeoutReason = '等待初始响应'
+      } else if (activeToolCount > 0) {
+        // 阶段 2：工具正在执行（允许长时间操作）
+        timeoutMs = RETRY_CONFIG.toolExecutionTimeoutMs
+        timeoutReason = `工具执行中 (${activeToolCount} 个活跃工具)`
+      } else {
+        // 阶段 3：流式输出中（检测连接中断）
+        timeoutMs = RETRY_CONFIG.streamingTimeoutMs
+        timeoutReason = '流式输出中'
+      }
+
+      inactivityTimer = setTimeout(() => {
+        const elapsed = Date.now() - lastActivityTime
+        if (elapsed >= timeoutMs && !controller.signal.aborted) {
+          console.warn(
+            `[Agent 服务] SDK 无响应超时 (${elapsed}ms, 限制: ${timeoutMs}ms, 状态: ${timeoutReason})，主动中止`,
+          )
+          isTimeoutAborted = true
+          controller.abort()
+        }
+      }, timeoutMs)
+    }
+
+    resetInactivityTimer()
+
     // 8. 遍历 SDK 消息流
     for await (const sdkMessage of queryIterator) {
+      // 标记已收到第一条消息
+      if (!receivedFirstMessage) {
+        receivedFirstMessage = true
+        console.log('[Agent 服务] 已收到初始响应')
+      }
+
+      // 重置超时计时器（收到新消息）
+      resetInactivityTimer()
+
       if (controller.signal.aborted) break
 
       const msg = sdkMessage as SDKMessage
@@ -785,10 +1144,28 @@ export async function runAgent(
         }
         accumulatedEvents.push(event)
 
+        // 追踪工具执行状态（用于智能超时检测）
+        if (event.type === 'tool_start') {
+          activeToolCount++
+          console.log(`[Agent 服务] 工具开始执行: ${event.toolName} (活跃工具数: ${activeToolCount})`)
+          // 工具开始执行 - 切换到工具执行超时模式
+          resetInactivityTimer()
+        } else if (event.type === 'tool_result') {
+          activeToolCount = Math.max(0, activeToolCount - 1)
+          console.log(`[Agent 服务] 工具执行完成: ${event.toolName ?? '未知'} (剩余活跃工具: ${activeToolCount})`)
+          // 工具执行完成 - 如果没有其他工具了，切换回流式输出超时模式
+          resetInactivityTimer()
+        }
+
         // 推送给渲染进程
         const streamEvent: AgentStreamEvent = { sessionId, event }
         webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, streamEvent)
       }
+    }
+
+    // 清理超时计时器
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer)
     }
 
     // 9. 持久化 assistant 消息（包含完整文本和工具事件）
@@ -821,9 +1198,15 @@ export async function runAgent(
     }
 
     // 异步生成标题（不阻塞 stream complete 响应）
-    autoGenerateTitle(sessionId, userMessage, channelId, modelId || 'claude-sonnet-4-5-20250929', webContents)
+    autoGenerateTitle(sessionId, userMessage, channelId, modelId || defaultModel, webContents)
   } catch (error) {
-    if (controller.signal.aborted) {
+    // 清理超时计时器
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer)
+    }
+
+    // 用户主动中止
+    if (controller.signal.aborted && !isTimeoutAborted) {
       console.log(`[Agent 服务] 会话 ${sessionId} 已被用户中止`)
 
       // 保存已累积的部分内容
@@ -843,14 +1226,76 @@ export async function runAgent(
       return
     }
 
+    // 超时情况：抛出可重试的错误
+    if (isTimeoutAborted) {
+      console.warn(`[Agent 服务] SDK 响应超时，准备重试`)
+      throw new Error('ETIMEDOUT: SDK 无响应超时')
+    }
+
     const errorMessage = error instanceof Error ? error.message : '未知错误'
+    const errorStack = error instanceof Error ? error.stack : undefined
     console.error(`[Agent 服务] 执行失败:`, error)
 
-    // 构建包含 stderr 诊断信息的错误消息
+    // 诊断信息：检查累积状态
+    console.log(`[Agent 服务][诊断] 累积状态 - 文本长度: ${accumulatedText.length}, 事件数: ${accumulatedEvents.length}`)
+
+    // 保存已累积的部分内容（避免数据丢失）
+    if (accumulatedText || accumulatedEvents.length > 0) {
+      try {
+        const partialMsg: AgentMessage = {
+          id: randomUUID(),
+          role: 'assistant',
+          content: accumulatedText,
+          createdAt: Date.now(),
+          model: resolvedModel,
+          events: accumulatedEvents,
+        }
+        appendAgentMessage(sessionId, partialMsg)
+        console.log(`[Agent 服务] ✓ 已保存部分执行结果 (${accumulatedText.length} 字符, ${accumulatedEvents.length} 事件)`)
+      } catch (saveError) {
+        console.error('[Agent 服务] ✗ 保存部分内容失败:', saveError)
+      }
+    } else {
+      console.log('[Agent 服务] 无部分内容可保存（累积为空）')
+    }
+
+    // 构建包含详细诊断信息的错误消息
     const stderrOutput = stderrChunks.join('').trim()
-    const detailedError = stderrOutput
-      ? `${errorMessage}\n\nstderr: ${stderrOutput.slice(0, 500)}`
-      : errorMessage
+    const diagnosticParts: string[] = []
+
+    // 主错误消息
+    diagnosticParts.push(`错误: ${errorMessage}`)
+
+    // stderr 输出（如果有）
+    if (stderrOutput) {
+      // 提取最后 1000 字符，通常包含最相关的错误信息
+      const relevantStderr = stderrOutput.slice(-1000)
+      diagnosticParts.push(`\nStderr 输出:\n${relevantStderr}`)
+    }
+
+    // 运行环境信息（帮助诊断）
+    diagnosticParts.push('\n运行环境:')
+    if (agentExec) {
+      diagnosticParts.push(`- 运行时: ${agentExec.type} (${agentExec.path})`)
+    }
+    diagnosticParts.push(`- 模型: ${modelId || defaultModel}`)
+    diagnosticParts.push(`- 平台: ${process.platform} ${process.arch}`)
+    if (workspaceSlug && workspace) {
+      diagnosticParts.push(`- 工作区: ${workspace.name} (${agentCwd || '未知'})`)
+    }
+    if (existingSdkSessionId) {
+      diagnosticParts.push(`- Resume: ${existingSdkSessionId}`)
+    }
+
+    // 堆栈跟踪（仅在非生产环境或开发模式下）
+    if (errorStack && (!app.isPackaged || process.env.NODE_ENV === 'development')) {
+      diagnosticParts.push(`\n堆栈跟踪:\n${errorStack.slice(0, 500)}`)
+    }
+
+    const detailedError = diagnosticParts.join('\n')
+
+    // 完整错误信息输出到控制台，便于调试
+    console.error('[Agent 服务] 详细错误信息:', detailedError)
 
     // 如果是 resume 失败，清除 sdkSessionId 以便下次重新开始
     if (existingSdkSessionId) {
@@ -862,10 +1307,14 @@ export async function runAgent(
       }
     }
 
+    // 发送错误给 UI（即使即将重试，也让用户先看到错误）
     webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
       sessionId,
       error: detailedError,
     })
+
+    // 抛出异常供外层重试逻辑捕获
+    throw error
   } finally {
     activeControllers.delete(sessionId)
   }
@@ -888,6 +1337,7 @@ const DEFAULT_SESSION_TITLE = '新 Agent 会话'
  */
 export async function generateAgentTitle(input: AgentGenerateTitleInput): Promise<string | null> {
   const { userMessage, channelId, modelId } = input
+  console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
   try {
     const channels = listChannels()
@@ -928,13 +1378,18 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
       prompt: TITLE_PROMPT + userMessage,
     })
 
-    const title = await fetchTitle(request, adapter)
-    if (!title) return null
+    const proxyUrl = await getEffectiveProxyUrl()
+    const fetchFn = getFetchFn(proxyUrl)
+    const title = await fetchTitle(request, adapter, fetchFn)
+    if (!title) {
+      console.warn('[Agent 标题生成] API 返回空标题')
+      return null
+    }
 
     const cleaned = title.trim().replace(/^["'""''「《]+|["'""''」》]+$/g, '').trim()
     const result = cleaned.slice(0, MAX_TITLE_LENGTH) || null
 
-    console.log(`[Agent 标题生成] 生成标题: "${result}"`)
+    console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
     return result
   } catch (error) {
     console.warn('[Agent 标题生成] 生成失败:', error)
@@ -1002,14 +1457,33 @@ export function stopAllAgents(): void {
 export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedFile[] {
   const sessionDir = getAgentSessionWorkspacePath(input.workspaceSlug, input.sessionId)
   const results: AgentSavedFile[] = []
+  const usedPaths = new Set<string>()
 
   for (const file of input.files) {
-    const targetPath = join(sessionDir, file.filename)
+    let targetPath = join(sessionDir, file.filename)
+
+    // 防止同名文件覆盖：若路径已存在或本批次已使用，则追加序号
+    if (usedPaths.has(targetPath) || existsSync(targetPath)) {
+      const dotIdx = file.filename.lastIndexOf('.')
+      const baseName = dotIdx > 0 ? file.filename.slice(0, dotIdx) : file.filename
+      const ext = dotIdx > 0 ? file.filename.slice(dotIdx) : ''
+      let counter = 1
+      let candidate = join(sessionDir, `${baseName}-${counter}${ext}`)
+      while (usedPaths.has(candidate) || existsSync(candidate)) {
+        counter++
+        candidate = join(sessionDir, `${baseName}-${counter}${ext}`)
+      }
+      targetPath = candidate
+    }
+    usedPaths.add(targetPath)
+
     // 确保父目录存在（支持 filename 包含子路径，如 "subdir/file.txt"）
     mkdirSync(dirname(targetPath), { recursive: true })
     const buffer = Buffer.from(file.data, 'base64')
     writeFileSync(targetPath, buffer)
-    results.push({ filename: file.filename, targetPath })
+
+    const actualFilename = targetPath.slice(sessionDir.length + 1)
+    results.push({ filename: actualFilename, targetPath })
     console.log(`[Agent 服务] 文件已保存: ${targetPath} (${buffer.length} bytes)`)
   }
 
@@ -1017,11 +1491,11 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
 }
 
 /**
- * 复制文件夹到 Agent session 工作目录
+ * 复制文件夹到 Agent session 工作目录（异步版本）
  *
- * 使用 fs.cpSync 递归复制整个文件夹，返回所有复制的文件列表。
+ * 使用异步 fs.cp 递归复制整个文件夹，返回所有复制的文件列表。
  */
-export function copyFolderToSession(input: AgentCopyFolderInput): AgentSavedFile[] {
+export async function copyFolderToSession(input: AgentCopyFolderInput): Promise<AgentSavedFile[]> {
   const { sourcePath, workspaceSlug, sessionId } = input
   const sessionDir = getAgentSessionWorkspacePath(workspaceSlug, sessionId)
 
@@ -1029,25 +1503,25 @@ export function copyFolderToSession(input: AgentCopyFolderInput): AgentSavedFile
   const folderName = sourcePath.split('/').filter(Boolean).pop() || 'folder'
   const targetDir = join(sessionDir, folderName)
 
-  // 递归复制
-  cpSync(sourcePath, targetDir, { recursive: true })
+  // 异步递归复制
+  await cp(sourcePath, targetDir, { recursive: true })
   console.log(`[Agent 服务] 文件夹已复制: ${sourcePath} → ${targetDir}`)
 
-  // 遍历复制后的目录，收集所有文件路径
+  // 异步遍历复制后的目录，收集所有文件路径
   const results: AgentSavedFile[] = []
-  const collectFiles = (dir: string, relativeTo: string): void => {
-    const items = readdirSync(dir, { withFileTypes: true })
+  const collectFiles = async (dir: string, relativeTo: string): Promise<void> => {
+    const items = await readdir(dir, { withFileTypes: true })
     for (const item of items) {
       const fullPath = join(dir, item.name)
       if (item.isDirectory()) {
-        collectFiles(fullPath, relativeTo)
+        await collectFiles(fullPath, relativeTo)
       } else {
         const relPath = fullPath.slice(relativeTo.length + 1)
         results.push({ filename: relPath, targetPath: fullPath })
       }
     }
   }
-  collectFiles(targetDir, sessionDir)
+  await collectFiles(targetDir, sessionDir)
 
   console.log(`[Agent 服务] 文件夹复制完成，共 ${results.length} 个文件`)
   return results

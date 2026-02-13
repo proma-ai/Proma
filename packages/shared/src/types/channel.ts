@@ -24,6 +24,9 @@ export type ProviderType =
 /** Proma 官方渠道固定 ID */
 export const PROMA_OFFICIAL_CHANNEL_ID = 'proma-official'
 
+/** Proma 官方渠道 Agent 模式默认模型 */
+export const PROMA_OFFICIAL_DEFAULT_AGENT_MODEL = 'claude-opus-4-6'
+
 /**
  * 各供应商的默认 Base URL
  */

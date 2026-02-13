@@ -16,6 +16,7 @@ import { isCloudMode } from '@/lib/mode'
 import { ModeSwitcher } from './ModeSwitcher'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
+import { settingsTabAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
@@ -140,6 +141,7 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
 
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const [activeItem, setActiveItem] = React.useState<SidebarItemId>('all-chats')
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
@@ -589,7 +591,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       {mode === 'agent' && capabilities && (
         <div className="px-3 pb-1">
           <button
-            onClick={() => handleItemClick('settings')}
+            onClick={() => { setSettingsTab('agent'); handleItemClick('settings') }}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
           >
             <div className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -634,7 +636,14 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         open={pendingDeleteId !== null}
         onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleConfirmDelete()
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除对话</AlertDialogTitle>
             <AlertDialogDescription>

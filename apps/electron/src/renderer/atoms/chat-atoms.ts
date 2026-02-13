@@ -35,6 +35,7 @@ export interface ConversationStreamState {
   streaming: boolean
   content: string
   reasoning: string
+  model?: string
 }
 
 /**
@@ -91,6 +92,15 @@ export const streamingReasoningAtom = atom<string>(
     const currentId = get(currentConversationIdAtom)
     if (!currentId) return ''
     return get(streamingStatesAtom).get(currentId)?.reasoning ?? ''
+  },
+)
+
+/** 当前对话流式消息绑定的模型（发送时快照） */
+export const streamingModelAtom = atom<string | null>(
+  (get) => {
+    const currentId = get(currentConversationIdAtom)
+    if (!currentId) return null
+    return get(streamingStatesAtom).get(currentId)?.model ?? null
   },
 )
 
@@ -154,3 +164,31 @@ export const currentChatErrorAtom = atom<string | null>((get) => {
   if (!currentId) return null
   return get(chatStreamErrorsAtom).get(currentId) ?? null
 })
+
+/**
+ * 对话输入框草稿 Map — 以 conversationId 为 key
+ * 用于在切换对话时保留输入框内容
+ */
+export const conversationDraftsAtom = atom<Map<string, string>>(new Map())
+
+/** 当前对话的草稿内容（派生读写原子） */
+export const currentConversationDraftAtom = atom<string>(
+  (get) => {
+    const currentId = get(currentConversationIdAtom)
+    if (!currentId) return ''
+    return get(conversationDraftsAtom).get(currentId) ?? ''
+  },
+  (get, set, newDraft: string) => {
+    const currentId = get(currentConversationIdAtom)
+    if (!currentId) return
+    set(conversationDraftsAtom, (prev) => {
+      const map = new Map(prev)
+      if (newDraft.trim() === '') {
+        map.delete(currentId)
+      } else {
+        map.set(currentId, newDraft)
+      }
+      return map
+    })
+  }
+)

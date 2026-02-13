@@ -8,9 +8,7 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true
+    "noEmit": true
   },
   "include": ["src/**/*"]
 }

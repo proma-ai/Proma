@@ -52,7 +52,11 @@ interface AnthropicDeltaEvent {
 
 /** Anthropic 标题响应 */
 interface AnthropicTitleResponse {
-  content?: Array<{ type: string; text?: string }>
+  content?: Array<{
+    type: string
+    text?: string
+    thinking?: string
+  }>
 }
 
 // ===== 消息转换 =====
@@ -205,12 +209,34 @@ export class AnthropicAdapter implements ProviderAdapter {
         model: input.modelId,
         max_tokens: 50,
         messages: [{ role: 'user', content: input.prompt }],
+        // 禁用 extended thinking（MiniMax 等供应商也会遵循此设置）
+        thinking: { type: 'disabled' },
       }),
     }
   }
 
   parseTitleResponse(responseBody: unknown): string | null {
     const data = responseBody as AnthropicTitleResponse
-    return data.content?.[0]?.text ?? null
+    if (!data.content || data.content.length === 0) return null
+
+    // 优先查找 type === "text" 的块
+    const textBlock = data.content.find((block) => block.type === 'text')
+    if (textBlock?.text) return textBlock.text
+
+    // 如果没有 text 块，尝试从第一个 thinking 块中提取（MiniMax 兼容）
+    const thinkingBlock = data.content.find((block) => block.type === 'thinking')
+    if (thinkingBlock?.thinking) {
+      // thinking 内容可能很长，尝试提取最后一行或关键部分
+      const lines = thinkingBlock.thinking.trim().split('\n')
+      const lastLine = lines[lines.length - 1]?.trim()
+      // 如果最后一行以 "- " 开头，提取它（常见的标题格式）
+      if (lastLine?.startsWith('- ')) {
+        return lastLine.slice(2).trim()
+      }
+      // 否则返回最后一行
+      return lastLine || null
+    }
+
+    return null
   }
 }

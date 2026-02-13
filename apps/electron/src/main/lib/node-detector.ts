@@ -6,20 +6,7 @@
 
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
-
-/**
- * Node.js 运行时状态
- */
-export interface NodeRuntimeStatus {
-  /** 是否可用 */
-  available: boolean
-  /** Node.js 版本号 */
-  version: string | null
-  /** Node.js 可执行路径 */
-  path: string | null
-  /** 错误信息（如果不可用）*/
-  error: string | null
-}
+import type { NodeRuntimeStatus } from '@proma/shared'
 
 /**
  * 从系统 PATH 查找 Node.js

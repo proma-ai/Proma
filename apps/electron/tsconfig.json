@@ -1,7 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "composite": true,
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
@@ -9,11 +8,5 @@
       "@/*": ["./src/renderer/*"]
     }
   },
-  "include": ["src/**/*"],
-  "references": [
-    { "path": "../../packages/cloud" },
-    { "path": "../../packages/core" },
-    { "path": "../../packages/shared" },
-    { "path": "../../packages/ui" }
-  ]
+  "include": ["src/**/*"]
 }

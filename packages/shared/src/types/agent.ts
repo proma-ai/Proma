@@ -52,6 +52,8 @@ export type AgentEvent =
   // 控制流
   | { type: 'complete'; stopReason?: string; usage?: AgentEventUsage }
   | { type: 'error'; message: string }
+  // 重试机制
+  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }
   // Usage 更新
   | { type: 'usage_update'; usage: { inputTokens: number; contextWindow?: number } }
   // 上下文压缩

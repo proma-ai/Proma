@@ -13,7 +13,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -40,10 +40,12 @@ import {
   agentContextStatusAtom,
   agentStreamErrorsAtom,
   currentAgentErrorAtom,
+  currentAgentSessionDraftAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import type { AgentSendInput, AgentStreamEvent, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
+import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 
 /** 将 File 对象转为 base64 字符串 */
 function fileToBase64(file: File): Promise<string> {
@@ -56,50 +58,6 @@ function fileToBase64(file: File): Promise<string> {
     }
     reader.onerror = reject
     reader.readAsDataURL(file)
-  })
-}
-
-/** 递归读取 FileSystemDirectoryEntry 中所有文件 */
-function readDirectoryRecursive(
-  dirEntry: FileSystemDirectoryEntry,
-  basePath: string,
-): Promise<Array<{ relativePath: string; file: File }>> {
-  return new Promise((resolve, reject) => {
-    const results: Array<{ relativePath: string; file: File }> = []
-    const reader = dirEntry.createReader()
-
-    const readBatch = (): void => {
-      reader.readEntries(
-        async (entries) => {
-          if (entries.length === 0) {
-            resolve(results)
-            return
-          }
-
-          for (const entry of entries) {
-            if (entry.isFile) {
-              const fileEntry = entry as FileSystemFileEntry
-              const file = await new Promise<File>((res, rej) => {
-                fileEntry.file(res, rej)
-              })
-              results.push({ relativePath: `${basePath}/${entry.name}`, file })
-            } else if (entry.isDirectory) {
-              const subResults = await readDirectoryRecursive(
-                entry as FileSystemDirectoryEntry,
-                `${basePath}/${entry.name}`,
-              )
-              results.push(...subResults)
-            }
-          }
-
-          // readEntries 可能分批返回，需要持续读取
-          readBatch()
-        },
-        reject,
-      )
-    }
-
-    readBatch()
   })
 }
 
@@ -120,17 +78,26 @@ export function AgentView(): React.ReactElement {
   const setAgentStreamErrors = useSetAtom(agentStreamErrorsAtom)
   const agentError = useAtomValue(currentAgentErrorAtom)
 
-  const [inputContent, setInputContent] = React.useState('')
+  const [inputContent, setInputContent] = useAtom(currentAgentSessionDraftAtom)
   const [fileBrowserOpen, setFileBrowserOpen] = React.useState(false)
   const [sessionPath, setSessionPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [pendingFolderRefs, setPendingFolderRefs] = React.useState<AgentSavedFile[]>([])
+  const [isUploadingFolder, setIsUploadingFolder] = React.useState(false)
+  const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
+  const [errorCopied, setErrorCopied] = React.useState(false)
 
   // 当前会话 ID ref（避免闭包捕获旧值）
   const currentSessionIdRef = React.useRef(currentSessionId)
   React.useEffect(() => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
+
+  // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
+  const pendingFilesRef = React.useRef(pendingFiles)
+  React.useEffect(() => {
+    pendingFilesRef.current = pendingFiles
+  }, [pendingFiles])
 
   // 渠道已选但模型未选时，自动选择第一个可用模型
   React.useEffect(() => {
@@ -142,7 +109,11 @@ export function AgentView(): React.ReactElement {
 
       // Agent 优先使用 agentModels，回退到 models
       const modelList = channel.agentModels ?? channel.models
-      const firstModel = modelList.find((m) => m.enabled)
+      // Proma 官方渠道优先选择默认 Agent 模型
+      const preferredModel = channel.provider === 'proma'
+        ? modelList.find((m) => m.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL && m.enabled)
+        : undefined
+      const firstModel = preferredModel ?? modelList.find((m) => m.enabled)
       if (!firstModel) return
 
       setAgentModelId(firstModel.id)
@@ -187,7 +158,7 @@ export function AgentView(): React.ReactElement {
       updater: (prev: AgentStreamState) => AgentStreamState,
     ): void => {
       setStreamingStates((prev) => {
-        const current = prev.get(sessionId) ?? { running: true, content: '', toolActivities: [] }
+        const current = prev.get(sessionId) ?? { running: true, content: '', toolActivities: [], model: undefined }
         const next = updater(current)
         const map = new Map(prev)
         map.set(sessionId, next)
@@ -254,14 +225,20 @@ export function AgentView(): React.ReactElement {
         const finalize = (): void => removeState(data.sessionId)
 
         if (data.sessionId === currentSessionIdRef.current) {
+          console.log('[AgentView][诊断] 错误发生在当前会话，重新加载消息...')
           window.electronAPI
             .getAgentSessionMessages(data.sessionId)
             .then((messages) => {
+              console.log(`[AgentView][诊断] 已加载 ${messages.length} 条消息`)
               setCurrentMessages(messages)
               finalize()
             })
-            .catch(() => finalize())
+            .catch((error) => {
+              console.error('[AgentView][诊断] 加载消息失败:', error)
+              finalize()
+            })
         } else {
+          console.log('[AgentView][诊断] 错误发生在后台会话，不重新加载')
           finalize()
         }
       }
@@ -298,7 +275,12 @@ export function AgentView(): React.ReactElement {
       // 初始化流式状态
       setStreamingStates((prev) => {
         const map = new Map(prev)
-        map.set(currentSessionId, { running: true, content: '', toolActivities: [] })
+        map.set(currentSessionId, {
+          running: true,
+          content: '',
+          toolActivities: [],
+          model: agentModelId || undefined,
+        })
         return map
       })
 
@@ -334,16 +316,34 @@ export function AgentView(): React.ReactElement {
 
   // ===== 附件处理 =====
 
+  /** 为文件生成唯一文件名（避免粘贴多张图片时文件名重复导致覆盖） */
+  const makeUniqueFilename = React.useCallback((originalName: string, existingNames: string[]): string => {
+    if (!existingNames.includes(originalName)) return originalName
+    const dotIdx = originalName.lastIndexOf('.')
+    const baseName = dotIdx > 0 ? originalName.slice(0, dotIdx) : originalName
+    const ext = dotIdx > 0 ? originalName.slice(dotIdx) : ''
+    let counter = 1
+    while (existingNames.includes(`${baseName}-${counter}${ext}`)) {
+      counter++
+    }
+    return `${baseName}-${counter}${ext}`
+  }, [])
+
   /** 将 File 对象列表添加为待发送附件 */
   const addFilesAsAttachments = React.useCallback(async (files: File[]): Promise<void> => {
+    // 收集已有的 pending 文件名，用于去重
+    const usedNames: string[] = pendingFilesRef.current.map((f) => f.filename)
+
     for (const file of files) {
       try {
         const base64 = await fileToBase64(file)
         const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined
+        const uniqueFilename = makeUniqueFilename(file.name, usedNames)
+        usedNames.push(uniqueFilename)
 
         const pending: AgentPendingFile = {
           id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          filename: file.name,
+          filename: uniqueFilename,
           mediaType: file.type || 'application/octet-stream',
           size: file.size,
           previewUrl,
@@ -359,7 +359,7 @@ export function AgentView(): React.ReactElement {
         console.error('[AgentView] 添加附件失败:', error)
       }
     }
-  }, [setPendingFiles])
+  }, [makeUniqueFilename, setPendingFiles])
 
   /** 打开文件选择对话框 */
   const handleOpenFileDialog = React.useCallback(async (): Promise<void> => {
@@ -394,7 +394,7 @@ export function AgentView(): React.ReactElement {
 
   /** 打开文件夹选择对话框 */
   const handleOpenFolderDialog = React.useCallback(async (): Promise<void> => {
-    if (!currentSessionId || !currentWorkspaceId) return
+    if (!currentSessionId || !currentWorkspaceId || isUploadingFolder) return
 
     const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
     if (!workspace) return
@@ -403,6 +403,9 @@ export function AgentView(): React.ReactElement {
       const result = await window.electronAPI.openFolderDialog()
       if (!result) return
 
+      setIsUploadingFolder(true)
+      console.log(`[AgentView] 开始复制文件夹: ${result.path}`)
+
       const saved = await window.electronAPI.copyFolderToSession({
         sourcePath: result.path,
         workspaceSlug: workspace.slug,
@@ -410,10 +413,19 @@ export function AgentView(): React.ReactElement {
       })
 
       setPendingFolderRefs((prev) => [...prev, ...saved])
+      console.log(`[AgentView] 文件夹复制成功，共 ${saved.length} 个文件`)
     } catch (error) {
       console.error('[AgentView] 文件夹选择失败:', error)
+      // 显示错误提示
+      setAgentStreamErrors((prev) => {
+        const map = new Map(prev)
+        map.set(currentSessionId, `文件夹上传失败: ${error instanceof Error ? error.message : '未知错误'}`)
+        return map
+      })
+    } finally {
+      setIsUploadingFolder(false)
     }
-  }, [currentSessionId, currentWorkspaceId, workspaces])
+  }, [currentSessionId, currentWorkspaceId, workspaces, isUploadingFolder, setAgentStreamErrors])
 
   /** 移除待发送文件 */
   const handleRemoveFile = React.useCallback((id: string): void => {
@@ -452,55 +464,33 @@ export function AgentView(): React.ReactElement {
 
     const items = Array.from(e.dataTransfer.items)
     const regularFiles: File[] = []
-    const folderEntries: FileSystemDirectoryEntry[] = []
+    let hasFolders = false
 
     // 使用 webkitGetAsEntry 区分文件和文件夹
     for (const item of items) {
       if (item.kind !== 'file') continue
       const entry = item.webkitGetAsEntry?.()
       if (entry?.isDirectory) {
-        folderEntries.push(entry as FileSystemDirectoryEntry)
+        // 检测到文件夹，显示警告
+        hasFolders = true
+        console.warn('[AgentView] 拖拽文件夹已禁用，请使用"添加文件夹"按钮')
       } else {
         const file = item.getAsFile()
         if (file) regularFiles.push(file)
       }
     }
 
-    // 处理普通文件
+    // 如果检测到文件夹，显示提示
+    if (hasFolders) {
+      setDragFolderWarning(true)
+      setTimeout(() => setDragFolderWarning(false), 3000)
+    }
+
+    // 只处理普通文件
     if (regularFiles.length > 0) {
       addFilesAsAttachments(regularFiles)
     }
-
-    // 处理文件夹：递归读取 → base64 → saveFilesToAgentSession
-    if (folderEntries.length > 0 && currentSessionId && currentWorkspaceId) {
-      const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
-      if (!workspace) return
-
-      for (const dirEntry of folderEntries) {
-        try {
-          const files = await readDirectoryRecursive(dirEntry, dirEntry.name)
-          if (files.length === 0) continue
-
-          const filesToSave = await Promise.all(
-            files.map(async ({ relativePath, file }) => ({
-              filename: relativePath,
-              data: await fileToBase64(file),
-            }))
-          )
-
-          const saved = await window.electronAPI.saveFilesToAgentSession({
-            workspaceSlug: workspace.slug,
-            sessionId: currentSessionId,
-            files: filesToSave,
-          })
-
-          setPendingFolderRefs((prev) => [...prev, ...saved])
-        } catch (error) {
-          console.error('[AgentView] 拖拽文件夹处理失败:', error)
-        }
-      }
-    }
-  }, [addFilesAsAttachments, currentSessionId, currentWorkspaceId, workspaces])
+  }, [addFilesAsAttachments])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
@@ -577,7 +567,12 @@ export function AgentView(): React.ReactElement {
     // 初始化流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
-      map.set(currentSessionId, { running: true, content: '', toolActivities: [] })
+      map.set(currentSessionId, {
+        running: true,
+        content: '',
+        toolActivities: [],
+        model: agentModelId || undefined,
+      })
       return map
     })
 
@@ -633,7 +628,12 @@ export function AgentView(): React.ReactElement {
     // 初始化流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
-      const current = prev.get(currentSessionId) ?? { running: true, content: '', toolActivities: [] }
+      const current = prev.get(currentSessionId) ?? {
+        running: true,
+        content: '',
+        toolActivities: [],
+        model: agentModelId || undefined,
+      }
       map.set(currentSessionId, { ...current, running: true })
       return map
     })
@@ -646,6 +646,19 @@ export function AgentView(): React.ReactElement {
       workspaceId: currentWorkspaceId || undefined,
     }).catch(console.error)
   }, [currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates])
+
+  /** 复制错误信息到剪贴板 */
+  const handleCopyError = React.useCallback(async (): Promise<void> => {
+    if (!agentError) return
+
+    try {
+      await navigator.clipboard.writeText(agentError)
+      setErrorCopied(true)
+      setTimeout(() => setErrorCopied(false), 2000)
+    } catch (error) {
+      console.error('[AgentView] 复制错误信息失败:', error)
+    }
+  }, [agentError])
 
   const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || pendingFolderRefs.length > 0) && agentChannelId !== null && !streaming
 
@@ -671,30 +684,66 @@ export function AgentView(): React.ReactElement {
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0 max-w-[min(72rem,100%)] mx-auto">
         {/* Agent Header */}
-        <AgentHeader
-          onToggleFileBrowser={() => setFileBrowserOpen((prev) => !prev)}
-          fileBrowserOpen={fileBrowserOpen}
-        />
+        <AgentHeader />
 
         {/* 消息区域 */}
         <AgentMessages />
 
         {/* 错误提示 */}
         {agentError && (
-          <div className="mx-4 mb-2 px-4 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm flex items-center gap-2">
-            <AlertCircle className="size-4 shrink-0" />
-            <span className="flex-1 break-all">{agentError}</span>
+          <div className="mx-4 mb-2 rounded-lg bg-destructive/10 border border-destructive/20">
+            <div className="px-4 py-2.5 flex items-start gap-2">
+              <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-destructive mb-1">Agent 执行错误</div>
+                <pre className="text-xs text-destructive/90 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[300px] overflow-y-auto">
+                  {agentError}
+                </pre>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-destructive"
+                      onClick={handleCopyError}
+                    >
+                      {errorCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{errorCopied ? '已复制' : '复制错误信息'}</p>
+                  </TooltipContent>
+                </Tooltip>
+                <button
+                  type="button"
+                  className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-destructive"
+                  onClick={() => {
+                    if (!currentSessionId) return
+                    setAgentStreamErrors((prev) => {
+                      const map = new Map(prev)
+                      map.delete(currentSessionId)
+                      return map
+                    })
+                    setErrorCopied(false)
+                  }}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 拖拽文件夹警告 */}
+        {dragFolderWarning && (
+          <div className="mx-4 mb-2 px-4 py-2.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-sm flex items-center gap-2">
+            <FolderPlus className="size-4 shrink-0" />
+            <span className="flex-1">不支持拖拽文件夹，请使用"添加文件夹"按钮</span>
             <button
               type="button"
-              className="shrink-0 p-0.5 rounded hover:bg-destructive/10 transition-colors"
-              onClick={() => {
-                if (!currentSessionId) return
-                setAgentStreamErrors((prev) => {
-                  const map = new Map(prev)
-                  map.delete(currentSessionId)
-                  return map
-                })
-              }}
+              className="shrink-0 p-0.5 rounded hover:bg-amber-500/10 transition-colors"
+              onClick={() => setDragFolderWarning(false)}
             >
               <X className="size-3.5" />
             </button>
@@ -770,6 +819,7 @@ export function AgentView(): React.ReactElement {
                   : '请先在设置中选择 Agent 供应商'
               }
               disabled={!agentChannelId}
+              autoFocusTrigger={currentSessionId}
             />
 
             {/* Footer 工具栏 */}
@@ -799,14 +849,15 @@ export function AgentView(): React.ReactElement {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
+                          className="size-[30px] rounded-full text-foreground/60 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                           onClick={handleOpenFolderDialog}
+                          disabled={isUploadingFolder}
                         >
                           <FolderPlus className="size-5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="top">
-                        <p>添加文件夹</p>
+                        <p>{isUploadingFolder ? '正在上传文件夹...' : '添加文件夹'}</p>
                       </TooltipContent>
                     </Tooltip>
                     <ModelSelector
@@ -860,13 +911,50 @@ export function AgentView(): React.ReactElement {
         </div>
       </div>
 
-      {/* 文件浏览器侧面板 */}
-      {fileBrowserOpen && sessionPath && (
-        <div className="w-[300px] border-l flex-shrink-0">
-          <FileBrowser
-            rootPath={sessionPath}
-            onClose={() => setFileBrowserOpen(false)}
-          />
+      {/* 文件浏览器侧栏 — 始终渲染同一个切换按钮 */}
+      {sessionPath && (
+        <div
+          className={cn(
+            'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden',
+            fileBrowserOpen ? 'w-[300px] border-l' : 'w-10'
+          )}
+        >
+          {/* 切换按钮 — 始终固定在右上角，同一个 DOM 元素 */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-2.5 top-2.5 z-10 h-7 w-7"
+                onClick={() => setFileBrowserOpen((prev) => !prev)}
+              >
+                <FolderOpen
+                  className={cn(
+                    'size-3.5 absolute transition-all duration-200',
+                    fileBrowserOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100'
+                  )}
+                />
+                <X
+                  className={cn(
+                    'size-3.5 absolute transition-all duration-200',
+                    fileBrowserOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75'
+                  )}
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              <p>{fileBrowserOpen ? '关闭文件浏览器' : '打开文件浏览器'}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          {/* FileBrowser 内容 — 收起时隐藏 */}
+          <div className={cn(
+            'w-[300px] h-full transition-opacity duration-300',
+            fileBrowserOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          )}>
+            <FileBrowser rootPath={sessionPath} />
+          </div>
         </div>
       )}
     </div>
