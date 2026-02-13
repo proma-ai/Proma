@@ -65,6 +65,11 @@ mac:
         - x64
   # macOS 额外资源
   extraResources:
+    # Claude Agent SDK（必须包含，否则 macOS 打包后找不到）
+    - from: node_modules/@anthropic-ai/claude-agent-sdk
+      to: app/node_modules/@anthropic-ai/claude-agent-sdk
+      filter:
+        - "**/*"
     # Bun 二进制（download-bun.ts 使用 darwin-${arch} 命名）
     - from: "vendor/bun/darwin-${arch}"
       to: "vendor/bun"
@@ -101,6 +106,11 @@ win:
         - x64
   # Windows 额外资源
   extraResources:
+    # Claude Agent SDK（必须包含，否则 Windows 打包后找不到）
+    - from: node_modules/@anthropic-ai/claude-agent-sdk
+      to: app/node_modules/@anthropic-ai/claude-agent-sdk
+      filter:
+        - "**/*"
     # Bun 二进制
     - from: "vendor/bun/win32-${arch}"
       to: "vendor/bun"
