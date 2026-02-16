@@ -211,6 +211,15 @@ bun run generate:icons    # 生成应用图标
 2. ✅ 确认 SDK 在 `files` 配置中被正确包含
 3. ✅ 本地测试打包后的应用 Agent 功能（使用 `CSC_IDENTITY_AUTO_DISCOVERY=false bunx electron-builder --mac --dir` 快速测试）
 
+**其他依赖的打包策略：**
+- **原则**：只有 `electron` 和 `@anthropic-ai/claude-agent-sdk` 需要标记为 `--external`
+- `electron`：由 Electron 运行时提供，必须 external
+- `@anthropic-ai/claude-agent-sdk`：有特殊打包要求（symlink、vendor 等），必须 external + 在 files 中包含
+- **所有其他依赖**（如 `electron-updater`、`undici`、`chokidar` 等）：应该让 esbuild 打包进 `main.cjs`
+  - ✅ 优点：避免遗漏子依赖，简化 electron-builder 配置
+  - ❌ 如果标记为 external：必须在 `electron-builder.yml` 的 `files` 中手动列出所有子依赖
+- **常见错误**：将普通 npm 包标记为 external 但忘记在 `files` 中包含，导致打包后找不到模块（如 `Cannot find module 'universalify'`）
+
 ## 代码风格
 
 - 永远不要使用 `any` 类型 — 创建合适的 interface
