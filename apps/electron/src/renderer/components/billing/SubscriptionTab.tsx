@@ -12,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, Zap, Crown, Rocket, Flame, Clock, Star } from 'lucide-react'
+import { Loader2, Zap, Crown, Rocket, Flame, Clock, Star, ChevronDown, ChevronUp } from 'lucide-react'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
@@ -79,6 +79,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
   const [selectedTier, setSelectedTier] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
+  const [showUsedUp, setShowUsedUp] = React.useState(false)
 
   /** 加载订阅档位和当前订阅 */
   const refreshSubscription = React.useCallback(async () => {
@@ -153,40 +154,106 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
   return (
     <div className="space-y-6">
       {/* 当前活跃订阅 */}
-      {subStatus && subStatus.has_active && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">当前订阅(支持随时叠加订阅)</h3>
-          {subStatus.subscriptions.map((sub) => {
-            const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
-            const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
-            const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
-            const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      {subStatus && subStatus.has_active && (() => {
+        // 将订阅分为活跃的和已用完的
+        const activeSubs: typeof subStatus.subscriptions = []
+        const usedUpSubs: typeof subStatus.subscriptions = []
 
-            return (
-              <Card key={sub.id}>
-                <CardContent className="py-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{sub.tier_name}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        <Clock size={10} className="mr-1" />
-                        {daysLeft} 天后到期
-                      </Badge>
+        subStatus.subscriptions.forEach((sub) => {
+          const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
+          const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
+          const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
+
+          if (percent >= 100) {
+            usedUpSubs.push(sub)
+          } else {
+            activeSubs.push(sub)
+          }
+        })
+
+        return (
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-muted-foreground">当前订阅(支持随时叠加订阅)</h3>
+
+            {/* 活跃订阅（有剩余额度） */}
+            {activeSubs.map((sub) => {
+              const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
+              const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
+              const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
+              const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+
+              return (
+                <Card key={sub.id}>
+                  <CardContent className="py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{sub.tier_name}</span>
+                        <Badge variant="secondary" className="text-xs">
+                          <Clock size={10} className="mr-1" />
+                          {daysLeft} 天后到期
+                        </Badge>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {formatCurrency(used)} / {formatCurrency(quota)}
+                      </span>
                     </div>
-                    <span className="text-sm text-muted-foreground">
-                      {formatCurrency(used)} / {formatCurrency(quota)}
-                    </span>
-                  </div>
-                  <Progress value={percent} className="h-2" />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    到期日: {formatDate(sub.expires_at)}
-                  </p>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      )}
+                    <Progress value={percent} className="h-2" />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      到期日: {formatDate(sub.expires_at)}
+                    </p>
+                  </CardContent>
+                </Card>
+              )
+            })}
+
+            {/* 已用完的订阅（可折叠） */}
+            {usedUpSubs.length > 0 && (
+              <div className="space-y-2">
+                <button
+                  onClick={() => setShowUsedUp(!showUsedUp)}
+                  className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
+                >
+                  {showUsedUp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  <span>已用完的订阅 ({usedUpSubs.length})</span>
+                </button>
+
+                {showUsedUp && usedUpSubs.map((sub) => {
+                  const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
+                  const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
+                  const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
+                  const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+
+                  return (
+                    <Card key={sub.id} className="opacity-60">
+                      <CardContent className="py-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{sub.tier_name}</span>
+                            <Badge variant="outline" className="text-xs">
+                              已用完
+                            </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              <Clock size={10} className="mr-1" />
+                              {daysLeft} 天后到期
+                            </Badge>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(used)} / {formatCurrency(quota)}
+                          </span>
+                        </div>
+                        <Progress value={percent} className="h-1.5" />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          到期日: {formatDate(sub.expires_at)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* 订阅档位选择 */}
       <div className="space-y-3">
