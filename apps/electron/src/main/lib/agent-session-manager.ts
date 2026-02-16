@@ -168,7 +168,7 @@ export function updateAgentSessionMeta(
     throw new Error(`Agent 会话不存在: ${id}`)
   }
 
-  const existing = index.sessions[idx]
+  const existing = index.sessions[idx]!
   const updated: AgentSessionMeta = {
     ...existing,
     ...updates,
@@ -193,7 +193,7 @@ export function deleteAgentSession(id: string): void {
     throw new Error(`Agent 会话不存在: ${id}`)
   }
 
-  const removed = index.sessions.splice(idx, 1)[0]
+  const removed = index.sessions.splice(idx, 1)[0]!
   writeIndex(index)
 
   // 删除消息文件

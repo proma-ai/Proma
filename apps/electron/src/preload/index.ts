@@ -490,6 +490,10 @@ export interface ElectronAPI {
   listReleases: (options?: GitHubReleaseListOptions) => Promise<GitHubRelease[]>
   /** 根据 tag 获取 Release */
   getReleaseByTag: (tag: string) => Promise<GitHubRelease | null>
+
+  // 工作区文件变化通知
+  onCapabilitiesChanged: (callback: () => void) => () => void
+  onWorkspaceFilesChanged: (callback: () => void) => () => void
 }
 
 /**

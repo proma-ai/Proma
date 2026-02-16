@@ -42,6 +42,8 @@ const CONFIG_VERSION = 1
  */
 function normalizeAnthropicBaseUrl(baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, '')
+  // 去除用户误填的 /messages 后缀，避免后续拼接时路径重复
+  url = url.replace(/\/messages$/, '')
   if (!url.match(/\/v\d+$/)) {
     url = `${url}/v1`
   }
@@ -290,7 +292,7 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
     throw new Error(`渠道不存在: ${id}`)
   }
 
-  const existing = config.channels[index]
+  const existing = config.channels[index]!
 
   const updated: Channel = {
     ...existing,
@@ -326,7 +328,7 @@ export function deleteChannel(id: string): void {
     throw new Error(`渠道不存在: ${id}`)
   }
 
-  const removed = config.channels.splice(index, 1)[0]
+  const removed = config.channels.splice(index, 1)[0]!
   writeConfig(config)
 
   console.log(`[渠道管理] 已删除渠道: ${removed.name} (${removed.id})`)

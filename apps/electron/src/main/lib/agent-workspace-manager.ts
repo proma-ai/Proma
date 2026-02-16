@@ -177,7 +177,7 @@ export function updateAgentWorkspace(
     throw new Error(`Agent 工作区不存在: ${id}`)
   }
 
-  const existing = index.workspaces[idx]
+  const existing = index.workspaces[idx]!
   const updated: AgentWorkspace = {
     ...existing,
     name: updates.name,
@@ -202,7 +202,7 @@ export function deleteAgentWorkspace(id: string): void {
     throw new Error(`Agent 工作区不存在: ${id}`)
   }
 
-  const removed = index.workspaces.splice(idx, 1)[0]
+  const removed = index.workspaces.splice(idx, 1)[0]!
   writeIndex(index)
 
   console.log(`[Agent 工作区] 已删除工作区索引: ${removed.name} (slug: ${removed.slug}，目录已保留)`)
@@ -359,6 +359,8 @@ function parseSkillFrontmatter(content: string, slug: string): SkillMeta {
   if (!fmMatch) return meta
 
   const yaml = fmMatch[1]
+  if (!yaml) return meta
+
   for (const line of yaml.split('\n')) {
     const colonIdx = line.indexOf(':')
     if (colonIdx === -1) continue

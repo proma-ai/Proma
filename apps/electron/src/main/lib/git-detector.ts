@@ -67,7 +67,7 @@ function getGitVersion(gitPath: string): string | null {
     if (result.status === 0 && result.stdout) {
       // git version 2.39.0 -> 2.39.0
       const match = result.stdout.match(/git version (\d+\.\d+\.\d+)/)
-      return match ? match[1] : result.stdout.trim()
+      return match ? match[1]! : result.stdout.trim()
     }
   } catch {
     // 执行失败

@@ -172,7 +172,7 @@ export const currentChatErrorAtom = atom<string | null>((get) => {
 export const conversationDraftsAtom = atom<Map<string, string>>(new Map())
 
 /** 当前对话的草稿内容（派生读写原子） */
-export const currentConversationDraftAtom = atom<string>(
+export const currentConversationDraftAtom = atom(
   (get) => {
     const currentId = get(currentConversationIdAtom)
     if (!currentId) return ''

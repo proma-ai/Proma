@@ -81,10 +81,10 @@ function extractToolActivities(events: AgentMessage['events']): ToolActivity[] {
       const existingIdx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
       if (existingIdx >= 0) {
         activities[existingIdx] = {
-          ...activities[existingIdx],
+          ...activities[existingIdx]!,
           input: event.input,
-          intent: event.intent || activities[existingIdx].intent,
-          displayName: event.displayName || activities[existingIdx].displayName,
+          intent: event.intent || activities[existingIdx]!.intent,
+          displayName: event.displayName || activities[existingIdx]!.displayName,
         }
       } else {
         activities.push({
@@ -101,7 +101,7 @@ function extractToolActivities(events: AgentMessage['events']): ToolActivity[] {
       const idx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
       if (idx >= 0) {
         activities[idx] = {
-          ...activities[idx],
+          ...activities[idx]!,
           result: event.result,
           isError: event.isError,
           done: true,
@@ -110,17 +110,17 @@ function extractToolActivities(events: AgentMessage['events']): ToolActivity[] {
     } else if (event.type === 'task_backgrounded') {
       const idx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
       if (idx >= 0) {
-        activities[idx] = { ...activities[idx], isBackground: true, taskId: event.taskId }
+        activities[idx] = { ...activities[idx]!, isBackground: true, taskId: event.taskId }
       }
     } else if (event.type === 'shell_backgrounded') {
       const idx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
       if (idx >= 0) {
-        activities[idx] = { ...activities[idx], isBackground: true, shellId: event.shellId }
+        activities[idx] = { ...activities[idx]!, isBackground: true, shellId: event.shellId }
       }
     } else if (event.type === 'task_progress') {
       const idx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
       if (idx >= 0) {
-        activities[idx] = { ...activities[idx], elapsedSeconds: event.elapsedSeconds }
+        activities[idx] = { ...activities[idx]!, elapsedSeconds: event.elapsedSeconds }
       }
     }
   }
@@ -140,12 +140,12 @@ function parseAttachedFiles(content: string): { files: AttachedFileRef[]; text: 
   if (!match) return { files: [], text: content }
 
   const files: AttachedFileRef[] = []
-  const lines = match[1].split('\n')
+  const lines = match[1]!.split('\n')
   for (const line of lines) {
     // 格式: - filename: /path/to/file
     const lineMatch = line.match(/^-\s+(.+?):\s+(.+)$/)
     if (lineMatch) {
-      files.push({ filename: lineMatch[1].trim(), path: lineMatch[2].trim() })
+      files.push({ filename: lineMatch[1]!.trim(), path: lineMatch[2]!.trim() })
     }
   }
 

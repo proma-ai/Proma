@@ -200,8 +200,8 @@ export function deleteConversationAttachments(conversationId: string): void {
 export async function openFileDialog(): Promise<FileDialogResult> {
   // macOS 上必须传入父窗口，否则对话框可能出现在应用窗口后面
   const parentWindow = BrowserWindow.getFocusedWindow()
-  const dialogOptions = {
-    properties: ['openFile', 'multiSelections'] as const,
+  const dialogOptions: Electron.OpenDialogOptions = {
+    properties: ['openFile', 'multiSelections'],
     filters: FILE_FILTERS,
   }
 

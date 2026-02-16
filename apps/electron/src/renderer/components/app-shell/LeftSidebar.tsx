@@ -209,7 +209,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         setConversations(list)
         // 默认加载最近一条对话（按 updatedAt 降序，首条即最新）
         if (list.length > 0) {
-          setCurrentConversationId(list[0].id)
+          setCurrentConversationId(list[0]!.id)
         }
       })
       .catch(console.error)
@@ -698,19 +698,25 @@ function ConversationItem({
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const justStartedEditing = React.useRef(false)
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
     setEditTitle(conversation.title)
     setEditing(true)
-    requestAnimationFrame(() => {
+    justStartedEditing.current = true
+    // 延迟聚焦，等待 ContextMenu 完全关闭后再 focus
+    setTimeout(() => {
+      justStartedEditing.current = false
       inputRef.current?.focus()
       inputRef.current?.select()
-    })
+    }, 300)
   }
 
   /** 保存标题 */
   const saveTitle = async (): Promise<void> => {
+    // ContextMenu 关闭导致的 blur，忽略
+    if (justStartedEditing.current) return
     const trimmed = editTitle.trim()
     if (!trimmed || trimmed === conversation.title) {
       setEditing(false)
@@ -859,17 +865,21 @@ function AgentSessionItem({
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const justStartedEditing = React.useRef(false)
 
   const startEdit = (): void => {
     setEditTitle(session.title)
     setEditing(true)
-    requestAnimationFrame(() => {
+    justStartedEditing.current = true
+    setTimeout(() => {
+      justStartedEditing.current = false
       inputRef.current?.focus()
       inputRef.current?.select()
-    })
+    }, 300)
   }
 
   const saveTitle = async (): Promise<void> => {
+    if (justStartedEditing.current) return
     const trimmed = editTitle.trim()
     if (!trimmed || trimmed === session.title) {
       setEditing(false)

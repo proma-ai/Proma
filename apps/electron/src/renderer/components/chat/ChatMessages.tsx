@@ -301,7 +301,7 @@ export function ChatMessages({
             {(streaming || smoothContent || smoothReasoning) && (
               <Message from="assistant">
                 <MessageHeader
-                  model={streamingModel}
+                  model={streamingModel ?? undefined}
                   time={formatMessageTime(Date.now())}
                   logo={
                     <img

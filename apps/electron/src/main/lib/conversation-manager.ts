@@ -227,7 +227,7 @@ export function updateConversationMeta(
     throw new Error(`对话不存在: ${id}`)
   }
 
-  const existing = index.conversations[idx]
+  const existing = index.conversations[idx]!
   const updated: ConversationMeta = {
     ...existing,
     ...updates,
@@ -256,7 +256,7 @@ export function deleteConversation(id: string): void {
     throw new Error(`对话不存在: ${id}`)
   }
 
-  const removed = index.conversations.splice(idx, 1)[0]
+  const removed = index.conversations.splice(idx, 1)[0]!
   writeIndex(index)
 
   // 删除消息文件

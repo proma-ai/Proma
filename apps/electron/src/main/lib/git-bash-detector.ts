@@ -48,7 +48,7 @@ function verifyBashPath(bashPath: string): string | null {
     const versionMatch = output.match(/version\s+(\S+)/)
     if (versionMatch?.[1]) {
       // 提取主版本号（如 "5.2.15(1)-release" → "5.2.15"）
-      const cleanVersion = versionMatch[1].split('(')[0]
+      const cleanVersion = versionMatch[1]!.split('(')[0]!
       return cleanVersion
     }
 

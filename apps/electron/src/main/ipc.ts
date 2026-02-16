@@ -647,15 +647,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.OPEN_FOLDER_DIALOG,
     async (): Promise<{ path: string; name: string } | null> => {
-      const win = BrowserWindow.getFocusedWindow()
-      const result = await dialog.showOpenDialog(win ?? BrowserWindow.getAllWindows()[0], {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (!win) return null
+
+      const result = await dialog.showOpenDialog(win, {
         properties: ['openDirectory'],
         title: '选择文件夹',
       })
 
       if (result.canceled || result.filePaths.length === 0) return null
 
-      const folderPath = result.filePaths[0]
+      const folderPath = result.filePaths[0]!
       const name = folderPath.split('/').filter(Boolean).pop() || 'folder'
       return { path: folderPath, name }
     }

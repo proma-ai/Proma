@@ -759,7 +759,12 @@ async function runAgentInternal(
     sdkEnv.ANTHROPIC_BASE_URL = cloudBaseUrl.replace(/\/api\/v1\/?$/, '')
   } else if (channel.baseUrl && channel.baseUrl !== DEFAULT_ANTHROPIC_URL) {
     // 自定义 Base URL 时注入 ANTHROPIC_BASE_URL
+    // SDK 内部会自动拼接 /v1/messages，需要去除用户误填的路径后缀
     sdkEnv.ANTHROPIC_BASE_URL = channel.baseUrl
+      .trim()
+      .replace(/\/+$/, '')
+      .replace(/\/v\d+\/messages$/, '')
+      .replace(/\/v\d+$/, '')
   } else {
     // 确保不会残留上一次的 Base URL
     delete sdkEnv.ANTHROPIC_BASE_URL
@@ -985,7 +990,7 @@ async function runAgentInternal(
         // 衔接上下文：有 SDK session ID 则 resume
         ...(existingSdkSessionId ? { resume: existingSdkSessionId } : {}),
         // MCP 服务器（每次 query 都从磁盘读取最新配置，支持回合间动态更新）
-        ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
+        ...(Object.keys(mcpServers).length > 0 && { mcpServers: mcpServers as Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig> }),
         // Skill 插件（SDK 自动发现 skills/ 目录下的 SKILL.md）
         ...(workspaceSlug && { plugins: [{ type: 'local' as const, path: getAgentWorkspacePath(workspaceSlug) }] }),
         stderr: (data: string) => {
@@ -1198,7 +1203,8 @@ async function runAgentInternal(
     }
 
     // 异步生成标题（不阻塞 stream complete 响应）
-    autoGenerateTitle(sessionId, userMessage, channelId, modelId || defaultModel, webContents)
+    // 使用 SDK 实际确认的模型，避免因默认模型与当前渠道不匹配导致标题生成失败。
+    autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, webContents)
   } catch (error) {
     // 清理超时计时器
     if (inactivityTimer) {

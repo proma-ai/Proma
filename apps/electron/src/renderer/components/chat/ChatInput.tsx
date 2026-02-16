@@ -56,7 +56,7 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => {
       const result = reader.result as string
       // 去掉 data:xxx;base64, 前缀
-      const base64 = result.split(',')[1]
+      const base64 = result.split(',')[1]!
       resolve(base64)
     }
     reader.onerror = reject
@@ -171,8 +171,8 @@ export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): R
 
   /** 语音识别结果 */
   const handleSpeechTranscript = React.useCallback((text: string): void => {
-    setContent((prev) => prev + (prev ? ' ' : '') + text)
-  }, [])
+    setContent(content + (content ? ' ' : '') + text)
+  }, [content, setContent])
 
   /** 粘贴文件回调 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {

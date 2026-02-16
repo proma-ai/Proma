@@ -546,7 +546,7 @@ export function ChatView(): React.ReactElement {
   const handleClearContext = React.useCallback((): void => {
     if (!currentConversationId || currentMessages.length === 0) return
 
-    const lastMessage = currentMessages[currentMessages.length - 1]
+    const lastMessage = currentMessages[currentMessages.length - 1]!
     const lastMessageId = lastMessage.id
 
     let newDividers: string[]

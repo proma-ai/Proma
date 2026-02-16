@@ -108,7 +108,7 @@ function AgentSettingsInitializer(): null {
           const exists = workspaces.some((w) => w.id === settings.agentWorkspaceId)
           setCurrentWorkspaceId(exists ? settings.agentWorkspaceId! : workspaces[0]?.id ?? null)
         } else if (workspaces.length > 0) {
-          setCurrentWorkspaceId(workspaces[0].id)
+          setCurrentWorkspaceId(workspaces[0]!.id)
         }
       }).catch(console.error)
     }).catch(console.error)

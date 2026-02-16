@@ -522,7 +522,10 @@ export function stopAllGenerations(): void {
 // ===== 标题生成 =====
 
 /** 标题生成 Prompt */
-const TITLE_PROMPT = '根据用户的第一条消息，生成一个简短的对话标题（10字以内）。只输出标题，不要有任何其他内容、标点符号或引号。\n\n用户消息：'
+const TITLE_PROMPT = '根据用户的第一条消息，生成一个简短的对话标题（10字以内）。只输出标题，不要有任何其他内容、标点符号或引号。如果消息内容过短或无明确主题，直接使用原始消息作为标题。\n\n用户消息：'
+
+/** 短消息阈值：低于此长度直接使用原文作为标题 */
+const SHORT_MESSAGE_THRESHOLD = 4
 
 /** 最大标题长度 */
 const MAX_TITLE_LENGTH = 20
@@ -539,6 +542,14 @@ const MAX_TITLE_LENGTH = 20
 export async function generateTitle(input: GenerateTitleInput): Promise<string | null> {
   const { userMessage, channelId, modelId } = input
   console.log('[标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
+
+  // 短消息直接使用原文作为标题，避免 AI 幻觉
+  const trimmedMessage = userMessage.trim()
+  if (trimmedMessage.length <= SHORT_MESSAGE_THRESHOLD) {
+    const shortTitle = trimmedMessage.slice(0, MAX_TITLE_LENGTH)
+    console.log('[标题生成] 消息过短，直接使用原文作为标题:', shortTitle)
+    return shortTitle
+  }
 
   // 查找渠道
   const channels = listChannels()

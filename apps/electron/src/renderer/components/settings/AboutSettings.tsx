@@ -374,7 +374,7 @@ function ShellEnvironmentCard(): React.ReactElement | null {
         <EnvironmentCheckCard
           name="Git Bash"
           status={shell.gitBash?.available ? 'success' : 'error'}
-          version={shell.gitBash?.version}
+          version={shell.gitBash?.version ?? undefined}
           requirement="Git for Windows 自带"
           downloadUrl="https://git-scm.com/download/win"
           statusText={

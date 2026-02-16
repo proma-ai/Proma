@@ -18,7 +18,7 @@ function getTrayIconPath(): string {
 function showMainWindow(): void {
   const windows = BrowserWindow.getAllWindows()
   if (windows.length === 0) return
-  const mainWindow = windows[0]
+  const mainWindow = windows[0]!
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
   }

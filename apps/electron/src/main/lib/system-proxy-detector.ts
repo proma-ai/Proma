@@ -59,7 +59,7 @@ async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
       } else if (serviceList.includes('Ethernet')) {
         networkService = 'Ethernet'
       } else if (serviceList.length > 0) {
-        networkService = serviceList[0]
+        networkService = serviceList[0]!
       }
     } catch {
       // 如果获取服务列表失败，使用默认的 Wi-Fi

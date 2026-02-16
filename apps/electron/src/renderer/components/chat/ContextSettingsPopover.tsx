@@ -36,7 +36,7 @@ function getContextLengthLabel(value: ContextLengthValue): string {
 
 /** 将滑块位置转换为实际值 */
 function sliderPositionToValue(position: number): ContextLengthValue {
-  return CONTEXT_LENGTH_OPTIONS[position]
+  return CONTEXT_LENGTH_OPTIONS[position]!
 }
 
 /** 将实际值转换为滑块位置 */
@@ -53,7 +53,7 @@ export function ContextSettingsPopover(): React.ReactElement {
   const maxSliderPosition = CONTEXT_LENGTH_OPTIONS.length - 1
 
   const handleSliderChange = (values: number[]): void => {
-    const newValue = sliderPositionToValue(values[0])
+    const newValue = sliderPositionToValue(values[0]!)
     // 暂不允许选择 infinite
     if (newValue === 'infinite') {
       return

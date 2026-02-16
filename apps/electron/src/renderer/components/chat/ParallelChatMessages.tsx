@@ -194,7 +194,7 @@ function MessageColumn({
         {side === 'assistant' && (streaming || streamingContent || streamingReasoning) && (
           <Message from="assistant">
             <MessageHeader
-              model={streamingModel}
+              model={streamingModel ?? undefined}
               time={formatMessageTime(Date.now())}
               logo={
                 <img

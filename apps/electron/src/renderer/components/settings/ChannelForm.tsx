@@ -84,9 +84,11 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
  * Anthropic 特殊处理：如果 baseUrl 已包含 /v1，则不重复添加。
  */
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '')
+  let trimmed = baseUrl.trim().replace(/\/+$/, '')
 
   if (provider === 'anthropic') {
+    // 去除用户误填的 /messages 后缀，与 normalizeAnthropicBaseUrl 保持一致
+    trimmed = trimmed.replace(/\/messages$/, '')
     if (trimmed.match(/\/v\d+$/)) {
       return `${trimmed}/messages`
     }

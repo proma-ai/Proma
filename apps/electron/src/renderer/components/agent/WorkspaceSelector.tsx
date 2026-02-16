@@ -159,9 +159,9 @@ export function WorkspaceSelector(): React.ReactElement {
 
       // 如果删除的是当前工作区，切换到第一个剩余的
       if (deleteTargetId === currentWorkspaceId && remaining.length > 0) {
-        setCurrentWorkspaceId(remaining[0].id)
+        setCurrentWorkspaceId(remaining[0]!.id)
         window.electronAPI.updateSettings({
-          agentWorkspaceId: remaining[0].id,
+          agentWorkspaceId: remaining[0]!.id,
         }).catch(console.error)
       }
     } catch (error) {

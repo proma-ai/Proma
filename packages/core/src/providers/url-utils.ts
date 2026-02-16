@@ -7,14 +7,18 @@
 /**
  * 规范化 Anthropic Base URL
  *
- * 去除尾部斜杠，如果没有版本路径则追加 /v1。
+ * 去除尾部斜杠，去除误填的 /messages 后缀，如果没有版本路径则追加 /v1。
  * 例如：
  * - "https://api.anthropic.com" → "https://api.anthropic.com/v1"
  * - "https://api.anthropic.com/v1" → 不变
  * - "https://proxy.example.com/v2/" → "https://proxy.example.com/v2"
+ * - "https://proxy.example.com/v1/messages" → "https://proxy.example.com/v1"
+ * - "https://proxy.example.com/v1/messages/" → "https://proxy.example.com/v1"
  */
 export function normalizeAnthropicBaseUrl(baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, '')
+  // 去除用户误填的 /messages 后缀，避免后续拼接时路径重复
+  url = url.replace(/\/messages$/, '')
   if (!url.match(/\/v\d+$/)) {
     url = `${url}/v1`
   }

@@ -29,6 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
@@ -350,13 +351,16 @@ export const UserMessageContent = React.memo(
 
 type MessageLoadingProps = HTMLAttributes<HTMLDivElement>
 
-/** 3 个弹跳点加载动画 */
+/** 等待首个 chunk 的加载动画 */
 export function MessageLoading({ className, ...props }: MessageLoadingProps): React.ReactElement {
   return (
-    <div className={cn('flex items-center gap-1 mt-2', className)} {...props}>
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
+    <div className={cn('mt-0', className)} {...props}>
+      <LoadingIndicator
+        label="正在思考..."
+        size="sm"
+        showElapsed={true}
+        className="text-muted-foreground/60"
+      />
     </div>
   )
 }

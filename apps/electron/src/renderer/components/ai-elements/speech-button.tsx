@@ -64,7 +64,7 @@ interface SpeechRecognitionErrorEvent extends Event {
 
 /** 获取 SpeechRecognition 构造函数 */
 function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
-  const win = window as Record<string, unknown>
+  const win = window as unknown as Record<string, unknown>
   return (win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null) as
     | (new () => SpeechRecognitionInstance)
     | null

@@ -82,7 +82,7 @@ function mergeTodoWrites(activities: ToolActivity[]): ToolActivity[] {
 
   if (todoWrites.length === 0) return activities
 
-  const latest = todoWrites[todoWrites.length - 1]
+  const latest = todoWrites[todoWrites.length - 1]!
   const allDone = todoWrites.every((t) => t.done)
 
   const merged: ToolActivity = {
@@ -376,7 +376,7 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
 
 /** 当前 Agent 会话的草稿内容（派生读写原子） */
-export const currentAgentSessionDraftAtom = atom<string>(
+export const currentAgentSessionDraftAtom = atom(
   (get) => {
     const currentId = get(currentAgentSessionIdAtom)
     if (!currentId) return ''
