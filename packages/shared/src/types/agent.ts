@@ -22,6 +22,58 @@ export interface AgentWorkspace {
 
 // ===== Agent 事件类型 =====
 
+/** 错误代码 */
+export type ErrorCode =
+  | 'invalid_api_key'
+  | 'invalid_credentials'
+  | 'response_too_large'
+  | 'expired_oauth_token'
+  | 'token_expired'
+  | 'rate_limited'
+  | 'service_error'
+  | 'service_unavailable'
+  | 'network_error'
+  | 'mcp_auth_required'
+  | 'mcp_unreachable'
+  | 'billing_error'
+  | 'model_no_tool_support'
+  | 'invalid_model'
+  | 'data_policy_error'
+  | 'invalid_request'
+  | 'image_too_large'
+  | 'provider_error'
+  | 'unknown_error'
+
+/** 恢复操作 */
+export interface RecoveryAction {
+  /** 操作键（用于快捷键） */
+  key: string
+  /** 操作标签 */
+  label: string
+  /** 操作类型 */
+  action: 'settings' | 'retry' | 'cancel' | string
+}
+
+/** 类型化错误 */
+export interface TypedError {
+  /** 错误代码，用于程序化处理 */
+  code: ErrorCode
+  /** 用户友好的标题 */
+  title: string
+  /** 详细的错误消息 */
+  message: string
+  /** 建议的恢复操作 */
+  actions: RecoveryAction[]
+  /** 是否可以自动重试 */
+  canRetry: boolean
+  /** 重试延迟（毫秒） */
+  retryDelayMs?: number
+  /** 诊断详情（用于调试） */
+  details?: string[]
+  /** 原始错误消息（用于调试） */
+  originalError?: string
+}
+
 /** Agent 事件 Usage 信息 */
 export interface AgentEventUsage {
   inputTokens: number
@@ -30,6 +82,41 @@ export interface AgentEventUsage {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+}
+
+/**
+ * 重试尝试记录
+ *
+ * 记录每次重试尝试的详细信息，用于错误诊断和 UI 展示。
+ */
+export interface RetryAttempt {
+  /** 第几次尝试 (1-based) */
+  attempt: number
+  /** 时间戳 */
+  timestamp: number
+  /** 错误原因（简短描述，如"SDK 响应超时"） */
+  reason: string
+  /** 完整错误消息 */
+  errorMessage: string
+  /** stderr 输出（可选） */
+  stderr?: string
+  /** 堆栈跟踪（可选） */
+  stack?: string
+  /** 运行环境信息（可选） */
+  environment?: {
+    /** 运行时，如 "Bun 1.0.0" */
+    runtime: string
+    /** 平台，如 "darwin arm64" */
+    platform: string
+    /** 模型，如 "claude-sonnet-4-5-20250929" */
+    model: string
+    /** 工作区名称 */
+    workspace?: string
+    /** 工作目录 */
+    cwd?: string
+  }
+  /** 延迟秒数 */
+  delaySeconds: number
 }
 
 /**
@@ -52,8 +139,12 @@ export type AgentEvent =
   // 控制流
   | { type: 'complete'; stopReason?: string; usage?: AgentEventUsage }
   | { type: 'error'; message: string }
+  | { type: 'typed_error'; error: TypedError }
   // 重试机制
-  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }
+  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }  // 保留向后兼容
+  | { type: 'retry_attempt'; attemptData: RetryAttempt }  // 新增：记录详细尝试信息
+  | { type: 'retry_cleared' }  // 新增：重试成功，清除状态
+  | { type: 'retry_failed'; finalAttempt: RetryAttempt }  // 新增：重试失败
   // Usage 更新
   | { type: 'usage_update'; usage: { inputTokens: number; contextWindow?: number } }
   // 上下文压缩
@@ -103,6 +194,18 @@ export interface AgentMessage {
   model?: string
   /** 工具活动数据（agent 事件列表，用于回放工具调用） */
   events?: AgentEvent[]
+  /** 错误代码（status 消息，role='status' 时使用） */
+  errorCode?: ErrorCode
+  /** 错误标题（status 消息） */
+  errorTitle?: string
+  /** 错误详细信息（status 消息） */
+  errorDetails?: string[]
+  /** 原始错误消息（status 消息） */
+  errorOriginal?: string
+  /** 是否可以重试（status 消息） */
+  errorCanRetry?: boolean
+  /** 错误恢复操作（status 消息） */
+  errorActions?: RecoveryAction[]
 }
 
 // ===== Agent 标题生成输入 =====
@@ -137,6 +240,12 @@ export interface McpServerEntry {
   headers?: Record<string, string>
   /** 是否启用 */
   enabled: boolean
+  /** 最后一次测试结果 */
+  lastTestResult?: {
+    success: boolean
+    message: string
+    timestamp: number
+  }
 }
 
 /** 工作区 MCP 配置文件 */
@@ -176,6 +285,40 @@ export interface AgentSendInput {
   modelId?: string
   /** 工作区 ID（用于确定 cwd） */
   workspaceId?: string
+}
+
+// ===== 后台任务管理 =====
+
+/**
+ * 获取任务输出请求
+ */
+export interface GetTaskOutputInput {
+  /** 任务 ID */
+  taskId: string
+  /** 是否阻塞等待完成（默认 false） */
+  block?: boolean
+}
+
+/**
+ * 获取任务输出响应
+ */
+export interface GetTaskOutputResult {
+  /** 任务输出内容 */
+  output: string
+  /** 任务是否已完成 */
+  isComplete: boolean
+}
+
+/**
+ * 停止任务请求
+ */
+export interface StopTaskInput {
+  /** 会话 ID */
+  sessionId: string
+  /** 任务 ID */
+  taskId: string
+  /** 任务类型 */
+  type: 'agent' | 'shell'
 }
 
 // ===== Agent 流式事件载荷 =====
@@ -274,6 +417,12 @@ export const AGENT_IPC_CHANNELS = {
   /** 中止 Agent 执行 */
   STOP_AGENT: 'agent:stop',
 
+  // 后台任务管理
+  /** 获取任务输出 */
+  GET_TASK_OUTPUT: 'agent:get-task-output',
+  /** 停止任务 */
+  STOP_TASK: 'agent:stop-task',
+
   // 工作区能力（MCP + Skill）
   /** 获取工作区能力摘要 */
   GET_CAPABILITIES: 'agent:get-capabilities',
@@ -281,6 +430,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_MCP_CONFIG: 'agent:get-mcp-config',
   /** 保存工作区 MCP 配置 */
   SAVE_MCP_CONFIG: 'agent:save-mcp-config',
+  /** 测试 MCP 服务器连接 */
+  TEST_MCP_SERVER: 'agent:test-mcp-server',
   /** 获取工作区 Skill 列表 */
   GET_SKILLS: 'agent:get-skills',
   /** 删除工作区 Skill */

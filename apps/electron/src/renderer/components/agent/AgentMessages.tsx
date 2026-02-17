@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Bot, FileText, FileImage, RotateCw } from 'lucide-react'
+import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -29,8 +29,11 @@ import { CopyButton } from '@/components/chat/CopyButton'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo } from '@/lib/model-logo'
 import { ToolActivityList } from './ToolActivityItem'
+import { BackgroundTasksPanel } from './BackgroundTasksPanel'
+import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
 import {
   currentAgentMessagesAtom,
+  currentAgentSessionIdAtom,
   agentStreamingAtom,
   agentStreamingContentAtom,
   agentToolActivitiesAtom,
@@ -38,7 +41,8 @@ import {
   agentRetryingAtom,
 } from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
-import type { AgentMessage } from '@proma/shared'
+import { cn } from '@/lib/utils'
+import type { AgentMessage, RetryAttempt } from '@proma/shared'
 import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
 
 function EmptyState(): React.ReactElement {
@@ -171,14 +175,192 @@ function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactEleme
   )
 }
 
-/** 重试提示组件 - 简洁版 */
+/** 重试提示组件 - 折叠式 */
 function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['retrying']> }): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false)
+  const [countdown, setCountdown] = React.useState(0)
+
+  // 倒计时逻辑
+  React.useEffect(() => {
+    if (retrying.failed || retrying.history.length === 0) {
+      setCountdown(0)
+      return
+    }
+
+    const lastAttempt = retrying.history[retrying.history.length - 1]
+    if (!lastAttempt) return
+
+    // 计算倒计时
+    const updateCountdown = (): void => {
+      const elapsed = (Date.now() - lastAttempt.timestamp) / 1000 // 已过去的秒数
+      const remaining = Math.max(0, lastAttempt.delaySeconds - elapsed)
+      setCountdown(Math.ceil(remaining))
+
+      if (remaining <= 0) {
+        setCountdown(0)
+      }
+    }
+
+    // 立即更新一次
+    updateCountdown()
+
+    // 每 100ms 更新一次倒计时
+    const timer = setInterval(updateCountdown, 100)
+    return () => clearInterval(timer)
+  }, [retrying.failed, retrying.history])
+
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3 px-1">
-      <RotateCw className="size-3 animate-spin opacity-60" />
-      <span>
-        重试中 ({retrying.attempt}/{retrying.maxAttempts}) · {retrying.reason}
-      </span>
+    <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 p-3 mb-3">
+      {/* 头部：简洁状态 */}
+      <button
+        type="button"
+        className="flex items-center gap-2 w-full text-left hover:opacity-80 transition-opacity"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {retrying.failed ? (
+          <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+        ) : (
+          <RotateCw className="size-4 animate-spin text-amber-600 dark:text-amber-400 shrink-0" />
+        )}
+        <span className="text-sm text-amber-900 dark:text-amber-100 flex-1">
+          {retrying.failed
+            ? `重试失败 (${retrying.currentAttempt}/${retrying.maxAttempts})`
+            : countdown > 0
+              ? `重试倒计时 ${countdown}秒 (${retrying.currentAttempt}/${retrying.maxAttempts})`
+              : `重试中 (${retrying.currentAttempt}/${retrying.maxAttempts})`}
+          {retrying.history.length > 0 && ` · ${retrying.history[retrying.history.length - 1]?.reason}`}
+        </span>
+        {expanded ? (
+          <ChevronDown className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+        ) : (
+          <ChevronRight className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+        )}
+      </button>
+
+      {/* 展开内容：重试历史 */}
+      {expanded && retrying.history.length > 0 && (
+        <div className="mt-3 space-y-3 border-t border-amber-200 dark:border-amber-800 pt-3">
+          <div className="text-xs font-medium text-amber-900 dark:text-amber-100">
+            尝试历史：
+          </div>
+          {retrying.history.map((attempt, index) => (
+            <RetryAttemptItem
+              key={attempt.timestamp}
+              attempt={attempt}
+              isLatest={index === retrying.history.length - 1}
+              isFailed={retrying.failed && index === retrying.history.length - 1}
+            />
+          ))}
+          {!retrying.failed && (
+            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6">
+              {countdown > 0 ? (
+                <>
+                  <RotateCw className="size-3 animate-spin" />
+                  <span>等待 {countdown} 秒后开始第 {retrying.currentAttempt} 次尝试</span>
+                </>
+              ) : (
+                <>
+                  <RotateCw className="size-3 animate-spin" />
+                  <span>正在进行第 {retrying.currentAttempt} 次尝试...</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 单条重试尝试记录 */
+function RetryAttemptItem({
+  attempt,
+  isLatest,
+  isFailed,
+}: {
+  attempt: RetryAttempt
+  isLatest: boolean
+  isFailed: boolean
+}): React.ReactElement {
+  const [showStderr, setShowStderr] = React.useState(false)
+  const [showStack, setShowStack] = React.useState(false)
+
+  const time = new Date(attempt.timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+
+  return (
+    <div className={cn('pl-6 space-y-2', isLatest && 'font-medium')}>
+      {/* 尝试头部 */}
+      <div className="flex items-start gap-2">
+        <span className="text-destructive shrink-0">❌</span>
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="text-xs text-amber-900 dark:text-amber-100">
+            第 {attempt.attempt} 次 ({time}) - {attempt.reason}
+          </div>
+          <div className="text-xs text-amber-700 dark:text-amber-300 font-mono break-words">
+            {attempt.errorMessage}
+          </div>
+
+          {/* 环境信息 */}
+          {attempt.environment && (
+            <div className="text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
+              <div>运行时: {attempt.environment.runtime}</div>
+              <div>平台: {attempt.environment.platform}</div>
+              <div>模型: {attempt.environment.model}</div>
+              {attempt.environment.workspace && <div>工作区: {attempt.environment.workspace}</div>}
+            </div>
+          )}
+
+          {/* 可展开的 stderr */}
+          {attempt.stderr && (
+            <div className="mt-2">
+              <button
+                type="button"
+                className="text-[11px] text-amber-700 dark:text-amber-300 hover:underline flex items-center gap-1"
+                onClick={() => setShowStderr(!showStderr)}
+              >
+                {showStderr ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                显示 stderr 输出
+              </button>
+              {showStderr && (
+                <pre className="mt-1 text-[10px] text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/30 p-2 rounded overflow-x-auto max-h-[200px] overflow-y-auto">
+                  {attempt.stderr}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {/* 可展开的堆栈跟踪 */}
+          {attempt.stack && (
+            <div className="mt-2">
+              <button
+                type="button"
+                className="text-[11px] text-amber-700 dark:text-amber-300 hover:underline flex items-center gap-1"
+                onClick={() => setShowStack(!showStack)}
+              >
+                {showStack ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                显示堆栈跟踪
+              </button>
+              {showStack && (
+                <pre className="mt-1 text-[10px] text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/30 p-2 rounded overflow-x-auto max-h-[200px] overflow-y-auto">
+                  {attempt.stack}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -250,16 +432,46 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
     )
   }
 
+  if (message.role === 'status' && message.errorCode) {
+    // TypedError 消息 - 复用普通消息格式，简单显示错误
+    return (
+      <Message from="assistant">
+        <MessageHeader
+          model={undefined}
+          time={formatMessageTime(message.createdAt)}
+          logo={
+            <div className="size-[35px] rounded-[25%] bg-destructive/10 flex items-center justify-center">
+              <AlertTriangle size={18} className="text-destructive" />
+            </div>
+          }
+        />
+        <MessageContent>
+          <div className="text-destructive">
+            <MessageResponse>{message.content}</MessageResponse>
+          </div>
+        </MessageContent>
+        {/* 操作按钮（hover 时可见） */}
+        <MessageActions className="pl-[46px] mt-0.5">
+          <CopyButton content={message.content} />
+        </MessageActions>
+      </Message>
+    )
+  }
+
   return null
 }
 
 export function AgentMessages(): React.ReactElement {
   const messages = useAtomValue(currentAgentMessagesAtom)
+  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const streaming = useAtomValue(agentStreamingAtom)
   const streamingContent = useAtomValue(agentStreamingContentAtom)
   const toolActivities = useAtomValue(agentToolActivitiesAtom)
   const agentStreamingModel = useAtomValue(agentStreamingModelAtom)
   const retrying = useAtomValue(agentRetryingAtom)
+
+  // 获取后台任务列表
+  const { tasks: backgroundTasks } = useBackgroundTasks(currentSessionId || '')
 
   const { displayedContent: smoothContent } = useSmoothStream({
     content: streamingContent,
@@ -289,6 +501,8 @@ export function AgentMessages(): React.ReactElement {
                   {toolActivities.length > 0 && (
                     <div className="mb-3">
                       <ToolActivityList activities={toolActivities} animate />
+                      {/* 后台任务面板 — 显示在工具活动下方 */}
+                      <BackgroundTasksPanel tasks={backgroundTasks} />
                     </div>
                   )}
                   {smoothContent ? (

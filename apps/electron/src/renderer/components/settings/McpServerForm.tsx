@@ -6,8 +6,9 @@
  */
 
 import * as React from 'react'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import type { McpServerEntry, McpTransportType, WorkspaceMcpConfig } from '@proma/shared'
 import {
   SettingsSection,
@@ -76,7 +77,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
   // 表单状态
   const [name, setName] = React.useState(server?.name ?? '')
   const [transportType, setTransportType] = React.useState<McpTransportType>(server?.entry.type ?? 'stdio')
-  const [enabled, setEnabled] = React.useState(server?.entry.enabled ?? true)
+  const [enabled, setEnabled] = React.useState(server?.entry.enabled ?? false) // 默认关闭
 
   // stdio 字段
   const [command, setCommand] = React.useState(server?.entry.command ?? '')
@@ -89,12 +90,40 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
 
   // UI 状态
   const [saving, setSaving] = React.useState(false)
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(
+    server?.entry.lastTestResult ?? null
+  )
+
+  // 监听配置改变，清空测试结果（避免使用过期的测试结果）
+  React.useEffect(() => {
+    if (!server) return // 新建时不需要清空
+
+    // 检查关键配置是否改变
+    const configChanged =
+      transportType !== server.entry.type ||
+      (transportType === 'stdio' && command !== server.entry.command) ||
+      (transportType !== 'stdio' && url !== server.entry.url)
+
+    if (configChanged) {
+      setTestResult(null)
+      setEnabled(false) // 配置改变时自动关闭开关
+    }
+  }, [transportType, command, url, server])
 
   /** 构建 McpServerEntry */
-  const buildEntry = (): McpServerEntry => {
+  const buildEntry = (includeTestResult = false): McpServerEntry => {
     const base: McpServerEntry = {
       type: transportType,
-      enabled,
+      // 关键保护：只有测试成功才能启用
+      enabled: enabled && testResult?.success === true,
+      // 保存测试结果
+      ...(includeTestResult && testResult && {
+        lastTestResult: {
+          ...testResult,
+          timestamp: Date.now(),
+        },
+      }),
     }
 
     if (transportType === 'stdio') {
@@ -115,6 +144,35 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
     return base
   }
 
+  /** 测试连接 */
+  const handleTest = async (): Promise<void> => {
+    const serverName = name.trim()
+    if (!serverName) return
+
+    // stdio 需要 command，http/sse 需要 url
+    if (transportType === 'stdio' && !command.trim()) return
+    if (transportType !== 'stdio' && !url.trim()) return
+
+    setTesting(true)
+    setTestResult(null)
+
+    try {
+      const entry = buildEntry(false) // 测试时不包含旧的测试结果
+      const result = await window.electronAPI.testMcpServer(serverName, entry)
+      setTestResult({
+        success: result.success,
+        message: result.message,
+      })
+    } catch (error) {
+      setTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : '测试失败',
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   /** 提交表单 */
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -126,14 +184,24 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
     if (transportType === 'stdio' && !command.trim()) return
     if (transportType !== 'stdio' && !url.trim()) return
 
+    // 警告：如果用户试图启用但测试未成功
+    if (enabled && !testResult?.success) {
+      console.warn('[MCP 表单] 用户试图启用未测试成功的 MCP，将强制禁用')
+    }
+
     setSaving(true)
     try {
       // 读取现有配置
       const config = await window.electronAPI.getWorkspaceMcpConfig(workspaceSlug)
+      const entry = buildEntry(true) // 保存时包含测试结果
+
+      // 日志记录实际保存的状态
+      console.log(`[MCP 表单] 保存 MCP: ${serverName}, enabled: ${entry.enabled}, testResult: ${testResult?.success}`)
+
       const newConfig: WorkspaceMcpConfig = {
         servers: {
           ...config.servers,
-          [serverName]: buildEntry(),
+          [serverName]: entry,
         },
       }
       await window.electronAPI.saveWorkspaceMcpConfig(workspaceSlug, newConfig)
@@ -151,6 +219,11 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
     if (transportType === 'stdio' && !command.trim()) return false
     if (transportType !== 'stdio' && !url.trim()) return false
     return true
+  }
+
+  /** 判断是否可以测试 */
+  const canTest = (): boolean => {
+    return canSubmit()
   }
 
   return (
@@ -254,11 +327,73 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
             </>
           )}
 
+          {/* 测试连接区域 */}
+          <div className="px-4 py-3 space-y-3 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-foreground">连接测试</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  必须测试成功后才能启用
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTest}
+                disabled={testing || !canTest()}
+              >
+                {testing && <Loader2 size={14} className="animate-spin" />}
+                <span>{testing ? '测试中...' : '测试连接'}</span>
+              </Button>
+            </div>
+
+            {/* 测试结果显示 */}
+            {testResult && (
+              <div
+                className={cn(
+                  'flex items-start gap-2 px-3 py-2 rounded-md text-sm',
+                  testResult.success
+                    ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                    : 'bg-red-500/10 text-red-700 dark:text-red-400'
+                )}
+              >
+                {testResult.success ? (
+                  <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+                ) : (
+                  <XCircle size={16} className="mt-0.5 shrink-0" />
+                )}
+                <div className="flex-1">
+                  <div className="font-medium">
+                    {testResult.success ? '测试成功' : '测试失败'}
+                  </div>
+                  <div className="text-xs mt-0.5 opacity-90">{testResult.message}</div>
+                </div>
+              </div>
+            )}
+
+            {/* 未测试警告 */}
+            {!testResult && !testing && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-md text-sm bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <div className="text-xs">
+                  尚未测试连接。请先点击"测试连接"按钮验证配置是否正确。
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 启用开关 */}
           <SettingsToggle
             label="启用此服务器"
-            description="关闭后该 MCP 服务器不会在 Agent 会话中加载"
+            description={
+              testResult?.success
+                ? '开启后该 MCP 服务器将在 Agent 会话中加载'
+                : '只有测试成功后才能启用'
+            }
             checked={enabled}
             onCheckedChange={setEnabled}
+            disabled={!testResult?.success}
           />
         </SettingsCard>
       </SettingsSection>

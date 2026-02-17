@@ -22,7 +22,7 @@ import { createRequire } from 'node:module'
 import { app, BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
 import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
-import type { AgentSendInput, AgentEvent, AgentMessage, AgentStreamEvent, AgentGenerateTitleInput, AgentSaveFilesInput, AgentSavedFile, AgentCopyFolderInput } from '@proma/shared'
+import type { AgentSendInput, AgentEvent, AgentMessage, AgentStreamEvent, AgentGenerateTitleInput, AgentSaveFilesInput, AgentSavedFile, AgentCopyFolderInput, TypedError, ErrorCode } from '@proma/shared'
 import {
   ToolIndex,
   extractToolStarts,
@@ -49,136 +49,117 @@ import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-bui
 /** 活跃的 AbortController 映射（sessionId → controller） */
 const activeControllers = new Map<string, AbortController>()
 
-// ===== 错误重试机制 =====
-
-/** 重试配置 */
-const RETRY_CONFIG = {
-  /** 最大重试次数 */
-  maxAttempts: 3,
-  /** 初始延迟（秒） */
-  initialDelaySeconds: 1,
-  /** 延迟倍数（指数退避） */
-  delayMultiplier: 2,
-  /** 初始响应超时（毫秒） - 用于检测网络连接问题 */
-  initialResponseTimeoutMs: 30000, // 30 秒
-  /** 流式输出超时（毫秒） - 用于检测连接中断（仅当没有活跃工具时） */
-  streamingTimeoutMs: 60000, // 60 秒
-  /** 工具执行超时（毫秒） - 工具执行时的宽松超时 */
-  toolExecutionTimeoutMs: 300000, // 5 分钟
-} as const
-
 /**
- * 判断错误是否可重试
+ * 映射 SDK 错误代码到 TypedError
  *
- * 可重试的错误类型：
- * - 网络错误（连接失败、超时、DNS 解析失败）
- * - API 临时错误（429, 500, 502, 503, 504）
- * - MCP 服务器启动失败（stderr 包含 MCP 相关错误）
- * - SDK 无响应超时（我们主动触发的超时）
- *
- * 不可重试的错误：
- * - 认证错误（401, 403, Invalid API key）
- * - 参数错误（400, 422）
- * - 用户主动中止（AbortError）
- * - 工作区配置问题
+ * 参考 craft-agents-oss 的实现，将 SDK 的错误代码（如 authentication_failed）
+ * 映射为结构化的 TypedError，包含用户友好的提示和建议操作。
  */
-function isRetryableError(error: unknown, stderrOutput: string): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  const stack = error instanceof Error ? error.stack?.toLowerCase() || '' : ''
-
-  // 用户主动中止 - 不重试（注意：超时触发的 abort 会被标记为 isTimeoutAborted，不会走到这里）
-  if (message.includes('abort') && !message.includes('timeout')) return false
-
-  // 认证错误 - 不重试
-  if (
-    message.includes('401') ||
-    message.includes('403') ||
-    message.includes('unauthorized') ||
-    message.includes('forbidden') ||
-    message.includes('invalid api key') ||
-    message.includes('authentication')
-  ) {
-    return false
+function mapSDKErrorToTypedError(
+  errorCode: string,
+  detailedMessage: string,
+  originalError: string
+): TypedError {
+  // SDK 错误代码映射
+  const errorMap: Record<string, { code: ErrorCode; title: string; message: string; canRetry: boolean }> = {
+    'authentication_failed': {
+      code: 'invalid_api_key',
+      title: '认证失败',
+      message: '无法通过 API 认证，API Key 可能无效或已过期',
+      canRetry: true,
+    },
+    'billing_error': {
+      code: 'billing_error',
+      title: '账单错误',
+      message: '您的账户存在账单问题',
+      canRetry: false,
+    },
+    'rate_limited': {
+      code: 'rate_limited',
+      title: '请求频率限制',
+      message: '请求过于频繁，请稍后再试',
+      canRetry: true,
+    },
+    'overloaded': {
+      code: 'provider_error',
+      title: '服务繁忙',
+      message: 'API 服务当前过载，请稍后再试',
+      canRetry: true,
+    },
   }
 
-  // 参数错误 - 不重试
-  if (message.includes('400') || message.includes('422') || message.includes('invalid request')) {
-    return false
+  const mapped = errorMap[errorCode] || {
+    code: 'unknown_error' as ErrorCode,
+    title: '未知错误',
+    message: detailedMessage || errorCode,
+    canRetry: false,
   }
 
-  // 超时错误 - 重试（包括我们主动触发的超时）
-  if (message.includes('etimedout') || message.includes('timeout') || message.includes('无响应超时')) {
-    return true
+  return {
+    code: mapped.code,
+    title: mapped.title,
+    // 优先使用详细消息，回退到映射消息
+    message: detailedMessage || mapped.message,
+    actions: [
+      { key: 's', label: '设置', action: 'settings' },
+      ...(mapped.canRetry ? [{ key: 'r', label: '重试', action: 'retry' }] : []),
+    ],
+    canRetry: mapped.canRetry,
+    retryDelayMs: mapped.canRetry ? 1000 : undefined,
+    originalError,
   }
-
-  // 网络错误 - 重试
-  const networkErrors = [
-    'econnrefused',
-    'enotfound',
-    'eai_again',
-    'enetunreach',
-    'ehostunreach',
-    'fetch failed',
-    'socket hang up',
-    'network error',
-    'connect timeout',
-  ]
-  if (networkErrors.some((err) => message.includes(err) || stack.includes(err))) {
-    return true
-  }
-
-  // API 临时错误 - 重试
-  const retryableStatuses = ['429', '500', '502', '503', '504']
-  if (retryableStatuses.some((status) => message.includes(status))) {
-    return true
-  }
-
-  // MCP 服务器启动失败 - 重试（但限制次数，避免配置错误导致无限重试）
-  if (stderrOutput.toLowerCase().includes('mcp') && (
-    message.includes('spawn') ||
-    message.includes('enoent') ||
-    stderrOutput.includes('error')
-  )) {
-    return true
-  }
-
-  // 其他未知错误 - 默认不重试（保守策略）
-  return false
 }
 
-/**
- * 提取错误的简短描述（用于重试通知）
- */
-function getErrorReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
 
-  // 超时错误（优先检测，包括我们自己抛出的超时错误）
-  if (message.includes('ETIMEDOUT') || message.toLowerCase().includes('timeout') || message.includes('无响应超时')) {
-    return 'SDK 响应超时'
+
+/**
+ * 从 stderr 中提取 API 错误信息
+ *
+ * 解析类似这样的错误：
+ * "401 {\"error\":{\"message\":\"...\"}}"
+ * "API error: 400 Bad Request ..."
+ */
+function extractApiError(stderr: string): { statusCode: number; message: string } | null {
+  if (!stderr) return null
+
+  // 模式 1：JSON 错误格式 - "401 {...}"
+  const jsonMatch = stderr.match(/(\d{3})\s+(\{[^}]*"error"[^}]*\})/s)
+  if (jsonMatch) {
+    try {
+      const statusCode = parseInt(jsonMatch[1]!)
+      const errorObj = JSON.parse(jsonMatch[2]!)
+      const message = errorObj.error?.message || errorObj.message || '未知错误'
+      return { statusCode, message }
+    } catch {
+      // JSON 解析失败，继续尝试其他模式
+    }
   }
 
-  // 网络错误
-  if (message.toLowerCase().includes('econnrefused')) return '连接被拒绝'
-  if (message.toLowerCase().includes('enotfound')) return 'DNS 解析失败'
-  if (message.toLowerCase().includes('fetch failed')) return '网络请求失败'
+  // 模式 2：API error 格式 - "API error (attempt X/Y): 401 401 {...}"
+  const apiErrorMatch = stderr.match(/API error[^:]*:\s+(\d{3})\s+\d{3}\s+(\{.*?\})/s)
+  if (apiErrorMatch) {
+    try {
+      const statusCode = parseInt(apiErrorMatch[1]!)
+      const errorObj = JSON.parse(apiErrorMatch[2]!)
+      const message = errorObj.error?.message || errorObj.message || '未知错误'
+      return { statusCode, message }
+    } catch {
+      // JSON 解析失败
+    }
+  }
 
-  // API 错误
-  if (message.includes('429')) return 'API 速率限制'
-  if (message.includes('500')) return '服务器内部错误'
-  if (message.includes('502')) return '网关错误'
-  if (message.includes('503')) return '服务不可用'
-  if (message.includes('504')) return '网关超时'
+  // 模式 3：直接的状态码 + 消息
+  const simpleMatch = stderr.match(/(\d{3})[:\s]+(.+?)(?:\n|$)/i)
+  if (simpleMatch) {
+    const statusCode = parseInt(simpleMatch[1]!)
+    const message = simpleMatch[2]!.trim()
+    // 只有在状态码是有效的 HTTP 错误码时才返回
+    if (statusCode >= 400 && statusCode < 600) {
+      return { statusCode, message }
+    }
+  }
 
-  // 截断过长的消息
-  const maxLength = 50
-  return message.length > maxLength ? message.slice(0, maxLength) + '...' : message
-}
-
-/**
- * 延迟指定秒数（异步）
- */
-function delay(seconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+  return null
 }
 
 /**
@@ -359,9 +340,48 @@ function convertSDKMessage(
     case 'assistant': {
       const msg = message as SDKAssistantMessage
 
-      // SDK 级别错误
+      // SDK 级别错误（如 authentication_failed）
       if (msg.error) {
-        events.push({ type: 'error', message: msg.error.message || '未知 SDK 错误' })
+        let detailedMessage: string = msg.error.message
+        let originalError: string = msg.error.message
+        const errorType = msg.error.errorType
+
+        // 尝试从 content 中提取详细错误信息
+        try {
+          const content = msg.message?.content
+          if (Array.isArray(content) && content.length > 0) {
+            const textBlock = content.find((block: any) => block.type === 'text')
+            if (textBlock && 'text' in textBlock && typeof textBlock.text === 'string') {
+              const fullText: string = textBlock.text
+              originalError = fullText
+
+              // 提取 JSON 格式的 API 错误：API Error: 401 {"error":{"message":"..."}}
+              const apiErrorMatch = fullText.match(/API Error:\s*\d+\s*(\{.*\})/s)
+              if (apiErrorMatch && apiErrorMatch[1]) {
+                try {
+                  const apiErrorObj = JSON.parse(apiErrorMatch[1])
+                  if (apiErrorObj.error?.message) {
+                    detailedMessage = apiErrorObj.error.message
+                  }
+                } catch {
+                  // JSON 解析失败，使用完整文本
+                  detailedMessage = fullText
+                }
+              } else {
+                // 没有 JSON 格式，使用完整文本
+                detailedMessage = fullText
+              }
+            }
+          }
+        } catch (err) {
+          // 提取失败，使用原始 error 字段
+          console.error('[convertSDKMessage] 提取错误详情失败:', err)
+        }
+
+        // 映射到 TypedError（使用 errorType 作为错误代码）
+        const errorCode = errorType || 'unknown_error'
+        const typedError = mapSDKErrorToTypedError(errorCode, detailedMessage, originalError)
+        events.push({ type: 'typed_error', error: typedError })
         break
       }
 
@@ -605,89 +625,28 @@ function buildContextPrompt(sessionId: string, currentUserMessage: string): stri
 }
 
 /**
- * 运行 Agent 并流式推送事件到渲染进程（带自动重试）
+ * 运行 Agent 并流式推送事件到渲染进程
  *
- * 包装原 runAgent 函数，添加智能重试机制：
- * - 检测可恢复的错误（网络中断、API 临时故障、MCP 服务器启动失败）
- * - 指数退避重试（1s → 2s → 4s）
- * - 实时通知 UI 重试状态
- * - 达到上限后停止，避免无限重试
+ * 直接透传 API 错误，不做重试。保持架构简单，让上游 API 提供商的错误消息直达用户。
  */
-export async function runAgentWithRetry(
+export async function runAgent(
   input: AgentSendInput,
   webContents: WebContents,
-): Promise<void> {
-  let attempt = 0
-  const stderrChunks: string[] = []
-
-  while (attempt < RETRY_CONFIG.maxAttempts) {
-    attempt++
-
-    try {
-      // 尝试运行 Agent
-      await runAgentInternal(input, webContents, stderrChunks)
-      // 成功完成 - 退出重试循环
-      return
-    } catch (error) {
-      const stderrOutput = stderrChunks.join('').trim()
-      const isRetryable = isRetryableError(error, stderrOutput)
-
-      // 最后一次尝试失败 - 不再重试
-      if (attempt >= RETRY_CONFIG.maxAttempts) {
-        console.error(`[Agent 服务] 重试失败，已达到最大次数 (${RETRY_CONFIG.maxAttempts})`)
-        // 错误已在 runAgentInternal 中发送给 UI，这里直接返回
-        return
-      }
-
-      // 不可重试的错误 - 立即失败
-      if (!isRetryable) {
-        console.log(`[Agent 服务] 错误不可重试，停止尝试: ${error instanceof Error ? error.message : error}`)
-        return
-      }
-
-      // 可重试 - 延迟后重试
-      const delaySeconds = RETRY_CONFIG.initialDelaySeconds * Math.pow(RETRY_CONFIG.delayMultiplier, attempt - 1)
-      const reason = getErrorReason(error)
-
-      console.log(
-        `[Agent 服务] 遇到可恢复错误，准备重试 (${attempt}/${RETRY_CONFIG.maxAttempts}): ${reason}`,
-      )
-
-      // 发送重试事件给 UI
-      const retryEvent: AgentEvent = {
-        type: 'retrying',
-        attempt,
-        maxAttempts: RETRY_CONFIG.maxAttempts,
-        delaySeconds,
-        reason,
-      }
-      webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
-        sessionId: input.sessionId,
-        event: retryEvent,
-      } as AgentStreamEvent)
-
-      // 等待后重试
-      await delay(delaySeconds)
-
-      // 清空 stderr 缓冲区（避免上一次的错误干扰判断）
-      stderrChunks.length = 0
-    }
-  }
-}
-
-/**
- * 运行 Agent 并流式推送事件到渲染进程（内部实现）
- *
- * 原 runAgent 逻辑，改名为 runAgentInternal，供重试包装器调用。
- */
-async function runAgentInternal(
-  input: AgentSendInput,
-  webContents: WebContents,
-  stderrChunks: string[],
 ): Promise<void> {
   const { sessionId, userMessage, channelId, modelId, workspaceId } = input
+  const stderrChunks: string[] = []
 
-  // 0. Windows 平台：检查 Shell 环境可用性
+  // 0. 并发保护：检查是否已有正在运行的请求
+  if (activeControllers.has(sessionId)) {
+    console.warn(`[Agent 服务] 会话 ${sessionId} 正在处理中，拒绝新请求`)
+    webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+      sessionId,
+      error: '上一条消息仍在处理中，请稍候再试',
+    })
+    return
+  }
+
+  // 1. Windows 平台：检查 Shell 环境可用性
   if (process.platform === 'win32') {
     const runtimeStatus = getRuntimeStatus()
     const shellStatus = runtimeStatus?.shell
@@ -808,6 +767,7 @@ async function runAgentInternal(
   // 2.5 读取已有的 SDK session ID（用于 resume 衔接上下文）
   const sessionMeta = getAgentSessionMeta(sessionId)
   let existingSdkSessionId = sessionMeta?.sdkSessionId
+  console.log(`[Agent 服务] 会话元数据 resume 状态: sdkSessionId=${existingSdkSessionId || '无'}`)
 
   // 3. 持久化用户消息
   const userMsg: AgentMessage = {
@@ -842,12 +802,7 @@ async function runAgentInternal(
   let agentCwd: string | undefined
   let workspaceSlug: string | undefined
   let workspace: import('@proma/shared').AgentWorkspace | undefined
-  // 超时检测变量（声明在 try 之前，供 catch 块使用）
-  let lastActivityTime = Date.now()
-  let inactivityTimer: NodeJS.Timeout | null = null
-  let receivedFirstMessage = false // 是否已收到第一条消息（用于检测初始连接问题）
-  let activeToolCount = 0 // 当前正在执行的工具数量
-  let isTimeoutAborted = false // 是否因超时而中止（区分用户主动中止）
+  let isCompacting = false // 是否正在执行上下文压缩
 
   try {
     // 6. 动态导入 SDK（避免在 esbuild 打包时出问题）
@@ -894,19 +849,31 @@ async function runAgentInternal(
         ensurePluginManifest(ws.slug, ws.name)
 
         // 迁移兼容：旧会话在 workspace 级别 cwd 下创建，resume 在新 cwd 下会失败
-        // 检测：有 sdkSessionId 但 session 目录为空（刚创建）→ 清除 sdkSessionId，回填历史上下文
+        // 检测：session 目录完全为空（刚创建）→ 清除并回填历史
+        //
+        // 注意：SDK 不会在工作目录创建 .claude-agent/ 等可见标识文件，
+        // resume 机制基于 SDK 内部状态（可能在 ~/.claude/ 或内存中），
+        // 我们只需要确保不在空目录中尝试 resume（因为 cwd 迁移会导致文件路径变化）
         if (existingSdkSessionId) {
           try {
             const { readdirSync } = await import('node:fs')
             const contents = readdirSync(agentCwd)
+            console.log(`[Agent 服务] 检查 session 目录: ${agentCwd}, 文件数: ${contents.length}`)
+
+            // 只在目录完全为空时清除 sdkSessionId（说明是新创建或刚迁移的会话）
             if (contents.length === 0) {
               updateAgentSessionMeta(sessionId, { sdkSessionId: undefined })
               existingSdkSessionId = undefined
-              console.log(`[Agent 服务] 迁移: session 目录为空，清除 sdkSessionId，回填历史上下文`)
+              console.log(`[Agent 服务] 迁移: session 目录为空（新创建或迁移），清除 sdkSessionId`)
+            } else {
+              console.log(`[Agent 服务] 保留 sdkSessionId，将尝试 resume: ${existingSdkSessionId}`)
             }
-          } catch {
-            // 读取失败不影响主流程
+          } catch (error) {
+            console.warn('[Agent 服务] 读取 session 目录失败:', error)
+            // 读取失败不影响主流程，保留 sdkSessionId 尝试 resume
           }
+        } else {
+          console.log(`[Agent 服务] 无 sdkSessionId，将作为新会话启动（回填历史上下文）`)
         }
       }
     }
@@ -916,6 +883,7 @@ async function runAgentInternal(
     if (workspaceSlug) {
       const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
       for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
+        // 只加载已启用的服务器（用户已通过测试验证）
         if (!entry.enabled) continue
 
         if (entry.type === 'stdio' && entry.command) {
@@ -929,12 +897,17 @@ async function runAgentInternal(
             command: entry.command,
             ...(entry.args && entry.args.length > 0 && { args: entry.args }),
             ...(Object.keys(mergedEnv).length > 0 && { env: mergedEnv }),
+            // 容错配置：单个服务器启动失败不影响整个 SDK
+            required: false,
+            startup_timeout_sec: 30,
           }
         } else if ((entry.type === 'http' || entry.type === 'sse') && entry.url) {
           mcpServers[name] = {
             type: entry.type,
             url: entry.url,
             ...(entry.headers && Object.keys(entry.headers).length > 0 && { headers: entry.headers }),
+            // 容错配置
+            required: false,
           }
         }
       }
@@ -959,8 +932,10 @@ async function runAgentInternal(
         ? contextualMessage
         : buildContextPrompt(sessionId, contextualMessage)
 
-    if (finalPrompt !== contextualMessage) {
-      console.log(`[Agent 服务] 已回填历史上下文（无 resume）`)
+    if (existingSdkSessionId) {
+      console.log(`[Agent 服务] 使用 resume 模式，SDK session ID: ${existingSdkSessionId}`)
+    } else if (finalPrompt !== contextualMessage) {
+      console.log(`[Agent 服务] 无 resume，已回填历史上下文（最近 ${MAX_CONTEXT_MESSAGES} 条消息）`)
     }
 
     const queryIterator = sdk.query({
@@ -1002,59 +977,8 @@ async function runAgentInternal(
 
     console.log(`[Agent 服务] SDK query 已创建，开始遍历消息流...`)
 
-    // 智能超时检测：根据当前状态动态调整超时时间
-    lastActivityTime = Date.now()
-    receivedFirstMessage = false
-    activeToolCount = 0
-
-    const resetInactivityTimer = (): void => {
-      lastActivityTime = Date.now()
-      if (inactivityTimer) {
-        clearTimeout(inactivityTimer)
-      }
-
-      // 根据当前状态选择超时时间
-      let timeoutMs: number
-      let timeoutReason: string
-
-      if (!receivedFirstMessage) {
-        // 阶段 1：等待初始响应（检测网络连接问题）
-        timeoutMs = RETRY_CONFIG.initialResponseTimeoutMs
-        timeoutReason = '等待初始响应'
-      } else if (activeToolCount > 0) {
-        // 阶段 2：工具正在执行（允许长时间操作）
-        timeoutMs = RETRY_CONFIG.toolExecutionTimeoutMs
-        timeoutReason = `工具执行中 (${activeToolCount} 个活跃工具)`
-      } else {
-        // 阶段 3：流式输出中（检测连接中断）
-        timeoutMs = RETRY_CONFIG.streamingTimeoutMs
-        timeoutReason = '流式输出中'
-      }
-
-      inactivityTimer = setTimeout(() => {
-        const elapsed = Date.now() - lastActivityTime
-        if (elapsed >= timeoutMs && !controller.signal.aborted) {
-          console.warn(
-            `[Agent 服务] SDK 无响应超时 (${elapsed}ms, 限制: ${timeoutMs}ms, 状态: ${timeoutReason})，主动中止`,
-          )
-          isTimeoutAborted = true
-          controller.abort()
-        }
-      }, timeoutMs)
-    }
-
-    resetInactivityTimer()
-
     // 8. 遍历 SDK 消息流
     for await (const sdkMessage of queryIterator) {
-      // 标记已收到第一条消息
-      if (!receivedFirstMessage) {
-        receivedFirstMessage = true
-        console.log('[Agent 服务] 已收到初始响应')
-      }
-
-      // 重置超时计时器（收到新消息）
-      resetInactivityTimer()
 
       if (controller.signal.aborted) break
 
@@ -1113,11 +1037,13 @@ async function runAgentInternal(
           const evt: AgentEvent = { type: 'compact_complete' }
           webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event: evt } as AgentStreamEvent)
           accumulatedEvents.push(evt)
+          isCompacting = false
           console.log('[Agent 服务] 上下文压缩完成')
         } else if (sysMsg.subtype === 'status' && sysMsg.status === 'compacting') {
           const evt: AgentEvent = { type: 'compacting' }
           webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event: evt } as AgentStreamEvent)
           accumulatedEvents.push(evt)
+          isCompacting = true
           console.log('[Agent 服务] 上下文压缩中...')
         }
       }
@@ -1143,34 +1069,69 @@ async function runAgentInternal(
       }
 
       for (const event of agentEvents) {
+        // 检查 typed_error 事件 - 立即保存错误消息并退出
+        if (event.type === 'typed_error') {
+          // 先保存已累积的 assistant 内容（如果有）
+          if (accumulatedText || accumulatedEvents.length > 0) {
+            const assistantMsg: AgentMessage = {
+              id: randomUUID(),
+              role: 'assistant',
+              content: accumulatedText,
+              createdAt: Date.now(),
+              model: resolvedModel,
+              events: accumulatedEvents,
+            }
+            appendAgentMessage(sessionId, assistantMsg)
+          }
+
+          // 保存 TypedError 作为 status 消息
+          const errorMsg: AgentMessage = {
+            id: randomUUID(),
+            role: 'status',
+            content: event.error.title
+              ? `${event.error.title}: ${event.error.message}`
+              : event.error.message,
+            createdAt: Date.now(),
+            errorCode: event.error.code,
+            errorTitle: event.error.title,
+            errorDetails: event.error.details,
+            errorOriginal: event.error.originalError,
+            errorCanRetry: event.error.canRetry,
+            errorActions: event.error.actions,
+          }
+          appendAgentMessage(sessionId, errorMsg)
+          console.log(`[Agent 服务] 已保存 TypedError 消息: ${event.error.code} - ${event.error.title}`)
+
+          // 推送 typed_error 事件给渲染进程
+          webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event } as AgentStreamEvent)
+
+          // 更新会话索引
+          try {
+            updateAgentSessionMeta(sessionId, {})
+          } catch {
+            // 索引更新失败不影响主流程
+          }
+
+          // 清理 activeController（在发送 STREAM_COMPLETE 前）
+          activeControllers.delete(sessionId)
+
+          // 发送 STREAM_COMPLETE
+          webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
+
+          // 退出处理（错误后不应继续）
+          return
+        }
+
         // 累积文本
         if (event.type === 'text_delta') {
           accumulatedText += event.text
         }
         accumulatedEvents.push(event)
 
-        // 追踪工具执行状态（用于智能超时检测）
-        if (event.type === 'tool_start') {
-          activeToolCount++
-          console.log(`[Agent 服务] 工具开始执行: ${event.toolName} (活跃工具数: ${activeToolCount})`)
-          // 工具开始执行 - 切换到工具执行超时模式
-          resetInactivityTimer()
-        } else if (event.type === 'tool_result') {
-          activeToolCount = Math.max(0, activeToolCount - 1)
-          console.log(`[Agent 服务] 工具执行完成: ${event.toolName ?? '未知'} (剩余活跃工具: ${activeToolCount})`)
-          // 工具执行完成 - 如果没有其他工具了，切换回流式输出超时模式
-          resetInactivityTimer()
-        }
-
         // 推送给渲染进程
         const streamEvent: AgentStreamEvent = { sessionId, event }
         webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, streamEvent)
       }
-    }
-
-    // 清理超时计时器
-    if (inactivityTimer) {
-      clearTimeout(inactivityTimer)
     }
 
     // 9. 持久化 assistant 消息（包含完整文本和工具事件）
@@ -1193,6 +1154,9 @@ async function runAgentInternal(
       // 索引更新失败不影响主流程
     }
 
+    // 清理 activeController（在发送 STREAM_COMPLETE 前，确保后端准备好接受新请求）
+    activeControllers.delete(sessionId)
+
     webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
 
     // Proma 官方渠道对话完成后通知渲染进程刷新余额
@@ -1206,13 +1170,17 @@ async function runAgentInternal(
     // 使用 SDK 实际确认的模型，避免因默认模型与当前渠道不匹配导致标题生成失败。
     autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, webContents)
   } catch (error) {
-    // 清理超时计时器
-    if (inactivityTimer) {
-      clearTimeout(inactivityTimer)
+    // 打印完整的 stderr 用于诊断
+    const fullStderr = stderrChunks.join('').trim()
+    if (fullStderr) {
+      console.error(`[Agent 服务] 完整 stderr 输出 (${fullStderr.length} 字符):`)
+      console.error(fullStderr)
+    } else {
+      console.error(`[Agent 服务] stderr 为空`)
     }
 
     // 用户主动中止
-    if (controller.signal.aborted && !isTimeoutAborted) {
+    if (controller.signal.aborted) {
       console.log(`[Agent 服务] 会话 ${sessionId} 已被用户中止`)
 
       // 保存已累积的部分内容
@@ -1228,22 +1196,15 @@ async function runAgentInternal(
         appendAgentMessage(sessionId, partialMsg)
       }
 
+      // 清理 activeController
+      activeControllers.delete(sessionId)
+
       webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
       return
     }
 
-    // 超时情况：抛出可重试的错误
-    if (isTimeoutAborted) {
-      console.warn(`[Agent 服务] SDK 响应超时，准备重试`)
-      throw new Error('ETIMEDOUT: SDK 无响应超时')
-    }
-
     const errorMessage = error instanceof Error ? error.message : '未知错误'
-    const errorStack = error instanceof Error ? error.stack : undefined
     console.error(`[Agent 服务] 执行失败:`, error)
-
-    // 诊断信息：检查累积状态
-    console.log(`[Agent 服务][诊断] 累积状态 - 文本长度: ${accumulatedText.length}, 事件数: ${accumulatedEvents.length}`)
 
     // 保存已累积的部分内容（避免数据丢失）
     if (accumulatedText || accumulatedEvents.length > 0) {
@@ -1261,65 +1222,65 @@ async function runAgentInternal(
       } catch (saveError) {
         console.error('[Agent 服务] ✗ 保存部分内容失败:', saveError)
       }
-    } else {
-      console.log('[Agent 服务] 无部分内容可保存（累积为空）')
     }
 
-    // 构建包含详细诊断信息的错误消息
+    // 从 stderr 提取 API 原始错误并直接展示
     const stderrOutput = stderrChunks.join('').trim()
-    const diagnosticParts: string[] = []
+    const apiError = extractApiError(stderrOutput)
 
-    // 主错误消息
-    diagnosticParts.push(`错误: ${errorMessage}`)
-
-    // stderr 输出（如果有）
-    if (stderrOutput) {
-      // 提取最后 1000 字符，通常包含最相关的错误信息
-      const relevantStderr = stderrOutput.slice(-1000)
-      diagnosticParts.push(`\nStderr 输出:\n${relevantStderr}`)
+    let userFacingError: string
+    if (apiError) {
+      // 直接展示 API 原始错误，不做任何转换
+      userFacingError = `API 错误 (${apiError.statusCode}):\n${apiError.message}`
+    } else {
+      // 无法解析 API 错误，显示基本错误信息
+      userFacingError = errorMessage
     }
 
-    // 运行环境信息（帮助诊断）
-    diagnosticParts.push('\n运行环境:')
-    if (agentExec) {
-      diagnosticParts.push(`- 运行时: ${agentExec.type} (${agentExec.path})`)
-    }
-    diagnosticParts.push(`- 模型: ${modelId || defaultModel}`)
-    diagnosticParts.push(`- 平台: ${process.platform} ${process.arch}`)
-    if (workspaceSlug && workspace) {
-      diagnosticParts.push(`- 工作区: ${workspace.name} (${agentCwd || '未知'})`)
-    }
-    if (existingSdkSessionId) {
-      diagnosticParts.push(`- Resume: ${existingSdkSessionId}`)
-    }
-
-    // 堆栈跟踪（仅在非生产环境或开发模式下）
-    if (errorStack && (!app.isPackaged || process.env.NODE_ENV === 'development')) {
-      diagnosticParts.push(`\n堆栈跟踪:\n${errorStack.slice(0, 500)}`)
+    // 保存错误消息到 JSONL（重要：确保错误信息持久化）
+    try {
+      const errorMsg: AgentMessage = {
+        id: randomUUID(),
+        role: 'status',
+        content: userFacingError,
+        createdAt: Date.now(),
+        errorCode: 'unknown_error',
+        errorTitle: '执行错误',
+        errorOriginal: error instanceof Error ? error.stack : String(error),
+      }
+      appendAgentMessage(sessionId, errorMsg)
+      console.log(`[Agent 服务] ✓ 已保存错误消息到 JSONL`)
+    } catch (saveError) {
+      console.error('[Agent 服务] ✗ 保存错误消息失败:', saveError)
     }
 
-    const detailedError = diagnosticParts.join('\n')
+    // 发送错误给 UI
+    webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+      sessionId,
+      error: userFacingError,
+    })
 
-    // 完整错误信息输出到控制台，便于调试
-    console.error('[Agent 服务] 详细错误信息:', detailedError)
+    // 清理 activeController（在发送 STREAM_COMPLETE 前）
+    activeControllers.delete(sessionId)
 
-    // 如果是 resume 失败，清除 sdkSessionId 以便下次重新开始
-    if (existingSdkSessionId) {
+    // 发送 STREAM_COMPLETE（确保前端知道流式已结束）
+    webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId })
+
+    // 根据错误类型决定是否保留 sdkSessionId
+    // API 配置错误（400/401/403/404）保留，服务器错误（500+）清除
+    const shouldClearSession = !apiError || apiError.statusCode >= 500
+
+    if (existingSdkSessionId && shouldClearSession) {
       try {
         updateAgentSessionMeta(sessionId, { sdkSessionId: undefined })
-        console.log(`[Agent 服务] 已清除失效的 sdkSessionId，下次发送将重新开始`)
+        console.log(`[Agent 服务] 已清除失效的 sdkSessionId`)
       } catch {
         // 清理失败不影响错误流
       }
+    } else if (existingSdkSessionId && !shouldClearSession) {
+      console.log(`[Agent 服务] 保留 sdkSessionId (API 错误 ${apiError?.statusCode})`)
     }
 
-    // 发送错误给 UI（即使即将重试，也让用户先看到错误）
-    webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
-      sessionId,
-      error: detailedError,
-    })
-
-    // 抛出异常供外层重试逻辑捕获
     throw error
   } finally {
     activeControllers.delete(sessionId)

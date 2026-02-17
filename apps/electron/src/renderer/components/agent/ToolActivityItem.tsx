@@ -44,12 +44,12 @@ import {
 // ===== 尺寸配置 =====
 
 const SIZE = {
-  icon: 'size-3',
-  spinner: 'size-2.5',
-  row: 'py-[3px]',
+  icon: 'size-2.5',
+  spinner: 'size-2',
+  row: 'py-[2px]',
   staggerLimit: 10,
   autoScrollThreshold: 6,
-  rowHeight: 24,
+  rowHeight: 22,
 } as const
 
 // ===== 工具图标映射 =====
@@ -295,7 +295,7 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
   return (
     <div
       className={cn(
-        'group/row flex items-center gap-2 text-[13px] rounded-md',
+        'group/row flex items-center gap-1.5 text-[12px] rounded-md',
         SIZE.row,
         animate && 'animate-in fade-in slide-in-from-left-2 duration-200 fill-mode-both',
       )}
@@ -372,9 +372,12 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, de
     ? parent.input.subagent_type
     : undefined
 
+  // 优先使用 description，回退到 prompt
   const description = typeof parent.input.description === 'string'
     ? parent.input.description
-    : parent.intent ?? parent.displayName ?? 'Task'
+    : typeof parent.input.prompt === 'string'
+      ? parent.input.prompt
+      : parent.intent ?? parent.displayName ?? 'Task'
 
   const delay = animate && index < SIZE.staggerLimit ? `${index * 30}ms` : '0ms'
 
@@ -390,22 +393,24 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, de
         type="button"
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          'w-full flex items-center gap-2 pl-1 text-left text-[13px] rounded-md hover:text-foreground transition-colors cursor-pointer',
+          'w-full flex items-center gap-1.5 pl-1 text-left text-[12px] rounded-md hover:text-foreground transition-colors cursor-pointer',
           SIZE.row,
         )}
       >
         <ChevronRight
           className={cn(
-            'size-3 text-muted-foreground/60 transition-transform duration-150',
+            'size-2.5 text-muted-foreground/60 transition-transform duration-150',
             expanded && 'rotate-90',
           )}
         />
 
         <StatusIcon status={derivedStatus} toolName="Task" />
 
-        <span className="shrink-0 px-1.5 py-0.5 rounded bg-background shadow-sm text-[10px] font-medium leading-none">
-          {subagentType ?? 'Task'}
-        </span>
+        {subagentType && (
+          <span className="shrink-0 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[9px] font-medium leading-none">
+            {subagentType}
+          </span>
+        )}
 
         <span className="truncate flex-1 min-w-0 text-foreground/70">{description}</span>
 

@@ -279,7 +279,10 @@ function detectBackgroundEvents(
   if (entry.name === 'Task' && !isError && resultStr && entry.input.run_in_background === true) {
     const agentIdMatch = resultStr.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
     if (agentIdMatch?.[1]) {
-      const intentValue = entry.input._intent
+      // 优先使用 _intent，回退到 description（任务名称）
+      const intentValue = (typeof entry.input._intent === 'string' && entry.input._intent)
+        || (typeof entry.input.description === 'string' && entry.input.description)
+        || undefined
       events.push({
         type: 'task_backgrounded',
         toolUseId,

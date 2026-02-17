@@ -38,6 +38,9 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  GetTaskOutputInput,
+  GetTaskOutputResult,
+  StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
   WorkspaceCapabilities,
@@ -268,6 +271,14 @@ export interface ElectronAPI {
   /** 中止 Agent 执行 */
   stopAgent: (sessionId: string) => Promise<void>
 
+  // ===== Agent 后台任务管理 =====
+
+  /** 获取任务输出 */
+  getTaskOutput: (input: GetTaskOutputInput) => Promise<GetTaskOutputResult>
+
+  /** 停止任务 */
+  stopTask: (input: StopTaskInput) => Promise<void>
+
   // ===== Agent 工作区管理相关 =====
 
   /** 获取 Agent 工作区列表 */
@@ -292,6 +303,9 @@ export interface ElectronAPI {
 
   /** 保存工作区 MCP 配置 */
   saveWorkspaceMcpConfig: (workspaceSlug: string, config: WorkspaceMcpConfig) => Promise<void>
+
+  /** 测试 MCP 服务器连接 */
+  testMcpServer: (name: string, entry: import('@proma/shared').McpServerEntry) => Promise<{ success: boolean; message: string }>
 
   /** 获取工作区 Skill 列表 */
   getWorkspaceSkills: (workspaceSlug: string) => Promise<SkillMeta[]>
@@ -739,6 +753,15 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_AGENT, sessionId)
   },
 
+  // Agent 后台任务管理
+  getTaskOutput: (input: GetTaskOutputInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_TASK_OUTPUT, input)
+  },
+
+  stopTask: (input: StopTaskInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_TASK, input)
+  },
+
   // Agent 工作区管理
   listAgentWorkspaces: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_WORKSPACES)
@@ -767,6 +790,10 @@ const electronAPI: ElectronAPI = {
 
   saveWorkspaceMcpConfig: (workspaceSlug: string, config: WorkspaceMcpConfig) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SAVE_MCP_CONFIG, workspaceSlug, config)
+  },
+
+  testMcpServer: (name: string, entry: import('@proma/shared').McpServerEntry) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TEST_MCP_SERVER, name, entry) as Promise<{ success: boolean; message: string }>
   },
 
   getWorkspaceSkills: (workspaceSlug: string) => {

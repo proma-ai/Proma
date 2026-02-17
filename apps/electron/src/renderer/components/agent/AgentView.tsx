@@ -24,6 +24,7 @@ import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
 import {
   currentAgentSessionIdAtom,
   currentAgentMessagesAtom,
@@ -86,6 +87,14 @@ export function AgentView(): React.ReactElement {
   const [isUploadingFolder, setIsUploadingFolder] = React.useState(false)
   const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
+
+  // 后台任务管理
+  const {
+    tasks: backgroundTasks,
+    addTask,
+    updateTaskProgress,
+    removeTask,
+  } = useBackgroundTasks(currentSessionId || '')
 
   // 当前会话 ID ref（避免闭包捕获旧值）
   const currentSessionIdRef = React.useRef(currentSessionId)
@@ -174,13 +183,53 @@ export function AgentView(): React.ReactElement {
         map.delete(sessionId)
         return map
       })
+
+      // 清理后台任务（SDK 退出时，所有后台任务都应停止）
+      if (sessionId === currentSessionId && backgroundTasks.length > 0) {
+        console.log(`[AgentView] 清理 ${backgroundTasks.length} 个后台任务`)
+        // 逐个移除所有后台任务
+        backgroundTasks.forEach((task) => {
+          removeTask(task.toolUseId)
+        })
+      }
     }
 
     const cleanupEvent = window.electronAPI.onAgentStreamEvent(
       (streamEvent: AgentStreamEvent) => {
-        updateState(streamEvent.sessionId, (prev) =>
-          applyAgentEvent(prev, streamEvent.event)
-        )
+        const { sessionId, event } = streamEvent
+
+        // 应用事件到流式状态
+        updateState(sessionId, (prev) => applyAgentEvent(prev, event))
+
+        // 处理后台任务事件
+        if (event.type === 'task_backgrounded') {
+          addTask({
+            id: event.taskId,
+            type: 'agent',
+            toolUseId: event.toolUseId,
+            startTime: Date.now(),
+            intent: event.intent,
+          })
+        } else if (event.type === 'task_progress') {
+          updateTaskProgress(event.toolUseId, event.elapsedSeconds)
+        } else if (event.type === 'shell_backgrounded') {
+          addTask({
+            id: event.shellId,
+            type: 'shell',
+            toolUseId: event.toolUseId,
+            startTime: Date.now(),
+            intent: event.command || event.intent,
+          })
+        } else if (event.type === 'tool_result') {
+          // 工具完成时，移除对应的后台任务
+          removeTask(event.toolUseId)
+        } else if (event.type === 'shell_killed') {
+          // Shell 被杀死时，移除任务
+          const task = backgroundTasks.find((t) => t.id === event.shellId)
+          if (task) {
+            removeTask(task.toolUseId)
+          }
+        }
       }
     )
 
@@ -222,7 +271,9 @@ export function AgentView(): React.ReactElement {
           return map
         })
 
-        const finalize = (): void => removeState(data.sessionId)
+        // 改进：不再调用 removeState()
+        // retrying 状态由 retry_failed 事件控制
+        // 只重新加载消息，保留流式状态
 
         if (data.sessionId === currentSessionIdRef.current) {
           console.log('[AgentView][诊断] 错误发生在当前会话，重新加载消息...')
@@ -231,15 +282,12 @@ export function AgentView(): React.ReactElement {
             .then((messages) => {
               console.log(`[AgentView][诊断] 已加载 ${messages.length} 条消息`)
               setCurrentMessages(messages)
-              finalize()
             })
             .catch((error) => {
               console.error('[AgentView][诊断] 加载消息失败:', error)
-              finalize()
             })
         } else {
           console.log('[AgentView][诊断] 错误发生在后台会话，不重新加载')
-          finalize()
         }
       }
     )
@@ -258,7 +306,7 @@ export function AgentView(): React.ReactElement {
       cleanupError()
       cleanupTitleUpdated()
     }
-  }, [setStreamingStates, setCurrentMessages, setAgentSessions, setAgentStreamErrors])
+  }, [setStreamingStates, setCurrentMessages, setAgentSessions, setAgentStreamErrors, addTask, updateTaskProgress, removeTask, backgroundTasks])
 
   // 自动发送 pending prompt（从设置页"对话完成配置"触发）
   React.useEffect(() => {
@@ -688,52 +736,6 @@ export function AgentView(): React.ReactElement {
 
         {/* 消息区域 */}
         <AgentMessages />
-
-        {/* 错误提示 */}
-        {agentError && (
-          <div className="mx-4 mb-2 rounded-lg bg-destructive/10 border border-destructive/20">
-            <div className="px-4 py-2.5 flex items-start gap-2">
-              <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-destructive mb-1">Agent 执行错误</div>
-                <pre className="text-xs text-destructive/90 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[300px] overflow-y-auto">
-                  {agentError}
-                </pre>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-destructive"
-                      onClick={handleCopyError}
-                    >
-                      {errorCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
-                    <p>{errorCopied ? '已复制' : '复制错误信息'}</p>
-                  </TooltipContent>
-                </Tooltip>
-                <button
-                  type="button"
-                  className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-destructive"
-                  onClick={() => {
-                    if (!currentSessionId) return
-                    setAgentStreamErrors((prev) => {
-                      const map = new Map(prev)
-                      map.delete(currentSessionId)
-                      return map
-                    })
-                    setErrorCopied(false)
-                  }}
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* 拖拽文件夹警告 */}
         {dragFolderWarning && (

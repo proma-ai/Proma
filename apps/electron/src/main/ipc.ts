@@ -32,6 +32,9 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  GetTaskOutputInput,
+  GetTaskOutputResult,
+  StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
   WorkspaceCapabilities,
@@ -86,7 +89,7 @@ import {
   updateAgentSessionMeta,
   deleteAgentSession,
 } from './lib/agent-session-manager'
-import { runAgentWithRetry, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
 import {
   listAgentWorkspaces,
@@ -601,6 +604,19 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 测试 MCP 服务器连接
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TEST_MCP_SERVER,
+    async (_, name: string, entry: import('@proma/shared').McpServerEntry): Promise<{ success: boolean; message: string }> => {
+      const { validateMcpServer } = await import('./lib/mcp-validator')
+      const result = await validateMcpServer(name, entry)
+      return {
+        success: result.valid,
+        message: result.valid ? '连接成功' : (result.reason || '连接失败'),
+      }
+    }
+  )
+
   // 获取工作区 Skill 列表
   ipcMain.handle(
     AGENT_IPC_CHANNELS.GET_SKILLS,
@@ -617,11 +633,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 发送 Agent 消息（触发 Agent SDK 流式响应，带自动重试）
+  // 发送 Agent 消息（触发 Agent SDK 流式响应）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {
-      await runAgentWithRetry(input, event.sender)
+      await runAgent(input, event.sender)
     }
   )
 
@@ -630,6 +646,51 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.STOP_AGENT,
     async (_, sessionId: string): Promise<void> => {
       stopAgent(sessionId)
+    }
+  )
+
+  // ===== Agent 后台任务管理 =====
+
+  // 获取任务输出（保留接口，供未来扩展）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_TASK_OUTPUT,
+    async (_, input: GetTaskOutputInput): Promise<GetTaskOutputResult> => {
+      try {
+        // TODO: 实现通过 SDK 的 TaskOutput 获取任务输出
+        // const sdk = AgentService.getSDKInstance()
+        // if (!sdk) throw new Error('Agent SDK 未初始化')
+        // const output = await sdk.getTaskOutput(input.taskId, { block: input.block ?? false })
+
+        console.warn('[IPC] GET_TASK_OUTPUT: 当前版本暂未实现，返回空输出')
+        return {
+          output: '',
+          isComplete: false,
+        }
+      } catch (error) {
+        console.error('[IPC] 获取任务输出失败:', error)
+        throw error
+      }
+    }
+  )
+
+  // 停止任务
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.STOP_TASK,
+    async (_, input: StopTaskInput): Promise<void> => {
+      try {
+        if (input.type === 'shell') {
+          // Shell 任务通过 killShell 停止
+          // TODO: 实现 killShell 调用（需要在 agent-service 中暴露）
+          console.warn('[IPC] STOP_TASK: Shell 任务停止功能待实现')
+        } else {
+          // Agent 任务目前没有直接停止机制
+          // 可以通过 stopAgent() 停止整个会话
+          console.warn('[IPC] STOP_TASK: Agent 任务暂不支持单独停止')
+        }
+      } catch (error) {
+        console.error('[IPC] 停止任务失败:', error)
+        throw error
+      }
     }
   )
 

@@ -6,7 +6,8 @@
  */
 
 import { atom } from 'jotai'
-import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile } from '@proma/shared'
+import { atomFamily } from 'jotai/utils'
+import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt } from '@proma/shared'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -46,12 +47,16 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
-  /** 重试状态 */
+  /** 重试状态（扩展版） */
   retrying?: {
-    attempt: number
+    /** 当前第几次尝试 */
+    currentAttempt: number
+    /** 最大尝试次数 */
     maxAttempts: number
-    delaySeconds: number
-    reason: string
+    /** 重试历史记录（按时间顺序） */
+    history: RetryAttempt[]
+    /** 是否已失败 */
+    failed: boolean
   }
 }
 
@@ -274,7 +279,7 @@ export function applyAgentEvent(
         ...prev,
         toolActivities: prev.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
-            ? { ...t, isBackground: true, taskId: event.taskId }
+            ? { ...t, isBackground: true, taskId: event.taskId, done: true }
             : t
         ),
       }
@@ -294,7 +299,7 @@ export function applyAgentEvent(
         ...prev,
         toolActivities: prev.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
-            ? { ...t, isBackground: true, shellId: event.shellId }
+            ? { ...t, isBackground: true, shellId: event.shellId, done: true }
             : t
         ),
       }
@@ -303,9 +308,17 @@ export function applyAgentEvent(
       return prev
 
     case 'complete':
-      return { ...prev, running: false }
+      // 成功完成 - 清除 retrying
+      return { ...prev, running: false, retrying: undefined }
+
+    case 'typed_error':
+      // 处理类型化错误（TypedError）
+      // 停止运行，清除重试状态
+      return { ...prev, running: false, retrying: undefined }
 
     case 'error':
+      // 改进：error 事件不再清除 retrying 状态
+      // retrying 状态由专用事件控制
       return { ...prev, running: false }
 
     case 'usage_update':
@@ -322,15 +335,49 @@ export function applyAgentEvent(
       return { ...prev, isCompacting: false }
 
     case 'retrying':
+      // 向后兼容：保留原有的简单 retrying 事件
+      return {
+        ...prev,
+        retrying: prev.retrying ?? {
+          currentAttempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          history: [],
+          failed: false,
+        },
+      }
+
+    case 'retry_attempt': {
+      // 新增：记录详细的重试尝试
+      const currentHistory = prev.retrying?.history ?? []
       return {
         ...prev,
         retrying: {
-          attempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          delaySeconds: event.delaySeconds,
-          reason: event.reason,
+          currentAttempt: event.attemptData.attempt,
+          maxAttempts: prev.retrying?.maxAttempts ?? 3,
+          history: [...currentHistory, event.attemptData],
+          failed: false,
         },
       }
+    }
+
+    case 'retry_cleared':
+      // 新增：重试成功，清除状态
+      return { ...prev, retrying: undefined }
+
+    case 'retry_failed': {
+      // 新增：重试失败，标记为 failed 但保留历史
+      const finalHistory = prev.retrying?.history ?? []
+      return {
+        ...prev,
+        running: false,
+        retrying: {
+          currentAttempt: event.finalAttempt.attempt,
+          maxAttempts: prev.retrying?.maxAttempts ?? 3,
+          history: [...finalHistory, event.finalAttempt],
+          failed: true,
+        },
+      }
+    }
 
     default:
       return prev
@@ -395,4 +442,36 @@ export const currentAgentSessionDraftAtom = atom(
       return map
     })
   }
+)
+
+// ===== 后台任务管理 =====
+
+/**
+ * 后台任务数据结构
+ *
+ * 用于 ActiveTasksBar 显示运行中的 Agent 任务和 Shell 任务。
+ */
+export interface BackgroundTask {
+  /** 任务或 Shell ID */
+  id: string
+  /** 任务类型 */
+  type: 'agent' | 'shell'
+  /** 关联的工具调用 ID（用于滚动定位到 ToolActivityItem） */
+  toolUseId: string
+  /** 任务开始时间戳 */
+  startTime: number
+  /** 已耗时（秒） */
+  elapsedSeconds: number
+  /** 任务意图/描述 */
+  intent?: string
+}
+
+/**
+ * 后台任务列表原子家族
+ *
+ * 按 sessionId 隔离，每个会话独立管理后台任务。
+ * 任务完成后从列表中移除（只显示运行中任务）。
+ */
+export const backgroundTasksAtomFamily = atomFamily((sessionId: string) =>
+  atom<BackgroundTask[]>([])
 )
