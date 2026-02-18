@@ -45,6 +45,11 @@ import { getAgentWorkspacePath, getAgentSessionWorkspacePath } from './config-pa
 import { getRuntimeStatus } from './runtime-init'
 import { getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
 import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-builder'
+import { permissionService } from './agent-permission-service'
+import { askUserService } from './agent-ask-user-service'
+import { getWorkspacePermissionMode } from './agent-workspace-manager'
+import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@proma/shared'
+import { SAFE_TOOLS } from '@proma/shared'
 
 /** 活跃的 AbortController 映射（sessionId → controller） */
 const activeControllers = new Map<string, AbortController>()
@@ -938,6 +943,41 @@ export async function runAgent(
       console.log(`[Agent 服务] 无 resume，已回填历史上下文（最近 ${MAX_CONTEXT_MESSAGES} 条消息）`)
     }
 
+    // 10. 获取权限模式并创建 canUseTool 回调
+    const permissionMode: PromaPermissionMode = workspaceSlug
+      ? getWorkspacePermissionMode(workspaceSlug)
+      : 'smart'
+    console.log(`[Agent 服务] 权限模式: ${permissionMode}`)
+
+    const canUseTool = permissionMode !== 'auto'
+      ? permissionService.createCanUseTool(
+          sessionId,
+          permissionMode,
+          (request: PermissionRequest) => {
+            // 发送权限请求到渲染进程
+            webContents.send(AGENT_IPC_CHANNELS.PERMISSION_REQUEST, {
+              sessionId,
+              request,
+            })
+            // 同时作为 AgentEvent 推送（用于消息流中显示）
+            const event: AgentEvent = { type: 'permission_request', request }
+            webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event } as AgentStreamEvent)
+          },
+          // AskUserQuestion 交互式问答处理器
+          (sid, input, signal, sendAskUser) => askUserService.handleAskUserQuestion(sid, input, signal, sendAskUser),
+          // AskUser IPC 发送回调
+          (request: AskUserRequest) => {
+            webContents.send(AGENT_IPC_CHANNELS.ASK_USER_REQUEST, {
+              sessionId,
+              request,
+            })
+            // 同时作为 AgentEvent 推送
+            const event: AgentEvent = { type: 'ask_user_request', request }
+            webContents.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event } as AgentStreamEvent)
+          },
+        )
+      : undefined
+
     const queryIterator = sdk.query({
       prompt: finalPrompt,
       options: {
@@ -946,8 +986,14 @@ export async function runAgent(
         executableArgs,
         model: modelId || defaultModel,
         maxTurns: 30,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
+        // 权限模式：auto 使用 bypass，其他使用 default
+        permissionMode: permissionMode === 'auto' ? 'bypassPermissions' : 'default',
+        allowDangerouslySkipPermissions: permissionMode === 'auto',
+        // 自定义权限处理器（非 auto 模式才注入）
+        ...(canUseTool && { canUseTool }),
+        // 只读工具白名单（SDK 级别，跳过 canUseTool 回调）
+        // 注意：AskUserQuestion 不在 SAFE_TOOLS 中，会走 canUseTool 以展示交互式 UI
+        ...(permissionMode !== 'auto' && { allowedTools: [...SAFE_TOOLS] }),
         includePartialMessages: true,
         cwd: agentCwd,
         abortController: controller,
@@ -1284,6 +1330,10 @@ export async function runAgent(
     throw error
   } finally {
     activeControllers.delete(sessionId)
+    // 清理权限服务中的待处理请求
+    permissionService.clearSessionPending(sessionId)
+    // 清理 AskUser 服务中的待处理请求
+    askUserService.clearSessionPending(sessionId)
   }
 }
 

@@ -44,6 +44,9 @@ import type {
   SystemProxyDetectResult,
   GitHubRelease,
   GitHubReleaseListOptions,
+  PermissionResponse,
+  PromaPermissionMode,
+  AskUserResponse,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -90,6 +93,8 @@ import {
   deleteAgentSession,
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
+import { permissionService } from './lib/agent-permission-service'
+import { askUserService } from './lib/agent-ask-user-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
 import {
   listAgentWorkspaces,
@@ -103,6 +108,8 @@ import {
   getWorkspaceCapabilities,
   getAgentWorkspace,
   deleteWorkspaceSkill,
+  getWorkspacePermissionMode,
+  setWorkspacePermissionMode,
 } from './lib/agent-workspace-manager'
 import {
   getLatestRelease,
@@ -537,6 +544,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_SESSION,
     async (_, id: string): Promise<void> => {
+      // 清理权限服务中该会话的白名单
+      permissionService.clearSessionWhitelist(id)
+      permissionService.clearSessionPending(id)
+      // 清理 AskUser 服务中的待处理请求
+      askUserService.clearSessionPending(id)
       return deleteAgentSession(id)
     }
   )
@@ -657,10 +669,6 @@ export function registerIpcHandlers(): void {
     async (_, input: GetTaskOutputInput): Promise<GetTaskOutputResult> => {
       try {
         // TODO: 实现通过 SDK 的 TaskOutput 获取任务输出
-        // const sdk = AgentService.getSDKInstance()
-        // if (!sdk) throw new Error('Agent SDK 未初始化')
-        // const output = await sdk.getTaskOutput(input.taskId, { block: input.block ?? false })
-
         console.warn('[IPC] GET_TASK_OUTPUT: 当前版本暂未实现，返回空输出')
         return {
           output: '',
@@ -673,23 +681,76 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== Agent 权限系统 =====
+
+  // 响应权限请求
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.PERMISSION_RESPOND,
+    async (event, response: PermissionResponse): Promise<void> => {
+      const { requestId, behavior, alwaysAllow } = response
+      const sessionId = permissionService.respondToPermission(requestId, behavior, alwaysAllow)
+
+      // 发送 permission_resolved 事件给渲染进程
+      if (sessionId) {
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          event: { type: 'permission_resolved', requestId, behavior },
+        })
+      }
+    }
+  )
+
   // 停止任务
   ipcMain.handle(
     AGENT_IPC_CHANNELS.STOP_TASK,
     async (_, input: StopTaskInput): Promise<void> => {
       try {
         if (input.type === 'shell') {
-          // Shell 任务通过 killShell 停止
-          // TODO: 实现 killShell 调用（需要在 agent-service 中暴露）
           console.warn('[IPC] STOP_TASK: Shell 任务停止功能待实现')
         } else {
-          // Agent 任务目前没有直接停止机制
-          // 可以通过 stopAgent() 停止整个会话
           console.warn('[IPC] STOP_TASK: Agent 任务暂不支持单独停止')
         }
       } catch (error) {
         console.error('[IPC] 停止任务失败:', error)
         throw error
+      }
+    }
+  )
+
+  // 获取工作区权限模式
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_PERMISSION_MODE,
+    async (_, workspaceSlug: string): Promise<PromaPermissionMode> => {
+      return getWorkspacePermissionMode(workspaceSlug)
+    }
+  )
+
+  // 设置工作区权限模式
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_PERMISSION_MODE,
+    async (_, workspaceSlug: string, mode: PromaPermissionMode): Promise<void> => {
+      const validModes = new Set<string>(['auto', 'smart', 'supervised'])
+      if (!validModes.has(mode)) {
+        throw new Error(`无效的权限模式: ${mode}`)
+      }
+      setWorkspacePermissionMode(workspaceSlug, mode)
+    }
+  )
+
+  // ===== AskUserQuestion 交互式问答 =====
+
+  // 响应 AskUser 请求
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ASK_USER_RESPOND,
+    async (event, response: AskUserResponse): Promise<void> => {
+      const { requestId, answers } = response
+      const sessionId = askUserService.respondToAskUser(requestId, answers)
+
+      if (sessionId) {
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          event: { type: 'ask_user_resolved', requestId },
+        })
       }
     }
   )

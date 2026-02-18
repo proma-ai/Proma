@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt } from '@proma/shared'
+import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest } from '@proma/shared'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -47,6 +47,8 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
+  /** 流式开始时间戳（用于思考计时持久化） */
+  startedAt?: number
   /** 重试状态（扩展版） */
   retrying?: {
     /** 当前第几次尝试 */
@@ -173,6 +175,63 @@ export const workspaceCapabilitiesVersionAtom = atom(0)
 /** 工作区文件版本号 — 文件变化时自增，触发文件浏览器重新加载 */
 export const workspaceFilesVersionAtom = atom(0)
 
+// ===== 权限系统 Atoms =====
+
+/** 当前工作区权限模式 */
+export const agentPermissionModeAtom = atom<PromaPermissionMode>('smart')
+
+/** 待处理的权限请求 Map — 以 sessionId 为 key，切换会话时保留状态 */
+const _allPendingPermissionRequestsAtom = atom<Map<string, readonly PermissionRequest[]>>(new Map())
+
+type PermissionRequestsUpdate = readonly PermissionRequest[] | ((prev: readonly PermissionRequest[]) => readonly PermissionRequest[])
+
+/** 当前会话的权限请求队列（派生读写原子） */
+export const pendingPermissionRequestsAtom = atom(
+  (get): readonly PermissionRequest[] => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return []
+    return get(_allPendingPermissionRequestsAtom).get(currentId) ?? []
+  },
+  (get, set, update: PermissionRequestsUpdate) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return
+    set(_allPendingPermissionRequestsAtom, (prev) => {
+      const map = new Map(prev)
+      const current = map.get(currentId) ?? []
+      const newValue = typeof update === 'function' ? update(current) : update
+      if (newValue.length === 0) map.delete(currentId)
+      else map.set(currentId, newValue)
+      return map
+    })
+  }
+)
+
+/** 待处理的 AskUser 请求 Map — 以 sessionId 为 key，切换会话时保留状态 */
+const _allPendingAskUserRequestsAtom = atom<Map<string, readonly AskUserRequest[]>>(new Map())
+
+type AskUserRequestsUpdate = readonly AskUserRequest[] | ((prev: readonly AskUserRequest[]) => readonly AskUserRequest[])
+
+/** 当前会话的 AskUser 请求队列（派生读写原子） */
+export const pendingAskUserRequestsAtom = atom(
+  (get): readonly AskUserRequest[] => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return []
+    return get(_allPendingAskUserRequestsAtom).get(currentId) ?? []
+  },
+  (get, set, update: AskUserRequestsUpdate) => {
+    const currentId = get(currentAgentSessionIdAtom)
+    if (!currentId) return
+    set(_allPendingAskUserRequestsAtom, (prev) => {
+      const map = new Map(prev)
+      const current = map.get(currentId) ?? []
+      const newValue = typeof update === 'function' ? update(current) : update
+      if (newValue.length === 0) map.delete(currentId)
+      else map.set(currentId, newValue)
+      return map
+    })
+  }
+)
+
 export const currentAgentSessionAtom = atom<AgentSessionMeta | null>((get) => {
   const sessions = get(agentSessionsAtom)
   const currentId = get(currentAgentSessionIdAtom)
@@ -208,6 +267,12 @@ export const agentRetryingAtom = atom<AgentStreamState['retrying'] | undefined>(
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return undefined
   return get(agentStreamingStatesAtom).get(currentId)?.retrying
+})
+
+export const agentStartedAtAtom = atom<number | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.startedAt
 })
 
 export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
@@ -378,6 +443,22 @@ export function applyAgentEvent(
         },
       }
     }
+
+    case 'permission_request':
+      // 权限请求事件由 PermissionBanner 处理，不影响流式状态
+      return prev
+
+    case 'permission_resolved':
+      // 权限解决事件由 PermissionBanner 处理，不影响流式状态
+      return prev
+
+    case 'ask_user_request':
+      // AskUser 请求事件由 AskUserBanner 处理，不影响流式状态
+      return prev
+
+    case 'ask_user_resolved':
+      // AskUser 解决事件由 AskUserBanner 处理，不影响流式状态
+      return prev
 
     default:
       return prev

@@ -73,6 +73,11 @@ import type {
   SystemProxyDetectResult,
   GitHubRelease,
   GitHubReleaseListOptions,
+  PermissionRequest,
+  PermissionResponse,
+  PromaPermissionMode,
+  AskUserRequest,
+  AskUserResponse,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -325,11 +330,27 @@ export interface ElectronAPI {
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
 
-  /** 订阅工作区能力变化事件 */
-  onCapabilitiesChanged: (callback: () => void) => () => void
+  // ===== Agent 权限系统 =====
 
-  /** 订阅工作区文件变化事件 */
-  onWorkspaceFilesChanged: (callback: () => void) => () => void
+  /** 响应权限请求 */
+  respondPermission: (response: PermissionResponse) => Promise<void>
+
+  /** 获取工作区权限模式 */
+  getPermissionMode: (workspaceSlug: string) => Promise<PromaPermissionMode>
+
+  /** 设置工作区权限模式 */
+  setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => Promise<void>
+
+  /** 订阅权限请求事件（返回清理函数） */
+  onPermissionRequest: (callback: (data: { sessionId: string; request: PermissionRequest }) => void) => () => void
+
+  // ===== AskUserQuestion 交互式问答 =====
+
+  /** 响应 AskUser 请求 */
+  respondAskUser: (response: AskUserResponse) => Promise<void>
+
+  /** 订阅 AskUser 请求事件（返回清理函数） */
+  onAskUserRequest: (callback: (data: { sessionId: string; request: AskUserRequest }) => void) => () => void
 
   // ===== Agent 附件 =====
 
@@ -827,6 +848,36 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: { sessionId: string; title: string }): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.TITLE_UPDATED, listener) }
+  },
+
+  // Agent 权限系统
+  respondPermission: (response: PermissionResponse) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.PERMISSION_RESPOND, response)
+  },
+
+  getPermissionMode: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERMISSION_MODE, workspaceSlug)
+  },
+
+  setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERMISSION_MODE, workspaceSlug, mode)
+  },
+
+  onPermissionRequest: (callback: (data: { sessionId: string; request: PermissionRequest }) => void) => {
+    const listener = (_: unknown, data: { sessionId: string; request: PermissionRequest }): void => callback(data)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.PERMISSION_REQUEST, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.PERMISSION_REQUEST, listener) }
+  },
+
+  // AskUserQuestion 交互式问答
+  respondAskUser: (response: AskUserResponse) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ASK_USER_RESPOND, response)
+  },
+
+  onAskUserRequest: (callback: (data: { sessionId: string; request: AskUserRequest }) => void) => {
+    const listener = (_: unknown, data: { sessionId: string; request: AskUserRequest }): void => callback(data)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.ASK_USER_REQUEST, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.ASK_USER_REQUEST, listener) }
   },
 
   // 工作区文件变化通知

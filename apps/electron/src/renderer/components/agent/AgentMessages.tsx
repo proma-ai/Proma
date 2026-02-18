@@ -39,6 +39,7 @@ import {
   agentToolActivitiesAtom,
   agentStreamingModelAtom,
   agentRetryingAtom,
+  agentStartedAtAtom,
 } from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { cn } from '@/lib/utils'
@@ -469,6 +470,7 @@ export function AgentMessages(): React.ReactElement {
   const toolActivities = useAtomValue(agentToolActivitiesAtom)
   const agentStreamingModel = useAtomValue(agentStreamingModelAtom)
   const retrying = useAtomValue(agentRetryingAtom)
+  const startedAt = useAtomValue(agentStartedAtAtom)
 
   // 获取后台任务列表
   const { tasks: backgroundTasks } = useBackgroundTasks(currentSessionId || '')
@@ -511,7 +513,7 @@ export function AgentMessages(): React.ReactElement {
                       {streaming && <StreamingIndicator />}
                     </>
                   ) : (
-                    streaming && toolActivities.length === 0 && !retrying && <MessageLoading />
+                    streaming && toolActivities.length === 0 && !retrying && <MessageLoading startedAt={startedAt} />
                   )}
                 </MessageContent>
               </Message>

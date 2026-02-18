@@ -18,7 +18,7 @@ import {
   getWorkspaceSkillsDir,
   getDefaultSkillsDir,
 } from './config-paths'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
 
 /**
  * 工作区索引文件格式
@@ -409,4 +409,64 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
 
   rmSync(skillPath, { recursive: true, force: true })
   console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}`)
+}
+
+// ===== 权限模式管理 =====
+
+/** 工作区配置文件格式 */
+interface WorkspaceConfig {
+  permissionMode?: PromaPermissionMode
+}
+
+/**
+ * 获取工作区配置文件路径
+ */
+function getWorkspaceConfigPath(workspaceSlug: string): string {
+  return join(getAgentWorkspacePath(workspaceSlug), 'config.json')
+}
+
+/**
+ * 读取工作区配置
+ */
+function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
+  const configPath = getWorkspaceConfigPath(workspaceSlug)
+
+  if (!existsSync(configPath)) {
+    return {}
+  }
+
+  try {
+    const raw = readFileSync(configPath, 'utf-8')
+    return JSON.parse(raw) as WorkspaceConfig
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * 写入工作区配置
+ */
+function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
+  const configPath = getWorkspaceConfigPath(workspaceSlug)
+  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+}
+
+/**
+ * 获取工作区权限模式
+ *
+ * 默认返回 'smart'（智能模式）。
+ */
+export function getWorkspacePermissionMode(workspaceSlug: string): PromaPermissionMode {
+  const config = readWorkspaceConfig(workspaceSlug)
+  return config.permissionMode ?? 'smart'
+}
+
+/**
+ * 设置工作区权限模式
+ */
+export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPermissionMode): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const updated: WorkspaceConfig = { ...config, permissionMode: mode }
+  writeWorkspaceConfig(workspaceSlug, updated)
+  console.log(`[Agent 工作区] 权限模式已更新: ${workspaceSlug} → ${mode}`)
 }

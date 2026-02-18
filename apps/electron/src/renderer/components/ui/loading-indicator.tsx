@@ -62,7 +62,8 @@ export function LoadingIndicator({
   size = 'default',
   ...props
 }: LoadingIndicatorProps): React.ReactElement {
-  const [elapsed, setElapsed] = React.useState(0)
+  const initialElapsed = typeof showElapsed === 'number' ? Date.now() - showElapsed : 0
+  const [elapsed, setElapsed] = React.useState(initialElapsed)
   const startTimeRef = React.useRef<number | null>(null)
 
   // 已用时间追踪
@@ -72,6 +73,7 @@ export function LoadingIndicator({
     // 初始化开始时间
     if (typeof showElapsed === 'number') {
       startTimeRef.current = showElapsed
+      setElapsed(Date.now() - showElapsed)
     } else if (!startTimeRef.current) {
       startTimeRef.current = Date.now()
     }
