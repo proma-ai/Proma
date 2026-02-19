@@ -36,6 +36,7 @@ import {
   initializeBilling,
 } from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
+import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
 import './styles/globals.css'
 
 /**
@@ -244,6 +245,17 @@ function OfficialChannelInitializer(): null {
   return null
 }
 
+/**
+ * Agent IPC 监听器初始化组件
+ *
+ * 全局挂载，永不销毁。确保 Agent 流式事件、权限请求
+ * 在页面切换时不丢失。
+ */
+function AgentListenersInitializer(): null {
+  useGlobalAgentListeners()
+  return null
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeInitializer />
@@ -251,6 +263,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BillingInitializer />
     <OfficialChannelInitializer />
     <AgentSettingsInitializer />
+    <AgentListenersInitializer />
     <UpdaterInitializer />
     <App />
   </React.StrictMode>

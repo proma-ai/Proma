@@ -181,7 +181,7 @@ export const workspaceFilesVersionAtom = atom(0)
 export const agentPermissionModeAtom = atom<PromaPermissionMode>('smart')
 
 /** 待处理的权限请求 Map — 以 sessionId 为 key，切换会话时保留状态 */
-const _allPendingPermissionRequestsAtom = atom<Map<string, readonly PermissionRequest[]>>(new Map())
+export const allPendingPermissionRequestsAtom = atom<Map<string, readonly PermissionRequest[]>>(new Map())
 
 type PermissionRequestsUpdate = readonly PermissionRequest[] | ((prev: readonly PermissionRequest[]) => readonly PermissionRequest[])
 
@@ -190,12 +190,12 @@ export const pendingPermissionRequestsAtom = atom(
   (get): readonly PermissionRequest[] => {
     const currentId = get(currentAgentSessionIdAtom)
     if (!currentId) return []
-    return get(_allPendingPermissionRequestsAtom).get(currentId) ?? []
+    return get(allPendingPermissionRequestsAtom).get(currentId) ?? []
   },
   (get, set, update: PermissionRequestsUpdate) => {
     const currentId = get(currentAgentSessionIdAtom)
     if (!currentId) return
-    set(_allPendingPermissionRequestsAtom, (prev) => {
+    set(allPendingPermissionRequestsAtom, (prev) => {
       const map = new Map(prev)
       const current = map.get(currentId) ?? []
       const newValue = typeof update === 'function' ? update(current) : update
@@ -207,7 +207,7 @@ export const pendingPermissionRequestsAtom = atom(
 )
 
 /** 待处理的 AskUser 请求 Map — 以 sessionId 为 key，切换会话时保留状态 */
-const _allPendingAskUserRequestsAtom = atom<Map<string, readonly AskUserRequest[]>>(new Map())
+export const allPendingAskUserRequestsAtom = atom<Map<string, readonly AskUserRequest[]>>(new Map())
 
 type AskUserRequestsUpdate = readonly AskUserRequest[] | ((prev: readonly AskUserRequest[]) => readonly AskUserRequest[])
 
@@ -216,12 +216,12 @@ export const pendingAskUserRequestsAtom = atom(
   (get): readonly AskUserRequest[] => {
     const currentId = get(currentAgentSessionIdAtom)
     if (!currentId) return []
-    return get(_allPendingAskUserRequestsAtom).get(currentId) ?? []
+    return get(allPendingAskUserRequestsAtom).get(currentId) ?? []
   },
   (get, set, update: AskUserRequestsUpdate) => {
     const currentId = get(currentAgentSessionIdAtom)
     if (!currentId) return
-    set(_allPendingAskUserRequestsAtom, (prev) => {
+    set(allPendingAskUserRequestsAtom, (prev) => {
       const map = new Map(prev)
       const current = map.get(currentId) ?? []
       const newValue = typeof update === 'function' ? update(current) : update

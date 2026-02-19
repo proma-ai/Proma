@@ -8,7 +8,7 @@
  * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -329,7 +329,8 @@ export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
     const entries = readdirSync(skillsDir, { withFileTypes: true })
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+      const isDir = entry.isDirectory() || (entry.isSymbolicLink() && statSync(join(skillsDir, entry.name)).isDirectory())
+      if (!isDir) continue
 
       const skillMdPath = join(skillsDir, entry.name, 'SKILL.md')
       if (!existsSync(skillMdPath)) continue

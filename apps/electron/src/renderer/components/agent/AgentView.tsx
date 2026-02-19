@@ -3,10 +3,12 @@
  *
  * 职责：
  * - 加载当前 Agent 会话消息
- * - 订阅 Agent 流式 IPC 事件
- * - 管理 streaming 状态
- * - 复用 ChatInput 组件（去掉 Chat 特有功能）
+ * - 发送/停止/压缩 Agent 消息
+ * - 附件上传处理
  * - AgentHeader 支持标题编辑 + 文件浏览器切换
+ *
+ * 注意：IPC 流式事件监听已提升到全局 useGlobalAgentListeners，
+ * 本组件为纯展示 + 交互组件。
  *
  * 布局：AgentHeader | AgentMessages | AgentInput + 可选 FileBrowser 侧面板
  */
@@ -27,14 +29,11 @@ import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
 import {
   currentAgentSessionIdAtom,
   currentAgentMessagesAtom,
   agentStreamingStatesAtom,
   agentStreamingAtom,
-  applyAgentEvent,
-  agentSessionsAtom,
   agentChannelIdAtom,
   agentModelIdAtom,
   currentAgentWorkspaceIdAtom,
@@ -45,12 +44,9 @@ import {
   agentStreamErrorsAtom,
   currentAgentErrorAtom,
   currentAgentSessionDraftAtom,
-  pendingPermissionRequestsAtom,
-  pendingAskUserRequestsAtom,
 } from '@/atoms/agent-atoms'
-import type { AgentStreamState } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
-import type { AgentSendInput, AgentStreamEvent, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
 import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 
 /** 将 File 对象转为 base64 字符串 */
@@ -74,7 +70,6 @@ export function AgentView(): React.ReactElement {
   const streaming = useAtomValue(agentStreamingAtom)
   const [agentChannelId, setAgentChannelId] = useAtom(agentChannelIdAtom)
   const [agentModelId, setAgentModelId] = useAtom(agentModelIdAtom)
-  const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
@@ -85,8 +80,6 @@ export function AgentView(): React.ReactElement {
   const agentError = useAtomValue(currentAgentErrorAtom)
 
   const [inputContent, setInputContent] = useAtom(currentAgentSessionDraftAtom)
-  const setPendingPermissions = useSetAtom(pendingPermissionRequestsAtom)
-  const setPendingAskUserRequests = useSetAtom(pendingAskUserRequestsAtom)
   const [fileBrowserOpen, setFileBrowserOpen] = React.useState(false)
   const [sessionPath, setSessionPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
@@ -94,20 +87,6 @@ export function AgentView(): React.ReactElement {
   const [isUploadingFolder, setIsUploadingFolder] = React.useState(false)
   const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
-
-  // 后台任务管理
-  const {
-    tasks: backgroundTasks,
-    addTask,
-    updateTaskProgress,
-    removeTask,
-  } = useBackgroundTasks(currentSessionId || '')
-
-  // 当前会话 ID ref（避免闭包捕获旧值）
-  const currentSessionIdRef = React.useRef(currentSessionId)
-  React.useEffect(() => {
-    currentSessionIdRef.current = currentSessionId
-  }, [currentSessionId])
 
   // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
   const pendingFilesRef = React.useRef(pendingFiles)
@@ -166,194 +145,6 @@ export function AgentView(): React.ReactElement {
       .catch(console.error)
 
   }, [currentSessionId, setCurrentMessages])
-
-  // 订阅 Agent 流式 IPC 事件
-  React.useEffect(() => {
-    /** 辅助：更新指定会话的流式状态 */
-    const updateState = (
-      sessionId: string,
-      updater: (prev: AgentStreamState) => AgentStreamState,
-    ): void => {
-      setStreamingStates((prev) => {
-        const current = prev.get(sessionId) ?? { running: true, content: '', toolActivities: [], model: undefined, startedAt: Date.now() }
-        const next = updater(current)
-        const map = new Map(prev)
-        map.set(sessionId, next)
-        return map
-      })
-    }
-
-    /** 辅助：从 Map 中移除状态 */
-    const removeState = (sessionId: string): void => {
-      setStreamingStates((prev) => {
-        if (!prev.has(sessionId)) return prev
-        const map = new Map(prev)
-        map.delete(sessionId)
-        return map
-      })
-
-      // 清理后台任务（SDK 退出时，所有后台任务都应停止）
-      if (sessionId === currentSessionId && backgroundTasks.length > 0) {
-        console.log(`[AgentView] 清理 ${backgroundTasks.length} 个后台任务`)
-        // 逐个移除所有后台任务
-        backgroundTasks.forEach((task) => {
-          removeTask(task.toolUseId)
-        })
-      }
-    }
-
-    const cleanupEvent = window.electronAPI.onAgentStreamEvent(
-      (streamEvent: AgentStreamEvent) => {
-        const { sessionId, event } = streamEvent
-
-        // 应用事件到流式状态
-        updateState(sessionId, (prev) => applyAgentEvent(prev, event))
-
-        // 处理后台任务事件
-        if (event.type === 'task_backgrounded') {
-          addTask({
-            id: event.taskId,
-            type: 'agent',
-            toolUseId: event.toolUseId,
-            startTime: Date.now(),
-            intent: event.intent,
-          })
-        } else if (event.type === 'task_progress') {
-          updateTaskProgress(event.toolUseId, event.elapsedSeconds)
-        } else if (event.type === 'shell_backgrounded') {
-          addTask({
-            id: event.shellId,
-            type: 'shell',
-            toolUseId: event.toolUseId,
-            startTime: Date.now(),
-            intent: event.command || event.intent,
-          })
-        } else if (event.type === 'tool_result') {
-          // 工具完成时，移除对应的后台任务
-          removeTask(event.toolUseId)
-        } else if (event.type === 'shell_killed') {
-          // Shell 被杀死时，移除任务
-          const task = backgroundTasks.find((t) => t.id === event.shellId)
-          if (task) {
-            removeTask(task.toolUseId)
-          }
-        }
-      }
-    )
-
-    const cleanupComplete = window.electronAPI.onAgentStreamComplete(
-      (data: { sessionId: string }) => {
-        // 先加载持久化消息，再移除流式状态
-        // 确保两次状态更新在同一回调中，React 批量合并为一次渲染，避免跳动
-        const finalize = (): void => {
-          removeState(data.sessionId)
-          // 刷新会话列表
-          window.electronAPI
-            .listAgentSessions()
-            .then(setAgentSessions)
-            .catch(console.error)
-        }
-
-        if (data.sessionId === currentSessionIdRef.current) {
-          window.electronAPI
-            .getAgentSessionMessages(data.sessionId)
-            .then((messages) => {
-              setCurrentMessages(messages)
-              finalize()
-            })
-            .catch(() => finalize())
-        } else {
-          finalize()
-        }
-      }
-    )
-
-    const cleanupError = window.electronAPI.onAgentStreamError(
-      (data: { sessionId: string; error: string }) => {
-        console.error('[AgentView] 流式错误:', data.error)
-
-        // 存储错误消息，供 UI 显示
-        setAgentStreamErrors((prev) => {
-          const map = new Map(prev)
-          map.set(data.sessionId, data.error)
-          return map
-        })
-
-        // 改进：不再调用 removeState()
-        // retrying 状态由 retry_failed 事件控制
-        // 只重新加载消息，保留流式状态
-
-        if (data.sessionId === currentSessionIdRef.current) {
-          console.log('[AgentView][诊断] 错误发生在当前会话，重新加载消息...')
-          window.electronAPI
-            .getAgentSessionMessages(data.sessionId)
-            .then((messages) => {
-              console.log(`[AgentView][诊断] 已加载 ${messages.length} 条消息`)
-              setCurrentMessages(messages)
-            })
-            .catch((error) => {
-              console.error('[AgentView][诊断] 加载消息失败:', error)
-            })
-        } else {
-          console.log('[AgentView][诊断] 错误发生在后台会话，不重新加载')
-        }
-      }
-    )
-
-    // 监听主进程自动标题生成完成事件
-    const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(() => {
-      window.electronAPI
-        .listAgentSessions()
-        .then(setAgentSessions)
-        .catch(console.error)
-    })
-
-    // 订阅权限请求事件
-    const cleanupPermission = window.electronAPI.onPermissionRequest(
-      (data) => {
-        // 只处理当前会话的权限请求；其他会话的自动拒绝
-        if (data.sessionId === currentSessionIdRef.current) {
-          setPendingPermissions((prev) => [...prev, data.request])
-        } else {
-          // 非当前会话的请求自动拒绝（避免 SDK 无限等待）
-          window.electronAPI.respondPermission({
-            requestId: data.request.requestId,
-            behavior: 'deny',
-            alwaysAllow: false,
-          }).catch(() => {
-            // 拒绝失败不影响 UI
-          })
-        }
-      }
-    )
-
-    // 订阅 AskUser 请求事件
-    const cleanupAskUser = window.electronAPI.onAskUserRequest(
-      (data) => {
-        // 只处理当前会话的 AskUser 请求；其他会话自动回复空答案
-        if (data.sessionId === currentSessionIdRef.current) {
-          setPendingAskUserRequests((prev) => [...prev, data.request])
-        } else {
-          // 非当前会话：回复空答案（避免 SDK 无限等待）
-          window.electronAPI.respondAskUser({
-            requestId: data.request.requestId,
-            answers: {},
-          }).catch(() => {
-            // 失败不影响 UI
-          })
-        }
-      }
-    )
-
-    return () => {
-      cleanupEvent()
-      cleanupComplete()
-      cleanupError()
-      cleanupTitleUpdated()
-      cleanupPermission()
-      cleanupAskUser()
-    }
-  }, [setStreamingStates, setCurrentMessages, setAgentSessions, setAgentStreamErrors, addTask, updateTaskProgress, removeTask, backgroundTasks, setPendingPermissions, setPendingAskUserRequests])
 
   // 自动发送 pending prompt（从设置页"对话完成配置"触发）
   React.useEffect(() => {

@@ -137,7 +137,7 @@ bun run generate:icons    # 生成应用图标
 | Atom 文件 | 管理的状态 |
 |-----------|-----------|
 | `chat-atoms.ts` | 对话列表、当前消息、流式状态（Map 结构支持多对话并行）、模型选择、上下文设置、并排模式、思考模式、待上传附件 |
-| `agent-atoms.ts` | Agent 会话列表、当前会话、流式状态（`AgentStreamState`）、工作区选择、渠道选择 |
+| `agent-atoms.ts` | Agent 会话列表、当前会话、流式状态（`AgentStreamState`）、工作区选择、渠道选择、权限/AskUser 请求队列（按 sessionId Map） |
 | `active-view.ts` | 主面板视图切换（'conversations' / 'settings'） |
 | `app-mode.ts` | 应用模式（Chat / Agent） |
 | `settings-tab.ts` | 设置面板当前标签页 |
@@ -149,11 +149,27 @@ bun run generate:icons    # 生成应用图标
 
 - **`app-shell/`**：三面板布局（LeftSidebar | NavigatorPanel | MainContentPanel），侧边栏含模式切换、置顶对话、日期分组列表、流式指示器
 - **`chat/`**：聊天核心 — ChatView（消息加载/流式订阅）、ChatHeader（模型选择/上下文设置）、ChatInput（Tiptap 富文本编辑器）、ChatMessages（消息列表/自动滚动）、ParallelChatMessages（并排模式）
-- **`agent/`**：Agent 模式 — AgentView（会话主视图）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）
+- **`agent/`**：Agent 模式 — AgentView（纯展示 + 交互，IPC 监听已提升到全局）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）、PermissionBanner/AskUserBanner（权限/问答请求 UI）
 - **`settings/`**：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）；含 `primitives/` 可复用表单组件
 - **`file-browser/`**：文件浏览器 — FileBrowser（工作区文件树浏览）
 - **`ai-elements/`**：AI 展示组件 — Markdown 渲染、代码块、Mermaid 图、推理折叠、上下文分割线、富文本输入
 - **`ui/`**：ShadcnUI 组件（new-york 风格，CSS 变量主题）
+
+### 全局 Hooks（`renderer/hooks/`）
+
+| Hook | 职责 |
+|------|------|
+| `useGlobalAgentListeners` | 全局 Agent IPC 监听器，在 `main.tsx` 顶层挂载，使用 `useStore()` 直接操作 atoms。处理流式事件、完成/错误、标题更新、权限请求、AskUser 请求，永不随组件卸载销毁 |
+| `useBackgroundTasks` | 后台任务管理（Agent/Shell 任务的增删改查），按 sessionId 隔离 |
+
+### 渲染进程初始化组件（`renderer/main.tsx`）
+
+| 组件 | 职责 |
+|------|------|
+| `ThemeInitializer` | 从主进程加载主题设置、监听系统主题变化、同步到 DOM |
+| `AgentSettingsInitializer` | 加载 Agent 渠道/模型/工作区设置、订阅 MCP/文件变化事件 |
+| `AgentListenersInitializer` | 挂载 `useGlobalAgentListeners`，全局 Agent IPC 监听 |
+| `UpdaterInitializer` | 订阅主进程推送的自动更新状态变化事件 |
 
 ### 本地文件存储（`~/.proma/`）
 
@@ -247,7 +263,7 @@ bun run generate:icons    # 生成应用图标
 ```
 用户输入 → agent-service.ts (SDK query) → SDK SDKMessage 流
 → convertSDKMessage() → AgentEvent[] → webContents.send()
-→ agent-atoms.ts (applyAgentEvent) → React UI
+→ useGlobalAgentListeners (全局 IPC 监听) → store.set(atoms) → React UI
 ```
 
 ### 关键设计
@@ -256,6 +272,8 @@ bun run generate:icons    # 生成应用图标
 - **事件转换**：`convertSDKMessage()`（`@proma/shared`）将 SDK 原始消息转为统一的 `AgentEvent` 类型
 - **工具匹配**：`packages/shared/src/agent/tool-matching.ts` — 无状态 `ToolIndex` + `extractToolStarts` / `extractToolResults` 解析工具调用
 - **状态管理**：`applyAgentEvent()` 纯函数更新 `AgentStreamState`，支持流式增量更新
+- **全局 IPC 监听**：`useGlobalAgentListeners`（`renderer/hooks/`）在 `main.tsx` 顶层挂载，通过 `useStore()` 直接操作 atoms，永不销毁。确保页面切换（如设置页）时流式输出、权限请求不丢失
+- **权限请求排队**：权限/AskUser 请求按 sessionId 入队到 Map atoms（`allPendingPermissionRequestsAtom` / `allPendingAskUserRequestsAtom`），不区分当前/后台会话，SDK Promise 等待用户回来响应
 - **工作区隔离**：每个工作区独立的 MCP Server 配置和 cwd，Agent 会话按工作区过滤
 
 ### 共享类型（`@proma/shared`）
