@@ -131,5 +131,5 @@ jobs:
             apps/electron/out/*.zip
             apps/electron/out/*.exe
             apps/electron/out/*.yml
-          retention-days: 7
+          retention-days: 1
           if-no-files-found: warn
