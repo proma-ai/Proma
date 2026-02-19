@@ -1346,6 +1346,9 @@ const MAX_TITLE_LENGTH = 20
 /** 默认会话标题（用于判断是否需要自动生成） */
 const DEFAULT_SESSION_TITLE = '新 Agent 会话'
 
+/** Proma 官方渠道标题生成专用模型（轻量、快速、低成本） */
+const PROMA_TITLE_MODEL = 'openai/gpt-oss-120b'
+
 /**
  * 生成 Agent 会话标题
  *
@@ -1387,11 +1390,16 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
       baseUrl = channel.baseUrl
     }
 
+    // Proma 官方渠道：标题生成走 /api/v1/chat 端点，使用轻量 Chat 模型（快且便宜）
+    const titleModelId = channel.provider === 'proma'
+      ? PROMA_TITLE_MODEL
+      : modelId
+
     const adapter = getAdapter(channel.provider)
     const request = adapter.buildTitleRequest({
       baseUrl,
       apiKey,
-      modelId,
+      modelId: titleModelId,
       prompt: TITLE_PROMPT + userMessage,
     })
 

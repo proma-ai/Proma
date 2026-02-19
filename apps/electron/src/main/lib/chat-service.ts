@@ -527,6 +527,9 @@ const TITLE_PROMPT = '根据用户的第一条消息，生成一个简短的对�
 /** 短消息阈值：低于此长度直接使用原文作为标题 */
 const SHORT_MESSAGE_THRESHOLD = 4
 
+/** Proma 官方渠道标题生成专用模型（轻量、快速、低成本） */
+const PROMA_TITLE_MODEL = 'openai/gpt-oss-120b'
+
 /** 最大标题长度 */
 const MAX_TITLE_LENGTH = 20
 
@@ -583,10 +586,11 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
 
   try {
     const adapter = getAdapter(channel.provider)
+    const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
     const request = adapter.buildTitleRequest({
       baseUrl,
       apiKey,
-      modelId,
+      modelId: titleModelId,
       prompt: TITLE_PROMPT + userMessage,
     })
 
