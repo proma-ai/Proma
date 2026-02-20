@@ -453,13 +453,13 @@ function ApiUsageGuide(): React.ReactElement {
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -d '{
-    "model": "gpt-4o",
+    "model": "claude-sonnet-4-6",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`
   : `curl https://api.proma.cool/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{ "model": "gpt-4o", ... }'`}
+  -d '{ "model": "claude-sonnet-4-6", ... }'`}
             </pre>
           </div>
 
