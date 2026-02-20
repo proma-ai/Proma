@@ -22,7 +22,7 @@ import {
 import { updateStatusAtom, installUpdate } from '@/atoms/updater'
 import { ReleaseNotesViewer } from './ReleaseNotesViewer'
 
-const GITHUB_RELEASES_URL = 'https://github.com/ErlichLiu/Proma/releases'
+const DOWNLOAD_URL = 'https://proma.cool/download'
 
 export function UpdateDialog(): React.ReactElement | null {
   const updateStatus = useAtomValue(updateStatusAtom)
@@ -65,7 +65,7 @@ export function UpdateDialog(): React.ReactElement | null {
     await installUpdate()
   }
 
-  const githubUrl = release?.html_url || GITHUB_RELEASES_URL
+  const downloadUrl = DOWNLOAD_URL
 
   if (!dialogVersion) return null
 
@@ -90,17 +90,17 @@ export function UpdateDialog(): React.ReactElement | null {
         <p className="text-xs text-muted-foreground">
           如果自动更新失败，请前往{' '}
           <a
-            href={githubUrl}
+            href={downloadUrl}
             onClick={(e) => {
               e.preventDefault()
-              window.electronAPI.openExternal(githubUrl)
+              window.electronAPI.openExternal(downloadUrl)
             }}
             className="inline-flex items-center gap-0.5 text-primary hover:underline"
           >
-            GitHub Release
+            官网下载页
             <ExternalLink className="h-3 w-3" />
           </a>
-          {' '}页面下载最新版本覆盖安装。
+          {' '}下载最新版本覆盖安装。
         </p>
 
         <AlertDialogFooter>
