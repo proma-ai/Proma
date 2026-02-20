@@ -416,14 +416,14 @@ export interface ElectronAPI {
     downloadUpdate: () => Promise<void>
     installUpdate: () => Promise<void>
     getStatus: () => Promise<{
-      status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+      status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error'
       version?: string
       releaseNotes?: string
       progress?: { percent: number; transferred: number; total: number }
       error?: string
     }>
     onStatusChanged: (callback: (status: {
-      status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+      status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error'
       version?: string
       releaseNotes?: string
       progress?: { percent: number; transferred: number; total: number }

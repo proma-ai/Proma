@@ -16,7 +16,7 @@ interface UpdateProgress {
 
 /** 更新状态 */
 export interface UpdateStatus {
-  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error'
   version?: string
   releaseNotes?: string
   progress?: UpdateProgress

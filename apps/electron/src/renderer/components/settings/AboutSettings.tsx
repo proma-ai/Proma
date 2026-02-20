@@ -87,7 +87,15 @@ function UpdateCard(): React.ReactElement | null {
           <StatusText status={status.status} version={status.version} error={status.error} />
 
           {/* 操作按钮 */}
-          {status.status === 'downloaded' ? (
+          {status.status === 'installing' ? (
+            <button
+              disabled
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-50 cursor-not-allowed"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              正在安装...
+            </button>
+          ) : status.status === 'downloaded' ? (
             <button
               onClick={handleInstall}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -180,6 +188,13 @@ function StatusText({ status, version, error }: {
         <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
           <CheckCircle2 className="h-3 w-3" />
           v{version} 已就绪，重启后生效
+        </span>
+      )
+    case 'installing':
+      return (
+        <span className="text-xs text-primary flex items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          正在安装更新，即将重启...
         </span>
       )
     case 'not-available':

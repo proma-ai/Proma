@@ -15,6 +15,7 @@ import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
 import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
+import { getIsQuitting, setQuitting, isUpdating } from './lib/app-lifecycle'
 import { isCloudMode } from '@proma/cloud'
 import { registerCloudIpcHandlers } from './cloud-ipc'
 import { registerSyncIpcHandlers } from './sync-ipc'
@@ -24,8 +25,6 @@ import { handleOAuthCallback } from './lib/cloud-auth-service'
 const PROTOCOL_NAME = 'proma'
 
 let mainWindow: BrowserWindow | null = null
-// 标记是否真正要退出应用（用于区分关闭窗口和退出应用）
-let isQuitting = false
 
 /**
  * 检查窗口是否在可用显示器范围内
@@ -147,7 +146,7 @@ function createWindow(): void {
   // 同时隐藏应用（类似 Cmd+H），确保点击 Dock 图标时 macOS 能正确触发 activate 事件
   if (process.platform === 'darwin') {
     mainWindow.on('close', (event) => {
-      if (!isQuitting) {
+      if (!getIsQuitting()) {
         event.preventDefault()
         mainWindow?.hide()
         app.hide()
@@ -310,7 +309,14 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     // 标记正在退出，让 close 事件不再阻止关闭
-    isQuitting = true
+    setQuitting()
+
+    // 正在安装更新时，让 electron-updater 控制退出流程，不做额外操作
+    if (isUpdating()) {
+      console.log('[应用] 正在安装更新，跳过额外清理')
+      return
+    }
+
     // 中止所有活跃的 Agent 和 Chat 子进程
     stopAllAgents()
     stopAllGenerations()
