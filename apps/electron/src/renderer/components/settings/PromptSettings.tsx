@@ -8,11 +8,13 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Plus, Trash2, Star } from 'lucide-react'
+import { Plus, Trash2, Star, Download, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { isCloudMode } from '@/lib/mode'
 import {
   SettingsSection,
   SettingsCard,
@@ -36,6 +38,7 @@ export function PromptSettings(): React.ReactElement {
   const [editName, setEditName] = React.useState('')
   const [editContent, setEditContent] = React.useState('')
   const [hoveredId, setHoveredId] = React.useState<string | null>(null)
+  const [downloading, setDownloading] = React.useState(false)
 
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -156,6 +159,31 @@ export function PromptSettings(): React.ReactElement {
     }
   }
 
+  /** 下载云端提示词 */
+  const handleDownloadCloudPrompts = async (): Promise<void> => {
+    setDownloading(true)
+    try {
+      const result = await window.electronAPI.cloudPrompts.download()
+      if (result.success) {
+        if (result.imported === 0) {
+          toast.info('云端没有私有提示词')
+        } else {
+          toast.success(`已下载 ${result.imported} 条提示词`)
+          // 刷新本地提示词列表
+          const cfg = await window.electronAPI.getSystemPromptConfig()
+          setConfig(cfg)
+        }
+      } else {
+        toast.error(`下载失败: ${result.error ?? '未知错误'}`)
+      }
+    } catch (error) {
+      console.error('[提示词设置] 下载云端提示词失败:', error)
+      toast.error('下载云端提示词失败')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* 提示词列表 */}
@@ -163,10 +191,26 @@ export function PromptSettings(): React.ReactElement {
         title="系统提示词"
         description="管理 Chat 模式的系统提示词"
         action={
-          <Button size="sm" onClick={handleCreate}>
-            <Plus className="size-4 mr-1" />
-            新建
-          </Button>
+          <div className="flex items-center gap-2">
+            {isCloudMode() && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadCloudPrompts}
+                disabled={downloading}
+              >
+                {downloading
+                  ? <Loader2 className="size-4 mr-1 animate-spin" />
+                  : <Download className="size-4 mr-1" />
+                }
+                下载提示词
+              </Button>
+            )}
+            <Button size="sm" onClick={handleCreate}>
+              <Plus className="size-4 mr-1" />
+              新建
+            </Button>
+          </div>
         }
       >
         <SettingsCard divided={false} className="p-0">

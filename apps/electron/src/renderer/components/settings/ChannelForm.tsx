@@ -574,7 +574,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
               </Button>
             </div>
           )}
-          </div>
         </SettingsCard>
       </SettingsSection>
     </form>

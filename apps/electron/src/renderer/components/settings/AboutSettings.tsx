@@ -24,9 +24,14 @@ import { Badge } from '@/components/ui/badge'
 import { ReleaseNotesViewer } from './ReleaseNotesViewer'
 import { VersionHistory } from './VersionHistory'
 
-/** 从 package.json 构建时由 Vite define 注入 */
-declare const __APP_VERSION__: string
-const APP_VERSION = __APP_VERSION__
+/** 从 Vite define 注入（build 模式），dev 模式下可能未定义 */
+const APP_VERSION: string = (() => {
+  try {
+    return typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '开发模式'
+  } catch {
+    return '开发模式'
+  }
+})()
 
 /** 更新状态卡片 */
 function UpdateCard(): React.ReactElement | null {

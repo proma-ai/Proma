@@ -28,3 +28,6 @@ export type { ApiKeysApi } from './api-keys'
 
 export { createSubscriptionApi } from './subscription'
 export type { SubscriptionApi } from './subscription'
+
+export { createPromptsApi } from './prompts'
+export type { PromptsApi } from './prompts'

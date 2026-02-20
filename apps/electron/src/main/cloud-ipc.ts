@@ -58,6 +58,7 @@ import {
   updateApiKey,
   deleteApiKey,
 } from './lib/cloud-api-keys-service'
+import { downloadCloudPrompts } from './lib/cloud-prompts-service'
 import type {
   ApiKeyCreateParams,
   ApiKeyUpdateParams,
@@ -322,5 +323,14 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 处理器')
+  // ===== 提示词下载 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.DOWNLOAD_CLOUD_PROMPTS,
+    async () => {
+      return downloadCloudPrompts()
+    },
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 处理器')
 }

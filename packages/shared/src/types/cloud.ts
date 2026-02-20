@@ -322,4 +322,38 @@ export const CLOUD_IPC_CHANNELS = {
   CREATE_SUBSCRIPTION_WECHAT: 'cloud:subscription:create-wechat',
   GET_SUBSCRIPTION_ORDER_STATUS: 'cloud:subscription:order-status',
   GET_SUBSCRIPTION_HISTORY: 'cloud:subscription:history',
+  // 提示词下载
+  DOWNLOAD_CLOUD_PROMPTS: 'cloud:prompts:download',
 } as const
+
+// ===== 云端提示词相关类型 =====
+
+/** 云端提示词响应（后端 PromptResponse） */
+export interface CloudPromptResponse {
+  id: string
+  name: string
+  content: string
+  description: string | null
+  userId: string | null
+  isDefault: boolean
+  sortOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 云端提示词列表响应 */
+export interface CloudPromptsListResponse {
+  privatePrompts: CloudPromptResponse[]
+  publicPrompts: CloudPromptResponse[]
+  globalDefault: CloudPromptResponse | null
+  userDefault: CloudPromptResponse | null
+  userDefaultPromptId: string | null
+}
+
+/** 下载云端提示词结果 */
+export interface DownloadCloudPromptsResult {
+  success: boolean
+  imported: number
+  error?: string
+}

@@ -85,6 +85,7 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
+  DownloadCloudPromptsResult,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -524,6 +525,14 @@ export interface ElectronAPI {
     getOrderStatus: (orderNo: string) => Promise<BillingIpcResponse<SubscriptionOrderRecord>>
     /** 获取订阅历史 */
     getHistory: () => Promise<BillingIpcResponse<SubscriptionOrderRecord[]>>
+  }
+
+  // ===== Cloud 提示词下载相关 =====
+
+  /** Cloud 提示词下载 API */
+  cloudPrompts: {
+    /** 下载云端提示词到本地 */
+    download: () => Promise<DownloadCloudPromptsResult>
   }
 
   // ===== 数据同步相关 =====
@@ -1121,6 +1130,13 @@ const electronAPI: ElectronAPI = {
     },
     getHistory: () => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SUBSCRIPTION_HISTORY)
+    },
+  },
+
+  // Cloud 提示词下载
+  cloudPrompts: {
+    download: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.DOWNLOAD_CLOUD_PROMPTS)
     },
   },
 
