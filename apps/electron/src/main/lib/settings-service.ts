@@ -23,6 +23,7 @@ export function getSettings(): AppSettings {
       themeMode: DEFAULT_THEME_MODE,
       onboardingCompleted: false,
       environmentCheckSkipped: false,
+      notificationsEnabled: true,
     }
   }
 
@@ -37,6 +38,7 @@ export function getSettings(): AppSettings {
       onboardingCompleted: data.onboardingCompleted ?? false,
       environmentCheckSkipped: data.environmentCheckSkipped ?? false,
       lastEnvironmentCheck: data.lastEnvironmentCheck,
+      notificationsEnabled: data.notificationsEnabled ?? true,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -44,6 +46,7 @@ export function getSettings(): AppSettings {
       themeMode: DEFAULT_THEME_MODE,
       onboardingCompleted: false,
       environmentCheckSkipped: false,
+      notificationsEnabled: true,
     }
   }
 }

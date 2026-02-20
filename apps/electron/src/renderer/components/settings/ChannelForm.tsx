@@ -22,6 +22,7 @@ import {
   Zap,
   Download,
   Info,
+  Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -39,6 +40,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   SettingsSection,
   SettingsCard,
@@ -114,6 +116,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   // 新模型输入
   const [newModelId, setNewModelId] = React.useState('')
   const [newModelName, setNewModelName] = React.useState('')
+
+  // 模型搜索过滤
+  const [modelFilter, setModelFilter] = React.useState('')
 
   // UI 状态
   const [saving, setSaving] = React.useState(false)
@@ -282,6 +287,19 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       setSaving(false)
     }
   }
+
+  // 过滤并排序模型列表：已启用的排前面，再按搜索词过滤
+  const filteredModels = React.useMemo(() => {
+    const sorted = [...models].sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+      return 0
+    })
+    if (!modelFilter.trim()) return sorted
+    const keyword = modelFilter.trim().toLowerCase()
+    return sorted.filter(
+      (m) => m.id.toLowerCase().includes(keyword) || m.name.toLowerCase().includes(keyword)
+    )
+  }, [models, modelFilter])
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -452,76 +470,110 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         )}
 
         <SettingsCard divided={false}>
-          <div className="divide-y divide-border/50">
-            {/* 已有模型列表 */}
-            {models.map((model) => (
-              <div
-                key={model.id}
-                className="flex items-center gap-2 px-4 py-2.5"
-              >
-                <input
-                  type="checkbox"
-                  checked={model.enabled}
-                  onChange={() => handleToggleModel(model.id)}
-                  className="w-3.5 h-3.5 rounded border-input accent-foreground"
+          {/* 模型搜索过滤 */}
+          {models.length > 5 && (
+            <div className="px-4 pt-3 pb-1">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={modelFilter}
+                  onChange={(e) => setModelFilter(e.target.value)}
+                  placeholder="搜索模型..."
+                  className="h-8 text-sm pl-8"
                 />
-                <span className="text-sm text-foreground flex-1">
-                  {model.name}
-                  {model.name !== model.id && (
-                    <span className="text-muted-foreground ml-1">({model.id})</span>
-                  )}
-                </span>
-                {!isPromaOfficial && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveModel(model.id)}
-                    className="p-0.5 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
               </div>
-            ))}
+            </div>
+          )}
 
-            {/* 添加新模型 — 官方渠道隐藏 */}
-            {!isPromaOfficial && (
-              <div className="flex items-center gap-2 px-4 py-2.5">
-                <Input
-                  value={newModelId}
-                  onChange={(e) => setNewModelId(e.target.value)}
-                  placeholder="模型 ID（如 claude-opus-4-6）"
-                  className="flex-1 h-8 text-sm"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddModel()
-                    }
-                  }}
-                />
-                <Input
-                  value={newModelName}
-                  onChange={(e) => setNewModelName(e.target.value)}
-                  placeholder="显示名称（可选）"
-                  className="flex-1 h-8 text-sm"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddModel()
-                    }
-                  }}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  onClick={handleAddModel}
-                  disabled={!newModelId.trim()}
-                  className="h-8 w-8 flex-shrink-0"
+          {/* 模型计数 */}
+          {models.length > 0 && (
+            <div className="px-4 pt-2 pb-1 text-xs text-muted-foreground">
+              {modelFilter.trim()
+                ? `${filteredModels.length} / ${models.length} 个模型`
+                : `${models.filter((m) => m.enabled).length} 个已启用，共 ${models.length} 个模型`}
+            </div>
+          )}
+
+          <ScrollArea className={models.length > 8 ? 'h-[320px]' : undefined}>
+            <div className="divide-y divide-border/50">
+              {/* 已有模型列表（过滤 + 排序后） */}
+              {filteredModels.map((model) => (
+                <div
+                  key={model.id}
+                  className="flex items-center gap-2 px-4 py-2.5"
                 >
-                  <Plus size={18} />
-                </Button>
-              </div>
-            )}
+                  <input
+                    type="checkbox"
+                    checked={model.enabled}
+                    onChange={() => handleToggleModel(model.id)}
+                    className="w-3.5 h-3.5 rounded border-input accent-foreground"
+                  />
+                  <span className="text-sm text-foreground flex-1">
+                    {model.name}
+                    {model.name !== model.id && (
+                      <span className="text-muted-foreground ml-1">({model.id})</span>
+                    )}
+                  </span>
+                  {!isPromaOfficial && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveModel(model.id)}
+                      className="p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* 搜索无结果提示 */}
+              {modelFilter.trim() && filteredModels.length === 0 && (
+                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  未找到匹配的模型
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+
+          {/* 添加新模型 — 官方渠道隐藏 */}
+          {!isPromaOfficial && (
+            <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border/50">
+              <Input
+                value={newModelId}
+                onChange={(e) => setNewModelId(e.target.value)}
+                placeholder="模型 ID（如 claude-opus-4-6）"
+                className="flex-1 h-8 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleAddModel()
+                  }
+                }}
+              />
+              <Input
+                value={newModelName}
+                onChange={(e) => setNewModelName(e.target.value)}
+                placeholder="显示名称（可选）"
+                className="flex-1 h-8 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleAddModel()
+                  }
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                onClick={handleAddModel}
+                disabled={!newModelId.trim()}
+                className="h-8 w-8 flex-shrink-0"
+              >
+                <Plus size={18} />
+              </Button>
+            </div>
+          )}
           </div>
         </SettingsCard>
       </SettingsSection>

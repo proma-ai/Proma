@@ -17,6 +17,7 @@ import {
   SettingsSection,
   SettingsCard,
   SettingsRow,
+  SettingsToggle,
 } from './primitives'
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover'
 import {
@@ -33,9 +34,15 @@ import {
 import { buttonVariants } from '../ui/button'
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
+// Cloud 模式专属
 import { cloudUserAtom, isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
 import { isSyncingAtom, downloadAllStatusAtom } from '@/atoms/sync-atoms'
 import { isCloudMode } from '@/lib/mode'
+// 通知
+import {
+  notificationsEnabledAtom,
+  updateNotificationsEnabled,
+} from '@/atoms/notifications'
 import { cn } from '@/lib/utils'
 
 /** emoji-mart 选择回调的 emoji 对象类型 */
@@ -50,10 +57,13 @@ interface EmojiMartEmoji {
 
 export function GeneralSettings(): React.ReactElement {
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
+  // Cloud 模式专属
   const cloudUser = useAtomValue(cloudUserAtom)
   const isCloudAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const [downloadAllStatus, setDownloadAllStatus] = useAtom(downloadAllStatusAtom)
+  // 通知
+  const [notificationsEnabled, setNotificationsEnabled] = useAtom(notificationsEnabledAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
@@ -287,6 +297,15 @@ export function GeneralSettings(): React.ReactElement {
           >
             <span className="text-[13px] text-foreground/40">简体中文</span>
           </SettingsRow>
+          <SettingsToggle
+            label="桌面通知"
+            description="Agent 完成任务或需要操作时发送通知"
+            checked={notificationsEnabled}
+            onCheckedChange={(checked) => {
+              setNotificationsEnabled(checked)
+              updateNotificationsEnabled(checked)
+            }}
+          />
         </SettingsCard>
       </SettingsSection>
 

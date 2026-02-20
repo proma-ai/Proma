@@ -56,9 +56,9 @@ export function AgentHeader(): React.ReactElement | null {
   }
 
   return (
-    <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px] titlebar-no-drag">
+    <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px] titlebar-drag-region">
       {editing ? (
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input
             ref={inputRef}
             value={editTitle}
@@ -89,7 +89,7 @@ export function AgentHeader(): React.ReactElement | null {
         <button
           type="button"
           onClick={startEdit}
-          className="group flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors truncate flex-1 min-w-0"
+          className="titlebar-no-drag group flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors truncate flex-1 min-w-0"
         >
           <span className="truncate">{session.title}</span>
           <Pencil className="size-3 opacity-40 group-hover:opacity-70 transition-opacity flex-shrink-0" />

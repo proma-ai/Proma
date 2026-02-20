@@ -160,6 +160,8 @@ interface RichTextInputProps {
   onPasteFiles?: (files: File[]) => void
   /** 占位文字 */
   placeholder?: string
+  /** 是否显示建议样式（斜体占位符） */
+  suggestionActive?: boolean
   /** 是否禁用 */
   disabled?: boolean
   /** 自动聚焦触发器（当此值变化时自动聚焦，通常传入对话 ID） */
@@ -179,6 +181,7 @@ export function RichTextInput({
   onSubmit,
   onPasteFiles,
   placeholder = '有什么可以帮助到你的呢？',
+  suggestionActive = false,
   className,
   disabled = false,
   autoFocusTrigger,
@@ -329,6 +332,19 @@ export function RichTextInput({
     }
   }, [editor, disabled])
 
+  // 动态更新 placeholder 文本
+  useEffect(() => {
+    if (!editor) return
+    const placeholderExt = editor.extensionManager.extensions.find(
+      (ext) => ext.name === 'placeholder'
+    )
+    if (placeholderExt) {
+      placeholderExt.options.placeholder = placeholder
+      // 触发 TipTap 重新渲染 placeholder
+      editor.view.dispatch(editor.state.tr)
+    }
+  }, [editor, placeholder])
+
   // 自动聚焦：组件挂载时 + autoFocusTrigger 变化时
   useEffect(() => {
     if (editor && !disabled) {
@@ -365,7 +381,7 @@ export function RichTextInput({
           pointer-events: none;
           height: 0;
           opacity: 0.5;
-          font-style: normal;
+          font-style: ${suggestionActive ? 'italic' : 'normal'};
         }
         .ProseMirror::-webkit-scrollbar {
           width: 3px;

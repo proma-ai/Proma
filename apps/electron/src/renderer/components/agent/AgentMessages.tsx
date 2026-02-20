@@ -127,6 +127,11 @@ function extractToolActivities(events: AgentMessage['events']): ToolActivity[] {
       if (idx >= 0) {
         activities[idx] = { ...activities[idx]!, elapsedSeconds: event.elapsedSeconds }
       }
+    } else if (event.type === 'task_started' && event.toolUseId) {
+      const idx = activities.findIndex((t) => t.toolUseId === event.toolUseId)
+      if (idx >= 0) {
+        activities[idx] = { ...activities[idx]!, intent: event.description, taskId: event.taskId }
+      }
     }
   }
   return activities

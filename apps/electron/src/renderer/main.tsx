@@ -25,6 +25,7 @@ import {
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import {
+// Cloud 模式专属
   cloudUserAtom,
   cloudAuthLoadingAtom,
   initializeCloudAuth,
@@ -36,7 +37,13 @@ import {
   initializeBilling,
 } from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
+// 通知
+import {
+  notificationsEnabledAtom,
+  initializeNotifications,
+} from './atoms/notifications'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
+import { Toaster } from './components/ui/sonner'
 import './styles/globals.css'
 
 /**
@@ -150,6 +157,7 @@ function UpdaterInitializer(): null {
 }
 
 /**
+/**
  * Cloud 认证初始化组件
  *
  * 仅在 Cloud 模式下从主进程恢复认证状态并订阅变化。
@@ -246,6 +254,21 @@ function OfficialChannelInitializer(): null {
 }
 
 /**
+ * 通知初始化组件
+ *
+ * 从主进程加载通知开关设置。
+ */
+function NotificationsInitializer(): null {
+  const setEnabled = useSetAtom(notificationsEnabledAtom)
+
+  useEffect(() => {
+    initializeNotifications(setEnabled)
+  }, [setEnabled])
+
+  return null
+}
+
+/**
  * Agent IPC 监听器初始化组件
  *
  * 全局挂载，永不销毁。确保 Agent 流式事件、权限请求
@@ -263,8 +286,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <BillingInitializer />
     <OfficialChannelInitializer />
     <AgentSettingsInitializer />
+    <NotificationsInitializer />
     <AgentListenersInitializer />
     <UpdaterInitializer />
     <App />
+    <Toaster position="top-right" />
   </React.StrictMode>
 )

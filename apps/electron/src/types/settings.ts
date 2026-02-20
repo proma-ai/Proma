@@ -28,6 +28,8 @@ export interface AppSettings {
   environmentCheckSkipped?: boolean
   /** 最后一次环境检测结果（缓存） */
   lastEnvironmentCheck?: EnvironmentCheckResult
+  /** 是否启用桌面通知 */
+  notificationsEnabled?: boolean
 }
 
 /** 设置 IPC 通道 */

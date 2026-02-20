@@ -6,7 +6,9 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS } from '@proma/shared'
+// Cloud 模式专属 IPC 通道
+import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -33,6 +35,7 @@ import type {
   AgentMessage,
   AgentSendInput,
   AgentStreamEvent,
+  AgentStreamCompletePayload,
   AgentWorkspace,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
@@ -78,6 +81,10 @@ import type {
   PromaPermissionMode,
   AskUserRequest,
   AskUserResponse,
+  SystemPromptConfig,
+  SystemPrompt,
+  SystemPromptCreateInput,
+  SystemPromptUpdateInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -322,7 +329,7 @@ export interface ElectronAPI {
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
 
   /** 订阅 Agent 流式完成事件 */
-  onAgentStreamComplete: (callback: (data: { sessionId: string }) => void) => () => void
+  onAgentStreamComplete: (callback: (data: AgentStreamCompletePayload) => void) => () => void
 
   /** 订阅 Agent 流式错误事件 */
   onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => () => void
@@ -379,6 +386,26 @@ export interface ElectronAPI {
 
   /** 在系统文件管理器中显示文件 */
   showInFolder: (filePath: string) => Promise<void>
+
+  // ===== 系统提示词管理 =====
+
+  /** 获取系统提示词配置 */
+  getSystemPromptConfig: () => Promise<SystemPromptConfig>
+
+  /** 创建提示词 */
+  createSystemPrompt: (input: SystemPromptCreateInput) => Promise<SystemPrompt>
+
+  /** 更新提示词 */
+  updateSystemPrompt: (id: string, input: SystemPromptUpdateInput) => Promise<SystemPrompt>
+
+  /** 删除提示词 */
+  deleteSystemPrompt: (id: string) => Promise<void>
+
+  /** 更新追加日期时间和用户名开关 */
+  updateAppendSetting: (enabled: boolean) => Promise<void>
+
+  /** 设置默认提示词 */
+  setDefaultPrompt: (id: string | null) => Promise<void>
 
   // ===== 自动更新相关（可选，仅在 updater 模块存在时可用） =====
 
@@ -831,8 +858,8 @@ const electronAPI: ElectronAPI = {
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_EVENT, listener) }
   },
 
-  onAgentStreamComplete: (callback: (data: { sessionId: string }) => void) => {
-    const listener = (_: unknown, data: { sessionId: string }): void => callback(data)
+  onAgentStreamComplete: (callback: (data: AgentStreamCompletePayload) => void) => {
+    const listener = (_: unknown, data: AgentStreamCompletePayload): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener) }
   },
@@ -925,6 +952,31 @@ const electronAPI: ElectronAPI = {
 
   showInFolder: (filePath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_IN_FOLDER, filePath)
+  },
+
+  // 系统提示词管理
+  getSystemPromptConfig: () => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.GET_CONFIG)
+  },
+
+  createSystemPrompt: (input: SystemPromptCreateInput) => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.CREATE, input)
+  },
+
+  updateSystemPrompt: (id: string, input: SystemPromptUpdateInput) => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.UPDATE, id, input)
+  },
+
+  deleteSystemPrompt: (id: string) => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.DELETE, id)
+  },
+
+  updateAppendSetting: (enabled: boolean) => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.UPDATE_APPEND_SETTING, enabled)
+  },
+
+  setDefaultPrompt: (id: string | null) => {
+    return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.SET_DEFAULT, id)
   },
 
   // 自动更新（updater 模块为可选，bridge 始终暴露，IPC 调用失败时由渲染进程处理）

@@ -17,11 +17,16 @@ import {
   currentAgentMessagesAtom,
   allPendingPermissionRequestsAtom,
   allPendingAskUserRequestsAtom,
+  agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
   applyAgentEvent,
 } from '@/atoms/agent-atoms'
+import {
+  notificationsEnabledAtom,
+  sendDesktopNotification,
+} from '@/atoms/notifications'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
-import type { AgentStreamEvent } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload } from '@proma/shared'
 
 export function useGlobalAgentListeners(): void {
   const store = useStore()
@@ -91,16 +96,43 @@ export function useGlobalAgentListeners(): void {
             if (!task) return prev
             return prev.filter((t) => t.toolUseId !== task.toolUseId)
           })
+        } else if (event.type === 'prompt_suggestion') {
+          // 存储提示建议到 atom
+          console.log(`[GlobalAgentListeners] 收到建议: sessionId=${sessionId}, suggestion="${event.suggestion.slice(0, 50)}..."`)
+          store.set(agentPromptSuggestionsAtom, (prev) => {
+            const map = new Map(prev)
+            map.set(sessionId, event.suggestion)
+            return map
+          })
         }
       }
     )
 
     // ===== 2. 流式完成 =====
     const cleanupComplete = window.electronAPI.onAgentStreamComplete(
-      (data: { sessionId: string }) => {
+      (data: AgentStreamCompletePayload) => {
         const currentId = store.get(currentAgentSessionIdAtom)
 
+        // 发送桌面通知
+        const enabled = store.get(notificationsEnabledAtom)
+        const sessions = store.get(agentSessionsAtom)
+        const session = sessions.find((s) => s.id === data.sessionId)
+        sendDesktopNotification(
+          'Agent 任务完成',
+          session?.title ?? '任务已完成',
+          enabled
+        )
+
+        /** 竞态保护：检查该会话是否已有新的流式请求正在运行 */
+        const isNewStreamRunning = (): boolean => {
+          const state = store.get(agentStreamingStatesAtom).get(data.sessionId)
+          return state?.running === true
+        }
+
         const finalize = (): void => {
+          // 竞态保护：新流已启动时不要清理状态
+          if (isNewStreamRunning()) return
+
           // 移除流式状态
           store.set(agentStreamingStatesAtom, (prev) => {
             if (!prev.has(data.sessionId)) return prev
@@ -122,13 +154,23 @@ export function useGlobalAgentListeners(): void {
         }
 
         if (data.sessionId === currentId) {
-          window.electronAPI
-            .getAgentSessionMessages(data.sessionId)
-            .then((messages) => {
-              store.set(currentAgentMessagesAtom, messages)
-              finalize()
-            })
-            .catch(() => finalize())
+          if (data.messages) {
+            // 同步路径：直接使用 payload 中已持久化的消息，消除异步 IPC 竞态窗口
+            if (!isNewStreamRunning()) {
+              store.set(currentAgentMessagesAtom, data.messages)
+            }
+            finalize()
+          } else {
+            // 降级路径：payload 无消息（兼容旧版主进程），异步重新加载
+            window.electronAPI
+              .getAgentSessionMessages(data.sessionId)
+              .then((messages) => {
+                if (isNewStreamRunning()) return
+                store.set(currentAgentMessagesAtom, messages)
+                finalize()
+              })
+              .catch(() => finalize())
+          }
         } else {
           finalize()
         }
@@ -153,6 +195,9 @@ export function useGlobalAgentListeners(): void {
           window.electronAPI
             .getAgentSessionMessages(data.sessionId)
             .then((messages) => {
+              // 竞态保护：新流已启动时跳过消息覆盖
+              const state = store.get(agentStreamingStatesAtom).get(data.sessionId)
+              if (state?.running) return
               store.set(currentAgentMessagesAtom, messages)
             })
             .catch((error) => {
@@ -182,6 +227,16 @@ export function useGlobalAgentListeners(): void {
           map.set(sessionId, [...current, request])
           return map
         })
+
+        // 发送桌面通知
+        const enabled = store.get(notificationsEnabledAtom)
+        sendDesktopNotification(
+          '需要权限确认',
+          request.toolName
+            ? `Agent 请求使用工具: ${request.toolName}`
+            : 'Agent 需要你的权限确认',
+          enabled
+        )
       }
     )
 
@@ -195,6 +250,14 @@ export function useGlobalAgentListeners(): void {
           map.set(sessionId, [...current, request])
           return map
         })
+
+        // 发送桌面通知
+        const enabled = store.get(notificationsEnabledAtom)
+        sendDesktopNotification(
+          'Agent 需要你的输入',
+          request.questions[0]?.question ?? 'Agent 有问题需要你回答',
+          enabled
+        )
       }
     )
 

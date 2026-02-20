@@ -359,6 +359,21 @@ export function applyAgentEvent(
         ),
       }
 
+    case 'task_started': {
+      // 查找匹配 toolUseId 的 ToolActivity，更新 intent 和 taskId
+      if (!event.toolUseId) return prev
+      const idx = prev.toolActivities.findIndex((t) => t.toolUseId === event.toolUseId)
+      if (idx < 0) return prev
+      return {
+        ...prev,
+        toolActivities: prev.toolActivities.map((t) =>
+          t.toolUseId === event.toolUseId
+            ? { ...t, intent: event.description, taskId: event.taskId }
+            : t
+        ),
+      }
+    }
+
     case 'shell_backgrounded':
       return {
         ...prev,
@@ -460,6 +475,10 @@ export function applyAgentEvent(
       // AskUser 解决事件由 AskUserBanner 处理，不影响流式状态
       return prev
 
+    case 'prompt_suggestion':
+      // 提示建议由全局监听器处理，不影响流式状态
+      return prev
+
     default:
       return prev
   }
@@ -524,6 +543,18 @@ export const currentAgentSessionDraftAtom = atom(
     })
   }
 )
+
+// ===== 提示建议 Atoms =====
+
+/** Agent 提示建议 Map — 以 sessionId 为 key，存储最近一条建议 */
+export const agentPromptSuggestionsAtom = atom<Map<string, string>>(new Map())
+
+/** 当前 Agent 会话的提示建议（派生只读原子） */
+export const currentAgentSuggestionAtom = atom<string | null>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return null
+  return get(agentPromptSuggestionsAtom).get(currentId) ?? null
+})
 
 // ===== 后台任务管理 =====
 
