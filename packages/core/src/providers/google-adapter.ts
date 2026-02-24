@@ -5,7 +5,7 @@
  * 特点：
  * - 角色：user / model（注意：assistant 映射为 model）
  * - 图片格式：{ inline_data: { mime_type, data } }
- * - SSE 解析：遍历 candidates[0].content.parts，区分 thought 推理和正常文本
+ * - SSE 解析：遍历 candidates[0].content.parts，区分 thought 推理和正常文本 + functionCall
  * - 认证：API Key 作为 URL 查询参数
  * - 支持推理内容：Gemini 2.5/3 系列通过 thinkingConfig 启用思考过程回显
  */
@@ -17,17 +17,31 @@ import type {
   StreamEvent,
   TitleRequestInput,
   ImageAttachmentData,
+  ToolDefinition,
+  ContinuationMessage,
 } from './types.ts'
 import { normalizeBaseUrl } from './url-utils.ts'
 
 // ===== Google 特有类型 =====
 
-/** Google 内容部分 */
+/** Google 内容部分（扩展支持 functionCall / functionResponse） */
 interface GooglePart {
   text?: string
+  /** Gemini 2.5/3 思考内容标记 */
+  thought?: boolean
+  /** 思考签名（工具调用时由模型生成，续接请求必须原样返回） */
+  thoughtSignature?: string
   inline_data?: {
     mime_type: string
     data: string
+  }
+  functionCall?: {
+    name: string
+    args?: Record<string, unknown>
+  }
+  functionResponse?: {
+    name: string
+    response: Record<string, unknown>
   }
 }
 
@@ -41,11 +55,7 @@ interface GoogleContent {
 interface GoogleStreamData {
   candidates?: Array<{
     content?: {
-      parts?: Array<{
-        text?: string
-        /** Gemini 2.5/3 思考内容标记，true 表示此 part 为推理过程 */
-        thought?: boolean
-      }>
+      parts?: GooglePart[]
     }
     finishReason?: string
   }>
@@ -120,6 +130,55 @@ function toGoogleContents(input: StreamRequestInput): GoogleContent[] {
   return contents
 }
 
+/**
+ * 将工具定义转换为 Google 格式
+ */
+function toGoogleTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
+  return [{
+    functionDeclarations: tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    })),
+  }]
+}
+
+/**
+ * 将续接消息追加到 Google contents 列表
+ */
+function appendContinuationMessages(
+  contents: GoogleContent[],
+  continuationMessages: ContinuationMessage[],
+): void {
+  for (const contMsg of continuationMessages) {
+    if (contMsg.role === 'assistant') {
+      const parts: GooglePart[] = []
+      if (contMsg.content) {
+        parts.push({ text: contMsg.content })
+      }
+      for (const tc of contMsg.toolCalls) {
+        const part: GooglePart = {
+          functionCall: { name: tc.name, args: tc.arguments },
+        }
+        // 还原 thoughtSignature（Gemini 2.5+ 思考模型要求原样返回）
+        if (tc.metadata?.thoughtSignature) {
+          part.thoughtSignature = tc.metadata.thoughtSignature as string
+        }
+        parts.push(part)
+      }
+      contents.push({ role: 'model', parts })
+    } else if (contMsg.role === 'tool') {
+      const parts: GooglePart[] = contMsg.results.map((r) => ({
+        functionResponse: {
+          name: r.toolCallId,
+          response: { content: r.content },
+        },
+      }))
+      contents.push({ role: 'user', parts })
+    }
+  }
+}
+
 // ===== 适配器实现 =====
 
 export class GoogleAdapter implements ProviderAdapter {
@@ -157,6 +216,16 @@ export class GoogleAdapter implements ProviderAdapter {
       }
     }
 
+    // 工具定义
+    if (input.tools && input.tools.length > 0) {
+      body.tools = toGoogleTools(input.tools)
+    }
+
+    // 工具续接消息
+    if (input.continuationMessages && input.continuationMessages.length > 0) {
+      appendContinuationMessages(contents, input.continuationMessages)
+    }
+
     return {
       url: `${url}/v1beta/models/${input.modelId}:streamGenerateContent?alt=sse&key=${input.apiKey}`,
       headers: {
@@ -174,8 +243,28 @@ export class GoogleAdapter implements ProviderAdapter {
 
       const events: StreamEvent[] = []
 
-      // 遍历所有 parts，区分推理内容和正常文本
+      // 遍历所有 parts，区分推理内容、正常文本和函数调用
       for (const part of parts) {
+        // 函数调用（Google 一次返回完整参数）
+        if (part.functionCall) {
+          const fc = part.functionCall
+          events.push({
+            type: 'tool_call_start',
+            toolCallId: fc.name,  // Google 没有独立的调用 ID，用函数名
+            toolName: fc.name,
+            // 保留 thoughtSignature，续接请求需要原样返回
+            metadata: part.thoughtSignature
+              ? { thoughtSignature: part.thoughtSignature }
+              : undefined,
+          })
+          events.push({
+            type: 'tool_call_delta',
+            toolCallId: fc.name,
+            argumentsDelta: JSON.stringify(fc.args || {}),
+          })
+          continue
+        }
+
         if (!part.text) continue
 
         if (part.thought) {

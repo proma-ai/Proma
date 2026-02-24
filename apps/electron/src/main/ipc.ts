@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -51,6 +51,7 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
+  MemoryConfig,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -115,6 +116,7 @@ import {
   getWorkspacePermissionMode,
   setWorkspacePermissionMode,
 } from './lib/agent-workspace-manager'
+import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import {
   getSystemPromptConfig,
   createSystemPrompt,
@@ -746,6 +748,43 @@ export function registerIpcHandlers(): void {
         throw new Error(`无效的权限模式: ${mode}`)
       }
       setWorkspacePermissionMode(workspaceSlug, mode)
+    }
+  )
+
+  // 全局记忆配置
+  ipcMain.handle(
+    MEMORY_IPC_CHANNELS.GET_CONFIG,
+    async (): Promise<MemoryConfig> => {
+      return getMemoryConfig()
+    }
+  )
+
+  ipcMain.handle(
+    MEMORY_IPC_CHANNELS.SET_CONFIG,
+    async (_, config: MemoryConfig): Promise<void> => {
+      setMemoryConfig(config)
+    }
+  )
+
+  ipcMain.handle(
+    MEMORY_IPC_CHANNELS.TEST_CONNECTION,
+    async (): Promise<{ success: boolean; message: string }> => {
+      const config = getMemoryConfig()
+      if (!config.apiKey) {
+        return { success: false, message: '请先填写 API Key' }
+      }
+      try {
+        const { searchMemory } = await import('./lib/memos-client')
+        const result = await searchMemory(
+          { apiKey: config.apiKey, userId: config.userId?.trim() || 'proma-user', baseUrl: config.baseUrl },
+          'test connection',
+          1,
+        )
+        return { success: true, message: `连接成功，已检索到 ${result.facts.length} 条事实、${result.preferences.length} 条偏好` }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        return { success: false, message: `连接失败: ${msg}` }
+      }
     }
   )
 

@@ -281,6 +281,7 @@ export async function fullSync(
 
     for (let i = 0; i < remoteConversations.length; i++) {
       const remoteConv = remoteConversations[i]
+      if (!remoteConv) continue
       const progress = Math.round(((i + 1) / total) * 90)
 
       notifyProgress(webContents, {

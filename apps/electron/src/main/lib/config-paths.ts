@@ -157,6 +157,15 @@ export function getSystemPromptsPath(): string {
 }
 
 /**
+ * 获取记忆配置文件路径
+ *
+ * @returns ~/.proma/memory.json
+ */
+export function getMemoryConfigPath(): string {
+  return join(getConfigDir(), 'memory.json')
+}
+
+/**
  * 获取 Agent 会话索引文件路径
  *
  * @returns ~/.proma/agent-sessions.json

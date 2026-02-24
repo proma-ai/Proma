@@ -5,7 +5,7 @@
  * 配置文件存储在 ~/.proma/proxy-settings.json。
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { ProxyConfig } from '@proma/shared'
 import { getProxySettingsPath } from './config-paths'
 import { detectSystemProxy } from './system-proxy-detector'
@@ -33,9 +33,8 @@ export async function getProxySettings(): Promise<ProxyConfig> {
   }
 
   try {
-    const file = Bun.file(configPath)
-    const config = (await file.json()) as ProxyConfig
-    return config
+    const raw = readFileSync(configPath, 'utf-8')
+    return JSON.parse(raw) as ProxyConfig
   } catch (error) {
     console.error('[代理配置] 读取配置失败:', error)
     return DEFAULT_PROXY_CONFIG
@@ -51,7 +50,7 @@ export async function saveProxySettings(config: ProxyConfig): Promise<void> {
   const configPath = getProxySettingsPath()
 
   try {
-    await Bun.write(configPath, JSON.stringify(config, null, 2))
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
     console.log('[代理配置] 配置已保存:', config)
   } catch (error) {
     console.error('[代理配置] 保存配置失败:', error)

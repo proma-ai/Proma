@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare } from 'lucide-react'
+import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -205,6 +205,10 @@ ${skillList}
 
   /** 删除 MCP 服务器 */
   const handleDelete = async (serverName: string): Promise<void> => {
+    // 内置 MCP 不可删除
+    const entry = mcpConfig.servers[serverName]
+    if (entry?.isBuiltin) return
+
     if (!confirm(`确定删除 MCP 服务器「${serverName}」？此操作不可恢复。`)) return
 
     try {
@@ -278,7 +282,9 @@ ${skillList}
     )
   }
 
-  const serverEntries = Object.entries(mcpConfig.servers ?? {})
+  const serverEntries = Object.entries(mcpConfig.servers ?? {}).filter(
+    ([name]) => name !== 'memos-cloud', // 记忆功能已迁移到独立配置，隐藏旧 MCP 条目
+  )
 
   // 列表视图
   return (
@@ -399,6 +405,8 @@ interface McpServerRowProps {
 }
 
 function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowProps): React.ReactElement {
+  const isBuiltin = entry.isBuiltin === true
+
   return (
     <SettingsRow
       label={name}
@@ -407,6 +415,12 @@ function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowP
       className="group"
     >
       <div className="flex items-center gap-2">
+        {isBuiltin && (
+          <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+            <ShieldCheck size={12} />
+            内置
+          </span>
+        )}
         <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
           {TRANSPORT_LABELS[entry.type] ?? entry.type}
         </span>
@@ -417,13 +431,15 @@ function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowP
         >
           <Pencil size={14} />
         </button>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-          title="删除"
-        >
-          <Trash2 size={14} />
-        </button>
+        {!isBuiltin && (
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+            title="删除"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
         <Switch
           checked={entry.enabled}
           onCheckedChange={onToggle}

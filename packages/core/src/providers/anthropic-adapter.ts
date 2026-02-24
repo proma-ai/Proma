@@ -5,7 +5,7 @@
  * 特点：
  * - 角色：user / assistant（不支持 system 角色，system 通过 body.system 传递）
  * - 图片格式：{ type: 'image', source: { type: 'base64', media_type, data } }
- * - SSE 解析：content_block_delta → text，thinking_delta → reasoning
+ * - SSE 解析：content_block_delta → text，thinking_delta → reasoning，tool_use 支持
  * - 认证：x-api-key + Authorization: Bearer
  */
 
@@ -16,20 +16,30 @@ import type {
   StreamEvent,
   TitleRequestInput,
   ImageAttachmentData,
+  ToolDefinition,
+  ContinuationMessage,
 } from './types.ts'
 import { normalizeAnthropicBaseUrl } from './url-utils.ts'
 
 // ===== Anthropic 特有类型 =====
 
-/** Anthropic 内容块 */
+/** Anthropic 内容块（扩展支持 tool_use / tool_result） */
 interface AnthropicContentBlock {
-  type: 'text' | 'image'
+  type: 'text' | 'image' | 'tool_use' | 'tool_result'
   text?: string
   source?: {
     type: 'base64'
     media_type: string
     data: string
   }
+  // tool_use 字段
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  // tool_result 字段
+  tool_use_id?: string
+  content?: string | AnthropicContentBlock[]
+  is_error?: boolean
 }
 
 /** Anthropic 消息格式 */
@@ -39,14 +49,24 @@ interface AnthropicMessage {
 }
 
 /** Anthropic SSE 事件 */
-interface AnthropicDeltaEvent {
+interface AnthropicSSEEvent {
   type: string
+  /** content_block_start 的 content_block */
+  content_block?: {
+    type: string
+    id?: string
+    name?: string
+  }
   delta?: {
     type?: string
     /** 普通文本增量 (text_delta) */
     text?: string
     /** 思考内容增量 (thinking_delta) */
     thinking?: string
+    /** 工具参数 JSON 增量 (input_json_delta) */
+    partial_json?: string
+    /** message_delta 的 stop_reason */
+    stop_reason?: string
   }
 }
 
@@ -128,6 +148,52 @@ function toAnthropicMessages(
   return messages
 }
 
+/**
+ * 将工具定义转换为 Anthropic 格式
+ */
+function toAnthropicTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+  }))
+}
+
+/**
+ * 将续接消息追加到 Anthropic 消息列表
+ */
+function appendContinuationMessages(
+  messages: AnthropicMessage[],
+  continuationMessages: ContinuationMessage[],
+): void {
+  for (const contMsg of continuationMessages) {
+    if (contMsg.role === 'assistant') {
+      const content: AnthropicContentBlock[] = []
+      if (contMsg.content) {
+        content.push({ type: 'text', text: contMsg.content })
+      }
+      for (const tc of contMsg.toolCalls) {
+        content.push({
+          type: 'tool_use',
+          id: tc.id,
+          name: tc.name,
+          input: tc.arguments,
+        })
+      }
+      messages.push({ role: 'assistant', content })
+    } else if (contMsg.role === 'tool') {
+      // Anthropic: tool_result 是 user role 消息的 content block
+      const content: AnthropicContentBlock[] = contMsg.results.map((result) => ({
+        type: 'tool_result' as const,
+        tool_use_id: result.toolCallId,
+        content: result.content,
+        is_error: result.isError ?? false,
+      }))
+      messages.push({ role: 'user', content })
+    }
+  }
+}
+
 // ===== 适配器实现 =====
 
 export class AnthropicAdapter implements ProviderAdapter {
@@ -161,6 +227,16 @@ export class AnthropicAdapter implements ProviderAdapter {
       body.system = input.systemMessage
     }
 
+    // 工具定义
+    if (input.tools && input.tools.length > 0) {
+      body.tools = toAnthropicTools(input.tools)
+    }
+
+    // 工具续接消息
+    if (input.continuationMessages && input.continuationMessages.length > 0) {
+      appendContinuationMessages(messages, input.continuationMessages)
+    }
+
     return {
       url: `${url}/messages`,
       headers: {
@@ -175,17 +251,38 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   parseSSELine(jsonLine: string): StreamEvent[] {
     try {
-      const event = JSON.parse(jsonLine) as AnthropicDeltaEvent
+      const event = JSON.parse(jsonLine) as AnthropicSSEEvent
       const events: StreamEvent[] = []
+
+      // 工具调用开始
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        events.push({
+          type: 'tool_call_start',
+          toolCallId: event.content_block.id || '',
+          toolName: event.content_block.name || '',
+        })
+      }
 
       if (event.type === 'content_block_delta') {
         // 推理内容（thinking_delta 的内容在 delta.thinking 字段中）
         if (event.delta?.type === 'thinking_delta' && event.delta?.thinking) {
           events.push({ type: 'reasoning', delta: event.delta.thinking })
+        } else if (event.delta?.type === 'input_json_delta' && event.delta?.partial_json) {
+          // 工具参数 JSON 增量
+          events.push({
+            type: 'tool_call_delta',
+            toolCallId: '',  // SSE reader 通过 currentToolCallId 关联
+            argumentsDelta: event.delta.partial_json,
+          })
         } else if (event.delta?.text) {
           // 普通文本内容（text_delta）
           events.push({ type: 'chunk', delta: event.delta.text })
         }
+      }
+
+      // message_delta 携带 stop_reason
+      if (event.type === 'message_delta' && event.delta?.stop_reason) {
+        events.push({ type: 'done', stopReason: event.delta.stop_reason })
       }
 
       return events

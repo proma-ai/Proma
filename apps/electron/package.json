@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.4.24",
+  "version": "0.5.0",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -41,7 +41,7 @@
     "release:win": "bun run dist:win && bun run upload:release"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.49",
+    "@anthropic-ai/claude-agent-sdk": "0.2.51",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@proma/cloud": "workspace:*",
@@ -89,7 +89,8 @@
     "tailwind-merge": "^2.5.5",
     "undici": "^7.21.0",
     "use-stick-to-bottom": "^1.1.2",
-    "word-extractor": "1.0.4"
+    "word-extractor": "1.0.4",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

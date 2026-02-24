@@ -13,13 +13,32 @@ The core vision of Proma is not to replace any particular software. Currently, o
 
 ## Screenshots
 
+### Chat Mode
 Chat mode with multi-model switching and file attachment support.
+
 ![Proma Chat Mode](https://img.erlich.fun/personal-blog/uPic/tBXRKI.png)
+
+### Agent Mode
 Agent mode with general-purpose agent capabilities. Supports the full Claude series, MiniMax M2.1, Kimi K2.5, Zhipu GLM, and third-party channels. Elegant, clean, smooth, and confident streaming output.
+
 ![Proma Agent Mode](https://img.erlich.fun/personal-blog/uPic/3ZHWyA.png)
+
+### Skill & MCP
 Built-in Brainstorming and office suite Skills with MCP support. Automatically helps you find and install Skills through conversation.
+
 ![Proma Default Skills and Mcp](https://img.erlich.fun/personal-blog/uPic/PNBOSt.png)
+
+### Memory
+Shared memory across Chat and Agent modes — AI truly understands you and remembers your preferences and habits.
+
+![Proma memory settings](https://img.erlich.fun/personal-blog/uPic/94B0LN.png)
+
+![Proma memory demo](https://img.erlich.fun/personal-blog/uPic/Wi8QfB.png)
+
+### Channel Configuration
+
 Full-protocol LLM channel support for all domestic and international providers, configured via Base URL + API Key.
+
 ![Proma Mutili Provider Support](https://img.erlich.fun/personal-blog/uPic/uPPazd.png)
 
 ## Features
@@ -29,6 +48,7 @@ Full-protocol LLM channel support for all domestic and international providers, 
 - **Streaming & Thinking** — Real-time streaming output with extended thinking visualization
 - **Rich Rendering** — Mermaid diagrams, syntax-highlighted code blocks, Markdown
 - **Attachments & Documents** — Upload images and parse PDF/Office/text files in conversations
+- **Memory** — Shared memory across Chat and Agent, AI remembers your preferences, habits, and context across sessions
 - **Local-First** — All data stored locally in `~/.proma/`, no database, fully portable
 - **Themes** — Light and dark mode with system preference detection
 
@@ -76,6 +96,15 @@ Proma is built on the shoulders of these great projects:
 - [Cherry Studio](https://github.com/CherryHQ/cherry-studio) — Inspiration for multi-provider desktop AI
 - [Lobe Icons](https://github.com/lobehub/lobe-icons) — AI/LLM brand icon set
 - [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss) — Agent SDK integration patterns
+- [MemOS](https://memos.openmem.net) — Memory feature implementation
+
+## Contributing
+
+We welcome contributions to Proma! Whether it's fixing bugs, adding features, or improving documentation, every contribution matters.
+
+**PR Bounty Program** — Proma currently offers a PR bounty program. Merged PRs automatically receive a generous bounty that can be used with Claude Code and similar products, helping you develop more effectively with AI-assisted tools. Simply leave your email address in the PR description when submitting.
+
+![Proma Given](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
 
 ## License
 

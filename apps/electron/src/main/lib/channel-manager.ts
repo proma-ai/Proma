@@ -159,7 +159,7 @@ export function syncOfficialChannel(models: ChannelModel[]): void {
     console.log(`[渠道管理] 已创建官方渠道，共 ${models.length} 个模型`)
   } else {
     // 更新模型：保留用户的 enabled 状态
-    const existing = config.channels[index]
+    const existing = config.channels[index]!
     const enabledMap = new Map<string, boolean>()
     for (const m of existing.models) {
       enabledMap.set(m.id, m.enabled)
@@ -174,7 +174,7 @@ export function syncOfficialChannel(models: ChannelModel[]): void {
       ...existing,
       models: updatedModels,
       updatedAt: Date.now(),
-    }
+    } as Channel
     writeConfig(config)
     console.log(`[渠道管理] 已更新官方渠道模型，共 ${updatedModels.length} 个`)
   }
@@ -195,7 +195,7 @@ export function syncOfficialAgentModels(models: ChannelModel[]): void {
     return
   }
 
-  const existing = config.channels[index]
+  const existing = config.channels[index]!
   const enabledMap = new Map<string, boolean>()
   for (const m of existing.agentModels ?? []) {
     enabledMap.set(m.id, m.enabled)
@@ -210,7 +210,7 @@ export function syncOfficialAgentModels(models: ChannelModel[]): void {
     ...existing,
     agentModels: updatedModels,
     updatedAt: Date.now(),
-  }
+  } as Channel
   writeConfig(config)
   console.log(`[渠道管理] 已更新官方渠道 Agent 模型，共 ${updatedModels.length} 个`)
 }

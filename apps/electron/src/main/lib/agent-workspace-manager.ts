@@ -18,7 +18,7 @@ import {
   getWorkspaceSkillsDir,
   getDefaultSkillsDir,
 } from './config-paths'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
+import type { AgentWorkspace, McpServerEntry, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
 
 /**
  * 工作区索引文件格式
@@ -216,37 +216,37 @@ export function deleteAgentWorkspace(id: string): void {
  */
 export function ensureDefaultWorkspace(): AgentWorkspace {
   const index = readIndex()
-  const existing = index.workspaces.find((w) => w.slug === 'default')
+  let defaultWs = index.workspaces.find((w) => w.slug === 'default')
 
-  if (existing) {
+  if (!defaultWs) {
+    const now = Date.now()
+    defaultWs = {
+      id: randomUUID(),
+      name: '默认工作区',
+      slug: 'default',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    // 创建工作区目录
+    getAgentWorkspacePath('default')
+
+    // 创建 SDK plugin manifest
+    ensurePluginManifest('default', '默认工作区')
+
+    // 复制默认 Skills 模板
+    copyDefaultSkills('default')
+
+    index.workspaces.push(defaultWs)
+    writeIndex(index)
+
+    console.log('[Agent 工作区] 已创建默认工作区')
+  } else {
     // 迁移兼容：确保已有默认工作区包含 plugin manifest 和 skills
-    ensurePluginManifest(existing.slug, existing.name)
-    return existing
+    ensurePluginManifest(defaultWs.slug, defaultWs.name)
   }
 
-  const now = Date.now()
-  const workspace: AgentWorkspace = {
-    id: randomUUID(),
-    name: '默认工作区',
-    slug: 'default',
-    createdAt: now,
-    updatedAt: now,
-  }
-
-  // 创建工作区目录
-  getAgentWorkspacePath('default')
-
-  // 创建 SDK plugin manifest
-  ensurePluginManifest('default', '默认工作区')
-
-  // 复制默认 Skills 模板
-  copyDefaultSkills('default')
-
-  index.workspaces.push(workspace)
-  writeIndex(index)
-
-  console.log('[Agent 工作区] 已创建默认工作区')
-  return workspace
+  return defaultWs
 }
 
 // ===== Plugin Manifest（SDK 插件发现） =====

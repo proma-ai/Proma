@@ -73,6 +73,7 @@ function serializeKeyValueText(record: Record<string, string> | undefined, separ
 
 export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpServerFormProps): React.ReactElement {
   const isEdit = server !== null
+  const isBuiltin = server?.entry.isBuiltin === true
 
   // 表单状态
   const [name, setName] = React.useState(server?.name ?? '')
@@ -99,17 +100,20 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
   React.useEffect(() => {
     if (!server) return // 新建时不需要清空
 
-    // 检查关键配置是否改变
+    // 检查关键配置是否改变（包括连接相关的所有字段）
     const configChanged =
       transportType !== server.entry.type ||
       (transportType === 'stdio' && command !== server.entry.command) ||
-      (transportType !== 'stdio' && url !== server.entry.url)
+      (transportType !== 'stdio' && url !== server.entry.url) ||
+      argsText !== (server.entry.args?.join(', ') ?? '') ||
+      envText !== serializeKeyValueText(server.entry.env, '=') ||
+      headersText !== serializeKeyValueText(server.entry.headers, ':')
 
     if (configChanged) {
       setTestResult(null)
       setEnabled(false) // 配置改变时自动关闭开关
     }
-  }, [transportType, command, url, server])
+  }, [transportType, command, url, argsText, envText, headersText, server])
 
   /** 构建 McpServerEntry */
   const buildEntry = (includeTestResult = false): McpServerEntry => {
@@ -117,6 +121,8 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
       type: transportType,
       // 关键保护：只有测试成功才能启用
       enabled: enabled && testResult?.success === true,
+      // 保留内置标记
+      ...(isBuiltin && { isBuiltin: true }),
       // 保存测试结果
       ...(includeTestResult && testResult && {
         lastTestResult: {
@@ -250,6 +256,19 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
       {/* 基本信息 */}
       <SettingsSection title="基本信息">
         <SettingsCard>
+          {/* 内置 MCP 引导提示 */}
+          {isBuiltin && (
+            <div className="px-4 py-3 text-sm bg-blue-500/10 text-blue-700 dark:text-blue-400 rounded-md mx-4 mt-3">
+              <div className="font-medium">内置记忆服务 (MemOS Cloud)</div>
+              <div className="text-xs mt-1 opacity-90">
+                前往 <a href="https://memos-dashboard.openmem.net/apikeys/" target="_blank" rel="noopener noreferrer" className="underline">memos-dashboard.openmem.net</a> 注册并获取 API Key 和 User ID，填入下方环境变量后启用。
+              </div>
+              <div className="text-xs mt-2 opacity-80 space-y-0.5">
+                <div><code className="font-mono">MEMOS_API_KEY</code> — 你的 API 密钥，在控制台 API Keys 页面生成</div>
+                <div><code className="font-mono">MEMOS_USER_ID</code> — 你的用户 ID，在控制台个人设置中查看</div>
+              </div>
+            </div>
+          )}
           <SettingsInput
             label="服务器名称"
             value={name}
@@ -264,6 +283,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
             onValueChange={(v) => setTransportType(v as McpTransportType)}
             options={TRANSPORT_OPTIONS}
             placeholder="选择传输类型"
+            disabled={isBuiltin}
           />
 
           {/* stdio 专用字段 */}
@@ -275,6 +295,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
                 onChange={setCommand}
                 placeholder="例如: npx"
                 required
+                disabled={isBuiltin}
               />
               <SettingsInput
                 label="参数"
@@ -282,6 +303,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
                 onChange={setArgsText}
                 placeholder="逗号分隔，例如: -y, @modelcontextprotocol/server-github"
                 description="多个参数用逗号分隔"
+                disabled={isBuiltin}
               />
               {/* 环境变量多行输入 */}
               <div className="px-4 py-3 space-y-2">

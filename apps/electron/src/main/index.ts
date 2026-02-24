@@ -119,8 +119,9 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'))
   }
 
-  // Show main window when ready
+  // 窗口就绪后最大化显示
   mainWindow.once('ready-to-show', () => {
+    mainWindow?.maximize()
     mainWindow?.show()
   })
 

@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
-import type { ConversationMeta, ChatMessage, FileAttachment } from '@proma/shared'
+import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity } from '@proma/shared'
 
 /** 选中的模型信息 */
 interface SelectedModel {
@@ -36,6 +36,8 @@ export interface ConversationStreamState {
   content: string
   reasoning: string
   model?: string
+  /** 记忆工具活动列表（流式期间累积） */
+  toolActivities: ChatToolActivity[]
 }
 
 /**
@@ -101,6 +103,15 @@ export const streamingModelAtom = atom<string | null>(
     const currentId = get(currentConversationIdAtom)
     if (!currentId) return null
     return get(streamingStatesAtom).get(currentId)?.model ?? null
+  },
+)
+
+/** 当前对话的工具活动列表（派生只读） */
+export const streamingToolActivitiesAtom = atom<ChatToolActivity[]>(
+  (get) => {
+    const currentId = get(currentConversationIdAtom)
+    if (!currentId) return []
+    return get(streamingStatesAtom).get(currentId)?.toolActivities ?? []
   },
 )
 

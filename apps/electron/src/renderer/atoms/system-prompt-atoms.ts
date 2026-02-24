@@ -16,6 +16,9 @@ import {
 import type { SystemPromptConfig, SystemPrompt } from '@proma/shared'
 import { userProfileAtom } from './user-profile'
 
+/** 提示词编辑侧栏是否打开 */
+export const promptSidebarOpenAtom = atom<boolean>(false)
+
 /** 完整提示词配置（从主进程加载） */
 export const promptConfigAtom = atom<SystemPromptConfig>({
   prompts: [BUILTIN_DEFAULT_PROMPT],

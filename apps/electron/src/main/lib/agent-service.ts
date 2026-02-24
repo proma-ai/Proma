@@ -48,6 +48,8 @@ import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-bui
 import { permissionService } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { getWorkspacePermissionMode } from './agent-workspace-manager'
+import { getMemoryConfig } from './memory-service'
+import { searchMemory, addMemory, formatSearchResult } from './memos-client'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@proma/shared'
 import { SAFE_TOOLS } from '@proma/shared'
 
@@ -871,6 +873,9 @@ export async function runAgent(
         // 只加载已启用的服务器（用户已通过测试验证）
         if (!entry.enabled) continue
 
+        // 跳过 memos-cloud：已迁移为 SDK 内置工具
+        if (name === 'memos-cloud') continue
+
         if (entry.type === 'stdio' && entry.command) {
           // 合并系统 PATH 到 MCP 服务器环境，确保 npx/node 等工具可被找到
           const mergedEnv: Record<string, string> = {
@@ -896,8 +901,59 @@ export async function runAgent(
           }
         }
       }
+
       if (Object.keys(mcpServers).length > 0) {
         console.log(`[Agent 服务] 已加载 ${Object.keys(mcpServers).length} 个 MCP 服务器`)
+      }
+    }
+
+    // 8.1 注入 SDK 内置记忆工具（全局，不依赖工作区）
+    const memoryConfig = getMemoryConfig()
+    const memUserId = memoryConfig.userId?.trim() || 'proma-user'
+    if (memoryConfig.enabled && memoryConfig.apiKey) {
+      try {
+        const { z } = await import('zod')
+        const memosServer = sdk.createSdkMcpServer({
+          name: 'mem',
+          version: '1.0.0',
+          tools: [
+            sdk.tool(
+              'recall_memory',
+              'Search user memories (facts and preferences) from MemOS Cloud. Use this to recall relevant context about the user.',
+              { query: z.string().describe('Search query for memory retrieval'), limit: z.number().optional().describe('Max results (default 6)') },
+              async (args) => {
+                const result = await searchMemory(
+                  { apiKey: memoryConfig.apiKey, userId: memUserId, baseUrl: memoryConfig.baseUrl },
+                  args.query,
+                  args.limit,
+                )
+                return { content: [{ type: 'text' as const, text: formatSearchResult(result) }] }
+              },
+              { annotations: { readOnlyHint: true } },
+            ),
+            sdk.tool(
+              'add_memory',
+              'Store a conversation message pair into MemOS Cloud for long-term memory. Call this after meaningful exchanges worth remembering.',
+              {
+                userMessage: z.string().describe('The user message to store'),
+                assistantMessage: z.string().optional().describe('The assistant response to store'),
+                conversationId: z.string().optional().describe('Conversation ID for grouping'),
+                tags: z.array(z.string()).optional().describe('Tags for categorization'),
+              },
+              async (args) => {
+                await addMemory(
+                  { apiKey: memoryConfig.apiKey, userId: memUserId, baseUrl: memoryConfig.baseUrl },
+                  args,
+                )
+                return { content: [{ type: 'text' as const, text: 'Memory stored successfully.' }] }
+              },
+            ),
+          ],
+        })
+        mcpServers['mem'] = memosServer as unknown as Record<string, unknown>
+        console.log(`[Agent 服务] 已注入内置记忆工具 (mem)`)
+      } catch (err) {
+        console.error(`[Agent 服务] 注入记忆工具失败:`, err)
       }
     }
 

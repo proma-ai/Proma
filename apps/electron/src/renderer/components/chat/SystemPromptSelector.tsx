@@ -5,17 +5,19 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
-import { BookOpen, Check, Star } from 'lucide-react'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { BookOpen, Check, Star, Pencil } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
   promptConfigAtom,
   selectedPromptIdAtom,
   defaultPromptIdAtom,
+  promptSidebarOpenAtom,
 } from '@/atoms/system-prompt-atoms'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +25,7 @@ export function SystemPromptSelector(): React.ReactElement {
   const [config, setConfig] = useAtom(promptConfigAtom)
   const [selectedId, setSelectedId] = useAtom(selectedPromptIdAtom)
   const defaultPromptId = useAtomValue(defaultPromptIdAtom)
+  const setPromptSidebarOpen = useSetAtom(promptSidebarOpenAtom)
   const [open, setOpen] = React.useState(false)
 
   /** 懒加载配置 */
@@ -43,7 +46,7 @@ export function SystemPromptSelector(): React.ReactElement {
           title={tooltipText}
           className="inline-flex items-center justify-center h-7 w-7 rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
         >
-          <BookOpen className="size-3.5" />
+          <BookOpen className="size-4" />
         </button>
       </DropdownMenuTrigger>
 
@@ -75,6 +78,17 @@ export function SystemPromptSelector(): React.ReactElement {
             )}
           </div>
         ))}
+        <DropdownMenuSeparator />
+        <div
+          onClick={() => {
+            setPromptSidebarOpen(true)
+            setOpen(false)
+          }}
+          className="relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <Pencil className="size-4" />
+          <span>编辑提示词</span>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   )

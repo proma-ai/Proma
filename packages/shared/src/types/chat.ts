@@ -266,6 +266,32 @@ export interface StreamErrorEvent {
   error: string
 }
 
+/**
+ * Chat 工具活动（记忆工具调用状态）
+ */
+export interface ChatToolActivity {
+  /** 工具调用 ID */
+  toolCallId: string
+  /** 工具名称 */
+  toolName: string
+  /** 活动类型：开始 / 结果 */
+  type: 'start' | 'result'
+  /** 执行结果（仅 result 时存在） */
+  result?: string
+  /** 是否出错 */
+  isError?: boolean
+}
+
+/**
+ * 流式工具活动事件
+ */
+export interface StreamToolActivityEvent {
+  /** 对话 ID */
+  conversationId: string
+  /** 工具活动详情 */
+  activity: ChatToolActivity
+}
+
 // ===== 模型选项 =====
 
 /**
@@ -364,4 +390,6 @@ export const CHAT_IPC_CHANNELS = {
   STREAM_COMPLETE: 'chat:stream:complete',
   /** 流式错误 */
   STREAM_ERROR: 'chat:stream:error',
+  /** 工具活动事件（记忆工具调用/结果指示） */
+  STREAM_TOOL_ACTIVITY: 'chat:stream:tool-activity',
 } as const

@@ -6,16 +6,12 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Pencil, Check, X, Columns2, Pin } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
+import { Pencil, Check, X, Pin, Columns2 } from 'lucide-react'
 import { currentConversationAtom, conversationsAtom, parallelModeAtom } from '@/atoms/chat-atoms'
 import { SystemPromptSelector } from './SystemPromptSelector'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 export function ChatHeader(): React.ReactElement | null {
   const conversation = useAtomValue(currentConversationAtom)
@@ -26,8 +22,6 @@ export function ChatHeader(): React.ReactElement | null {
   const inputRef = React.useRef<HTMLInputElement>(null)
 
   if (!conversation) return null
-
-  const isPinned = !!conversation.pinned
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
@@ -53,18 +47,6 @@ export function ChatHeader(): React.ReactElement | null {
       console.error('[ChatHeader] 更新标题失败:', error)
     }
     setEditing(false)
-  }
-
-  /** 切换置顶状态 */
-  const handleTogglePin = async (): Promise<void> => {
-    try {
-      const updated = await window.electronAPI.togglePinConversation(conversation.id)
-      setConversations((prev) =>
-        prev.map((c) => (c.id === updated.id ? updated : c))
-      )
-    } catch (error) {
-      console.error('[ChatHeader] 切换置顶失败:', error)
-    }
   }
 
   /** 键盘事件 */
@@ -124,48 +106,39 @@ export function ChatHeader(): React.ReactElement | null {
         </div>
       )}
 
-      {/* 右上角按钮组 — 绝对定位，与 Agent 侧统一 */}
-      <div className="absolute right-2.5 top-2.5 z-10 flex items-center gap-1 titlebar-no-drag">
+      {/* 右侧按钮组 */}
+      <div className="flex items-center gap-1 titlebar-no-drag ml-auto">
         <SystemPromptSelector />
-
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className={cn(
-                'h-7 w-7',
-                isPinned && 'bg-accent text-accent-foreground'
-              )}
-              onClick={handleTogglePin}
+              className={cn('h-7 w-7', conversation.pinned && 'bg-accent text-accent-foreground')}
+              onClick={async () => {
+                const updated = await window.electronAPI.togglePinConversation(conversation.id)
+                setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+              }}
             >
               <Pin className="size-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>{isPinned ? '取消置顶' : '置顶对话'}</p>
-          </TooltipContent>
+          <TooltipContent side="bottom"><p>{conversation.pinned ? '取消置顶' : '置顶对话'}</p></TooltipContent>
         </Tooltip>
-
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className={cn(
-                'h-7 w-7',
-                parallelMode && 'bg-accent text-accent-foreground'
-              )}
+              className={cn('h-7 w-7', parallelMode && 'bg-accent text-accent-foreground')}
               onClick={() => setParallelMode(!parallelMode)}
             >
               <Columns2 className="size-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>{parallelMode ? '关闭并排模式' : '并排模式'}</p>
-          </TooltipContent>
+          <TooltipContent side="bottom"><p>{parallelMode ? '关闭并排模式' : '并排模式'}</p></TooltipContent>
         </Tooltip>
       </div>
     </div>

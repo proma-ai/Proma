@@ -16,7 +16,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check, Sparkles } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -590,7 +590,7 @@ export function AgentView(): React.ReactElement {
     }
   }, [agentError])
 
-  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || pendingFolderRefs.length > 0 || !!suggestion) && agentChannelId !== null && !streaming
+  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || pendingFolderRefs.length > 0) && agentChannelId !== null && !streaming
 
   // 无当前会话 → 引导文案
   if (!currentSessionId) {
@@ -698,6 +698,32 @@ export function AgentView(): React.ReactElement {
               </div>
             )}
 
+            {/* Agent 建议提示 */}
+            {suggestion && !streaming && (
+              <div className="px-3 pb-1.5">
+                <button
+                  type="button"
+                  className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
+                  onClick={handleSend}
+                >
+                  <Sparkles className="size-4 shrink-0 mt-0.5 text-primary/60 group-hover:text-primary/80" />
+                  <span className="flex-1 min-w-0 text-foreground/80 group-hover:text-foreground line-clamp-3">{suggestion}</span>
+                  <X
+                    className="size-3.5 shrink-0 mt-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPromptSuggestions((prev) => {
+                        if (!currentSessionId || !prev.has(currentSessionId)) return prev
+                        const map = new Map(prev)
+                        map.delete(currentSessionId)
+                        return map
+                      })
+                    }}
+                  />
+                </button>
+              </div>
+            )}
+
             <RichTextInput
               value={inputContent}
               onChange={setInputContent}
@@ -705,12 +731,9 @@ export function AgentView(): React.ReactElement {
               onPasteFiles={handlePasteFiles}
               placeholder={
                 agentChannelId
-                  ? suggestion
-                    ? `${suggestion} (Proma Agent 提供，按下回车自动发送，或手动输入)`
-                    : '输入消息... (Enter 发送，Shift+Enter 换行)'
+                  ? '输入消息... (Enter 发送，Shift+Enter 换行)'
                   : '请先在设置中选择 Agent 供应商'
               }
-              suggestionActive={!!suggestion && inputContent.trim().length === 0}
               disabled={!agentChannelId}
               autoFocusTrigger={currentSessionId}
             />
@@ -805,52 +828,54 @@ export function AgentView(): React.ReactElement {
         </div>
       </div>
 
-      {/* 文件浏览器侧栏 — 始终渲染同一个切换按钮 */}
-      {sessionPath && (
-        <div
-          className={cn(
-            'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden',
-            fileBrowserOpen ? 'w-[300px] border-l' : 'w-10'
-          )}
-        >
-          {/* 切换按钮 — 始终固定在右上角，同一个 DOM 元素 */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-2.5 top-2.5 z-10 h-7 w-7"
-                onClick={() => setFileBrowserOpen((prev) => !prev)}
-              >
-                <FolderOpen
-                  className={cn(
-                    'size-3.5 absolute transition-all duration-200',
-                    fileBrowserOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100'
-                  )}
-                />
-                <X
-                  className={cn(
-                    'size-3.5 absolute transition-all duration-200',
-                    fileBrowserOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75'
-                  )}
-                />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              <p>{fileBrowserOpen ? '关闭文件浏览器' : '打开文件浏览器'}</p>
-            </TooltipContent>
-          </Tooltip>
+      {/* 文件浏览器侧栏 — 始终渲染 w-10 占位，避免切换模式时布局跳动 */}
+      <div
+        className={cn(
+          'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden titlebar-drag-region',
+          sessionPath && fileBrowserOpen ? 'w-[300px] border-l' : 'w-10'
+        )}
+      >
+        {sessionPath && (
+          <>
+            {/* 切换按钮 — 始终固定在右上角，同一个 DOM 元素 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-2.5 top-2.5 z-10 h-7 w-7 titlebar-no-drag"
+                  onClick={() => setFileBrowserOpen((prev) => !prev)}
+                >
+                  <FolderOpen
+                    className={cn(
+                      'size-3.5 absolute transition-all duration-200',
+                      fileBrowserOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100'
+                    )}
+                  />
+                  <X
+                    className={cn(
+                      'size-3.5 absolute transition-all duration-200',
+                      fileBrowserOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75'
+                    )}
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                <p>{fileBrowserOpen ? '关闭文件浏览器' : '打开文件浏览器'}</p>
+              </TooltipContent>
+            </Tooltip>
 
-          {/* FileBrowser 内容 — 收起时隐藏 */}
-          <div className={cn(
-            'w-[300px] h-full transition-opacity duration-300',
-            fileBrowserOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-          )}>
-            <FileBrowser rootPath={sessionPath} />
-          </div>
-        </div>
-      )}
+            {/* FileBrowser 内容 — 收起时隐藏 */}
+            <div className={cn(
+              'w-[300px] h-full transition-opacity duration-300 titlebar-no-drag',
+              fileBrowserOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            )}>
+              <FileBrowser rootPath={sessionPath} />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

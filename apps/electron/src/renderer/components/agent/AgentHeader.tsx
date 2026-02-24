@@ -86,14 +86,20 @@ export function AgentHeader(): React.ReactElement | null {
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={startEdit}
-          className="titlebar-no-drag group flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors truncate flex-1 min-w-0"
-        >
-          <span className="truncate">{session.title}</span>
-          <Pencil className="size-3 opacity-40 group-hover:opacity-70 transition-opacity flex-shrink-0" />
-        </button>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="truncate text-sm font-medium text-foreground">
+            {session.title}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={startEdit}
+            className="titlebar-no-drag p-1 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="编辑标题"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        </div>
       )}
     </div>
   )

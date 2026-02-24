@@ -90,6 +90,30 @@
   display: none;
 }
 
+/* 纤细滚动条 */
+.scrollbar-thin,
+.scrollbar-thin > * {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar,
+.scrollbar-thin > *::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track,
+.scrollbar-thin > *::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb,
+.scrollbar-thin > *::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover,
+.scrollbar-thin > *::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
 /* 滚动区域上下渐隐遮罩 */
 .mask-fade-y {
   mask-image: linear-gradient(

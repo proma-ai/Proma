@@ -26,6 +26,60 @@ export interface ImageAttachmentData {
  */
 export type ImageAttachmentReader = (attachments?: FileAttachment[]) => ImageAttachmentData[]
 
+// ===== Tool Use（Function Calling）=====
+
+/** 工具参数属性定义 */
+export interface ToolParameterProperty {
+  type: string
+  description?: string
+  enum?: string[]
+}
+
+/** 工具定义（供应商无关的统一格式） */
+export interface ToolDefinition {
+  /** 工具名称 */
+  name: string
+  /** 工具描述 */
+  description: string
+  /** JSON Schema 格式的参数定义 */
+  parameters: {
+    type: 'object'
+    properties: Record<string, ToolParameterProperty>
+    required?: string[]
+  }
+}
+
+/** 模型返回的工具调用 */
+export interface ToolCall {
+  /** 工具调用 ID（用于匹配结果） */
+  id: string
+  /** 工具名称 */
+  name: string
+  /** 解析后的参数 */
+  arguments: Record<string, unknown>
+  /** 供应商特定的元数据（如 Google 的 thought_signature） */
+  metadata?: Record<string, unknown>
+}
+
+/** 工具执行结果（传回给模型的下一轮请求） */
+export interface ToolResult {
+  /** 对应的工具调用 ID */
+  toolCallId: string
+  /** 执行结果内容 */
+  content: string
+  /** 是否出错 */
+  isError?: boolean
+}
+
+/**
+ * 续接消息（工具调用后传回给模型的消息）
+ *
+ * 供应商无关格式，各适配器负责转换为供应商特定格式。
+ */
+export type ContinuationMessage =
+  | { role: 'assistant'; content: string; toolCalls: ToolCall[] }
+  | { role: 'tool'; results: ToolResult[] }
+
 // ===== 流式事件 =====
 
 /** 文本增量事件 */
@@ -49,6 +103,24 @@ export interface StreamErrorEvent {
 /** 流式完成事件 */
 export interface StreamDoneEvent {
   type: 'done'
+  /** 停止原因：'tool_use' 表示需要执行工具后继续 */
+  stopReason?: 'end_turn' | 'tool_use' | string
+}
+
+/** 工具调用开始事件 */
+export interface StreamToolCallStartEvent {
+  type: 'tool_call_start'
+  toolCallId: string
+  toolName: string
+  /** 供应商特定的元数据（如 Google 的 thought_signature） */
+  metadata?: Record<string, unknown>
+}
+
+/** 工具调用参数增量事件 */
+export interface StreamToolCallDeltaEvent {
+  type: 'tool_call_delta'
+  toolCallId: string
+  argumentsDelta: string
 }
 
 /** 所有流式事件的联合类型 */
@@ -57,6 +129,8 @@ export type StreamEvent =
   | StreamReasoningEvent
   | StreamErrorEvent
   | StreamDoneEvent
+  | StreamToolCallStartEvent
+  | StreamToolCallDeltaEvent
 
 /** 流式事件回调函数 */
 export type StreamEventCallback = (event: StreamEvent) => void
@@ -95,6 +169,10 @@ export interface StreamRequestInput {
   readImageAttachments: ImageAttachmentReader
   /** 是否启用思考模式（各适配器根据供应商 API 自行转换） */
   thinkingEnabled?: boolean
+  /** 工具定义列表（可选，启用 function calling） */
+  tools?: ToolDefinition[]
+  /** 工具续接消息（tool use 循环中，前一轮的 tool_use + tool_result） */
+  continuationMessages?: ContinuationMessage[]
 }
 
 /** 标题生成请求的输入参数 */

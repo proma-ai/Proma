@@ -23,6 +23,8 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
+import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
+import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
 import { useSmoothStream } from '@proma/ui'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
@@ -469,6 +471,7 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
 
 export function AgentMessages(): React.ReactElement {
   const messages = useAtomValue(currentAgentMessagesAtom)
+  const userProfile = useAtomValue(userProfileAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const streaming = useAtomValue(agentStreamingAtom)
   const streamingContent = useAtomValue(agentStreamingContentAtom)
@@ -485,6 +488,18 @@ export function AgentMessages(): React.ReactElement {
     isStreaming: streaming,
   })
 
+  // 迷你地图数据
+  const minimapItems: MinimapItem[] = React.useMemo(
+    () => messages.map((m) => ({
+      id: m.id,
+      role: m.role === 'status' ? 'status' as const : m.role as MinimapItem['role'],
+      preview: m.content.replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 80),
+      avatar: m.role === 'user' ? userProfile.avatar : undefined,
+      model: m.model,
+    })),
+    [messages, userProfile.avatar]
+  )
+
   return (
     <Conversation>
       <ConversationContent>
@@ -493,7 +508,9 @@ export function AgentMessages(): React.ReactElement {
         ) : (
           <>
             {messages.map((msg: AgentMessage) => (
-              <AgentMessageItem key={msg.id} message={msg} />
+              <div key={msg.id} data-message-id={msg.id}>
+                <AgentMessageItem message={msg} />
+              </div>
             ))}
 
             {(streaming || smoothContent || toolActivities.length > 0 || retrying) && (
@@ -526,6 +543,7 @@ export function AgentMessages(): React.ReactElement {
           </>
         )}
       </ConversationContent>
+      <ScrollMinimap items={minimapItems} />
       <ConversationScrollButton />
     </Conversation>
   )
