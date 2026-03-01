@@ -144,10 +144,12 @@ export class PromaAdapter implements ProviderAdapter {
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {
-    const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
+    // 标题生成使用 OpenAI 兼容的非流式端点（/v1/chat/completions），而非仅支持 SSE 的 /api/v1/chat
+    // baseUrl 形如 https://api.proma.cool/api/v1，需要提取根域名再拼接 /v1/chat/completions
+    const rootUrl = input.baseUrl.trim().replace(/\/+$/, '').replace(/\/api\/v\d+$/, '')
 
     return {
-      url: `${baseUrl}/chat`,
+      url: `${rootUrl}/v1/chat/completions`,
       headers: {
         'Authorization': `Bearer ${input.apiKey}`,
         'Content-Type': 'application/json',

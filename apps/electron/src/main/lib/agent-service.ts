@@ -31,7 +31,7 @@ import {
 } from '@proma/shared'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey } from './cloud-channel-service'
-import { getAuthToken } from './cloud-auth-service'
+import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
 import {
   getAdapter,
@@ -1457,22 +1457,32 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
       baseUrl = channel.baseUrl
     }
 
-    // Proma 官方渠道：标题生成走 /api/v1/chat 端点，使用轻量 Chat 模型（快且便宜）
-    const titleModelId = channel.provider === 'proma'
-      ? PROMA_TITLE_MODEL
-      : modelId
-
     const adapter = getAdapter(channel.provider)
-    const request = adapter.buildTitleRequest({
-      baseUrl,
-      apiKey,
-      modelId: titleModelId,
-      prompt: TITLE_PROMPT + userMessage,
-    })
-
     const proxyUrl = await getEffectiveProxyUrl()
     const fetchFn = getFetchFn(proxyUrl)
-    const title = await fetchTitle(request, adapter, fetchFn)
+    const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
+
+    const doFetch = async (key: string): Promise<string | null> => {
+      const request = adapter.buildTitleRequest({
+        baseUrl,
+        apiKey: key,
+        modelId: titleModelId,
+        prompt: TITLE_PROMPT + userMessage,
+      })
+      return fetchTitle(request, adapter, fetchFn)
+    }
+
+    let title = await doFetch(apiKey)
+
+    // Proma 渠道：token 过期时尝试刷新后重试一次
+    if (!title && channel.provider === 'proma') {
+      const newToken = await tryRefreshAuthToken()
+      if (newToken) {
+        console.log('[Agent 标题生成] Token 已刷新，重试...')
+        title = await doFetch(newToken)
+      }
+    }
+
     if (!title) {
       console.warn('[Agent 标题生成] API 返回空标题')
       return null

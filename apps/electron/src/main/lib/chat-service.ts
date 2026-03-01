@@ -745,19 +745,33 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     baseUrl = channel.baseUrl
   }
 
-  try {
-    const adapter = getAdapter(channel.provider)
-    const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
+  const adapter = getAdapter(channel.provider)
+  const proxyUrl = await getEffectiveProxyUrl()
+  const fetchFn = getFetchFn(proxyUrl)
+  const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
+
+  const doFetch = async (key: string): Promise<string | null> => {
     const request = adapter.buildTitleRequest({
       baseUrl,
-      apiKey,
+      apiKey: key,
       modelId: titleModelId,
       prompt: TITLE_PROMPT + userMessage,
     })
+    return fetchTitle(request, adapter, fetchFn)
+  }
 
-    const proxyUrl = await getEffectiveProxyUrl()
-    const fetchFn = getFetchFn(proxyUrl)
-    const title = await fetchTitle(request, adapter, fetchFn)
+  try {
+    let title = await doFetch(apiKey)
+
+    // Proma 渠道：token 过期时尝试刷新后重试一次
+    if (!title && channel.provider === 'proma') {
+      const newToken = await tryRefreshAuthToken()
+      if (newToken) {
+        console.log('[标题生成] Token 已刷新，重试...')
+        title = await doFetch(newToken)
+      }
+    }
+
     if (!title) {
       console.warn('[标题生成] API 返回空标题')
       return null
