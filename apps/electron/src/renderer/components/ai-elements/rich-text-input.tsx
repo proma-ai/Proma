@@ -22,6 +22,8 @@ import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
+import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 // 创建 lowlight 实例，使用常见语言
@@ -166,6 +168,8 @@ interface RichTextInputProps {
   disabled?: boolean
   /** 自动聚焦触发器（当此值变化时自动聚焦，通常传入对话 ID） */
   autoFocusTrigger?: string | null
+  /** 是否支持手动折叠（内容较长时显示折叠按钮） */
+  collapsible?: boolean
   className?: string
 }
 
@@ -185,8 +189,11 @@ export function RichTextInput({
   className,
   disabled = false,
   autoFocusTrigger,
+  collapsible = false,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
+  // 手动折叠状态：用户主动折叠输入框
+  const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 跟踪 IME 输入状态（中文输入法等）
@@ -289,6 +296,7 @@ export function RichTextInput({
         lastEditorValueRef.current = ''
         onChange('')
         setIsExpanded(false)
+        setIsManuallyCollapsed(false)
       } else {
         const markdown = htmlToMarkdown(html)
         lastEditorValueRef.current = markdown
@@ -314,6 +322,7 @@ export function RichTextInput({
         editor.commands.clearContent()
         lastEditorValueRef.current = ''
         setIsExpanded(false)
+        setIsManuallyCollapsed(false)
       } else {
         const html = controllerValue
           .split(/\n\n+/)
@@ -355,16 +364,42 @@ export function RichTextInput({
     }
   }, [editor, disabled, autoFocusTrigger])
 
+  // 是否显示折叠按钮：启用 collapsible 且内容已自动扩展
+  const showCollapseToggle = collapsible && isExpanded
+
   return (
     <div
       className={cn(
         'relative w-full overflow-y-auto transition-[max-height] duration-200 ease-in-out',
-        isExpanded ? 'max-h-[500px]' : 'max-h-[200px]',
+        isManuallyCollapsed
+          ? 'max-h-[60px]'
+          : isExpanded ? 'max-h-[500px]' : 'max-h-[200px]',
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
     >
       <EditorContent editor={editor} className="w-full" />
+      {/* 折叠/展开切换按钮 — sticky 悬浮在滚动区域内 */}
+      {showCollapseToggle && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="sticky bottom-1 float-right mr-2 z-10 p-0.5 rounded hover:bg-muted/80 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+              onClick={() => setIsManuallyCollapsed((prev) => !prev)}
+            >
+              {isManuallyCollapsed ? (
+                <ChevronsUpDown className="size-3.5" />
+              ) : (
+                <ChevronsDownUp className="size-3.5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {isManuallyCollapsed ? '展开输入框' : '折叠输入框'}
+          </TooltipContent>
+        </Tooltip>
+      )}
       <style>{`
         .ProseMirror {
           outline: none;

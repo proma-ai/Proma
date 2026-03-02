@@ -16,14 +16,14 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check, Sparkles } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Sparkles } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
 import { AskUserBanner } from './AskUserBanner'
-import { FileBrowser } from '@/components/file-browser'
+import { SidePanel } from './SidePanel'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
@@ -31,46 +31,34 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
-  currentAgentSessionIdAtom,
-  currentAgentMessagesAtom,
   agentStreamingStatesAtom,
-  agentStreamingAtom,
   agentChannelIdAtom,
   agentModelIdAtom,
   currentAgentWorkspaceIdAtom,
   agentPendingPromptAtom,
   agentPendingFilesAtom,
   agentWorkspacesAtom,
-  agentContextStatusAtom,
   agentStreamErrorsAtom,
-  currentAgentErrorAtom,
-  currentAgentSessionDraftAtom,
+  agentSessionDraftsAtom,
   agentPromptSuggestionsAtom,
-  currentAgentSuggestionAtom,
+  agentMessageRefreshAtom,
+  agentSessionsAtom,
+  currentAgentSessionIdAtom,
 } from '@/atoms/agent-atoms'
+import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
+import { AgentSessionProvider } from '@/contexts/session-context'
 import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
 import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
+import { fileToBase64 } from '@/lib/file-utils'
 
-/** 将 File 对象转为 base64 字符串 */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result as string
-      const base64 = result.split(',')[1]!
-      resolve(base64)
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-export function AgentView(): React.ReactElement {
-  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const [currentMessages, setCurrentMessages] = useAtom(currentAgentMessagesAtom)
+export function AgentView({ sessionId }: { sessionId: string }): React.ReactElement {
+  const [messages, setMessages] = React.useState<AgentMessage[]>([])
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
-  const streaming = useAtomValue(agentStreamingAtom)
+  const streamingStates = useAtomValue(agentStreamingStatesAtom)
+  const streamState = streamingStates.get(sessionId)
+  const streaming = streamState?.running ?? false
   const [agentChannelId, setAgentChannelId] = useAtom(agentChannelIdAtom)
   const [agentModelId, setAgentModelId] = useAtom(agentModelIdAtom)
   const setActiveView = useSetAtom(activeViewAtom)
@@ -78,15 +66,37 @@ export function AgentView(): React.ReactElement {
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
   const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
-  const contextStatus = useAtomValue(agentContextStatusAtom)
+  const contextStatus: AgentContextStatus = {
+    isCompacting: streamState?.isCompacting ?? false,
+    inputTokens: streamState?.inputTokens,
+    contextWindow: streamState?.contextWindow,
+  }
   const setAgentStreamErrors = useSetAtom(agentStreamErrorsAtom)
-  const agentError = useAtomValue(currentAgentErrorAtom)
+  const streamErrors = useAtomValue(agentStreamErrorsAtom)
+  const agentError = streamErrors.get(sessionId) ?? null
   const store = useStore()
-  const suggestion = useAtomValue(currentAgentSuggestionAtom)
+  const suggestionsMap = useAtomValue(agentPromptSuggestionsAtom)
+  const suggestion = suggestionsMap.get(sessionId) ?? null
   const setPromptSuggestions = useSetAtom(agentPromptSuggestionsAtom)
+  const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
+  const [tabs, setTabs] = useAtom(tabsAtom)
+  const [layout, setLayout] = useAtom(splitLayoutAtom)
 
-  const [inputContent, setInputContent] = useAtom(currentAgentSessionDraftAtom)
-  const [fileBrowserOpen, setFileBrowserOpen] = React.useState(false)
+  const draftsMap = useAtomValue(agentSessionDraftsAtom)
+  const setDraftsMap = useSetAtom(agentSessionDraftsAtom)
+  const inputContent = draftsMap.get(sessionId) ?? ''
+  const setInputContent = React.useCallback((value: string) => {
+    setDraftsMap((prev) => {
+      const map = new Map(prev)
+      if (value.trim() === '') {
+        map.delete(sessionId)
+      } else {
+        map.set(sessionId, value)
+      }
+      return map
+    })
+  }, [sessionId, setDraftsMap])
   const [sessionPath, setSessionPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [pendingFolderRefs, setPendingFolderRefs] = React.useState<AgentSavedFile[]>([])
@@ -127,35 +137,45 @@ export function AgentView(): React.ReactElement {
 
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
-    if (!currentSessionId || !currentWorkspaceId) {
+    if (!currentWorkspaceId) {
       setSessionPath(null)
       return
     }
 
     window.electronAPI
-      .getAgentSessionPath(currentWorkspaceId, currentSessionId)
+      .getAgentSessionPath(currentWorkspaceId, sessionId)
       .then(setSessionPath)
       .catch(() => setSessionPath(null))
-  }, [currentSessionId, currentWorkspaceId])
+  }, [sessionId, currentWorkspaceId])
+
+  // 监听消息刷新版本号
+  const refreshMap = useAtomValue(agentMessageRefreshAtom)
+  const refreshVersion = refreshMap.get(sessionId) ?? 0
 
   // 加载当前会话消息
   React.useEffect(() => {
-    if (!currentSessionId) {
-      setCurrentMessages([])
-      return
-    }
-
     window.electronAPI
-      .getAgentSessionMessages(currentSessionId)
-      .then(setCurrentMessages)
-      .catch(console.error)
+      .getAgentSessionMessages(sessionId)
+      .then((msgs) => {
+        setMessages(msgs)
 
-  }, [currentSessionId, setCurrentMessages])
+        // 消息加载完成后，清除已完成的流式状态（running=false 的过渡气泡）
+        // 在同一个微任务中执行，确保 React 在一次渲染中同时显示持久化消息并移除流式气泡
+        setStreamingStates((prev) => {
+          const state = prev.get(sessionId)
+          if (!state || state.running) return prev  // 仍在运行中，不清除
+          const map = new Map(prev)
+          map.delete(sessionId)
+          return map
+        })
+      })
+      .catch(console.error)
+  }, [sessionId, refreshVersion, setStreamingStates])
 
   // 自动发送 pending prompt（从设置页"对话完成配置"触发）
   React.useEffect(() => {
     if (!pendingPrompt) return
-    if (!currentSessionId || pendingPrompt.sessionId !== currentSessionId) return
+    if (pendingPrompt.sessionId !== sessionId) return
     if (!agentChannelId || streaming) return
 
     // 立即清除，防止重复执行
@@ -167,7 +187,7 @@ export function AgentView(): React.ReactElement {
       // 初始化流式状态
       setStreamingStates((prev) => {
         const map = new Map(prev)
-        map.set(currentSessionId, {
+        map.set(sessionId, {
           running: true,
           content: '',
           toolActivities: [],
@@ -184,11 +204,11 @@ export function AgentView(): React.ReactElement {
         content: prompt.message,
         createdAt: Date.now(),
       }
-      setCurrentMessages((prev) => [...prev, tempUserMsg])
+      setMessages((prev) => [...prev, tempUserMsg])
 
       // 发送消息
       const input: AgentSendInput = {
-        sessionId: currentSessionId,
+        sessionId,
         userMessage: prompt.message,
         channelId: agentChannelId,
         modelId: agentModelId || undefined,
@@ -198,14 +218,14 @@ export function AgentView(): React.ReactElement {
         console.error('[AgentView] 自动发送配置消息失败:', error)
         setStreamingStates((prev) => {
           const map = new Map(prev)
-          map.delete(currentSessionId)
+          map.delete(sessionId)
           return map
         })
       })
     }, 150)
 
     return () => clearTimeout(timer)
-  }, [pendingPrompt, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates, setCurrentMessages])
+  }, [pendingPrompt, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates])
 
   // ===== 附件处理 =====
 
@@ -287,7 +307,7 @@ export function AgentView(): React.ReactElement {
 
   /** 打开文件夹选择对话框 */
   const handleOpenFolderDialog = React.useCallback(async (): Promise<void> => {
-    if (!currentSessionId || !currentWorkspaceId || isUploadingFolder) return
+    if (!currentWorkspaceId || isUploadingFolder) return
 
     const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
     if (!workspace) return
@@ -302,7 +322,7 @@ export function AgentView(): React.ReactElement {
       const saved = await window.electronAPI.copyFolderToSession({
         sourcePath: result.path,
         workspaceSlug: workspace.slug,
-        sessionId: currentSessionId,
+        sessionId,
       })
 
       setPendingFolderRefs((prev) => [...prev, ...saved])
@@ -312,13 +332,13 @@ export function AgentView(): React.ReactElement {
       // 显示错误提示
       setAgentStreamErrors((prev) => {
         const map = new Map(prev)
-        map.set(currentSessionId, `文件夹上传失败: ${error instanceof Error ? error.message : '未知错误'}`)
+        map.set(sessionId, `文件夹上传失败: ${error instanceof Error ? error.message : '未知错误'}`)
         return map
       })
     } finally {
       setIsUploadingFolder(false)
     }
-  }, [currentSessionId, currentWorkspaceId, workspaces, isUploadingFolder, setAgentStreamErrors])
+  }, [sessionId, currentWorkspaceId, workspaces, isUploadingFolder, setAgentStreamErrors])
 
   /** 移除待发送文件 */
   const handleRemoveFile = React.useCallback((id: string): void => {
@@ -409,7 +429,7 @@ export function AgentView(): React.ReactElement {
     const text = inputContent.trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
-    if ((!effectiveText && pendingFiles.length === 0 && pendingFolderRefs.length === 0) || !currentSessionId || !agentChannelId) return
+    if ((!effectiveText && pendingFiles.length === 0 && pendingFolderRefs.length === 0) || !agentChannelId) return
 
     // 上一条消息仍在处理中，提示用户等待或停止
     if (streaming) {
@@ -421,17 +441,17 @@ export function AgentView(): React.ReactElement {
 
     // 清除当前会话的错误消息
     setAgentStreamErrors((prev) => {
-      if (!prev.has(currentSessionId)) return prev
+      if (!prev.has(sessionId)) return prev
       const map = new Map(prev)
-      map.delete(currentSessionId)
+      map.delete(sessionId)
       return map
     })
 
     // 清除当前会话的提示建议
     setPromptSuggestions((prev) => {
-      if (!prev.has(currentSessionId)) return prev
+      if (!prev.has(sessionId)) return prev
       const map = new Map(prev)
-      map.delete(currentSessionId)
+      map.delete(sessionId)
       return map
     })
 
@@ -447,7 +467,7 @@ export function AgentView(): React.ReactElement {
         try {
           const saved = await window.electronAPI.saveFilesToAgentSession({
             workspaceSlug: workspace.slug,
-            sessionId: currentSessionId,
+            sessionId,
             files: filesToSave,
           })
           const refs = saved.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
@@ -477,9 +497,9 @@ export function AgentView(): React.ReactElement {
 
     // 防御性快照：将当前流式 assistant 内容保存到消息列表
     // 避免重置流式状态时丢失前一轮回复（竞态场景：complete 事件到达但 STREAM_COMPLETE 尚未到达）
-    const prevStream = store.get(agentStreamingStatesAtom).get(currentSessionId)
+    const prevStream = store.get(agentStreamingStatesAtom).get(sessionId)
     if (prevStream && prevStream.content && !prevStream.running) {
-      setCurrentMessages((prev) => {
+      setMessages((prev) => {
         // 仅在最后一条不是 assistant 消息时追加（避免重复）
         const lastMsg = prev[prev.length - 1]
         if (lastMsg?.role === 'assistant') return prev
@@ -496,7 +516,7 @@ export function AgentView(): React.ReactElement {
     // 初始化流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
-      map.set(currentSessionId, {
+      map.set(sessionId, {
         running: true,
         content: '',
         toolActivities: [],
@@ -512,10 +532,10 @@ export function AgentView(): React.ReactElement {
       content: finalMessage,
       createdAt: Date.now(),
     }
-    setCurrentMessages((prev) => [...prev, tempUserMsg])
+    setMessages((prev) => [...prev, tempUserMsg])
 
     const input: AgentSendInput = {
-      sessionId: currentSessionId,
+      sessionId,
       userMessage: finalMessage,
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
@@ -527,55 +547,53 @@ export function AgentView(): React.ReactElement {
     window.electronAPI.sendAgentMessage(input).catch((error) => {
       console.error('[AgentView] 发送消息失败:', error)
       setStreamingStates((prev) => {
-        if (!prev.has(currentSessionId)) return prev
+        if (!prev.has(sessionId)) return prev
         const map = new Map(prev)
-        map.delete(currentSessionId)
+        map.delete(sessionId)
         return map
       })
     })
-  }, [inputContent, pendingFiles, pendingFolderRefs, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, store, setStreamingStates, setCurrentMessages, setPendingFiles, setAgentStreamErrors, setPromptSuggestions])
+  }, [inputContent, pendingFiles, pendingFolderRefs, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
-    if (!currentSessionId) return
-
     setStreamingStates((prev) => {
-      const current = prev.get(currentSessionId)
+      const current = prev.get(sessionId)
       if (!current) return prev
       const map = new Map(prev)
-      map.set(currentSessionId, { ...current, running: false })
+      map.set(sessionId, { ...current, running: false })
       return map
     })
 
-    window.electronAPI.stopAgent(currentSessionId).catch(console.error)
-  }, [currentSessionId, setStreamingStates])
+    window.electronAPI.stopAgent(sessionId).catch(console.error)
+  }, [sessionId, setStreamingStates])
 
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
-    if (!currentSessionId || !agentChannelId || streaming) return
+    if (!agentChannelId || streaming) return
 
     // 初始化流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
-      const current = prev.get(currentSessionId) ?? {
+      const current = prev.get(sessionId) ?? {
         running: true,
         content: '',
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: Date.now(),
       }
-      map.set(currentSessionId, { ...current, running: true, startedAt: current.startedAt ?? Date.now() })
+      map.set(sessionId, { ...current, running: true, startedAt: current.startedAt ?? Date.now() })
       return map
     })
 
     window.electronAPI.sendAgentMessage({
-      sessionId: currentSessionId,
+      sessionId,
       userMessage: '/compact',
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
     }).catch(console.error)
-  }, [currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates])
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates])
 
   /** 复制错误信息到剪贴板 */
   const handleCopyError = React.useCallback(async (): Promise<void> => {
@@ -590,34 +608,105 @@ export function AgentView(): React.ReactElement {
     }
   }, [agentError])
 
+  /** 重试：在当前会话中重新发送最后一条用户消息 */
+  const handleRetry = React.useCallback((): void => {
+    if (!agentChannelId || streaming) return
+
+    // 找到最后一条用户消息
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
+    if (!lastUserMsg) return
+
+    // 清除错误状态
+    setAgentStreamErrors((prev) => {
+      if (!prev.has(sessionId)) return prev
+      const map = new Map(prev)
+      map.delete(sessionId)
+      return map
+    })
+
+    // 初始化流式状态
+    setStreamingStates((prev) => {
+      const map = new Map(prev)
+      map.set(sessionId, {
+        running: true,
+        content: '',
+        toolActivities: [],
+        model: agentModelId || undefined,
+      })
+      return map
+    })
+
+    window.electronAPI.sendAgentMessage({
+      sessionId,
+      userMessage: lastUserMsg.content,
+      channelId: agentChannelId,
+      modelId: agentModelId || undefined,
+      workspaceId: currentWorkspaceId || undefined,
+    }).catch(console.error)
+  }, [messages, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates])
+
+  /** 在新会话中重试：创建新会话 + 切换 tab + 发送引用旧会话的提示词 */
+  const handleRetryInNewSession = React.useCallback(async (): Promise<void> => {
+    if (!agentChannelId) return
+
+    try {
+      const meta = await window.electronAPI.createAgentSession(
+        undefined, agentChannelId, currentWorkspaceId || undefined,
+      )
+      setAgentSessions((prev) => [meta, ...prev])
+
+      // 切换到新会话 tab
+      const result = openTab(tabs, layout, { type: 'agent', sessionId: meta.id, title: meta.title })
+      setTabs(result.tabs)
+      setLayout(result.layout)
+      setCurrentAgentSessionId(meta.id)
+
+      // 发送引用旧会话的默认提示词
+      const prompt = `上个会话的 id 是 ${sessionId}，可以参考同工作区下的会话继续完成工作`
+
+      // 初始化新会话流式状态
+      setStreamingStates((prev) => {
+        const map = new Map(prev)
+        map.set(meta.id, {
+          running: true,
+          content: '',
+          toolActivities: [],
+          model: agentModelId || undefined,
+        })
+        return map
+      })
+
+      window.electronAPI.sendAgentMessage({
+        sessionId: meta.id,
+        userMessage: prompt,
+        channelId: agentChannelId,
+        modelId: agentModelId || undefined,
+        workspaceId: currentWorkspaceId || undefined,
+      }).catch(console.error)
+    } catch (error) {
+      console.error('[AgentView] 在新会话中重试失败:', error)
+    }
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, tabs, layout, setAgentSessions, setCurrentAgentSessionId, setTabs, setLayout, setStreamingStates])
+
   const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || pendingFolderRefs.length > 0) && agentChannelId !== null && !streaming
 
-  // 无当前会话 → 引导文案
-  if (!currentSessionId) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full w-full max-w-[min(72rem,100%)] mx-auto gap-4 text-muted-foreground" style={{ zoom: 1.1 }}>
-        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-          <Bot size={32} className="text-muted-foreground/60" />
-        </div>
-        <div className="text-center space-y-2">
-          <h2 className="text-lg font-medium text-foreground">Agent 模式</h2>
-          <p className="text-sm max-w-[300px]">
-            从左侧点击"新会话"按钮创建一个 Agent 会话
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
+    <AgentSessionProvider sessionId={sessionId}>
     <div className="flex h-full overflow-hidden">
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0 max-w-[min(72rem,100%)] mx-auto">
         {/* Agent Header */}
-        <AgentHeader />
+        <AgentHeader sessionId={sessionId} />
 
         {/* 消息区域 */}
-        <AgentMessages />
+        <AgentMessages
+          sessionId={sessionId}
+          messages={messages}
+          streaming={streaming}
+          streamState={streamState}
+          onRetry={handleRetry}
+          onRetryInNewSession={handleRetryInNewSession}
+        />
 
         {/* 拖拽文件夹警告 */}
         {dragFolderWarning && (
@@ -635,10 +724,10 @@ export function AgentView(): React.ReactElement {
         )}
 
         {/* 权限请求横幅 */}
-        <PermissionBanner />
+        <PermissionBanner sessionId={sessionId} />
 
         {/* AskUserQuestion 交互式问答横幅 */}
-        <AskUserBanner />
+        <AskUserBanner sessionId={sessionId} />
 
         {/* 输入区域 — 复用 Chat 的卡片式输入风格 */}
         <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px] pt-2">
@@ -713,9 +802,9 @@ export function AgentView(): React.ReactElement {
                     onClick={(e) => {
                       e.stopPropagation()
                       setPromptSuggestions((prev) => {
-                        if (!currentSessionId || !prev.has(currentSessionId)) return prev
+                        if (!prev.has(sessionId)) return prev
                         const map = new Map(prev)
-                        map.delete(currentSessionId)
+                        map.delete(sessionId)
                         return map
                       })
                     }}
@@ -735,7 +824,8 @@ export function AgentView(): React.ReactElement {
                   : '请先在设置中选择 Agent 供应商'
               }
               disabled={!agentChannelId}
-              autoFocusTrigger={currentSessionId}
+              autoFocusTrigger={sessionId}
+              collapsible
             />
 
             {/* Footer 工具栏 */}
@@ -828,54 +918,9 @@ export function AgentView(): React.ReactElement {
         </div>
       </div>
 
-      {/* 文件浏览器侧栏 — 始终渲染 w-10 占位，避免切换模式时布局跳动 */}
-      <div
-        className={cn(
-          'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden titlebar-drag-region',
-          sessionPath && fileBrowserOpen ? 'w-[300px] border-l' : 'w-10'
-        )}
-      >
-        {sessionPath && (
-          <>
-            {/* 切换按钮 — 始终固定在右上角，同一个 DOM 元素 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-2.5 top-2.5 z-10 h-7 w-7 titlebar-no-drag"
-                  onClick={() => setFileBrowserOpen((prev) => !prev)}
-                >
-                  <FolderOpen
-                    className={cn(
-                      'size-3.5 absolute transition-all duration-200',
-                      fileBrowserOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100'
-                    )}
-                  />
-                  <X
-                    className={cn(
-                      'size-3.5 absolute transition-all duration-200',
-                      fileBrowserOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75'
-                    )}
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">
-                <p>{fileBrowserOpen ? '关闭文件浏览器' : '打开文件浏览器'}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            {/* FileBrowser 内容 — 收起时隐藏 */}
-            <div className={cn(
-              'w-[300px] h-full transition-opacity duration-300 titlebar-no-drag',
-              fileBrowserOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            )}>
-              <FileBrowser rootPath={sessionPath} />
-            </div>
-          </>
-        )}
-      </div>
+      {/* 侧面板（Team Activity + File Browser） */}
+      <SidePanel sessionId={sessionId} sessionPath={sessionPath} />
     </div>
+    </AgentSessionProvider>
   )
 }

@@ -87,6 +87,13 @@ export interface TextBlock {
 export type ContentBlock = ToolUseBlock | ToolResultBlock | TextBlock | { type: string }
 
 // ============================================================================
+// 子代理工具名称
+// ============================================================================
+
+/** 子代理工具名称集合 — 这些工具派生并行子代理，不应互相嵌套 */
+export const SUBAGENT_TOOL_NAMES = new Set(['Task', 'Agent'])
+
+// ============================================================================
 // 纯提取函数
 // ============================================================================
 
@@ -110,11 +117,11 @@ export function extractToolStarts(
     toolIndex.register(toolBlock.id, toolBlock.name, toolBlock.input)
 
     // 确定父级：SDK 的 parent_tool_use_id 是权威来源
-    // 推断仅适用于非 Task 工具 — 并行 Task 是同级关系，不应互相嵌套
+    // 推断仅适用于非子代理工具 — 并行 Task/Agent 是同级关系，不应互相嵌套
     let parentToolUseId: string | undefined
     if (sdkParentToolUseId) {
       parentToolUseId = sdkParentToolUseId
-    } else if (toolBlock.name !== 'Task' && activeParentTools && activeParentTools.size === 1) {
+    } else if (!SUBAGENT_TOOL_NAMES.has(toolBlock.name) && activeParentTools && activeParentTools.size === 1) {
       const [singleActiveParent] = activeParentTools
       if (toolBlock.id !== singleActiveParent) {
         parentToolUseId = singleActiveParent
@@ -275,9 +282,10 @@ function detectBackgroundEvents(
 ): AgentEvent[] {
   const events: AgentEvent[] = []
 
-  // 后台 Task 检测
-  if (entry.name === 'Task' && !isError && resultStr && entry.input.run_in_background === true) {
-    const agentIdMatch = resultStr.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
+  // 后台 Task/Agent 检测
+  if (SUBAGENT_TOOL_NAMES.has(entry.name) && !isError && resultStr && entry.input.run_in_background === true) {
+    // 匹配 agentId / agent_id，ID 可能包含 @ 等特殊字符
+    const agentIdMatch = resultStr.match(/(?:agentId|agent_id):\s*([^\s\n]+)/)
     if (agentIdMatch?.[1]) {
       // 优先使用 _intent，回退到 description（任务名称）
       const intentValue = (typeof entry.input._intent === 'string' && entry.input._intent)

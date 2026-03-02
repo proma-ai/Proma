@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -29,24 +29,25 @@ import { useSmoothStream } from '@proma/ui'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
+import { Button } from '@/components/ui/button'
 import { getModelLogo } from '@/lib/model-logo'
 import { ToolActivityList } from './ToolActivityItem'
 import { BackgroundTasksPanel } from './BackgroundTasksPanel'
 import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
-import {
-  currentAgentMessagesAtom,
-  currentAgentSessionIdAtom,
-  agentStreamingAtom,
-  agentStreamingContentAtom,
-  agentToolActivitiesAtom,
-  agentStreamingModelAtom,
-  agentRetryingAtom,
-  agentStartedAtAtom,
-} from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { cn } from '@/lib/utils'
 import type { AgentMessage, RetryAttempt } from '@proma/shared'
 import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
+
+/** AgentMessages 属性接口 */
+interface AgentMessagesProps {
+  sessionId: string
+  messages: AgentMessage[]
+  streaming: boolean
+  streamState?: AgentStreamState
+  onRetry?: () => void
+  onRetryInNewSession?: () => void
+}
 
 function EmptyState(): React.ReactElement {
   return (
@@ -373,7 +374,14 @@ function RetryAttemptItem({
   )
 }
 
-function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactElement | null {
+/** AgentMessageItem 属性接口 */
+interface AgentMessageItemProps {
+  message: AgentMessage
+  onRetry?: () => void
+  onRetryInNewSession?: () => void
+}
+
+function AgentMessageItem({ message, onRetry, onRetryInNewSession }: AgentMessageItemProps): React.ReactElement | null {
   const userProfile = useAtomValue(userProfileAtom)
 
   if (message.role === 'user') {
@@ -457,6 +465,21 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
           <div className="text-destructive">
             <MessageResponse>{message.content}</MessageResponse>
           </div>
+          {/* 错误操作按钮 */}
+          <div className="flex items-center gap-2 mt-3">
+            {onRetry && (
+              <Button size="sm" onClick={onRetry}>
+                <RotateCw className="size-3.5 mr-1.5" />
+                重试
+              </Button>
+            )}
+            {onRetryInNewSession && (
+              <Button size="sm" variant="outline" onClick={onRetryInNewSession}>
+                <Plus className="size-3.5 mr-1.5" />
+                在新会话中重试
+              </Button>
+            )}
+          </div>
         </MessageContent>
         {/* 操作按钮（hover 时可见） */}
         <MessageActions className="pl-[46px] mt-0.5">
@@ -469,19 +492,18 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
   return null
 }
 
-export function AgentMessages(): React.ReactElement {
-  const messages = useAtomValue(currentAgentMessagesAtom)
+export function AgentMessages({ sessionId, messages, streaming, streamState, onRetry, onRetryInNewSession }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
-  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const streaming = useAtomValue(agentStreamingAtom)
-  const streamingContent = useAtomValue(agentStreamingContentAtom)
-  const toolActivities = useAtomValue(agentToolActivitiesAtom)
-  const agentStreamingModel = useAtomValue(agentStreamingModelAtom)
-  const retrying = useAtomValue(agentRetryingAtom)
-  const startedAt = useAtomValue(agentStartedAtAtom)
+
+  // 从 streamState 属性中计算派生值
+  const streamingContent = streamState?.content ?? ''
+  const toolActivities = streamState?.toolActivities ?? []
+  const agentStreamingModel = streamState?.model
+  const retrying = streamState?.retrying
+  const startedAt = streamState?.startedAt
 
   // 获取后台任务列表
-  const { tasks: backgroundTasks } = useBackgroundTasks(currentSessionId || '')
+  const { tasks: backgroundTasks } = useBackgroundTasks(sessionId)
 
   const { displayedContent: smoothContent } = useSmoothStream({
     content: streamingContent,
@@ -509,7 +531,11 @@ export function AgentMessages(): React.ReactElement {
           <>
             {messages.map((msg: AgentMessage) => (
               <div key={msg.id} data-message-id={msg.id}>
-                <AgentMessageItem message={msg} />
+                <AgentMessageItem
+                  message={msg}
+                  onRetry={onRetry}
+                  onRetryInNewSession={onRetryInNewSession}
+                />
               </div>
             ))}
 

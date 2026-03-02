@@ -9,7 +9,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { pendingAskUserRequestsAtom } from '@/atoms/agent-atoms'
+import { allPendingAskUserRequestsAtom } from '@/atoms/agent-atoms'
 import type { AskUserQuestion } from '@proma/shared'
 
 interface QuestionAnswer {
@@ -20,8 +20,14 @@ interface QuestionAnswer {
 
 const EMPTY_ANSWER: QuestionAnswer = { selected: [], customText: '', showCustom: false }
 
-export function AskUserBanner(): React.ReactElement | null {
-  const [requests, setRequests] = useAtom(pendingAskUserRequestsAtom)
+/** AskUserBanner 属性接口 */
+interface AskUserBannerProps {
+  sessionId: string
+}
+
+export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactElement | null {
+  const [allRequests, setAllRequests] = useAtom(allPendingAskUserRequestsAtom)
+  const requests = allRequests.get(sessionId) ?? []
   const [answers, setAnswers] = React.useState<Map<number, QuestionAnswer>>(new Map())
   const [submitting, setSubmitting] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState(0)
@@ -139,7 +145,14 @@ export function AskUserBanner(): React.ReactElement | null {
         }
       }
       await window.electronAPI.respondAskUser({ requestId: request.requestId, answers: answersRecord })
-      setRequests((prev) => prev.filter((r) => r.requestId !== request.requestId))
+      setAllRequests((prev) => {
+        const map = new Map(prev)
+        const current = map.get(sessionId) ?? []
+        const newValue = current.filter((r) => r.requestId !== request.requestId)
+        if (newValue.length === 0) map.delete(sessionId)
+        else map.set(sessionId, newValue)
+        return map
+      })
     } catch (error) {
       console.error('[AskUserBanner] 响应失败:', error)
     } finally {

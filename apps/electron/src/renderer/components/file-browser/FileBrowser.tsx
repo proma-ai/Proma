@@ -50,9 +50,11 @@ interface ContextMenuState {
 
 interface FileBrowserProps {
   rootPath: string
+  /** 隐藏内置顶部工具栏（面包屑 + 按钮），由外部自行渲染 */
+  hideToolbar?: boolean
 }
 
-export function FileBrowser({ rootPath }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath, hideToolbar }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -150,32 +152,34 @@ export function FileBrowser({ rootPath }: FileBrowserProps): React.ReactElement 
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* 顶部工具栏 */}
-      <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
-        <span className="text-xs text-muted-foreground truncate flex-1" title={rootPath}>
-          {breadcrumb}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 flex-shrink-0"
-          onClick={() => window.electronAPI.openFile(rootPath).catch(console.error)}
-          title="在 Finder 中打开"
-        >
-          <ExternalLink className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 flex-shrink-0"
-          onClick={loadRoot}
-          disabled={loading}
-        >
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-        </Button>
-      </div>
+      {/* 顶部工具栏（可由外部接管） */}
+      {!hideToolbar && (
+        <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
+          <span className="text-xs text-muted-foreground truncate flex-1" title={rootPath}>
+            {breadcrumb}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 flex-shrink-0"
+            onClick={() => window.electronAPI.openFile(rootPath).catch(console.error)}
+            title="在 Finder 中打开"
+          >
+            <ExternalLink className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 flex-shrink-0"
+            onClick={loadRoot}
+            disabled={loading}
+          >
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+          </Button>
+        </div>
+      )}
 
       {/* 文件树 */}
       <ScrollArea className="flex-1">

@@ -307,7 +307,7 @@ export const UserMessageContent = React.memo(
     }, [])
 
     return (
-      <div className={cn('relative rounded-[10px] bg-foreground/[0.045] dark:bg-foreground/[0.08] px-3.5 py-2.5', className)} {...props}>
+      <div className={cn('relative rounded-[10px] bg-foreground/[0.045] dark:bg-foreground/[0.08] px-3.5 py-2.5', shouldCollapse && !isExpanded && 'pb-6', className)} {...props}>
         <div
           ref={contentRef}
           className={cn(
@@ -325,7 +325,7 @@ export const UserMessageContent = React.memo(
             className={cn(
               'flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors mt-1',
               !isExpanded &&
-                'absolute bottom-0 left-0 right-0 pt-4 bg-gradient-to-t from-foreground/[0.045] dark:from-foreground/[0.08] to-transparent'
+                'absolute bottom-0 left-0 right-0 px-3.5 pb-2.5 pt-4 rounded-b-[10px] bg-gradient-to-t from-foreground/[0.045] dark:from-foreground/[0.08] to-transparent'
             )}
           >
             {isExpanded ? (

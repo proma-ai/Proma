@@ -1,15 +1,15 @@
 /**
  * AppShell - 应用主布局容器
  *
- * 布局结构：[LeftSidebar 280px] | [MainContentPanel 浮动效果]
+ * 布局结构：[LeftSidebar 可折叠] | [MainArea: TabBar + SplitContainer]
  *
- * MainContentPanel 根据当前 App 模式（Chat/Agent）自动渲染对应内容
+ * MainArea 支持多标签页 + 分屏，Settings 视图为独立覆盖。
  */
 
 import * as React from 'react'
 import { useSetAtom } from 'jotai'
 import { LeftSidebar } from './LeftSidebar'
-import { MainContentPanel } from './MainContentPanel'
+import { MainArea } from '@/components/tabs/MainArea'
 import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellContext'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import type { SyncProgressEvent } from '@proma/shared'
@@ -67,13 +67,13 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-50" />
 
       <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
-        {/* 左侧边栏：默认 280px，放大时可收缩到最小 180px */}
+        {/* 左侧边栏：可折叠 */}
         <LeftSidebar />
 
-        {/* 右侧容器：relative z-[60] 使其在 z-50 拖动区域之上；titlebar-no-drag 标记非拖动区域 */}
-        <div className="flex-1 min-w-0 p-2 relative z-[60] titlebar-no-drag">
-          {/* 主内容面板（根据模式自动切换内容） */}
-          <MainContentPanel />
+        {/* 右侧容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
+        <div className="flex-1 min-w-0 p-2 relative z-[60]">
+          {/* 主内容区域（TabBar + SplitContainer） */}
+          <MainArea />
         </div>
       </div>
     </AppShellProvider>

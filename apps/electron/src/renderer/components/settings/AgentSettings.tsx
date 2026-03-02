@@ -10,9 +10,11 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck } from 'lucide-react'
+import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import {
   agentWorkspacesAtom,
   currentAgentWorkspaceIdAtom,
@@ -22,11 +24,15 @@ import {
   currentAgentSessionIdAtom,
   agentPendingPromptAtom,
   workspaceCapabilitiesVersionAtom,
+  agentThinkingAtom,
+  agentEffortAtom,
+  agentMaxBudgetUsdAtom,
+  agentMaxTurnsAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
-import type { McpServerEntry, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
-import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
+import type { McpServerEntry, SkillMeta, WorkspaceMcpConfig, ThinkingConfig, AgentEffort } from '@proma/shared'
+import { SettingsSection, SettingsCard, SettingsRow, SettingsSegmentedControl, SettingsInput } from './primitives'
 import { McpServerForm } from './McpServerForm'
 
 /** 组件视图模式 */
@@ -61,6 +67,7 @@ export function AgentSettings(): React.ReactElement {
   // MCP 配置
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
+  const [skillsDir, setSkillsDir] = React.useState('')
   const [loading, setLoading] = React.useState(true)
 
   /** 加载 MCP 配置和 Skills */
@@ -71,12 +78,14 @@ export function AgentSettings(): React.ReactElement {
     }
 
     try {
-      const [config, skillList] = await Promise.all([
+      const [config, skillList, dir] = await Promise.all([
         window.electronAPI.getWorkspaceMcpConfig(workspaceSlug),
         window.electronAPI.getWorkspaceSkills(workspaceSlug),
+        window.electronAPI.getWorkspaceSkillsDir(workspaceSlug),
       ])
       setMcpConfig(config)
       setSkills(skillList)
+      setSkillsDir(dir)
     } catch (error) {
       console.error('[Agent 设置] 加载工作区配置失败:', error)
     } finally {
@@ -256,6 +265,17 @@ ${skillList}
     }
   }
 
+  /** 切换 Skill 启用/禁用 */
+  const handleToggleSkill = async (skillSlug: string, enabled: boolean): Promise<void> => {
+    try {
+      await window.electronAPI.toggleWorkspaceSkill(workspaceSlug, skillSlug, enabled)
+      setSkills((prev) => prev.map((s) => s.slug === skillSlug ? { ...s, enabled } : s))
+      bumpCapabilitiesVersion((v) => v + 1)
+    } catch (error) {
+      console.error('[Agent 设置] 切换 Skill 状态失败:', error)
+    }
+  }
+
   /** 表单保存回调 */
   const handleFormSaved = (): void => {
     setViewMode('list')
@@ -289,6 +309,9 @@ ${skillList}
   // 列表视图
   return (
     <div className="space-y-8">
+      {/* 区块零：Agent 高级设置 */}
+      <AgentAdvancedSettings />
+
       {/* 区块一：MCP 服务器 */}
       <SettingsSection
         title="MCP 服务器"
@@ -340,6 +363,19 @@ ${skillList}
       <SettingsSection
         title="Skills"
         description="将 SKILL.md 放入工作区 skills/ 目录即可被 Agent 自动发现"
+        action={skillsDir ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.electronAPI.openFile(skillsDir)}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <FolderOpen size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>打开 Skills 目录</TooltipContent>
+          </Tooltip>
+        ) : undefined}
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -350,29 +386,13 @@ ${skillList}
             </div>
           </SettingsCard>
         ) : (
-          <SettingsCard>
-            {skills.map((skill) => (
-              <SettingsRow
-                key={skill.slug}
-                label={skill.name}
-                icon={<Sparkles size={18} className="text-amber-500" />}
-                description={skill.description ?? skill.slug}
-                className="group"
-              >
-                <button
-                  onClick={() => handleDeleteSkill(skill.slug, skill.name)}
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-                  title="删除"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </SettingsRow>
-            ))}
-          </SettingsCard>
+          <SkillGroupedList
+            skills={skills}
+            skillsDir={skillsDir}
+            onDelete={handleDeleteSkill}
+            onToggle={handleToggleSkill}
+          />
         )}
-        <p className="text-xs text-muted-foreground px-1">
-          路径: ~/.proma/agent-workspaces/{workspaceSlug}/skills/
-        </p>
 
         <Button
           size="sm"
@@ -446,5 +466,368 @@ function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowP
         />
       </div>
     </SettingsRow>
+  )
+}
+
+// ===== Skills 分组列表子组件 =====
+
+/** 分组结果 */
+interface SkillGroup {
+  prefix: string
+  skills: SkillMeta[]
+}
+
+/** 按前缀对 Skills 分组 */
+function groupSkillsByPrefix(skills: SkillMeta[]): SkillGroup[] {
+  const prefixMap = new Map<string, SkillMeta[]>()
+
+  for (const skill of skills) {
+    const dashIdx = skill.slug.indexOf('-')
+    const prefix = dashIdx > 0 ? skill.slug.slice(0, dashIdx) : ''
+    const key = prefix || skill.slug
+    const list = prefixMap.get(key) ?? []
+    list.push(skill)
+    prefixMap.set(key, list)
+  }
+
+  const groups: SkillGroup[] = []
+  const standalone: SkillMeta[] = []
+
+  for (const [prefix, list] of prefixMap) {
+    if (list.length >= 2) {
+      groups.push({ prefix, skills: list })
+    } else {
+      standalone.push(...list)
+    }
+  }
+
+  // 独立 skill 合为一个无前缀组
+  if (standalone.length > 0) {
+    groups.push({ prefix: '', skills: standalone })
+  }
+
+  return groups
+}
+
+/** 从 slug 中移除前缀得到短名称 */
+function shortName(slug: string, prefix: string): string {
+  if (!prefix) return slug
+  return slug.startsWith(prefix + '-') ? slug.slice(prefix.length + 1) : slug
+}
+
+interface SkillGroupedListProps {
+  skills: SkillMeta[]
+  skillsDir: string
+  onDelete: (slug: string, name: string) => void
+  onToggle: (slug: string, enabled: boolean) => void
+}
+
+function SkillGroupedList({ skills, skillsDir, onDelete, onToggle }: SkillGroupedListProps): React.ReactElement {
+  const groups = React.useMemo(() => groupSkillsByPrefix(skills), [skills])
+  const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set())
+  const [expandedSkill, setExpandedSkill] = React.useState<string | null>(null)
+
+  const toggleGroup = (prefix: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(prefix)) next.delete(prefix)
+      else next.add(prefix)
+      return next
+    })
+  }
+
+  const openSkillFolder = (slug: string) => {
+    if (skillsDir) {
+      window.electronAPI.openFile(`${skillsDir}/${slug}`)
+    }
+  }
+
+  return (
+    <div className="space-y-2 min-w-0">
+      {groups.map((group) =>
+        group.prefix ? (
+          <SkillGroupCard
+            key={group.prefix}
+            group={group}
+            expanded={expandedGroups.has(group.prefix)}
+            expandedSkill={expandedSkill}
+            onToggle={() => toggleGroup(group.prefix)}
+            onExpandSkill={(slug) => setExpandedSkill(expandedSkill === slug ? null : slug)}
+            onDelete={onDelete}
+            onToggleEnabled={onToggle}
+            onOpenFolder={openSkillFolder}
+          />
+        ) : (
+          /* 独立 skill 不分组，平铺展示 */
+          <SettingsCard key="__standalone__">
+            {group.skills.map((skill) => (
+              <SkillItemRow
+                key={skill.slug}
+                skill={skill}
+                displayName={skill.name}
+                expanded={expandedSkill === skill.slug}
+                onToggleExpand={() => setExpandedSkill(expandedSkill === skill.slug ? null : skill.slug)}
+                onDelete={() => onDelete(skill.slug, skill.name)}
+                onToggleEnabled={(enabled) => onToggle(skill.slug, enabled)}
+                onOpenFolder={() => openSkillFolder(skill.slug)}
+              />
+            ))}
+          </SettingsCard>
+        )
+      )}
+    </div>
+  )
+}
+
+interface SkillGroupCardProps {
+  group: SkillGroup
+  expanded: boolean
+  expandedSkill: string | null
+  onToggle: () => void
+  onExpandSkill: (slug: string) => void
+  onDelete: (slug: string, name: string) => void
+  onToggleEnabled: (slug: string, enabled: boolean) => void
+  onOpenFolder: (slug: string) => void
+}
+
+function SkillGroupCard({ group, expanded, expandedSkill, onToggle, onExpandSkill, onDelete, onToggleEnabled, onOpenFolder }: SkillGroupCardProps): React.ReactElement {
+  return (
+    <SettingsCard divided={false}>
+      {/* 分组头部 */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/30 transition-colors min-w-0"
+      >
+        {expanded
+          ? <ChevronDown size={14} className="text-muted-foreground flex-shrink-0" />
+          : <ChevronRight size={14} className="text-muted-foreground flex-shrink-0" />
+        }
+        <Sparkles size={16} className="text-amber-500 flex-shrink-0" />
+        <span className="text-sm font-medium text-foreground flex-1 min-w-0 truncate">{group.prefix}</span>
+        <span className="text-xs px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium tabular-nums flex-shrink-0">
+          {group.skills.length}
+        </span>
+      </button>
+
+      {/* 展开的子项 */}
+      {expanded && (
+        <div className="overflow-hidden">
+          {group.skills.map((skill) => (
+            <SkillItemRow
+              key={skill.slug}
+              skill={skill}
+              displayName={shortName(skill.slug, group.prefix)}
+              expanded={expandedSkill === skill.slug}
+              onToggleExpand={() => onExpandSkill(skill.slug)}
+              onDelete={() => onDelete(skill.slug, skill.name)}
+              onToggleEnabled={(enabled) => onToggleEnabled(skill.slug, enabled)}
+              onOpenFolder={() => onOpenFolder(skill.slug)}
+              indent
+            />
+          ))}
+        </div>
+      )}
+    </SettingsCard>
+  )
+}
+
+interface SkillItemRowProps {
+  skill: SkillMeta
+  displayName: string
+  expanded: boolean
+  onToggleExpand: () => void
+  onDelete: () => void
+  onToggleEnabled: (enabled: boolean) => void
+  onOpenFolder: () => void
+  indent?: boolean
+}
+
+function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, onToggleEnabled, onOpenFolder, indent }: SkillItemRowProps): React.ReactElement {
+  return (
+    <div className={cn('group border-t border-border/50 overflow-hidden', !skill.enabled && 'opacity-50')}>
+      <div className={cn('flex items-center gap-2 px-4 py-2', indent && 'pl-8')}>
+        {indent && <Sparkles size={14} className="text-amber-400/60 flex-shrink-0" />}
+        {!indent && <Sparkles size={16} className="text-amber-500 flex-shrink-0" />}
+
+        {/* 名称 + 可展开描述 */}
+        <button
+          onClick={onToggleExpand}
+          className="flex-1 min-w-0 text-left overflow-hidden"
+        >
+          <div className="text-sm font-medium text-foreground truncate">{displayName}</div>
+          {expanded && skill.description && (
+            <div className="text-xs text-muted-foreground mt-1 break-words">
+              {skill.description}
+            </div>
+          )}
+          {!expanded && skill.description && (
+            <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
+          )}
+        </button>
+
+        {/* 操作按钮 */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onOpenFolder}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <FolderOpen size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>打开文件夹</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onDelete}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <Trash2 size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>删除</TooltipContent>
+          </Tooltip>
+          <Switch
+            checked={skill.enabled}
+            onCheckedChange={onToggleEnabled}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== Agent 高级设置子组件 =====
+
+/** 思考模式选项 */
+const THINKING_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'adaptive', label: '自适应' },
+  { value: 'disabled', label: '关闭' },
+]
+
+/** 推理深度选项 */
+const EFFORT_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'max', label: '最大' },
+]
+
+/** 从 ThinkingConfig 转为 UI 字符串 */
+function thinkingToValue(config: ThinkingConfig | undefined): string {
+  if (!config) return 'default'
+  return config.type === 'adaptive' ? 'adaptive' : config.type === 'disabled' ? 'disabled' : 'default'
+}
+
+/** 从 UI 字符串转为 ThinkingConfig（'default' 返回 undefined） */
+function valueToThinking(value: string): ThinkingConfig | undefined {
+  if (value === 'adaptive') return { type: 'adaptive' }
+  if (value === 'disabled') return { type: 'disabled' }
+  return undefined
+}
+
+/** 从 AgentEffort 转为 UI 字符串 */
+function effortToValue(effort: AgentEffort | undefined): string {
+  return effort ?? 'default'
+}
+
+/** 从 UI 字符串转为 AgentEffort（'default' 返回 undefined） */
+function valueToEffort(value: string): AgentEffort | undefined {
+  if (value === 'default') return undefined
+  return value as AgentEffort
+}
+
+function AgentAdvancedSettings(): React.ReactElement {
+  const thinking = useAtomValue(agentThinkingAtom)
+  const setThinking = useSetAtom(agentThinkingAtom)
+  const effort = useAtomValue(agentEffortAtom)
+  const setEffort = useSetAtom(agentEffortAtom)
+  const maxBudget = useAtomValue(agentMaxBudgetUsdAtom)
+  const setMaxBudget = useSetAtom(agentMaxBudgetUsdAtom)
+  const maxTurns = useAtomValue(agentMaxTurnsAtom)
+  const setMaxTurns = useSetAtom(agentMaxTurnsAtom)
+
+  // 数字输入使用字符串状态，失焦时持久化
+  const [budgetStr, setBudgetStr] = React.useState(maxBudget != null ? String(maxBudget) : '')
+  const [turnsStr, setTurnsStr] = React.useState(maxTurns != null ? String(maxTurns) : '')
+
+  // 同步外部变化（如初始化加载）
+  React.useEffect(() => {
+    setBudgetStr(maxBudget != null ? String(maxBudget) : '')
+  }, [maxBudget])
+  React.useEffect(() => {
+    setTurnsStr(maxTurns != null ? String(maxTurns) : '')
+  }, [maxTurns])
+
+  const handleThinkingChange = (value: string): void => {
+    const config = valueToThinking(value)
+    setThinking(config)
+    window.electronAPI.updateSettings({ agentThinking: config })
+  }
+
+  const handleEffortChange = (value: string): void => {
+    const effortValue = valueToEffort(value)
+    setEffort(effortValue)
+    window.electronAPI.updateSettings({ agentEffort: effortValue })
+  }
+
+  const handleBudgetBlur = (): void => {
+    const num = parseFloat(budgetStr)
+    const value = !isNaN(num) && num > 0 ? num : undefined
+    setMaxBudget(value)
+    window.electronAPI.updateSettings({ agentMaxBudgetUsd: value })
+  }
+
+  const handleTurnsBlur = (): void => {
+    const num = parseInt(turnsStr, 10)
+    const value = !isNaN(num) && num > 0 ? num : undefined
+    setMaxTurns(value)
+    window.electronAPI.updateSettings({ agentMaxTurns: value })
+  }
+
+  return (
+    <SettingsSection
+      title="Agent 高级设置"
+      description="控制 Agent 的思考模式、推理深度和资源限制"
+    >
+      <SettingsCard>
+        <SettingsSegmentedControl
+          label="思考模式"
+          description="自适应模式下 Agent 会根据任务复杂度自动决定是否启用深度思考"
+          value={thinkingToValue(thinking)}
+          onValueChange={handleThinkingChange}
+          options={THINKING_OPTIONS}
+        />
+        <SettingsSegmentedControl
+          label="推理深度"
+          description="控制 Agent 在每次回复中投入的推理计算量"
+          value={effortToValue(effort)}
+          onValueChange={handleEffortChange}
+          options={EFFORT_OPTIONS}
+        />
+        <SettingsInput
+          label="预算限制（美元/次）"
+          description="单次 Agent 会话的最大花费，留空则不限制"
+          value={budgetStr}
+          onChange={setBudgetStr}
+          onBlur={handleBudgetBlur}
+          placeholder="例如: 1.0"
+          type="number"
+        />
+        <SettingsInput
+          label="最大轮次"
+          description="单次 Agent 会话的最大交互轮次，留空则使用 SDK 默认值"
+          value={turnsStr}
+          onChange={setTurnsStr}
+          onBlur={handleTurnsBlur}
+          placeholder="例如: 30"
+          type="number"
+        />
+      </SettingsCard>
+    </SettingsSection>
   )
 }

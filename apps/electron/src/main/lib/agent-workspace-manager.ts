@@ -8,7 +8,7 @@
  * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -16,6 +16,7 @@ import {
   getAgentWorkspacePath,
   getWorkspaceMcpPath,
   getWorkspaceSkillsDir,
+  getInactiveSkillsDir,
   getDefaultSkillsDir,
 } from './config-paths'
 import type { AgentWorkspace, McpServerEntry, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
@@ -321,40 +322,20 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
  *
  * 遍历 skills/{slug}/SKILL.md，解析 YAML frontmatter 提取元数据。
  */
+/**
+ * 扫描工作区活跃 Skills 目录
+ *
+ * 仅返回 skills/ 下的活跃 Skill，供 prompt builder 和 capabilities 使用。
+ */
 export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
-  const skillsDir = getWorkspaceSkillsDir(workspaceSlug)
-  const skills: SkillMeta[] = []
-
-  try {
-    const entries = readdirSync(skillsDir, { withFileTypes: true })
-
-    for (const entry of entries) {
-      const isDir = entry.isDirectory() || (entry.isSymbolicLink() && statSync(join(skillsDir, entry.name)).isDirectory())
-      if (!isDir) continue
-
-      const skillMdPath = join(skillsDir, entry.name, 'SKILL.md')
-      if (!existsSync(skillMdPath)) continue
-
-      try {
-        const content = readFileSync(skillMdPath, 'utf-8')
-        const meta = parseSkillFrontmatter(content, entry.name)
-        skills.push(meta)
-      } catch {
-        console.warn(`[Agent 工作区] 解析 Skill 失败: ${entry.name}`)
-      }
-    }
-  } catch {
-    // skills 目录可能不存在
-  }
-
-  return skills
+  return scanSkillsInDir(getWorkspaceSkillsDir(workspaceSlug), true)
 }
 
 /**
  * 解析 SKILL.md 的 YAML frontmatter
  */
-function parseSkillFrontmatter(content: string, slug: string): SkillMeta {
-  const meta: SkillMeta = { slug, name: slug }
+function parseSkillFrontmatter(content: string, slug: string, enabled: boolean): SkillMeta {
+  const meta: SkillMeta = { slug, name: slug, enabled }
 
   const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
   if (!fmMatch) return meta
@@ -410,6 +391,78 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
 
   rmSync(skillPath, { recursive: true, force: true })
   console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}`)
+}
+
+/**
+ * 扫描指定目录下的 Skills
+ *
+ * 通用扫描逻辑，供 getWorkspaceSkills 和 getAllWorkspaceSkills 复用。
+ */
+function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
+  const skills: SkillMeta[] = []
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+
+    for (const entry of entries) {
+      const isDir = entry.isDirectory() || (entry.isSymbolicLink() && statSync(join(dir, entry.name)).isDirectory())
+      if (!isDir) continue
+
+      const skillMdPath = join(dir, entry.name, 'SKILL.md')
+      if (!existsSync(skillMdPath)) continue
+
+      try {
+        const content = readFileSync(skillMdPath, 'utf-8')
+        const meta = parseSkillFrontmatter(content, entry.name, enabled)
+        skills.push(meta)
+      } catch {
+        console.warn(`[Agent 工作区] 解析 Skill 失败: ${entry.name}`)
+      }
+    }
+  } catch {
+    // 目录可能不存在
+  }
+
+  return skills
+}
+
+/**
+ * 获取工作区所有 Skills（含活跃和不活跃）
+ *
+ * 同时扫描 skills/ 和 skills-inactive/ 目录，返回带 enabled 标记的完整列表。
+ * 用于设置页 UI 展示。
+ */
+export function getAllWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
+  const activeSkills = scanSkillsInDir(getWorkspaceSkillsDir(workspaceSlug), true)
+  const inactiveSkills = scanSkillsInDir(getInactiveSkillsDir(workspaceSlug), false)
+  return [...activeSkills, ...inactiveSkills]
+}
+
+/**
+ * 切换工作区 Skill 的启用/禁用状态
+ *
+ * 在 skills/ 和 skills-inactive/ 之间移动文件夹。
+ */
+export function toggleWorkspaceSkill(workspaceSlug: string, skillSlug: string, enabled: boolean): void {
+  const activeDir = getWorkspaceSkillsDir(workspaceSlug)
+  const inactiveDir = getInactiveSkillsDir(workspaceSlug)
+
+  const srcDir = enabled ? inactiveDir : activeDir
+  const destDir = enabled ? activeDir : inactiveDir
+
+  const srcPath = join(srcDir, skillSlug)
+  const destPath = join(destDir, skillSlug)
+
+  if (!existsSync(srcPath)) {
+    throw new Error(`Skill 不存在: ${skillSlug}`)
+  }
+
+  if (existsSync(destPath)) {
+    throw new Error(`目标目录已存在同名 Skill: ${skillSlug}`)
+  }
+
+  renameSync(srcPath, destPath)
+  console.log(`[Agent 工作区] Skill ${enabled ? '启用' : '禁用'}: ${workspaceSlug}/${skillSlug}`)
 }
 
 // ===== 权限模式管理 =====

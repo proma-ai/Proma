@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { cn } from '@/lib/utils'
-import { Settings, Radio, Palette, Info, Plug, Globe, BookOpen, Brain } from 'lucide-react'
+import { Settings, Radio, Palette, Info, Plug, Globe, BookOpen, Wrench } from 'lucide-react'
 // Cloud 模式专属图标
 import { CreditCard, KeyRound } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -25,7 +25,7 @@ import { AppearanceSettings } from './AppearanceSettings'
 import { AboutSettings } from './AboutSettings'
 import { AgentSettings } from './AgentSettings'
 import { PromptSettings } from './PromptSettings'
-import { MemorySettings } from './MemorySettings'
+import { ToolSettings } from './ToolSettings'
 // Cloud 模式专属组件
 import { BillingSettings } from '@/components/billing/BillingSettings'
 import { ApiKeysSettings } from './ApiKeysSettings'
@@ -48,7 +48,7 @@ const BASE_TABS: TabItem[] = [
 
 /** Agent 模式专属 Tab */
 const AGENT_TAB: TabItem = { id: 'agent', label: '配置', icon: <Plug size={16} /> }
-const MEMORY_TAB: TabItem = { id: 'memory', label: '记忆', icon: <Brain size={16} /> }
+const TOOLS_TAB: TabItem = { id: 'tools', label: '工具', icon: <Wrench size={16} /> }
 
 /** Cloud 模式专属 Tab */
 const BILLING_TAB: TabItem = { id: 'billing', label: '账单', icon: <CreditCard size={16} /> }
@@ -75,8 +75,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <ProxySettings />
     case 'agent':
       return <AgentSettings />
-    case 'memory':
-      return <MemorySettings />
+    case 'tools':
+      return <ToolSettings />
     // Cloud 模式专属页面
     case 'billing':
       return <BillingSettings />
@@ -95,13 +95,13 @@ export function SettingsPanel(): React.ReactElement {
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
 
-  // Agent 模式时在渠道后插入 Agent Tab，记忆 tab 两种模式都显示，Cloud 模式插入 Billing Tab
+  // Agent 模式时在渠道后插入 Agent Tab，记忆/工具 tab 两种模式都显示，Cloud 模式插入 Billing Tab
   const tabs = React.useMemo(() => {
     const result = [...BASE_TABS]
     if (appMode === 'agent') {
       result.push(AGENT_TAB)
     }
-    result.push(MEMORY_TAB)
+    result.push(TOOLS_TAB)
     if (isCloudMode()) {
       result.push(BILLING_TAB)
       result.push(API_TAB)

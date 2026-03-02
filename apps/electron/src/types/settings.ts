@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { EnvironmentCheckResult } from '@proma/shared'
+import type { EnvironmentCheckResult, PromaPermissionMode, ThinkingConfig, AgentEffort } from '@proma/shared'
 
 /** 主题模式 */
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -30,6 +30,36 @@ export interface AppSettings {
   lastEnvironmentCheck?: EnvironmentCheckResult
   /** 是否启用桌面通知 */
   notificationsEnabled?: boolean
+  /** 标签页持久化状态（重启恢复） */
+  tabState?: PersistedTabSettings
+  /** Agent 权限模式（全局默认，工作区级覆盖此值） */
+  agentPermissionMode?: PromaPermissionMode
+  /** Agent 思考模式 */
+  agentThinking?: ThinkingConfig
+  /** Agent 推理深度 */
+  agentEffort?: AgentEffort
+  /** Agent 最大预算（美元/次） */
+  agentMaxBudgetUsd?: number
+  /** Agent 最大轮次（0 或 undefined = SDK 默认） */
+  agentMaxTurns?: number
+}
+
+/** 持久化的标签页状态 */
+export interface PersistedTabSettings {
+  tabs: Array<{
+    id: string
+    type: 'chat' | 'agent'
+    sessionId: string
+    title: string
+  }>
+  splitLayout: {
+    mode: 'single' | 'horizontal-2' | 'vertical-2' | 'grid-4'
+    panels: Array<{
+      index: number
+      activeTabId: string | null
+    }>
+    focusedPanelIndex: number
+  }
 }
 
 /** 设置 IPC 通道 */

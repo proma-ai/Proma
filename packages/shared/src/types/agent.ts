@@ -46,6 +46,111 @@ export interface AgentWorkspace {
   updatedAt: number
 }
 
+// ===== SDK 新增类型声明（0.2.52 ~ 0.2.63） =====
+
+/**
+ * 思考模式配置
+ *
+ * 控制 Claude 的推理/思考行为：
+ * - adaptive: Claude 自行决定何时以及思考多少（Opus 4.6+ 默认）
+ * - enabled: 固定思考 Token 预算（旧模型）
+ * - disabled: 不使用扩展思考
+ */
+export type ThinkingConfig =
+  | { type: 'adaptive' }
+  | { type: 'enabled'; budgetTokens: number }
+  | { type: 'disabled' }
+
+/**
+ * 推理深度等级
+ *
+ * 与 adaptive thinking 配合使用，引导思考深度：
+ * - low: 最少思考，最快响应
+ * - medium: 适度思考
+ * - high: 深度推理（默认）
+ * - max: 最大深度（仅 Opus 4.6）
+ */
+export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
+
+/**
+ * 自定义子代理定义
+ *
+ * 通过 SDK 的 agents 选项注册可被 Agent 工具调用的自定义子代理。
+ */
+export interface AgentDefinition {
+  /** 自然语言描述，说明何时使用该代理 */
+  description: string
+  /** 允许使用的工具名称列表，省略则继承父级所有工具 */
+  tools?: string[]
+  /** 明确禁止使用的工具名称列表 */
+  disallowedTools?: string[]
+  /** 自定义系统提示词 */
+  prompt?: string
+  /** 使用的模型（覆盖父级） */
+  model?: string
+  /** 最大轮次（覆盖父级） */
+  maxTurns?: number
+}
+
+/**
+ * SDK 会话信息（listSessions 返回）
+ *
+ * SDK 0.2.53 新增，用于发现和列出历史会话。
+ */
+export interface SDKSessionInfo {
+  /** 会话 ID */
+  sessionId: string
+  /** 项目路径 */
+  projectPath?: string
+  /** 会话标题（从 transcript 提取） */
+  title?: string
+  /** 创建时间 ISO 字符串 */
+  createdAt?: string
+  /** 最后更新时间 ISO 字符串 */
+  lastUpdatedAt?: string
+  /** 消息计数概要 */
+  messageCount?: number
+}
+
+/**
+ * SDK 会话消息（getSessionMessages 返回）
+ *
+ * SDK 0.2.59 新增，用于读取会话的完整对话历史。
+ */
+export interface SDKSessionMessage {
+  /** 消息类型（SDK 原始类型标识） */
+  type: string
+  /** 消息角色 */
+  role?: 'user' | 'assistant'
+  /** 消息内容 */
+  content?: unknown
+  /** 时间戳 */
+  timestamp?: string
+}
+
+/**
+ * SDK Beta 特性标识
+ *
+ * 当前支持：
+ * - context-1m-2025-08-07: 启用 1M token 上下文窗口（仅 Sonnet 4/4.5）
+ */
+export type SdkBeta = 'context-1m-2025-08-07'
+
+/**
+ * JSON Schema 输出格式
+ *
+ * 用于指定结构化输出，Agent 将返回符合 Schema 的 JSON 数据。
+ */
+export interface JsonSchemaOutputFormat {
+  type: 'json_schema'
+  /** JSON Schema 定义 */
+  schema: Record<string, unknown>
+  /** Schema 名称（可选） */
+  name?: string
+  /** Schema 描述（可选） */
+  description?: string
+}
+
 // ===== Agent 事件类型 =====
 
 /** 错误代码 */
@@ -205,6 +310,8 @@ export interface AgentSessionMeta {
   sdkSessionId?: string
   /** 所属工作区 ID */
   workspaceId?: string
+  /** 是否置顶 */
+  pinned?: boolean
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -273,6 +380,8 @@ export interface McpServerEntry {
   url?: string
   /** http/sse: 请求头 */
   headers?: Record<string, string>
+  /** 启动超时（秒），仅 stdio 类型有效，默认 30 */
+  timeout?: number
   /** 是否启用 */
   enabled: boolean
   /** 是否为内置 MCP（不可删除，仅可配置 env） */
@@ -298,6 +407,7 @@ export interface SkillMeta {
   name: string
   description?: string
   icon?: string
+  enabled: boolean
 }
 
 /** 工作区能力摘要（MCP + Skill 计数） */
@@ -524,6 +634,10 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_TITLE: 'agent:update-title',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
+  /** 迁移 Chat 对话记录到 Agent 会话 */
+  MIGRATE_CHAT_TO_AGENT: 'agent:migrate-chat-to-agent',
+  /** 切换会话置顶状态 */
+  TOGGLE_PIN: 'agent:toggle-pin',
 
   // 工作区管理
   /** 获取工作区列表 */
@@ -562,8 +676,12 @@ export const AGENT_IPC_CHANNELS = {
   TEST_MCP_SERVER: 'agent:test-mcp-server',
   /** 获取工作区 Skill 列表 */
   GET_SKILLS: 'agent:get-skills',
+  /** 获取工作区 Skills 目录绝对路径 */
+  GET_SKILLS_DIR: 'agent:get-skills-dir',
   /** 删除工作区 Skill */
   DELETE_SKILL: 'agent:delete-skill',
+  /** 切换工作区 Skill 启用/禁用 */
+  TOGGLE_SKILL: 'agent:toggle-skill',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */
@@ -604,8 +722,6 @@ export const AGENT_IPC_CHANNELS = {
   WORKSPACE_FILES_CHANGED: 'agent:workspace-files-changed',
 
   // 权限系统
-  /** 权限请求（主进程 → 渲染进程推送） */
-  PERMISSION_REQUEST: 'agent:permission:request',
   /** 权限响应（渲染进程 → 主进程） */
   PERMISSION_RESPOND: 'agent:permission:respond',
   /** 设置权限模式（渲染进程 → 主进程） */
@@ -614,8 +730,6 @@ export const AGENT_IPC_CHANNELS = {
   GET_PERMISSION_MODE: 'agent:get-permission-mode',
 
   // AskUserQuestion 交互式问答
-  /** AskUser 请求（主进程 → 渲染进程推送） */
-  ASK_USER_REQUEST: 'agent:ask-user:request',
   /** AskUser 响应（渲染进程 → 主进程） */
   ASK_USER_RESPOND: 'agent:ask-user:respond',
 } as const

@@ -6,17 +6,31 @@
  */
 
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
+import { toast } from 'sonner'
 import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import type { MemoryConfig } from '@proma/shared'
 import { SettingsSection, SettingsCard } from './primitives'
+import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
+
+/** 刷新全局工具列表 atom */
+async function refreshChatTools(setter: (tools: Awaited<ReturnType<typeof window.electronAPI.getChatTools>>) => void): Promise<void> {
+  try {
+    const tools = await window.electronAPI.getChatTools()
+    setter(tools)
+  } catch (err) {
+    console.error('[MemorySettings] 刷新工具列表失败:', err)
+  }
+}
 
 export function MemorySettings(): React.ReactElement {
   const [config, setConfig] = React.useState<MemoryConfig>({ enabled: false, apiKey: '', userId: 'proma-user' })
   const [saving, setSaving] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
+  const setChatTools = useSetAtom(chatToolsAtom)
 
   // 本地编辑状态
   const [apiKey, setApiKey] = React.useState('')
@@ -43,12 +57,21 @@ export function MemorySettings(): React.ReactElement {
       await window.electronAPI.setMemoryConfig(updated)
       setConfig(updated)
       setApiKey(updated.apiKey)
+      // 刷新全局工具列表（available/enabled 可能变化）
+      await refreshChatTools(setChatTools)
+      toast.success('记忆设置已保存')
     } catch (error) {
       console.error('[记忆设置] 保存失败:', error)
     } finally {
       setSaving(false)
     }
   }
+
+  /** API Key 输入框失焦时静默保存 */
+  const handleBlurSave = React.useCallback(async (): Promise<void> => {
+    if (apiKey === config.apiKey) return
+    await handleSave({ ...config, apiKey })
+  }, [apiKey, config])
 
   const handleTest = async (): Promise<void> => {
     // 如果有未保存的 API Key，先保存再测试
@@ -66,8 +89,6 @@ export function MemorySettings(): React.ReactElement {
       setTesting(false)
     }
   }
-
-  const dirty = apiKey !== config.apiKey
 
   if (loading) {
     return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -129,6 +150,7 @@ export function MemorySettings(): React.ReactElement {
                   placeholder="memos API Key"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
+                  onBlur={handleBlurSave}
                   className="pr-10"
                 />
                 <button
@@ -141,16 +163,6 @@ export function MemorySettings(): React.ReactElement {
                 </button>
               </div>
             </div>
-
-            {dirty && (
-              <Button
-                size="sm"
-                disabled={saving}
-                onClick={() => handleSave({ ...config, apiKey })}
-              >
-                {saving ? '保存中...' : '保存'}
-              </Button>
-            )}
 
             {testResult && (
               <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>

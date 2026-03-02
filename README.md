@@ -106,6 +106,12 @@ Proma 的诞生离不开这些优秀的开源项目：
 
 ![Proma Given](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
 
+
+## 赞助支持（招募中）
+AI 时代最能玩梗，但又一语中的炒作组织，惊叹于对这个 AI 时代的精准嘲讽，点透疯癫。微信公众号搜索：**葬 AI**
+
+![葬 AI](https://img.erlich.fun/personal-blog/uPic/zang-ai.png)
+
 ## 开源许可
 
 [MIT](./LICENSE)

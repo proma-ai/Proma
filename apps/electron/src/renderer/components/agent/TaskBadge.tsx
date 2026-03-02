@@ -24,10 +24,10 @@ export interface TaskBadgeProps {
  * formatElapsed(3660) → "1h 1m"
  */
 function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
 
   const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
+  const remainingSeconds = Math.round(seconds % 60)
 
   if (minutes < 60) {
     return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`

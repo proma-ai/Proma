@@ -30,6 +30,7 @@ import {
   ChevronRight,
   MessageCircleDashed,
   Plus,
+  Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -72,6 +73,8 @@ const TOOL_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   TaskUpdate: ListTodo,
   TaskGet: ListTodo,
   TaskList: ListTodo,
+  TeamCreate: Users,
+  Agent: Users,
 }
 
 function getToolIcon(toolName: string): React.ComponentType<{ className?: string }> {
@@ -179,8 +182,8 @@ function ErrorBadge(): React.ReactElement {
 
 // ===== 格式化耗时 =====
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
+export function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
   return `${m}m${s}s`
@@ -215,6 +218,81 @@ function getInputSummary(toolName: string, input: Record<string, unknown>): stri
   if (toolName === 'Skill') {
     const skill = input.skill
     if (typeof skill === 'string') return skill
+  }
+  // Task 子代理：显示 description
+  if (toolName === 'Task') {
+    const desc = input.description ?? input.prompt
+    if (typeof desc === 'string') return desc.length > 80 ? desc.slice(0, 80) + '…' : desc
+  }
+  // TaskCreate：显示 subject
+  if (toolName === 'TaskCreate') {
+    const subject = input.subject
+    if (typeof subject === 'string') return subject.length > 80 ? subject.slice(0, 80) + '…' : subject
+  }
+  // TaskUpdate：显示状态变更
+  if (toolName === 'TaskUpdate') {
+    const parts: string[] = []
+    if (typeof input.taskId === 'string') parts.push(`#${input.taskId}`)
+    if (typeof input.status === 'string') parts.push(input.status)
+    if (typeof input.subject === 'string') parts.push(input.subject.length > 60 ? input.subject.slice(0, 60) + '…' : input.subject)
+    return parts.length > 0 ? parts.join(' ') : null
+  }
+  // TaskGet / TaskList：显示 taskId 或 reason
+  if (toolName === 'TaskGet') {
+    const taskId = input.taskId
+    if (typeof taskId === 'string') return `#${taskId}`
+  }
+  if (toolName === 'TaskList') {
+    const reason = input.reason
+    if (typeof reason === 'string') return reason.length > 80 ? reason.slice(0, 80) + '…' : reason
+  }
+  // Read：显示文件路径
+  if (toolName === 'Read') {
+    const fp = input.file_path ?? input.filePath
+    if (typeof fp === 'string') {
+      const filename = fp.split('/').pop() ?? fp
+      return filename
+    }
+  }
+  // Edit / Write：显示文件路径
+  if (toolName === 'Edit' || toolName === 'Write') {
+    const fp = input.file_path ?? input.filePath
+    if (typeof fp === 'string') {
+      const filename = fp.split('/').pop() ?? fp
+      return filename
+    }
+  }
+  // NotebookEdit：显示 notebook 路径
+  if (toolName === 'NotebookEdit') {
+    const fp = input.notebook_path
+    if (typeof fp === 'string') {
+      const filename = fp.split('/').pop() ?? fp
+      return filename
+    }
+  }
+  // TodoWrite：显示任务数量
+  if (toolName === 'TodoWrite') {
+    const todos = input.todos
+    if (Array.isArray(todos)) return `${todos.length} 项任务`
+  }
+  // TeamCreate：显示 team_name + description
+  if (toolName === 'TeamCreate') {
+    const name = input.team_name
+    const desc = input.description
+    if (typeof name === 'string') {
+      if (typeof desc === 'string') return `${name} · ${desc.length > 60 ? desc.slice(0, 60) + '…' : desc}`
+      return name
+    }
+  }
+  // Agent：显示 name + description
+  if (toolName === 'Agent') {
+    const agentName = input.name
+    const desc = input.description ?? input.prompt
+    if (typeof agentName === 'string' && typeof desc === 'string') {
+      return `${agentName} · ${desc.length > 60 ? desc.slice(0, 60) + '…' : desc}`
+    }
+    if (typeof desc === 'string') return desc.length > 80 ? desc.slice(0, 80) + '…' : desc
+    if (typeof agentName === 'string') return agentName
   }
   return null
 }
@@ -274,14 +352,14 @@ function TodoList({ items }: { items: TodoItem[] }): React.ReactElement {
 
 // ===== 活动行 =====
 
-interface ActivityRowProps {
+export interface ActivityRowProps {
   activity: ToolActivity
   index?: number
   animate?: boolean
   onOpenDetails?: (activity: ToolActivity) => void
 }
 
-function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: ActivityRowProps): React.ReactElement {
+export function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: ActivityRowProps): React.ReactElement {
   const status = getActivityStatus(activity)
   const filePath = extractFilePath(activity.input)
   const diffStats = computeDiffStats(activity.toolName, activity.input)

@@ -15,6 +15,7 @@ import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
 import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
+import { startChatToolsWatcher, stopChatToolsWatcher } from './lib/chat-tools-watcher'
 import { getIsQuitting, setQuitting, isUpdating } from './lib/app-lifecycle'
 import { isCloudMode } from '@proma/cloud'
 import { registerCloudIpcHandlers } from './cloud-ipc'
@@ -248,6 +249,9 @@ if (!gotTheLock) {
     const menu = createApplicationMenu()
     Menu.setApplicationMenu(menu)
 
+    // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
+    startChatToolsWatcher()
+
     // Register IPC handlers
     registerIpcHandlers()
 
@@ -325,6 +329,8 @@ if (!gotTheLock) {
     cleanupUpdater()
     // 停止工作区文件监听
     stopWorkspaceWatcher()
+    // 停止 Chat 工具配置文件监听
+    stopChatToolsWatcher()
     // Clean up system tray before quitting
     destroyTray()
   })

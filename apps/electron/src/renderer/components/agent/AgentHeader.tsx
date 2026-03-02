@@ -8,10 +8,16 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Pencil, Check, X } from 'lucide-react'
-import { currentAgentSessionAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
+import { agentSessionsAtom } from '@/atoms/agent-atoms'
 
-export function AgentHeader(): React.ReactElement | null {
-  const session = useAtomValue(currentAgentSessionAtom)
+/** AgentHeader 属性接口 */
+interface AgentHeaderProps {
+  sessionId: string
+}
+
+export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement | null {
+  const sessions = useAtomValue(agentSessionsAtom)
+  const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')

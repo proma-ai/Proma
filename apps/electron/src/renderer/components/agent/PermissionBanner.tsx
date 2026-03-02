@@ -12,7 +12,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import { Shield, ShieldAlert, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { pendingPermissionRequestsAtom } from '@/atoms/agent-atoms'
+import { allPendingPermissionRequestsAtom } from '@/atoms/agent-atoms'
 import type { DangerLevel } from '@proma/shared'
 
 /** 危险等级对应的图标颜色 */
@@ -31,8 +31,14 @@ function formatToolName(toolName: string): string {
   return toolName
 }
 
-export function PermissionBanner(): React.ReactElement | null {
-  const [requests, setRequests] = useAtom(pendingPermissionRequestsAtom)
+/** PermissionBanner 属性接口 */
+interface PermissionBannerProps {
+  sessionId: string
+}
+
+export function PermissionBanner({ sessionId }: PermissionBannerProps): React.ReactElement | null {
+  const [allRequests, setAllRequests] = useAtom(allPendingPermissionRequestsAtom)
+  const requests = allRequests.get(sessionId) ?? []
   const [responding, setResponding] = React.useState(false)
   const respondRef = React.useRef<(behavior: 'allow' | 'deny', alwaysAllow?: boolean) => void>()
 
@@ -70,7 +76,14 @@ export function PermissionBanner(): React.ReactElement | null {
         alwaysAllow,
       })
       // 移除已响应的请求（FIFO 出队）
-      setRequests((prev) => prev.filter((r) => r.requestId !== request.requestId))
+      setAllRequests((prev) => {
+        const map = new Map(prev)
+        const current = map.get(sessionId) ?? []
+        const newValue = current.filter((r) => r.requestId !== request.requestId)
+        if (newValue.length === 0) map.delete(sessionId)
+        else map.set(sessionId, newValue)
+        return map
+      })
     } catch (error) {
       console.error('[PermissionBanner] 响应失败:', error)
     } finally {

@@ -8,6 +8,7 @@
  * - 动态 per-message 上下文（buildDynamicContext）：注入到用户消息前，每次实时读取磁盘
  */
 
+import type { PromaPermissionMode } from '@proma/shared'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-manager'
 import { getMemoryConfig } from './memory-service'
@@ -19,6 +20,7 @@ interface SystemPromptContext {
   workspaceName?: string
   workspaceSlug?: string
   sessionId: string
+  permissionMode: PromaPermissionMode
 }
 
 /**
@@ -94,6 +96,26 @@ description: 简要描述
 ---
 详细指令内容...
 \`\`\``)
+  }
+
+  // 不确定性处理策略（根据权限模式区分）
+  if (ctx.permissionMode === 'auto') {
+    sections.push(`## 不确定性处理
+
+当前用户使用的是自动模式（所有工具调用自动批准），此模式下 AskUserQuestion 工具不可用。
+
+**当你遇到不确定的情况时：**
+- **停下来，直接在回复文本中向用户提问**，等待用户回复后再继续
+- 列出你考虑的选项和各自的利弊，让用户决策
+- **绝对不要**调用 AskUserQuestion 工具，该工具在自动模式下会失败`)
+  } else {
+    sections.push(`## 不确定性处理
+
+**遇到不确定的部分时，尽可能多地使用 AskUserQuestion 工具来向用户提问：**
+- 提供清晰的选项列表，降低用户输入的复杂度
+- 每个选项附带简短说明，帮助用户快速决策
+- 拆分多个独立问题为多个 AskUserQuestion 调用，避免一次性提问过多
+- 特别是在触发 brainstorming / 头脑风暴类 Skill 时，**必须**通过 AskUserQuestion 逐步引导用户明确需求和方向，而非让用户自己大段输入`)
   }
 
   // 交互规范

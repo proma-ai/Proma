@@ -123,6 +123,8 @@ export interface ChatMessage {
   outputTokens?: number
   /** 工具调用信息列表（云端同步字段） */
   toolCalls?: ToolCallInfo[]
+  /** 工具活动记录（assistant 消息，工具调用历史） */
+  toolActivities?: ChatToolActivity[]
 }
 
 // ===== 对话相关 =====
@@ -206,6 +208,8 @@ export interface ChatSendInput {
   attachments?: FileAttachment[]
   /** 是否启用思考模式 */
   thinkingEnabled?: boolean
+  /** 本次请求启用的工具 ID 列表（由前端工具选择器决定） */
+  enabledToolIds?: string[]
 }
 
 // ===== 标题生成 =====

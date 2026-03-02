@@ -14,19 +14,7 @@ import { MessageAction } from '@/components/ai-elements/message'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, FileAttachment } from '@proma/shared'
-
-/** 文件转 base64（模块级纯函数） */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result as string
-      resolve(result.split(',')[1]!)
-    }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
+import { fileToBase64 } from '@/lib/file-utils'
 
 interface NewInlineAttachment {
   filename: string

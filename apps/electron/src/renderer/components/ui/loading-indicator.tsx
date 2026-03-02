@@ -8,10 +8,10 @@ import { Spinner } from './spinner'
  * @returns 不足一分钟返回 "45s"，超过一分钟返回 "1:02"
  */
 function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
+  const totalSeconds = ms / 1000
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainingSeconds = Math.floor(totalSeconds % 60)
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
@@ -82,7 +82,7 @@ export function LoadingIndicator({
       if (startTimeRef.current) {
         setElapsed(Date.now() - startTimeRef.current)
       }
-    }, 1000)
+    }, 100)
 
     return () => clearInterval(interval)
   }, [showElapsed])

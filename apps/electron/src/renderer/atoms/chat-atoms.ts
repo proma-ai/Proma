@@ -10,7 +10,7 @@ import { atomWithStorage } from 'jotai/utils'
 import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity } from '@proma/shared'
 
 /** 选中的模型信息 */
-interface SelectedModel {
+export interface SelectedModel {
   channelId: string
   modelId: string
 }
@@ -203,3 +203,40 @@ export const currentConversationDraftAtom = atom(
     })
   }
 )
+
+/**
+ * Chat 消息刷新版本 Map — 以 conversationId 为 key
+ * 全局监听器在流式完成/错误时递增版本号，
+ * ChatView 监听版本号变化来重新加载消息。
+ */
+export const chatMessageRefreshAtom = atom<Map<string, number>>(new Map())
+
+// ===== Agent 模式推荐 =====
+
+/** Agent 模式推荐数据（由 suggest_agent_mode 工具结果写入） */
+export interface AgentRecommendation {
+  /** 推荐理由（AI 生成，描述 Agent 如何帮助用户） */
+  reason: string
+  /** 建议的 Agent 初始提示词 */
+  suggestedPrompt: string
+  /** 来源对话 ID（用于对话切换时清除） */
+  conversationId: string
+}
+
+/** 待处理的 Agent 模式推荐（工具结果写入，用户操作/关闭/切换对话时清除） */
+export const pendingAgentRecommendationAtom = atom<AgentRecommendation | null>(null)
+
+// ===== Per-conversation 设置 Map =====
+// 分屏时每个 ChatView 实例独立控制，缺省时使用全局默认值
+
+/** 每个对话的模型选择 */
+export const conversationModelsAtom = atom<Map<string, SelectedModel | null>>(new Map())
+
+/** 每个对话的上下文长度 */
+export const conversationContextLengthAtom = atom<Map<string, ContextLengthValue>>(new Map())
+
+/** 每个对话的思考模式 */
+export const conversationThinkingEnabledAtom = atom<Map<string, boolean>>(new Map())
+
+/** 每个对话的并排模式 */
+export const conversationParallelModeAtom = atom<Map<string, boolean>>(new Map())

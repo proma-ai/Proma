@@ -15,15 +15,15 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   promptConfigAtom,
-  selectedPromptIdAtom,
   defaultPromptIdAtom,
   promptSidebarOpenAtom,
 } from '@/atoms/system-prompt-atoms'
+import { useConversationPromptId } from '@/hooks/useConversationSettings'
 import { cn } from '@/lib/utils'
 
 export function SystemPromptSelector(): React.ReactElement {
   const [config, setConfig] = useAtom(promptConfigAtom)
-  const [selectedId, setSelectedId] = useAtom(selectedPromptIdAtom)
+  const [selectedId, setSelectedId] = useConversationPromptId()
   const defaultPromptId = useAtomValue(defaultPromptIdAtom)
   const setPromptSidebarOpen = useSetAtom(promptSidebarOpenAtom)
   const [open, setOpen] = React.useState(false)

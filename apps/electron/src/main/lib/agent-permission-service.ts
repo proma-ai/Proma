@@ -24,23 +24,55 @@ import {
   hasDangerousStructure,
 } from '@proma/shared'
 
-/** SDK PermissionResult 类型（避免直接依赖 SDK 内部类型） */
-type PermissionResult = {
+/** SDK PermissionBehavior */
+type PermissionBehavior = 'allow' | 'deny'
+
+/** SDK PermissionUpdateDestination */
+type PermissionUpdateDestination = 'userSettings' | 'projectSettings' | 'localSettings' | 'session' | 'cliArg'
+
+/** SDK 权限规则值 */
+interface PermissionRuleValue {
+  toolName: string
+  ruleContent?: string
+}
+
+/** SDK PermissionUpdate（匹配 SDK 0.2.63） */
+export type PermissionUpdate = {
+  type: 'addRules' | 'replaceRules' | 'removeRules'
+  rules: PermissionRuleValue[]
+  behavior: PermissionBehavior
+  destination: PermissionUpdateDestination
+} | {
+  type: 'setMode'
+  mode: string
+  destination: PermissionUpdateDestination
+} | {
+  type: 'addDirectories' | 'removeDirectories'
+  directories: string[]
+  destination: PermissionUpdateDestination
+}
+
+/** SDK PermissionResult（匹配 SDK 0.2.63） */
+export type PermissionResult = {
   behavior: 'allow'
-  /** SDK CLI 的 Zod 校验要求此字段为 record 类型，不能省略 */
-  updatedInput: Record<string, unknown>
+  updatedInput?: Record<string, unknown>
+  updatedPermissions?: PermissionUpdate[]
+  toolUseID?: string
 } | {
   behavior: 'deny'
   message: string
   interrupt?: boolean
+  toolUseID?: string
 }
 
-/** canUseTool 回调的 options 参数 */
-interface CanUseToolOptions {
+/** canUseTool 回调的 options 参数（匹配 SDK CanUseTool） */
+export interface CanUseToolOptions {
   signal: AbortSignal
-  toolUseID: string
+  suggestions?: PermissionUpdate[]
+  blockedPath?: string
   decisionReason?: string
-  suggestions?: unknown[]
+  toolUseID: string
+  agentID?: string
 }
 
 /** 待处理的权限请求 */

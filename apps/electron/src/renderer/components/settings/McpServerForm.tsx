@@ -84,6 +84,9 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
   const [command, setCommand] = React.useState(server?.entry.command ?? '')
   const [argsText, setArgsText] = React.useState(server?.entry.args?.join(', ') ?? '')
   const [envText, setEnvText] = React.useState(serializeKeyValueText(server?.entry.env, '='))
+  const [timeoutStr, setTimeoutStr] = React.useState(
+    server?.entry.timeout != null ? String(server.entry.timeout) : ''
+  )
 
   // http/sse 字段
   const [url, setUrl] = React.useState(server?.entry.url ?? '')
@@ -141,6 +144,8 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
       if (args.length > 0) base.args = args
       const env = parseKeyValueText(envText, '=')
       if (Object.keys(env).length > 0) base.env = env
+      const timeout = parseInt(timeoutStr, 10)
+      if (!isNaN(timeout) && timeout > 0) base.timeout = timeout
     } else {
       base.url = url.trim()
       const headers = parseKeyValueText(headersText, ':')
@@ -319,6 +324,14 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onCancel }: McpS
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y font-mono"
                 />
               </div>
+              <SettingsInput
+                label="启动超时（秒）"
+                description="MCP 服务器启动的最大等待时间，默认 30 秒"
+                value={timeoutStr}
+                onChange={setTimeoutStr}
+                placeholder="30"
+                type="number"
+              />
             </>
           )}
 

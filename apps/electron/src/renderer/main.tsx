@@ -6,7 +6,7 @@
 
 import React, { useEffect } from 'react'
 import ReactDOM from 'react-dom/client'
-import { useSetAtom, useAtomValue } from 'jotai'
+import { useSetAtom, useAtomValue, useStore } from 'jotai'
 import App from './App'
 import {
   themeModeAtom,
@@ -22,6 +22,11 @@ import {
   currentAgentWorkspaceIdAtom,
   workspaceCapabilitiesVersionAtom,
   workspaceFilesVersionAtom,
+  agentPermissionModeAtom,
+  agentThinkingAtom,
+  agentEffortAtom,
+  agentMaxBudgetUsdAtom,
+  agentMaxTurnsAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import {
@@ -43,7 +48,12 @@ import {
   initializeNotifications,
 } from './atoms/notifications'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
+import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
+import { tabsAtom, splitLayoutAtom } from './atoms/tab-atoms'
+import type { TabItem, SplitLayoutState } from './atoms/tab-atoms'
+import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { Toaster } from './components/ui/sonner'
+import { toast } from 'sonner'
 import { UpdateDialog } from './components/settings/UpdateDialog'
 import './styles/globals.css'
 
@@ -98,6 +108,11 @@ function AgentSettingsInitializer(): null {
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const bumpFiles = useSetAtom(workspaceFilesVersionAtom)
+  const setPermissionMode = useSetAtom(agentPermissionModeAtom)
+  const setThinking = useSetAtom(agentThinkingAtom)
+  const setEffort = useSetAtom(agentEffortAtom)
+  const setMaxBudget = useSetAtom(agentMaxBudgetUsdAtom)
+  const setMaxTurns = useSetAtom(agentMaxTurnsAtom)
 
   useEffect(() => {
     // 加载设置
@@ -107,6 +122,21 @@ function AgentSettingsInitializer(): null {
       }
       if (settings.agentModelId) {
         setAgentModelId(settings.agentModelId)
+      }
+      if (settings.agentPermissionMode) {
+        setPermissionMode(settings.agentPermissionMode)
+      }
+      if (settings.agentThinking) {
+        setThinking(settings.agentThinking)
+      }
+      if (settings.agentEffort) {
+        setEffort(settings.agentEffort)
+      }
+      if (settings.agentMaxBudgetUsd != null) {
+        setMaxBudget(settings.agentMaxBudgetUsd)
+      }
+      if (settings.agentMaxTurns != null) {
+        setMaxTurns(settings.agentMaxTurns)
       }
 
       // 加载工作区列表并恢复上次选中的工作区
@@ -121,7 +151,7 @@ function AgentSettingsInitializer(): null {
         }
       }).catch(console.error)
     }).catch(console.error)
-  }, [setAgentChannelId, setAgentModelId, setAgentWorkspaces, setCurrentWorkspaceId])
+  }, [setAgentChannelId, setAgentModelId, setAgentWorkspaces, setCurrentWorkspaceId, setPermissionMode, setThinking, setEffort, setMaxBudget, setMaxTurns])
 
   // 订阅主进程文件监听推送
   useEffect(() => {
@@ -270,6 +300,17 @@ function NotificationsInitializer(): null {
 }
 
 /**
+ * Chat IPC 监听器初始化组件
+ *
+ * 全局挂载，永不销毁。确保 Chat 流式事件
+ * 在页面切换时不丢失。
+ */
+function ChatListenersInitializer(): null {
+  useGlobalChatListeners()
+  return null
+}
+
+/**
  * Agent IPC 监听器初始化组件
  *
  * 全局挂载，永不销毁。确保 Agent 流式事件、权限请求
@@ -277,6 +318,37 @@ function NotificationsInitializer(): null {
  */
 function AgentListenersInitializer(): null {
   useGlobalAgentListeners()
+  return null
+}
+
+/**
+ * Chat 工具初始化组件
+ *
+ * 启动时从主进程加载所有工具信息到 atom。
+ * 订阅 chat-tools.json 文件变更通知，自动刷新工具列表。
+ */
+function ChatToolInitializer(): null {
+  const setChatTools = useSetAtom(chatToolsAtom)
+
+  useEffect(() => {
+    window.electronAPI.getChatTools()
+      .then(setChatTools)
+      .catch((err: unknown) => console.error('[ChatToolInitializer] 加载工具列表失败:', err))
+  }, [setChatTools])
+
+  // 订阅自定义工具配置变更
+  useEffect(() => {
+    const cleanup = window.electronAPI.onCustomToolChanged(() => {
+      window.electronAPI.getChatTools()
+        .then((tools) => {
+          setChatTools(tools)
+          toast.success('Chat 工具已更新')
+        })
+        .catch((err: unknown) => console.error('[ChatToolInitializer] 刷新工具列表失败:', err))
+    })
+    return cleanup
+  }, [setChatTools])
+
   return null
 }
 
@@ -288,7 +360,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <OfficialChannelInitializer />
     <AgentSettingsInitializer />
     <NotificationsInitializer />
+    <ChatListenersInitializer />
     <AgentListenersInitializer />
+    <ChatToolInitializer />
     <UpdaterInitializer />
     <App />
     <UpdateDialog />

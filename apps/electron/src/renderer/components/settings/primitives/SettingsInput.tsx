@@ -19,6 +19,8 @@ interface SettingsInputProps {
   value: string
   /** 变更回调 */
   onChange: (value: string) => void
+  /** 失焦回调（可选，用于延迟保存场景） */
+  onBlur?: () => void
   /** 占位符 */
   placeholder?: string
   /** 是否必填 */
@@ -36,6 +38,7 @@ export function SettingsInput({
   description,
   value,
   onChange,
+  onBlur,
   placeholder,
   required,
   disabled,
@@ -54,6 +57,7 @@ export function SettingsInput({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         required={required}
         disabled={disabled}

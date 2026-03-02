@@ -18,6 +18,7 @@ import {
 } from './config-paths'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import type { AgentSessionMeta, AgentMessage } from '@proma/shared'
+import { getConversationMessages } from './conversation-manager'
 
 /**
  * 会话索引文件格式
@@ -159,7 +160,7 @@ export function appendAgentMessage(id: string, message: AgentMessage): void {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -223,4 +224,42 @@ export function deleteAgentSession(id: string): void {
   }
 
   console.log(`[Agent 会话] 已删除会话: ${removed.title} (${removed.id})`)
+}
+
+/**
+ * 迁移 Chat 对话记录到 Agent 会话
+ *
+ * 读取 Chat 对话的消息，转换为 AgentMessage 格式，
+ * 追加到目标 Agent 会话的 JSONL 文件中。
+ *
+ * 仅迁移 user 和 assistant 角色的消息文本内容，
+ * 工具活动、推理、附件等 Chat 特有字段不迁移。
+ */
+export function migrateChatToAgentSession(conversationId: string, agentSessionId: string): void {
+  const chatMessages = getConversationMessages(conversationId)
+
+  if (chatMessages.length === 0) {
+    console.log(`[Agent 会话] Chat 对话无消息，跳过迁移 (${conversationId})`)
+    return
+  }
+
+  let count = 0
+  for (const cm of chatMessages) {
+    // 仅迁移 user 和 assistant 消息
+    if (cm.role !== 'user' && cm.role !== 'assistant') continue
+    if (!cm.content.trim()) continue
+
+    const agentMsg: AgentMessage = {
+      id: randomUUID(),
+      role: cm.role,
+      content: cm.content,
+      createdAt: cm.createdAt,
+      model: cm.role === 'assistant' ? cm.model : undefined,
+    }
+
+    appendAgentMessage(agentSessionId, agentMsg)
+    count++
+  }
+
+  console.log(`[Agent 会话] 已迁移 ${count} 条消息到 Agent 会话 (${conversationId} → ${agentSessionId})`)
 }

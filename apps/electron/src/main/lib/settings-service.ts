@@ -39,6 +39,12 @@ export function getSettings(): AppSettings {
       environmentCheckSkipped: data.environmentCheckSkipped ?? false,
       lastEnvironmentCheck: data.lastEnvironmentCheck,
       notificationsEnabled: data.notificationsEnabled ?? true,
+      tabState: data.tabState,
+      agentPermissionMode: data.agentPermissionMode,
+      agentThinking: data.agentThinking,
+      agentEffort: data.agentEffort,
+      agentMaxBudgetUsd: data.agentMaxBudgetUsd,
+      agentMaxTurns: data.agentMaxTurns,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)

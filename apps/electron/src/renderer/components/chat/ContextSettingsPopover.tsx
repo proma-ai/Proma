@@ -6,7 +6,6 @@
  */
 
 import { useState } from 'react'
-import { useAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -22,10 +21,10 @@ import {
 import { cn } from '@/lib/utils'
 import { Settings2 } from 'lucide-react'
 import {
-  contextLengthAtom,
   CONTEXT_LENGTH_OPTIONS,
   type ContextLengthValue,
 } from '@/atoms/chat-atoms'
+import { useConversationContextLength } from '@/hooks/useConversationSettings'
 
 /** 上下文长度滑块标签 */
 function getContextLengthLabel(value: ContextLengthValue): string {
@@ -47,7 +46,7 @@ function valueToSliderPosition(value: ContextLengthValue): number {
 
 export function ContextSettingsPopover(): React.ReactElement {
   const [open, setOpen] = useState(false)
-  const [contextLength, setContextLength] = useAtom(contextLengthAtom)
+  const [contextLength, setContextLength] = useConversationContextLength()
 
   const sliderPosition = valueToSliderPosition(contextLength)
   const maxSliderPosition = CONTEXT_LENGTH_OPTIONS.length - 1

@@ -14,9 +14,10 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { MessageSquare, Loader2, Brain, CheckCircle2, XCircle } from 'lucide-react'
+import { MessageSquare, Loader2 } from 'lucide-react'
 import { ChatMessageItem, formatMessageTime } from './ChatMessageItem'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
+import { ChatToolActivityIndicator } from './ChatToolActivityIndicator'
 import { ParallelChatMessages } from './ParallelChatMessages'
 import {
   Message,
@@ -41,79 +42,10 @@ import {
   ReasoningContent,
 } from '@/components/ai-elements/reasoning'
 import { useSmoothStream } from '@proma/ui'
-import {
-  currentMessagesAtom,
-  streamingAtom,
-  streamingContentAtom,
-  streamingReasoningAtom,
-  streamingModelAtom,
-  streamingToolActivitiesAtom,
-  contextDividersAtom,
-  parallelModeAtom,
-  hasMoreMessagesAtom,
-  currentConversationIdAtom,
-} from '@/atoms/chat-atoms'
+import { useConversationParallelMode } from '@/hooks/useConversationSettings'
 import { getModelLogo } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import type { ChatMessage, ChatToolActivity } from '@proma/shared'
-import { cn } from '@/lib/utils'
-
-// ===== 记忆工具活动指示器 =====
-
-/** 工具名称到中文标签的映射 */
-const TOOL_LABELS: Record<string, { running: string; done: string }> = {
-  recall_memory: { running: '正在回忆…', done: '回忆完成' },
-  add_memory: { running: '正在记住…', done: '已记住' },
-}
-
-function MemoryToolIndicator({ activities }: { activities: ChatToolActivity[] }): React.ReactElement | null {
-  if (activities.length === 0) return null
-
-  // 合并同一个 toolCallId 的 start/result 事件
-  const merged = new Map<string, { toolName: string; done: boolean; isError?: boolean }>()
-  for (const a of activities) {
-    const existing = merged.get(a.toolCallId)
-    if (a.type === 'start') {
-      merged.set(a.toolCallId, { toolName: a.toolName, done: false })
-    } else if (a.type === 'result') {
-      merged.set(a.toolCallId, {
-        toolName: existing?.toolName ?? a.toolName,
-        done: true,
-        isError: a.isError,
-      })
-    }
-  }
-
-  const items = Array.from(merged.values())
-  if (items.length === 0) return null
-
-  return (
-    <div className="space-y-1 mb-2">
-      {items.map((item, i) => {
-        const label = TOOL_LABELS[item.toolName] ?? { running: item.toolName, done: item.toolName }
-        return (
-          <div
-            key={i}
-            className={cn(
-              'flex items-center gap-1.5 text-xs text-muted-foreground',
-              'animate-in fade-in slide-in-from-left-2 duration-200',
-            )}
-          >
-            {!item.done ? (
-              <Loader2 className="size-3 animate-spin text-primary" />
-            ) : item.isError ? (
-              <XCircle className="size-3 text-destructive" />
-            ) : (
-              <CheckCircle2 className="size-3 text-green-500" />
-            )}
-            <Brain className="size-3" />
-            <span>{item.done ? (item.isError ? `${label.done}（失败）` : label.done) : label.running}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 // ===== 滚动到顶部加载更多 =====
 
@@ -181,6 +113,24 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
 // ===== 主组件 =====
 
 interface ChatMessagesProps {
+  /** 当前对话 ID */
+  conversationId: string
+  /** 消息列表 */
+  messages: ChatMessage[]
+  /** 是否正在流式生成 */
+  streaming: boolean
+  /** 流式累积内容 */
+  streamingContent: string
+  /** 流式推理内容 */
+  streamingReasoning: string
+  /** 流式消息绑定的模型 */
+  streamingModel: string | null
+  /** 工具活动列表 */
+  toolActivities: ChatToolActivity[]
+  /** 上下文分隔线 */
+  contextDividers: string[]
+  /** 是否还有更多历史消息 */
+  hasMore: boolean
   /** 删除消息回调 */
   onDeleteMessage?: (messageId: string) => Promise<void>
   /** 重新发送消息回调 */
@@ -214,6 +164,15 @@ function EmptyState(): React.ReactElement {
 }
 
 export function ChatMessages({
+  conversationId,
+  messages,
+  streaming,
+  streamingContent,
+  streamingReasoning,
+  streamingModel,
+  toolActivities,
+  contextDividers,
+  hasMore,
   onDeleteMessage,
   onResendMessage,
   onStartInlineEdit,
@@ -223,14 +182,9 @@ export function ChatMessages({
   onDeleteDivider,
   onLoadMore,
 }: ChatMessagesProps): React.ReactElement {
-  const messages = useAtomValue(currentMessagesAtom)
   const userProfile = useAtomValue(userProfileAtom)
-  const streaming = useAtomValue(streamingAtom)
-  const streamingContent = useAtomValue(streamingContentAtom)
-  const streamingReasoning = useAtomValue(streamingReasoningAtom)
-  const toolActivities = useAtomValue(streamingToolActivitiesAtom)
 
-  // 平滑流式输出：将高频 atom 更新转为逐字渲染
+  // 平滑流式输出：将高频更新转为逐字渲染
   const { displayedContent: smoothContent } = useSmoothStream({
     content: streamingContent,
     isStreaming: streaming,
@@ -239,11 +193,7 @@ export function ChatMessages({
     content: streamingReasoning,
     isStreaming: streaming,
   })
-  const contextDividers = useAtomValue(contextDividersAtom)
-  const parallelMode = useAtomValue(parallelModeAtom)
-  const streamingModel = useAtomValue(streamingModelAtom)
-  const hasMore = useAtomValue(hasMoreMessagesAtom)
-  const currentConversationId = useAtomValue(currentConversationIdAtom)
+  const [parallelMode] = useConversationParallelMode()
 
   /** 是否正在加载更多历史 */
   const [loadingMore, setLoadingMore] = React.useState(false)
@@ -257,11 +207,11 @@ export function ChatMessages({
 
   // 对话切换时立即隐藏
   React.useEffect(() => {
-    if (currentConversationId !== prevConversationIdRef.current) {
-      prevConversationIdRef.current = currentConversationId
+    if (conversationId !== prevConversationIdRef.current) {
+      prevConversationIdRef.current = conversationId
       setReady(false)
     }
-  }, [currentConversationId])
+  }, [conversationId])
 
   // 消息渲染 + StickToBottom 定位完成后淡入
   React.useEffect(() => {
@@ -390,8 +340,8 @@ export function ChatMessages({
                   }
                 />
                 <MessageContent>
-                  {/* 记忆工具活动指示器 */}
-                  <MemoryToolIndicator activities={toolActivities} />
+                  {/* 工具活动指示器 */}
+                  <ChatToolActivityIndicator activities={toolActivities} />
 
                   {/* 推理内容（如果有） */}
                   {smoothReasoning && (

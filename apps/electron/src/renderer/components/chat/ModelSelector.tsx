@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, Cpu, Search } from 'lucide-react'
 import {
   Dialog,
@@ -18,10 +18,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  selectedModelAtom,
-  currentConversationIdAtom,
   conversationsAtom,
 } from '@/atoms/chat-atoms'
+import { useConversationModelOptional } from '@/hooks/useConversationSettings'
+import { useConversationIdOptional } from '@/contexts/session-context'
 import { getModelLogo, getChannelLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
@@ -84,15 +84,15 @@ export function ModelSelector({
   onModelSelect,
   useAgentModels,
 }: ModelSelectorProps = {}): React.ReactElement {
-  const [internalSelectedModel, setInternalSelectedModel] = useAtom(selectedModelAtom)
-  const currentConversationId = useAtomValue(currentConversationIdAtom)
+  const [conversationModel, setConversationModel] = useConversationModelOptional()
+  const conversationId = useConversationIdOptional()
   const setConversations = useSetAtom(conversationsAtom)
   const [channels, setChannels] = React.useState<Channel[]>([])
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
 
-  // 外部模型优先，否则用内部 atom
-  const selectedModel = externalSelectedModel !== undefined ? externalSelectedModel : internalSelectedModel
+  // 外部模型优先 → per-conversation 模型
+  const selectedModel = externalSelectedModel !== undefined ? externalSelectedModel : conversationModel
 
   // 加载渠道列表
   React.useEffect(() => {
@@ -172,13 +172,16 @@ export function ModelSelector({
       return
     }
 
-    setInternalSelectedModel({ channelId: option.channelId, modelId: option.modelId })
+    // Chat 模式：写入 per-conversation Map
+    if (setConversationModel) {
+      setConversationModel({ channelId: option.channelId, modelId: option.modelId })
+    }
     setOpen(false)
 
     // 将模型/渠道选择保存到当前对话元数据
-    if (currentConversationId) {
+    if (conversationId) {
       window.electronAPI
-        .updateConversationModel(currentConversationId, option.modelId, option.channelId)
+        .updateConversationModel(conversationId, option.modelId, option.channelId)
         .then((updated) => {
           setConversations((prev) =>
             prev.map((c) => (c.id === updated.id ? updated : c))

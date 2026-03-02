@@ -74,3 +74,35 @@ export const resolvedSystemMessageAtom = atom<string | undefined>((get) => {
 
   return message
 })
+
+// ===== Per-conversation 系统提示词 =====
+
+/** 每个对话选中的提示词 ID（分屏时独立） */
+export const conversationPromptIdAtom = atom<Map<string, string>>(new Map())
+
+/** 根据 promptId 解析 systemMessage（纯函数，不依赖全局 atom） */
+export function resolveSystemMessage(
+  promptId: string,
+  config: SystemPromptConfig,
+  userName: string,
+): string | undefined {
+  const prompt = config.prompts.find((p) => p.id === promptId)
+  if (!prompt) return undefined
+
+  let message = prompt.content
+
+  if (config.appendDateTimeAndUserName) {
+    const now = new Date()
+    const dateTimeStr = now.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      weekday: 'long',
+    })
+    message += `\n\n---\n当前时间: ${dateTimeStr}\n用户名: ${userName}`
+  }
+
+  return message
+}

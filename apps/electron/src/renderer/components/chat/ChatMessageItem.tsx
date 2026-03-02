@@ -37,6 +37,7 @@ import { getModelLogo } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import type { ChatMessage } from '@proma/shared'
 import type { InlineEditSubmitPayload } from './InlineEditForm'
+import { ChatToolActivityIndicator } from './ChatToolActivityIndicator'
 
 // 重导出供外部使用
 export type { InlineEditSubmitPayload } from './InlineEditForm'
@@ -159,6 +160,11 @@ export function ChatMessageItem({
         <MessageContent>
           {message.role === 'assistant' ? (
             <>
+              {/* 工具活动记录（历史消息） */}
+              {message.toolActivities && message.toolActivities.length > 0 && (
+                <ChatToolActivityIndicator activities={message.toolActivities} />
+              )}
+
               {/* 推理折叠区域 */}
               {message.reasoning && (
                 <Reasoning

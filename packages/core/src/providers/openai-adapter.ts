@@ -240,9 +240,11 @@ export class OpenAIAdapter implements ProviderAdapter {
             })
           }
           if (tc.function?.arguments) {
+            // tc.id 仅在首个 chunk 中存在，后续 delta 不携带 id
+            // 使用空字符串让 SSE reader 通过 currentToolCallId 关联
             events.push({
               type: 'tool_call_delta',
-              toolCallId: tc.id || `tc_${tc.index ?? 0}`,
+              toolCallId: tc.id || '',
               argumentsDelta: tc.function.arguments,
             })
           }
