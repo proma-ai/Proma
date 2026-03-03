@@ -26,7 +26,7 @@ import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@pr
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
-import { getSystemApiKey } from './cloud-channel-service'
+import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
 import { getAdapter, fetchTitle } from '@proma/core'
@@ -638,8 +638,21 @@ export class AgentOrchestrator {
       try {
         apiKey = await getSystemApiKey()
       } catch {
-        callbacks.onError('获取 Proma 官方渠道 API Key 失败')
-        return
+        // token 可能过期，尝试刷新后重试一次
+        const newToken = await tryRefreshAuthToken()
+        if (newToken) {
+          try {
+            clearSystemKeyCache()
+            apiKey = await getSystemApiKey()
+            console.log('[Agent 编排] Token 已刷新，System API Key 重新获取成功')
+          } catch {
+            callbacks.onError('获取 Proma 官方渠道 API Key 失败，请检查登录状态')
+            return
+          }
+        } else {
+          callbacks.onError('登录已过期，请重新登录')
+          return
+        }
       }
     } else {
       try {
@@ -1036,7 +1049,11 @@ export class AgentOrchestrator {
           if (apiError) {
             userFacingError = `API 错误 (${apiError.statusCode}):\n${apiError.message}`
           } else {
-            userFacingError = errorMessage
+            // 没有解析到 API 错误时，把 stderr 内容附加上去（便于诊断 Windows exit code 1 等问题）
+            const stderrSummary = stderrOutput
+              ? `\n\n诊断信息:\n${stderrOutput.slice(0, 500)}${stderrOutput.length > 500 ? '...' : ''}`
+              : ''
+            userFacingError = errorMessage + stderrSummary
           }
 
           // 保存错误消息到 JSONL

@@ -69,8 +69,8 @@ export async function getSystemApiKey(): Promise<string> {
   return result.key
 }
 
-/** 清除 system API key 缓存 */
-function clearSystemKeyCache(): void {
+/** 清除 system API key 缓存（token 刷新后调用，强制重新获取） */
+export function clearSystemKeyCache(): void {
   cachedSystemKey = null
 }
 
