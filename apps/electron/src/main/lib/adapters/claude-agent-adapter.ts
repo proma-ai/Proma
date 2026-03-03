@@ -195,7 +195,7 @@ function mapSDKErrorToTypedError(
 
   const mapped = errorMap[errorCode] || {
     code: 'unknown_error' as ErrorCode,
-    title: '未知错误',
+    title: '',
     message: detailedMessage || errorCode,
     canRetry: false,
   }
