@@ -27,6 +27,8 @@ import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey } from './cloud-channel-service'
+import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getAdapter, fetchTitle } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -281,6 +283,9 @@ const MAX_TITLE_LENGTH = 20
 /** 默认会话标题（用于判断是否需要自动生成） */
 const DEFAULT_SESSION_TITLE = '新 Agent 会话'
 
+/** Proma 官方渠道标题生成专用模型（轻量、快速、低成本） */
+const PROMA_TITLE_MODEL = 'openai/gpt-oss-120b'
+
 /** 默认模型 ID */
 const DEFAULT_MODEL_ID = 'claude-sonnet-4-5-20250929'
 
@@ -472,27 +477,49 @@ export class AgentOrchestrator {
       }
 
       let apiKey: string
+      let baseUrl: string
       if (channel.provider === 'proma') {
-        try {
-          apiKey = getSystemApiKey(channelId)
-        } catch {
-          console.warn('[Agent 标题生成] 获取 Proma 官方渠道 API Key 失败')
+        // Proma 官方渠道：使用缓存的 auth token（同步，轻量）
+        const token = getAuthToken()
+        if (!token) {
+          console.warn('[Agent 标题生成] 未找到 Proma auth token，请检查登录状态')
           return null
         }
+        apiKey = token
+        baseUrl = getCloudApiConfig().baseUrl
       } else {
         apiKey = decryptApiKey(channelId)
+        baseUrl = channel.baseUrl
       }
-      const providerAdapter = getAdapter(channel.provider)
-      const request = providerAdapter.buildTitleRequest({
-        baseUrl: channel.baseUrl,
-        apiKey,
-        modelId,
-        prompt: TITLE_PROMPT + userMessage,
-      })
 
+      // Proma 官方渠道使用轻量 Chat 模型（快速且低成本）
+      const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
+
+      const providerAdapter = getAdapter(channel.provider)
       const proxyUrl = await getEffectiveProxyUrl()
       const fetchFn = getFetchFn(proxyUrl)
-      const title = await fetchTitle(request, providerAdapter, fetchFn)
+
+      const doFetch = async (key: string): Promise<string | null> => {
+        const request = providerAdapter.buildTitleRequest({
+          baseUrl,
+          apiKey: key,
+          modelId: titleModelId,
+          prompt: TITLE_PROMPT + userMessage,
+        })
+        return fetchTitle(request, providerAdapter, fetchFn)
+      }
+
+      let title = await doFetch(apiKey)
+
+      // Proma 渠道：token 过期时尝试刷新后重试一次
+      if (!title && channel.provider === 'proma') {
+        const newToken = await tryRefreshAuthToken()
+        if (newToken) {
+          console.log('[Agent 标题生成] Token 已刷新，重试...')
+          title = await doFetch(newToken)
+        }
+      }
+
       if (!title) {
         console.warn('[Agent 标题生成] API 返回空标题')
         return null
@@ -609,7 +636,7 @@ export class AgentOrchestrator {
     if (channel.provider === 'proma') {
       // Proma 官方渠道：使用系统 API Key（由 Cloud 服务管理）
       try {
-        apiKey = getSystemApiKey(channelId)
+        apiKey = await getSystemApiKey()
       } catch {
         callbacks.onError('获取 Proma 官方渠道 API Key 失败')
         return
@@ -623,8 +650,9 @@ export class AgentOrchestrator {
       }
     }
 
-    // 3. 构建环境变量
-    const sdkEnv = await this.buildSdkEnv(apiKey, channel.baseUrl)
+    // 3. 构建环境变量（Proma 官方渠道使用 Cloud API baseUrl）
+    const sdkBaseUrl = channel.provider === 'proma' ? getCloudApiConfig().baseUrl : channel.baseUrl
+    const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl)
 
     // 4. 读取已有的 SDK session ID（用于 resume）
     const sessionMeta = getAgentSessionMeta(sessionId)
