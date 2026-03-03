@@ -663,8 +663,12 @@ export class AgentOrchestrator {
       }
     }
 
-    // 3. 构建环境变量（Proma 官方渠道使用 Cloud API baseUrl）
-    const sdkBaseUrl = channel.provider === 'proma' ? getCloudApiConfig().baseUrl : channel.baseUrl
+    // 3. 构建环境变量（Proma 官方渠道使用 Cloud API 根 URL）
+    // getCloudApiConfig().baseUrl 形如 https://api.proma.cool/api/v1
+    // 需去掉 /api/v1 得到根 URL，SDK 子进程会自动拼接 /v1/messages
+    const sdkBaseUrl = channel.provider === 'proma'
+      ? getCloudApiConfig().baseUrl.replace(/\/api\/v\d+\/?$/, '')
+      : channel.baseUrl
     const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl)
 
     // 4. 读取已有的 SDK session ID（用于 resume）
