@@ -671,6 +671,13 @@ export class AgentOrchestrator {
       : channel.baseUrl
     const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl)
 
+    // 诊断日志：记录 Proma 官方渠道的关键认证参数
+    if (channel.provider === 'proma') {
+      const keyPrefix = apiKey.slice(0, 8)
+      const resolvedBaseUrl = sdkEnv.ANTHROPIC_BASE_URL || '(未设置，使用默认)'
+      console.log(`[Agent 编排] Proma 认证参数: key=${keyPrefix}..., baseUrl=${resolvedBaseUrl}`)
+    }
+
     // 4. 读取已有的 SDK session ID（用于 resume）
     const sessionMeta = getAgentSessionMeta(sessionId)
     let existingSdkSessionId = sessionMeta?.sdkSessionId
@@ -912,6 +919,35 @@ export class AgentOrchestrator {
           for await (const event of this.adapter.query(queryOptions)) {
             // typed_error：判断是否可自动重试
             if (event.type === 'typed_error') {
+              // Proma 官方渠道认证失败：刷新 token + 重获取 System Key 后重试
+              if (event.error.code === 'invalid_api_key' && channel.provider === 'proma' && attempt <= MAX_AUTO_RETRIES) {
+                console.log(`[Agent 编排] Proma 认证失败: ${event.error.message}`)
+                console.log(`[Agent 编排] 原始错误: ${event.error.originalError}`)
+                try {
+                  const newToken = await tryRefreshAuthToken()
+                  if (newToken) {
+                    clearSystemKeyCache()
+                    const newApiKey = await getSystemApiKey()
+                    // 更新 SDK 环境变量（下次 adapter.query 使用新凭证）
+                    const env = queryOptions.env as Record<string, string | undefined>
+                    env.ANTHROPIC_API_KEY = newApiKey
+                    lastRetryableError = '认证失败，已刷新凭证'
+                    console.log(`[Agent 编排] Proma 凭证已刷新: key=${newApiKey.slice(0, 8)}...`)
+                  } else {
+                    lastRetryableError = event.error.message
+                    console.warn('[Agent 编排] Proma token 刷新失败')
+                  }
+                } catch (refreshError) {
+                  lastRetryableError = event.error.message
+                  console.warn('[Agent 编排] Proma 凭证刷新异常:', refreshError)
+                }
+                this.persistAssistantMessage(sessionId, accumulatedText, accumulatedEvents, resolvedModel)
+                accumulatedText = ''
+                accumulatedEvents.length = 0
+                shouldRetryFromTypedError = true
+                break
+              }
+
               if (isAutoRetryableTypedError(event.error) && attempt <= MAX_AUTO_RETRIES) {
                 lastRetryableError = event.error.title
                   ? `${event.error.title}: ${event.error.message}`
@@ -1020,6 +1056,32 @@ export class AgentOrchestrator {
           const stderrOutput = stderrChunks.join('').trim()
           const apiError = extractApiError(stderrOutput)
           const rawErrorMessage = error instanceof Error ? error.message : ''
+
+          // Proma 官方渠道 401：刷新凭证后重试
+          if (apiError?.statusCode === 401 && channel.provider === 'proma' && attempt <= MAX_AUTO_RETRIES) {
+            console.log(`[Agent 编排] Proma 401 错误 (catch): ${apiError.message}`)
+            console.log(`[Agent 编排] stderr 输出: ${stderrOutput.slice(0, 500)}`)
+            try {
+              const newToken = await tryRefreshAuthToken()
+              if (newToken) {
+                clearSystemKeyCache()
+                const newApiKey = await getSystemApiKey()
+                const env = queryOptions.env as Record<string, string | undefined>
+                env.ANTHROPIC_API_KEY = newApiKey
+                lastRetryableError = `API Error 401: ${apiError.message}（已刷新凭证）`
+                console.log(`[Agent 编排] Proma 凭证已刷新: key=${newApiKey.slice(0, 8)}...`)
+              } else {
+                lastRetryableError = `API Error 401: ${apiError.message}`
+              }
+            } catch {
+              lastRetryableError = `API Error 401: ${apiError.message}`
+            }
+            this.persistAssistantMessage(sessionId, accumulatedText, accumulatedEvents, resolvedModel)
+            accumulatedText = ''
+            accumulatedEvents.length = 0
+            stderrChunks.length = 0
+            continue
+          }
 
           // 判断是否可重试
           if (isAutoRetryableCatchError(apiError, rawErrorMessage) && attempt <= MAX_AUTO_RETRIES) {
