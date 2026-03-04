@@ -41,7 +41,7 @@
     "release:win": "bun run dist:win && bun run upload:release"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.63",
+    "@anthropic-ai/claude-agent-sdk": "0.2.66",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@proma/cloud": "workspace:*",

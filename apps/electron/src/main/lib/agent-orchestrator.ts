@@ -309,11 +309,27 @@ export class AgentOrchestrator {
   private async buildSdkEnv(
     apiKey: string,
     baseUrl: string | undefined,
+    useAuthToken = false,
   ): Promise<Record<string, string | undefined>> {
     const DEFAULT_ANTHROPIC_URL = 'https://api.anthropic.com'
+
+    // 从 process.env 继承系统变量，但清理所有 ANTHROPIC_ 前缀的变量，
+    // 防止本地开发环境（如 ANTHROPIC_AUTH_TOKEN、ANTHROPIC_API_KEY、
+    // ANTHROPIC_BASE_URL 等）干扰 SDK 的认证和请求目标
+    const cleanEnv: Record<string, string | undefined> = {}
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!key.startsWith('ANTHROPIC_')) {
+        cleanEnv[key] = value
+      }
+    }
+
     const sdkEnv: Record<string, string | undefined> = {
-      ...process.env,
-      ANTHROPIC_API_KEY: apiKey,
+      ...cleanEnv,
+      // 注入认证凭证：Proma 官方渠道使用 AUTH_TOKEN（Bearer），其他渠道使用 API_KEY（x-api-key）
+      ...(useAuthToken
+        ? { ANTHROPIC_AUTH_TOKEN: apiKey }
+        : { ANTHROPIC_API_KEY: apiKey }
+      ),
       // 提升输出 token 上限，避免 "exceeded 32000 output token maximum" 错误
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000',
       // 启用 Agent Teams（实验性多 Agent 协作）
@@ -322,14 +338,13 @@ export class AgentOrchestrator {
       CLAUDE_CODE_ENABLE_TASKS: 'true',
     }
 
+    // 显式控制 ANTHROPIC_BASE_URL
     if (baseUrl && baseUrl !== DEFAULT_ANTHROPIC_URL) {
       sdkEnv.ANTHROPIC_BASE_URL = baseUrl
         .trim()
         .replace(/\/+$/, '')
         .replace(/\/v\d+\/messages$/, '')
         .replace(/\/v\d+$/, '')
-    } else {
-      delete sdkEnv.ANTHROPIC_BASE_URL
     }
 
     const proxyUrl = await getEffectiveProxyUrl()
@@ -669,13 +684,27 @@ export class AgentOrchestrator {
     const sdkBaseUrl = channel.provider === 'proma'
       ? getCloudApiConfig().baseUrl.replace(/\/api\/v\d+\/?$/, '')
       : channel.baseUrl
-    const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl)
+    // 同步凭证到 process.env（SDK in-process 代码可能直接读取 process.env）
+    // 参考 craft-agents-oss: 先清理再注入，确保 SDK 无论从 env 选项还是 process.env 都拿到正确值
+    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_AUTH_TOKEN
+    delete process.env.ANTHROPIC_BASE_URL
+    if (channel.provider === 'proma') {
+      process.env.ANTHROPIC_AUTH_TOKEN = apiKey
+    } else {
+      process.env.ANTHROPIC_API_KEY = apiKey
+    }
+    if (sdkBaseUrl) {
+      process.env.ANTHROPIC_BASE_URL = sdkBaseUrl
+    }
 
-    // 诊断日志：记录 Proma 官方渠道的关键认证参数
+    const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl, channel.provider === 'proma')
+
+    // 诊断日志：记录关键认证参数
     if (channel.provider === 'proma') {
       const keyPrefix = apiKey.slice(0, 8)
       const resolvedBaseUrl = sdkEnv.ANTHROPIC_BASE_URL || '(未设置，使用默认)'
-      console.log(`[Agent 编排] Proma 认证参数: key=${keyPrefix}..., baseUrl=${resolvedBaseUrl}`)
+      console.log(`[Agent 编排] Proma 认证参数: key=${keyPrefix}..., baseUrl=${resolvedBaseUrl}, authMethod=AUTH_TOKEN`)
     }
 
     // 4. 读取已有的 SDK session ID（用于 resume）
@@ -930,7 +959,7 @@ export class AgentOrchestrator {
                     const newApiKey = await getSystemApiKey()
                     // 更新 SDK 环境变量（下次 adapter.query 使用新凭证）
                     const env = queryOptions.env as Record<string, string | undefined>
-                    env.ANTHROPIC_API_KEY = newApiKey
+                    env.ANTHROPIC_AUTH_TOKEN = newApiKey
                     lastRetryableError = '认证失败，已刷新凭证'
                     console.log(`[Agent 编排] Proma 凭证已刷新: key=${newApiKey.slice(0, 8)}...`)
                   } else {
@@ -1067,7 +1096,7 @@ export class AgentOrchestrator {
                 clearSystemKeyCache()
                 const newApiKey = await getSystemApiKey()
                 const env = queryOptions.env as Record<string, string | undefined>
-                env.ANTHROPIC_API_KEY = newApiKey
+                env.ANTHROPIC_AUTH_TOKEN = newApiKey
                 lastRetryableError = `API Error 401: ${apiError.message}（已刷新凭证）`
                 console.log(`[Agent 编排] Proma 凭证已刷新: key=${newApiKey.slice(0, 8)}...`)
               } else {

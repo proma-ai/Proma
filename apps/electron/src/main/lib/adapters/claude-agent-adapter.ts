@@ -618,6 +618,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         abortController: controller,
         env: options.env,
         systemPrompt: options.systemPrompt,
+        // 不加载 user 级别的 ~/.claude/settings.json，防止其中的 env 字段
+        // （如 ANTHROPIC_AUTH_TOKEN、ANTHROPIC_BASE_URL）覆盖我们注入的凭证。
+        // 保留 project 级别以支持 CLAUDE.md 加载。
+        settingSources: ['project'],
 
         // 条件字段
         ...(options.canUseTool && { canUseTool: options.canUseTool }),

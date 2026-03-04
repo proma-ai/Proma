@@ -5,6 +5,14 @@ import { existsSync } from 'fs'
 // 商业版固定为 Cloud 模式
 process.env.PROMA_MODE = 'cloud'
 
+// 清理本地环境中的 ANTHROPIC_* 变量，防止干扰应用的认证流程
+// Electron 桌面应用通过渠道系统管理 API Key，不应受终端环境变量影响
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('ANTHROPIC_')) {
+    delete process.env[key]
+  }
+}
+
 import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray } from './tray'
