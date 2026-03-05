@@ -19,9 +19,9 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt } from '@proma/shared'
-import { SAFE_TOOLS } from '@proma/shared'
+import { SAFE_TOOLS, CLOUD_IPC_CHANNELS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
@@ -1340,6 +1340,14 @@ export class AgentOrchestrator {
             accumulatedEvents.length = 0
             stderrChunks.length = 0
             continue
+          }
+
+          // Proma 官方渠道 402：额度不足，广播事件触发充值对话框
+          if (apiError?.statusCode === 402 && channel.provider === 'proma') {
+            BrowserWindow.getAllWindows().forEach((win) => {
+              win.webContents.send(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED)
+            })
+            console.log(`[Agent 编排] Proma 额度不足 (402)，已广播事件`)
           }
 
           // 判断是否可重试
