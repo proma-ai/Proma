@@ -162,7 +162,20 @@ export function createApiClient(options?: {
 
       // 401 处理：尝试刷新 token
       if (response.status === 401 && tokenStorage && !isRetry) {
-        // 如果是刷新接口本身返回 401，直接认证失败
+        // 公开认证端点返回 401，直接透传服务器错误（不触发 token 刷新）
+        // /auth/login 返回 401 = 用户名或密码错误，不是 token 过期
+        // /auth/refresh 返回 401 = refresh token 已失效，清除会话
+        if (path.includes('/auth/login') || path.includes('/auth/register')) {
+          const errorData = await response.json().catch(() => null)
+          throw createApiError(
+            response.status,
+            (errorData as Record<string, string>)?.detail ||
+              (errorData as Record<string, string>)?.message ||
+              '邮箱或密码错误',
+            errorData,
+          )
+        }
+
         if (path.includes('/auth/refresh')) {
           tokenStorage.clearTokens()
           onAuthFailed?.()
