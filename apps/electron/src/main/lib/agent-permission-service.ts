@@ -121,6 +121,11 @@ export class AgentPermissionService {
 
       const allow = (): PermissionResult => ({ behavior: 'allow' as const, updatedInput: input })
 
+      // Worker（子代理）的工具调用自动批准，避免 UI 等待导致超时死锁
+      if (options.agentID) {
+        return allow()
+      }
+
       // 自动模式：全部允许（理论上不会到这里，auto 模式使用 bypassPermissions）
       if (mode === 'auto') return allow()
 

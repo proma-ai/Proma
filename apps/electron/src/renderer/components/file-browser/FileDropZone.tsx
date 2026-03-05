@@ -9,6 +9,7 @@ import * as React from 'react'
 import { toast } from 'sonner'
 import { Upload, File, FolderPlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { fileToBase64 } from '@/lib/file-utils'
 
@@ -19,9 +20,11 @@ interface FileDropZoneProps {
   sessionId: string
   /** 上传成功后的回调（触发文件浏览器刷新） */
   onFilesUploaded: () => void
+  /** 附加文件夹回调 */
+  onAttachFolder?: () => void
 }
 
-export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded }: FileDropZoneProps): React.ReactElement {
+export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAttachFolder }: FileDropZoneProps): React.ReactElement {
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
 
@@ -88,7 +91,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded }: File
     }
 
     if (hasFolders) {
-      toast.info('不支持拖拽文件夹', { description: '请使用「选择文件夹」按钮' })
+      toast.info('不支持拖拽文件夹', { description: '请使用输入框工具栏的「附加文件夹」按钮' })
     }
 
     if (regularFiles.length > 0) {
@@ -120,28 +123,6 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded }: File
     } catch (error) {
       console.error('[FileDropZone] 选择文件失败:', error)
       toast.error('文件上传失败')
-    } finally {
-      setIsUploading(false)
-    }
-  }, [workspaceSlug, sessionId, onFilesUploaded])
-
-  const handleSelectFolder = React.useCallback(async (): Promise<void> => {
-    try {
-      const result = await window.electronAPI.openFolderDialog()
-      if (!result) return
-
-      setIsUploading(true)
-      await window.electronAPI.copyFolderToSession({
-        sourcePath: result.path,
-        workspaceSlug,
-        sessionId,
-      })
-
-      onFilesUploaded()
-      toast.success(`已添加文件夹「${result.name}」`)
-    } catch (error) {
-      console.error('[FileDropZone] 选择文件夹失败:', error)
-      toast.error('文件夹上传失败')
     } finally {
       setIsUploading(false)
     }
@@ -179,26 +160,42 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded }: File
               <span className="text-[10px] text-muted-foreground/60">供 Agent 读取和处理</span>
             </p>
             <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 text-[11px] px-2 gap-1"
-                onClick={handleSelectFiles}
-              >
-                <File className="size-3" />
-                选择文件
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 text-[11px] px-2 gap-1"
-                onClick={handleSelectFolder}
-              >
-                <FolderPlus className="size-3" />
-                选择文件夹
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[11px] px-2 gap-1"
+                    onClick={handleSelectFiles}
+                  >
+                    <File className="size-3" />
+                    选择文件
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>将文件放入 Agent 工作文件夹</p>
+                </TooltipContent>
+              </Tooltip>
+              {onAttachFolder && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[11px] px-2 gap-1"
+                      onClick={onAttachFolder}
+                    >
+                      <FolderPlus className="size-3" />
+                      附加文件夹
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>告知 Agent 你想处理的文件夹</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </>
         )}

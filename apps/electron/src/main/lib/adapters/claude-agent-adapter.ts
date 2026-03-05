@@ -72,6 +72,8 @@ interface SDKToolProgressMessage {
   tool_name: string
   parent_tool_use_id: string | null
   elapsed_time_seconds?: number
+  /** Agent Teams: 所属 teammate 任务 ID */
+  task_id?: string
 }
 
 type SDKMessage =
@@ -155,6 +157,8 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   forkSession?: boolean
   /** 指定 SDK 会话 ID（替代自动生成，与 AgentQueryInput.sessionId 区分） */
   sdkSessionId?: string
+  /** 附加的外部目录（SDK additionalDirectories） */
+  additionalDirectories?: string[]
 }
 
 // ============================================================================
@@ -338,6 +342,18 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         this.translatePromptSuggestion(message, events)
         break
 
+      case 'tool_use_summary': {
+        const summaryMsg = message as { type: 'tool_use_summary'; summary?: string; preceding_tool_use_ids?: string[] }
+        if (summaryMsg.summary) {
+          events.push({
+            type: 'tool_use_summary',
+            summary: summaryMsg.summary,
+            precedingToolUseIds: summaryMsg.preceding_tool_use_ids ?? [],
+          })
+        }
+        break
+      }
+
       default:
         console.log(`[ClaudeAgentAdapter] 忽略消息类型: ${message.type}`)
         break
@@ -453,6 +469,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         toolUseId: msg.parent_tool_use_id || msg.tool_use_id,
         elapsedSeconds: msg.elapsed_time_seconds,
         turnId: turnId.value || undefined,
+        // Agent Teams: 透传 taskId 和 toolName（区分 teammate 内的工具进度 vs 普通工具计时）
+        ...(msg.task_id && { taskId: msg.task_id, lastToolName: msg.tool_name }),
       })
     }
 
@@ -515,19 +533,55 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     const msg = message as {
       type: 'system'; subtype?: string; status?: string
       task_id?: string; tool_use_id?: string; description?: string; task_type?: string
+      // Agent Teams: task_progress 扩展字段
+      last_tool_name?: string; usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number }
+      // Agent Teams: task_notification 扩展字段
+      summary?: string; output_file?: string
     }
 
     if (msg.subtype === 'compact_boundary') {
       events.push({ type: 'compact_complete' })
     } else if (msg.subtype === 'status' && msg.status === 'compacting') {
       events.push({ type: 'compacting' })
-    } else if (msg.subtype === 'task_started' && msg.task_id && msg.description) {
+    } else if (msg.subtype === 'task_started' && msg.task_id) {
       events.push({
         type: 'task_started',
         taskId: msg.task_id,
         toolUseId: msg.tool_use_id,
-        description: msg.description,
+        description: msg.description || `Task ${msg.task_id}`,
         taskType: msg.task_type,
+        turnId: turnId.value || undefined,
+      })
+    } else if (msg.subtype === 'task_progress' && msg.task_id) {
+      // Agent Teams: teammate 任务进度（区别于 tool_progress 的计时事件）
+      events.push({
+        type: 'task_progress',
+        taskId: msg.task_id,
+        toolUseId: msg.tool_use_id || msg.task_id,
+        // 不设 elapsedSeconds — system task_progress 无真实计时，避免覆盖 tool_progress 的值
+        description: msg.description,
+        lastToolName: msg.last_tool_name,
+        usage: msg.usage ? {
+          totalTokens: msg.usage.total_tokens ?? 0,
+          toolUses: msg.usage.tool_uses ?? 0,
+          durationMs: msg.usage.duration_ms ?? 0,
+        } : undefined,
+        turnId: turnId.value || undefined,
+      })
+    } else if (msg.subtype === 'task_notification' && msg.task_id) {
+      // Agent Teams: teammate 任务完成/失败/停止
+      events.push({
+        type: 'task_notification',
+        taskId: msg.task_id,
+        toolUseId: msg.tool_use_id,
+        status: (msg.status as 'completed' | 'failed' | 'stopped') || 'completed',
+        summary: msg.summary || '',
+        outputFile: msg.output_file,
+        usage: msg.usage ? {
+          totalTokens: msg.usage.total_tokens ?? 0,
+          toolUses: msg.usage.tool_uses ?? 0,
+          durationMs: msg.usage.duration_ms ?? 0,
+        } : undefined,
         turnId: turnId.value || undefined,
       })
     }
@@ -647,6 +701,9 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         ...(options.persistSession != null && { persistSession: options.persistSession }),
         ...(options.forkSession != null && { forkSession: options.forkSession }),
         ...(options.sdkSessionId && { sessionId: options.sdkSessionId }),
+        ...(options.additionalDirectories && options.additionalDirectories.length > 0 && {
+          additionalDirectories: options.additionalDirectories,
+        }),
       } as import('@anthropic-ai/claude-agent-sdk').Options
 
       const queryIterator = sdk.query({

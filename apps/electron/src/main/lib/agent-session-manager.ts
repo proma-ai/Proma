@@ -8,13 +8,15 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
   getAgentSessionMessagesPath,
   getAgentSessionWorkspacePath,
+  getAgentWorkspacePath,
 } from './config-paths'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import type { AgentSessionMeta, AgentMessage } from '@proma/shared'
@@ -160,7 +162,7 @@ export function appendAgentMessage(id: string, message: AgentMessage): void {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned' | 'attachedDirectories'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -224,6 +226,63 @@ export function deleteAgentSession(id: string): void {
   }
 
   console.log(`[Agent 会话] 已删除会话: ${removed.title} (${removed.id})`)
+}
+
+/**
+ * 迁移 Agent 会话到另一个工作区
+ *
+ * 操作步骤：
+ * 1. 验证会话和目标工作区存在
+ * 2. 源 == 目标 → no-op
+ * 3. 移动会话工作目录到目标工作区
+ * 4. 更新元数据（workspaceId + 清空 sdkSessionId）
+ * 5. JSONL 消息文件保持原位（全局目录）
+ */
+export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: string): AgentSessionMeta {
+  const index = readIndex()
+  const idx = index.sessions.findIndex((s) => s.id === sessionId)
+  if (idx === -1) {
+    throw new Error(`Agent 会话不存在: ${sessionId}`)
+  }
+
+  const session = index.sessions[idx]!
+
+  // 源 == 目标 → 直接返回
+  if (session.workspaceId === targetWorkspaceId) return session
+
+  const targetWs = getAgentWorkspace(targetWorkspaceId)
+  if (!targetWs) {
+    throw new Error(`目标工作区不存在: ${targetWorkspaceId}`)
+  }
+
+  // 移动工作目录（如果源工作区存在）
+  if (session.workspaceId) {
+    const sourceWs = getAgentWorkspace(session.workspaceId)
+    if (sourceWs) {
+      const srcDir = join(getAgentWorkspacePath(sourceWs.slug), sessionId)
+      if (existsSync(srcDir)) {
+        const destDir = join(getAgentWorkspacePath(targetWs.slug), sessionId)
+        renameSync(srcDir, destDir)
+        console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
+      }
+    }
+  }
+
+  // 确保目标工作区下有 session 目录
+  getAgentSessionWorkspacePath(targetWs.slug, sessionId)
+
+  // 更新元数据
+  const updated: AgentSessionMeta = {
+    ...session,
+    workspaceId: targetWorkspaceId,
+    sdkSessionId: undefined, // SDK 上下文与工作区 cwd 绑定，必须清空
+    updatedAt: Date.now(),
+  }
+  index.sessions[idx] = updated
+  writeIndex(index)
+
+  console.log(`[Agent 会话] 已迁移会话到工作区: ${updated.title} → ${targetWs.name}`)
+  return updated
 }
 
 /**

@@ -94,7 +94,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
 
   return (
     <div
-      className="absolute right-0 top-0 bottom-0 z-10 flex items-start"
+      className="absolute right-0 top-0 z-10 flex items-start"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >

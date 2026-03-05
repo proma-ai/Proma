@@ -12,27 +12,17 @@ declare module '*.css' {
   export default content
 }
 
-/** 更新进度信息 */
-interface UpdateProgress {
-  percent: number
-  transferred: number
-  total: number
-}
-
 /** 更新状态（与 updater-types.ts 保持一致） */
 interface UpdateStatus {
-  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'error'
   version?: string
   releaseNotes?: string
-  progress?: UpdateProgress
   error?: string
 }
 
-/** 更新 API（可选，仅在 updater 模块存在时可用） */
+/** 更新 API（仅版本检测，不自动下载/安装） */
 interface UpdaterAPI {
   checkForUpdates: () => Promise<void>
-  downloadUpdate: () => Promise<void>
-  installUpdate: () => Promise<void>
   getStatus: () => Promise<UpdateStatus>
   onStatusChanged: (callback: (status: UpdateStatus) => void) => () => void
 }

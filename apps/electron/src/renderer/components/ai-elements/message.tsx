@@ -20,6 +20,8 @@
 import * as React from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { ChevronDown, ChevronUp, Paperclip } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -215,7 +217,8 @@ export const MessageResponse = React.memo(
         )}
       >
         <Markdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
           components={{
             a: ({ href, children: linkChildren, ...linkProps }) => (
               <a

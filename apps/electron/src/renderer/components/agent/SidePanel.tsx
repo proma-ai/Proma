@@ -26,6 +26,7 @@ import {
   workspaceFilesVersionAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
+  agentAttachedDirectoriesMapAtom,
 } from '@/atoms/agent-atoms'
 import type { SidePanelTab } from '@/atoms/agent-atoms'
 
@@ -98,6 +99,50 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
 
+  // 附加目录列表
+  const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
+  const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
+  const attachedDirs = attachedDirsMap.get(sessionId) ?? []
+
+  const handleAttachFolder = React.useCallback(async () => {
+    try {
+      const result = await window.electronAPI.openFolderDialog()
+      if (!result) return
+
+      const updated = await window.electronAPI.attachDirectory({
+        sessionId,
+        directoryPath: result.path,
+      })
+      setAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        map.set(sessionId, updated)
+        return map
+      })
+    } catch (error) {
+      console.error('[SidePanel] 附加文件夹失败:', error)
+    }
+  }, [sessionId, setAttachedDirsMap])
+
+  const handleDetachDirectory = React.useCallback(async (dirPath: string) => {
+    try {
+      const updated = await window.electronAPI.detachDirectory({
+        sessionId,
+        directoryPath: dirPath,
+      })
+      setAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        if (updated.length > 0) {
+          map.set(sessionId, updated)
+        } else {
+          map.delete(sessionId)
+        }
+        return map
+      })
+    } catch (error) {
+      console.error('[SidePanel] 移除附加目录失败:', error)
+    }
+  }, [sessionId, setAttachedDirsMap])
+
   // 文件上传完成后递增版本号，触发 FileBrowser 刷新
   const handleFilesUploaded = React.useCallback(() => {
     setFilesVersion((prev) => prev + 1)
@@ -129,7 +174,7 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   }, [filesVersion, sessionPath, hasTeamActivity, setIsOpen, setActiveTab])
 
   // 面板是否可显示内容（需要有 sessionPath 或 team 活动）
-  const hasContent = sessionPath || hasTeamActivity
+  const hasContent = sessionPath || hasTeamActivity || attachedDirs.length > 0
 
   return (
     <div
@@ -217,37 +262,80 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
             <TabsContent value="files" className="flex-1 overflow-hidden m-0 data-[state=active]:flex data-[state=active]:flex-col">
               {sessionPath && workspaceSlug ? (
                 <>
-                  {/* 工具栏：路径面包屑 + 打开文件夹 + 刷新 */}
+                  {/* 工具栏：工作区目录标签 + 路径 + 按钮 */}
                   <div className="flex items-center gap-1 px-3 h-[36px] border-b flex-shrink-0">
-                    <span className="text-xs text-muted-foreground truncate flex-1" title={sessionPath}>
+                    <span className="text-[11px] font-medium text-muted-foreground shrink-0">工作区目录</span>
+                    <span className="text-[11px] text-muted-foreground/60 truncate flex-1" title={sessionPath}>
                       {breadcrumb}
                     </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 flex-shrink-0"
-                      onClick={() => window.electronAPI.openFile(sessionPath).catch(console.error)}
-                      title="在 Finder 中打开"
-                    >
-                      <ExternalLink className="size-3" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 flex-shrink-0"
-                      onClick={handleRefresh}
-                      title="刷新"
-                    >
-                      <RefreshCw className="size-3" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={() => window.electronAPI.openFile(sessionPath).catch(console.error)}
+                        >
+                          <ExternalLink className="size-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p>在 Finder 中打开工作区文件夹</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={handleRefresh}
+                        >
+                          <RefreshCw className="size-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p>刷新文件列表</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
+                  {/* 附加目录列表 */}
+                  {attachedDirs.length > 0 && (
+                    <div className="px-3 pt-2.5 pb-1 space-y-1 flex-shrink-0">
+                      <div className="text-[11px] font-medium text-muted-foreground mb-1">附加目录（Agent 可以读取并操作此文件夹）</div>
+                      {attachedDirs.map((dir) => {
+                        const dirName = dir.split('/').filter(Boolean).pop() || dir
+                        return (
+                          <div
+                            key={dir}
+                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/50 group"
+                          >
+                            <FolderOpen className="size-3.5 text-amber-500 shrink-0" />
+                            <span className="text-xs truncate flex-1" title={dir}>
+                              {dirName}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => handleDetachDirectory(dir)}
+                            >
+                              <X className="size-3" />
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                   {/* 文件拖拽上传区域 */}
                   <FileDropZone
                     workspaceSlug={workspaceSlug}
                     sessionId={sessionId}
                     onFilesUploaded={handleFilesUploaded}
+                    onAttachFolder={handleAttachFolder}
                   />
                   {/* 文件浏览器（隐藏内置工具栏） */}
                   <div className="flex-1 min-h-0">

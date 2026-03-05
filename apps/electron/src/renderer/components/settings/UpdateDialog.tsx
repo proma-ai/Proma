@@ -1,13 +1,13 @@
 /**
- * UpdateDialog - 全局更新弹窗
+ * UpdateDialog - 新版本通知弹窗
  *
- * 当检测到更新下载完成时自动弹出，提供安装和手动下载两条路径。
+ * 当检测到新版本时自动弹出，引导用户前往 GitHub Releases 下载。
  * 同一版本只弹一次，用户关闭后不再重复弹出。
  */
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Loader2, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import type { GitHubRelease } from '@proma/shared'
 import {
   AlertDialog,
@@ -19,7 +19,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
-import { updateStatusAtom, installUpdate } from '@/atoms/updater'
+import { updateStatusAtom } from '@/atoms/updater'
 import { ReleaseNotesViewer } from './ReleaseNotesViewer'
 
 const DOWNLOAD_URL = 'https://proma.cool/download'
@@ -33,10 +33,10 @@ export function UpdateDialog(): React.ReactElement | null {
   // 记录已弹出过的版本号，同一版本不重复弹出
   const shownVersionRef = React.useRef<string | null>(null)
 
-  // 当状态变为 downloaded 且是新版本时，自动弹出
+  // 当状态变为 available 且是新版本时，自动弹出
   React.useEffect(() => {
     if (
-      updateStatus.status === 'downloaded' &&
+      updateStatus.status === 'available' &&
       updateStatus.version &&
       shownVersionRef.current !== updateStatus.version
     ) {
@@ -58,11 +58,10 @@ export function UpdateDialog(): React.ReactElement | null {
     }
   }, [updateStatus.status, updateStatus.version])
 
-  const isInstalling = updateStatus.status === 'installing'
-
-  const handleInstall = async (e: React.MouseEvent): Promise<void> => {
+  const handleGoToDownload = (e: React.MouseEvent): void => {
     e.preventDefault()
-    await installUpdate()
+    const url = release?.html_url || GITHUB_RELEASES_URL
+    window.electronAPI.openExternal(url)
   }
 
   const downloadUrl = DOWNLOAD_URL
@@ -75,7 +74,7 @@ export function UpdateDialog(): React.ReactElement | null {
         <AlertDialogHeader>
           <AlertDialogTitle>发现新版本</AlertDialogTitle>
           <AlertDialogDescription>
-            v{dialogVersion} 已下载完成，是否立即安装？
+            v{dialogVersion} 已发布，请前往下载页面获取最新版本覆盖安装。
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -103,19 +102,14 @@ export function UpdateDialog(): React.ReactElement | null {
           {' '}下载最新版本覆盖安装。
         </p>
 
+
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={isInstalling}>
-            稍后提醒
+          <AlertDialogCancel>
+            稍后再说
           </AlertDialogCancel>
-          <AlertDialogAction onClick={handleInstall} disabled={isInstalling}>
-            {isInstalling ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                正在安装...
-              </>
-            ) : (
-              '立即安装'
-            )}
+          <AlertDialogAction onClick={handleGoToDownload}>
+            <ExternalLink className="h-4 w-4 mr-1.5" />
+            前往下载
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

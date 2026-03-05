@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ThinkingConfig, AgentEffort } from '@proma/shared'
+import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ThinkingConfig, AgentEffort, TaskUsage, AgentTeamData } from '@proma/shared'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -49,6 +49,48 @@ export interface SubAgentEntry {
   childActivities: ToolActivity[]
 }
 
+/** Teammate 状态枚举 */
+export type TeammateStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
+/** 单个 teammate 的实时状态（Agent Teams 功能） */
+export interface TeammateState {
+  /** SDK task_id */
+  taskId: string
+  /** 关联的 tool_use_id（Task 工具调用 ID） */
+  toolUseId?: string
+  /** 任务描述（spawn 时 Claude 给出的说明） */
+  description: string
+  /** 任务类型（SDK 内部类型，如 in_process_teammate） */
+  taskType?: string
+  /** 在当前对话中的序号（从 1 开始） */
+  index: number
+  /** 当前状态 */
+  status: TeammateStatus
+  /** 最近一次 task_progress 的描述（实时思考内容） */
+  progressDescription?: string
+  /** 当前正在运行的工具名 */
+  currentToolName?: string
+  /** 当前工具已运行秒数 */
+  currentToolElapsedSeconds?: number
+  /** 当前工具 toolUseId */
+  currentToolUseId?: string
+  /** 已使用的工具历史记录（最近 N 个，去重） */
+  toolHistory: string[]
+  /** 完成时的摘要 */
+  summary?: string
+  /** 完成时输出文件路径 */
+  outputFile?: string
+  /** 累计用量 */
+  usage?: TaskUsage
+  /** 开始时间戳 */
+  startedAt: number
+  /** 结束时间戳 */
+  endedAt?: number
+}
+
+/** 工具历史最大记录数 */
+const MAX_TOOL_HISTORY = 20
+
 /** 侧面板活跃 Tab */
 export type SidePanelTab = 'team' | 'files'
 
@@ -77,6 +119,10 @@ export interface AgentStreamState {
     /** 是否已失败 */
     failed: boolean
   }
+  /** Agent Teams: teammate 状态列表 */
+  teammates: TeammateState[]
+  /** 是否等待 auto-resume（teammate 结果收集中） */
+  waitingResume?: boolean
 }
 
 /** 从 ToolActivity 派生状态 */
@@ -221,6 +267,265 @@ export function buildTeamActivityEntries(activities: ToolActivity[]): SubAgentEn
   return entries
 }
 
+// ============================================================================
+// Team Overview — 从 ToolActivity 提取丰富的团队信息
+// ============================================================================
+
+/** 团队全景信息（从工具调用事件提取） */
+export interface TeamOverview {
+  /** 团队名称（来自 TeamCreate） */
+  teamName?: string
+  /** 团队描述 */
+  teamDescription?: string
+  /** 任务看板项（来自 TaskCreate + TaskUpdate） */
+  tasks: TeamTaskItem[]
+  /** Agent 条目（来自 Agent tool_start） */
+  agents: TeamAgentInfo[]
+}
+
+/** 团队任务项 */
+export interface TeamTaskItem {
+  /** 任务编号（从 result 中解析） */
+  taskNumber?: string
+  /** 任务主题 */
+  subject: string
+  /** 任务描述 */
+  description?: string
+  /** 进行中标签 */
+  activeForm?: string
+  /** 被哪些任务阻塞 */
+  blockedBy: string[]
+  /** 状态（来自 TaskUpdate） */
+  status?: string
+  /** 工具调用 ID */
+  toolUseId: string
+}
+
+/** 团队 Agent 条目 */
+export interface TeamAgentInfo {
+  /** Agent 名称 */
+  name: string
+  /** 描述/角色 */
+  description: string
+  /** 所属团队 */
+  teamName?: string
+  /** Agent 类型 */
+  subagentType?: string
+  /** 是否后台运行 */
+  isBackground?: boolean
+  /** 对应的 toolUseId */
+  toolUseId: string
+  /** Agent 工具状态 */
+  status: ActivityStatus
+  /** 关联的 TeammateState（通过 toolUseId 匹配） */
+  teammate?: TeammateState
+}
+
+/**
+ * 从 ToolActivity[] 和 TeammateState[] 提取团队全景信息
+ *
+ * 解析 TeamCreate、TaskCreate、TaskUpdate、Agent 工具调用，
+ * 构建团队名称 + Task Board + Agent 列表。
+ */
+export function extractTeamOverview(
+  activities: ToolActivity[],
+  teammates: TeammateState[],
+): TeamOverview | null {
+  let teamName: string | undefined
+  let teamDescription: string | undefined
+  const tasks: TeamTaskItem[] = []
+  const agents: TeamAgentInfo[] = []
+
+  // 按 toolUseId 建立 TeammateState 快速查找表
+  const teammateByToolUseId = new Map<string, TeammateState>()
+  for (const tm of teammates) {
+    if (tm.toolUseId) teammateByToolUseId.set(tm.toolUseId, tm)
+  }
+
+  for (const a of activities) {
+    switch (a.toolName) {
+      case 'TeamCreate': {
+        if (typeof a.input.team_name === 'string') teamName = a.input.team_name
+        if (typeof a.input.description === 'string') teamDescription = a.input.description
+        break
+      }
+
+      case 'TaskCreate': {
+        const subject = typeof a.input.subject === 'string' ? a.input.subject : ''
+        if (!subject) break
+        // 从 result 中解析任务编号（如 "Task #1 created successfully"）
+        let taskNumber: string | undefined
+        if (a.result) {
+          const match = a.result.match(/(?:Task\s+)?#(\d+)/i)
+          if (match) taskNumber = match[1]
+        }
+        tasks.push({
+          taskNumber,
+          subject,
+          description: typeof a.input.description === 'string' ? a.input.description : undefined,
+          activeForm: typeof a.input.activeForm === 'string' ? a.input.activeForm : undefined,
+          blockedBy: [],
+          toolUseId: a.toolUseId,
+        })
+        break
+      }
+
+      case 'TaskUpdate': {
+        const taskId = typeof a.input.taskId === 'string' ? a.input.taskId : undefined
+        if (!taskId) break
+        // 找到匹配的 task，合并数据
+        const task = tasks.find((t) => t.taskNumber === taskId)
+        if (task) {
+          if (Array.isArray(a.input.addBlockedBy)) {
+            for (const dep of a.input.addBlockedBy) {
+              if (typeof dep === 'string' && !task.blockedBy.includes(dep)) {
+                task.blockedBy.push(dep)
+              }
+            }
+          }
+          if (typeof a.input.status === 'string') {
+            task.status = a.input.status
+          }
+        }
+        break
+      }
+
+      case 'Agent': {
+        const name = typeof a.input.name === 'string' ? a.input.name : ''
+        const desc = typeof a.input.description === 'string'
+          ? a.input.description
+          : typeof a.input.prompt === 'string'
+            ? a.input.prompt
+            : ''
+        if (!name && !desc) break
+        agents.push({
+          name: name || 'Agent',
+          description: desc,
+          teamName: typeof a.input.team_name === 'string' ? a.input.team_name : undefined,
+          subagentType: typeof a.input.subagent_type === 'string' ? a.input.subagent_type : undefined,
+          isBackground: a.input.run_in_background === true,
+          toolUseId: a.toolUseId,
+          status: getActivityStatus(a),
+          teammate: teammateByToolUseId.get(a.toolUseId),
+        })
+        break
+      }
+
+      default:
+        break
+    }
+  }
+
+  // 无任何团队信息则返回 null
+  if (!teamName && tasks.length === 0 && agents.length === 0) return null
+
+  return { teamName, teamDescription, tasks, agents }
+}
+
+/**
+ * 从持久化消息中重建 Team 数据
+ *
+ * 页面刷新后，从 JSONL 加载的 AgentMessage.events 中提取
+ * ToolActivity[] 和 TeammateState[]，用于填充缓存 atoms。
+ */
+export function rebuildTeamDataFromMessages(messages: AgentMessage[]): {
+  toolActivities: ToolActivity[]
+  teammates: TeammateState[]
+  overview: TeamOverview | null
+} | null {
+  // 收集所有 assistant 消息中的 events
+  const allEvents: AgentEvent[] = []
+  for (const msg of messages) {
+    if (msg.events) allEvents.push(...msg.events)
+  }
+  if (allEvents.length === 0) return null
+
+  // 重建 ToolActivity[]
+  const toolActivities: ToolActivity[] = []
+  for (const event of allEvents) {
+    if (event.type === 'tool_start') {
+      toolActivities.push({
+        toolUseId: event.toolUseId,
+        toolName: event.toolName,
+        input: event.input ?? {},
+        intent: event.intent,
+        displayName: event.displayName,
+        done: false,
+        parentToolUseId: event.parentToolUseId,
+      })
+    } else if (event.type === 'tool_result') {
+      const idx = toolActivities.findIndex((t) => t.toolUseId === event.toolUseId)
+      if (idx >= 0) {
+        toolActivities[idx] = {
+          ...toolActivities[idx]!,
+          result: event.result,
+          isError: event.isError,
+          done: true,
+        }
+      }
+    }
+  }
+
+  // 重建 TeammateState[]
+  const teammates: TeammateState[] = []
+  for (const event of allEvents) {
+    if (event.type === 'task_started') {
+      teammates.push({
+        taskId: event.taskId,
+        toolUseId: event.toolUseId,
+        description: event.description,
+        taskType: event.taskType,
+        index: teammates.length + 1,
+        status: 'running',
+        toolHistory: [],
+        startedAt: Date.now(),
+      })
+    } else if (event.type === 'task_progress' && event.taskId) {
+      const idx = teammates.findIndex((t) => t.taskId === event.taskId)
+      if (idx >= 0) {
+        const tm = teammates[idx]!
+        teammates[idx] = {
+          ...tm,
+          progressDescription: event.description ?? tm.progressDescription,
+          usage: event.usage ?? tm.usage,
+          ...(event.lastToolName && {
+            currentToolName: event.lastToolName,
+            currentToolElapsedSeconds: event.elapsedSeconds,
+            toolHistory: appendToolHistory(tm.toolHistory, event.lastToolName),
+          }),
+        }
+      }
+    } else if (event.type === 'task_notification') {
+      const idx = teammates.findIndex((t) => t.taskId === event.taskId)
+      if (idx >= 0) {
+        const tm = teammates[idx]!
+        teammates[idx] = {
+          ...tm,
+          status: event.status,
+          summary: event.summary,
+          outputFile: event.outputFile,
+          endedAt: Date.now(),
+          ...(event.usage && { usage: event.usage }),
+          currentToolName: undefined,
+          currentToolElapsedSeconds: undefined,
+          currentToolUseId: undefined,
+        }
+      }
+    }
+  }
+
+  // 检查是否有团队活动
+  const hasTeamActivity = toolActivities.some((a) =>
+    a.toolName === 'TeamCreate' || a.toolName === 'TaskCreate' ||
+    a.toolName === 'Agent' || a.toolName === 'Task',
+  ) || teammates.length > 0
+
+  if (!hasTeamActivity) return null
+
+  const overview = extractTeamOverview(toolActivities, teammates)
+  return { toolActivities, teammates, overview }
+}
+
 /** 待自动发送的 Agent 提示（从设置页"对话完成配置"触发） */
 export interface AgentPendingPrompt {
   sessionId: string
@@ -264,18 +569,50 @@ export const agentSidePanelTabMapAtom = atom<Map<string, SidePanelTab>>(new Map(
  */
 export const cachedTeamActivitiesAtom = atom<Map<string, SubAgentEntry[]>>(new Map())
 
+/**
+ * Teammate 状态缓存 — 以 sessionId 为 key
+ *
+ * 流式完成后保存 teammates 快照，确保切换会话后面板数据不丢失。
+ */
+export const cachedTeammateStatesAtom = atom<Map<string, TeammateState[]>>(new Map())
+
+/**
+ * TeamOverview 缓存 — 以 sessionId 为 key
+ *
+ * 流式完成后保存 TeamOverview 快照，确保切换 tab 后团队全景数据不丢失。
+ */
+export const cachedTeamOverviewsAtom = atom<Map<string, TeamOverview>>(new Map())
+
+/**
+ * 轮询数据缓存 — 以 sessionId 为 key
+ *
+ * 缓存文件系统轮询得到的 AgentTeamData（tasks + inboxes），
+ * 防止组件卸载后通信时间线等数据丢失。
+ */
+export const cachedPolledTeamDataAtom = atom<Map<string, AgentTeamData>>(new Map())
+
+/**
+ * 已关闭 Team 面板的 sessionId 集合
+ *
+ * 用户主动关闭 Team 活动面板后，阻止 derived atoms 返回数据。
+ * 当新一轮流式请求开始时自动清除（允许新 Team 数据显示）。
+ */
+export const dismissedTeamSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
 /** 当前会话是否有 Team/Task 活动（派生只读原子，同时检查流式状态和缓存） */
 export const hasTeamActivityAtom = atom<boolean>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return false
+  if (get(dismissedTeamSessionIdsAtom).has(currentId)) return false
   // 优先检查流式状态
   const state = get(agentStreamingStatesAtom).get(currentId)
   if (state) {
-    return state.toolActivities.some(
+    const hasActivity = state.toolActivities.some(
       (a) => a.toolName === 'Task' || a.toolName === 'Agent'
     )
+    if (hasActivity) return true
   }
-  // 回退到缓存
+  // 回退到缓存（流式状态无 Team 活动或不存在时）
   const cached = get(cachedTeamActivitiesAtom).get(currentId)
   return cached !== undefined && cached.length > 0
 })
@@ -284,6 +621,7 @@ export const hasTeamActivityAtom = atom<boolean>((get) => {
 export const teamActivityEntriesAtom = atom<SubAgentEntry[]>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return []
+  if (get(dismissedTeamSessionIdsAtom).has(currentId)) return []
   // 优先使用流式状态
   const state = get(agentStreamingStatesAtom).get(currentId)
   if (state && state.toolActivities.length > 0) {
@@ -298,6 +636,42 @@ export const teamActivityEntriesAtom = atom<SubAgentEntry[]>((get) => {
 export const teamActivityCountAtom = atom<number>((get) => {
   const entries = get(teamActivityEntriesAtom)
   return entries.filter((e) => e.status === 'running' || e.status === 'backgrounded').length
+})
+
+/** 当前会话的 teammate 状态列表（派生只读原子，优先流式状态，回退缓存） */
+export const teammateStatesAtom = atom<TeammateState[]>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return []
+  if (get(dismissedTeamSessionIdsAtom).has(currentId)) return []
+  // 优先使用流式状态中的 teammates
+  const state = get(agentStreamingStatesAtom).get(currentId)
+  if (state && state.teammates.length > 0) return state.teammates
+  // 回退到缓存
+  return get(cachedTeammateStatesAtom).get(currentId) ?? []
+})
+
+/** 是否有 teammate 活动（综合检查流式状态和缓存） */
+export const hasTeammatesAtom = atom<boolean>((get) => {
+  return get(teammateStatesAtom).length > 0
+})
+
+/** 运行中的 teammate 数量 */
+export const runningTeammateCountAtom = atom<number>((get) => {
+  return get(teammateStatesAtom).filter((t) => t.status === 'running').length
+})
+
+/** 团队全景信息（派生只读原子，从 toolActivities + teammates 提取，回退到缓存） */
+export const teamOverviewAtom = atom<TeamOverview | null>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return null
+  if (get(dismissedTeamSessionIdsAtom).has(currentId)) return null
+  const state = get(agentStreamingStatesAtom).get(currentId)
+  if (state) {
+    const overview = extractTeamOverview(state.toolActivities, state.teammates)
+    if (overview) return overview
+  }
+  // 回退到缓存（流式状态无 Team 数据或不存在时）
+  return get(cachedTeamOverviewsAtom).get(currentId) ?? null
 })
 
 // ===== 权限系统 Atoms =====
@@ -422,6 +796,16 @@ export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
 })
 
 /**
+ * 追加工具名到历史记录（不可变版本）
+ * 相同工具不连续重复，超出上限则删除最旧的
+ */
+function appendToolHistory(history: string[], toolName: string): string[] {
+  if (history[history.length - 1] === toolName) return history
+  const next = [...history, toolName]
+  return next.length > MAX_TOOL_HISTORY ? next.slice(next.length - MAX_TOOL_HISTORY) : next
+}
+
+/**
  * 处理 AgentEvent 并更新流式状态（纯函数）
  */
 export function applyAgentEvent(
@@ -488,27 +872,82 @@ export function applyAgentEvent(
       }
 
     case 'task_progress':
-      return {
-        ...prev,
-        toolActivities: prev.toolActivities.map((t) =>
-          t.toolUseId === event.toolUseId
-            ? { ...t, elapsedSeconds: event.elapsedSeconds }
-            : t
-        ),
+      // Teams 级别的 teammate 进度（带 taskId）
+      if (event.taskId) {
+        const tmIdx = prev.teammates.findIndex((t) => t.taskId === event.taskId)
+        if (tmIdx >= 0) {
+          const tm = prev.teammates[tmIdx]!
+          const updatedTm: TeammateState = {
+            ...tm,
+            progressDescription: event.description ?? tm.progressDescription,
+            usage: event.usage ?? tm.usage,
+            // 更新当前工具名和计时（来自 tool_progress 或 system task_progress）
+            ...(event.lastToolName && {
+              currentToolName: event.lastToolName,
+              currentToolElapsedSeconds: event.elapsedSeconds ?? tm.currentToolElapsedSeconds,
+              currentToolUseId: event.toolUseId,
+              toolHistory: appendToolHistory(tm.toolHistory, event.lastToolName),
+            }),
+            // 无 lastToolName 但有真实 elapsedSeconds 时仅更新计时
+            ...(!event.lastToolName && event.elapsedSeconds != null && {
+              currentToolElapsedSeconds: event.elapsedSeconds,
+            }),
+            // 主对话仍在运行时，收到进度说明 teammate 实际仍在工作，重置 stopped/failed
+            // 主对话已结束时（running: false），不重置（防止建议信息等后续事件错误唤醒）
+            ...(prev.running && (tm.status === 'stopped' || tm.status === 'failed')
+              ? { status: 'running' as const, endedAt: undefined }
+              : {}),
+          }
+          const nextTeammates = [...prev.teammates]
+          nextTeammates[tmIdx] = updatedTm
+          return { ...prev, teammates: nextTeammates }
+        }
       }
+      // 普通 tool 计时语义（仅当有真实 elapsedSeconds 时更新）
+      if (event.elapsedSeconds != null) {
+        return {
+          ...prev,
+          toolActivities: prev.toolActivities.map((t) =>
+            t.toolUseId === event.toolUseId
+              ? { ...t, elapsedSeconds: event.elapsedSeconds! }
+              : t
+          ),
+        }
+      }
+      return prev
 
     case 'task_started': {
       // 查找匹配 toolUseId 的 ToolActivity，更新 intent 和 taskId
-      if (!event.toolUseId) return prev
-      const idx = prev.toolActivities.findIndex((t) => t.toolUseId === event.toolUseId)
-      if (idx < 0) return prev
+      let nextActivities = prev.toolActivities
+      if (event.toolUseId) {
+        const idx = prev.toolActivities.findIndex((t) => t.toolUseId === event.toolUseId)
+        if (idx >= 0) {
+          nextActivities = prev.toolActivities.map((t) =>
+            t.toolUseId === event.toolUseId
+              ? { ...t, intent: event.description, taskId: event.taskId }
+              : t
+          )
+        }
+      }
+      // 去重：已有同 taskId 的 teammate 时仅更新 activities
+      if (prev.teammates.some((t) => t.taskId === event.taskId)) {
+        return { ...prev, toolActivities: nextActivities }
+      }
+      // 创建 TeammateState
+      const newTeammate: TeammateState = {
+        taskId: event.taskId,
+        toolUseId: event.toolUseId,
+        description: event.description,
+        taskType: event.taskType,
+        index: prev.teammates.length + 1,
+        status: 'running',
+        toolHistory: [],
+        startedAt: Date.now(),
+      }
       return {
         ...prev,
-        toolActivities: prev.toolActivities.map((t) =>
-          t.toolUseId === event.toolUseId
-            ? { ...t, intent: event.description, taskId: event.taskId }
-            : t
-        ),
+        toolActivities: nextActivities,
+        teammates: [...prev.teammates, newTeammate],
       }
     }
 
@@ -525,11 +964,62 @@ export function applyAgentEvent(
     case 'shell_killed':
       return prev
 
+    case 'task_notification': {
+      // Agent Teams: teammate 完成/失败/停止
+      const nextTeammates = [...prev.teammates]
+      let tmIdx = nextTeammates.findIndex((t) => t.taskId === event.taskId)
+      if (tmIdx < 0) {
+        // task_started 丢失时的兜底：从 notification 补创 teammate
+        nextTeammates.push({
+          taskId: event.taskId,
+          toolUseId: event.toolUseId,
+          description: event.summary || event.taskId,
+          index: nextTeammates.length + 1,
+          status: 'running',
+          toolHistory: [],
+          startedAt: Date.now(),
+        })
+        tmIdx = nextTeammates.length - 1
+      }
+      nextTeammates[tmIdx] = {
+        ...nextTeammates[tmIdx]!,
+        status: event.status,
+        summary: event.summary,
+        outputFile: event.outputFile,
+        endedAt: Date.now(),
+        ...(event.usage && { usage: event.usage }),
+        // 任务结束后清除实时工具状态
+        currentToolName: undefined,
+        currentToolElapsedSeconds: undefined,
+        currentToolUseId: undefined,
+      }
+      return { ...prev, teammates: nextTeammates }
+    }
+
+    case 'tool_use_summary':
+      // 工具使用摘要 — 目前不影响流式状态，仅用于 UI 展示
+      return prev
+
+    case 'waiting_resume':
+      return { ...prev, waitingResume: true }
+
+    case 'resume_start':
+      return { ...prev, waitingResume: false }
+
     case 'complete':
       // 成功完成 — 清除 retrying，但保持 running: true
       // 等待 STREAM_COMPLETE IPC 回调通过删除流式状态来控制 UI 就绪状态
       // 这避免了用户在后端尚未完成清理时就能发送新消息的竞态条件
-      return { ...prev, retrying: undefined }
+      // 同时将仍 running 的 teammates 标记为 stopped（兜底）
+      return {
+        ...prev,
+        retrying: undefined,
+        teammates: prev.teammates.map((tm) =>
+          tm.status === 'running'
+            ? { ...tm, status: 'stopped' as const, endedAt: Date.now(), currentToolName: undefined, currentToolElapsedSeconds: undefined, currentToolUseId: undefined }
+            : tm
+        ),
+      }
 
     case 'typed_error':
       // 处理类型化错误（TypedError）
@@ -668,6 +1158,13 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
  * 用于在切换会话时保留输入框内容
  */
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
+
+/**
+ * 会话附加目录 Map — 以 sessionId 为 key
+ * 存储每个会话通过"附加文件夹"功能关联的外部目录路径列表。
+ * 这些路径作为 SDK additionalDirectories 参数传递。
+ */
+export const agentAttachedDirectoriesMapAtom = atom<Map<string, string[]>>(new Map())
 
 /** 当前 Agent 会话的草稿内容（派生读写原子） */
 export const currentAgentSessionDraftAtom = atom(

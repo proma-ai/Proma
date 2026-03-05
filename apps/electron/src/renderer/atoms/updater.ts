@@ -2,34 +2,27 @@
  * 自动更新状态原子
  *
  * 管理应用更新状态，订阅主进程推送的更新事件。
+ * 仅检测新版本并通知，不自动下载/安装。
  * 优雅降级：如果 window.electronAPI.updater 不存在（开源构建），状态保持 idle。
  */
 
 import { atom } from 'jotai'
 
-/** 更新进度信息 */
-interface UpdateProgress {
-  percent: number
-  transferred: number
-  total: number
-}
-
 /** 更新状态 */
 export interface UpdateStatus {
-  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error'
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'error'
   version?: string
   releaseNotes?: string
-  progress?: UpdateProgress
   error?: string
 }
 
 /** 更新状态 atom */
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 
-/** 是否有可用更新（available 或 downloaded 状态） */
+/** 是否有可用更新 */
 export const hasUpdateAtom = atom((get) => {
   const { status } = get(updateStatusAtom)
-  return status === 'available' || status === 'downloaded'
+  return status === 'available'
 })
 
 /** updater 是否可用 */
@@ -65,9 +58,4 @@ export function initializeUpdater(
 /** 手动检查更新 */
 export async function checkForUpdates(): Promise<void> {
   await window.electronAPI?.updater?.checkForUpdates()
-}
-
-/** 安装更新并重启 */
-export async function installUpdate(): Promise<void> {
-  await window.electronAPI?.updater?.installUpdate()
 }

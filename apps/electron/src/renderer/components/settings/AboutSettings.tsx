@@ -1,19 +1,20 @@
 /**
  * AboutSettings - 关于页面
  *
- * 显示应用版本号等基本信息，以及自动更新状态和控制。
+ * 显示应用版本号等基本信息，以及版本检测状态。
+ * 检测到新版本后引导用户去 GitHub Releases 手动下载。
  */
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { RefreshCw, Download, Loader2, CheckCircle2, AlertCircle, Info, Terminal, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, Loader2, CheckCircle2, AlertCircle, Info, Terminal, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 import type { EnvironmentCheckResult, RuntimeStatus } from '@proma/shared'
 import {
   SettingsSection,
   SettingsCard,
   SettingsRow,
 } from './primitives'
-import { updateStatusAtom, updaterAvailableAtom, checkForUpdates, installUpdate } from '@/atoms/updater'
+import { updateStatusAtom, updaterAvailableAtom, checkForUpdates } from '@/atoms/updater'
 import {
   environmentCheckResultAtom,
   hasEnvironmentIssuesAtom,
@@ -32,6 +33,8 @@ const APP_VERSION: string = (() => {
     return '开发模式'
   }
 })()
+
+const GITHUB_RELEASES_URL = 'https://github.com/ErlichLiu/Proma/releases'
 
 /** 更新状态卡片 */
 function UpdateCard(): React.ReactElement | null {
@@ -54,14 +57,14 @@ function UpdateCard(): React.ReactElement | null {
     }
   }
 
-  const handleInstall = async (): Promise<void> => {
-    await installUpdate()
+  const handleGoToDownload = (): void => {
+    const url = release?.html_url || GITHUB_RELEASES_URL
+    window.electronAPI.openExternal(url)
   }
 
   // 当检测到新版本时，获取完整的 release 信息
   React.useEffect(() => {
     if (status.status === 'available' && status.version && !release) {
-      // 从 GitHub 获取完整的 release 信息
       window.electronAPI
         .getReleaseByTag(`v${status.version}`)
         .then((r) => {
@@ -87,21 +90,13 @@ function UpdateCard(): React.ReactElement | null {
           <StatusText status={status.status} version={status.version} error={status.error} />
 
           {/* 操作按钮 */}
-          {status.status === 'installing' ? (
+          {status.status === 'available' ? (
             <button
-              disabled
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground opacity-50 cursor-not-allowed"
-            >
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              正在安装...
-            </button>
-          ) : status.status === 'downloaded' ? (
-            <button
-              onClick={handleInstall}
+              onClick={handleGoToDownload}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              <Download className="h-3.5 w-3.5" />
-              立即安装
+              <ExternalLink className="h-3.5 w-3.5" />
+              前往下载
             </button>
           ) : (
             <button
@@ -120,23 +115,8 @@ function UpdateCard(): React.ReactElement | null {
         </div>
       </SettingsRow>
 
-      {/* 下载进度条 */}
-      {status.status === 'downloading' && status.progress && (
-        <div className="px-4 pb-4 -mt-2">
-          <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-300"
-              style={{ width: `${Math.round(status.progress.percent)}%` }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            下载中 {Math.round(status.progress.percent)}%
-          </p>
-        </div>
-      )}
-
-      {/* Release Notes（新版本可用或已下载时显示） */}
-      {(status.status === 'available' || status.status === 'downloaded') && hasReleaseNotes && (
+      {/* Release Notes（新版本可用时显示） */}
+      {status.status === 'available' && hasReleaseNotes && (
         <div className="px-4 pb-4 border-t">
           <button
             onClick={() => setShowReleaseNotes(!showReleaseNotes)}
@@ -177,24 +157,8 @@ function StatusText({ status, version, error }: {
     case 'available':
       return (
         <span className="text-xs text-primary flex items-center gap-1">
-          <Download className="h-3 w-3" />
+          <ExternalLink className="h-3 w-3" />
           新版本 v{version} 可用
-        </span>
-      )
-    case 'downloading':
-      return <span className="text-xs text-muted-foreground">正在下载更新...</span>
-    case 'downloaded':
-      return (
-        <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-          <CheckCircle2 className="h-3 w-3" />
-          v{version} 已就绪，重启后生效
-        </span>
-      )
-    case 'installing':
-      return (
-        <span className="text-xs text-primary flex items-center gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          正在安装更新，即将重启...
         </span>
       )
     case 'not-available':

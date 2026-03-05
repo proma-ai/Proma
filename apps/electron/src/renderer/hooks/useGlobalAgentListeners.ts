@@ -21,7 +21,10 @@ import {
   agentSidePanelOpenMapAtom,
   agentSidePanelTabMapAtom,
   cachedTeamActivitiesAtom,
+  cachedTeammateStatesAtom,
+  cachedTeamOverviewsAtom,
   buildTeamActivityEntries,
+  extractTeamOverview,
   applyAgentEvent,
 } from '@/atoms/agent-atoms'
 import {
@@ -47,6 +50,7 @@ export function useGlobalAgentListeners(): void {
             running: true,
             content: '',
             toolActivities: [],
+            teammates: [],
             model: undefined,
             startedAt: Date.now(),
           }
@@ -56,8 +60,11 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
-        // 自动打开侧面板：检测到 Agent/Task 工具启动时
-        if (event.type === 'tool_start' && (event.toolName === 'Agent' || event.toolName === 'Task')) {
+        // 自动打开侧面板：检测到 Agent/Task 工具启动或 teammate 任务开始时
+        if (
+          (event.type === 'tool_start' && (event.toolName === 'Agent' || event.toolName === 'Task')) ||
+          event.type === 'task_started'
+        ) {
           store.set(agentSidePanelOpenMapAtom, (prev) => {
             const map = new Map(prev)
             map.set(sessionId, true)
@@ -87,7 +94,7 @@ export function useGlobalAgentListeners(): void {
           store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
             prev.map((t) =>
               t.toolUseId === event.toolUseId
-                ? { ...t, elapsedSeconds: event.elapsedSeconds }
+                ? { ...t, elapsedSeconds: event.elapsedSeconds ?? t.elapsedSeconds }
                 : t
             )
           )
@@ -189,6 +196,27 @@ export function useGlobalAgentListeners(): void {
             store.set(cachedTeamActivitiesAtom, (prev) => {
               const map = new Map(prev)
               map.set(data.sessionId, teamEntries)
+              return map
+            })
+          }
+        }
+
+        // 缓存 Teammate 状态数据（Agent Teams 功能）
+        if (streamState && streamState.teammates.length > 0) {
+          store.set(cachedTeammateStatesAtom, (prev) => {
+            const map = new Map(prev)
+            map.set(data.sessionId, streamState.teammates)
+            return map
+          })
+        }
+
+        // 缓存 TeamOverview 快照（确保切换 tab 后团队全景数据不丢失）
+        if (streamState && streamState.toolActivities.length > 0) {
+          const overview = extractTeamOverview(streamState.toolActivities, streamState.teammates)
+          if (overview) {
+            store.set(cachedTeamOverviewsAtom, (prev) => {
+              const map = new Map(prev)
+              map.set(data.sessionId, overview)
               return map
             })
           }

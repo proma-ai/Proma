@@ -2,6 +2,7 @@
  * 自动更新 IPC 处理器
  *
  * 注册更新相关的 IPC 通道，供渲染进程调用。
+ * 仅支持检查更新和获取状态，不提供下载/安装功能。
  */
 
 import { ipcMain } from 'electron'
@@ -9,8 +10,6 @@ import { UPDATER_IPC_CHANNELS } from './updater-types'
 import type { UpdateStatus } from './updater-types'
 import {
   checkForUpdates,
-  downloadUpdate,
-  installUpdate,
   getUpdateStatus,
 } from './auto-updater'
 
@@ -23,22 +22,6 @@ export function registerUpdaterIpc(): void {
     UPDATER_IPC_CHANNELS.CHECK_FOR_UPDATES,
     async (): Promise<void> => {
       await checkForUpdates()
-    }
-  )
-
-  // 下载更新
-  ipcMain.handle(
-    UPDATER_IPC_CHANNELS.DOWNLOAD_UPDATE,
-    async (): Promise<void> => {
-      await downloadUpdate()
-    }
-  )
-
-  // 安装更新（退出并安装）
-  ipcMain.handle(
-    UPDATER_IPC_CHANNELS.INSTALL_UPDATE,
-    async (): Promise<void> => {
-      installUpdate()
     }
   )
 
