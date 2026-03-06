@@ -34,7 +34,7 @@ const APP_VERSION: string = (() => {
   }
 })()
 
-const GITHUB_RELEASES_URL = 'https://github.com/ErlichLiu/Proma/releases'
+const GITHUB_RELEASES_URL = 'https://proma.cool/download'
 
 /** 更新状态卡片 */
 function UpdateCard(): React.ReactElement | null {
