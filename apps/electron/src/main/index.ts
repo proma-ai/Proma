@@ -328,6 +328,8 @@ if (!gotTheLock) {
     // macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
     if (process.platform !== 'darwin') {
       app.quit()
+    }
+  })
 
   app.on('before-quit', () => {
     // 标记正在退出，让 close 事件不再阻止关闭
