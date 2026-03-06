@@ -10,10 +10,16 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { PanelRight, X, Users, FolderOpen, ExternalLink, RefreshCw } from 'lucide-react'
+import { PanelRight, X, Users, FolderOpen, ExternalLink, RefreshCw, ChevronRight, Folder, FileText, MoreHorizontal, FolderSearch, Pencil, FolderInput } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { FileBrowser, FileDropZone } from '@/components/file-browser'
 import { TeamActivityPanel } from './TeamActivityPanel'
@@ -29,6 +35,7 @@ import {
   agentAttachedDirectoriesMapAtom,
 } from '@/atoms/agent-atoms'
 import type { SidePanelTab } from '@/atoms/agent-atoms'
+import type { FileEntry } from '@proma/shared'
 
 interface SidePanelProps {
   sessionId: string
@@ -301,45 +308,25 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  {/* 附加目录列表 */}
-                  {attachedDirs.length > 0 && (
-                    <div className="px-3 pt-2.5 pb-1 space-y-1 flex-shrink-0">
-                      <div className="text-[11px] font-medium text-muted-foreground mb-1">附加目录（Agent 可以读取并操作此文件夹）</div>
-                      {attachedDirs.map((dir) => {
-                        const dirName = dir.split('/').filter(Boolean).pop() || dir
-                        return (
-                          <div
-                            key={dir}
-                            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/50 group"
-                          >
-                            <FolderOpen className="size-3.5 text-amber-500 shrink-0" />
-                            <span className="text-xs truncate flex-1" title={dir}>
-                              {dirName}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleDetachDirectory(dir)}
-                            >
-                              <X className="size-3" />
-                            </Button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {/* 文件拖拽上传区域 */}
-                  <FileDropZone
-                    workspaceSlug={workspaceSlug}
-                    sessionId={sessionId}
-                    onFilesUploaded={handleFilesUploaded}
-                    onAttachFolder={handleAttachFolder}
-                  />
-                  {/* 文件浏览器（隐藏内置工具栏） */}
-                  <div className="flex-1 min-h-0">
-                    <FileBrowser rootPath={sessionPath} hideToolbar />
+                  {/* 可滚动内容区：附加目录 + 文件浏览器 + 拖拽上传 */}
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    {/* 附加目录列表（可展开目录树） */}
+                    {attachedDirs.length > 0 && (
+                      <AttachedDirsSection
+                        attachedDirs={attachedDirs}
+                        onDetach={handleDetachDirectory}
+                        refreshVersion={filesVersion}
+                      />
+                    )}
+                    {/* 文件浏览器（嵌入模式，不自带滚动） */}
+                    <FileBrowser rootPath={sessionPath} hideToolbar embedded />
+                    {/* 文件拖拽上传区域 */}
+                    <FileDropZone
+                      workspaceSlug={workspaceSlug}
+                      sessionId={sessionId}
+                      onFilesUploaded={handleFilesUploaded}
+                      onAttachFolder={handleAttachFolder}
+                    />
                   </div>
                 </>
               ) : (
@@ -352,5 +339,363 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
         </div>
       )}
     </div>
+  )
+}
+
+// ===== 附加目录容器（管理选中状态） =====
+
+interface AttachedDirsSectionProps {
+  attachedDirs: string[]
+  onDetach: (dirPath: string) => void
+  /** 文件版本号，用于自动刷新已展开的目录 */
+  refreshVersion: number
+}
+
+/** 附加目录区域：统一管理所有子项的选中状态 */
+function AttachedDirsSection({ attachedDirs, onDetach, refreshVersion }: AttachedDirsSectionProps): React.ReactElement {
+  const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set())
+
+  const handleSelect = React.useCallback((path: string, ctrlKey: boolean) => {
+    setSelectedPaths((prev) => {
+      if (ctrlKey) {
+        // Ctrl+点击：切换选中
+        const next = new Set(prev)
+        if (next.has(path)) {
+          next.delete(path)
+        } else {
+          next.add(path)
+        }
+        return next
+      }
+      // 普通点击：单选
+      return new Set([path])
+    })
+  }, [])
+
+  return (
+    <div className="pt-2.5 pb-1 flex-shrink-0">
+      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（Agent 可以读取并操作此文件夹）</div>
+      {attachedDirs.map((dir) => (
+        <AttachedDirTree
+          key={dir}
+          dirPath={dir}
+          onDetach={() => onDetach(dir)}
+          selectedPaths={selectedPaths}
+          onSelect={handleSelect}
+          refreshVersion={refreshVersion}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ===== 附加目录树组件 =====
+
+interface AttachedDirTreeProps {
+  dirPath: string
+  onDetach: () => void
+  selectedPaths: Set<string>
+  onSelect: (path: string, ctrlKey: boolean) => void
+  /** 文件版本号，变化时已展开的目录自动重新加载 */
+  refreshVersion: number
+}
+
+/** 附加目录根节点：可展开/收起，带移除按钮 */
+function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVersion }: AttachedDirTreeProps): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false)
+  const [children, setChildren] = React.useState<FileEntry[]>([])
+  const [loaded, setLoaded] = React.useState(false)
+
+  const dirName = dirPath.split('/').filter(Boolean).pop() || dirPath
+
+  // 当 refreshVersion 变化时，已展开的目录自动重新加载
+  React.useEffect(() => {
+    if (expanded && loaded) {
+      window.electronAPI.listAttachedDirectory(dirPath)
+        .then((items) => setChildren(items))
+        .catch((err) => console.error('[AttachedDirTree] 刷新失败:', err))
+    }
+  }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleExpand = async (): Promise<void> => {
+    if (!expanded && !loaded) {
+      try {
+        const items = await window.electronAPI.listAttachedDirectory(dirPath)
+        setChildren(items)
+        setLoaded(true)
+      } catch (err) {
+        console.error('[AttachedDirTree] 加载失败:', err)
+      }
+    }
+    setExpanded(!expanded)
+  }
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-accent/50 group"
+        onClick={toggleExpand}
+      >
+        <ChevronRight
+          className={cn(
+            'size-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-150',
+            expanded && 'rotate-90',
+          )}
+        />
+        {expanded ? (
+          <FolderOpen className="size-4 text-amber-500 flex-shrink-0" />
+        ) : (
+          <Folder className="size-4 text-amber-500 flex-shrink-0" />
+        )}
+        <span className="text-xs truncate flex-1" title={dirPath}>
+          {dirName}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          onClick={(e) => { e.stopPropagation(); onDetach() }}
+        >
+          <X className="size-3" />
+        </Button>
+      </div>
+      {expanded && children.length === 0 && loaded && (
+        <div className="text-[11px] text-muted-foreground/50 py-1" style={{ paddingLeft: 48 }}>
+          空文件夹
+        </div>
+      )}
+      {expanded && children.map((child) => (
+        <AttachedDirItem key={child.path} entry={child} depth={1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} />
+      ))}
+    </div>
+  )
+}
+
+interface AttachedDirItemProps {
+  entry: FileEntry
+  depth: number
+  selectedPaths: Set<string>
+  onSelect: (path: string, ctrlKey: boolean) => void
+  /** 文件版本号，变化时已展开的目录自动重新加载 */
+  refreshVersion: number
+}
+
+/** 附加目录子项：递归可展开，支持选中 + 三点菜单（含重命名、移动） */
+function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion }: AttachedDirItemProps): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false)
+  const [children, setChildren] = React.useState<FileEntry[]>([])
+  const [loaded, setLoaded] = React.useState(false)
+  // 重命名状态
+  const [isRenaming, setIsRenaming] = React.useState(false)
+  const [renameValue, setRenameValue] = React.useState(entry.name)
+  const renameInputRef = React.useRef<HTMLInputElement>(null)
+  // 当前显示的名称和路径（重命名后更新）
+  const [currentName, setCurrentName] = React.useState(entry.name)
+  const [currentPath, setCurrentPath] = React.useState(entry.path)
+
+  const isSelected = selectedPaths.has(currentPath)
+
+  // 当 refreshVersion 变化时，已展开的文件夹自动重新加载子项
+  React.useEffect(() => {
+    if (expanded && loaded && entry.isDirectory) {
+      window.electronAPI.listAttachedDirectory(currentPath)
+        .then((items) => setChildren(items))
+        .catch((err) => console.error('[AttachedDirItem] 刷新子目录失败:', err))
+    }
+  }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleDir = async (): Promise<void> => {
+    if (!entry.isDirectory) return
+    if (!expanded && !loaded) {
+      try {
+        const items = await window.electronAPI.listAttachedDirectory(currentPath)
+        setChildren(items)
+        setLoaded(true)
+      } catch (err) {
+        console.error('[AttachedDirItem] 加载子目录失败:', err)
+      }
+    }
+    setExpanded(!expanded)
+  }
+
+  const handleClick = (e: React.MouseEvent): void => {
+    onSelect(currentPath, e.ctrlKey || e.metaKey)
+    if (entry.isDirectory) {
+      toggleDir()
+    }
+  }
+
+  const handleDoubleClick = (): void => {
+    if (!entry.isDirectory) {
+      window.electronAPI.openAttachedFile(currentPath).catch(console.error)
+    }
+  }
+
+  // 开始重命名
+  const startRename = (): void => {
+    setRenameValue(currentName)
+    setIsRenaming(true)
+    // 延迟聚焦，等待 DOM 渲染
+    setTimeout(() => renameInputRef.current?.select(), 50)
+  }
+
+  // 确认重命名
+  const confirmRename = async (): Promise<void> => {
+    const newName = renameValue.trim()
+    if (!newName || newName === currentName) {
+      setIsRenaming(false)
+      return
+    }
+    try {
+      await window.electronAPI.renameAttachedFile(currentPath, newName)
+      // 更新本地显示
+      const parentDir = currentPath.substring(0, currentPath.lastIndexOf('/'))
+      const newPath = `${parentDir}/${newName}`
+      // 更新选中状态中的路径
+      onSelect(newPath, false)
+      setCurrentName(newName)
+      setCurrentPath(newPath)
+    } catch (err) {
+      console.error('[AttachedDirItem] 重命名失败:', err)
+    }
+    setIsRenaming(false)
+  }
+
+  // 取消重命名
+  const cancelRename = (): void => {
+    setIsRenaming(false)
+    setRenameValue(currentName)
+  }
+
+  // 移动到文件夹
+  const handleMove = async (): Promise<void> => {
+    try {
+      const result = await window.electronAPI.openFolderDialog()
+      if (!result) return
+      await window.electronAPI.moveAttachedFile(currentPath, result.path)
+      // 移动后更新路径
+      const newPath = `${result.path}/${currentName}`
+      setCurrentPath(newPath)
+    } catch (err) {
+      console.error('[AttachedDirItem] 移动失败:', err)
+    }
+  }
+
+  const paddingLeft = 8 + depth * 16
+
+  return (
+    <>
+      <div
+        className={cn(
+          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group',
+          isSelected ? 'bg-accent' : 'hover:bg-accent/50',
+        )}
+        style={{ paddingLeft }}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+      >
+        {entry.isDirectory ? (
+          <ChevronRight
+            className={cn(
+              'size-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-150',
+              expanded && 'rotate-90',
+            )}
+          />
+        ) : (
+          <span className="w-3.5 flex-shrink-0" />
+        )}
+        {entry.isDirectory ? (
+          expanded ? (
+            <FolderOpen className="size-4 text-amber-500 flex-shrink-0" />
+          ) : (
+            <Folder className="size-4 text-amber-500 flex-shrink-0" />
+          )
+        ) : (
+          <FileText className="size-4 text-muted-foreground flex-shrink-0" />
+        )}
+
+        {/* 名称：正常显示 / 重命名输入框 */}
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            className="text-xs flex-1 min-w-0 bg-background border border-primary rounded px-1 py-0.5 outline-none"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') confirmRename()
+              if (e.key === 'Escape') cancelRename()
+              e.stopPropagation()
+            }}
+            onBlur={confirmRename}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="truncate text-xs flex-1">{currentName}</span>
+        )}
+
+        {/* 三点菜单按钮 */}
+        {isSelected && !isRenaming && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={() => window.electronAPI.showAttachedInFolder(currentPath).catch(console.error)}
+                >
+                  <FolderSearch />
+                  在文件夹中显示
+                </DropdownMenuItem>
+                {!entry.isDirectory && (
+                  <DropdownMenuItem
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                    onSelect={() => window.electronAPI.openAttachedFile(currentPath).catch(console.error)}
+                  >
+                    <ExternalLink />
+                    打开文件
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={startRename}
+                >
+                  <Pencil />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={handleMove}
+                >
+                  <FolderInput />
+                  移动到...
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+      </div>
+      {expanded && children.length === 0 && loaded && (
+        <div
+          className="text-[11px] text-muted-foreground/50 py-1"
+          style={{ paddingLeft: paddingLeft + 24 }}
+        >
+          空文件夹
+        </div>
+      )}
+      {expanded && children.map((child) => (
+        <AttachedDirItem key={child.path} entry={child} depth={depth + 1} selectedPaths={selectedPaths} onSelect={onSelect} refreshVersion={refreshVersion} />
+      ))}
+    </>
   )
 }

@@ -2,11 +2,10 @@
  * AI Elements - TipTap 富文本输入组件
  *
  * 独立受控组件，不依赖 PromptInput Provider。
- * 移植自 proma-frontend 的 ai-elements/rich-text-input.tsx，
- * 去掉了粘贴图片处理和 Backspace 删除附件逻辑。
  *
  * 功能：
  * - StarterKit + Placeholder + Underline + Link + CodeBlockLowlight
+ * - 可选 Mention 扩展（@ 引用文件）
  * - htmlToMarkdown 转换
  * - IME composition 处理
  * - Enter 提交 / Shift+Enter 换行
@@ -14,17 +13,19 @@
  * - 自动扩高
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import Mention from '@tiptap/extension-mention'
 import { common, createLowlight } from 'lowlight'
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
 
 // 创建 lowlight 实例，使用常见语言
 const lowlight = createLowlight(common)
@@ -109,6 +110,14 @@ function htmlToMarkdown(html: string): string {
       case 'h5': return `##### ${children}\n\n`
       case 'h6': return `###### ${children}\n\n`
       case 'hr': return '---\n\n'
+      case 'span': {
+        // Mention 节点：转换为 @file:路径 格式
+        if (el.getAttribute('data-type') === 'mention') {
+          const filePath = el.getAttribute('data-id') || ''
+          return `@file:${filePath}`
+        }
+        return children
+      }
       default: return children
     }
   }
@@ -170,6 +179,10 @@ interface RichTextInputProps {
   autoFocusTrigger?: string | null
   /** 是否支持手动折叠（内容较长时显示折叠按钮） */
   collapsible?: boolean
+  /** 工作区根路径（启用 @ 引用文件功能时需要） */
+  workspacePath?: string | null
+  /** 附加目录路径列表（@ 引用时一并搜索） */
+  attachedDirs?: string[]
   className?: string
 }
 
@@ -190,6 +203,8 @@ export function RichTextInput({
   disabled = false,
   autoFocusTrigger,
   collapsible = false,
+  workspacePath,
+  attachedDirs = [],
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   // 手动折叠状态：用户主动折叠输入框
@@ -204,6 +219,20 @@ export function RichTextInput({
   // 保持 onPasteFiles 引用最新
   const onPasteFilesRef = useRef(onPasteFiles)
   onPasteFilesRef.current = onPasteFiles
+  // Mention 活跃状态（阻止 Enter 发送消息）
+  const mentionActiveRef = useRef(false)
+  // 工作区路径引用（给 Suggestion 使用）
+  const workspacePathRef = useRef<string | null>(workspacePath ?? null)
+  workspacePathRef.current = workspacePath ?? null
+  // 附加目录路径引用（给 Suggestion 使用）
+  const attachedDirsRef = useRef<string[]>(attachedDirs)
+  attachedDirsRef.current = attachedDirs
+
+  // Mention Suggestion 配置（稳定引用，不随 workspacePath 变化重建）
+  const mentionSuggestion = useMemo(
+    () => createFileMentionSuggestion(workspacePathRef, mentionActiveRef, attachedDirsRef),
+    [],
+  )
 
   const editor = useEditor({
     extensions: [
@@ -230,6 +259,14 @@ export function RichTextInput({
       Placeholder.configure({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
+      }),
+      // @ 引用文件（始终加载扩展，workspacePathRef 内部控制是否搜索）
+      // 不能条件加载，因为 useEditor 不会在 workspacePath 变化时重建扩展
+      Mention.configure({
+        HTMLAttributes: {
+          class: 'mention-chip',
+        },
+        suggestion: mentionSuggestion,
       }),
     ],
     content: value || '',
@@ -279,6 +316,11 @@ export function RichTextInput({
 
           // 检查是否正在输入中文（IME 组合输入）
           if (isComposingRef.current || event.isComposing) {
+            return false
+          }
+
+          // Mention 列表打开时，让 TipTap Mention 处理 Enter
+          if (mentionActiveRef.current) {
             return false
           }
 
@@ -420,6 +462,15 @@ export function RichTextInput({
         }
         .ProseMirror::-webkit-scrollbar {
           width: 3px;
+        }
+        .mention-chip {
+          background-color: hsl(var(--primary) / 0.1);
+          color: hsl(var(--primary));
+          border-radius: 4px;
+          padding: 1px 4px;
+          font-size: 13px;
+          font-weight: 500;
+          white-space: nowrap;
         }
       `}</style>
     </div>

@@ -7,7 +7,7 @@ Next-generation AI desktop app with integrated agents. Local-first, multi-provid
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
 ### Commercial Version Running in Parallel
-Proma also offers a commercial version. If you need **cloud features** | **stable and reliable API** | **cost-effective subscription plans** | **simple user experience**, you're welcome to support the commercial version of Proma: https://proma.cool/download
+Proma also offers a commercial version. If you need **cloud features** | **stable and reliable API** | **cost-effective subscription plans** | **simple user experience**, you're welcome to support the commercial version of Proma: https://proma.cool/download — subscription plans start at 40% of official pricing.
 
 The core vision of Proma is not to replace any particular software. Currently, only the infrastructure of Proma has been implemented. Going forward, Proma will continue to build multi-agent collaboration (personal and team), agent connections with external services, Tools and Skills consolidation, and the ability to proactively provide software and suggestions based on user understanding and memory. Proma is evolving rapidly with the help of VibeCoding tools. PRs are welcome!
 
@@ -23,6 +23,10 @@ Agent mode with general-purpose agent capabilities. Supports the full Claude ser
 
 ![Proma Agent Mode](https://img.erlich.fun/personal-blog/uPic/3ZHWyA.png)
 
+### Agent Teams
+Agent Teams (or Agent Swarm) is one of the major development directions for agents in 2026. Proma already supports Agent Teams, which can automatically assemble teams based on task complexity. In practice, this improves complex task handling by at least 5%–20%. When running Agent Teams, you'll see each agent's working status on the right panel. (You can also request Agent Teams via natural language and assign each agent a specific work or research scope.)
+![Proma Agent Teams](https://img.erlich.fun/personal-blog/uPic/vNVpRu.png)
+
 ### Skill & MCP
 Built-in Brainstorming and office suite Skills with MCP support. Automatically helps you find and install Skills through conversation.
 
@@ -34,6 +38,7 @@ Shared memory across Chat and Agent modes — AI truly understands you and remem
 ![Proma memory settings](https://img.erlich.fun/personal-blog/uPic/94B0LN.png)
 
 ![Proma memory demo](https://img.erlich.fun/personal-blog/uPic/Wi8QfB.png)
+
 
 ### Channel Configuration
 
@@ -105,6 +110,12 @@ We welcome contributions to Proma! Whether it's fixing bugs, adding features, or
 **PR Bounty Program** — Proma currently offers a PR bounty program. Merged PRs automatically receive a generous bounty that can be used with Claude Code and similar products, helping you develop more effectively with AI-assisted tools. Simply leave your email address in the PR description when submitting.
 
 ![Proma Given](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
+
+
+## Sponsorship (Recruiting)
+The most meme-savvy yet spot-on hype organization of the AI era — amazed by its precise satire and piercing insights into this AI age. Search on WeChat Official Account: **葬 AI**
+
+![葬 AI](https://img.erlich.fun/personal-blog/uPic/zang-ai.png)
 
 ## License
 

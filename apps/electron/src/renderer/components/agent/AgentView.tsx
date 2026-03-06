@@ -30,6 +30,7 @@ import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { FeishuNotifyToggle } from '@/components/chat/FeishuNotifyToggle'
 import {
   agentStreamingStatesAtom,
   agentChannelIdAtom,
@@ -853,12 +854,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onPasteFiles={handlePasteFiles}
               placeholder={
                 agentChannelId
-                  ? '输入消息... (Enter 发送，Shift+Enter 换行)'
+                  ? '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件)'
                   : '请先在设置中选择 Agent 供应商'
               }
               disabled={!agentChannelId}
               autoFocusTrigger={sessionId}
               collapsible
+              workspacePath={sessionPath}
+              attachedDirs={attachedDirs}
             />
 
             {/* Footer 工具栏 */}
@@ -912,6 +915,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                       isProcessing={streaming}
                       onCompact={handleCompact}
                     />
+                    <FeishuNotifyToggle sessionId={sessionId} />
                   </>
                 )}
               </div>

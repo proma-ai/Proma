@@ -536,6 +536,22 @@ export interface FileEntry {
   children?: FileEntry[]
 }
 
+/** 文件索引条目（用于 @ 引用搜索） */
+export interface FileIndexEntry {
+  /** 文件/目录名称 */
+  name: string
+  /** 相对于工作区的路径 */
+  path: string
+  /** 条目类型 */
+  type: 'file' | 'dir'
+}
+
+/** 文件搜索结果 */
+export interface FileSearchResult {
+  entries: FileIndexEntry[]
+  total: number
+}
+
 // ===== Agent 附件 =====
 
 /** Agent 待发送文件（UI 侧暂存） */
@@ -827,6 +843,22 @@ export const AGENT_IPC_CHANNELS = {
   OPEN_FILE: 'agent:open-file',
   /** 在系统文件管理器中显示文件 */
   SHOW_IN_FOLDER: 'agent:show-in-folder',
+  /** 重命名文件/目录 */
+  RENAME_FILE: 'agent:rename-file',
+  /** 移动文件/目录到目标目录 */
+  MOVE_FILE: 'agent:move-file',
+  /** 列出附加目录内容（无工作区路径限制） */
+  LIST_ATTACHED_DIRECTORY: 'agent:list-attached-directory',
+  /** 用系统默认应用打开附加目录文件（无工作区路径限制） */
+  OPEN_ATTACHED_FILE: 'agent:open-attached-file',
+  /** 在文件管理器中显示附加目录文件（无工作区路径限制） */
+  SHOW_ATTACHED_IN_FOLDER: 'agent:show-attached-in-folder',
+  /** 重命名附加目录文件/目录（无工作区路径限制） */
+  RENAME_ATTACHED_FILE: 'agent:rename-attached-file',
+  /** 移动附加目录文件/目录（无工作区路径限制） */
+  MOVE_ATTACHED_FILE: 'agent:move-attached-file',
+  /** 搜索工作区文件（用于 @ 引用） */
+  SEARCH_WORKSPACE_FILES: 'agent:search-workspace-files',
 
   // 标题自动生成通知（主进程 → 渲染进程推送）
   /** 标题已更新（首次对话完成后自动生成） */

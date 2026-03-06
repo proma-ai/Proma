@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -39,6 +39,7 @@ import type {
   SkillMeta,
   WorkspaceCapabilities,
   FileEntry,
+  FileSearchResult,
   EnvironmentCheckResult,
   ProxyConfig,
   SystemProxyDetectResult,
@@ -57,6 +58,13 @@ import type {
   ChatToolMeta,
   AgentTeamData,
   MoveSessionToWorkspaceInput,
+  FeishuConfigInput,
+  FeishuConfig,
+  FeishuBridgeState,
+  FeishuTestResult,
+  FeishuChatBinding,
+  FeishuPresenceReport,
+  FeishuNotifyMode,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -142,6 +150,10 @@ import {
   listReleases as listGitHubReleases,
   getReleaseByTag,
 } from './lib/github-release-service'
+import { watchAttachedDirectory, unwatchAttachedDirectory } from './lib/workspace-watcher'
+import { getFeishuConfig, saveFeishuConfig } from './lib/feishu-config'
+import { feishuBridge } from './lib/feishu-bridge'
+import { presenceService } from './lib/feishu-presence'
 
 /**
  * 注册 IPC 处理器
@@ -530,7 +542,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_SESSIONS,
     async (): Promise<AgentSessionMeta[]> => {
-      return listAgentSessions()
+      const sessions = listAgentSessions()
+      // 启动所有已有附加目录的文件监听
+      for (const session of sessions) {
+        if (session.attachedDirectories) {
+          for (const dir of session.attachedDirectories) {
+            watchAttachedDirectory(dir)
+          }
+        }
+      }
+      return sessions
     }
   )
 
@@ -1029,6 +1050,8 @@ export function registerIpcHandlers(): void {
 
       const updated = [...existing, input.directoryPath]
       updateAgentSessionMeta(input.sessionId, { attachedDirectories: updated })
+      // 启动附加目录文件监听
+      watchAttachedDirectory(input.directoryPath)
       return updated
     }
   )
@@ -1043,6 +1066,8 @@ export function registerIpcHandlers(): void {
       const existing = meta.attachedDirectories ?? []
       const updated = existing.filter((d) => d !== input.directoryPath)
       updateAgentSessionMeta(input.sessionId, { attachedDirectories: updated })
+      // 停止附加目录文件监听
+      unwatchAttachedDirectory(input.directoryPath)
       return updated
     }
   )
@@ -1149,6 +1174,202 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 重命名文件/目录
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.RENAME_FILE,
+    async (_, filePath: string, newName: string): Promise<void> => {
+      const { renameSync } = await import('node:fs')
+      const { resolve, dirname, join } = await import('node:path')
+
+      const safePath = resolve(filePath)
+      const workspacesRoot = resolve(getAgentWorkspacesDir())
+      if (!safePath.startsWith(workspacesRoot)) {
+        throw new Error('访问路径超出 Agent 工作区范围')
+      }
+
+      const newPath = join(dirname(safePath), newName)
+      renameSync(safePath, newPath)
+      console.log(`[Agent 文件] 已重命名: ${safePath} → ${newPath}`)
+    }
+  )
+
+  // 移动文件/目录到目标目录
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.MOVE_FILE,
+    async (_, filePath: string, targetDir: string): Promise<void> => {
+      const { renameSync } = await import('node:fs')
+      const { resolve, basename, join } = await import('node:path')
+
+      const safePath = resolve(filePath)
+      const safeTarget = resolve(targetDir)
+      const workspacesRoot = resolve(getAgentWorkspacesDir())
+      if (!safePath.startsWith(workspacesRoot) || !safeTarget.startsWith(workspacesRoot)) {
+        throw new Error('访问路径超出 Agent 工作区范围')
+      }
+
+      const newPath = join(safeTarget, basename(safePath))
+      renameSync(safePath, newPath)
+      console.log(`[Agent 文件] 已移动: ${safePath} → ${newPath}`)
+    }
+  )
+
+  // 列出附加目录内容（无工作区路径限制，用于用户附加的外部目录）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY,
+    async (_, dirPath: string): Promise<FileEntry[]> => {
+      const { readdirSync } = await import('node:fs')
+      const { resolve } = await import('node:path')
+
+      const safePath = resolve(dirPath)
+      const entries: FileEntry[] = []
+      const items = readdirSync(safePath, { withFileTypes: true })
+
+      for (const item of items) {
+        if (item.name.startsWith('.')) continue
+        const fullPath = resolve(safePath, item.name)
+        entries.push({
+          name: item.name,
+          path: fullPath,
+          isDirectory: item.isDirectory(),
+        })
+      }
+
+      entries.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+
+      return entries
+    }
+  )
+
+  // 用系统默认应用打开附加目录文件（无工作区路径限制）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.OPEN_ATTACHED_FILE,
+    async (_, filePath: string): Promise<void> => {
+      const { resolve } = await import('node:path')
+      await shell.openPath(resolve(filePath))
+    }
+  )
+
+  // 在文件管理器中显示附加目录文件（无工作区路径限制）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SHOW_ATTACHED_IN_FOLDER,
+    async (_, filePath: string): Promise<void> => {
+      const { resolve } = await import('node:path')
+      shell.showItemInFolder(resolve(filePath))
+    }
+  )
+
+  // 重命名附加目录文件/目录（无工作区路径限制）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.RENAME_ATTACHED_FILE,
+    async (_, filePath: string, newName: string): Promise<void> => {
+      const { renameSync } = await import('node:fs')
+      const { resolve, dirname, join } = await import('node:path')
+
+      const safePath = resolve(filePath)
+      const newPath = join(dirname(safePath), newName)
+      renameSync(safePath, newPath)
+      console.log(`[附加目录] 已重命名: ${safePath} → ${newPath}`)
+    }
+  )
+
+  // 移动附加目录文件/目录（无工作区路径限制）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE,
+    async (_, filePath: string, targetDir: string): Promise<void> => {
+      const { renameSync } = await import('node:fs')
+      const { resolve, basename, join } = await import('node:path')
+
+      const safePath = resolve(filePath)
+      const newPath = join(resolve(targetDir), basename(safePath))
+      renameSync(safePath, newPath)
+      console.log(`[附加目录] 已移动: ${safePath} → ${newPath}`)
+    }
+  )
+
+  // 搜索工作区文件（用于 @ 引用，递归扫描，支持附加目录）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES,
+    async (_, rootPath: string, query: string, limit = 20, additionalPaths?: string[]): Promise<FileSearchResult> => {
+      const { readdirSync } = await import('node:fs')
+      const { resolve, relative } = await import('node:path')
+
+      const safeRoot = resolve(rootPath)
+      const ignoreDirs = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache'])
+
+      // 递归收集文件（限制深度 5 层）
+      const allEntries: Array<{ name: string; path: string; type: 'file' | 'dir' }> = []
+
+      function scan(dir: string, depth: number, baseRoot: string): void {
+        if (depth > 5) return
+        try {
+          const items = readdirSync(dir, { withFileTypes: true })
+          for (const item of items) {
+            if (item.name.startsWith('.')) continue
+            if (item.isDirectory() && ignoreDirs.has(item.name)) continue
+
+            const fullPath = resolve(dir, item.name)
+            const relPath = relative(baseRoot, fullPath)
+            allEntries.push({
+              name: item.name,
+              path: relPath,
+              type: item.isDirectory() ? 'dir' : 'file',
+            })
+
+            if (item.isDirectory()) {
+              scan(fullPath, depth + 1, baseRoot)
+            }
+          }
+        } catch {
+          // 忽略无权限的目录
+        }
+      }
+
+      scan(safeRoot, 0, safeRoot)
+
+      // 扫描附加目录（外部路径）
+      if (additionalPaths && additionalPaths.length > 0) {
+        for (const addPath of additionalPaths) {
+          const addRoot = resolve(addPath)
+          scan(addRoot, 0, addRoot)
+        }
+      }
+
+      // 搜索匹配
+      const q = query.toLowerCase()
+      if (!q) {
+        return { entries: allEntries.slice(0, limit), total: allEntries.length }
+      }
+
+      const matched = allEntries.filter((entry) => {
+        const nameLower = entry.name.toLowerCase()
+        const pathLower = entry.path.toLowerCase()
+        if (nameLower.startsWith(q)) return true
+        if (nameLower.includes(q) || pathLower.includes(q)) return true
+        // 模糊匹配
+        let qi = 0
+        for (let i = 0; i < nameLower.length && qi < q.length; i++) {
+          if (nameLower[i] === q[qi]) qi++
+        }
+        return qi === q.length
+      })
+
+      // 排序：精确前缀优先，目录优先，路径短优先
+      matched.sort((a, b) => {
+        const aStartsWith = a.name.toLowerCase().startsWith(q) ? 0 : 1
+        const bStartsWith = b.name.toLowerCase().startsWith(q) ? 0 : 1
+        if (aStartsWith !== bStartsWith) return aStartsWith - bStartsWith
+        if (a.type === 'dir' && b.type !== 'dir') return -1
+        if (a.type !== 'dir' && b.type === 'dir') return 1
+        return a.path.length - b.path.length
+      })
+
+      return { entries: matched.slice(0, limit), total: matched.length }
+    }
+  )
+
   // ===== 系统提示词管理 =====
 
   // 获取系统提示词配置
@@ -1222,6 +1443,87 @@ export function registerIpcHandlers(): void {
     GITHUB_RELEASE_IPC_CHANNELS.GET_RELEASE_BY_TAG,
     async (_, tag: string): Promise<GitHubRelease | null> => {
       return getReleaseByTag(tag)
+    }
+  )
+
+  // ===== 飞书集成 =====
+
+  // 获取飞书配置
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_CONFIG,
+    async (): Promise<FeishuConfig> => {
+      return getFeishuConfig()
+    }
+  )
+
+  // 保存飞书配置
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.SAVE_CONFIG,
+    async (_, input: FeishuConfigInput): Promise<FeishuConfig> => {
+      const config = saveFeishuConfig(input)
+      // 配置变更后自动重启或停止 Bridge
+      if (input.enabled && input.appId && input.appSecret) {
+        await feishuBridge.restart()
+      } else if (!input.enabled) {
+        feishuBridge.stop()
+      }
+      return config
+    }
+  )
+
+  // 测试飞书连接
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.TEST_CONNECTION,
+    async (_, appId: string, appSecret: string): Promise<FeishuTestResult> => {
+      return feishuBridge.testConnection(appId, appSecret)
+    }
+  )
+
+  // 启动飞书 Bridge
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.START_BRIDGE,
+    async (): Promise<void> => {
+      await feishuBridge.start()
+    }
+  )
+
+  // 停止飞书 Bridge
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.STOP_BRIDGE,
+    async (): Promise<void> => {
+      feishuBridge.stop()
+    }
+  )
+
+  // 获取飞书 Bridge 状态
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_STATUS,
+    async (): Promise<FeishuBridgeState> => {
+      return feishuBridge.getStatus()
+    }
+  )
+
+  // 获取活跃绑定列表
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.LIST_BINDINGS,
+    async (): Promise<FeishuChatBinding[]> => {
+      return feishuBridge.listBindings()
+    }
+  )
+
+  // 上报用户在场状态
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.REPORT_PRESENCE,
+    async (_, report: FeishuPresenceReport): Promise<void> => {
+      presenceService.updatePresence(report)
+    }
+  )
+
+  // 设置会话通知模式
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.SET_SESSION_NOTIFY,
+    async (_, sessionId: string, mode: FeishuNotifyMode): Promise<void> => {
+      feishuBridge.setSessionNotifyMode(sessionId, mode)
     }
   )
 

@@ -807,7 +807,10 @@ export class AgentOrchestrator {
       // 9.5 验证 sdkSessionId 是否仍然有效（SDK 0.2.53 listSessions）
       if (existingSdkSessionId) {
         try {
-          const sessions = await sdk.listSessions({ dir: agentCwd })
+          const listSessions = (sdk as unknown as {
+            listSessions: (opts: { dir: string }) => Promise<Array<{ sessionId: string }>>
+          }).listSessions
+          const sessions = await listSessions({ dir: agentCwd })
           const isValid = sessions.some((s: { sessionId: string }) => s.sessionId === existingSdkSessionId)
           if (!isValid) {
             console.log(`[Agent 编排] sdkSessionId 已失效 (${existingSdkSessionId})，将使用上下文注入`)

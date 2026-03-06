@@ -376,6 +376,15 @@ export function getSyncStatePath(): string {
 }
 
 /**
+ * 获取飞书配置文件路径
+ *
+ * @returns ~/.proma/feishu.json
+ */
+export function getFeishuConfigPath(): string {
+  return join(getConfigDir(), 'feishu.json')
+}
+
+/**
  * 获取指定 Agent 会话的工作路径
  *
  * 在工作区目录下创建以 sessionId 命名的子文件夹，

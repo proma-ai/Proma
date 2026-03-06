@@ -35,6 +35,9 @@ const eventBus = new AgentEventBus()
 const adapter = new ClaudeAgentAdapter()
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
 
+/** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
+export { eventBus as agentEventBus }
+
 /**
  * 会话 → webContents 映射
  *
@@ -111,6 +114,67 @@ export async function runAgent(
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
     // 避免被拒绝的请求误删仍在运行的会话映射
+    if (!orchestrator.isActive(input.sessionId)) {
+      sessionWebContents.delete(input.sessionId)
+    }
+  }
+}
+
+/**
+ * 无渲染进程的 Agent 运行（供飞书 Bridge 等外部调用方使用）
+ *
+ * 如果桌面窗口存在，同时注册 webContents 以便事件同步到桌面端 UI。
+ * 事件同时通过 EventBus listeners 分发给飞书 Bridge。
+ */
+export async function runAgentHeadless(
+  input: AgentSendInput,
+  callbacks: {
+    onError: (error: string) => void
+    onComplete: () => void
+    onTitleUpdated: (title: string) => void
+  },
+): Promise<void> {
+  // 尝试注册主窗口 webContents，让流式事件同步推送到桌面端
+  const win = BrowserWindow.getAllWindows()[0]
+  const wc = win && !win.isDestroyed() ? win.webContents : null
+  if (wc) {
+    sessionWebContents.set(input.sessionId, wc)
+  }
+
+  try {
+    await orchestrator.sendMessage(input, {
+      onError: (error) => {
+        callbacks.onError(error)
+        // 同步到渲染进程
+        if (wc && !wc.isDestroyed()) {
+          wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+            sessionId: input.sessionId,
+            error,
+          })
+        }
+      },
+      onComplete: (messages) => {
+        callbacks.onComplete()
+        // 同步到渲染进程
+        if (wc && !wc.isDestroyed()) {
+          wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
+            sessionId: input.sessionId,
+            messages,
+          })
+        }
+      },
+      onTitleUpdated: (title) => {
+        callbacks.onTitleUpdated(title)
+        // 同步到渲染进程
+        if (wc && !wc.isDestroyed()) {
+          wc.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
+            sessionId: input.sessionId,
+            title,
+          })
+        }
+      },
+    })
+  } finally {
     if (!orchestrator.isActive(input.sessionId)) {
       sessionWebContents.delete(input.sessionId)
     }

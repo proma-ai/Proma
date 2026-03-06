@@ -36,6 +36,7 @@ import {
   useConversationModel,
   useConversationThinkingEnabled,
 } from '@/hooks/useConversationSettings'
+import { FeishuNotifyToggle } from './FeishuNotifyToggle'
 import { cn } from '@/lib/utils'
 import { fileToBase64 } from '@/lib/file-utils'
 
@@ -307,6 +308,8 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
                 </TooltipContent>
               </Tooltip>
+
+              <FeishuNotifyToggle sessionId={conversationId} />
 
               <SpeechButton onTranscript={handleSpeechTranscript} />
 

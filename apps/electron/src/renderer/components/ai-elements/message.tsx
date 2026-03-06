@@ -22,7 +22,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { ChevronDown, ChevronUp, Paperclip } from 'lucide-react'
+import { ChevronDown, ChevronUp, Paperclip, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -278,6 +278,46 @@ export const MessageResponse = React.memo(
 /** 折叠行数阈值 */
 const COLLAPSE_LINE_THRESHOLD = 4
 
+/** 将文本中的 @file:路径 替换为样式化 chip */
+const FILE_MENTION_RE = /@file:(\S+)/g
+
+function renderTextWithMentions(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  // 重置 lastIndex（全局正则复用时需要）
+  FILE_MENTION_RE.lastIndex = 0
+
+  while ((match = FILE_MENTION_RE.exec(text)) !== null) {
+    // 添加 match 前的纯文本
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    // 渲染 mention chip
+    const filePath = match[1] ?? ''
+    const fileName = filePath.split('/').pop() || filePath
+    parts.push(
+      <span
+        key={`mention-${match.index}`}
+        className="inline-flex items-center gap-0.5 bg-primary/10 text-primary rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline"
+        title={filePath}
+      >
+        <FileText className="size-3 inline shrink-0" />
+        {fileName}
+      </span>
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  // 添加剩余文本
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : text
+}
+
 interface UserMessageContentProps extends HTMLAttributes<HTMLDivElement> {
   children: string
 }
@@ -319,7 +359,7 @@ export const UserMessageContent = React.memo(
             shouldCollapse && !isExpanded && 'max-h-[6.5em]'
           )}
         >
-          {children}
+          {renderTextWithMentions(children)}
         </div>
         {shouldCollapse && (
           <button

@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -44,6 +44,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.2.66",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@proma/cloud": "workspace:*",
     "@proma/core": "workspace:*",
     "@proma/shared": "workspace:*",
@@ -68,6 +69,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tiptap/extension-code-block-lowlight": "^3.19.0",
     "@tiptap/extension-link": "^3.19.0",
+    "@tiptap/extension-mention": "^3.19.0",
     "@tiptap/extension-placeholder": "^3.19.0",
     "@tiptap/extension-underline": "^3.19.0",
     "@tiptap/react": "^3.19.0",

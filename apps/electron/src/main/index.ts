@@ -31,6 +31,8 @@ import { registerCloudIpcHandlers } from './cloud-ipc'
 import { registerSyncIpcHandlers } from './sync-ipc'
 import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
+import { feishuBridge } from './lib/feishu-bridge'
+import { getFeishuConfig } from './lib/feishu-config'
 
 const PROTOCOL_NAME = 'proma'
 
@@ -302,6 +304,14 @@ if (!gotTheLock) {
       })
     }
 
+    // 飞书 Bridge 自动启动（配置启用时）
+    const feishuConfig = getFeishuConfig()
+    if (feishuConfig.enabled && feishuConfig.appId && feishuConfig.appSecret) {
+      feishuBridge.start().catch((err) => {
+        console.error('[飞书 Bridge] 自动启动失败:', err)
+      })
+    }
+
     app.on('activate', () => {
       // 直接检查 mainWindow 引用，避免 getAllWindows() 包含 DevTools 等其他窗口导致误判
       if (!mainWindow || mainWindow.isDestroyed()) {
@@ -318,8 +328,6 @@ if (!gotTheLock) {
     // macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
     if (process.platform !== 'darwin') {
       app.quit()
-    }
-  })
 
   app.on('before-quit', () => {
     // 标记正在退出，让 close 事件不再阻止关闭
@@ -334,6 +342,8 @@ if (!gotTheLock) {
     stopWorkspaceWatcher()
     // 停止 Chat 工具配置文件监听
     stopChatToolsWatcher()
+    // 停止飞书 Bridge
+    feishuBridge.stop()
     // Clean up system tray before quitting
     destroyTray()
   })

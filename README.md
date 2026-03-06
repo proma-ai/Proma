@@ -1,6 +1,6 @@
 # Proma
 
-下一代集成通用 Agent 的 AI 桌面应用。本地优先、多供应商支持、完全开源。
+下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams 等能力，本地优先、多供应商支持、完全开源。
 
 [English version README.md](./README.en.md)
 
@@ -22,6 +22,10 @@ Proma 的聊天模式，支持多模型切换，支持附加文件对话。
 Proma Agent 模式，通用 Agent 能力，支持 Cladue 全系列、Minimax M2.1、Kimi K2.5、智谱 GLM 等模型，支持第三方渠道。优雅、简洁、丝滑、确信的流式输出。
 
 ![Proma Agent Mode](https://img.erlich.fun/personal-blog/uPic/3ZHWyA.png)
+
+### Agent Teams
+Agent Teams 或者 Agent 蜂群将会是 2026 年 Agent 主要的发展方向之一，Proma 也已经支持 Agent Teams 能力，并且可以自动根据用户的任务复杂度自动组件 Agent Teams，实际测试可以将复杂任务的处理能力和效果提高至少 5% - 20%。当运行 Agent Teams 时你将在右侧看到具体的 Agent 的工作状态。（也可以通过自然语言主动要求使用 Agent Teams，并为每个 Agent 指定它的工作或研究范围）
+![Proma Agent Teams](https://img.erlich.fun/personal-blog/uPic/vNVpRu.png)
 
 ### Skill & MCP
 Proma Skills 和 MCP，默认内置 Brainstorming 和办公软件 Skill，支持通过对话就能自动帮助你寻找和安装 Skills。
