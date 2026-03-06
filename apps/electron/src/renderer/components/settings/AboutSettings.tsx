@@ -34,6 +34,7 @@ const APP_VERSION: string = (() => {
   }
 })()
 
+// 【商业版】下载地址指向官网，合并 upstream 时勿改为开源仓库地址
 const GITHUB_RELEASES_URL = 'https://proma.cool/download'
 
 /** 更新状态卡片 */
