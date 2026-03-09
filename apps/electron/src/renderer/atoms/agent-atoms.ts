@@ -1044,6 +1044,9 @@ export function applyAgentEvent(
     case 'compact_complete':
       return { ...prev, isCompacting: false }
 
+    case 'model_resolved':
+      return { ...prev, model: event.model }
+
     case 'retrying':
       // 向后兼容：保留原有的简单 retrying 事件
       return {

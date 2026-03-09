@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSetAtom } from 'jotai'
-import { RefreshCw, Info } from 'lucide-react'
+import { RefreshCw, Info, GraduationCap } from 'lucide-react'
 import type { EnvironmentCheckResult } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -20,7 +20,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { EnvironmentCheckCard } from '@/components/environment/EnvironmentCheckCard'
+import { TutorialViewer } from '@/components/tutorial/TutorialViewer'
 import {
   environmentCheckResultAtom,
   isCheckingEnvironmentAtom,
@@ -41,6 +49,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const [result, setResult] = useState<EnvironmentCheckResult | null>(null)
   const [isChecking, setCheckingState] = useState(true)
   const [showSkipDialog, setShowSkipDialog] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(false)
 
   // 执行环境检测
   const checkEnvironment = async () => {
@@ -149,6 +158,22 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         )}
       </div>
 
+      {/* 教程入口 */}
+      <div className="w-full max-w-2xl mb-8">
+        <button
+          onClick={() => setShowTutorial(true)}
+          className="w-full rounded-xl bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 border border-primary/15 p-4 flex items-center gap-4 hover:from-primary/10 hover:via-primary/15 hover:to-primary/10 transition-colors text-left"
+        >
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <GraduationCap size={20} className="text-primary" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-foreground">查看使用教程</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">了解 Proma 的全部功能和使用技巧</p>
+          </div>
+        </button>
+      </div>
+
       {/* 底部操作栏 */}
       <div className="flex gap-4">
         <Button
@@ -197,6 +222,23 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 教程 Sheet */}
+      <Sheet open={showTutorial} onOpenChange={setShowTutorial}>
+        <SheetContent side="right" className="w-[560px] sm:max-w-[560px] p-0">
+          <SheetHeader className="px-6 pt-6 pb-4 border-b">
+            <SheetTitle className="flex items-center gap-2">
+              <GraduationCap size={18} className="text-primary" />
+              Proma 使用教程
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="h-[calc(100vh-80px)]">
+            <div className="px-6 py-4">
+              <TutorialViewer />
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

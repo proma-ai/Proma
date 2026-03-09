@@ -3,6 +3,7 @@
  */
 
 import * as React from 'react'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,7 @@ interface MoveSessionDialogProps {
   sessionId: string
   currentWorkspaceId: string | undefined
   workspaces: AgentWorkspace[]
-  onMoved: (updatedSession: AgentSessionMeta) => void
+  onMoved: (updatedSession: AgentSessionMeta, targetWorkspaceName: string) => void
 }
 
 export function MoveSessionDialog({
@@ -58,16 +59,19 @@ export function MoveSessionDialog({
   const handleConfirm = async (): Promise<void> => {
     if (!selectedWorkspaceId || moving) return
 
+    const targetWs = availableWorkspaces.find((ws) => ws.id === selectedWorkspaceId)
     setMoving(true)
     try {
       const updated = await window.electronAPI.moveAgentSessionToWorkspace({
         sessionId,
         targetWorkspaceId: selectedWorkspaceId,
       })
-      onMoved(updated)
+      onMoved(updated, targetWs?.name ?? '未知工作区')
       onOpenChange(false)
     } catch (error) {
       console.error('[迁移会话] 迁移失败:', error)
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error('迁移失败', { description: message })
       setMoving(false)
     }
   }

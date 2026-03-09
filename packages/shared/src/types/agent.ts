@@ -303,6 +303,8 @@ export type AgentEvent =
   | { type: 'ask_user_resolved'; requestId: string }
   // 提示建议
   | { type: 'prompt_suggestion'; suggestion: string }
+  // 模型确认（SDK 确认实际使用的模型）
+  | { type: 'model_resolved'; model: string }
   // Auto-Resume（Teams 完成后自动收集结果）
   | { type: 'waiting_resume'; message: string }
   | { type: 'resume_start'; messageId: string }
@@ -452,6 +454,10 @@ export interface AgentSendInput {
   workspaceId?: string
   /** 附加的外部目录（绝对路径，传递给 SDK additionalDirectories） */
   additionalDirectories?: string[]
+  /** 动态注入的 MCP 服务器（仅在本次会话中生效，如飞书群聊工具） */
+  customMcpServers?: Record<string, Record<string, unknown>>
+  /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'auto'） */
+  permissionModeOverride?: PromaPermissionMode
 }
 
 // ===== 会话迁移输入 =====

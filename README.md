@@ -1,8 +1,16 @@
 # Proma
 
-下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams 等能力，本地优先、多供应商支持、完全开源。
+> **📖 新手？从这里开始 →** [**Proma 使用教程系列**](./tutorial/tutorial-1.md) — 从零开始配置环境、连接大模型，3-5 分钟即可上手。
+
+下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams 等能力，本地优先、多供应商支持、完全开源。支持远程通过飞书机器人与 Agent 对话和交互，让你用手机也可以处理很多必要的工作。
 
 [English version README.md](./README.en.md)
+
+### ✦ 核心能力
+
+> **Chat** · 多模型对话 &nbsp;│&nbsp; **Agent** · 自主通用 Agent &nbsp;│&nbsp; **Agent Teams** · 多 Agent 协同 &nbsp;│&nbsp; **Skills & MCP** · 可扩展工具链
+>
+> **飞书远程** · 手机也能用 Agent &nbsp;│&nbsp; **记忆** · 跨会话理解你 &nbsp;│&nbsp; **多供应商** · Anthropic / OpenAI / Google / DeepSeek / MiniMax / Kimi / 智谱 &nbsp;│&nbsp; **本地优先** · 数据全在你手里
 
 ![Proma 海报](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
@@ -32,6 +40,17 @@ Proma Skills 和 MCP，默认内置 Brainstorming 和办公软件 Skill，支持
 
 ![Proma Default Skills and Mcp](https://img.erlich.fun/personal-blog/uPic/PNBOSt.png)
 
+### 通过飞书远程使用 Proma
+Proma 支持通过使用飞书机器人的方式来远程使用 Proma Agent 能力，支持切换工作区（/workspace 命令），支持创建新会话（/new 命令），这样就可以实现类似截图中的效果，可以为不同的工作区先配置上（或直接通过 Proma Agent 来帮你配置）对应的 Skills / MCP 以及文件附录等资源，即可远程也能让 Proma Agent 帮你完成工作。譬如远程帮你进行调研，并将调研文件通过邮件或其他方式发送到同事的邮箱、远程合并 PR 或者修复紧急的 Bug 并推送上线等。
+
+![Proma Lark Demo](https://img.erlich.fun/personal-blog/uPic/nNu4wA.png)
+
+实际的配置过程很简单，但我也知道这对于任何新手来说认知压力会比较大，但请相信我克服这种恐惧，3 分钟足够。
+
+![Proma Lark Config](https://img.erlich.fun/personal-blog/uPic/wTQisd.png)
+
+![Proma Lark Command](https://img.erlich.fun/personal-blog/uPic/tvzfZp.png)
+
 ### 记忆能力
 Proma 记忆功能，Chat 和 Agent 共享记忆，让 AI 真正了解你、记住你的偏好和习惯。
 ![Proma memory settings](https://img.erlich.fun/personal-blog/uPic/94B0LN.png)
@@ -49,6 +68,7 @@ Proma 全协议大模型渠道支持，支持国内外所有渠道模型，通�
 
 - **多供应商支持** — Anthropic、OpenAI、Google、DeepSeek、MiniMax、Kimi、智谱 GLM，以及任何 OpenAI 兼容端点
 - **AI Agent 模式** — 基于 Claude Agent SDK 的自主通用 Agent
+- **远程全天候使用 Proma** - 基于飞书/Lark 的机器人能力，实现远程使用 Proma Agent，搭配工作区的 Skill 和 MCP 等可以实现更好的远程工作
 - **流式输出 & 思考模式** — 实时流式响应，可视化扩展思考过程
 - **丰富渲染** — Mermaid 图表、语法高亮代码块、Markdown
 - **附件 & 文档解析** — 上传图片，解析 PDF/Office/文本文件内容到对话中

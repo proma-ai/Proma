@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync, renameSync, readdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -262,6 +262,22 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
       const srcDir = join(getAgentWorkspacePath(sourceWs.slug), sessionId)
       if (existsSync(srcDir)) {
         const destDir = join(getAgentWorkspacePath(targetWs.slug), sessionId)
+        // 清理已存在的空目标目录，防止 renameSync 抛出 ENOTEMPTY/EEXIST
+        if (existsSync(destDir)) {
+          try {
+            const contents = readdirSync(destDir)
+            if (contents.length === 0) {
+              rmSync(destDir, { recursive: true })
+              console.log(`[Agent 会话] 已清理空目标目录: ${destDir}`)
+            } else {
+              // 目标目录非空，合并：先移除目标，再移动源
+              rmSync(destDir, { recursive: true })
+              console.log(`[Agent 会话] 已清理非空目标目录（以源目录为准）: ${destDir}`)
+            }
+          } catch (cleanupError) {
+            console.warn(`[Agent 会话] 清理目标目录失败，跳过目录迁移:`, cleanupError)
+          }
+        }
         renameSync(srcDir, destDir)
         console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
       }

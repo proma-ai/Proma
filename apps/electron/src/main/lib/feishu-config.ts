@@ -93,11 +93,13 @@ export function getFeishuConfig(): FeishuConfig {
  */
 export function saveFeishuConfig(input: FeishuConfigInput): FeishuConfig {
   const configPath = getFeishuConfigPath()
+  const current = getFeishuConfig()
 
   const config: FeishuConfig = {
     enabled: input.enabled,
     appId: input.appId.trim(),
-    appSecret: input.appSecret ? encryptSecret(input.appSecret) : '',
+    // 空字符串时保留原值（UI 端留空表示不修改）
+    appSecret: input.appSecret ? encryptSecret(input.appSecret) : current.appSecret,
     defaultWorkspaceId: input.defaultWorkspaceId,
   }
 

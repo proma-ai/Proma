@@ -274,11 +274,37 @@ function ensureRipgrepAvailable(cliPath: string): void {
 /** 最大回填消息条数 */
 const MAX_CONTEXT_MESSAGES = 20
 
+/** 单条工具摘要最大字符数 */
+const MAX_TOOL_SUMMARY_LENGTH = 200
+
+/**
+ * 从 assistant 消息的 events 中提取工具活动摘要
+ *
+ * 返回简要的工具名称 + 关键输入信息，帮助新 SDK 会话理解之前做过什么。
+ */
+function extractToolSummary(events: import('@proma/shared').AgentEvent[]): string {
+  const summaries: string[] = []
+  for (const event of events) {
+    if (event.type === 'tool_start') {
+      const input = event.input
+      // 提取关键输入参数（如 file_path、command 等）
+      const keyParam = input.file_path ?? input.command ?? input.path ?? input.query ?? ''
+      const paramStr = keyParam ? `: ${String(keyParam).slice(0, 100)}` : ''
+      summaries.push(`[tool: ${event.toolName}${paramStr}]`)
+    }
+  }
+  if (summaries.length === 0) return ''
+  const joined = summaries.join(' ')
+  return joined.length > MAX_TOOL_SUMMARY_LENGTH
+    ? joined.slice(0, MAX_TOOL_SUMMARY_LENGTH) + '...'
+    : joined
+}
+
 /**
  * 构建带历史上下文的 prompt
  *
  * 当 resume 不可用时，将最近消息拼接为上下文注入 prompt，
- * 让新 SDK 会话保留对话记忆。仅取 user/assistant 角色的文本内容。
+ * 让新 SDK 会话保留对话记忆。包含文本内容和工具活动摘要。
  */
 function buildContextPrompt(sessionId: string, currentUserMessage: string): string {
   const allMessages = getAgentSessionMessages(sessionId)
@@ -290,7 +316,17 @@ function buildContextPrompt(sessionId: string, currentUserMessage: string): stri
   const recent = history.slice(-MAX_CONTEXT_MESSAGES)
   const lines = recent
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
-    .map((m) => `[${m.role}]: ${m.content}`)
+    .map((m) => {
+      let line = `[${m.role}]: ${m.content}`
+      // assistant 消息附带工具活动摘要，减少迁移后的"失忆"感
+      if (m.role === 'assistant' && m.events && m.events.length > 0) {
+        const toolSummary = extractToolSummary(m.events)
+        if (toolSummary) {
+          line += `\n  工具活动: ${toolSummary}`
+        }
+      }
+      return line
+    })
 
   if (lines.length === 0) return currentUserMessage
 
@@ -632,7 +668,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories } = input
+    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride } = input
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -823,9 +859,15 @@ export class AgentOrchestrator {
         }
       }
 
-      // 10. 构建 MCP 服务器配置 + 记忆工具
+      // 10. 构建 MCP 服务器配置 + 记忆工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
       await this.injectMemoryTools(sdk, mcpServers)
+
+      // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
+      if (customMcpServers) {
+        Object.assign(mcpServers, customMcpServers)
+        console.log(`[Agent 编排] 已合并 ${Object.keys(customMcpServers).length} 个自定义 MCP 服务器`)
+      }
 
       // 11. 构建动态上下文和最终 prompt
       const dynamicCtx = buildDynamicContext({
@@ -850,10 +892,11 @@ export class AgentOrchestrator {
 
       // 12. 读取应用设置 + 获取权限模式
       const appSettings = getSettings()
-      const permissionMode: PromaPermissionMode = workspaceSlug
-        ? getWorkspacePermissionMode(workspaceSlug)
-        : (appSettings.agentPermissionMode ?? 'smart')
-      console.log(`[Agent 编排] 权限模式: ${permissionMode}`)
+      const permissionMode: PromaPermissionMode = permissionModeOverride
+        ?? (workspaceSlug
+          ? getWorkspacePermissionMode(workspaceSlug)
+          : (appSettings.agentPermissionMode ?? 'smart'))
+      console.log(`[Agent 编排] 权限模式: ${permissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)
 
       const canUseTool = permissionMode !== 'auto'
         ? permissionService.createCanUseTool(
@@ -929,6 +972,9 @@ export class AgentOrchestrator {
         onModelResolved: (model: string) => {
           resolvedModel = model
           console.log(`[Agent 编排] SDK 确认模型: ${resolvedModel}`)
+          // 通知渲染进程更新流式状态中的模型信息
+          const modelEvent: AgentEvent = { type: 'model_resolved', model }
+          this.eventBus.emit(sessionId, modelEvent)
         },
         onContextWindow: (cw: number) => {
           console.log(`[Agent 编排] 缓存 contextWindow: ${cw}`)

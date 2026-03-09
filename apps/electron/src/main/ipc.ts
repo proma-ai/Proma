@@ -65,6 +65,7 @@ import type {
   FeishuChatBinding,
   FeishuPresenceReport,
   FeishuNotifyMode,
+  FeishuUpdateBindingInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -98,6 +99,7 @@ import {
   openFileDialog,
 } from './lib/attachment-service'
 import { extractTextFromAttachment } from './lib/document-parser'
+import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { checkEnvironment } from './lib/environment-checker'
@@ -151,7 +153,7 @@ import {
   getReleaseByTag,
 } from './lib/github-release-service'
 import { watchAttachedDirectory, unwatchAttachedDirectory } from './lib/workspace-watcher'
-import { getFeishuConfig, saveFeishuConfig } from './lib/feishu-config'
+import { getFeishuConfig, saveFeishuConfig, getDecryptedAppSecret } from './lib/feishu-config'
 import { feishuBridge } from './lib/feishu-bridge'
 import { presenceService } from './lib/feishu-presence'
 
@@ -339,6 +341,22 @@ export function registerIpcHandlers(): void {
       const current = conversations.find((c) => c.id === id)
       if (!current) throw new Error(`对话不存在: ${id}`)
       return updateConversationMeta(id, { pinned: !current.pinned })
+    }
+  )
+
+  // 获取教程内容
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.GET_TUTORIAL_CONTENT,
+    async (): Promise<string | null> => {
+      return getTutorialContent()
+    }
+  )
+
+  // 创建欢迎对话（含教程附件）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.CREATE_WELCOME_CONVERSATION,
+    async (): Promise<ConversationMeta | null> => {
+      return createWelcomeConversation()
     }
   )
 
@@ -623,8 +641,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_SESSION_TO_WORKSPACE,
     async (_, input: MoveSessionToWorkspaceInput): Promise<AgentSessionMeta> => {
+      // 渲染进程的 running 状态可能比主进程 activeSessions 清理更早变为 false
+      // （STREAM_COMPLETE 在 finally 之前发送），短暂等待后重试一次
       if (isAgentSessionActive(input.sessionId)) {
-        throw new Error('会话正在运行中，请停止后再迁移')
+        await new Promise((r) => setTimeout(r, 500))
+        if (isAgentSessionActive(input.sessionId)) {
+          throw new Error('会话正在运行中，请停止后再迁移')
+        }
       }
       return moveSessionToWorkspace(input.sessionId, input.targetWorkspaceId)
     }
@@ -1456,6 +1479,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 获取解密后的 App Secret
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_DECRYPTED_SECRET,
+    async (): Promise<string> => {
+      return getDecryptedAppSecret()
+    }
+  )
+
   // 保存飞书配置
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.SAVE_CONFIG,
@@ -1508,6 +1539,22 @@ export function registerIpcHandlers(): void {
     FEISHU_IPC_CHANNELS.LIST_BINDINGS,
     async (): Promise<FeishuChatBinding[]> => {
       return feishuBridge.listBindings()
+    }
+  )
+
+  // 更新绑定（工作区/会话）
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.UPDATE_BINDING,
+    async (_, input: FeishuUpdateBindingInput): Promise<FeishuChatBinding | null> => {
+      return feishuBridge.updateBinding(input)
+    }
+  )
+
+  // 移除绑定
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.REMOVE_BINDING,
+    async (_, chatId: string): Promise<boolean> => {
+      return feishuBridge.removeBinding(chatId)
     }
   )
 

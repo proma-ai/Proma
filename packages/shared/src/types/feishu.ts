@@ -46,6 +46,16 @@ export interface FeishuBridgeState {
 
 // ===== 聊天绑定 =====
 
+/** 更新绑定请求（渲染进程 → 主进程） */
+export interface FeishuUpdateBindingInput {
+  /** 目标 chat_id */
+  chatId: string
+  /** 新的工作区 ID（不传则不修改） */
+  workspaceId?: string
+  /** 新的会话 ID（不传则不修改） */
+  sessionId?: string
+}
+
 /** 飞书聊天 → Proma 会话绑定（内存态，不持久化） */
 export interface FeishuChatBinding {
   /** 飞书 chat_id（单聊或群聊） */
@@ -62,6 +72,10 @@ export interface FeishuChatBinding {
   modelId?: string
   /** 会话模式 */
   mode: 'agent' | 'chat'
+  /** 聊天类型（单聊或群聊） */
+  chatType?: 'p2p' | 'group'
+  /** 群名称（群聊时） */
+  groupName?: string
   /** 创建时间 */
   createdAt: number
 }
@@ -98,6 +112,78 @@ export interface FeishuNotificationSentPayload {
   preview: string
 }
 
+// ===== 群聊相关类型 =====
+
+/** 飞书消息事件中的 @mention 条目 */
+export interface FeishuMention {
+  /** 消息体中的占位符 key（如 "@_user_1"） */
+  key: string
+  /** 被 @ 用户/机器人的 ID，可能是字符串或 { open_id, union_id, user_id } 对象 */
+  id: string | { open_id?: string; union_id?: string; user_id?: string }
+  /** 被 @ 用户的显示名称 */
+  name: string
+  /** ID 类型（飞书 API 返回） */
+  id_type?: string
+}
+
+/** 飞书群聊信息缓存 */
+export interface FeishuGroupInfo {
+  /** 群聊 chat_id */
+  chatId: string
+  /** 群名称 */
+  name: string
+  /** 群描述 */
+  description?: string
+  /** 群成员列表 */
+  members?: FeishuGroupMember[]
+  /** 缓存时间戳 */
+  cachedAt: number
+}
+
+/** 飞书群成员信息 */
+export interface FeishuGroupMember {
+  /** 成员 open_id */
+  openId: string
+  /** 显示名称 */
+  name: string
+}
+
+/** 飞书消息上下文（贯穿消息处理链） */
+export interface FeishuMessageContext {
+  /** 飞书 chat_id */
+  chatId: string
+  /** 发送者 open_id */
+  senderOpenId: string
+  /** 发送者显示名称（群聊时获取） */
+  senderName?: string
+  /** 消息 ID（用于群聊 thread reply） */
+  messageId: string
+  /** 聊天类型 */
+  chatType: 'p2p' | 'group'
+  /** 群名称（group 时） */
+  groupName?: string
+}
+
+// ===== 群聊消息历史 =====
+
+/** 飞书聊天消息（群聊上下文读取） */
+export interface FeishuChatMessage {
+  /** 消息 ID */
+  messageId: string
+  /** 发送者 ID */
+  senderId: string
+  /** 发送者类型 */
+  senderType: 'user' | 'app' | 'anonymous' | 'unknown'
+  /** 发送者显示名称（异步解析） */
+  senderName?: string
+  /** 消息类型（text / post / image / interactive 等） */
+  msgType: string
+  /** 消息内容（已解析的文本，非 text 类型为描述） */
+  content: string
+  /** 创建时间（毫秒时间戳） */
+  createTime: number
+}
+
 // ===== IPC 通道常量 =====
 
 export const FEISHU_IPC_CHANNELS = {
@@ -105,6 +191,8 @@ export const FEISHU_IPC_CHANNELS = {
   GET_CONFIG: 'feishu:get-config',
   /** 保存飞书配置 */
   SAVE_CONFIG: 'feishu:save-config',
+  /** 获取解密后的 App Secret */
+  GET_DECRYPTED_SECRET: 'feishu:get-decrypted-secret',
   /** 测试飞书连接 */
   TEST_CONNECTION: 'feishu:test-connection',
   /** 启动 Bridge */
@@ -117,6 +205,10 @@ export const FEISHU_IPC_CHANNELS = {
   STATUS_CHANGED: 'feishu:status-changed',
   /** 获取活跃绑定列表 */
   LIST_BINDINGS: 'feishu:list-bindings',
+  /** 更新绑定（修改工作区/会话） */
+  UPDATE_BINDING: 'feishu:update-binding',
+  /** 移除绑定 */
+  REMOVE_BINDING: 'feishu:remove-binding',
   /** 渲染进程 → 主进程：上报用户在场状态 */
   REPORT_PRESENCE: 'feishu:report-presence',
   /** 渲染进程 → 主进程：设置某会话的通知模式 */

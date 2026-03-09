@@ -23,7 +23,7 @@ export interface FormattedAgentResult {
 /**
  * 构建 Agent 回复的飞书交互卡片
  */
-export function buildAgentReplyCard(result: FormattedAgentResult): Record<string, unknown> {
+export function buildAgentReplyCard(result: FormattedAgentResult, subtitle?: string): Record<string, unknown> {
   const toolLine = formatToolSummaryLine(result.toolSummaries, result.duration)
   const content = truncateForFeishu(result.text)
 
@@ -31,6 +31,7 @@ export function buildAgentReplyCard(result: FormattedAgentResult): Record<string
     config: { wide_screen_mode: true },
     header: {
       title: { tag: 'plain_text', content: 'Proma Agent' },
+      ...(subtitle ? { subtitle: { tag: 'plain_text', content: subtitle } } : {}),
       template: 'blue',
     },
     elements: [
@@ -258,6 +259,7 @@ export function buildHelpCard(): Record<string, unknown> {
         content: [
           '`/help` — 显示帮助',
           '`/new [标题]` — 创建新 Agent 会话',
+          '`/now` — 查看当前状态（工作区、会话、MCP、Skills 等）',
           '`/chat` — 切换到 Chat 模式',
           '`/agent` — 切换到 Agent 模式',
           '`/list` — 列出所有会话',

@@ -103,6 +103,7 @@ import type {
   FeishuPresenceReport,
   FeishuNotifyMode,
   FeishuNotificationSentPayload,
+  FeishuUpdateBindingInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 
@@ -181,6 +182,14 @@ export interface ElectronAPI {
 
   /** 切换对话置顶状态 */
   togglePinConversation: (id: string) => Promise<ConversationMeta>
+
+  // ===== 教程 =====
+
+  /** 获取教程内容 */
+  getTutorialContent: () => Promise<string | null>
+
+  /** 创建欢迎对话（含教程附件） */
+  createWelcomeConversation: () => Promise<ConversationMeta | null>
 
   // ===== 消息发送 =====
 
@@ -665,6 +674,8 @@ export interface ElectronAPI {
 
   /** 获取飞书配置 */
   getFeishuConfig: () => Promise<FeishuConfig>
+  /** 获取解密后的 App Secret */
+  getDecryptedFeishuSecret: () => Promise<string>
   /** 保存飞书配置（appSecret 为明文） */
   saveFeishuConfig: (input: FeishuConfigInput) => Promise<FeishuConfig>
   /** 测试飞书连接 */
@@ -677,6 +688,10 @@ export interface ElectronAPI {
   getFeishuStatus: () => Promise<FeishuBridgeState>
   /** 获取活跃绑定列表 */
   listFeishuBindings: () => Promise<FeishuChatBinding[]>
+  /** 更新绑定（修改工作区/会话） */
+  updateFeishuBinding: (input: FeishuUpdateBindingInput) => Promise<FeishuChatBinding | null>
+  /** 移除绑定 */
+  removeFeishuBinding: (chatId: string) => Promise<boolean>
   /** 上报用户在场状态 */
   reportFeishuPresence: (report: FeishuPresenceReport) => Promise<void>
   /** 设置会话通知模式 */
@@ -769,6 +784,15 @@ const electronAPI: ElectronAPI = {
 
   togglePinConversation: (id: string) => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.TOGGLE_PIN, id)
+  },
+
+  // 教程
+  getTutorialContent: () => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.GET_TUTORIAL_CONTENT)
+  },
+
+  createWelcomeConversation: () => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.CREATE_WELCOME_CONVERSATION)
   },
 
   // 消息发送
@@ -1407,6 +1431,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_CONFIG)
   },
 
+  getDecryptedFeishuSecret: () => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_DECRYPTED_SECRET)
+  },
+
   saveFeishuConfig: (input: FeishuConfigInput) => {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.SAVE_CONFIG, input)
   },
@@ -1429,6 +1457,14 @@ const electronAPI: ElectronAPI = {
 
   listFeishuBindings: () => {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.LIST_BINDINGS)
+  },
+
+  updateFeishuBinding: (input: FeishuUpdateBindingInput) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.UPDATE_BINDING, input)
+  },
+
+  removeFeishuBinding: (chatId: string) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.REMOVE_BINDING, chatId)
   },
 
   reportFeishuPresence: (report: FeishuPresenceReport) => {

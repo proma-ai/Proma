@@ -42,6 +42,8 @@ export interface AppSettings {
   agentMaxBudgetUsd?: number
   /** Agent 最大轮次（0 或 undefined = SDK 默认） */
   agentMaxTurns?: number
+  /** 教程推荐横幅是否已关闭 */
+  tutorialBannerDismissed?: boolean
 }
 
 /** 持久化的标签页状态 */
