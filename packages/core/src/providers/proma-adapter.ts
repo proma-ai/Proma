@@ -2,8 +2,7 @@
  * Proma 官方供应商适配器
  *
  * 实现 ProviderAdapter 接口，对接 Proma Cloud 后端 /chat 端点。
- * 后端返回 OpenAI 兼容 SSE 格式（choices[0].delta.content + reasoning_content），
- * SSE 解析直接复用 OpenAI 的逻辑。
+ * 后端返回 OpenAI 兼容 SSE 格式，SSE 解析和工具处理直接复用 OpenAI 适配器的逻辑。
  *
  * 与 OpenAIAdapter 的区别：
  * - 请求路径为 {baseUrl}/chat 而非 /chat/completions
@@ -19,6 +18,12 @@ import type {
   TitleRequestInput,
   ImageAttachmentData,
 } from './types.ts'
+import {
+  type OpenAIMessage,
+  toOpenAITools,
+  appendContinuationMessages,
+  parseOpenAICompatSSE,
+} from './openai-adapter.ts'
 
 // ===== Proma 特有类型 =====
 
@@ -27,20 +32,6 @@ interface PromaContentBlock {
   type: 'text' | 'image_url'
   text?: string
   image_url?: { url: string }
-}
-
-/** Proma 消息格式 */
-interface PromaMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string | PromaContentBlock[]
-}
-
-/** OpenAI 兼容 SSE 数据块 */
-interface PromaChunkData {
-  choices?: Array<{
-    delta?: { content?: string; reasoning_content?: string }
-    finish_reason?: string | null
-  }>
 }
 
 /** 标题响应（非流式） */
@@ -70,9 +61,9 @@ function buildMessageContent(
   return content
 }
 
-function toPromaMessages(input: StreamRequestInput): PromaMessage[] {
+function toPromaMessages(input: StreamRequestInput): OpenAIMessage[] {
   const { history, userMessage, systemMessage, attachments, readImageAttachments } = input
-  const messages: PromaMessage[] = []
+  const messages: OpenAIMessage[] = []
 
   if (systemMessage) {
     messages.push({ role: 'system', content: systemMessage })
@@ -108,39 +99,35 @@ export class PromaAdapter implements ProviderAdapter {
     const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
     const messages = toPromaMessages(input)
 
+    const bodyObj: Record<string, unknown> = {
+      model: input.modelId,
+      messages,
+      stream: true,
+      thinkingEnabled: input.thinkingEnabled ?? false,
+    }
+
+    // 工具定义（复用 OpenAI 兼容格式）
+    if (input.tools && input.tools.length > 0) {
+      bodyObj.tools = toOpenAITools(input.tools)
+    }
+
+    // 工具续接消息
+    if (input.continuationMessages && input.continuationMessages.length > 0) {
+      appendContinuationMessages(messages, input.continuationMessages)
+    }
+
     return {
       url: `${baseUrl}/chat`,
       headers: {
         'Authorization': `Bearer ${input.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: input.modelId,
-        messages,
-        stream: true,
-        thinkingEnabled: input.thinkingEnabled ?? false,
-      }),
+      body: JSON.stringify(bodyObj),
     }
   }
 
   parseSSELine(jsonLine: string): StreamEvent[] {
-    try {
-      const chunk = JSON.parse(jsonLine) as PromaChunkData
-      const delta = chunk.choices?.[0]?.delta
-      const events: StreamEvent[] = []
-
-      if (delta?.content) {
-        events.push({ type: 'chunk', delta: delta.content })
-      }
-
-      if (delta?.reasoning_content) {
-        events.push({ type: 'reasoning', delta: delta.reasoning_content })
-      }
-
-      return events
-    } catch {
-      return []
-    }
+    return parseOpenAICompatSSE(jsonLine)
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {
