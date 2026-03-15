@@ -1,8 +1,8 @@
 /**
  * FileDropZone — 文件拖拽上传区域
  *
- * 引导用户通过拖拽或点击将文件添加到 Agent 会话目录。
- * 文件上传后直接保存到会话工作区，FileBrowser 通过版本号自动刷新。
+ * 引导用户通过拖拽或点击将文件添加到 Agent 会话目录或工作区文件目录。
+ * 文件上传后直接保存到目标目录，FileBrowser 通过版本号自动刷新。
  */
 
 import * as React from 'react'
@@ -16,19 +16,23 @@ import { fileToBase64 } from '@/lib/file-utils'
 interface FileDropZoneProps {
   /** 当前工作区 slug（用于 IPC 调用） */
   workspaceSlug: string
-  /** 当前会话 ID */
-  sessionId: string
+  /** 当前会话 ID（session 模式必传） */
+  sessionId?: string
+  /** 上传目标：session（会话目录）或 workspace（工作区文件目录） */
+  target?: 'session' | 'workspace'
   /** 上传成功后的回调（触发文件浏览器刷新） */
   onFilesUploaded: () => void
   /** 附加文件夹回调 */
   onAttachFolder?: () => void
 }
 
-export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAttachFolder }: FileDropZoneProps): React.ReactElement {
+export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onFilesUploaded, onAttachFolder }: FileDropZoneProps): React.ReactElement {
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
 
-  /** 保存文件到会话目录 */
+  const isWorkspace = target === 'workspace'
+
+  /** 保存文件到目标目录 */
   const saveFiles = React.useCallback(async (files: globalThis.File[]): Promise<void> => {
     if (files.length === 0) return
 
@@ -40,11 +44,18 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
         fileEntries.push({ filename: file.name, data: base64 })
       }
 
-      await window.electronAPI.saveFilesToAgentSession({
-        workspaceSlug,
-        sessionId,
-        files: fileEntries,
-      })
+      if (isWorkspace) {
+        await window.electronAPI.saveFilesToWorkspaceFiles({
+          workspaceSlug,
+          files: fileEntries,
+        })
+      } else {
+        await window.electronAPI.saveFilesToAgentSession({
+          workspaceSlug,
+          sessionId: sessionId!,
+          files: fileEntries,
+        })
+      }
 
       onFilesUploaded()
       toast.success(`已添加 ${files.length} 个文件`)
@@ -54,7 +65,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
     } finally {
       setIsUploading(false)
     }
-  }, [workspaceSlug, sessionId, onFilesUploaded])
+  }, [workspaceSlug, sessionId, isWorkspace, onFilesUploaded])
 
   // ===== 拖拽处理 =====
 
@@ -91,7 +102,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
     }
 
     if (hasFolders) {
-      toast.info('不支持拖拽文件夹', { description: '请使用输入框工具栏的「附加文件夹」按钮' })
+      toast.info('不支持拖拽文件夹', { description: '请使用「附加文件夹」按钮' })
     }
 
     if (regularFiles.length > 0) {
@@ -112,11 +123,18 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
         data: f.data,
       }))
 
-      await window.electronAPI.saveFilesToAgentSession({
-        workspaceSlug,
-        sessionId,
-        files: fileEntries,
-      })
+      if (isWorkspace) {
+        await window.electronAPI.saveFilesToWorkspaceFiles({
+          workspaceSlug,
+          files: fileEntries,
+        })
+      } else {
+        await window.electronAPI.saveFilesToAgentSession({
+          workspaceSlug,
+          sessionId: sessionId!,
+          files: fileEntries,
+        })
+      }
 
       onFilesUploaded()
       toast.success(`已添加 ${result.files.length} 个文件`)
@@ -126,7 +144,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
     } finally {
       setIsUploading(false)
     }
-  }, [workspaceSlug, sessionId, onFilesUploaded])
+  }, [workspaceSlug, sessionId, isWorkspace, onFilesUploaded])
 
   return (
     <div className="flex-shrink-0 px-3 pt-3 pb-1">
@@ -155,9 +173,11 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
               isDragOver ? 'text-primary' : 'text-muted-foreground/60',
             )} />
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
-              将文件拖拽到此处
+              拖拽文件到此处
               <br />
-              <span className="text-[10px] text-muted-foreground/60">供 Agent 读取和处理</span>
+              <span className="text-[10px] text-muted-foreground/60">
+                {isWorkspace ? '工作区内所有会话可访问' : '供 Agent 读取和处理'}
+              </span>
             </p>
             <div className="flex items-center gap-1.5">
               <Tooltip>
@@ -174,7 +194,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p>将文件放入 Agent 工作文件夹</p>
+                  <p>{isWorkspace ? '添加文件到工作区文件目录' : '将文件放入 Agent 工作文件夹'}</p>
                 </TooltipContent>
               </Tooltip>
               {onAttachFolder && (
@@ -192,7 +212,7 @@ export function FileDropZone({ workspaceSlug, sessionId, onFilesUploaded, onAtta
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    <p>告知 Agent 你想处理的文件夹</p>
+                    <p>{isWorkspace ? '附加文件夹供工作区所有会话访问' : '告知 Agent 你想处理的文件夹'}</p>
                   </TooltipContent>
                 </Tooltip>
               )}

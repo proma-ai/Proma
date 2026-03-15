@@ -30,8 +30,10 @@ import type {
   AgentWorkspace,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
+  AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
   AgentAttachDirectoryInput,
+  WorkspaceAttachDirectoryInput,
   GetTaskOutputInput,
   GetTaskOutputResult,
   StopTaskInput,
@@ -115,11 +117,11 @@ import {
   migrateChatToAgentSession,
   moveSessionToWorkspace,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, isAgentSessionActive } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { getAgentTeamData, readAgentOutputFile } from './lib/agent-team-reader'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir } from './lib/config-paths'
 import {
   listAgentWorkspaces,
   createAgentWorkspace,
@@ -135,6 +137,9 @@ import {
   toggleWorkspaceSkill,
   getWorkspacePermissionMode,
   setWorkspacePermissionMode,
+  getWorkspaceAttachedDirectories,
+  attachWorkspaceDirectory,
+  detachWorkspaceDirectory,
 } from './lib/agent-workspace-manager'
 import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import { getAllToolInfos } from './lib/chat-tool-registry'
@@ -433,6 +438,35 @@ export function registerIpcHandlers(): void {
     CHAT_IPC_CHANNELS.READ_ATTACHMENT,
     async (_, localPath: string): Promise<string> => {
       return readAttachmentAsBase64(localPath)
+    }
+  )
+
+  // 另存图片到用户选择的位置（原生 Save As 对话框）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.SAVE_IMAGE_AS,
+    async (event, localPath: string, defaultFilename: string): Promise<boolean> => {
+      const { dialog, BrowserWindow } = await import('electron')
+      const { writeFileSync } = await import('node:fs')
+      const { extname: pathExtname } = await import('node:path')
+
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const ext = pathExtname(defaultFilename).replace('.', '').toLowerCase()
+      const filterMap: Record<string, string> = { jpg: 'JPEG', jpeg: 'JPEG', png: 'PNG', gif: 'GIF', webp: 'WebP', bmp: 'BMP' }
+      const filterName = filterMap[ext] ?? 'Image'
+
+      const result = await dialog.showSaveDialog(win ?? BrowserWindow.getFocusedWindow()!, {
+        defaultPath: defaultFilename,
+        filters: [
+          { name: `${filterName} 图片`, extensions: [ext || 'png'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+
+      if (result.canceled || !result.filePath) return false
+
+      const base64 = readAttachmentAsBase64(localPath)
+      writeFileSync(result.filePath, Buffer.from(base64, 'base64'))
+      return true
     }
   )
 
@@ -991,6 +1025,35 @@ export function registerIpcHandlers(): void {
           return { success: false, message: `连接失败: ${msg}` }
         }
       }
+      // Nano Banana 生图工具测试
+      if (toolId === 'nano-banana') {
+        const { getToolCredentials: getCredentials } = await import('./lib/chat-tool-config')
+        const credentials = getCredentials('nano-banana')
+        if (!credentials.apiKey) {
+          return { success: false, message: '请先填写 Gemini API Key' }
+        }
+        try {
+          const baseUrl = credentials.baseUrl?.trim() || 'https://generativelanguage.googleapis.com'
+          const model = credentials.model?.trim() || 'gemini-3.1-flash-image-preview'
+          const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
+              generationConfig: { maxOutputTokens: 10 },
+            }),
+          })
+          if (!response.ok) {
+            const errorText = await response.text()
+            return { success: false, message: `API 请求失败 (${response.status}): ${errorText.slice(0, 200)}` }
+          }
+          return { success: true, message: `连接成功，模型 ${model} 可用` }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          return { success: false, message: `连接失败: ${msg}` }
+        }
+      }
       return { success: false, message: `工具 ${toolId} 不支持测试` }
     }
   )
@@ -1038,6 +1101,22 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.SAVE_FILES_TO_SESSION,
     async (_, input: AgentSaveFilesInput): Promise<AgentSavedFile[]> => {
       return saveFilesToAgentSession(input)
+    }
+  )
+
+  // 保存文件到工作区文件目录
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SAVE_FILES_TO_WORKSPACE,
+    async (_, input: AgentSaveWorkspaceFilesInput): Promise<AgentSavedFile[]> => {
+      return saveFilesToWorkspaceFiles(input)
+    }
+  )
+
+  // 获取工作区文件目录路径
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_WORKSPACE_FILES_PATH,
+    async (_, workspaceSlug: string): Promise<string> => {
+      return getWorkspaceFilesDir(workspaceSlug)
     }
   )
 
@@ -1092,6 +1171,34 @@ export function registerIpcHandlers(): void {
       // 停止附加目录文件监听
       unwatchAttachedDirectory(input.directoryPath)
       return updated
+    }
+  )
+
+  // 附加外部目录到工作区（所有会话可访问）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ATTACH_WORKSPACE_DIRECTORY,
+    async (_, input: WorkspaceAttachDirectoryInput): Promise<string[]> => {
+      const updated = attachWorkspaceDirectory(input.workspaceSlug, input.directoryPath)
+      watchAttachedDirectory(input.directoryPath)
+      return updated
+    }
+  )
+
+  // 移除工作区的附加目录
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DETACH_WORKSPACE_DIRECTORY,
+    async (_, input: WorkspaceAttachDirectoryInput): Promise<string[]> => {
+      const updated = detachWorkspaceDirectory(input.workspaceSlug, input.directoryPath)
+      unwatchAttachedDirectory(input.directoryPath)
+      return updated
+    }
+  )
+
+  // 获取工作区附加目录列表
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_WORKSPACE_DIRECTORIES,
+    async (_, workspaceSlug: string): Promise<string[]> => {
+      return getWorkspaceAttachedDirectories(workspaceSlug)
     }
   )
 
@@ -1194,6 +1301,15 @@ export function registerIpcHandlers(): void {
       }
 
       shell.showItemInFolder(safePath)
+    }
+  )
+
+  // 在新窗口中预览文件（允许任意绝对路径）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.PREVIEW_FILE,
+    async (_, filePath: string): Promise<void> => {
+      const { openFilePreview } = await import('./lib/file-preview-service')
+      openFilePreview(filePath)
     }
   )
 

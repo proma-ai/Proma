@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { PanelRight, X, Users, FolderOpen, ExternalLink, RefreshCw, ChevronRight, Folder, FileText, MoreHorizontal, FolderSearch, Pencil, FolderInput } from 'lucide-react'
+import { PanelRight, X, Users, FolderOpen, ExternalLink, RefreshCw, ChevronRight, Folder, FileText, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -33,6 +33,7 @@ import {
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   agentAttachedDirectoriesMapAtom,
+  workspaceAttachedDirectoriesMapAtom,
 } from '@/atoms/agent-atoms'
 import type { SidePanelTab } from '@/atoms/agent-atoms'
 import type { FileEntry } from '@proma/shared'
@@ -106,10 +107,29 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
 
-  // 附加目录列表
+  // 附加目录列表（会话级）
   const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
   const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
   const attachedDirs = attachedDirsMap.get(sessionId) ?? []
+
+  // 附加目录列表（工作区级）
+  const wsAttachedDirsMap = useAtomValue(workspaceAttachedDirectoriesMapAtom)
+  const setWsAttachedDirsMap = useSetAtom(workspaceAttachedDirectoriesMapAtom)
+  const wsAttachedDirs = currentWorkspaceId ? (wsAttachedDirsMap.get(currentWorkspaceId) ?? []) : []
+
+  // 加载工作区级附加目录
+  React.useEffect(() => {
+    if (!workspaceSlug || !currentWorkspaceId) return
+    window.electronAPI.getWorkspaceDirectories(workspaceSlug)
+      .then((dirs) => {
+        setWsAttachedDirsMap((prev) => {
+          const map = new Map(prev)
+          map.set(currentWorkspaceId, dirs)
+          return map
+        })
+      })
+      .catch(console.error)
+  }, [workspaceSlug, currentWorkspaceId, setWsAttachedDirsMap])
 
   const handleAttachFolder = React.useCallback(async () => {
     try {
@@ -150,6 +170,48 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
     }
   }, [sessionId, setAttachedDirsMap])
 
+  // 工作区级附加文件夹
+  const handleAttachWorkspaceFolder = React.useCallback(async () => {
+    if (!workspaceSlug || !currentWorkspaceId) return
+    try {
+      const result = await window.electronAPI.openFolderDialog()
+      if (!result) return
+
+      const updated = await window.electronAPI.attachWorkspaceDirectory({
+        workspaceSlug,
+        directoryPath: result.path,
+      })
+      setWsAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        map.set(currentWorkspaceId, updated)
+        return map
+      })
+    } catch (error) {
+      console.error('[SidePanel] 附加工作区文件夹失败:', error)
+    }
+  }, [workspaceSlug, currentWorkspaceId, setWsAttachedDirsMap])
+
+  const handleDetachWorkspaceDirectory = React.useCallback(async (dirPath: string) => {
+    if (!workspaceSlug || !currentWorkspaceId) return
+    try {
+      const updated = await window.electronAPI.detachWorkspaceDirectory({
+        workspaceSlug,
+        directoryPath: dirPath,
+      })
+      setWsAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        if (updated.length > 0) {
+          map.set(currentWorkspaceId, updated)
+        } else {
+          map.delete(currentWorkspaceId)
+        }
+        return map
+      })
+    } catch (error) {
+      console.error('[SidePanel] 移除工作区附加目录失败:', error)
+    }
+  }, [workspaceSlug, currentWorkspaceId, setWsAttachedDirsMap])
+
   // 文件上传完成后递增版本号，触发 FileBrowser 刷新
   const handleFilesUploaded = React.useCallback(() => {
     setFilesVersion((prev) => prev + 1)
@@ -166,6 +228,16 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
     const parts = sessionPath.split('/').filter(Boolean)
     return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : sessionPath
   }, [sessionPath])
+
+  // 工作区文件目录路径
+  const [workspaceFilesPath, setWorkspaceFilesPath] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!workspaceSlug) {
+      setWorkspaceFilesPath(null)
+      return
+    }
+    window.electronAPI.getWorkspaceFilesPath(workspaceSlug).then(setWorkspaceFilesPath).catch(() => setWorkspaceFilesPath(null))
+  }, [workspaceSlug])
 
   // 自动打开：文件变化时（仅在有 sessionPath 时）
   const prevFilesVersionRef = React.useRef(filesVersion)
@@ -268,11 +340,20 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
             {/* File Browser Tab */}
             <TabsContent value="files" className="flex-1 overflow-hidden m-0 data-[state=active]:flex data-[state=active]:flex-col">
               {sessionPath && workspaceSlug ? (
-                <>
-                  {/* 工具栏：工作区目录标签 + 路径 + 按钮 */}
-                  <div className="flex items-center gap-1 px-3 h-[36px] border-b flex-shrink-0">
-                    <span className="text-[11px] font-medium text-muted-foreground shrink-0">工作区目录</span>
-                    <span className="text-[11px] text-muted-foreground/60 truncate flex-1" title={sessionPath}>
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {/* ===== 会话文件区 ===== */}
+                  <div className="flex items-center gap-1 px-3 h-[32px] flex-shrink-0">
+                    <FolderOpen className="size-3 text-muted-foreground" />
+                    <span className="text-[11px] font-medium text-muted-foreground">会话文件</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="size-3 text-muted-foreground/50 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[200px]">
+                        <p>当前会话的专属文件，仅本次对话的 Agent 可以访问</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className="text-[10px] text-muted-foreground/50 truncate flex-1" title={sessionPath}>
                       {breadcrumb}
                     </span>
                     <Tooltip>
@@ -281,14 +362,14 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6 flex-shrink-0"
+                          className="h-5 w-5 flex-shrink-0"
                           onClick={() => window.electronAPI.openFile(sessionPath).catch(console.error)}
                         >
-                          <ExternalLink className="size-3" />
+                          <ExternalLink className="size-2.5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom">
-                        <p>在 Finder 中打开工作区文件夹</p>
+                        <p>在 Finder 中打开</p>
                       </TooltipContent>
                     </Tooltip>
                     <Tooltip>
@@ -297,10 +378,10 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6 flex-shrink-0"
+                          className="h-5 w-5 flex-shrink-0"
                           onClick={handleRefresh}
                         >
-                          <RefreshCw className="size-3" />
+                          <RefreshCw className="size-2.5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom">
@@ -308,27 +389,82 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  {/* 可滚动内容区：附加目录 + 文件浏览器 + 拖拽上传 */}
-                  <div className="flex-1 min-h-0 overflow-y-auto">
-                    {/* 附加目录列表（可展开目录树） */}
-                    {attachedDirs.length > 0 && (
+                  {/* 附加目录列表（可展开目录树） */}
+                  {attachedDirs.length > 0 && (
+                    <AttachedDirsSection
+                      attachedDirs={attachedDirs}
+                      onDetach={handleDetachDirectory}
+                      refreshVersion={filesVersion}
+                    />
+                  )}
+                  {/* 会话文件浏览器 */}
+                  <FileBrowser rootPath={sessionPath} hideToolbar embedded />
+                  {/* 会话文件拖拽上传区域 */}
+                  <FileDropZone
+                    workspaceSlug={workspaceSlug}
+                    sessionId={sessionId}
+                    target="session"
+                    onFilesUploaded={handleFilesUploaded}
+                    onAttachFolder={handleAttachFolder}
+                  />
+
+                  {/* ===== 分隔线 ===== */}
+                  <div className="mx-3 my-3 border-t border-dashed border-muted-foreground/20" />
+
+                  {/* ===== 工作区文件区 ===== */}
+                  <div className="bg-muted/30 rounded-lg mx-2 mb-2 pb-1">
+                    <div className="flex items-center gap-1 px-2 h-[32px] flex-shrink-0">
+                      <FolderHeart className="size-3 text-primary/70" />
+                      <span className="text-[11px] font-medium text-primary/70">工作区文件</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 text-primary/40 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[220px]">
+                          <p>工作区内所有会话可访问的文件和文件夹，每个新对话都可以自动读取</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="flex-1" />
+                      {workspaceFilesPath && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 flex-shrink-0"
+                              onClick={() => window.electronAPI.openFile(workspaceFilesPath).catch(console.error)}
+                            >
+                              <ExternalLink className="size-2.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">
+                            <p>在 Finder 中打开工作区文件目录</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
+                    {/* 工作区级附加目录 */}
+                    {wsAttachedDirs.length > 0 && (
                       <AttachedDirsSection
-                        attachedDirs={attachedDirs}
-                        onDetach={handleDetachDirectory}
+                        attachedDirs={wsAttachedDirs}
+                        onDetach={handleDetachWorkspaceDirectory}
                         refreshVersion={filesVersion}
                       />
                     )}
-                    {/* 文件浏览器（嵌入模式，不自带滚动） */}
-                    <FileBrowser rootPath={sessionPath} hideToolbar embedded />
-                    {/* 文件拖拽上传区域 */}
+                    {/* 工作区文件浏览器 */}
+                    {workspaceFilesPath && (
+                      <FileBrowser rootPath={workspaceFilesPath} hideToolbar embedded />
+                    )}
+                    {/* 工作区文件拖拽上传区域 */}
                     <FileDropZone
                       workspaceSlug={workspaceSlug}
-                      sessionId={sessionId}
+                      target="workspace"
                       onFilesUploaded={handleFilesUploaded}
-                      onAttachFolder={handleAttachFolder}
+                      onAttachFolder={handleAttachWorkspaceFolder}
                     />
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
                   请选择工作区

@@ -374,6 +374,8 @@ export const CHAT_IPC_CHANNELS = {
   SAVE_ATTACHMENT: 'chat:save-attachment',
   /** 读取附件（返回 base64） */
   READ_ATTACHMENT: 'chat:read-attachment',
+  /** 另存图片到用户选择的位置（原生 Save As 对话框） */
+  SAVE_IMAGE_AS: 'chat:save-image-as',
   /** 删除附件 */
   DELETE_ATTACHMENT: 'chat:delete-attachment',
   /** 打开文件选择对话框 */

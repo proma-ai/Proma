@@ -172,6 +172,7 @@ export type ErrorCode =
   | 'data_policy_error'
   | 'invalid_request'
   | 'image_too_large'
+  | 'prompt_too_long'
   | 'provider_error'
   | 'unknown_error'
 
@@ -182,7 +183,7 @@ export interface RecoveryAction {
   /** 操作标签 */
   label: string
   /** 操作类型 */
-  action: 'settings' | 'retry' | 'cancel' | string
+  action: 'settings' | 'retry' | 'cancel' | 'compact' | string
 }
 
 /** 类型化错误 */
@@ -263,6 +264,16 @@ export interface RetryAttempt {
 /**
  * Agent 事件类型
  *
+/** MCP 工具结果中的图片附件 */
+export interface AgentToolResultImage {
+  localPath: string
+  filename: string
+  mediaType: string
+}
+
+/**
+ * Agent 事件流类型
+ *
  * 从 SDK 消息转换而来的扁平事件流，用于驱动 UI 渲染。
  */
 export type AgentEvent =
@@ -271,7 +282,7 @@ export type AgentEvent =
   | { type: 'text_complete'; text: string; isIntermediate: boolean; turnId?: string; parentToolUseId?: string }
   // 工具执行
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string }
-  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string; imageAttachments?: AgentToolResultImage[] }
   // 后台任务
   | { type: 'task_backgrounded'; toolUseId: string; taskId: string; intent?: string; turnId?: string }
   | { type: 'task_started'; taskId: string; toolUseId?: string; description: string; taskType?: string; turnId?: string }
@@ -458,6 +469,10 @@ export interface AgentSendInput {
   customMcpServers?: Record<string, Record<string, unknown>>
   /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'auto'） */
   permissionModeOverride?: PromaPermissionMode
+  /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */
+  mentionedSkills?: string[]
+  /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
+  mentionedMcpServers?: string[]
 }
 
 // ===== 会话迁移输入 =====
@@ -583,10 +598,24 @@ export interface AgentSavedFile {
   targetPath: string
 }
 
+/** Agent 文件保存到工作区文件目录的输入 */
+export interface AgentSaveWorkspaceFilesInput {
+  workspaceSlug: string
+  files: Array<{ filename: string; data: string }>
+}
+
 /** 附加/分离目录的输入参数 */
 export interface AgentAttachDirectoryInput {
   /** 会话 ID */
   sessionId: string
+  /** 目录的绝对路径 */
+  directoryPath: string
+}
+
+/** 工作区级附加/分离目录的输入参数 */
+export interface WorkspaceAttachDirectoryInput {
+  /** 工作区 slug */
+  workspaceSlug: string
   /** 目录的绝对路径 */
   directoryPath: string
 }
@@ -831,12 +860,22 @@ export const AGENT_IPC_CHANNELS = {
   // 附件
   /** 保存文件到 Agent session 工作目录 */
   SAVE_FILES_TO_SESSION: 'agent:save-files-to-session',
+  /** 保存文件到工作区文件目录 */
+  SAVE_FILES_TO_WORKSPACE: 'agent:save-files-to-workspace',
+  /** 获取工作区文件目录路径 */
+  GET_WORKSPACE_FILES_PATH: 'agent:get-workspace-files-path',
   /** 打开文件夹选择对话框 */
   OPEN_FOLDER_DIALOG: 'agent:open-folder-dialog',
   /** 附加外部目录到 Agent 会话 */
   ATTACH_DIRECTORY: 'agent:attach-directory',
   /** 移除会话的附加目录 */
   DETACH_DIRECTORY: 'agent:detach-directory',
+  /** 附加外部目录到工作区（所有会话共享） */
+  ATTACH_WORKSPACE_DIRECTORY: 'agent:attach-workspace-directory',
+  /** 移除工作区的附加目录 */
+  DETACH_WORKSPACE_DIRECTORY: 'agent:detach-workspace-directory',
+  /** 获取工作区附加目录列表 */
+  GET_WORKSPACE_DIRECTORIES: 'agent:get-workspace-directories',
 
   // 文件系统操作
   /** 获取 session 工作路径 */
@@ -849,6 +888,8 @@ export const AGENT_IPC_CHANNELS = {
   OPEN_FILE: 'agent:open-file',
   /** 在系统文件管理器中显示文件 */
   SHOW_IN_FOLDER: 'agent:show-in-folder',
+  /** 在新窗口中预览文件 */
+  PREVIEW_FILE: 'agent:preview-file',
   /** 重命名文件/目录 */
   RENAME_FILE: 'agent:rename-file',
   /** 移动文件/目录到目标目录 */

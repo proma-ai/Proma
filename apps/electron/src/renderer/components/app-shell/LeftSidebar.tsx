@@ -469,9 +469,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   /** 重命名 Agent 会话标题 */
   const handleAgentRename = async (id: string, newTitle: string): Promise<void> => {
     try {
-      await window.electronAPI.updateAgentSessionTitle(id, newTitle)
+      const updated = await window.electronAPI.updateAgentSessionTitle(id, newTitle)
       setAgentSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, title: newTitle, updatedAt: Date.now() } : s))
+        prev.map((s) => (s.id === updated.id ? updated : s))
       )
       // 同步更新标签页标题
       setTabs((prev) => updateTabTitle(prev, id, newTitle))

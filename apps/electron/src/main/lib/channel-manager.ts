@@ -24,38 +24,10 @@ import type {
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
+import { normalizeAnthropicBaseUrl, normalizeBaseUrl } from '@proma/core'
 
 /** 当前配置版本 */
 const CONFIG_VERSION = 1
-
-// ===== URL 规范化工具 =====
-
-/**
- * 规范化 Anthropic Base URL
- *
- * 处理逻辑：
- * - 去除尾部斜杠
- * - 确保包含 /v1（如果用户没填则自动补上）
- * - 如果已经包含 /v1 则不重复添加
- *
- * 最终结果类似 https://api.anthropic.com/v1
- */
-function normalizeAnthropicBaseUrl(baseUrl: string): string {
-  let url = baseUrl.trim().replace(/\/+$/, '')
-  // 去除用户误填的 /messages 后缀，避免后续拼接时路径重复
-  url = url.replace(/\/messages$/, '')
-  if (!url.match(/\/v\d+$/)) {
-    url = `${url}/v1`
-  }
-  return url
-}
-
-/**
- * 规范化通用 Base URL（去除尾部斜杠）
- */
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, '')
-}
 
 /**
  * 读取渠道配置文件

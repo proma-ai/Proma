@@ -21,7 +21,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { Wrench, Brain, Globe, Settings } from 'lucide-react'
+import { Wrench, Brain, Globe, Settings, ImagePlus } from 'lucide-react'
 import { chatToolsAtom, enabledToolIdsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import { activeViewAtom } from '@/atoms/active-view'
@@ -33,6 +33,8 @@ function getToolIcon(iconName?: string): React.ReactElement {
       return <Brain className="size-4" />
     case 'Globe':
       return <Globe className="size-4" />
+    case 'ImagePlus':
+      return <ImagePlus className="size-4" />
     default:
       return <Wrench className="size-4" />
   }

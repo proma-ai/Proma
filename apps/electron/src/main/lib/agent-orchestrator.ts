@@ -18,23 +18,26 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { app, BrowserWindow } from 'electron'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt } from '@proma/shared'
 import { SAFE_TOOLS, CLOUD_IPC_CHANNELS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
+import { isPromptTooLongError, friendlyErrorMessage } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
-import { getAdapter, fetchTitle } from '@proma/core'
+import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath } from './config-paths'
+import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir } from './config-paths'
+import { getWorkspaceAttachedDirectories } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-builder'
@@ -225,7 +228,11 @@ function resolveSDKCliPath(): string {
 /**
  * 获取 Agent SDK 运行时可执行文件
  *
- * 优先级：Node.js → Bun → 降级到字符串 'node'
+ * 优先级：Node.js → Bun → which node 同步查找 → 字符串 'node'
+ *
+ * 当 runtimeStatusCache 尚未初始化时（应用启动竞态），
+ * 降级到 'node' 字符串可能因 Electron 进程 PATH 不含 node 而触发 ENOENT。
+ * 此时用 which/where 同步查找作为兜底，避免 SDK spawn 失败。
  */
 function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
   const status = getRuntimeStatus()
@@ -236,6 +243,20 @@ function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
 
   if (status?.bun?.available && status.bun.path) {
     return { type: 'bun', path: status.bun.path }
+  }
+
+  // runtimeStatusCache 未就绪时，同步查找 node 路径
+  try {
+    const cmd = process.platform === 'win32' ? 'where' : 'which'
+    const nodePath = execFileSync(cmd, ['node'], { encoding: 'utf-8', timeout: 2000 })
+      .trim()
+      .split('\n')[0]
+    if (nodePath && existsSync(nodePath)) {
+      console.warn(`[Agent 编排] runtimeStatusCache 未就绪，同步查找 node: ${nodePath}`)
+      return { type: 'node', path: nodePath }
+    }
+  } catch {
+    // 忽略查找失败，继续降级
   }
 
   return { type: 'node', path: 'node' }
@@ -397,15 +418,14 @@ export class AgentOrchestrator {
       CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
       // 启用 Tasks 功能
       CLAUDE_CODE_ENABLE_TASKS: 'true',
+      // 配置隔离：让 SDK 使用独立的配置目录，不读取用户的 ~/.claude.json
+      CLAUDE_CONFIG_DIR: getSdkConfigDir(),
     }
 
     // 显式控制 ANTHROPIC_BASE_URL：仅在用户配置了自定义 Base URL 时注入
+    // 使用统一的 normalizeAnthropicBaseUrlForSdk 规范化，SDK 内部会自动拼接 /v1/messages
     if (baseUrl && baseUrl !== DEFAULT_ANTHROPIC_URL) {
-      sdkEnv.ANTHROPIC_BASE_URL = baseUrl
-        .trim()
-        .replace(/\/+$/, '')
-        .replace(/\/v\d+\/messages$/, '')
-        .replace(/\/v\d+$/, '')
+      sdkEnv.ANTHROPIC_BASE_URL = normalizeAnthropicBaseUrlForSdk(baseUrl)
     }
 
     const proxyUrl = await getEffectiveProxyUrl()
@@ -532,6 +552,23 @@ export class AgentOrchestrator {
       console.log(`[Agent 编排] 已注入内置记忆工具 (mem)`)
     } catch (err) {
       console.error(`[Agent 编排] 注入记忆工具失败:`, err)
+    }
+  }
+
+  /**
+   * 注入 SDK 内置生图工具（Nano Banana）
+   */
+  private async injectNanoBananaTools(
+    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
+    mcpServers: Record<string, Record<string, unknown>>,
+    sessionId: string,
+    agentCwd?: string,
+  ): Promise<void> {
+    try {
+      const { injectNanoBananaMcpServer } = await import('./chat-tools/nano-banana-mcp')
+      await injectNanoBananaMcpServer(sdk, mcpServers, sessionId, agentCwd)
+    } catch (err) {
+      console.error(`[Agent 编排] 注入 Nano Banana MCP 失败:`, err)
     }
   }
 
@@ -668,7 +705,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride } = input
+    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers } = input
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -756,7 +793,10 @@ export class AgentOrchestrator {
       process.env.ANTHROPIC_API_KEY = apiKey
     }
     if (sdkBaseUrl) {
-      process.env.ANTHROPIC_BASE_URL = sdkBaseUrl
+      // 非 proma 渠道应用规范化逻辑，确保 process.env 与 sdkEnv 中的 URL 一致
+      process.env.ANTHROPIC_BASE_URL = channel.provider === 'proma'
+        ? sdkBaseUrl
+        : normalizeAnthropicBaseUrlForSdk(sdkBaseUrl)
     }
 
     const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl, channel.provider === 'proma')
@@ -859,9 +899,10 @@ export class AgentOrchestrator {
         }
       }
 
-      // 10. 构建 MCP 服务器配置 + 记忆工具 + 自定义工具
+      // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
       await this.injectMemoryTools(sdk, mcpServers)
+      await this.injectNanoBananaTools(sdk, mcpServers, sessionId, agentCwd)
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
@@ -875,7 +916,25 @@ export class AgentOrchestrator {
         workspaceSlug,
         agentCwd,
       })
-      const contextualMessage = `${dynamicCtx}\n\n${userMessage}`
+
+      // 11.5 注入 mention 引用指令（Skill/MCP）— 仅影响 prompt，不影响持久化
+      let enrichedMessage = userMessage
+      if (mentionedSkills?.length || mentionedMcpServers?.length) {
+        const toolLines: string[] = ['用户在消息中明确引用了以下工具，请在本次回复中主动调用：']
+        for (const slug of mentionedSkills ?? []) {
+          const qualifiedName = workspaceSlug
+            ? `proma-workspace-${workspaceSlug}:${slug}`
+            : slug
+          toolLines.push(`- Skill: ${qualifiedName}（请立即调用此 Skill）`)
+        }
+        for (const name of mentionedMcpServers ?? []) {
+          toolLines.push(`- MCP 服务器: ${name}（请使用此 MCP 服务器的工具来完成任务）`)
+        }
+        enrichedMessage = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${userMessage}`
+        console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
+      }
+
+      const contextualMessage = `${dynamicCtx}\n\n${enrichedMessage}`
 
       const isCompactCommand = userMessage.trim() === '/compact'
       const finalPrompt = isCompactCommand
@@ -947,7 +1006,23 @@ export class AgentOrchestrator {
         resumeSessionId: existingSdkSessionId,
         ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
         ...(workspaceSlug && { plugins: [{ type: 'local' as const, path: getAgentWorkspacePath(workspaceSlug) }] }),
-        ...(additionalDirectories && additionalDirectories.length > 0 && { additionalDirectories }),
+        // 合并用户附加目录 + 工作区附加目录 + 工作区文件目录
+        ...(() => {
+          const allDirs = [...(additionalDirectories || [])]
+          if (workspaceSlug) {
+            // 工作区级附加目录
+            const workspaceDirs = getWorkspaceAttachedDirectories(workspaceSlug)
+            for (const dir of workspaceDirs) {
+              if (!allDirs.includes(dir)) allDirs.push(dir)
+            }
+            // 工作区文件目录
+            const wsFilesDir = getWorkspaceFilesDir(workspaceSlug)
+            if (!allDirs.includes(wsFilesDir)) {
+              allDirs.push(wsFilesDir)
+            }
+          }
+          return allDirs.length > 0 ? { additionalDirectories: allDirs } : {}
+        })(),
         // SDK 0.2.52+ 新增选项（从 settings 读取）
         ...(appSettings.agentThinking && { thinking: appSettings.agentThinking }),
         ...(appSettings.agentEffort && { effort: appSettings.agentEffort }),
@@ -1429,24 +1504,33 @@ export class AgentOrchestrator {
 
           let userFacingError: string
           if (apiError) {
-            userFacingError = `API 错误 (${apiError.statusCode}):\n${apiError.message}`
+            userFacingError = friendlyErrorMessage(`API 错误 (${apiError.statusCode}):\n${apiError.message}`)
           } else {
             // 没有解析到 API 错误时，把 stderr 内容附加上去（便于诊断 Windows exit code 1 等问题）
             const stderrSummary = stderrOutput
               ? `\n\n诊断信息:\n${stderrOutput.slice(0, 500)}${stderrOutput.length > 500 ? '...' : ''}`
               : ''
-            userFacingError = errorMessage + stderrSummary
+            userFacingError = friendlyErrorMessage(errorMessage) + stderrSummary
           }
 
           // 保存错误消息到 JSONL
           try {
+            // 检测是否为 prompt too long 错误
+            const isPromptTooLong = isPromptTooLongError(
+              userFacingError,
+              error instanceof Error ? (error.stack ?? error.message) : String(error),
+              stderrOutput,
+            )
+
             const errMsg: AgentMessage = {
               id: randomUUID(),
               role: 'status',
-              content: userFacingError,
+              content: isPromptTooLong
+                ? '上下文过长：当前对话的上下文已超出模型限制，请压缩上下文或开启新会话'
+                : userFacingError,
               createdAt: Date.now(),
-              errorCode: 'unknown_error',
-              errorTitle: '执行错误',
+              errorCode: isPromptTooLong ? 'prompt_too_long' : 'unknown_error',
+              errorTitle: isPromptTooLong ? '上下文过长' : '执行错误',
               errorOriginal: error instanceof Error ? error.stack : String(error),
             }
             appendAgentMessage(sessionId, errMsg)

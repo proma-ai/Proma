@@ -132,6 +132,12 @@
   );
 }
 
+/* 消息级别渲染优化：初次渲染完成后，屏幕外消息跳过渲染和布局 */
+.cv-ready [data-message-id] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
 /* Shiki 代码块样式 */
 .code-block-wrapper {
   contain: content;

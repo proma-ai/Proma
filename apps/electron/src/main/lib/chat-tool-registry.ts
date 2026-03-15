@@ -26,6 +26,11 @@ import {
   AGENT_RECOMMEND_TOOL_DEFINITIONS,
   isAgentRecommendAvailable,
 } from './chat-tools/agent-recommend-tool'
+import {
+  NANO_BANANA_TOOL_META,
+  NANO_BANANA_TOOL_DEFINITIONS,
+  isNanoBananaAvailable,
+} from './chat-tools/nano-banana-tool'
 import { getMemoryConfig } from './memory-service'
 
 // ===== 内置工具注册 =====
@@ -53,6 +58,11 @@ const BUILTIN_TOOLS: BuiltinToolEntry[] = [
     meta: AGENT_RECOMMEND_TOOL_META,
     getDefinitions: () => AGENT_RECOMMEND_TOOL_DEFINITIONS,
     checkAvailable: isAgentRecommendAvailable,
+  },
+  {
+    meta: NANO_BANANA_TOOL_META,
+    getDefinitions: () => NANO_BANANA_TOOL_DEFINITIONS,
+    checkAvailable: isNanoBananaAvailable,
   },
 ]
 

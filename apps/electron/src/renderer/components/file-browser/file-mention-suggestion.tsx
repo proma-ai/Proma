@@ -11,6 +11,7 @@ import type { SuggestionOptions } from '@tiptap/suggestion'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry } from '@proma/shared'
+import { createMentionPopup, positionPopup } from '@/components/agent/mention-popup-utils'
 
 /**
  * 创建文件 @ 引用的 Suggestion 配置
@@ -38,7 +39,7 @@ export function createFileMentionSuggestion(
         const result = await window.electronAPI.searchWorkspaceFiles(
           wsPath,
           query ?? '',
-          8,
+          20,
           additionalPaths.length > 0 ? additionalPaths : undefined,
         )
         return result.entries
@@ -66,38 +67,13 @@ export function createFileMentionSuggestion(
             editor: props.editor,
           })
 
-          // 创建浮动容器（向上弹出）
-          popup = document.createElement('div')
-          popup.style.position = 'absolute'
-          popup.style.zIndex = '9999'
-          document.body.appendChild(popup)
-          popup.appendChild(renderer.element)
-
-          // 定位到光标上方
-          const rect = props.clientRect?.()
-          if (rect && popup) {
-            popup.style.left = `${rect.left}px`
-            requestAnimationFrame(() => {
-              if (!popup) return
-              const popupHeight = popup.offsetHeight
-              popup.style.top = `${rect.top - popupHeight - 4}px`
-            })
-          }
+          popup = createMentionPopup(renderer.element)
+          positionPopup(popup, props.clientRect?.())
         },
 
         onUpdate(props) {
           renderer?.updateProps({ items: props.items })
-
-          // 重新定位
-          const rect = props.clientRect?.()
-          if (rect && popup) {
-            popup.style.left = `${rect.left}px`
-            requestAnimationFrame(() => {
-              if (!popup) return
-              const popupHeight = popup.offsetHeight
-              popup.style.top = `${rect.top - popupHeight - 4}px`
-            })
-          }
+          positionPopup(popup, props.clientRect?.())
         },
 
         onKeyDown(props) {

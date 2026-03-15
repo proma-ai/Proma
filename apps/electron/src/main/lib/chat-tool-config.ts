@@ -15,6 +15,7 @@ const DEFAULT_CONFIG: ChatToolsFileConfig = {
   toolStates: {
     memory: { enabled: true },
     'web-search': { enabled: false },
+    'nano-banana': { enabled: false },
   },
   toolCredentials: {},
   customTools: [],

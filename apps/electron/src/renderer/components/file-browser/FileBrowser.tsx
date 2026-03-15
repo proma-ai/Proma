@@ -402,10 +402,10 @@ function FileTreeItem({
     }
   }
 
-  /** 双击打开文件 */
+  /** 双击预览文件 */
   const handleDoubleClick = (): void => {
     if (!entry.isDirectory) {
-      window.electronAPI.openFile(entry.path).catch(console.error)
+      window.electronAPI.previewFile(entry.path).catch(console.error)
     }
   }
 

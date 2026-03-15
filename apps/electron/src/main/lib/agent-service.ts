@@ -20,13 +20,14 @@ import type {
   AgentSendInput,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
+  AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
   AgentStreamEvent,
 } from '@proma/shared'
 import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
-import { getAgentSessionWorkspacePath } from './config-paths'
+import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
 import { getChannelById } from './channel-manager'
 
 // ===== 实例创建 =====
@@ -244,6 +245,46 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
     const actualFilename = targetPath.slice(sessionDir.length + 1)
     results.push({ filename: actualFilename, targetPath })
     console.log(`[Agent 服务] 文件已保存: ${targetPath} (${buffer.length} bytes)`)
+  }
+
+  return results
+}
+
+/**
+ * 保存文件到工作区文件目录
+ *
+ * 将 base64 编码的文件写入工作区 workspace-files/ 目录，所有会话均可访问。
+ */
+export function saveFilesToWorkspaceFiles(input: AgentSaveWorkspaceFilesInput): AgentSavedFile[] {
+  const wsFilesDir = getWorkspaceFilesDir(input.workspaceSlug)
+  const results: AgentSavedFile[] = []
+  const usedPaths = new Set<string>()
+
+  for (const file of input.files) {
+    let targetPath = join(wsFilesDir, file.filename)
+
+    // 防止同名文件覆盖
+    if (usedPaths.has(targetPath) || existsSync(targetPath)) {
+      const dotIdx = file.filename.lastIndexOf('.')
+      const baseName = dotIdx > 0 ? file.filename.slice(0, dotIdx) : file.filename
+      const ext = dotIdx > 0 ? file.filename.slice(dotIdx) : ''
+      let counter = 1
+      let candidate = join(wsFilesDir, `${baseName}-${counter}${ext}`)
+      while (usedPaths.has(candidate) || existsSync(candidate)) {
+        counter++
+        candidate = join(wsFilesDir, `${baseName}-${counter}${ext}`)
+      }
+      targetPath = candidate
+    }
+    usedPaths.add(targetPath)
+
+    mkdirSync(dirname(targetPath), { recursive: true })
+    const buffer = Buffer.from(file.data, 'base64')
+    writeFileSync(targetPath, buffer)
+
+    const actualFilename = targetPath.slice(wsFilesDir.length + 1)
+    results.push({ filename: actualFilename, targetPath })
+    console.log(`[Agent 服务] 工作区文件已保存: ${targetPath} (${buffer.length} bytes)`)
   }
 
   return results

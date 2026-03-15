@@ -1,8 +1,8 @@
 # Proma
 
-> **📖 新手？从这里开始 →** [**Proma 使用教程系列**](./tutorial/tutorial-1.md) — 从零开始配置环境、连接大模型，3-5 分钟即可上手。
+> **📖 新手？从这里开始 →** [**Proma 使用教程系列(点击此处)**](./tutorial/tutorial.md) — 从零开始配置环境、连接大模型，3-5 分钟即可上手。
 
-下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams 等能力，本地优先、多供应商支持、完全开源。支持远程通过飞书机器人与 Agent 对话和交互，让你用手机也可以处理很多必要的工作。
+下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams **等能力**，本地优先、多供应商支持、完全开源。支持远程通过飞书机器人与 Agent 对话和交互，甚至把 Proma Agent 拉进群组替你完成工作，跟同事实现 Agent 协作，让你用手机也可以处理很多必要的工作。
 
 [English version README.md](./README.en.md)
 
@@ -40,8 +40,10 @@ Proma Skills 和 MCP，默认内置 Brainstorming 和办公软件 Skill，支持
 
 ![Proma Default Skills and Mcp](https://img.erlich.fun/personal-blog/uPic/PNBOSt.png)
 
-### 通过飞书远程使用 Proma
+### 通过飞书远程使用 Proma / 支持私聊和群组
 Proma 支持通过使用飞书机器人的方式来远程使用 Proma Agent 能力，支持切换工作区（/workspace 命令），支持创建新会话（/new 命令），这样就可以实现类似截图中的效果，可以为不同的工作区先配置上（或直接通过 Proma Agent 来帮你配置）对应的 Skills / MCP 以及文件附录等资源，即可远程也能让 Proma Agent 帮你完成工作。譬如远程帮你进行调研，并将调研文件通过邮件或其他方式发送到同事的邮箱、远程合并 PR 或者修复紧急的 Bug 并推送上线等。
+
+也支持将 Proma Agent 拉进你的飞书群组，可以跟同事共享你积攒下来的 Skills 和 MCP 能力，利用本地的文件和飞书文档一起完成更智能的 Agent 协作，甚至可以直接用 Proma Agent 来完成对外部用户的服务。
 
 ![Proma Lark Demo](https://img.erlich.fun/personal-blog/uPic/nNu4wA.png)
 

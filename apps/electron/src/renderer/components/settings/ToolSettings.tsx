@@ -194,6 +194,201 @@ function WebSearchSettings(): React.ReactElement {
   )
 }
 
+/** Nano Banana 生图工具设置区域 */
+function NanoBananaSettings(): React.ReactElement {
+  const [apiKey, setApiKey] = React.useState('')
+  const [baseUrl, setBaseUrl] = React.useState('')
+  const [model, setModel] = React.useState('')
+  const [showApiKey, setShowApiKey] = React.useState(false)
+  const [enabled, setEnabled] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
+  const setChatTools = useSetAtom(chatToolsAtom)
+
+  const savedCredentialsRef = React.useRef({ apiKey: '', baseUrl: '', model: '' })
+
+  React.useEffect(() => {
+    Promise.all([
+      window.electronAPI.getChatTools(),
+      window.electronAPI.getChatToolCredentials('nano-banana'),
+    ]).then(([tools, credentials]) => {
+      const tool = tools.find((t) => t.meta.id === 'nano-banana')
+      if (tool) setEnabled(tool.enabled)
+      if (credentials.apiKey) setApiKey(credentials.apiKey)
+      if (credentials.baseUrl) setBaseUrl(credentials.baseUrl)
+      if (credentials.model) setModel(credentials.model)
+      savedCredentialsRef.current = {
+        apiKey: credentials.apiKey || '',
+        baseUrl: credentials.baseUrl || '',
+        model: credentials.model || '',
+      }
+    }).catch((err: unknown) => {
+      console.error('[Nano Banana 设置] 加载失败:', err)
+    }).finally(() => {
+      setLoading(false)
+    })
+  }, [])
+
+  /** 静默保存凭据（blur 时触发） */
+  const handleBlurSave = React.useCallback(async (): Promise<void> => {
+    const current = { apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }
+    const saved = savedCredentialsRef.current
+    if (current.apiKey === saved.apiKey && current.baseUrl === saved.baseUrl && current.model === saved.model) return
+    try {
+      await window.electronAPI.updateChatToolCredentials('nano-banana', current)
+      savedCredentialsRef.current = current
+      await refreshChatTools(setChatTools)
+      toast.success('Nano Banana 设置已保存')
+    } catch (error) {
+      console.error('[Nano Banana 设置] 保存失败:', error)
+    }
+  }, [apiKey, baseUrl, model, setChatTools])
+
+  const handleToggle = async (checked: boolean): Promise<void> => {
+    try {
+      await window.electronAPI.updateChatToolState('nano-banana', { enabled: checked })
+      setEnabled(checked)
+      await refreshChatTools(setChatTools)
+    } catch (error) {
+      console.error('[Nano Banana 设置] 切换失败:', error)
+    }
+  }
+
+  const handleTest = async (): Promise<void> => {
+    // 先保存可能的变更
+    const current = { apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }
+    const saved = savedCredentialsRef.current
+    if (current.apiKey !== saved.apiKey || current.baseUrl !== saved.baseUrl || current.model !== saved.model) {
+      try {
+        await window.electronAPI.updateChatToolCredentials('nano-banana', current)
+        savedCredentialsRef.current = current
+        await refreshChatTools(setChatTools)
+      } catch (error) {
+        console.error('[Nano Banana 设置] 保存失败:', error)
+      }
+    }
+
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await window.electronAPI.testChatTool('nano-banana')
+      setTestResult(result)
+    } catch (error) {
+      setTestResult({ success: false, message: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
+  }
+
+  return (
+    <SettingsSection
+      title="Nano Banana"
+      description="启用后 AI 可以生成和编辑图片（基于 Gemini Image Generation）"
+      action={
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+        />
+      }
+    >
+      <SettingsCard divided={false}>
+        <div className="space-y-4 p-4">
+          {/* 引导说明 */}
+          <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
+            <p>Nano Banana 基于 <span className="font-medium text-foreground">Gemini Image Generation</span> 提供 AI 图片生成与编辑能力。</p>
+            <p className="text-xs">配置步骤：</p>
+            <ol className="text-xs list-decimal list-inside space-y-1">
+              <li>
+                访问{' '}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-0.5"
+                >
+                  Google AI Studio
+                  <ExternalLink size={10} />
+                </a>
+                {' '}获取 Gemini API Key
+              </li>
+              <li>将 API Key 填入下方，可选修改 API 地址和模型</li>
+              <li>开启开关即可在对话中使用生图能力</li>
+            </ol>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">API Key</label>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={testing || !apiKey.trim()}
+                onClick={handleTest}
+              >
+                {testing ? <><Loader2 size={14} className="animate-spin mr-1.5" />测试中...</> : '测试连接'}
+              </Button>
+            </div>
+            <div className="relative">
+              <Input
+                type={showApiKey ? 'text' : 'password'}
+                placeholder="AIza..."
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                onBlur={handleBlurSave}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                tabIndex={-1}
+              >
+                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">API 地址</label>
+            <Input
+              type="text"
+              placeholder="https://generativelanguage.googleapis.com"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              onBlur={handleBlurSave}
+            />
+            <p className="text-xs text-muted-foreground">留空则使用 Gemini 官方地址</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">模型</label>
+            <Input
+              type="text"
+              placeholder="gemini-3.1-flash-image-preview"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              onBlur={handleBlurSave}
+            />
+            <p className="text-xs text-muted-foreground">留空则使用默认模型 gemini-3.1-flash-image-preview</p>
+          </div>
+
+          {testResult && (
+            <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+              {testResult.success ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+              <span>{testResult.message}</span>
+            </div>
+          )}
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
+
 /** 自定义工具列表区域 */
 function CustomToolsSection(): React.ReactElement | null {
   const tools = useAtomValue(chatToolsAtom)
@@ -277,6 +472,9 @@ export function ToolSettings(): React.ReactElement {
 
       {/* 联网搜索工具 */}
       <WebSearchSettings />
+
+      {/* Nano Banana 生图工具 */}
+      <NanoBananaSettings />
 
       {/* 自定义工具 */}
       <CustomToolsSection />

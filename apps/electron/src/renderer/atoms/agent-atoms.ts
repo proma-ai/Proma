@@ -27,6 +27,8 @@ export interface ToolActivity {
   taskId?: string
   shellId?: string
   isBackground?: boolean
+  /** MCP 工具返回的图片附件 */
+  imageAttachments?: Array<{ localPath: string; filename: string; mediaType: string }>
 }
 
 /** 活动分组（Task 子代理） */
@@ -856,7 +858,7 @@ export function applyAgentEvent(
         ...prev,
         toolActivities: prev.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
-            ? { ...t, result: event.result, isError: event.isError, done: true }
+            ? { ...t, result: event.result, isError: event.isError, done: true, imageAttachments: event.imageAttachments }
             : t
         ),
       }
@@ -1168,6 +1170,13 @@ export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
  * 这些路径作为 SDK additionalDirectories 参数传递。
  */
 export const agentAttachedDirectoriesMapAtom = atom<Map<string, string[]>>(new Map())
+
+/**
+ * 工作区级附加目录列表（按 workspaceId 存储）
+ *
+ * 工作区内所有会话共享这些附加目录。
+ */
+export const workspaceAttachedDirectoriesMapAtom = atom<Map<string, string[]>>(new Map())
 
 /** 当前 Agent 会话的草稿内容（派生读写原子） */
 export const currentAgentSessionDraftAtom = atom(
