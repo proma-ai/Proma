@@ -115,3 +115,20 @@ export function deleteCustomTool(toolId: string): void {
   delete config.toolCredentials[toolId]
   saveChatToolsConfig(config)
 }
+
+/**
+ * 读取原始配置文件（不 merge 默认值）
+ *
+ * 用于判断 toolState 是否被用户显式设置过。
+ * 若文件不存在或解析失败，返回空对象。
+ */
+export function getRawChatToolsConfig(): Partial<ChatToolsFileConfig> {
+  const filePath = getChatToolsConfigPath()
+  if (!existsSync(filePath)) return {}
+  try {
+    const raw = readFileSync(filePath, 'utf-8')
+    return JSON.parse(raw) as Partial<ChatToolsFileConfig>
+  } catch {
+    return {}
+  }
+}

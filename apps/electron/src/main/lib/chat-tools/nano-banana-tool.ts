@@ -9,7 +9,9 @@
 import type { ToolCall, ToolResult, ToolDefinition } from '@proma/core'
 import type { ChatToolMeta, FileAttachment } from '@proma/shared'
 import { randomUUID } from 'node:crypto'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getToolCredentials } from '../chat-tool-config'
+import { getAuthToken } from '../cloud-auth-service'
 import { saveAttachment, readAttachmentAsBase64, isImageAttachment } from '../attachment-service'
 
 // ===== Gemini API 类型（REST API 使用 camelCase） =====
@@ -141,11 +143,11 @@ export const NANO_BANANA_TOOL_DEFINITIONS: ToolDefinition[] = [
 // ===== 可用性检查 =====
 
 /**
- * 检查 Nano Banana 工具是否可用（API Key 已配置）
+ * 检查 Nano Banana 工具是否可用（API Key 已配置 或 云端模式）
  */
 export function isNanoBananaAvailable(): boolean {
   const credentials = getToolCredentials('nano-banana')
-  return !!credentials.apiKey
+  return !!credentials.apiKey || credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
 }
 
 // ===== 工具执行 =====
@@ -265,7 +267,9 @@ export async function executeNanoBananaTool(
 ): Promise<ToolResult> {
   const credentials = getToolCredentials('nano-banana')
 
-  if (!credentials.apiKey) {
+  const isCloud = credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
+
+  if (!credentials.apiKey && !isCloud) {
     return {
       toolCallId: toolCall.id,
       content: 'Nano Banana 未配置 API Key',
@@ -287,7 +291,6 @@ export async function executeNanoBananaTool(
       }
     }
 
-    const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
     const model = credentials.model?.trim() || DEFAULT_MODEL
 
     // 收集参考图
@@ -296,33 +299,79 @@ export async function executeNanoBananaTool(
     // 获取对话历史
     const history = conversationHistory.get(context.conversationId) ?? []
 
-    // 构建请求
+    // 构建请求体（云端和本地共用）
     const requestBody = buildGeminiRequest(prompt, referenceImageParts, history, {
       aspectRatio,
       imageSize,
     })
 
-    const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
+    let data: GeminiResponse
 
-    console.log(`[Nano Banana] 调用 Gemini API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`[Nano Banana] API 请求失败 (${response.status}):`, errorText)
-      return {
-        toolCallId: toolCall.id,
-        content: `Gemini API 请求失败 (${response.status}): ${errorText.slice(0, 200)}`,
-        isError: true,
+    // 云端模式：通过 proma-api 代理
+    if (isCloud) {
+      const token = getAuthToken()
+      if (!token) {
+        return {
+          toolCallId: toolCall.id,
+          content: '云端生图失败：未登录',
+          isError: true,
+        }
       }
-    }
 
-    const data = (await response.json()) as GeminiResponse
+      const { baseUrl } = getCloudApiConfig()
+      const cloudBody = {
+        ...(requestBody as Record<string, unknown>),
+        model,
+        image_size: imageSize || 'auto',
+      }
+
+      console.log(`[Nano Banana] 云端调用: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+
+      const cloudResponse = await fetch(`${baseUrl}/tools/generate-image`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(cloudBody),
+      })
+
+      if (!cloudResponse.ok) {
+        const errorText = await cloudResponse.text()
+        console.error(`[Nano Banana] 云端请求失败 (${cloudResponse.status}):`, errorText)
+        return {
+          toolCallId: toolCall.id,
+          content: `云端图片生成失败 (${cloudResponse.status}): ${errorText.slice(0, 200)}`,
+          isError: true,
+        }
+      }
+
+      data = await cloudResponse.json() as GeminiResponse
+    } else {
+      // 本地 Gemini 直连
+      const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
+      const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
+
+      console.log(`[Nano Banana] 调用 Gemini API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+
+      const localResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      })
+
+      if (!localResponse.ok) {
+        const errorText = await localResponse.text()
+        console.error(`[Nano Banana] API 请求失败 (${localResponse.status}):`, errorText)
+        return {
+          toolCallId: toolCall.id,
+          content: `Gemini API 请求失败 (${localResponse.status}): ${errorText.slice(0, 200)}`,
+          isError: true,
+        }
+      }
+
+      data = await localResponse.json() as GeminiResponse
+    }
 
     if (data.error) {
       return {
@@ -340,7 +389,7 @@ export async function executeNanoBananaTool(
       }
     }
 
-    const parts = data.candidates![0].content.parts
+    const parts = data.candidates![0]!.content.parts
     console.log(`[Nano Banana] 响应包含 ${parts.length} 个 parts，类型:`, parts.map((p) => p.inlineData ? `image(${p.inlineData.mimeType})` : `text(${(p.text ?? '').slice(0, 30)})`))
     const generatedAttachments: FileAttachment[] = []
     const textParts: string[] = []

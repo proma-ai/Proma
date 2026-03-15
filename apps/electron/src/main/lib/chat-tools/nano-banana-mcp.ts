@@ -9,8 +9,10 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, resolve, isAbsolute, join } from 'node:path'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getToolState, getToolCredentials } from '../chat-tool-config'
 import { saveAttachment, isImageAttachment } from '../attachment-service'
+import { getAuthToken } from '../cloud-auth-service'
 
 // ===== Gemini API 类型（REST API 使用 camelCase） =====
 
@@ -179,7 +181,7 @@ function buildGeminiRequest(
 }
 
 /**
- * 调用 Gemini Image Generation API 并返回 MCP 工具结果
+ * 调用 Gemini Image Generation API（或云端代理）并返回 MCP 工具结果
  */
 async function callGeminiAndBuildResult(
   prompt: string,
@@ -187,7 +189,6 @@ async function callGeminiAndBuildResult(
   options: { aspectRatio?: string; imageSize?: string; referenceImagePaths?: string[]; cwd?: string },
 ): Promise<McpToolResult> {
   const credentials = getToolCredentials('nano-banana')
-  const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
   const model = credentials.model?.trim() || DEFAULT_MODEL
 
   // 获取会话历史
@@ -203,25 +204,68 @@ async function callGeminiAndBuildResult(
 
   // 构建请求
   const requestBody = buildGeminiRequest(prompt, referenceImageParts, history, options)
-  const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
 
-  console.log(`[Nano Banana MCP] 调用 Gemini API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+  let data: GeminiResponse
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  })
+  const isCloud = credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error(`[Nano Banana MCP] API 请求失败 (${response.status}):`, errorText)
-    return {
-      content: [{ type: 'text' as const, text: `Gemini API 请求失败 (${response.status}): ${errorText.slice(0, 200)}` }],
+  // 云端模式：通过 proma-api 代理
+  if (isCloud) {
+    const token = getAuthToken()
+    if (!token) {
+      return { content: [{ type: 'text' as const, text: '云端生图失败：未登录' }] }
     }
-  }
 
-  const data = (await response.json()) as GeminiResponse
+    const { baseUrl } = getCloudApiConfig()
+    const cloudBody = {
+      ...(requestBody as Record<string, unknown>),
+      model,
+      image_size: options.imageSize || 'auto',
+    }
+
+    console.log(`[Nano Banana MCP] 云端调用: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+
+    const cloudResponse = await fetch(`${baseUrl}/tools/generate-image`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cloudBody),
+    })
+
+    if (!cloudResponse.ok) {
+      const errorText = await cloudResponse.text()
+      console.error(`[Nano Banana MCP] 云端请求失败 (${cloudResponse.status}):`, errorText)
+      return {
+        content: [{ type: 'text' as const, text: `云端图片生成失败 (${cloudResponse.status}): ${errorText.slice(0, 200)}` }],
+      }
+    }
+
+    data = await cloudResponse.json() as GeminiResponse
+  } else {
+    // 本地 Gemini 直连
+    const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
+    const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
+
+    console.log(`[Nano Banana MCP] 调用 Gemini API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+
+    const localResponse = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    if (!localResponse.ok) {
+      const errorText = await localResponse.text()
+      console.error(`[Nano Banana MCP] API 请求失败 (${localResponse.status}):`, errorText)
+      return {
+        content: [{ type: 'text' as const, text: `Gemini API 请求失败 (${localResponse.status}): ${errorText.slice(0, 200)}` }],
+      }
+    }
+
+    data = await localResponse.json() as GeminiResponse
+  }
 
   if (data.error) {
     return {
@@ -322,10 +366,11 @@ export async function injectNanoBananaMcpServer(
   sessionId: string,
   agentCwd?: string,
 ): Promise<void> {
-  // 检查工具是否启用且有凭据
+  // 检查工具是否启用且有凭据（本地 API Key 或云端模式）
   const toolState = getToolState('nano-banana')
   const credentials = getToolCredentials('nano-banana')
-  if (!toolState.enabled || !credentials.apiKey) return
+  const isCloud = credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
+  if (!toolState.enabled || (!credentials.apiKey && !isCloud)) return
 
   const { z } = await import('zod')
 

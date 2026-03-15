@@ -19,6 +19,7 @@ import type { ChannelModel, BillingIpcResponse, CloudModelGroup } from '@proma/s
 import { CLOUD_IPC_CHANNELS } from '@proma/shared'
 import { getApiClient } from './cloud-auth-service'
 import { syncOfficialChannel, removeOfficialChannel, syncOfficialAgentModels } from './channel-manager'
+import { getRawChatToolsConfig, updateToolCredentials, updateToolState } from './chat-tool-config'
 
 // ===== API 实例（延迟初始化） =====
 
@@ -173,6 +174,9 @@ export async function initOfficialChannel(): Promise<void> {
 
     // 拉取 Agent 专用模型
     await fetchAndSyncAgentModels()
+
+    // 同步云端工具默认配置
+    syncCloudToolDefaults()
   } catch (error) {
     // 未认证或网络错误时静默跳过
     const message = isApiError(error) ? error.message : (error instanceof Error ? error.message : '未知错误')
@@ -209,6 +213,50 @@ export async function refreshOfficialModels(): Promise<BillingIpcResponse<void>>
 export function cleanupOfficialChannel(): void {
   removeOfficialChannel()
   clearSystemKeyCache()
+  // 清理云端工具凭据
+  updateToolCredentials('web-search', {})
+  updateToolCredentials('nano-banana', {})
   broadcastOfficialChannelUpdated()
   console.log('[Cloud Channel] 官方渠道已移除')
+}
+
+// ===== 云端工具默认配置 =====
+
+/** 需要自动配置的云端内置工具 */
+const CLOUD_TOOLS = ['web-search', 'nano-banana'] as const
+
+/**
+ * 同步云端工具默认配置
+ *
+ * 首次激活时自动 enable 工具；之后尊重用户手动关闭的设置。
+ * 写入 cloudMode 标志，保留用户已设置的 useCloud / model 偏好。
+ */
+function syncCloudToolDefaults(): void {
+  const rawConfig = getRawChatToolsConfig()
+
+  for (const toolId of CLOUD_TOOLS) {
+    // 若 toolStates 中不存在该 key → 首次激活，自动 enable
+    if (!rawConfig.toolStates || !(toolId in rawConfig.toolStates)) {
+      updateToolState(toolId, { enabled: true })
+      console.log(`[Cloud Channel] 工具首次激活，已自动开启: ${toolId}`)
+    }
+  }
+
+  // 写入云端凭据：保留已有的 useCloud / model / apiKey 偏好
+  const existingWs = rawConfig.toolCredentials?.['web-search'] ?? {}
+  updateToolCredentials('web-search', {
+    ...existingWs,
+    cloudMode: 'true',
+    useCloud: existingWs.useCloud ?? 'true',
+  })
+
+  const existingNb = rawConfig.toolCredentials?.['nano-banana'] ?? {}
+  updateToolCredentials('nano-banana', {
+    ...existingNb,
+    cloudMode: 'true',
+    model: existingNb.model || 'gemini-3.1-flash-image-preview',
+    useCloud: existingNb.useCloud ?? 'true',
+  })
+
+  console.log('[Cloud Channel] 云端工具默认配置已同步')
 }

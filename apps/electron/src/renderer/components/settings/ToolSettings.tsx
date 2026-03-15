@@ -8,10 +8,11 @@
 import * as React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { toast } from 'sonner'
-import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
+import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Trash2, Cloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { MemorySettings } from './MemorySettings'
 import { SettingsSection, SettingsCard } from './primitives'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
@@ -34,25 +35,28 @@ function WebSearchSettings(): React.ReactElement {
   const [loading, setLoading] = React.useState(true)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
+  /** 是否为 Proma Cloud 商业版用户（有云端能力可用） */
+  const [cloudAvailable, setCloudAvailable] = React.useState(false)
+  /** 用户是否选择使用 Proma Cloud 提供（默认 true） */
+  const [useCloud, setUseCloud] = React.useState(true)
   const setChatTools = useSetAtom(chatToolsAtom)
 
-  // 已保存的 API Key（用于判断是否有变更）
   const savedApiKeyRef = React.useRef('')
 
-  // 从主进程加载当前配置 + 凭据
   React.useEffect(() => {
     Promise.all([
       window.electronAPI.getChatTools(),
       window.electronAPI.getChatToolCredentials('web-search'),
     ]).then(([tools, credentials]) => {
       const searchTool = tools.find((t) => t.meta.id === 'web-search')
-      if (searchTool) {
-        setEnabled(searchTool.enabled)
-      }
+      if (searchTool) setEnabled(searchTool.enabled)
       if (credentials.apiKey) {
         setApiKey(credentials.apiKey)
         savedApiKeyRef.current = credentials.apiKey
       }
+      const isCloud = credentials.cloudMode === 'true'
+      setCloudAvailable(isCloud)
+      setUseCloud(isCloud && credentials.useCloud !== 'false')
     }).catch((err: unknown) => {
       console.error('[联网搜索设置] 加载失败:', err)
     }).finally(() => {
@@ -60,20 +64,43 @@ function WebSearchSettings(): React.ReactElement {
     })
   }, [])
 
+  /** 切换"使用 Proma Cloud" */
+  const handleCloudToggle = async (checked: boolean): Promise<void> => {
+    setUseCloud(checked)
+    setTestResult(null)
+    try {
+      const creds: Record<string, string> = {
+        cloudMode: 'true',
+        useCloud: checked ? 'true' : 'false',
+      }
+      // 关闭云端时保留已输入的 apiKey
+      if (!checked && apiKey.trim()) creds.apiKey = apiKey.trim()
+      await window.electronAPI.updateChatToolCredentials('web-search', creds)
+      await refreshChatTools(setChatTools)
+    } catch (error) {
+      console.error('[联网搜索设置] 切换云端失败:', error)
+    }
+  }
+
   /** 静默保存 API Key（blur 时触发） */
   const handleBlurSave = React.useCallback(async (): Promise<void> => {
     const trimmed = apiKey.trim()
     if (trimmed === savedApiKeyRef.current) return
     try {
-      await window.electronAPI.updateChatToolCredentials('web-search', { apiKey: trimmed })
+      const creds: Record<string, string> = { apiKey: trimmed }
+      // 云端用户关闭了 useCloud 后手动输入 apiKey，需要保留 cloudMode
+      if (cloudAvailable) {
+        creds.cloudMode = 'true'
+        creds.useCloud = 'false'
+      }
+      await window.electronAPI.updateChatToolCredentials('web-search', creds)
       savedApiKeyRef.current = trimmed
-      // 刷新全局工具列表（available 状态可能变化）
       await refreshChatTools(setChatTools)
       toast.success('联网搜索设置已保存')
     } catch (error) {
       console.error('[联网搜索设置] 保存失败:', error)
     }
-  }, [apiKey, setChatTools])
+  }, [apiKey, cloudAvailable, setChatTools])
 
   const handleToggle = async (checked: boolean): Promise<void> => {
     try {
@@ -86,11 +113,12 @@ function WebSearchSettings(): React.ReactElement {
   }
 
   const handleTest = async (): Promise<void> => {
-    // 先保存可能的变更
     const trimmed = apiKey.trim()
     if (trimmed !== savedApiKeyRef.current) {
       try {
-        await window.electronAPI.updateChatToolCredentials('web-search', { apiKey: trimmed })
+        const creds: Record<string, string> = { apiKey: trimmed }
+        if (cloudAvailable) { creds.cloudMode = 'true'; creds.useCloud = 'false' }
+        await window.electronAPI.updateChatToolCredentials('web-search', creds)
         savedApiKeyRef.current = trimmed
         await refreshChatTools(setChatTools)
       } catch (error) {
@@ -114,79 +142,90 @@ function WebSearchSettings(): React.ReactElement {
     return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
   }
 
+  /** 实际使用云端 = 云端可用 + 用户选择使用 */
+  const isUsingCloud = cloudAvailable && useCloud
+
   return (
     <SettingsSection
       title="联网搜索"
       description="启用后 AI 可以实时搜索互联网获取最新信息"
       action={
-        <Switch
-          checked={enabled}
-          onCheckedChange={handleToggle}
-        />
+        <Switch checked={enabled} onCheckedChange={handleToggle} />
       }
     >
       <SettingsCard divided={false}>
         <div className="space-y-4 p-4">
-          {/* 引导说明 */}
-          <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
-            <p>联网搜索由 <span className="font-medium text-foreground">Tavily</span> 提供，启用后 AI 可以搜索互联网获取实时信息。</p>
-            <p className="text-xs">配置步骤：</p>
-            <ol className="text-xs list-decimal list-inside space-y-1">
-              <li>
-                访问{' '}
-                <a
-                  href="https://tavily.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                >
-                  Tavily 官网
-                  <ExternalLink size={10} />
-                </a>
-                {' '}注册账号
-              </li>
-              <li>在控制台获取 API Key（免费额度每月 1000 次搜索）</li>
-              <li>将 API Key 填入下方，然后开启开关</li>
-            </ol>
-          </div>
+          {/* 云端用户：显示 Proma Cloud 开关 */}
+          {cloudAvailable && (
+            <div className="flex items-center justify-between rounded-lg bg-primary/10 px-3 py-2">
+              <div className="flex items-center gap-2 text-sm text-primary">
+                <Cloud size={14} className="shrink-0" />
+                <span className="font-medium">使用 Proma Cloud 提供</span>
+                {isUsingCloud && <span className="text-xs opacity-70">$0.018 / 次</span>}
+              </div>
+              <Switch checked={useCloud} onCheckedChange={handleCloudToggle} />
+            </div>
+          )}
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">API Key</label>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={testing || !apiKey.trim()}
-                onClick={handleTest}
-              >
-                {testing ? <><Loader2 size={14} className="animate-spin mr-1.5" />测试中...</> : '测试连接'}
-              </Button>
-            </div>
-            <div className="relative">
-              <Input
-                type={showApiKey ? 'text' : 'password'}
-                placeholder="tvly-..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onBlur={handleBlurSave}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-              >
-                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
+          {isUsingCloud ? (
+            <p className="text-xs text-muted-foreground">
+              由 Proma 统一提供联网搜索能力，无需配置 API Key，搜索费用从账户余额扣除。
+            </p>
+          ) : (
+            <>
+              {/* 本地模式 / 云端用户关闭后：显示 API Key 输入 */}
+              {!cloudAvailable && (
+                <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
+                  <p>联网搜索由 <span className="font-medium text-foreground">Tavily</span> 提供，启用后 AI 可以搜索互联网获取实时信息。</p>
+                  <p className="text-xs">配置步骤：</p>
+                  <ol className="text-xs list-decimal list-inside space-y-1">
+                    <li>
+                      访问{' '}
+                      <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+                        Tavily 官网<ExternalLink size={10} />
+                      </a>
+                      {' '}注册账号
+                    </li>
+                    <li>在控制台获取 API Key（免费额度每月 1000 次搜索）</li>
+                    <li>将 API Key 填入下方，然后开启开关</li>
+                  </ol>
+                </div>
+              )}
 
-          {testResult && (
-            <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
-              {testResult.success ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
-              <span>{testResult.message}</span>
-            </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Tavily API Key</label>
+                  <Button size="sm" variant="outline" disabled={testing || !apiKey.trim()} onClick={handleTest}>
+                    {testing ? <><Loader2 size={14} className="animate-spin mr-1.5" />测试中...</> : '测试连接'}
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    placeholder="tvly-..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    onBlur={handleBlurSave}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {testResult && (
+                <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+                  {testResult.success ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </SettingsCard>
@@ -204,6 +243,10 @@ function NanoBananaSettings(): React.ReactElement {
   const [loading, setLoading] = React.useState(true)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
+  /** 是否为 Proma Cloud 商业版用户 */
+  const [cloudAvailable, setCloudAvailable] = React.useState(false)
+  /** 用户是否选择使用 Proma Cloud 提供（默认 true） */
+  const [useCloud, setUseCloud] = React.useState(true)
   const setChatTools = useSetAtom(chatToolsAtom)
 
   const savedCredentialsRef = React.useRef({ apiKey: '', baseUrl: '', model: '' })
@@ -218,6 +261,9 @@ function NanoBananaSettings(): React.ReactElement {
       if (credentials.apiKey) setApiKey(credentials.apiKey)
       if (credentials.baseUrl) setBaseUrl(credentials.baseUrl)
       if (credentials.model) setModel(credentials.model)
+      const isCloud = credentials.cloudMode === 'true'
+      setCloudAvailable(isCloud)
+      setUseCloud(isCloud && credentials.useCloud !== 'false')
       savedCredentialsRef.current = {
         apiKey: credentials.apiKey || '',
         baseUrl: credentials.baseUrl || '',
@@ -230,20 +276,63 @@ function NanoBananaSettings(): React.ReactElement {
     })
   }, [])
 
-  /** 静默保存凭据（blur 时触发） */
+  /** 切换"使用 Proma Cloud" */
+  const handleCloudToggle = async (checked: boolean): Promise<void> => {
+    setUseCloud(checked)
+    setTestResult(null)
+    try {
+      const creds: Record<string, string> = {
+        cloudMode: 'true',
+        useCloud: checked ? 'true' : 'false',
+        model: model || 'gemini-3.1-flash-image-preview',
+      }
+      // 关闭云端时保留已输入的本地凭据
+      if (!checked) {
+        if (apiKey.trim()) creds.apiKey = apiKey.trim()
+        if (baseUrl.trim()) creds.baseUrl = baseUrl.trim()
+      }
+      await window.electronAPI.updateChatToolCredentials('nano-banana', creds)
+      await refreshChatTools(setChatTools)
+    } catch (error) {
+      console.error('[Nano Banana 设置] 切换云端失败:', error)
+    }
+  }
+
+  /** 静默保存凭据（blur 时触发，仅本地模式） */
   const handleBlurSave = React.useCallback(async (): Promise<void> => {
     const current = { apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }
     const saved = savedCredentialsRef.current
     if (current.apiKey === saved.apiKey && current.baseUrl === saved.baseUrl && current.model === saved.model) return
     try {
-      await window.electronAPI.updateChatToolCredentials('nano-banana', current)
+      const creds: Record<string, string> = { ...current }
+      if (cloudAvailable) {
+        creds.cloudMode = 'true'
+        creds.useCloud = 'false'
+      }
+      await window.electronAPI.updateChatToolCredentials('nano-banana', creds)
       savedCredentialsRef.current = current
       await refreshChatTools(setChatTools)
       toast.success('Nano Banana 设置已保存')
     } catch (error) {
       console.error('[Nano Banana 设置] 保存失败:', error)
     }
-  }, [apiKey, baseUrl, model, setChatTools])
+  }, [apiKey, baseUrl, model, cloudAvailable, setChatTools])
+
+  /** 云端模式下切换模型（立即保存） */
+  const handleCloudModelChange = async (value: string): Promise<void> => {
+    setModel(value)
+    try {
+      await window.electronAPI.updateChatToolCredentials('nano-banana', {
+        cloudMode: 'true',
+        useCloud: 'true',
+        model: value,
+      })
+      savedCredentialsRef.current = { ...savedCredentialsRef.current, model: value }
+      await refreshChatTools(setChatTools)
+    } catch (error) {
+      console.error('[Nano Banana 设置] 保存模型失败:', error)
+    }
+  }
 
   const handleToggle = async (checked: boolean): Promise<void> => {
     try {
@@ -256,12 +345,13 @@ function NanoBananaSettings(): React.ReactElement {
   }
 
   const handleTest = async (): Promise<void> => {
-    // 先保存可能的变更
     const current = { apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }
     const saved = savedCredentialsRef.current
     if (current.apiKey !== saved.apiKey || current.baseUrl !== saved.baseUrl || current.model !== saved.model) {
       try {
-        await window.electronAPI.updateChatToolCredentials('nano-banana', current)
+        const creds: Record<string, string> = { ...current }
+        if (cloudAvailable) { creds.cloudMode = 'true'; creds.useCloud = 'false' }
+        await window.electronAPI.updateChatToolCredentials('nano-banana', creds)
         savedCredentialsRef.current = current
         await refreshChatTools(setChatTools)
       } catch (error) {
@@ -285,103 +375,140 @@ function NanoBananaSettings(): React.ReactElement {
     return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
   }
 
+  const isUsingCloud = cloudAvailable && useCloud
+
   return (
     <SettingsSection
       title="Nano Banana"
       description="启用后 AI 可以生成和编辑图片（基于 Gemini Image Generation）"
       action={
-        <Switch
-          checked={enabled}
-          onCheckedChange={handleToggle}
-        />
+        <Switch checked={enabled} onCheckedChange={handleToggle} />
       }
     >
       <SettingsCard divided={false}>
         <div className="space-y-4 p-4">
-          {/* 引导说明 */}
-          <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
-            <p>Nano Banana 基于 <span className="font-medium text-foreground">Gemini Image Generation</span> 提供 AI 图片生成与编辑能力。</p>
-            <p className="text-xs">配置步骤：</p>
-            <ol className="text-xs list-decimal list-inside space-y-1">
-              <li>
-                访问{' '}
-                <a
-                  href="https://aistudio.google.com/apikey"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                >
-                  Google AI Studio
-                  <ExternalLink size={10} />
-                </a>
-                {' '}获取 Gemini API Key
-              </li>
-              <li>将 API Key 填入下方，可选修改 API 地址和模型</li>
-              <li>开启开关即可在对话中使用生图能力</li>
-            </ol>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">API Key</label>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={testing || !apiKey.trim()}
-                onClick={handleTest}
-              >
-                {testing ? <><Loader2 size={14} className="animate-spin mr-1.5" />测试中...</> : '测试连接'}
-              </Button>
+          {/* 云端用户：显示 Proma Cloud 开关 */}
+          {cloudAvailable && (
+            <div className="flex items-center justify-between rounded-lg bg-primary/10 px-3 py-2">
+              <div className="flex items-center gap-2 text-sm text-primary">
+                <Cloud size={14} className="shrink-0" />
+                <span className="font-medium">使用 Proma Cloud 提供</span>
+              </div>
+              <Switch checked={useCloud} onCheckedChange={handleCloudToggle} />
             </div>
-            <div className="relative">
-              <Input
-                type={showApiKey ? 'text' : 'password'}
-                placeholder="AIza..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onBlur={handleBlurSave}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-              >
-                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+          )}
+
+          {isUsingCloud ? (
+            // 云端模式内容
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground text-sm">计费说明</p>
+                <p><span className="font-medium text-foreground">Nano Banana 2</span>（Flash）：auto $0.10 · 1K $0.15 · 2K $0.18 · 4K $0.30</p>
+                <p><span className="font-medium text-foreground">Nano Banana Pro</span>：1K $0.20 · 2K $0.20 · 4K $0.40</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">模型</label>
+                <Select value={model || 'gemini-3.1-flash-image-preview'} onValueChange={handleCloudModelChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择模型" />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectItem value="gemini-3.1-flash-image-preview">
+                      <div className="text-left">
+                        <div className="font-medium">Nano Banana 2</div>
+                        <div className="text-xs text-muted-foreground">auto $0.10 · 1K $0.15 · 2K $0.18 · 4K $0.30</div>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="gemini-3-pro-image-preview">
+                      <div className="text-left">
+                        <div className="font-medium">Nano Banana Pro</div>
+                        <div className="text-xs text-muted-foreground">1K $0.20 · 2K $0.20 · 4K $0.40</div>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
+          ) : (
+            // 本地模式内容
+            <>
+              {!cloudAvailable && (
+                <div className="rounded-lg bg-muted/50 p-3 space-y-2 text-sm text-muted-foreground">
+                  <p>Nano Banana 基于 <span className="font-medium text-foreground">Gemini Image Generation</span> 提供 AI 图片生成与编辑能力。</p>
+                  <p className="text-xs">配置步骤：</p>
+                  <ol className="text-xs list-decimal list-inside space-y-1">
+                    <li>
+                      访问{' '}
+                      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+                        Google AI Studio<ExternalLink size={10} />
+                      </a>
+                      {' '}获取 Gemini API Key
+                    </li>
+                    <li>将 API Key 填入下方，可选修改 API 地址和模型</li>
+                    <li>开启开关即可在对话中使用生图能力</li>
+                  </ol>
+                </div>
+              )}
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">API 地址</label>
-            <Input
-              type="text"
-              placeholder="https://generativelanguage.googleapis.com"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              onBlur={handleBlurSave}
-            />
-            <p className="text-xs text-muted-foreground">留空则使用 Gemini 官方地址</p>
-          </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">API Key</label>
+                  <Button size="sm" variant="outline" disabled={testing || !apiKey.trim()} onClick={handleTest}>
+                    {testing ? <><Loader2 size={14} className="animate-spin mr-1.5" />测试中...</> : '测试连接'}
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    placeholder="AIza..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    onBlur={handleBlurSave}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">模型</label>
-            <Input
-              type="text"
-              placeholder="gemini-3.1-flash-image-preview"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              onBlur={handleBlurSave}
-            />
-            <p className="text-xs text-muted-foreground">留空则使用默认模型 gemini-3.1-flash-image-preview</p>
-          </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">API 地址</label>
+                <Input
+                  type="text"
+                  placeholder="https://generativelanguage.googleapis.com"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  onBlur={handleBlurSave}
+                />
+                <p className="text-xs text-muted-foreground">留空则使用 Gemini 官方地址</p>
+              </div>
 
-          {testResult && (
-            <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
-              {testResult.success ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
-              <span>{testResult.message}</span>
-            </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">模型</label>
+                <Input
+                  type="text"
+                  placeholder="gemini-3.1-flash-image-preview"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  onBlur={handleBlurSave}
+                />
+                <p className="text-xs text-muted-foreground">留空则使用默认模型 gemini-3.1-flash-image-preview</p>
+              </div>
+
+              {testResult && (
+                <div className={`flex items-start gap-2 rounded-lg p-3 text-sm ${testResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+                  {testResult.success ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </SettingsCard>
