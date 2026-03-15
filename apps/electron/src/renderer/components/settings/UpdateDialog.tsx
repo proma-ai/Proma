@@ -61,8 +61,7 @@ export function UpdateDialog(): React.ReactElement | null {
 
   const handleGoToDownload = (e: React.MouseEvent): void => {
     e.preventDefault()
-    const url = release?.html_url || DOWNLOAD_URL
-    window.electronAPI.openExternal(url)
+    window.electronAPI.openExternal(DOWNLOAD_URL)
   }
 
   const downloadUrl = DOWNLOAD_URL
