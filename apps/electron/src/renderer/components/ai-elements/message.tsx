@@ -206,9 +206,104 @@ interface MessageResponseProps {
   basePath?: string
 }
 
+/** 稳定引用的插件数组，避免 react-markdown 每帧重建插件管线 */
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeKatex]
+
+// ===== Memo'd Markdown 子组件（稳定引用，避免 react-markdown 每帧重建组件映射） =====
+
+/** 外部链接渲染器 */
+const MarkdownLink = React.memo(function MarkdownLink({
+  href,
+  children: linkChildren,
+  ...linkProps
+}: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
+  return (
+    <a
+      {...linkProps}
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+          window.electronAPI.openExternal(href)
+        }
+      }}
+      title={href}
+    >
+      {linkChildren}
+    </a>
+  )
+})
+
+/** 递归提取纯文本（children 可能是字符串数组） */
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (!node) return ''
+  if (Array.isArray(node)) return node.map(extractText).join('')
+  if (React.isValidElement(node)) {
+    return extractText((node.props as { children?: React.ReactNode }).children)
+  }
+  return ''
+}
+
+/** 代码块 / Mermaid 渲染器 */
+const MarkdownPre = React.memo(function MarkdownPre({
+  children: preChildren,
+}: { children?: React.ReactNode }): React.ReactElement {
+  const codeChild = React.Children.toArray(preChildren).find(
+    (child): child is React.ReactElement =>
+      React.isValidElement(child) && (child as React.ReactElement).type === 'code'
+  ) as React.ReactElement | undefined
+
+  if (codeChild) {
+    const codeProps = codeChild.props as { className?: string; children?: React.ReactNode }
+    if (codeProps.className?.includes('language-mermaid')) {
+      const mermaidCode = extractText(codeProps.children).replace(/\n$/, '')
+      return <MermaidBlock code={mermaidCode} />
+    }
+  }
+
+  return <CodeBlock>{preChildren}</CodeBlock>
+})
+
+/** 行内代码 / 文件路径渲染器 */
+const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
+  children: codeChildren,
+  className: codeClassName,
+  basePath,
+  ...codeProps
+}: React.HTMLAttributes<HTMLElement> & { basePath?: string }): React.ReactElement {
+  if (codeClassName) {
+    return <code className={codeClassName} {...codeProps}>{codeChildren}</code>
+  }
+
+  const text = typeof codeChildren === 'string' ? codeChildren : ''
+
+  if (text) {
+    if (isAbsoluteFilePath(text)) {
+      return <FilePathChip filePath={text.trim()} />
+    }
+    if (basePath && isRelativeFilePath(text)) {
+      return <FilePathChip filePath={text.trim()} basePath={basePath} />
+    }
+  }
+
+  return <code {...codeProps}>{codeChildren}</code>
+})
+
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */
 export const MessageResponse = React.memo(
   function MessageResponse({ children, className, basePath }: MessageResponseProps): React.ReactElement {
+    // 稳定引用的 components 对象，避免 react-markdown 每帧重建组件映射
+    const components = React.useMemo(() => ({
+      a: MarkdownLink,
+      pre: MarkdownPre,
+      code: (props: React.HTMLAttributes<HTMLElement>) => (
+        <MarkdownInlineCode {...props} basePath={basePath} />
+      ),
+    }), [basePath])
+
     return (
       <div
         className={cn(
@@ -220,77 +315,9 @@ export const MessageResponse = React.memo(
         )}
       >
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={{
-            a: ({ href, children: linkChildren, ...linkProps }) => (
-              <a
-                {...linkProps}
-                href={href}
-                onClick={(e) => {
-                  e.preventDefault()
-                  if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-                    window.electronAPI.openExternal(href)
-                  }
-                }}
-                title={href}
-              >
-                {linkChildren}
-              </a>
-            ),
-            pre: ({ children: preChildren }) => {
-              // 检测子 <code> 元素的 className 是否包含 language-mermaid
-              const codeChild = React.Children.toArray(preChildren).find(
-                (child): child is React.ReactElement =>
-                  React.isValidElement(child) && (child as React.ReactElement).type === 'code'
-              ) as React.ReactElement | undefined
-
-              if (codeChild) {
-                const codeProps = codeChild.props as { className?: string; children?: React.ReactNode }
-                if (codeProps.className?.includes('language-mermaid')) {
-                  // 递归提取纯文本（children 可能是字符串数组）
-                  const extractText = (node: React.ReactNode): string => {
-                    if (typeof node === 'string') return node
-                    if (typeof node === 'number') return String(node)
-                    if (!node) return ''
-                    if (Array.isArray(node)) return node.map(extractText).join('')
-                    if (React.isValidElement(node)) {
-                      return extractText((node.props as { children?: React.ReactNode }).children)
-                    }
-                    return ''
-                  }
-                  const mermaidCode = extractText(codeProps.children).replace(/\n$/, '')
-                  return <MermaidBlock code={mermaidCode} />
-                }
-              }
-
-              return <CodeBlock>{preChildren}</CodeBlock>
-            },
-            code: ({ children: codeChildren, className: codeClassName, ...codeProps }) => {
-              // 仅处理行内代码（代码块内的 <code> 有 className="language-xxx"）
-              if (codeClassName) {
-                return <code className={codeClassName} {...codeProps}>{codeChildren}</code>
-              }
-
-              // 提取纯文本内容
-              const text = typeof codeChildren === 'string' ? codeChildren : ''
-
-              if (text) {
-                // 检测绝对文件路径
-                if (isAbsoluteFilePath(text)) {
-                  return <FilePathChip filePath={text.trim()} />
-                }
-
-                // 检测相对文件路径（需要 basePath）
-                if (basePath && isRelativeFilePath(text)) {
-                  return <FilePathChip filePath={text.trim()} basePath={basePath} />
-                }
-              }
-
-              // 默认渲染
-              return <code {...codeProps}>{codeChildren}</code>
-            },
-          }}
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={components}
         >
           {children}
         </Markdown>

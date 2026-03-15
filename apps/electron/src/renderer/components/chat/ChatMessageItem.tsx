@@ -94,7 +94,7 @@ interface ChatMessageItemProps {
   isParallelMode?: boolean
 }
 
-export function ChatMessageItem({
+export const ChatMessageItem = React.memo(function ChatMessageItem({
   message,
   conversationId,
   isStreaming = false,
@@ -264,4 +264,4 @@ export function ChatMessageItem({
       />
     </>
   )
-}
+})

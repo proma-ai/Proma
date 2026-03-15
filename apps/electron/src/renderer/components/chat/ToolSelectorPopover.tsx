@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { Wrench, Brain, Globe, Settings, ImagePlus } from 'lucide-react'
-import { chatToolsAtom, enabledToolIdsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
+import { chatToolsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import { activeViewAtom } from '@/atoms/active-view'
 
@@ -43,17 +43,19 @@ function getToolIcon(iconName?: string): React.ReactElement {
 export function ToolSelectorPopover(): React.ReactElement {
   const [open, setOpen] = useState(false)
   const tools = useAtomValue(chatToolsAtom)
-  const [enabledIds, setEnabledIds] = useAtom(enabledToolIdsAtom)
+  const setChatTools = useSetAtom(chatToolsAtom)
   const hasActiveTools = useAtomValue(hasActiveToolsAtom)
-  const [, setActiveView] = useAtom(activeViewAtom)
-  const [, setSettingsTab] = useAtom(settingsTabAtom)
+  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
 
-  /** 切换工具开关 */
-  const toggleTool = (toolId: string): void => {
-    if (enabledIds.includes(toolId)) {
-      setEnabledIds(enabledIds.filter((id) => id !== toolId))
-    } else {
-      setEnabledIds([...enabledIds, toolId])
+  /** 切换工具开关（通过 IPC 更新后端配置，再刷新 atom） */
+  const toggleTool = async (toolId: string, currentEnabled: boolean): Promise<void> => {
+    try {
+      await window.electronAPI.updateChatToolState(toolId, { enabled: !currentEnabled })
+      const updated = await window.electronAPI.getChatTools()
+      setChatTools(updated)
+    } catch (err) {
+      console.error('[ToolSelectorPopover] 切换工具失败:', err)
     }
   }
 
@@ -98,7 +100,7 @@ export function ToolSelectorPopover(): React.ReactElement {
           ) : (
             <div className="space-y-1">
               {tools.map((tool) => {
-                const isEnabled = enabledIds.includes(tool.meta.id)
+                const isEnabled = tool.enabled
                 const canToggle = tool.available
 
                 return (
@@ -127,7 +129,7 @@ export function ToolSelectorPopover(): React.ReactElement {
                     </div>
                     <Switch
                       checked={isEnabled && canToggle}
-                      onCheckedChange={() => toggleTool(tool.meta.id)}
+                      onCheckedChange={() => toggleTool(tool.meta.id, isEnabled)}
                       disabled={!canToggle}
                       className="scale-75"
                     />

@@ -55,6 +55,8 @@ export function MemorySettings(): React.ReactElement {
     setSaving(true)
     try {
       await window.electronAPI.setMemoryConfig(updated)
+      // 同步记忆工具开关到 chat-tools.json（唯一状态源）
+      await window.electronAPI.updateChatToolState('memory', { enabled: updated.enabled })
       setConfig(updated)
       setApiKey(updated.apiKey)
       // 刷新全局工具列表（available/enabled 可能变化）

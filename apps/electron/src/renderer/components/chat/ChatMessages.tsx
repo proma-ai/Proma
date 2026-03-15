@@ -291,7 +291,7 @@ export function ChatMessages({
   const dividerSet = new Set(contextDividers)
 
   return (
-    <Conversation className={ready ? 'cv-ready opacity-100 transition-opacity duration-200' : 'opacity-0'}>
+    <Conversation className={ready ? `${streaming ? '' : 'cv-ready '}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
       {/* 滚动到顶部时自动加载更多历史 */}
       <ScrollTopLoader
         hasMore={hasMore}

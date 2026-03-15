@@ -14,6 +14,7 @@ import type { ChatToolsFileConfig, ChatToolState, ChatToolMeta } from '@proma/sh
 const DEFAULT_CONFIG: ChatToolsFileConfig = {
   toolStates: {
     memory: { enabled: true },
+    'agent-mode-recommend': { enabled: true },
     'web-search': { enabled: false },
     'nano-banana': { enabled: false },
   },
