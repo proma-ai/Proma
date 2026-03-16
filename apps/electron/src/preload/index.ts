@@ -92,6 +92,11 @@ import type {
   MemoryConfig,
   // Cloud 模式专属类型
   DownloadCloudPromptsResult,
+  UsageQueryParams,
+  UsageLogResponse,
+  ToolUsageLogResponse,
+  SpeechUsageLogResponse,
+  AgentUsageLogResponse,
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
@@ -660,6 +665,20 @@ export interface ElectronAPI {
   cloudPrompts: {
     /** 下载云端提示词到本地 */
     download: () => Promise<DownloadCloudPromptsResult>
+  }
+
+  // ===== Cloud 用量日志相关 =====
+
+  /** Cloud 用量日志 API */
+  cloudUsage: {
+    /** 获取模型调用日志 */
+    getUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<UsageLogResponse>>
+    /** 获取工具调用日志 */
+    getToolUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<ToolUsageLogResponse>>
+    /** 获取语音用量日志 */
+    getSpeechUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<SpeechUsageLogResponse>>
+    /** 获取 Agent API 调用日志 */
+    getAgentUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<AgentUsageLogResponse>>
   }
 
   // ===== 数据同步相关 =====
@@ -1436,6 +1455,22 @@ const electronAPI: ElectronAPI = {
   cloudPrompts: {
     download: () => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.DOWNLOAD_CLOUD_PROMPTS)
+    },
+  },
+
+  // Cloud 用量日志
+  cloudUsage: {
+    getUsageLogs: (params?: UsageQueryParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_USAGE_LOGS, params)
+    },
+    getToolUsageLogs: (params?: UsageQueryParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_TOOL_USAGE_LOGS, params)
+    },
+    getSpeechUsageLogs: (params?: UsageQueryParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_SPEECH_USAGE_LOGS, params)
+    },
+    getAgentUsageLogs: (params?: UsageQueryParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_AGENT_USAGE_LOGS, params)
     },
   },
 

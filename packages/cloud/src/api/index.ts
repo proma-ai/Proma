@@ -31,3 +31,6 @@ export type { SubscriptionApi } from './subscription'
 
 export { createPromptsApi } from './prompts'
 export type { PromptsApi } from './prompts'
+
+export { createUsageApi } from './usage'
+export type { UsageApi } from './usage'

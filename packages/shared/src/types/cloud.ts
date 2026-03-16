@@ -324,7 +324,146 @@ export const CLOUD_IPC_CHANNELS = {
   GET_SUBSCRIPTION_HISTORY: 'cloud:subscription:history',
   // 提示词下载
   DOWNLOAD_CLOUD_PROMPTS: 'cloud:prompts:download',
+  // 用量日志
+  GET_USAGE_LOGS: 'cloud:usage:get',
+  GET_TOOL_USAGE_LOGS: 'cloud:usage:get-tool',
+  GET_SPEECH_USAGE_LOGS: 'cloud:usage:get-speech',
+  GET_AGENT_USAGE_LOGS: 'cloud:usage:get-agent',
 } as const
+
+// ===== 用量日志相关类型 =====
+
+/** 日期筛选 */
+export type DateFilter = 'today' | 'yesterday' | 'all'
+
+/** 用量查询参数 */
+export interface UsageQueryParams {
+  dateFilter?: DateFilter
+  page?: number
+  pageSize?: number
+}
+
+/** 模型调用日志项 */
+export interface UsageLogItem {
+  id: string
+  modelId: string
+  modelName: string
+  conversationId?: string | null
+  inputTokens: number
+  outputTokens: number
+  totalCost: number | string
+  createdAt: string
+}
+
+/** 模型调用统计 */
+export interface UsageStats {
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number | string
+}
+
+/** 模型调用日志响应 */
+export interface UsageLogResponse {
+  items: UsageLogItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: UsageStats
+}
+
+/** 语音用量日志项 */
+export interface SpeechUsageLogItem {
+  id: string
+  modelId: string | null
+  modelName: string
+  durationSeconds: number
+  cost: number | string
+  status: 'SUCCESS' | 'FAILED'
+  errorMessage: string | null
+  createdAt: string
+}
+
+/** 语音用量统计 */
+export interface SpeechUsageStats {
+  totalRequests: number
+  successfulRequests: number
+  failedRequests: number
+  totalDurationSeconds: number
+  totalCost: number | string
+}
+
+/** 语音用量日志响应 */
+export interface SpeechUsageLogResponse {
+  items: SpeechUsageLogItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: SpeechUsageStats
+}
+
+/** 工具调用日志项 */
+export interface ToolUsageLogItem {
+  id: string
+  toolName: string
+  toolInput: string | null
+  conversationId: string | null
+  cost: number | string
+  createdAt: string
+}
+
+/** 工具调用统计 */
+export interface ToolUsageStats {
+  totalRequests: number
+  totalCost: number | string
+}
+
+/** 工具调用日志响应 */
+export interface ToolUsageLogResponse {
+  items: ToolUsageLogItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: ToolUsageStats
+}
+
+/** Agent API 调用日志项 */
+export interface AgentUsageLogItem {
+  id: string
+  apiKeyId: string
+  apiKeyName: string
+  endpoint: string
+  modelId: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  totalCost: number | string
+  responseStatus: number | null
+  durationMs: number | null
+  createdAt: string
+}
+
+/** Agent API 调用统计 */
+export interface AgentUsageStats {
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCacheCreationTokens: number
+  totalCacheReadTokens: number
+  totalCost: number | string
+  successCount: number
+  errorCount: number
+}
+
+/** Agent API 调用日志响应 */
+export interface AgentUsageLogResponse {
+  items: AgentUsageLogItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: AgentUsageStats
+}
 
 // ===== 云端提示词相关类型 =====
 
