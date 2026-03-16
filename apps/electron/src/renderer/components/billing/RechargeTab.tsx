@@ -1,27 +1,27 @@
 /**
  * RechargeTab - 充值标签页（内嵌在 BillingSettings）
  *
- * 套餐选择 → 支付方式（仅微信） → 支付 → 自动刷新
+ * 套餐选择 → 支付 → 自动刷新
+ * 顶部显示订阅推荐引导
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { Button } from '@/components/ui/button'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ArrowRight, Sparkles, Info } from 'lucide-react'
 import { TierSelector } from './TierSelector'
-import { PaymentMethodRadio } from './PaymentMethodRadio'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
 import { VipVerifyInput } from './VipVerifyInput'
 import {
   paymentTiersAtom,
   selectedTierIdAtom,
-  selectedPaymentMethodAtom,
 } from '@/atoms/cloud-billing'
 
 interface RechargeTabProps {
   onPaymentComplete: () => Promise<void>
   onVipVerified: () => Promise<void>
+  onSwitchToSubscription: () => void
 }
 
 /** 微信支付状态 */
@@ -33,13 +33,16 @@ interface WechatPayState {
   status: WechatPayStatus
 }
 
-export function RechargeTab({ onPaymentComplete, onVipVerified }: RechargeTabProps): React.ReactElement {
+export function RechargeTab({ onPaymentComplete, onVipVerified, onSwitchToSubscription }: RechargeTabProps): React.ReactElement {
   const tiers = useAtomValue(paymentTiersAtom)
   const [selectedTierId, setSelectedTierId] = useAtom(selectedTierIdAtom)
-  const [paymentMethod, setPaymentMethod] = useAtom(selectedPaymentMethodAtom)
 
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
+
+  // 获取选中套餐的金额（用于按钮显示）
+  const selectedTierData = tiers.find((t) => t.id === selectedTierId)
+  const selectedAmountCny = selectedTierData ? (selectedTierData.amount_cny / 100).toFixed(0) : 0
 
   /** 发起支付 */
   const handlePay = async (): Promise<void> => {
@@ -101,6 +104,31 @@ export function RechargeTab({ onPaymentComplete, onVipVerified }: RechargeTabPro
 
   return (
     <div className="space-y-6">
+      {/* 订阅推荐引导 */}
+      <button
+        onClick={onSwitchToSubscription}
+        className="w-full group rounded-2xl overflow-hidden text-left transition-all hover:shadow-xl bg-gradient-to-br from-indigo-600/80 via-slate-600/80 to-slate-700/80 dark:from-indigo-700/75 dark:via-slate-600/75 dark:to-slate-700/75 backdrop-blur-md border border-white/15"
+      >
+        <div className="px-5 py-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0">
+                <Sparkles size={20} className="text-white/90" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-100">推荐使用订阅计划，更划算</p>
+                <p className="text-sm text-slate-300/80 mt-1">
+                  订阅享更低价格，解锁 Claude API、Proma Agent、Nano Banana 等全部权益
+                </p>
+              </div>
+            </div>
+            <div className="h-8 w-8 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0 transition-transform group-hover:translate-x-0.5">
+              <ArrowRight size={16} className="text-white/90" />
+            </div>
+          </div>
+        </div>
+      </button>
+
       {/* 套餐选择 */}
       <TierSelector
         tiers={tiers}
@@ -108,14 +136,19 @@ export function RechargeTab({ onPaymentComplete, onVipVerified }: RechargeTabPro
         onSelect={setSelectedTierId}
       />
 
-      {/* 支付方式 */}
-      <PaymentMethodRadio
-        value={paymentMethod}
-        onChange={setPaymentMethod}
-      />
-
       {/* VIP 验证 */}
       <VipVerifyInput onVerified={onVipVerified} />
+
+      {/* 说明 */}
+      <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-3">
+        <div className="flex items-start gap-2">
+          <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
+            <p>预充值余额不会过期，仅用于 Proma 应用内 AI 对话消耗</p>
+            <p>充值为一次性购买，不含订阅权益（如 Claude API 访问等）</p>
+          </div>
+        </div>
+      </div>
 
       {/* 支付按钮 */}
       <Button
@@ -125,7 +158,9 @@ export function RechargeTab({ onPaymentComplete, onVipVerified }: RechargeTabPro
         onClick={handlePay}
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-        确认充值
+        {selectedTierId
+          ? `微信支付 · ¥${selectedAmountCny}`
+          : '请选择充值档位'}
       </Button>
     </div>
   )

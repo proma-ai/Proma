@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { Loader2 } from 'lucide-react'
+import { Loader2, CreditCard, Repeat, ArrowRightLeft } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BalanceCard } from './BalanceCard'
 import { RechargeTab } from './RechargeTab'
@@ -35,6 +35,8 @@ export function BillingSettings(): React.ReactElement {
   const setOrders = useSetAtom(orderHistoryAtom)
   const setSubTiers = useSetAtom(subscriptionTiersAtom)
   const setSubStatus = useSetAtom(subscriptionStatusAtom)
+
+  const [activeTab, setActiveTab] = React.useState('subscription')
 
   /** 加载账单信息 */
   const refreshBilling = React.useCallback(async () => {
@@ -86,6 +88,11 @@ export function BillingSettings(): React.ReactElement {
     refreshAll()
   }, [refreshAll])
 
+  /** 切换到订阅计划 tab */
+  const switchToSubscription = React.useCallback(() => {
+    setActiveTab('subscription')
+  }, [])
+
   if (billingLoading && !billingInfo) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -95,18 +102,25 @@ export function BillingSettings(): React.ReactElement {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <h2 className="text-lg font-semibold">账单</h2>
-
+    <div className="space-y-6">
       {/* 余额卡片 */}
       <BalanceCard />
 
       {/* Tabs：订阅 / 充值 / 迁移 */}
-      <Tabs defaultValue="subscription" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="subscription">订阅计划(更划算)</TabsTrigger>
-          <TabsTrigger value="recharge">余额充值</TabsTrigger>
-          <TabsTrigger value="transfer">从 DeepClaude 迁移</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3 h-10">
+          <TabsTrigger value="subscription" className="gap-1.5 text-xs">
+            <CreditCard size={13} />
+            订阅计划
+          </TabsTrigger>
+          <TabsTrigger value="recharge" className="gap-1.5 text-xs">
+            <Repeat size={13} />
+            余额充值
+          </TabsTrigger>
+          <TabsTrigger value="transfer" className="gap-1.5 text-xs">
+            <ArrowRightLeft size={13} />
+            额度迁移
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="subscription" className="space-y-6 mt-4">
@@ -117,6 +131,7 @@ export function BillingSettings(): React.ReactElement {
           <RechargeTab
             onPaymentComplete={refreshAll}
             onVipVerified={refreshTiers}
+            onSwitchToSubscription={switchToSubscription}
           />
           <OrderHistory />
         </TabsContent>

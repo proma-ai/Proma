@@ -1,12 +1,11 @@
 /**
- * BalanceCard - 余额卡片
+ * BalanceCard - 账户总览卡片
  *
- * 显示账户余额、订阅额度、本月用量、累计用量、VIP 状态
+ * 干净白底风格，左侧主额度 + 右侧分区统计
  */
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { billingInfoAtom, isVipAtom, discountLevelAtom } from '@/atoms/cloud-billing'
 
@@ -27,46 +26,59 @@ export function BalanceCard(): React.ReactElement | null {
   const discountPercent = discountLevel > 0 ? Math.round((1 - discountLevel) * 100) : 0
   const hasSubscription = billing.hasActiveSubscription
 
+  const rawCredits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
+  const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
+    ? parseFloat(billing.subscriptionQuotaRemaining)
+    : (billing.subscriptionQuotaRemaining ?? 0)
+  const totalAvailable = (isNaN(rawCredits) ? 0 : rawCredits) + (isNaN(subRemaining) ? 0 : subRemaining)
+
   return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="flex items-center justify-between gap-6">
-          <div className="flex items-center gap-8">
-            <div>
-              <p className="text-xs text-muted-foreground">预充值余额</p>
-              <p className="text-lg font-semibold">{formatCurrency(billing.credits)}</p>
-            </div>
-            {hasSubscription && (
-              <div>
-                <p className="text-xs text-muted-foreground">订阅剩余</p>
-                <p className="text-lg font-semibold text-primary">
-                  {formatCurrency(billing.subscriptionQuotaRemaining)}
-                </p>
-              </div>
-            )}
-            <div>
-              <p className="text-xs text-muted-foreground">本月用量</p>
-              <p className="text-lg font-semibold">{formatCurrency(billing.usedQuotaMonthly)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">累计用量</p>
-              <p className="text-lg font-semibold">{formatCurrency(billing.usedQuota)}</p>
+    <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+      <div className="px-6 py-5">
+        <div className="flex items-start justify-between">
+          {/* 左侧：总额度 */}
+          <div>
+            <p className="text-xs text-muted-foreground font-medium">总可用额度</p>
+            <p className="text-3xl font-bold tracking-tight mt-1">{formatCurrency(totalAvailable)}</p>
+            <div className="flex items-center gap-2 mt-2.5">
+              {hasSubscription && (
+                <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-medium bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300">
+                  订阅中
+                </Badge>
+              )}
+              {isVip && (
+                <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                  VIP {discountPercent > 0 ? `${100 - discountPercent}折` : ''}
+                </Badge>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {hasSubscription && (
-              <Badge variant="default" className="bg-primary/10 text-primary border-primary/20">
-                订阅中
-              </Badge>
+
+          {/* 右侧：统计数据 */}
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-right">
+            <div>
+              <p className="text-[11px] text-muted-foreground">预充值</p>
+              <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.credits)}</p>
+            </div>
+            {hasSubscription ? (
+              <div>
+                <p className="text-[11px] text-muted-foreground">订阅剩余</p>
+                <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.subscriptionQuotaRemaining)}</p>
+              </div>
+            ) : (
+              <div />
             )}
-            {isVip && (
-              <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                VIP {discountPercent > 0 ? `${100 - discountPercent}折` : ''}
-              </Badge>
-            )}
+            <div>
+              <p className="text-[11px] text-muted-foreground">本月用量</p>
+              <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuotaMonthly)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-muted-foreground">累计用量</p>
+              <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuota)}</p>
+            </div>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

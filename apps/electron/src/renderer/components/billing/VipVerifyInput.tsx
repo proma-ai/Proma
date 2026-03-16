@@ -58,10 +58,10 @@ export function VipVerifyInput({ onVerified }: VipVerifyInputProps): React.React
   }
 
   return (
-    <div className="space-y-2">
+    <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-4 space-y-2.5">
       <div className="flex items-center gap-2">
-        <Tag className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">优惠码（DeepClaude 用户专享）</span>
+        <Tag className="h-4 w-4 text-stone-500 dark:text-stone-400" />
+        <span className="text-sm text-stone-600 dark:text-stone-300">优惠码（DeepClaude 用户专享）</span>
       </div>
       <div className="flex gap-2">
         <Input
