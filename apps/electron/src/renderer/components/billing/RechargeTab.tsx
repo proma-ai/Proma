@@ -12,7 +12,6 @@ import { Loader2, ArrowRight, Sparkles, Info } from 'lucide-react'
 import { TierSelector } from './TierSelector'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
-import { VipVerifyInput } from './VipVerifyInput'
 import {
   paymentTiersAtom,
   selectedTierIdAtom,
@@ -107,7 +106,7 @@ export function RechargeTab({ onPaymentComplete, onVipVerified, onSwitchToSubscr
       {/* 订阅推荐引导 */}
       <button
         onClick={onSwitchToSubscription}
-        className="w-full group rounded-2xl overflow-hidden text-left transition-all hover:shadow-xl bg-gradient-to-br from-indigo-600/80 via-slate-600/80 to-slate-700/80 dark:from-indigo-700/75 dark:via-slate-600/75 dark:to-slate-700/75 backdrop-blur-md border border-white/15"
+        className="w-full group rounded-2xl overflow-hidden text-left transition-all hover:shadow-xl bg-gradient-to-r from-indigo-700/85 via-violet-700/82 to-slate-700/80 dark:from-indigo-800/82 dark:via-violet-800/80 dark:to-slate-800/78 backdrop-blur-md border border-white/10"
       >
         <div className="px-5 py-5">
           <div className="flex items-center justify-between">
@@ -116,8 +115,8 @@ export function RechargeTab({ onPaymentComplete, onVipVerified, onSwitchToSubscr
                 <Sparkles size={20} className="text-white/90" />
               </div>
               <div>
-                <p className="text-base font-semibold text-slate-100">推荐使用订阅计划，更划算</p>
-                <p className="text-sm text-slate-300/80 mt-1">
+                <p className="text-base font-semibold text-white">推荐使用订阅计划，更划算</p>
+                <p className="text-sm text-white/70 mt-1">
                   订阅享更低价格，解锁 Claude API、Proma Agent、Nano Banana 等全部权益
                 </p>
               </div>
@@ -136,16 +135,13 @@ export function RechargeTab({ onPaymentComplete, onVipVerified, onSwitchToSubscr
         onSelect={setSelectedTierId}
       />
 
-      {/* VIP 验证 */}
-      <VipVerifyInput onVerified={onVipVerified} />
-
       {/* 说明 */}
-      <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-3">
+      <div className="rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 backdrop-blur-sm border border-indigo-200/30 dark:border-indigo-800/20 px-4 py-3">
         <div className="flex items-start gap-2">
-          <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
-            <p>预充值余额不会过期，仅用于 Proma 应用内 AI 对话消耗</p>
-            <p>充值为一次性购买，不含订阅权益（如 Claude API 访问等）</p>
+          <Info size={14} className="text-indigo-400/70 dark:text-indigo-400/60 mt-0.5 shrink-0" />
+          <div className="text-xs text-indigo-600/60 dark:text-indigo-300/50 space-y-0.5">
+            <p>预充值余额不会过期，仅用于 Proma 应用内 AI 对话消耗以及 Proma 生成 API 外部调用消耗使用</p>
+            <p>充值为一次性购买，不含订阅权益</p>
           </div>
         </div>
       </div>
