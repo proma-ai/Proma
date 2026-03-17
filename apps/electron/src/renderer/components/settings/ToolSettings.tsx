@@ -161,7 +161,7 @@ function WebSearchSettings(): React.ReactElement {
               <div className="flex items-center gap-2 text-sm text-primary">
                 <Cloud size={14} className="shrink-0" />
                 <span className="font-medium">使用 Proma Cloud 提供</span>
-                {isUsingCloud && <span className="text-xs opacity-70">$0.018 / 次</span>}
+                {isUsingCloud && <span className="text-xs opacity-70">0.13 积分/次</span>}
               </div>
               <Switch checked={useCloud} onCheckedChange={handleCloudToggle} />
             </div>
@@ -402,9 +402,9 @@ function NanoBananaSettings(): React.ReactElement {
             // 云端模式内容
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
-                <p className="font-medium text-foreground text-sm">计费说明</p>
-                <p><span className="font-medium text-foreground">Nano Banana 2</span>（Flash）：auto $0.10 · 1K $0.15 · 2K $0.18 · 4K $0.30</p>
-                <p><span className="font-medium text-foreground">Nano Banana Pro</span>：1K $0.20 · 2K $0.20 · 4K $0.40</p>
+                <p className="font-medium text-foreground text-sm">计费说明（积分）</p>
+                <p><span className="font-medium text-foreground">Nano Banana 2</span>（Flash）：auto 0.73 · 1K 1.10 · 2K 1.31 · 4K 2.19</p>
+                <p><span className="font-medium text-foreground">Nano Banana Pro</span>：1K 1.46 · 2K 1.46 · 4K 2.92</p>
               </div>
 
               <div className="space-y-1.5">
@@ -417,13 +417,13 @@ function NanoBananaSettings(): React.ReactElement {
                     <SelectItem value="gemini-3.1-flash-image-preview">
                       <div className="text-left">
                         <div className="font-medium">Nano Banana 2</div>
-                        <div className="text-xs text-muted-foreground">auto $0.10 · 1K $0.15 · 2K $0.18 · 4K $0.30</div>
+                        <div className="text-xs text-muted-foreground">auto 0.73 · 1K 1.10 · 2K 1.31 · 4K 2.19 积分</div>
                       </div>
                     </SelectItem>
                     <SelectItem value="gemini-3-pro-image-preview">
                       <div className="text-left">
                         <div className="font-medium">Nano Banana Pro</div>
-                        <div className="text-xs text-muted-foreground">1K $0.20 · 2K $0.20 · 4K $0.40</div>
+                        <div className="text-xs text-muted-foreground">1K 1.46 · 2K 1.46 · 4K 2.92 积分</div>
                       </div>
                     </SelectItem>
                   </SelectContent>

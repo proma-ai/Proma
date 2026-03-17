@@ -82,6 +82,11 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
               </div>
             </div>
 
+            {/* 余额数字 */}
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+              {totalAvailable < 10 ? totalAvailable.toFixed(2) : Math.floor(totalAvailable)}
+            </span>
+
             {hasSubscription && (
               <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-500">
                 <Sparkles size={8} />
