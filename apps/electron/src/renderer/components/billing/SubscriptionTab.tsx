@@ -7,17 +7,17 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import {
-  Loader2, Zap, Crown, Rocket, Flame, Clock,
+  Zap, Crown, Rocket, Flame, Clock,
   ChevronDown, ChevronUp, Check, Info,
 } from 'lucide-react'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
+import { DeveloperLetterDialog } from './DeveloperLetterDialog'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
 import type { SubscriptionTier } from '@proma/shared'
 
@@ -133,13 +133,6 @@ const TIER_DESC: Record<string, string> = {
 }
 
 const RECOMMENDED_TIER = 'standard'
-const USD_TO_CNY_RATE = 7
-
-function calcDiscount(tier: SubscriptionTier): number {
-  const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE * 100
-  if (equivalentCny <= 0) return 0
-  return Math.round((1 - tier.amount_cny / equivalentCny) * 100)
-}
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr)
@@ -147,10 +140,10 @@ function formatDate(dateStr: string): string {
 }
 
 function formatCurrency(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return '$0.00'
+  if (value === null || value === undefined) return '0.00 积分'
   const num = typeof value === 'string' ? parseFloat(value) : value
-  if (isNaN(num)) return '$0.00'
-  return `$${num.toFixed(2)}`
+  if (isNaN(num)) return '0.00 积分'
+  return `${num.toFixed(2)} 积分`
 }
 
 export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps): React.ReactElement {
@@ -161,6 +154,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
   const [showUsedUp, setShowUsedUp] = React.useState(false)
+  const [showLetterDialog, setShowLetterDialog] = React.useState(false)
 
   const refreshSubscription = React.useCallback(async () => {
     const result = await window.electronAPI.cloudSubscription.getCurrent()
@@ -335,8 +329,6 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
           {tiers.map((tier: SubscriptionTier) => {
             const isSelected = selectedTier === tier.id
             const isRecommended = tier.id === RECOMMENDED_TIER
-            const discount = calcDiscount(tier)
-            const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE
             const actualCny = tier.amount_cny / 100
             const visual = TIER_VISUALS[tier.id] ?? DEFAULT_VISUAL
 
@@ -358,7 +350,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                   <div className="mb-4">
                     <h3 className={cn('text-base font-bold', visual.textColor)}>{tier.name}</h3>
                     <p className={cn('text-[11px] mt-0.5', visual.mutedColor)}>
-                      ${tier.quota_usd} 额度/月
+                      {tier.quota} 积分/月
                     </p>
                   </div>
 
@@ -370,16 +362,6 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                       </span>
                       <span className={cn('text-[11px]', visual.mutedColor)}>/月</span>
                     </div>
-                    {discount > 0 && (
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={cn('text-[11px] line-through', visual.mutedColor)}>
-                          ¥{equivalentCny}
-                        </span>
-                        <span className="text-[10px] font-medium text-emerald-400 bg-emerald-400/15 px-1.5 py-0.5 rounded">
-                          省 {discount}%
-                        </span>
-                      </div>
-                    )}
                   </div>
 
                   {/* 描述 */}
@@ -387,20 +369,19 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                     {TIER_DESC[tier.id] ?? ''}
                   </p>
 
-                  {/* 选择按钮 */}
+                  {/* 立即订阅按钮 */}
                   <button
                     className={cn(
                       'w-full py-2 rounded-lg text-xs font-medium transition-all mb-4',
-                      isSelected
-                        ? 'bg-white text-stone-800 shadow-sm dark:bg-white dark:text-stone-900'
-                        : visual.buttonClass,
+                      visual.buttonClass,
                     )}
                     onClick={(e) => {
                       e.stopPropagation()
                       setSelectedTier(tier.id)
+                      setShowLetterDialog(true)
                     }}
                   >
-                    {isSelected ? '已选择' : '选择方案'}
+                    立即订阅 · ¥{actualCny}
                   </button>
 
                   {/* 分隔线 */}
@@ -423,30 +404,30 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         </div>
       </div>
 
-      {/* 说明 */}
+      {/* 积分计费说明 */}
       <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-3">
         <div className="flex items-start gap-2">
           <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
           <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
-            <p>订阅有效期 31 天，到期后未使用额度清零</p>
-            <p>支持重复购买叠加，优先消耗先购买的额度 (FIFO)</p>
-            <p>折扣基于 1 USD = 7 CNY 的汇率换算</p>
+            <p>所有模型价格与官方保持一致</p>
+            <p>1 积分 = ¥1，订阅有效期 31 天，到期后未使用积分清零</p>
+            <p>支持重复购买叠加，优先消耗先购买的积分 (FIFO)</p>
+            <p>低价模型 (lc-* 开头) 按 1x 倍率计费，其他模型按 7.3x 倍率计费（美元计价标准）</p>
           </div>
         </div>
       </div>
 
-      {/* 支付按钮 */}
-      <Button
-        className="w-full"
-        size="lg"
-        disabled={!selectedTier || loading}
-        onClick={handleSubscribe}
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-        {selectedTier
-          ? `立即订阅 · ¥${(tiers.find((t: SubscriptionTier) => t.id === selectedTier)?.amount_cny ?? 0) / 100}`
-          : '请选择订阅计划'}
-      </Button>
+      {/* 开发者信封弹窗 */}
+      <DeveloperLetterDialog
+        open={showLetterDialog}
+        onOpenChange={setShowLetterDialog}
+        onConfirm={() => {
+          setShowLetterDialog(false)
+          handleSubscribe()
+        }}
+        selectedTierName={tiers.find((t: SubscriptionTier) => t.id === selectedTier)?.name ?? ''}
+        loading={loading}
+      />
     </div>
   )
 }
