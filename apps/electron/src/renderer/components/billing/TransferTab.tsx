@@ -18,6 +18,12 @@ function formatCurrency(value: number | null | undefined): string {
   return `$${value.toFixed(2)}`
 }
 
+/** USD → 积分换算说明 */
+function formatPoints(usdValue: number | null | undefined): string {
+  if (usdValue === null || usdValue === undefined) return '0.00 积分'
+  return `${(usdValue * 7).toFixed(2)} 积分`
+}
+
 export function TransferTab({ onTransferComplete }: TransferTabProps): React.ReactElement {
   const [apiKey, setApiKey] = React.useState('')
   const [showApiKey, setShowApiKey] = React.useState(false)
@@ -98,7 +104,7 @@ export function TransferTab({ onTransferComplete }: TransferTabProps): React.Rea
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        输入您的 DeepClaude API Key，将额度转移到当前账户
+        输入您的 DeepClaude API Key，将额度转移到当前账户（1 USD = 7 积分）
       </p>
 
       {/* API Key 输入 */}
@@ -136,6 +142,7 @@ export function TransferTab({ onTransferComplete }: TransferTabProps): React.Rea
             <div className="rounded-lg bg-muted/50 p-4">
               <p className="text-xs text-muted-foreground mb-1">DeepClaude 当前余额</p>
               <p className="text-lg font-semibold">{formatCurrency(deepClaudeBalance)}</p>
+              <p className="text-xs text-muted-foreground">≈ {formatPoints(deepClaudeBalance)}</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <p className="text-xs text-muted-foreground mb-1">转移金额</p>

@@ -100,7 +100,7 @@ export function OrderHistory(): React.ReactElement {
                 <TableCell className="text-xs">
                   {new Date(order.created_at).toLocaleString('zh-CN')}
                 </TableCell>
-                <TableCell className="text-xs">${order.credits}</TableCell>
+                <TableCell className="text-xs">{order.credits} 积分</TableCell>
                 <TableCell className="text-xs">¥{(order.amount / 100).toFixed(0)}</TableCell>
                 <TableCell className="text-xs">
                   {order.payment_channel === 'WECHAT' ? '微信' : 'Stripe'}

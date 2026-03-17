@@ -125,7 +125,7 @@ export function TierSelector({ tiers, selectedTier, onSelect }: TierSelectorProp
                     </span>
                   </div>
                   <p className={cn('text-[11px] mt-0.5', visual.mutedColor)}>
-                    ${tier.credits} 额度
+                    {tier.credits} 积分
                   </p>
                   {hasDis && discount > 0 && (
                     <div className="flex items-center gap-2 mt-1.5">

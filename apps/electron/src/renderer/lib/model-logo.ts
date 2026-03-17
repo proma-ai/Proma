@@ -149,6 +149,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   gpts: GPT4Logo,
 
   // === Claude / Anthropic ===
+  'lc-claude': ClaudeLogo,
   '(claude|anthropic-)': ClaudeLogo,
 
   // === DeepSeek ===

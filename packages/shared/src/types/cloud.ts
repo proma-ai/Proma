@@ -112,7 +112,7 @@ export type SubscriptionOrderStatus = 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'CANCEL
 export interface SubscriptionTier {
   id: string       // lite/standard/pro/max
   name: string     // Lite/Standard/Pro/Max
-  quota_usd: number // 额度 (USD)
+  quota: number    // 额度（积分）
   amount_cny: number // 价格 (分)
 }
 

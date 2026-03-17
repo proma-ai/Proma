@@ -91,7 +91,7 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          剩余额度 {credits}
+          剩余 {credits}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

@@ -10,10 +10,10 @@ import { Badge } from '@/components/ui/badge'
 import { billingInfoAtom, isVipAtom, discountLevelAtom } from '@/atoms/cloud-billing'
 
 function formatCurrency(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return '$0.00'
+  if (value === null || value === undefined) return '0.00 积分'
   const num = typeof value === 'string' ? parseFloat(value) : value
-  if (isNaN(num)) return '$0.00'
-  return `$${num.toFixed(2)}`
+  if (isNaN(num)) return '0.00 积分'
+  return `${num.toFixed(2)} 积分`
 }
 
 export function BalanceCard(): React.ReactElement | null {
