@@ -47,3 +47,6 @@ export * from './chat-tool'
 
 // 飞书集成相关类型
 export * from './feishu'
+
+// 模型健康检查相关类型
+export * from './model-health'

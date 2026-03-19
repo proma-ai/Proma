@@ -324,6 +324,10 @@ export const CLOUD_IPC_CHANNELS = {
   GET_SUBSCRIPTION_HISTORY: 'cloud:subscription:history',
   // 提示词下载
   DOWNLOAD_CLOUD_PROMPTS: 'cloud:prompts:download',
+  // 模型健康检查
+  GET_MODEL_HEALTH: 'cloud:model-health:get',
+  /** 健康数据更新推送通道（主进程 → 渲染进程） */
+  MODEL_HEALTH_UPDATED: 'cloud:model-health:updated',
 } as const
 
 // ===== 云端提示词相关类型 =====

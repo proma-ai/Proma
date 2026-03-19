@@ -55,6 +55,7 @@ import type { TabItem, SplitLayoutState } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBridgeStateAtom } from './atoms/feishu-atoms'
 import { currentConversationIdAtom } from './atoms/chat-atoms'
+import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import type { FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
@@ -469,6 +470,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <CloudAuthInitializer />
     <BillingInitializer />
     <OfficialChannelInitializer />
+    <ModelHealthInitializer />
     <AgentSettingsInitializer />
     <NotificationsInitializer />
     <ChatListenersInitializer />
