@@ -2,25 +2,20 @@
  * BillingSettings - 账单设置主页
  *
  * 显示在设置面板的"账单"tab 中（仅 Cloud 模式）
- * 包含：余额卡片 + Tabs（订阅计划 / 立即充值 / 从 DeepClaude 迁移） + 订单历史
+ * 包含：余额卡片 + 订阅计划
  */
 
 import * as React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { Loader2, CreditCard, Repeat, ArrowRightLeft } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Loader2 } from 'lucide-react'
 import { BalanceCard } from './BalanceCard'
-import { RechargeTab } from './RechargeTab'
-import { TransferTab } from './TransferTab'
 import { SubscriptionTab } from './SubscriptionTab'
-import { OrderHistory } from './OrderHistory'
 import {
   billingInfoAtom,
   billingLoadingAtom,
   paymentTiersAtom,
   isVipAtom,
   discountLevelAtom,
-  orderHistoryAtom,
   subscriptionTiersAtom,
   subscriptionStatusAtom,
 } from '@/atoms/cloud-billing'
@@ -32,11 +27,8 @@ export function BillingSettings(): React.ReactElement {
   const setTiers = useSetAtom(paymentTiersAtom)
   const setIsVip = useSetAtom(isVipAtom)
   const setDiscountLevel = useSetAtom(discountLevelAtom)
-  const setOrders = useSetAtom(orderHistoryAtom)
   const setSubTiers = useSetAtom(subscriptionTiersAtom)
   const setSubStatus = useSetAtom(subscriptionStatusAtom)
-
-  const [activeTab, setActiveTab] = React.useState('subscription')
 
   /** 加载账单信息 */
   const refreshBilling = React.useCallback(async () => {
@@ -56,14 +48,6 @@ export function BillingSettings(): React.ReactElement {
     }
   }, [setTiers, setIsVip, setDiscountLevel])
 
-  /** 刷新订单历史 */
-  const refreshOrders = React.useCallback(async () => {
-    const result = await window.electronAPI.cloudBilling.getOrders()
-    if (result.success && result.data) {
-      setOrders(result.data)
-    }
-  }, [setOrders])
-
   /** 加载订阅档位和当前订阅 */
   const refreshSubscription = React.useCallback(async () => {
     const [tiersResult, currentResult] = await Promise.all([
@@ -80,18 +64,13 @@ export function BillingSettings(): React.ReactElement {
 
   /** 刷新全部数据 */
   const refreshAll = React.useCallback(async () => {
-    await Promise.all([refreshBilling(), refreshTiers(), refreshOrders(), refreshSubscription()])
-  }, [refreshBilling, refreshTiers, refreshOrders, refreshSubscription])
+    await Promise.all([refreshBilling(), refreshTiers(), refreshSubscription()])
+  }, [refreshBilling, refreshTiers, refreshSubscription])
 
   // 初始加载
   React.useEffect(() => {
     refreshAll()
   }, [refreshAll])
-
-  /** 切换到订阅计划 tab */
-  const switchToSubscription = React.useCallback(() => {
-    setActiveTab('subscription')
-  }, [])
 
   if (billingLoading && !billingInfo) {
     return (
@@ -106,40 +85,8 @@ export function BillingSettings(): React.ReactElement {
       {/* 余额卡片 */}
       <BalanceCard />
 
-      {/* Tabs：订阅 / 充值 / 迁移 */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 h-10">
-          <TabsTrigger value="subscription" className="gap-1.5 text-xs">
-            <CreditCard size={13} />
-            订阅计划
-          </TabsTrigger>
-          <TabsTrigger value="recharge" className="gap-1.5 text-xs">
-            <Repeat size={13} />
-            余额充值
-          </TabsTrigger>
-          <TabsTrigger value="transfer" className="gap-1.5 text-xs">
-            <ArrowRightLeft size={13} />
-            额度迁移
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="subscription" className="space-y-6 mt-4">
-          <SubscriptionTab onSubscriptionComplete={refreshAll} />
-        </TabsContent>
-
-        <TabsContent value="recharge" className="space-y-6 mt-4">
-          <RechargeTab
-            onPaymentComplete={refreshAll}
-            onVipVerified={refreshTiers}
-            onSwitchToSubscription={switchToSubscription}
-          />
-          <OrderHistory />
-        </TabsContent>
-
-        <TabsContent value="transfer" className="space-y-6 mt-4">
-          <TransferTab onTransferComplete={refreshAll} />
-        </TabsContent>
-      </Tabs>
+      {/* 订阅计划 */}
+      <SubscriptionTab onSubscriptionComplete={refreshAll} />
     </div>
   )
 }

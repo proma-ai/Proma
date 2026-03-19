@@ -170,21 +170,6 @@ export interface VerifyVipResponse {
   message: string
 }
 
-/** 外部余额查询响应 */
-export interface QueryExternalBalanceResponse {
-  credits: number
-  usedQuota: number
-  remainQuotaInUsd: number
-}
-
-/** 额度迁移响应 */
-export interface TransferCreditsResponse {
-  success: boolean
-  message: string
-  newBalance?: number
-  credits?: number
-}
-
 /** 账单 IPC 通用响应 */
 export interface BillingIpcResponse<T = unknown> {
   success: boolean
@@ -300,9 +285,6 @@ export const CLOUD_IPC_CHANNELS = {
   GET_ORDER_STATUS: 'cloud:payment:order-status',
   GET_ORDERS: 'cloud:payment:orders',
   VERIFY_VIP: 'cloud:payment:verify-vip',
-  // 额度迁移
-  QUERY_EXTERNAL_BALANCE: 'cloud:payment:query-external-balance',
-  TRANSFER_CREDITS: 'cloud:payment:transfer-credits',
   // 额度不足推送通道（主进程 → 渲染进程）
   QUOTA_EXCEEDED: 'cloud:billing:quota-exceeded',
   // 余额变动推送通道（主进程 → 渲染进程，如对话扣费后）

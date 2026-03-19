@@ -11,8 +11,6 @@ import type {
   CreateStripePaymentResponse,
   OrderRecord,
   VerifyVipResponse,
-  QueryExternalBalanceResponse,
-  TransferCreditsResponse,
 } from '@proma/shared'
 
 /** 创建支付 API */
@@ -60,25 +58,7 @@ export function createPaymentApi(client: CloudApiClient) {
         api_key: apiKey,
       })
       return response.data
-    },
-
-    /** 查询外部（DeepClaude）余额 */
-    queryExternalBalance: async (apiKey: string): Promise<QueryExternalBalanceResponse> => {
-      const response = await client.post<QueryExternalBalanceResponse>(
-        '/user/query-external-balance',
-        { apiKey },
-      )
-      return response.data
-    },
-
-    /** 迁移外部额度到当前账户 */
-    transferCredits: async (apiKey: string, amount: number): Promise<TransferCreditsResponse> => {
-      const response = await client.post<TransferCreditsResponse>(
-        '/user/transfer-credits',
-        { apiKey, amount },
-      )
-      return response.data
-    },
+    }
   }
 }
 

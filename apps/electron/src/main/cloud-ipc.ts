@@ -40,8 +40,6 @@ import {
   getOrderStatus,
   getOrders,
   verifyVip,
-  queryExternalBalance,
-  transferCredits,
   getSubscriptionTiers,
   getSubscriptionCurrent,
   createSubscriptionWechat,
@@ -244,22 +242,6 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     CLOUD_IPC_CHANNELS.VERIFY_VIP,
     async (_, apiKey: string) => {
       return verifyVip(apiKey)
-    },
-  )
-
-  // ===== 额度迁移 =====
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.QUERY_EXTERNAL_BALANCE,
-    async (_, apiKey: string) => {
-      return queryExternalBalance(apiKey)
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.TRANSFER_CREDITS,
-    async (_, apiKey: string, amount: number) => {
-      return transferCredits(apiKey, amount)
     },
   )
 

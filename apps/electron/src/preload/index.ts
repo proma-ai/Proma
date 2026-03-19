@@ -61,8 +61,6 @@ import type {
   CreateStripePaymentResponse,
   OrderRecord,
   VerifyVipResponse,
-  QueryExternalBalanceResponse,
-  TransferCreditsResponse,
   ApiKeyResponse,
   ApiKeyCreateResponse,
   ApiKeyCreateParams,
@@ -615,10 +613,6 @@ export interface ElectronAPI {
     getOrders: () => Promise<BillingIpcResponse<OrderRecord[]>>
     /** VIP 验证 */
     verifyVip: (apiKey: string) => Promise<BillingIpcResponse<VerifyVipResponse>>
-    /** 查询外部（DeepClaude）余额 */
-    queryExternalBalance: (apiKey: string) => Promise<BillingIpcResponse<QueryExternalBalanceResponse>>
-    /** 迁移外部额度 */
-    transferCredits: (apiKey: string, amount: number) => Promise<BillingIpcResponse<TransferCreditsResponse>>
     /** 订阅额度不足事件（返回清理函数） */
     onQuotaExceeded: (callback: () => void) => () => void
     /** 订阅余额变动事件（对话扣费后，返回清理函数） */
@@ -1389,12 +1383,6 @@ const electronAPI: ElectronAPI = {
     },
     verifyVip: (apiKey: string) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.VERIFY_VIP, apiKey)
-    },
-    queryExternalBalance: (apiKey: string) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.QUERY_EXTERNAL_BALANCE, apiKey)
-    },
-    transferCredits: (apiKey: string, amount: number) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.TRANSFER_CREDITS, apiKey, amount)
     },
     onQuotaExceeded: (callback: () => void) => {
       const listener = (): void => callback()

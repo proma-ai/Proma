@@ -21,8 +21,6 @@ import type {
   CreateStripePaymentResponse,
   OrderRecord,
   VerifyVipResponse,
-  QueryExternalBalanceResponse,
-  TransferCreditsResponse,
   BillingIpcResponse,
   SubscriptionTiersResponse,
   SubscriptionStatusResponse,
@@ -160,26 +158,6 @@ export async function getOrders(): Promise<BillingIpcResponse<OrderRecord[]>> {
 export async function verifyVip(apiKey: string): Promise<BillingIpcResponse<VerifyVipResponse>> {
   try {
     const data = await getPaymentApi().verifyVip(apiKey)
-    return { success: true, data }
-  } catch (error) {
-    return { success: false, error: wrapError(error) }
-  }
-}
-
-/** 查询外部余额 */
-export async function queryExternalBalance(apiKey: string): Promise<BillingIpcResponse<QueryExternalBalanceResponse>> {
-  try {
-    const data = await getPaymentApi().queryExternalBalance(apiKey)
-    return { success: true, data }
-  } catch (error) {
-    return { success: false, error: wrapError(error) }
-  }
-}
-
-/** 迁移额度 */
-export async function transferCredits(apiKey: string, amount: number): Promise<BillingIpcResponse<TransferCreditsResponse>> {
-  try {
-    const data = await getPaymentApi().transferCredits(apiKey, amount)
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }
