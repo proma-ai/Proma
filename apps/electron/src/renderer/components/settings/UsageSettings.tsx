@@ -56,10 +56,10 @@ function formatCost(cost: number | string): string {
   return `${num.toFixed(4)} 积分`
 }
 
-/** 格式化 token 数 */
+/** 格式化 token 数（去掉不必要的尾零，如 100.0K → 100K） */
 function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`
+  if (tokens >= 1_000_000) return `${parseFloat((tokens / 1_000_000).toFixed(1))}M`
+  if (tokens >= 1_000) return `${parseFloat((tokens / 1_000).toFixed(1))}K`
   return String(tokens)
 }
 
@@ -447,6 +447,7 @@ function AgentUsageTable({
           <TableRow>
             <TableHead className="w-[100px]">时间</TableHead>
             <TableHead>API Key</TableHead>
+            <TableHead>模型</TableHead>
             <TableHead>端点</TableHead>
             <TableHead className="text-right">输入</TableHead>
             <TableHead className="text-right">输出</TableHead>
@@ -460,6 +461,7 @@ function AgentUsageTable({
             <TableRow key={item.id}>
               <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
               <TableCell className="font-medium text-xs truncate max-w-[100px]">{item.apiKeyName}</TableCell>
+              <TableCell className="text-xs truncate max-w-[100px]">{item.modelId ?? '-'}</TableCell>
               <TableCell className="text-xs truncate max-w-[120px]">{item.endpoint}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
