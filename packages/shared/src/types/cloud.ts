@@ -306,6 +306,10 @@ export const CLOUD_IPC_CHANNELS = {
   GET_SUBSCRIPTION_HISTORY: 'cloud:subscription:history',
   // 提示词下载
   DOWNLOAD_CLOUD_PROMPTS: 'cloud:prompts:download',
+  // 模型健康检查
+  GET_MODEL_HEALTH: 'cloud:model-health:get',
+  /** 健康数据更新推送通道（主进程 → 渲染进程） */
+  MODEL_HEALTH_UPDATED: 'cloud:model-health:updated',
   // 用量日志
   GET_USAGE_LOGS: 'cloud:usage:get',
   GET_TOOL_USAGE_LOGS: 'cloud:usage:get-tool',

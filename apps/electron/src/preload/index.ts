@@ -108,6 +108,8 @@ import type {
   FeishuPresenceReport,
   FeishuNotifyMode,
   FeishuNotificationSentPayload,
+  // 模型健康检查类型
+  ModelHealthIpcResponse,
   FeishuUpdateBindingInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
@@ -621,6 +623,10 @@ export interface ElectronAPI {
     syncOfficialChannel: () => Promise<BillingIpcResponse<void>>
     /** 订阅官方渠道更新事件（返回清理函数） */
     onOfficialChannelUpdated: (callback: () => void) => () => void
+    /** 获取模型健康数据 */
+    getModelHealth: () => Promise<ModelHealthIpcResponse>
+    /** 订阅健康数据更新事件（返回清理函数） */
+    onModelHealthUpdated: (callback: () => void) => () => void
   }
 
   // ===== Cloud API Key 管理相关 =====
@@ -1401,6 +1407,14 @@ const electronAPI: ElectronAPI = {
       const listener = (): void => callback()
       ipcRenderer.on(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener)
       return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.OFFICIAL_CHANNEL_UPDATED, listener) }
+    },
+    getModelHealth: () => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_MODEL_HEALTH)
+    },
+    onModelHealthUpdated: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(CLOUD_IPC_CHANNELS.MODEL_HEALTH_UPDATED, listener)
+      return () => { ipcRenderer.removeListener(CLOUD_IPC_CHANNELS.MODEL_HEALTH_UPDATED, listener) }
     },
   },
 

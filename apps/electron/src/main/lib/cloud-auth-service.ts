@@ -353,6 +353,14 @@ export async function logout(): Promise<CloudAuthIpcResponse> {
   } catch {
     // 清理失败不影响登出
   }
+  // 清理健康数据缓存并停止轮询
+  try {
+    const { clearHealthCache, stopHealthPolling } = await import('./cloud-health-service')
+    clearHealthCache()
+    stopHealthPolling()
+  } catch {
+    // 清理失败不影响登出
+  }
   broadcastAuthStateChanged()
   return { success: true }
 }

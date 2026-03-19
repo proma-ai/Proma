@@ -57,6 +57,7 @@ import {
   deleteApiKey,
 } from './lib/cloud-api-keys-service'
 import { downloadCloudPrompts } from './lib/cloud-prompts-service'
+import { getModelHealth, startHealthPolling, stopHealthPolling } from './lib/cloud-health-service'
 import {
   getUsageLogs,
   getToolUsageLogs,
@@ -321,6 +322,18 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
+  // ===== 模型健康检查 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_MODEL_HEALTH,
+    async () => {
+      return getModelHealth()
+    },
+  )
+
+  // 启动健康数据主动轮询（每 3 分钟）
+  startHealthPolling()
+
   // ===== 用量日志 =====
 
   ipcMain.handle(
@@ -351,5 +364,5 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 用量日志 处理器')
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 + 用量日志 处理器')
 }

@@ -17,6 +17,7 @@ import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom } from '@/atoms/agent-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { ChannelForm } from './ChannelForm'
+import { ModelHealthTable } from './ModelHealthTable'
 
 /** 组件视图模式 */
 type ViewMode = 'list' | 'create' | 'edit'
@@ -180,16 +181,20 @@ export function ChannelSettings(): React.ReactElement {
       >
         {/* 官方渠道（始终排在第一位） */}
         {officialChannel && (
-          <SettingsCard>
-            <OfficialChannelRow
-              channel={officialChannel}
-              onEdit={() => {
-                setEditingChannel(officialChannel)
-                setViewMode('edit')
-              }}
-              onToggle={() => handleToggle(officialChannel)}
-            />
-          </SettingsCard>
+          <>
+            <SettingsCard>
+              <OfficialChannelRow
+                channel={officialChannel}
+                onEdit={() => {
+                  setEditingChannel(officialChannel)
+                  setViewMode('edit')
+                }}
+                onToggle={() => handleToggle(officialChannel)}
+              />
+            </SettingsCard>
+            {/* 官方渠道下方显示模型健康状态 */}
+            {officialChannel.enabled && <ModelHealthTable />}
+          </>
         )}
 
         {loading ? (
