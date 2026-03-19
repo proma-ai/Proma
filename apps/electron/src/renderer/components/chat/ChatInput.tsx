@@ -255,12 +255,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             onChange={setContent}
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
-            placeholder={
-              selectedModel
-                ? '输入消息... (Enter 发送，Shift+Enter 换行。支持拖放文件和直接粘贴图片)'
-                : '请先选择模型'
-            }
-            disabled={!selectedModel}
+            placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
             autoFocusTrigger={conversationId}
           />
 

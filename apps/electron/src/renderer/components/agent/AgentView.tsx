@@ -52,6 +52,7 @@ import {
   buildTeamActivityEntries,
   rebuildTeamDataFromMessages,
   agentAttachedDirectoriesMapAtom,
+  workspaceAttachedDirectoriesMapAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
@@ -93,6 +94,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
   const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
   const attachedDirs = attachedDirsMap.get(sessionId) ?? []
+  const wsAttachedDirsMap = useAtomValue(workspaceAttachedDirectoriesMapAtom)
+  const wsAttachedDirs = currentWorkspaceId ? (wsAttachedDirsMap.get(currentWorkspaceId) ?? []) : []
 
   const draftsMap = useAtomValue(agentSessionDraftsAtom)
   const setDraftsMap = useSetAtom(agentSessionDraftsAtom)
@@ -109,6 +112,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [sessionId, setDraftsMap])
   const [sessionPath, setSessionPath] = React.useState<string | null>(null)
+  const [workspaceFilesPath, setWorkspaceFilesPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
@@ -156,6 +160,33 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       .then(setSessionPath)
       .catch(() => setSessionPath(null))
   }, [sessionId, currentWorkspaceId])
+
+  // 获取工作区共享文件目录路径（@ 引用时需要搜索）
+  const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
+  React.useEffect(() => {
+    if (!workspaceSlug) {
+      setWorkspaceFilesPath(null)
+      return
+    }
+    window.electronAPI
+      .getWorkspaceFilesPath(workspaceSlug)
+      .then(setWorkspaceFilesPath)
+      .catch(() => setWorkspaceFilesPath(null))
+  }, [workspaceSlug])
+
+  // 合并工作区文件目录、工作区级附加目录和会话级附加目录，供 @ 引用搜索
+  const allAttachedDirs = React.useMemo(() => {
+    const dirs = [...attachedDirs]
+    // 添加工作区级附加目录
+    for (const d of wsAttachedDirs) {
+      if (!dirs.includes(d)) dirs.push(d)
+    }
+    // 添加工作区共享文件目录
+    if (workspaceFilesPath && !dirs.includes(workspaceFilesPath)) {
+      dirs.unshift(workspaceFilesPath)
+    }
+    return dirs
+  }, [attachedDirs, wsAttachedDirs, workspaceFilesPath])
 
   // 监听消息刷新版本号
   const refreshMap = useAtomValue(agentMessageRefreshAtom)
@@ -464,8 +495,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   /** 构建 externalSelectedModel 给 ModelSelector */
   const externalSelectedModel = React.useMemo(() => {
-    if (!agentChannelId) return null
-    if (!agentModelId) return { channelId: agentChannelId, modelId: '' }
+    if (!agentChannelId || !agentModelId) return null
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
 
@@ -568,6 +598,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         toolActivities: [],
         teammates: [],
         model: agentModelId || undefined,
+        startedAt: Date.now(),
       })
       return map
     })
@@ -588,6 +619,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       ...(attachedDirs.length > 0 && { additionalDirectories: attachedDirs }),
+      // 解析用户消息中的 Skill/MCP 引用，传递结构化元数据给后端
+      ...(() => {
+        const skills = [...effectiveText.matchAll(/\/skill:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
+        const mcps = [...effectiveText.matchAll(/#mcp:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
+        return {
+          ...(skills.length > 0 && { mentionedSkills: skills }),
+          ...(mcps.length > 0 && { mentionedMcpServers: mcps }),
+        }
+      })(),
     }
 
     setInputContent('')
@@ -682,6 +722,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         toolActivities: [],
         teammates: [],
         model: agentModelId || undefined,
+        startedAt: Date.now(),
       })
       return map
     })
@@ -723,6 +764,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           toolActivities: [],
           teammates: [],
           model: agentModelId || undefined,
+          startedAt: Date.now(),
         })
         return map
       })
@@ -755,8 +797,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           messages={messages}
           streaming={streaming}
           streamState={streamState}
+          sessionPath={sessionPath}
           onRetry={handleRetry}
           onRetryInNewSession={handleRetryInNewSession}
+          onCompact={handleCompact}
         />
 
         {/* 拖拽文件夹警告 */}
@@ -854,14 +898,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onPasteFiles={handlePasteFiles}
               placeholder={
                 agentChannelId
-                  ? '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件)'
+                  ? '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
                   : '请先在设置中选择 Agent 供应商'
               }
               disabled={!agentChannelId}
               autoFocusTrigger={sessionId}
               collapsible
               workspacePath={sessionPath}
-              attachedDirs={attachedDirs}
+              workspaceSlug={workspaceSlug}
+              attachedDirs={allAttachedDirs}
             />
 
             {/* Footer 工具栏 */}

@@ -248,6 +248,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
         reasoning: '',
         model: selectedModel.modelId,
         toolActivities: [],
+        startedAt: Date.now(),
       })
       return map
     })
@@ -497,6 +498,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
             streamingContent={streamingContent}
             streamingReasoning={streamingReasoning}
             streamingModel={streamingModel}
+            startedAt={streamState?.startedAt}
             toolActivities={toolActivities}
             contextDividers={contextDividers}
             hasMore={hasMoreMessages}

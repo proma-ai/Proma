@@ -29,6 +29,7 @@ import {
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
+import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
 
 export function AgentRecommendBanner(): React.ReactElement | null {
   const [recommendation, setRecommendation] = useAtom(pendingAgentRecommendationAtom)
@@ -81,18 +82,34 @@ export function AgentRecommendBanner(): React.ReactElement | null {
         }).catch(console.error)
       }
 
-      // 5. 切换到新会话 + 设置建议提示 + 切换模式
+      // 5. 切换模式
+      store.set(appModeAtom, 'agent')
+      store.set(activeViewAtom, 'conversations')
+
+      // 6. 打开 Agent 会话 Tab 并激活
+      const sessionTitle = session.title ?? '新 Agent 会话'
+      const tabs = store.get(tabsAtom)
+      const layout = store.get(splitLayoutAtom)
+      const result = openTab(tabs, layout, {
+        type: 'agent',
+        sessionId: session.id,
+        title: sessionTitle,
+      })
+      store.set(tabsAtom, result.tabs)
+      store.set(splitLayoutAtom, result.layout)
       store.set(currentAgentSessionIdAtom, session.id)
 
-      // 在 Agent 输入区显示建议提示（用户点击后发送，而非自动发送）
+      // 7. 在 Agent 输入区显示建议提示（用户点击后发送，而非自动发送）
       store.set(agentPromptSuggestionsAtom, (prev) => {
         const map = new Map(prev)
         map.set(session.id, suggestedPrompt)
         return map
       })
 
-      store.set(activeViewAtom, 'conversations')
-      store.set(appModeAtom, 'agent')
+      // 8. 通知用户
+      toast.success('已切换到 Agent 模式', {
+        description: '对话历史已迁移到新的 Agent 会话',
+      })
     } catch (error) {
       console.error('[AgentRecommendBanner] 迁移失败:', error)
       toast.error('切换到 Agent 模式失败')

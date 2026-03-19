@@ -162,8 +162,45 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
 }
 
 // ============================================================================
+// SDK 错误消息友好化
+// ============================================================================
+
+/** 已知 SDK 错误 → 用户友好提示映射 */
+const FRIENDLY_ERROR_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
+  {
+    pattern: /not logged in|please run \/login/i,
+    message: '请检查是否选择了正确的 Proma 供应渠道和模型',
+  },
+]
+
+/** 将 SDK 原始错误消息转换为用户友好的提示（无匹配则返回原文） */
+export function friendlyErrorMessage(raw: string): string {
+  for (const { pattern, message } of FRIENDLY_ERROR_MESSAGES) {
+    if (pattern.test(raw)) return message
+  }
+  return raw
+}
+
+// ============================================================================
 // 错误映射（从 agent-service.ts 迁移）
 // ============================================================================
+
+/** Prompt too long 错误关键词匹配 */
+const PROMPT_TOO_LONG_PATTERNS = [
+  'prompt is too long',
+  'prompt_too_long',
+  'input is too long',
+  'context_length_exceeded',
+  'maximum context length',
+  'token limit',
+  'exceeds the model',
+] as const
+
+/** 检测错误消息是否为 prompt too long 类型 */
+export function isPromptTooLongError(...messages: string[]): boolean {
+  const combined = messages.join(' ').toLowerCase()
+  return PROMPT_TOO_LONG_PATTERNS.some((p) => combined.includes(p))
+}
 
 function mapSDKErrorToTypedError(
   errorCode: string,
@@ -195,6 +232,12 @@ function mapSDKErrorToTypedError(
       message: 'API 服务当前过载，请稍后再试',
       canRetry: true,
     },
+    'prompt_too_long': {
+      code: 'prompt_too_long',
+      title: '上下文过长',
+      message: '当前对话的上下文已超出模型限制，请压缩上下文或开启新会话',
+      canRetry: false,
+    },
   }
 
   const mapped = errorMap[errorCode] || {
@@ -211,6 +254,7 @@ function mapSDKErrorToTypedError(
     actions: [
       { key: 's', label: '设置', action: 'settings' },
       ...(mapped.canRetry ? [{ key: 'r', label: '重试', action: 'retry' }] : []),
+      ...(mapped.code === 'prompt_too_long' ? [{ key: 'c', label: '压缩上下文', action: 'compact' }] : []),
     ],
     canRetry: mapped.canRetry,
     retryDelayMs: mapped.canRetry ? 1000 : undefined,
@@ -267,8 +311,12 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         // SDK 级别错误（如 authentication_failed）
         if (msg.error) {
           const { detailedMessage, originalError } = this.extractErrorDetails(msg)
-          const errorCode = msg.error.errorType || 'unknown_error'
-          const typedError = mapSDKErrorToTypedError(errorCode, detailedMessage, originalError)
+          let errorCode = msg.error.errorType || 'unknown_error'
+          // 从错误消息中检测 prompt too long（errorType 可能不精确）
+          if (isPromptTooLongError(detailedMessage, originalError)) {
+            errorCode = 'prompt_too_long'
+          }
+          const typedError = mapSDKErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
           events.push({ type: 'typed_error', error: typedError })
           break
         }
@@ -518,7 +566,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     if (msg.subtype === 'success') {
       events.push({ type: 'complete', usage })
     } else {
-      const errorMsg = msg.errors ? msg.errors.join(', ') : 'Agent 查询失败'
+      const errorMsg = friendlyErrorMessage(msg.errors ? msg.errors.join(', ') : 'Agent 查询失败')
       events.push({ type: 'error', message: errorMsg })
       events.push({ type: 'complete', usage })
     }

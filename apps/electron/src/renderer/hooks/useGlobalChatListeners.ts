@@ -53,6 +53,7 @@ export function useGlobalChatListeners(): void {
           reasoning: '',
           model: undefined,
           toolActivities: [],
+          startedAt: Date.now(),
         }
         const next = updater(current)
         const map = new Map(prev)

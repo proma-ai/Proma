@@ -60,13 +60,13 @@ export const subscriptionStatusAtom = atom<SubscriptionStatusResponse | null>(nu
 /** 余额显示（格式化后的字符串，包含订阅额度） */
 export const creditsDisplayAtom = atom<string>((get) => {
   const billing = get(billingInfoAtom)
-  if (!billing) return '$0.00'
+  if (!billing) return '0.00 积分'
   const credits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
   const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
     ? parseFloat(billing.subscriptionQuotaRemaining)
     : (billing.subscriptionQuotaRemaining ?? 0)
   const total = (isNaN(credits) ? 0 : credits) + (isNaN(subRemaining) ? 0 : subRemaining)
-  return `$${total.toFixed(2)}`
+  return `${total.toFixed(2)} 积分`
 })
 
 // ===== 初始化函数 =====

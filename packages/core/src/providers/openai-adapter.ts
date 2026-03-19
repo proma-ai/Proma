@@ -32,14 +32,14 @@ interface OpenAIContentBlock {
 }
 
 /** OpenAI tool_call 格式 */
-interface OpenAIToolCall {
+export interface OpenAIToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string }
 }
 
 /** OpenAI 消息格式（扩展支持 tool role） */
-interface OpenAIMessage {
+export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | OpenAIContentBlock[] | null
   tool_calls?: OpenAIToolCall[]
@@ -47,7 +47,7 @@ interface OpenAIMessage {
 }
 
 /** OpenAI SSE 数据块 */
-interface OpenAIChunkData {
+export interface OpenAIChunkData {
   choices?: Array<{
     delta?: {
       content?: string
@@ -138,7 +138,7 @@ function toOpenAIMessages(input: StreamRequestInput): OpenAIMessage[] {
 /**
  * 将工具定义转换为 OpenAI 格式
  */
-function toOpenAITools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
+export function toOpenAITools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
   return tools.map((tool) => ({
     type: 'function',
     function: {
@@ -152,7 +152,7 @@ function toOpenAITools(tools: ToolDefinition[]): Array<Record<string, unknown>> 
 /**
  * 将续接消息追加到 OpenAI 消息列表
  */
-function appendContinuationMessages(
+export function appendContinuationMessages(
   messages: OpenAIMessage[],
   continuationMessages: ContinuationMessage[],
 ): void {
@@ -180,6 +180,58 @@ function appendContinuationMessages(
 }
 
 // ===== 适配器实现 =====
+
+/**
+ * 解析 OpenAI 兼容 SSE 数据行（供 OpenAI / Proma 等适配器复用）
+ */
+export function parseOpenAICompatSSE(jsonLine: string): StreamEvent[] {
+  try {
+    const chunk = JSON.parse(jsonLine) as OpenAIChunkData
+    const delta = chunk.choices?.[0]?.delta
+    const events: StreamEvent[] = []
+
+    if (delta?.content) {
+      events.push({ type: 'chunk', delta: delta.content })
+    }
+
+    // DeepSeek 等供应商的推理内容
+    if (delta?.reasoning_content) {
+      events.push({ type: 'reasoning', delta: delta.reasoning_content })
+    }
+
+    // 工具调用
+    if (delta?.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        if (tc.function?.name) {
+          events.push({
+            type: 'tool_call_start',
+            toolCallId: tc.id || `tc_${tc.index ?? 0}`,
+            toolName: tc.function.name,
+          })
+        }
+        if (tc.function?.arguments) {
+          // tc.id 仅在首个 chunk 中存在，后续 delta 不携带 id
+          // 使用空字符串让 SSE reader 通过 currentToolCallId 关联
+          events.push({
+            type: 'tool_call_delta',
+            toolCallId: tc.id || '',
+            argumentsDelta: tc.function.arguments,
+          })
+        }
+      }
+    }
+
+    // 检查 finish_reason
+    const finishReason = chunk.choices?.[0]?.finish_reason
+    if (finishReason === 'tool_calls') {
+      events.push({ type: 'done', stopReason: 'tool_use' })
+    }
+
+    return events
+  } catch {
+    return []
+  }
+}
 
 export class OpenAIAdapter implements ProviderAdapter {
   readonly providerType = 'openai' as const
@@ -215,52 +267,7 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 
   parseSSELine(jsonLine: string): StreamEvent[] {
-    try {
-      const chunk = JSON.parse(jsonLine) as OpenAIChunkData
-      const delta = chunk.choices?.[0]?.delta
-      const events: StreamEvent[] = []
-
-      if (delta?.content) {
-        events.push({ type: 'chunk', delta: delta.content })
-      }
-
-      // DeepSeek 等供应商的推理内容
-      if (delta?.reasoning_content) {
-        events.push({ type: 'reasoning', delta: delta.reasoning_content })
-      }
-
-      // 工具调用
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          if (tc.function?.name) {
-            events.push({
-              type: 'tool_call_start',
-              toolCallId: tc.id || `tc_${tc.index ?? 0}`,
-              toolName: tc.function.name,
-            })
-          }
-          if (tc.function?.arguments) {
-            // tc.id 仅在首个 chunk 中存在，后续 delta 不携带 id
-            // 使用空字符串让 SSE reader 通过 currentToolCallId 关联
-            events.push({
-              type: 'tool_call_delta',
-              toolCallId: tc.id || '',
-              argumentsDelta: tc.function.arguments,
-            })
-          }
-        }
-      }
-
-      // 检查 finish_reason
-      const finishReason = chunk.choices?.[0]?.finish_reason
-      if (finishReason === 'tool_calls') {
-        events.push({ type: 'done', stopReason: 'tool_use' })
-      }
-
-      return events
-    } catch {
-      return []
-    }
+    return parseOpenAICompatSSE(jsonLine)
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {

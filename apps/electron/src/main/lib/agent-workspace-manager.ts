@@ -470,6 +470,7 @@ export function toggleWorkspaceSkill(workspaceSlug: string, skillSlug: string, e
 /** 工作区配置文件格式 */
 interface WorkspaceConfig {
   permissionMode?: PromaPermissionMode
+  attachedDirectories?: string[]
 }
 
 /**
@@ -523,4 +524,43 @@ export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPer
   const updated: WorkspaceConfig = { ...config, permissionMode: mode }
   writeWorkspaceConfig(workspaceSlug, updated)
   console.log(`[Agent 工作区] 权限模式已更新: ${workspaceSlug} → ${mode}`)
+}
+
+// ===== 工作区级附加目录管理 =====
+
+/**
+ * 获取工作区附加目录列表
+ */
+export function getWorkspaceAttachedDirectories(workspaceSlug: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  return config.attachedDirectories ?? []
+}
+
+/**
+ * 附加目录到工作区（所有会话可访问）
+ */
+export function attachWorkspaceDirectory(workspaceSlug: string, directoryPath: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const existing = config.attachedDirectories ?? []
+
+  if (existing.includes(directoryPath)) {
+    return existing
+  }
+
+  const updated = [...existing, directoryPath]
+  writeWorkspaceConfig(workspaceSlug, { ...config, attachedDirectories: updated })
+  console.log(`[Agent 工作区] 已附加工作区目录: ${directoryPath} → ${workspaceSlug}`)
+  return updated
+}
+
+/**
+ * 从工作区移除附加目录
+ */
+export function detachWorkspaceDirectory(workspaceSlug: string, directoryPath: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const existing = config.attachedDirectories ?? []
+  const updated = existing.filter((d) => d !== directoryPath)
+  writeWorkspaceConfig(workspaceSlug, { ...config, attachedDirectories: updated })
+  console.log(`[Agent 工作区] 已移除工作区目录: ${directoryPath} ← ${workspaceSlug}`)
+  return updated
 }

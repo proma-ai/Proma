@@ -40,8 +40,6 @@ import {
   getOrderStatus,
   getOrders,
   verifyVip,
-  queryExternalBalance,
-  transferCredits,
   getSubscriptionTiers,
   getSubscriptionCurrent,
   createSubscriptionWechat,
@@ -60,9 +58,16 @@ import {
 } from './lib/cloud-api-keys-service'
 import { downloadCloudPrompts } from './lib/cloud-prompts-service'
 import { getModelHealth, startHealthPolling, stopHealthPolling } from './lib/cloud-health-service'
+import {
+  getUsageLogs,
+  getToolUsageLogs,
+  getSpeechUsageLogs,
+  getAgentUsageLogs,
+} from './lib/cloud-usage-service'
 import type {
   ApiKeyCreateParams,
   ApiKeyUpdateParams,
+  UsageQueryParams,
 } from '@proma/shared'
 
 /**
@@ -241,22 +246,6 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  // ===== 额度迁移 =====
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.QUERY_EXTERNAL_BALANCE,
-    async (_, apiKey: string) => {
-      return queryExternalBalance(apiKey)
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.TRANSFER_CREDITS,
-    async (_, apiKey: string, amount: number) => {
-      return transferCredits(apiKey, amount)
-    },
-  )
-
   // ===== API Key 管理 =====
 
   ipcMain.handle(
@@ -345,5 +334,35 @@ export async function registerCloudIpcHandlers(): Promise<void> {
   // 启动健康数据主动轮询（每 3 分钟）
   startHealthPolling()
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 处理器')
+  // ===== 用量日志 =====
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_USAGE_LOGS,
+    async (_, params?: UsageQueryParams) => {
+      return getUsageLogs(params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_TOOL_USAGE_LOGS,
+    async (_, params?: UsageQueryParams) => {
+      return getToolUsageLogs(params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_SPEECH_USAGE_LOGS,
+    async (_, params?: UsageQueryParams) => {
+      return getSpeechUsageLogs(params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_AGENT_USAGE_LOGS,
+    async (_, params?: UsageQueryParams) => {
+      return getAgentUsageLogs(params)
+    },
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 + 用量日志 处理器')
 }

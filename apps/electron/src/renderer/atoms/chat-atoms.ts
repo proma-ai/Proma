@@ -38,6 +38,8 @@ export interface ConversationStreamState {
   model?: string
   /** 记忆工具活动列表（流式期间累积） */
   toolActivities: ChatToolActivity[]
+  /** 流式开始时间戳（用于思考计时持久化） */
+  startedAt?: number
 }
 
 /**

@@ -35,9 +35,9 @@ export function QuotaExceededDialog(): React.ReactElement {
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>额度已用完</AlertDialogTitle>
+          <AlertDialogTitle>积分不足</AlertDialogTitle>
           <AlertDialogDescription>
-            您的使用额度已耗尽，请充值后继续使用
+            您的积分已耗尽，请充值后继续使用
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

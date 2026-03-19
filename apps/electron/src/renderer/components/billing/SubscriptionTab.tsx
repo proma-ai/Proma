@@ -1,20 +1,23 @@
 /**
  * SubscriptionTab - 订阅计划标签页
  *
- * 订阅档位选择 → 微信支付 → 激活订阅
+ * 莫兰迪色调 + 玻璃质感卡片 + 功能列表
  * 支持多订阅共存，FIFO 消耗
  */
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, Zap, Crown, Rocket, Flame, Clock, Star, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  Zap, Crown, Rocket, Flame, Clock,
+  ChevronDown, ChevronUp, Check, Info,
+} from 'lucide-react'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
+import { DeveloperLetterDialog } from './DeveloperLetterDialog'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
 import type { SubscriptionTier } from '@proma/shared'
 
@@ -22,7 +25,6 @@ interface SubscriptionTabProps {
   onSubscriptionComplete: () => Promise<void>
 }
 
-/** 微信支付状态 */
 interface WechatPayState {
   codeUrl: string
   orderNo: string
@@ -31,34 +33,106 @@ interface WechatPayState {
   status: WechatPayStatus
 }
 
-/** 档位图标映射 */
-const TIER_ICONS: Record<string, React.ReactNode> = {
-  lite: <Zap size={20} />,
-  standard: <Crown size={20} />,
-  pro: <Rocket size={20} />,
-  max: <Flame size={20} />,
+/** 档位视觉配置 */
+interface TierVisual {
+  icon: React.ReactNode
+  subtitle: string
+  /** 卡片背景 */
+  cardBg: string
+  /** 额外卡片 class（玻璃效果等） */
+  cardExtra: string
+  /** 文字颜色 */
+  textColor: string
+  /** 次要文字颜色 */
+  mutedColor: string
+  /** 价格颜色 */
+  priceColor: string
+  /** 按钮样式 */
+  buttonClass: string
+  /** 勾选图标颜色 */
+  checkColor: string
+  /** 分隔线颜色 */
+  dividerColor: string
+  /** 推荐条背景（仅推荐档位用） */
+  recommendBg: string
 }
 
-/** 档位推荐标签 */
-const TIER_LABELS: Record<string, string> = {
-  lite: '轻度使用',
-  standard: '日常使用',
-  pro: '高频使用',
-  max: '重度使用',
+const TIER_VISUALS: Record<string, TierVisual> = {
+  lite: {
+    icon: <Zap size={18} />,
+    subtitle: '轻度使用',
+    cardBg: 'bg-stone-50/80 dark:bg-stone-900/40',
+    cardExtra: 'backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40',
+    textColor: 'text-stone-800 dark:text-stone-200',
+    mutedColor: 'text-stone-500 dark:text-stone-400',
+    priceColor: 'text-stone-800 dark:text-stone-100',
+    buttonClass: 'bg-stone-200/60 hover:bg-stone-200 text-stone-700 dark:bg-stone-700/50 dark:hover:bg-stone-700/70 dark:text-stone-200',
+    checkColor: 'text-stone-500 dark:text-stone-400',
+    dividerColor: 'border-stone-200/80 dark:border-stone-700/50',
+    recommendBg: '',
+  },
+  standard: {
+    icon: <Crown size={18} />,
+    subtitle: '日常使用',
+    cardBg: 'bg-gradient-to-b from-indigo-600/90 via-indigo-700/88 to-slate-700/85 dark:from-indigo-700/88 dark:via-indigo-800/85 dark:to-slate-800/82',
+    cardExtra: 'backdrop-blur-md border border-white/15',
+    textColor: 'text-slate-100',
+    mutedColor: 'text-slate-300/80',
+    priceColor: 'text-white',
+    buttonClass: 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm',
+    checkColor: 'text-emerald-400',
+    dividerColor: 'border-white/12',
+    recommendBg: '',
+  },
+  pro: {
+    icon: <Rocket size={18} />,
+    subtitle: '高频使用',
+    cardBg: 'bg-gradient-to-b from-rose-600/90 via-orange-600/88 to-amber-700/85 dark:from-rose-700/88 dark:via-orange-700/85 dark:to-amber-800/82',
+    cardExtra: 'backdrop-blur-md border border-white/15',
+    textColor: 'text-orange-50',
+    mutedColor: 'text-orange-200/70',
+    priceColor: 'text-white',
+    buttonClass: 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm',
+    checkColor: 'text-emerald-400',
+    dividerColor: 'border-white/12',
+    recommendBg: '',
+  },
+  max: {
+    icon: <Flame size={18} />,
+    subtitle: '重度使用',
+    cardBg: 'bg-gradient-to-b from-neutral-900/95 via-stone-900/93 to-black/90 dark:from-black/95 dark:via-neutral-950/93 dark:to-black/90',
+    cardExtra: 'backdrop-blur-md border border-white/10',
+    textColor: 'text-neutral-200',
+    mutedColor: 'text-neutral-400',
+    priceColor: 'text-white',
+    buttonClass: 'bg-white/12 hover:bg-white/20 text-neutral-200 backdrop-blur-sm',
+    checkColor: 'text-emerald-400',
+    dividerColor: 'border-white/8',
+    recommendBg: '',
+  },
 }
 
-/** 推荐档位 */
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+const DEFAULT_VISUAL = TIER_VISUALS.lite!
+
+/** 所有档位共享的功能列表 */
+const FEATURES = [
+  '全部顶尖 AI 模型',
+  'Claude API 访问',
+  'Proma Agent',
+  'Agent 开发',
+  'Nano Banana',
+]
+
+/** 档位描述 */
+const TIER_DESC: Record<string, string> = {
+  lite: '适合探索 AI 能力，体验基础模型的入门方案',
+  standard: '适合偶尔使用，可满足传统聊天对话需求',
+  pro: '面向专业用户，支持密集 Agent 工作',
+  max: '专为重度用户设计，无限制释放 AI 生产力',
+}
+
 const RECOMMENDED_TIER = 'standard'
-
-/** 汇率：1 USD = 7 CNY */
-const USD_TO_CNY_RATE = 7
-
-/** 计算折扣百分比（按 7:1 汇率换算的等价原价 vs 实际价格） */
-function calcDiscount(tier: SubscriptionTier): number {
-  const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE * 100 // 等价原价（分）
-  if (equivalentCny <= 0) return 0
-  return Math.round((1 - tier.amount_cny / equivalentCny) * 100)
-}
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr)
@@ -66,10 +140,10 @@ function formatDate(dateStr: string): string {
 }
 
 function formatCurrency(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return '$0.00'
+  if (value === null || value === undefined) return '0.00 积分'
   const num = typeof value === 'string' ? parseFloat(value) : value
-  if (isNaN(num)) return '$0.00'
-  return `$${num.toFixed(2)}`
+  if (isNaN(num)) return '0.00 积分'
+  return `${num.toFixed(2)} 积分`
 }
 
 export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps): React.ReactElement {
@@ -80,8 +154,8 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
   const [showUsedUp, setShowUsedUp] = React.useState(false)
+  const [showLetterDialog, setShowLetterDialog] = React.useState(false)
 
-  /** 加载订阅档位和当前订阅 */
   const refreshSubscription = React.useCallback(async () => {
     const result = await window.electronAPI.cloudSubscription.getCurrent()
     if (result.success && result.data) {
@@ -93,14 +167,11 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
     refreshSubscription()
   }, [refreshSubscription])
 
-  /** 发起订阅支付 */
   const handleSubscribe = async (): Promise<void> => {
     if (!selectedTier) return
-
     setLoading(true)
     const result = await window.electronAPI.cloudSubscription.createWechatPayment(selectedTier)
     setLoading(false)
-
     if (result.success && result.data) {
       setWechatPay({
         codeUrl: result.data.code_url,
@@ -112,10 +183,8 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
     }
   }
 
-  /** 微信轮询回调 */
   const handleWechatPoll = React.useCallback(async () => {
     if (!wechatPay) return
-
     const result = await window.electronAPI.cloudSubscription.getOrderStatus(wechatPay.orderNo)
     if (result.success && result.data) {
       const { status } = result.data
@@ -129,14 +198,12 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
     }
   }, [wechatPay, onSubscriptionComplete, refreshSubscription])
 
-  /** 重置支付状态 */
   const handleReset = async (): Promise<void> => {
     setWechatPay(null)
     await onSubscriptionComplete()
     await refreshSubscription()
   }
 
-  // 如果正在微信支付，显示支付区域
   if (wechatPay) {
     return (
       <WechatPayArea
@@ -155,7 +222,6 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
     <div className="space-y-6">
       {/* 当前活跃订阅 */}
       {subStatus && subStatus.has_active && (() => {
-        // 将订阅分为活跃的和已用完的
         const activeSubs: typeof subStatus.subscriptions = []
         const usedUpSubs: typeof subStatus.subscriptions = []
 
@@ -163,7 +229,6 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
           const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
           const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
           const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
-
           if (percent >= 100) {
             usedUpSubs.push(sub)
           } else {
@@ -173,78 +238,75 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
 
         return (
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground">当前订阅(支持随时叠加订阅)</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-muted-foreground">当前订阅</h3>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground">
+                支持随时叠加
+              </Badge>
+            </div>
 
-            {/* 活跃订阅（有剩余额度） */}
             {activeSubs.map((sub) => {
               const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
               const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
+              const remaining = quota - used
               const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
               const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
 
               return (
-                <Card key={sub.id}>
-                  <CardContent className="py-3">
-                    <div className="flex items-center justify-between mb-2">
+                <Card key={sub.id} className="overflow-hidden border-0 shadow-sm">
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-center justify-between mb-2.5">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">{sub.tier_name}</span>
-                        <Badge variant="secondary" className="text-xs">
-                          <Clock size={10} className="mr-1" />
-                          {daysLeft} 天后到期
+                        <span className="font-semibold text-sm">{sub.tier_name}</span>
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 gap-1 font-normal">
+                          <Clock size={9} />
+                          {daysLeft}天后到期
                         </Badge>
                       </div>
-                      <span className="text-sm text-muted-foreground">
-                        {formatCurrency(used)} / {formatCurrency(quota)}
+                      <span className="text-xs font-medium text-muted-foreground">
+                        剩余 {formatCurrency(remaining)}
                       </span>
                     </div>
                     <Progress value={percent} className="h-2" />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      到期日: {formatDate(sub.expires_at)}
-                    </p>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[11px] text-muted-foreground">
+                        已使用 {formatCurrency(used)} / {formatCurrency(quota)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {formatDate(sub.expires_at)} 到期
+                      </p>
+                    </div>
                   </CardContent>
                 </Card>
               )
             })}
 
-            {/* 已用完的订阅（可折叠） */}
             {usedUpSubs.length > 0 && (
               <div className="space-y-2">
                 <button
                   onClick={() => setShowUsedUp(!showUsedUp)}
-                  className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {showUsedUp ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  <span>已用完的订阅 ({usedUpSubs.length})</span>
+                  {showUsedUp ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  <span>已用完 ({usedUpSubs.length})</span>
                 </button>
-
                 {showUsedUp && usedUpSubs.map((sub) => {
                   const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
                   const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
-                  const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
                   const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-
                   return (
-                    <Card key={sub.id} className="opacity-60">
-                      <CardContent className="py-3">
-                        <div className="flex items-center justify-between mb-2">
+                    <Card key={sub.id} className="opacity-50 border-dashed">
+                      <CardContent className="py-2.5 px-4">
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">{sub.tier_name}</span>
-                            <Badge variant="outline" className="text-xs">
-                              已用完
-                            </Badge>
-                            <Badge variant="secondary" className="text-xs">
-                              <Clock size={10} className="mr-1" />
-                              {daysLeft} 天后到期
-                            </Badge>
+                            <span className="text-sm">{sub.tier_name}</span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">已用完</Badge>
+                            <span className="text-[10px] text-muted-foreground">{daysLeft}天后到期</span>
                           </div>
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-[11px] text-muted-foreground">
                             {formatCurrency(used)} / {formatCurrency(quota)}
                           </span>
                         </div>
-                        <Progress value={percent} className="h-1.5" />
-                        <p className="text-xs text-muted-foreground mt-1">
-                          到期日: {formatDate(sub.expires_at)}
-                        </p>
                       </CardContent>
                     </Card>
                   )
@@ -255,102 +317,117 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         )
       })()}
 
-      {/* 订阅档位选择 */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          {subStatus?.has_active ? '续订 / 叠加额度' : '选择订阅计划(推荐从低档位开始使用，支持随时叠加)'}
-        </h3>
-        <div className="grid grid-cols-2 gap-3">
+      {/* 订阅计划卡片 */}
+      <div className="space-y-4">
+        {!subStatus?.has_active && (
+          <p className="text-xs text-muted-foreground">
+            推荐从低档位开始，随时可叠加更多额度
+          </p>
+        )}
+
+        <div className="grid grid-cols-4 gap-3">
           {tiers.map((tier: SubscriptionTier) => {
             const isSelected = selectedTier === tier.id
             const isRecommended = tier.id === RECOMMENDED_TIER
-            const discount = calcDiscount(tier)
-            const equivalentCny = tier.quota_usd * USD_TO_CNY_RATE // 等价原价（元）
             const actualCny = tier.amount_cny / 100
+            const visual = TIER_VISUALS[tier.id] ?? DEFAULT_VISUAL
 
             return (
-              <Card
+              <div
                 key={tier.id}
                 className={cn(
-                  'relative cursor-pointer transition-all hover:shadow-md',
-                  isSelected && 'ring-2 ring-primary shadow-md',
-                  isRecommended && !isSelected && 'ring-1 ring-primary/50 shadow-sm',
-                  isRecommended && 'bg-primary/[0.03] dark:bg-primary/[0.06]'
+                  'relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-200',
+                  visual.cardBg,
+                  visual.cardExtra,
+                  isSelected
+                    ? 'ring-2 ring-white/60 shadow-xl scale-[1.02]'
+                    : 'shadow-lg hover:shadow-xl hover:scale-[1.01]',
                 )}
                 onClick={() => setSelectedTier(tier.id)}
               >
-                {/* 推荐角标 */}
-                {isRecommended && (
-                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-10">
-                    <Badge className="bg-primary text-primary-foreground text-xs px-2.5 py-0.5 shadow-sm">
-                      <Star size={10} className="mr-1 fill-current" />
-                      推荐
-                    </Badge>
-                  </div>
-                )}
-
-                {/* 折扣角标 */}
-                {discount > 0 && (
-                  <div className="absolute -top-1.5 -right-1.5 z-10">
-                    <span className="inline-flex items-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 shadow-sm">
-                      -{discount}%
-                    </span>
-                  </div>
-                )}
-
-                <CardContent className={cn('py-4 text-center', isRecommended && 'pt-6')}>
-                  <div className="flex justify-center mb-2 text-primary">
-                    {TIER_ICONS[tier.id]}
-                  </div>
-                  <p className="font-semibold">{tier.name}</p>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    {TIER_LABELS[tier.id] ?? ''}
-                  </p>
-
-                  {/* 价格区域 */}
-                  <div className="space-y-0.5">
-                    {discount > 0 && (
-                      <p className="text-sm text-muted-foreground line-through">
-                        ¥{equivalentCny}
-                      </p>
-                    )}
-                    <p className={cn(
-                      'text-2xl font-bold',
-                      isRecommended ? 'text-primary' : 'text-foreground'
-                    )}>
-                      ¥{actualCny}
+                <div className="px-4 pt-5 pb-5">
+                  {/* 档位名称 */}
+                  <div className="mb-4">
+                    <h3 className={cn('text-base font-bold', visual.textColor)}>{tier.name}</h3>
+                    <p className={cn('text-[11px] mt-0.5', visual.mutedColor)}>
+                      {tier.quota} 积分/月
                     </p>
-                    <p className="text-xs text-muted-foreground">/月</p>
                   </div>
 
-                  <p className="text-sm font-medium mt-1.5">
-                    ${tier.quota_usd} 额度
+                  {/* 价格 */}
+                  <div className="mb-1">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className={cn('text-2xl font-bold tracking-tight', visual.priceColor)}>
+                        ¥{actualCny}
+                      </span>
+                      <span className={cn('text-[11px]', visual.mutedColor)}>/月</span>
+                    </div>
+                  </div>
+
+                  {/* 描述 */}
+                  <p className={cn('text-[11px] mt-2 mb-4 leading-relaxed', visual.mutedColor)}>
+                    {TIER_DESC[tier.id] ?? ''}
                   </p>
-                </CardContent>
-              </Card>
+
+                  {/* 立即订阅按钮 */}
+                  <button
+                    className={cn(
+                      'w-full py-2 rounded-lg text-xs font-medium transition-all mb-4',
+                      visual.buttonClass,
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedTier(tier.id)
+                      setShowLetterDialog(true)
+                    }}
+                  >
+                    立即订阅 · ¥{actualCny}
+                  </button>
+
+                  {/* 分隔线 */}
+                  <div className={cn('border-t mb-3', visual.dividerColor)} />
+
+                  {/* 功能列表 */}
+                  <div className="space-y-1.5">
+                    <p className={cn('text-[10px] font-medium mb-1', visual.mutedColor)}>包含:</p>
+                    {FEATURES.map((feature) => (
+                      <div key={feature} className="flex items-center gap-1.5">
+                        <Check size={12} className={visual.checkColor} strokeWidth={2.5} />
+                        <span className={cn('text-[11px]', visual.textColor)}>{feature}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             )
           })}
         </div>
       </div>
 
-      {/* 说明 */}
-      <div className="text-xs text-muted-foreground space-y-1">
-        <p>· 订阅有效期 31 天，到期后未使用额度清零</p>
-        <p>· 支持重复购买，新额度独立计算，优先消耗先购买的额度</p>
-        <p>· 订阅额度仅限应用内使用，API 调用请使用预充值余额</p>
-        <p>· 折扣基于 1 USD = 7 CNY 的汇率换算</p>
+      {/* 积分计费说明 */}
+      <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-3">
+        <div className="flex items-start gap-2">
+          <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
+            <p>所有模型价格与官方保持一致</p>
+            <p>1 积分 = ¥1，订阅有效期 31 天，到期后未使用积分清零</p>
+            <p>支持重复购买叠加，优先消耗先购买的积分 (FIFO)</p>
+            <p>低价模型 (lc-* 开头) 按 1x 倍率计费，其他模型按 7.3x 倍率计费（美元计价标准）</p>
+          </div>
+        </div>
       </div>
 
-      {/* 支付按钮 */}
-      <Button
-        className="w-full"
-        size="lg"
-        disabled={!selectedTier || loading}
-        onClick={handleSubscribe}
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-        立即订阅
-      </Button>
+      {/* 开发者信封弹窗 */}
+      <DeveloperLetterDialog
+        open={showLetterDialog}
+        onOpenChange={setShowLetterDialog}
+        onConfirm={() => {
+          setShowLetterDialog(false)
+          handleSubscribe()
+        }}
+        selectedTierName={tiers.find((t: SubscriptionTier) => t.id === selectedTier)?.name ?? ''}
+        loading={loading}
+      />
     </div>
   )
 }

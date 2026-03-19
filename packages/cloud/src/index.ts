@@ -26,6 +26,7 @@ export {
   createApiKeysApi,
   createSubscriptionApi,
   createPromptsApi,
+  createUsageApi,
 } from './api/index'
 export type {
   CloudApiClient,
@@ -41,4 +42,5 @@ export type {
   ApiKeysApi,
   SubscriptionApi,
   PromptsApi,
+  UsageApi,
 } from './api/index'

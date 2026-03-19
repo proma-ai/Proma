@@ -9,9 +9,9 @@
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { cn } from '@/lib/utils'
-import { Settings, Radio, Palette, Info, Plug, Globe, BookOpen, Wrench, MessageSquare } from 'lucide-react'
+import { Settings, Radio, Palette, Info, Plug, Globe, BookOpen, Wrench, MessageSquare, GraduationCap } from 'lucide-react'
 // Cloud 模式专属图标
-import { CreditCard, KeyRound } from 'lucide-react'
+import { CreditCard, KeyRound, ScrollText } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { SettingsTab } from '@/atoms/settings-tab'
@@ -29,8 +29,10 @@ import { ToolSettings } from './ToolSettings'
 // Cloud 模式专属组件
 import { BillingSettings } from '@/components/billing/BillingSettings'
 import { ApiKeysSettings } from './ApiKeysSettings'
+import { UsageSettings } from './UsageSettings'
 import { isCloudMode } from '@/lib/mode'
 import { FeishuSettings } from './FeishuSettings'
+import { TutorialViewer } from '../tutorial/TutorialViewer'
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -51,12 +53,16 @@ const BASE_TABS: TabItem[] = [
 const AGENT_TAB: TabItem = { id: 'agent', label: '配置', icon: <Plug size={16} /> }
 const TOOLS_TAB: TabItem = { id: 'tools', label: '工具', icon: <Wrench size={16} /> }
 const FEISHU_TAB: TabItem = { id: 'feishu', label: '飞书', icon: <MessageSquare size={16} /> }
+const TUTORIAL_TAB: TabItem = { id: 'tutorial', label: '教程', icon: <GraduationCap size={16} /> }
 
 /** Cloud 模式专属 Tab */
 const BILLING_TAB: TabItem = { id: 'billing', label: '账单', icon: <CreditCard size={16} /> }
 
 /** Cloud 模式专属 Tab - API Key 管理 */
 const API_TAB: TabItem = { id: 'api', label: 'API', icon: <KeyRound size={16} /> }
+
+/** Cloud 模式专属 Tab - 用量日志 */
+const USAGE_TAB: TabItem = { id: 'usage', label: '日志', icon: <ScrollText size={16} /> }
 
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
@@ -84,12 +90,16 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <BillingSettings />
     case 'api':
       return <ApiKeysSettings />
+    case 'usage':
+      return <UsageSettings />
     case 'appearance':
       return <AppearanceSettings />
     case 'about':
       return <AboutSettings />
     case 'feishu':
       return <FeishuSettings />
+    case 'tutorial':
+      return <TutorialViewer />
   }
 }
 
@@ -107,9 +117,11 @@ export function SettingsPanel(): React.ReactElement {
     }
     result.push(TOOLS_TAB)
     result.push(FEISHU_TAB)
+    result.push(TUTORIAL_TAB)
     if (isCloudMode()) {
       result.push(BILLING_TAB)
       result.push(API_TAB)
+      result.push(USAGE_TAB)
     }
     result.push(...TAIL_TABS)
     return result

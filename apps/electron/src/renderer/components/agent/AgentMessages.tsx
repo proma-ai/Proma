@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -45,8 +45,11 @@ interface AgentMessagesProps {
   messages: AgentMessage[]
   streaming: boolean
   streamState?: AgentStreamState
+  /** 当前会话工作目录，用于解析相对文件路径 */
+  sessionPath?: string | null
   onRetry?: () => void
   onRetryInNewSession?: () => void
+  onCompact?: () => void
 }
 
 function EmptyState(): React.ReactElement {
@@ -75,6 +78,62 @@ function AssistantLogo({ model }: { model?: string }): React.ReactElement {
   return (
     <div className="size-[35px] rounded-[25%] bg-primary/10 flex items-center justify-center">
       <Bot size={18} className="text-primary" />
+    </div>
+  )
+}
+
+/** 单张工具结果图片（内联显示） */
+function InlineImage({ attachment }: { attachment: { localPath: string; filename: string; mediaType: string } }): React.ReactElement {
+  const [imageSrc, setImageSrc] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    window.electronAPI
+      .readAttachment(attachment.localPath)
+      .then((base64) => {
+        setImageSrc(`data:${attachment.mediaType};base64,${base64}`)
+      })
+      .catch((error) => {
+        console.error('[InlineImage] 读取附件失败:', error)
+      })
+  }, [attachment.localPath, attachment.mediaType])
+
+  const handleSave = React.useCallback((): void => {
+    window.electronAPI.saveImageAs(attachment.localPath, attachment.filename)
+  }, [attachment.localPath, attachment.filename])
+
+  if (!imageSrc) {
+    return <div className="size-[280px] rounded-lg bg-muted/30 animate-pulse shrink-0" />
+  }
+
+  return (
+    <div className="relative group inline-block">
+      <img
+        src={imageSrc}
+        alt={attachment.filename}
+        className="size-[280px] rounded-lg object-cover shrink-0"
+      />
+      <button
+        type="button"
+        onClick={handleSave}
+        className="absolute bottom-2 right-2 p-1.5 rounded-md bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
+        title="保存图片"
+      >
+        <Download className="size-4" />
+      </button>
+    </div>
+  )
+}
+
+/** 从工具活动中提取并内联显示所有生成的图片 */
+function ToolResultInlineImages({ activities }: { activities: ToolActivity[] }): React.ReactElement | null {
+  const allImages = activities.flatMap((a) => a.imageAttachments ?? [])
+  if (allImages.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-3">
+      {allImages.map((img, i) => (
+        <InlineImage key={`${img.localPath}-${i}`} attachment={img} />
+      ))}
     </div>
   )
 }
@@ -113,6 +172,7 @@ function extractToolActivities(events: AgentMessage['events']): ToolActivity[] {
           result: event.result,
           isError: event.isError,
           done: true,
+          imageAttachments: event.imageAttachments,
         }
       }
     } else if (event.type === 'task_backgrounded') {
@@ -377,11 +437,13 @@ function RetryAttemptItem({
 /** AgentMessageItem 属性接口 */
 interface AgentMessageItemProps {
   message: AgentMessage
+  sessionPath?: string | null
   onRetry?: () => void
   onRetryInNewSession?: () => void
+  onCompact?: () => void
 }
 
-function AgentMessageItem({ message, onRetry, onRetryInNewSession }: AgentMessageItemProps): React.ReactElement | null {
+function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, onCompact }: AgentMessageItemProps): React.ReactElement | null {
   const userProfile = useAtomValue(userProfileAtom)
 
   if (message.role === 'user') {
@@ -434,8 +496,9 @@ function AgentMessageItem({ message, onRetry, onRetryInNewSession }: AgentMessag
               <ToolActivityList activities={toolActivities} />
             </div>
           )}
+          <ToolResultInlineImages activities={toolActivities} />
           {message.content && (
-            <MessageResponse>{message.content}</MessageResponse>
+            <MessageResponse basePath={sessionPath || undefined}>{message.content}</MessageResponse>
           )}
         </MessageContent>
         {/* 操作按钮（hover 时可见） */}
@@ -467,8 +530,14 @@ function AgentMessageItem({ message, onRetry, onRetryInNewSession }: AgentMessag
           </div>
           {/* 错误操作按钮 */}
           <div className="flex items-center gap-2 mt-3">
+            {message.errorCode === 'prompt_too_long' && onCompact && (
+              <Button size="sm" onClick={onCompact}>
+                <Minimize2 className="size-3.5 mr-1.5" />
+                压缩上下文
+              </Button>
+            )}
             {onRetry && (
-              <Button size="sm" onClick={onRetry}>
+              <Button size="sm" variant={message.errorCode === 'prompt_too_long' ? 'outline' : 'default'} onClick={onRetry}>
                 <RotateCw className="size-3.5 mr-1.5" />
                 重试
               </Button>
@@ -492,8 +561,37 @@ function AgentMessageItem({ message, onRetry, onRetryInNewSession }: AgentMessag
   return null
 }
 
-export function AgentMessages({ sessionId, messages, streaming, streamState, onRetry, onRetryInNewSession }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, messages, streaming, streamState, sessionPath, onRetry, onRetryInNewSession, onCompact }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+
+  /**
+   * 淡入控制：切换会话时先隐藏，等布局完成后再显示。
+   * 同时用于延迟启用 content-visibility 优化，避免初次加载跳动。
+   */
+  const [ready, setReady] = React.useState(false)
+  const prevSessionIdRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (sessionId !== prevSessionIdRef.current) {
+      prevSessionIdRef.current = sessionId
+      setReady(false)
+    }
+  }, [sessionId])
+
+  React.useEffect(() => {
+    if (ready) return
+    if (messages.length === 0 && !streaming) {
+      setReady(true)
+      return
+    }
+    let cancelled = false
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) setReady(true)
+      })
+    })
+    return () => { cancelled = true }
+  }, [messages, streaming, ready])
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
@@ -523,7 +621,7 @@ export function AgentMessages({ sessionId, messages, streaming, streamState, onR
   )
 
   return (
-    <Conversation>
+    <Conversation className={ready ? `${streaming ? '' : 'cv-ready '}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
       <ConversationContent>
         {messages.length === 0 && !streaming ? (
           <EmptyState />
@@ -533,8 +631,10 @@ export function AgentMessages({ sessionId, messages, streaming, streamState, onR
               <div key={msg.id} data-message-id={msg.id}>
                 <AgentMessageItem
                   message={msg}
+                  sessionPath={sessionPath}
                   onRetry={onRetry}
                   onRetryInNewSession={onRetryInNewSession}
+                  onCompact={onCompact}
                 />
               </div>
             ))}
@@ -555,9 +655,10 @@ export function AgentMessages({ sessionId, messages, streaming, streamState, onR
                       <BackgroundTasksPanel tasks={backgroundTasks} />
                     </div>
                   )}
+                  <ToolResultInlineImages activities={toolActivities} />
                   {smoothContent ? (
                     <>
-                      <MessageResponse>{smoothContent}</MessageResponse>
+                      <MessageResponse basePath={sessionPath || undefined}>{smoothContent}</MessageResponse>
                       {streaming && <StreamingIndicator />}
                     </>
                   ) : (

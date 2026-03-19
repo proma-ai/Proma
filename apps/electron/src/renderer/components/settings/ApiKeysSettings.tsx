@@ -69,10 +69,10 @@ function formatDate(dateString: string | null): string {
   })
 }
 
-/** 格式化费用 */
+/** 格式化费用（积分） */
 function formatCost(cost: number | string): string {
   const num = typeof cost === 'string' ? parseFloat(cost) : cost
-  return `$${num.toFixed(4)}`
+  return `${num.toFixed(4)} 积分`
 }
 
 /** 格式化 API Key 显示（只显示前缀和后4位） */

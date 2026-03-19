@@ -26,7 +26,11 @@ import {
   AGENT_RECOMMEND_TOOL_DEFINITIONS,
   isAgentRecommendAvailable,
 } from './chat-tools/agent-recommend-tool'
-import { getMemoryConfig } from './memory-service'
+import {
+  NANO_BANANA_TOOL_META,
+  NANO_BANANA_TOOL_DEFINITIONS,
+  isNanoBananaAvailable,
+} from './chat-tools/nano-banana-tool'
 
 // ===== 内置工具注册 =====
 
@@ -53,6 +57,11 @@ const BUILTIN_TOOLS: BuiltinToolEntry[] = [
     meta: AGENT_RECOMMEND_TOOL_META,
     getDefinitions: () => AGENT_RECOMMEND_TOOL_DEFINITIONS,
     checkAvailable: isAgentRecommendAvailable,
+  },
+  {
+    meta: NANO_BANANA_TOOL_META,
+    getDefinitions: () => NANO_BANANA_TOOL_DEFINITIONS,
+    checkAvailable: isNanoBananaAvailable,
   },
 ]
 
@@ -115,7 +124,6 @@ export interface EnabledToolsResult {
 export function getEnabledTools(enabledToolIds?: string[]): EnabledToolsResult {
   // 未传入 enabledToolIds 时使用配置文件的开关状态
   const config = getChatToolsConfig()
-  const memoryConfig = getMemoryConfig()
 
   const allDefinitions: ToolDefinition[] = []
   const systemPromptParts: string[] = []
@@ -127,11 +135,6 @@ export function getEnabledTools(enabledToolIds?: string[]): EnabledToolsResult {
     // 检查工具是否启用（前端开关 + 配置开关）
     const isEnabledByUser = enabledToolIds ? enabledToolIds.includes(toolId) : (state?.enabled ?? false)
     if (!isEnabledByUser) continue
-
-    // 记忆工具额外检查全局记忆配置的 enabled 状态
-    if (toolId === 'memory') {
-      if (!memoryConfig.enabled || !memoryConfig.apiKey) continue
-    }
 
     // 检查工具是否可用（凭据已配置）
     if (!entry.checkAvailable()) continue
@@ -174,7 +177,6 @@ export function getEnabledTools(enabledToolIds?: string[]): EnabledToolsResult {
  */
 export function getAllToolInfos(): ChatToolInfo[] {
   const config = getChatToolsConfig()
-  const memoryConfig = getMemoryConfig()
   const infos: ChatToolInfo[] = []
 
   // 内置工具
@@ -182,15 +184,9 @@ export function getAllToolInfos(): ChatToolInfo[] {
     const toolId = entry.meta.id
     const state = config.toolStates[toolId]
 
-    // 记忆工具的 enabled 还受全局记忆配置影响
-    let enabled = state?.enabled ?? false
-    if (toolId === 'memory') {
-      enabled = enabled && memoryConfig.enabled
-    }
-
     infos.push({
       meta: entry.meta,
-      enabled,
+      enabled: state?.enabled ?? false,
       available: entry.checkAvailable(),
     })
   }

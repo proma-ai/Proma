@@ -7,7 +7,9 @@
 
 import type { ToolCall, ToolResult, ToolDefinition } from '@proma/core'
 import type { ChatToolMeta } from '@proma/shared'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getToolCredentials } from '../chat-tool-config'
+import { getAuthToken } from '../cloud-auth-service'
 
 // ===== 工具元数据 =====
 
@@ -54,11 +56,11 @@ export const WEB_SEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
 // ===== 可用性检查 =====
 
 /**
- * 检查搜索工具是否可用（API Key 已配置）
+ * 检查搜索工具是否可用（API Key 已配置 或 云端模式）
  */
 export function isWebSearchAvailable(): boolean {
   const credentials = getToolCredentials('web-search')
-  return !!credentials.apiKey
+  return !!credentials.apiKey || credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
 }
 
 // ===== 工具执行 =====
@@ -86,13 +88,27 @@ interface TavilySearchResponse {
   answer?: string
 }
 
+/** 云端联网搜索响应类型 */
+interface CloudWebSearchSource {
+  title: string
+  url: string
+  content: string
+}
+
+interface CloudWebSearchResponse {
+  answer: string | null
+  sources: CloudWebSearchSource[]
+}
+
 /**
  * 执行联网搜索工具调用
  */
 export async function executeWebSearchTool(toolCall: ToolCall): Promise<ToolResult> {
   const credentials = getToolCredentials('web-search')
 
-  if (!credentials.apiKey) {
+  const isCloud = credentials.cloudMode === 'true' && credentials.useCloud !== 'false'
+
+  if (!credentials.apiKey && !isCloud) {
     return {
       toolCallId: toolCall.id,
       content: '搜索工具未配置 API Key',
@@ -111,6 +127,44 @@ export async function executeWebSearchTool(toolCall: ToolCall): Promise<ToolResu
       }
     }
 
+    // 云端模式：调用 proma-api 代理
+    if (isCloud) {
+      const token = getAuthToken()
+      if (!token) {
+        return {
+          toolCallId: toolCall.id,
+          content: '云端搜索失败：未登录',
+          isError: true,
+        }
+      }
+
+      const { baseUrl } = getCloudApiConfig()
+      const response = await fetch(`${baseUrl}/tools/web-search`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        return {
+          toolCallId: toolCall.id,
+          content: `云端搜索请求失败 (${response.status}): ${errorText}`,
+          isError: true,
+        }
+      }
+
+      const data = await response.json() as CloudWebSearchResponse
+      return {
+        toolCallId: toolCall.id,
+        content: formatCloudSearchResults(data),
+      }
+    }
+
+    // 本地 Tavily 直连
     const response = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -164,6 +218,31 @@ function formatSearchResults(data: TavilySearchResponse): string {
     for (const result of data.results) {
       parts.push(`- [${result.title}](${result.url})`)
       parts.push(`  ${result.content.slice(0, 300)}`)
+      parts.push('')
+    }
+  } else {
+    parts.push('未找到相关结果。')
+  }
+
+  return parts.join('\n')
+}
+
+/**
+ * 格式化云端搜索结果为 LLM 可读文本
+ */
+function formatCloudSearchResults(data: CloudWebSearchResponse): string {
+  const parts: string[] = []
+
+  if (data.answer) {
+    parts.push(`**概要：** ${data.answer}`)
+    parts.push('')
+  }
+
+  if (data.sources && data.sources.length > 0) {
+    parts.push('**搜索结果：**')
+    for (const source of data.sources) {
+      parts.push(`- [${source.title}](${source.url})`)
+      parts.push(`  ${source.content.slice(0, 300)}`)
       parts.push('')
     }
   } else {

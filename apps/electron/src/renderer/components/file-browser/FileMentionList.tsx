@@ -73,7 +73,7 @@ export const FileMentionList = React.forwardRef<FileMentionRef, FileMentionListP
     return (
       <div
         ref={containerRef}
-        className="rounded-lg border bg-popover shadow-lg overflow-y-auto max-h-[200px] min-w-[200px]"
+        className="rounded-lg border bg-popover shadow-lg overflow-y-auto max-h-[280px] min-w-[200px]"
       >
         {items.map((item, index) => (
           <button

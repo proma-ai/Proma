@@ -8,7 +8,7 @@
  * 1. 新增 delta 通过 Intl.Segmenter 拆分为字符粒度后入队
  * 2. requestAnimationFrame 驱动渲染循环
  * 3. 每帧动态计算渲染字符数（队列长时加速追赶，短时放慢）
- * 4. 流结束时一次性输出剩余内容
+ * 4. 流结束后加速但渐进排空队列（不一次性 dump，避免跳动）
  *
  * 参考 Cherry Studio 的 useSmoothStream 实现。
  */
@@ -105,20 +105,21 @@ export function useSmoothStream({
     prevContentRef.current = newContent
   }, [content])
 
-  // 非流式状态时，直接显示完整内容（历史消息、编辑后的消息等）
+  // 非流式状态时，确保最终内容一致（安全网，不立即 flush 队列）
   useEffect(() => {
     if (!isStreaming) {
-      // 如果队列还有剩余，一次性输出
+      // 如果 rAF 循环仍在运行，让它自然排空队列
+      if (rafRef.current) return
+
+      // rAF 已停止：同步剩余内容
       if (chunkQueueRef.current.length > 0) {
         displayedRef.current += chunkQueueRef.current.join('')
         chunkQueueRef.current = []
-        setDisplayedContent(displayedRef.current)
       }
-      // 确保显示内容与实际内容一致
       if (displayedRef.current !== content) {
         displayedRef.current = content
-        setDisplayedContent(content)
       }
+      setDisplayedContent(displayedRef.current)
     }
   }, [isStreaming, content])
 
@@ -129,7 +130,11 @@ export function useSmoothStream({
     // 队列为空
     if (queue.length === 0) {
       if (streamDoneRef.current) {
-        // 流结束 + 队列空 → 停止循环
+        // 流结束 + 队列空 → 同步最终内容并停止
+        if (displayedRef.current !== prevContentRef.current) {
+          displayedRef.current = prevContentRef.current
+          setDisplayedContent(displayedRef.current)
+        }
         rafRef.current = null
         return
       }
@@ -145,30 +150,32 @@ export function useSmoothStream({
     }
     lastRenderTimeRef.current = currentTime
 
-    // 动态计算本帧渲染字符数：队列越长越快（追赶），最少 1 个
-    let count = Math.max(1, Math.floor(queue.length / 5))
-
-    // 流结束时一次性输出所有剩余
-    if (streamDoneRef.current) {
-      count = queue.length
-    }
+    // 动态计算本帧渲染字符数：除数越大缓冲越深、输出越匀
+    // 流式中 /8 保持较深缓冲（牺牲少许延迟换取丝滑），结束后 /4 加速排空
+    const divisor = streamDoneRef.current ? 4 : 8
+    const count = Math.max(1, Math.floor(queue.length / divisor))
 
     // 取出字符并更新
     const chars = queue.splice(0, count)
     displayedRef.current += chars.join('')
     setDisplayedContent(displayedRef.current)
 
-    // 还有内容 → 继续下一帧
+    // 队列未空或流未结束 → 继续
     if (queue.length > 0 || !streamDoneRef.current) {
       rafRef.current = requestAnimationFrame(renderLoop)
     } else {
+      // 队列刚排空 + 流已结束 → 同步最终内容并停止
+      if (displayedRef.current !== prevContentRef.current) {
+        displayedRef.current = prevContentRef.current
+        setDisplayedContent(displayedRef.current)
+      }
       rafRef.current = null
     }
   }, [minDelay])
 
-  // 启动/重启渲染循环
+  // 启动/重启渲染循环（流结束后也继续运行直到队列排空）
   useEffect(() => {
-    if (isStreaming && !rafRef.current) {
+    if ((isStreaming || chunkQueueRef.current.length > 0) && !rafRef.current) {
       rafRef.current = requestAnimationFrame(renderLoop)
     }
 

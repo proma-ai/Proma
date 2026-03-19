@@ -69,6 +69,8 @@ export interface ToolResult {
   content: string
   /** 是否出错 */
   isError?: boolean
+  /** 工具生成的附件（如生图工具的图片），附加到 assistant 消息展示 */
+  generatedAttachments?: FileAttachment[]
 }
 
 /**

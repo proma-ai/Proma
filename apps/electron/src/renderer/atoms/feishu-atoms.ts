@@ -5,7 +5,7 @@
  */
 
 import { atom } from 'jotai'
-import type { FeishuBridgeState, FeishuNotifyMode } from '@proma/shared'
+import type { FeishuBridgeState, FeishuNotifyMode, FeishuChatBinding } from '@proma/shared'
 
 /** 飞书 Bridge 连接状态 */
 export const feishuBridgeStateAtom = atom<FeishuBridgeState>({
@@ -21,3 +21,6 @@ export const sessionFeishuNotifyModeAtom = atom<Map<string, FeishuNotifyMode>>(n
 
 /** 飞书是否已连接（derived atom） */
 export const feishuConnectedAtom = atom((get) => get(feishuBridgeStateAtom).status === 'connected')
+
+/** 飞书聊天绑定列表 */
+export const feishuBindingsAtom = atom<FeishuChatBinding[]>([])

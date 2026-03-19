@@ -286,6 +286,25 @@ export function getWorkspaceSkillsDir(slug: string): string {
 }
 
 /**
+ * 获取工作区文件目录路径
+ *
+ * 工作区内所有会话可访问的文件存放于此。
+ * 如果目录不存在则自动创建。
+ *
+ * @param slug 工作区 slug
+ * @returns ~/.proma/agent-workspaces/{slug}/workspace-files/
+ */
+export function getWorkspaceFilesDir(slug: string): string {
+  const dir = join(getAgentWorkspacePath(slug), 'workspace-files')
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+
+  return dir
+}
+
+/**
  * 获取工作区不活跃 Skills 目录路径
  *
  * 禁用的 Skill 会被移动到此目录，Agent SDK 不会扫描该目录。
@@ -385,6 +404,15 @@ export function getFeishuConfigPath(): string {
 }
 
 /**
+ * 获取飞书聊天绑定持久化路径
+ *
+ * @returns ~/.proma/feishu-bindings.json
+ */
+export function getFeishuBindingsPath(): string {
+  return join(getConfigDir(), 'feishu-bindings.json')
+}
+
+/**
  * 获取指定 Agent 会话的工作路径
  *
  * 在工作区目录下创建以 sessionId 命名的子文件夹，
@@ -400,6 +428,27 @@ export function getAgentSessionWorkspacePath(workspaceSlug: string, sessionId: s
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
     console.log(`[配置] 已创建 Agent 会话工作目录: ${dir}`)
+  }
+
+  return dir
+}
+
+/**
+ * 获取 SDK 隔离配置目录路径
+ *
+ * 用于设置 CLAUDE_CONFIG_DIR 环境变量，让 SDK 读取独立的配置文件，
+ * 而不是用户的 ~/.claude.json，实现 Proma 与 Claude Code CLI 的配置隔离。
+ *
+ * 如果目录不存在则自动创建。
+ *
+ * @returns ~/.proma/sdk-config/
+ */
+export function getSdkConfigDir(): string {
+  const dir = join(getConfigDir(), 'sdk-config')
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+    console.log(`[配置] 已创建 SDK 配置目录: ${dir}`)
   }
 
   return dir

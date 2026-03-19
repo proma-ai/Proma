@@ -10,7 +10,7 @@ import { SECTION_TITLE_CLASS, SECTION_DESCRIPTION_CLASS } from './SettingsUICons
 
 interface SettingsSectionProps {
   /** 区块标题 */
-  title: string
+  title: React.ReactNode
   /** 区块描述（可选） */
   description?: string
   /** 右侧操作按钮插槽（可选） */

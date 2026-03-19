@@ -125,6 +125,8 @@ interface ChatMessagesProps {
   streamingReasoning: string
   /** 流式消息绑定的模型 */
   streamingModel: string | null
+  /** 流式开始时间戳 */
+  startedAt?: number
   /** 工具活动列表 */
   toolActivities: ChatToolActivity[]
   /** 上下文分隔线 */
@@ -170,6 +172,7 @@ export function ChatMessages({
   streamingContent,
   streamingReasoning,
   streamingModel,
+  startedAt,
   toolActivities,
   contextDividers,
   hasMore,
@@ -266,9 +269,11 @@ export function ChatMessages({
     return (
       <ParallelChatMessages
         messages={messages}
+        conversationId={conversationId}
         streaming={streaming}
         streamingContent={smoothContent}
         streamingReasoning={smoothReasoning}
+        startedAt={startedAt}
         contextDividers={contextDividers}
         onDeleteDivider={onDeleteDivider}
         onDeleteMessage={onDeleteMessage}
@@ -286,7 +291,7 @@ export function ChatMessages({
   const dividerSet = new Set(contextDividers)
 
   return (
-    <Conversation className={ready ? 'opacity-100 transition-opacity duration-200' : 'opacity-0'}>
+    <Conversation className={ready ? `${streaming ? '' : 'cv-ready '}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
       {/* 滚动到顶部时自动加载更多历史 */}
       <ScrollTopLoader
         hasMore={hasMore}
@@ -304,6 +309,7 @@ export function ChatMessages({
                 <div data-message-id={msg.id}>
                   <ChatMessageItem
                     message={msg}
+                    conversationId={conversationId}
                     isStreaming={false}
                     isLastAssistant={false}
                     allMessages={messages}
@@ -362,7 +368,7 @@ export function ChatMessages({
                     </>
                   ) : (
                     /* 等待首个 chunk 时的加载动画（仅流式中且无推理时显示） */
-                    streaming && !smoothReasoning && <MessageLoading />
+                    streaming && !smoothReasoning && <MessageLoading startedAt={startedAt} />
                   )}
                 </MessageContent>
               </Message>

@@ -30,6 +30,7 @@ import {
   ReasoningContent,
 } from '@/components/ai-elements/reasoning'
 import { CopyButton } from './CopyButton'
+import { MigrateToAgentButton } from './MigrateToAgentButton'
 import { DeleteMessageDialog } from './DeleteMessageDialog'
 import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
@@ -67,6 +68,8 @@ export function formatMessageTime(timestamp: number): string {
 interface ChatMessageItemProps {
   /** 消息数据 */
   message: ChatMessage
+  /** 当前对话 ID（用于迁移到 Agent 模式） */
+  conversationId?: string
   /** 是否正在流式生成中 */
   isStreaming?: boolean
   /** 是否为最后一条 assistant 消息（用于显示 StreamingIndicator） */
@@ -91,8 +94,9 @@ interface ChatMessageItemProps {
   isParallelMode?: boolean
 }
 
-export function ChatMessageItem({
+export const ChatMessageItem = React.memo(function ChatMessageItem({
   message,
+  conversationId,
   isStreaming = false,
   isLastAssistant = false,
   onDeleteMessage,
@@ -188,6 +192,11 @@ export function ChatMessageItem({
               ) : message.stopped ? (
                 <MessageStopped />
               ) : null}
+
+              {/* 生成的图片附件（如 Nano Banana 生图结果） */}
+              {message.attachments && message.attachments.length > 0 && (
+                <MessageAttachments attachments={message.attachments} />
+              )}
             </>
           ) : (
             /* 用户消息 - 附件 + 可折叠文本 / 原地编辑 */
@@ -212,6 +221,9 @@ export function ChatMessageItem({
         {(message.content || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
           <MessageActions className="pl-[46px] mt-0.5">
             <CopyButton content={message.content} />
+            {message.role === 'assistant' && conversationId && (
+              <MigrateToAgentButton conversationId={conversationId} />
+            )}
             {message.role === 'user' && onResendMessage && (
               <MessageAction
                 tooltip="重新发送"
@@ -252,4 +264,4 @@ export function ChatMessageItem({
       />
     </>
   )
-}
+})

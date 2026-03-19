@@ -374,6 +374,8 @@ export const CHAT_IPC_CHANNELS = {
   SAVE_ATTACHMENT: 'chat:save-attachment',
   /** 读取附件（返回 base64） */
   READ_ATTACHMENT: 'chat:read-attachment',
+  /** 另存图片到用户选择的位置（原生 Save As 对话框） */
+  SAVE_IMAGE_AS: 'chat:save-image-as',
   /** 删除附件 */
   DELETE_ATTACHMENT: 'chat:delete-attachment',
   /** 打开文件选择对话框 */
@@ -384,6 +386,12 @@ export const CHAT_IPC_CHANNELS = {
   // 置顶管理
   /** 切换对话置顶状态 */
   TOGGLE_PIN: 'chat:toggle-pin',
+
+  // 教程
+  /** 获取教程内容 */
+  GET_TUTORIAL_CONTENT: 'chat:get-tutorial-content',
+  /** 创建欢迎对话（含教程附件） */
+  CREATE_WELCOME_CONVERSATION: 'chat:create-welcome-conversation',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** 内容片段 */

@@ -4,6 +4,12 @@ Next-generation AI desktop app with integrated agents. Local-first, multi-provid
 
 [中文](./README.md)
 
+### ✦ Core Capabilities
+
+> **Chat** · Multi-model conversations &nbsp;│&nbsp; **Agent** · Autonomous general agent &nbsp;│&nbsp; **Agent Teams** · Multi-agent collaboration &nbsp;│&nbsp; **Skills & MCP** · Extensible toolchain
+>
+> **Lark Remote** · Use Agent from your phone &nbsp;│&nbsp; **Memory** · Understands you across sessions &nbsp;│&nbsp; **Multi-Provider** · Anthropic / OpenAI / Google / DeepSeek / MiniMax / Kimi / Zhipu &nbsp;│&nbsp; **Local-First** · Your data stays with you
+
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
 ### Commercial Version Running in Parallel

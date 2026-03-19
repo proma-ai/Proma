@@ -7,7 +7,7 @@
  * 无可变队列、栈或顺序依赖的状态。
  */
 
-import type { AgentEvent } from '../types/agent'
+import type { AgentEvent, AgentToolResultImage } from '../types/agent'
 
 // ============================================================================
 // Tool Index — 追加式、顺序无关的查找表
@@ -189,22 +189,24 @@ export function extractToolResults(
       const toolUseId = block.tool_use_id
       const entry = toolIndex.getEntry(toolUseId)
 
-      const resultStr = serializeResult(block.content)
+      // 从原始 content 中提取图片和文本（在 JSON 序列化之前，避免标记被转义）
+      const { text: cleanedResult, images } = extractFromMcpContent(block.content)
       const isError = block.is_error ?? isToolResultError(block.content)
 
       events.push({
         type: 'tool_result',
         toolUseId,
         toolName: entry?.name,
-        result: resultStr,
+        result: cleanedResult,
         isError,
         input: entry?.input,
         turnId,
         parentToolUseId: sdkParentToolUseId ?? undefined,
+        imageAttachments: images.length > 0 ? images : undefined,
       })
 
       if (entry) {
-        const bgEvents = detectBackgroundEvents(toolUseId, entry, resultStr, isError, turnId)
+        const bgEvents = detectBackgroundEvents(toolUseId, entry, cleanedResult, isError, turnId)
         events.push(...bgEvents)
       }
     }
@@ -212,22 +214,24 @@ export function extractToolResults(
     const toolUseId = sdkParentToolUseId ?? `fallback-${turnId ?? 'unknown'}`
     const entry = toolIndex.getEntry(toolUseId)
 
-    const resultStr = serializeResult(toolUseResultValue)
+    // 从原始值中提取图片和文本
+    const { text: cleanedResult, images } = extractFromMcpContent(toolUseResultValue)
     const isError = isToolResultError(toolUseResultValue)
 
     events.push({
       type: 'tool_result',
       toolUseId,
       toolName: entry?.name,
-      result: resultStr,
+      result: cleanedResult,
       isError,
       input: entry?.input,
       turnId,
       parentToolUseId: undefined,
+      imageAttachments: images.length > 0 ? images : undefined,
     })
 
     if (entry) {
-      const bgEvents = detectBackgroundEvents(toolUseId, entry, resultStr, isError, turnId)
+      const bgEvents = detectBackgroundEvents(toolUseId, entry, cleanedResult, isError, turnId)
       events.push(...bgEvents)
     }
   }
@@ -249,6 +253,56 @@ function extractIntent(toolBlock: ToolUseBlock): string | undefined {
   return intent
 }
 
+/** MCP 内容块类型（用于从 tool_result 中提取图片） */
+interface McpContentBlock {
+  type: string
+  text?: string
+  data?: string
+  mimeType?: string
+  [key: string]: unknown
+}
+
+/**
+ * 从 MCP 工具结果的原始 content 中预提取图片附件和文本。
+ *
+ * MCP tool_result 的 content 可能是：
+ * - string：普通文本结果
+ * - Array<McpContentBlock>：包含 text / image 内容块
+ *
+ * 此函数在 JSON 序列化之前处理，避免 [PROMA_IMAGE_ATTACHMENT:...] 标记被转义、
+ * 以及 image 块的巨大 base64 数据被序列化到显示文本中。
+ */
+function extractFromMcpContent(content: unknown): { text: string; images: AgentToolResultImage[] } {
+  // 字符串直接返回，交给后续 parseToolResultImages 处理
+  if (typeof content === 'string') {
+    return { text: content, images: [] }
+  }
+
+  // 非数组情况：走普通序列化
+  if (!Array.isArray(content)) {
+    return { text: serializeResult(content), images: [] }
+  }
+
+  const blocks = content as McpContentBlock[]
+  const textParts: string[] = []
+  const images: AgentToolResultImage[] = []
+
+  for (const block of blocks) {
+    if (block.type === 'text' && typeof block.text === 'string') {
+      textParts.push(block.text)
+    }
+    // 跳过 image 块（base64 数据不需要序列化到显示文本）
+    // 图片信息通过 text 块中的 [PROMA_IMAGE_ATTACHMENT:...] 标记携带
+  }
+
+  const rawText = textParts.join('\n')
+  // 从合并的文本中解析图片标记
+  const parsed = parseToolResultImages(rawText)
+  images.push(...parsed.images)
+
+  return { text: parsed.text, images }
+}
+
 /** 将工具结果值序列化为字符串 */
 export function serializeResult(value: unknown): string {
   if (typeof value === 'string') return value
@@ -258,6 +312,26 @@ export function serializeResult(value: unknown): string {
   } catch {
     return '[结果包含不可序列化的数据]'
   }
+}
+
+/** 从序列化结果中解析图片附件标记 */
+interface ParsedToolResult {
+  text: string
+  images: AgentToolResultImage[]
+}
+
+export function parseToolResultImages(raw: string): ParsedToolResult {
+  const images: AgentToolResultImage[] = []
+  const cleaned = raw.replace(
+    /\[PROMA_IMAGE_ATTACHMENT:(\{[^}]+\})\]/g,
+    (_, json: string) => {
+      try {
+        images.push(JSON.parse(json) as AgentToolResultImage)
+      } catch { /* 忽略解析失败 */ }
+      return ''
+    },
+  )
+  return { text: cleaned.trim(), images }
 }
 
 /** 检查工具结果是否指示错误 */
