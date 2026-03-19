@@ -20,10 +20,10 @@ import type { ConversationMeta, FileAttachment, ChatMessage } from '@proma/share
  */
 function getTutorialFilePath(): string {
   if (app.isPackaged) {
-    return join(process.resourcesPath, 'tutorial-1.md')
+    return join(process.resourcesPath, 'tutorial.md')
   }
   // 开发模式：app.getAppPath() → apps/electron/
-  return join(app.getAppPath(), '../../tutorial/tutorial-1.md')
+  return join(app.getAppPath(), '../../tutorial/tutorial.md')
 }
 
 /**

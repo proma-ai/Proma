@@ -39,8 +39,8 @@ extraResources:
     filter:
       - "**/*"
   # 教程文件（教程查看器 + 欢迎对话使用）
-  - from: ../../tutorial/tutorial-1.md
-    to: tutorial-1.md
+  - from: ../../tutorial/tutorial.md
+    to: tutorial.md
 
 # ============================================
 # macOS 配置
