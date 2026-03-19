@@ -26,6 +26,7 @@ import { useConversationIdOptional } from '@/contexts/session-context'
 import { getModelLogo, getChannelLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 import { ModelHealthIndicator } from './ModelHealthIndicator'
+import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel, ModelOption } from '@proma/shared'
 
 /** 从渠道列表构建扁平化的模型选项 */
@@ -328,8 +329,10 @@ export function ModelSelector({
                           )}>
                             {option.modelName}
                           </span>
-                          {/* 健康指示器：有数据则显示，无数据自动隐藏 */}
-                          <ModelHealthIndicator modelId={option.modelId} className="ml-auto" />
+                          {/* 健康指示器：仅官方渠道显示（数据来源为官方 API） */}
+                          {option.channelId === PROMA_OFFICIAL_CHANNEL_ID && (
+                            <ModelHealthIndicator modelId={option.modelId} className="ml-auto" />
+                          )}
                         </button>
                       )
                     })}
