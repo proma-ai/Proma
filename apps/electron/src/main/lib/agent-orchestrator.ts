@@ -1612,9 +1612,8 @@ export class AgentOrchestrator {
             } catch {
               lastRetryableError = `API Error 401: ${apiError.message}`
             }
-            this.persistAssistantMessage(sessionId, accumulatedText, accumulatedEvents, resolvedModel)
-            accumulatedText = ''
-            accumulatedEvents.length = 0
+            this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+            accumulatedMessages.length = 0
             stderrChunks.length = 0
             continue
           }

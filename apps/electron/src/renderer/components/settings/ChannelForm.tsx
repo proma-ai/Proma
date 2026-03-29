@@ -543,41 +543,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           </SettingsCard>
         </SettingsSection>
       )}
-              <Input
-                type={showApiKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={isEdit ? '留空则不更新' : '输入 API Key'}
-                required={!isEdit}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                tabIndex={-1}
-              >
-                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-            {testResult && (
-              <div className={cn(
-                'flex items-center gap-1.5 text-xs',
-                testResult.success ? 'text-emerald-600' : 'text-destructive'
-              )}>
-                {testResult.success ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                <span>{testResult.message}</span>
-              </div>
-            )}
-          </div>
-          <SettingsToggle
-            label="启用此渠道"
-            description="关闭后该渠道不会在模型选择中出现"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-        </SettingsCard>
-      </SettingsSection>
 
       {/* 已启用模型 */}
       <SettingsSection
