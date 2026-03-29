@@ -1042,7 +1042,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             onDrop={handleDrop}
           >
             {/* 无 Agent 渠道提示 */}
-            {!agentChannelId && (
+            {agentChannelIds.length === 0 && (
               <div className="flex items-center gap-2 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
                 <Settings size={14} />
                 <span>请在设置中选择 Agent 供应商</span>
@@ -1118,10 +1118,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             {/* Footer 工具栏 */}
             <div className="flex items-center justify-between px-2 py-1 h-[48px] gap-4">
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                {agentChannelId && (
+                {agentChannelIds.length > 0 && (
                   <>
                     <ModelSelector
-                      filterChannelId={agentChannelId}
+                      filterChannelIds={agentChannelIds}
                       externalSelectedModel={externalSelectedModel}
                       onModelSelect={handleModelSelect}
                       useAgentModels
