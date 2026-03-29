@@ -253,7 +253,7 @@ export function QuickTaskApp(): React.ReactElement {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className={`quick-task-container flex w-full flex-col rounded-2xl bg-background shadow-2xl transition-colors ${isDragOver ? 'ring-2 ring-primary/50' : ''}`}>
+      <div className={`quick-task-container flex w-full flex-col rounded-2xl bg-background transition-colors ${isDragOver ? 'ring-2 ring-primary/50' : ''}`}>
         {/* 顶栏：模式切换 + 模型信息 */}
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <div className="flex items-center gap-2">

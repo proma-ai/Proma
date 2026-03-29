@@ -181,14 +181,21 @@ export function ChatMessages({
   const userProfile = useAtomValue(userProfileAtom)
 
   // 平滑流式输出：将高频更新转为逐字渲染
-  const { displayedContent: smoothContent } = useSmoothStream({
+  const { displayedContent: rawSmoothContent } = useSmoothStream({
     content: streamingContent,
     isStreaming: streaming,
   })
-  const { displayedContent: smoothReasoning } = useSmoothStream({
+  const { displayedContent: rawSmoothReasoning } = useSmoothStream({
     content: streamingReasoning,
     isStreaming: streaming,
   })
+
+  // 防闪屏守卫：useSmoothStream 的内部状态通过 useEffect 更新，比 props 晚一帧。
+  // 当流式状态被清除（streamingContent 变为 ''）但 smoothContent 仍持有旧值时，
+  // 会导致持久化消息和流式气泡同时渲染一帧（重复内容闪烁）。
+  // 这里用原始 streamingContent 作为守卫：如果原始内容已清空且不在流式中，立即归零。
+  const smoothContent = (streaming || streamingContent) ? rawSmoothContent : ''
+  const smoothReasoning = (streaming || streamingReasoning) ? rawSmoothReasoning : ''
   const [parallelMode] = useConversationParallelMode()
 
   /** 是否正在加载更多历史 */

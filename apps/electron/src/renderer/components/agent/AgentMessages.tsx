@@ -646,19 +646,23 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
   const prevSessionIdRef = React.useRef<string | null>(null)
 
   /**
-   * content-visibility 延迟启用：与 ready 状态同步，
-   * 避免流式→持久化消息切换瞬间 content-visibility:auto 导致浏览器 reflow 跳动。
+   * content-visibility 延迟启用：ready 后延迟开启，之后保持不变。
+   * 不随 streaming 状态反复切换，避免 content-visibility:auto 反复开关导致浏览器 reflow 跳动。
+   * 仅在切换会话（ready 重置为 false）时才重新走延迟启用流程。
    */
   const [cvReady, setCvReady] = React.useState(false)
   React.useEffect(() => {
-    if (!ready || streaming) {
+    if (!ready) {
       setCvReady(false)
       return
     }
-    // ready 后延迟启用 content-visibility，等布局稳定后再优化
+    // 已启用则保持，不因 streaming 反复切换
+    if (cvReady) return
+    // 流式期间暂不启用，等首次流式完成后再启用
+    if (streaming) return
     const timer = setTimeout(() => setCvReady(true), 100)
     return () => clearTimeout(timer)
-  }, [ready, streaming])
+  }, [ready, streaming, cvReady])
 
   React.useEffect(() => {
     if (sessionId !== prevSessionIdRef.current) {

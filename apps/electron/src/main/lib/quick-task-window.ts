@@ -37,7 +37,7 @@ export function createQuickTaskWindow(): void {
     maximizable: false,
     fullscreenable: false,
     show: false,
-    hasShadow: true,
+    hasShadow: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
