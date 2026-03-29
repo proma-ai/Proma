@@ -53,7 +53,7 @@ function formatDateTime(dateStr: string): string {
 /** 格式化费用（积分） */
 function formatCost(cost: number | string): string {
   const num = typeof cost === 'string' ? parseFloat(cost) : cost
-  return `${num.toFixed(4)} 积分`
+  return `${num.toFixed(2)} 积分`
 }
 
 /** 格式化 token 数（去掉不必要的尾零，如 100.0K → 100K） */
@@ -155,11 +155,12 @@ function Pagination({
 
 // ===== 统计卡片 =====
 
-function StatCard({ label, value }: { label: string; value: string }): React.ReactElement {
+function StatCard({ label, value, description }: { label: string; value: string; description?: string }): React.ReactElement {
   return (
     <div className="rounded-lg bg-muted/50 p-3 flex-1 min-w-0">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className="text-sm font-semibold truncate">{value}</p>
+      {description && <p className="text-xs text-muted-foreground mt-0.5 truncate">{description}</p>}
     </div>
   )
 }
@@ -436,27 +437,33 @@ function AgentUsageTable({
 
   return (
     <>
-      <div className="flex gap-3 mb-4">
-        <StatCard label="总请求" value={String(data.stats.totalRequests)} />
-        <StatCard label="成功" value={String(data.stats.successCount)} />
-        <StatCard label="错误" value={String(data.stats.errorCount)} />
+      <div className="flex gap-3 mb-4 flex-wrap">
+        <StatCard
+          label="总请求"
+          value={String(data.stats.totalRequests)}
+          description={`↑${data.stats.successCount} · ↓${data.stats.errorCount}`}
+        />
+        <StatCard label="输入" value={formatTokens(data.stats.totalInputTokens)} />
+        <StatCard label="输出" value={formatTokens(data.stats.totalOutputTokens)} />
+        <StatCard label="写缓存" value={formatTokens(data.stats.totalCacheCreationTokens)} />
+        <StatCard label="读缓存" value={formatTokens(data.stats.totalCacheReadTokens)} />
         <StatCard label="总费用" value={formatCost(data.stats.totalCost)} />
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[100px]">时间</TableHead>
-            <TableHead>API Key</TableHead>
-            <TableHead>模型</TableHead>
-            <TableHead>端点</TableHead>
-            <TableHead className="text-right">输入</TableHead>
-            <TableHead className="text-right">输出</TableHead>
-            <TableHead className="text-right">缓存写</TableHead>
-            <TableHead className="text-right">缓存读</TableHead>
-            <TableHead className="text-right">工具调用</TableHead>
-            <TableHead className="text-center">状态码</TableHead>
-            <TableHead className="text-right">耗时</TableHead>
-            <TableHead className="text-right">费用</TableHead>
+            <TableHead className="w-[100px] whitespace-nowrap">时间</TableHead>
+            <TableHead className="whitespace-nowrap">API Key</TableHead>
+            <TableHead className="whitespace-nowrap">模型</TableHead>
+            <TableHead className="whitespace-nowrap">端点</TableHead>
+            <TableHead className="text-right whitespace-nowrap">输入</TableHead>
+            <TableHead className="text-right whitespace-nowrap">输出</TableHead>
+            <TableHead className="text-right whitespace-nowrap">写缓存</TableHead>
+            <TableHead className="text-right whitespace-nowrap">读缓存</TableHead>
+            <TableHead className="text-right whitespace-nowrap">工具</TableHead>
+            <TableHead className="text-center whitespace-nowrap">状态</TableHead>
+            <TableHead className="text-right whitespace-nowrap">耗时</TableHead>
+            <TableHead className="text-right whitespace-nowrap">费用</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -492,8 +499,8 @@ function AgentUsageTable({
                   <span className="text-muted-foreground text-xs">-</span>
                 )}
               </TableCell>
-              <TableCell className="text-right text-xs">{formatMs(item.durationMs)}</TableCell>
-              <TableCell className="text-right text-xs">{formatCost(item.totalCost)}</TableCell>
+              <TableCell className="text-right text-xs whitespace-nowrap">{formatMs(item.durationMs)}</TableCell>
+              <TableCell className="text-right text-xs whitespace-nowrap">{formatCost(item.totalCost)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
