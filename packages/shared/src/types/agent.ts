@@ -151,6 +151,159 @@ export interface JsonSchemaOutputFormat {
   description?: string
 }
 
+// ===== SDK 消息类型（直接透传，不再翻译） =====
+
+/** SDK 文本内容块 */
+export interface SDKTextBlock {
+  type: 'text'
+  text: string
+}
+
+/** SDK 工具调用内容块 */
+export interface SDKToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+/** SDK 思考内容块 */
+export interface SDKThinkingBlock {
+  type: 'thinking'
+  thinking: string
+}
+
+/** SDK 内容块联合类型 */
+export type SDKContentBlock =
+  | SDKTextBlock
+  | SDKToolUseBlock
+  | SDKThinkingBlock
+  | { type: string; [key: string]: unknown }
+
+/** SDK tool_result 内容块（在 user 消息中） */
+export interface SDKToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content?: unknown
+  is_error?: boolean
+}
+
+/** SDK user 消息内容块联合类型 */
+export type SDKUserContentBlock =
+  | SDKToolResultBlock
+  | SDKTextBlock
+  | { type: string; [key: string]: unknown }
+
+/** SDK assistant 消息 */
+export interface SDKAssistantMessage {
+  type: 'assistant'
+  message: {
+    content: SDKContentBlock[]
+    usage?: {
+      input_tokens: number
+      output_tokens?: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+    model?: string
+    stop_reason?: string
+  }
+  parent_tool_use_id: string | null
+  session_id?: string
+  /** SDK 消息唯一标识，用于 forkSession / resumeSessionAt */
+  uuid?: string
+  error?: { message: string; errorType?: string }
+  isReplay?: boolean
+}
+
+/** SDK user 消息 */
+export interface SDKUserMessage {
+  type: 'user'
+  message?: {
+    content?: SDKUserContentBlock[]
+  }
+  parent_tool_use_id: string | null
+  session_id?: string
+  /** SDK 消息唯一标识 */
+  uuid?: string
+  tool_use_result?: unknown
+  isReplay?: boolean
+}
+
+/** SDK result 消息（查询结束时返回） */
+export interface SDKResultMessage {
+  type: 'result'
+  subtype: 'success' | 'error'
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
+  total_cost_usd?: number
+  modelUsage?: Record<string, { contextWindow?: number }>
+  errors?: string[]
+  session_id?: string
+}
+
+/** SDK system 消息（init / compact_boundary / task_started / task_progress / task_notification） */
+export interface SDKSystemMessage {
+  type: 'system'
+  subtype?: string
+  session_id?: string
+  /** init: 确认的模型 */
+  model?: string
+  /** task 相关字段 */
+  task_id?: string
+  description?: string
+  task_type?: string
+  tool_use_id?: string
+  status?: string
+  summary?: string
+  output_file?: string
+  last_tool_name?: string
+  usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number }
+  [key: string]: unknown
+}
+
+/** SDK tool_progress 消息（工具执行心跳） */
+export interface SDKToolProgressMessage {
+  type: 'tool_progress'
+  tool_use_id: string
+  tool_name: string
+  parent_tool_use_id: string | null
+  elapsed_time_seconds?: number
+  /** Agent Teams: 所属 teammate 任务 ID */
+  task_id?: string
+  session_id?: string
+}
+
+/** SDK prompt_suggestion 消息 */
+export interface SDKPromptSuggestionMessage {
+  type: 'prompt_suggestion'
+  suggestion?: string
+  session_id?: string
+}
+
+/** SDK tool_use_summary 消息 */
+export interface SDKToolUseSummaryMessage {
+  type: 'tool_use_summary'
+  summary?: string
+  preceding_tool_use_ids?: string[]
+  session_id?: string
+}
+
+/** SDK 消息联合类型（v1 query + includePartialMessages: false 返回的完整 JSON 对象） */
+export type SDKMessage =
+  | SDKAssistantMessage
+  | SDKUserMessage
+  | SDKResultMessage
+  | SDKSystemMessage
+  | SDKToolProgressMessage
+  | SDKPromptSuggestionMessage
+  | SDKToolUseSummaryMessage
+  | { type: string; session_id?: string; parent_tool_use_id?: string | null; [key: string]: unknown }
+
 // ===== Agent 事件类型 =====
 
 /** 错误代码 */
@@ -302,7 +455,7 @@ export type AgentEvent =
   | { type: 'retry_cleared' }  // 新增：重试成功，清除状态
   | { type: 'retry_failed'; finalAttempt: RetryAttempt }  // 新增：重试失败
   // Usage 更新
-  | { type: 'usage_update'; usage: { inputTokens: number; contextWindow?: number } }
+  | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
   | { type: 'compacting' }
   | { type: 'compact_complete' }
@@ -312,6 +465,11 @@ export type AgentEvent =
   // AskUserQuestion 交互式问答
   | { type: 'ask_user_request'; request: AskUserRequest }
   | { type: 'ask_user_resolved'; requestId: string }
+  // ExitPlanMode 计划审批
+  | { type: 'exit_plan_mode_request'; request: ExitPlanModeRequest }
+  | { type: 'exit_plan_mode_resolved'; requestId: string }
+  // EnterPlanMode 进入计划模式
+  | { type: 'enter_plan_mode'; sessionId: string }
   // 提示建议
   | { type: 'prompt_suggestion'; suggestion: string }
   // 模型确认（SDK 确认实际使用的模型）
@@ -319,6 +477,31 @@ export type AgentEvent =
   // Auto-Resume（Teams 完成后自动收集结果）
   | { type: 'waiting_resume'; message: string }
   | { type: 'resume_start'; messageId: string }
+  // 权限模式变更（Plan → bypassPermissions 等）
+  | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
+
+// ===== Proma 内部事件（SDK 不覆盖的场景） =====
+
+/** Proma 内部事件类型 */
+export type PromaEvent =
+  | { type: 'permission_request'; request: PermissionRequest }
+  | { type: 'permission_resolved'; requestId: string; behavior: 'allow' | 'deny' }
+  | { type: 'ask_user_request'; request: AskUserRequest }
+  | { type: 'ask_user_resolved'; requestId: string }
+  | { type: 'exit_plan_mode_request'; request: ExitPlanModeRequest }
+  | { type: 'exit_plan_mode_resolved'; requestId: string }
+  | { type: 'enter_plan_mode'; sessionId: string }
+  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
+  | { type: 'model_resolved'; model: string }
+  | { type: 'waiting_resume'; message: string }
+  | { type: 'resume_start'; messageId: string }
+  | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
+
+
+/** IPC 传输的统一 payload（替代 AgentEvent） */
+export type AgentStreamPayload =
+  | { kind: 'sdk_message'; message: SDKMessage }
+  | { kind: 'proma_event'; event: PromaEvent }
 
 // ===== Agent 会话管理 =====
 
@@ -341,8 +524,16 @@ export interface AgentSessionMeta {
   workspaceId?: string
   /** 是否置顶 */
   pinned?: boolean
+  /** 是否已归档 */
+  archived?: boolean
   /** 附加的外部目录路径列表（绝对路径，作为 SDK additionalDirectories 传递） */
   attachedDirectories?: string[]
+  /** 分叉来源：源会话的 SDK session ID（首次发消息时用于 resume + forkSession） */
+  forkedFromSdkSessionId?: string
+  /** 分叉截断点：源会话中的消息 uuid（inclusive） */
+  forkAtMessageUuid?: string
+  /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中） */
+  forkSourceDir?: string
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -379,6 +570,34 @@ export interface AgentMessage {
   errorCanRetry?: boolean
   /** 错误恢复操作（status 消息） */
   errorActions?: RecoveryAction[]
+  /** 耗时（毫秒），assistant 消息从流式开始到完成的时间 */
+  durationMs?: number
+  /** Token 用量明细（assistant 消息完成时记录） */
+  usage?: AgentEventUsage
+}
+
+// ===== Agent 消息搜索 =====
+
+/**
+ * Agent 会话消息搜索结果
+ */
+export interface AgentMessageSearchResult {
+  /** 会话 ID */
+  sessionId: string
+  /** 会话标题 */
+  sessionTitle: string
+  /** 消息 ID */
+  messageId: string
+  /** 消息角色 */
+  role: 'user' | 'assistant' | 'tool' | 'status'
+  /** 匹配上下文片段（约 80 字符） */
+  snippet: string
+  /** snippet 内匹配起始位置 */
+  matchStart: number
+  /** 匹配长度 */
+  matchLength: number
+  /** 是否已归档 */
+  archived?: boolean
 }
 
 // ===== Agent 标题生成输入 =====
@@ -438,6 +657,7 @@ export interface SkillMeta {
   name: string
   description?: string
   icon?: string
+  version?: string
   enabled: boolean
 }
 
@@ -467,12 +687,24 @@ export interface AgentSendInput {
   additionalDirectories?: string[]
   /** 动态注入的 MCP 服务器（仅在本次会话中生效，如飞书群聊工具） */
   customMcpServers?: Record<string, Record<string, unknown>>
-  /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'auto'） */
+  /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'bypassPermissions'） */
   permissionModeOverride?: PromaPermissionMode
   /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */
   mentionedSkills?: string[]
   /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
   mentionedMcpServers?: string[]
+}
+
+// ===== Agent 队列消息 =====
+
+/** 流式追加消息的输入参数（Agent 流式中发送新消息） */
+export interface AgentQueueMessageInput {
+  /** 会话 ID */
+  sessionId: string
+  /** 用户消息内容 */
+  userMessage: string
+  /** 前端预生成的 UUID（用于乐观更新去重） */
+  uuid?: string
 }
 
 // ===== 会话迁移输入 =====
@@ -485,6 +717,14 @@ export interface MoveSessionToWorkspaceInput {
   sessionId: string
   /** 目标工作区 ID */
   targetWorkspaceId: string
+}
+
+/** Fork（分叉）会话输入 */
+export interface ForkSessionInput {
+  /** Proma 会话 ID */
+  sessionId: string
+  /** SDK 消息 uuid（截断点，inclusive）。省略时复制全部历史 */
+  upToMessageUuid?: string
 }
 
 // ===== 后台任务管理 =====
@@ -529,8 +769,10 @@ export interface StopTaskInput {
 export interface AgentStreamEvent {
   /** 会话 ID */
   sessionId: string
-  /** 事件数据 */
-  event: AgentEvent
+  /** 事件数据（新格式） */
+  payload: AgentStreamPayload
+  /** @deprecated 兼容旧格式，Phase 2 后移除 */
+  event?: AgentEvent
 }
 
 /**
@@ -541,6 +783,8 @@ export interface AgentStreamCompletePayload {
   sessionId: string
   /** 已持久化的完整消息列表 */
   messages?: AgentMessage[]
+  /** 是否由用户手动中止 */
+  stoppedByUser?: boolean
 }
 
 // ===== 文件浏览器 =====
@@ -662,13 +906,59 @@ export interface AskUserResponse {
   answers: Record<string, string>
 }
 
+// ===== ExitPlanMode 计划审批类型 =====
+
+/** ExitPlanMode SDK 工具输入中的 allowedPrompts 项 */
+export interface ExitPlanAllowedPrompt {
+  /** 工具名称（目前仅 "Bash"） */
+  tool: 'Bash'
+  /** 语义化的操作描述（如 "run tests"、"install dependencies"） */
+  prompt: string
+}
+
+/** ExitPlanMode 请求（主进程 → 渲染进程） */
+export interface ExitPlanModeRequest {
+  /** 请求唯一 ID */
+  requestId: string
+  /** 会话 ID */
+  sessionId: string
+  /** SDK 工具原始输入 */
+  toolInput: Record<string, unknown>
+  /** 解析后的 allowedPrompts 列表 */
+  allowedPrompts: ExitPlanAllowedPrompt[]
+}
+
+/** ExitPlanMode 用户选择行为 */
+export type ExitPlanModeAction = 'approve_auto' | 'approve_edit' | 'deny' | 'feedback'
+
+/** ExitPlanMode 响应（渲染进程 → 主进程） */
+export interface ExitPlanModeResponse {
+  /** 请求 ID */
+  requestId: string
+  /** 用户选择的行为 */
+  action: ExitPlanModeAction
+  /** 用户反馈内容（action 为 feedback 时有值） */
+  feedback?: string
+}
+
 // ===== 权限系统类型 =====
 
-/** Proma 权限模式 */
-export type PromaPermissionMode = 'auto' | 'smart' | 'supervised'
+/** Proma 权限模式（直接映射 SDK 原生模式） */
+export type PromaPermissionMode = 'acceptEdits' | 'bypassPermissions' | 'plan'
 
 /** 权限模式定义顺序（用于循环切换） */
-export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['auto', 'smart', 'supervised']
+export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['acceptEdits', 'bypassPermissions', 'plan']
+
+/** 迁移旧权限模式值到新模式 */
+export function migratePermissionMode(mode: string): PromaPermissionMode {
+  if (mode === 'acceptEdits' || mode === 'bypassPermissions' || mode === 'plan') return mode
+  const migration: Record<string, PromaPermissionMode> = {
+    auto: 'bypassPermissions',
+    smart: 'acceptEdits',
+    supervised: 'acceptEdits',
+  }
+  return migration[mode] ?? 'acceptEdits'
+}
 
 /** 危险等级 */
 export type DangerLevel = 'safe' | 'normal' | 'dangerous'
@@ -794,6 +1084,8 @@ export const AGENT_IPC_CHANNELS = {
   CREATE_SESSION: 'agent:create-session',
   /** 获取会话消息 */
   GET_MESSAGES: 'agent:get-messages',
+  /** 获取会话 SDKMessage（Phase 4 新格式） */
+  GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
   /** 删除会话 */
@@ -802,8 +1094,14 @@ export const AGENT_IPC_CHANNELS = {
   MIGRATE_CHAT_TO_AGENT: 'agent:migrate-chat-to-agent',
   /** 切换会话置顶状态 */
   TOGGLE_PIN: 'agent:toggle-pin',
+  /** 切换会话归档状态 */
+  TOGGLE_ARCHIVE: 'agent:toggle-archive',
+  /** 搜索会话消息内容 */
+  SEARCH_MESSAGES: 'agent:search-messages',
   /** 迁移会话到另一个工作区 */
   MOVE_SESSION_TO_WORKSPACE: 'agent:move-session-to-workspace',
+  /** 分叉会话（从指定消息处创建新会话） */
+  FORK_SESSION: 'agent:fork-session',
 
   // 工作区管理
   /** 获取工作区列表 */
@@ -929,9 +1227,39 @@ export const AGENT_IPC_CHANNELS = {
   /** AskUser 响应（渲染进程 → 主进程） */
   ASK_USER_RESPOND: 'agent:ask-user:respond',
 
+  // ExitPlanMode 计划审批
+  /** ExitPlanMode 响应（渲染进程 → 主进程） */
+  EXIT_PLAN_MODE_RESPOND: 'agent:exit-plan-mode:respond',
+
   // Agent Teams 数据
   /** 获取 Team 聚合数据（sdkSessionId → AgentTeamData | null） */
   GET_TEAM_DATA: 'agent:get-team-data',
   /** 读取 Teammate 输出文件（filePath → string） */
   GET_AGENT_OUTPUT: 'agent:get-agent-output',
+
+  // 队列消息（Agent 运行中排队发送）
+  /** 排队发送消息 */
+  QUEUE_MESSAGE: 'agent:queue-message',
+  /** 取消队列消息 */
+  CANCEL_QUEUED_MESSAGE: 'agent:cancel-queued-message',
+  /** 提升队列消息为立即发送 */
+  PROMOTE_QUEUED_MESSAGE: 'agent:promote-queued-message',
+  /** 队列消息状态变更通知（主进程 → 渲染进程推送） */
+  QUEUED_MESSAGE_STATUS: 'agent:queued-message-status',
+
+  // 待处理请求恢复（渲染进程重载后查询主进程状态）
+  /** 获取所有待处理的交互请求快照 */
+  GET_PENDING_REQUESTS: 'agent:get-pending-requests',
 } as const
+
+/**
+ * 待处理交互请求快照（用于渲染进程重载后恢复状态）
+ */
+export interface PendingRequestsSnapshot {
+  /** 待处理的权限请求 */
+  permissions: PermissionRequest[]
+  /** 待处理的 AskUser 请求 */
+  askUsers: AskUserRequest[]
+  /** 待处理的 ExitPlanMode 请求 */
+  exitPlans: ExitPlanModeRequest[]
+}

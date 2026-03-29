@@ -2,4 +2,4 @@
  * Agent 模块导出
  */
 
-export * from './tool-matching'
+// tool-matching.ts 已删除 — SDK 消息直接透传，无需工具匹配

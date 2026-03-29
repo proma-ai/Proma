@@ -67,6 +67,12 @@
   app-region: drag;
 }
 
+/* 快速任务窗口：透明背景 + 无拖拽 */
+.quick-task-container {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 .titlebar-no-drag {
   -webkit-app-region: no-drag;
   app-region: no-drag;

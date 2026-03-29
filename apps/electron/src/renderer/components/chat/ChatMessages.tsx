@@ -14,7 +14,8 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { MessageSquare, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import { ChatMessageItem, formatMessageTime } from './ChatMessageItem'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import { ChatToolActivityIndicator } from './ChatToolActivityIndicator'
@@ -42,6 +43,7 @@ import {
   ReasoningContent,
 } from '@/components/ai-elements/reasoning'
 import { useSmoothStream } from '@proma/ui'
+import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { useConversationParallelMode } from '@/hooks/useConversationSettings'
 import { getModelLogo } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
@@ -151,18 +153,9 @@ interface ChatMessagesProps {
   onLoadMore?: () => Promise<void>
 }
 
-/** 空状态引导 */
+/** 空状态引导 — 使用 WelcomeEmptyState */
 function EmptyState(): React.ReactElement {
-  return (
-    <div className="flex h-full items-center justify-center">
-      <div className="flex flex-col items-center gap-3 text-muted-foreground">
-        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-          <MessageSquare size={24} className="text-muted-foreground/60" />
-        </div>
-        <p className="text-sm">在下方输入框开始对话</p>
-      </div>
-    </div>
-  )
+  return <WelcomeEmptyState />
 }
 
 export function ChatMessages({
@@ -291,7 +284,8 @@ export function ChatMessages({
   const dividerSet = new Set(contextDividers)
 
   return (
-    <Conversation className={ready ? `${streaming ? '' : 'cv-ready '}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
+    <Conversation resize={ready ? 'smooth' : 'instant'} className={ready ? `${streaming ? '' : 'cv-ready '}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
+      <ScrollPositionManager id={conversationId} ready={ready} />
       {/* 滚动到顶部时自动加载更多历史 */}
       <ScrollTopLoader
         hasMore={hasMore}

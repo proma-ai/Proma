@@ -11,13 +11,12 @@ import * as React from 'react'
 import { useSetAtom } from 'jotai'
 import { GraduationCap, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { activeViewAtom } from '@/atoms/active-view'
-import { settingsTabAtom } from '@/atoms/settings-tab'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 
 export function TutorialBanner(): React.ReactElement | null {
   const [visible, setVisible] = React.useState(false)
   const [dismissed, setDismissed] = React.useState(true)
-  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
 
   // 初始化：从主进程读取 settings 判断是否需要显示
@@ -43,7 +42,7 @@ export function TutorialBanner(): React.ReactElement | null {
   // 立即学习：跳转到设置教程页并关闭横幅
   const handleLearnNow = async () => {
     setSettingsTab('tutorial')
-    setActiveView('settings')
+    setSettingsOpen(true)
     await handleDismiss()
   }
 

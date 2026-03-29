@@ -23,6 +23,8 @@ import type {
   AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
   AgentStreamEvent,
+  AgentStreamPayload,
+  AgentQueueMessageInput,
 } from '@proma/shared'
 import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
@@ -49,10 +51,10 @@ const sessionWebContents = new Map<string, WebContents>()
 
 // ===== EventBus IPC 转发中间件 =====
 
-eventBus.use((sessionId, event, next) => {
+eventBus.use((sessionId, payload, next) => {
   const wc = sessionWebContents.get(sessionId)
   if (wc && !wc.isDestroyed()) {
-    wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, event } as AgentStreamEvent)
+    wc.send(AGENT_IPC_CHANNELS.STREAM_EVENT, { sessionId, payload } as AgentStreamEvent)
   }
   next()
 })
@@ -91,11 +93,12 @@ export async function runAgent(
           })
         }
       },
-      onComplete: (messages) => {
+      onComplete: (messages, opts) => {
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
             sessionId: input.sessionId,
             messages,
+            stoppedByUser: opts?.stoppedByUser ?? false,
           })
         }
         // Proma 官方渠道：对话完成后通知渲染进程刷新余额
@@ -206,6 +209,25 @@ export function isAgentSessionActive(sessionId: string): boolean {
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
 export function stopAllAgents(): void {
   orchestrator.stopAll()
+}
+
+// ===== 流式追加消息 =====
+
+/**
+ * 在 Agent 流式中追加发送消息
+ *
+ * 使用 'now' 优先级立即注入 SDK 并持久化。
+ */
+export async function queueAgentMessage(
+  input: AgentQueueMessageInput,
+  _webContents: WebContents,
+): Promise<string> {
+  return orchestrator.queueMessage(
+    input.sessionId,
+    input.userMessage,
+    undefined,
+    input.uuid,
+  )
 }
 
 // ===== 文件操作 =====

@@ -29,10 +29,9 @@ import {
   agentMaxBudgetUsdAtom,
   agentMaxTurnsAtom,
 } from '@/atoms/agent-atoms'
-import { activeViewAtom } from '@/atoms/active-view'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { appModeAtom } from '@/atoms/app-mode'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
-import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { McpServerEntry, SkillMeta, WorkspaceMcpConfig, ThinkingConfig, AgentEffort } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow, SettingsSegmentedControl, SettingsInput } from './primitives'
 import { McpServerForm } from './McpServerForm'
@@ -54,7 +53,7 @@ export function AgentSettings(): React.ReactElement {
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setCurrentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setAppMode = useSetAtom(appModeAtom)
   const bumpCapabilitiesVersion = useSetAtom(workspaceCapabilitiesVersionAtom)
 
@@ -208,7 +207,7 @@ ${skillList}
 
       // 跳转到 Agent 对话视图
       setAppMode('agent')
-      setActiveView('conversations')
+      setSettingsOpen(false)
     } catch (error) {
       console.error('[Agent 设置] 创建配置会话失败:', error)
     }
@@ -749,7 +748,6 @@ function valueToEffort(value: string): AgentEffort | undefined {
 /** 内置 Agent 工具状态展示 */
 function BuiltinAgentTools(): React.ReactElement {
   const tools = useAtomValue(chatToolsAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
 
   const memoryTool = tools.find((t) => t.meta.id === 'memory')
@@ -757,7 +755,6 @@ function BuiltinAgentTools(): React.ReactElement {
 
   /** 跳转到工具设置页 */
   const goToToolSettings = (): void => {
-    setActiveView('settings')
     setSettingsTab('tools')
   }
 

@@ -381,7 +381,8 @@ export async function executeNanoBananaTool(
       }
     }
 
-    if (!data.candidates || data.candidates.length === 0) {
+    const candidate = data.candidates?.[0]
+    if (!candidate) {
       return {
         toolCallId: toolCall.id,
         content: '未生成任何内容',
@@ -389,7 +390,7 @@ export async function executeNanoBananaTool(
       }
     }
 
-    const parts = data.candidates![0]!.content.parts
+    const parts = candidate.content.parts
     console.log(`[Nano Banana] 响应包含 ${parts.length} 个 parts，类型:`, parts.map((p) => p.inlineData ? `image(${p.inlineData.mimeType})` : `text(${(p.text ?? '').slice(0, 30)})`))
     const generatedAttachments: FileAttachment[] = []
     const textParts: string[] = []

@@ -32,8 +32,10 @@ import type {
   AttachmentSaveResult,
   FileDialogResult,
   RecentMessagesResult,
+  MessageSearchResult,
   AgentSessionMeta,
   AgentMessage,
+  SDKMessage,
   AgentSendInput,
   AgentStreamEvent,
   AgentStreamCompletePayload,
@@ -83,6 +85,7 @@ import type {
   PromaPermissionMode,
   AskUserRequest,
   AskUserResponse,
+  ExitPlanModeResponse,
   SystemPromptConfig,
   SystemPrompt,
   SystemPromptCreateInput,
@@ -100,6 +103,8 @@ import type {
   ChatToolMeta,
   AgentTeamData,
   MoveSessionToWorkspaceInput,
+  ForkSessionInput,
+  AgentMessageSearchResult,
   FeishuConfig,
   FeishuConfigInput,
   FeishuBridgeState,
@@ -111,8 +116,11 @@ import type {
   // 模型健康检查类型
   ModelHealthIpcResponse,
   FeishuUpdateBindingInput,
+  AgentQueueMessageInput,
+  PendingRequestsSnapshot,
 } from '@proma/shared'
-import type { UserProfile, AppSettings } from '../types'
+import type { UserProfile, AppSettings, QuickTaskSubmitInput, QuickTaskOpenSessionData } from '../types'
+import { QUICK_TASK_IPC_CHANNELS } from '../types'
 
 /**
  * 暴露给渲染进程的 API 接口定义
@@ -189,6 +197,12 @@ export interface ElectronAPI {
 
   /** 切换对话置顶状态 */
   togglePinConversation: (id: string) => Promise<ConversationMeta>
+
+  /** 切换对话归档状态 */
+  toggleArchiveConversation: (id: string) => Promise<ConversationMeta>
+
+  /** 搜索对话消息内容 */
+  searchConversationMessages: (query: string) => Promise<MessageSearchResult[]>
 
   // ===== 教程 =====
 
@@ -308,6 +322,9 @@ export interface ElectronAPI {
   /** 获取 Agent 会话消息 */
   getAgentSessionMessages: (id: string) => Promise<AgentMessage[]>
 
+  /** 获取 Agent 会话 SDKMessage（Phase 4 新格式） */
+  getAgentSessionSDKMessages: (id: string) => Promise<SDKMessage[]>
+
   /** 更新 Agent 会话标题 */
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
 
@@ -320,8 +337,17 @@ export interface ElectronAPI {
   /** 切换 Agent 会话置顶状态 */
   togglePinAgentSession: (id: string) => Promise<AgentSessionMeta>
 
+  /** 切换 Agent 会话归档状态 */
+  toggleArchiveAgentSession: (id: string) => Promise<AgentSessionMeta>
+
+  /** 搜索 Agent 会话消息内容 */
+  searchAgentSessionMessages: (query: string) => Promise<AgentMessageSearchResult[]>
+
   /** 迁移 Agent 会话到另一个工作区 */
   moveAgentSessionToWorkspace: (input: MoveSessionToWorkspaceInput) => Promise<AgentSessionMeta>
+
+  /** 分叉 Agent 会话 */
+  forkAgentSession: (input: ForkSessionInput) => Promise<AgentSessionMeta>
 
   /** 生成 Agent 会话标题 */
   generateAgentTitle: (input: AgentGenerateTitleInput) => Promise<string | null>
@@ -331,6 +357,11 @@ export interface ElectronAPI {
 
   /** 中止 Agent 执行 */
   stopAgent: (sessionId: string) => Promise<void>
+
+  // ===== Agent 队列消息 =====
+
+  /** 流式追加发送 Agent 消息（Agent 运行中） */
+  queueAgentMessage: (input: AgentQueueMessageInput) => Promise<string>
 
   // ===== Agent 后台任务管理 =====
 
@@ -442,6 +473,14 @@ export interface ElectronAPI {
 
   /** 响应 AskUser 请求 */
   respondAskUser: (response: AskUserResponse) => Promise<void>
+
+  // ===== ExitPlanMode 计划审批 =====
+
+  /** 响应 ExitPlanMode 请求 */
+  respondExitPlanMode: (response: ExitPlanModeResponse) => Promise<void>
+
+  /** 获取所有待处理的交互请求快照（渲染进程重载后恢复状态） */
+  getPendingRequests: () => Promise<PendingRequestsSnapshot>
 
   // ===== Agent Teams 数据 =====
 
@@ -742,6 +781,21 @@ export interface ElectronAPI {
   onFeishuStatusChanged: (callback: (state: FeishuBridgeState) => void) => () => void
   /** 订阅飞书通知已发送事件 */
   onFeishuNotificationSent: (callback: (payload: FeishuNotificationSentPayload) => void) => () => void
+  /** 订阅菜单关闭标签页事件（Cmd+W 被菜单拦截后转发） */
+  onMenuCloseTab: (callback: () => void) => () => void
+
+  // ===== 快速任务窗口 =====
+
+  /** 提交快速任务 */
+  submitQuickTask: (input: QuickTaskSubmitInput) => Promise<void>
+  /** 隐藏快速任务窗口 */
+  hideQuickTask: () => Promise<void>
+  /** 重新注册全局快捷键（设置变更后） */
+  reregisterGlobalShortcuts: () => Promise<Record<string, boolean>>
+  /** 订阅快速任务窗口聚焦事件 */
+  onQuickTaskFocus: (callback: () => void) => () => void
+  /** 订阅快速任务打开会话事件（主窗口接收，由渲染进程负责创建会话） */
+  onQuickTaskOpenSession: (callback: (data: QuickTaskOpenSessionData) => void) => () => void
 }
 
 /**
@@ -826,6 +880,14 @@ const electronAPI: ElectronAPI = {
 
   togglePinConversation: (id: string) => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.TOGGLE_PIN, id)
+  },
+
+  toggleArchiveConversation: (id: string) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.TOGGLE_ARCHIVE, id)
+  },
+
+  searchConversationMessages: (query: string) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.SEARCH_MESSAGES, query)
   },
 
   // 教程
@@ -986,6 +1048,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MESSAGES, id)
   },
 
+  getAgentSessionSDKMessages: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SDK_MESSAGES, id)
+  },
+
   updateAgentSessionTitle: (id: string, title: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_TITLE, id, title)
   },
@@ -1002,8 +1068,20 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_PIN, id)
   },
 
+  toggleArchiveAgentSession: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_ARCHIVE, id)
+  },
+
+  searchAgentSessionMessages: (query: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MESSAGES, query)
+  },
+
   moveAgentSessionToWorkspace: (input: MoveSessionToWorkspaceInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_SESSION_TO_WORKSPACE, input)
+  },
+
+  forkAgentSession: (input: ForkSessionInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.FORK_SESSION, input)
   },
 
   generateAgentTitle: (input: AgentGenerateTitleInput) => {
@@ -1016,6 +1094,11 @@ const electronAPI: ElectronAPI = {
 
   stopAgent: (sessionId: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_AGENT, sessionId)
+  },
+
+  // Agent 队列消息
+  queueAgentMessage: (input: AgentQueueMessageInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.QUEUE_MESSAGE, input)
   },
 
   // Agent 后台任务管理
@@ -1165,6 +1248,16 @@ const electronAPI: ElectronAPI = {
   // AskUserQuestion 交互式问答
   respondAskUser: (response: AskUserResponse) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ASK_USER_RESPOND, response)
+  },
+
+  // ExitPlanMode 计划审批
+  respondExitPlanMode: (response: ExitPlanModeResponse) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.EXIT_PLAN_MODE_RESPOND, response)
+  },
+
+  // 待处理请求恢复
+  getPendingRequests: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PENDING_REQUESTS)
   },
 
   // Agent Teams 数据
@@ -1573,6 +1666,38 @@ const electronAPI: ElectronAPI = {
     const listener = (_event: Electron.IpcRendererEvent, payload: FeishuNotificationSentPayload): void => callback(payload)
     ipcRenderer.on(FEISHU_IPC_CHANNELS.NOTIFICATION_SENT, listener)
     return () => { ipcRenderer.removeListener(FEISHU_IPC_CHANNELS.NOTIFICATION_SENT, listener) }
+  },
+
+  onMenuCloseTab: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('menu:close-tab', listener)
+    return () => { ipcRenderer.removeListener('menu:close-tab', listener) }
+  },
+
+  // ===== 快速任务窗口 =====
+
+  submitQuickTask: (input: QuickTaskSubmitInput) => {
+    return ipcRenderer.invoke(QUICK_TASK_IPC_CHANNELS.SUBMIT, input)
+  },
+
+  hideQuickTask: () => {
+    return ipcRenderer.invoke(QUICK_TASK_IPC_CHANNELS.HIDE)
+  },
+
+  reregisterGlobalShortcuts: () => {
+    return ipcRenderer.invoke(QUICK_TASK_IPC_CHANNELS.REREGISTER_GLOBAL_SHORTCUTS)
+  },
+
+  onQuickTaskFocus: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(QUICK_TASK_IPC_CHANNELS.FOCUS, listener)
+    return () => { ipcRenderer.removeListener(QUICK_TASK_IPC_CHANNELS.FOCUS, listener) }
+  },
+
+  onQuickTaskOpenSession: (callback: (data: QuickTaskOpenSessionData) => void) => {
+    const listener = (_: unknown, data: QuickTaskOpenSessionData): void => callback(data)
+    ipcRenderer.on('quick-task:open-session', listener)
+    return () => { ipcRenderer.removeListener('quick-task:open-session', listener) }
   },
 }
 

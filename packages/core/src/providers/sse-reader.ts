@@ -96,9 +96,15 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
       buffer = lines.pop() || ''
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-
-        const data = line.slice(6).trim()
+        // SSE 规范：冒号后的空格是可选的，兼容 "data: {...}" 和 "data:{...}" 两种格式
+        let data: string
+        if (line.startsWith('data: ')) {
+          data = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          data = line.slice(5).trim()
+        } else {
+          continue
+        }
         if (data === '[DONE]' || !data) continue
 
         // 4. 委托给 adapter 解析供应商特定 JSON

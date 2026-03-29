@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Zap, Compass, Eye } from 'lucide-react'
+import { Zap, Compass, Map } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentPermissionModeAtom, currentAgentWorkspaceIdAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import type { PromaPermissionMode } from '@proma/shared'
@@ -18,25 +18,21 @@ const MODE_CONFIG: Record<PromaPermissionMode, {
   icon: React.ComponentType<{ className?: string }>
   label: string
   description: string
-  className: string
 }> = {
-  auto: {
-    icon: Zap,
-    label: '自动',
-    description: '所有工具调用自动允许',
-    className: 'text-green-500 hover:text-green-400',
-  },
-  smart: {
+  acceptEdits: {
     icon: Compass,
-    label: '探索',
-    description: '只读自动允许，写入/危险操作需确认',
-    className: 'text-blue-500 hover:text-blue-400',
+    label: '自动编辑',
+    description: '文件编辑自动允许，危险操作需确认',
   },
-  supervised: {
-    icon: Eye,
-    label: '监督',
-    description: '所有操作都需要确认',
-    className: 'text-amber-500 hover:text-amber-400',
+  bypassPermissions: {
+    icon: Zap,
+    label: '完全自动',
+    description: '所有工具调用自动允许',
+  },
+  plan: {
+    icon: Map,
+    label: '计划模式',
+    description: '仅规划不执行，查看工具使用计划',
   },
 }
 
@@ -52,18 +48,19 @@ export function PermissionModeSelector(): React.ReactElement | null {
     return ws?.slug ?? null
   }, [currentWorkspaceId, workspaces])
 
-  // 加载工作区权限模式
+  // 加载工作区权限模式（仅值变化时更新，避免切换会话时抖动）
   React.useEffect(() => {
     if (!workspaceSlug) return
 
     window.electronAPI.getPermissionMode(workspaceSlug)
       .then((savedMode) => {
-        setMode(savedMode)
+        if (savedMode !== mode) setMode(savedMode)
       })
       .catch((error) => {
         console.error('[PermissionModeSelector] 加载权限模式失败:', error)
       })
-  }, [workspaceSlug, setMode])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在 workspaceSlug 变化时重新加载
+  }, [workspaceSlug])
 
   /** 循环切换模式 */
   const cycleMode = React.useCallback(async () => {
@@ -93,7 +90,7 @@ export function PermissionModeSelector(): React.ReactElement | null {
           <button
             type="button"
             onClick={() => { cycleMode(); requestAnimationFrame(() => document.querySelector<HTMLElement>('.ProseMirror')?.focus()) }}
-            className={`flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium transition-colors ${config.className}`}
+            className="flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium transition-colors text-muted-foreground hover:text-foreground"
           >
             <Icon className="size-3.5" />
             <span className="hidden sm:inline">{config.label}</span>

@@ -17,18 +17,17 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { quotaExceededDialogAtom } from '@/atoms/cloud-billing'
-import { activeViewAtom } from '@/atoms/active-view'
-import { settingsTabAtom } from '@/atoms/settings-tab'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 
 export function QuotaExceededDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(quotaExceededDialogAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
 
   const handleRecharge = (): void => {
     setOpen(false)
     setSettingsTab('billing')
-    setActiveView('settings')
+    setSettingsOpen(true)
   }
 
   return (

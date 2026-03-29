@@ -19,6 +19,7 @@ import { registerIpcHandlers } from './ipc'
 import { createTray, destroyTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
+import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { stopAllAgents } from './lib/agent-service'
 import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
@@ -33,10 +34,17 @@ import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
 import { feishuBridge } from './lib/feishu-bridge'
 import { getFeishuConfig } from './lib/feishu-config'
+import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
+import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/global-shortcut-service'
 
 const PROTOCOL_NAME = 'proma'
 
 let mainWindow: BrowserWindow | null = null
+
+/** 获取主窗口实例（供其他模块使用） */
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
 
 /**
  * 检查窗口是否在可用显示器范围内
@@ -179,18 +187,6 @@ if (app.isPackaged) {
   app.setAsDefaultProtocolClient(PROTOCOL_NAME)
 }
 
-/** 将主窗口拉到前台 */
-function focusMainWindow(): void {
-  if (!mainWindow) return
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
-  // macOS: 显示 Dock 图标
-  if (process.platform === 'darwin') {
-    app.dock?.show()
-  }
-}
-
 /**
  * 处理 proma:// deep-link URL
  * 格式：proma://oauth/callback?token=xxx&refresh_token=yyy
@@ -215,7 +211,7 @@ function handleDeepLink(url: string): void {
       }
     })
 
-    focusMainWindow()
+    showAndFocusMainWindow()
   } catch (error) {
     console.error('[Deep Link] 解析 URL 失败:', error)
   }
@@ -242,7 +238,7 @@ if (!gotTheLock) {
     if (url) {
       handleDeepLink(url)
     }
-    focusMainWindow()
+    showAndFocusMainWindow()
   })
 
   app.whenReady().then(async () => {
@@ -252,6 +248,9 @@ if (!gotTheLock) {
 
     // 同步默认 Skills 模板到 ~/.proma/default-skills/
     seedDefaultSkills()
+
+    // 升级所有工作区中版本过旧的默认 Skills
+    upgradeDefaultSkillsInWorkspaces()
 
     // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
     migrateFlowSessions()
@@ -296,6 +295,13 @@ if (!gotTheLock) {
     if (app.isPackaged && mainWindow) {
       initAutoUpdater(mainWindow)
     }
+
+    // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
+    createQuickTaskWindow()
+
+    // 注册全局快捷键
+    registerGlobalShortcut('quick-task', toggleQuickTaskWindow)
+    registerGlobalShortcut('show-main-window', showAndFocusMainWindow)
 
     // Cloud 模式：窗口就绪后自动执行增量同步
     if (isCloudMode() && mainWindow) {
@@ -346,6 +352,10 @@ if (!gotTheLock) {
     stopChatToolsWatcher()
     // 停止飞书 Bridge
     feishuBridge.stop()
+    // 注销全局快捷键
+    unregisterAllGlobalShortcuts()
+    // 销毁快速任务窗口
+    destroyQuickTaskWindow()
     // Clean up system tray before quitting
     destroyTray()
   })

@@ -8,13 +8,13 @@
  *   左侧：Paperclip 附件按钮、ModelSelector、ThinkingButton、SpeechButton、ContextSettingsPopover、ClearContextButton
  *   右侧：Send/Stop 按钮
  * - 拖放文件支持（onDragOver/onDragLeave/onDrop）
- * - Cmd/Ctrl+K 快捷键绑定清除上下文
+ * - 监听 proma:clear-context 和 proma:focus-input 自定义事件
  * - 卡片式容器样式
  */
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { CornerDownLeft, Square, Lightbulb, Paperclip } from 'lucide-react'
+import { CornerDownLeft, Square, Brain, Paperclip } from 'lucide-react'
 import { ModelSelector } from './ModelSelector'
 import { ClearContextButton } from './ClearContextButton'
 import { ContextSettingsPopover } from './ContextSettingsPopover'
@@ -209,20 +209,28 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     }
   }, [addFilesAsAttachments])
 
-  // Cmd/Ctrl+K 快捷键
+  // 监听快捷键系统分发的 clear-context 事件（Cmd+K）
   React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        onClearContext?.()
-      }
+    const handler = (): void => {
+      onClearContext?.()
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('proma:clear-context', handler)
+    return () => window.removeEventListener('proma:clear-context', handler)
   }, [onClearContext])
 
+  // 监听快捷键系统分发的 focus-input 事件（Cmd+L）
+  React.useEffect(() => {
+    const handler = (): void => {
+      // 聚焦 TipTap 编辑器：查找 Chat 输入框内的 ProseMirror 元素
+      const proseMirror = document.querySelector('[data-input-mode="chat"] .ProseMirror') as HTMLElement | null
+      proseMirror?.focus()
+    }
+    window.addEventListener('proma:focus-input', handler)
+    return () => window.removeEventListener('proma:focus-input', handler)
+  }, [])
+
   return (
-    <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px] pt-2">
+    <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px] pt-2" data-input-mode="chat">
         {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
         <div
           className={cn(
@@ -260,7 +268,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           />
 
           {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}
-          <div className="flex items-center justify-between px-2 py-[5px] h-[40px] gap-4">
+          <div className="flex items-center justify-between px-2 py-1 h-[48px] gap-4">
             {/* 左侧工具按钮 */}
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
               {/* 附件按钮 */}
@@ -270,7 +278,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
+                    className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
                     onClick={handleOpenFileDialog}
                   >
                     <Paperclip className="size-5" />
@@ -291,12 +299,12 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      'size-[30px] rounded-full',
+                      'size-[36px] rounded-full',
                       thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
                     )}
                     onClick={() => setThinkingEnabled(!thinkingEnabled)}
                   >
-                    <Lightbulb className="size-5" />
+                    <Brain className="size-5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
@@ -322,7 +330,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
+                  className="size-[36px] rounded-full text-destructive hover:bg-destructive/10"
                   onClick={onStop}
                 >
                   <Square className="size-[22px]" />
@@ -333,7 +341,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    'size-[30px] rounded-full',
+                    'size-[36px] rounded-full',
                     canSend
                       ? 'text-primary hover:bg-primary/10'
                       : 'text-foreground/30 cursor-not-allowed'

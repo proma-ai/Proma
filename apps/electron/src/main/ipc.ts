@@ -6,7 +6,8 @@
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS } from '../types'
+import type { QuickTaskSubmitInput } from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -50,6 +51,7 @@ import type {
   PermissionResponse,
   PromaPermissionMode,
   AskUserResponse,
+  ExitPlanModeResponse,
   SystemPromptConfig,
   SystemPrompt,
   SystemPromptCreateInput,
@@ -60,6 +62,7 @@ import type {
   ChatToolMeta,
   AgentTeamData,
   MoveSessionToWorkspaceInput,
+  ForkSessionInput,
   FeishuConfigInput,
   FeishuConfig,
   FeishuBridgeState,
@@ -68,6 +71,7 @@ import type {
   FeishuPresenceReport,
   FeishuNotifyMode,
   FeishuUpdateBindingInput,
+  SDKMessage,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
@@ -92,6 +96,8 @@ import {
   deleteMessage,
   truncateMessagesFrom,
   updateContextDividers,
+  autoArchiveConversations,
+  searchConversationMessages,
 } from './lib/conversation-manager'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -112,14 +118,19 @@ import {
   createAgentSession,
   getAgentSessionMeta,
   getAgentSessionMessages,
+  getAgentSessionSDKMessages,
   updateAgentSessionMeta,
   deleteAgentSession,
   migrateChatToAgentSession,
   moveSessionToWorkspace,
+  forkAgentSession,
+  autoArchiveAgentSessions,
+  searchAgentSessionMessages,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
+import { exitPlanService } from './lib/agent-exit-plan-service'
 import { getAgentTeamData, readAgentOutputFile } from './lib/agent-team-reader'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir } from './lib/config-paths'
 import {
@@ -346,6 +357,25 @@ export function registerIpcHandlers(): void {
       const current = conversations.find((c) => c.id === id)
       if (!current) throw new Error(`对话不存在: ${id}`)
       return updateConversationMeta(id, { pinned: !current.pinned })
+    }
+  )
+
+  // 切换对话归档状态
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.TOGGLE_ARCHIVE,
+    async (_, id: string): Promise<ConversationMeta> => {
+      const conversations = listConversations()
+      const current = conversations.find((c) => c.id === id)
+      if (!current) throw new Error(`对话不存在: ${id}`)
+      return updateConversationMeta(id, { archived: !current.archived })
+    }
+  )
+
+  // 搜索对话消息内容
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.SEARCH_MESSAGES,
+    async (_, query: string) => {
+      return searchConversationMessages(query)
     }
   )
 
@@ -623,6 +653,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 获取 Agent 会话 SDKMessage（Phase 4 新格式）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SDK_MESSAGES,
+    async (_, id: string): Promise<SDKMessage[]> => {
+      return getAgentSessionSDKMessages(id)
+    }
+  )
+
   // 更新 Agent 会话标题
   ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_TITLE,
@@ -648,6 +686,8 @@ export function registerIpcHandlers(): void {
       permissionService.clearSessionPending(id)
       // 清理 AskUser 服务中的待处理请求
       askUserService.clearSessionPending(id)
+      // 清理 ExitPlanMode 服务中的待处理请求
+      exitPlanService.clearSessionPending(id)
       return deleteAgentSession(id)
     }
   )
@@ -671,6 +711,25 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 切换 Agent 会话归档状态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TOGGLE_ARCHIVE,
+    async (_, id: string): Promise<AgentSessionMeta> => {
+      const sessions = listAgentSessions()
+      const current = sessions.find((s) => s.id === id)
+      if (!current) throw new Error(`Agent 会话不存在: ${id}`)
+      return updateAgentSessionMeta(id, { archived: !current.archived })
+    }
+  )
+
+  // 搜索 Agent 会话消息内容
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SEARCH_MESSAGES,
+    async (_, query: string) => {
+      return searchAgentSessionMessages(query)
+    }
+  )
+
   // 迁移 Agent 会话到另一个工作区
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_SESSION_TO_WORKSPACE,
@@ -684,6 +743,14 @@ export function registerIpcHandlers(): void {
         }
       }
       return moveSessionToWorkspace(input.sessionId, input.targetWorkspaceId)
+    }
+  )
+
+  // 分叉 Agent 会话
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.FORK_SESSION,
+    async (_, input: ForkSessionInput): Promise<AgentSessionMeta> => {
+      return forkAgentSession(input)
     }
   )
 
@@ -811,6 +878,16 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== Agent 队列消息 =====
+
+  // 排队发送消息
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.QUEUE_MESSAGE,
+    async (event, input: import('@proma/shared').AgentQueueMessageInput): Promise<string> => {
+      return queueAgentMessage(input, event.sender)
+    }
+  )
+
   // ===== Agent 后台任务管理 =====
 
   // 获取任务输出（保留接口，供未来扩展）
@@ -844,7 +921,7 @@ export function registerIpcHandlers(): void {
       if (sessionId) {
         event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
           sessionId,
-          event: { type: 'permission_resolved', requestId, behavior },
+          payload: { kind: 'proma_event', event: { type: 'permission_resolved', requestId, behavior } },
         })
       }
     }
@@ -879,7 +956,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_PERMISSION_MODE,
     async (_, workspaceSlug: string, mode: PromaPermissionMode): Promise<void> => {
-      const validModes = new Set<string>(['auto', 'smart', 'supervised'])
+      const validModes = new Set<string>(['acceptEdits', 'bypassPermissions', 'plan'])
       if (!validModes.has(mode)) {
         throw new Error(`无效的权限模式: ${mode}`)
       }
@@ -1070,8 +1147,58 @@ export function registerIpcHandlers(): void {
       if (sessionId) {
         event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
           sessionId,
-          event: { type: 'ask_user_resolved', requestId },
+          payload: { kind: 'proma_event', event: { type: 'ask_user_resolved', requestId } },
         })
+      }
+    }
+  )
+
+  // ===== ExitPlanMode 计划审批 =====
+
+  // 响应 ExitPlanMode 请求
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.EXIT_PLAN_MODE_RESPOND,
+    async (event, response: ExitPlanModeResponse): Promise<void> => {
+      const result = exitPlanService.respondToExitPlanMode(response)
+
+      if (result) {
+        const { sessionId, targetMode } = result
+
+        // 通知渲染进程请求已处理
+        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+          sessionId,
+          payload: { kind: 'proma_event', event: { type: 'exit_plan_mode_resolved', requestId: response.requestId } },
+        })
+
+        // 如果用户选择了新的权限模式，通知渲染进程更新 UI
+        if (targetMode) {
+          const { setWorkspacePermissionMode } = await import('./lib/agent-workspace-manager')
+          // 尝试获取当前会话的 workspaceSlug
+          const { getAgentSessionMeta } = await import('./lib/agent-session-manager')
+          const meta = getAgentSessionMeta(sessionId)
+          if (meta?.workspaceId) {
+            setWorkspacePermissionMode(meta.workspaceId, targetMode)
+          }
+          event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
+            sessionId,
+            payload: { kind: 'proma_event', event: { type: 'permission_mode_changed', mode: targetMode } },
+          })
+          console.log(`[IPC] ExitPlanMode 权限模式切换: ${targetMode}`)
+        }
+      }
+    }
+  )
+
+  // ===== 待处理请求恢复 =====
+
+  // 获取所有待处理的交互请求快照（渲染进程重载后恢复状态）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_PENDING_REQUESTS,
+    async (): Promise<import('@proma/shared').PendingRequestsSnapshot> => {
+      return {
+        permissions: permissionService.getPendingRequests(),
+        askUsers: askUserService.getPendingRequests(),
+        exitPlans: exitPlanService.getPendingRequests(),
       }
     }
   )
@@ -1232,9 +1359,6 @@ export function registerIpcHandlers(): void {
       const items = readdirSync(safePath, { withFileTypes: true })
 
       for (const item of items) {
-        // 跳过隐藏文件
-        if (item.name.startsWith('.')) continue
-
         const fullPath = resolve(safePath, item.name)
         entries.push({
           name: item.name,
@@ -1243,9 +1367,12 @@ export function registerIpcHandlers(): void {
         })
       }
 
-      // 目录在前，文件在后，各自按名称排序
+      // 目录在前，文件在后；隐藏文件（.开头）排在同类末尾，各自按名称排序
       entries.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        const aHidden = a.name.startsWith('.')
+        const bHidden = b.name.startsWith('.')
+        if (aHidden !== bHidden) return aHidden ? 1 : -1
         return a.name.localeCompare(b.name)
       })
 
@@ -1364,7 +1491,6 @@ export function registerIpcHandlers(): void {
       const items = readdirSync(safePath, { withFileTypes: true })
 
       for (const item of items) {
-        if (item.name.startsWith('.')) continue
         const fullPath = resolve(safePath, item.name)
         entries.push({
           name: item.name,
@@ -1373,8 +1499,12 @@ export function registerIpcHandlers(): void {
         })
       }
 
+      // 目录在前，文件在后；隐藏文件（.开头）排在同类末尾
       entries.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        const aHidden = a.name.startsWith('.')
+        const bHidden = b.name.startsWith('.')
+        if (aHidden !== bHidden) return aHidden ? 1 : -1
         return a.name.localeCompare(b.name)
       })
 
@@ -1694,4 +1824,66 @@ export function registerIpcHandlers(): void {
 
   // 注册更新 IPC 处理器
   registerUpdaterIpc()
+
+  // 启动时自动归档 + 每 24 小时定期检查
+  const runAutoArchive = (): void => {
+    try {
+      const settings = getSettings()
+      const days = settings.archiveAfterDays ?? 7
+      if (days > 0) {
+        const archivedChats = autoArchiveConversations(days)
+        const archivedSessions = autoArchiveAgentSessions(days)
+        if (archivedChats + archivedSessions > 0) {
+          console.log(`[自动归档] 已归档 ${archivedChats} 个对话, ${archivedSessions} 个 Agent 会话`)
+        }
+      }
+    } catch (error) {
+      console.error('[自动归档] 自动归档失败:', error)
+    }
+  }
+
+  runAutoArchive()
+  setInterval(runAutoArchive, 24 * 60 * 60 * 1000)
+
+  // ===== 快速任务窗口 =====
+
+  // 提交快速任务 → 隐藏窗口 + 转发到主窗口（由渲染进程创建会话并发送消息）
+  ipcMain.handle(
+    QUICK_TASK_IPC_CHANNELS.SUBMIT,
+    async (_, input: QuickTaskSubmitInput): Promise<void> => {
+      const { hideQuickTaskWindow } = await import('./lib/quick-task-window')
+      const { getMainWindow } = await import('./index')
+      hideQuickTaskWindow()
+
+      const mainWin = getMainWindow()
+      if (mainWin && !mainWin.isDestroyed()) {
+        // 转发到主窗口渲染进程，由 GlobalShortcuts 创建会话并触发发送
+        mainWin.webContents.send('quick-task:open-session', {
+          mode: input.mode,
+          text: input.text,
+          files: input.files,
+        })
+        mainWin.show()
+        mainWin.focus()
+      }
+    }
+  )
+
+  // 隐藏快速任务窗口
+  ipcMain.handle(
+    QUICK_TASK_IPC_CHANNELS.HIDE,
+    async (): Promise<void> => {
+      const { hideQuickTaskWindow } = await import('./lib/quick-task-window')
+      hideQuickTaskWindow()
+    }
+  )
+
+  // 重新注册全局快捷键（设置中修改快捷键后调用）
+  ipcMain.handle(
+    QUICK_TASK_IPC_CHANNELS.REREGISTER_GLOBAL_SHORTCUTS,
+    async (): Promise<Record<string, boolean>> => {
+      const { reregisterAllGlobalShortcuts } = await import('./lib/global-shortcut-service')
+      return reregisterAllGlobalShortcuts()
+    }
+  )
 }

@@ -102,13 +102,13 @@ export class AgentPermissionService {
   private sessionWhitelists = new Map<string, SessionWhitelist>()
 
   /**
-   * 创建 canUseTool 回调（绑定到特定会话和模式）
+   * 创建 canUseTool 回调（仅 acceptEdits 模式使用）
    *
+   * SDK 的 acceptEdits 模式自动处理文件编辑允许，仅在 SDK 认为需要确认时调用此回调。
    * 返回的函数签名匹配 SDK 的 CanUseTool 类型。
    */
   createCanUseTool(
     sessionId: string,
-    mode: PromaPermissionMode,
     sendToRenderer: (request: PermissionRequest) => void,
     askUserHandler?: (sessionId: string, input: Record<string, unknown>, signal: AbortSignal, sendToRenderer: (request: AskUserRequest) => void) => Promise<PermissionResult>,
     sendAskUserToRenderer?: (request: AskUserRequest) => void,
@@ -126,20 +126,8 @@ export class AgentPermissionService {
         return allow()
       }
 
-      // 自动模式：全部允许（理论上不会到这里，auto 模式使用 bypassPermissions）
-      if (mode === 'auto') return allow()
-
-      // 智能模式：只读工具自动允许
-      if (mode === 'smart') {
-        if (this.isReadOnlyTool(toolName, input)) return allow()
-        if (this.isWhitelisted(sessionId, toolName, input)) return allow()
-      }
-
-      // 监督模式：安全工具自动允许 + 检查白名单
-      if (mode === 'supervised') {
-        if (this.isReadOnlyTool(toolName, input)) return allow()
-        if (this.isWhitelisted(sessionId, toolName, input)) return allow()
-      }
+      // 会话白名单检查（用户之前选择了"始终允许"）
+      if (this.isWhitelisted(sessionId, toolName, input)) return allow()
 
       // 需要询问用户：构建请求并发送到 UI
       const request = this.buildPermissionRequest(sessionId, toolName, input, options)
@@ -194,6 +182,13 @@ export class AgentPermissionService {
         this.pendingPermissions.delete(requestId)
       }
     }
+  }
+
+  /**
+   * 获取当前所有待处理的权限请求（用于渲染进程重载后恢复状态）
+   */
+  getPendingRequests(): PermissionRequest[] {
+    return [...this.pendingPermissions.values()].map((p) => p.request)
   }
 
   /**

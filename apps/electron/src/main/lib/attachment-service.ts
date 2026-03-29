@@ -11,10 +11,11 @@
  */
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs'
-import { extname, basename, join } from 'node:path'
+import { extname, basename, join, isAbsolute, normalize } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { dialog, BrowserWindow } from 'electron'
 import {
+  getConfigDir,
   getConversationAttachmentsDir,
   resolveAttachmentPath,
 } from './config-paths'
@@ -135,13 +136,27 @@ export function saveAttachment(input: AttachmentSaveInput): AttachmentSaveResult
 /**
  * 读取附件并返回 base64 编码
  *
- * 用于发送到 AI API 时读取图片数据。
+ * 支持两种路径格式：
+ * 1. 相对路径 {conversationId}/{uuid}.ext → 解析到 ~/.proma/attachments/
+ * 2. 绝对路径（Agent 工作区附件）→ 需在 ~/.proma/ 目录下，直接读取
  *
- * @param localPath 相对路径 {conversationId}/{uuid}.ext
+ * @param localPath 相对路径或绝对路径
  * @returns base64 编码的文件数据
  */
 export function readAttachmentAsBase64(localPath: string): string {
-  const fullPath = resolveAttachmentPath(localPath)
+  let fullPath: string
+
+  if (isAbsolute(localPath)) {
+    // 绝对路径：验证在 ~/.proma/ 目录下，防止路径穿越
+    const configDir = getConfigDir()
+    const normalized = normalize(localPath)
+    if (!normalized.startsWith(configDir)) {
+      throw new Error(`附件路径不在安全目录内: ${localPath}`)
+    }
+    fullPath = normalized
+  } else {
+    fullPath = resolveAttachmentPath(localPath)
+  }
 
   if (!existsSync(fullPath)) {
     throw new Error(`附件文件不存在: ${localPath}`)

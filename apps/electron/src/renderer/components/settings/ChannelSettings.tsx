@@ -3,18 +3,19 @@
  *
  * 分为两个区块：
  * 1. 渠道管理 — 所有渠道列表 + 添加/编辑/删除（渠道同时用于 Chat 和 Agent）
- * 2. Agent 供应商 — 从已启用的 Anthropic 渠道中选择默认 Agent 供应商（支持 Proma 官方渠道）
+ * 2. Agent 供应商 — 从已启用的 Anthropic 渠道中通过 Switch 开关启用多个 Agent 供应商
  */
 
 import * as React from 'react'
-import { useAtom } from 'jotai'
-import { Plus, Pencil, Trash2, Shield, RefreshCw } from 'lucide-react'
+import { useAtom, useSetAtom } from 'jotai'
+import { Plus, Pencil, Trash2, Shield, RefreshCw, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel } from '@proma/shared'
 import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
-import { agentChannelIdAtom, agentModelIdAtom } from '@/atoms/agent-atoms'
+import { agentChannelIdAtom, agentModelIdAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { ChannelForm } from './ChannelForm'
 import { ModelHealthTable } from './ModelHealthTable'
@@ -29,12 +30,15 @@ export function ChannelSettings(): React.ReactElement {
   const [loading, setLoading] = React.useState(true)
   const [agentChannelId, setAgentChannelId] = useAtom(agentChannelIdAtom)
   const [, setAgentModelId] = useAtom(agentModelIdAtom)
+  const [agentChannelIds, setAgentChannelIds] = useAtom(agentChannelIdsAtom)
+  const setGlobalChannels = useSetAtom(channelsAtom)
 
   /** 加载渠道列表 */
   const loadChannels = React.useCallback(async (): Promise<Channel[]> => {
     try {
       const list = await window.electronAPI.listChannels()
       setChannels(list)
+      setGlobalChannels(list) // 同步到全局缓存
       return list
     } catch (error) {
       console.error('[渠道设置] 加载渠道列表失败:', error)
@@ -55,12 +59,20 @@ export function ChannelSettings(): React.ReactElement {
     try {
       await window.electronAPI.deleteChannel(channel.id)
 
-      // 如果删除的是当前 Agent 渠道，清空选择
+      // 从 Agent 渠道列表中移除
+      const newIds = agentChannelIds.filter((id) => id !== channel.id)
+      setAgentChannelIds(newIds)
+
+      // 如果删除的是当前选中的 Agent 渠道，清空选择
       if (agentChannelId === channel.id) {
         setAgentChannelId(null)
         setAgentModelId(null)
-        await window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined })
       }
+
+      await window.electronAPI.updateSettings({
+        agentChannelIds: newIds,
+        ...(agentChannelId === channel.id && { agentChannelId: undefined, agentModelId: undefined }),
+      })
 
       await loadChannels()
     } catch (error) {
@@ -73,65 +85,54 @@ export function ChannelSettings(): React.ReactElement {
     try {
       await window.electronAPI.updateChannel(channel.id, { enabled: !channel.enabled })
 
-      // 如果禁用的是当前 Agent 渠道，清空选择
-      if (channel.enabled && agentChannelId === channel.id) {
-        setAgentChannelId(null)
-        setAgentModelId(null)
-        await window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined })
+      // 如果禁用渠道，同时从 Agent 列表中移除
+      if (channel.enabled) {
+        const newIds = agentChannelIds.filter((id) => id !== channel.id)
+        setAgentChannelIds(newIds)
+        await window.electronAPI.updateSettings({ agentChannelIds: newIds })
+
+        // 如果禁用的是当前选中的 Agent 渠道，清空选择
+        if (agentChannelId === channel.id) {
+          setAgentChannelId(null)
+          setAgentModelId(null)
+          await window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined })
+        }
       }
 
-      // 加载最新渠道列表并检查是否需要自动选择
-      const updatedChannels = await loadChannels()
-      await checkAndAutoSelectAgentChannel(updatedChannels)
+      await loadChannels()
     } catch (error) {
       console.error('[渠道设置] 切换渠道状态失败:', error)
     }
   }
 
-  /** 选择 Agent 供应商 */
-  const handleSelectAgentProvider = async (channelId: string): Promise<void> => {
-    setAgentChannelId(channelId)
-    setAgentModelId(null)
-    try {
-      await window.electronAPI.updateSettings({ agentChannelId: channelId, agentModelId: undefined })
-    } catch (error) {
-      console.error('[渠道设置] 保存 Agent 供应商失败:', error)
+  /** 切换 Agent 供应商开关 */
+  const handleToggleAgentProvider = async (channelId: string, enabled: boolean): Promise<void> => {
+    const newIds = enabled
+      ? [...agentChannelIds, channelId]
+      : agentChannelIds.filter((id) => id !== channelId)
+
+    setAgentChannelIds(newIds)
+
+    // 如果关闭的是当前选中的渠道，清空选择
+    if (!enabled && agentChannelId === channelId) {
+      setAgentChannelId(null)
+      setAgentModelId(null)
+      await window.electronAPI.updateSettings({
+        agentChannelIds: newIds,
+        agentChannelId: undefined,
+        agentModelId: undefined,
+      }).catch(console.error)
+      return
     }
-  }
 
-  /** 检查并自动选择 Agent 渠道 */
-  const checkAndAutoSelectAgentChannel = async (channels: Channel[]): Promise<void> => {
-    // 获取可用的 Anthropic 渠道
-    const availableAnthropicChannels = channels.filter(
-      (c) => c.provider === 'anthropic' && c.enabled
-    )
-
-    // 如果当前没有选择 Agent 渠道，或当前选择的渠道不可用，自动选择第一个可用渠道
-    const currentAgentChannel = agentChannelId
-      ? channels.find((c) => c.id === agentChannelId)
-      : null
-    const shouldAutoSelect =
-      !agentChannelId || // 没有选择
-      !currentAgentChannel || // 选择的渠道不存在
-      !currentAgentChannel.enabled || // 选择的渠道已禁用
-      currentAgentChannel.provider !== 'anthropic' // 选择的不是 Anthropic 渠道
-
-    if (shouldAutoSelect && availableAnthropicChannels.length > 0) {
-      const firstChannel = availableAnthropicChannels[0]
-      if (firstChannel) {
-        await handleSelectAgentProvider(firstChannel.id)
-      }
-    }
+    await window.electronAPI.updateSettings({ agentChannelIds: newIds }).catch(console.error)
   }
 
   /** 表单保存回调 */
   const handleFormSaved = async (): Promise<void> => {
     setViewMode('list')
     setEditingChannel(null)
-
-    // 加载最新渠道列表并检查是否需要自动选择
-    const updatedChannels = await loadChannels()
-    await checkAndAutoSelectAgentChannel(updatedChannels)
+    await loadChannels()
   }
 
   /** 取消表单 */
@@ -168,14 +169,14 @@ export function ChannelSettings(): React.ReactElement {
   // 列表视图
   return (
     <div className="space-y-8">
-      {/* 区块一：渠道管理 */}
+      {/* 区块一：模型配置 */}
       <SettingsSection
-        title="渠道管理"
+        title="模型配置"
         description="管理 AI 供应商连接，配置 API Key 和可用模型。Anthropic 渠道同时可用于 Agent 模式"
         action={
           <Button size="sm" onClick={() => setViewMode('create')}>
             <Plus size={16} />
-            <span>添加渠道</span>
+            <span>添加配置</span>
           </Button>
         }
       >
@@ -202,7 +203,7 @@ export function ChannelSettings(): React.ReactElement {
         ) : userChannels.length === 0 && !officialChannel ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-12 text-center">
-              还没有配置任何渠道，点击上方"添加渠道"开始
+              还没有配置任何模型，点击上方"添加配置"开始
             </div>
           </SettingsCard>
         ) : userChannels.length > 0 ? (
@@ -226,7 +227,7 @@ export function ChannelSettings(): React.ReactElement {
       {/* 区块二：Agent 供应商 */}
       <SettingsSection
         title="Agent 供应商"
-        description="选择 Agent 模式的默认供应商，上方已启用的 Anthropic 兼容渠道会自动出现在此列表"
+        description="启用 Agent 模式可用的供应商，支持同时开启多个渠道，在 Agent 模式下可直接切换"
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -243,16 +244,16 @@ export function ChannelSettings(): React.ReactElement {
                 <AgentOfficialProviderRow
                   key={channel.id}
                   channel={channel}
-                  selected={agentChannelId === channel.id}
-                  onSelect={() => handleSelectAgentProvider(channel.id)}
+                  enabled={agentChannelIds.includes(channel.id)}
+                  onToggle={(enabled) => handleToggleAgentProvider(channel.id, enabled)}
                   onRefresh={loadChannels}
                 />
               ) : (
                 <AgentProviderRow
                   key={channel.id}
                   channel={channel}
-                  selected={agentChannelId === channel.id}
-                  onSelect={() => handleSelectAgentProvider(channel.id)}
+                  enabled={agentChannelIds.includes(channel.id)}
+                  onToggle={(enabled) => handleToggleAgentProvider(channel.id, enabled)}
                 />
               )
             ))}
@@ -320,11 +321,11 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
 
 interface AgentProviderRowProps {
   channel: Channel
-  selected: boolean
-  onSelect: () => void
+  enabled: boolean
+  onToggle: (enabled: boolean) => void
 }
 
-function AgentProviderRow({ channel, selected, onSelect }: AgentProviderRowProps): React.ReactElement {
+function AgentProviderRow({ channel, enabled, onToggle }: AgentProviderRowProps): React.ReactElement {
   const enabledCount = channel.models.filter((m) => m.enabled).length
   const description = [
     PROVIDER_LABELS[channel.provider],
@@ -339,21 +340,10 @@ function AgentProviderRow({ channel, selected, onSelect }: AgentProviderRowProps
       icon={<img src={getChannelLogo(channel.baseUrl)} alt="" className="w-8 h-8 rounded" />}
       description={description}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex items-center justify-center w-5 h-5 rounded-full border-2 transition-colors"
-        style={{
-          borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-        }}
-      >
-        {selected && (
-          <span
-            className="w-2.5 h-2.5 rounded-full"
-            style={{ backgroundColor: 'hsl(var(--primary))' }}
-          />
-        )}
-      </button>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+      />
     </SettingsRow>
   )
 }
@@ -362,12 +352,12 @@ function AgentProviderRow({ channel, selected, onSelect }: AgentProviderRowProps
 
 interface AgentOfficialProviderRowProps {
   channel: Channel
-  selected: boolean
-  onSelect: () => void
+  enabled: boolean
+  onToggle: (enabled: boolean) => void
   onRefresh: () => void
 }
 
-function AgentOfficialProviderRow({ channel, selected, onSelect, onRefresh }: AgentOfficialProviderRowProps): React.ReactElement {
+function AgentOfficialProviderRow({ channel, enabled, onToggle, onRefresh }: AgentOfficialProviderRowProps): React.ReactElement {
   const enabledCount = channel.models.filter((m) => m.enabled).length
   const [refreshing, setRefreshing] = React.useState(false)
 
@@ -406,21 +396,10 @@ function AgentOfficialProviderRow({ channel, selected, onSelect, onRefresh }: Ag
         >
           <Shield size={14} />
         </span>
-        <button
-          type="button"
-          onClick={onSelect}
-          className="flex items-center justify-center w-5 h-5 rounded-full border-2 transition-colors"
-          style={{
-            borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-          }}
-        >
-          {selected && (
-            <span
-              className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: 'hsl(var(--primary))' }}
-            />
-          )}
-        </button>
+        <Switch
+          checked={enabled}
+          onCheckedChange={onToggle}
+        />
       </div>
     </SettingsRow>
   )

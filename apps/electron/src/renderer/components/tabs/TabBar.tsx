@@ -29,7 +29,6 @@ import {
 } from '@/atoms/chat-atoms'
 import {
   agentSidePanelOpenMapAtom,
-  agentSidePanelTabMapAtom,
 } from '@/atoms/agent-atoms'
 import { conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { TabBarItem } from './TabBarItem'
@@ -49,7 +48,6 @@ export function TabBar(): React.ReactElement {
   const setConvParallel = useSetAtom(conversationParallelModeAtom)
   const setConvPromptId = useSetAtom(conversationPromptIdAtom)
   const setAgentSidePanelOpen = useSetAtom(agentSidePanelOpenMapAtom)
-  const setAgentSidePanelTab = useSetAtom(agentSidePanelTabMapAtom)
 
   /** 清理关闭标签对应的 per-conversation/session Map atoms 条目 */
   const cleanupMapAtoms = React.useCallback((tabId: string) => {
@@ -67,8 +65,7 @@ export function TabBar(): React.ReactElement {
     setConvPromptId(deleteKey)
     // Agent per-session atoms
     setAgentSidePanelOpen(deleteKey)
-    setAgentSidePanelTab(deleteKey)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setAgentSidePanelOpen, setAgentSidePanelTab])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setAgentSidePanelOpen])
 
   // 拖拽状态
   const dragState = React.useRef<{

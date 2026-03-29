@@ -4,26 +4,20 @@
  * 统一的事件分发中心，支持中间件链扩展。
  *
  * 核心方法：
- * - emit(sessionId, event): 发射事件，经过中间件链后分发给所有监听器
+ * - emit(sessionId, payload): 发射事件，经过中间件链后分发给所有监听器
  * - on(handler): 注册事件监听器，返回取消函数
  * - use(middleware): 注册中间件（事件经过中间件链后再分发）
- *
- * 中间件用途：
- * - 时间戳注入
- * - 开发模式日志
- * - IPC 转发（webContents.send）
- * - 多 Agent 元数据注入（Phase 4）
  */
 
-import type { AgentEvent } from '@proma/shared'
+import type { AgentStreamPayload } from '@proma/shared'
 
 /** 事件监听器 */
-export type AgentEventHandler = (sessionId: string, event: AgentEvent) => void
+export type AgentEventHandler = (sessionId: string, payload: AgentStreamPayload) => void
 
 /** 中间件：可修改事件或执行副作用，调用 next() 继续链路 */
 export type AgentEventMiddleware = (
   sessionId: string,
-  event: AgentEvent,
+  payload: AgentStreamPayload,
   next: () => void,
 ) => void
 
@@ -37,11 +31,11 @@ export class AgentEventBus {
    * 事件依次经过中间件链，最终分发给所有监听器。
    * 中间件可以通过不调用 next() 来拦截事件。
    */
-  emit(sessionId: string, event: AgentEvent): void {
+  emit(sessionId: string, payload: AgentStreamPayload): void {
     const dispatch = (): void => {
       for (const handler of this.handlers) {
         try {
-          handler(sessionId, event)
+          handler(sessionId, payload)
         } catch (error) {
           console.error(`[AgentEventBus] 事件处理器错误:`, error)
         }
@@ -62,7 +56,7 @@ export class AgentEventBus {
       const next = chain
       chain = () => {
         try {
-          mw(sessionId, event, next)
+          mw(sessionId, payload, next)
         } catch (error) {
           console.error(`[AgentEventBus] 中间件错误:`, error)
           next()

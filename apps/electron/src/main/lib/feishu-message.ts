@@ -4,7 +4,7 @@
  * 将 Agent 事件转换为飞书消息卡片格式。
  */
 
-import type { AgentEvent } from '@proma/shared'
+// Phase 1: AgentEvent 不再使用，保留 import 供后续清理
 
 /** 工具活动摘要 */
 export interface ToolSummary {
@@ -340,27 +340,20 @@ export function splitLongContent(text: string, maxLength = 25000): string[] {
 }
 
 /**
- * 从 AgentEvent 中提取工具名称（用于累积工具摘要）
+ * 累积工具使用次数（从 SDKMessage 的 tool_use block 中提取工具名）
  */
-export function accumulateToolSummary(
+export function accumulateToolStart(
   summaries: Map<string, ToolSummary>,
-  event: AgentEvent,
+  toolName: string,
 ): void {
-  if (event.type === 'tool_start') {
-    const existing = summaries.get(event.toolName)
-    if (existing) {
-      existing.count++
-    } else {
-      summaries.set(event.toolName, {
-        toolName: event.toolName,
-        count: 1,
-        hasError: false,
-      })
-    }
-  } else if (event.type === 'tool_result' && event.isError && event.toolName) {
-    const existing = summaries.get(event.toolName)
-    if (existing) {
-      existing.hasError = true
-    }
+  const existing = summaries.get(toolName)
+  if (existing) {
+    existing.count++
+  } else {
+    summaries.set(toolName, {
+      toolName,
+      count: 1,
+      hasError: false,
+    })
   }
 }

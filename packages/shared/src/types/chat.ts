@@ -170,6 +170,8 @@ export interface ConversationMeta {
   contextLength?: number | 'infinite'
   /** 是否置顶 */
   pinned?: boolean
+  /** 是否已归档 */
+  archived?: boolean
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -180,6 +182,30 @@ export interface ConversationMeta {
   promptId?: string
   /** 置顶文件夹 ID（云端同步字段） */
   folderId?: string
+}
+
+// ===== 消息搜索 =====
+
+/**
+ * 消息搜索结果
+ */
+export interface MessageSearchResult {
+  /** 对话 ID */
+  conversationId: string
+  /** 对话标题 */
+  conversationTitle: string
+  /** 消息 ID */
+  messageId: string
+  /** 消息角色 */
+  role: MessageRole
+  /** 匹配上下文片段（约 80 字符） */
+  snippet: string
+  /** snippet 内匹配起始位置 */
+  matchStart: number
+  /** 匹配长度 */
+  matchLength: number
+  /** 是否已归档 */
+  archived?: boolean
 }
 
 // ===== 消息发送 =====
@@ -386,6 +412,10 @@ export const CHAT_IPC_CHANNELS = {
   // 置顶管理
   /** 切换对话置顶状态 */
   TOGGLE_PIN: 'chat:toggle-pin',
+  /** 切换对话归档状态 */
+  TOGGLE_ARCHIVE: 'chat:toggle-archive',
+  /** 搜索对话消息内容 */
+  SEARCH_MESSAGES: 'chat:search-messages',
 
   // 教程
   /** 获取教程内容 */

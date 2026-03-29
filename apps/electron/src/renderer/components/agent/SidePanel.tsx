@@ -1,17 +1,13 @@
 /**
  * SidePanel — Agent 侧面板容器
  *
- * 包含 Team Activity 和 File Browser 两个 Tab。
- * 面板可自动打开（检测到 Team/Task 活动或文件变化）
- * 或由用户手动切换。
- *
+ * 直接展示文件浏览器，默认打开状态。
  * 切换按钮在面板关闭时显示活动指示点。
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { PanelRight, X, Users, FolderOpen, ExternalLink, RefreshCw, ChevronRight, Folder, FileText, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart } from 'lucide-react'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { PanelRight, X, FolderOpen, ExternalLink, RefreshCw, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -21,21 +17,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { FileBrowser, FileDropZone } from '@/components/file-browser'
-import { TeamActivityPanel } from './TeamActivityPanel'
+import { FileBrowser, FileDropZone, FileTypeIcon } from '@/components/file-browser'
 import {
   agentSidePanelOpenMapAtom,
-  agentSidePanelTabMapAtom,
-  agentStreamingStatesAtom,
-  cachedTeamActivitiesAtom,
-  buildTeamActivityEntries,
   workspaceFilesVersionAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   agentAttachedDirectoriesMapAtom,
   workspaceAttachedDirectoriesMapAtom,
 } from '@/atoms/agent-atoms'
-import type { SidePanelTab } from '@/atoms/agent-atoms'
 import type { FileEntry } from '@proma/shared'
 
 interface SidePanelProps {
@@ -44,59 +34,29 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.ReactElement {
-  // per-session 侧面板状态
+  // per-session 侧面板状态（默认打开）
   const sidePanelOpenMap = useAtomValue(agentSidePanelOpenMapAtom)
   const setSidePanelOpenMap = useSetAtom(agentSidePanelOpenMapAtom)
-  const sidePanelTabMap = useAtomValue(agentSidePanelTabMapAtom)
-  const setSidePanelTabMap = useSetAtom(agentSidePanelTabMapAtom)
 
-  const isOpen = sidePanelOpenMap.get(sessionId) ?? false
-  const activeTab = sidePanelTabMap.get(sessionId) ?? 'team'
+  const isOpen = sidePanelOpenMap.get(sessionId) ?? true
+
+  // 动画标志：仅用户手动点击时启用过渡动画，切换对话时即时显示
+  const animateRef = React.useRef(false)
+
+  // sessionId 变化时重置动画标志
+  React.useEffect(() => {
+    animateRef.current = false
+  }, [sessionId])
 
   const setIsOpen = React.useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    animateRef.current = true
     setSidePanelOpenMap((prev) => {
       const map = new Map(prev)
-      const current = map.get(sessionId) ?? false
+      const current = map.get(sessionId) ?? true
       map.set(sessionId, typeof value === 'function' ? value(current) : value)
       return map
     })
   }, [sessionId, setSidePanelOpenMap])
-
-  const setActiveTab = React.useCallback((tab: SidePanelTab) => {
-    setSidePanelTabMap((prev) => {
-      const map = new Map(prev)
-      map.set(sessionId, tab)
-      return map
-    })
-  }, [sessionId, setSidePanelTabMap])
-
-  // 直接用 sessionId 计算 team 活动（不依赖 currentAgentSessionIdAtom）
-  const streamingStates = useAtomValue(agentStreamingStatesAtom)
-  const cachedActivities = useAtomValue(cachedTeamActivitiesAtom)
-
-  const hasTeamActivity = React.useMemo(() => {
-    const state = streamingStates.get(sessionId)
-    if (state) {
-      return state.toolActivities.some(
-        (a) => a.toolName === 'Task' || a.toolName === 'Agent'
-      )
-    }
-    const cached = cachedActivities.get(sessionId)
-    return cached !== undefined && cached.length > 0
-  }, [sessionId, streamingStates, cachedActivities])
-
-  const runningCount = React.useMemo(() => {
-    const state = streamingStates.get(sessionId)
-    if (state && state.toolActivities.length > 0) {
-      const entries = buildTeamActivityEntries(state.toolActivities)
-      return entries.filter((e) => e.status === 'running' || e.status === 'backgrounded').length
-    }
-    const cached = cachedActivities.get(sessionId)
-    if (cached) {
-      return cached.filter((e) => e.status === 'running' || e.status === 'backgrounded').length
-    }
-    return 0
-  }, [sessionId, streamingStates, cachedActivities])
 
   const filesVersion = useAtomValue(workspaceFilesVersionAtom)
   const setFilesVersion = useSetAtom(workspaceFilesVersionAtom)
@@ -244,22 +204,19 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   React.useEffect(() => {
     if (filesVersion > prevFilesVersionRef.current && sessionPath) {
       setIsOpen(true)
-      // 仅在当前无 team 活动时切换到文件 tab
-      if (!hasTeamActivity) {
-        setActiveTab('files')
-      }
     }
     prevFilesVersionRef.current = filesVersion
-  }, [filesVersion, sessionPath, hasTeamActivity, setIsOpen, setActiveTab])
+  }, [filesVersion, sessionPath, setIsOpen])
 
-  // 面板是否可显示内容（需要有 sessionPath 或 team 活动）
-  const hasContent = sessionPath || hasTeamActivity || attachedDirs.length > 0
+  // 面板是否可显示内容（需要有 sessionPath 或附加目录）
+  const hasContent = sessionPath || attachedDirs.length > 0
 
   return (
     <div
       className={cn(
-        'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden titlebar-drag-region',
-        hasContent && isOpen ? 'w-[320px] border-l' : 'w-10',
+        'relative flex-shrink-0 overflow-hidden titlebar-drag-region',
+        animateRef.current && 'transition-[width] duration-300 ease-in-out',
+        isOpen ? 'w-[320px] border-l' : hasContent ? 'w-10' : 'w-0',
       )}
     >
       {/* 切换按钮 — 始终固定在右上角 */}
@@ -286,7 +243,7 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                 )}
               />
               {/* 活动指示点（面板关闭时显示） */}
-              {!isOpen && (hasTeamActivity || hasFileChanges) && (
+              {!isOpen && hasFileChanges && (
                 <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse" />
               )}
             </Button>
@@ -301,46 +258,23 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
       {hasContent && (
         <div
           className={cn(
-            'w-[320px] h-full flex flex-col transition-opacity duration-300 titlebar-no-drag',
+            'w-[320px] h-full flex flex-col titlebar-no-drag',
+            animateRef.current && 'transition-opacity duration-300',
             isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
           )}
         >
-          <Tabs
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as SidePanelTab)}
-            className="flex flex-col h-full"
-          >
-            {/* Tab 切换栏 */}
-            <div className="flex items-center gap-1 px-2 pr-10 h-[48px] border-b flex-shrink-0">
-              <TabsList className="h-8 bg-muted/50">
-                <TabsTrigger value="team" className="text-xs h-7 px-3 gap-1.5">
-                  <Users className="size-3" />
-                  Team
-                  {runningCount > 0 && (
-                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-primary text-primary-foreground leading-none">
-                      {runningCount}
-                    </span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="files" className="text-xs h-7 px-3 gap-1.5">
-                  <FolderOpen className="size-3" />
-                  文件
-                  {hasFileChanges && (
-                    <span className="ml-0.5 size-1.5 rounded-full bg-primary" />
-                  )}
-                </TabsTrigger>
-              </TabsList>
-            </div>
+          {/* 标题栏 */}
+          <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
+            <FolderOpen className="size-3.5 text-muted-foreground" />
+            <span className="text-xs font-medium">文件</span>
+            {hasFileChanges && (
+              <span className="ml-0.5 size-1.5 rounded-full bg-primary" />
+            )}
+          </div>
 
-            {/* Team Activity Tab */}
-            <TabsContent value="team" className="flex-1 overflow-hidden m-0 data-[state=active]:flex data-[state=active]:flex-col">
-              <TeamActivityPanel sessionId={sessionId} />
-            </TabsContent>
-
-            {/* File Browser Tab */}
-            <TabsContent value="files" className="flex-1 overflow-hidden m-0 data-[state=active]:flex data-[state=active]:flex-col">
-              {sessionPath && workspaceSlug ? (
-                <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* 文件浏览内容 */}
+          {sessionPath && workspaceSlug ? (
+            <div className="flex-1 min-h-0 flex flex-col">
                   {/* ===== 会话文件区 ===== */}
                   <div className="flex items-center gap-1 px-3 h-[32px] flex-shrink-0">
                     <FolderOpen className="size-3 text-muted-foreground" />
@@ -389,30 +323,33 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  {/* 附加目录列表（可展开目录树） */}
-                  {attachedDirs.length > 0 && (
-                    <AttachedDirsSection
-                      attachedDirs={attachedDirs}
-                      onDetach={handleDetachDirectory}
-                      refreshVersion={filesVersion}
+                  {/* 会话文件内容区（独立滚动） */}
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    {/* 附加目录列表（可展开目录树） */}
+                    {attachedDirs.length > 0 && (
+                      <AttachedDirsSection
+                        attachedDirs={attachedDirs}
+                        onDetach={handleDetachDirectory}
+                        refreshVersion={filesVersion}
+                      />
+                    )}
+                    {/* 会话文件浏览器 */}
+                    <FileBrowser rootPath={sessionPath} hideToolbar embedded />
+                    {/* 会话文件拖拽上传区域 */}
+                    <FileDropZone
+                      workspaceSlug={workspaceSlug}
+                      sessionId={sessionId}
+                      target="session"
+                      onFilesUploaded={handleFilesUploaded}
+                      onAttachFolder={handleAttachFolder}
                     />
-                  )}
-                  {/* 会话文件浏览器 */}
-                  <FileBrowser rootPath={sessionPath} hideToolbar embedded />
-                  {/* 会话文件拖拽上传区域 */}
-                  <FileDropZone
-                    workspaceSlug={workspaceSlug}
-                    sessionId={sessionId}
-                    target="session"
-                    onFilesUploaded={handleFilesUploaded}
-                    onAttachFolder={handleAttachFolder}
-                  />
+                  </div>
 
                   {/* ===== 分隔线 ===== */}
                   <div className="mx-3 my-3 border-t border-dashed border-muted-foreground/20" />
 
                   {/* ===== 工作区文件区 ===== */}
-                  <div className="bg-muted/30 rounded-lg mx-2 mb-2 pb-1">
+                  <div className="flex-1 min-h-0 flex flex-col bg-muted/30 rounded-lg mx-2 mb-2">
                     <div className="flex items-center gap-1 px-2 h-[32px] flex-shrink-0">
                       <FolderHeart className="size-3 text-primary/70" />
                       <span className="text-[11px] font-medium text-primary/70">工作区文件</span>
@@ -444,25 +381,28 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                         </Tooltip>
                       )}
                     </div>
-                    {/* 工作区级附加目录 */}
-                    {wsAttachedDirs.length > 0 && (
-                      <AttachedDirsSection
-                        attachedDirs={wsAttachedDirs}
-                        onDetach={handleDetachWorkspaceDirectory}
-                        refreshVersion={filesVersion}
+                    {/* 工作区文件内容区（独立滚动） */}
+                    <div className="flex-1 min-h-0 overflow-y-auto pb-1">
+                      {/* 工作区级附加目录 */}
+                      {wsAttachedDirs.length > 0 && (
+                        <AttachedDirsSection
+                          attachedDirs={wsAttachedDirs}
+                          onDetach={handleDetachWorkspaceDirectory}
+                          refreshVersion={filesVersion}
+                        />
+                      )}
+                      {/* 工作区文件浏览器 */}
+                      {workspaceFilesPath && (
+                        <FileBrowser rootPath={workspaceFilesPath} hideToolbar embedded />
+                      )}
+                      {/* 工作区文件拖拽上传区域 */}
+                      <FileDropZone
+                        workspaceSlug={workspaceSlug}
+                        target="workspace"
+                        onFilesUploaded={handleFilesUploaded}
+                        onAttachFolder={handleAttachWorkspaceFolder}
                       />
-                    )}
-                    {/* 工作区文件浏览器 */}
-                    {workspaceFilesPath && (
-                      <FileBrowser rootPath={workspaceFilesPath} hideToolbar embedded />
-                    )}
-                    {/* 工作区文件拖拽上传区域 */}
-                    <FileDropZone
-                      workspaceSlug={workspaceSlug}
-                      target="workspace"
-                      onFilesUploaded={handleFilesUploaded}
-                      onAttachFolder={handleAttachWorkspaceFolder}
-                    />
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -470,8 +410,6 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                   请选择工作区
                 </div>
               )}
-            </TabsContent>
-          </Tabs>
         </div>
       )}
     </div>
@@ -578,11 +516,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
             expanded && 'rotate-90',
           )}
         />
-        {expanded ? (
-          <FolderOpen className="size-4 text-amber-500 flex-shrink-0" />
-        ) : (
-          <Folder className="size-4 text-amber-500 flex-shrink-0" />
-        )}
+        <FileTypeIcon name={dirName} isDirectory isOpen={expanded} />
         <span className="text-xs truncate flex-1" title={dirPath}>
           {dirName}
         </span>
@@ -741,15 +675,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
         ) : (
           <span className="w-3.5 flex-shrink-0" />
         )}
-        {entry.isDirectory ? (
-          expanded ? (
-            <FolderOpen className="size-4 text-amber-500 flex-shrink-0" />
-          ) : (
-            <Folder className="size-4 text-amber-500 flex-shrink-0" />
-          )
-        ) : (
-          <FileText className="size-4 text-muted-foreground flex-shrink-0" />
-        )}
+        <FileTypeIcon name={currentName} isDirectory={entry.isDirectory} isOpen={expanded} />
 
         {/* 名称：正常显示 / 重命名输入框 */}
         {isRenaming ? (
@@ -770,21 +696,22 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
           <span className="truncate text-xs flex-1">{currentName}</span>
         )}
 
-        {/* 三点菜单按钮 */}
-        {isSelected && !isRenaming && (
-          <div
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70"
-                >
-                  <MoreHorizontal className="size-3.5" />
-                </button>
-              </DropdownMenuTrigger>
+        {/* 三点菜单按钮（始终占位，避免选中时行高跳动） */}
+        <div
+          className={cn('flex-shrink-0', !(isSelected && !isRenaming) && 'invisible')}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            {isSelected && !isRenaming && (
               <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
                 <DropdownMenuItem
                   className="text-xs py-1 [&>svg]:size-3.5"
@@ -817,9 +744,9 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
                   移动到...
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        )}
+            )}
+          </DropdownMenu>
+        </div>
       </div>
       {expanded && children.length === 0 && loaded && (
         <div

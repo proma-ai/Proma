@@ -32,6 +32,13 @@ import {
   AlertDialogCancel,
 } from '../ui/alert-dialog'
 import { buttonVariants } from '../ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import { UserAvatar } from '../chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
 // Cloud 模式专属
@@ -66,6 +73,7 @@ export function GeneralSettings(): React.ReactElement {
   const [notificationsEnabled, setNotificationsEnabled] = useAtom(notificationsEnabledAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
+  const [archiveAfterDays, setArchiveAfterDays] = React.useState<number>(7)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   /** Cloud 模式 + 已登录 */
@@ -87,6 +95,24 @@ export function GeneralSettings(): React.ReactElement {
       setNameInput(displayName)
     }
   }, [displayName, isEditingName])
+
+  // 加载归档天数设置
+  React.useEffect(() => {
+    window.electronAPI.getSettings().then((settings) => {
+      setArchiveAfterDays(settings.archiveAfterDays ?? 7)
+    }).catch(console.error)
+  }, [])
+
+  /** 更新归档天数 */
+  const handleArchiveDaysChange = async (value: string): Promise<void> => {
+    const days = parseInt(value, 10)
+    setArchiveAfterDays(days)
+    try {
+      await window.electronAPI.updateSettings({ archiveAfterDays: days })
+    } catch (error) {
+      console.error('[通用设置] 更新归档天数失败:', error)
+    }
+  }
 
   /** 更新头像 */
   const handleAvatarChange = async (avatar: string): Promise<void> => {
@@ -306,6 +332,23 @@ export function GeneralSettings(): React.ReactElement {
               updateNotificationsEnabled(checked)
             }}
           />
+          <SettingsRow
+            label="自动归档"
+            description="超过指定天数未更新的对话将自动归档（置顶对话除外）"
+          >
+            <Select value={String(archiveAfterDays)} onValueChange={handleArchiveDaysChange}>
+              <SelectTrigger className="w-[120px] h-8 text-[13px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">禁用</SelectItem>
+                <SelectItem value="7">7 天</SelectItem>
+                <SelectItem value="14">14 天</SelectItem>
+                <SelectItem value="30">30 天</SelectItem>
+                <SelectItem value="60">60 天</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 

@@ -1,7 +1,15 @@
-import { Menu, shell } from 'electron'
+import { Menu, shell, BrowserWindow } from 'electron'
 
 export function createApplicationMenu(): Menu {
   const isMac = process.platform === 'darwin'
+
+  /**
+   * 菜单快捷键说明：
+   *
+   * 大部分快捷键由渲染进程的 shortcut-registry 统一管理。
+   * 但 Cmd+W 需要在菜单中拦截（否则 macOS 默认关闭窗口），
+   * 改为通知渲染进程关闭当前标签页。
+   */
 
   const template: Electron.MenuItemConstructorOptions[] = [
     // 应用菜单 (仅 macOS)
@@ -27,7 +35,20 @@ export function createApplicationMenu(): Menu {
     // 文件菜单
     {
       label: '文件',
-      submenu: [isMac ? { role: 'close' as const, label: '关闭窗口' } : { role: 'quit' as const, label: '退出' }],
+      submenu: [
+        // Cmd+W / Ctrl+W：关闭当前标签页（而非关闭窗口）
+        {
+          label: '关闭标签页',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow()
+            if (win) {
+              win.webContents.send('menu:close-tab')
+            }
+          },
+        },
+        ...(isMac ? [] : [{ type: 'separator' as const }, { role: 'quit' as const, label: '退出' }]),
+      ],
     },
 
     // 编辑菜单

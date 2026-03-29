@@ -48,7 +48,7 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
 export function getAdapter(provider: ProviderType): ProviderAdapter {
   const adapter = adapterRegistry.get(provider)
   if (!adapter) {
-    throw new Error(`不支持的供应商: ${provider}`)
+    throw new Error(`不支持的供应商: ${provider}。你可能过去使用的是 Proma 商业版，请重新下载商业版覆盖安装，当前版本为开源版本。`)
   }
   return adapter
 }

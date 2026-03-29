@@ -6,7 +6,17 @@
  * 未来可扩展：PiAgentAdapter 等。
  */
 
-import type { AgentEvent } from './agent'
+import type { SDKMessage } from './agent'
+
+/** SDK 用户消息（队列消息注入用，匹配 SDK SDKUserMessage 结构） */
+export interface SDKUserMessageInput {
+  type: 'user'
+  message: { role: 'user'; content: string }
+  parent_tool_use_id: null
+  priority?: 'now' | 'next' | 'later'
+  uuid?: string
+  session_id: string
+}
 
 /**
  * Agent 查询输入（Provider 无关）
@@ -30,14 +40,18 @@ export interface AgentQueryInput {
 /**
  * Agent Provider 适配器接口
  *
- * 职责：接收查询输入，返回 AgentEvent 异步迭代流。
- * 内部负责 SDK 消息到 AgentEvent 的翻译，外部无需了解 SDK 细节。
+ * 职责：接收查询输入，返回 SDKMessage 异步迭代流。
+ * SDK 返回完整 JSON 对象（includePartialMessages: false），外部直接透传。
  */
 export interface AgentProviderAdapter {
-  /** 发起查询，返回 AgentEvent 异步迭代流 */
-  query(input: AgentQueryInput): AsyncIterable<AgentEvent>
+  /** 发起查询，返回 SDKMessage 异步迭代流 */
+  query(input: AgentQueryInput): AsyncIterable<SDKMessage>
   /** 中止指定会话的执行 */
   abort(sessionId: string): void
   /** 释放资源 */
   dispose(): void
+  /** 向活跃查询注入队列消息（可选，仅支持队列的 Provider 实现） */
+  sendQueuedMessage?(sessionId: string, message: SDKUserMessageInput): Promise<void>
+  /** 取消队列中的待发送消息（可选） */
+  cancelQueuedMessage?(sessionId: string, messageUuid: string): Promise<void>
 }

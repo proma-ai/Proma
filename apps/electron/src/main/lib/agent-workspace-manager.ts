@@ -18,8 +18,10 @@ import {
   getWorkspaceSkillsDir,
   getInactiveSkillsDir,
   getDefaultSkillsDir,
+  parseSkillVersion,
 } from './config-paths'
 import type { AgentWorkspace, McpServerEntry, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
+import { migratePermissionMode } from '@proma/shared'
 
 /**
  * 工作区索引文件格式
@@ -32,10 +34,12 @@ interface AgentWorkspacesIndex {
 }
 
 /** 当前索引版本 */
-const INDEX_VERSION = 1
+const INDEX_VERSION = 2
 
 /**
  * 读取工作区索引文件
+ *
+ * 读取后自动执行版本迁移。
  */
 function readIndex(): AgentWorkspacesIndex {
   const indexPath = getAgentWorkspacesIndexPath()
@@ -46,10 +50,64 @@ function readIndex(): AgentWorkspacesIndex {
 
   try {
     const raw = readFileSync(indexPath, 'utf-8')
-    return JSON.parse(raw) as AgentWorkspacesIndex
+    const index = JSON.parse(raw) as AgentWorkspacesIndex
+
+    // 版本迁移
+    if ((index.version ?? 1) < INDEX_VERSION) {
+      migrateIndex(index)
+    }
+
+    return index
   } catch (error) {
     console.error('[Agent 工作区] 读取索引文件失败:', error)
     return { version: INDEX_VERSION, workspaces: [] }
+  }
+}
+
+/**
+ * 索引版本迁移
+ *
+ * 按版本号逐级执行迁移逻辑，最终写回文件。
+ */
+function migrateIndex(index: AgentWorkspacesIndex): void {
+  const oldVersion = index.version ?? 1
+
+  // v1 → v2: 为所有工作区默认启用 skill-creator
+  if (oldVersion < 2) {
+    activateSkillCreatorInAllWorkspaces(index)
+  }
+
+  index.version = INDEX_VERSION
+  writeIndex(index)
+  console.log(`[Agent 工作区] 索引已迁移: v${oldVersion} → v${INDEX_VERSION}`)
+}
+
+/**
+ * 一次性迁移：为所有工作区启用 skill-creator
+ *
+ * 将 skills-inactive/skill-creator 移动到 skills/skill-creator。
+ * 若 skill-creator 不存在于任何位置则跳过（用户可能已删除）。
+ */
+function activateSkillCreatorInAllWorkspaces(index: AgentWorkspacesIndex): void {
+  for (const workspace of index.workspaces) {
+    const activeDir = getWorkspaceSkillsDir(workspace.slug)
+    const inactiveDir = getInactiveSkillsDir(workspace.slug)
+
+    const inactivePath = join(inactiveDir, 'skill-creator')
+    const activePath = join(activeDir, 'skill-creator')
+
+    // 已在 skills/ 中或两处都不存在 → 跳过
+    if (existsSync(activePath) || !existsSync(inactivePath)) continue
+
+    try {
+      if (!existsSync(activeDir)) {
+        mkdirSync(activeDir, { recursive: true })
+      }
+      renameSync(inactivePath, activePath)
+      console.log(`[Agent 工作区] 已为 ${workspace.slug} 启用 skill-creator`)
+    } catch (err) {
+      console.warn(`[Agent 工作区] 启用 skill-creator 失败 (${workspace.slug}):`, err)
+    }
   }
 }
 
@@ -250,6 +308,78 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
   return defaultWs
 }
 
+// ===== 默认 Skills 自动升级 =====
+
+/**
+ * 升级所有工作区中的默认 Skills
+ *
+ * 遍历所有工作区，将版本过旧的默认 Skill 更新到 ~/.proma/default-skills/ 中的最新版本。
+ * 仅更新 slug 与默认 Skill 匹配的目录，跳过用户自建的 Skill。
+ * 同时处理 skills/（活跃）和 skills-inactive/（已禁用）目录。
+ */
+export function upgradeDefaultSkillsInWorkspaces(): void {
+  const defaultDir = getDefaultSkillsDir()
+
+  // 收集默认 Skills 的 slug → version 映射
+  interface DefaultSkillInfo {
+    version: string
+    sourcePath: string
+  }
+  const defaultSkills = new Map<string, DefaultSkillInfo>()
+
+  try {
+    const entries = readdirSync(defaultDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const sourcePath = join(defaultDir, entry.name)
+      const version = parseSkillVersion(sourcePath)
+      defaultSkills.set(entry.name, { version, sourcePath })
+    }
+  } catch {
+    return // default-skills 目录不存在，跳过
+  }
+
+  if (defaultSkills.size === 0) return
+
+  // 遍历所有工作区
+  const index = readIndex()
+
+  for (const workspace of index.workspaces) {
+    const dirs = [
+      getWorkspaceSkillsDir(workspace.slug),
+      getInactiveSkillsDir(workspace.slug),
+    ]
+
+    for (const dir of dirs) {
+      if (!existsSync(dir)) continue
+
+      for (const [slug, info] of defaultSkills) {
+        const targetPath = join(dir, slug)
+        if (!existsSync(targetPath)) continue
+
+        const currentVer = parseSkillVersion(targetPath)
+        if (compareSemver(info.version, currentVer) > 0) {
+          cpSync(info.sourcePath, targetPath, { recursive: true, force: true })
+          console.log(`[Agent 工作区] 已升级 Skill: ${workspace.slug}/${slug} (${currentVer} → ${info.version})`)
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 比较两个 semver 版本字符串
+ */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
 // ===== Plugin Manifest（SDK 插件发现） =====
 
 /**
@@ -353,6 +483,7 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
     if (key === 'name' && value) meta.name = value
     if (key === 'description' && value) meta.description = value
     if (key === 'icon' && value) meta.icon = value
+    if (key === 'version' && value) meta.version = value
   }
 
   return meta
@@ -509,11 +640,11 @@ function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): v
 /**
  * 获取工作区权限模式
  *
- * 默认返回 'smart'（智能模式）。
+ * 默认返回 'acceptEdits'。支持旧模式值自动迁移。
  */
 export function getWorkspacePermissionMode(workspaceSlug: string): PromaPermissionMode {
   const config = readWorkspaceConfig(workspaceSlug)
-  return config.permissionMode ?? 'smart'
+  return config.permissionMode ? migratePermissionMode(config.permissionMode) : 'acceptEdits'
 }
 
 /**

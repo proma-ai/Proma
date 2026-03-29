@@ -23,8 +23,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Wrench, Brain, Globe, Settings, ImagePlus } from 'lucide-react'
 import { chatToolsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
-import { settingsTabAtom } from '@/atoms/settings-tab'
-import { activeViewAtom } from '@/atoms/active-view'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 
 /** 工具 ID 到图标的映射 */
 function getToolIcon(iconName?: string): React.ReactElement {
@@ -45,7 +44,7 @@ export function ToolSelectorPopover(): React.ReactElement {
   const tools = useAtomValue(chatToolsAtom)
   const setChatTools = useSetAtom(chatToolsAtom)
   const hasActiveTools = useAtomValue(hasActiveToolsAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
 
   /** 切换工具开关（通过 IPC 更新后端配置，再刷新 atom） */
@@ -62,7 +61,7 @@ export function ToolSelectorPopover(): React.ReactElement {
   /** 跳转到设置页工具 tab */
   const goToToolSettings = (): void => {
     setOpen(false)
-    setActiveView('settings')
+    setSettingsOpen(true)
     setSettingsTab('tools')
   }
 

@@ -18,7 +18,7 @@ import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 
 /** debounce 延迟（ms） */
-const DEBOUNCE_MS = 500
+const DEBOUNCE_MS = 300
 
 let watcher: FSWatcher | null = null
 

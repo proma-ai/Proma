@@ -139,8 +139,8 @@ export function isRelativeFilePath(text: string): boolean {
   // 排除含空格或特殊字符的（太可能是其他内容）
   if (!/^[\w./@-]+$/.test(trimmed)) return false
 
-  // 排除以点开头的隐藏文件（如 .gitignore）——这些通常不是要预览的
-  if (trimmed.startsWith('.') && !trimmed.startsWith('./')) return false
+  // 排除以点开头的隐藏文件（如 .gitignore），但保留含子路径的目录相对路径（如 .context/file.md）
+  if (trimmed.startsWith('.') && !trimmed.startsWith('./') && !trimmed.includes('/')) return false
 
   return true
 }

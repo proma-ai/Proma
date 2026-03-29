@@ -10,8 +10,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { Wallet, Sparkles } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { creditsDisplayAtom, billingInfoAtom } from '@/atoms/cloud-billing'
-import { activeViewAtom } from '@/atoms/active-view'
-import { settingsTabAtom } from '@/atoms/settings-tab'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { isCloudMode } from '@/lib/mode'
 import { isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
 import { cn } from '@/lib/utils'
@@ -27,14 +26,14 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
   const credits = useAtomValue(creditsDisplayAtom)
   const billing = useAtomValue(billingInfoAtom)
   const isAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
-  const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
 
   if (!isCloudMode() || !isAuthenticated || !billing) return null
 
   const handleClick = (): void => {
     setSettingsTab('billing')
-    setActiveView('settings')
+    setSettingsOpen(true)
   }
 
   // 计算可用额度

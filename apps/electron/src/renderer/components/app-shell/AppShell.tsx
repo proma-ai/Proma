@@ -67,8 +67,10 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-50" />
 
       <div className="h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
-        {/* 左侧边栏：可折叠 */}
-        <LeftSidebar />
+        {/* 左侧边栏：可折叠，带圆角和内边距 */}
+        <div className="p-2 pr-0 relative z-[60]">
+          <LeftSidebar />
+        </div>
 
         {/* 右侧容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
         <div className="flex-1 min-w-0 p-2 relative z-[60]">

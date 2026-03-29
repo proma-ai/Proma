@@ -307,7 +307,7 @@ export const MessageResponse = React.memo(
     return (
       <div
         className={cn(
-          'prose dark:prose-invert max-w-none text-[14px]',
+          'prose dark:prose-invert max-w-none text-[15px]',
           'prose-p:my-1.5 prose-p:leading-[1.6] prose-li:leading-[1.6] prose-pre:my-0 prose-headings:my-2',
           '[&_.code-block-wrapper+.code-block-wrapper]:mt-4',
           '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
@@ -428,7 +428,7 @@ export const UserMessageContent = React.memo(
         <div
           ref={contentRef}
           className={cn(
-            'whitespace-pre-wrap overflow-hidden transition-[max-height] duration-200 text-[14px] leading-[1.6]',
+            'whitespace-pre-wrap overflow-hidden transition-[max-height] duration-200 text-[15px] leading-[1.6]',
             '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
             shouldCollapse && !isExpanded && 'max-h-[6.5em]'
           )}

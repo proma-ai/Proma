@@ -6,7 +6,7 @@
  */
 
 import { join } from 'node:path'
-import { mkdirSync, existsSync, cpSync, readdirSync } from 'node:fs'
+import { mkdirSync, existsSync, cpSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 /** 配置目录名称 */
@@ -341,11 +341,56 @@ export function getDefaultSkillsDir(): string {
 }
 
 /**
+ * 从 SKILL.md 的 YAML frontmatter 中解析 version 字段
+ *
+ * 无 version 字段时返回 '0.0.0'（确保旧 Skill 会被更新）。
+ */
+export function parseSkillVersion(skillDir: string): string {
+  const skillMdPath = join(skillDir, 'SKILL.md')
+  if (!existsSync(skillMdPath)) return '0.0.0'
+
+  try {
+    const content = readFileSync(skillMdPath, 'utf-8')
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
+    if (!fmMatch?.[1]) return '0.0.0'
+
+    for (const line of fmMatch[1].split('\n')) {
+      const colonIdx = line.indexOf(':')
+      if (colonIdx === -1) continue
+      const key = line.slice(0, colonIdx).trim()
+      const value = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '')
+      if (key === 'version' && value) return value
+    }
+  } catch {
+    // 解析失败视为最低版本
+  }
+
+  return '0.0.0'
+}
+
+/**
+ * 比较两个 semver 版本字符串
+ *
+ * @returns 正数表示 a > b，0 表示相等，负数表示 a < b
+ */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/**
  * 从 app bundle 同步默认 Skills 到 ~/.proma/default-skills/
  *
  * 打包模式下从 process.resourcesPath/default-skills 复制。
- * 仅补充缺失的 Skill 目录，不覆盖用户已有的内容。
  * 开发模式下从源码 default-skills/ 目录复制。
+ *
+ * - 缺失的 Skill：直接复制
+ * - 已存在的 Skill：比较 version，bundled 版本更新时覆盖
  */
 export function seedDefaultSkills(): void {
   const { app } = require('electron')
@@ -364,11 +409,24 @@ export function seedDefaultSkills(): void {
     const entries = readdirSync(bundledDir, { withFileTypes: true })
 
     for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+
+      const source = join(bundledDir, entry.name)
       const target = join(userDir, entry.name)
+
       if (!existsSync(target)) {
-        const source = join(bundledDir, entry.name)
+        // 缺失的 Skill：直接复制
         cpSync(source, target, { recursive: true })
         console.log(`[配置] 已同步默认 Skill: ${entry.name}`)
+      } else {
+        // 已存在：比较版本，bundled 更新时覆盖
+        const bundledVer = parseSkillVersion(source)
+        const existingVer = parseSkillVersion(target)
+
+        if (compareSemver(bundledVer, existingVer) > 0) {
+          cpSync(source, target, { recursive: true, force: true })
+          console.log(`[配置] 已升级默认 Skill: ${entry.name} (${existingVer} → ${bundledVer})`)
+        }
       }
     }
   } catch (err) {

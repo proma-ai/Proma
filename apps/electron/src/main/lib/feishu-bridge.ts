@@ -11,7 +11,7 @@
 
 import { BrowserWindow } from 'electron'
 import type {
-  AgentEvent,
+  AgentStreamPayload,
   AgentSendInput,
   FeishuBridgeState,
   FeishuChatBinding,
@@ -43,7 +43,7 @@ import {
   buildWorkspaceSwitchedCard,
   buildWorkspaceListCard,
   buildHelpCard,
-  accumulateToolSummary,
+  accumulateToolStart,
   splitLongContent,
 } from './feishu-message'
 import type { ToolSummary, FormattedAgentResult, WorkspaceListItem } from './feishu-message'
@@ -191,8 +191,8 @@ class FeishuBridge {
       await this.wsClient.start({ eventDispatcher })
 
       // 注册 EventBus 监听器
-      this.eventBusUnsubscribe = agentEventBus.on((sessionId, event) => {
-        this.handleAgentEvent(sessionId, event)
+      this.eventBusUnsubscribe = agentEventBus.on((sessionId, payload) => {
+        this.handleAgentPayload(sessionId, payload)
       })
 
       // 恢复之前的聊天绑定
@@ -1184,7 +1184,7 @@ class FeishuBridge {
         channelId,
         modelId,
         workspaceId: binding.workspaceId,
-        permissionModeOverride: 'auto',
+        permissionModeOverride: 'bypassPermissions',
         ...(customMcpServers && { customMcpServers }),
       }
 
@@ -1212,33 +1212,62 @@ class FeishuBridge {
 
   // ===== EventBus 事件处理 =====
 
-  private handleAgentEvent(sessionId: string, event: AgentEvent): void {
+  private handleAgentPayload(sessionId: string, payload: AgentStreamPayload): void {
     // 对于飞书发起的会话，缓冲由 handleUserMessage 初始化
     // 对于桌面发起的会话，complete 事件时检查是否需要通知
     const buffer = this.sessionBuffers.get(sessionId)
 
-    if (buffer) {
-      if (event.type === 'text_delta') {
-        buffer.text += event.text
+    if (buffer && payload.kind === 'sdk_message') {
+      const msg = payload.message
+      // 从 assistant 消息中提取文本
+      if (msg.type === 'assistant') {
+        const aMsg = msg as { message?: { content?: Array<{ type: string; text?: string }> } }
+        for (const block of aMsg.message?.content ?? []) {
+          if (block.type === 'text' && block.text) {
+            buffer.text += block.text
+          }
+        }
+        // 从 assistant 消息中累积工具使用摘要
+        for (const block of aMsg.message?.content ?? []) {
+          if (block.type === 'tool_use') {
+            const tb = block as { name?: string }
+            if (tb.name) {
+              accumulateToolStart(buffer.toolSummaries, tb.name)
+            }
+          }
+        }
       }
-      accumulateToolSummary(buffer.toolSummaries, event)
+      // 从 user tool_result 中检测错误
+      if (msg.type === 'user') {
+        const uMsg = msg as { message?: { content?: Array<{ type: string; tool_use_id?: string; is_error?: boolean }> } }
+        for (const block of uMsg.message?.content ?? []) {
+          if (block.type === 'tool_result' && block.is_error) {
+            // 标记工具有错误（简化处理：无法确定具体工具名）
+          }
+        }
+      }
+      // result 消息 → 会话完成
+      if (msg.type === 'result') {
+        if (buffer) {
+          this.handleFeishuSessionComplete(sessionId)
+        } else {
+          this.handleDesktopSessionComplete(sessionId)
+        }
+        return
+      }
     }
 
-    if (event.type === 'complete') {
-      if (buffer) {
-        // 飞书发起的会话 → 发送完整回复
-        this.handleFeishuSessionComplete(sessionId)
-      } else {
-        // 桌面发起的会话 → 检查是否需要发送通知
-        this.handleDesktopSessionComplete(sessionId)
+    // Proma 内部事件处理：错误等
+    if (payload.kind === 'sdk_message' && payload.message.type === 'assistant') {
+      const aMsg = payload.message as { error?: { message: string } }
+      if (aMsg.error) {
+        const chatId = this.sessionToChat.get(sessionId)
+        if (chatId) {
+          const prefix = this.resolveContextPrefix(chatId)
+          this.sendCardMessage(chatId, buildErrorCard(`${prefix}${aMsg.error.message}`)).catch(console.error)
+        }
+        this.sessionBuffers.delete(sessionId)
       }
-    } else if (event.type === 'error') {
-      const chatId = this.sessionToChat.get(sessionId)
-      if (chatId) {
-        const prefix = this.resolveContextPrefix(chatId)
-        this.sendCardMessage(chatId, buildErrorCard(`${prefix}${event.message}`)).catch(console.error)
-      }
-      this.sessionBuffers.delete(sessionId)
     }
   }
 

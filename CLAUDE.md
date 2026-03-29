@@ -21,22 +21,48 @@ Proma 是一个集成通用 AI Agent 的下一代人工智能软件，采用 Ele
 Bun workspace monorepo：
 
 ```
-proma/
+proma-v2/
 ├── packages/
-│   ├── core/       # AI Provider 适配器、代码高亮服务 (Shiki)
-│   ├── shared/     # 共享类型、IPC 通道常量、配置、Agent 工具匹配
-│   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock, useSmoothStream)
+│   ├── shared/     # 共享类型、IPC 通道常量、配置、工具函数 (v0.1.15)
+│   ├── core/       # AI Provider 适配器、代码高亮服务 (v0.2.2)
+│   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock) (v0.1.3)
 └── apps/
-    └── electron/   # Electron 桌面应用
+    └── electron/   # Electron 桌面应用 (v0.8.0)
         └── src/
             ├── main/       # 主进程 + 服务层 (main/lib/)
             ├── preload/    # IPC 上下文桥接
-            └── renderer/   # React UI (Vite + Tailwind + ShadcnUI)
+            └── renderer/   # React UI (Vite + Tailwind + Radix UI)
 ```
 
 **包命名规范**：`@proma/*` 作用域（`@proma/core`、`@proma/shared`、`@proma/ui`、`@proma/electron`）
 
 **依赖管理**：package.json 中使用 `workspace:*` 引用内部包
+
+### 包职责详解
+
+#### @proma/shared (v0.1.15)
+- **导出模块**：`./types`、`./config`、`./utils`、`./constants/permission-rules`
+- **关键类型**：`AgentMessage`、`ChatMessage`、`Channel`、`PermissionRequest`、`FeishuConfig`
+- **依赖**：无运行时依赖（仅 TypeScript）
+
+#### @proma/core (v0.2.2)
+- **导出模块**：`./providers`、`./highlight`、`./types`、`./utils`
+- **关键功能**：Provider 适配器注册表、代码高亮（Shiki）
+- **依赖**：`@proma/shared`、`shiki`
+- **Peer 依赖**：`@anthropic-ai/claude-agent-sdk`、`@anthropic-ai/sdk`、`@modelcontextprotocol/sdk`
+
+#### @proma/ui (v0.1.3)
+- **关键组件**：共享 React UI 组件库
+- **依赖**：`@proma/core`、`beautiful-mermaid`、`shiki`、Radix UI
+- **Peer 依赖**：`react@^18.3.0`、`react-dom@^18.3.0`
+
+#### @proma/electron (v0.8.0)
+- **职责**：Electron 桌面应用主体，集成所有包
+- **关键依赖**：
+  - `@anthropic-ai/claude-agent-sdk@0.2.87` - Agent SDK
+  - `@larksuiteoapi/node-sdk` - 飞书集成
+  - Radix UI、TipTap、Tailwind CSS
+  - 文件解析：`pdf-parse`、`officeparser`、`word-extractor`
 
 ## 常用命令
 
@@ -90,6 +116,28 @@ bun run generate:icons    # 生成应用图标
 - Bun 自动加载 .env 文件（无需 dotenv）
 - 优先使用 Bun 原生 API：`Bun.file` > `node:fs`，`Bun.$\`command\`` > `execa`
 
+## 技术栈
+
+| 层级 | 技术 | 版本 |
+|------|------|------|
+| **运行时** | Bun | 1.2.5+ |
+| **语言** | TypeScript | 5.0.0+ |
+| **桌面框架** | Electron | 39.5.1 |
+| **前端框架** | React | 18.3.1 |
+| **状态管理** | Jotai | 2.17.1 |
+| **UI 组件** | Radix UI | 最新 |
+| **样式** | Tailwind CSS | 3.4.17 |
+| **富文本编辑器** | TipTap | 3.19.0 |
+| **代码高亮** | Shiki | 3.22.0 |
+| **Markdown** | React Markdown | 10.1.0 |
+| **图表** | Beautiful Mermaid | 最新 |
+| **数学公式** | KaTeX | 0.16+ |
+| **构建工具** | Vite | 6.0.3 |
+| **打包工具** | esbuild | 0.24.0+ |
+| **分发工具** | Electron Builder | 25.1.8 |
+| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.2.87 |
+| **飞书 SDK** | @larksuiteoapi/node-sdk | 最新 |
+
 ## 核心架构
 
 ### IPC 通信模式（最重要的架构模式）
@@ -97,40 +145,99 @@ bun run generate:icons    # 生成应用图标
 类型定义 → 主进程处理 → Preload 桥接 → 渲染进程调用：
 
 1. **类型 & 常量**：`@proma/shared` 定义 IPC 通道名称常量和请求/响应类型
-2. **主进程处理**：`main/ipc.ts` 注册 `ipcMain.handle()` 处理器，调用 `main/lib/` 服务
+2. **主进程处理**：`main/ipc.ts`（57KB）注册 `ipcMain.handle()` 处理器，调用 `main/lib/` 服务
 3. **Preload 桥接**：`preload/index.ts` 通过 `contextBridge.exposeInMainWorld` 暴露类型安全的 API
 4. **渲染进程**：通过 `window.electronAPI.*` 调用，Jotai atoms 中封装调用逻辑
 
 添加新 IPC 通道时，需要同步修改这四个位置。
 
+#### 主要 IPC 通道组
+
+- `IPC_CHANNELS` - 基础通道（运行时、Git、环境）
+- `CHANNEL_IPC_CHANNELS` - 渠道管理
+- `CHAT_IPC_CHANNELS` - Chat 功能
+- `AGENT_IPC_CHANNELS` - Agent 功能
+- `ENVIRONMENT_IPC_CHANNELS` - 环境检查
+- `PROXY_IPC_CHANNELS` - 代理设置
+- `SYSTEM_PROMPT_IPC_CHANNELS` - 系统提示词
+- `MEMORY_IPC_CHANNELS` - 记忆功能
+- `CHAT_TOOL_IPC_CHANNELS` - Chat 工具
+- `FEISHU_IPC_CHANNELS` - 飞书集成
+- `GITHUB_RELEASE_IPC_CHANNELS` - GitHub 发布
+
 ### 主进程服务层（`main/lib/`）
+
+#### 核心服务
 
 | 服务 | 职责 |
 |------|------|
-| `channel-manager.ts` | 渠道 CRUD、API Key AES-256-GCM 加密（Electron safeStorage）、连接测试、模型获取 |
-| `conversation-manager.ts` | 对话 CRUD、JSONL 消息存储、置顶、上下文分割 |
-| `chat-service.ts` | AI 流式调用编排、Provider 适配器集成、消息持久化、AbortController |
-| `agent-service.ts` | Agent SDK 调用编排、流式事件转换与推送、AbortController |
-| `agent-session-manager.ts` | Agent 会话 CRUD、JSONL 消息存储 |
-| `agent-prompt-builder.ts` | Agent 系统提示词构建（注入工作区上下文） |
-| `agent-workspace-manager.ts` | 工作区管理、MCP Server 配置、Skills 配置 |
-| `attachment-service.ts` | 附件存储/读取/删除、文件对话框 |
-| `document-parser.ts` | 文档文本提取（PDF/Office/文本文件） |
+| `agent-orchestrator.ts` | Agent 核心编排层（71KB）：并发守卫、渠道查找、环境变量构建、SDK 路径解析、消息持久化、事件流处理、错误处理、自动标题生成 |
+| `agent-session-manager.ts` | Agent 会话管理：SDK 消息持久化、会话元数据 CRUD、JSONL 存储 |
+| `agent-prompt-builder.ts` | Agent 系统提示词构建（18KB）：动态上下文构建、内置 Agent 构建、工作区上下文注入 |
+| `agent-permission-service.ts` | Agent 权限管理：工具权限检查、权限模式管理 |
+| `agent-ask-user-service.ts` | Agent 用户交互：AskUser 请求处理 |
+| `agent-exit-plan-service.ts` | Agent 退出计划服务 |
+| `agent-workspace-manager.ts` | 工作区管理（16KB）：MCP Server 配置、Skills 配置、工作区 CRUD |
+| `agent-team-reader.ts` | Agent 团队协作：团队配置读取 |
+| `chat-service.ts` | Chat 流式调用编排（20KB）：Provider 适配器集成、消息持久化、AbortController |
+| `conversation-manager.ts` | 对话管理（13KB）：对话 CRUD、JSONL 消息存储、置顶、上下文分割 |
+| `channel-manager.ts` | 渠道管理（16KB）：渠道 CRUD、API Key AES-256-GCM 加密（safeStorage）、连接测试、模型获取 |
+
+#### 集成服务
+
+| 服务 | 职责 |
+|------|------|
+| `feishu-bridge.ts` | 飞书集成（68KB）：消息同步、任务通知、OAuth 认证 |
+| `memory-service.ts` | 记忆管理：跨会话记忆存储与检索 |
+| `memos-client.ts` | Memos 客户端：笔记服务集成 |
+
+#### 工具与文件
+
+| 服务 | 职责 |
+|------|------|
+| `chat-tools/` | Chat 工具实现目录：内置工具函数 |
+| `workspace-watcher.ts` | 工作区文件监听：文件系统变化监控 |
+| `chat-tools-watcher.ts` | Chat 工具监听：工具配置变化监控 |
+| `attachment-service.ts` | 附件管理：存储/读取/删除、文件对话框 |
+| `document-parser.ts` | 文档解析：PDF/Office/文本文件提取 |
+
+#### 系统服务
+
+| 服务 | 职责 |
+|------|------|
+| `runtime-init.ts` | 运行时初始化：Shell 环境、Bun、Git 检测（`bun-finder.ts`、`git-detector.ts`、`shell-env.ts`） |
+| `config-paths.ts` | 配置路径管理：`~/.proma/` 目录结构 |
 | `user-profile-service.ts` | 用户档案持久化 |
 | `settings-service.ts` | 应用设置持久化（主题等） |
-| `config-paths.ts` | `~/.proma/` 目录路径管理 |
-| `runtime-init.ts` | Bun/Git 运行时检测（`bun-finder.ts`、`git-detector.ts`、`shell-env.ts`） |
+| `updater/` | 自动更新：Electron Updater 集成 |
 
 ### AI Provider 适配器（`packages/core/src/providers/`）
 
-基于适配器模式的多 Provider 支持：
+基于适配器模式的多 Provider 支持，通过注册表统一管理：
 
-- `ProviderAdapter` 接口定义统一的 `sendMessage()` 流式方法
-- **Anthropic**：`anthropic-adapter.ts` — Messages API，支持 extended_thinking
-- **OpenAI / DeepSeek / Custom**：`openai-adapter.ts` — Chat Completions API
-- **Google**：`google-adapter.ts` — Generative Language API
+#### 核心架构
+- `ProviderAdapter` 接口：定义统一的 `sendMessage()` 流式方法
+- `provider-registry.ts`：Provider 注册表，按 `providerId` 查找适配器
 - `sse-reader.ts`：通用 SSE 流读取器（fetch + ReadableStream）
-- 多模态支持：图片（各 Provider 格式不同）、文档（提取文本注入 `<file>` XML 标签）
+
+#### 支持的 Provider
+
+| Provider | 适配器 | API 协议 | 特性 |
+|----------|--------|----------|------|
+| **Anthropic** | `anthropic-adapter.ts` | Messages API | extended_thinking、多模态 |
+| **OpenAI** | `openai-adapter.ts` | Chat Completions | 标准 OpenAI 协议 |
+| **DeepSeek** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **Moonshot** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **智谱 AI** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **MiniMax** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **豆包** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **通义千问** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **Google** | `google-adapter.ts` | Generative Language API | Gemini 系列 |
+| **Custom** | `openai-adapter.ts` | Chat Completions | 自定义 OpenAI 兼容端点 |
+
+#### 多模态支持
+- **图片**：各 Provider 格式不同，适配器自动转换
+- **文档**：提取文本后注入 `<file>` XML 标签
 
 ### Jotai 状态管理（`renderer/atoms/`）
 
@@ -150,10 +257,10 @@ bun run generate:icons    # 生成应用图标
 - **`app-shell/`**：三面板布局（LeftSidebar | NavigatorPanel | MainContentPanel），侧边栏含模式切换、置顶对话、日期分组列表、流式指示器
 - **`chat/`**：聊天核心 — ChatView（消息加载/流式订阅）、ChatHeader（模型选择/上下文设置）、ChatInput（Tiptap 富文本编辑器）、ChatMessages（消息列表/自动滚动）、ParallelChatMessages（并排模式）
 - **`agent/`**：Agent 模式 — AgentView（纯展示 + 交互，IPC 监听已提升到全局）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）、PermissionBanner/AskUserBanner（权限/问答请求 UI）
-- **`settings/`**：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）；含 `primitives/` 可复用表单组件
+- **`settings/`**：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）、FeishuSettings（飞书集成）；含 `primitives/` 可复用表单组件
 - **`file-browser/`**：文件浏览器 — FileBrowser（工作区文件树浏览）
 - **`ai-elements/`**：AI 展示组件 — Markdown 渲染、代码块、Mermaid 图、推理折叠、上下文分割线、富文本输入
-- **`ui/`**：ShadcnUI 组件（new-york 风格，CSS 变量主题）
+- **`ui/`**：Radix UI 组件（现代化设计，CSS 变量主题）
 
 ### 全局 Hooks（`renderer/hooks/`）
 
@@ -182,17 +289,25 @@ bun run generate:icons    # 生成应用图标
 ├── agent-sessions.json     # Agent 会话索引
 ├── agent-sessions/         # Agent 会话消息存储
 │   └── {uuid}.jsonl        # 每会话一个 JSONL 文件
-├── workspaces/             # 工作区配置
-│   └── {slug}/
-│       └── config.json     # MCP Server、Skills 等配置
+├── agent-workspaces/       # Agent 工作区目录
+│   └── {workspace-slug}/
+│       ├── {session-id}/   # 会话工作目录
+│       ├── workspace-files/# 工作区持久文件
+│       ├── mcp.json        # MCP Server 配置
+│       └── skills/         # Skills 配置目录
 ├── attachments/            # 附件文件
 │   └── {conversationId}/
 │       └── {uuid}.ext
 ├── user-profile.json       # 用户档案 { userName, avatar }
-└── settings.json           # 应用设置 { themeMode }
+├── settings.json           # 应用设置 { themeMode }
+└── sdk-config/             # Agent SDK 配置目录
+    └── projects/           # SDK 项目配置
 ```
 
-关键设计：JSON 配置 + JSONL 追加日志，无本地数据库，文件可移植。
+**关键设计**：
+- JSON 配置 + JSONL 追加日志，无本地数据库，文件可移植
+- Agent 工作区按 slug 隔离，每个会话独立目录
+- MCP 配置和 Skills 按工作区管理
 
 ## 构建工具
 
@@ -256,19 +371,47 @@ bun run generate:icons    # 生成应用图标
 
 ## Agent SDK 集成架构
 
-基于 `@anthropic-ai/claude-agent-sdk` 实现 Agent 模式，与 Chat 模式并行：
+基于 `@anthropic-ai/claude-agent-sdk@0.2.87` 实现 Agent 模式，与 Chat 模式并行。
 
 ### 核心流程
 
 ```
-用户输入 → agent-service.ts (SDK query) → SDK SDKMessage 流
-→ convertSDKMessage() → AgentEvent[] → webContents.send()
-→ useGlobalAgentListeners (全局 IPC 监听) → store.set(atoms) → React UI
+用户输入 → agent-orchestrator.ts (SDK 编排)
+  ↓
+SDK query() → SDKMessage 流
+  ↓
+convertSDKMessage() → AgentEvent[]
+  ↓
+webContents.send() → IPC 推送
+  ↓
+useGlobalAgentListeners (全局监听) → store.set(atoms)
+  ↓
+React UI 更新
 ```
+
+### 关键组件
+
+#### agent-orchestrator.ts（核心编排层，71KB）
+- **并发守卫**：同一会话不允许并行请求
+- **渠道管理**：查找渠道 + API Key 解密
+- **环境构建**：环境变量 + SDK 路径解析
+- **消息持久化**：SDK 消息存储到 JSONL
+- **事件流处理**：文本累积 + 工具调用解析
+- **错误处理**：SDK 错误映射 + 重试逻辑
+- **自动标题**：首次对话自动生成标题
+
+#### agent-prompt-builder.ts（提示词构建，18KB）
+- **系统提示词生成**：基于工作区配置
+- **动态上下文构建**：注入工作区信息
+- **内置 Agent 构建**：预定义 Agent 配置
+
+#### agent-permission-service.ts（权限管理）
+- **工具权限检查**：基于权限规则
+- **权限模式管理**：safe / ask / allow-all
 
 ### 关键设计
 
-- **SDK 调用**：`sdk.query({ prompt, options: { apiKey, model, permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true, cwd, abortController } })`
+- **SDK 调用**：`sdk.query({ prompt, options: { apiKey, model, permissionMode, cwd, abortController } })`
 - **事件转换**：`convertSDKMessage()`（`@proma/shared`）将 SDK 原始消息转为统一的 `AgentEvent` 类型
 - **工具匹配**：`packages/shared/src/agent/tool-matching.ts` — 无状态 `ToolIndex` + `extractToolStarts` / `extractToolResults` 解析工具调用
 - **状态管理**：`applyAgentEvent()` 纯函数更新 `AgentStreamState`，支持流式增量更新
@@ -295,3 +438,28 @@ bun run generate:icons    # 生成应用图标
 - **MCP 集成**：Model Context Protocol 用于外部数据源
 - **凭证存储**：AES-256-GCM 加密
 - **配置位置**：`~/.proma/`（类似 `~/.craft-agent/`）
+
+## 核心特性
+
+### 已实现功能
+
+- ✅ **多 Provider 支持**：Anthropic、OpenAI、DeepSeek、Moonshot、智谱、MiniMax、豆包、通义千问、Google、自定义端点
+- ✅ **Agent SDK 集成**：基于 Claude Agent SDK 的完整 Agent 模式
+- ✅ **飞书集成**：消息同步、任务通知、OAuth 认证（68KB 核心服务）
+- ✅ **工作区管理**：多工作区隔离、MCP Server 配置、Skills 管理
+- ✅ **权限系统**：工具权限检查、用户确认流程
+- ✅ **记忆系统**：跨会话记忆存储与检索
+- ✅ **自动更新**：Electron Updater 集成
+- ✅ **代理支持**：系统代理检测与配置
+- ✅ **文档解析**：PDF、Office、文本文件提取
+- ✅ **多模态支持**：图片、文档附件
+- ✅ **Chat 工具**：内置工具系统 + 动态加载
+
+### 架构亮点
+
+- **并发守卫**：同一会话防止并行请求冲突
+- **全局监听**：Agent IPC 监听器永不销毁，确保后台会话不丢失
+- **权限排队**：按 sessionId 隔离权限请求，支持多会话并行
+- **文件监听**：工作区文件、MCP 配置、Chat 工具实时监控
+- **事件流处理**：SDK 消息流式转换与累积
+- **错误映射**：SDK 错误统一转换为应用错误

@@ -11,13 +11,15 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, CloudDownload, Info, Check, CircleAlert, PanelLeftClose, PanelLeftOpen, ArrowRightLeft } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, CloudDownload, Info, Check, CircleAlert, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isCloudMode } from '@/lib/mode'
 import { ModeSwitcher } from './ModeSwitcher'
+import { SearchDialog } from './SearchDialog'
+import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
-import { settingsTabAtom } from '@/atoms/settings-tab'
+import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
@@ -33,11 +35,13 @@ import {
   currentAgentSessionIdAtom,
   agentRunningSessionIdsAtom,
   agentChannelIdAtom,
+  agentModelIdAtom,
+  agentSessionChannelMapAtom,
+  agentSessionModelMapAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   workspaceCapabilitiesVersionAtom,
   agentSidePanelOpenMapAtom,
-  agentSidePanelTabMapAtom,
 } from '@/atoms/agent-atoms'
 import {
   tabsAtom,
@@ -49,9 +53,12 @@ import {
   updateTabTitle,
 } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { sidebarViewModeAtom } from '@/atoms/sidebar-atoms'
+import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import { hasUpdateAtom } from '@/atoms/updater'
 import { isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
 import { isSyncingAtom, hasDownloadedAllAtom, downloadAllStatusAtom } from '@/atoms/sync-atoms'
+import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { promptConfigAtom, selectedPromptIdAtom, conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
@@ -111,13 +118,12 @@ export interface LeftSidebarProps {
 }
 
 /** 侧边栏导航项标识 */
-type SidebarItemId = 'pinned' | 'all-chats' | 'settings'
+type SidebarItemId = 'pinned' | 'all-chats'
 
 /** 导航项到视图的映射 */
 const ITEM_TO_VIEW: Record<SidebarItemId, ActiveView> = {
   pinned: 'conversations',
   'all-chats': 'conversations',
-  settings: 'settings',
 }
 
 /** 日期分组标签 */
@@ -153,9 +159,12 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const [activeItem, setActiveItem] = React.useState<SidebarItemId>('all-chats')
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
+  const draftSessionIds = useAtomValue(draftSessionIdsAtom)
+  const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const [hoveredId, setHoveredId] = React.useState<string | null>(null)
   /** 待删除对话 ID，非空时显示确认弹窗 */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
@@ -165,7 +174,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [pinnedExpanded, setPinnedExpanded] = React.useState(true)
   /** Agent 置顶区域展开/收起 */
   const [pinnedAgentExpanded, setPinnedAgentExpanded] = React.useState(true)
-  const setUserProfile = useSetAtom(userProfileAtom)
+  const [userProfile, setUserProfile] = useAtom(userProfileAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
@@ -183,6 +192,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [currentAgentSessionId, setCurrentAgentSessionId] = useAtom(currentAgentSessionIdAtom)
   const agentRunningIds = useAtomValue(agentRunningSessionIdsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
+  const agentModelId = useAtomValue(agentModelIdAtom)
+  const setSessionChannelMap = useSetAtom(agentSessionChannelMapAtom)
+  const setSessionModelMap = useSetAtom(agentSessionModelMapAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
 
@@ -196,6 +208,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const activeTabId = useAtomValue(activeTabIdAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
 
+  // 归档 & 搜索状态
+  const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
+  const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
+
   // per-conversation/session Map atoms（删除时清理）
   const setConvModels = useSetAtom(conversationModelsAtom)
   const setConvContextLength = useSetAtom(conversationContextLengthAtom)
@@ -203,7 +219,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const setConvParallel = useSetAtom(conversationParallelModeAtom)
   const setConvPromptId = useSetAtom(conversationPromptIdAtom)
   const setAgentSidePanelOpen = useSetAtom(agentSidePanelOpenMapAtom)
-  const setAgentSidePanelTab = useSetAtom(agentSidePanelTabMapAtom)
 
   /** 清理 per-conversation/session Map atoms 条目 */
   const cleanupMapAtoms = React.useCallback((id: string) => {
@@ -219,8 +234,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setConvParallel(deleteKey)
     setConvPromptId(deleteKey)
     setAgentSidePanelOpen(deleteKey)
-    setAgentSidePanelTab(deleteKey)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setAgentSidePanelOpen, setAgentSidePanelTab])
+    setSessionChannelMap(deleteKey)
+    setSessionModelMap(deleteKey)
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setAgentSidePanelOpen, setSessionChannelMap, setSessionModelMap])
 
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null
@@ -238,22 +254,39 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       .catch(console.error)
   }, [currentWorkspaceSlug, mode, activeView, capabilitiesVersion])
 
-  /** 置顶对话列表 */
+  /** 置顶对话列表（仅活跃模式显示，排除 draft） */
   const pinnedConversations = React.useMemo(
-    () => conversations.filter((c) => c.pinned),
-    [conversations]
+    () => viewMode === 'active' ? conversations.filter((c) => c.pinned && !draftSessionIds.has(c.id)) : [],
+    [conversations, viewMode, draftSessionIds]
   )
 
-  /** 置顶 Agent 会话列表（跨工作区） */
+  /** 置顶 Agent 会话列表（仅活跃模式显示，跨工作区，排除 draft） */
   const pinnedAgentSessions = React.useMemo(
-    () => agentSessions.filter((s) => s.pinned),
-    [agentSessions]
+    () => viewMode === 'active' ? agentSessions.filter((s) => s.pinned && !draftSessionIds.has(s.id)) : [],
+    [agentSessions, viewMode, draftSessionIds]
   )
 
-  /** 对话按日期分组 */
+  /** 对话按日期分组（根据 viewMode 过滤归档状态，排除 draft） */
   const conversationGroups = React.useMemo(
-    () => groupByDate(conversations),
+    () => {
+      const filtered = viewMode === 'archived'
+        ? conversations.filter((c) => c.archived && !draftSessionIds.has(c.id))
+        : conversations.filter((c) => !c.archived && !draftSessionIds.has(c.id))
+      return groupByDate(filtered)
+    },
+    [conversations, viewMode, draftSessionIds]
+  )
+
+  /** 已归档对话数量 */
+  const archivedConversationCount = React.useMemo(
+    () => conversations.filter((c) => c.archived).length,
     [conversations]
+  )
+
+  /** 已归档 Agent 会话数量（当前工作区） */
+  const archivedAgentSessionCount = React.useMemo(
+    () => agentSessions.filter((s) => s.archived && (!currentWorkspaceId || s.workspaceId === currentWorkspaceId)).length,
+    [agentSessions, currentWorkspaceId]
   )
 
   // 初始加载对话列表 + 用户档案 + Agent 会话
@@ -299,12 +332,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setActiveView(ITEM_TO_VIEW[item])
   }
 
-  // 当 activeView 从外部改变时，同步 activeItem
+  // 切换模式时重置归档视图
   React.useEffect(() => {
-    if (activeView === 'conversations' && activeItem === 'settings') {
-      setActiveItem('all-chats')
-    }
-  }, [activeView, activeItem])
+    setViewMode('active')
+  }, [mode, setViewMode])
 
   /** 创建新对话（继承当前选中的模型/渠道） */
   const handleNewConversation = async (): Promise<void> => {
@@ -373,6 +404,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     }
   }
 
+  /** 切换对话归档状态 */
+  const handleToggleArchive = async (id: string): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.toggleArchiveConversation(id)
+      setConversations((prev) =>
+        prev.map((c) => (c.id === updated.id ? updated : c))
+      )
+      toast.success(updated.archived ? '已归档' : '已取消归档')
+    } catch (error) {
+      console.error('[侧边栏] 切换归档失败:', error)
+    }
+  }
+
   /** 确认删除对话 */
   const handleConfirmDelete = async (): Promise<void> => {
     if (!pendingDeleteId) return
@@ -380,6 +424,14 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     // 关闭对应的标签页
     const tabResult = closeTab(tabs, layout, pendingDeleteId)
     setTabs(tabResult.tabs)
+
+    // 清理 draft 标记（如有）
+    setDraftSessionIds((prev: Set<string>) => {
+      if (!prev.has(pendingDeleteId)) return prev
+      const next = new Set(prev)
+      next.delete(pendingDeleteId)
+      return next
+    })
     setLayout(tabResult.layout)
 
     // 清理 per-conversation/session Map atoms 条目
@@ -423,6 +475,21 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         currentWorkspaceId || undefined,
       )
       setAgentSessions((prev) => [meta, ...prev])
+      // 从全局默认值初始化 per-session 渠道/模型配置
+      if (agentChannelId) {
+        setSessionChannelMap((prev) => {
+          const map = new Map(prev)
+          map.set(meta.id, agentChannelId)
+          return map
+        })
+      }
+      if (agentModelId) {
+        setSessionModelMap((prev) => {
+          const map = new Map(prev)
+          map.set(meta.id, agentModelId)
+          return map
+        })
+      }
       // 打开新标签页
       const result = openTab(tabs, layout, { type: 'agent', sessionId: meta.id, title: meta.title })
       setTabs(result.tabs)
@@ -492,6 +559,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     }
   }
 
+  /** 切换 Agent 会话归档状态 */
+  const handleToggleArchiveAgent = async (id: string): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.toggleArchiveAgentSession(id)
+      setAgentSessions((prev) =>
+        prev.map((s) => (s.id === updated.id ? updated : s))
+      )
+      toast.success(updated.archived ? '已归档' : '已取消归档')
+    } catch (error) {
+      console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
+    }
+  }
+
   /** 迁移会话到另一个工作区后的回调 */
   const handleSessionMoved = (updatedSession: AgentSessionMeta, targetWorkspaceName: string): void => {
     setAgentSessions((prev) =>
@@ -510,10 +590,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     })
   }
 
-  /** Agent 会话按工作区过滤 */
+  /** Agent 会话按工作区过滤 + 归档过滤 + 排除 draft */
   const filteredAgentSessions = React.useMemo(
-    () => agentSessions.filter((s) => s.workspaceId === currentWorkspaceId),
-    [agentSessions, currentWorkspaceId]
+    () => {
+      const byWorkspace = agentSessions.filter((s) => s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id))
+      return viewMode === 'archived'
+        ? byWorkspace.filter((s) => s.archived)
+        : byWorkspace.filter((s) => !s.archived)
+    },
+    [agentSessions, currentWorkspaceId, viewMode, draftSessionIds]
   )
 
   /** Agent 会话按日期分组 */
@@ -571,7 +656,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="h-full flex flex-col items-center bg-background transition-[width] duration-300"
+        className="h-full flex flex-col items-center bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
         style={{ width: 48, flexShrink: 0 }}
       >
         {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -612,22 +697,17 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         {/* 弹性空间 */}
         <div className="flex-1" />
 
-        {/* 设置按钮 */}
+        {/* 用户头像（点击打开设置） */}
         <div className="pb-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => handleItemClick('settings')}
-                className={cn(
-                  'relative p-2 rounded-[10px] transition-colors titlebar-no-drag',
-                  activeItem === 'settings'
-                    ? 'bg-foreground/[0.08] text-foreground'
-                    : 'text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground'
-                )}
+                onClick={() => setSettingsOpen(true)}
+                className="relative p-1 rounded-[10px] transition-colors titlebar-no-drag hover:bg-foreground/[0.04]"
               >
-                <Settings size={18} />
+                <UserAvatar avatar={userProfile.avatar} size={28} />
                 {(hasUpdate || hasEnvironmentIssues) && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+                  <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>
             </TooltipTrigger>
@@ -637,6 +717,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
         {deleteDialog}
         {moveDialog}
+        <SearchDialog />
       </div>
     )
   }
@@ -644,7 +725,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="h-full flex flex-col bg-background transition-[width] duration-300"
+      className="h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
       {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -675,16 +756,40 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </div>
       )}
 
-      {/* 新对话/新会话按钮 */}
-      <div className="px-3 pt-2">
+      {/* 新对话/新会话按钮 + 搜索按钮 */}
+      <div className="px-3 pt-2 flex items-center gap-1.5">
         <button
           onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-foreground/[0.04] hover:bg-foreground/[0.08] transition-colors duration-100 titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
+          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-foreground/[0.04] hover:bg-foreground/[0.08] transition-colors duration-100 titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
         >
           <Plus size={14} />
           <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
         </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setSearchDialogOpen(true)}
+              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 bg-foreground/[0.04] hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors duration-100 titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
+            >
+              <Search size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">搜索 (⌘F)</TooltipContent>
+        </Tooltip>
       </div>
+
+      {/* 归档视图标题栏 */}
+      {viewMode === 'archived' && (
+        <div className="px-3 pt-3">
+          <button
+            onClick={() => setViewMode('active')}
+            className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] text-foreground/60 hover:text-foreground/80 hover:bg-foreground/[0.04] transition-colors titlebar-no-drag"
+          >
+            <ArrowLeft size={14} />
+            <span>返回活跃{mode === 'agent' ? '会话' : '对话'}</span>
+          </button>
+        </div>
+      )}
 
       {/* Chat 模式：导航菜单（置顶区域） */}
       {mode === 'chat' && (
@@ -720,6 +825,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 onRequestDelete={() => handleRequestDelete(conv.id)}
                 onRename={handleRename}
                 onTogglePin={handleTogglePin}
+                onToggleArchive={handleToggleArchive}
                 onMouseEnter={() => setHoveredId(conv.id)}
                 onMouseLeave={() => setHoveredId(null)}
               />
@@ -763,6 +869,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 onRequestMove={() => setMoveTargetId(session.id)}
                 onRename={handleAgentRename}
                 onTogglePin={handleTogglePinAgent}
+                onToggleArchive={handleToggleArchiveAgent}
                 onMouseEnter={() => setHoveredId(session.id)}
                 onMouseLeave={() => setHoveredId(null)}
               />
@@ -793,6 +900,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     onRequestDelete={() => handleRequestDelete(conv.id)}
                     onRename={handleRename}
                     onTogglePin={handleTogglePin}
+                    onToggleArchive={handleToggleArchive}
                     onMouseEnter={() => setHoveredId(conv.id)}
                     onMouseLeave={() => setHoveredId(null)}
                   />
@@ -821,6 +929,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     onRequestMove={() => setMoveTargetId(session.id)}
                     onRename={handleAgentRename}
                     onTogglePin={handleTogglePinAgent}
+                    onToggleArchive={handleToggleArchiveAgent}
                     onMouseEnter={() => setHoveredId(session.id)}
                     onMouseLeave={() => setHoveredId(null)}
                   />
@@ -879,13 +988,37 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         ) : null
       )}
 
+      {/* 已归档入口 */}
+      {viewMode === 'active' && (
+        <div className="px-3 pb-1">
+          {mode === 'chat' && archivedConversationCount > 0 && (
+            <button
+              onClick={() => setViewMode('archived')}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-[10px] text-[12px] text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground/60 transition-colors titlebar-no-drag"
+            >
+              <Archive size={13} className="text-foreground/30" />
+              <span>已归档 ({archivedConversationCount})</span>
+            </button>
+          )}
+          {mode === 'agent' && archivedAgentSessionCount > 0 && (
+            <button
+              onClick={() => setViewMode('archived')}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-[10px] text-[12px] text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground/60 transition-colors titlebar-no-drag"
+            >
+              <Archive size={13} className="text-foreground/30" />
+              <span>已归档 ({archivedAgentSessionCount})</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Agent 模式：工作区能力指示器 */}
       {mode === 'agent' && capabilities && (
         <div className="px-3 pb-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => { setSettingsTab('agent'); handleItemClick('settings') }}
+                onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
               >
                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -903,7 +1036,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 </div>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">点击配置 MCP 与 Skills</TooltipContent>
+            <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
           </Tooltip>
         </div>
       )}
@@ -913,23 +1046,26 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         <SidebarCreditIndicator />
       </div>
 
-      {/* 底部设置 */}
+      {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
-        <SidebarItem
-          icon={<Settings size={18} />}
-          label="设置"
-          active={activeItem === 'settings'}
-          onClick={() => handleItemClick('settings')}
-          suffix={
-            (hasUpdate || hasEnvironmentIssues) ? (
-              <span className="w-2 h-2 rounded-full bg-red-500" />
-            ) : undefined
-          }
-        />
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] transition-colors titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
+        >
+          <UserAvatar avatar={userProfile.avatar} size={28} />
+          <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
+          <div className="relative flex-shrink-0 text-foreground/40">
+            <Settings size={16} />
+            {(hasUpdate || hasEnvironmentIssues) && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+            )}
+          </div>
+        </button>
       </div>
 
       {deleteDialog}
       {moveDialog}
+      <SearchDialog />
     </div>
   )
 }
@@ -947,6 +1083,7 @@ interface ConversationItemProps {
   onRequestDelete: () => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
+  onToggleArchive: (id: string) => Promise<void>
   onMouseEnter: () => void
   onMouseLeave: () => void
 }
@@ -961,6 +1098,7 @@ function ConversationItem({
   onRequestDelete,
   onRename,
   onTogglePin,
+  onToggleArchive,
   onMouseEnter,
   onMouseLeave,
 }: ConversationItemProps): React.ReactElement {
@@ -1075,7 +1213,7 @@ function ConversationItem({
               {isPinned ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{isPinned ? '取消置顶' : '置顶对话'}</TooltipContent>
+          <TooltipContent side="top">{isPinned ? '取消置顶' : '置顶对话'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1089,7 +1227,21 @@ function ConversationItem({
               <Pencil size={13} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">重命名</TooltipContent>
+          <TooltipContent side="top">重命名</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleArchive(conversation.id)
+              }}
+              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
+            >
+              {conversation.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{conversation.archived ? '取消归档' : '归档'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1103,7 +1255,7 @@ function ConversationItem({
               <Trash2 size={13} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">删除对话</TooltipContent>
+          <TooltipContent side="top">删除对话</TooltipContent>
         </Tooltip>
       </div>
     </div>
@@ -1123,6 +1275,7 @@ interface AgentSessionItemProps {
   onRequestMove: () => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
+  onToggleArchive: (id: string) => Promise<void>
   onMouseEnter: () => void
   onMouseLeave: () => void
 }
@@ -1138,6 +1291,7 @@ function AgentSessionItem({
   onRequestMove,
   onRename,
   onTogglePin,
+  onToggleArchive,
   onMouseEnter,
   onMouseLeave,
 }: AgentSessionItemProps): React.ReactElement {
@@ -1243,7 +1397,7 @@ function AgentSessionItem({
               {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{session.pinned ? '取消置顶' : '置顶会话'}</TooltipContent>
+          <TooltipContent side="top">{session.pinned ? '取消置顶' : '置顶会话'}</TooltipContent>
         </Tooltip>
         {!running && (
           <Tooltip>
@@ -1258,7 +1412,7 @@ function AgentSessionItem({
                 <ArrowRightLeft size={13} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">迁移到其他工作区</TooltipContent>
+            <TooltipContent side="top">迁移到其他工作区</TooltipContent>
           </Tooltip>
         )}
         <Tooltip>
@@ -1273,7 +1427,21 @@ function AgentSessionItem({
               <Pencil size={13} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">重命名</TooltipContent>
+          <TooltipContent side="top">重命名</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleArchive(session.id)
+              }}
+              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
+            >
+              {session.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{session.archived ? '取消归档' : '归档'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1287,7 +1455,7 @@ function AgentSessionItem({
               <Trash2 size={13} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">删除会话</TooltipContent>
+          <TooltipContent side="top">删除会话</TooltipContent>
         </Tooltip>
       </div>
     </div>

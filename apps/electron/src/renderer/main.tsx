@@ -18,6 +18,7 @@ import {
 import {
   agentChannelIdAtom,
   agentModelIdAtom,
+  agentChannelIdsAtom,
   agentWorkspacesAtom,
   currentAgentWorkspaceIdAtom,
   currentAgentSessionIdAtom,
@@ -54,17 +55,21 @@ import { tabsAtom, splitLayoutAtom } from './atoms/tab-atoms'
 import type { TabItem, SplitLayoutState } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBridgeStateAtom } from './atoms/feishu-atoms'
-import { currentConversationIdAtom } from './atoms/chat-atoms'
+import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import type { FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
-import { diffCapabilities } from '@proma/shared'
+import { diffCapabilities, migratePermissionMode } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { UpdateDialog } from './components/settings/UpdateDialog'
+import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
+
+// ===== 窗口类型检测 =====
+const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 
 /**
  * 主题初始化组件
@@ -113,6 +118,7 @@ function ThemeInitializer(): null {
 function AgentSettingsInitializer(): null {
   const setAgentChannelId = useSetAtom(agentChannelIdAtom)
   const setAgentModelId = useSetAtom(agentModelIdAtom)
+  const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
   const setAgentWorkspaces = useSetAtom(agentWorkspacesAtom)
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
@@ -122,6 +128,10 @@ function AgentSettingsInitializer(): null {
   const setEffort = useSetAtom(agentEffortAtom)
   const setMaxBudget = useSetAtom(agentMaxBudgetUsdAtom)
   const setMaxTurns = useSetAtom(agentMaxTurnsAtom)
+
+  const setChannels = useSetAtom(channelsAtom)
+  const setChannelsLoaded = useSetAtom(channelsLoadedAtom)
+  const store = useStore()
 
   // 读取当前工作区信息（用于能力变化 diff）
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
@@ -133,16 +143,55 @@ function AgentSettingsInitializer(): null {
   const suppressToastRef = useRef(true)
 
   useEffect(() => {
-    // 加载设置
-    window.electronAPI.getSettings().then((settings) => {
-      if (settings.agentChannelId) {
-        setAgentChannelId(settings.agentChannelId)
+    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性
+    Promise.all([
+      window.electronAPI.listChannels(),
+      window.electronAPI.getSettings(),
+    ]).then(([channels, settings]) => {
+      // 缓存渠道列表
+      setChannels(channels)
+      setChannelsLoaded(true)
+
+      const channelIds = new Set(channels.map((c) => c.id))
+
+      // 验证 Chat 模式的全局默认模型（localStorage 持久化的可能指向已删除渠道）
+      const chatModel = store.get(selectedModelAtom)
+      if (chatModel && !channelIds.has(chatModel.channelId)) {
+        console.warn('[AgentSettings] Chat selectedModel 指向已删除的渠道，清除')
+        store.set(selectedModelAtom, null)
       }
-      if (settings.agentModelId) {
+
+      // 验证并加载 Agent 渠道/模型
+      if (settings.agentChannelId && channelIds.has(settings.agentChannelId)) {
+        setAgentChannelId(settings.agentChannelId)
+      } else if (settings.agentChannelId && !channelIds.has(settings.agentChannelId)) {
+        // 渠道已删除，清除无效设置
+        console.warn('[AgentSettings] agentChannelId 指向已删除的渠道，清除')
+        window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined }).catch(console.error)
+      }
+      if (settings.agentModelId && (!settings.agentChannelId || channelIds.has(settings.agentChannelId))) {
         setAgentModelId(settings.agentModelId)
       }
+
+      // 加载 Agent 启用渠道列表，过滤已删除的渠道
+      if (settings.agentChannelIds && settings.agentChannelIds.length > 0) {
+        const validIds = settings.agentChannelIds.filter((id) => channelIds.has(id))
+        setAgentChannelIds(validIds)
+        // 如果有渠道被清理，持久化更新后的列表
+        if (validIds.length !== settings.agentChannelIds.length) {
+          console.warn('[AgentSettings] 清理了已删除的 agentChannelIds')
+          window.electronAPI.updateSettings({ agentChannelIds: validIds }).catch(console.error)
+        }
+      } else if (settings.agentChannelId && channelIds.has(settings.agentChannelId)) {
+        // 迁移：旧版本只有 agentChannelId，自动转为数组
+        const migrated = [settings.agentChannelId]
+        setAgentChannelIds(migrated)
+        window.electronAPI.updateSettings({ agentChannelIds: migrated }).catch(console.error)
+      }
+
       if (settings.agentPermissionMode) {
-        setPermissionMode(settings.agentPermissionMode)
+        // 迁移旧权限模式值（auto/smart/supervised → acceptEdits/bypassPermissions/plan）
+        setPermissionMode(migratePermissionMode(settings.agentPermissionMode))
       }
       if (settings.agentThinking) {
         setThinking(settings.agentThinking)
@@ -169,7 +218,7 @@ function AgentSettingsInitializer(): null {
         }
       }).catch(console.error)
     }).catch(console.error)
-  }, [setAgentChannelId, setAgentModelId, setAgentWorkspaces, setCurrentWorkspaceId, setPermissionMode, setThinking, setEffort, setMaxBudget, setMaxTurns])
+  }, [setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentWorkspaces, setCurrentWorkspaceId, setPermissionMode, setThinking, setEffort, setMaxBudget, setMaxTurns, setChannels, setChannelsLoaded])
 
   // 工作区切换时重置能力缓存，预加载基线
   useEffect(() => {
@@ -464,22 +513,36 @@ function FeishuInitializer(): null {
   return null
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ThemeInitializer />
-    <CloudAuthInitializer />
-    <BillingInitializer />
-    <OfficialChannelInitializer />
-    <ModelHealthInitializer />
-    <AgentSettingsInitializer />
-    <NotificationsInitializer />
-    <ChatListenersInitializer />
-    <AgentListenersInitializer />
-    <ChatToolInitializer />
-    <UpdaterInitializer />
-    <FeishuInitializer />
-    <App />
-    <UpdateDialog />
-    <Toaster position="top-right" />
-  </React.StrictMode>
-)
+// ===== 快速任务窗口：轻量渲染 =====
+if (isQuickTaskWindow) {
+  import('./components/quick-task/QuickTaskApp').then(({ QuickTaskApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <QuickTaskApp />
+      </React.StrictMode>
+    )
+  })
+} else {
+  // ===== 主窗口：完整渲染 =====
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <ThemeInitializer />
+      <CloudAuthInitializer />
+      <BillingInitializer />
+      <OfficialChannelInitializer />
+      <ModelHealthInitializer />
+      <AgentSettingsInitializer />
+      <NotificationsInitializer />
+      <ChatListenersInitializer />
+      <AgentListenersInitializer />
+      <ChatToolInitializer />
+      <UpdaterInitializer />
+      <FeishuInitializer />
+      <GlobalShortcuts />
+      <App />
+      <UpdateDialog />
+      <Toaster position="top-right" />
+    </React.StrictMode>
+  )
+}

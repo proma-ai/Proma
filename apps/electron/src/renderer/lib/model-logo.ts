@@ -183,7 +183,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   // === Zhipu / 智谱 ===
   zhipu: ZhipuLogo,
   cogview: ZhipuLogo,
-  glm: ChatGLMLogo,
+  glm: ZhipuLogo,
 
   // === Meta / Llama ===
   llama: LlamaLogo,
@@ -333,6 +333,23 @@ export function getChannelLogo(baseUrl: string): string {
     }
   }
   return DefaultLogo
+}
+
+/**
+ * 根据模型 ID 在渠道列表中查找显示名称
+ *
+ * 优先返回别名（name !== id），未找到则返回原始 modelId。
+ * 用于将 SDK 返回的 model ID 转为用户友好的显示名称。
+ */
+export function resolveModelDisplayName(modelId: string, channels: import('@proma/shared').Channel[]): string {
+  for (const channel of channels) {
+    for (const model of channel.models) {
+      if (model.id === modelId && model.name && model.name !== model.id) {
+        return model.name
+      }
+    }
+  }
+  return modelId
 }
 
 /** 默认模型图标 */

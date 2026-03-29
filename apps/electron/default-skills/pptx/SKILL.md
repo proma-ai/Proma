@@ -2,8 +2,10 @@
 name: pptx
 description: "Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill."
 license: Proprietary. LICENSE.txt has complete terms
+version: "1.0.0"
 ---
-
+version: "1.0.0"
+---
 # PPTX Skill
 
 ## Quick Reference
@@ -15,7 +17,8 @@ license: Proprietary. LICENSE.txt has complete terms
 | Create from scratch | Read [pptxgenjs.md](pptxgenjs.md) |
 
 ---
-
+version: "1.0.0"
+---
 ## Reading Content
 
 ```bash
@@ -30,7 +33,8 @@ python scripts/office/unpack.py presentation.pptx unpacked/
 ```
 
 ---
-
+version: "1.0.0"
+---
 ## Editing Workflow
 
 **Read [editing.md](editing.md) for full details.**
@@ -39,7 +43,8 @@ python scripts/office/unpack.py presentation.pptx unpacked/
 2. Unpack → manipulate slides → edit content → clean → pack
 
 ---
-
+version: "1.0.0"
+---
 ## Creating from Scratch
 
 **Read [pptxgenjs.md](pptxgenjs.md) for full details.**
@@ -47,7 +52,8 @@ python scripts/office/unpack.py presentation.pptx unpacked/
 Use when no template or reference presentation is available.
 
 ---
-
+version: "1.0.0"
+---
 ## Design Ideas
 
 **Don't create boring slides.** Plain bullets on a white background won't impress anyone. Consider ideas from this list for each slide.
@@ -137,7 +143,8 @@ Choose colors that match your topic — don't default to generic blue. Use these
 - **NEVER use accent lines under titles** — these are a hallmark of AI-generated slides; use whitespace or background color instead
 
 ---
-
+version: "1.0.0"
+---
 ## QA (Required)
 
 **Assume there are problems. Your job is to find them.**
@@ -203,7 +210,8 @@ Report ALL issues found, including minor ones.
 **Do not declare success until you've completed at least one fix-and-verify cycle.**
 
 ---
-
+version: "1.0.0"
+---
 ## Converting to Images
 
 Convert presentations to individual slide images for visual inspection:
@@ -222,7 +230,8 @@ pdftoppm -jpeg -r 150 -f N -l N output.pdf slide-fixed
 ```
 
 ---
-
+version: "1.0.0"
+---
 ## Dependencies
 
 - `pip install "markitdown[pptx]"` - text extraction
