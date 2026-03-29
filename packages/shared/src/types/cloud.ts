@@ -424,6 +424,8 @@ export interface AgentUsageLogItem {
   outputTokens: number
   cacheCreationInputTokens: number
   cacheReadInputTokens: number
+  webSearchRequests: number
+  webFetchRequests: number
   totalCost: number | string
   responseStatus: number | null
   durationMs: number | null

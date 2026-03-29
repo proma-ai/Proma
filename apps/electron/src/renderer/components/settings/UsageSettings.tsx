@@ -451,6 +451,9 @@ function AgentUsageTable({
             <TableHead>端点</TableHead>
             <TableHead className="text-right">输入</TableHead>
             <TableHead className="text-right">输出</TableHead>
+            <TableHead className="text-right">缓存写</TableHead>
+            <TableHead className="text-right">缓存读</TableHead>
+            <TableHead className="text-right">工具调用</TableHead>
             <TableHead className="text-center">状态码</TableHead>
             <TableHead className="text-right">耗时</TableHead>
             <TableHead className="text-right">费用</TableHead>
@@ -465,6 +468,17 @@ function AgentUsageTable({
               <TableCell className="text-xs truncate max-w-[120px]">{item.endpoint}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.cacheCreationInputTokens > 0 ? formatTokens(item.cacheCreationInputTokens) : '-'}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.cacheReadInputTokens > 0 ? formatTokens(item.cacheReadInputTokens) : '-'}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.webSearchRequests + item.webFetchRequests > 0
+                  ? item.webSearchRequests + item.webFetchRequests
+                  : '-'}
+              </TableCell>
               <TableCell className="text-center">
                 {item.responseStatus !== null ? (
                   <span className={`inline-block px-1.5 py-0.5 rounded text-xs ${
