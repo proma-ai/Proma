@@ -1,5 +1,9 @@
 # Proma
 
+<video width="560" controls>
+  <source src="https://img.erlich.fun/personal-blog/uPic/%E7%AE%80%E5%8D%95%E4%BB%8B%E7%BB%8D%20Proma.mp4" type="video/mp4">
+</video>
+
 > **📖 新手？从这里开始 →** [**Proma 使用教程系列(点击此处)**](./tutorial/tutorial.md) — 从零开始配置环境、连接大模型，3-5 分钟即可上手。
 
 下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams **等能力**，本地优先、多供应商支持、完全开源。支持远程通过飞书机器人与 Agent 对话和交互，甚至把 Proma Agent 拉进群组替你完成工作，跟同事实现 Agent 协作，让你用手机也可以处理很多必要的工作。

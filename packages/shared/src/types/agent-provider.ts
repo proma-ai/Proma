@@ -54,4 +54,6 @@ export interface AgentProviderAdapter {
   sendQueuedMessage?(sessionId: string, message: SDKUserMessageInput): Promise<void>
   /** 取消队列中的待发送消息（可选） */
   cancelQueuedMessage?(sessionId: string, messageUuid: string): Promise<void>
+  /** 动态切换活跃查询的权限模式（可选，仅支持 SDK 原生 setPermissionMode 的 Provider） */
+  setPermissionMode?(sessionId: string, mode: string): Promise<void>
 }

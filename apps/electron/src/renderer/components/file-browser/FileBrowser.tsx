@@ -248,7 +248,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded }: FileBrowserProp
   )
 
   return (
-    <div className={cn('flex flex-col bg-background', !embedded && 'h-full')}>
+    <div className={cn('flex flex-col', !embedded && 'h-full')}>
       {/* 顶部工具栏（可由外部接管） */}
       {!hideToolbar && (
         <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
@@ -496,7 +496,7 @@ function FileTreeItem({
     <>
       <div
         className={cn(
-          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group',
+          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg',
           isSelected ? 'bg-accent' : 'hover:bg-accent/50',
         )}
         style={{ paddingLeft }}

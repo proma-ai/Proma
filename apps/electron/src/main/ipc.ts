@@ -127,7 +127,7 @@ import {
   autoArchiveAgentSessions,
   searchAgentSessionMessages,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -952,7 +952,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 设置工作区权限模式
+  // 设置工作区权限模式（同时更新运行中的活跃 session）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_PERMISSION_MODE,
     async (_, workspaceSlug: string, mode: PromaPermissionMode): Promise<void> => {
@@ -960,7 +960,17 @@ export function registerIpcHandlers(): void {
       if (!validModes.has(mode)) {
         throw new Error(`无效的权限模式: ${mode}`)
       }
+      // 持久化到工作区配置
       setWorkspacePermissionMode(workspaceSlug, mode)
+      // 同步更新该工作区下所有运行中的 session
+      const sessions = listAgentSessions()
+      for (const session of sessions) {
+        if (session.workspaceId === workspaceSlug && isAgentSessionActive(session.id)) {
+          updateAgentPermissionMode(session.id, mode).catch((err) => {
+            console.warn(`[IPC] 运行中权限模式切换失败: sessionId=${session.id}`, err)
+          })
+        }
+      }
     }
   )
 
@@ -1172,9 +1182,6 @@ export function registerIpcHandlers(): void {
 
         // 如果用户选择了新的权限模式，通知渲染进程更新 UI
         if (targetMode) {
-          const { setWorkspacePermissionMode } = await import('./lib/agent-workspace-manager')
-          // 尝试获取当前会话的 workspaceSlug
-          const { getAgentSessionMeta } = await import('./lib/agent-session-manager')
           const meta = getAgentSessionMeta(sessionId)
           if (meta?.workspaceId) {
             setWorkspacePermissionMode(meta.workspaceId, targetMode)

@@ -15,15 +15,23 @@ export interface ShortcutOverrides {
 }
 
 /** 主题模式 */
-export type ThemeMode = 'light' | 'dark' | 'system'
+export type ThemeMode = 'light' | 'dark' | 'system' | 'special'
+
+/** 特殊风格主题 */
+export type ThemeStyle = 'default' | 'ocean-light' | 'ocean-dark' | 'forest-light' | 'forest-dark' | 'slate-light' | 'slate-dark'
 
 /** 默认主题模式 */
 export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
+
+/** 默认特殊风格 */
+export const DEFAULT_THEME_STYLE: ThemeStyle = 'default'
 
 /** 应用设置 */
 export interface AppSettings {
   /** 主题模式 */
   themeMode: ThemeMode
+  /** 特殊风格主题 */
+  themeStyle?: ThemeStyle
   /** Agent 默认渠道 ID（仅限 Anthropic 渠道） — 当前选中的渠道 */
   agentChannelId?: string
   /** Agent 默认模型 ID */

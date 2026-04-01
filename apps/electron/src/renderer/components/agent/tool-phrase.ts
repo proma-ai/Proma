@@ -231,6 +231,102 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
       return phrase('生成图片')
     }
 
+    case 'TaskOutput': {
+      const taskId = input.task_id ?? input.taskId
+      if (typeof taskId === 'string') return phrase(`获取任务 #${taskId} 输出`)
+      return phrase('获取任务输出')
+    }
+
+    case 'TaskStop': {
+      const taskId = input.task_id ?? input.taskId
+      if (typeof taskId === 'string') return phrase(`停止任务 #${taskId}`)
+      return phrase('停止任务')
+    }
+
+    case 'AskUserQuestion': {
+      const questions = input.questions
+      if (Array.isArray(questions) && questions.length > 0) {
+        const first = questions[0] as Record<string, unknown>
+        if (typeof first.question === 'string') {
+          return phrase(`询问 ${truncate(first.question, 60)}`)
+        }
+      }
+      return phrase('等待用户输入')
+    }
+
+    case 'CronCreate': {
+      const cron = input.cron
+      const prompt = input.prompt
+      if (typeof cron === 'string' && typeof prompt === 'string') {
+        return phrase(`创建定时任务 ${cron} · ${truncate(prompt, 40)}`)
+      }
+      if (typeof cron === 'string') return phrase(`创建定时任务 ${cron}`)
+      return phrase('创建定时任务')
+    }
+
+    case 'CronDelete': {
+      const id = input.id
+      if (typeof id === 'string') return phrase(`删除定时任务 ${id}`)
+      return phrase('删除定时任务')
+    }
+
+    case 'CronList': {
+      return phrase('列出定时任务')
+    }
+
+    case 'RemoteTrigger': {
+      const action = input.action
+      const triggerId = input.trigger_id
+      const actionMap: Record<string, string> = {
+        list: '列出',
+        get: '获取',
+        create: '创建',
+        update: '更新',
+        run: '运行',
+      }
+      const actionLabel = typeof action === 'string' ? (actionMap[action] ?? action) : undefined
+      if (actionLabel && typeof triggerId === 'string') {
+        return phrase(`${actionLabel}远程触发器 ${triggerId}`)
+      }
+      if (actionLabel) return phrase(`${actionLabel}远程触发器`)
+      return phrase('远程触发器')
+    }
+
+    case 'EnterWorktree': {
+      const name = input.name
+      if (typeof name === 'string') return phrase(`进入 Worktree ${name}`)
+      return phrase('进入 Worktree')
+    }
+
+    case 'ExitWorktree': {
+      const action = input.action
+      if (action === 'remove') return phrase('退出并删除 Worktree')
+      if (action === 'keep') return phrase('退出 Worktree')
+      return phrase('退出 Worktree')
+    }
+
+    case 'ReadMcpResourceTool': {
+      const server = input.server
+      const uri = input.uri
+      if (typeof server === 'string' && typeof uri === 'string') {
+        return phrase(`读取 MCP 资源 ${server} / ${truncate(uri, 40)}`)
+      }
+      if (typeof uri === 'string') return phrase(`读取 MCP 资源 ${truncate(uri, 60)}`)
+      return phrase('读取 MCP 资源')
+    }
+
+    case 'ListMcpResourcesTool': {
+      const server = input.server
+      if (typeof server === 'string') return phrase(`列出 ${server} 的 MCP 资源`)
+      return phrase('列出 MCP 资源')
+    }
+
+    case 'SendMessage': {
+      const to = input.to
+      if (typeof to === 'string') return phrase(`发送消息给 ${to}`)
+      return phrase('发送消息')
+    }
+
     default: {
       // MCP 工具：mcp__serverName__toolName
       const mcpParts = toolName.split('__')

@@ -115,6 +115,8 @@ export interface ChatMessage {
   reasoning?: string
   /** 是否被用户中止 */
   stopped?: boolean
+  /** 流式生成时遇到的错误信息 */
+  error?: string
   /** 文件附件列表 */
   attachments?: FileAttachment[]
   /** 输入 Token 数量（云端同步字段） */
@@ -308,8 +310,10 @@ export interface ChatToolActivity {
   type: 'start' | 'result'
   /** 执行结果（仅 result 时存在） */
   result?: string
-  /** 是否出错 */
+  /** 是否遇到错误 */
   isError?: boolean
+  /** 工具调用参数（result 事件中携带，用于语义化短语和结构化结果渲染） */
+  input?: Record<string, unknown>
 }
 
 /**

@@ -764,7 +764,7 @@ export function getGroupId(group: MessageGroup): string {
  */
 export function getGroupPreview(group: MessageGroup): string {
   if (group.type === 'user') {
-    return (extractUserText(group.message) ?? '').replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 80)
+    return (extractUserText(group.message) ?? '').replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 200)
   }
   if (group.type === 'system') {
     if (group.message.subtype === 'compact_boundary') return '上下文已压缩'
@@ -782,7 +782,7 @@ export function getGroupPreview(group: MessageGroup): string {
       }
     }
   }
-  return texts.join(' ').slice(0, 80)
+  return texts.join(' ').slice(0, 200)
 }
 
 export function MessageGroupRenderer({ group, allMessages, basePath, onFork, isStreaming }: MessageGroupRendererProps): React.ReactElement | null {

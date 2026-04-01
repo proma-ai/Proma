@@ -214,42 +214,30 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   return (
     <div
       className={cn(
-        'relative flex-shrink-0 overflow-hidden titlebar-drag-region',
+        'relative h-full flex-shrink-0 overflow-hidden titlebar-drag-region bg-content-area/95 backdrop-blur-xl rounded-2xl shadow-xl',
         animateRef.current && 'transition-[width] duration-300 ease-in-out',
-        isOpen ? 'w-[320px] border-l' : hasContent ? 'w-10' : 'w-0',
+        isOpen ? 'w-[320px]' : hasContent ? 'w-10' : 'w-0',
       )}
     >
-      {/* 切换按钮 — 始终固定在右上角 */}
-      {hasContent && (
+      {/* 面板关闭时的打开按钮 */}
+      {hasContent && !isOpen && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="absolute right-2.5 top-2.5 z-10 h-7 w-7 titlebar-no-drag"
-              onClick={() => setIsOpen((prev) => !prev)}
+              className="absolute left-1/2 -translate-x-1/2 top-3 z-10 h-7 w-7 titlebar-no-drag"
+              onClick={() => setIsOpen(true)}
             >
-              <PanelRight
-                className={cn(
-                  'size-3.5 absolute transition-all duration-200',
-                  isOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100',
-                )}
-              />
-              <X
-                className={cn(
-                  'size-3.5 absolute transition-all duration-200',
-                  isOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75',
-                )}
-              />
-              {/* 活动指示点（面板关闭时显示） */}
-              {!isOpen && hasFileChanges && (
+              <PanelRight className="size-3.5" />
+              {hasFileChanges && (
                 <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse" />
               )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left">
-            <p>{isOpen ? '关闭侧面板' : '打开侧面板'}</p>
+            <p>打开侧面板</p>
           </TooltipContent>
         </Tooltip>
       )}
@@ -258,20 +246,11 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
       {hasContent && (
         <div
           className={cn(
-            'w-[320px] h-full flex flex-col titlebar-no-drag',
+            'w-[320px] h-full flex flex-col titlebar-no-drag pt-3',
             animateRef.current && 'transition-opacity duration-300',
             isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
           )}
         >
-          {/* 标题栏 */}
-          <div className="flex items-center gap-1 px-3 pr-10 h-[48px] border-b flex-shrink-0">
-            <FolderOpen className="size-3.5 text-muted-foreground" />
-            <span className="text-xs font-medium">文件</span>
-            {hasFileChanges && (
-              <span className="ml-0.5 size-1.5 rounded-full bg-primary" />
-            )}
-          </div>
-
           {/* 文件浏览内容 */}
           {sessionPath && workspaceSlug ? (
             <div className="flex-1 min-h-0 flex flex-col">
@@ -322,6 +301,23 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                         <p>刷新文件列表</p>
                       </TooltipContent>
                     </Tooltip>
+                    {/* 关闭/打开面板按钮 */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 flex-shrink-0"
+                          onClick={() => setIsOpen((prev) => !prev)}
+                        >
+                          <X className="size-2.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p>关闭侧面板</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                   {/* 会话文件内容区（独立滚动） */}
                   <div className="flex-1 min-h-0 overflow-y-auto">
@@ -346,16 +342,16 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                   </div>
 
                   {/* ===== 分隔线 ===== */}
-                  <div className="mx-3 my-3 border-t border-dashed border-muted-foreground/20" />
+                  <div className="mx-3 my-3 border-t border-muted-foreground/20" />
 
                   {/* ===== 工作区文件区 ===== */}
-                  <div className="flex-1 min-h-0 flex flex-col bg-muted/30 rounded-lg mx-2 mb-2">
+                  <div className="flex-1 min-h-0 flex flex-col mx-2 mb-2">
                     <div className="flex items-center gap-1 px-2 h-[32px] flex-shrink-0">
-                      <FolderHeart className="size-3 text-primary/70" />
-                      <span className="text-[11px] font-medium text-primary/70">工作区文件</span>
+                      <FolderHeart className="size-3 text-muted-foreground" />
+                      <span className="text-[11px] font-medium text-muted-foreground">工作区文件</span>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Info className="size-3 text-primary/40 cursor-help" />
+                          <Info className="size-3 text-muted-foreground/50 cursor-help" />
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-[220px]">
                           <p>工作区内所有会话可访问的文件和文件夹，每个新对话都可以自动读取</p>
@@ -406,8 +402,29 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                   </div>
                 </div>
               ) : (
-                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                  请选择工作区
+                <div className="flex-1 flex flex-col">
+                  {/* 顶部关闭按钮 */}
+                  <div className="flex items-center justify-end px-3 h-[32px] flex-shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 flex-shrink-0"
+                          onClick={() => setIsOpen((prev) => !prev)}
+                        >
+                          <X className="size-2.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p>关闭侧面板</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+                    请选择工作区
+                  </div>
                 </div>
               )}
         </div>

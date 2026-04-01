@@ -7,11 +7,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        border: 'hsl(var(--border))',
+        border: 'hsl(var(--border) / <alpha-value>)',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        background: 'hsl(var(--background) / <alpha-value>)',
+        foreground: 'hsl(var(--foreground) / <alpha-value>)',
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
@@ -40,6 +40,16 @@ export default {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',
         },
+        dialog: {
+          DEFAULT: 'hsl(var(--dialog))',
+          foreground: 'hsl(var(--dialog-foreground))',
+        },
+        tooltip: {
+          DEFAULT: 'hsl(var(--tooltip) / <alpha-value>)',
+          foreground: 'hsl(var(--tooltip-foreground) / <alpha-value>)',
+          muted: 'hsl(var(--tooltip-muted) / <alpha-value>)',
+        },
+        'content-area': 'hsl(var(--content-area) / <alpha-value>)',
       },
       keyframes: {
         'slide-in-from-top': {

@@ -20,16 +20,18 @@ import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, 
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
+import { Badge } from '@/components/ui/badge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
 import { AskUserBanner } from './AskUserBanner'
 import { ExitPlanModeBanner } from './ExitPlanModeBanner'
-import { SidePanel } from './SidePanel'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { FeishuNotifyToggle } from '@/components/chat/FeishuNotifyToggle'
 import {
@@ -55,16 +57,97 @@ import {
   agentThinkingAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
+  agentSessionPathMapAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
-import { channelsAtom } from '@/atoms/chat-atoms'
+import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption, SDKMessage } from '@proma/shared'
 import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { fileToBase64 } from '@/lib/file-utils'
+
+// ===== 思考模式 Hover Popover =====
+
+interface AgentThinkingPopoverProps {
+  agentThinking: import('@proma/shared').ThinkingConfig | undefined
+  onToggle: () => void
+}
+
+function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverProps): React.ReactElement {
+  const [thinkingExpanded, setThinkingExpanded] = useAtom(thinkingExpandedAtom)
+  const [open, setOpen] = React.useState(false)
+  const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const isEnabled = agentThinking?.type === 'adaptive'
+
+  const handleMouseEnter = React.useCallback(() => {
+    if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
+    setOpen(true)
+  }, [])
+
+  const handleMouseLeave = React.useCallback(() => {
+    hoverTimeout.current = setTimeout(() => setOpen(false), 150)
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
+    }
+  }, [])
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'size-[36px] rounded-full',
+            isEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+          )}
+          onClick={onToggle}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          <Brain className="size-5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="center"
+        sideOffset={8}
+        className="w-auto min-w-[160px] p-2 px-2.5"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs text-foreground/70">思考模式</span>
+            <Switch
+              checked={isEnabled}
+              onCheckedChange={onToggle}
+              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+            />
+          </div>
+          <div className="h-px bg-border" />
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs text-foreground/70">展开思考</span>
+            <Switch
+              checked={thinkingExpanded}
+              onCheckedChange={setThinkingExpanded}
+              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+            />
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export function AgentView({ sessionId }: { sessionId: string }): React.ReactElement {
   const [messages, setMessages] = React.useState<AgentMessage[]>([])
@@ -73,6 +156,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const streamingStates = useAtomValue(agentStreamingStatesAtom)
   const streamState = streamingStates.get(sessionId)
   const streaming = streamState?.running ?? false
+  const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
+  const stoppedByUser = stoppedByUserSessions.has(sessionId)
   const liveMessagesMap = useAtomValue(liveMessagesMapAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
   const liveMessages = liveMessagesMap.get(sessionId) ?? []
@@ -157,7 +242,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftsMap])
-  const [sessionPath, setSessionPath] = React.useState<string | null>(null)
+  const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
+  const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
+  const sessionPath = sessionPathMap.get(sessionId) ?? null
   const [workspaceFilesPath, setWorkspaceFilesPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
@@ -203,15 +290,39 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
     if (!currentWorkspaceId) {
-      setSessionPath(null)
+      setSessionPathMap((prev) => {
+        const map = new Map(prev)
+        map.delete(sessionId)
+        return map
+      })
       return
     }
 
     window.electronAPI
       .getAgentSessionPath(currentWorkspaceId, sessionId)
-      .then(setSessionPath)
-      .catch(() => setSessionPath(null))
-  }, [sessionId, currentWorkspaceId])
+      .then((path) => {
+        if (path) {
+          setSessionPathMap((prev) => {
+            const map = new Map(prev)
+            map.set(sessionId, path)
+            return map
+          })
+        } else {
+          setSessionPathMap((prev) => {
+            const map = new Map(prev)
+            map.delete(sessionId)
+            return map
+          })
+        }
+      })
+      .catch(() => {
+        setSessionPathMap((prev) => {
+          const map = new Map(prev)
+          map.delete(sessionId)
+          return map
+        })
+      })
+  }, [sessionId, currentWorkspaceId, setSessionPathMap])
 
   // 获取工作区共享文件目录路径（@ 引用时需要搜索）
   const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
@@ -623,8 +734,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         sessionId,
         userMessage: effectiveText,
         uuid: localUuid,
-      }).then(() => {
-        toast.info('消息已追加发送')
       }).catch((error) => {
         console.error('[AgentView] 追加消息失败:', error)
         toast.error('追加消息失败', { description: String(error) })
@@ -976,7 +1085,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   return (
     <AgentSessionProvider sessionId={sessionId}>
-    <div className="flex h-full overflow-hidden">
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0 max-w-[min(72rem,100%)] mx-auto">
         {/* Agent Header */}
@@ -1031,10 +1139,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <ExitPlanModeBanner sessionId={sessionId} />
 
         {/* 输入区域 — 复用 Chat 的卡片式输入风格 */}
-        <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px] pt-2" data-input-mode="agent">
+        <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="agent">
           <div
             className={cn(
-              'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm pt-2 transition-all duration-200',
+              'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm transition-all duration-200',
               isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
             )}
             onDragOver={handleDragOver}
@@ -1127,41 +1235,24 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                       useAgentModels
                     />
                     <PermissionModeSelector />
-                    {/* 思考模式切换 */}
+                    {/* 思考模式切换 + 展开偏好 */}
+                    <AgentThinkingPopover
+                      agentThinking={agentThinking}
+                      onToggle={() => {
+                        const next = agentThinking?.type === 'adaptive'
+                          ? { type: 'disabled' as const }
+                          : { type: 'adaptive' as const }
+                        setAgentThinking(next)
+                        window.electronAPI.updateSettings({ agentThinking: next })
+                      }}
+                    />
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className={cn(
-                            'size-[36px] rounded-full',
-                            agentThinking?.type === 'adaptive'
-                              ? 'text-green-500'
-                              : 'text-foreground/60 hover:text-foreground'
-                          )}
-                          onClick={() => {
-                            const next = agentThinking?.type === 'adaptive'
-                              ? { type: 'disabled' as const }
-                              : { type: 'adaptive' as const }
-                            setAgentThinking(next)
-                            window.electronAPI.updateSettings({ agentThinking: next })
-                          }}
-                        >
-                          <Brain className="size-5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        <p>{agentThinking?.type === 'adaptive' ? '关闭思考模式' : '开启思考模式（自适应）'}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
+                          className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
                           onClick={handleOpenFileDialog}
                         >
                           <Paperclip className="size-5" />
@@ -1177,7 +1268,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
+                          className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
                           onClick={handleAttachFolder}
                         >
                           <FolderPlus className="size-5" />
@@ -1197,7 +1288,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                       isProcessing={streaming}
                       onCompact={handleCompact}
                     />
-                    <FeishuNotifyToggle sessionId={sessionId} />
+                    {!streaming && stoppedByUser && (
+                      <Badge variant="outline" className="text-xs text-muted-foreground/70 border-muted-foreground/30 shrink-0">
+                        已被用户中断
+                      </Badge>
+                    )}
+                    {/* <FeishuNotifyToggle sessionId={sessionId} /> */}
                   </>
                 )}
               </div>
@@ -1235,10 +1331,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           </div>
         </div>
       </div>
-
-      {/* 侧面板（Team Activity + File Browser） */}
-      <SidePanel sessionId={sessionId} sessionPath={sessionPath} />
-    </div>
     </AgentSessionProvider>
   )
 }

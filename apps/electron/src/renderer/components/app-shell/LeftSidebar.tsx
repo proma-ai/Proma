@@ -99,8 +99,8 @@ function SidebarItem({ icon, label, active, suffix, onClick }: SidebarItemProps)
       className={cn(
         'w-full flex items-center justify-between px-3 py-2 rounded-[10px] text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
-          ? 'bg-foreground/[0.08] dark:bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/60 hover:bg-foreground/[0.04] dark:hover:bg-foreground/[0.04] hover:text-foreground'
+          ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-primary/5 hover:text-foreground'
       )}
     >
       <div className="flex items-center gap-3">
@@ -321,6 +321,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       .catch(console.error)
   }, [isAuthenticated, setHasDownloadedAll])
 
+  // 窗口聚焦时重新同步列表，修复长时间后前后端不一致
+  React.useEffect(() => {
+    const handleFocus = (): void => {
+      window.electronAPI.listConversations().then(setConversations).catch(console.error)
+      window.electronAPI.listAgentSessions().then(setAgentSessions).catch(console.error)
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [setConversations, setAgentSessions])
+
   /** 处理导航项点击 */
   const handleItemClick = (item: SidebarItemId): void => {
     if (item === 'pinned') {
@@ -411,6 +421,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       setConversations((prev) =>
         prev.map((c) => (c.id === updated.id ? updated : c))
       )
+      // 归档时自动关闭该对话的标签页
+      if (updated.archived) {
+        const tabResult = closeTab(tabs, layout, id)
+        setTabs(tabResult.tabs)
+        setLayout(tabResult.layout)
+        // 如果归档的是当前选中的对话，取消选中
+        if (currentConversationId === id) {
+          setCurrentConversationId(null)
+        }
+      }
       toast.success(updated.archived ? '已归档' : '已取消归档')
     } catch (error) {
       console.error('[侧边栏] 切换归档失败:', error)
@@ -441,12 +461,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       // Agent 模式：删除 Agent 会话
       try {
         await window.electronAPI.deleteAgentSession(pendingDeleteId)
-        setAgentSessions((prev) => prev.filter((s) => s.id !== pendingDeleteId))
+        // 全量刷新确保与后端同步
+        const sessions = await window.electronAPI.listAgentSessions()
+        setAgentSessions(sessions)
         if (currentAgentSessionId === pendingDeleteId) {
           setCurrentAgentSessionId(null)
         }
       } catch (error) {
         console.error('[侧边栏] 删除 Agent 会话失败:', error)
+        // 即使后端报错，也从本地列表移除（可能是会话已不存在）
+        setAgentSessions((prev) => prev.filter((s) => s.id !== pendingDeleteId))
+        if (currentAgentSessionId === pendingDeleteId) {
+          setCurrentAgentSessionId(null)
+        }
       } finally {
         setPendingDeleteId(null)
       }
@@ -455,12 +482,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
     try {
       await window.electronAPI.deleteConversation(pendingDeleteId)
-      setConversations((prev) => prev.filter((c) => c.id !== pendingDeleteId))
+      // 全量刷新确保与后端同步
+      const conversations = await window.electronAPI.listConversations()
+      setConversations(conversations)
       if (currentConversationId === pendingDeleteId) {
         setCurrentConversationId(null)
       }
     } catch (error) {
       console.error('[侧边栏] 删除对话失败:', error)
+      // 即使后端报错，也从本地列表移除（可能是对话已不存在）
+      setConversations((prev) => prev.filter((c) => c.id !== pendingDeleteId))
+      if (currentConversationId === pendingDeleteId) {
+        setCurrentConversationId(null)
+      }
     } finally {
       setPendingDeleteId(null)
     }
@@ -566,6 +600,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       setAgentSessions((prev) =>
         prev.map((s) => (s.id === updated.id ? updated : s))
       )
+      // 归档时自动关闭该会话的标签页
+      if (updated.archived) {
+        const tabResult = closeTab(tabs, layout, id)
+        setTabs(tabResult.tabs)
+        setLayout(tabResult.layout)
+        // 如果归档的是当前选中的会话，取消选中
+        if (currentAgentSessionId === id) {
+          setCurrentAgentSessionId(null)
+        }
+      }
       toast.success(updated.archived ? '已归档' : '已取消归档')
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
@@ -656,7 +700,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="h-full flex flex-col items-center bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
+        className="h-full flex flex-col items-center bg-background/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
         style={{ width: 48, flexShrink: 0 }}
       >
         {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -683,7 +727,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-                className="p-2 rounded-[10px] text-foreground/70 bg-foreground/[0.04] hover:bg-foreground/[0.08] transition-colors titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
+                className="p-2 rounded-[10px] text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors titlebar-no-drag border border-dashed border-primary/20 hover:border-primary/30"
               >
                 <Plus size={16} />
               </button>
@@ -703,7 +747,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 onClick={() => setSettingsOpen(true)}
-                className="relative p-1 rounded-[10px] transition-colors titlebar-no-drag hover:bg-foreground/[0.04]"
+                className="relative p-1 rounded-[10px] transition-colors titlebar-no-drag hover:bg-foreground/5"
               >
                 <UserAvatar avatar={userProfile.avatar} size={28} />
                 {(hasUpdate || hasEnvironmentIssues) && (
@@ -725,7 +769,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="h-full flex flex-col bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
+      className="h-full flex flex-col bg-background/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
       {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -760,7 +804,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       <div className="px-3 pt-2 flex items-center gap-1.5">
         <button
           onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-foreground/[0.04] hover:bg-foreground/[0.08] transition-colors duration-100 titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
+          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors duration-100 titlebar-no-drag border border-dashed border-primary/20 hover:border-primary/30"
         >
           <Plus size={14} />
           <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
@@ -769,7 +813,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           <TooltipTrigger asChild>
             <button
               onClick={() => setSearchDialogOpen(true)}
-              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 bg-foreground/[0.04] hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors duration-100 titlebar-no-drag border border-dashed border-foreground/10 hover:border-foreground/20"
+              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-colors duration-100 titlebar-no-drag border border-dashed border-primary/20 hover:border-primary/30"
             >
               <Search size={14} />
             </button>
@@ -1159,8 +1203,8 @@ function ConversationItem({
       className={cn(
         'w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
         active
-          ? 'bg-foreground/[0.08] dark:bg-foreground/[0.08] shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'hover:bg-foreground/[0.04] dark:hover:bg-foreground/[0.04]'
+          ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'hover:bg-primary/5'
       )}
     >
       <div className="flex-1 min-w-0">
@@ -1345,8 +1389,8 @@ function AgentSessionItem({
       className={cn(
         'w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
         active
-          ? 'bg-foreground/[0.08] dark:bg-foreground/[0.08] shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'hover:bg-foreground/[0.04] dark:hover:bg-foreground/[0.04]'
+          ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'hover:bg-primary/5'
       )}
     >
       <div className="flex-1 min-w-0">

@@ -184,9 +184,9 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    className="h-6 text-[11px] px-2 gap-1"
+                    className="h-6 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
                     onClick={handleSelectFiles}
                   >
                     <File className="size-3" />
@@ -202,9 +202,9 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="h-6 text-[11px] px-2 gap-1"
+                      className="h-6 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
                       onClick={onAttachFolder}
                     >
                       <FolderPlus className="size-3" />

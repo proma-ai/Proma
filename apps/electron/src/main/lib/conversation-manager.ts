@@ -266,7 +266,8 @@ export function deleteConversation(id: string): void {
   const idx = index.conversations.findIndex((c) => c.id === id)
 
   if (idx === -1) {
-    throw new Error(`对话不存在: ${id}`)
+    console.warn(`[对话管理] 对话不存在，跳过删除: ${id}`)
+    return
   }
 
   const removed = index.conversations.splice(idx, 1)[0]!

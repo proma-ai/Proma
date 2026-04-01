@@ -157,7 +157,7 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 2. 根据探索结果，委派 \`researcher\` 分析方案（如需要）
 3. 整合所有信息，将调研结果输出到 \`.context/note.md\`
 4. 不确定的部分调用头脑风暴 Skill 与用户确认
-5. 进入 Plan 模式输出执行计划，确保每一步在用户掌控之下
+5. 将执行计划输出到 \`.context/plan/\` 目录，确保每一步在用户掌控之下
 6. 执行实施，将进度更新到 \`.context/todo.md\`
 7. 完成后委派 \`code-reviewer\` 做最终质量检查`)
 
@@ -190,10 +190,10 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
   }
 
   // 不确定性处理策略（根据权限模式区分）
-  if (ctx.permissionMode === 'bypassPermissions' || ctx.permissionMode === 'plan') {
+  if (ctx.permissionMode === 'bypassPermissions') {
     sections.push(`## 不确定性处理
 
-当前用户使用的是${ctx.permissionMode === 'bypassPermissions' ? '完全自动模式（所有工具调用自动批准）' : '计划模式（仅规划不执行）'}。
+当前用户使用的是完全自动模式（所有工具调用自动批准）。
 
 **⚠️ 严禁调用 AskUserQuestion 工具！**
 **当你遇到不确定的情况时：**
@@ -212,15 +212,20 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 - 发现用户的假设或判断可能有误时，主动指出并提供依据，不要盲目附和`)
   }
 
-  // 计划模式特殊指令
+  // 计划模式指令（始终注入计划文件路径规则）
   if (ctx.permissionMode === 'plan') {
     sections.push(`## 计划模式
 
-你当前处于计划模式。规则：
+你当前处于计划模式，只能进行调研和规划，不能执行写操作。规则：
 1. 将计划文件写入当前工作目录的 \`.context/plan/\` 子目录（如 \`.context/plan/my-plan.md\`）
 2. 完成计划后，**不要立即调用 ExitPlanMode**
 3. 先向用户展示计划摘要，以及完整的计划文档的路径地址，然后等待用户确认后再退出计划模式
-4. 用户确认执行后，再调用 ExitPlanMode 退出计划模式`)
+4. 用户确认执行后，再调用 ExitPlanMode 退出计划模式
+5. 在计划模式下，你可以使用 Read、Glob、Grep、WebSearch 等只读工具进行调研，但不能使用 Edit、Bash 等写操作工具`)
+  } else {
+    sections.push(`## 计划模式文件路径
+
+当进入计划模式（EnterPlanMode）时，计划文件必须写入当前工作目录的 \`.context/plan/\` 子目录（如 \`.context/plan/my-plan.md\`）。`)
   }
 
   // 记忆系统指引（静态，利用 prompt caching）
@@ -373,32 +378,29 @@ export function buildDynamicContext(ctx: DynamicContext): string {
       }
     }
 
-    // Skills 列表（SDK plugin 机制下 skill 名称带 plugin 前缀）
+    // Skills 列表已通过 SDK plugin 机制自动发现并注册，无需手动注入
+    // 仅检查 skill-creator 是否启用，注入持续改进提示
     const skills = getWorkspaceSkills(ctx.workspaceSlug)
-    if (skills.length > 0) {
-      const pluginPrefix = `proma-workspace-${ctx.workspaceSlug}`
-      wsLines.push(`Skills（调用 Skill 工具时必须使用含前缀的完整名称，如 ${pluginPrefix}:skill-name，不可省略前缀）:`)
-      for (const skill of skills) {
-        const qualifiedName = `${pluginPrefix}:${skill.slug}`
-        const desc = skill.description ? `: ${skill.description}` : ''
-        wsLines.push(`- ${qualifiedName}${desc}`)
-      }
-
-      // 当 skill-creator 处于启用状态时，注入 Skill 持续改进提示
-      const hasSkillCreator = skills.some((s) => s.slug === 'skill-creator')
-      if (hasSkillCreator) {
-        wsLines.push('')
-        wsLines.push([
-          '<skill_improvement_hint>',
-          'skill-creator 已启用。在调用其他 Skill 前后，留意以下信号：',
-          '- 用户主动修正了某个 Skill 产出的内容（格式、流程、术语等）→ 该 Skill 可能需要更新',
-          '- 用户反复描述一类任务但没有匹配的 Skill → 可能值得创建新 Skill',
-          '- 某个 Skill 的输出持续需要大量后续调整 → 可能需要重构',
-          '发现上述信号时，先简要告知用户观察到的改进点，征得同意后再通过 skill-creator 执行创建、更新或重构。',
-          '不要在每次调用 Skill 后都提出建议——仅在确实观察到可复用的改进模式时才提出。',
-          '</skill_improvement_hint>',
-        ].join('\n'))
-      }
+    const hasSkillCreator = skills.some((s) => s.slug === 'skill-creator')
+    if (hasSkillCreator) {
+      wsLines.push([
+        '<skill_improvement_hint>',
+        'skill-creator 已启用。在整个对话过程中，留意以下信号：',
+        '',
+        '**现有 Skill 改进信号：**',
+        '- 用户主动修正了某个 Skill 产出的内容（格式、流程、术语等）→ 该 Skill 可能需要更新',
+        '- 某个 Skill 的输出持续需要大量后续调整 → 可能需要重构',
+        '',
+        '**新 Skill 创建信号：**',
+        '- 用户反复描述一类任务但没有匹配的 Skill → 可能值得创建新 Skill',
+        '- 你在对话中经历了一个有价值的多步工作流（如：探索→分析→方案选择→实施，或多轮推理决策与用户交互），且该流程具有通用性——未来其他场景大概率会复用类似模式 → 主动建议将其固化为 Skill',
+        '',
+        '**行动原则：**',
+        '- 发现信号时，简要描述你观察到的模式和复用价值，征得用户同意后通过 skill-creator 执行',
+        '- 对于主动建议新 Skill，要说清楚：观察到了什么模式、为什么觉得复用度高、固化后的 Skill 大致做什么',
+        '- 不要在每次交互后都提建议——仅在确实观察到高复用价值的模式时才提出',
+        '</skill_improvement_hint>',
+      ].join('\n'))
     }
 
     if (wsLines.length > 0) {

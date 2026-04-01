@@ -25,6 +25,7 @@ import type {
   AgentStreamEvent,
   AgentStreamPayload,
   AgentQueueMessageInput,
+  PromaPermissionMode,
 } from '@proma/shared'
 import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
@@ -209,6 +210,15 @@ export function isAgentSessionActive(sessionId: string): boolean {
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
 export function stopAllAgents(): void {
   orchestrator.stopAll()
+}
+
+/**
+ * 运行中动态切换会话的权限模式
+ *
+ * 同时更新 Proma 侧（canUseTool 动态读取）和 SDK 侧（query.setPermissionMode）。
+ */
+export async function updateAgentPermissionMode(sessionId: string, mode: PromaPermissionMode): Promise<void> {
+  await orchestrator.updateSessionPermissionMode(sessionId, mode)
 }
 
 // ===== 流式追加消息 =====

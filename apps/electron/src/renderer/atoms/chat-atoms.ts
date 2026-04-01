@@ -261,3 +261,9 @@ export const conversationThinkingEnabledAtom = atom<Map<string, boolean>>(new Ma
 
 /** 每个对话的并排模式 */
 export const conversationParallelModeAtom = atom<Map<string, boolean>>(new Map())
+
+/** 思考块默认展开偏好（持久化到 localStorage） */
+export const thinkingExpandedAtom = atomWithStorage<boolean>(
+  'proma-thinking-expanded',
+  false,
+)

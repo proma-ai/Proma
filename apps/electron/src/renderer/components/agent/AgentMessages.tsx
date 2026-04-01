@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download, Square } from 'lucide-react'
+import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
   Message,
@@ -33,7 +33,6 @@ import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { ToolActivityList } from './ToolActivityItem'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
-import { stoppedByUserSessionsAtom } from '@/atoms/agent-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
@@ -635,34 +634,9 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 export function AgentMessages({ sessionId, messages, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, onRetry, onRetryInNewSession, onFork, onCompact }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
-  const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
-  const stoppedByUser = stoppedByUserSessions.has(sessionId)
-
-  /**
-   * 淡入控制：切换会话时先隐藏，等布局完成后再显示。
-   * 同时用于延迟启用 content-visibility 优化，避免初次加载跳动。
-   */
+  /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
   const prevSessionIdRef = React.useRef<string | null>(null)
-
-  /**
-   * content-visibility 延迟启用：ready 后延迟开启，之后保持不变。
-   * 不随 streaming 状态反复切换，避免 content-visibility:auto 反复开关导致浏览器 reflow 跳动。
-   * 仅在切换会话（ready 重置为 false）时才重新走延迟启用流程。
-   */
-  const [cvReady, setCvReady] = React.useState(false)
-  React.useEffect(() => {
-    if (!ready) {
-      setCvReady(false)
-      return
-    }
-    // 已启用则保持，不因 streaming 反复切换
-    if (cvReady) return
-    // 流式期间暂不启用，等首次流式完成后再启用
-    if (streaming) return
-    const timer = setTimeout(() => setCvReady(true), 100)
-    return () => clearTimeout(timer)
-  }, [ready, streaming, cvReady])
 
   React.useEffect(() => {
     if (sessionId !== prevSessionIdRef.current) {
@@ -697,42 +671,23 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
     isStreaming: streaming,
   })
 
-  // 迷你地图数据
-  const minimapItems: MinimapItem[] = React.useMemo(
-    () => {
-      // SDK 渲染路径：从 Turn 分组构建迷你地图项
-      if (persistedSDKMessages && persistedSDKMessages.length > 0) {
-        const persistedG = groupIntoTurns(persistedSDKMessages)
-        const liveG = groupIntoTurns(liveMessages ?? [])
-        // 去重：liveMessages 中可能包含与 persisted 相同的消息
-        const seenIds = new Set(persistedG.map(getGroupId))
-        const allGroups = [...persistedG, ...liveG.filter((g) => {
-          const id = getGroupId(g)
-          if (seenIds.has(id)) return false
-          seenIds.add(id)
-          return true
-        })]
-        return allGroups.map((group) => ({
-          id: getGroupId(group),
-          role: group.type === 'user' ? 'user' as const
-            : group.type === 'system' ? 'status' as const
-            : 'assistant' as const,
-          preview: getGroupPreview(group),
-          avatar: group.type === 'user' ? userProfile.avatar : undefined,
-          model: group.type === 'assistant-turn' ? group.model : undefined,
-        }))
-      }
-      // 旧格式回退
-      return messages.map((m, i) => ({
-        id: m.id || `msg-${i}`,
-        role: m.role === 'status' ? 'status' as const : m.role as MinimapItem['role'],
-        preview: (m.content ?? '').replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 80),
-        avatar: m.role === 'user' ? userProfile.avatar : undefined,
-        model: m.model,
-      }))
-    },
-    [messages, persistedSDKMessages, liveMessages, userProfile.avatar]
-  )
+  /**
+   * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
+   * 强制 resize="instant" 避免中间高度变化触发平滑滚动动画。
+   */
+  const [transitioning, setTransitioning] = React.useState(false)
+  React.useEffect(() => {
+    if (streaming) {
+      setTransitioning(false)
+      return
+    }
+    if (streamingContent || smoothContent) {
+      setTransitioning(true)
+      return
+    }
+    const timer = setTimeout(() => setTransitioning(false), 150)
+    return () => clearTimeout(timer)
+  }, [streaming, streamingContent, smoothContent])
 
   // 判断是否使用新的 SDKMessage 渲染路径
   const useSDKRenderer = persistedSDKMessages && persistedSDKMessages.length > 0
@@ -757,11 +712,45 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
     return groupIntoTurns(liveMessages)
   }, [liveMessages])
 
+  // 迷你地图数据 — 复用 persistedGroups / liveGroups，确保 getGroupId 对同一对象引用返回一致的 ID
+  const minimapItems: MinimapItem[] = React.useMemo(
+    () => {
+      if (useSDKRenderer) {
+        // 去重：liveGroups 中可能包含与 persistedGroups 相同的消息
+        const seenIds = new Set(persistedGroups.map(getGroupId))
+        const allGroups = [...persistedGroups, ...liveGroups.filter((g) => {
+          const id = getGroupId(g)
+          if (seenIds.has(id)) return false
+          seenIds.add(id)
+          return true
+        })]
+        return allGroups.map((group) => ({
+          id: getGroupId(group),
+          role: group.type === 'user' ? 'user' as const
+            : group.type === 'system' ? 'status' as const
+            : 'assistant' as const,
+          preview: getGroupPreview(group),
+          avatar: group.type === 'user' ? userProfile.avatar : undefined,
+          model: group.type === 'assistant-turn' ? group.model : undefined,
+        }))
+      }
+      // 旧格式回退
+      return messages.map((m, i) => ({
+        id: m.id || `msg-${i}`,
+        role: m.role === 'status' ? 'status' as const : m.role as MinimapItem['role'],
+        preview: (m.content ?? '').replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 200),
+        avatar: m.role === 'user' ? userProfile.avatar : undefined,
+        model: m.model,
+      }))
+    },
+    [useSDKRenderer, persistedGroups, liveGroups, messages, userProfile.avatar]
+  )
+
   // 实时消息中是否已有可渲染的助手内容
   const hasLiveAssistantContent = liveGroups.some((g) => g.type === 'assistant-turn')
 
   return (
-    <Conversation resize={ready ? 'smooth' : 'instant'} className={ready ? `${cvReady ? 'cv-ready ' : ''}opacity-100 transition-opacity duration-200` : 'opacity-0'}>
+    <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? 'opacity-100 transition-opacity duration-200' : 'opacity-0'}>
       <ScrollPositionManager id={sessionId} ready={ready} />
       <ConversationContent>
         {!hasContent && !streaming ? (
@@ -837,13 +826,6 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
               </Message>
             )}
 
-            {/* 用户打断指示器 */}
-            {!streaming && stoppedByUser && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 mt-2 ml-[56px]">
-                <Square className="size-3" />
-                <span>已被用户打断</span>
-              </div>
-            )}
           </>
         )}
       </ConversationContent>

@@ -10,16 +10,21 @@
 import * as React from 'react'
 import {
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   XCircle,
   Loader2,
   Brain,
   MessageSquareText,
 } from 'lucide-react'
+import { useAtomValue } from 'jotai'
+import { thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { getToolIcon } from './tool-utils'
 import { getToolPhrase } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
+import { formatDuration } from './AgentMessages'
 import type {
   SDKContentBlock,
   SDKMessage,
@@ -28,6 +33,7 @@ import type {
   SDKThinkingBlock,
   SDKUserMessage,
   SDKToolResultBlock,
+  SDKSystemMessage,
 } from '@proma/shared'
 
 // ===== useToolResult Hook =====
@@ -66,6 +72,119 @@ function useToolResult(toolUseId: string, allMessages: SDKMessage[]): ToolResult
     }
     return null
   }, [toolUseId, allMessages])
+}
+
+// ===== useSubAgentMeta Hook =====
+
+interface SubAgentMeta {
+  durationMs: number
+  totalTokens: number
+  toolUses: number
+}
+
+/** 从 allMessages 中查找匹配 toolUseId 的 task_notification 系统消息，提取用量数据 */
+function useSubAgentMeta(toolUseId: string, allMessages: SDKMessage[]): SubAgentMeta | null {
+  return React.useMemo(() => {
+    for (const msg of allMessages) {
+      if (msg.type !== 'system') continue
+      const sysMsg = msg as SDKSystemMessage
+      if (sysMsg.subtype !== 'task_notification') continue
+      if (sysMsg.tool_use_id !== toolUseId) continue
+      const usage = sysMsg.usage
+      if (!usage) return null
+      return {
+        durationMs: usage.duration_ms ?? 0,
+        totalTokens: usage.total_tokens ?? 0,
+        toolUses: usage.tool_uses ?? 0,
+      }
+    }
+    return null
+  }, [toolUseId, allMessages])
+}
+
+// ===== SubAgent 结果文本解析 =====
+
+interface ParsedAgentResult {
+  /** 清理后的输出文本（去除元数据） */
+  text: string
+  /** 从 <usage> 标签解析的用量数据（作为 task_notification 的备用） */
+  usage?: SubAgentMeta
+}
+
+/** 从 Agent tool_result 文本中分离内容与元数据（agentId 行 + <usage> 标签） */
+function parseAgentResultText(raw: string): ParsedAgentResult {
+  let text = raw
+
+  // 提取 <usage> 标签中的用量数据
+  let usage: SubAgentMeta | undefined
+  const usageMatch = text.match(/<usage>([\s\S]*?)<\/usage>/)
+  if (usageMatch) {
+    const body = usageMatch[1]!
+    const totalTokens = Number(body.match(/total_tokens:\s*(\d+)/)?.[1]) || 0
+    const toolUses = Number(body.match(/tool_uses:\s*(\d+)/)?.[1]) || 0
+    const durationMs = Number(body.match(/duration_ms:\s*(\d+)/)?.[1]) || 0
+    if (totalTokens > 0 || toolUses > 0 || durationMs > 0) {
+      usage = { durationMs, totalTokens, toolUses }
+    }
+    text = text.replace(/<usage>[\s\S]*?<\/usage>/, '')
+  }
+
+  // 移除 agentId 行
+  text = text.replace(/agentId:.*\n?/g, '')
+
+  // 移除 <output> 标签包裹
+  text = text.replace(/<\/?output>/g, '')
+
+  return { text: text.trim(), usage }
+}
+
+// ===== SubAgent 完成信息尾部 =====
+
+function SubAgentFooter({
+  meta,
+  resultText,
+}: {
+  meta: SubAgentMeta | null
+  resultText?: string
+}): React.ReactElement | null {
+  // 解析结果文本，分离内容与元数据
+  const parsed = React.useMemo(
+    () => resultText ? parseAgentResultText(resultText) : null,
+    [resultText],
+  )
+
+  // 优先使用 task_notification 的用量数据，备用从 result 文本中解析
+  const effectiveMeta = meta ?? parsed?.usage ?? null
+  const cleanText = parsed?.text || ''
+
+  // 没有任何信息时不渲染
+  if (!effectiveMeta && !cleanText) return null
+
+  return (
+    <div className="mt-2 pt-2 border-t border-border/20 space-y-1.5">
+      {/* 最终输出文本（Markdown 渲染） */}
+      {cleanText && (
+        <div className="text-muted-foreground/70">
+          <MessageResponse>{cleanText}</MessageResponse>
+        </div>
+      )}
+
+      {/* 用量统计行（最底部） */}
+      {effectiveMeta && (
+        <div className="flex items-center gap-3 text-[12px] text-muted-foreground/60 tabular-nums">
+          {effectiveMeta.durationMs > 0 && (
+            <span>{formatDuration(effectiveMeta.durationMs)}</span>
+          )}
+          {effectiveMeta.totalTokens > 0 && (
+            <span>{effectiveMeta.totalTokens.toLocaleString()} tokens</span>
+          )}
+          {effectiveMeta.toolUses > 0 && (
+            <span>{effectiveMeta.toolUses} 次工具调用</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ===== ContentBlock Props =====
@@ -150,6 +269,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   const toolResult = useToolResult(block.id, allMessages)
   const isAgentTool = block.name === 'Agent' || block.name === 'Task'
   const hasChildren = isAgentTool && childBlocks && childBlocks.length > 0
+  const subAgentMeta = useSubAgentMeta(block.id, allMessages)
 
   // Agent/Task 子代理内容默认折叠
   const [childrenExpanded, setChildrenExpanded] = React.useState(false)
@@ -235,6 +355,14 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
                 dimmed
               />
             ))}
+
+            {/* SubAgent 完成信息 */}
+            {isCompleted && (
+              <SubAgentFooter
+                meta={subAgentMeta}
+                resultText={toolResult?.result}
+              />
+            )}
           </div>
         )}
       </div>
@@ -296,7 +424,33 @@ interface ThinkingBlockProps {
   dimmed?: boolean
 }
 
+/** 思考块折叠行数阈值 */
+const THINKING_COLLAPSE_LINE_THRESHOLD = 4
+
 function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.ReactElement {
+  const thinkingExpanded = useAtomValue(thinkingExpandedAtom)
+  const [isExpanded, setIsExpanded] = React.useState(thinkingExpanded)
+  const [shouldCollapse, setShouldCollapse] = React.useState(false)
+  const contentRef = React.useRef<HTMLDivElement>(null)
+
+  // 检测内容是否超过阈值行数
+  React.useEffect(() => {
+    if (!contentRef.current) return
+    const el = contentRef.current
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22
+    const maxHeight = lineHeight * THINKING_COLLAPSE_LINE_THRESHOLD
+    setShouldCollapse(el.scrollHeight > maxHeight + 10)
+  }, [block.thinking])
+
+  // 当全局偏好变更时同步（仅在"应折叠"时生效）
+  React.useEffect(() => {
+    setIsExpanded(thinkingExpanded)
+  }, [thinkingExpanded])
+
+  const toggleExpand = React.useCallback(() => {
+    setIsExpanded((prev) => !prev)
+  }, [])
+
   return (
     <div className="relative mb-3">
       <div className="flex items-center gap-1.5 mb-1.5">
@@ -307,20 +461,48 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
       </div>
       <div
         className={cn(
-          'rounded-lg px-3.5 py-2.5',
+          'relative rounded-lg px-3.5 py-2.5',
           dimmed ? 'bg-muted/30' : 'bg-muted/50',
+          shouldCollapse && !isExpanded && 'pb-7',
         )}
         style={{
           border: 'none',
           backgroundImage: `url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='8' ry='8' stroke='${dimmed ? 'rgba(128,128,128,0.3)' : 'rgba(128,128,128,0.5)'}' stroke-width='1.5' stroke-dasharray='8%2c 6' stroke-dashoffset='0' stroke-linecap='round'/%3e%3c/svg%3e")`,
         }}
       >
-        <div className={cn(
-          'prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 whitespace-pre-wrap text-[14px] leading-relaxed',
-          dimmed ? 'text-muted-foreground' : 'text-foreground/90',
-        )}>
-          {block.thinking}
+        <div
+          ref={contentRef}
+          className={cn(
+            'prose prose-sm dark:prose-invert max-w-none prose-p:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-[14px] leading-relaxed overflow-hidden transition-[max-height] duration-200',
+            dimmed ? 'text-muted-foreground' : 'text-foreground/90',
+            shouldCollapse && !isExpanded && 'max-h-[5.6em]',
+          )}
+        >
+          <MessageResponse>{block.thinking}</MessageResponse>
         </div>
+        {shouldCollapse && (
+          <button
+            type="button"
+            onClick={toggleExpand}
+            className={cn(
+              'flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors mt-1',
+              !isExpanded &&
+                'absolute bottom-0 left-0 right-0 px-3.5 pb-2 pt-4 rounded-b-lg bg-gradient-to-t from-muted/80 to-transparent'
+            )}
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="size-3" />
+                <span>收起</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="size-3" />
+                <span>展开思考</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   )

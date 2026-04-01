@@ -6,14 +6,23 @@
     <title>Proma</title>
     <script>
       // 主题初始化脚本（在 React 加载前执行，避免闪烁）
-      // 从 localStorage 缓存读取主题模式，立即应用 dark 类名
+      // 从 localStorage 缓存读取主题模式和特殊风格，立即应用类名
       ;(function() {
         var mode = localStorage.getItem('proma-theme-mode') || 'dark'
-        if (mode === 'dark') {
-          document.documentElement.classList.add('dark')
+        var style = localStorage.getItem('proma-theme-style')
+        var html = document.documentElement
+
+        if (mode === 'special' && style && style !== 'default') {
+          // 特殊风格模式：添加主题类名 + 根据后缀决定 dark 类
+          html.classList.add('theme-' + style)
+          if (style.endsWith('-dark')) {
+            html.classList.add('dark')
+          }
+        } else if (mode === 'dark') {
+          html.classList.add('dark')
         } else if (mode === 'system') {
           if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.classList.add('dark')
+            html.classList.add('dark')
           }
         }
         // mode === 'light' 时不添加 dark 类

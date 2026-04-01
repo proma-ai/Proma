@@ -255,6 +255,9 @@ export const workspaceFilesVersionAtom = atom(0)
 /** 侧面板是否打开（per-session Map） */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 
+/** 当前会话的工作路径 Map — sessionId → path */
+export const agentSessionPathMapAtom = atom<Map<string, string>>(new Map())
+
 // ===== 权限系统 Atoms =====
 
 /** 当前工作区权限模式 */

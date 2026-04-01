@@ -7,7 +7,11 @@ import type { LucideIcon } from 'lucide-react'
 import {
   BookOpen,
   Bot,
+  CalendarClock,
+  CalendarDays,
+  CalendarX,
   ClipboardList,
+  Database,
   Download,
   FilePenLine,
   SquareCheck,
@@ -17,13 +21,21 @@ import {
   GitBranch,
   Globe,
   ImagePlus,
+  Layers,
   List,
   ListChecks,
+  LogIn,
+  LogOut,
   Map,
   MapPinOff,
+  MessageCircleQuestion,
+  OctagonX,
   Pencil,
   Plug,
+  Radio,
   Search,
+  Send,
+  Server,
   Terminal,
   UserMinus,
   Users,
@@ -56,6 +68,18 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   EnterPlanMode: Map,
   ExitPlanMode: MapPinOff,
   generate_image: ImagePlus,
+  TaskOutput: Layers,
+  TaskStop: OctagonX,
+  AskUserQuestion: MessageCircleQuestion,
+  CronCreate: CalendarClock,
+  CronDelete: CalendarX,
+  CronList: CalendarDays,
+  RemoteTrigger: Radio,
+  EnterWorktree: LogIn,
+  ExitWorktree: LogOut,
+  ReadMcpResourceTool: Database,
+  ListMcpResourcesTool: Server,
+  SendMessage: Send,
 }
 
 /**
@@ -94,6 +118,18 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   EnterPlanMode: '正在生成计划',
   ExitPlanMode: '正在退出计划',
   generate_image: '生成图片',
+  TaskOutput: '获取任务输出',
+  TaskStop: '停止任务',
+  AskUserQuestion: '等待用户输入',
+  CronCreate: '创建定时任务',
+  CronDelete: '删除定时任务',
+  CronList: '列出定时任务',
+  RemoteTrigger: '远程触发器',
+  EnterWorktree: '进入 Worktree',
+  ExitWorktree: '退出 Worktree',
+  ReadMcpResourceTool: '读取 MCP 资源',
+  ListMcpResourcesTool: '列出 MCP 资源',
+  SendMessage: '发送消息',
 }
 
 /**
@@ -279,6 +315,83 @@ export function getInputSummary(
       if (typeof prompt === 'string') {
         return prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
       }
+      return null
+    }
+
+    case 'TaskOutput':
+    case 'TaskStop': {
+      const taskId = input.task_id ?? input.taskId
+      if (typeof taskId === 'string') return `#${taskId}`
+      return null
+    }
+
+    case 'AskUserQuestion': {
+      const questions = input.questions
+      if (Array.isArray(questions) && questions.length > 0) {
+        const first = questions[0] as Record<string, unknown>
+        if (typeof first.question === 'string') {
+          return first.question.length > 60 ? first.question.slice(0, 60) + '…' : first.question
+        }
+      }
+      return null
+    }
+
+    case 'CronCreate': {
+      const cron = input.cron
+      const prompt = input.prompt
+      if (typeof cron === 'string' && typeof prompt === 'string') {
+        const truncated = prompt.length > 40 ? prompt.slice(0, 40) + '…' : prompt
+        return `${cron} · ${truncated}`
+      }
+      if (typeof cron === 'string') return cron
+      return null
+    }
+
+    case 'CronDelete': {
+      const id = input.id
+      if (typeof id === 'string') return id
+      return null
+    }
+
+    case 'RemoteTrigger': {
+      const action = input.action
+      const triggerId = input.trigger_id
+      if (typeof action === 'string' && typeof triggerId === 'string') return `${action} · ${triggerId}`
+      if (typeof action === 'string') return action
+      return null
+    }
+
+    case 'EnterWorktree': {
+      const name = input.name
+      if (typeof name === 'string') return name
+      return null
+    }
+
+    case 'ExitWorktree': {
+      const action = input.action
+      if (action === 'remove') return '移除 Worktree'
+      if (action === 'keep') return '保留 Worktree'
+      return null
+    }
+
+    case 'CronList':
+      return null
+
+    case 'ReadMcpResourceTool': {
+      const uri = input.uri
+      if (typeof uri === 'string') return uri.length > 60 ? uri.slice(0, 60) + '…' : uri
+      return null
+    }
+
+    case 'ListMcpResourcesTool': {
+      const server = input.server
+      if (typeof server === 'string') return server
+      return null
+    }
+
+    case 'SendMessage': {
+      const to = input.to
+      if (typeof to === 'string') return to
       return null
     }
 

@@ -249,9 +249,8 @@ export function CodeBlock({ children }: CodeBlockProps): React.ReactElement {
 
       {/* 代码区域：逐行渲染 */}
       <pre
-        className="shiki overflow-x-auto p-4 m-0 text-[13px] leading-[1.6]"
+        className="shiki overflow-x-auto p-4 m-0 text-[13px] leading-[1.6] bg-[hsl(var(--code-bg))]"
         style={{
-          backgroundColor: tokenResult?.bgColor ?? '#24292e',
           color: tokenResult?.fgColor ?? '#e1e4e8',
           borderRadius: '0 0 8px 8px',
         }}

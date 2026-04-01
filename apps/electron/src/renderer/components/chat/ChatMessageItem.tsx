@@ -11,7 +11,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertCircle, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -191,9 +191,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                     <StreamingIndicator />
                   )}
                 </>
+              ) : message.error ? (
+                null
               ) : message.stopped ? (
                 <MessageStopped />
               ) : null}
+
+              {/* 错误提示 */}
+              {message.error && (
+                <div className="mt-1 px-3 py-2 rounded-md bg-destructive/10 text-destructive text-sm flex items-center gap-2">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span className="break-all">{message.error}</span>
+                </div>
+              )}
 
               {/* 生成的图片附件（如 Nano Banana 生图结果） */}
               {message.attachments && message.attachments.length > 0 && (
@@ -220,7 +230,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
         </MessageContent>
 
         {/* 操作按钮（非 streaming 时显示，hover 时可见） */}
-        {(message.content || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
+        {(message.content || message.error || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
           <MessageActions className="pl-[46px] mt-0.5">
             <CopyButton content={message.content} />
             {message.role === 'assistant' && conversationId && (
@@ -250,7 +260,13 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                 <Trash2 className="size-3.5" />
               </MessageAction>
             )}
-            {message.role === 'assistant' && message.stopped && (
+            {message.role === 'assistant' && message.error && (
+              <span className="text-[11px] text-destructive ml-1 flex items-center gap-0.5">
+                <AlertCircle className="size-3" />
+                生成失败
+              </span>
+            )}
+            {message.role === 'assistant' && message.stopped && !message.error && (
               <span className="text-[11px] text-foreground/40 ml-1">（已中止）</span>
             )}
           </MessageActions>

@@ -242,6 +242,16 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
+    // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
+    window.electronAPI.listAgentSessions().then((sessions) => {
+      const stoppedIds = new Set<string>(
+        sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
+      )
+      if (stoppedIds.size > 0) {
+        store.set(stoppedByUserSessionsAtom, stoppedIds)
+      }
+    }).catch(console.error)
+
     // ===== 1. 流式事件 =====
     const cleanupEvent = window.electronAPI.onAgentStreamEvent(
       (streamEvent: AgentStreamEvent) => {
@@ -495,11 +505,15 @@ export function useGlobalAgentListeners(): void {
           // 注意：liveMessages 的清理已移至 AgentView 消息加载完成后执行，
           // 与 streamingState 清理同步，避免「实时消息已清 → 持久化消息未到」的空档闪烁
 
-          // 刷新会话列表
+          // 刷新会话列表并同步 stoppedByUser 状态
           window.electronAPI
             .listAgentSessions()
             .then((sessions) => {
               store.set(agentSessionsAtom, sessions)
+              // 从持久化 meta 对齐 stoppedByUser 状态
+              store.set(stoppedByUserSessionsAtom, new Set<string>(
+                sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
+              ))
             })
             .catch(console.error)
 

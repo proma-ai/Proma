@@ -90,6 +90,7 @@ export async function executeToolCalls(
         toolCallId: tc.id,
         result: result.content,
         isError: result.isError,
+        input: tc.arguments,
       },
     })
   }

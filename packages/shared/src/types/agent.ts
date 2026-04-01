@@ -534,6 +534,8 @@ export interface AgentSessionMeta {
   forkAtMessageUuid?: string
   /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中） */
   forkSourceDir?: string
+  /** 最后一次流式执行是否被用户主动中断 */
+  stoppedByUser?: boolean
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */

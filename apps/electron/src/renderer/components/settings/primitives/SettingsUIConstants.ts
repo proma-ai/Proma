@@ -17,8 +17,8 @@ export const SECTION_TITLE_CLASS = 'text-base font-semibold text-foreground'
 /** 区块描述样式 */
 export const SECTION_DESCRIPTION_CLASS = 'text-sm text-muted-foreground mt-1'
 
-/** 卡片容器样式 */
-export const CARD_CLASS = 'rounded-xl bg-card shadow-minimal overflow-hidden'
+/** 卡片容器样式 - 只有默认深色主题用透明，其他都用卡片背景 */
+export const CARD_CLASS = 'rounded-xl overflow-hidden settings-card'
 
 /** 卡片内行样式 */
 export const ROW_CLASS = 'flex items-center justify-between px-4 py-3'

@@ -10,6 +10,7 @@ import { useSetAtom, useAtomValue, useStore } from 'jotai'
 import App from './App'
 import {
   themeModeAtom,
+  themeStyleAtom,
   systemIsDarkAtom,
   resolvedThemeAtom,
   applyThemeToDOM,
@@ -79,15 +80,18 @@ const isQuickTaskWindow = new URLSearchParams(window.location.search).get('windo
  */
 function ThemeInitializer(): null {
   const setThemeMode = useSetAtom(themeModeAtom)
+  const setThemeStyle = useSetAtom(themeStyleAtom)
   const setSystemIsDark = useSetAtom(systemIsDarkAtom)
-  const resolvedTheme = useAtomValue(resolvedThemeAtom)
+  const themeMode = useAtomValue(themeModeAtom)
+  const themeStyle = useAtomValue(themeStyleAtom)
+  const systemIsDark = useAtomValue(systemIsDarkAtom)
 
   // 初始化：从主进程加载设置 + 订阅系统主题变化
   useEffect(() => {
     let isMounted = true
     let cleanup: (() => void) | undefined
 
-    initializeTheme(setThemeMode, setSystemIsDark).then((fn) => {
+    initializeTheme(setThemeMode, setSystemIsDark, setThemeStyle).then((fn) => {
       if (isMounted) {
         cleanup = fn
       } else {
@@ -100,12 +104,12 @@ function ThemeInitializer(): null {
       isMounted = false
       cleanup?.()
     }
-  }, [setThemeMode, setSystemIsDark])
+  }, [setThemeMode, setSystemIsDark, setThemeStyle])
 
   // 响应式应用主题到 DOM
   useEffect(() => {
-    applyThemeToDOM(resolvedTheme)
-  }, [resolvedTheme])
+    applyThemeToDOM(themeMode, themeStyle, systemIsDark)
+  }, [themeMode, themeStyle, systemIsDark])
 
   return null
 }

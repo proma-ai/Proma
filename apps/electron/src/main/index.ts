@@ -5,6 +5,17 @@ import { existsSync } from 'fs'
 // 商业版固定为 Cloud 模式
 process.env.PROMA_MODE = 'cloud'
 
+// 处理 EPIPE 错误：当 stdout/stderr 管道被关闭时（如 electronmon 重启），忽略写入错误
+// 这在开发环境热重载时经常发生，不影响应用功能
+process.stdout?.on?.('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
+process.stderr?.on?.('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return
+  throw err
+})
+
 // 清理本地环境中的 ANTHROPIC_* 变量，防止干扰应用的认证流程
 // Electron 桌面应用通过渠道系统管理 API Key，不应受终端环境变量影响
 // 注意：此操作必须在 initializeRuntime()（loadShellEnv）之前执行

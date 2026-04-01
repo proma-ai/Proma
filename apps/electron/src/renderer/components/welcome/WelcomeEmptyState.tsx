@@ -13,6 +13,7 @@ import { Lightbulb, MessageSquare, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
+import { themeStyleAtom } from '@/atoms/theme'
 import { getRandomTip, getPlatform, type Tip } from '@/lib/tips'
 import { useCreateSession } from '@/hooks/useCreateSession'
 
@@ -33,6 +34,7 @@ const MODE_CONFIG: Record<AppMode, { icon: React.ReactNode; label: string }> = {
 export function WelcomeEmptyState(): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const [mode, setMode] = useAtom(appModeAtom)
+  const themeStyle = useAtomValue(themeStyleAtom)
   const { createChat, createAgent } = useCreateSession()
 
   // 稳定的随机 Tip（组件挂载时选一条）
@@ -41,6 +43,9 @@ export function WelcomeEmptyState(): React.ReactElement {
   const hour = new Date().getHours()
   const greeting = getGreeting(hour)
   const displayName = userProfile.userName || '用户'
+
+  // 森息晨光主题下选中按钮使用主色
+  const selectedColor = themeStyle === 'forest-light' ? '#3f8361' : undefined
 
   /** 切换模式：切换模式并创建对应的 draft 会话 */
   const handleModeSwitch = React.useCallback(async (targetMode: AppMode): Promise<void> => {
@@ -77,13 +82,15 @@ export function WelcomeEmptyState(): React.ReactElement {
         />
         {(['chat', 'agent'] as const).map((m) => {
           const config = MODE_CONFIG[m]
+          const isSelected = mode === m
           return (
             <button
               key={m}
               onClick={() => handleModeSwitch(m)}
+              style={isSelected && selectedColor ? { color: selectedColor } : undefined}
               className={cn(
                 'relative z-[1] flex items-center gap-1.5 rounded-lg px-5 py-1.5 text-[13px] font-medium transition-colors duration-200',
-                mode === m
+                isSelected
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               )}

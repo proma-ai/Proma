@@ -56,7 +56,7 @@ export function TabBarItem({
         'rounded-t-lg text-xs transition-colors select-none cursor-pointer',
         'border-t border-l border-r border-transparent',
         isActive
-          ? 'bg-background text-foreground border-border/50 shadow-sm'
+          ? 'bg-content-area text-foreground border-border/50 shadow-[0_1px_3px_rgba(0,0,0,0.08),0_2px_6px_rgba(0,0,0,0.04)]'
           : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
       )}
       onClick={onActivate}

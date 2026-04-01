@@ -18,10 +18,12 @@ import type {
   PromaPermissionMode,
 } from '@proma/shared'
 
-/** canUseTool 返回的权限结果 */
-type PermissionResult = {
+/** ExitPlanMode 审批结果（扩展 SDK PermissionResult，附加 targetMode） */
+export type ExitPlanPermissionResult = {
   behavior: 'allow'
   updatedInput: Record<string, unknown>
+  /** 用户选择的目标权限模式 */
+  targetMode?: PromaPermissionMode
 } | {
   behavior: 'deny'
   message: string
@@ -29,7 +31,7 @@ type PermissionResult = {
 
 /** 待处理的 ExitPlanMode 请求 */
 interface PendingExitPlan {
-  resolve: (result: PermissionResult) => void
+  resolve: (result: ExitPlanPermissionResult) => void
   request: ExitPlanModeRequest
   toolInput: Record<string, unknown>
 }
@@ -59,7 +61,7 @@ export class AgentExitPlanService {
     input: Record<string, unknown>,
     signal: AbortSignal,
     sendToRenderer: (request: ExitPlanModeRequest) => void,
-  ): Promise<PermissionResult> {
+  ): Promise<ExitPlanPermissionResult> {
     const allowedPrompts = this.parseAllowedPrompts(input)
 
     const request: ExitPlanModeRequest = {
@@ -71,7 +73,7 @@ export class AgentExitPlanService {
 
     sendToRenderer(request)
 
-    return new Promise<PermissionResult>((resolve) => {
+    return new Promise<ExitPlanPermissionResult>((resolve) => {
       this.pendingRequests.set(request.requestId, { resolve, request, toolInput: input })
 
       signal.addEventListener('abort', () => {
@@ -101,6 +103,7 @@ export class AgentExitPlanService {
         pending.resolve({
           behavior: 'allow' as const,
           updatedInput: pending.toolInput,
+          targetMode: 'bypassPermissions',
         })
         return { sessionId, targetMode: 'bypassPermissions' }
       }
@@ -109,6 +112,7 @@ export class AgentExitPlanService {
         pending.resolve({
           behavior: 'allow' as const,
           updatedInput: pending.toolInput,
+          targetMode: 'acceptEdits',
         })
         return { sessionId, targetMode: 'acceptEdits' }
       }

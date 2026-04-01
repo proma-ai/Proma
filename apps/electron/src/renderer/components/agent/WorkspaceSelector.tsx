@@ -178,7 +178,7 @@ export function WorkspaceSelector(): React.ReactElement {
               className={cn(
                 'group w-full flex items-center gap-2 px-2.5 py-[5px] rounded-md text-[13px] transition-colors duration-100 cursor-pointer titlebar-no-drag',
                 ws.id === currentWorkspaceId
-                  ? 'bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+                  ? 'workspace-item-selected bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
                   : 'text-foreground/70 hover:bg-foreground/[0.04]',
               )}
             >
