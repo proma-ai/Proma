@@ -125,6 +125,16 @@ export function ChannelSettings(): React.ReactElement {
       return
     }
 
+    // 启用供应商时，如果还没有默认渠道，自动设为默认
+    if (enabled && !agentChannelId) {
+      setAgentChannelId(channelId)
+      await window.electronAPI.updateSettings({
+        agentChannelIds: newIds,
+        agentChannelId: channelId,
+      }).catch(console.error)
+      return
+    }
+
     await window.electronAPI.updateSettings({ agentChannelIds: newIds }).catch(console.error)
   }
 

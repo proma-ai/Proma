@@ -61,7 +61,7 @@ import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import type { FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
-import { diffCapabilities, migratePermissionMode } from '@proma/shared'
+import { diffCapabilities, migratePermissionMode, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { UpdateDialog } from './components/settings/UpdateDialog'
@@ -191,6 +191,41 @@ function AgentSettingsInitializer(): null {
         const migrated = [settings.agentChannelId]
         setAgentChannelIds(migrated)
         window.electronAPI.updateSettings({ agentChannelIds: migrated }).catch(console.error)
+      }
+
+      // 自动选择 Agent 渠道：当 agentChannelId 未设置时，从已启用的供应商列表中选择
+      // 优先选择 Proma 官方渠道；如果供应商列表也为空，自动启用官方渠道
+      // 注意：使用本地变量追踪状态，避免 store.get() 读不到刚 set 的值
+      const resolvedChannelId = (settings.agentChannelId && channelIds.has(settings.agentChannelId))
+        ? settings.agentChannelId
+        : null
+      const resolvedChannelIds: string[] = settings.agentChannelIds?.filter((id) => channelIds.has(id)) ?? (
+        (settings.agentChannelId && channelIds.has(settings.agentChannelId)) ? [settings.agentChannelId] : []
+      )
+
+      if (!resolvedChannelId) {
+        if (resolvedChannelIds.length > 0) {
+          // 有已启用的供应商，自动选择第一个（优先官方）
+          const preferredId = resolvedChannelIds.includes(PROMA_OFFICIAL_CHANNEL_ID)
+            ? PROMA_OFFICIAL_CHANNEL_ID
+            : resolvedChannelIds[0]!
+          setAgentChannelId(preferredId)
+          window.electronAPI.updateSettings({ agentChannelId: preferredId }).catch(console.error)
+        } else {
+          // 供应商列表为空，检查是否有可用的 Proma 官方渠道，自动启用
+          const officialChannel = channels.find(
+            (c) => c.id === PROMA_OFFICIAL_CHANNEL_ID && c.enabled
+          )
+          if (officialChannel) {
+            const autoIds = [officialChannel.id]
+            setAgentChannelIds(autoIds)
+            setAgentChannelId(officialChannel.id)
+            window.electronAPI.updateSettings({
+              agentChannelIds: autoIds,
+              agentChannelId: officialChannel.id,
+            }).catch(console.error)
+          }
+        }
       }
 
       if (settings.agentPermissionMode) {
