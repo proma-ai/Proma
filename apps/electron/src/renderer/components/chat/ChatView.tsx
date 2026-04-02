@@ -71,6 +71,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [contextDividers, setContextDividers] = React.useState<string[]>([])
   const [pendingAttachments, setPendingAttachments] = React.useState<PendingAttachment[]>([])
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
+  const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
 
   // ===== Per-conversation hooks（分屏独立） =====
@@ -142,11 +143,13 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
   // ===== 加载消息 + 上下文分隔线 =====
   React.useEffect(() => {
+    setMessagesLoaded(false)
     window.electronAPI
       .getRecentMessages(conversationId, INITIAL_MESSAGE_LIMIT)
       .then((result) => {
         setMessages(result.messages)
         setHasMoreMessages(result.hasMore)
+        setMessagesLoaded(true)
 
         // 消息加载完成后，清除已完成的流式状态（streaming=false 的过渡气泡）
         // 在同一个微任务中执行，确保 React 在一次渲染中同时显示持久化消息并移除流式气泡
@@ -562,6 +565,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
           <ChatMessages
             conversationId={conversationId}
             messages={messages}
+            messagesLoaded={messagesLoaded}
             streaming={isStreaming}
             streamingContent={streamingContent}
             streamingReasoning={streamingReasoning}

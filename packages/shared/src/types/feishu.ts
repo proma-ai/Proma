@@ -7,7 +7,7 @@
 
 // ===== 飞书 Bot 配置 =====
 
-/** 飞书 Bot 应用配置（持久化到 ~/.proma/feishu.json） */
+/** 飞书 Bot 应用配置（持久化到 ~/.proma/feishu.json）— 旧格式，向后兼容 */
 export interface FeishuConfig {
   /** 是否启用飞书集成 */
   enabled: boolean
@@ -19,13 +19,61 @@ export interface FeishuConfig {
   defaultWorkspaceId?: string
 }
 
-/** 飞书配置保存输入（App Secret 为明文，主进程负责加密） */
+/** 飞书配置保存输入（App Secret 为明文，主进程负责加密）— 旧格式，向后兼容 */
 export interface FeishuConfigInput {
   enabled: boolean
   appId: string
   /** 明文 App Secret */
   appSecret: string
   defaultWorkspaceId?: string
+}
+
+// ===== 多 Bot 配置（v2） =====
+
+/** 单个飞书 Bot 配置 */
+export interface FeishuBotConfig {
+  /** Bot 唯一标识（UUID） */
+  id: string
+  /** Bot 显示名称（如"研发助手"、"运维助手"） */
+  name: string
+  /** 是否启用 */
+  enabled: boolean
+  /** 飞书应用 App ID */
+  appId: string
+  /** 飞书应用 App Secret（safeStorage 加密后的 base64 字符串） */
+  appSecret: string
+  /** 该 Bot 的默认工作区 ID */
+  defaultWorkspaceId?: string
+  /** 该 Bot 的默认渠道 ID */
+  defaultChannelId?: string
+  /** 该 Bot 的默认模型 ID */
+  defaultModelId?: string
+}
+
+/** 多 Bot 配置文件（~/.proma/feishu.json 新格式） */
+export interface FeishuMultiBotConfig {
+  version: 2
+  bots: FeishuBotConfig[]
+}
+
+/** 单个 Bot 配置保存输入（明文 secret） */
+export interface FeishuBotConfigInput {
+  /** Bot ID（新建时不传，更新时必传） */
+  id?: string
+  /** Bot 显示名称 */
+  name: string
+  /** 是否启用 */
+  enabled: boolean
+  /** 飞书应用 App ID */
+  appId: string
+  /** 明文 App Secret（空字符串表示不修改） */
+  appSecret: string
+  /** 默认工作区 ID */
+  defaultWorkspaceId?: string
+  /** 默认渠道 ID */
+  defaultChannelId?: string
+  /** 默认模型 ID */
+  defaultModelId?: string
 }
 
 // ===== Bridge 连接状态 =====
@@ -44,6 +92,20 @@ export interface FeishuBridgeState {
   activeBindings: number
 }
 
+/** 单个 Bot 的 Bridge 状态（包含身份信息） */
+export interface FeishuBotBridgeState extends FeishuBridgeState {
+  /** Bot ID */
+  botId: string
+  /** Bot 显示名称 */
+  botName: string
+}
+
+/** 多 Bot Bridge 状态聚合 */
+export interface FeishuMultiBridgeState {
+  /** botId → 状态 */
+  bots: Record<string, FeishuBotBridgeState>
+}
+
 // ===== 聊天绑定 =====
 
 /** 更新绑定请求（渲染进程 → 主进程） */
@@ -60,6 +122,8 @@ export interface FeishuUpdateBindingInput {
 export interface FeishuChatBinding {
   /** 飞书 chat_id（单聊或群聊） */
   chatId: string
+  /** 所属 Bot ID */
+  botId: string
   /** 飞书用户 open_id */
   userId: string
   /** 绑定的 Proma 会话 ID */
@@ -187,19 +251,19 @@ export interface FeishuChatMessage {
 // ===== IPC 通道常量 =====
 
 export const FEISHU_IPC_CHANNELS = {
-  /** 获取飞书配置 */
+  /** 获取飞书配置（旧格式，向后兼容） */
   GET_CONFIG: 'feishu:get-config',
-  /** 保存飞书配置 */
+  /** 保存飞书配置（旧格式，向后兼容） */
   SAVE_CONFIG: 'feishu:save-config',
-  /** 获取解密后的 App Secret */
+  /** 获取解密后的 App Secret（旧格式，向后兼容） */
   GET_DECRYPTED_SECRET: 'feishu:get-decrypted-secret',
   /** 测试飞书连接 */
   TEST_CONNECTION: 'feishu:test-connection',
-  /** 启动 Bridge */
+  /** 启动 Bridge（旧格式，向后兼容） */
   START_BRIDGE: 'feishu:start-bridge',
-  /** 停止 Bridge */
+  /** 停止 Bridge（旧格式，向后兼容） */
   STOP_BRIDGE: 'feishu:stop-bridge',
-  /** 获取 Bridge 状态 */
+  /** 获取 Bridge 状态（旧格式，向后兼容） */
   GET_STATUS: 'feishu:get-status',
   /** Bridge 状态变化（主进程 → 渲染进程推送） */
   STATUS_CHANGED: 'feishu:status-changed',
@@ -215,4 +279,23 @@ export const FEISHU_IPC_CHANNELS = {
   SET_SESSION_NOTIFY: 'feishu:set-session-notify',
   /** 主进程 → 渲染进程：飞书通知已发送 */
   NOTIFICATION_SENT: 'feishu:notification-sent',
+
+  // ===== 多 Bot（v2）=====
+
+  /** 获取多 Bot 配置 */
+  GET_MULTI_CONFIG: 'feishu:get-multi-config',
+  /** 保存单个 Bot 配置（新建或更新） */
+  SAVE_BOT_CONFIG: 'feishu:save-bot-config',
+  /** 删除 Bot */
+  REMOVE_BOT: 'feishu:remove-bot',
+  /** 获取单个 Bot 的解密 App Secret */
+  GET_BOT_DECRYPTED_SECRET: 'feishu:get-bot-decrypted-secret',
+  /** 启动单个 Bot Bridge */
+  START_BOT: 'feishu:start-bot',
+  /** 停止单个 Bot Bridge */
+  STOP_BOT: 'feishu:stop-bot',
+  /** 获取多 Bot Bridge 状态 */
+  GET_MULTI_STATUS: 'feishu:get-multi-status',
+  /** 多 Bot 状态变化推送 */
+  MULTI_STATUS_CHANGED: 'feishu:multi-status-changed',
 } as const

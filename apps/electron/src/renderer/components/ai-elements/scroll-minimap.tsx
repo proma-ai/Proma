@@ -288,7 +288,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
               className={cn(
                 'absolute left-1 h-[2px] w-[20px] rounded-full transition-colors',
                 isVisible
-                  ? 'bg-primary dark:bg-primary/70'
+                  ? 'bg-primary dark:bg-primary/70 minimap-visible-indicator'
                   : hasUser
                     ? 'bg-primary/25 dark:bg-primary/15'
                     : 'bg-primary/40 dark:bg-primary/25'

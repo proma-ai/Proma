@@ -170,12 +170,12 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
           <>
             <Upload className={cn(
               'size-5 transition-colors',
-              isDragOver ? 'text-primary' : 'text-muted-foreground/60',
+              isDragOver ? 'text-primary' : 'text-muted-foreground/75',
             )} />
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               拖拽文件到此处
               <br />
-              <span className="text-[10px] text-muted-foreground/60">
+              <span className="text-[10px] text-muted-foreground/75">
                 {isWorkspace ? '工作区内所有会话可访问' : '供 Agent 读取和处理'}
               </span>
             </p>

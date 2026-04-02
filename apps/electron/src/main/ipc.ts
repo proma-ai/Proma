@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS } from '../types'
 import type { QuickTaskSubmitInput } from '../types'
 import type {
@@ -71,6 +71,12 @@ import type {
   FeishuPresenceReport,
   FeishuNotifyMode,
   FeishuUpdateBindingInput,
+  DingTalkConfigInput,
+  DingTalkConfig,
+  DingTalkBridgeState,
+  DingTalkTestResult,
+  WeChatConfig,
+  WeChatBridgeState,
   SDKMessage,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
@@ -169,9 +175,21 @@ import {
   getReleaseByTag,
 } from './lib/github-release-service'
 import { watchAttachedDirectory, unwatchAttachedDirectory } from './lib/workspace-watcher'
-import { getFeishuConfig, saveFeishuConfig, getDecryptedAppSecret } from './lib/feishu-config'
-import { feishuBridge } from './lib/feishu-bridge'
+import {
+  getFeishuConfig,
+  saveFeishuConfig,
+  getDecryptedAppSecret,
+  getFeishuMultiBotConfig,
+  saveFeishuBotConfig,
+  removeFeishuBot,
+  getDecryptedBotAppSecret,
+} from './lib/feishu-config'
+import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { presenceService } from './lib/feishu-presence'
+import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret } from './lib/dingtalk-config'
+import { dingtalkBridge } from './lib/dingtalk-bridge'
+import { getWeChatConfig } from './lib/wechat-config'
+import { wechatBridge } from './lib/wechat-bridge'
 
 /**
  * 注册 IPC 处理器
@@ -1724,6 +1742,8 @@ export function registerIpcHandlers(): void {
 
   // ===== 飞书集成 =====
 
+  // --- 旧 API（向后兼容，操作 bots[0]）---
+
   // 获取飞书配置
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.GET_CONFIG,
@@ -1740,18 +1760,116 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 保存飞书配置
+  // 保存飞书配置（旧格式，操作 bots[0]）
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.SAVE_CONFIG,
     async (_, input: FeishuConfigInput): Promise<FeishuConfig> => {
       const config = saveFeishuConfig(input)
-      // 配置变更后自动重启或停止 Bridge
-      if (input.enabled && input.appId && input.appSecret) {
-        await feishuBridge.restart()
-      } else if (!input.enabled) {
-        feishuBridge.stop()
+      // 配置变更后，重启对应的 Bot
+      const multi = getFeishuMultiBotConfig()
+      const firstBot = multi.bots[0]
+      if (firstBot) {
+        if (input.enabled && input.appId && input.appSecret) {
+          await feishuBridgeManager.restartBot(firstBot.id)
+        } else if (!input.enabled) {
+          feishuBridgeManager.stopBot(firstBot.id)
+        }
       }
       return config
+    }
+  )
+
+  // 启动飞书 Bridge（旧格式，启动所有 Bot）
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.START_BRIDGE,
+    async (): Promise<void> => {
+      await feishuBridgeManager.startAll()
+    }
+  )
+
+  // 停止飞书 Bridge（旧格式，停止所有 Bot）
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.STOP_BRIDGE,
+    async (): Promise<void> => {
+      feishuBridgeManager.stopAll()
+    }
+  )
+
+  // 获取飞书 Bridge 状态（旧格式，返回第一个 Bot 状态）
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_STATUS,
+    async (): Promise<FeishuBridgeState> => {
+      const states = feishuBridgeManager.getStates()
+      const first = Object.values(states.bots)[0]
+      return first ?? { status: 'disconnected', activeBindings: 0 }
+    }
+  )
+
+  // --- 新 API（多 Bot v2）---
+
+  // 获取多 Bot 配置
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_MULTI_CONFIG,
+    async () => {
+      return getFeishuMultiBotConfig()
+    }
+  )
+
+  // 保存单个 Bot 配置
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.SAVE_BOT_CONFIG,
+    async (_, input: import('@proma/shared').FeishuBotConfigInput) => {
+      const saved = saveFeishuBotConfig(input)
+      // 配置变更后自动重启或停止（不阻塞保存结果）
+      if (saved.enabled && saved.appId && saved.appSecret) {
+        feishuBridgeManager.restartBot(saved.id).catch((err) => {
+          console.error(`[飞书 IPC] Bot "${saved.name}" 重启失败:`, err)
+        })
+      } else {
+        feishuBridgeManager.stopBot(saved.id)
+      }
+      return saved
+    }
+  )
+
+  // 删除 Bot
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.REMOVE_BOT,
+    async (_, botId: string) => {
+      feishuBridgeManager.stopBot(botId)
+      return removeFeishuBot(botId)
+    }
+  )
+
+  // 获取单个 Bot 解密 Secret
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_BOT_DECRYPTED_SECRET,
+    async (_, botId: string) => {
+      return getDecryptedBotAppSecret(botId)
+    }
+  )
+
+  // 启动单个 Bot
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.START_BOT,
+    async (_, botId: string) => {
+      await feishuBridgeManager.startBot(botId)
+    }
+  )
+
+  // 停止单个 Bot
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.STOP_BOT,
+    async (_, botId: string) => {
+      feishuBridgeManager.stopBot(botId)
+    }
+  )
+
+  // 获取多 Bot 状态
+  ipcMain.handle(
+    FEISHU_IPC_CHANNELS.GET_MULTI_STATUS,
+    async () => {
+      return feishuBridgeManager.getStates()
     }
   )
 
@@ -1759,31 +1877,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.TEST_CONNECTION,
     async (_, appId: string, appSecret: string): Promise<FeishuTestResult> => {
-      return feishuBridge.testConnection(appId, appSecret)
-    }
-  )
-
-  // 启动飞书 Bridge
-  ipcMain.handle(
-    FEISHU_IPC_CHANNELS.START_BRIDGE,
-    async (): Promise<void> => {
-      await feishuBridge.start()
-    }
-  )
-
-  // 停止飞书 Bridge
-  ipcMain.handle(
-    FEISHU_IPC_CHANNELS.STOP_BRIDGE,
-    async (): Promise<void> => {
-      feishuBridge.stop()
-    }
-  )
-
-  // 获取飞书 Bridge 状态
-  ipcMain.handle(
-    FEISHU_IPC_CHANNELS.GET_STATUS,
-    async (): Promise<FeishuBridgeState> => {
-      return feishuBridge.getStatus()
+      return feishuBridgeManager.testConnection(appId, appSecret)
     }
   )
 
@@ -1791,7 +1885,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.LIST_BINDINGS,
     async (): Promise<FeishuChatBinding[]> => {
-      return feishuBridge.listBindings()
+      return feishuBridgeManager.listAllBindings()
     }
   )
 
@@ -1799,7 +1893,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.UPDATE_BINDING,
     async (_, input: FeishuUpdateBindingInput): Promise<FeishuChatBinding | null> => {
-      return feishuBridge.updateBinding(input)
+      const bridge = feishuBridgeManager.findBridgeByChatId(input.chatId)
+      return bridge?.updateBinding(input) ?? null
     }
   )
 
@@ -1807,7 +1902,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.REMOVE_BINDING,
     async (_, chatId: string): Promise<boolean> => {
-      return feishuBridge.removeBinding(chatId)
+      const bridge = feishuBridgeManager.findBridgeByChatId(chatId)
+      return bridge?.removeBinding(chatId) ?? false
     }
   )
 
@@ -1823,7 +1919,125 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.SET_SESSION_NOTIFY,
     async (_, sessionId: string, mode: FeishuNotifyMode): Promise<void> => {
-      feishuBridge.setSessionNotifyMode(sessionId, mode)
+      // 通知模式需要发到所有 Bridge（不确定哪个 Bridge 持有该 session）
+      for (const bridge of feishuBridgeManager.getAllBridges().values()) {
+        bridge.setSessionNotifyMode(sessionId, mode)
+      }
+    }
+  )
+
+  // ===== 钉钉集成 =====
+
+  // 获取钉钉配置
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_CONFIG,
+    async (): Promise<DingTalkConfig> => {
+      return getDingTalkConfig()
+    }
+  )
+
+  // 获取解密后的 Client Secret
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_DECRYPTED_SECRET,
+    async (): Promise<string> => {
+      return getDecryptedClientSecret()
+    }
+  )
+
+  // 保存钉钉配置
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.SAVE_CONFIG,
+    async (_, input: DingTalkConfigInput): Promise<DingTalkConfig> => {
+      const config = saveDingTalkConfig(input)
+      // 配置变更后自动重启或停止 Bridge
+      if (input.enabled && input.clientId && input.clientSecret) {
+        await dingtalkBridge.restart()
+      } else if (!input.enabled) {
+        dingtalkBridge.stop()
+      }
+      return config
+    }
+  )
+
+  // 测试钉钉连接
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.TEST_CONNECTION,
+    async (_, clientId: string, clientSecret: string): Promise<DingTalkTestResult> => {
+      return dingtalkBridge.testConnection(clientId, clientSecret)
+    }
+  )
+
+  // 启动钉钉 Bridge
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.START_BRIDGE,
+    async (): Promise<void> => {
+      await dingtalkBridge.start()
+    }
+  )
+
+  // 停止钉钉 Bridge
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.STOP_BRIDGE,
+    async (): Promise<void> => {
+      dingtalkBridge.stop()
+    }
+  )
+
+  // 获取钉钉 Bridge 状态
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_STATUS,
+    async (): Promise<DingTalkBridgeState> => {
+      return dingtalkBridge.getStatus()
+    }
+  )
+
+  // ===== 微信集成 =====
+
+  // 获取微信配置
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.GET_CONFIG,
+    async (): Promise<WeChatConfig> => {
+      return getWeChatConfig()
+    }
+  )
+
+  // 开始扫码登录
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.START_LOGIN,
+    async (): Promise<void> => {
+      await wechatBridge.startLogin()
+    }
+  )
+
+  // 登出
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.LOGOUT,
+    async (): Promise<void> => {
+      wechatBridge.logout()
+    }
+  )
+
+  // 启动 Bridge（用已有凭证）
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.START_BRIDGE,
+    async (): Promise<void> => {
+      await wechatBridge.start()
+    }
+  )
+
+  // 停止 Bridge
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.STOP_BRIDGE,
+    async (): Promise<void> => {
+      wechatBridge.stop()
+    }
+  )
+
+  // 获取 Bridge 状态
+  ipcMain.handle(
+    WECHAT_IPC_CHANNELS.GET_STATUS,
+    async (): Promise<WeChatBridgeState> => {
+      return wechatBridge.getStatus()
     }
   )
 

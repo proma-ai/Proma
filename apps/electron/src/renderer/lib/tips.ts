@@ -34,6 +34,7 @@ export const TIPS: Tip[] = [
   { id: 'mac-shortcut-clear', text: '按 ⌘K 清除当前对话上下文', platform: 'mac' },
   { id: 'mac-shortcut-stop', text: '按 ⌘. 中断 AI 响应', platform: 'mac' },
   { id: 'mac-shortcut-close', text: '按 ⌘W 关闭当前标签页', platform: 'mac' },
+  { id: 'mac-shortcut-zoom', text: '按 ⌘+ / ⌘- 可以放大或缩小界面，⌘0 重置', platform: 'mac' },
 
   // Windows 快捷键
   { id: 'win-shortcut-new', text: '按 Ctrl+N 快速创建新对话', platform: 'windows' },
@@ -45,6 +46,7 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-clear', text: '按 Ctrl+K 清除当前对话上下文', platform: 'windows' },
   { id: 'win-shortcut-stop', text: '按 Ctrl+. 中断 AI 响应', platform: 'windows' },
   { id: 'win-shortcut-close', text: '按 Ctrl+W 关闭当前标签页', platform: 'windows' },
+  { id: 'win-shortcut-zoom', text: '按 Ctrl++ / Ctrl+- 可以放大或缩小界面，Ctrl+0 重置', platform: 'windows' },
 
   // 通用
   { id: 'tip-agent-file', text: 'Agent 模式下输入 @ 可以引用工作区文件', platform: 'all' },
