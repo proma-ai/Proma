@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download } from 'lucide-react'
+import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download, CreditCard } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
   Message,
@@ -57,6 +57,7 @@ interface AgentMessagesProps {
   onRetryInNewSession?: () => void
   onFork?: (upToMessageUuid: string) => void
   onCompact?: () => void
+  onGoToBilling?: () => void
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -440,9 +441,10 @@ interface AgentMessageItemProps {
   onRetry?: () => void
   onRetryInNewSession?: () => void
   onCompact?: () => void
+  onGoToBilling?: () => void
 }
 
-function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, onCompact }: AgentMessageItemProps): React.ReactElement | null {
+function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, onCompact, onGoToBilling }: AgentMessageItemProps): React.ReactElement | null {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
 
@@ -531,23 +533,34 @@ function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, 
           </div>
           {/* 错误操作按钮 */}
           <div className="flex items-center gap-2 mt-3">
-            {message.errorCode === 'prompt_too_long' && onCompact && (
-              <Button size="sm" onClick={onCompact}>
-                <Minimize2 className="size-3.5 mr-1.5" />
-                压缩上下文
-              </Button>
-            )}
-            {onRetry && (
-              <Button size="sm" variant={message.errorCode === 'prompt_too_long' ? 'outline' : 'default'} onClick={onRetry}>
-                <RotateCw className="size-3.5 mr-1.5" />
-                重试
-              </Button>
-            )}
-            {onRetryInNewSession && (
-              <Button size="sm" variant="outline" onClick={onRetryInNewSession}>
-                <Plus className="size-3.5 mr-1.5" />
-                在新会话中重试
-              </Button>
+            {message.errorCode === 'billing_error' ? (
+              onGoToBilling && (
+                <Button size="sm" onClick={onGoToBilling}>
+                  <CreditCard className="size-3.5 mr-1.5" />
+                  去充值
+                </Button>
+              )
+            ) : (
+              <>
+                {message.errorCode === 'prompt_too_long' && onCompact && (
+                  <Button size="sm" onClick={onCompact}>
+                    <Minimize2 className="size-3.5 mr-1.5" />
+                    压缩上下文
+                  </Button>
+                )}
+                {onRetry && (
+                  <Button size="sm" variant={message.errorCode === 'prompt_too_long' ? 'outline' : 'default'} onClick={onRetry}>
+                    <RotateCw className="size-3.5 mr-1.5" />
+                    重试
+                  </Button>
+                )}
+                {onRetryInNewSession && (
+                  <Button size="sm" variant="outline" onClick={onRetryInNewSession}>
+                    <Plus className="size-3.5 mr-1.5" />
+                    在新会话中重试
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </MessageContent>
@@ -631,7 +644,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, messages, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, onRetry, onRetryInNewSession, onFork, onCompact }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, messages, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, onRetry, onRetryInNewSession, onFork, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
@@ -779,6 +792,7 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
                     onRetry={onRetry}
                     onRetryInNewSession={onRetryInNewSession}
                     onCompact={onCompact}
+                    onGoToBilling={onGoToBilling}
                   />
                 </div>
               ))

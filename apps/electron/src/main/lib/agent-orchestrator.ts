@@ -20,9 +20,9 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, symlinkSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload } from '@proma/shared'
-import { SAFE_TOOLS, CLOUD_IPC_CHANNELS } from '@proma/shared'
+import { SAFE_TOOLS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { isPromptTooLongError, friendlyErrorMessage, mapSDKErrorToTypedError, extractErrorDetails } from './adapters/claude-agent-adapter'
@@ -1700,12 +1700,10 @@ export class AgentOrchestrator {
             continue
           }
 
-          // Proma 官方渠道 402：额度不足，广播事件触发充值对话框
-          if (apiError?.statusCode === 402 && channel.provider === 'proma') {
-            BrowserWindow.getAllWindows().forEach((win) => {
-              win.webContents.send(CLOUD_IPC_CHANNELS.QUOTA_EXCEEDED)
-            })
-            console.log(`[Agent 编排] Proma 额度不足 (402)，已广播事件`)
+          // Proma 官方渠道 402：额度不足，标记为计费错误（在聊天内显示，不弹模态框）
+          const isBillingError = apiError?.statusCode === 402 && channel.provider === 'proma'
+          if (isBillingError) {
+            console.log(`[Agent 编排] Proma 额度不足 (402)，将在聊天内显示充值提示`)
           }
 
           // 判断是否可重试
@@ -1736,7 +1734,9 @@ export class AgentOrchestrator {
           }
 
           let userFacingError: string
-          if (apiError) {
+          if (isBillingError) {
+            userFacingError = '余额不足，请充值后继续使用'
+          } else if (apiError) {
             userFacingError = friendlyErrorMessage(`API 错误 (${apiError.statusCode}):\n${apiError.message}`)
           } else {
             // 没有解析到 API 错误时，把 stderr 内容附加上去（便于诊断 Windows exit code 1 等问题）
@@ -1758,15 +1758,17 @@ export class AgentOrchestrator {
             const errMsg: SDKMessage = {
               type: 'assistant',
               message: {
-                content: [{ type: 'text', text: isPromptTooLong
-                  ? '上下文过长：当前对话的上下文已超出模型限制，请压缩上下文或开启新会话'
-                  : userFacingError }],
+                content: [{ type: 'text', text: isBillingError
+                  ? '余额不足，请充值后继续使用'
+                  : isPromptTooLong
+                    ? '上下文过长：当前对话的上下文已超出模型限制，请压缩上下文或开启新会话'
+                    : userFacingError }],
               },
               parent_tool_use_id: null,
-              error: { message: userFacingError, errorType: isPromptTooLong ? 'prompt_too_long' : 'unknown_error' },
+              error: { message: userFacingError, errorType: isBillingError ? 'billing_error' : isPromptTooLong ? 'prompt_too_long' : 'unknown_error' },
               _createdAt: Date.now(),
-              _errorCode: isPromptTooLong ? 'prompt_too_long' : 'unknown_error',
-              _errorTitle: isPromptTooLong ? '上下文过长' : '执行错误',
+              _errorCode: isBillingError ? 'billing_error' : isPromptTooLong ? 'prompt_too_long' : 'unknown_error',
+              _errorTitle: isBillingError ? '余额不足' : isPromptTooLong ? '上下文过长' : '执行错误',
             } as unknown as SDKMessage
             appendSDKMessages(sessionId, [errMsg])
             console.log(`[Agent 编排] 已保存错误消息到 JSONL`)

@@ -60,7 +60,7 @@ import {
   agentSessionPathMapAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
-import { settingsOpenAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
 import { AgentSessionProvider } from '@/contexts/session-context'
@@ -173,6 +173,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const agentChannelIds = useAtomValue(agentChannelIdsAtom)
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
@@ -911,6 +912,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     window.electronAPI.stopAgent(sessionId).catch(console.error)
   }, [sessionId, setStreamingStates])
 
+  /** 余额不足时跳转到账单设置 */
+  const handleGoToBilling = React.useCallback((): void => {
+    setSettingsTab('billing')
+    setSettingsOpen(true)
+  }, [setSettingsTab, setSettingsOpen])
+
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
     if (!agentChannelId || streaming) return
@@ -1103,6 +1110,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetryInNewSession={handleRetryInNewSession}
           onFork={handleFork}
           onCompact={handleCompact}
+          onGoToBilling={handleGoToBilling}
         />
 
         {/* 拖拽文件夹警告 */}

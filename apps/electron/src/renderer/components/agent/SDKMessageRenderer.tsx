@@ -12,8 +12,8 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split } from 'lucide-react'
-import { useAtomValue } from 'jotai'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard } from 'lucide-react'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ContentBlock } from './ContentBlock'
 import { DurationBadge } from './AgentMessages'
@@ -32,6 +32,8 @@ import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
+import { Button } from '@/components/ui/button'
 import type {
   SDKMessage,
   SDKAssistantMessage,
@@ -685,11 +687,21 @@ function ErrorMessage({ message }: { message: SDKAssistantMessage }): React.Reac
 
   const msgAny = message as unknown as Record<string, unknown>
   const errorTitle = typeof msgAny._errorTitle === 'string' ? msgAny._errorTitle : undefined
+  const errorCode = typeof msgAny._errorCode === 'string' ? msgAny._errorCode : undefined
+  const isBillingError = errorCode === 'billing_error'
+
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
 
   const contentText = message.message?.content
     ?.filter((b) => b.type === 'text' && 'text' in b)
     .map((b) => (b as { text: string }).text)
     .join('\n') ?? errorText
+
+  const handleGoToBilling = (): void => {
+    setSettingsTab('billing')
+    setSettingsOpen(true)
+  }
 
   return (
     <Message from="assistant">
@@ -709,6 +721,14 @@ function ErrorMessage({ message }: { message: SDKAssistantMessage }): React.Reac
         <div className="text-destructive">
           <MessageResponse>{contentText}</MessageResponse>
         </div>
+        {isBillingError && (
+          <div className="mt-3">
+            <Button size="sm" onClick={handleGoToBilling}>
+              <CreditCard className="size-3.5 mr-1.5" />
+              去充值
+            </Button>
+          </div>
+        )}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
         <CopyButton content={contentText} />
