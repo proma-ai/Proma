@@ -453,6 +453,33 @@ export function getSyncStatePath(): string {
 }
 
 /**
+ * 获取微信配置文件路径
+ *
+ * @returns ~/.proma/wechat.json
+ */
+export function getWeChatConfigPath(): string {
+  return join(getConfigDir(), 'wechat.json')
+}
+
+/**
+ * 获取微信长轮询同步游标路径
+ *
+ * @returns ~/.proma/wechat-sync.json
+ */
+export function getWeChatSyncPath(): string {
+  return join(getConfigDir(), 'wechat-sync.json')
+}
+
+/**
+ * 获取钉钉配置文件路径
+ *
+ * @returns ~/.proma/dingtalk.json
+ */
+export function getDingTalkConfigPath(): string {
+  return join(getConfigDir(), 'dingtalk.json')
+}
+
+/**
  * 获取飞书配置文件路径
  *
  * @returns ~/.proma/feishu.json
@@ -468,6 +495,15 @@ export function getFeishuConfigPath(): string {
  */
 export function getFeishuBindingsPath(): string {
   return join(getConfigDir(), 'feishu-bindings.json')
+}
+
+/**
+ * 获取某个飞书 Bot 的聊天绑定持久化路径
+ *
+ * @returns ~/.proma/feishu-bindings-{botId}.json
+ */
+export function getFeishuBotBindingsPath(botId: string): string {
+  return join(getConfigDir(), `feishu-bindings-${botId}.json`)
 }
 
 /**

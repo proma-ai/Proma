@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -33,13 +33,11 @@ import { SettingsSection } from './primitives/SettingsSection'
 import { SettingsCard } from './primitives/SettingsCard'
 import { SettingsInput } from './primitives/SettingsInput'
 import { SettingsSecretInput } from './primitives/SettingsSecretInput'
-import { SettingsSelect } from './primitives/SettingsSelect'
-import { SettingsSegmentedControl } from './primitives/SettingsSegmentedControl'
 import { SettingsRow } from './primitives/SettingsRow'
-import { feishuBridgeStateAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
+import { feishuBotStatesAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
 import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
-import type { FeishuTestResult, FeishuChatBinding } from '@proma/shared'
+import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState } from '@proma/shared'
 
 // ===== 常量 =====
 
@@ -53,17 +51,11 @@ const TAB_OPTIONS: Array<{ value: FeishuTab; label: string }> = [
 /** 连接状态颜色映射 */
 const STATUS_CONFIG = {
   disconnected: { color: 'bg-gray-400', label: '未连接' },
-  connecting: { color: 'bg-yellow-400 animate-pulse', label: '连接中...' },
+  connecting: { color: 'bg-amber-400 animate-pulse', label: '连接中...' },
   connected: { color: 'bg-green-500', label: '已连接' },
   error: { color: 'bg-red-500', label: '连接错误' },
 } as const
 
-/** 通知模式选项 */
-const NOTIFY_MODE_OPTIONS = [
-  { value: 'auto', label: '智能' },
-  { value: 'always', label: '始终' },
-  { value: 'off', label: '关闭' },
-]
 
 /** 飞书批量权限配置 JSON（用于一键复制粘贴到飞书开放平台） */
 const FEISHU_SCOPES_JSON = JSON.stringify({
@@ -270,8 +262,10 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
 function FeishuBindingsTab(): React.ReactElement {
   const bindings = useAtomValue(feishuBindingsAtom)
   const setBindings = useSetAtom(feishuBindingsAtom)
-  const bridgeState = useAtomValue(feishuBridgeStateAtom)
+  const botStates = useAtomValue(feishuBotStatesAtom)
   const [refreshing, setRefreshing] = React.useState(false)
+
+  const anyConnected = Object.values(botStates).some((b) => b.status === 'connected')
 
   // 刷新绑定列表
   const refreshBindings = React.useCallback(async () => {
@@ -291,12 +285,12 @@ function FeishuBindingsTab(): React.ReactElement {
     refreshBindings()
   }, [refreshBindings])
 
-  // Bridge 状态变化时也刷新
+  // 有 Bot 连接时刷新
   React.useEffect(() => {
-    if (bridgeState.status === 'connected') {
+    if (anyConnected) {
       refreshBindings()
     }
-  }, [bridgeState.status, refreshBindings])
+  }, [anyConnected, refreshBindings])
 
   // 更新绑定
   const handleUpdate = React.useCallback(async (chatId: string, updates: { workspaceId?: string; sessionId?: string }) => {
@@ -397,81 +391,59 @@ function FeishuBindingsTab(): React.ReactElement {
   )
 }
 
-// ===== Bot 配置 Tab =====
+// ===== 单个 Bot 配置卡片 =====
 
-function FeishuConfigTab(): React.ReactElement {
-  const bridgeState = useAtomValue(feishuBridgeStateAtom)
-  const workspaces = useAtomValue(agentWorkspacesAtom)
+interface BotConfigCardProps {
+  bot: FeishuBotConfig
+  state: FeishuBotBridgeState | undefined
+  onSaved: () => void
+  onRemoved: () => void
+}
 
-  // 表单状态
-  const [appId, setAppId] = React.useState('')
+function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): React.ReactElement {
+  const [name, setName] = React.useState(bot.name)
+  const [appId, setAppId] = React.useState(bot.appId)
   const [appSecret, setAppSecret] = React.useState('')
-  const [defaultWorkspaceId, setDefaultWorkspaceId] = React.useState('')
-  const [defaultNotifyMode, setDefaultNotifyMode] = React.useState('auto')
-
-  // UI 状态
-  const [loading, setLoading] = React.useState(true)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<FeishuTestResult | null>(null)
+  const [expanded, setExpanded] = React.useState(!bot.appId) // 新建的 Bot 默认展开
 
-  // 加载配置
+  // 加载已有 secret（使用 bot-specific API）
   React.useEffect(() => {
-    Promise.all([
-      window.electronAPI.getFeishuConfig(),
-      window.electronAPI.getDecryptedFeishuSecret().catch(() => ''),
-    ]).then(([config, secret]) => {
-      setAppId(config.appId ?? '')
-      if (secret) setAppSecret(secret)
-      setDefaultWorkspaceId(config.defaultWorkspaceId ?? '')
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [])
+    if (bot.appSecret && bot.id) {
+      window.electronAPI.getDecryptedFeishuBotSecret?.(bot.id)
+        .then((s: string) => { if (s) setAppSecret(s) })
+        .catch(() => {
+          // 回退到旧 API（兼容迁移前的首个 Bot）
+          window.electronAPI.getDecryptedFeishuSecret?.()
+            .then((s: string) => { if (s) setAppSecret(s) })
+            .catch(() => {})
+        })
+    }
+  }, [bot.id, bot.appSecret])
 
-  // 工作区选项
-  const workspaceOptions = React.useMemo(
-    () => workspaces.map((w) => ({ value: w.id, label: w.name })),
-    [workspaces]
-  )
+  const statusConfig = state ? STATUS_CONFIG[state.status] : STATUS_CONFIG.disconnected
+  const isConnected = state?.status === 'connected' || state?.status === 'connecting'
 
-  // 保存配置
   const handleSave = React.useCallback(async () => {
-    if (!appId.trim()) return
-
+    if (!appId.trim() || !name.trim()) return
     try {
-      await window.electronAPI.saveFeishuConfig({
+      await window.electronAPI.saveFeishuBotConfig({
+        id: bot.id,
+        name: name.trim(),
         enabled: true,
         appId: appId.trim(),
         appSecret: appSecret || '',
-        defaultWorkspaceId: defaultWorkspaceId || undefined,
       })
-      toast.success('飞书配置已保存')
+      toast.success(`Bot "${name}" 已保存`)
+      onSaved()
     } catch {
-      toast.error('保存飞书配置失败')
+      toast.error('保存配置失败')
     }
-  }, [appId, appSecret, defaultWorkspaceId])
+  }, [bot.id, name, appId, appSecret, onSaved])
 
-  // 保存默认配置
-  const handleSaveDefaults = React.useCallback(async () => {
-    try {
-      await window.electronAPI.saveFeishuConfig({
-        enabled: true,
-        appId: appId.trim(),
-        appSecret: '',
-        defaultWorkspaceId: defaultWorkspaceId || undefined,
-      })
-      toast.success('默认配置已保存')
-    } catch {
-      toast.error('保存默认配置失败')
-    }
-  }, [appId, defaultWorkspaceId])
-
-  // 测试连接
-  const handleTestConnection = React.useCallback(async () => {
-    if (!appId.trim() || !appSecret.trim()) {
-      setTestResult({ success: false, message: '请填写 App ID 和 App Secret' })
-      return
-    }
-
+  const handleTest = React.useCallback(async () => {
+    if (!appId.trim() || !appSecret.trim()) return
     setTesting(true)
     setTestResult(null)
     try {
@@ -484,73 +456,69 @@ function FeishuConfigTab(): React.ReactElement {
     }
   }, [appId, appSecret])
 
-  // 启动/停止 Bridge
-  const handleToggleBridge = React.useCallback(async () => {
-    if (bridgeState.status === 'connected' || bridgeState.status === 'connecting') {
-      await window.electronAPI.stopFeishuBridge()
-      toast.success('飞书 Bridge 已停止')
+  const handleToggle = React.useCallback(async () => {
+    if (isConnected) {
+      await window.electronAPI.stopFeishuBot(bot.id)
+      toast.success(`Bot "${bot.name}" 已停止`)
     } else {
       try {
-        await window.electronAPI.startFeishuBridge()
-        toast.success('飞书 Bridge 启动中...')
+        await window.electronAPI.startFeishuBot(bot.id)
+        toast.success(`Bot "${bot.name}" 启动中...`)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '启动飞书 Bridge 失败')
+        toast.error(err instanceof Error ? err.message : '启动失败')
       }
     }
-  }, [bridgeState.status])
+  }, [bot.id, bot.name, isConnected])
 
-  const statusConfig = STATUS_CONFIG[bridgeState.status]
-  const isConnected = bridgeState.status === 'connected' || bridgeState.status === 'connecting'
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
+  const handleRemove = React.useCallback(async () => {
+    try {
+      await window.electronAPI.removeFeishuBot(bot.id)
+      toast.success(`Bot "${bot.name}" 已删除`)
+      onRemoved()
+    } catch {
+      toast.error('删除失败')
+    }
+  }, [bot.id, bot.name, onRemoved])
 
   return (
-    <div className="space-y-8">
-      {/* 连接状态 */}
-      <SettingsSection
-        title="飞书集成"
-        description="连接飞书机器人，在飞书中控制 Proma Agent"
+    <SettingsCard>
+      {/* 头部：名称 + 状态 + 展开/折叠 */}
+      <button
+        type="button"
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
       >
-        <SettingsCard>
-          <SettingsRow
-            label="Bridge 状态"
-            description={bridgeState.errorMessage ?? undefined}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className={cn('w-2 h-2 rounded-full', statusConfig.color)} />
-                <span className="text-sm text-muted-foreground">{statusConfig.label}</span>
-              </div>
-              <Button
-                size="sm"
-                variant={isConnected ? 'destructive' : 'default'}
-                onClick={handleToggleBridge}
-                disabled={!appId}
-              >
-                {isConnected ? '停止' : '启动'}
-              </Button>
-            </div>
-          </SettingsRow>
-          {bridgeState.activeBindings > 0 && (
-            <SettingsRow label="活跃绑定" description="当前连接的飞书聊天数">
-              <span className="text-sm font-medium">{bridgeState.activeBindings}</span>
-            </SettingsRow>
-          )}
-        </SettingsCard>
-      </SettingsSection>
+        <div className="flex items-center gap-3">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.color}`} />
+          <span className="font-medium text-sm">{bot.name || '未命名 Bot'}</span>
+          <span className="text-xs text-muted-foreground">{bot.appId ? bot.appId.slice(0, 12) + '...' : '未配置'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {isConnected ? (
+            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleToggle() }}>
+              <PowerOff size={14} className="mr-1" />
+              停止
+            </Button>
+          ) : bot.appId ? (
+            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleToggle() }}
+              disabled={state?.status === 'connecting'}>
+              {state?.status === 'connecting' ? <Loader2 size={14} className="animate-spin mr-1" /> : <Power size={14} className="mr-1" />}
+              启动
+            </Button>
+          ) : null}
+          <span className="text-xs text-muted-foreground">{expanded ? '▾' : '▸'}</span>
+        </div>
+      </button>
 
-      {/* Bot 配置 */}
-      <SettingsSection
-        title="Bot 配置"
-        description="从飞书开发者平台获取应用凭证"
-      >
-        <SettingsCard>
+      {/* 展开的配置表单 */}
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+          <SettingsInput
+            label="Bot 名称"
+            value={name}
+            onChange={setName}
+            placeholder="如：研发助手"
+          />
           <SettingsInput
             label="App ID"
             value={appId}
@@ -563,73 +531,148 @@ function FeishuConfigTab(): React.ReactElement {
             onChange={setAppSecret}
             placeholder="输入 App Secret"
           />
-        </SettingsCard>
 
-        <div className="flex items-center gap-3 mt-3">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleTestConnection}
-            disabled={testing || !appId.trim() || !appSecret.trim()}
-          >
-            {testing && <Loader2 size={14} className="animate-spin" />}
-            <span>{testing ? '测试中...' : '测试连接'}</span>
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!appId.trim()}
-          >
-            保存配置
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={handleTest}
+              disabled={testing || !appId.trim() || !appSecret.trim()}>
+              {testing && <Loader2 size={14} className="animate-spin" />}
+              <span>{testing ? '测试中...' : '测试连接'}</span>
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={!appId.trim() || !name.trim()}>
+              保存配置
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="destructive">
+                  <Trash2 size={14} className="mr-1" />
+                  删除
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>确认删除</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    删除 Bot "{bot.name}" 将同时断开连接并清除所有绑定。此操作不可撤销。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleRemove}>删除</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+
+          {testResult && (
+            <div className={cn(
+              'p-3 rounded-lg flex items-start gap-2 text-sm',
+              testResult.success ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-red-500/10 text-red-700 dark:text-red-400'
+            )}>
+              {testResult.success
+                ? <CheckCircle2 size={16} className="flex-shrink-0 mt-0.5" />
+                : <XCircle size={16} className="flex-shrink-0 mt-0.5" />
+              }
+              <span>{testResult.message}{testResult.botName && ` — ${testResult.botName}`}</span>
+            </div>
+          )}
+
+          {state?.status === 'error' && state.errorMessage && (
+            <div className="p-2.5 rounded-lg bg-red-500/10 text-red-700 dark:text-red-400 text-sm">
+              {state.errorMessage}
+            </div>
+          )}
         </div>
+      )}
+    </SettingsCard>
+  )
+}
 
-        {testResult && (
-          <div className={cn(
-            'mt-3 p-3 rounded-lg flex items-start gap-2 text-sm',
-            testResult.success ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-red-500/10 text-red-700 dark:text-red-400'
-          )}>
-            {testResult.success
-              ? <CheckCircle2 size={16} className="flex-shrink-0 mt-0.5" />
-              : <XCircle size={16} className="flex-shrink-0 mt-0.5" />
-            }
-            <span>{testResult.message}{testResult.botName && ` — ${testResult.botName}`}</span>
+// ===== Bot 配置 Tab（多 Bot 版本）=====
+
+function FeishuConfigTab(): React.ReactElement {
+  const botStates = useAtomValue(feishuBotStatesAtom)
+  const [bots, setBots] = React.useState<FeishuBotConfig[]>([])
+  const [loading, setLoading] = React.useState(true)
+
+  const loadBots = React.useCallback(async () => {
+    try {
+      const config = await window.electronAPI.getFeishuMultiConfig()
+      setBots(config.bots)
+    } catch {
+      // fallback: 旧 API
+      try {
+        const oldConfig = await window.electronAPI.getFeishuConfig()
+        if (oldConfig.appId) {
+          setBots([{
+            id: 'legacy',
+            name: '飞书助手',
+            enabled: oldConfig.enabled,
+            appId: oldConfig.appId,
+            appSecret: oldConfig.appSecret,
+          }])
+        }
+      } catch { /* ignore */ }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => { loadBots() }, [loadBots])
+
+  const handleAddBot = React.useCallback(async () => {
+    try {
+      const saved = await window.electronAPI.saveFeishuBotConfig({
+        name: `飞书助手 ${bots.length + 1}`,
+        enabled: false,
+        appId: '',
+        appSecret: '',
+      })
+      setBots((prev) => [...prev, saved])
+    } catch {
+      toast.error('创建 Bot 失败')
+    }
+  }, [bots.length])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Bot 列表 */}
+      <SettingsSection
+        title="飞书 Bot 列表"
+        description="管理多个飞书机器人，每个 Bot 可绑定不同的工作区和模型"
+        action={
+          <Button size="sm" variant="outline" onClick={handleAddBot}>
+            <Plus size={14} className="mr-1.5" />
+            添加 Bot
+          </Button>
+        }
+      >
+        {bots.length === 0 ? (
+          <SettingsCard divided={false}>
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              还没有配置飞书 Bot。点击「添加 Bot」开始。
+            </div>
+          </SettingsCard>
+        ) : (
+          <div className="space-y-3">
+            {bots.map((bot) => (
+              <BotConfigCard
+                key={bot.id}
+                bot={bot}
+                state={botStates[bot.id]}
+                onSaved={loadBots}
+                onRemoved={loadBots}
+              />
+            ))}
           </div>
         )}
-      </SettingsSection>
-
-      {/* 默认配置 */}
-      <SettingsSection
-        title="默认配置"
-        description="飞书发起新会话时使用的默认设置"
-      >
-        <SettingsCard>
-          <SettingsSegmentedControl
-            label="默认通知模式"
-            description="智能: 离开时才发飞书 | 始终: 总是发 | 关闭: 从不发"
-            value={defaultNotifyMode}
-            onValueChange={setDefaultNotifyMode}
-            options={NOTIFY_MODE_OPTIONS}
-          />
-          {workspaceOptions.length > 0 && (
-            <SettingsSelect
-              label="默认工作区（可在飞书内通过 /workspaces 选择）"
-              value={defaultWorkspaceId}
-              onValueChange={setDefaultWorkspaceId}
-              options={workspaceOptions}
-              placeholder="选择工作区"
-            />
-          )}
-        </SettingsCard>
-
-        <div className="flex items-center mt-3">
-          <Button
-            size="sm"
-            onClick={handleSaveDefaults}
-          >
-            保存默认配置
-          </Button>
-        </div>
       </SettingsSection>
 
       {/* 创建飞书 Bot 引导 */}
@@ -731,39 +774,6 @@ function FeishuConfigTab(): React.ReactElement {
         </SettingsCard>
       </SettingsSection>
 
-      {/* 飞书命令使用说明 */}
-      <SettingsSection
-        title="飞书命令"
-        description="在飞书中向 Bot 发送以下命令"
-      >
-        <SettingsCard divided={false}>
-          <div className="px-4 py-3 space-y-2 text-sm text-muted-foreground">
-            <div className="grid grid-cols-[100px_1fr] gap-y-1.5 gap-x-4">
-              <code className="text-foreground/80 font-mono">/help</code>
-              <span>显示帮助</span>
-              <code className="text-foreground/80 font-mono">/new</code>
-              <span>创建新 Agent 会话</span>
-              {/* <code className="text-foreground/80 font-mono">/chat</code>
-              <span>切换到 Chat 模式</span> */}
-              <code className="text-foreground/80 font-mono">/agent</code>
-              <span>切换到 Agent 模式</span>
-              <code className="text-foreground/80 font-mono">/list</code>
-              <span>列出所有会话</span>
-              <code className="text-foreground/80 font-mono">/stop</code>
-              <span>停止当前 Agent</span>
-              <code className="text-foreground/80 font-mono">/switch</code>
-              <span>切换到已有会话（序号）</span>
-              <code className="text-foreground/80 font-mono">/workspace</code>
-              <span>设置默认工作区</span>
-              <code className="text-foreground/80 font-mono">/now</code>
-              <span>查看当前状态（工作区、会话、MCP、Skills）</span>
-            </div>
-            <p className="pt-2 text-xs">
-              直接发送文本会自动创建新会话或发送到当前绑定的会话。
-            </p>
-          </div>
-        </SettingsCard>
-      </SettingsSection>
     </div>
   )
 }

@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
@@ -116,6 +116,12 @@ import type {
   // 模型健康检查类型
   ModelHealthIpcResponse,
   FeishuUpdateBindingInput,
+  DingTalkConfig,
+  DingTalkConfigInput,
+  DingTalkBridgeState,
+  DingTalkTestResult,
+  WeChatConfig,
+  WeChatBridgeState,
   AgentQueueMessageInput,
   PendingRequestsSnapshot,
 } from '@proma/shared'
@@ -781,6 +787,60 @@ export interface ElectronAPI {
   onFeishuStatusChanged: (callback: (state: FeishuBridgeState) => void) => () => void
   /** 订阅飞书通知已发送事件 */
   onFeishuNotificationSent: (callback: (payload: FeishuNotificationSentPayload) => void) => () => void
+
+  // --- 多 Bot v2 API ---
+
+  /** 获取多 Bot 配置 */
+  getFeishuMultiConfig: () => Promise<import('@proma/shared').FeishuMultiBotConfig>
+  /** 保存单个 Bot 配置 */
+  saveFeishuBotConfig: (input: import('@proma/shared').FeishuBotConfigInput) => Promise<import('@proma/shared').FeishuBotConfig>
+  /** 获取单个 Bot 解密后的 App Secret */
+  getDecryptedFeishuBotSecret: (botId: string) => Promise<string>
+  /** 删除 Bot */
+  removeFeishuBot: (botId: string) => Promise<boolean>
+  /** 启动单个 Bot */
+  startFeishuBot: (botId: string) => Promise<void>
+  /** 停止单个 Bot */
+  stopFeishuBot: (botId: string) => Promise<void>
+  /** 获取多 Bot 状态 */
+  getFeishuMultiStatus: () => Promise<import('@proma/shared').FeishuMultiBridgeState>
+
+  // ===== 钉钉集成 =====
+
+  /** 获取钉钉配置 */
+  getDingTalkConfig: () => Promise<DingTalkConfig>
+  /** 获取解密后的 Client Secret */
+  getDecryptedDingTalkSecret: () => Promise<string>
+  /** 保存钉钉配置（clientSecret 为明文） */
+  saveDingTalkConfig: (input: DingTalkConfigInput) => Promise<DingTalkConfig>
+  /** 测试钉钉连接 */
+  testDingTalkConnection: (clientId: string, clientSecret: string) => Promise<DingTalkTestResult>
+  /** 启动钉钉 Bridge */
+  startDingTalkBridge: () => Promise<void>
+  /** 停止钉钉 Bridge */
+  stopDingTalkBridge: () => Promise<void>
+  /** 获取钉钉 Bridge 状态 */
+  getDingTalkStatus: () => Promise<DingTalkBridgeState>
+  /** 订阅钉钉 Bridge 状态变化 */
+  onDingTalkStatusChanged: (callback: (state: DingTalkBridgeState) => void) => () => void
+
+  // ===== 微信集成 =====
+
+  /** 获取微信配置 */
+  getWeChatConfig: () => Promise<WeChatConfig>
+  /** 开始扫码登录 */
+  startWeChatLogin: () => Promise<void>
+  /** 登出微信 */
+  logoutWeChat: () => Promise<void>
+  /** 启动微信 Bridge（用已有凭证） */
+  startWeChatBridge: () => Promise<void>
+  /** 停止微信 Bridge */
+  stopWeChatBridge: () => Promise<void>
+  /** 获取微信 Bridge 状态 */
+  getWeChatStatus: () => Promise<WeChatBridgeState>
+  /** 订阅微信 Bridge 状态变化 */
+  onWeChatStatusChanged: (callback: (state: WeChatBridgeState) => void) => () => void
+
   /** 订阅菜单关闭标签页事件（Cmd+W 被菜单拦截后转发） */
   onMenuCloseTab: (callback: () => void) => () => void
 
@@ -1666,6 +1726,104 @@ const electronAPI: ElectronAPI = {
     const listener = (_event: Electron.IpcRendererEvent, payload: FeishuNotificationSentPayload): void => callback(payload)
     ipcRenderer.on(FEISHU_IPC_CHANNELS.NOTIFICATION_SENT, listener)
     return () => { ipcRenderer.removeListener(FEISHU_IPC_CHANNELS.NOTIFICATION_SENT, listener) }
+  },
+
+  // --- 多 Bot v2 API ---
+
+  getFeishuMultiConfig: () => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_MULTI_CONFIG)
+  },
+
+  saveFeishuBotConfig: (input: import('@proma/shared').FeishuBotConfigInput) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.SAVE_BOT_CONFIG, input)
+  },
+
+  getDecryptedFeishuBotSecret: (botId: string) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_BOT_DECRYPTED_SECRET, botId)
+  },
+
+  removeFeishuBot: (botId: string) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.REMOVE_BOT, botId)
+  },
+
+  startFeishuBot: (botId: string) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.START_BOT, botId)
+  },
+
+  stopFeishuBot: (botId: string) => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.STOP_BOT, botId)
+  },
+
+  getFeishuMultiStatus: () => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_MULTI_STATUS)
+  },
+
+  // ===== 微信集成 =====
+
+  getWeChatConfig: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.GET_CONFIG)
+  },
+
+  startWeChatLogin: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.START_LOGIN)
+  },
+
+  logoutWeChat: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.LOGOUT)
+  },
+
+  startWeChatBridge: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.START_BRIDGE)
+  },
+
+  stopWeChatBridge: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.STOP_BRIDGE)
+  },
+
+  getWeChatStatus: () => {
+    return ipcRenderer.invoke(WECHAT_IPC_CHANNELS.GET_STATUS)
+  },
+
+  onWeChatStatusChanged: (callback: (state: WeChatBridgeState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: WeChatBridgeState): void => callback(state)
+    ipcRenderer.on(WECHAT_IPC_CHANNELS.STATUS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(WECHAT_IPC_CHANNELS.STATUS_CHANGED, listener) }
+  },
+
+  // ===== 钉钉集成 =====
+
+  getDingTalkConfig: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_CONFIG)
+  },
+
+  getDecryptedDingTalkSecret: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_DECRYPTED_SECRET)
+  },
+
+  saveDingTalkConfig: (input: DingTalkConfigInput) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.SAVE_CONFIG, input)
+  },
+
+  testDingTalkConnection: (clientId: string, clientSecret: string) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.TEST_CONNECTION, clientId, clientSecret)
+  },
+
+  startDingTalkBridge: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.START_BRIDGE)
+  },
+
+  stopDingTalkBridge: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.STOP_BRIDGE)
+  },
+
+  getDingTalkStatus: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_STATUS)
+  },
+
+  onDingTalkStatusChanged: (callback: (state: DingTalkBridgeState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: DingTalkBridgeState): void => callback(state)
+    ipcRenderer.on(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, listener) }
   },
 
   onMenuCloseTab: (callback: () => void) => {

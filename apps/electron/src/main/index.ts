@@ -43,8 +43,12 @@ import { registerCloudIpcHandlers } from './cloud-ipc'
 import { registerSyncIpcHandlers } from './sync-ipc'
 import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
-import { feishuBridge } from './lib/feishu-bridge'
-import { getFeishuConfig } from './lib/feishu-config'
+import { feishuBridgeManager } from './lib/feishu-bridge-manager'
+import { getFeishuMultiBotConfig } from './lib/feishu-config'
+import { dingtalkBridge } from './lib/dingtalk-bridge'
+import { getDingTalkConfig } from './lib/dingtalk-config'
+import { wechatBridge } from './lib/wechat-bridge'
+import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
 import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/global-shortcut-service'
 
@@ -321,11 +325,27 @@ if (!gotTheLock) {
       })
     }
 
-    // 飞书 Bridge 自动启动（配置启用时）
-    const feishuConfig = getFeishuConfig()
-    if (feishuConfig.enabled && feishuConfig.appId && feishuConfig.appSecret) {
-      feishuBridge.start().catch((err) => {
-        console.error('[飞书 Bridge] 自动启动失败:', err)
+    // 飞书 Bridge 自动启动（所有已启用的 Bot）
+    const feishuMultiConfig = getFeishuMultiBotConfig()
+    if (feishuMultiConfig.bots.some((b) => b.enabled && b.appId && b.appSecret)) {
+      feishuBridgeManager.startAll().catch((err) => {
+        console.error('[飞书 BridgeManager] 自动启动失败:', err)
+      })
+    }
+
+    // 钉钉 Bridge 自动启动（配置启用时）
+    const dingtalkConfig = getDingTalkConfig()
+    if (dingtalkConfig.enabled && dingtalkConfig.clientId && dingtalkConfig.clientSecret) {
+      dingtalkBridge.start().catch((err) => {
+        console.error('[钉钉 Bridge] 自动启动失败:', err)
+      })
+    }
+
+    // 微信 Bridge 自动启动（有已保存凭证时）
+    const wechatConfig = getWeChatConfig()
+    if (wechatConfig.enabled && wechatConfig.credentials) {
+      wechatBridge.start().catch((err) => {
+        console.error('[微信 Bridge] 自动启动失败:', err)
       })
     }
 
@@ -362,7 +382,11 @@ if (!gotTheLock) {
     // 停止 Chat 工具配置文件监听
     stopChatToolsWatcher()
     // 停止飞书 Bridge
-    feishuBridge.stop()
+    feishuBridgeManager.stopAll()
+    // 停止钉钉 Bridge
+    dingtalkBridge.stop()
+    // 停止微信 Bridge
+    wechatBridge.stop()
     // 注销全局快捷键
     unregisterAllGlobalShortcuts()
     // 销毁快速任务窗口

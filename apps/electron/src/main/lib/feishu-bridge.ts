@@ -24,13 +24,14 @@ import type {
   FeishuMessageContext,
   FeishuChatMessage,
   FeishuUpdateBindingInput,
+  FeishuBotConfig,
 } from '@proma/shared'
 import { FEISHU_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
-import { getFeishuConfig, getDecryptedAppSecret } from './feishu-config'
+import { getDecryptedBotAppSecret } from './feishu-config'
 import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
 import { listAgentWorkspaces, getAgentWorkspace, getWorkspaceCapabilities } from './agent-workspace-manager'
-import { getAgentSessionWorkspacePath, getFeishuBindingsPath } from './config-paths'
+import { getAgentSessionWorkspacePath, getFeishuBotBindingsPath } from './config-paths'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getSettings } from './settings-service'
@@ -77,9 +78,12 @@ interface SessionBuffer {
   startedAt: number
 }
 
-// ===== 单例 Bridge =====
+// ===== Bridge =====
 
 class FeishuBridge {
+  /** Bot 配置（构造时注入） */
+  private readonly botConfig: FeishuBotConfig
+
   /** SDK Client（发消息用） */
   private client: InstanceType<typeof import('@larksuiteoapi/node-sdk').Client> | null = null
   /** WebSocket Client */
@@ -127,24 +131,33 @@ class FeishuBridge {
   /** EventBus 监听器取消函数 */
   private eventBusUnsubscribe: (() => void) | null = null
 
+  constructor(botConfig: FeishuBotConfig) {
+    this.botConfig = botConfig
+  }
+
+  /** 获取 Bot 配置 */
+  getBotConfig(): FeishuBotConfig {
+    return this.botConfig
+  }
+
   // ===== 生命周期 =====
 
   async start(): Promise<void> {
-    const config = getFeishuConfig()
-    if (!config.enabled || !config.appId || !config.appSecret) {
+    const { appId, appSecret } = this.botConfig
+    if (!appId || !appSecret) {
       throw new Error('请先配置 App ID 和 App Secret')
     }
 
     this.updateStatus({ status: 'connecting' })
 
     try {
-      const appSecret = getDecryptedAppSecret()
+      const plainSecret = getDecryptedBotAppSecret(this.botConfig.id)
       const lark = await import('@larksuiteoapi/node-sdk')
 
       // 创建 SDK Client
       this.client = new lark.Client({
-        appId: config.appId,
-        appSecret,
+        appId,
+        appSecret: plainSecret,
         appType: lark.AppType.SelfBuild,
       })
 
@@ -183,8 +196,8 @@ class FeishuBridge {
 
       // 创建 WebSocket 长连接
       this.wsClient = new lark.WSClient({
-        appId: config.appId,
-        appSecret,
+        appId,
+        appSecret: plainSecret,
         loggerLevel: lark.LoggerLevel.warn,
       })
 
@@ -246,7 +259,7 @@ class FeishuBridge {
 
   /** 从磁盘恢复聊天绑定（应用重启后延续之前的会话） */
   private loadBindings(): void {
-    const bindingsPath = getFeishuBindingsPath()
+    const bindingsPath = getFeishuBotBindingsPath(this.botConfig.id)
     if (!existsSync(bindingsPath)) return
 
     try {
@@ -282,7 +295,7 @@ class FeishuBridge {
   private saveBindings(): void {
     try {
       const bindings = Array.from(this.chatBindings.values())
-      const bindingsPath = getFeishuBindingsPath()
+      const bindingsPath = getFeishuBotBindingsPath(this.botConfig.id)
       writeFileSync(bindingsPath, JSON.stringify(bindings, null, 2), 'utf-8')
     } catch (error) {
       console.error('[飞书 Bridge] 保存绑定失败:', error)
@@ -757,11 +770,10 @@ class FeishuBridge {
     overrideWorkspaceId?: string,
   ): Promise<void> {
     const { chatId } = msgCtx
-    const config = getFeishuConfig()
     const appSettings = getSettings()
 
-    // 选择工作区：显式指定 > 飞书配置 > 应用设置 > 第一个工作区
-    let workspaceId = overrideWorkspaceId ?? config.defaultWorkspaceId ?? appSettings.agentWorkspaceId
+    // 选择工作区：显式指定 > Bot 默认 > 应用设置 > 第一个工作区
+    let workspaceId = overrideWorkspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
     if (!workspaceId) {
       const workspaces = await listAgentWorkspaces()
       workspaceId = workspaces[0]?.id
@@ -772,8 +784,8 @@ class FeishuBridge {
       return
     }
 
-    // 渠道/模型：直接复用 Proma 应用当前设置
-    const channelId = appSettings.agentChannelId
+    // 渠道/模型：Bot 配置 > 应用设置
+    const channelId = this.botConfig.defaultChannelId ?? appSettings.agentChannelId
     if (!channelId) {
       await this.sendMessage(chatId, '请先在 Proma Agent 设置中选择渠道。')
       return
@@ -789,6 +801,7 @@ class FeishuBridge {
     // 绑定
     const binding: FeishuChatBinding = {
       chatId,
+      botId: this.botConfig.id,
       userId: msgCtx.senderOpenId,
       sessionId: session.id,
       workspaceId,
@@ -911,12 +924,12 @@ class FeishuBridge {
     }
 
     const appSettings = getSettings()
-    const config = getFeishuConfig()
     const binding: FeishuChatBinding = {
       chatId,
+      botId: this.botConfig.id,
       userId: msgCtx.senderOpenId,
       sessionId: match.id,
-      workspaceId: match.workspaceId ?? config.defaultWorkspaceId ?? appSettings.agentWorkspaceId ?? '',
+      workspaceId: match.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId ?? '',
       channelId: match.channelId ?? appSettings.agentChannelId ?? '',
       modelId: appSettings.agentModelId ?? undefined,
       mode: 'agent',
@@ -971,9 +984,18 @@ class FeishuBridge {
       this.saveBindings()
     }
 
-    // 更新飞书配置的默认工作区（下次自动创建会话时使用）
-    const { updateFeishuConfigPartial } = await import('./feishu-config')
-    updateFeishuConfigPartial({ defaultWorkspaceId: match.id })
+    // 更新 Bot 配置的默认工作区（下次自动创建会话时使用）
+    const { saveFeishuBotConfig } = await import('./feishu-config')
+    saveFeishuBotConfig({
+      id: this.botConfig.id,
+      name: this.botConfig.name,
+      enabled: this.botConfig.enabled,
+      appId: this.botConfig.appId,
+      appSecret: '', // 空字符串表示不修改
+      defaultWorkspaceId: match.id,
+      defaultChannelId: this.botConfig.defaultChannelId,
+      defaultModelId: this.botConfig.defaultModelId,
+    })
 
     // 列出该工作区下最近 10 条会话（序号为全局排序位置）
     const sessions = listAgentSessions()
@@ -1173,10 +1195,10 @@ class FeishuBridge {
         }
       }
 
-      // 使用最新的渠道和模型设置（用户可能在运行中更改）
+      // 使用最新的渠道和模型设置（Bot 配置 > 应用设置 > 绑定默认值）
       const latestSettings = getSettings()
-      const channelId = latestSettings.agentChannelId || binding.channelId
-      const modelId = latestSettings.agentModelId || binding.modelId
+      const channelId = this.botConfig.defaultChannelId || latestSettings.agentChannelId || binding.channelId
+      const modelId = this.botConfig.defaultModelId || latestSettings.agentModelId || binding.modelId
 
       const input: AgentSendInput = {
         sessionId: binding.sessionId,
@@ -1949,14 +1971,18 @@ class FeishuBridge {
   private updateStatus(partial: Partial<FeishuBridgeState>): void {
     this.status = { ...this.status, ...partial }
 
-    // 广播到渲染进程
+    // 广播到渲染进程（包含 botId 和 botName）
     const windows = BrowserWindow.getAllWindows()
     if (windows.length > 0 && !windows[0]!.isDestroyed()) {
-      windows[0]!.webContents.send(FEISHU_IPC_CHANNELS.STATUS_CHANGED, this.status)
+      windows[0]!.webContents.send(FEISHU_IPC_CHANNELS.STATUS_CHANGED, {
+        ...this.status,
+        botId: this.botConfig.id,
+        botName: this.botConfig.name,
+      })
     }
   }
 }
 
-// ===== 导出单例 =====
+// ===== 导出类（由 FeishuBridgeManager 创建实例） =====
 
-export const feishuBridge = new FeishuBridge()
+export { FeishuBridge }

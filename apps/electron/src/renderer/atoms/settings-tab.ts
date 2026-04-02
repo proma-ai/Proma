@@ -14,7 +14,7 @@
 
 import { atom } from 'jotai'
 
-export type SettingsTab = 'general' | 'channels' | 'proxy' | 'appearance' | 'about' | 'agent' | 'prompts' | 'tools' | 'feishu' | 'tutorial' | 'shortcuts'
+export type SettingsTab = 'general' | 'channels' | 'proxy' | 'appearance' | 'about' | 'agent' | 'prompts' | 'tools' | 'bots' | 'tutorial' | 'shortcuts'
   // Cloud 模式专属标签页
   | 'billing' | 'api' | 'usage'
 

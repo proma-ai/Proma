@@ -19,6 +19,7 @@
     --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
+    --stop-hover-bg: hsla(0, 80%, 60%, 0.12);
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
@@ -48,8 +49,9 @@
     --secondary-foreground: 0 0% 98%;
     --accent: 0 0% 40%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 55% 45%;
     --destructive-foreground: 0 0% 98%;
+    --stop-hover-bg: hsl(0, 40%, 18%);
     --card: 0 0% 7%;                      /* 卡片背景 = 背景色 */
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 7%;                   /* 弹出层 = 背景色 */
@@ -91,6 +93,7 @@
     --dialog-foreground: 210 30% 15%;     /* #1b2632 弹窗前景 */
     --destructive: 0 84.2% 60.2%;         /* #ef4444 危险色 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
+    --stop-hover-bg: hsla(0, 80%, 60%, 0.12);
     --tooltip: 210 45% 18%;               /* #192e43 Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 210 20% 75%;         /* #b3bfcc Tooltip弱 */
@@ -120,8 +123,9 @@
     --popover-foreground: 210 20% 92%;    /* #e7ebef 弹出前景 */
     --dialog: 210 25% 16%;                /* #1f2933 弹窗背景 */
     --dialog-foreground: 210 20% 92%;     /* #e7ebef 弹窗前景 */
-    --destructive: 0 62.8% 30.6%;         /* #7f1d1d 危险色 */
+    --destructive: 0 55% 45%;              /* 中饱和度红 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
+    --stop-hover-bg: hsl(0, 35%, 18%);
     --tooltip: 210 40% 22%;               /* #22384f Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 210 20% 70%;         /* #a3b3c2 Tooltip弱 */
@@ -155,6 +159,7 @@
     --dialog-foreground: 150 25% 15%;     /* #1d3026 弹窗前景 */
     --destructive: 0 72% 51%;             /* #dc2828 危险色 */
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
+    --stop-hover-bg: hsla(0, 70%, 50%, 0.12);
     --tooltip: 150 20% 18%;               /* #25372e Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 140 10% 60%;         /* #8fa396 Tooltip弱 */
@@ -184,8 +189,9 @@
     --popover-foreground: 140 10% 90%;    /* #e3e8e5 弹出前景 */
     --dialog: 150 15% 15%;                /* #212c26 弹窗背景 */
     --dialog-foreground: 140 10% 90%;     /* #e3e8e5 弹窗前景 */
-    --destructive: 0 63% 31%;             /* #811d1d 危险色 */
+    --destructive: 0 55% 45%;              /* 中饱和度红 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
+    --stop-hover-bg: hsl(0, 35%, 18%);
     --tooltip: 150 25% 20%;               /* #264033 Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 140 10% 65%;         /* #9dafa3 Tooltip弱 */
@@ -224,6 +230,7 @@
     /* 功能色 */
     --destructive: 0 65% 50%;             /* #d43c3c 危险色 */
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
+    --stop-hover-bg: hsla(0, 60%, 50%, 0.12);
     --tooltip: 40 8% 20%;                 /* #37352e Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 40 5% 55%;           /* #928e84 Tooltip弱 */
@@ -258,8 +265,9 @@
     --dialog: 260 5% 16%;                 /* #282528 弹窗背景 */
     --dialog-foreground: 30 10% 90%;      /* #e9e6e3 弹窗前景 */
     /* 功能色 */
-    --destructive: 0 45% 45%;             /* #a6524f 柔和危险色 */
+    --destructive: 0 45% 50%;              /* #b8635f 柔和危险色 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
+    --stop-hover-bg: hsl(0, 25%, 20%);
     --tooltip: 260 8% 22%;                /* #38343d Tooltip */
     --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
     --tooltip-muted: 30 8% 65%;           /* #aca49d Tooltip弱 */
@@ -609,3 +617,23 @@
 .spinner-cube:nth-child(7) { animation-delay: 0s; }
 .spinner-cube:nth-child(8) { animation-delay: 0.1s; }
 .spinner-cube:nth-child(9) { animation-delay: 0.2s; }
+
+/* ===== 深色主题：迷你导航当前可见范围指示器 — 加亮 ===== */
+.theme-ocean-dark .minimap-visible-indicator {
+  background-color: hsl(205 60% 55%) !important;   /* 更亮的蓝 */
+}
+.theme-forest-dark .minimap-visible-indicator {
+  background-color: hsl(151 40% 45%) !important;   /* 更亮的绿 */
+}
+
+/* ===== 计划模式：输入框定位上下文 ===== */
+.plan-mode-border {
+  position: relative;
+}
+/* 深色主题 plan 虚线颜色加亮 */
+.theme-ocean-dark .plan-mode-border .plan-mode-stroke {
+  stroke: hsl(205 60% 55% / 0.7);
+}
+.theme-forest-dark .plan-mode-border .plan-mode-stroke {
+  stroke: hsl(151 40% 45% / 0.7);
+}

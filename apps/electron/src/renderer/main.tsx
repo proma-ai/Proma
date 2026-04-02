@@ -55,10 +55,10 @@ import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
 import { tabsAtom, splitLayoutAtom } from './atoms/tab-atoms'
 import type { TabItem, SplitLayoutState } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
-import { feishuBridgeStateAtom } from './atoms/feishu-atoms'
+import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
-import type { FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
+import type { FeishuBotBridgeState, FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 import { diffCapabilities, migratePermissionMode, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -504,14 +504,30 @@ function FeishuInitializer(): null {
   const store = useStore()
 
   useEffect(() => {
-    // 加载初始状态
-    window.electronAPI.getFeishuStatus()
-      .then((state: FeishuBridgeState) => store.set(feishuBridgeStateAtom, state))
-      .catch((err: unknown) => console.error('[FeishuInitializer] 加载状态失败:', err))
+    // 加载初始多 Bot 状态
+    window.electronAPI.getFeishuMultiStatus?.()
+      .then((multiState: { bots: Record<string, FeishuBotBridgeState> }) => {
+        store.set(feishuBotStatesAtom, multiState.bots)
+      })
+      .catch(() => {
+        // 回退：使用旧 API 获取单 Bot 状态
+        window.electronAPI.getFeishuStatus()
+          .then((state: FeishuBridgeState) => {
+            const s = state as FeishuBotBridgeState
+            const botId = s.botId ?? 'default'
+            store.set(feishuBotStatesAtom, { [botId]: { ...s, botId, botName: s.botName ?? '飞书助手' } })
+          })
+          .catch((err: unknown) => console.error('[FeishuInitializer] 加载状态失败:', err))
+      })
 
-    // 订阅状态变化
-    const cleanupStatus = window.electronAPI.onFeishuStatusChanged((state: FeishuBridgeState) => {
-      store.set(feishuBridgeStateAtom, state)
+    // 订阅状态变化（现在每次推送包含 botId）
+    const cleanupStatus = window.electronAPI.onFeishuStatusChanged((raw: FeishuBridgeState) => {
+      const state = raw as FeishuBotBridgeState
+      const botId = state.botId ?? 'default'
+      store.set(feishuBotStatesAtom, (prev) => ({
+        ...prev,
+        [botId]: { ...state, botId, botName: state.botName ?? '飞书助手' },
+      }))
     })
 
     // 订阅通知已发送事件 → Sonner + 桌面通知

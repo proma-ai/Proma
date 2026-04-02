@@ -45,6 +45,8 @@ import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
 interface AgentMessagesProps {
   sessionId: string
   messages: AgentMessage[]
+  /** 消息是否已完成首次加载 */
+  messagesLoaded?: boolean
   /** Phase 4: 持久化的 SDKMessage（新格式） */
   persistedSDKMessages?: SDKMessage[]
   streaming: boolean
@@ -53,6 +55,8 @@ interface AgentMessagesProps {
   liveMessages?: SDKMessage[]
   /** 当前会话工作目录，用于解析相对文件路径 */
   sessionPath?: string | null
+  /** 最后一轮是否被用户中断 */
+  stoppedByUser?: boolean
   onRetry?: () => void
   onRetryInNewSession?: () => void
   onFork?: (upToMessageUuid: string) => void
@@ -638,13 +642,13 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
 
   return (
     <div className="flex items-center gap-2 min-h-[28px]">
-      <Spinner size="sm" className="text-primary/50" />
-      <span className="text-[13px] font-light text-muted-foreground/50 tabular-nums">Agent Running {formatTime(elapsed)}</span>
+      <Spinner size="sm" className="text-primary/75" />
+      <span className="text-[13px] font-light text-muted-foreground/75 tabular-nums">Agent Running {formatTime(elapsed)}</span>
     </div>
   )
 }
 
-export function AgentMessages({ sessionId, messages, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, onRetry, onRetryInNewSession, onFork, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, stoppedByUser, onRetry, onRetryInNewSession, onFork, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
@@ -660,6 +664,10 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
 
   React.useEffect(() => {
     if (ready) return
+
+    // 必须等消息加载完成，否则 messages=[] 会被误判为空对话
+    if (messagesLoaded === false) return
+
     if (messages.length === 0 && (!persistedSDKMessages || persistedSDKMessages.length === 0) && !streaming) {
       setReady(true)
       return
@@ -671,7 +679,7 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
       })
     })
     return () => { cancelled = true }
-  }, [messages, streaming, persistedSDKMessages])
+  }, [messages, streaming, persistedSDKMessages, messagesLoaded])
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
@@ -773,15 +781,22 @@ export function AgentMessages({ sessionId, messages, persistedSDKMessages, strea
             {/* 持久化消息渲染 */}
             {useSDKRenderer ? (
               // Turn 分组渲染 — 每个 turn 只有一个模型 header
-              persistedGroups.map((group) => (
-                <MessageGroupRenderer
-                  key={getGroupId(group)}
-                  group={group}
-                  allMessages={allSDKMessages}
-                  basePath={sessionPath || undefined}
-                  onFork={onFork}
-                />
-              ))
+              persistedGroups.map((group, idx) => {
+                // 仅在最后一个 assistant-turn 上显示"已被用户中断" badge
+                const isLastAssistantTurn = !streaming && stoppedByUser
+                  && group.type === 'assistant-turn'
+                  && idx === persistedGroups.findLastIndex((g) => g.type === 'assistant-turn')
+                return (
+                  <MessageGroupRenderer
+                    key={getGroupId(group)}
+                    group={group}
+                    allMessages={allSDKMessages}
+                    basePath={sessionPath || undefined}
+                    onFork={onFork}
+                    stoppedByUser={isLastAssistantTurn || undefined}
+                  />
+                )
+              })
             ) : (
               // 旧格式回退 — AgentMessageItem
               messages.map((msg: AgentMessage) => (

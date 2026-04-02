@@ -244,7 +244,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         >
           {/* 附件预览区域 — Cherry Studio: padding 5px 15px, flex-wrap, gap 4px */}
           {pendingAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 px-[15px] py-[5px]">
+            <div className="flex flex-wrap gap-1 px-[15px] pt-[10px] pb-[15px]">
               {pendingAttachments.map((att) => (
                 <AttachmentPreviewItem
                   key={att.id}
@@ -330,10 +330,10 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-[36px] rounded-full text-destructive hover:bg-destructive/10"
+                  className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
                   onClick={onStop}
                 >
-                  <Square className="size-[22px]" />
+                  <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
                 </Button>
               ) : (
                 <Button

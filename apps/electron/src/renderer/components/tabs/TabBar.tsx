@@ -26,10 +26,15 @@ import {
   conversationContextLengthAtom,
   conversationThinkingEnabledAtom,
   conversationParallelModeAtom,
+  currentConversationIdAtom,
 } from '@/atoms/chat-atoms'
 import {
   agentSidePanelOpenMapAtom,
+  agentSessionsAtom,
+  currentAgentSessionIdAtom,
+  currentAgentWorkspaceIdAtom,
 } from '@/atoms/agent-atoms'
+import { appModeAtom } from '@/atoms/app-mode'
 import { conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { TabBarItem } from './TabBarItem'
 import { SplitModeToggle } from './SplitModeToggle'
@@ -40,6 +45,13 @@ export function TabBar(): React.ReactElement {
   const activeTabId = useAtomValue(activeTabIdAtom)
   const streamingMap = useAtomValue(tabStreamingMapAtom)
   const scrollRef = React.useRef<HTMLDivElement>(null)
+
+  // Tab 切换时同步 sidebar 状态
+  const setAppMode = useSetAtom(appModeAtom)
+  const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
+  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
 
   // per-conversation/session Map atoms（用于关闭标签时清理）
   const setConvModels = useSetAtom(conversationModelsAtom)
@@ -77,7 +89,26 @@ export function TabBar(): React.ReactElement {
 
   const handleActivate = React.useCallback((tabId: string) => {
     setLayout((prev) => focusTab(prev, tabId))
-  }, [setLayout])
+
+    const tab = tabs.find((t) => t.id === tabId)
+    if (!tab) return
+
+    if (tab.type === 'chat') {
+      setAppMode('chat')
+      setCurrentConversationId(tab.sessionId)
+    } else if (tab.type === 'agent') {
+      setAppMode('agent')
+      setCurrentAgentSessionId(tab.sessionId)
+
+      const session = agentSessions.find((s) => s.id === tab.sessionId)
+      if (session?.workspaceId) {
+        setCurrentAgentWorkspaceId(session.workspaceId)
+        window.electronAPI.updateSettings({
+          agentWorkspaceId: session.workspaceId,
+        }).catch(console.error)
+      }
+    }
+  }, [setLayout, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId])
 
   const handleClose = React.useCallback((tabId: string) => {
     setTabs((prevTabs) => {
