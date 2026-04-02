@@ -260,8 +260,11 @@ export const agentSessionPathMapAtom = atom<Map<string, string>>(new Map())
 
 // ===== 权限系统 Atoms =====
 
-/** 当前工作区权限模式 */
-export const agentPermissionModeAtom = atom<PromaPermissionMode>('acceptEdits')
+/** 工作区默认权限模式（初始化和新会话使用） */
+export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('acceptEdits')
+
+/** Per-session 权限模式 Map — sessionId → PromaPermissionMode */
+export const agentPermissionModeMapAtom = atom<Map<string, PromaPermissionMode>>(new Map())
 
 /** Agent 思考模式 */
 export const agentThinkingAtom = atom<ThinkingConfig | undefined>(undefined)
@@ -848,3 +851,8 @@ export const backgroundTasksAtomFamily = atomFamily((sessionId: string) =>
 
 /** 被用户手动打断的会话集合（仅当前 streaming 周期有效，reload 后清除） */
 export const stoppedByUserSessionsAtom = atom<Set<string>>(new Set<string>())
+
+// ===== 初始化就绪状态 =====
+
+/** AgentSettingsInitializer 是否已完成加载（渠道/工作区/设置全部就绪） */
+export const agentSettingsReadyAtom = atom(false)

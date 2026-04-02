@@ -58,8 +58,12 @@ import {
   agentThinkingAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
-  agentPermissionModeAtom,
+  agentPermissionModeMapAtom,
+  agentDefaultPermissionModeAtom,
   agentSessionPathMapAtom,
+  allPendingAskUserRequestsAtom,
+  allPendingExitPlanRequestsAtom,
+  allPendingPermissionRequestsAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
@@ -217,7 +221,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const agentError = streamErrors.get(sessionId) ?? null
   const planModeSessions = useAtomValue(agentPlanModeSessionsAtom)
   const isPlanMode = planModeSessions.has(sessionId)
-  const permissionMode = useAtomValue(agentPermissionModeAtom)
+  const permissionModeMap = useAtomValue(agentPermissionModeMapAtom)
+  const defaultPermissionMode = useAtomValue(agentDefaultPermissionModeAtom)
+  const permissionMode = permissionModeMap.get(sessionId) ?? defaultPermissionMode
   const isPermissionPlanMode = permissionMode === 'plan'
   const store = useStore()
   const suggestionsMap = useAtomValue(agentPromptSuggestionsAtom)
@@ -1092,6 +1098,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     return () => window.removeEventListener('proma:focus-input', handler)
   }, [])
 
+  const allAskUserRequests = useAtomValue(allPendingAskUserRequestsAtom)
+  const allExitPlanRequests = useAtomValue(allPendingExitPlanRequestsAtom)
+  const allPermissionRequests = useAtomValue(allPendingPermissionRequestsAtom)
+  const hasBannerOverlay =
+    (allAskUserRequests.get(sessionId)?.length ?? 0) > 0 ||
+    (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0 ||
+    (allPermissionRequests.get(sessionId)?.length ?? 0) > 0
+
   const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0) && agentChannelId !== null && !streaming
 
   return (
@@ -1152,7 +1166,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         {/* ExitPlanMode 计划审批横幅 */}
         <ExitPlanModeBanner sessionId={sessionId} />
 
-        {/* 输入区域 — 复用 Chat 的卡片式输入风格 */}
+        {/* 输入区域 — 交互横幅显示时隐藏，由横幅替代 */}
+        {!hasBannerOverlay && (
         <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="agent">
           <div
             className={cn(
@@ -1182,7 +1197,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
             {/* 附件预览区域 */}
             {pendingFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-3 pb-1.5">
+              <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
                 {pendingFiles.map((file) => (
                   <AttachmentPreviewItem
                     key={file.id}
@@ -1197,7 +1212,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
             {/* Agent 建议提示 */}
             {suggestion && !streaming && (
-              <div className="px-3 pb-1.5">
+              <div className="px-3 pt-2.5 pb-1.5">
                 <button
                   type="button"
                   className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
@@ -1250,7 +1265,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                       onModelSelect={handleModelSelect}
                       useAgentModels
                     />
-                    <PermissionModeSelector />
+                    <PermissionModeSelector sessionId={sessionId} />
                     {/* 思考模式切换 + 展开偏好 */}
                     <AgentThinkingPopover
                       agentThinking={agentThinking}
@@ -1346,6 +1361,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             </div>
           </div>
         </div>
+        )}
       </div>
     </AgentSessionProvider>
   )

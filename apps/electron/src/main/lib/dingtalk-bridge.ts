@@ -1,19 +1,23 @@
 /**
- * 钉钉 Bridge 服务
+ * 钉钉 Bridge 服务（多 Bot 版本）
  *
  * 核心职责：
  * - 通过 WebSocket 长连接（Stream 模式）接收钉钉消息
  * - 管理连接生命周期（启动/停止/重启/状态推送）
  * - 消息路由到 Proma Agent，通过 sessionWebhook 回复
+ *
+ * 每个 DingTalkBridge 实例对应一个 Bot，由 DingTalkBridgeManager 管理。
  */
 
 import { BrowserWindow } from 'electron'
 import type {
   DingTalkBridgeState,
+  DingTalkBotBridgeState,
+  DingTalkBotConfig,
   DingTalkTestResult,
 } from '@proma/shared'
 import { DINGTALK_IPC_CHANNELS } from '@proma/shared'
-import { getDingTalkConfig, getDecryptedClientSecret } from './dingtalk-config'
+import { getDecryptedBotClientSecret } from './dingtalk-config'
 import { BridgeCommandHandler } from './bridge-command-handler'
 
 // ===== 类型声明 =====
@@ -65,54 +69,54 @@ interface DingTalkRobotMessage {
   sessionWebhookExpiredTime: number
 }
 
-/** 最近的 chatId → sessionWebhook 映射（webhook 有效期约 35 分钟，限制缓存大小） */
-const webhookCache = new Map<string, string>()
-const MAX_WEBHOOK_CACHE = 200
-
-function cacheWebhook(chatId: string, webhook: string): void {
-  if (webhookCache.size >= MAX_WEBHOOK_CACHE) {
-    const firstKey = webhookCache.keys().next().value
-    if (firstKey) webhookCache.delete(firstKey)
-  }
-  webhookCache.set(chatId, webhook)
-}
-
-// ===== 单例 Bridge =====
+// ===== Bridge 实例 =====
 
 class DingTalkBridge {
   private client: DWClientInstance | null = null
   private state: DingTalkBridgeState = { status: 'disconnected' }
 
+  /** 每个实例独立的 webhook 缓存 */
+  private webhookCache = new Map<string, string>()
+  private readonly MAX_WEBHOOK_CACHE = 200
+
+  /** Bot 配置（构造时传入） */
+  readonly botConfig: DingTalkBotConfig
+
   /** 通用命令处理器 */
-  private commandHandler = new BridgeCommandHandler({
-    platformName: '钉钉',
-    adapter: {
-      sendText: async (chatId: string, text: string, meta?: unknown) => {
-        // 优先用 meta 中的 webhook，其次用缓存
-        const ctx = meta as { sessionWebhook?: string } | undefined
-        const webhook = ctx?.sessionWebhook ?? webhookCache.get(chatId)
-        if (!webhook) {
-          console.warn('[钉钉 Bridge] 无法回复：没有可用的 sessionWebhook')
-          return
-        }
-        try {
-          const resp = await fetch(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              msgtype: 'text',
-              text: { content: text },
-            }),
-          })
-          if (!resp.ok) {
-            console.warn(`[钉钉 Bridge] 发送消息失败: HTTP ${resp.status}`)
+  private commandHandler: BridgeCommandHandler
+
+  constructor(botConfig: DingTalkBotConfig) {
+    this.botConfig = botConfig
+    this.commandHandler = new BridgeCommandHandler({
+      platformName: `钉钉-${botConfig.name}`,
+      adapter: {
+        sendText: async (chatId: string, text: string, meta?: unknown) => {
+          const ctx = meta as { sessionWebhook?: string } | undefined
+          const webhook = ctx?.sessionWebhook ?? this.webhookCache.get(chatId)
+          if (!webhook) {
+            console.warn(`[钉钉 Bridge/${this.botConfig.name}] 无法回复：没有可用的 sessionWebhook`)
+            return
           }
-        } catch (error) {
-          console.error('[钉钉 Bridge] 发送消息异常:', error)
-        }
+          try {
+            const resp = await fetch(webhook, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                msgtype: 'text',
+                text: { content: text },
+              }),
+            })
+            if (!resp.ok) {
+              console.warn(`[钉钉 Bridge/${this.botConfig.name}] 发送消息失败: HTTP ${resp.status}`)
+            }
+          } catch (error) {
+            console.error(`[钉钉 Bridge/${this.botConfig.name}] 发送消息异常:`, error)
+          }
+        },
       },
-    },
-  })
+      getDefaultWorkspaceId: () => this.botConfig.defaultWorkspaceId,
+    })
+  }
 
   /** 获取当前状态 */
   getStatus(): DingTalkBridgeState {
@@ -121,8 +125,7 @@ class DingTalkBridge {
 
   /** 启动 Stream 连接 */
   async start(): Promise<void> {
-    const config = getDingTalkConfig()
-    if (!config.enabled || !config.clientId || !config.clientSecret) {
+    if (!this.botConfig.clientId || !this.botConfig.clientSecret) {
       throw new Error('请先配置 Client ID 和 Client Secret')
     }
 
@@ -134,17 +137,16 @@ class DingTalkBridge {
     this.updateStatus({ status: 'connecting' })
 
     try {
-      const clientSecret = getDecryptedClientSecret()
+      const clientSecret = getDecryptedBotClientSecret(this.botConfig.id)
       const sdk = await import('dingtalk-stream-sdk-nodejs') as DWClientModule
 
-      // 创建客户端
       this.client = new sdk.DWClient({
-        clientId: config.clientId,
+        clientId: this.botConfig.clientId,
         clientSecret,
         keepAlive: true,
       })
 
-      // 注册 CALLBACK：订阅机器人消息（CALLBACK 类型不会自动 ACK，需手动发送）
+      // 注册 CALLBACK：订阅机器人消息
       this.client.registerCallbackListener(sdk.TOPIC_ROBOT, (msg: DWClientDownStream) => {
         this.client?.send(msg.headers.messageId, { status: sdk.EventAck.SUCCESS })
         this.handleRobotMessage(msg)
@@ -152,22 +154,19 @@ class DingTalkBridge {
 
       // 注册 EVENT：其他事件类型（自动 ACK）
       this.client.registerAllEventListener((msg: DWClientDownStream) => {
-        console.log('[钉钉 Bridge] 收到事件:', msg.headers.topic, msg.headers.eventType ?? '')
+        console.log(`[钉钉 Bridge/${this.botConfig.name}] 收到事件:`, msg.headers.topic, msg.headers.eventType ?? '')
         return { status: sdk.EventAck.SUCCESS }
       })
 
-      // 建立 WebSocket 连接
       await this.client.connect()
-
-      // 订阅 Agent EventBus
       this.commandHandler.subscribe()
 
       this.updateStatus({ status: 'connected', connectedAt: Date.now() })
-      console.log('[钉钉 Bridge] Stream 连接已建立')
+      console.log(`[钉钉 Bridge/${this.botConfig.name}] Stream 连接已建立`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       this.updateStatus({ status: 'error', errorMessage })
-      console.error('[钉钉 Bridge] 连接失败:', errorMessage)
+      console.error(`[钉钉 Bridge/${this.botConfig.name}] 连接失败:`, errorMessage)
       this.client = null
       throw error
     }
@@ -185,13 +184,7 @@ class DingTalkBridge {
     }
     this.commandHandler.unsubscribe()
     this.updateStatus({ status: 'disconnected' })
-    console.log('[钉钉 Bridge] 已停止')
-  }
-
-  /** 重启连接 */
-  async restart(): Promise<void> {
-    this.stop()
-    await this.start()
+    console.log(`[钉钉 Bridge/${this.botConfig.name}] 已停止`)
   }
 
   /** 测试连接（使用提供的凭证，不影响当前连接） */
@@ -205,12 +198,9 @@ class DingTalkBridge {
         clientSecret,
       })
 
-      // 注册空回调以满足 SDK 要求
       testClient.registerAllEventListener(() => ({ status: sdk.EventAck.SUCCESS }))
-
       await testClient.connect()
 
-      // 连接成功，立即断开
       testClient.disconnect()
       testClient = null
 
@@ -230,13 +220,13 @@ class DingTalkBridge {
     }
   }
 
-  /** 处理机器人消息，路由到通用命令处理器 */
+  /** 处理机器人消息 */
   private handleRobotMessage(msg: DWClientDownStream): void {
     try {
       const data = JSON.parse(msg.data) as DingTalkRobotMessage
       const text = data.text?.content?.trim() ?? ''
 
-      console.log('[钉钉 Bridge] 收到消息:', {
+      console.log(`[钉钉 Bridge/${this.botConfig.name}] 收到消息:`, {
         msgId: msg.headers.messageId,
         senderNick: data.senderNick,
         text: text.length > 100 ? text.slice(0, 100) + '...' : text,
@@ -245,31 +235,44 @@ class DingTalkBridge {
 
       if (!text) return
 
-      // 缓存 webhook 供后续回复使用
+      // 缓存 webhook
       const chatId = data.conversationId
-      cacheWebhook(chatId, data.sessionWebhook)
+      this.cacheWebhook(chatId, data.sessionWebhook)
 
       // 委托给通用命令处理器
       this.commandHandler.handleIncomingMessage(chatId, text, {
         sessionWebhook: data.sessionWebhook,
       }).catch((error) => {
-        console.error('[钉钉 Bridge] 处理消息失败:', error)
+        console.error(`[钉钉 Bridge/${this.botConfig.name}] 处理消息失败:`, error)
       })
     } catch (error) {
-      console.error('[钉钉 Bridge] 解析消息失败:', error, msg.data)
+      console.error(`[钉钉 Bridge/${this.botConfig.name}] 解析消息失败:`, error, msg.data)
     }
+  }
+
+  /** 缓存 webhook */
+  private cacheWebhook(chatId: string, webhook: string): void {
+    if (this.webhookCache.size >= this.MAX_WEBHOOK_CACHE) {
+      const firstKey = this.webhookCache.keys().next().value
+      if (firstKey) this.webhookCache.delete(firstKey)
+    }
+    this.webhookCache.set(chatId, webhook)
   }
 
   /** 更新状态并推送到渲染进程 */
   private updateStatus(partial: Partial<DingTalkBridgeState>): void {
     this.state = { ...this.state, ...partial }
-    // 推送到所有渲染进程窗口
+    const botState: DingTalkBotBridgeState = {
+      ...this.state,
+      botId: this.botConfig.id,
+      botName: this.botConfig.name,
+    }
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
-        win.webContents.send(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, this.state)
+        win.webContents.send(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, botState)
       }
     }
   }
 }
 
-export const dingtalkBridge = new DingTalkBridge()
+export { DingTalkBridge }

@@ -22,7 +22,7 @@ import {
   agentSidePanelOpenMapAtom,
   applyAgentEvent,
   liveMessagesMapAtom,
-  agentPermissionModeAtom,
+  agentPermissionModeMapAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
 } from '@/atoms/agent-atoms'
@@ -429,12 +429,20 @@ export function useGlobalAgentListeners(): void {
               next.add(sessionId)
               return next
             })
-            // 同步更新权限模式选择器
-            store.set(agentPermissionModeAtom, 'plan')
+            // 同步更新权限模式选择器（per-session）
+            store.set(agentPermissionModeMapAtom, (prev: Map<string, import('@proma/shared').PromaPermissionMode>) => {
+              const next = new Map(prev)
+              next.set(sessionId, 'plan')
+              return next
+            })
           } else if (event.type === 'permission_mode_changed') {
             // 权限模式变更（如 Plan 模式退出时切换到完全自动）
             console.log(`[GlobalAgentListeners] 权限模式变更: ${event.mode}`)
-            store.set(agentPermissionModeAtom, event.mode)
+            store.set(agentPermissionModeMapAtom, (prev: Map<string, import('@proma/shared').PromaPermissionMode>) => {
+              const next = new Map(prev)
+              next.set(sessionId, event.mode)
+              return next
+            })
           }
         }
       }

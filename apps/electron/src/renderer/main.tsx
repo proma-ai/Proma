@@ -25,11 +25,12 @@ import {
   currentAgentSessionIdAtom,
   workspaceCapabilitiesVersionAtom,
   workspaceFilesVersionAtom,
-  agentPermissionModeAtom,
+  agentDefaultPermissionModeAtom,
   agentThinkingAtom,
   agentEffortAtom,
   agentMaxBudgetUsdAtom,
   agentMaxTurnsAtom,
+  agentSettingsReadyAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import {
@@ -56,9 +57,10 @@ import { tabsAtom, splitLayoutAtom } from './atoms/tab-atoms'
 import type { TabItem, SplitLayoutState } from './atoms/tab-atoms'
 import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBotStatesAtom } from './atoms/feishu-atoms'
+import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
-import type { FeishuBotBridgeState, FeishuBridgeState, FeishuNotificationSentPayload } from '@proma/shared'
+import type { FeishuBotBridgeState, FeishuBridgeState, FeishuNotificationSentPayload, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 import { diffCapabilities, migratePermissionMode, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -127,12 +129,13 @@ function AgentSettingsInitializer(): null {
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const bumpFiles = useSetAtom(workspaceFilesVersionAtom)
-  const setPermissionMode = useSetAtom(agentPermissionModeAtom)
+  const setPermissionMode = useSetAtom(agentDefaultPermissionModeAtom)
   const setThinking = useSetAtom(agentThinkingAtom)
   const setEffort = useSetAtom(agentEffortAtom)
   const setMaxBudget = useSetAtom(agentMaxBudgetUsdAtom)
   const setMaxTurns = useSetAtom(agentMaxTurnsAtom)
 
+  const setAgentSettingsReady = useSetAtom(agentSettingsReadyAtom)
   const setChannels = useSetAtom(channelsAtom)
   const setChannelsLoaded = useSetAtom(channelsLoadedAtom)
   const store = useStore()
@@ -255,9 +258,16 @@ function AgentSettingsInitializer(): null {
         } else if (workspaces.length > 0) {
           setCurrentWorkspaceId(workspaces[0]!.id)
         }
-      }).catch(console.error)
-    }).catch(console.error)
-  }, [setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentWorkspaces, setCurrentWorkspaceId, setPermissionMode, setThinking, setEffort, setMaxBudget, setMaxTurns, setChannels, setChannelsLoaded])
+        setAgentSettingsReady(true)
+      }).catch((err) => {
+        console.error(err)
+        setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
+      })
+    }).catch((err) => {
+      console.error(err)
+      setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
+    })
+  }, [setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentWorkspaces, setCurrentWorkspaceId, setPermissionMode, setThinking, setEffort, setMaxBudget, setMaxTurns, setChannels, setChannelsLoaded, setAgentSettingsReady])
 
   // 工作区切换时重置能力缓存，预加载基线
   useEffect(() => {
@@ -568,6 +578,50 @@ function FeishuInitializer(): null {
   return null
 }
 
+/**
+ * DingTalkInitializer
+ *
+ * - 加载多 Bot 初始状态
+ * - 订阅钉钉 Bridge 状态变化
+ */
+function DingTalkInitializer(): null {
+  const store = useStore()
+
+  useEffect(() => {
+    // 加载初始多 Bot 状态
+    window.electronAPI.getDingTalkMultiStatus?.()
+      .then((multiState: { bots: Record<string, DingTalkBotBridgeState> }) => {
+        store.set(dingtalkBotStatesAtom, multiState.bots)
+      })
+      .catch(() => {
+        // 回退：使用旧 API 获取单 Bot 状态
+        window.electronAPI.getDingTalkStatus()
+          .then((state: DingTalkBridgeState) => {
+            const s = state as DingTalkBotBridgeState
+            const botId = s.botId ?? 'default'
+            store.set(dingtalkBotStatesAtom, { [botId]: { ...s, botId, botName: s.botName ?? '钉钉助手' } })
+          })
+          .catch((err: unknown) => console.error('[DingTalkInitializer] 加载状态失败:', err))
+      })
+
+    // 订阅状态变化（现在每次推送包含 botId）
+    const cleanupStatus = window.electronAPI.onDingTalkStatusChanged((raw: DingTalkBridgeState) => {
+      const state = raw as DingTalkBotBridgeState
+      const botId = state.botId ?? 'default'
+      store.set(dingtalkBotStatesAtom, (prev) => ({
+        ...prev,
+        [botId]: { ...state, botId, botName: state.botName ?? '钉钉助手' },
+      }))
+    })
+
+    return () => {
+      cleanupStatus()
+    }
+  }, [store])
+
+  return null
+}
+
 // ===== 快速任务窗口：轻量渲染 =====
 if (isQuickTaskWindow) {
   import('./components/quick-task/QuickTaskApp').then(({ QuickTaskApp }) => {
@@ -594,6 +648,7 @@ if (isQuickTaskWindow) {
       <ChatToolInitializer />
       <UpdaterInitializer />
       <FeishuInitializer />
+      <DingTalkInitializer />
       <GlobalShortcuts />
       <App />
       <UpdateDialog />
