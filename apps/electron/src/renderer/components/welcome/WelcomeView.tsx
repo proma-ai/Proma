@@ -14,7 +14,7 @@ import { useAtom, useAtomValue } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { appModeAtom } from '@/atoms/app-mode'
 import { conversationsAtom } from '@/atoms/chat-atoms'
-import { agentSessionsAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
+import { agentSessionsAtom, currentAgentWorkspaceIdAtom, agentSettingsReadyAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
@@ -24,6 +24,7 @@ export function WelcomeView(): React.ReactElement {
   const conversations = useAtomValue(conversationsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
   const [tabs, setTabs] = useAtom(tabsAtom)
   const [layout, setLayout] = useAtom(splitLayoutAtom)
@@ -32,6 +33,8 @@ export function WelcomeView(): React.ReactElement {
 
   React.useEffect(() => {
     if (initRef.current) return
+    // Agent 模式需等待 settings 就绪（workspaceId 等异步加载完成）
+    if (mode === 'agent' && !agentSettingsReady) return
     initRef.current = true
 
     if (mode === 'chat') {
@@ -65,7 +68,7 @@ export function WelcomeView(): React.ReactElement {
         createAgent({ draft: true })
       }
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentSettingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 短暂的过渡状态（通常几十毫秒内就会被 SplitContainer 替换）
   return (

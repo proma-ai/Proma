@@ -253,6 +253,9 @@ export interface ElectronAPI {
   /** 另存图片到用户选择的位置（原生 Save As 对话框） */
   saveImageAs: (localPath: string, defaultFilename: string) => Promise<boolean>
 
+  /** 保存应用内置资源文件到用户选择的位置（原生 Save As 对话框） */
+  saveResourceFileAs: (resourceRelativePath: string, defaultFilename: string) => Promise<boolean>
+
   /** 删除附件 */
   deleteAttachment: (localPath: string) => Promise<void>
 
@@ -824,6 +827,23 @@ export interface ElectronAPI {
   /** 订阅钉钉 Bridge 状态变化 */
   onDingTalkStatusChanged: (callback: (state: DingTalkBridgeState) => void) => () => void
 
+  // --- 钉钉多 Bot v2 API ---
+
+  /** 获取多 Bot 配置 */
+  getDingTalkMultiConfig: () => Promise<import('@proma/shared').DingTalkMultiBotConfig>
+  /** 保存单个 Bot 配置 */
+  saveDingTalkBotConfig: (input: import('@proma/shared').DingTalkBotConfigInput) => Promise<import('@proma/shared').DingTalkBotConfig>
+  /** 获取单个 Bot 解密后的 Client Secret */
+  getDecryptedDingTalkBotSecret: (botId: string) => Promise<string>
+  /** 删除 Bot */
+  removeDingTalkBot: (botId: string) => Promise<boolean>
+  /** 启动单个 Bot */
+  startDingTalkBot: (botId: string) => Promise<void>
+  /** 停止单个 Bot */
+  stopDingTalkBot: (botId: string) => Promise<void>
+  /** 获取多 Bot 状态 */
+  getDingTalkMultiStatus: () => Promise<import('@proma/shared').DingTalkMultiBridgeState>
+
   // ===== 微信集成 =====
 
   /** 获取微信配置 */
@@ -1004,6 +1024,10 @@ const electronAPI: ElectronAPI = {
 
   saveImageAs: (localPath: string, defaultFilename: string) => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.SAVE_IMAGE_AS, localPath, defaultFilename)
+  },
+
+  saveResourceFileAs: (resourceRelativePath: string, defaultFilename: string) => {
+    return ipcRenderer.invoke(CHAT_IPC_CHANNELS.SAVE_RESOURCE_FILE_AS, resourceRelativePath, defaultFilename)
   },
 
   deleteAttachment: (localPath: string) => {
@@ -1824,6 +1848,36 @@ const electronAPI: ElectronAPI = {
     const listener = (_event: Electron.IpcRendererEvent, state: DingTalkBridgeState): void => callback(state)
     ipcRenderer.on(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, listener)
     return () => { ipcRenderer.removeListener(DINGTALK_IPC_CHANNELS.STATUS_CHANGED, listener) }
+  },
+
+  // --- 钉钉多 Bot v2 API ---
+
+  getDingTalkMultiConfig: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_MULTI_CONFIG)
+  },
+
+  saveDingTalkBotConfig: (input: import('@proma/shared').DingTalkBotConfigInput) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.SAVE_BOT_CONFIG, input)
+  },
+
+  getDecryptedDingTalkBotSecret: (botId: string) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_BOT_DECRYPTED_SECRET, botId)
+  },
+
+  removeDingTalkBot: (botId: string) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.REMOVE_BOT, botId)
+  },
+
+  startDingTalkBot: (botId: string) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.START_BOT, botId)
+  },
+
+  stopDingTalkBot: (botId: string) => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.STOP_BOT, botId)
+  },
+
+  getDingTalkMultiStatus: () => {
+    return ipcRenderer.invoke(DINGTALK_IPC_CHANNELS.GET_MULTI_STATUS)
   },
 
   onMenuCloseTab: (callback: () => void) => {

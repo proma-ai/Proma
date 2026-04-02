@@ -186,8 +186,8 @@ import {
 } from './lib/feishu-config'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { presenceService } from './lib/feishu-presence'
-import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret } from './lib/dingtalk-config'
-import { dingtalkBridge } from './lib/dingtalk-bridge'
+import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
+import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
 
@@ -514,6 +514,46 @@ export function registerIpcHandlers(): void {
 
       const base64 = readAttachmentAsBase64(localPath)
       writeFileSync(result.filePath, Buffer.from(base64, 'base64'))
+      return true
+    }
+  )
+
+  // 保存应用内置资源文件到用户选择的位置（原生 Save As 对话框）
+  ipcMain.handle(
+    CHAT_IPC_CHANNELS.SAVE_RESOURCE_FILE_AS,
+    async (event, resourceRelativePath: string, defaultFilename: string): Promise<boolean> => {
+      const { dialog, BrowserWindow } = await import('electron')
+      const { writeFileSync, readFileSync, existsSync } = await import('node:fs')
+      const { join, normalize, sep, extname: pathExtname } = await import('node:path')
+
+      // 解析到应用内置 resources 目录
+      const resourcesDir = normalize(join(__dirname, 'resources'))
+      const fullPath = normalize(join(resourcesDir, resourceRelativePath))
+
+      // 安全校验：防止路径穿越（追加 sep 防止 resources-evil 绕过）
+      if (!fullPath.startsWith(resourcesDir + sep)) {
+        throw new Error('Path traversal not allowed')
+      }
+      if (!existsSync(fullPath)) {
+        throw new Error(`Resource not found: ${resourceRelativePath}`)
+      }
+
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const ext = pathExtname(defaultFilename).replace('.', '').toLowerCase()
+      const filterMap: Record<string, string> = { jpg: 'JPEG', jpeg: 'JPEG', png: 'PNG', gif: 'GIF', webp: 'WebP' }
+      const filterName = filterMap[ext] ?? 'Image'
+
+      const result = await dialog.showSaveDialog(win ?? BrowserWindow.getFocusedWindow()!, {
+        defaultPath: defaultFilename,
+        filters: [
+          { name: `${filterName} 图片`, extensions: [ext || 'png'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+
+      if (result.canceled || !result.filePath) return false
+
+      writeFileSync(result.filePath, readFileSync(fullPath))
       return true
     }
   )
@@ -1928,7 +1968,7 @@ export function registerIpcHandlers(): void {
 
   // ===== 钉钉集成 =====
 
-  // 获取钉钉配置
+  // 获取钉钉配置（旧 API，向后兼容）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.GET_CONFIG,
     async (): Promise<DingTalkConfig> => {
@@ -1936,7 +1976,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 获取解密后的 Client Secret
+  // 获取解密后的 Client Secret（旧 API，向后兼容）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.GET_DECRYPTED_SECRET,
     async (): Promise<string> => {
@@ -1944,18 +1984,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 保存钉钉配置
+  // 保存钉钉配置（旧 API，向后兼容）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.SAVE_CONFIG,
     async (_, input: DingTalkConfigInput): Promise<DingTalkConfig> => {
-      const config = saveDingTalkConfig(input)
-      // 配置变更后自动重启或停止 Bridge
-      if (input.enabled && input.clientId && input.clientSecret) {
-        await dingtalkBridge.restart()
-      } else if (!input.enabled) {
-        dingtalkBridge.stop()
-      }
-      return config
+      return saveDingTalkConfig(input)
     }
   )
 
@@ -1963,31 +1996,101 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.TEST_CONNECTION,
     async (_, clientId: string, clientSecret: string): Promise<DingTalkTestResult> => {
-      return dingtalkBridge.testConnection(clientId, clientSecret)
+      return dingtalkBridgeManager.testConnection(clientId, clientSecret)
     }
   )
 
-  // 启动钉钉 Bridge
+  // 启动钉钉 Bridge（旧 API，启动第一个 Bot）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.START_BRIDGE,
     async (): Promise<void> => {
-      await dingtalkBridge.start()
+      await dingtalkBridgeManager.startAll()
     }
   )
 
-  // 停止钉钉 Bridge
+  // 停止钉钉 Bridge（旧 API，停止所有 Bot）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.STOP_BRIDGE,
     async (): Promise<void> => {
-      dingtalkBridge.stop()
+      dingtalkBridgeManager.stopAll()
     }
   )
 
-  // 获取钉钉 Bridge 状态
+  // 获取钉钉 Bridge 状态（旧 API，返回第一个 Bot 状态）
   ipcMain.handle(
     DINGTALK_IPC_CHANNELS.GET_STATUS,
     async (): Promise<DingTalkBridgeState> => {
-      return dingtalkBridge.getStatus()
+      const states = dingtalkBridgeManager.getStates()
+      const first = Object.values(states.bots)[0]
+      return first ?? { status: 'disconnected' }
+    }
+  )
+
+  // --- 钉钉多 Bot v2 API ---
+
+  // 获取多 Bot 配置
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_MULTI_CONFIG,
+    async () => {
+      return getDingTalkMultiBotConfig()
+    }
+  )
+
+  // 保存单个 Bot 配置
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.SAVE_BOT_CONFIG,
+    async (_, input: import('@proma/shared').DingTalkBotConfigInput) => {
+      const saved = saveDingTalkBotConfig(input)
+      // 配置变更后自动重启或停止（不阻塞保存结果）
+      if (saved.enabled && saved.clientId && saved.clientSecret) {
+        dingtalkBridgeManager.restartBot(saved.id).catch((err) => {
+          console.error(`[钉钉 IPC] Bot "${saved.name}" 重启失败:`, err)
+        })
+      } else {
+        dingtalkBridgeManager.stopBot(saved.id)
+      }
+      return saved
+    }
+  )
+
+  // 删除 Bot
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.REMOVE_BOT,
+    async (_, botId: string) => {
+      dingtalkBridgeManager.stopBot(botId)
+      return removeDingTalkBot(botId)
+    }
+  )
+
+  // 获取单个 Bot 解密 Secret
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_BOT_DECRYPTED_SECRET,
+    async (_, botId: string) => {
+      return getDecryptedBotClientSecret(botId)
+    }
+  )
+
+  // 启动单个 Bot
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.START_BOT,
+    async (_, botId: string) => {
+      await dingtalkBridgeManager.startBot(botId)
+    }
+  )
+
+  // 停止单个 Bot
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.STOP_BOT,
+    async (_, botId: string) => {
+      dingtalkBridgeManager.stopBot(botId)
+    }
+  )
+
+  // 获取多 Bot 状态
+  ipcMain.handle(
+    DINGTALK_IPC_CHANNELS.GET_MULTI_STATUS,
+    async () => {
+      return dingtalkBridgeManager.getStates()
     }
   )
 

@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync, renameSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -111,11 +111,28 @@ export function createAgentSession(
   // 确保消息目录存在
   getAgentSessionsDir()
 
-  // 若有工作区，创建 session 级别子文件夹
+  // 若有工作区，创建 session 级别子文件夹并初始化 .claude / .context
   if (workspaceId) {
     const ws = getAgentWorkspace(workspaceId)
     if (ws) {
-      getAgentSessionWorkspacePath(ws.slug, meta.id)
+      const sessionDir = getAgentSessionWorkspacePath(ws.slug, meta.id)
+
+      // 初始化 .claude/settings.json（plansDirectory → .context）
+      const claudeDir = join(sessionDir, '.claude')
+      if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true })
+      const settingsPath = join(claudeDir, 'settings.json')
+      let sdkSettings: Record<string, unknown> = {}
+      try {
+        sdkSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+      } catch { /* 文件不存在或解析失败 */ }
+      if (sdkSettings.plansDirectory !== '.context') {
+        sdkSettings.plansDirectory = '.context'
+        writeFileSync(settingsPath, JSON.stringify(sdkSettings, null, 2))
+      }
+
+      // 初始化 .context/ 目录
+      const contextDir = join(sessionDir, '.context')
+      if (!existsSync(contextDir)) mkdirSync(contextDir, { recursive: true })
     }
   }
 

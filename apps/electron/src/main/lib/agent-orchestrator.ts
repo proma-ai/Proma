@@ -714,6 +714,31 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Session-not-found 恢复：清除失效的 sdkSessionId，切换到上下文回填模式
+   *
+   * 当 resume 的目标 session 已过期/被清理时，SDK 会抛出 "No conversation found" 错误。
+   * 此方法执行恢复的公共逻辑，调用方负责设置 existingSdkSessionId = undefined 和流程控制（break/continue）。
+   *
+   * @returns lastRetryableError 描述字符串
+   */
+  private prepareSessionNotFoundRecovery(
+    sessionId: string,
+    queryOptions: ClaudeAgentQueryOptions,
+    contextualMessage: string,
+    agentCwd: string,
+    accumulatedMessages: SDKMessage[],
+    queryStartedAt: number,
+  ): string {
+    console.log(`[Agent 编排] 检测到 session-not-found 错误，清除 sdkSessionId 并切换到上下文回填模式`)
+    try { updateAgentSessionMeta(sessionId, { sdkSessionId: undefined }) } catch { /* 忽略 */ }
+    queryOptions.resumeSessionId = undefined
+    queryOptions.prompt = buildContextPrompt(sessionId, contextualMessage, { agentCwd })
+    this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+    accumulatedMessages.length = 0
+    return 'Session 已失效，切换到上下文回填模式'
+  }
+
+  /**
    * 持久化累积的 SDKMessage（Phase 4: 直接存储原始 SDKMessage）
    *
    * 只持久化 assistant、user、result 和 compact_boundary system 消息
@@ -1080,6 +1105,7 @@ export class AgentOrchestrator {
         'Agent', 'TodoRead', 'TodoWrite', 'TaskOutput',
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',
+        'AskUserQuestion',
       ])
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1395,14 +1421,8 @@ export class AgentOrchestrator {
 
                 // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
                 if (isSessionNotFoundError(detailedMessage, originalError) && existingSdkSessionId && attempt <= MAX_AUTO_RETRIES) {
-                  console.log(`[Agent 编排] 检测到 session-not-found 错误 (assistant error)，切换到上下文回填模式`)
                   existingSdkSessionId = undefined
-                  try { updateAgentSessionMeta(sessionId, { sdkSessionId: undefined }) } catch { /* 忽略 */ }
-                  queryOptions.resumeSessionId = undefined
-                  queryOptions.prompt = buildContextPrompt(sessionId, contextualMessage, { agentCwd })
-                  lastRetryableError = 'Session 已失效，切换到上下文回填模式'
-                  this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-                  accumulatedMessages.length = 0
+                  lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, accumulatedMessages, queryStartedAt)
                   shouldRetryFromError = true
                   break
                 }
@@ -1666,7 +1686,7 @@ export class AgentOrchestrator {
           }
 
           // Plan 模式：Agent 完成规划后注入"接受计划"建议
-          if (initialPermissionMode === 'plan' && this.activeSessions.has(sessionId)) {
+          if (initialPermissionMode === 'plan' && planModeEntered && this.activeSessions.has(sessionId)) {
             this.eventBus.emit(sessionId, {
               kind: 'sdk_message',
               message: { type: 'prompt_suggestion', suggestion: '请执行该计划' } as unknown as SDKMessage,
@@ -1707,17 +1727,8 @@ export class AgentOrchestrator {
 
           // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
           if (isSessionNotFoundError(rawErrorMessage, stderrOutput) && existingSdkSessionId && attempt <= MAX_AUTO_RETRIES) {
-            console.log(`[Agent 编排] 检测到 session-not-found 错误，清除 sdkSessionId 并切换到上下文回填模式`)
-            // 清除失效的 sdkSessionId
             existingSdkSessionId = undefined
-            try { updateAgentSessionMeta(sessionId, { sdkSessionId: undefined }) } catch { /* 忽略 */ }
-            // 重建 prompt：从 resume 模式切换到上下文回填，并注入 session 元信息
-            queryOptions.resumeSessionId = undefined
-            queryOptions.prompt = buildContextPrompt(sessionId, contextualMessage, { agentCwd })
-            lastRetryableError = 'Session 已失效，切换到上下文回填模式'
-            // 保存部分内容
-            this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-            accumulatedMessages.length = 0
+            lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, accumulatedMessages, queryStartedAt)
             stderrChunks.length = 0
             continue  // 进入下一次 retry 循环
           }

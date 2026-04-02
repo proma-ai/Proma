@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { PanelRight, X, FolderOpen, ExternalLink, RefreshCw, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart } from 'lucide-react'
+import { X, FolderOpen, ExternalLink, RefreshCw, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -40,16 +40,17 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
 
   const isOpen = sidePanelOpenMap.get(sessionId) ?? true
 
-  // 动画标志：仅用户手动点击时启用过渡动画，切换对话时即时显示
-  const animateRef = React.useRef(false)
-
-  // sessionId 变化时重置动画标志
+  // 动画标志：渲染阶段直接计算，同一会话内 isOpen 变化时启用过渡动画，切换会话时即时显示
+  const prevIsOpenRef = React.useRef(isOpen)
+  const prevSessionIdRef = React.useRef(sessionId)
+  const shouldAnimate = prevSessionIdRef.current === sessionId && prevIsOpenRef.current !== isOpen
+  // 在渲染后更新 prev 值，以便下次渲染比较
   React.useEffect(() => {
-    animateRef.current = false
-  }, [sessionId])
+    prevIsOpenRef.current = isOpen
+    prevSessionIdRef.current = sessionId
+  })
 
   const setIsOpen = React.useCallback((value: boolean | ((prev: boolean) => boolean)) => {
-    animateRef.current = true
     setSidePanelOpenMap((prev) => {
       const map = new Map(prev)
       const current = map.get(sessionId) ?? true
@@ -212,38 +213,15 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
     <div
       className={cn(
         'relative h-full flex-shrink-0 overflow-hidden titlebar-drag-region bg-content-area/95 backdrop-blur-xl rounded-2xl shadow-xl',
-        animateRef.current && 'transition-[width] duration-300 ease-in-out',
-        isOpen ? 'w-[320px]' : 'w-10',
+        shouldAnimate && 'transition-[width] duration-300 ease-in-out',
+        isOpen ? 'w-[320px]' : 'w-0',
       )}
     >
-      {/* 面板关闭时的打开按钮 */}
-      {!isOpen && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute left-1/2 -translate-x-1/2 top-3 z-10 h-7 w-7 titlebar-no-drag"
-              onClick={() => setIsOpen(true)}
-            >
-              <PanelRight className="size-3.5" />
-              {hasFileChanges && (
-                <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            <p>打开侧面板</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
-
       {/* 面板内容 */}
       <div
         className={cn(
           'w-[320px] h-full flex flex-col titlebar-no-drag pt-3',
-          animateRef.current && 'transition-opacity duration-300',
+          shouldAnimate && 'transition-opacity duration-300',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}
         >

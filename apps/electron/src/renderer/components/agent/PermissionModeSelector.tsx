@@ -3,13 +3,14 @@
  *
  * 集成在 AgentHeader 中，紧凑的三模式切换按钮。
  * 支持循环切换和工作区级别的持久化。
+ * 每个会话独立维护自己的权限模式。
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
-import { Zap, Compass, Map } from 'lucide-react'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { Zap, Compass, Map as MapIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { agentPermissionModeAtom, currentAgentWorkspaceIdAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
+import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, currentAgentWorkspaceIdAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import type { PromaPermissionMode } from '@proma/shared'
 import { PROMA_PERMISSION_MODE_ORDER } from '@proma/shared'
 
@@ -30,14 +31,21 @@ const MODE_CONFIG: Record<PromaPermissionMode, {
     description: '所有工具调用自动允许',
   },
   plan: {
-    icon: Map,
+    icon: MapIcon,
     label: '计划模式',
     description: '仅规划不执行，查看工具使用计划',
   },
 }
 
-export function PermissionModeSelector(): React.ReactElement | null {
-  const [mode, setMode] = useAtom(agentPermissionModeAtom)
+interface PermissionModeSelectorProps {
+  sessionId: string
+}
+
+export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProps): React.ReactElement | null {
+  const [modeMap, setModeMap] = useAtom(agentPermissionModeMapAtom)
+  const defaultMode = useAtomValue(agentDefaultPermissionModeAtom)
+  const setDefaultMode = useSetAtom(agentDefaultPermissionModeAtom)
+  const mode = modeMap.get(sessionId) ?? defaultMode
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
 
@@ -48,13 +56,26 @@ export function PermissionModeSelector(): React.ReactElement | null {
     return ws?.slug ?? null
   }, [currentWorkspaceId, workspaces])
 
+  // 初始化：如果当前 session 不在 Map 中，从默认值写入，确保隔离
+  React.useEffect(() => {
+    if (!modeMap.has(sessionId)) {
+      setModeMap((prev: Map<string, PromaPermissionMode>) => {
+        if (prev.has(sessionId)) return prev
+        const next = new Map(prev)
+        next.set(sessionId, defaultMode)
+        return next
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅 sessionId 变化时初始化
+  }, [sessionId])
+
   // 加载工作区权限模式（仅值变化时更新，避免切换会话时抖动）
   React.useEffect(() => {
     if (!workspaceSlug) return
 
     window.electronAPI.getPermissionMode(workspaceSlug)
       .then((savedMode) => {
-        if (savedMode !== mode) setMode(savedMode)
+        if (savedMode !== defaultMode) setDefaultMode(savedMode)
       })
       .catch((error) => {
         console.error('[PermissionModeSelector] 加载权限模式失败:', error)
@@ -68,7 +89,12 @@ export function PermissionModeSelector(): React.ReactElement | null {
     const nextIndex = (currentIndex + 1) % PROMA_PERMISSION_MODE_ORDER.length
     const nextMode = PROMA_PERMISSION_MODE_ORDER[nextIndex]!
 
-    setMode(nextMode)
+    // 更新当前 session 的模式
+    setModeMap((prev: Map<string, PromaPermissionMode>) => {
+      const next = new Map(prev)
+      next.set(sessionId, nextMode)
+      return next
+    })
 
     // 持久化到工作区配置
     if (workspaceSlug) {
@@ -78,7 +104,7 @@ export function PermissionModeSelector(): React.ReactElement | null {
         console.error('[PermissionModeSelector] 保存权限模式失败:', error)
       }
     }
-  }, [mode, workspaceSlug, setMode])
+  }, [mode, sessionId, workspaceSlug, setModeMap])
 
   const config = MODE_CONFIG[mode]
   const Icon = config.icon
