@@ -41,6 +41,11 @@ extraResources:
   # 教程文件（教程查看器 + 欢迎对话使用）
   - from: ../../tutorial/tutorial.md
     to: tutorial.md
+  # Proma 品牌 Logo 素材（品牌素材下载功能使用）
+  - from: resources/proma-logos
+    to: proma-logos
+    filter:
+      - "**/*"
 
 # ============================================
 # macOS 配置
