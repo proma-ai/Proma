@@ -29,16 +29,17 @@ export function WelcomeView(): React.ReactElement {
   const [tabs, setTabs] = useAtom(tabsAtom)
   const [layout, setLayout] = useAtom(splitLayoutAtom)
   const { createChat, createAgent } = useCreateSession()
-  const initRef = React.useRef(false)
+  const initRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
-    if (initRef.current) return
+    // 如果已经为当前模式初始化过，则跳过
+    if (initRef.current === mode) return
     // Agent 模式需等待 settings 就绪（workspaceId 等异步加载完成）
     if (mode === 'agent' && !agentSettingsReady) return
-    initRef.current = true
+    initRef.current = mode
 
     if (mode === 'chat') {
-      // 优先复用现有非归档、非 draft 会话
+      // 1. 优先复用现有非归档、非 draft 会话
       const existing = conversations.find((c) => !c.archived && !draftSessionIds.has(c.id))
       if (existing) {
         const result = openTab(tabs, layout, {
@@ -48,11 +49,25 @@ export function WelcomeView(): React.ReactElement {
         })
         setTabs(result.tabs)
         setLayout(result.layout)
-      } else {
-        createChat({ draft: true })
+        return
       }
+      // 2. 检查是否已有 draft 会话，复用而不是创建新的
+      const draftSession = conversations.find((c) => !c.archived && draftSessionIds.has(c.id))
+      if (draftSession) {
+        const result = openTab(tabs, layout, {
+          type: 'chat',
+          sessionId: draftSession.id,
+          title: draftSession.title,
+        })
+        setTabs(result.tabs)
+        setLayout(result.layout)
+        return
+      }
+      // 3. 没有任何会话时才创建新的 draft 会话
+      createChat({ draft: true })
     } else {
       // Agent 模式：按当前工作区过滤
+      // 1. 优先复用现有非归档、非 draft 会话
       const existing = agentSessions.find(
         (s) => !s.archived && s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id),
       )
@@ -64,11 +79,26 @@ export function WelcomeView(): React.ReactElement {
         })
         setTabs(result.tabs)
         setLayout(result.layout)
-      } else {
-        createAgent({ draft: true })
+        return
       }
+      // 2. 检查是否已有 draft 会话（当前工作区），复用而不是创建新的
+      const draftSession = agentSessions.find(
+        (s) => !s.archived && s.workspaceId === currentWorkspaceId && draftSessionIds.has(s.id),
+      )
+      if (draftSession) {
+        const result = openTab(tabs, layout, {
+          type: 'agent',
+          sessionId: draftSession.id,
+          title: draftSession.title,
+        })
+        setTabs(result.tabs)
+        setLayout(result.layout)
+        return
+      }
+      // 3. 没有任何会话时才创建新的 draft 会话
+      createAgent({ draft: true })
     }
-  }, [agentSettingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, agentSettingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 短暂的过渡状态（通常几十毫秒内就会被 SplitContainer 替换）
   return (

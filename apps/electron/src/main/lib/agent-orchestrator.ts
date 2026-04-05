@@ -455,6 +455,8 @@ export class AgentOrchestrator {
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000',
       // 启用 Tasks 功能
       CLAUDE_CODE_ENABLE_TASKS: 'true',
+      // 禁用实验性 beta 功能，使用稳定模式
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
       // 配置隔离：让 SDK 使用独立的配置目录，不读取用户的 ~/.claude.json
       CLAUDE_CONFIG_DIR: getSdkConfigDir(),
     }
@@ -1564,7 +1566,11 @@ export class AgentOrchestrator {
             // Agent Teams: 追踪 teammate 任务状态（从 system 消息中）
             if (msg.type === 'system') {
               const sysMsg = msg as import('@proma/shared').SDKSystemMessage
-              if (sysMsg.subtype === 'task_started' && sysMsg.task_id) {
+              if (
+                sysMsg.subtype === 'task_started' &&
+                sysMsg.task_id &&
+                (sysMsg.task_type === 'local_agent' || sysMsg.task_type === 'remote_agent')
+              ) {
                 startedTaskIds.add(sysMsg.task_id)
               } else if (sysMsg.subtype === 'task_notification' && sysMsg.task_id) {
                 completedTaskIds.add(sysMsg.task_id)

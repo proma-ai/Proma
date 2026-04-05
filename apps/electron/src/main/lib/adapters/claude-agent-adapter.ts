@@ -316,7 +316,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         env: options.env,
         systemPrompt: options.systemPrompt,
         // 不加载 user 级别的 ~/.claude/settings.json
-        settingSources: ['project'],
+        settingSources: ['user', 'project'],
 
         // 条件字段
         ...(options.canUseTool && { canUseTool: options.canUseTool }),

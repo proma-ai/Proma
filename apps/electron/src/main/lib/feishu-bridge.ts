@@ -225,9 +225,13 @@ class FeishuBridge {
     this.eventBusUnsubscribe?.()
     this.eventBusUnsubscribe = null
 
-    // 清理 WebSocket
+    // 关闭 WebSocket 连接
     if (this.wsClient) {
-      // SDK WSClient 没有显式的 stop 方法，清空引用让 GC 回收
+      try {
+        this.wsClient.close({ force: true })
+      } catch {
+        // 忽略关闭时的错误
+      }
       this.wsClient = null
     }
     this.client = null

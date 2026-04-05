@@ -401,6 +401,7 @@ interface BotConfigCardProps {
 }
 
 function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): React.ReactElement {
+  const setBotStates = useSetAtom(feishuBotStatesAtom)
   const [name, setName] = React.useState(bot.name)
   const [appId, setAppId] = React.useState(bot.appId)
   const [appSecret, setAppSecret] = React.useState('')
@@ -456,19 +457,53 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
     }
   }, [appId, appSecret])
 
+  /** 操作完成后主动拉取最新状态，确保 UI 同步 */
+  const refreshBotStates = React.useCallback(async () => {
+    try {
+      const multiState = await window.electronAPI.getFeishuMultiStatus?.()
+      if (multiState?.bots) {
+        setBotStates(multiState.bots)
+      }
+    } catch { /* 忽略 */ }
+  }, [setBotStates])
+
   const handleToggle = React.useCallback(async () => {
     if (isConnected) {
       await window.electronAPI.stopFeishuBot(bot.id)
       toast.success(`Bot "${bot.name}" 已停止`)
+      await refreshBotStates()
     } else {
-      try {
-        await window.electronAPI.startFeishuBot(bot.id)
-        toast.success(`Bot "${bot.name}" 启动中...`)
-      } catch (err) {
+      // 启动是异步的（10-15秒），不阻塞等待完成
+      // 先发起启动请求，然后轮询状态直到连接成功或失败
+      window.electronAPI.startFeishuBot(bot.id).catch((err: unknown) => {
         toast.error(err instanceof Error ? err.message : '启动失败')
-      }
+        refreshBotStates()
+      })
+      // 短暂等待让主进程设置 connecting 状态
+      await new Promise((r) => setTimeout(r, 300))
+      await refreshBotStates()
+      // 轮询直到状态不再是 connecting
+      const poll = setInterval(async () => {
+        try {
+          const multiState = await window.electronAPI.getFeishuMultiStatus?.()
+          if (multiState?.bots) {
+            setBotStates(multiState.bots)
+            const botState = multiState.bots[bot.id]
+            if (!botState || botState.status !== 'connecting') {
+              clearInterval(poll)
+              if (botState?.status === 'connected') {
+                toast.success(`Bot "${bot.name}" 已连接`)
+              }
+            }
+          }
+        } catch {
+          clearInterval(poll)
+        }
+      }, 1000)
+      // 安全超时：60秒后停止轮询
+      setTimeout(() => clearInterval(poll), 60_000)
     }
-  }, [bot.id, bot.name, isConnected])
+  }, [bot.id, bot.name, isConnected, refreshBotStates, setBotStates])
 
   const handleRemove = React.useCallback(async () => {
     try {
@@ -483,10 +518,12 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
   return (
     <SettingsCard>
       {/* 头部：名称 + 状态 + 展开/折叠 */}
-      <button
-        type="button"
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+      <div
+        role="button"
+        tabIndex={0}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors cursor-pointer"
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded) } }}
       >
         <div className="flex items-center gap-3">
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusConfig.color}`} />
@@ -508,7 +545,7 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
           ) : null}
           <span className="text-xs text-muted-foreground">{expanded ? '▾' : '▸'}</span>
         </div>
-      </button>
+      </div>
 
       {/* 展开的配置表单 */}
       {expanded && (

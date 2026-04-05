@@ -15,7 +15,6 @@ import { userProfileAtom } from '@/atoms/user-profile'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
 import { themeStyleAtom } from '@/atoms/theme'
 import { getRandomTip, getPlatform, type Tip } from '@/lib/tips'
-import { useCreateSession } from '@/hooks/useCreateSession'
 
 /** 根据小时返回时段问候 */
 function getGreeting(hour: number): string {
@@ -35,7 +34,6 @@ export function WelcomeEmptyState(): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const [mode, setMode] = useAtom(appModeAtom)
   const themeStyle = useAtomValue(themeStyleAtom)
-  const { createChat, createAgent } = useCreateSession()
 
   // 稳定的随机 Tip（组件挂载时选一条）
   const [tip] = React.useState<Tip>(() => getRandomTip(getPlatform()))
@@ -47,16 +45,11 @@ export function WelcomeEmptyState(): React.ReactElement {
   // 森息晨光主题下选中按钮使用主色
   const selectedColor = themeStyle === 'forest-light' ? '#3f8361' : undefined
 
-  /** 切换模式：切换模式并创建对应的 draft 会话 */
-  const handleModeSwitch = React.useCallback(async (targetMode: AppMode): Promise<void> => {
+  /** 切换模式：仅切换模式，不创建新会话 */
+  const handleModeSwitch = React.useCallback((targetMode: AppMode): void => {
     if (targetMode === mode) return
     setMode(targetMode)
-    if (targetMode === 'chat') {
-      await createChat({ draft: true })
-    } else {
-      await createAgent({ draft: true })
-    }
-  }, [mode, setMode, createChat, createAgent])
+  }, [mode, setMode])
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-4 animate-in fade-in duration-500">
