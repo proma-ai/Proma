@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -101,6 +101,7 @@ function Link({ href, children }: { href: string; children: React.ReactNode }): 
 /** 权限列表展示 + 一键复制批量权限 JSON */
 function PermissionsStep(): React.ReactElement {
   const [copied, setCopied] = React.useState(false)
+  const [expanded, setExpanded] = React.useState(false)
 
   const handleCopy = React.useCallback(() => {
     navigator.clipboard.writeText(FEISHU_SCOPES_JSON).then(() => {
@@ -123,6 +124,27 @@ function PermissionsStep(): React.ReactElement {
           进入「权限管理」页面，点击下方按钮复制权限配置 JSON，
           然后在飞书开放平台通过「批量开通」粘贴即可一键添加所有权限：
         </p>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <ChevronRight size={14} className={cn('transition-transform duration-200', expanded && 'rotate-90')} />
+          <span>{expanded ? '收起权限详情' : '展开查看权限详情'}</span>
+        </button>
+        {expanded && (
+          <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-0.5 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+            <div><span className="text-foreground/70">im:message</span> — 获取与发送单聊、群组消息</div>
+            <div><span className="text-foreground/70">im:message:send_as_bot</span> — 以机器人身份发送消息</div>
+            <div><span className="text-foreground/70">im:message.p2p_msg:readonly</span> — 接收用户发给机器人的单聊消息</div>
+            <div><span className="text-foreground/70">im:message.group_at_msg:readonly</span> — 接收群聊中 @机器人 的消息</div>
+            <div><span className="text-foreground/70">im:message.group_msg</span> — 读取群聊历史消息（群聊上下文）</div>
+            <div><span className="text-foreground/70">im:chat:readonly</span> — 获取群组信息</div>
+            <div><span className="text-foreground/70">im:chat.members:read</span> — 获取群成员列表（支持 @某人）</div>
+            <div><span className="text-foreground/70">im:resource</span> — 获取消息中的资源文件（图片、文档等）</div>
+            <div><span className="text-foreground/70">contact:contact.base:readonly</span> — 获取用户基本信息（群聊发送者名称）</div>
+          </div>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -132,19 +154,81 @@ function PermissionsStep(): React.ReactElement {
           {copied ? <Check size={14} /> : <Copy size={14} />}
           <span>{copied ? '已复制' : '复制批量权限配置'}</span>
         </Button>
-        <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-0.5">
-          <div><span className="text-foreground/70">im:message</span> — 获取与发送单聊、群组消息</div>
-          <div><span className="text-foreground/70">im:message:send_as_bot</span> — 以机器人身份发送消息</div>
-          <div><span className="text-foreground/70">im:message.p2p_msg:readonly</span> — 接收用户发给机器人的单聊消息</div>
-          <div><span className="text-foreground/70">im:message.group_at_msg:readonly</span> — 接收群聊中 @机器人 的消息</div>
-          <div><span className="text-foreground/70">im:message.group_msg</span> — 读取群聊历史消息（群聊上下文）</div>
-          <div><span className="text-foreground/70">im:chat:readonly</span> — 获取群组信息</div>
-          <div><span className="text-foreground/70">im:chat.members:read</span> — 获取群成员列表（支持 @某人）</div>
-          <div><span className="text-foreground/70">im:resource</span> — 获取消息中的资源文件（图片、文档等）</div>
-          <div><span className="text-foreground/70">contact:contact.base:readonly</span> — 获取用户基本信息（群聊发送者名称）</div>
-        </div>
       </div>
     </div>
+  )
+}
+
+// ===== 飞书 CLI 预置 Prompt =====
+
+const FEISHU_CLI_PROMPT = `请帮我配置飞书 CLI 开发环境，按以下步骤执行：
+
+1. 安装飞书 CLI 到全局
+npm install -g @larksuite/cli
+
+2. 将 SKILL 配置到本工作区（默认配置本工作区，但请提醒用户是否需要额外安装到全局，会使得预置上下文增加，造成不必要的Token消耗）
+npx skills add https://github.com/larksuite/cli -y -g
+
+3. 初始化 CLI 配置
+lark-cli config init --new
+
+到最后一步配置环节需要特别提醒用户：已有Bot应用则选择已有应用，没有再选择新建飞书CLI应用。`
+
+/** 飞书 CLI 配置引导 */
+function FeishuCliSection(): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false)
+  const [copied, setCopied] = React.useState(false)
+
+  const handleSendToAgent = React.useCallback(() => {
+    navigator.clipboard.writeText(FEISHU_CLI_PROMPT).then(() => {
+      setCopied(true)
+      toast.success('配置指令已复制，请在 Agent 对话中粘贴发送')
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      toast.error('复制失败')
+    })
+  }, [])
+
+  return (
+    <SettingsSection
+      title="配置飞书 CLI"
+      description="飞书官方开源的命令行工具，配置后 Proma Agent 将可以直接读消息、查日历、写文档、建多维表格、发邮件，把任务真正落到飞书里完成。"
+    >
+      <SettingsCard divided={false}>
+        <div className="px-4 py-4 space-y-2 text-sm text-muted-foreground">
+          <p className="text-xs">复制配置提示词，并前往飞书Bot日常绑定的<strong>工作区</strong>，创建新的 Proma Agent 对话并发送即可让 Proma 协助完成配置。</p>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            onClick={() => setExpanded(!expanded)}
+          >
+            <ChevronRight size={14} className={cn('transition-transform duration-200', expanded && 'rotate-90')} />
+            <span>{expanded ? '收起配置步骤' : '展开查看配置步骤'}</span>
+          </button>
+
+          {expanded && (
+            <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+              <div><span className="text-foreground/70 font-semibold">步骤 1</span> — 安装飞书 CLI 到全局</div>
+              <div className="pl-3 text-foreground/60">npm install -g @larksuite/cli</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 2</span> — 将 SKILL 配置到本工作区（默认配置本工作区，但请提醒用户是否需要额外安装到全局，会使得预置上下文增加，造成不必要的Token消耗）</div>
+              <div className="pl-3 text-foreground/60">npx skills add https://github.com/larksuite/cli -y -g</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 3</span> — 初始化 CLI 配置</div>
+              <div className="pl-3 text-foreground/60">lark-cli config init --new</div>
+            </div>
+          )}
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSendToAgent}
+            className="gap-1.5"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <span>{copied ? '已复制至剪贴板' : '复制配置提示词'}</span>
+          </Button>
+        </div>
+      </SettingsCard>
+    </SettingsSection>
   )
 }
 
@@ -730,7 +814,7 @@ function FeishuConfigTab(): React.ReactElement {
                 <Link href="https://open.feishu.cn/app">飞书开放平台</Link>
                 {' '}（海外版：
                 <Link href="https://open.larksuite.com/app">Lark 开放平台</Link>
-                ），点击「创建自建应用」，填写应用名称和描述。
+                ），点击「创建自建应用」并填写名称描述。
               </p>
             </div>
 
@@ -741,10 +825,10 @@ function FeishuConfigTab(): React.ReactElement {
                 <span className="font-medium text-foreground">获取凭证</span>
               </div>
               <p className="pl-7 text-muted-foreground">
-                进入应用详情页，在「凭证与基础信息」中找到{' '}
+                进入详情页，在「凭证与基础信息」中找到{' '}
                 <span className="text-foreground font-medium">App ID</span> 和{' '}
                 <span className="text-foreground font-medium">App Secret</span>，
-                复制到上方的配置表单中。
+                复制到上方的配置表单。
               </p>
             </div>
 
@@ -810,6 +894,9 @@ function FeishuConfigTab(): React.ReactElement {
           </div>
         </SettingsCard>
       </SettingsSection>
+
+      {/* 飞书 CLI 配置引导 */}
+      <FeishuCliSection />
 
     </div>
   )

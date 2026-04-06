@@ -30,7 +30,11 @@ import { FEISHU_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getDecryptedBotAppSecret } from './feishu-config'
 import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
-import { listAgentWorkspaces, getAgentWorkspace, getWorkspaceCapabilities } from './agent-workspace-manager'
+import {
+  listAgentWorkspacesByUpdatedAt,
+  getAgentWorkspace,
+  getWorkspaceCapabilities,
+} from './agent-workspace-manager'
 import { getAgentSessionWorkspacePath, getFeishuBotBindingsPath } from './config-paths'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -779,8 +783,9 @@ class FeishuBridge {
     // 选择工作区：显式指定 > Bot 默认 > 应用设置 > 第一个工作区
     let workspaceId = overrideWorkspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
     if (!workspaceId) {
-      const workspaces = await listAgentWorkspaces()
-      workspaceId = workspaces[0]?.id
+      const byTime = listAgentWorkspacesByUpdatedAt()
+      const def = byTime.find((w) => w.slug === 'default')
+      workspaceId = def?.id ?? byTime[0]?.id
     }
 
     if (!workspaceId) {
@@ -850,7 +855,7 @@ class FeishuBridge {
   private async handleListCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
     const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspaces()
+    const workspaces = listAgentWorkspacesByUpdatedAt()
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 
@@ -951,7 +956,7 @@ class FeishuBridge {
 
   private async handleWorkspaceCommand(msgCtx: FeishuMessageContext, arg?: string): Promise<void> {
     const { chatId } = msgCtx
-    const workspaces = listAgentWorkspaces()
+    const workspaces = listAgentWorkspacesByUpdatedAt()
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 

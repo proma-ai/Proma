@@ -51,7 +51,6 @@ import {
   agentPromptSuggestionsAtom,
   agentMessageRefreshAtom,
   agentSessionsAtom,
-  currentAgentSessionIdAtom,
   agentAttachedDirectoriesMapAtom,
   workspaceAttachedDirectoriesMapAtom,
   liveMessagesMapAtom,
@@ -64,11 +63,12 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
   allPendingPermissionRequestsAtom,
+  finalizeStreamingActivities,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
-import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
+import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption, SDKMessage } from '@proma/shared'
@@ -230,9 +230,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const suggestion = suggestionsMap.get(sessionId) ?? null
   const setPromptSuggestions = useSetAtom(agentPromptSuggestionsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
-  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
-  const [tabs, setTabs] = useAtom(tabsAtom)
-  const [layout, setLayout] = useAtom(splitLayoutAtom)
+  const openSession = useOpenSession()
   const setAttachedDirsMap = useSetAtom(agentAttachedDirectoriesMapAtom)
   const attachedDirsMap = useAtomValue(agentAttachedDirectoriesMapAtom)
   const attachedDirs = attachedDirsMap.get(sessionId) ?? []
@@ -258,7 +256,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const sessionPath = sessionPathMap.get(sessionId) ?? null
   const [workspaceFilesPath, setWorkspaceFilesPath] = React.useState<string | null>(null)
   const [isDragOver, setIsDragOver] = React.useState(false)
-  const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
 
   // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
@@ -633,35 +630,60 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     e.stopPropagation()
     setIsDragOver(false)
 
-    const items = Array.from(e.dataTransfer.items)
-    const regularFiles: File[] = []
-    let hasFolders = false
+    const droppedFiles = Array.from(e.dataTransfer.files)
+    if (droppedFiles.length === 0) return
 
-    // 使用 webkitGetAsEntry 区分文件和文件夹
-    for (const item of items) {
-      if (item.kind !== 'file') continue
-      const entry = item.webkitGetAsEntry?.()
-      if (entry?.isDirectory) {
-        // 检测到文件夹，显示警告
-        hasFolders = true
-        console.warn('[AgentView] 拖拽文件夹已禁用，请使用"添加文件夹"按钮')
-      } else {
-        const file = item.getAsFile()
-        if (file) regularFiles.push(file)
+    // 通过 preload 的 webUtils.getPathForFile 获取真实路径
+    const pathMap = new Map<string, File>()
+    const paths: string[] = []
+    for (const f of droppedFiles) {
+      try {
+        const p = window.electronAPI.getPathForFile(f)
+        if (p) {
+          paths.push(p)
+          pathMap.set(p, f)
+        }
+      } catch { /* 无法获取路径时忽略 */ }
+    }
+
+    if (paths.length > 0) {
+      try {
+        // 通过主进程检测目录 vs 文件
+        const { directories, files: filePaths } = await window.electronAPI.checkPathsType(paths)
+
+        // 拖拽的文件夹直接附加
+        for (const dirPath of directories) {
+          try {
+            const updated = await window.electronAPI.attachDirectory({
+              sessionId,
+              directoryPath: dirPath,
+            })
+            setAttachedDirsMap((prev) => {
+              const map = new Map(prev)
+              map.set(sessionId, updated)
+              return map
+            })
+            const dirName = dirPath.split('/').pop() || dirPath
+            toast.success(`已附加目录: ${dirName}`)
+          } catch (error) {
+            console.error('[AgentView] 拖拽附加文件夹失败:', error)
+          }
+        }
+
+        // 普通文件作为附件
+        const regularFiles = filePaths.map((p) => pathMap.get(p)!).filter(Boolean)
+        if (regularFiles.length > 0) {
+          addFilesAsAttachments(regularFiles)
+        }
+      } catch (error) {
+        console.error('[AgentView] 路径检测失败，回退处理:', error)
+        addFilesAsAttachments(droppedFiles)
       }
+    } else {
+      // 无路径信息：回退，所有项按普通文件处理
+      addFilesAsAttachments(droppedFiles)
     }
-
-    // 如果检测到文件夹，显示提示
-    if (hasFolders) {
-      setDragFolderWarning(true)
-      setTimeout(() => setDragFolderWarning(false), 3000)
-    }
-
-    // 只处理普通文件
-    if (regularFiles.length > 0) {
-      addFilesAsAttachments(regularFiles)
-    }
-  }, [addFilesAsAttachments])
+  }, [sessionId, addFilesAsAttachments, setAttachedDirsMap])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
@@ -913,9 +935,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const handleStop = React.useCallback((): void => {
     setStreamingStates((prev) => {
       const current = prev.get(sessionId)
-      if (!current) return prev
+      if (!current || !current.running) return prev
       const map = new Map(prev)
-      map.set(sessionId, { ...current, running: false })
+      map.set(sessionId, {
+        ...current,
+        running: false,
+        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+      })
       return map
     })
 
@@ -1019,10 +1045,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       setAgentSessions((prev) => [meta, ...prev])
 
       // 切换到新会话 tab
-      const result = openTab(tabs, layout, { type: 'agent', sessionId: meta.id, title: meta.title })
-      setTabs(result.tabs)
-      setLayout(result.layout)
-      setCurrentAgentSessionId(meta.id)
+      openSession('agent', meta.id, meta.title)
 
       // 发送引用旧会话的默认提示词
       const prompt = `上个会话的 id 是 ${sessionId}，可以参考同工作区下的会话继续完成工作`
@@ -1051,7 +1074,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     } catch (error) {
       console.error('[AgentView] 在新会话中重试失败:', error)
     }
-  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, tabs, layout, setAgentSessions, setCurrentAgentSessionId, setTabs, setLayout, setStreamingStates])
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, openSession, setAgentSessions, setStreamingStates])
 
   /** 分叉会话：从指定消息处创建新会话并自动切换 */
   const handleFork = React.useCallback(async (upToMessageUuid: string): Promise<void> => {
@@ -1063,10 +1086,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       setAgentSessions((prev) => [meta, ...prev])
 
       // 切换到新会话 tab
-      const result = openTab(tabs, layout, { type: 'agent', sessionId: meta.id, title: meta.title })
-      setTabs(result.tabs)
-      setLayout(result.layout)
-      setCurrentAgentSessionId(meta.id)
+      openSession('agent', meta.id, meta.title)
 
       toast.success('已创建分叉会话', {
         description: meta.title,
@@ -1077,7 +1097,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         description: error instanceof Error ? error.message : '未知错误',
       })
     }
-  }, [sessionId, tabs, layout, setAgentSessions, setCurrentAgentSessionId, setTabs, setLayout])
+  }, [sessionId, openSession, setAgentSessions])
 
   // 监听快捷键系统分发的 stop-generation 事件（Cmd+.）
   React.useEffect(() => {
@@ -1132,21 +1152,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onCompact={handleCompact}
           onGoToBilling={handleGoToBilling}
         />
-
-        {/* 拖拽文件夹警告 */}
-        {dragFolderWarning && (
-          <div className="mx-4 mb-2 px-4 py-2.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-sm flex items-center gap-2">
-            <FolderPlus className="size-4 shrink-0" />
-            <span className="flex-1">不支持拖拽文件夹，请使用"附加文件夹"按钮</span>
-            <button
-              type="button"
-              className="shrink-0 p-0.5 rounded hover:bg-amber-500/10 transition-colors"
-              onClick={() => setDragFolderWarning(false)}
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* 权限请求横幅 */}
         <PermissionBanner sessionId={sessionId} />

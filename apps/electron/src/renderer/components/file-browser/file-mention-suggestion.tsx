@@ -24,6 +24,7 @@ export function createFileMentionSuggestion(
   workspacePathRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
   attachedDirsRef?: React.RefObject<string[]>,
+  mentionItemCountRef?: React.MutableRefObject<number>,
 ): Omit<SuggestionOptions<FileIndexEntry>, 'editor'> {
   return {
     char: '@',
@@ -56,6 +57,7 @@ export function createFileMentionSuggestion(
       return {
         onStart(props) {
           mentionActiveRef.current = true
+          if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
           renderer = new ReactRenderer(FileMentionList, {
             props: {
               items: props.items,
@@ -72,6 +74,7 @@ export function createFileMentionSuggestion(
         },
 
         onUpdate(props) {
+          if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
           renderer?.updateProps({ items: props.items })
           positionPopup(popup, props.clientRect?.())
         },
@@ -82,6 +85,7 @@ export function createFileMentionSuggestion(
 
         onExit() {
           mentionActiveRef.current = false
+          if (mentionItemCountRef) mentionItemCountRef.current = 0
           popup?.remove()
           popup = null
           renderer?.destroy()

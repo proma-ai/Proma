@@ -79,6 +79,32 @@ export interface TeammateState {
 /** 工具历史最大记录数 */
 const MAX_TOOL_HISTORY = 20
 
+/**
+ * 将流式状态中未完成的 toolActivities 和 running teammates 标记为终态。
+ * 用于 complete、handleStop、STREAM_COMPLETE 等多个终态入口的兜底清理。
+ * 当所有项已处于终态时返回原引用，避免不必要的 React 重渲染。
+ */
+export function finalizeStreamingActivities(
+  toolActivities: ToolActivity[],
+  teammates: TeammateState[]
+): { toolActivities: ToolActivity[]; teammates: TeammateState[] } {
+  const hasUnfinishedTools = toolActivities.some((ta) => !ta.done)
+  const hasRunningTeammates = teammates.some((tm) => tm.status === 'running')
+
+  return {
+    toolActivities: hasUnfinishedTools
+      ? toolActivities.map((ta) => (ta.done ? ta : { ...ta, done: true }))
+      : toolActivities,
+    teammates: hasRunningTeammates
+      ? teammates.map((tm) =>
+          tm.status === 'running'
+            ? { ...tm, status: 'stopped' as const, endedAt: Date.now(), currentToolName: undefined, currentToolElapsedSeconds: undefined, currentToolUseId: undefined }
+            : tm
+        )
+      : teammates,
+  }
+}
+
 /** Agent 会话的流式状态 */
 export interface AgentStreamState {
   running: boolean
@@ -603,15 +629,11 @@ export function applyAgentEvent(
       // 成功完成 — 清除 retrying，但保持 running: true
       // 等待 STREAM_COMPLETE IPC 回调通过删除流式状态来控制 UI 就绪状态
       // 这避免了用户在后端尚未完成清理时就能发送新消息的竞态条件
-      // 同时将仍 running 的 teammates 标记为 stopped（兜底）
+      // 同时将仍 running 的 teammates 标记为 stopped、未完成的工具活动标记为 done（兜底）
       return {
         ...prev,
         retrying: undefined,
-        teammates: prev.teammates.map((tm) =>
-          tm.status === 'running'
-            ? { ...tm, status: 'stopped' as const, endedAt: Date.now(), currentToolName: undefined, currentToolElapsedSeconds: undefined, currentToolUseId: undefined }
-            : tm
-        ),
+        ...finalizeStreamingActivities(prev.toolActivities, prev.teammates),
       }
 
     case 'typed_error':

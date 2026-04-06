@@ -15,15 +15,13 @@ import { Search, X, MessageSquare, Bot, Archive, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
-import { conversationsAtom, currentConversationIdAtom } from '@/atoms/chat-atoms'
+import { conversationsAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
-  currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
 } from '@/atoms/agent-atoms'
-import { appModeAtom } from '@/atoms/app-mode'
-import { openTab, tabsAtom, splitLayoutAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { useOpenSession } from '@/hooks/useOpenSession'
 import type { ConversationMeta, AgentSessionMeta, MessageSearchResult, AgentMessageSearchResult } from '@proma/shared'
 
 /** 标题搜索结果项 */
@@ -105,13 +103,9 @@ export function SearchDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(searchDialogOpenAtom)
   const conversations = useAtomValue(conversationsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
-  const setMode = useSetAtom(appModeAtom)
   const setActiveView = useSetAtom(activeViewAtom)
-  const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
-  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
-  const [tabs, setTabs] = useAtom(tabsAtom)
-  const [layout, setLayout] = useAtom(splitLayoutAtom)
+  const openSession = useOpenSession()
 
   const [query, setQuery] = React.useState('')
   const [searchQuery, setSearchQuery] = React.useState('')
@@ -253,24 +247,15 @@ export function SearchDialog(): React.ReactElement {
     setActiveView('conversations')
 
     if (result.type === 'chat') {
-      setMode('chat')
-      setCurrentConversationId(result.id)
-      // 查找对话标题
       const conv = conversations.find((c) => c.id === result.id)
       const title = conv?.title ?? result.title
-      const newState = openTab(tabs, layout, { type: 'chat', sessionId: result.id, title })
-      setTabs(newState.tabs)
-      setLayout(newState.layout)
+      openSession('chat', result.id, title)
     } else {
-      setMode('agent')
-      setCurrentAgentSessionId(result.id)
       const session = agentSessions.find((s) => s.id === result.id)
       const title = session?.title ?? result.title
-      const newState = openTab(tabs, layout, { type: 'agent', sessionId: result.id, title })
-      setTabs(newState.tabs)
-      setLayout(newState.layout)
+      openSession('agent', result.id, title)
     }
-  }, [setOpen, setActiveView, setMode, setCurrentConversationId, setCurrentAgentSessionId, conversations, agentSessions, tabs, layout, setTabs, setLayout])
+  }, [setOpen, setActiveView, openSession, conversations, agentSessions])
 
   // 键盘导航
   const handleKeyDown = React.useCallback((e: React.KeyboardEvent) => {

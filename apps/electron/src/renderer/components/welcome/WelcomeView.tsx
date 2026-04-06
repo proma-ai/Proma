@@ -13,16 +13,13 @@ import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { appModeAtom } from '@/atoms/app-mode'
-import { conversationsAtom } from '@/atoms/chat-atoms'
-import { agentSessionsAtom, currentAgentWorkspaceIdAtom, agentSettingsReadyAtom } from '@/atoms/agent-atoms'
+import { currentAgentWorkspaceIdAtom, agentSettingsReadyAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 
 export function WelcomeView(): React.ReactElement {
   const mode = useAtomValue(appModeAtom)
-  const conversations = useAtomValue(conversationsAtom)
-  const agentSessions = useAtomValue(agentSessionsAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
@@ -36,67 +33,83 @@ export function WelcomeView(): React.ReactElement {
     if (initRef.current === mode) return
     // Agent 模式需等待 settings 就绪（workspaceId 等异步加载完成）
     if (mode === 'agent' && !agentSettingsReady) return
+
+    // 标记当前 mode 的请求，用于取消过期的异步回调
+    const currentMode = mode
     initRef.current = mode
 
-    if (mode === 'chat') {
-      // 1. 优先复用现有非归档、非 draft 会话
-      const existing = conversations.find((c) => !c.archived && !draftSessionIds.has(c.id))
-      if (existing) {
-        const result = openTab(tabs, layout, {
-          type: 'chat',
-          sessionId: existing.id,
-          title: existing.title,
-        })
-        setTabs(result.tabs)
-        setLayout(result.layout)
-        return
-      }
-      // 2. 检查是否已有 draft 会话，复用而不是创建新的
-      const draftSession = conversations.find((c) => !c.archived && draftSessionIds.has(c.id))
-      if (draftSession) {
-        const result = openTab(tabs, layout, {
-          type: 'chat',
-          sessionId: draftSession.id,
-          title: draftSession.title,
-        })
-        setTabs(result.tabs)
-        setLayout(result.layout)
-        return
-      }
-      // 3. 没有任何会话时才创建新的 draft 会话
-      createChat({ draft: true })
+    // 从后端 IPC 拿最新数据，避免 HMR 导致 atoms 重置为空时重复创建会话
+    if (currentMode === 'chat') {
+      window.electronAPI.listConversations().then((freshConversations) => {
+        // 如果 mode 已切换，丢弃过期回调
+        if (initRef.current !== currentMode) return
+        // 1. 优先复用现有非归档、非 draft 会话
+        const existing = freshConversations.find(
+          (c) => !c.archived && !draftSessionIds.has(c.id),
+        )
+        if (existing) {
+          const result = openTab(tabs, layout, {
+            type: 'chat',
+            sessionId: existing.id,
+            title: existing.title,
+          })
+          setTabs(result.tabs)
+          setLayout(result.layout)
+          return
+        }
+        // 2. 检查是否已有 draft 会话，复用而不是创建新的
+        const draftSession = freshConversations.find(
+          (c) => !c.archived && draftSessionIds.has(c.id),
+        )
+        if (draftSession) {
+          const result = openTab(tabs, layout, {
+            type: 'chat',
+            sessionId: draftSession.id,
+            title: draftSession.title,
+          })
+          setTabs(result.tabs)
+          setLayout(result.layout)
+          return
+        }
+        // 3. 没有任何会话时才创建新的 draft 会话
+        createChat({ draft: true })
+      }).catch(console.error)
     } else {
-      // Agent 模式：按当前工作区过滤
-      // 1. 优先复用现有非归档、非 draft 会话
-      const existing = agentSessions.find(
-        (s) => !s.archived && s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id),
-      )
-      if (existing) {
-        const result = openTab(tabs, layout, {
-          type: 'agent',
-          sessionId: existing.id,
-          title: existing.title,
-        })
-        setTabs(result.tabs)
-        setLayout(result.layout)
-        return
-      }
-      // 2. 检查是否已有 draft 会话（当前工作区），复用而不是创建新的
-      const draftSession = agentSessions.find(
-        (s) => !s.archived && s.workspaceId === currentWorkspaceId && draftSessionIds.has(s.id),
-      )
-      if (draftSession) {
-        const result = openTab(tabs, layout, {
-          type: 'agent',
-          sessionId: draftSession.id,
-          title: draftSession.title,
-        })
-        setTabs(result.tabs)
-        setLayout(result.layout)
-        return
-      }
-      // 3. 没有任何会话时才创建新的 draft 会话
-      createAgent({ draft: true })
+      window.electronAPI.listAgentSessions().then((freshSessions) => {
+        // 如果 mode 已切换，丢弃过期回调
+        if (initRef.current !== currentMode) return
+        // Agent 模式：按当前工作区过滤
+        // 1. 优先复用现有非归档、非 draft 会话
+        const existing = freshSessions.find(
+          (s) => !s.archived && s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id),
+        )
+        if (existing) {
+          const result = openTab(tabs, layout, {
+            type: 'agent',
+            sessionId: existing.id,
+            title: existing.title,
+          })
+          setTabs(result.tabs)
+          setLayout(result.layout)
+          return
+        }
+        // 2. 检查是否已有 draft 会话（当前工作区），复用而不是创建新的
+        const draftSession = freshSessions.find(
+          (s) => !s.archived && s.workspaceId === currentWorkspaceId && draftSessionIds.has(s.id),
+        )
+        if (draftSession) {
+          const result = openTab(tabs, layout, {
+            type: 'agent',
+            sessionId: draftSession.id,
+            title: draftSession.title,
+          })
+          setTabs(result.tabs)
+          setLayout(result.layout)
+          return
+        }
+        // 3. 没有任何会话时才创建新的 draft 会话
+        createAgent({ draft: true })
+      }).catch(console.error)
     }
   }, [mode, agentSettingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
 

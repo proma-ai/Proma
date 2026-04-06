@@ -34,6 +34,7 @@ function createMentionSuggestion<T>(
   config: MentionSuggestionConfig<T>,
   workspaceSlugRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
+  mentionItemCountRef: React.MutableRefObject<number>,
 ): Omit<SuggestionOptions<T>, 'editor'> {
   return {
     char: config.char,
@@ -56,6 +57,7 @@ function createMentionSuggestion<T>(
       return {
         onStart(props) {
           mentionActiveRef.current = true
+          mentionItemCountRef.current = props.items.length
           renderer = new ReactRenderer(MentionList, {
             props: {
               items: props.items,
@@ -75,6 +77,7 @@ function createMentionSuggestion<T>(
         },
 
         onUpdate(props) {
+          mentionItemCountRef.current = props.items.length
           renderer?.updateProps({ items: props.items })
           positionPopup(popup, props.clientRect?.())
         },
@@ -85,6 +88,7 @@ function createMentionSuggestion<T>(
 
         onExit() {
           mentionActiveRef.current = false
+          mentionItemCountRef.current = 0
           popup?.remove()
           popup = null
           renderer?.destroy()
@@ -106,6 +110,7 @@ export interface SkillMentionItem {
 export function createSkillMentionSuggestion(
   workspaceSlugRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
+  mentionItemCountRef: React.MutableRefObject<number>,
 ) {
   return createMentionSuggestion<SkillMentionItem>(
     {
@@ -132,6 +137,7 @@ export function createSkillMentionSuggestion(
     },
     workspaceSlugRef,
     mentionActiveRef,
+    mentionItemCountRef,
   )
 }
 
@@ -146,6 +152,7 @@ export interface McpMentionItem {
 export function createMcpMentionSuggestion(
   workspaceSlugRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
+  mentionItemCountRef: React.MutableRefObject<number>,
 ) {
   return createMentionSuggestion<McpMentionItem>(
     {
@@ -170,5 +177,6 @@ export function createMcpMentionSuggestion(
     },
     workspaceSlugRef,
     mentionActiveRef,
+    mentionItemCountRef,
   )
 }

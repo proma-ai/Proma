@@ -5,7 +5,7 @@
  * 使用上下文隔离确保安全性
  */
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
@@ -394,6 +394,9 @@ export interface ElectronAPI {
   /** 删除 Agent 工作区 */
   deleteAgentWorkspace: (id: string) => Promise<void>
 
+  /** 重排工作区顺序 */
+  reorderAgentWorkspaces: (orderedIds: string[]) => Promise<AgentWorkspace[]>
+
   // ===== 工作区能力（MCP + Skill） =====
 
   /** 获取工作区能力摘要 */
@@ -568,6 +571,12 @@ export interface ElectronAPI {
 
   /** 移动附加目录文件/目录（无工作区路径限制） */
   moveAttachedFile: (filePath: string, targetDir: string) => Promise<void>
+
+  /** 检查路径类型（文件 or 目录），用于拖拽检测 */
+  checkPathsType: (paths: string[]) => Promise<{ directories: string[]; files: string[] }>
+
+  /** 获取拖拽文件的本地路径（替代已废弃的 File.path） */
+  getPathForFile: (file: File) => string
 
   /** 搜索工作区文件（用于 @ 引用，支持附加目录） */
   searchWorkspaceFiles: (rootPath: string, query: string, limit?: number, additionalPaths?: string[]) => Promise<FileSearchResult>
@@ -1211,6 +1220,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_WORKSPACE, id)
   },
 
+  reorderAgentWorkspaces: (orderedIds: string[]) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REORDER_WORKSPACES, orderedIds)
+  },
+
   // 工作区能力（MCP + Skill）
   getWorkspaceCapabilities: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_CAPABILITIES, workspaceSlug)
@@ -1454,6 +1467,14 @@ const electronAPI: ElectronAPI = {
 
   moveAttachedFile: (filePath: string, targetDir: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE, filePath, targetDir)
+  },
+
+  checkPathsType: (paths: string[]) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CHECK_PATHS_TYPE, paths)
+  },
+
+  getPathForFile: (file: File) => {
+    return webUtils.getPathForFile(file)
   },
 
   searchWorkspaceFiles: (rootPath: string, query: string, limit = 20, additionalPaths?: string[]) => {

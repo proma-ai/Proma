@@ -144,6 +144,7 @@ import {
   createAgentWorkspace,
   updateAgentWorkspace,
   deleteAgentWorkspace,
+  reorderAgentWorkspaces,
   ensureDefaultWorkspace,
   getWorkspaceMcpConfig,
   saveWorkspaceMcpConfig,
@@ -190,6 +191,9 @@ import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDin
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
+
+/** 文件浏览器中需要隐藏的系统文件 */
+const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
 
 /**
  * 注册 IPC 处理器
@@ -374,7 +378,13 @@ export function registerIpcHandlers(): void {
       const conversations = listConversations()
       const current = conversations.find((c) => c.id === id)
       if (!current) throw new Error(`对话不存在: ${id}`)
-      return updateConversationMeta(id, { pinned: !current.pinned })
+      const newPinned = !current.pinned
+      // 置顶时自动取消归档
+      const updates: Partial<ConversationMeta> = { pinned: newPinned }
+      if (newPinned && current.archived) {
+        updates.archived = false
+      }
+      return updateConversationMeta(id, updates)
     }
   )
 
@@ -385,7 +395,13 @@ export function registerIpcHandlers(): void {
       const conversations = listConversations()
       const current = conversations.find((c) => c.id === id)
       if (!current) throw new Error(`对话不存在: ${id}`)
-      return updateConversationMeta(id, { archived: !current.archived })
+      const newArchived = !current.archived
+      // 归档时自动取消置顶
+      const updates: Partial<ConversationMeta> = { archived: newArchived }
+      if (newArchived && current.pinned) {
+        updates.pinned = false
+      }
+      return updateConversationMeta(id, updates)
     }
   )
 
@@ -765,7 +781,13 @@ export function registerIpcHandlers(): void {
       const sessions = listAgentSessions()
       const current = sessions.find((s) => s.id === id)
       if (!current) throw new Error(`Agent 会话不存在: ${id}`)
-      return updateAgentSessionMeta(id, { pinned: !current.pinned })
+      const newPinned = !current.pinned
+      // 置顶时自动取消归档
+      const updates: Partial<AgentSessionMeta> = { pinned: newPinned }
+      if (newPinned && current.archived) {
+        updates.archived = false
+      }
+      return updateAgentSessionMeta(id, updates)
     }
   )
 
@@ -776,7 +798,13 @@ export function registerIpcHandlers(): void {
       const sessions = listAgentSessions()
       const current = sessions.find((s) => s.id === id)
       if (!current) throw new Error(`Agent 会话不存在: ${id}`)
-      return updateAgentSessionMeta(id, { archived: !current.archived })
+      const newArchived = !current.archived
+      // 归档时自动取消置顶
+      const updates: Partial<AgentSessionMeta> = { archived: newArchived }
+      if (newArchived && current.pinned) {
+        updates.pinned = false
+      }
+      return updateAgentSessionMeta(id, updates)
     }
   )
 
@@ -846,6 +874,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.DELETE_WORKSPACE,
     async (_, id: string): Promise<void> => {
       return deleteAgentWorkspace(id)
+    }
+  )
+
+  // 重排工作区顺序
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REORDER_WORKSPACES,
+    async (_, orderedIds: string[]): Promise<AgentWorkspace[]> => {
+      return reorderAgentWorkspaces(orderedIds)
     }
   )
 
@@ -1424,6 +1460,7 @@ export function registerIpcHandlers(): void {
       const items = readdirSync(safePath, { withFileTypes: true })
 
       for (const item of items) {
+        if (HIDDEN_FS_ENTRIES.has(item.name)) continue
         const fullPath = resolve(safePath, item.name)
         entries.push({
           name: item.name,
@@ -1556,6 +1593,7 @@ export function registerIpcHandlers(): void {
       const items = readdirSync(safePath, { withFileTypes: true })
 
       for (const item of items) {
+        if (HIDDEN_FS_ENTRIES.has(item.name)) continue
         const fullPath = resolve(safePath, item.name)
         entries.push({
           name: item.name,
@@ -1623,6 +1661,29 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 检查路径类型（文件 or 目录），用于拖拽检测
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CHECK_PATHS_TYPE,
+    async (_, paths: string[]): Promise<{ directories: string[]; files: string[] }> => {
+      const { statSync } = await import('node:fs')
+      const directories: string[] = []
+      const files: string[] = []
+      for (const p of paths) {
+        try {
+          const stat = statSync(p)
+          if (stat.isDirectory()) {
+            directories.push(p)
+          } else {
+            files.push(p)
+          }
+        } catch {
+          // 无法访问的路径忽略
+        }
+      }
+      return { directories, files }
+    }
+  )
+
   // 搜索工作区文件（用于 @ 引用，递归扫描，支持附加目录）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES,
@@ -1632,28 +1693,36 @@ export function registerIpcHandlers(): void {
 
       const safeRoot = resolve(rootPath)
       const ignoreDirs = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache'])
+      const ignoreFiles = new Set(['.DS_Store', '.Spotlight-V100', '.Trashes', 'Thumbs.db', 'desktop.ini'])
 
-      // 递归收集文件（限制深度 5 层）
-      const allEntries: Array<{ name: string; path: string; type: 'file' | 'dir' }> = []
+      // 按来源分组收集文件，用于空 query 时均衡分配结果
+      const rootEntries: Array<{ name: string; path: string; type: 'file' | 'dir' }> = []
+      const additionalEntryGroups: Array<Array<{ name: string; path: string; type: 'file' | 'dir' }>> = []
 
-      function scan(dir: string, depth: number, baseRoot: string): void {
-        if (depth > 5) return
+      function scan(
+        dir: string,
+        depth: number,
+        baseRoot: string,
+        target: Array<{ name: string; path: string; type: 'file' | 'dir' }>,
+        useAbsPath: boolean,
+      ): void {
+        if (depth > 10) return
         try {
           const items = readdirSync(dir, { withFileTypes: true })
           for (const item of items) {
-            if (item.name.startsWith('.')) continue
+            if (ignoreFiles.has(item.name)) continue
             if (item.isDirectory() && ignoreDirs.has(item.name)) continue
 
             const fullPath = resolve(dir, item.name)
-            const relPath = relative(baseRoot, fullPath)
-            allEntries.push({
+            const entryPath = useAbsPath ? fullPath : relative(baseRoot, fullPath)
+            target.push({
               name: item.name,
-              path: relPath,
+              path: entryPath,
               type: item.isDirectory() ? 'dir' : 'file',
             })
 
             if (item.isDirectory()) {
-              scan(fullPath, depth + 1, baseRoot)
+              scan(fullPath, depth + 1, baseRoot, target, useAbsPath)
             }
           }
         } catch {
@@ -1661,22 +1730,47 @@ export function registerIpcHandlers(): void {
         }
       }
 
-      scan(safeRoot, 0, safeRoot)
+      // session 目录：相对路径
+      scan(safeRoot, 0, safeRoot, rootEntries, false)
 
-      // 扫描附加目录（外部路径）
+      // 附加目录：绝对路径（消除歧义，agent 可直接使用）
       if (additionalPaths && additionalPaths.length > 0) {
         for (const addPath of additionalPaths) {
           const addRoot = resolve(addPath)
-          scan(addRoot, 0, addRoot)
+          const group: Array<{ name: string; path: string; type: 'file' | 'dir' }> = []
+          scan(addRoot, 0, addRoot, group, true)
+          additionalEntryGroups.push(group)
         }
       }
 
       // 搜索匹配
       const q = query.toLowerCase()
+
       if (!q) {
-        return { entries: allEntries.slice(0, limit), total: allEntries.length }
+        // 空 query：从各来源交替取结果，确保均衡展示
+        const allGroups = [rootEntries, ...additionalEntryGroups].filter((g) => g.length > 0)
+        const result: Array<{ name: string; path: string; type: 'file' | 'dir' }> = []
+        const groupCount = allGroups.length
+        if (groupCount > 0) {
+          // 每组至少分配 perGroup 条，剩余名额按需补充
+          const perGroup = Math.max(1, Math.floor(limit / groupCount))
+          for (const group of allGroups) {
+            result.push(...group.slice(0, perGroup))
+          }
+          // 如果还有剩余名额，按组顺序补充
+          if (result.length < limit) {
+            for (const group of allGroups) {
+              for (let i = perGroup; i < group.length && result.length < limit; i++) {
+                result.push(group[i]!)
+              }
+            }
+          }
+        }
+        const allEntries = [rootEntries, ...additionalEntryGroups].flat()
+        return { entries: result.slice(0, limit), total: allEntries.length }
       }
 
+      const allEntries = [rootEntries, ...additionalEntryGroups].flat()
       const matched = allEntries.filter((entry) => {
         const nameLower = entry.name.toLowerCase()
         const pathLower = entry.path.toLowerCase()
