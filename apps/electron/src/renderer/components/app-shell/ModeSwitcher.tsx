@@ -16,7 +16,7 @@ export function ModeSwitcher(): React.ReactElement {
   const [mode, setMode] = useAtom(appModeAtom)
 
   return (
-    <div className="px-2 pt-2">
+    <div className="pt-2">
       <div className="relative flex rounded-lg bg-muted p-1">
         {/* 滑动背景指示器 */}
         <div

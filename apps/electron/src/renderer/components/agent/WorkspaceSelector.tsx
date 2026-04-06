@@ -1,13 +1,14 @@
 /**
  * WorkspaceSelector — Agent 工作区切换器
  *
- * 垂直列表展示所有工作区，支持新建、重命名、删除和切换。
+ * 垂直列表展示所有工作区，支持新建、重命名、删除、切换和拖拽排序。
  * 切换工作区后持久化到 settings。
  */
 
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { FolderOpen, Plus, Pencil, Trash2 } from 'lucide-react'
+import { FolderOpen, Plus, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
   AlertDialog,
@@ -33,6 +34,8 @@ export function WorkspaceSelector(): React.ReactElement {
   const [creating, setCreating] = React.useState(false)
   const [newName, setNewName] = React.useState('')
   const createInputRef = React.useRef<HTMLInputElement>(null)
+  /** 防止连续 Enter 触发多次创建请求 */
+  const createInFlightRef = React.useRef(false)
 
   // 重命名状态
   const [editingId, setEditingId] = React.useState<string | null>(null)
@@ -42,9 +45,13 @@ export function WorkspaceSelector(): React.ReactElement {
   // 删除确认状态
   const [deleteTargetId, setDeleteTargetId] = React.useState<string | null>(null)
 
+  // 拖拽状态
+  const [dragId, setDragId] = React.useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = React.useState<string | null>(null)
+
   /** 切换工作区 */
   const handleSelect = (workspace: AgentWorkspace): void => {
-    if (editingId) return // 编辑中不切换
+    if (editingId) return
     setCurrentWorkspaceId(workspace.id)
 
     window.electronAPI.updateSettings({
@@ -68,6 +75,8 @@ export function WorkspaceSelector(): React.ReactElement {
       setCreating(false)
       return
     }
+    if (createInFlightRef.current) return
+    createInFlightRef.current = true
 
     try {
       const workspace = await window.electronAPI.createAgentWorkspace(trimmed)
@@ -79,7 +88,11 @@ export function WorkspaceSelector(): React.ReactElement {
         agentWorkspaceId: workspace.id,
       }).catch(console.error)
     } catch (error) {
-      console.error('[WorkspaceSelector] 创建工作区失败:', error)
+      const msg = error instanceof Error ? error.message : '创建失败'
+      toast.error(msg)
+      setCreating(false)
+    } finally {
+      createInFlightRef.current = false
     }
   }
 
@@ -117,7 +130,8 @@ export function WorkspaceSelector(): React.ReactElement {
       const updated = await window.electronAPI.updateAgentWorkspace(editingId, { name: trimmed })
       setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
     } catch (error) {
-      console.error('[WorkspaceSelector] 重命名工作区失败:', error)
+      const msg = error instanceof Error ? error.message : '重命名失败'
+      toast.error(msg)
     } finally {
       setEditingId(null)
     }
@@ -147,7 +161,6 @@ export function WorkspaceSelector(): React.ReactElement {
       const remaining = workspaces.filter((w) => w.id !== deleteTargetId)
       setWorkspaces(remaining)
 
-      // 如果删除的是当前工作区，切换到第一个剩余的
       if (deleteTargetId === currentWorkspaceId && remaining.length > 0) {
         setCurrentWorkspaceId(remaining[0]!.id)
         window.electronAPI.updateSettings({
@@ -161,27 +174,100 @@ export function WorkspaceSelector(): React.ReactElement {
     }
   }
 
-  /** 是否可以删除该工作区 */
   const canDelete = (ws: AgentWorkspace): boolean => {
     return ws.slug !== 'default' && workspaces.length > 1
   }
 
+  // ===== 拖拽排序 =====
+
+  const handleDragStart = (e: React.DragEvent, wsId: string): void => {
+    setDragId(wsId)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', wsId)
+  }
+
+  const handleDragOver = (e: React.DragEvent, wsId: string): void => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragId && wsId !== dragId) {
+      setDropTargetId(wsId)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent): void => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDropTargetId(null)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent, targetId: string): void => {
+    e.preventDefault()
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      setDropTargetId(null)
+      return
+    }
+
+    const fromIdx = workspaces.findIndex((w) => w.id === dragId)
+    const toIdx = workspaces.findIndex((w) => w.id === targetId)
+    if (fromIdx === -1 || toIdx === -1) return
+
+    const reordered = [...workspaces]
+    const [moved] = reordered.splice(fromIdx, 1)
+    const insertIdx = fromIdx < toIdx ? toIdx - 1 : toIdx
+    reordered.splice(insertIdx, 0, moved!)
+
+    setWorkspaces(reordered)
+    setDragId(null)
+    setDropTargetId(null)
+
+    window.electronAPI.reorderAgentWorkspaces(reordered.map((w) => w.id)).catch(console.error)
+  }
+
+  const handleDragEnd = (): void => {
+    setDragId(null)
+    setDropTargetId(null)
+  }
+
   return (
     <>
-      <div className="flex flex-col gap-0.5">
-        {/* 工作区列表（可滚动） */}
-        <div className="max-h-[120px] overflow-y-auto scrollbar-none flex flex-col gap-0.5">
+      <div className="rounded-lg border border-border/60 overflow-hidden">
+        {/* 头部 */}
+        <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border/40">
+          <span className="text-[11px] font-medium text-foreground/50 uppercase tracking-wide">工作区</span>
+          <button
+            onClick={handleStartCreate}
+            className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/35 hover:text-foreground/60 transition-colors titlebar-no-drag"
+            title="新建工作区"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+
+        {/* 工作区列表 */}
+        <div className="max-h-[120px] overflow-y-auto scrollbar-thin flex flex-col gap-0.5 p-1">
           {workspaces.map((ws) => (
             <div
               key={ws.id}
+              draggable={editingId !== ws.id}
+              onDragStart={(e) => handleDragStart(e, ws.id)}
+              onDragOver={(e) => handleDragOver(e, ws.id)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, ws.id)}
+              onDragEnd={handleDragEnd}
               onClick={() => handleSelect(ws)}
               className={cn(
-                'group w-full flex items-center gap-2 px-2.5 py-[5px] rounded-md text-[13px] transition-colors duration-100 cursor-pointer titlebar-no-drag',
+                'group w-full flex items-center gap-1 px-1 py-[5px] rounded-md text-[13px] transition-colors duration-100 cursor-pointer titlebar-no-drag',
                 ws.id === currentWorkspaceId
                   ? 'workspace-item-selected bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
                   : 'text-foreground/70 hover:bg-foreground/[0.04]',
+                dragId === ws.id && 'opacity-40',
+                dropTargetId === ws.id && 'ring-1 ring-primary/40',
               )}
             >
+              {/* 拖拽手柄 */}
+              <GripVertical size={12} className="flex-shrink-0 text-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing" />
+
               <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
 
               {editingId === ws.id ? (
@@ -199,7 +285,6 @@ export function WorkspaceSelector(): React.ReactElement {
                 <>
                   <span className="flex-1 min-w-0 truncate">{ws.name}</span>
 
-                  {/* 操作按钮 — hover 时显示 */}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button
                       onClick={(e) => handleStartRename(e, ws)}
@@ -222,34 +307,24 @@ export function WorkspaceSelector(): React.ReactElement {
               )}
             </div>
           ))}
-        </div>
 
-        {/* 新建工作区 */}
-        {creating ? (
-          <div className="flex items-center gap-2 px-2.5 py-[5px]">
-            <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
-            <input
-              ref={createInputRef}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={handleCreateKeyDown}
-              onBlur={() => {
-                if (!newName.trim()) setCreating(false)
-              }}
-              placeholder="工作区名称..."
-              className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
-              maxLength={50}
-            />
-          </div>
-        ) : (
-          <button
-            onClick={handleStartCreate}
-            className="w-full flex items-center gap-2 px-2.5 py-[5px] rounded-md text-[13px] text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground/60 transition-colors duration-100 titlebar-no-drag"
-          >
-            <Plus size={13} />
-            <span>新建工作区</span>
-          </button>
-        )}
+          {/* 新建工作区输入框 */}
+          {creating && (
+            <div className="flex items-center gap-2 px-2 py-[5px]">
+              <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
+              <input
+                ref={createInputRef}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={handleCreateKeyDown}
+                onBlur={() => setCreating(false)}
+                placeholder="工作区名称..."
+                className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
+                maxLength={50}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 删除确认弹窗 */}

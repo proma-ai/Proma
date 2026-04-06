@@ -22,11 +22,13 @@ interface FileDropZoneProps {
   target?: 'session' | 'workspace'
   /** 上传成功后的回调（触发文件浏览器刷新） */
   onFilesUploaded: () => void
-  /** 附加文件夹回调 */
+  /** 附加文件夹回调（点击按钮时打开对话框） */
   onAttachFolder?: () => void
+  /** 拖拽文件夹回调（拖拽放下文件夹时直接附加） */
+  onFoldersDropped?: (folderPaths: string[]) => void
 }
 
-export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onFilesUploaded, onAttachFolder }: FileDropZoneProps): React.ReactElement {
+export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onFilesUploaded, onAttachFolder, onFoldersDropped }: FileDropZoneProps): React.ReactElement {
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
 
@@ -86,29 +88,48 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
     e.stopPropagation()
     setIsDragOver(false)
 
-    const items = Array.from(e.dataTransfer.items)
-    const regularFiles: globalThis.File[] = []
-    let hasFolders = false
+    const droppedFiles = Array.from(e.dataTransfer.files)
+    if (droppedFiles.length === 0) return
 
-    for (const item of items) {
-      if (item.kind !== 'file') continue
-      const entry = item.webkitGetAsEntry?.()
-      if (entry?.isDirectory) {
-        hasFolders = true
-      } else {
-        const file = item.getAsFile()
-        if (file) regularFiles.push(file)
+    // 通过 preload 的 webUtils.getPathForFile 获取真实路径
+    const pathMap = new Map<string, globalThis.File>()
+    const paths: string[] = []
+    for (const f of droppedFiles) {
+      try {
+        const p = window.electronAPI.getPathForFile(f)
+        if (p) {
+          paths.push(p)
+          pathMap.set(p, f)
+        }
+      } catch { /* 无法获取路径时忽略 */ }
+    }
+
+    if (paths.length > 0) {
+      try {
+        // 通过主进程检测目录 vs 文件
+        const { directories, files: filePaths } = await window.electronAPI.checkPathsType(paths)
+
+        if (directories.length > 0) {
+          if (onFoldersDropped) {
+            onFoldersDropped(directories)
+          } else {
+            toast.info('不支持拖拽文件夹', { description: '请使用「附加文件夹」按钮' })
+          }
+        }
+
+        const regularFiles = filePaths.map((p) => pathMap.get(p)!).filter(Boolean)
+        if (regularFiles.length > 0) {
+          await saveFiles(regularFiles)
+        }
+      } catch (error) {
+        console.error('[FileDropZone] 路径检测失败，回退处理:', error)
+        await saveFiles(droppedFiles)
       }
+    } else {
+      // 无路径信息：回退，所有项按普通文件处理
+      await saveFiles(droppedFiles)
     }
-
-    if (hasFolders) {
-      toast.info('不支持拖拽文件夹', { description: '请使用「附加文件夹」按钮' })
-    }
-
-    if (regularFiles.length > 0) {
-      await saveFiles(regularFiles)
-    }
-  }, [saveFiles])
+  }, [saveFiles, onFoldersDropped])
 
   // ===== 按钮点击处理 =====
 

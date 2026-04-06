@@ -4,8 +4,6 @@
  * 负责 Agent 工作区的 CRUD 操作。
  * - 工作区索引：~/.proma/agent-workspaces.json（轻量元数据）
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
- *
- * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync } from 'node:fs'
@@ -20,27 +18,17 @@ import {
   getDefaultSkillsDir,
   parseSkillVersion,
 } from './config-paths'
-import type { AgentWorkspace, McpServerEntry, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
 import { migratePermissionMode } from '@proma/shared'
 
-/**
- * 工作区索引文件格式
- */
 interface AgentWorkspacesIndex {
-  /** 配置版本号 */
   version: number
-  /** 工作区元数据列表 */
   workspaces: AgentWorkspace[]
 }
 
-/** 当前索引版本 */
 const INDEX_VERSION = 2
 
-/**
- * 读取工作区索引文件
- *
- * 读取后自动执行版本迁移。
- */
+/** 读取工作区索引文件，自动执行版本迁移 */
 function readIndex(): AgentWorkspacesIndex {
   const indexPath = getAgentWorkspacesIndexPath()
 
@@ -64,11 +52,6 @@ function readIndex(): AgentWorkspacesIndex {
   }
 }
 
-/**
- * 索引版本迁移
- *
- * 按版本号逐级执行迁移逻辑，最终写回文件。
- */
 function migrateIndex(index: AgentWorkspacesIndex): void {
   const oldVersion = index.version ?? 1
 
@@ -82,12 +65,7 @@ function migrateIndex(index: AgentWorkspacesIndex): void {
   console.log(`[Agent 工作区] 索引已迁移: v${oldVersion} → v${INDEX_VERSION}`)
 }
 
-/**
- * 一次性迁移：为所有工作区启用 skill-creator
- *
- * 将 skills-inactive/skill-creator 移动到 skills/skill-creator。
- * 若 skill-creator 不存在于任何位置则跳过（用户可能已删除）。
- */
+/** v1→v2 迁移：将 skills-inactive/skill-creator 移到 skills/ */
 function activateSkillCreatorInAllWorkspaces(index: AgentWorkspacesIndex): void {
   for (const workspace of index.workspaces) {
     const activeDir = getWorkspaceSkillsDir(workspace.slug)
@@ -96,7 +74,6 @@ function activateSkillCreatorInAllWorkspaces(index: AgentWorkspacesIndex): void 
     const inactivePath = join(inactiveDir, 'skill-creator')
     const activePath = join(activeDir, 'skill-creator')
 
-    // 已在 skills/ 中或两处都不存在 → 跳过
     if (existsSync(activePath) || !existsSync(inactivePath)) continue
 
     try {
@@ -111,9 +88,6 @@ function activateSkillCreatorInAllWorkspaces(index: AgentWorkspacesIndex): void 
   }
 }
 
-/**
- * 写入工作区索引文件
- */
 function writeIndex(index: AgentWorkspacesIndex): void {
   const indexPath = getAgentWorkspacesIndexPath()
 
@@ -125,23 +99,17 @@ function writeIndex(index: AgentWorkspacesIndex): void {
   }
 }
 
-/**
- * 将名称转换为 URL-safe 的 slug
- *
- * 英文：kebab-case，中文/特殊字符：fallback 为 workspace-{timestamp}
- */
+/** 名称转 URL-safe slug，非 ASCII 名称 fallback 为 workspace-{timestamp} */
 function slugify(name: string, existingSlugs: Set<string>): string {
   let base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
 
-  // 中文或其他非 ASCII 名称 fallback
   if (!base) {
     base = `workspace-${Date.now()}`
   }
 
-  // 重复时加数字后缀
   let slug = base
   let counter = 1
   while (existingSlugs.has(slug)) {
@@ -152,28 +120,43 @@ function slugify(name: string, existingSlugs: Set<string>): string {
   return slug
 }
 
-/**
- * 获取所有工作区（按 updatedAt 降序）
- */
+/** 返回索引中的存储顺序（与 UI 拖拽顺序一致）；返回副本，避免调用方 sort 等操作误改索引数组 */
+
 export function listAgentWorkspaces(): AgentWorkspace[] {
   const index = readIndex()
-  return index.workspaces.sort((a, b) => b.updatedAt - a.updatedAt)
+  return index.workspaces.slice()
 }
 
-/**
- * 按 ID 获取单个工作区
- */
+/** 按 updatedAt 降序（桥接/飞书列表等与旧版内联 sort 一致；渲染进程仍用 listAgentWorkspaces） */
+export function listAgentWorkspacesByUpdatedAt(): AgentWorkspace[] {
+  const index = readIndex()
+  return index.workspaces.slice().sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** 按指定 ID 顺序重排工作区，未列出的追加到末尾 */
+export function reorderAgentWorkspaces(orderedIds: string[]): AgentWorkspace[] {
+  const index = readIndex()
+  const byId = new Map(index.workspaces.map((w) => [w.id, w]))
+  const reordered: AgentWorkspace[] = []
+  for (const id of orderedIds) {
+    const ws = byId.get(id)
+    if (ws) {
+      reordered.push(ws)
+      byId.delete(id)
+    }
+  }
+  for (const ws of byId.values()) reordered.push(ws)
+  index.workspaces = reordered
+  writeIndex(index)
+  return reordered
+}
+
 export function getAgentWorkspace(id: string): AgentWorkspace | undefined {
   const index = readIndex()
   return index.workspaces.find((w) => w.id === id)
 }
 
-/**
- * 将默认 Skills 模板复制到工作区 skills/ 目录
- *
- * 从 ~/.proma/default-skills/ 复制所有内容。
- * 如果模板目录不存在或为空则跳过。
- */
+/** 将 ~/.proma/default-skills/ 复制到工作区 skills/ 目录 */
 function copyDefaultSkills(workspaceSlug: string): void {
   const defaultDir = getDefaultSkillsDir()
   const targetDir = getWorkspaceSkillsDir(workspaceSlug)
@@ -185,15 +168,18 @@ function copyDefaultSkills(workspaceSlug: string): void {
     cpSync(defaultDir, targetDir, { recursive: true })
     console.log(`[Agent 工作区] 已复制默认 Skills 到: ${workspaceSlug}`)
   } catch {
-    // 模板目录不存在或复制失败，跳过不影响工作区创建
+    // 模板目录不存在，跳过
   }
 }
 
-/**
- * 创建新工作区
- */
 export function createAgentWorkspace(name: string): AgentWorkspace {
   const index = readIndex()
+
+  const duplicate = index.workspaces.find((w) => w.name === name)
+  if (duplicate) {
+    throw new Error(`工作区名称「${name}」已存在`)
+  }
+
   const existingSlugs = new Set(index.workspaces.map((w) => w.slug))
   const slug = slugify(name, existingSlugs)
   const now = Date.now()
@@ -206,25 +192,18 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
     updatedAt: now,
   }
 
-  // 创建工作区目录
   getAgentWorkspacePath(slug)
-
-  // 创建 SDK plugin manifest（SDK 需要此文件发现 skills）
   ensurePluginManifest(slug, name)
-
-  // 复制默认 Skills 模板
   copyDefaultSkills(slug)
 
-  index.workspaces.push(workspace)
+  index.workspaces.unshift(workspace)
   writeIndex(index)
 
   console.log(`[Agent 工作区] 已创建工作区: ${name} (slug: ${slug})`)
   return workspace
 }
 
-/**
- * 更新工作区（仅更新名称，不改 slug/目录）
- */
+/** 更新工作区名称（slug 和目录不变） */
 export function updateAgentWorkspace(
   id: string,
   updates: { name: string },
@@ -237,6 +216,12 @@ export function updateAgentWorkspace(
   }
 
   const existing = index.workspaces[idx]!
+
+  const duplicate = index.workspaces.find((w) => w.id !== id && w.name === updates.name)
+  if (duplicate) {
+    throw new Error(`工作区名称「${updates.name}」已存在`)
+  }
+
   const updated: AgentWorkspace = {
     ...existing,
     name: updates.name,
@@ -250,9 +235,7 @@ export function updateAgentWorkspace(
   return updated
 }
 
-/**
- * 删除工作区（仅删索引条目，保留目录避免误删用户文件）
- */
+/** 删除工作区索引条目，保留目录避免误删用户文件 */
 export function deleteAgentWorkspace(id: string): void {
   const index = readIndex()
   const idx = index.workspaces.findIndex((w) => w.id === id)
@@ -267,12 +250,7 @@ export function deleteAgentWorkspace(id: string): void {
   console.log(`[Agent 工作区] 已删除工作区索引: ${removed.name} (slug: ${removed.slug}，目录已保留)`)
 }
 
-/**
- * 确保默认工作区存在
- *
- * 首次启动时自动创建名为"默认工作区"的工作区（slug: default）。
- * 返回默认工作区的 ID。
- */
+/** 确保默认工作区存在，首次启动时自动创建（slug: default） */
 export function ensureDefaultWorkspace(): AgentWorkspace {
   const index = readIndex()
   let defaultWs = index.workspaces.find((w) => w.slug === 'default')
@@ -287,13 +265,8 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
       updatedAt: now,
     }
 
-    // 创建工作区目录
     getAgentWorkspacePath('default')
-
-    // 创建 SDK plugin manifest
     ensurePluginManifest('default', '默认工作区')
-
-    // 复制默认 Skills 模板
     copyDefaultSkills('default')
 
     index.workspaces.push(defaultWs)
@@ -301,7 +274,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
 
     console.log('[Agent 工作区] 已创建默认工作区')
   } else {
-    // 迁移兼容：确保已有默认工作区包含 plugin manifest 和 skills
+    // 迁移兼容：确保已有默认工作区包含 plugin manifest
     ensurePluginManifest(defaultWs.slug, defaultWs.name)
   }
 
@@ -310,17 +283,10 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
 
 // ===== 默认 Skills 自动升级 =====
 
-/**
- * 升级所有工作区中的默认 Skills
- *
- * 遍历所有工作区，将版本过旧的默认 Skill 更新到 ~/.proma/default-skills/ 中的最新版本。
- * 仅更新 slug 与默认 Skill 匹配的目录，跳过用户自建的 Skill。
- * 同时处理 skills/（活跃）和 skills-inactive/（已禁用）目录。
- */
+/** 将所有工作区中版本过旧的默认 Skill 升级到 ~/.proma/default-skills/ 的最新版本 */
 export function upgradeDefaultSkillsInWorkspaces(): void {
   const defaultDir = getDefaultSkillsDir()
 
-  // 收集默认 Skills 的 slug → version 映射
   interface DefaultSkillInfo {
     version: string
     sourcePath: string
@@ -336,12 +302,11 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
       defaultSkills.set(entry.name, { version, sourcePath })
     }
   } catch {
-    return // default-skills 目录不存在，跳过
+    return
   }
 
   if (defaultSkills.size === 0) return
 
-  // 遍历所有工作区
   const index = readIndex()
 
   for (const workspace of index.workspaces) {
@@ -367,9 +332,7 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
   }
 }
 
-/**
- * 比较两个 semver 版本字符串
- */
+/** 比较两个 semver 版本字符串，返回值 >0 表示 a 更新 */
 function compareSemver(a: string, b: string): number {
   const pa = a.split('.').map(Number)
   const pb = b.split('.').map(Number)
@@ -382,12 +345,7 @@ function compareSemver(a: string, b: string): number {
 
 // ===== Plugin Manifest（SDK 插件发现） =====
 
-/**
- * 确保工作区包含 .claude-plugin/plugin.json 清单
- *
- * SDK 需要此文件才能将工作区识别为合法插件，
- * 进而发现 skills/ 目录下的 Skill。
- */
+/** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills */
 export function ensurePluginManifest(workspaceSlug: string, workspaceName: string): void {
   const wsPath = getAgentWorkspacePath(workspaceSlug)
   const pluginDir = join(wsPath, '.claude-plugin')
@@ -410,9 +368,6 @@ export function ensurePluginManifest(workspaceSlug: string, workspaceName: strin
 
 // ===== MCP 配置管理 =====
 
-/**
- * 读取工作区 MCP 配置
- */
 export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig {
   const mcpPath = getWorkspaceMcpPath(workspaceSlug)
 
@@ -430,9 +385,6 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
   }
 }
 
-/**
- * 保存工作区 MCP 配置
- */
 export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceMcpConfig): void {
   const mcpPath = getWorkspaceMcpPath(workspaceSlug)
 
@@ -447,23 +399,12 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
 
 // ===== Skill 目录扫描 =====
 
-/**
- * 扫描工作区 Skills 目录
- *
- * 遍历 skills/{slug}/SKILL.md，解析 YAML frontmatter 提取元数据。
- */
-/**
- * 扫描工作区活跃 Skills 目录
- *
- * 仅返回 skills/ 下的活跃 Skill，供 prompt builder 和 capabilities 使用。
- */
+/** 扫描工作区活跃 Skills，仅返回 skills/ 下的 Skill */
 export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
   return scanSkillsInDir(getWorkspaceSkillsDir(workspaceSlug), true)
 }
 
-/**
- * 解析 SKILL.md 的 YAML frontmatter
- */
+/** 解析 SKILL.md 的 YAML frontmatter，支持单行值、block scalar（`|` / `>`）和多行缩进 */
 function parseSkillFrontmatter(content: string, slug: string, enabled: boolean): SkillMeta {
   const meta: SkillMeta = { slug, name: slug, enabled }
 
@@ -473,27 +414,51 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
   const yaml = fmMatch[1]
   if (!yaml) return meta
 
+  const validKeys = new Set(['name', 'description', 'icon', 'version'])
+  const entries: Record<string, string> = {}
+  let currentKey = ''
+  let isFolded = false
+
   for (const line of yaml.split('\n')) {
-    const colonIdx = line.indexOf(':')
-    if (colonIdx === -1) continue
+    const indented = /^\s/.test(line)
 
-    const key = line.slice(0, colonIdx).trim()
-    const value = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '')
+    if (!indented) {
+      const colonIdx = line.indexOf(':')
+      if (colonIdx === -1) { currentKey = ''; continue }
 
-    if (key === 'name' && value) meta.name = value
-    if (key === 'description' && value) meta.description = value
-    if (key === 'icon' && value) meta.icon = value
-    if (key === 'version' && value) meta.version = value
+      const key = line.slice(0, colonIdx).trim()
+      const raw = line.slice(colonIdx + 1).trim()
+
+      if (!validKeys.has(key)) { currentKey = ''; isFolded = false; continue }
+
+      if (raw === '|' || raw === '>') {
+        currentKey = key
+        isFolded = raw === '>'
+        entries[key] = ''
+        continue
+      }
+
+      currentKey = key
+      isFolded = false
+      entries[key] = raw.replace(/^["']|["']$/g, '')
+    } else if (currentKey) {
+      const text = line.trim()
+      if (!text) { if (entries[currentKey]) entries[currentKey] += '\n'; continue }
+      const sep = isFolded ? ' ' : '\n'
+      entries[currentKey] = entries[currentKey] ? entries[currentKey] + sep + text : text
+    }
   }
+
+  if (entries.name) meta.name = entries.name.trim()
+  if (entries.description) meta.description = entries.description.trim()
+  if (entries.icon) meta.icon = entries.icon.trim()
+  if (entries.version) meta.version = entries.version.trim()
 
   return meta
 }
 
 // ===== 工作区能力摘要 =====
 
-/**
- * 获取工作区能力摘要（MCP + Skill 计数）
- */
 export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabilities {
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
   const skills = getWorkspaceSkills(workspaceSlug)
@@ -507,11 +472,6 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
   return { mcpServers, skills }
 }
 
-/**
- * 删除工作区 Skill
- *
- * 删除 skills/{slug}/ 整个目录。
- */
 export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): void {
   const skillsDir = getWorkspaceSkillsDir(workspaceSlug)
   const skillPath = join(skillsDir, skillSlug)
@@ -524,11 +484,7 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
   console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}`)
 }
 
-/**
- * 扫描指定目录下的 Skills
- *
- * 通用扫描逻辑，供 getWorkspaceSkills 和 getAllWorkspaceSkills 复用。
- */
+/** 扫描指定目录下的 Skills，供 getWorkspaceSkills 和 getAllWorkspaceSkills 复用 */
 function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
   const skills: SkillMeta[] = []
 
@@ -557,23 +513,14 @@ function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
   return skills
 }
 
-/**
- * 获取工作区所有 Skills（含活跃和不活跃）
- *
- * 同时扫描 skills/ 和 skills-inactive/ 目录，返回带 enabled 标记的完整列表。
- * 用于设置页 UI 展示。
- */
+/** 获取工作区所有 Skills（含活跃和不活跃），用于设置页 UI */
 export function getAllWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
   const activeSkills = scanSkillsInDir(getWorkspaceSkillsDir(workspaceSlug), true)
   const inactiveSkills = scanSkillsInDir(getInactiveSkillsDir(workspaceSlug), false)
   return [...activeSkills, ...inactiveSkills]
 }
 
-/**
- * 切换工作区 Skill 的启用/禁用状态
- *
- * 在 skills/ 和 skills-inactive/ 之间移动文件夹。
- */
+/** 在 skills/ 和 skills-inactive/ 之间移动来切换启用/禁用 */
 export function toggleWorkspaceSkill(workspaceSlug: string, skillSlug: string, enabled: boolean): void {
   const activeDir = getWorkspaceSkillsDir(workspaceSlug)
   const inactiveDir = getInactiveSkillsDir(workspaceSlug)
@@ -598,22 +545,15 @@ export function toggleWorkspaceSkill(workspaceSlug: string, skillSlug: string, e
 
 // ===== 权限模式管理 =====
 
-/** 工作区配置文件格式 */
 interface WorkspaceConfig {
   permissionMode?: PromaPermissionMode
   attachedDirectories?: string[]
 }
 
-/**
- * 获取工作区配置文件路径
- */
 function getWorkspaceConfigPath(workspaceSlug: string): string {
   return join(getAgentWorkspacePath(workspaceSlug), 'config.json')
 }
 
-/**
- * 读取工作区配置
- */
 function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
 
@@ -629,27 +569,17 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
   }
 }
 
-/**
- * 写入工作区配置
- */
 function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
 }
 
-/**
- * 获取工作区权限模式
- *
- * 默认返回 'acceptEdits'。支持旧模式值自动迁移。
- */
+/** 获取工作区权限模式，默认 'acceptEdits'，支持旧值自动迁移 */
 export function getWorkspacePermissionMode(workspaceSlug: string): PromaPermissionMode {
   const config = readWorkspaceConfig(workspaceSlug)
   return config.permissionMode ? migratePermissionMode(config.permissionMode) : 'acceptEdits'
 }
 
-/**
- * 设置工作区权限模式
- */
 export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPermissionMode): void {
   const config = readWorkspaceConfig(workspaceSlug)
   const updated: WorkspaceConfig = { ...config, permissionMode: mode }
@@ -659,17 +589,11 @@ export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPer
 
 // ===== 工作区级附加目录管理 =====
 
-/**
- * 获取工作区附加目录列表
- */
 export function getWorkspaceAttachedDirectories(workspaceSlug: string): string[] {
   const config = readWorkspaceConfig(workspaceSlug)
   return config.attachedDirectories ?? []
 }
 
-/**
- * 附加目录到工作区（所有会话可访问）
- */
 export function attachWorkspaceDirectory(workspaceSlug: string, directoryPath: string): string[] {
   const config = readWorkspaceConfig(workspaceSlug)
   const existing = config.attachedDirectories ?? []
@@ -684,9 +608,6 @@ export function attachWorkspaceDirectory(workspaceSlug: string, directoryPath: s
   return updated
 }
 
-/**
- * 从工作区移除附加目录
- */
 export function detachWorkspaceDirectory(workspaceSlug: string, directoryPath: string): string[] {
   const config = readWorkspaceConfig(workspaceSlug)
   const existing = config.attachedDirectories ?? []

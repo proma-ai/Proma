@@ -204,6 +204,8 @@ export interface ContentBlockProps {
   dimmed?: boolean
   /** 子代理的内容块（Agent/Task 工具调用的嵌套子块） */
   childBlocks?: SDKContentBlock[]
+  /** 是否正在流式输出中（仅流式中的未完成工具调用才显示 spinner） */
+  isStreaming?: boolean
 }
 
 // ===== 提示词折叠行 =====
@@ -252,6 +254,23 @@ function PromptRow({ prompt, dimmed = false }: { prompt: string; dimmed?: boolea
   )
 }
 
+// ===== 工具短语 diff 着色 =====
+
+/** 将 displayLabel 中的 +N 染绿、-N 染红（仅匹配前面是空格或字符串开头的，避免误染行范围如 505-600） */
+function renderLabelWithDiffColors(label: string): React.ReactNode {
+  const parts = label.split(/((?:^|(?<=\s))[+-]\d+)/g)
+  if (parts.length === 1) return label
+  return parts.map((part, i) => {
+    if (/^\+\d+$/.test(part)) {
+      return <span key={i} className="text-green-500">{part}</span>
+    }
+    if (/^-\d+$/.test(part)) {
+      return <span key={i} className="text-red-500">{part}</span>
+    }
+    return part
+  })
+}
+
 // ===== 工具调用块 =====
 
 interface ToolUseBlockProps {
@@ -262,9 +281,11 @@ interface ToolUseBlockProps {
   dimmed?: boolean
   childBlocks?: SDKContentBlock[]
   basePath?: string
+  /** 是否正在流式输出中 */
+  isStreaming?: boolean
 }
 
-function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed = false, childBlocks, basePath }: ToolUseBlockProps): React.ReactElement {
+function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed = false, childBlocks, basePath, isStreaming }: ToolUseBlockProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const toolResult = useToolResult(block.id, allMessages)
   const isAgentTool = block.name === 'Agent' || block.name === 'Task'
@@ -280,8 +301,8 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   const isCompleted = toolResult !== null
   const isError = toolResult?.isError === true
 
-  // 运行中显示进行时短语，完成后显示完成态短语
-  const displayLabel = isCompleted ? phrase.label : phrase.loadingLabel
+  // 运行中显示进行时短语，完成或非流式（已终止）显示完成态短语
+  const displayLabel = (isCompleted || !isStreaming) ? phrase.label : phrase.loadingLabel
 
   const delay = animate && index < 10 ? `${index * 30}ms` : '0ms'
 
@@ -315,8 +336,8 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
             )}
           />
 
-          {/* 状态指示 */}
-          {!isCompleted ? (
+          {/* 状态指示：仅流式中的未完成工具才显示 spinner */}
+          {!isCompleted && isStreaming ? (
             <Loader2 className="size-3.5 animate-spin text-primary/50 shrink-0" />
           ) : isError ? (
             <XCircle className="size-3.5 text-destructive/70 shrink-0" />
@@ -353,6 +374,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
                 animate
                 index={ci}
                 dimmed
+                isStreaming={isStreaming}
               />
             ))}
 
@@ -382,7 +404,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         className="flex items-center gap-2 py-0.5 text-left hover:opacity-70 transition-opacity group"
         onClick={() => setExpanded(!expanded)}
       >
-        {!isCompleted ? (
+        {!isCompleted && isStreaming ? (
           <Loader2 className="size-3.5 animate-spin text-primary/50 shrink-0" />
         ) : isError ? (
           <XCircle className="size-3.5 text-destructive/70 shrink-0" />
@@ -393,7 +415,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         <span className={cn(
           'truncate text-[14px]',
           dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
-        )}>{displayLabel}</span>
+        )}>{renderLabelWithDiffColors(displayLabel)}</span>
 
         <ChevronRight
           className={cn(
@@ -510,7 +532,7 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
 
 // ===== ContentBlock 主组件 =====
 
-export function ContentBlock({ block, allMessages, basePath, animate = false, index = 0, dimmed = false, childBlocks }: ContentBlockProps): React.ReactElement | null {
+export function ContentBlock({ block, allMessages, basePath, animate = false, index = 0, dimmed = false, childBlocks, isStreaming }: ContentBlockProps): React.ReactElement | null {
   // text 块 — 主要内容，不受 dimmed 影响
   if (block.type === 'text') {
     const textBlock = block as SDKTextBlock
@@ -532,6 +554,7 @@ export function ContentBlock({ block, allMessages, basePath, animate = false, in
         dimmed={dimmed}
         childBlocks={childBlocks}
         basePath={basePath}
+        isStreaming={isStreaming}
       />
     )
   }

@@ -11,7 +11,11 @@ import { BrowserWindow } from 'electron'
 import type { AgentStreamPayload } from '@proma/shared'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
-import { listAgentWorkspaces, getAgentWorkspace, getWorkspaceCapabilities } from './agent-workspace-manager'
+import {
+  listAgentWorkspacesByUpdatedAt,
+  getAgentWorkspace,
+  getWorkspaceCapabilities,
+} from './agent-workspace-manager'
 import { runAgentHeadless, agentEventBus, stopAgent } from './agent-service'
 import { getSettings } from './settings-service'
 import { getAgentWorkspacePath } from './config-paths'
@@ -250,7 +254,7 @@ export class BridgeCommandHandler {
 
   private async handleListCommand(chatId: string, contextData?: unknown): Promise<void> {
     const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspaces()
+    const workspaces = listAgentWorkspacesByUpdatedAt()
     const binding = this.chatBindings.get(chatId)
 
     if (sessions.length === 0) {
@@ -345,7 +349,7 @@ export class BridgeCommandHandler {
   }
 
   private async handleWorkspaceCommand(chatId: string, arg?: string, contextData?: unknown): Promise<void> {
-    const workspaces = listAgentWorkspaces()
+    const workspaces = listAgentWorkspacesByUpdatedAt()
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 

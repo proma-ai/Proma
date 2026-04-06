@@ -54,6 +54,7 @@ function MentionListInner<T>(
         return true
       }
       if (event.key === 'Enter') {
+        if (items.length === 0) return false
         const item = items[localIndex]
         if (item) onSelect(item)
         return true

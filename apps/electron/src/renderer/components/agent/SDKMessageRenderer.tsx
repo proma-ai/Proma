@@ -414,6 +414,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, isS
                 index={i}
                 dimmed={hasTextContent && block.type !== 'text'}
                 childBlocks={childBlocks}
+                isStreaming={isStreaming}
               />
             )
           })}
