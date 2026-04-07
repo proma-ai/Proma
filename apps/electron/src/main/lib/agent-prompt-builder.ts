@@ -112,6 +112,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 执行 shell 命令用 Bash — 破坏性操作（rm、git push --force 等）前先确认
 - 文本输出直接写在回复中，不要用 echo/printf
 - 当存在内置工具时，优先采用内置工具完成任务，避免滥用 MCP、shell 等过于通用的工具来完成简单任务
+- **路径规则**：你的 cwd 是会话目录，不是项目源码目录。操作附加工作目录中的文件时，Glob/Grep/Read 的 path 参数必须使用**绝对路径**（如 \`/Users/xxx/project/src\`），不要用相对路径
 - 处理多个独立任务时，尽量并行调用工具以提高效率
 - 用户可能也会在工作区文件夹下添加文件或者附加文件作为长期上下文或者长期处理任务，要注意及时感知这些变化并利用起来
 - **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子`)

@@ -26,6 +26,8 @@ export interface ShortcutDefinition {
   category: ShortcutCategory
   /** 是否为全局快捷键（由主进程 globalShortcut 注册） */
   global?: boolean
+  /** 是否为只读（仅展示，不可自定义） */
+  readonly?: boolean
 }
 
 /** 用户自定义快捷键覆盖（持久化到 settings.json） */
@@ -96,6 +98,26 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     defaultMac: 'Cmd+L',
     defaultWin: 'Ctrl+L',
     category: 'navigation',
+  },
+
+  // 编辑级（输入框格式化，仅 macOS — Cmd+B/S 被全局快捷键占用）
+  {
+    id: 'editor-bold',
+    name: '加粗 / 取消加粗',
+    description: '输入框中切换文字加粗（因 Cmd+B 已用于切换侧边栏）',
+    defaultMac: 'Ctrl+B',
+    defaultWin: '',
+    category: 'edit',
+    readonly: true,
+  },
+  {
+    id: 'editor-strikethrough',
+    name: '删除线 / 取消删除线',
+    description: '输入框中切换文字删除线',
+    defaultMac: 'Ctrl+S',
+    defaultWin: '',
+    category: 'edit',
+    readonly: true,
   },
 
   // 编辑级

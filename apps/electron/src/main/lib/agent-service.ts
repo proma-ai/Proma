@@ -100,6 +100,7 @@ export async function runAgent(
             sessionId: input.sessionId,
             messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
+            startedAt: opts?.startedAt,
           })
         }
         // Proma 官方渠道：对话完成后通知渲染进程刷新余额
@@ -158,13 +159,15 @@ export async function runAgentHeadless(
           })
         }
       },
-      onComplete: (messages) => {
+      onComplete: (messages, opts) => {
         callbacks.onComplete()
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
             sessionId: input.sessionId,
             messages,
+            stoppedByUser: opts?.stoppedByUser ?? false,
+            startedAt: opts?.startedAt,
           })
         }
       },

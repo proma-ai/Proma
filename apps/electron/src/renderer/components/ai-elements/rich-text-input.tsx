@@ -367,6 +367,22 @@ export function RichTextInput({
         return false
       },
       handleKeyDown: (view, event) => {
+        // macOS 上 Cmd+B/S 被全局快捷键占用，用 Ctrl+B/S 作为格式化替代键
+        const isMacOS = navigator.platform.startsWith('Mac')
+        if (isMacOS && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+          const key = event.key.toLowerCase()
+          if (key === 'b') {
+            event.preventDefault()
+            editor?.chain().focus().toggleBold().run()
+            return true
+          }
+          if (key === 's') {
+            event.preventDefault()
+            editor?.chain().focus().toggleStrike().run()
+            return true
+          }
+        }
+
         // Enter 提交，Shift+Enter 换行
         if (event.key === 'Enter' && !event.shiftKey) {
           // 如果在代码块中，允许正常换行

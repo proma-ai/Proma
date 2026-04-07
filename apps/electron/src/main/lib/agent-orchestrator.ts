@@ -70,7 +70,7 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
 }
@@ -404,7 +404,7 @@ const DEFAULT_MODEL_ID = 'claude-sonnet-4-5-20250929'
 export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
-  private activeSessions = new Set<string>()
+  private activeSessions = new Map<string, number>()
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
@@ -923,8 +923,9 @@ export class AgentOrchestrator {
     } as unknown as SDKMessage
     appendSDKMessages(sessionId, [userSDKMsg])
 
-    // 6. 注册活跃会话
-    this.activeSessions.add(sessionId)
+    // 6. 注册活跃会话（用时间戳作为 generation 标识，区分同一 session 的不同运行轮次）
+    const runGeneration = Date.now()
+    this.activeSessions.set(sessionId, runGeneration)
 
     // 7. 状态初始化
     const accumulatedMessages: SDKMessage[] = []
@@ -1328,7 +1329,7 @@ export class AgentOrchestrator {
           // 等待期间如果会话被中止，退出
           if (!this.activeSessions.has(sessionId)) {
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-            callbacks.onComplete(getAgentSessionMessages(sessionId))
+            callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
             return
           }
         }
@@ -1505,7 +1506,7 @@ export class AgentOrchestrator {
                 if (!loopAbort.signal.aborted) loopAbort.abort()
                 await watchdogDone
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
-                callbacks.onComplete(getAgentSessionMessages(sessionId))
+                callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
                 return
               }
             }
@@ -1701,7 +1702,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          callbacks.onComplete(getAgentSessionMessages(sessionId))
+          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
 
           break  // 成功完成，退出重试循环
 
@@ -1722,7 +1723,7 @@ export class AgentOrchestrator {
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             // 持久化中断状态到会话 meta
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
-            callbacks.onComplete(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser })
+            callbacks.onComplete(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: runGeneration })
             return
           }
 
@@ -1849,7 +1850,7 @@ export class AgentOrchestrator {
           }
 
           callbacks.onError(userFacingError)
-          callbacks.onComplete(getAgentSessionMessages(sessionId))
+          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
 
           // 根据错误类型决定是否保留 sdkSessionId
           const shouldClearSession = !apiError || apiError.statusCode >= 500
@@ -1889,13 +1890,16 @@ export class AgentOrchestrator {
         appendSDKMessages(sessionId, [retryErrorSDKMsg])
 
         callbacks.onError(`重试 ${MAX_AUTO_RETRIES} 次后仍然失败: ${lastRetryableError}`)
-        callbacks.onComplete(getAgentSessionMessages(sessionId))
+        callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
       }
 
     } finally {
-      this.activeSessions.delete(sessionId)
-      this.sessionPermissionModes.delete(sessionId)
-      this.queuedMessageUuids.delete(sessionId)
+      // 只在 generation 匹配时才清理，防止旧流的 finally 误删新流的注册
+      if (this.activeSessions.get(sessionId) === runGeneration) {
+        this.activeSessions.delete(sessionId)
+        this.sessionPermissionModes.delete(sessionId)
+        this.queuedMessageUuids.delete(sessionId)
+      }
       permissionService.clearSessionPending(sessionId)
       askUserService.clearSessionPending(sessionId)
       exitPlanService.clearSessionPending(sessionId)

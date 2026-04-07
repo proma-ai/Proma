@@ -149,9 +149,12 @@ import {
   getWorkspaceMcpConfig,
   saveWorkspaceMcpConfig,
   getAllWorkspaceSkills,
+  getOtherWorkspaceSkills,
   getWorkspaceCapabilities,
   getAgentWorkspace,
   deleteWorkspaceSkill,
+  importSkillFromWorkspace,
+  updateSkillFromSource,
   toggleWorkspaceSkill,
   getWorkspacePermissionMode,
   setWorkspacePermissionMode,
@@ -953,6 +956,30 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.TOGGLE_SKILL,
     async (_, workspaceSlug: string, skillSlug: string, enabled: boolean): Promise<void> => {
       return toggleWorkspaceSkill(workspaceSlug, skillSlug, enabled)
+    }
+  )
+
+  // 获取其他工作区的 Skill 列表
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_SKILLS,
+    async (_, currentSlug: string) => {
+      return getOtherWorkspaceSkills(currentSlug)
+    }
+  )
+
+  // 从其他工作区导入 Skill
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.IMPORT_SKILL_FROM_WORKSPACE,
+    async (_, targetSlug: string, sourceSlug: string, skillSlug: string): Promise<SkillMeta> => {
+      return importSkillFromWorkspace(targetSlug, sourceSlug, skillSlug)
+    }
+  )
+
+  // 从源工作区同步更新已导入的 Skill
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SKILL_FROM_SOURCE,
+    async (_, targetSlug: string, skillSlug: string): Promise<SkillMeta> => {
+      return updateSkillFromSource(targetSlug, skillSlug)
     }
   )
 

@@ -16,7 +16,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Map as MapIcon } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Map as MapIcon, Sparkles } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -1126,7 +1126,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0 ||
     (allPermissionRequests.get(sessionId)?.length ?? 0) > 0
 
-  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0) && agentChannelId !== null && !streaming
+  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && !streaming
 
   return (
     <AgentSessionProvider sessionId={sessionId}>
@@ -1212,6 +1212,32 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                     onRemove={() => handleRemoveFile(file.id)}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Agent 建议提示 */}
+            {suggestion && !streaming && (
+              <div className="px-3 pt-2.5 pb-1.5">
+                <button
+                  type="button"
+                  className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
+                  onClick={handleSend}
+                >
+                  <Sparkles className="size-4 shrink-0 mt-0.5 text-primary/60 group-hover:text-primary/80" />
+                  <span className="flex-1 min-w-0 text-foreground/80 group-hover:text-foreground line-clamp-3">{suggestion}</span>
+                  <X
+                    className="size-3.5 shrink-0 mt-0.5 text-muted-foreground/40 hover:text-foreground transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPromptSuggestions((prev) => {
+                        if (!prev.has(sessionId)) return prev
+                        const map = new Map(prev)
+                        map.delete(sessionId)
+                        return map
+                      })
+                    }}
+                  />
+                </button>
               </div>
             )}
 

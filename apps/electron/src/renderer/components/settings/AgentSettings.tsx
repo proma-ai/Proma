@@ -10,8 +10,12 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Settings } from 'lucide-react'
+import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Settings, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -32,7 +36,7 @@ import {
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { appModeAtom } from '@/atoms/app-mode'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
-import type { McpServerEntry, SkillMeta, WorkspaceMcpConfig, ThinkingConfig, AgentEffort } from '@proma/shared'
+import type { McpServerEntry, SkillMeta, OtherWorkspaceSkillsGroup, WorkspaceMcpConfig, ThinkingConfig, AgentEffort } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow, SettingsSegmentedControl, SettingsInput } from './primitives'
 import { McpServerForm } from './McpServerForm'
 
@@ -69,6 +73,10 @@ export function AgentSettings(): React.ReactElement {
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
   const [skillsDir, setSkillsDir] = React.useState('')
+  const [otherWorkspaces, setOtherWorkspaces] = React.useState<OtherWorkspaceSkillsGroup[]>([])
+  const [showImportDialog, setShowImportDialog] = React.useState(false)
+  const [importingSkill, setImportingSkill] = React.useState<string | null>(null)
+  const [updatingSkill, setUpdatingSkill] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
 
   /** 加载 MCP 配置和 Skills */
@@ -93,6 +101,23 @@ export function AgentSettings(): React.ReactElement {
       setLoading(false)
     }
   }, [workspaceSlug])
+
+  /** 懒加载其他工作区 Skill（打开导入弹窗时触发） */
+  const loadOtherWorkspaces = React.useCallback(async () => {
+    if (!workspaceSlug) return
+    try {
+      const groups = await window.electronAPI.getOtherWorkspaceSkills(workspaceSlug)
+      setOtherWorkspaces(groups)
+    } catch (error) {
+      console.error('[Agent 设置] 加载其他工作区 Skill 失败:', error)
+    }
+  }, [workspaceSlug])
+
+  React.useEffect(() => {
+    if (showImportDialog) {
+      void loadOtherWorkspaces()
+    }
+  }, [showImportDialog, loadOtherWorkspaces])
 
   React.useEffect(() => {
     loadData()
@@ -277,6 +302,45 @@ ${skillList}
     }
   }
 
+  /** 从其他工作区导入 Skill */
+  const handleImportSkill = async (sourceSlug: string, skillSlug: string): Promise<void> => {
+    if (!workspaceSlug || importingSkill) return
+
+    setImportingSkill(skillSlug)
+    try {
+      const imported = await window.electronAPI.importSkillFromWorkspace(workspaceSlug, sourceSlug, skillSlug)
+      setSkills((prev) => prev.some((skill) => skill.slug === imported.slug) ? prev : [...prev, imported])
+      bumpCapabilitiesVersion((v) => v + 1)
+      setShowImportDialog(false)
+      toast.success(`已导入 Skill: ${imported.name}`)
+    } catch (error) {
+      console.error('[Agent 设置] 导入 Skill 失败:', error)
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error('导入 Skill 失败', { description: message })
+    } finally {
+      setImportingSkill(null)
+    }
+  }
+
+  /** 从源工作区同步更新已导入的 Skill */
+  const handleUpdateSkill = async (skillSlug: string): Promise<void> => {
+    if (!workspaceSlug || updatingSkill) return
+
+    setUpdatingSkill(skillSlug)
+    try {
+      const updated = await window.electronAPI.updateSkillFromSource(workspaceSlug, skillSlug)
+      setSkills((prev) => prev.map((s) => s.slug === skillSlug ? updated : s))
+      bumpCapabilitiesVersion((v) => v + 1)
+      toast.success(`已同步更新 Skill: ${updated.name}`)
+    } catch (error) {
+      console.error('[Agent 设置] 更新 Skill 失败:', error)
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error('更新 Skill 失败', { description: message })
+    } finally {
+      setUpdatingSkill(null)
+    }
+  }
+
   /** 表单保存回调 */
   const handleFormSaved = (): void => {
     setViewMode('list')
@@ -367,19 +431,27 @@ ${skillList}
       <SettingsSection
         title="Skills"
         description="将 SKILL.md 放入工作区 skills/ 目录即可被 Agent 自动发现"
-        action={skillsDir ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => window.electronAPI.openFile(skillsDir)}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              >
-                <FolderOpen size={16} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>打开 Skills 目录</TooltipContent>
-          </Tooltip>
-        ) : undefined}
+        action={
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowImportDialog(true)}>
+              <Plus size={16} />
+              <span>从其他工作区导入</span>
+            </Button>
+            {skillsDir && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => window.electronAPI.openFile(skillsDir)}
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <FolderOpen size={16} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>打开 Skills 目录</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        }
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -395,6 +467,7 @@ ${skillList}
             skillsDir={skillsDir}
             onDelete={handleDeleteSkill}
             onToggle={handleToggleSkill}
+            onUpdate={handleUpdateSkill}
           />
         )}
 
@@ -407,6 +480,15 @@ ${skillList}
           <span>跟 Proma Agent 对话完成配置</span>
         </Button>
       </SettingsSection>
+
+      <ImportSkillFromWorkspaceDialog
+        open={showImportDialog}
+        onOpenChange={setShowImportDialog}
+        otherWorkspaces={otherWorkspaces}
+        installedSkills={skills}
+        importingSkill={importingSkill}
+        onImport={handleImportSkill}
+      />
     </div>
   )
 }
@@ -524,9 +606,10 @@ interface SkillGroupedListProps {
   skillsDir: string
   onDelete: (slug: string, name: string) => void
   onToggle: (slug: string, enabled: boolean) => void
+  onUpdate: (slug: string) => void
 }
 
-function SkillGroupedList({ skills, skillsDir, onDelete, onToggle }: SkillGroupedListProps): React.ReactElement {
+function SkillGroupedList({ skills, skillsDir, onDelete, onToggle, onUpdate }: SkillGroupedListProps): React.ReactElement {
   const groups = React.useMemo(() => groupSkillsByPrefix(skills), [skills])
   const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set())
   const [expandedSkill, setExpandedSkill] = React.useState<string | null>(null)
@@ -560,6 +643,7 @@ function SkillGroupedList({ skills, skillsDir, onDelete, onToggle }: SkillGroupe
             onDelete={onDelete}
             onToggleEnabled={onToggle}
             onOpenFolder={openSkillFolder}
+            onUpdate={onUpdate}
           />
         ) : (
           /* 独立 skill 不分组，平铺展示 */
@@ -574,6 +658,7 @@ function SkillGroupedList({ skills, skillsDir, onDelete, onToggle }: SkillGroupe
                 onDelete={() => onDelete(skill.slug, skill.name)}
                 onToggleEnabled={(enabled) => onToggle(skill.slug, enabled)}
                 onOpenFolder={() => openSkillFolder(skill.slug)}
+                onUpdate={skill.hasUpdate ? () => onUpdate(skill.slug) : undefined}
               />
             ))}
           </SettingsCard>
@@ -592,9 +677,10 @@ interface SkillGroupCardProps {
   onDelete: (slug: string, name: string) => void
   onToggleEnabled: (slug: string, enabled: boolean) => void
   onOpenFolder: (slug: string) => void
+  onUpdate: (slug: string) => void
 }
 
-function SkillGroupCard({ group, expanded, expandedSkill, onToggle, onExpandSkill, onDelete, onToggleEnabled, onOpenFolder }: SkillGroupCardProps): React.ReactElement {
+function SkillGroupCard({ group, expanded, expandedSkill, onToggle, onExpandSkill, onDelete, onToggleEnabled, onOpenFolder, onUpdate }: SkillGroupCardProps): React.ReactElement {
   return (
     <SettingsCard divided={false}>
       {/* 分组头部 */}
@@ -626,6 +712,7 @@ function SkillGroupCard({ group, expanded, expandedSkill, onToggle, onExpandSkil
               onDelete={() => onDelete(skill.slug, skill.name)}
               onToggleEnabled={(enabled) => onToggleEnabled(skill.slug, enabled)}
               onOpenFolder={() => onOpenFolder(skill.slug)}
+              onUpdate={skill.hasUpdate ? () => onUpdate(skill.slug) : undefined}
               indent
             />
           ))}
@@ -643,10 +730,11 @@ interface SkillItemRowProps {
   onDelete: () => void
   onToggleEnabled: (enabled: boolean) => void
   onOpenFolder: () => void
+  onUpdate?: () => void
   indent?: boolean
 }
 
-function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, onToggleEnabled, onOpenFolder, indent }: SkillItemRowProps): React.ReactElement {
+function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, onToggleEnabled, onOpenFolder, onUpdate, indent }: SkillItemRowProps): React.ReactElement {
   return (
     <div className={cn('group border-t border-border/50 overflow-hidden', !skill.enabled && 'opacity-50')}>
       <div className={cn('flex items-center gap-2 px-4 py-2', indent && 'pl-8')}>
@@ -658,7 +746,14 @@ function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, 
           onClick={onToggleExpand}
           className="flex-1 min-w-0 text-left overflow-hidden"
         >
-          <div className="text-sm font-medium text-foreground truncate">{displayName}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground truncate">{displayName}</span>
+            {skill.hasUpdate && (
+              <span className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                可更新
+              </span>
+            )}
+          </div>
           {expanded && skill.description && (
             <div className="text-xs text-muted-foreground mt-1 break-words">
               {skill.description}
@@ -671,6 +766,19 @@ function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, 
 
         {/* 操作按钮 */}
         <div className="flex items-center gap-1 flex-shrink-0">
+          {onUpdate && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={onUpdate}
+                  className="p-1.5 rounded-md text-blue-500 hover:text-blue-600 hover:bg-blue-500/10 transition-colors"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>从源工作区同步更新</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -700,6 +808,150 @@ function SkillItemRow({ skill, displayName, expanded, onToggleExpand, onDelete, 
         </div>
       </div>
     </div>
+  )
+}
+
+interface ImportSkillFromWorkspaceDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  otherWorkspaces: OtherWorkspaceSkillsGroup[]
+  installedSkills: SkillMeta[]
+  importingSkill: string | null
+  onImport: (sourceSlug: string, skillSlug: string) => Promise<void>
+}
+
+function ImportSkillFromWorkspaceDialog({
+  open,
+  onOpenChange,
+  otherWorkspaces,
+  installedSkills,
+  importingSkill,
+  onImport,
+}: ImportSkillFromWorkspaceDialogProps): React.ReactElement {
+  const installedSlugs = React.useMemo(
+    () => new Set(installedSkills.map((skill) => skill.slug)),
+    [installedSkills]
+  )
+
+  const availableWorkspaces = React.useMemo(
+    () =>
+      otherWorkspaces
+        .map((workspace) => ({
+          ...workspace,
+          skills: workspace.skills.filter((skill) => !installedSlugs.has(skill.slug)),
+        }))
+        .filter((workspace) => workspace.skills.length > 0),
+    [otherWorkspaces, installedSlugs]
+  )
+  const [selectedWorkspaceSlug, setSelectedWorkspaceSlug] = React.useState('')
+
+  const selectedWorkspace = React.useMemo(
+    () => availableWorkspaces.find((workspace) => workspace.workspaceSlug === selectedWorkspaceSlug) ?? null,
+    [availableWorkspaces, selectedWorkspaceSlug]
+  )
+
+  React.useEffect(() => {
+    if (!open || availableWorkspaces.length === 0) {
+      setSelectedWorkspaceSlug('')
+      return
+    }
+
+    setSelectedWorkspaceSlug((current) =>
+      availableWorkspaces.some((workspace) => workspace.workspaceSlug === current)
+        ? current
+        : availableWorkspaces[0]?.workspaceSlug ?? ''
+    )
+  }, [availableWorkspaces, open])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
+        <DialogHeader className="px-6 pb-4 pt-6">
+          <DialogTitle>从其他工作区导入 Skill</DialogTitle>
+          <DialogDescription>
+            从其他工作区中选择 Skill 导入到当前工作区。已安装的同名 Skill 会自动过滤。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 px-6 pb-6">
+          {availableWorkspaces.length === 0 ? (
+            <SettingsCard divided={false}>
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                没有可导入的 Skill。其他工作区暂无 Skill，或者它们都已经安装到当前工作区了。
+              </div>
+            </SettingsCard>
+          ) : (
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-foreground">选择来源工作区</div>
+                <Select value={selectedWorkspaceSlug} onValueChange={setSelectedWorkspaceSlug}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择来源工作区" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableWorkspaces.map((workspace) => (
+                      <SelectItem key={workspace.workspaceSlug} value={workspace.workspaceSlug}>
+                        {workspace.workspaceName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(selectedWorkspace ? [selectedWorkspace] : []).map((workspace) => (
+                <div key={workspace.workspaceSlug}>
+                  <div className="mb-3 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                    <span className="truncate">{workspace.workspaceName}</span>
+                    <span className="shrink-0 rounded-md bg-muted px-2 py-1 text-xs font-medium tabular-nums">
+                      {workspace.skills.length} 个
+                    </span>
+                  </div>
+                  <ScrollArea className="max-h-[420px] pr-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                    {workspace.skills.map((skill) => (
+                      <SettingsCard key={skill.slug} divided={false} className="overflow-hidden">
+                        <div className="flex h-full flex-col gap-4 p-4">
+                          <div className="flex items-start gap-3">
+                            <div className="rounded-xl bg-amber-500/12 p-2 text-amber-500 shadow-sm">
+                              <Sparkles size={18} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <div className="truncate text-sm font-medium text-foreground">{skill.name}</div>
+                                {skill.version ? (
+                                  <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                    v{skill.version}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">{skill.slug}</div>
+                            </div>
+                          </div>
+
+                          <div className="min-h-[40px] text-sm leading-6 text-muted-foreground">
+                            {skill.description ?? '暂无描述'}
+                          </div>
+
+                          <Button
+                            size="sm"
+                            className="w-full"
+                            onClick={() => void onImport(workspace.workspaceSlug, skill.slug)}
+                            disabled={importingSkill !== null}
+                          >
+                            {importingSkill === skill.slug ? '导入中...' : '导入'}
+                          </Button>
+                        </div>
+                      </SettingsCard>
+                    ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

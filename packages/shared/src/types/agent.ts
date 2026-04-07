@@ -653,6 +653,14 @@ export interface WorkspaceMcpConfig {
 
 // ===== Skill 元数据 =====
 
+/** 从其他工作区导入的 Skill 来源元数据 */
+export interface SkillImportSource {
+  sourceWorkspaceSlug: string
+  sourceWorkspaceName: string
+  importedAt: string        // ISO 8601
+  sourceVersion: string     // 导入时源 Skill 的 version，无则 '0.0.0'
+}
+
 /** 工作区 Skill 元数据 */
 export interface SkillMeta {
   slug: string
@@ -661,6 +669,17 @@ export interface SkillMeta {
   icon?: string
   version?: string
   enabled: boolean
+  /** 如果此 Skill 是从其他工作区导入的，则携带来源信息 */
+  importSource?: SkillImportSource
+  /** 是否有可用更新（源 Skill 版本 > importSource.sourceVersion） */
+  hasUpdate?: boolean
+}
+
+/** 其他工作区 Skill 分组（导入对话框用） */
+export interface OtherWorkspaceSkillsGroup {
+  workspaceName: string
+  workspaceSlug: string
+  skills: SkillMeta[]
 }
 
 /** 工作区能力摘要（MCP + Skill 计数） */
@@ -787,6 +806,8 @@ export interface AgentStreamCompletePayload {
   messages?: AgentMessage[]
   /** 是否由用户手动中止 */
   stoppedByUser?: boolean
+  /** 本轮流式开始时间戳（用于区分新旧流，防止旧流的 complete 事件重置新流状态） */
+  startedAt?: number
 }
 
 // ===== 文件浏览器 =====
@@ -1150,6 +1171,12 @@ export const AGENT_IPC_CHANNELS = {
   DELETE_SKILL: 'agent:delete-skill',
   /** 切换工作区 Skill 启用/禁用 */
   TOGGLE_SKILL: 'agent:toggle-skill',
+  /** 获取其他工作区的 Skill 列表 */
+  GET_OTHER_WORKSPACE_SKILLS: 'agent:get-other-workspace-skills',
+  /** 从其他工作区导入 Skill 到当前工作区 */
+  IMPORT_SKILL_FROM_WORKSPACE: 'agent:import-skill-from-workspace',
+  /** 从源工作区同步更新已导入的 Skill */
+  UPDATE_SKILL_FROM_SOURCE: 'agent:update-skill-from-source',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

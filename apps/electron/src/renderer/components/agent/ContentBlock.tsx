@@ -256,8 +256,9 @@ function PromptRow({ prompt, dimmed = false }: { prompt: string; dimmed?: boolea
 
 // ===== 工具短语 diff 着色 =====
 
-/** 将 displayLabel 中的 +N 染绿、-N 染红（仅匹配前面是空格或字符串开头的，避免误染行范围如 505-600） */
-function renderLabelWithDiffColors(label: string): React.ReactNode {
+/** 将 displayLabel 中的 +N 染绿、-N 染红（仅对 Edit 工具生效，避免 `head -5` 等命令参数被误染） */
+function renderLabelWithDiffColors(label: string, toolName: string): React.ReactNode {
+  if (toolName !== 'Edit') return label
   const parts = label.split(/((?:^|(?<=\s))[+-]\d+)/g)
   if (parts.length === 1) return label
   return parts.map((part, i) => {
@@ -415,7 +416,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         <span className={cn(
           'truncate text-[14px]',
           dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
-        )}>{renderLabelWithDiffColors(displayLabel)}</span>
+        )}>{renderLabelWithDiffColors(displayLabel, block.name)}</span>
 
         <ChevronRight
           className={cn(

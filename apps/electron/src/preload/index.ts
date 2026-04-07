@@ -51,6 +51,7 @@ import type {
   StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
+  OtherWorkspaceSkillsGroup,
   WorkspaceCapabilities,
   FileEntry,
   CloudAuthState,
@@ -422,6 +423,15 @@ export interface ElectronAPI {
 
   /** 切换工作区 Skill 启用/禁用 */
   toggleWorkspaceSkill: (workspaceSlug: string, skillSlug: string, enabled: boolean) => Promise<void>
+
+  /** 获取其他工作区的 Skill 列表 */
+  getOtherWorkspaceSkills: (currentSlug: string) => Promise<OtherWorkspaceSkillsGroup[]>
+
+  /** 从其他工作区导入 Skill */
+  importSkillFromWorkspace: (targetSlug: string, sourceSlug: string, skillSlug: string) => Promise<SkillMeta>
+
+  /** 从源工作区同步更新已导入的 Skill */
+  updateSkillFromSource: (targetSlug: string, skillSlug: string) => Promise<SkillMeta>
 
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
@@ -1255,6 +1265,27 @@ const electronAPI: ElectronAPI = {
 
   toggleWorkspaceSkill: (workspaceSlug: string, skillSlug: string, enabled: boolean) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_SKILL, workspaceSlug, skillSlug, enabled)
+  },
+
+  getOtherWorkspaceSkills: (currentSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_SKILLS, currentSlug)
+  },
+
+  importSkillFromWorkspace: (targetSlug: string, sourceSlug: string, skillSlug: string) => {
+    return ipcRenderer.invoke(
+      AGENT_IPC_CHANNELS.IMPORT_SKILL_FROM_WORKSPACE,
+      targetSlug,
+      sourceSlug,
+      skillSlug,
+    )
+  },
+
+  updateSkillFromSource: (targetSlug: string, skillSlug: string) => {
+    return ipcRenderer.invoke(
+      AGENT_IPC_CHANNELS.UPDATE_SKILL_FROM_SOURCE,
+      targetSlug,
+      skillSlug,
+    )
   },
 
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {

@@ -259,6 +259,17 @@ const QUERY_READY_TIMEOUT_MS = 60_000
 export class ClaudeAgentAdapter implements AgentProviderAdapter {
 
   abort(sessionId: string): void {
+    // 先调用 query.close() 强制终止 CLI 子进程及其所有子进程（包括正在运行的 bash 命令）
+    const query = activeQueries.get(sessionId)
+    if (query) {
+      try {
+        query.close()
+      } catch {
+        // query 可能已关闭或子进程已退出，忽略
+      }
+      activeQueries.delete(sessionId)
+    }
+
     const controller = activeControllers.get(sessionId)
     if (controller) {
       controller.abort()
@@ -267,6 +278,13 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
   }
 
   dispose(): void {
+    for (const [, query] of activeQueries) {
+      try {
+        query.close()
+      } catch {
+        // 忽略已关闭的 query
+      }
+    }
     for (const [, controller] of activeControllers) {
       controller.abort()
     }

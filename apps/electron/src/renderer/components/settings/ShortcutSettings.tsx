@@ -300,7 +300,7 @@ export function ShortcutSettings(): React.ReactElement {
               </p>
             )}
             <div className="space-y-1">
-              {shortcuts.map((def) => {
+              {shortcuts.filter((def) => !def.readonly || (isMac ? def.defaultMac : def.defaultWin)).map((def) => {
                 const currentAccel = getActiveAccelerator(def.id)
                 const isCustomized = !!overrides[def.id]
 
@@ -318,21 +318,29 @@ export function ShortcutSettings(): React.ReactElement {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 ml-4">
-                      <ShortcutRecorder
-                        shortcutId={def.id}
-                        currentAccelerator={currentAccel}
-                        onRecord={handleRecord}
-                      />
-                      {isCustomized && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground"
-                          onClick={() => handleReset(def.id)}
-                          title="恢复默认"
-                        >
-                          <RotateCcw size={12} />
-                        </Button>
+                      {def.readonly ? (
+                        <span className="text-xs px-2.5 py-1 rounded-md bg-muted text-foreground/60 font-mono">
+                          {getAcceleratorDisplay(isMac ? def.defaultMac : def.defaultWin)}
+                        </span>
+                      ) : (
+                        <>
+                          <ShortcutRecorder
+                            shortcutId={def.id}
+                            currentAccelerator={currentAccel}
+                            onRecord={handleRecord}
+                          />
+                          {isCustomized && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground"
+                              onClick={() => handleReset(def.id)}
+                              title="恢复默认"
+                            >
+                              <RotateCcw size={12} />
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
