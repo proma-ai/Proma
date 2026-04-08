@@ -277,21 +277,19 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   return (
     <div className="absolute right-1 top-0 bottom-0 z-10 flex pointer-events-none">
       {/* ── 迷你地图悬停区域（面板 + 横杠） ── */}
-      <div
-        className="flex items-start h-full pointer-events-auto"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
+      <div className="flex items-start h-full">
         {/* 展开面板 */}
         {hovered && (
           <div
             className={cn(
-              'mr-1 w-[280px] rounded-lg border bg-popover shadow-xl origin-top-right flex flex-col overflow-hidden',
+              'mr-1 w-[280px] rounded-lg border bg-popover shadow-xl origin-top-right flex flex-col overflow-hidden pointer-events-auto',
               isLeaving
                 ? 'animate-out fade-out-0 zoom-out-95 duration-75'
                 : 'animate-in fade-in-0 zoom-in-95 duration-150'
             )}
             style={{ maxHeight: 'min(420px, 60vh)', marginTop: 12 }}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
           >
             {/* 标题栏 */}
             <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
@@ -348,8 +346,13 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
           </div>
         )}
 
-        {/* ── 迷你地图横杠（紧凑排列） ── */}
-        <div className="relative mt-3 flex-shrink-0" style={{ width: 24, height: barCount * 6 }}>
+        {/* ── 迷你地图横杠（紧凑排列）—— 只有这里触发面板展开 ── */}
+        <div
+          className="relative mt-3 flex-shrink-0 pointer-events-auto"
+          style={{ width: 24, height: barCount * 6 }}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
           {Array.from({ length: barCount }, (_, i) => {
             const start = Math.floor((i * items.length) / barCount)
             const end = Math.floor(((i + 1) * items.length) / barCount)

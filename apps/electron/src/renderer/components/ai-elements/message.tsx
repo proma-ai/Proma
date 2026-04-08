@@ -25,6 +25,7 @@ import rehypeKatex from 'rehype-katex'
 import { ChevronDown, ChevronUp, Paperclip, FileText, Sparkles, Server, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 import {
   Tooltip,
   TooltipContent,
@@ -546,9 +547,10 @@ interface MessageAttachmentImageProps {
   isSingle?: boolean
 }
 
-/** 图片附件展示（单图: max 500px，多图: 280px 方块） */
+/** 图片附件展示（单图: max 500px，多图: 280px 方块），点击可预览大图 */
 function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachmentImageProps): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
+  const [lightboxOpen, setLightboxOpen] = React.useState(false)
 
   React.useEffect(() => {
     // 云端附件：直接使用 URL
@@ -588,13 +590,15 @@ function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachm
     <img
       src={imageSrc}
       alt={attachment.filename}
-      className="max-w-[500px] max-h-[min(500px,50vh)] rounded-lg object-contain"
+      className="max-w-[500px] max-h-[min(500px,50vh)] rounded-lg object-contain cursor-pointer"
+      onClick={() => setLightboxOpen(true)}
     />
   ) : (
     <img
       src={imageSrc}
       alt={attachment.filename}
-      className="size-[280px] rounded-lg object-cover shrink-0"
+      className="size-[280px] rounded-lg object-cover shrink-0 cursor-pointer"
+      onClick={() => setLightboxOpen(true)}
     />
   )
 
@@ -609,6 +613,13 @@ function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachm
       >
         <Download className="size-4" />
       </button>
+      <ImageLightbox
+        src={imageSrc}
+        alt={attachment.filename}
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        onSave={handleSave}
+      />
     </div>
   )
 }

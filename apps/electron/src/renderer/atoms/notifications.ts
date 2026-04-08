@@ -10,6 +10,8 @@ import { atom } from 'jotai'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
 // ===== 音频资源导入 =====
+import soundDing from '@/assets/sound/ding.mp3'
+import soundDingDong from '@/assets/sound/ding-dong.mp3'
 import soundDiscord from '@/assets/sound/discord.mp3'
 import soundDone from '@/assets/sound/done.mp3'
 import soundDownPower from '@/assets/sound/down-power.mp3'
@@ -28,6 +30,8 @@ export interface NotificationSoundMeta {
 
 /** 所有可用通知音（不含 none） */
 export const NOTIFICATION_SOUNDS: NotificationSoundMeta[] = [
+  { id: 'ding', label: 'Ding', url: soundDing },
+  { id: 'ding-dong', label: 'Ding Dong', url: soundDingDong },
   { id: 'discord', label: 'Discord', url: soundDiscord },
   { id: 'done', label: 'Done', url: soundDone },
   { id: 'down-power', label: 'Down Power', url: soundDownPower },
@@ -43,9 +47,9 @@ const SOUND_URL_MAP: Record<string, string> = Object.fromEntries(
 
 /** 各场景的默认通知音 */
 export const DEFAULT_NOTIFICATION_SOUNDS: Required<NotificationSoundSettings> = {
-  taskComplete: 'done',
-  permissionRequest: 'discord',
-  exitPlanMode: 'lite',
+  taskComplete: 'ding',
+  permissionRequest: 'ding-dong',
+  exitPlanMode: 'ding-dong',
 }
 
 // ===== Jotai Atoms =====
@@ -204,7 +208,7 @@ export function sendDesktopNotification(
   if (!enabled) return
   if (!options?.force && document.hasFocus()) return
 
-  const notification = new Notification(title, { body })
+  const notification = new Notification(title, { body, silent: true })
   notification.onclick = () => {
     window.focus()
     options?.onNavigate?.()

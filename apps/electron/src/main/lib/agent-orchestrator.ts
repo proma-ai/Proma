@@ -1116,7 +1116,6 @@ export class AgentOrchestrator {
         'Agent', 'TodoRead', 'TodoWrite', 'TaskOutput',
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',
-        'AskUserQuestion',
       ])
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1158,6 +1157,16 @@ export class AgentOrchestrator {
           planModeEntered = true
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'enter_plan_mode', sessionId } })
           return { behavior: 'allow' as const, updatedInput: input }
+        }
+
+        // AskUserQuestion：始终走交互式问答流程，不受权限模式影响
+        if (toolName === 'AskUserQuestion') {
+          return askUserService.handleAskUserQuestion(
+            sessionId, input, options.signal,
+            (request: AskUserRequest) => {
+              this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'ask_user_request', request } })
+            },
+          )
         }
 
         // ── 普通工具的权限分派 ──

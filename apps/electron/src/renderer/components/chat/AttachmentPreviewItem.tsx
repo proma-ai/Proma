@@ -10,6 +10,7 @@
 import * as React from 'react'
 import { X, Paperclip } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 
 interface AttachmentPreviewItemProps {
   /** 原始文件名 */
@@ -40,8 +41,10 @@ export function AttachmentPreviewItem({
   onRemove,
   className,
 }: AttachmentPreviewItemProps): React.ReactElement {
+  const [lightboxOpen, setLightboxOpen] = React.useState(false)
+
   if (isImage(mediaType) && previewUrl) {
-    // 图片预览 — 紧凑缩略图
+    // 图片预览 — 紧凑缩略图，点击可预览大图
     return (
       <div
         className={cn(
@@ -52,7 +55,8 @@ export function AttachmentPreviewItem({
         <img
           src={previewUrl}
           alt={filename}
-          className="size-full object-cover"
+          className="size-full object-cover cursor-pointer"
+          onClick={() => setLightboxOpen(true)}
         />
         {/* hover 关闭按钮 */}
         <button
@@ -68,6 +72,12 @@ export function AttachmentPreviewItem({
         >
           <X className="size-3" />
         </button>
+        <ImageLightbox
+          src={previewUrl}
+          alt={filename}
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+        />
       </div>
     )
   }

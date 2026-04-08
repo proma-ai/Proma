@@ -6,11 +6,11 @@
  */
 
 import * as React from 'react'
-import { useAtom, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { tabsAtom, splitLayoutAtom, openTab, type TabType } from '@/atoms/tab-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
-import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { currentAgentSessionIdAtom, agentSessionsAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
 
 type OpenSessionFn = (type: TabType, sessionId: string, title: string) => void
 
@@ -20,6 +20,8 @@ export function useOpenSession(): OpenSessionFn {
   const setAppMode = useSetAtom(appModeAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
 
   return React.useCallback(
     (type: TabType, sessionId: string, title: string): void => {
@@ -32,8 +34,17 @@ export function useOpenSession(): OpenSessionFn {
         setCurrentConversationId(sessionId)
       } else {
         setCurrentAgentSessionId(sessionId)
+
+        // 同步 workspaceId，确保与 TabBar 切换行为一致
+        const session = agentSessions.find((s) => s.id === sessionId)
+        if (session?.workspaceId) {
+          setCurrentAgentWorkspaceId(session.workspaceId)
+          window.electronAPI.updateSettings({
+            agentWorkspaceId: session.workspaceId,
+          }).catch(console.error)
+        }
       }
     },
-    [tabs, layout, setTabs, setLayout, setAppMode, setCurrentConversationId, setCurrentAgentSessionId],
+    [tabs, layout, setTabs, setLayout, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId],
   )
 }

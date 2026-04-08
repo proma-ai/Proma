@@ -118,6 +118,19 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
         ? (cur.selected.includes(label) ? cur.selected.filter((s) => s !== label) : [...cur.selected, label])
         : [label]
       map.set(qIdx, { ...cur, selected, showCustom: false, customText: '' })
+
+      // 单选时，选择明确选项后自动跳转到下一个未回答的问题
+      if (!q.multiSelect) {
+        const nextUnanswered = questions.findIndex((_, idx) => {
+          if (idx <= qIdx) return false
+          const a = map.get(idx) ?? EMPTY_ANSWER
+          return a.selected.length === 0 && !(a.showCustom && a.customText.trim())
+        })
+        if (nextUnanswered !== -1) {
+          setTimeout(() => setActiveTab(nextUnanswered), 150)
+        }
+      }
+
       return map
     })
   }
@@ -203,7 +216,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
                   `}
                   onClick={() => setActiveTab(idx)}
                 >
-                  {q.header || `问题 ${idx + 1}`}
+                  {`${idx + 1}-${q.multiSelect ? '多选' : '单选'}：${q.header || `问题 ${idx + 1}`}`}
                 </button>
               )
             })}

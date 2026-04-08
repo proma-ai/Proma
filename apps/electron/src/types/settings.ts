@@ -10,7 +10,7 @@ import type { EnvironmentCheckResult, PromaPermissionMode, ThinkingConfig, Agent
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
 
 /** 可选通知音 ID */
-export type NotificationSoundId = 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
+export type NotificationSoundId = 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
 
 /** 各场景通知音配置 */
 export interface NotificationSoundSettings {

@@ -181,7 +181,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
-  const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const globalWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const sessions = useAtomValue(agentSessionsAtom)
+  // 从会话元数据派生 workspaceId：会话数据已加载时以自身为准，未加载时回退全局 atom
+  const currentWorkspaceId = React.useMemo(() => {
+    const meta = sessions.find((s) => s.id === sessionId)
+    if (!meta) return globalWorkspaceId // 数据未加载，回退全局
+    return meta.workspaceId ?? null     // 数据已加载，以会话自身为准
+  }, [sessions, sessionId, globalWorkspaceId])
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
   const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
@@ -417,7 +424,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, store])
 
   // 从会话元数据初始化附加目录
-  const sessions = useAtomValue(agentSessionsAtom)
   React.useEffect(() => {
     const meta = sessions.find((s) => s.id === sessionId)
     const dirs = meta?.attachedDirectories ?? []
