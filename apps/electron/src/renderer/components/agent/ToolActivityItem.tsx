@@ -87,6 +87,27 @@ function StatusIcon({ status, toolName }: { status: ActivityStatus; toolName?: s
   )
 }
 
+// ===== Diff 标记着色 =====
+
+/** 将 Edit/Write label 中末尾的 +N / -N 标记渲染为绿/红色 */
+function renderLabelWithDiff(label: string, toolName: string): React.ReactNode {
+  if (toolName !== 'Edit' && toolName !== 'Write') return label
+  const match = label.match(/^(.+?)(\s+[+-]\d+(?:\s+[+-]\d+)?)$/)
+  if (!match) return label
+  const [, text, diffPart] = match
+  const tokens = diffPart!.trim().split(/\s+/)
+  return (
+    <>
+      {text}{' '}
+      {tokens.map((tok, i) => (
+        <span key={i} className={tok.startsWith('+') ? 'text-green-500' : 'text-red-500'}>
+          {tok}{i < tokens.length - 1 ? ' ' : ''}
+        </span>
+      ))}
+    </>
+  )
+}
+
 // ===== 错误 Badge =====
 
 function ErrorBadge(): React.ReactElement {
@@ -177,7 +198,7 @@ export function ActivityRow({ activity, index = 0, animate = false, onOpenDetail
           onClick={(e) => { e.stopPropagation(); onOpenDetails(activity) }}
         >
           <StatusIcon status={status} toolName={activity.toolName} />
-          <span className="truncate text-foreground/80 group-hover/expand:text-foreground transition-colors duration-150 flex-1">{displayLabel}</span>
+          <span className="truncate text-foreground/80 group-hover/expand:text-foreground transition-colors duration-150 flex-1">{renderLabelWithDiff(displayLabel, activity.toolName)}</span>
           {activity.isError && <ErrorBadge />}
           {activity.elapsedSeconds !== undefined && activity.elapsedSeconds > 0 && (
             <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">
@@ -189,7 +210,7 @@ export function ActivityRow({ activity, index = 0, animate = false, onOpenDetail
       ) : (
         <>
           <StatusIcon status={status} toolName={activity.toolName} />
-          <span className="truncate text-foreground/80">{displayLabel}</span>
+          <span className="truncate text-foreground/80">{renderLabelWithDiff(displayLabel, activity.toolName)}</span>
           {activity.isError && <ErrorBadge />}
           {activity.elapsedSeconds !== undefined && activity.elapsedSeconds > 0 && (
             <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">

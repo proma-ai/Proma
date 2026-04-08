@@ -48,6 +48,7 @@ import {
   agentWorkspacesAtom,
   agentStreamErrorsAtom,
   agentSessionDraftsAtom,
+  agentSessionDraftHtmlAtom,
   agentPromptSuggestionsAtom,
   agentMessageRefreshAtom,
   agentSessionsAtom,
@@ -62,7 +63,6 @@ import {
   agentSessionPathMapAtom,
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
-  allPendingPermissionRequestsAtom,
   finalizeStreamingActivities,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
@@ -251,6 +251,20 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftsMap])
+  const draftHtmlMap = useAtomValue(agentSessionDraftHtmlAtom)
+  const setDraftHtmlMap = useSetAtom(agentSessionDraftHtmlAtom)
+  const inputHtmlContent = draftHtmlMap.get(sessionId) ?? ''
+  const setInputHtmlContent = React.useCallback((html: string) => {
+    setDraftHtmlMap((prev) => {
+      const map = new Map(prev)
+      if (!html || html === '<p></p>') {
+        map.delete(sessionId)
+      } else {
+        map.set(sessionId, html)
+      }
+      return map
+    })
+  }, [sessionId, setDraftHtmlMap])
   const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
   const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const sessionPath = sessionPathMap.get(sessionId) ?? null
@@ -755,6 +769,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
       // 2. 清空输入框
       setInputContent('')
+      setInputHtmlContent('')
       setPromptSuggestions((prev) => {
         if (!prev.has(sessionId)) return prev
         const map = new Map(prev)
@@ -919,6 +934,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
 
     setInputContent('')
+    setInputHtmlContent('')
 
     window.electronAPI.sendAgentMessage(input).catch((error) => {
       console.error('[AgentView] 发送消息失败:', error)
@@ -1120,13 +1136,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   const allAskUserRequests = useAtomValue(allPendingAskUserRequestsAtom)
   const allExitPlanRequests = useAtomValue(allPendingExitPlanRequestsAtom)
-  const allPermissionRequests = useAtomValue(allPendingPermissionRequestsAtom)
   const hasBannerOverlay =
     (allAskUserRequests.get(sessionId)?.length ?? 0) > 0 ||
-    (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0 ||
-    (allPermissionRequests.get(sessionId)?.length ?? 0) > 0
+    (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0
 
-  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && !streaming
+  const hasTextInput = inputContent.trim().length > 0
+  const canSend = (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && (!streaming || hasTextInput)
 
   return (
     <AgentSessionProvider sessionId={sessionId}>
@@ -1258,6 +1273,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               workspacePath={sessionPath}
               workspaceSlug={workspaceSlug}
               attachedDirs={allAttachedDirs}
+              htmlValue={inputHtmlContent}
+              onHtmlChange={setInputHtmlContent}
             />
 
             {/* Footer 工具栏 */}
@@ -1336,7 +1353,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               </div>
 
               <div className="flex items-center gap-1.5">
-                {streaming ? (
+                {streaming && !hasTextInput ? (
                   <Button
                     type="button"
                     variant="ghost"

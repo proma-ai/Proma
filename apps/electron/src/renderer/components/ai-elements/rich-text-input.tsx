@@ -190,6 +190,10 @@ interface RichTextInputProps {
   workspaceSlug?: string | null
   /** 附加目录路径列表（@ 引用时一并搜索） */
   attachedDirs?: string[]
+  /** HTML 草稿值（切换会话恢复时使用，保留 mention 等富文本结构） */
+  htmlValue?: string
+  /** HTML 值变更回调（用于保存富文本草稿） */
+  onHtmlChange?: (html: string) => void
   className?: string
 }
 
@@ -213,6 +217,8 @@ export function RichTextInput({
   workspacePath,
   workspaceSlug,
   attachedDirs = [],
+  htmlValue,
+  onHtmlChange,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   // 手动折叠状态：用户主动折叠输入框
@@ -227,6 +233,9 @@ export function RichTextInput({
   // 保持 onPasteFiles 引用最新
   const onPasteFilesRef = useRef(onPasteFiles)
   onPasteFilesRef.current = onPasteFiles
+  // 保持 onHtmlChange 引用最新
+  const onHtmlChangeRef = useRef(onHtmlChange)
+  onHtmlChangeRef.current = onHtmlChange
   // Mention 活跃状态（阻止 Enter 发送消息）
   const mentionActiveRef = useRef(false)
   // Mention 弹窗中的可选项数量（0 时 Enter 不阻塞发送）
@@ -281,7 +290,7 @@ export function RichTextInput({
       CodeBlockLowlight.configure({
         lowlight,
         HTMLAttributes: {
-          class: 'rounded-md bg-muted p-3 font-mono text-sm',
+          class: 'rounded-md p-3 font-mono text-sm',
         },
       }),
       Placeholder.configure({
@@ -340,8 +349,8 @@ export function RichTextInput({
           'prose dark:prose-invert max-w-none focus:outline-none',
           'min-h-[101px] w-full text-[15px] leading-[1.6]',
           '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-          '[&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-3',
-          '[&_code]:bg-muted [&_code]:rounded [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sm',
+          '[&_pre]:rounded-md [&_pre]:p-3',
+          '[&_code]:bg-muted [&_code]:rounded [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sm [&_code]:text-foreground',
           '[&_pre_code]:bg-transparent [&_pre_code]:p-0'
         ),
       },
@@ -416,12 +425,14 @@ export function RichTextInput({
       if (html === '<p></p>') {
         lastEditorValueRef.current = ''
         onChange('')
+        onHtmlChangeRef.current?.('')
         setIsExpanded(false)
         setIsManuallyCollapsed(false)
       } else {
         const markdown = htmlToMarkdown(html)
         lastEditorValueRef.current = markdown
         onChange(markdown)
+        onHtmlChangeRef.current?.(html)
 
         // 检查行数，超过5行时展开输入框
         const lineCount = countEditorLines(ed)
@@ -444,6 +455,10 @@ export function RichTextInput({
         lastEditorValueRef.current = ''
         setIsExpanded(false)
         setIsManuallyCollapsed(false)
+      } else if (htmlValue) {
+        // 优先使用 HTML 草稿恢复（保留 mention 等富文本节点）
+        editor.commands.setContent(htmlValue)
+        lastEditorValueRef.current = controllerValue
       } else {
         const html = controllerValue
           .split(/\n\n+/)

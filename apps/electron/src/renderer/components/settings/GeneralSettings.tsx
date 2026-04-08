@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
-import { Camera, ImagePlus, LogOut, CloudDownload, Check, CircleAlert } from 'lucide-react'
+import { Camera, ImagePlus, LogOut, CloudDownload, Check, CircleAlert, Volume2 } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import {
@@ -48,9 +48,18 @@ import { isCloudMode } from '@/lib/mode'
 // 通知
 import {
   notificationsEnabledAtom,
+  notificationSoundEnabledAtom,
+  notificationSoundsAtom,
   updateNotificationsEnabled,
+  updateNotificationSoundEnabled,
+  updateNotificationSound,
+  playNotificationSound,
+  NOTIFICATION_SOUNDS,
+  DEFAULT_NOTIFICATION_SOUNDS,
 } from '@/atoms/notifications'
 import { cn } from '@/lib/utils'
+import { Button } from '../ui/button'
+import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
 /** emoji-mart 选择回调的 emoji 对象类型 */
 interface EmojiMartEmoji {
@@ -71,6 +80,8 @@ export function GeneralSettings(): React.ReactElement {
   const [downloadAllStatus, setDownloadAllStatus] = useAtom(downloadAllStatusAtom)
   // 通知
   const [notificationsEnabled, setNotificationsEnabled] = useAtom(notificationsEnabledAtom)
+  const [notificationSoundEnabled, setNotificationSoundEnabled] = useAtom(notificationSoundEnabledAtom)
+  const [notificationSounds, setNotificationSounds] = useAtom(notificationSoundsAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
   const [archiveAfterDays, setArchiveAfterDays] = React.useState<number>(7)
@@ -332,6 +343,46 @@ export function GeneralSettings(): React.ReactElement {
               updateNotificationsEnabled(checked)
             }}
           />
+          <SettingsToggle
+            label="通知提示音"
+            description="阻塞操作（权限确认、问题回答、计划审批）触发时播放提示音"
+            checked={notificationSoundEnabled}
+            disabled={!notificationsEnabled}
+            onCheckedChange={(checked) => {
+              setNotificationSoundEnabled(checked)
+              updateNotificationSoundEnabled(checked)
+            }}
+          />
+          <SoundPicker
+            label="任务完成音效"
+            type="taskComplete"
+            sounds={notificationSounds}
+            disabled={!notificationsEnabled || !notificationSoundEnabled}
+            onSoundChange={async (type, soundId) => {
+              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
+              setNotificationSounds(newSounds)
+            }}
+          />
+          <SoundPicker
+            label="权限审批音效"
+            type="permissionRequest"
+            sounds={notificationSounds}
+            disabled={!notificationsEnabled || !notificationSoundEnabled}
+            onSoundChange={async (type, soundId) => {
+              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
+              setNotificationSounds(newSounds)
+            }}
+          />
+          <SoundPicker
+            label="计划审批音效"
+            type="exitPlanMode"
+            sounds={notificationSounds}
+            disabled={!notificationsEnabled || !notificationSoundEnabled}
+            onSoundChange={async (type, soundId) => {
+              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
+              setNotificationSounds(newSounds)
+            }}
+          />
           <SettingsRow
             label="自动归档"
             description="超过指定天数未更新的对话将自动归档（置顶对话除外）"
@@ -434,5 +485,52 @@ export function GeneralSettings(): React.ReactElement {
         </SettingsSection>
       )}
     </div>
+  )
+}
+
+// ===== SoundPicker 内部组件 =====
+
+interface SoundPickerProps {
+  label: string
+  type: NotificationSoundType
+  sounds: NotificationSoundSettings
+  disabled: boolean
+  onSoundChange: (type: NotificationSoundType, soundId: NotificationSoundId) => void
+}
+
+/** 单个场景的通知音选择器（下拉 + 试听按钮） */
+function SoundPicker({ label, type, sounds, disabled, onSoundChange }: SoundPickerProps): React.ReactElement {
+  const currentId = sounds[type] ?? DEFAULT_NOTIFICATION_SOUNDS[type]
+
+  return (
+    <SettingsRow label={label}>
+      <div className="flex items-center gap-1.5">
+        <Select
+          value={currentId}
+          onValueChange={(value) => onSoundChange(type, value as NotificationSoundId)}
+          disabled={disabled}
+        >
+          <SelectTrigger className="w-[130px] h-8 text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {NOTIFICATION_SOUNDS.map((s) => (
+              <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+            ))}
+            <SelectItem value="none">无</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          disabled={disabled || currentId === 'none'}
+          onClick={() => playNotificationSound(currentId)}
+          title="试听"
+        >
+          <Volume2 size={14} />
+        </Button>
+      </div>
+    </SettingsRow>
   )
 }

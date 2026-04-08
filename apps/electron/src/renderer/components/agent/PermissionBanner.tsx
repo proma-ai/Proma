@@ -48,7 +48,11 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
   React.useEffect(() => {
     if (!request) return
     const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
+      ) return
       if (e.key === 'Enter') {
         e.preventDefault()
         respondRef.current?.('allow')

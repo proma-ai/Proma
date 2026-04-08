@@ -12,6 +12,17 @@ declare module '*.css' {
   export default content
 }
 
+// 音频资源类型声明
+declare module '*.wav' {
+  const src: string
+  export default src
+}
+
+declare module '*.mp3' {
+  const src: string
+  export default src
+}
+
 /** 更新状态（与 updater-types.ts 保持一致） */
 interface UpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'not-available' | 'error'

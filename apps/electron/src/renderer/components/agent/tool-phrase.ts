@@ -65,6 +65,11 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
     case 'Write': {
       const fp = input.file_path ?? input.filePath
       const name = typeof fp === 'string' ? filename(fp) : '文件'
+      const content = input.content
+      if (typeof content === 'string' && content.length > 0) {
+        const lines = content.split('\n').length
+        return phrase(`写入 ${name} +${lines}`)
+      }
       return phrase(`写入 ${name}`)
     }
 

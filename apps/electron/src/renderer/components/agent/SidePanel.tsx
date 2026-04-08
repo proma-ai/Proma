@@ -309,7 +309,12 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                           />
                         )}
                         {/* 会话文件浏览器 */}
-                        <FileBrowser rootPath={sessionPath} hideToolbar embedded />
+                        <>
+                          {attachedDirs.length > 0 && (
+                            <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3 pt-2">工作文件（存储于该工作区目录）</div>
+                          )}
+                          <FileBrowser rootPath={sessionPath} hideToolbar embedded hideEmpty={attachedDirs.length > 0} />
+                        </>
                         {/* 会话文件拖拽上传区域 */}
                         <FileDropZone
                           workspaceSlug={workspaceSlug}
@@ -392,7 +397,12 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
                       )}
                       {/* 工作区文件浏览器 */}
                       {workspaceFilesPath && (
-                        <FileBrowser rootPath={workspaceFilesPath} hideToolbar embedded />
+                        <>
+                          {wsAttachedDirs.length > 0 && (
+                            <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3 pt-2">工作文件（存储于该工作区目录）</div>
+                          )}
+                          <FileBrowser rootPath={workspaceFilesPath} hideToolbar embedded hideEmpty={wsAttachedDirs.length > 0} />
+                        </>
                       )}
                       {/* 工作区文件拖拽上传区域 */}
                       <FileDropZone
@@ -468,7 +478,7 @@ function AttachedDirsSection({ attachedDirs, onDetach, refreshVersion }: Attache
 
   return (
     <div className="pt-2.5 pb-1 flex-shrink-0">
-      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（Agent 可以读取并操作此文件夹）</div>
+      <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（Agent 可以读取并操作此外部文件夹）</div>
       {attachedDirs.map((dir) => (
         <AttachedDirTree
           key={dir}
@@ -527,7 +537,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
   return (
     <div>
       <div
-        className="flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-accent/50 group"
+        className="flex items-center gap-1 py-1 pl-2 pr-2 text-sm cursor-pointer hover:bg-accent/50 group mx-2 rounded-lg"
         onClick={toggleExpand}
       >
         <ChevronRight
@@ -678,7 +688,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
     <>
       <div
         className={cn(
-          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group',
+          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg',
           isSelected ? 'bg-accent' : 'hover:bg-accent/50',
         )}
         style={{ paddingLeft }}

@@ -792,6 +792,12 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
 
 /**
+ * Agent 会话输入框 HTML 草稿 Map — 以 sessionId 为 key
+ * 保存 TipTap 编辑器的原始 HTML，用于切换会话时恢复 mention 等富文本节点
+ */
+export const agentSessionDraftHtmlAtom = atom<Map<string, string>>(new Map())
+
+/**
  * 会话附加目录 Map — 以 sessionId 为 key
  * 存储每个会话通过"附加文件夹"功能关联的外部目录路径列表。
  * 这些路径作为 SDK additionalDirectories 参数传递。

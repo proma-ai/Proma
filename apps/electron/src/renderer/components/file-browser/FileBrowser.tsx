@@ -52,9 +52,11 @@ interface FileBrowserProps {
   hideToolbar?: boolean
   /** 嵌入模式：不使用内部 ScrollArea 和 h-full，由外部容器控制布局和滚动 */
   embedded?: boolean
+  /** 隐藏"目录为空"提示（当外部已有附加目录等内容时使用） */
+  hideEmpty?: boolean
 }
 
-export function FileBrowser({ rootPath, hideToolbar, embedded }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -219,7 +221,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded }: FileBrowserProp
       {error && (
         <div className="px-3 py-2 text-xs text-destructive">{error}</div>
       )}
-      {!error && entries.length === 0 && !loading && (
+      {!error && entries.length === 0 && !loading && !hideEmpty && (
         <div className="px-3 py-4 text-xs text-muted-foreground text-center">
           目录为空
         </div>

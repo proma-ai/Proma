@@ -256,9 +256,9 @@ function PromptRow({ prompt, dimmed = false }: { prompt: string; dimmed?: boolea
 
 // ===== 工具短语 diff 着色 =====
 
-/** 将 displayLabel 中的 +N 染绿、-N 染红（仅对 Edit 工具生效，避免 `head -5` 等命令参数被误染） */
+/** 将 displayLabel 中的 +N 染绿、-N 染红（仅对 Edit/Write 工具生效，避免 `head -5` 等命令参数被误染） */
 function renderLabelWithDiffColors(label: string, toolName: string): React.ReactNode {
-  if (toolName !== 'Edit') return label
+  if (toolName !== 'Edit' && toolName !== 'Write') return label
   const parts = label.split(/((?:^|(?<=\s))[+-]\d+)/g)
   if (parts.length === 1) return label
   return parts.map((part, i) => {

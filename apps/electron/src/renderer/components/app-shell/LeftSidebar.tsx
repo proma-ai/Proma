@@ -249,10 +249,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [conversations, viewMode, draftSessionIds]
   )
 
-  /** 置顶 Agent 会话列表（仅活跃模式显示，跨工作区，排除 draft） */
+  /** 置顶 Agent 会话列表（仅活跃模式显示，按当前工作区过滤，排除 draft） */
   const pinnedAgentSessions = React.useMemo(
-    () => viewMode === 'active' ? agentSessions.filter((s) => s.pinned && !draftSessionIds.has(s.id)) : [],
-    [agentSessions, viewMode, draftSessionIds]
+    () => viewMode === 'active' ? agentSessions.filter((s) => s.pinned && !draftSessionIds.has(s.id) && (!currentWorkspaceId || s.workspaceId === currentWorkspaceId)) : [],
+    [agentSessions, viewMode, draftSessionIds, currentWorkspaceId]
   )
 
   /** 对话按日期分组（根据 viewMode 过滤归档状态，排除 draft） */

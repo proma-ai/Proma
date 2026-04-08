@@ -6,6 +6,22 @@
 
 import type { EnvironmentCheckResult, PromaPermissionMode, ThinkingConfig, AgentEffort } from '@proma/shared'
 
+/** 通知音场景类型 */
+export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
+
+/** 可选通知音 ID */
+export type NotificationSoundId = 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
+
+/** 各场景通知音配置 */
+export interface NotificationSoundSettings {
+  /** 任务完成 */
+  taskComplete?: NotificationSoundId
+  /** 权限审批（含 AskUser） */
+  permissionRequest?: NotificationSoundId
+  /** 计划审批 */
+  exitPlanMode?: NotificationSoundId
+}
+
 /** 用户自定义快捷键覆盖（持久化到 settings.json） */
 export interface ShortcutOverrides {
   [shortcutId: string]: {
@@ -48,6 +64,10 @@ export interface AppSettings {
   lastEnvironmentCheck?: EnvironmentCheckResult
   /** 是否启用桌面通知 */
   notificationsEnabled?: boolean
+  /** 是否启用通知提示音（阻塞 Hook 触发时播放） */
+  notificationSoundEnabled?: boolean
+  /** 各场景通知音选择 */
+  notificationSounds?: NotificationSoundSettings
   /** 标签页持久化状态（重启恢复） */
   tabState?: PersistedTabSettings
   /** Agent 权限模式（全局默认，工作区级覆盖此值） */

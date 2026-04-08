@@ -29,10 +29,13 @@ import {
 } from '@/atoms/agent-atoms'
 import {
   notificationsEnabledAtom,
+  notificationSoundEnabledAtom,
+  notificationSoundsAtom,
   sendDesktopNotification,
 } from '@/atoms/notifications'
-import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
+import { tabsAtom, splitLayoutAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
+import type { NotificationSoundType } from '@/types/settings'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
 
 // ============================================================================
@@ -243,6 +246,40 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
+    /** 构建导航到指定会话的回调 */
+    const makeNavigateToSession = (sessionId: string, sessionTitle: string) => () => {
+      const tabs = store.get(tabsAtom)
+      const layout = store.get(splitLayoutAtom)
+      const result = openTab(tabs, layout, { type: 'agent', sessionId, title: sessionTitle })
+      store.set(tabsAtom, result.tabs)
+      store.set(splitLayoutAtom, result.layout)
+    }
+
+    /** 获取会话标题 */
+    const getSessionTitle = (sessionId: string): string => {
+      const sessions = store.get(agentSessionsAtom)
+      return sessions.find((s) => s.id === sessionId)?.title ?? '未命名会话'
+    }
+
+    /** 发送阻塞通知（带提示音 + 会话导航） */
+    const sendBlockingNotification = (sessionId: string, title: string, body: string, soundType: NotificationSoundType) => {
+      const enabled = store.get(notificationsEnabledAtom)
+      const soundEnabled = store.get(notificationSoundEnabledAtom)
+      const sounds = store.get(notificationSoundsAtom)
+      const sessionTitle = getSessionTitle(sessionId)
+      sendDesktopNotification(
+        title,
+        `[${sessionTitle}] ${body}`,
+        enabled,
+        {
+          force: true,
+          playSound: enabled && soundEnabled,
+          soundType,
+          sounds,
+          onNavigate: makeNavigateToSession(sessionId, sessionTitle),
+        }
+      )
+    }
     // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
     window.electronAPI.listAgentSessions().then((sessions) => {
       const stoppedIds = new Set<string>(
@@ -376,14 +413,14 @@ export function useGlobalAgentListeners(): void {
               map.set(sessionId, [...current, event.request])
               return map
             })
-            // 桌面通知
-            const enabled = store.get(notificationsEnabledAtom)
-            sendDesktopNotification(
+            // 桌面通知（带提示音 + 会话导航）
+            sendBlockingNotification(
+              sessionId,
               '需要权限确认',
               event.request.toolName
                 ? `Agent 请求使用工具: ${event.request.toolName}`
                 : 'Agent 需要你的权限确认',
-              enabled
+              'permissionRequest'
             )
           } else if (event.type === 'ask_user_request') {
             // AskUser 请求入队（统一通道，不区分当前/后台会话）
@@ -393,12 +430,12 @@ export function useGlobalAgentListeners(): void {
               map.set(sessionId, [...current, event.request])
               return map
             })
-            // 桌面通知
-            const enabled = store.get(notificationsEnabledAtom)
-            sendDesktopNotification(
+            // 桌面通知（带提示音 + 会话导航）
+            sendBlockingNotification(
+              sessionId,
               'Agent 需要你的输入',
               event.request.questions[0]?.question ?? 'Agent 有问题需要你回答',
-              enabled
+              'permissionRequest'
             )
           } else if (event.type === 'exit_plan_mode_request') {
             // ExitPlanMode 请求入队
@@ -415,12 +452,12 @@ export function useGlobalAgentListeners(): void {
               next.delete(sessionId)
               return next
             })
-            // 桌面通知
-            const enabled = store.get(notificationsEnabledAtom)
-            sendDesktopNotification(
+            // 桌面通知（带提示音 + 会话导航）
+            sendBlockingNotification(
+              sessionId,
               'Agent 计划待审批',
               'Agent 已完成计划，等待你的审批',
-              enabled
+              'exitPlanMode'
             )
           } else if (event.type === 'enter_plan_mode') {
             // 进入 Plan 模式
@@ -452,14 +489,21 @@ export function useGlobalAgentListeners(): void {
     // ===== 2. 流式完成 =====
     const cleanupComplete = window.electronAPI.onAgentStreamComplete(
       (data: AgentStreamCompletePayload) => {
-        // 发送桌面通知
+        // 发送桌面通知（任务完成，始终播放提示音）
         const enabled = store.get(notificationsEnabledAtom)
-        const sessions = store.get(agentSessionsAtom)
-        const session = sessions.find((s) => s.id === data.sessionId)
+        const soundEnabled = store.get(notificationSoundEnabledAtom)
+        const sounds = store.get(notificationSoundsAtom)
+        const sessionTitle = getSessionTitle(data.sessionId)
         sendDesktopNotification(
           'Agent 任务完成',
-          session?.title ?? '任务已完成',
-          enabled
+          `[${sessionTitle}] 任务已完成`,
+          enabled,
+          {
+            playSound: enabled && soundEnabled,
+            soundType: 'taskComplete',
+            sounds,
+            onNavigate: makeNavigateToSession(data.sessionId, sessionTitle),
+          }
         )
 
         // STREAM_COMPLETE 表示后端已完全结束 — 立即标记 running: false

@@ -42,7 +42,7 @@
     "release:win": "bun run dist:win && bun run upload:release"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.89",
+    "@anthropic-ai/claude-agent-sdk": "0.2.96",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@larksuiteoapi/node-sdk": "^1.59.0",

@@ -482,6 +482,28 @@
   box-shadow: inset 0 -1px 0 0 hsl(260 10% 18% / 0.6);
 }
 
+/* ===== 输入框内代码块：按主题分色 ===== */
+/* 浅色主题：使用深色 code-bg + 浅色文字，与 AI 代码块一致 */
+.tiptap pre {
+  background-color: hsl(var(--code-bg));
+  color: hsl(0 0% 90%);
+}
+.tiptap pre code {
+  color: inherit;
+}
+/* 深色主题：使用 muted bg + 正常前景色 */
+.dark .tiptap pre,
+.theme-ocean-dark .tiptap pre,
+.theme-slate-dark .tiptap pre {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+/* 森息夜语：加深背景，与输入框区分 */
+.theme-forest-dark .tiptap pre {
+  background-color: hsl(150 20% 9%);
+  color: hsl(var(--foreground));
+}
+
 /* ===== 深色主题：代码块标题栏 ===== */
 /* 苍穹暮色: RGB 26 34 43 */
 .theme-ocean-dark .code-block-wrapper > div:first-child {
