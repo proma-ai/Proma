@@ -125,8 +125,16 @@ export function createAgentSession(
       try {
         sdkSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
       } catch { /* 文件不存在或解析失败 */ }
+      let needsWrite = false
       if (sdkSettings.plansDirectory !== '.context') {
         sdkSettings.plansDirectory = '.context'
+        needsWrite = true
+      }
+      if (sdkSettings.skipWebFetchPreflight !== true) {
+        sdkSettings.skipWebFetchPreflight = true
+        needsWrite = true
+      }
+      if (needsWrite) {
         writeFileSync(settingsPath, JSON.stringify(sdkSettings, null, 2))
       }
 

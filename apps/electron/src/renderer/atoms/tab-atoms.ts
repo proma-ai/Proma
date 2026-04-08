@@ -81,6 +81,16 @@ export const sidebarCollapsedAtom = atomWithStorage<boolean>(
   false,
 )
 
+/** Tab 迷你地图缓存（每个 Tab 的消息预览列表，在消息组件中填充） */
+export interface TabMinimapItem {
+  id: string
+  role: 'user' | 'assistant' | 'status'
+  preview: string
+  avatar?: string
+  model?: string
+}
+export const tabMinimapCacheAtom = atom<Map<string, TabMinimapItem[]>>(new Map())
+
 // ===== 派生 Atoms =====
 
 /** 当前焦点面板的活跃标签 ID */

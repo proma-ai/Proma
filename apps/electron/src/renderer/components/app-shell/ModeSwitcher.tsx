@@ -18,8 +18,8 @@ import { useOpenSession } from '@/hooks/useOpenSession'
 import { cn } from '@/lib/utils'
 
 const modes: { value: AppMode; label: string }[] = [
-  { value: 'chat', label: 'Chat' },
   { value: 'agent', label: 'Agent' },
+  { value: 'chat', label: 'Chat' },
 ]
 
 export function ModeSwitcher(): React.ReactElement {
@@ -73,7 +73,7 @@ export function ModeSwitcher(): React.ReactElement {
         <div
           className={cn(
             'mode-slider absolute top-1 bottom-1 w-[calc(50%-4px)] rounded bg-background shadow-sm transition-transform duration-300 ease-in-out',
-            mode === 'chat' ? 'translate-x-0' : 'translate-x-full'
+            mode === 'agent' ? 'translate-x-0' : 'translate-x-full'
           )}
         />
         {modes.map(({ value, label }) => (

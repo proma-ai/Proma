@@ -56,6 +56,8 @@ export interface SDKMessageRendererProps {
   basePath?: string
   /** 是否显示消息头部（模型 icon + 名称），默认 true */
   showHeader?: boolean
+  /** 用户在前端选择的模型 ID（优先用于显示名称） */
+  sessionModelId?: string
 }
 
 // ===== system 消息：上下文压缩分割线 =====
@@ -197,7 +199,7 @@ export type MessageGroup =
  * 4. 其他类型（result, tool_progress 等）→ 归入当前 assistant-turn
  * 5. 后处理：合并相邻同模型的 assistant-turn（处理子代理切换模型导致的碎片化）
  */
-export function groupIntoTurns(messages: SDKMessage[]): MessageGroup[] {
+export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
 
@@ -233,7 +235,7 @@ export function groupIntoTurns(messages: SDKMessage[]): MessageGroup[] {
           type: 'assistant-turn',
           assistantMessages: [aMsg],
           turnMessages: [msg],
-          model: aMsg.message?.model,
+          model: sessionModelId || aMsg.message?.model,
           createdAt: meta.createdAt,
         }
       } else {
@@ -320,9 +322,11 @@ export interface AssistantTurnRendererProps {
   isStreaming?: boolean
   /** 是否被用户中断 */
   stoppedByUser?: boolean
+  /** 用户在前端选择的模型 ID（优先用于显示名称） */
+  sessionModelId?: string
 }
 
-export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, isStreaming, stoppedByUser }: AssistantTurnRendererProps): React.ReactElement | null {
+export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
@@ -466,6 +470,7 @@ export function SDKMessageRenderer({
   allMessages,
   basePath,
   showHeader = true,
+  sessionModelId,
 }: SDKMessageRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   const msgType = message.type
@@ -485,7 +490,7 @@ export function SDKMessageRenderer({
     const blocks = aMsg.message?.content
     if (!Array.isArray(blocks) || blocks.length === 0) return null
 
-    const model = aMsg.message?.model
+    const model = sessionModelId || aMsg.message?.model
     const meta = extractMeta(message)
 
     // 检测是否有主要内容（text 块）
@@ -757,6 +762,8 @@ export interface MessageGroupRendererProps {
   isStreaming?: boolean
   /** 是否被用户中断 */
   stoppedByUser?: boolean
+  /** 用户在前端选择的模型 ID（优先用于显示名称） */
+  sessionModelId?: string
 }
 
 /**
@@ -816,7 +823,7 @@ export function getGroupPreview(group: MessageGroup): string {
   return texts.join(' ').slice(0, 200)
 }
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, isStreaming, stoppedByUser }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, basePath, onFork, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -844,6 +851,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, isS
         onFork={onFork}
         isStreaming={isStreaming}
         stoppedByUser={stoppedByUser}
+        sessionModelId={sessionModelId}
       />
     </div>
   )

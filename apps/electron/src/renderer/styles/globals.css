@@ -650,6 +650,96 @@
   background-color: hsl(151 40% 45%) !important;   /* 更亮的绿 */
 }
 
+/* ===== 滚动进度条 — 适配所有主题（无轨道背景，仅滑块） ===== */
+
+/* 默认亮色主题 */
+.scroll-progress-thumb {
+  background-color: hsl(var(--foreground) / 0.14);
+}
+.scroll-progress-thumb:hover {
+  background-color: hsl(var(--foreground) / 0.25);
+}
+.scroll-progress-thumb-active {
+  background-color: hsl(var(--foreground) / 0.32) !important;
+}
+
+/* 默认深色主题 */
+.dark:not([class*="theme-"]) .scroll-progress-thumb {
+  background-color: hsl(var(--foreground) / 0.12);
+}
+.dark:not([class*="theme-"]) .scroll-progress-thumb:hover {
+  background-color: hsl(var(--foreground) / 0.22);
+}
+.dark:not([class*="theme-"]) .scroll-progress-thumb-active {
+  background-color: hsl(var(--foreground) / 0.30) !important;
+}
+
+/* 晴空碧海 ocean-light */
+.theme-ocean-light .scroll-progress-thumb {
+  background-color: hsl(205 50% 50% / 0.18);
+}
+.theme-ocean-light .scroll-progress-thumb:hover {
+  background-color: hsl(205 50% 50% / 0.30);
+}
+.theme-ocean-light .scroll-progress-thumb-active {
+  background-color: hsl(205 50% 50% / 0.40) !important;
+}
+
+/* 苍穹暮色 ocean-dark */
+.theme-ocean-dark .scroll-progress-thumb {
+  background-color: hsl(205 60% 55% / 0.20);
+}
+.theme-ocean-dark .scroll-progress-thumb:hover {
+  background-color: hsl(205 60% 55% / 0.32);
+}
+.theme-ocean-dark .scroll-progress-thumb-active {
+  background-color: hsl(205 60% 55% / 0.42) !important;
+}
+
+/* 森息晨光 forest-light */
+.theme-forest-light .scroll-progress-thumb {
+  background-color: hsl(150 35% 38% / 0.18);
+}
+.theme-forest-light .scroll-progress-thumb:hover {
+  background-color: hsl(150 35% 38% / 0.30);
+}
+.theme-forest-light .scroll-progress-thumb-active {
+  background-color: hsl(150 35% 38% / 0.40) !important;
+}
+
+/* 森息夜语 forest-dark */
+.theme-forest-dark .scroll-progress-thumb {
+  background-color: hsl(151 40% 45% / 0.20);
+}
+.theme-forest-dark .scroll-progress-thumb:hover {
+  background-color: hsl(151 40% 45% / 0.32);
+}
+.theme-forest-dark .scroll-progress-thumb-active {
+  background-color: hsl(151 40% 45% / 0.42) !important;
+}
+
+/* 云朵舞者 slate-light */
+.theme-slate-light .scroll-progress-thumb {
+  background-color: hsl(18 20% 67% / 0.22);
+}
+.theme-slate-light .scroll-progress-thumb:hover {
+  background-color: hsl(18 20% 67% / 0.35);
+}
+.theme-slate-light .scroll-progress-thumb-active {
+  background-color: hsl(18 20% 67% / 0.45) !important;
+}
+
+/* 莫兰迪夜 slate-dark */
+.theme-slate-dark .scroll-progress-thumb {
+  background-color: hsl(15 25% 68% / 0.18);
+}
+.theme-slate-dark .scroll-progress-thumb:hover {
+  background-color: hsl(15 25% 68% / 0.30);
+}
+.theme-slate-dark .scroll-progress-thumb-active {
+  background-color: hsl(15 25% 68% / 0.40) !important;
+}
+
 /* ===== 计划模式：输入框定位上下文 ===== */
 .plan-mode-border {
   position: relative;

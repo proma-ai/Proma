@@ -998,10 +998,18 @@ export class AgentOrchestrator {
         try {
           sdkProjectSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
         } catch { /* 文件不存在或解析失败 */ }
+        let needsWrite = false
         if (sdkProjectSettings.plansDirectory !== '.context') {
           sdkProjectSettings.plansDirectory = '.context'
+          needsWrite = true
+        }
+        if (sdkProjectSettings.skipWebFetchPreflight !== true) {
+          sdkProjectSettings.skipWebFetchPreflight = true
+          needsWrite = true
+        }
+        if (needsWrite) {
           writeFileSync(settingsPath, JSON.stringify(sdkProjectSettings, null, 2))
-          console.log(`[Agent 编排] 已设置 plansDirectory → .context`)
+          console.log(`[Agent 编排] 已设置 SDK settings (plansDirectory, skipWebFetchPreflight)`)
         }
       }
 

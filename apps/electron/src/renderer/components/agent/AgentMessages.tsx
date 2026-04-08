@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Bot, FileText, FileImage, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Plus, Minimize2, Download, CreditCard } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/button'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { ToolActivityList } from './ToolActivityItem'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
@@ -44,6 +45,8 @@ import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
 /** AgentMessages 属性接口 */
 interface AgentMessagesProps {
   sessionId: string
+  /** 用户在前端选择的模型 ID（用于显示渠道配置的 Model Name） */
+  sessionModelId?: string
   messages: AgentMessage[]
   /** 消息是否已完成首次加载 */
   messagesLoaded?: boolean
@@ -648,8 +651,9 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, stoppedByUser, onRetry, onRetryInNewSession, onFork, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, stoppedByUser, onRetry, onRetryInNewSession, onFork, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+  const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
@@ -724,14 +728,14 @@ export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSD
   // Turn 分组（持久化消息按 turn 分组渲染）
   const persistedGroups = React.useMemo(() => {
     if (!persistedSDKMessages || persistedSDKMessages.length === 0) return []
-    return groupIntoTurns(persistedSDKMessages)
-  }, [persistedSDKMessages])
+    return groupIntoTurns(persistedSDKMessages, sessionModelId)
+  }, [persistedSDKMessages, sessionModelId])
 
   // Turn 分组（实时消息同样按 turn 分组，避免多个气泡最终合并的跳变）
   const liveGroups = React.useMemo(() => {
     if (!liveMessages || liveMessages.length === 0) return []
-    return groupIntoTurns(liveMessages)
-  }, [liveMessages])
+    return groupIntoTurns(liveMessages, sessionModelId)
+  }, [liveMessages, sessionModelId])
 
   // 迷你地图数据 — 复用 persistedGroups / liveGroups，确保 getGroupId 对同一对象引用返回一致的 ID
   const minimapItems: MinimapItem[] = React.useMemo(
@@ -767,6 +771,17 @@ export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSD
     [useSDKRenderer, persistedGroups, liveGroups, messages, userProfile.avatar]
   )
 
+  // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）
+  React.useEffect(() => {
+    if (minimapItems.length > 0) {
+      setMinimapCache((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, minimapItems)
+        return next
+      })
+    }
+  }, [sessionId, minimapItems, setMinimapCache])
+
   // 实时消息中是否已有可渲染的助手内容
   const hasLiveAssistantContent = liveGroups.some((g) => g.type === 'assistant-turn')
 
@@ -794,6 +809,7 @@ export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSD
                     basePath={sessionPath || undefined}
                     onFork={onFork}
                     stoppedByUser={isLastAssistantTurn || undefined}
+                    sessionModelId={sessionModelId}
                   />
                 )
               })
@@ -821,6 +837,7 @@ export function AgentMessages({ sessionId, messages, messagesLoaded, persistedSD
                 allMessages={allSDKMessages}
                 basePath={sessionPath || undefined}
                 isStreaming
+                sessionModelId={sessionModelId}
               />
             ))}
 

@@ -1,8 +1,9 @@
 /**
- * ScrollMinimap — 消息导航迷你地图
+ * ScrollMinimap — 消息导航迷你地图 + 滚动进度条
  *
- * 在消息区域右上角显示短横杠代表每条消息的位置，
- * 悬浮时弹出消息预览列表，点击可跳转到对应消息。
+ * 在消息区域右侧显示：
+ * 1. 短横杠代表每条消息的位置（迷你地图），悬浮时弹出消息预览列表
+ * 2. 可拖拽的滚动进度条，提供丝滑的滚动体验
  * 必须放在 StickToBottom（Conversation）内部使用。
  */
 
@@ -73,9 +74,12 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const [visibleIds, setVisibleIds] = React.useState<Set<string>>(new Set())
   const [canScroll, setCanScroll] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
+  const [isDragging, setIsDragging] = React.useState(false)
+  const [scrollMetrics, setScrollMetrics] = React.useState({ scrollTop: 0, scrollHeight: 1, clientHeight: 1 })
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const searchInputRef = React.useRef<HTMLInputElement>(null)
+  const trackRef = React.useRef<HTMLDivElement>(null)
 
   // ── 组件卸载时清理计时器 ──
 
@@ -86,7 +90,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     }
   }, [])
 
-  // ── 可见消息追踪 ──
+  // ── 可见消息 + 滚动指标追踪 ──
 
   React.useEffect(() => {
     const el = scrollRef.current
@@ -95,6 +99,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     const update = (): void => {
       const { scrollTop, scrollHeight, clientHeight } = el
       setCanScroll(scrollHeight > clientHeight + 10)
+      setScrollMetrics({ scrollTop, scrollHeight, clientHeight })
       if (scrollHeight <= 0) return
 
       const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]')
@@ -136,7 +141,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     if (!hovered) setSearchQuery('')
   }, [hovered])
 
-  // ── 鼠标进出控制 ──
+  // ── 鼠标进出控制（仅迷你地图区域） ──
 
   const handleMouseEnter = (): void => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
@@ -146,10 +151,8 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   }
 
   const handleMouseLeave = (): void => {
-    // 40ms 延迟后开始淡出动画
     closeTimerRef.current = setTimeout(() => {
       setIsLeaving(true)
-      // 淡出动画 80ms 后关闭
       fadeTimerRef.current = setTimeout(() => {
         setHovered(false)
         setIsLeaving(false)
@@ -165,23 +168,19 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     const target = el.querySelector<HTMLElement>(`[data-message-id="${id}"]`)
     if (!target) return
 
-    // 完全停止 StickToBottom 的自动滚动和正在进行的动画
     stopScroll()
     stickyState.animation = undefined
     stickyState.velocity = 0
     stickyState.accumulated = 0
 
-    // 递归累积 offsetTop 直到 scrollRef 容器，尽量让目标居中显示
     const offsetTop = getOffsetTopRelativeTo(target, el)
     const targetHeight = target.offsetHeight
     const viewportHeight = el.clientHeight
-    // 目标比视口小：居中；目标比视口大：顶部留 32px 间距
     const scrollTarget = targetHeight < viewportHeight
       ? offsetTop - (viewportHeight - targetHeight) / 2
       : offsetTop - 32
     el.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'smooth' })
 
-    // 跳转后关闭面板
     setHovered(false)
   }, [scrollRef, stopScroll, stickyState])
 
@@ -193,110 +192,210 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     return items.filter((item) => item.preview.toLowerCase().includes(q))
   }, [items, searchQuery])
 
+  // ── 滚动条滑块拖拽 ──
+
+  const handleThumbMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const el = scrollRef.current
+    const track = trackRef.current
+    if (!el || !track) return
+
+    // 停止 StickToBottom 自动滚动
+    stopScroll()
+    stickyState.animation = undefined
+    stickyState.velocity = 0
+    stickyState.accumulated = 0
+
+    setIsDragging(true)
+    const startY = e.clientY
+    const startScrollTop = el.scrollTop
+    const trackHeight = track.clientHeight
+    const { scrollHeight, clientHeight } = el
+    const scrollRange = scrollHeight - clientHeight
+    const thumbHeight = Math.max(trackHeight * 0.1, (clientHeight / scrollHeight) * trackHeight)
+    const scrollableTrack = trackHeight - thumbHeight
+
+    const onMouseMove = (ev: MouseEvent): void => {
+      ev.preventDefault()
+      const delta = ev.clientY - startY
+      const scrollDelta = scrollableTrack > 0 ? (delta / scrollableTrack) * scrollRange : 0
+      el.scrollTop = Math.max(0, Math.min(scrollRange, startScrollTop + scrollDelta))
+    }
+
+    const onMouseUp = (): void => {
+      setIsDragging(false)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'grabbing'
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [scrollRef, stopScroll, stickyState])
+
+  // ── 轨道点击跳转 ──
+
+  const handleTrackMouseDown = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // 只响应直接点击轨道背景，忽略点击滑块
+    if (e.target !== e.currentTarget) return
+
+    const track = trackRef.current
+    const el = scrollRef.current
+    if (!track || !el) return
+
+    stopScroll()
+    stickyState.animation = undefined
+    stickyState.velocity = 0
+    stickyState.accumulated = 0
+
+    const rect = track.getBoundingClientRect()
+    const clickRatio = (e.clientY - rect.top) / rect.height
+    const { scrollHeight, clientHeight } = el
+    const targetTop = clickRatio * (scrollHeight - clientHeight)
+    el.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' })
+  }, [scrollRef, stopScroll, stickyState])
+
   if (items.length < MIN_ITEMS || !canScroll) return null
 
   // ── 迷你地图条纹 ──
 
   const barCount = Math.min(items.length, MAX_BARS)
-  const stripHeight = barCount * 6
+
+  // ── 滚动条滑块尺寸计算 ──
+
+  const { scrollTop, scrollHeight, clientHeight } = scrollMetrics
+  const scrollRange = scrollHeight - clientHeight
+  const thumbRatio = scrollHeight > 0 ? Math.min(clientHeight / scrollHeight, 1) : 1
+  const thumbHeightPct = Math.max(10, thumbRatio * 100)
+  const thumbTopPct = scrollRange > 0 ? (scrollTop / scrollRange) * (100 - thumbHeightPct) : 0
 
   return (
-    <div
-      className="absolute right-2 top-0 z-10 flex items-start"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      {/* ── 展开面板 ── */}
-      {hovered && (
-        <div
-          className={cn(
-            'mr-1 w-[280px] rounded-lg border bg-popover shadow-xl origin-top-right flex flex-col overflow-hidden',
-            isLeaving
-              ? 'animate-out fade-out-0 zoom-out-95 duration-75'
-              : 'animate-in fade-in-0 zoom-in-95 duration-150'
-          )}
-          style={{ maxHeight: 'min(420px, 60vh)', marginTop: 12 }}
-        >
-          {/* 标题栏 */}
-          <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-            <span className="text-xs font-medium text-popover-foreground/70">消息导航</span>
-            <span className="text-[11px] text-muted-foreground tabular-nums">
-              {visibleIds.size}/{items.length}
-            </span>
-          </div>
+    <div className="absolute right-1 top-0 bottom-0 z-10 flex pointer-events-none">
+      {/* ── 迷你地图悬停区域（面板 + 横杠） ── */}
+      <div
+        className="flex items-start h-full pointer-events-auto"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* 展开面板 */}
+        {hovered && (
+          <div
+            className={cn(
+              'mr-1 w-[280px] rounded-lg border bg-popover shadow-xl origin-top-right flex flex-col overflow-hidden',
+              isLeaving
+                ? 'animate-out fade-out-0 zoom-out-95 duration-75'
+                : 'animate-in fade-in-0 zoom-in-95 duration-150'
+            )}
+            style={{ maxHeight: 'min(420px, 60vh)', marginTop: 12 }}
+          >
+            {/* 标题栏 */}
+            <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
+              <span className="text-xs font-medium text-popover-foreground/70">消息导航</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {visibleIds.size}/{items.length}
+              </span>
+            </div>
 
-          {/* 搜索框 */}
-          <div className="px-2 py-1.5 border-b shrink-0">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50" />
-              <Input
-                ref={searchInputRef}
-                placeholder="搜索消息..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => {
-                  // 搜索框获焦时取消关闭计时器
-                  if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
-                  if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
-                  setIsLeaving(false)
-                }}
-                className="h-7 text-xs pl-7"
-              />
+            {/* 搜索框 */}
+            <div className="px-2 py-1.5 border-b shrink-0">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50" />
+                <Input
+                  ref={searchInputRef}
+                  placeholder="搜索消息..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => {
+                    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+                    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+                    setIsLeaving(false)
+                  }}
+                  className="h-7 text-xs pl-7"
+                />
+              </div>
+            </div>
+
+            {/* 消息列表 */}
+            <div className="overflow-y-auto flex-1 p-1.5 space-y-0.5 scrollbar-thin">
+              {filteredItems.length === 0 ? (
+                <div className="py-6 text-center text-xs text-muted-foreground">
+                  未找到匹配消息
+                </div>
+              ) : (
+                filteredItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(
+                      'flex items-start gap-2 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent',
+                      visibleIds.has(item.id) && 'bg-accent/50'
+                    )}
+                    onClick={() => scrollToMessage(item.id)}
+                  >
+                    <ItemIcon item={item} />
+                    <div className="flex-1 min-w-0">
+                      <HighlightedPreview text={item.preview} query={searchQuery} />
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
+        )}
 
-          {/* 消息列表 */}
-          <div className="overflow-y-auto flex-1 p-1.5 space-y-0.5 scrollbar-thin">
-            {filteredItems.length === 0 ? (
-              <div className="py-6 text-center text-xs text-muted-foreground">
-                未找到匹配消息
-              </div>
-            ) : (
-              filteredItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={cn(
-                    'flex items-start gap-2 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent',
-                    visibleIds.has(item.id) && 'bg-accent/50'
-                  )}
-                  onClick={() => scrollToMessage(item.id)}
-                >
-                  <ItemIcon item={item} />
-                  <div className="flex-1 min-w-0">
-                    <HighlightedPreview text={item.preview} query={searchQuery} />
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
+        {/* ── 迷你地图横杠（紧凑排列） ── */}
+        <div className="relative mt-3 flex-shrink-0" style={{ width: 24, height: barCount * 6 }}>
+          {Array.from({ length: barCount }, (_, i) => {
+            const start = Math.floor((i * items.length) / barCount)
+            const end = Math.floor(((i + 1) * items.length) / barCount)
+            const group = items.slice(start, end)
+            const isVisible = group.some((it) => visibleIds.has(it.id))
+            const hasUser = group.some((it) => it.role === 'user')
+            const top = ((i + 0.5) / barCount) * 100
+            return (
+              <div
+                key={i}
+                className={cn(
+                  'absolute left-1 h-[2px] w-[20px] rounded-full transition-colors',
+                  isVisible
+                    ? 'bg-primary dark:bg-primary/70 minimap-visible-indicator'
+                    : hasUser
+                      ? 'bg-primary/25 dark:bg-primary/15'
+                      : 'bg-primary/40 dark:bg-primary/25'
+                )}
+                style={{ top: `${top}%` }}
+              />
+            )
+          })}
         </div>
-      )}
+      </div>
 
-      {/* ── 迷你地图条 ── */}
-      <div className="relative mt-3 flex-shrink-0" style={{ width: 24, height: stripHeight }}>
-        {Array.from({ length: barCount }, (_, i) => {
-          const start = Math.floor((i * items.length) / barCount)
-          const end = Math.floor(((i + 1) * items.length) / barCount)
-          const group = items.slice(start, end)
-          const isVisible = group.some((it) => visibleIds.has(it.id))
-          const hasUser = group.some((it) => it.role === 'user')
-          const top = ((i + 0.5) / barCount) * 100
-          return (
-            <div
-              key={i}
-              className={cn(
-                'absolute left-1 h-[2px] w-[20px] rounded-full transition-colors',
-                isVisible
-                  ? 'bg-primary dark:bg-primary/70 minimap-visible-indicator'
-                  : hasUser
-                    ? 'bg-primary/25 dark:bg-primary/15'
-                    : 'bg-primary/40 dark:bg-primary/25'
-              )}
-              style={{ top: `${top}%` }}
-            />
-          )
-        })}
+      {/* ── 滚动进度条 ── */}
+      <div className="relative ml-[4px] py-4 flex-shrink-0 pointer-events-auto" style={{ width: 7 }}>
+        <div
+          ref={trackRef}
+          className="relative h-full rounded-full cursor-pointer"
+          onMouseDown={handleTrackMouseDown}
+        >
+          <div
+            className={cn(
+              'absolute left-0 right-0 rounded-full transition-colors duration-100 scroll-progress-thumb',
+              isDragging
+                ? 'scroll-progress-thumb-active cursor-grabbing'
+                : 'cursor-grab'
+            )}
+            style={{
+              height: `${thumbHeightPct}%`,
+              top: `${thumbTopPct}%`,
+            }}
+            onMouseDown={handleThumbMouseDown}
+          />
+        </div>
       </div>
     </div>
   )
@@ -329,7 +428,6 @@ function HighlightedPreview({ text, query }: { text: string; query: string }): R
     return <span className="text-xs opacity-40">(空消息)</span>
   }
 
-  // 有搜索关键词时：纯文本 + 高亮匹配
   if (query.trim()) {
     const escaped = escapeRegExp(query)
     const parts = text.split(new RegExp(`(${escaped})`, 'gi'))
@@ -344,7 +442,6 @@ function HighlightedPreview({ text, query }: { text: string; query: string }): R
     )
   }
 
-  // 无搜索时：Markdown 渲染
   return (
     <div className="prose prose-sm dark:prose-invert max-w-none text-xs text-popover-foreground/80 prose-p:my-0 prose-headings:my-0.5 prose-headings:text-xs prose-li:my-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 line-clamp-3 overflow-hidden">
       <Markdown remarkPlugins={PREVIEW_REMARK_PLUGINS} components={PREVIEW_MD_COMPONENTS}>
