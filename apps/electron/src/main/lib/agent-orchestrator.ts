@@ -756,7 +756,15 @@ export class AgentOrchestrator {
     const toPersist = accumulatedMessages.filter(
       (m) => m.type === 'assistant' || m.type === 'user' || m.type === 'result'
         || (m.type === 'system' && (m as import('@proma/shared').SDKSystemMessage).subtype === 'compact_boundary')
-    )
+    ).filter((m) => {
+      // 过滤 SDK 内部生成的 user 文本消息（如 Skill 展开 prompt），与实时流过滤逻辑一致
+      if (m.type === 'user') {
+        const content = (m as { message?: { content?: Array<{ type: string }> } }).message?.content
+        const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
+        if (!hasToolResult) return false
+      }
+      return true
+    })
 
     if (toPersist.length === 0) return
 

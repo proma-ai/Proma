@@ -78,7 +78,13 @@ function createMentionSuggestion<T>(
 
         onUpdate(props) {
           mentionItemCountRef.current = props.items.length
-          renderer?.updateProps({ items: props.items })
+          renderer?.updateProps({
+            items: props.items,
+            onSelect: (item: T) => {
+              const cmd = config.toCommand(item)
+              props.command({ id: cmd.id, label: cmd.label })
+            },
+          })
           positionPopup(popup, props.clientRect?.())
         },
 

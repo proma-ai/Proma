@@ -39,6 +39,7 @@ import {
 import { FeishuNotifyToggle } from './FeishuNotifyToggle'
 import { cn } from '@/lib/utils'
 import { fileToBase64 } from '@/lib/file-utils'
+import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 
 interface ChatInputProps {
   /** 当前对话 ID */
@@ -58,6 +59,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ conversationId, streaming, pendingAttachments, onSetPendingAttachments, onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
+  const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
   // 从 Map atom 读写草稿
   const draftsMap = useAtomValue(conversationDraftsAtom)
   const setDraftsMap = useSetAtom(conversationDraftsAtom)
@@ -263,8 +265,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             onChange={setContent}
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
-            placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+            placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
             autoFocusTrigger={conversationId}
+            sendWithCmdEnter={sendWithCmdEnter}
           />
 
           {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}

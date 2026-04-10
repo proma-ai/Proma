@@ -194,6 +194,8 @@ interface RichTextInputProps {
   htmlValue?: string
   /** HTML 值变更回调（用于保存富文本草稿） */
   onHtmlChange?: (html: string) => void
+  /** 是否使用 Cmd/Ctrl+Enter 发送（而非 Enter） */
+  sendWithCmdEnter?: boolean
   className?: string
 }
 
@@ -219,6 +221,7 @@ export function RichTextInput({
   attachedDirs = [],
   htmlValue,
   onHtmlChange,
+  sendWithCmdEnter = false,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   // 手动折叠状态：用户主动折叠输入框
@@ -236,6 +239,9 @@ export function RichTextInput({
   // 保持 onHtmlChange 引用最新
   const onHtmlChangeRef = useRef(onHtmlChange)
   onHtmlChangeRef.current = onHtmlChange
+  // 发送模式引用
+  const sendWithCmdEnterRef = useRef(sendWithCmdEnter)
+  sendWithCmdEnterRef.current = sendWithCmdEnter
   // Mention 活跃状态（阻止 Enter 发送消息）
   const mentionActiveRef = useRef(false)
   // Mention 弹窗中的可选项数量（0 时 Enter 不阻塞发送）
@@ -392,8 +398,12 @@ export function RichTextInput({
           }
         }
 
-        // Enter 提交，Shift+Enter 换行
-        if (event.key === 'Enter' && !event.shiftKey) {
+        // 发送/换行逻辑：根据 sendWithCmdEnter 模式决定行为
+        if (event.key === 'Enter') {
+          const cmdEnterMode = sendWithCmdEnterRef.current
+          const hasCmd = event.metaKey || event.ctrlKey
+          const hasShift = event.shiftKey
+
           // 如果在代码块中，允许正常换行
           const { state } = view
           const { $from } = state.selection
@@ -412,8 +422,27 @@ export function RichTextInput({
             return false
           }
 
+          // 判断是发送还是换行
+          const isSend = cmdEnterMode ? hasCmd : (!hasShift && !hasCmd)
+
+          if (isSend) {
+            event.preventDefault()
+            onSubmitRef.current()
+            return true
+          }
+
+          // 换行：列表内延续列表项，其他场景插入硬换行（紧凑行距）
           event.preventDefault()
-          onSubmitRef.current()
+          // 检查是否在列表项内（遍历祖先节点）
+          let isInList = false
+          for (let d = $from.depth; d > 0; d--) {
+            if ($from.node(d).type.name === 'listItem') { isInList = true; break }
+          }
+          if (isInList && editor) {
+            editor.chain().focus().splitListItem('listItem').run()
+          } else if (editor) {
+            editor.chain().focus().setHardBreak().run()
+          }
           return true
         }
 
@@ -506,7 +535,7 @@ export function RichTextInput({
   return (
     <div
       className={cn(
-        'relative w-full overflow-y-auto transition-[max-height] duration-200 ease-in-out',
+        'rich-text-input relative w-full overflow-y-auto transition-[max-height] duration-200 ease-in-out',
         isManuallyCollapsed
           ? 'max-h-[101px]'
           : isExpanded ? 'max-h-[500px]' : 'max-h-[200px]',

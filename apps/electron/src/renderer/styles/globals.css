@@ -482,6 +482,11 @@
   box-shadow: inset 0 -1px 0 0 hsl(260 10% 18% / 0.6);
 }
 
+/* ===== 输入框段落紧凑行距（仅作用于输入框内的 tiptap 编辑器） ===== */
+.rich-text-input .tiptap p {
+  margin: 0;
+}
+
 /* ===== 输入框内代码块：按主题分色 ===== */
 /* 浅色主题：使用深色 code-bg + 浅色文字，与 AI 代码块一致 */
 .tiptap pre {

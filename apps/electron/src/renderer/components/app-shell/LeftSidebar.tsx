@@ -748,7 +748,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
       {/* Agent 模式：工作区选择器 */}
       {mode === 'agent' && (
-        <div className="px-3 pt-3">
+        <div className="px-3 pt-2">
           <WorkspaceSelector />
         </div>
       )}

@@ -71,6 +71,7 @@ import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
+import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption, SDKMessage } from '@proma/shared'
 import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { fileToBase64 } from '@/lib/file-utils'
@@ -163,6 +164,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const streamState = streamingStates.get(sessionId)
   const streaming = streamState?.running ?? false
   const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
+  const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
   const stoppedByUser = stoppedByUserSessions.has(sessionId)
   const liveMessagesMap = useAtomValue(liveMessagesMapAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
@@ -1270,7 +1272,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onPasteFiles={handlePasteFiles}
               placeholder={
                 agentChannelId
-                  ? '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
+                  ? sendWithCmdEnter
+                    ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
+                    : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
                   : '请先在设置中选择 Agent 供应商'
               }
               disabled={!agentChannelId}
@@ -1281,6 +1285,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               attachedDirs={allAttachedDirs}
               htmlValue={inputHtmlContent}
               onHtmlChange={setInputHtmlContent}
+              sendWithCmdEnter={sendWithCmdEnter}
             />
 
             {/* Footer 工具栏 */}

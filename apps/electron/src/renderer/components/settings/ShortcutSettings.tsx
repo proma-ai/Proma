@@ -12,7 +12,7 @@ import * as React from 'react'
 import { useAtom } from 'jotai'
 import { RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { shortcutOverridesAtom } from '@/atoms/shortcut-atoms'
+import { shortcutOverridesAtom, sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import {
   DEFAULT_SHORTCUTS,
   SHORTCUT_CATEGORY_LABELS,
@@ -182,6 +182,7 @@ function ShortcutRecorder({
 
 export function ShortcutSettings(): React.ReactElement {
   const [overrides, setOverrides] = useAtom(shortcutOverridesAtom)
+  const [sendWithCmdEnter, setSendWithCmdEnter] = useAtom(sendWithCmdEnterAtom)
 
   // 按分类分组
   const grouped = React.useMemo(() => {
@@ -261,6 +262,15 @@ export function ShortcutSettings(): React.ReactElement {
 
   const hasOverrides = Object.keys(overrides).length > 0
 
+  // 切换发送快捷键
+  const handleToggleSendKey = React.useCallback(() => {
+    const newValue = !sendWithCmdEnter
+    setSendWithCmdEnter(newValue)
+    window.electronAPI
+      .updateSettings({ sendWithCmdEnter: newValue })
+      .catch(console.error)
+  }, [sendWithCmdEnter, setSendWithCmdEnter])
+
   // 分类顺序
   const categoryOrder: ShortcutCategory[] = ['app', 'navigation', 'edit', 'global']
 
@@ -282,6 +292,45 @@ export function ShortcutSettings(): React.ReactElement {
             恢复全部默认
           </Button>
         )}
+      </div>
+
+      {/* 发送消息快捷键切换 */}
+      <div>
+        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+          发送消息
+        </h3>
+        <div className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-foreground">发送 / 换行快捷键</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              切换 Enter 发送消息或换行的行为
+            </div>
+          </div>
+          <div className="flex items-center gap-1 ml-4 rounded-lg bg-muted/60 p-0.5">
+            <button
+              type="button"
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                !sendWithCmdEnter
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => sendWithCmdEnter && handleToggleSendKey()}
+            >
+              Enter 发送
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                sendWithCmdEnter
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => !sendWithCmdEnter && handleToggleSendKey()}
+            >
+              {isMac ? '⌘' : 'Ctrl'}+Enter 发送
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* 按分类分组展示 */}

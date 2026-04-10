@@ -31,6 +31,7 @@ import {
   groupActivities,
   isActivityGroup,
 } from '@/atoms/agent-atoms'
+import { TaskProgressCard, TASK_TOOL_NAMES } from './TaskProgressCard'
 
 // ===== 尺寸配置 =====
 
@@ -460,16 +461,34 @@ export function ToolActivityList({ activities, animate = false }: ToolActivityLi
 
   const grouped = React.useMemo(() => groupActivities(activities), [activities])
 
+  // 提取所有 task 相关的活动用于聚合卡片
+  const taskActivities = React.useMemo(
+    () => activities.filter((a) => TASK_TOOL_NAMES.has(a.toolName)),
+    [activities]
+  )
+  const hasTaskCard = taskActivities.length > 0
+  // 从原始 activities 查找第一个 task 工具的 toolUseId，定位卡片插入点
+  const firstTaskToolUseId = React.useMemo(
+    () => activities.find((a) => TASK_TOOL_NAMES.has(a.toolName))?.toolUseId ?? null,
+    [activities]
+  )
+
   const visibleRows = React.useMemo(() => {
     let count = 0
     for (const item of grouped) {
+      if (!isActivityGroup(item) && TASK_TOOL_NAMES.has((item as ToolActivity).toolName)) {
+        // task 工具聚合为一张卡片，不计入独立行数
+        continue
+      }
       count += 1
       if (isActivityGroup(item)) {
         count += item.children.length
       }
     }
+    // 卡片��� 1 行
+    if (hasTaskCard) count += 1
     return count
-  }, [grouped])
+  }, [grouped, hasTaskCard])
 
   const needsCollapse = visibleRows > SIZE.autoScrollThreshold
 
@@ -527,23 +546,20 @@ export function ToolActivityList({ activities, animate = false }: ToolActivityLi
 
         const activity = item as ToolActivity
 
-        // TodoWrite / TaskCreate 特殊渲染
-        if (activity.toolName === 'TodoWrite' || activity.toolName === 'TaskCreate') {
-          const todos = parseTodoItems(activity.input)
-          if (todos && todos.length > 0) {
+        // Task 相关工具：聚合为一个 TaskProgressCard
+        if (TASK_TOOL_NAMES.has(activity.toolName)) {
+          // 在第一个 task 工具位置插入卡片，后续的跳过
+          if (activity.toolUseId === firstTaskToolUseId) {
             return (
-              <React.Fragment key={activity.toolUseId}>
-                <ActivityRow
-                  activity={activity}
-                  index={i}
-                  animate={animate}
-                  // 不传递 onOpenDetails，TodoWrite/TaskCreate 不支持点击展开详情
-                  // 因为它们已经有专属的 TodoList 展示
-                />
-                <TodoList items={todos} />
-              </React.Fragment>
+              <TaskProgressCard
+                key="task-progress-card"
+                activities={taskActivities}
+                animate={animate}
+                streamEnded={!animate}
+              />
             )
           }
+          return null
         }
 
         return (

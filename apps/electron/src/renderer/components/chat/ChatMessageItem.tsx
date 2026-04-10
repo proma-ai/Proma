@@ -163,7 +163,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
           </div>
         )}
 
-        <MessageContent>
+        <MessageContent className={isInlineEditing ? 'w-full' : undefined}>
           {message.role === 'assistant' ? (
             <>
               {/* 工具活动记录（历史消息） */}

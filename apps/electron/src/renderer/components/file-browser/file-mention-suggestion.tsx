@@ -75,7 +75,12 @@ export function createFileMentionSuggestion(
 
         onUpdate(props) {
           if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
-          renderer?.updateProps({ items: props.items })
+          renderer?.updateProps({
+            items: props.items,
+            onSelect: (item: FileIndexEntry) => {
+              props.command({ id: item.path, label: item.name })
+            },
+          })
           positionPopup(popup, props.clientRect?.())
         },
 

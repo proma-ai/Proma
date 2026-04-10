@@ -17,6 +17,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
+import { TaskProgressCard, TASK_TOOL_NAMES } from './TaskProgressCard'
 import { DurationBadge } from './AgentMessages'
 import {
   Message,
@@ -44,7 +45,10 @@ import type {
   SDKContentBlock,
   SDKResultMessage,
   AgentEventUsage,
+  SDKToolUseBlock,
+  SDKToolResultBlock,
 } from '@proma/shared'
+import type { ToolActivity } from '@/atoms/agent-atoms'
 
 // ===== SDKMessageRenderer Props =====
 
@@ -146,6 +150,8 @@ function extractUserText(message: SDKUserMessage): string | null {
 
 function isUserInputMessage(message: SDKUserMessage): boolean {
   if (message.parent_tool_use_id) return false
+  // SDK 合成消息（如 Skill 展开 prompt）不是用户输入
+  if (message.isSynthetic) return false
   // 包含 tool_result 块的消息是工具结果，不是用户输入
   const content = message.message?.content
   if (Array.isArray(content) && content.some((b) => b.type === 'tool_result')) return false
@@ -393,6 +399,100 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, isS
     (b) => b.type === 'text' && 'text' in b && !!(b as { text: string }).text
   )
 
+  // Task 聚合数据（useMemo 防止每次渲染重算）
+  const { taskActivities, firstTaskIndex, historicalTaskSubjects } = React.useMemo(() => {
+    const taskBlocks: SDKToolUseBlock[] = []
+    let _firstTaskIndex = -1
+
+    for (let i = 0; i < topLevelBlocks.length; i++) {
+      const block = topLevelBlocks[i]!
+      if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
+        if (_firstTaskIndex === -1) _firstTaskIndex = i
+        taskBlocks.push(block as SDKToolUseBlock)
+      }
+    }
+
+    // 从 turnMessages 中提取 tool_result 文本，用于 TaskProgressCard 匹配真实 taskId
+    const toolResultMap = new Map<string, string>()
+    for (const msg of turn.turnMessages) {
+      if (msg.type !== 'user') continue
+      const userMsg = msg as SDKUserMessage
+      const blocks = userMsg.message?.content
+      if (!Array.isArray(blocks)) continue
+      for (const b of blocks) {
+        if (b.type === 'tool_result') {
+          const rb = b as SDKToolResultBlock
+          const text = typeof rb.content === 'string'
+            ? rb.content
+            : Array.isArray(rb.content)
+              ? (rb.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
+              : ''
+          if (text) toolResultMap.set(rb.tool_use_id, text)
+        }
+      }
+    }
+
+    // 将 SDKToolUseBlock 转换为 ToolActivity 格式（含 result）
+    const _taskActivities: ToolActivity[] = taskBlocks.map((tb) => ({
+      toolUseId: tb.id,
+      toolName: tb.name,
+      input: tb.input as Record<string, unknown>,
+      result: toolResultMap.get(tb.id),
+      done: true,
+    }))
+
+    // 从 allMessages 中回溯历史 TaskCreate 的 taskId → subject 映射
+    // 用于"继续"后当前 turn 缺少 TaskCreate 时恢复任务名
+    const _historicalTaskSubjects = new Map<string, string>()
+    const globalResultMap = new Map<string, string>()
+    const pendingTaskCreates: SDKToolUseBlock[] = []
+    // 单次遍历：同时收集 tool_result 映射和 TaskCreate 块
+    for (const msg of allMessages) {
+      if (msg.type === 'user') {
+        const userMsg = msg as SDKUserMessage
+        const blocks = userMsg.message?.content
+        if (!Array.isArray(blocks)) continue
+        for (const b of blocks) {
+          if (b.type === 'tool_result') {
+            const rb = b as SDKToolResultBlock
+            const text = typeof rb.content === 'string'
+              ? rb.content
+              : Array.isArray(rb.content)
+                ? (rb.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
+                : ''
+            if (text) globalResultMap.set(rb.tool_use_id, text)
+          }
+        }
+      } else if (msg.type === 'assistant') {
+        const aMsg = msg as SDKAssistantMessage
+        const blocks = aMsg.message?.content
+        if (!Array.isArray(blocks)) continue
+        for (const b of blocks) {
+          if (b.type === 'tool_use' && (b as SDKToolUseBlock).name === 'TaskCreate') {
+            pendingTaskCreates.push(b as SDKToolUseBlock)
+          }
+        }
+      }
+    }
+    // 解析 TaskCreate 的真实 taskId 和 subject
+    for (const tb of pendingTaskCreates) {
+      const input = tb.input as Record<string, unknown>
+      const subject = typeof input.subject === 'string'
+        ? input.subject
+        : typeof input.description === 'string'
+          ? input.description
+          : undefined
+      if (!subject) continue
+      const resultText = globalResultMap.get(tb.id)
+      if (resultText) {
+        const match = resultText.match(/Task\s*#(\d+)/i)
+        if (match?.[1]) _historicalTaskSubjects.set(match[1], subject)
+      }
+    }
+
+    return { taskActivities: _taskActivities, firstTaskIndex: _firstTaskIndex, historicalTaskSubjects: _historicalTaskSubjects }
+  }, [topLevelBlocks, turn.turnMessages, allMessages])
+
   return (
     <Message from="assistant">
       <MessageHeader
@@ -403,26 +503,34 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, isS
       <MessageContent>
         <div className={cn('space-y-2')}>
           {topLevelBlocks.map((block, i) => {
-            const isAgentTool = block.type === 'tool_use'
-              && ((block as { name: string }).name === 'Agent' || (block as { name: string }).name === 'Task')
-            const childBlocks = isAgentTool
-              ? childBlocksMap.get((block as { id: string }).id)
-              : undefined
+              // Task 工具块：聚合为卡片（同 ToolActivityList 路径的逻辑，此处用索引定位）
+              if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
+                if (i === firstTaskIndex) {
+                  return <TaskProgressCard key="task-progress-card" activities={taskActivities} streamEnded={!isStreaming} historicalTaskSubjects={historicalTaskSubjects} />
+                }
+                return null
+              }
 
-            return (
-              <ContentBlock
-                key={i}
-                block={block}
-                allMessages={allMessages}
-                basePath={basePath}
-                animate={!!isStreaming}
-                index={i}
-                dimmed={hasTextContent && block.type !== 'text'}
-                childBlocks={childBlocks}
-                isStreaming={isStreaming}
-              />
-            )
-          })}
+              const isAgentTool = block.type === 'tool_use'
+                && ((block as { name: string }).name === 'Agent' || (block as { name: string }).name === 'Task')
+              const childBlocks = isAgentTool
+                ? childBlocksMap.get((block as { id: string }).id)
+                : undefined
+
+              return (
+                <ContentBlock
+                  key={i}
+                  block={block}
+                  allMessages={allMessages}
+                  basePath={basePath}
+                  animate={!!isStreaming}
+                  index={i}
+                  dimmed={hasTextContent && block.type !== 'text'}
+                  childBlocks={childBlocks}
+                  isStreaming={isStreaming}
+                />
+              )
+            })}
         </div>
         {/* 如果有错误但也有内容块，在末尾显示错误 */}
         {hasError && errorContent && topLevelBlocks.length > 0 && (

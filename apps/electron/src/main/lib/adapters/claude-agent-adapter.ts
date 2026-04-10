@@ -364,6 +364,9 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         ...(options.additionalDirectories && options.additionalDirectories.length > 0 && {
           additionalDirectories: options.additionalDirectories,
         }),
+        // 强制顺序执行工具，防止并发 tool_use 导致 400 错误
+        // 根因：多个 tool_use 并发时若结果未完整批量提交会触发 invalid_request_error
+        toolUseConcurrency: 1,
       } as import('@anthropic-ai/claude-agent-sdk').Options
 
       // 将初始 prompt 包装为 AsyncIterable<SDKUserMessage>，

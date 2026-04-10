@@ -228,6 +228,8 @@ export interface SDKUserMessage {
   uuid?: string
   tool_use_result?: unknown
   isReplay?: boolean
+  /** SDK 合成的消息（如 Skill 展开 prompt），非人类用户输入 */
+  isSynthetic?: boolean
 }
 
 /** SDK result 消息（查询结束时返回） */

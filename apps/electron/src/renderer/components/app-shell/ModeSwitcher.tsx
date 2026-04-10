@@ -15,11 +15,12 @@ import { conversationsAtom, currentConversationIdAtom } from '@/atoms/chat-atoms
 import { agentSessionsAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import { tabsAtom } from '@/atoms/tab-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
+import { Bot, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const modes: { value: AppMode; label: string }[] = [
-  { value: 'agent', label: 'Agent' },
-  { value: 'chat', label: 'Chat' },
+const modes: { value: AppMode; label: string; icon: React.ReactNode }[] = [
+  { value: 'agent', label: 'Agent', icon: <Bot size={15} /> },
+  { value: 'chat', label: 'Chat', icon: <MessageSquare size={15} /> },
 ]
 
 export function ModeSwitcher(): React.ReactElement {
@@ -68,25 +69,26 @@ export function ModeSwitcher(): React.ReactElement {
 
   return (
     <div className="pt-2">
-      <div className="relative flex rounded-lg bg-muted p-1">
+      <div className="relative flex rounded-xl bg-muted p-1">
         {/* 滑动背景指示器 */}
         <div
           className={cn(
-            'mode-slider absolute top-1 bottom-1 w-[calc(50%-4px)] rounded bg-background shadow-sm transition-transform duration-300 ease-in-out',
+            'mode-slider absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
             mode === 'agent' ? 'translate-x-0' : 'translate-x-full'
           )}
         />
-        {modes.map(({ value, label }) => (
+        {modes.map(({ value, label, icon }) => (
           <button
             key={value}
             onClick={() => handleModeSwitch(value)}
             className={cn(
-              'mode-btn relative z-[1] flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+              'mode-btn relative z-[1] flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1 text-sm font-medium transition-colors duration-200',
               mode === value
                 ? 'mode-btn-selected text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
+            {icon}
             {label}
           </button>
         ))}

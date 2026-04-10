@@ -70,10 +70,10 @@ export function WelcomeEmptyState(): React.ReactElement {
         <div
           className={cn(
             'absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
-            mode === 'chat' ? 'translate-x-0' : 'translate-x-full',
+            mode === 'agent' ? 'translate-x-0' : 'translate-x-full',
           )}
         />
-        {(['chat', 'agent'] as const).map((m) => {
+        {(['agent', 'chat'] as const).map((m) => {
           const config = MODE_CONFIG[m]
           const isSelected = mode === m
           return (
