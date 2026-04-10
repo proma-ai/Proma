@@ -15,8 +15,8 @@ import {
   Copy,
   Check,
   Loader2,
-  Eye,
-  EyeOff,
+  ToggleLeft,
+  ToggleRight,
   AlertCircle,
   ChevronDown,
   ChevronUp,
@@ -677,9 +677,9 @@ function ApiKeyRow({
                   {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : apiKey.status === 'ACTIVE' ? (
-                    <EyeOff className="h-3.5 w-3.5" />
+                    <ToggleRight className="h-3.5 w-3.5 text-green-500" />
                   ) : (
-                    <Eye className="h-3.5 w-3.5" />
+                    <ToggleLeft className="h-3.5 w-3.5" />
                   )}
                 </Button>
               </TooltipTrigger>
