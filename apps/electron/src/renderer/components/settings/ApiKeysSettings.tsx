@@ -15,8 +15,6 @@ import {
   Copy,
   Check,
   Loader2,
-  ToggleLeft,
-  ToggleRight,
   AlertCircle,
   ChevronDown,
   ChevronUp,
@@ -56,6 +54,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Switch } from '@/components/ui/switch'
 import { SettingsSection, SettingsCard } from './primitives'
 import type { ApiKeyResponse, ApiKeyStatus } from '@proma/shared'
 
@@ -668,27 +667,12 @@ function ApiKeyRow({
                 <p>编辑</p>
               </TooltipContent>
             </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleToggleStatus}
-                  disabled={toggling}
-                >
-                  {toggling ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : apiKey.status === 'ACTIVE' ? (
-                    <ToggleRight className="h-3.5 w-3.5 text-green-500" />
-                  ) : (
-                    <ToggleLeft className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>{apiKey.status === 'ACTIVE' ? '禁用' : '启用'}</p>
-              </TooltipContent>
-            </Tooltip>
+            <Switch
+              checked={apiKey.status === 'ACTIVE'}
+              onCheckedChange={handleToggleStatus}
+              disabled={toggling}
+              className="scale-75"
+            />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
