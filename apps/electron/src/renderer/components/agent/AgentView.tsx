@@ -403,7 +403,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // 加载当前会话消息
   React.useEffect(() => {
-    setMessagesLoaded(false)
+    // 流式运行中不重置 messagesLoaded，避免 streaming UI 消失后出现空窗闪烁
+    const isCurrentlyStreaming = store.get(agentStreamingStatesAtom).get(sessionId)?.running ?? false
+    if (!isCurrentlyStreaming) {
+      setMessagesLoaded(false)
+    }
     // 并行加载旧格式（用于 Team 数据重建）和新格式（用于 UI 渲染）
     const loadOldMessages = window.electronAPI.getAgentSessionMessages(sessionId)
     const loadSDKMessages = window.electronAPI.getAgentSessionSDKMessages(sessionId)

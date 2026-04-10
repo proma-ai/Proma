@@ -281,6 +281,13 @@ export const workspaceFilesVersionAtom = atom(0)
 /** 侧面板是否打开（per-session Map） */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 
+/** 当前会话的侧面板是否打开（派生只读，供 AppShell 使用，避免全 Map 订阅导致无关重渲染） */
+export const currentSessionSidePanelOpenAtom = atom<boolean>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return false
+  return get(agentSidePanelOpenMapAtom).get(currentId) ?? true
+})
+
 /** 当前会话的工作路径 Map — sessionId → path */
 export const agentSessionPathMapAtom = atom<Map<string, string>>(new Map())
 

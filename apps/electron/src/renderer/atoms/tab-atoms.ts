@@ -13,7 +13,9 @@ import {
 } from './chat-atoms'
 import {
   agentRunningSessionIdsAtom,
+  agentSessionIndicatorMapAtom,
 } from './agent-atoms'
+import type { SessionIndicatorStatus } from './agent-atoms'
 
 // ===== 类型定义 =====
 
@@ -118,6 +120,22 @@ export const tabStreamingMapAtom = atom<Map<string, boolean>>((get) => {
       map.set(tab.id, chatStreaming.has(tab.sessionId))
     } else if (tab.type === 'agent') {
       map.set(tab.id, agentRunning.has(tab.sessionId))
+    }
+  }
+  return map
+})
+
+/** 标签页指示点状态（chat 用 running/idle，agent 用完整 SessionIndicatorStatus） */
+export const tabIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((get) => {
+  const tabs = get(tabsAtom)
+  const chatStreaming = get(streamingConversationIdsAtom)
+  const agentIndicator = get(agentSessionIndicatorMapAtom)
+  const map = new Map<string, SessionIndicatorStatus>()
+  for (const tab of tabs) {
+    if (tab.type === 'chat') {
+      map.set(tab.id, chatStreaming.has(tab.sessionId) ? 'running' : 'idle')
+    } else if (tab.type === 'agent') {
+      map.set(tab.id, agentIndicator.get(tab.sessionId) ?? 'idle')
     }
   }
   return map

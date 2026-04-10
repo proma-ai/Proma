@@ -14,7 +14,7 @@ import { MainArea } from '@/components/tabs/MainArea'
 import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellContext'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
-import { currentAgentSessionIdAtom, agentSidePanelOpenMapAtom } from '@/atoms/agent-atoms'
+import { currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
@@ -68,9 +68,8 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
 
   const appMode = useAtomValue(appModeAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const sidePanelOpenMap = useAtomValue(agentSidePanelOpenMapAtom)
+  const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const showRightPanel = appMode === 'agent' && !!currentSessionId
-  const isPanelOpen = currentSessionId ? (sidePanelOpenMap.get(currentSessionId) ?? true) : false
 
   return (
     <AppShellProvider value={contextValue}>

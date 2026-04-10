@@ -12,6 +12,7 @@ import { useAtomValue } from 'jotai'
 import { MessageSquare, Bot, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
+import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { TabPreviewPanel } from './TabPreviewPanel'
 
@@ -20,7 +21,7 @@ export interface TabBarItemProps {
   type: TabType
   title: string
   isActive: boolean
-  isStreaming: boolean
+  isStreaming: SessionIndicatorStatus
   /** 是否显示 hover 预览面板（由父级管理） */
   isHovered: boolean
   /** 预览面板是否正在退出动画 */
@@ -119,12 +120,18 @@ export function TabBarItem({
           <span className="flex-1 min-w-0 truncate text-left">{title}</span>
         )}
 
-        {/* 流式指示器（窄状态下隐藏） */}
-        {isStreaming && !isNarrow && (
+        {/* 流式/状态指示器（窄状态下隐藏） */}
+        {isStreaming !== 'idle' && !isNarrow && (
           <span
             className={cn(
-              'size-1.5 rounded-full shrink-0 animate-pulse',
-              type === 'chat' ? 'bg-emerald-500' : 'bg-blue-500'
+              'size-1.5 rounded-full shrink-0',
+              isStreaming === 'completed'
+                ? 'bg-green-500'
+                : isStreaming === 'blocked'
+                  ? 'bg-orange-500 animate-pulse'
+                  : type === 'chat'
+                    ? 'bg-emerald-500 animate-pulse'
+                    : 'bg-blue-500 animate-pulse'
             )}
           />
         )}

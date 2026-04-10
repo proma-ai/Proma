@@ -14,7 +14,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import {
   tabsAtom,
   splitLayoutAtom,
-  tabStreamingMapAtom,
+  tabIndicatorMapAtom,
   activeTabIdAtom,
   openTab,
   closeTab,
@@ -22,6 +22,7 @@ import {
   reorderTabs,
 } from '@/atoms/tab-atoms'
 import type { TabItem } from '@/atoms/tab-atoms'
+import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import {
   conversationModelsAtom,
   conversationContextLengthAtom,
@@ -34,6 +35,7 @@ import {
   agentSessionsAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
+  unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
@@ -44,7 +46,7 @@ export function TabBar(): React.ReactElement {
   const [tabs, setTabs] = useAtom(tabsAtom)
   const [layout, setLayout] = useAtom(splitLayoutAtom)
   const activeTabId = useAtomValue(activeTabIdAtom)
-  const streamingMap = useAtomValue(tabStreamingMapAtom)
+  const indicatorMap = useAtomValue(tabIndicatorMapAtom)
 
   // Tab 切换时同步 sidebar 状态
   const setAppMode = useSetAtom(appModeAtom)
@@ -52,6 +54,7 @@ export function TabBar(): React.ReactElement {
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
+  const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
 
   // per-conversation/session Map atoms（用于关闭标签时清理）
   const setConvModels = useSetAtom(conversationModelsAtom)
@@ -100,6 +103,14 @@ export function TabBar(): React.ReactElement {
       setAppMode('agent')
       setCurrentAgentSessionId(tab.sessionId)
 
+      // 清除该会话的"已完成未查看"标记
+      setUnviewedCompleted((prev) => {
+        if (!prev.has(tab.sessionId)) return prev
+        const next = new Set(prev)
+        next.delete(tab.sessionId)
+        return next
+      })
+
       const session = agentSessions.find((s) => s.id === tab.sessionId)
       if (session?.workspaceId) {
         setCurrentAgentWorkspaceId(session.workspaceId)
@@ -108,7 +119,7 @@ export function TabBar(): React.ReactElement {
         }).catch(console.error)
       }
     }
-  }, [setLayout, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId])
+  }, [setLayout, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
   const handleClose = React.useCallback((tabId: string) => {
     setTabs((prevTabs) => {
@@ -155,7 +166,7 @@ export function TabBar(): React.ReactElement {
     <TabBarInner
       tabs={tabs}
       activeTabId={activeTabId}
-      streamingMap={streamingMap}
+      streamingMap={indicatorMap}
       onActivate={handleActivate}
       onClose={handleClose}
       onDragStart={handleDragStart}
@@ -174,7 +185,7 @@ function TabBarInner({
 }: {
   tabs: TabItem[]
   activeTabId: string | null
-  streamingMap: Map<string, boolean>
+  streamingMap: Map<string, SessionIndicatorStatus>
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
@@ -238,7 +249,7 @@ function TabBarInner({
             type={tab.type}
             title={tab.title}
             isActive={tab.id === activeTabId}
-            isStreaming={streamingMap.get(tab.id) ?? false}
+            isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}
             isLeaving={hoveredTabId === tab.id && isLeaving}
             onActivate={() => onActivate(tab.id)}

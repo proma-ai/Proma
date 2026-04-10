@@ -683,18 +683,22 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
     // 必须等消息加载完成，否则 messages=[] 会被误判为空对话
     if (messagesLoaded === false) return
 
+    // 流式进行中且有实时内容 → 跳过 fade 直接显示
+    if (streaming && liveMessages && liveMessages.length > 0) {
+      setReady(true)
+      return
+    }
+
     if (messages.length === 0 && (!persistedSDKMessages || persistedSDKMessages.length === 0) && !streaming) {
       setReady(true)
       return
     }
     let cancelled = false
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!cancelled) setReady(true)
-      })
+      if (!cancelled) setReady(true)
     })
     return () => { cancelled = true }
-  }, [messages, streaming, persistedSDKMessages, messagesLoaded])
+  }, [messages, streaming, liveMessages, persistedSDKMessages, messagesLoaded])
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
