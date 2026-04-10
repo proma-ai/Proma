@@ -102,7 +102,12 @@ function formatQuota(apiKey: ApiKeyResponse): string {
 function StatusBadge({ status }: { status: ApiKeyStatus }): React.ReactElement {
   switch (status) {
     case 'ACTIVE':
-      return <Badge className="bg-green-500 border-green-500">启用</Badge>
+      return (
+        <Badge variant="outline" className="gap-1 border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+          启用
+        </Badge>
+      )
     case 'DISABLED':
       return <Badge variant="secondary">禁用</Badge>
     case 'EXPIRED':
