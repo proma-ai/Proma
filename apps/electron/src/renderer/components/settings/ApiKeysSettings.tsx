@@ -53,6 +53,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { SettingsSection, SettingsCard } from './primitives'
 import type { ApiKeyResponse, ApiKeyStatus } from '@proma/shared'
 
@@ -618,13 +619,20 @@ function ApiKeyRow({
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
               {formatKeyDisplay(apiKey.key)}
             </code>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleCopy}
-            >
-              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleCopy}
+                >
+                  {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{copied ? '已复制' : '复制'}</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </TableCell>
         <TableCell>
@@ -644,38 +652,56 @@ function ApiKeyRow({
         </TableCell>
         <TableCell>
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setEditDialogOpen(true)}
-              title="编辑"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleToggleStatus}
-              disabled={toggling}
-              title={apiKey.status === 'ACTIVE' ? '禁用' : '启用'}
-            >
-              {toggling ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : apiKey.status === 'ACTIVE' ? (
-                <EyeOff className="h-3.5 w-3.5" />
-              ) : (
-                <Eye className="h-3.5 w-3.5" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setDeleteDialogOpen(true)}
-              className="text-muted-foreground hover:text-destructive"
-              title="删除"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setEditDialogOpen(true)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>编辑</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleToggleStatus}
+                  disabled={toggling}
+                >
+                  {toggling ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : apiKey.status === 'ACTIVE' ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{apiKey.status === 'ACTIVE' ? '禁用' : '启用'}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>删除</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </TableCell>
       </TableRow>
