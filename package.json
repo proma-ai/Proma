@@ -1,6 +1,6 @@
 {
   "name": "proma",
-  "version": "0.9.1",
+  "version": "0.1.0",
   "description": "The next gen ai software with general agents",
   "type": "module",
   "private": true,
