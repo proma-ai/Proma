@@ -132,7 +132,7 @@ function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; us
 
 // ===== 辅助：从 user 消息中提取纯文本内容 =====
 
-function extractUserText(message: SDKUserMessage): string | null {
+export function extractUserText(message: SDKUserMessage): string | null {
   const content = message.message?.content
   if (!Array.isArray(content)) return null
 
@@ -665,13 +665,13 @@ export function SDKMessageRenderer({
 // ===== 附件解析 =====
 
 /** 解析的附件引用 */
-interface AttachedFileRef {
+export interface AttachedFileRef {
   filename: string
   path: string
 }
 
 /** 解析消息中的 <attached_files> 块，返回文件列表和剩余文本 */
-function parseAttachedFiles(content: string): { files: AttachedFileRef[]; text: string } {
+export function parseAttachedFiles(content: string): { files: AttachedFileRef[]; text: string } {
   const regex = /<attached_files>\n?([\s\S]*?)\n?<\/attached_files>\n*/
   const match = content.match(regex)
   if (!match) return { files: [], text: content }
@@ -690,7 +690,7 @@ function parseAttachedFiles(content: string): { files: AttachedFileRef[]; text: 
 }
 
 /** 判断文件是否为图片类型 */
-function isImageFile(filename: string): boolean {
+export function isImageFile(filename: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(filename)
 }
 
@@ -902,7 +902,10 @@ export function getGroupId(group: MessageGroup): string {
     return groupIdCache.get(group)!
   }
   if (group.type === 'system') {
-    return `system-${group.message.subtype ?? 'unknown'}`
+    if (!groupIdCache.has(group)) {
+      groupIdCache.set(group, `system-${group.message.subtype ?? 'unknown'}-${++fallbackIdCounter}`)
+    }
+    return groupIdCache.get(group)!
   }
   // assistant-turn：取首条 assistant 消息的 uuid
   const first = group.assistantMessages[0]
@@ -945,7 +948,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, isS
 
   if (group.type === 'user') {
     return (
-      <div data-message-id={groupId}>
+      <div data-message-id={groupId} data-message-role="user">
         <UserInputMessage message={group.message} />
       </div>
     )

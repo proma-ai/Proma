@@ -33,7 +33,8 @@ import {
 import {
   agentSessionsAtom,
   currentAgentSessionIdAtom,
-  agentRunningSessionIdsAtom,
+  agentSessionIndicatorMapAtom,
+  unviewedCompletedSessionIdsAtom,
   agentChannelIdAtom,
   agentModelIdAtom,
   agentSessionChannelMapAtom,
@@ -43,6 +44,7 @@ import {
   workspaceCapabilitiesVersionAtom,
   agentSidePanelOpenMapAtom,
 } from '@/atoms/agent-atoms'
+import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import {
   tabsAtom,
   splitLayoutAtom,
@@ -178,7 +180,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const [currentAgentSessionId, setCurrentAgentSessionId] = useAtom(currentAgentSessionIdAtom)
-  const agentRunningIds = useAtomValue(agentRunningSessionIdsAtom)
+  const agentIndicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
+  const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
   const agentModelId = useAtomValue(agentModelIdAtom)
   const setSessionChannelMap = useSetAtom(agentSessionChannelMapAtom)
@@ -513,6 +516,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     openSession('agent', id, title)
     setActiveView('conversations')
     setActiveItem('all-chats')
+    // 清除该会话的"已完成未查看"标记
+    setUnviewedCompleted((prev: Set<string>) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }
 
   /** 重命名 Agent 会话标题 */
@@ -846,7 +856,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 session={session}
                 active={session.id === activeTabId}
                 hovered={session.id === hoveredId}
-                running={agentRunningIds.has(session.id)}
+                indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                 showPinIcon={false}
                 onSelect={() => handleSelectAgentSession(session.id, session.title)}
                 onRequestDelete={() => handleRequestDelete(session.id)}
@@ -915,7 +925,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     session={session}
                     active={session.id === activeTabId}
                     hovered={session.id === hoveredId}
-                    running={agentRunningIds.has(session.id)}
+                    indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                     showPinIcon={!!session.pinned}
                     onSelect={() => handleSelectAgentSession(session.id, session.title)}
                     onRequestDelete={() => handleRequestDelete(session.id)}
@@ -1224,7 +1234,7 @@ interface AgentSessionItemProps {
   session: AgentSessionMeta
   active: boolean
   hovered: boolean
-  running: boolean
+  indicatorStatus: SessionIndicatorStatus
   showPinIcon?: boolean
   onSelect: () => void
   onRequestDelete: () => void
@@ -1240,7 +1250,7 @@ function AgentSessionItem({
   session,
   active,
   hovered,
-  running,
+  indicatorStatus,
   showPinIcon,
   onSelect,
   onRequestDelete,
@@ -1322,10 +1332,22 @@ function AgentSessionItem({
             'truncate text-[13px] leading-5 flex items-center gap-1.5',
             active ? 'text-foreground' : 'text-foreground/80'
           )}>
-            {running && (
+            {indicatorStatus !== 'idle' && (
               <span className="relative flex-shrink-0 size-4 flex items-center justify-center">
-                <span className="absolute size-2 rounded-full bg-blue-500/60 animate-ping" />
-                <span className="relative block size-2 rounded-full bg-blue-500" />
+                {indicatorStatus === 'completed' ? (
+                  <span className="relative block size-2 rounded-full bg-green-500" />
+                ) : (
+                  <>
+                    <span className={cn(
+                      'absolute size-2 rounded-full animate-ping',
+                      indicatorStatus === 'blocked' ? 'bg-orange-500/60' : 'bg-blue-500/60'
+                    )} />
+                    <span className={cn(
+                      'relative block size-2 rounded-full',
+                      indicatorStatus === 'blocked' ? 'bg-orange-500' : 'bg-blue-500'
+                    )} />
+                  </>
+                )}
               </span>
             )}
             {showPinIcon && (
@@ -1355,7 +1377,7 @@ function AgentSessionItem({
           </TooltipTrigger>
           <TooltipContent side="top">{session.pinned ? '取消置顶' : '置顶会话'}</TooltipContent>
         </Tooltip>
-        {!running && (
+        {(indicatorStatus === 'idle' || indicatorStatus === 'completed') && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button

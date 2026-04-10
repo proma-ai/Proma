@@ -82,6 +82,13 @@ export function getDecryptedCredentials(): WeChatCredentials | null {
   }
 }
 
+/** 仅更新默认工作区 ID（不修改凭证） */
+export function updateWeChatDefaultWorkspace(workspaceId: string): void {
+  const configPath = getWeChatConfigPath()
+  const config = getWeChatConfig()
+  writeFileSync(configPath, JSON.stringify({ ...config, defaultWorkspaceId: workspaceId }, null, 2), 'utf-8')
+}
+
 /** 清除微信凭证（登出） */
 export function clearWeChatCredentials(): void {
   const configPath = getWeChatConfigPath()

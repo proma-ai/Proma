@@ -78,6 +78,13 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
 
   const request = requests[0] ?? null
 
+  // ===== Refs：确保 keydown handler 始终读取最新值，消除闭包过期问题 =====
+  const focusedIdxRef = React.useRef(focusedIdx)
+  focusedIdxRef.current = focusedIdx
+  const feedbackTextRef = React.useRef(feedbackText)
+  feedbackTextRef.current = feedbackText
+  const handleActionRef = React.useRef<((action: ExitPlanModeAction) => void) | null>(null)
+
   // 重置状态
   React.useEffect(() => {
     setFocusedIdx(0)
@@ -85,66 +92,8 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
     setFeedbackText('')
   }, [request?.requestId])
 
-  // 键盘导航
-  React.useEffect(() => {
-    if (!request) return
-
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      // 反馈输入框内：仅 Enter 提交
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          if (feedbackText.trim()) {
-            void handleAction('feedback')
-          }
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          setShowFeedback(false)
-          setFocusedIdx(3)
-        }
-        return
-      }
-
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        const count = PLAN_OPTIONS.length
-        const next = e.key === 'ArrowDown'
-          ? (focusedIdx + 1) % count
-          : (focusedIdx - 1 + count) % count
-        setFocusedIdx(next)
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        const option = PLAN_OPTIONS[focusedIdx]
-        if (option) {
-          if (option.action === 'feedback') {
-            setShowFeedback(true)
-          } else {
-            void handleAction(option.action)
-          }
-        }
-      } else if (e.key >= '1' && e.key <= '4') {
-        const idx = parseInt(e.key) - 1
-        const option = PLAN_OPTIONS[idx]
-        if (option) {
-          setFocusedIdx(idx)
-          if (option.action === 'feedback') {
-            setShowFeedback(true)
-          } else {
-            void handleAction(option.action)
-          }
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [request?.requestId, focusedIdx, feedbackText, showFeedback])
-
-  if (!request) return null
-
   const handleAction = async (action: ExitPlanModeAction): Promise<void> => {
-    if (submitting) return
+    if (submitting || !request) return
     setSubmitting(true)
     try {
       await window.electronAPI.respondExitPlanMode({
@@ -167,6 +116,68 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       setSubmitting(false)
     }
   }
+
+  handleActionRef.current = handleAction
+
+  // 键盘导航：只在 requestId 变化时重建 handler，内部通过 ref 读取最新值
+  React.useEffect(() => {
+    if (!request) return
+
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      const curFocusIdx = focusedIdxRef.current
+
+      // 反馈输入框内：仅 Enter 提交（输入法组合中跳过）
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault()
+          if (feedbackTextRef.current.trim()) {
+            handleActionRef.current?.('feedback')
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setShowFeedback(false)
+          setFocusedIdx(3)
+        }
+        return
+      }
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const count = PLAN_OPTIONS.length
+        const next = e.key === 'ArrowDown'
+          ? (curFocusIdx + 1) % count
+          : (curFocusIdx - 1 + count) % count
+        setFocusedIdx(next)
+      } else if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault()
+        const option = PLAN_OPTIONS[curFocusIdx]
+        if (option) {
+          if (option.action === 'feedback') {
+            setShowFeedback(true)
+          } else {
+            handleActionRef.current?.(option.action)
+          }
+        }
+      } else if (e.key >= '1' && e.key <= '4') {
+        const idx = parseInt(e.key) - 1
+        const option = PLAN_OPTIONS[idx]
+        if (option) {
+          setFocusedIdx(idx)
+          if (option.action === 'feedback') {
+            setShowFeedback(true)
+          } else {
+            handleActionRef.current?.(option.action)
+          }
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [request?.requestId])
+
+  if (!request) return null
 
   return (
     <div className="mx-4 mb-3 rounded-xl bg-card shadow-lg overflow-hidden animate-in slide-in-from-bottom-2 duration-200">
@@ -237,8 +248,9 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()
+                  e.stopPropagation()
                   if (feedbackText.trim()) {
                     void handleAction('feedback')
                   }
@@ -264,7 +276,7 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       {/* 底部提示 */}
       <div className="flex items-center px-4 pb-3">
         <span className="text-[10px] text-muted-foreground/40">
-          ↑↓ 选择 · Enter 确认 · 1-4 快速选择
+          点击选择 · ↑↓ Enter 确认 · 1-4 快速选择
         </span>
       </div>
     </div>

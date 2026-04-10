@@ -57,6 +57,8 @@ import {
   INBOX_RETRY_CONFIG,
   type TaskNotificationSummary,
 } from './agent-team-reader'
+import { validateToolInput } from './agent-tool-input-validator'
+import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 
 // ===== 类型定义 =====
 
@@ -70,7 +72,7 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
 }
@@ -1133,6 +1135,29 @@ export class AgentOrchestrator {
       const canUseTool = async (toolName: string, input: Record<string, unknown>, options: CanUseToolOptions): Promise<PermissionResult> => {
         const currentMode = getPermissionMode()
 
+        // ── 参数校验守卫（所有模式、所有工具，优先于权限检查） ──
+        const validationFailure = validateToolInput(toolName, input)
+        if (validationFailure) {
+          console.warn(`[Agent 工具验证] 参数缺失: tool=${toolName}, mode=${currentMode}`)
+          return validationFailure
+        }
+
+        // ── Write 大文件 token 截断防护 ──
+        if (toolName === 'Write' && typeof input.content === 'string') {
+          const estimatedTokens = estimateTokenCount(input.content)
+          if (estimatedTokens > WRITE_CONTENT_TOKEN_THRESHOLD) {
+            console.warn(
+              `[Agent 工具验证] Write 内容过大: tokens≈${estimatedTokens}, chars=${input.content.length}, file=${String(input.file_path)}`,
+            )
+            return {
+              behavior: 'deny' as const,
+              message:
+                `The content for Write tool (~${estimatedTokens} estimated tokens, ${input.content.length} chars) is too large and may be truncated. ` +
+                `Please split the write into smaller sequential steps: write the first portion of the file now, then use Edit tool to append remaining sections incrementally.`,
+            }
+          }
+        }
+
         // ── EnterPlanMode / ExitPlanMode 处理 ──
 
         // 完全自动模式：透明化（用户选择了完全信任 Agent）
@@ -1142,6 +1167,7 @@ export class AgentOrchestrator {
 
         // ExitPlanMode：只有 Agent 确实进入过 Plan 模式才走审批，否则静默放行
         if (toolName === 'ExitPlanMode') {
+          console.log(`[canUseTool] ExitPlanMode: signal.aborted=${options.signal.aborted}, planModeEntered=${planModeEntered}, mode=${currentMode}`)
           if (!planModeEntered) {
             return { behavior: 'allow' as const, updatedInput: input }
           }
@@ -1188,11 +1214,20 @@ export class AgentOrchestrator {
             if (PLAN_MODE_ALLOWED_TOOLS.has(toolName)) {
               return { behavior: 'allow' as const, updatedInput: input }
             }
-            // 允许 Write 到 .context/plan/ 目录（计划文件输出）
+            // 允许 Write 到 .context/plan/ 目录（Proma 自定义路径）
+            // 以及 .context/ 下直接子文件 .md（SDK 生成的 plan 文件如 .context/<slug>.md）
             if (toolName === 'Write') {
               const filePath = typeof input.file_path === 'string' ? input.file_path : ''
               if (filePath.includes('.context/plan/')) {
                 return { behavior: 'allow' as const, updatedInput: input }
+              }
+              // SDK plan 文件：.context/<slug>.md — 仅允许直接子文件，防止 path traversal
+              const ctxIdx = filePath.lastIndexOf('.context/')
+              if (ctxIdx !== -1) {
+                const afterCtx = filePath.substring(ctxIdx + '.context/'.length)
+                if (afterCtx.endsWith('.md') && !afterCtx.includes('/') && !afterCtx.includes('..')) {
+                  return { behavior: 'allow' as const, updatedInput: input }
+                }
               }
             }
             // MCP 工具（以 mcp__ 开头）允许调用（调研用）
@@ -1226,11 +1261,16 @@ export class AgentOrchestrator {
         env: sdkEnv,
         ...(maxTurns != null && { maxTurns }),
         sdkPermissionMode: initialPermissionMode,
-        // 始终为 true：Worker 子代理使用 SDK 内部 mailbox 通信，
-        // 若不跳过权限检查会导致 Worker 阻塞超时并提前停止
-        allowDangerouslySkipPermissions: true,
+        // 当提供 canUseTool 回调时必须为 false，否则 CLI 同时收到
+        // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
+        // 两个矛盾的指令，导致 ExitPlanMode/AskUserQuestion 等交互式工具失败。
+        // canUseTool 已完整处理所有权限模式（plan/acceptEdits/bypassPermissions），
+        // Worker 子代理在 bypassPermissions 模式下也会被自动放行。
+        allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
         ...(initialPermissionMode === 'acceptEdits' && { allowedTools: [...SAFE_TOOLS] }),
+        // claude_code preset 提供基础环境信息（platform/shell/OS/git/model/知识截止日期等）
+        // buildSystemPrompt 追加 Proma 特有指令（角色定义、SubAgent 策略、工作区信息等）
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -1267,7 +1307,7 @@ export class AgentOrchestrator {
         })(),
         // SDK 0.2.52+ 新增选项（从 settings 读取）
         ...(appSettings.agentThinking && { thinking: appSettings.agentThinking }),
-        ...(appSettings.agentEffort && { effort: appSettings.agentEffort }),
+        effort: appSettings.agentEffort ?? 'high',
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
@@ -1401,6 +1441,8 @@ export class AgentOrchestrator {
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // Teams 活跃时延迟 result 消息，避免前端提前标记 teammates 为 stopped
           let deferredResultMessage: SDKMessage | null = null
+          // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
+          let capturedResultSubtype: string | undefined
 
           while (!loopAbort.signal.aborted) {
             if (!pendingNext) {
@@ -1563,6 +1605,7 @@ export class AgentOrchestrator {
 
             // Turn 结束时：持久化累积消息
             if (msg.type === 'result') {
+              capturedResultSubtype = (msg as { subtype?: string }).subtype
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
             }
@@ -1727,7 +1770,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
+          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration, resultSubtype: capturedResultSubtype })
 
           break  // 成功完成，退出重试循环
 

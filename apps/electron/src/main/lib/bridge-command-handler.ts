@@ -525,6 +525,13 @@ export class BridgeCommandHandler {
       return
     }
 
+    // 即时确认：[workspace_name]->[session_title]: ⏳ Agent 处理中...
+    const workspace = binding.workspaceId ? getAgentWorkspace(binding.workspaceId) : undefined
+    const session = getAgentSessionMeta(binding.sessionId)
+    const wsName = workspace?.name ?? '默认'
+    const chatName = session?.title ?? '新会话'
+    await this.send(chatId, `${wsName} → ${chatName}: ⏳ Agent 处理中...`, contextData)
+
     // 初始化回复缓冲
     this.sessionBuffers.set(binding.sessionId, {
       text: '',

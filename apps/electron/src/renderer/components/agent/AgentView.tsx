@@ -289,6 +289,18 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // 渠道已选但模型未选时，自动选择第一个可用模型
   const globalChannels = useAtomValue(channelsAtom)
+
+  // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
+  const hasAvailableModel = React.useMemo(() => {
+    // Proma 官方渠道（商业版）：只要 enabled 且有可用模型，直接视为可用
+    const promaOfficial = globalChannels.find((c) => c.id === 'proma-official')
+    if (promaOfficial?.enabled && promaOfficial.models.some((m) => m.enabled)) return true
+    // 其他渠道：需在 agentChannelIds 白名单中
+    if (!agentChannelIds || agentChannelIds.length === 0) return false
+    return globalChannels.some(
+      (c) => c.enabled && agentChannelIds.includes(c.id) && c.models.some((m) => m.enabled),
+    )
+  }, [globalChannels, agentChannelIds])
   React.useEffect(() => {
     if (!agentChannelId || agentModelId) return
 
@@ -743,7 +755,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const text = inputContent.trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
-    if ((!effectiveText && pendingFiles.length === 0) || !agentChannelId) return
+    if ((!effectiveText && pendingFiles.length === 0) || !agentChannelId || !hasAvailableModel) return
 
     // 上一条消息仍在处理中，直接追加发送
     if (streaming) {
@@ -953,7 +965,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [inputContent, pendingFiles, attachedDirs, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap])
+  }, [inputContent, pendingFiles, attachedDirs, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
@@ -1149,7 +1161,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0
 
   const hasTextInput = inputContent.trim().length > 0
-  const canSend = (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && (!streaming || hasTextInput)
+  const canSend = (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   return (
     <AgentSessionProvider sessionId={sessionId}>
@@ -1209,11 +1221,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             onDrop={handleDrop}
           >
             {(isPlanMode || isPermissionPlanMode) && !isDragOver && <PlanModeDashedBorder />}
-            {/* 无 Agent 渠道提示 */}
-            {agentChannelIds.length === 0 && (
+            {/* 无 Agent 渠道或无可用模型提示 */}
+            {(agentChannelIds.length === 0 || !hasAvailableModel) && (
               <div className="flex items-center gap-2 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
                 <Settings size={14} />
-                <span>请在设置中选择 Agent 供应商</span>
+                <span>{!agentChannelId ? '请在设置中选择 Agent 供应商' : '暂无可用模型，请在设置中启用 Agent 渠道并配置模型'}</span>
                 <button
                   type="button"
                   className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
@@ -1271,13 +1283,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
               placeholder={
-                agentChannelId
+                agentChannelId && hasAvailableModel
                   ? sendWithCmdEnter
                     ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
                     : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP)'
-                  : '请先在设置中选择 Agent 供应商'
+                  : !agentChannelId
+                    ? '请先在设置中选择 Agent 供应商'
+                    : '暂无可用模型，请先在设置中启用渠道'
               }
-              disabled={!agentChannelId}
+              disabled={!agentChannelId || !hasAvailableModel}
               autoFocusTrigger={sessionId}
               collapsible
               workspacePath={sessionPath}

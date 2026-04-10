@@ -85,8 +85,8 @@ interface SessionBuffer {
 // ===== Bridge =====
 
 class FeishuBridge {
-  /** Bot 配置（构造时注入） */
-  private readonly botConfig: FeishuBotConfig
+  /** Bot 配置（构造时注入，workspace 切换时同步更新） */
+  private botConfig: FeishuBotConfig
 
   /** SDK Client（发消息用） */
   private client: InstanceType<typeof import('@larksuiteoapi/node-sdk').Client> | null = null
@@ -1005,6 +1005,8 @@ class FeishuBridge {
       defaultChannelId: this.botConfig.defaultChannelId,
       defaultModelId: this.botConfig.defaultModelId,
     })
+    // 同步更新内存中的 botConfig，避免后续读到旧快照
+    this.botConfig = { ...this.botConfig, defaultWorkspaceId: match.id }
 
     // 列出该工作区下最近 10 条会话（序号为全局排序位置）
     const sessions = listAgentSessions()

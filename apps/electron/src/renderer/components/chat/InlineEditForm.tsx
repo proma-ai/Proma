@@ -180,7 +180,7 @@ export function InlineEditForm({ message, onSubmit, onCancel }: InlineEditFormPr
   return (
     <div
       className={cn(
-        'space-y-2 rounded-xl border border-border/60 bg-background/40 p-2',
+        'w-full space-y-2 rounded-xl border border-border/60 bg-background/40 p-2',
         isDragOver && 'border-dashed border-primary/70 bg-primary/5',
       )}
       onDragOver={(event) => {

@@ -30,7 +30,7 @@ interface ScrollMinimapProps {
 }
 
 /** 最少消息数才显示迷你地图 */
-const MIN_ITEMS = 4
+const MIN_ITEMS = 1
 /** 迷你地图最多渲染的横杠数 */
 const MAX_BARS = 20
 

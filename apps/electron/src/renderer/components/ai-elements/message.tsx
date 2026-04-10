@@ -290,7 +290,14 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
     }
   }
 
-  return <code {...codeProps}>{codeChildren}</code>
+  return (
+    <code
+      className="rounded bg-foreground/10 px-[0.35em] py-[0.15em] text-[0.875em] font-medium"
+      {...codeProps}
+    >
+      {codeChildren}
+    </code>
+  )
 })
 
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */

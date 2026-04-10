@@ -778,3 +778,9 @@
 .theme-forest-dark .plan-mode-border .plan-mode-stroke {
   stroke: hsl(151 40% 45% / 0.7);
 }
+
+/* ===== prose inline code：移除 Tailwind Typography 默认的前后反引号伪元素 ===== */
+.prose code::before,
+.prose code::after {
+  content: none;
+}

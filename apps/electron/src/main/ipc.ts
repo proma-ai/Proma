@@ -1086,7 +1086,9 @@ export function registerIpcHandlers(): void {
       // 同步更新该工作区下所有运行中的 session
       const sessions = listAgentSessions()
       for (const session of sessions) {
-        if (session.workspaceId === workspaceSlug && isAgentSessionActive(session.id)) {
+        if (!session.workspaceId || !isAgentSessionActive(session.id)) continue
+        const sessionWs = getAgentWorkspace(session.workspaceId)
+        if (sessionWs?.slug === workspaceSlug) {
           updateAgentPermissionMode(session.id, mode).catch((err) => {
             console.warn(`[IPC] 运行中权限模式切换失败: sessionId=${session.id}`, err)
           })
@@ -1305,7 +1307,10 @@ export function registerIpcHandlers(): void {
         if (targetMode) {
           const meta = getAgentSessionMeta(sessionId)
           if (meta?.workspaceId) {
-            setWorkspacePermissionMode(meta.workspaceId, targetMode)
+            const ws = getAgentWorkspace(meta.workspaceId)
+            if (ws) {
+              setWorkspacePermissionMode(ws.slug, targetMode)
+            }
           }
           event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
             sessionId,

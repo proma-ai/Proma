@@ -414,6 +414,42 @@ export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
   return ids
 })
 
+/** 侧边栏会话指示点状态 */
+export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed'
+
+/** 已完成但用户尚未查看的会话 ID 集合 */
+export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
+/**
+ * 每个会话的指示点状态（只包含非 idle 的会话）
+ * 优先级：blocked > running > completed > idle
+ */
+export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((get) => {
+  const streamStates = get(agentStreamingStatesAtom)
+  const pendingPerms = get(allPendingPermissionRequestsAtom)
+  const pendingAskUser = get(allPendingAskUserRequestsAtom)
+  const pendingExitPlan = get(allPendingExitPlanRequestsAtom)
+  const unviewedCompleted = get(unviewedCompletedSessionIdsAtom)
+
+  const map = new Map<string, SessionIndicatorStatus>()
+
+  for (const [id, state] of streamStates) {
+    if (!state.running) continue
+    const hasBlock = (pendingPerms.get(id)?.length ?? 0) > 0
+      || (pendingAskUser.get(id)?.length ?? 0) > 0
+      || (pendingExitPlan.get(id)?.length ?? 0) > 0
+    map.set(id, hasBlock ? 'blocked' : 'running')
+  }
+
+  for (const id of unviewedCompleted) {
+    if (!map.has(id)) {
+      map.set(id, 'completed')
+    }
+  }
+
+  return map
+})
+
 /**
  * 追加工具名到历史记录（不可变版本）
  * 相同工具不连续重复，超出上限则删除最旧的

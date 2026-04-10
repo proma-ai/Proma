@@ -25,6 +25,7 @@ import {
 } from '@/components/ai-elements/conversation'
 import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
+import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
 import { useSmoothStream } from '@proma/ui'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
@@ -39,7 +40,7 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, type MessageGroup } from './SDKMessageRenderer'
 import type { AgentMessage, AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -735,30 +736,35 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
     return [...persisted, ...live]
   }, [persistedSDKMessages, liveMessages])
 
-  // Turn 分组（持久化消息按 turn 分组渲染）
-  const persistedGroups = React.useMemo(() => {
-    if (!persistedSDKMessages || persistedSDKMessages.length === 0) return []
-    return groupIntoTurns(persistedSDKMessages, sessionModelId)
-  }, [persistedSDKMessages, sessionModelId])
+  // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
+  const allGroups = React.useMemo(() => {
+    if (!useSDKRenderer) return []
+    return groupIntoTurns(allSDKMessages, sessionModelId)
+  }, [useSDKRenderer, allSDKMessages, sessionModelId])
 
-  // Turn 分组（实时消息同样按 turn 分组，避免多个气泡最终合并的跳变）
-  const liveGroups = React.useMemo(() => {
-    if (!liveMessages || liveMessages.length === 0) return []
-    return groupIntoTurns(liveMessages, sessionModelId)
-  }, [liveMessages, sessionModelId])
+  // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
+  const liveGroupSet = React.useMemo(() => {
+    if (!liveMessages || liveMessages.length === 0) return new Set<MessageGroup>()
+    const liveSet = new Set<SDKMessage>(liveMessages)
+    const result = new Set<MessageGroup>()
+    for (const group of allGroups) {
+      let isLive = false
+      if (group.type === 'user' || group.type === 'system') {
+        isLive = liveSet.has(group.message as SDKMessage)
+      } else {
+        // assistant-turn 可能被 mergeAdjacentSameModelTurns 合并，
+        // 需检查任意一条 assistantMessage 是否来自实时流
+        isLive = group.assistantMessages.some((m) => liveSet.has(m as SDKMessage))
+      }
+      if (isLive) result.add(group)
+    }
+    return result
+  }, [allGroups, liveMessages])
 
-  // 迷你地图数据 — 复用 persistedGroups / liveGroups，确保 getGroupId 对同一对象引用返回一致的 ID
+  // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
   const minimapItems: MinimapItem[] = React.useMemo(
     () => {
       if (useSDKRenderer) {
-        // 去重：liveGroups 中可能包含与 persistedGroups 相同的消息
-        const seenIds = new Set(persistedGroups.map(getGroupId))
-        const allGroups = [...persistedGroups, ...liveGroups.filter((g) => {
-          const id = getGroupId(g)
-          if (seenIds.has(id)) return false
-          seenIds.add(id)
-          return true
-        })]
         return allGroups.map((group) => ({
           id: getGroupId(group),
           role: group.type === 'user' ? 'user' as const
@@ -778,7 +784,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
         model: m.model,
       }))
     },
-    [useSDKRenderer, persistedGroups, liveGroups, messages, userProfile.avatar]
+    [useSDKRenderer, allGroups, messages, userProfile.avatar]
   )
 
   // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）
@@ -792,8 +798,32 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
     }
   }, [sessionId, minimapItems, setMinimapCache])
 
+  // 最后一条用户消息的数据 — 供 StickyUserMessage 使用
+  const lastUserMessageData = React.useMemo(() => {
+    if (useSDKRenderer) {
+      const lastUserGroup = [...allGroups].reverse().find((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
+      if (!lastUserGroup) return null
+      const rawText = extractUserText(lastUserGroup.message) ?? ''
+      const { files, text } = sdkParseAttachedFiles(rawText)
+      return {
+        id: getGroupId(lastUserGroup),
+        text,
+        attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
+      }
+    }
+    // 旧格式回退
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
+    if (!lastUserMsg) return null
+    const { files, text } = parseAttachedFiles(lastUserMsg.content ?? '')
+    return {
+      id: lastUserMsg.id ?? null,
+      text,
+      attachments: files.map((f) => ({ filename: f.filename, isImage: isImageFile(f.filename) })),
+    }
+  }, [useSDKRenderer, allGroups, messages])
+
   // 实时消息中是否已有可渲染的助手内容
-  const hasLiveAssistantContent = liveGroups.some((g) => g.type === 'assistant-turn')
+  const hasLiveAssistantContent = allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
 
   return (
     <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? 'opacity-100 transition-opacity duration-200' : 'opacity-0'}>
@@ -803,21 +833,22 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
           <EmptyState />
         ) : (
           <>
-            {/* 持久化消息渲染 */}
+            {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
             {useSDKRenderer ? (
-              // Turn 分组渲染 — 每个 turn 只有一个模型 header
-              persistedGroups.map((group, idx) => {
+              allGroups.map((group, idx) => {
+                const isLive = liveGroupSet.has(group)
                 // 仅在最后一个 assistant-turn 上显示"已被用户中断" badge
                 const isLastAssistantTurn = !streaming && stoppedByUser
                   && group.type === 'assistant-turn'
-                  && idx === persistedGroups.findLastIndex((g) => g.type === 'assistant-turn')
+                  && idx === allGroups.findLastIndex((g) => g.type === 'assistant-turn')
                 return (
                   <MessageGroupRenderer
                     key={getGroupId(group)}
                     group={group}
                     allMessages={allSDKMessages}
                     basePath={sessionPath || undefined}
-                    onFork={onFork}
+                    onFork={isLive ? undefined : onFork}
+                    isStreaming={isLive || undefined}
                     stoppedByUser={isLastAssistantTurn || undefined}
                     sessionModelId={sessionModelId}
                   />
@@ -826,7 +857,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
             ) : (
               // 旧格式回退 — AgentMessageItem
               messages.map((msg: AgentMessage) => (
-                <div key={msg.id} data-message-id={msg.id}>
+                <div key={msg.id} data-message-id={msg.id} data-message-role={msg.role === 'user' ? 'user' : undefined}>
                   <AgentMessageItem
                     message={msg}
                     sessionPath={sessionPath}
@@ -838,18 +869,6 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
                 </div>
               ))
             )}
-
-            {/* 实时 SDKMessage 渲染（流式期间，按 Turn 分组 — 与持久化渲染一致） */}
-            {liveGroups.map((group) => (
-              <MessageGroupRenderer
-                key={getGroupId(group)}
-                group={group}
-                allMessages={allSDKMessages}
-                basePath={sessionPath || undefined}
-                isStreaming
-                sessionModelId={sessionModelId}
-              />
-            ))}
 
             {/* 有实时助手内容时：仅追加运行指示器 */}
             {hasLiveAssistantContent && (streaming || retrying) && (
@@ -887,6 +906,13 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
       </ConversationContent>
       <ScrollMinimap items={minimapItems} />
       <ConversationScrollButton />
+      {lastUserMessageData && (
+        <StickyUserMessage
+          lastUserGroupId={lastUserMessageData.id}
+          text={lastUserMessageData.text}
+          attachments={lastUserMessageData.attachments}
+        />
+      )}
     </Conversation>
   )
 }

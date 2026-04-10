@@ -79,8 +79,8 @@ class DingTalkBridge {
   private webhookCache = new Map<string, string>()
   private readonly MAX_WEBHOOK_CACHE = 200
 
-  /** Bot 配置（构造时传入） */
-  readonly botConfig: DingTalkBotConfig
+  /** Bot 配置（构造时传入，workspace 切换时同步更新） */
+  botConfig: DingTalkBotConfig
 
   /** 通用命令处理器 */
   private commandHandler: BridgeCommandHandler
@@ -115,6 +115,18 @@ class DingTalkBridge {
         },
       },
       getDefaultWorkspaceId: () => this.botConfig.defaultWorkspaceId,
+      onWorkspaceSwitched: async (workspaceId) => {
+        const { saveDingTalkBotConfig } = await import('./dingtalk-config')
+        saveDingTalkBotConfig({
+          id: this.botConfig.id,
+          name: this.botConfig.name,
+          enabled: this.botConfig.enabled,
+          clientId: this.botConfig.clientId,
+          clientSecret: '',
+          defaultWorkspaceId: workspaceId,
+        })
+        this.botConfig = { ...this.botConfig, defaultWorkspaceId: workspaceId }
+      },
     })
   }
 

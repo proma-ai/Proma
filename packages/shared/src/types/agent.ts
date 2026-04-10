@@ -235,7 +235,7 @@ export interface SDKUserMessage {
 /** SDK result 消息（查询结束时返回） */
 export interface SDKResultMessage {
   type: 'result'
-  subtype: 'success' | 'error'
+  subtype: 'success' | 'error' | 'error_max_turns' | 'error_max_budget_usd' | 'error_during_execution' | (string & {})
   usage: {
     input_tokens: number
     output_tokens: number
@@ -810,6 +810,8 @@ export interface AgentStreamCompletePayload {
   stoppedByUser?: boolean
   /** 本轮流式开始时间戳（用于区分新旧流，防止旧流的 complete 事件重置新流状态） */
   startedAt?: number
+  /** SDK result 消息的 subtype（success / error_max_turns / error_max_budget_usd / error_during_execution 等） */
+  resultSubtype?: string
 }
 
 // ===== 文件浏览器 =====

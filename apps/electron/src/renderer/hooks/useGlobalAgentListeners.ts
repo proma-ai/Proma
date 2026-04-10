@@ -8,6 +8,7 @@
  */
 
 import { useEffect } from 'react'
+import { unstable_batchedUpdates } from 'react-dom'
 import { useStore } from 'jotai'
 import {
   agentStreamingStatesAtom,
@@ -26,6 +27,9 @@ import {
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
   finalizeStreamingActivities,
+  currentAgentSessionIdAtom,
+  currentAgentWorkspaceIdAtom,
+  unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import {
   notificationsEnabledAtom,
@@ -33,9 +37,11 @@ import {
   notificationSoundsAtom,
   sendDesktopNotification,
 } from '@/atoms/notifications'
+import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, splitLayoutAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { NotificationSoundType } from '@/types/settings'
+import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
 
 // ============================================================================
@@ -253,6 +259,13 @@ export function useGlobalAgentListeners(): void {
       const result = openTab(tabs, layout, { type: 'agent', sessionId, title: sessionTitle })
       store.set(tabsAtom, result.tabs)
       store.set(splitLayoutAtom, result.layout)
+      store.set(appModeAtom, 'agent')
+      store.set(currentAgentSessionIdAtom, sessionId)
+      const sessions = store.get(agentSessionsAtom)
+      const session = sessions.find((s) => s.id === sessionId)
+      if (session?.workspaceId) {
+        store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
+      }
     }
 
     /** 获取会话标题 */
@@ -293,6 +306,7 @@ export function useGlobalAgentListeners(): void {
     // ===== 1. 流式事件 =====
     const cleanupEvent = window.electronAPI.onAgentStreamEvent(
       (streamEvent: AgentStreamEvent) => {
+        unstable_batchedUpdates(() => {
         const { sessionId, payload } = streamEvent
 
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
@@ -483,12 +497,14 @@ export function useGlobalAgentListeners(): void {
             })
           }
         }
+        }) // unstable_batchedUpdates
       }
     )
 
     // ===== 2. 流式完成 =====
     const cleanupComplete = window.electronAPI.onAgentStreamComplete(
       (data: AgentStreamCompletePayload) => {
+        unstable_batchedUpdates(() => {
         // 发送桌面通知（任务完成，始终播放提示音）
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
@@ -524,6 +540,16 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
+        // 如果用户当前不在查看该会话，标记为"未查看的已完成"
+        const currentSessionId = store.get(currentAgentSessionIdAtom)
+        if (data.sessionId !== currentSessionId) {
+          store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
+            const next = new Set(prev)
+            next.add(data.sessionId)
+            return next
+          })
+        }
+
         // 标记用户主动打断状态
         if (data.stoppedByUser) {
           store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
@@ -531,6 +557,17 @@ export function useGlobalAgentListeners(): void {
             next.add(data.sessionId)
             return next
           })
+        }
+
+        // 非正常结束时显示截断提示
+        if (data.resultSubtype && data.resultSubtype !== 'success' && !data.stoppedByUser) {
+          const messages: Record<string, string> = {
+            error_max_turns: '任务被中断：已达到轮次上限。继续对话可让 Agent 接着完成。',
+            error_max_budget_usd: '任务被中断：已达到预算上限。',
+            error_during_execution: '任务执行过程中发生错误。',
+          }
+          const msg = messages[data.resultSubtype] ?? `任务异常结束（${data.resultSubtype}）`
+          toast.warning(msg, { duration: 8000 })
         }
 
         // 清除 Plan 模式状态（防止异常退出时残留）
@@ -587,12 +624,14 @@ export function useGlobalAgentListeners(): void {
           bumpRefresh()
         }
         finalize()
+        }) // unstable_batchedUpdates
       }
     )
 
     // ===== 3. 流式错误 =====
     const cleanupError = window.electronAPI.onAgentStreamError(
       (data: { sessionId: string; error: string }) => {
+        unstable_batchedUpdates(() => {
         console.error('[GlobalAgentListeners] 流式错误:', data.error)
 
         // 存储错误消息
@@ -611,6 +650,7 @@ export function useGlobalAgentListeners(): void {
             return map
           })
         }
+        }) // unstable_batchedUpdates
       }
     )
 

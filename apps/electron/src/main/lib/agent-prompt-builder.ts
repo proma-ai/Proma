@@ -4,7 +4,8 @@
  * 负责构建 Agent 的完整系统提示词和每条消息的动态上下文。
  *
  * 设计策略：
- * - 静态 system prompt（buildSystemPrompt）：完整的自定义系统提示词，替代 claude_code preset 以大幅降低 token 消耗
+ * - 静态 system prompt（buildSystemPrompt）：追加到 claude_code preset 之后的自定义系统提示词
+ *   preset 提供基础环境信息（platform/shell/OS/git/model 等），本模块追加 Proma 特有的指令
  * - 动态 per-message 上下文（buildDynamicContext）：注入到用户消息前，每次实时读取磁盘
  */
 
@@ -89,8 +90,10 @@ interface SystemPromptContext {
 /**
  * 构建完整的系统提示词
  *
- * 替代 claude_code preset，直接返回自定义系统提示词字符串。
- * 相比 preset（~15-20K tokens），自定义版本仅 ~2K tokens，大幅降低每次请求的 token 消耗。
+ * 构建追加到 claude_code preset 之后的自定义系统提示词。
+ *
+ * claude_code preset 提供：环境信息（platform/shell/OS）、git 状态、模型信息、知识截止日期、currentDate 等。
+ * 本函数追加：Proma Agent 角色定义、工具使用指南、SubAgent 策略、工作区信息、记忆系统等。
  * 工具（Read/Write/Edit/Bash 等）由 SDK 独立注册，不受 systemPrompt 影响。
  */
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
@@ -115,7 +118,8 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - **路径规则**：你的 cwd 是会话目录，不是项目源码目录。操作附加工作目录中的文件时，Glob/Grep/Read 的 path 参数必须使用**绝对路径**（如 \`/Users/xxx/project/src\`），不要用相对路径
 - 处理多个独立任务时，尽量并行调用工具以提高效率
 - 用户可能也会在工作区文件夹下添加文件或者附加文件作为长期上下文或者长期处理任务，要注意及时感知这些变化并利用起来
-- **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子`)
+- **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子
+- **大文件写入**：使用 Write 写入超过约 10,000 字（特别是中文/日文/韩文等 CJK 字符）时，主动拆分为多次写入——先 Write 首段，再用 Edit 追加后续段落，避免 token 截断导致文件内容不完整`)
 
   // SubAgent 委派策略
   sections.push(`## SubAgent 委派策略
@@ -179,7 +183,7 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 2. 根据探索结果，委派 \`researcher\` 分析方案（简单对比用 haiku，深度分析用 sonnet）
 3. 整合所有信息，将调研结果输出到 \`.context/note.md\`
 4. 不确定的部分调用头脑风暴 Skill 与用户确认
-5. 将执行计划输出到 \`.context/plan/\` 目录，确保每一步在用户掌控之下
+5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
 6. 执行实施，将进度更新到 \`.context/todo.md\`
 7. 完成后委派 \`code-reviewer\` 做最终质量检查（核心逻辑变更用 sonnet 审查）`)
 
@@ -321,13 +325,21 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 | 简单问答、一次性修改 | → 直接回复，不写文件 |
 | 执行计划 | → 写入 .context/plan/ 目录 |`)
 
+  // 任务完成标准
+  sections.push(`## 任务完成标准
+
+- 承诺完成的任务必须执行到底，不要在中途停下来等待确认（除非是计划模式）
+- 最终回复必须包含用户期望的实际交付物（代码、分析结果、文档内容），而不仅是"已完成"状态汇报
+- 如果将工作委派给 SubAgent，必须在收到结果后将**完整的关键发现**呈现给用户，不要只转述一句话摘要
+- 写入文件后，告知用户文件路径和关键内容摘要，确保用户能找到产出`)
+
   // 交互规范
   sections.push(`## 交互规范
 
 1. 优先使用中文回复，保留技术术语
 2. 与用户确认破坏性操作后再执行
 3. 自称 Proma Agent
-4. 回复简洁直接，不要冗长
+4. 日常交流简洁直接；但当任务的交付物本身就是文本输出时（分析报告、文档、方案对比），完整输出内容，不要压缩
 5. **会话恢复**：每次收到新任务时，先检查会话级和工作区级两个 \`.context/\` 目录（note.md、todo.md）以及当前目录的 CLAUDE.md
 6. **自检习惯**：复杂任务执行过程中，定期回顾 CLAUDE.md 和两级 .context/ 中的内容，确保行为与已记录的规范和计划保持一致`)
 
@@ -352,7 +364,7 @@ interface DynamicContext {
 export function buildDynamicContext(ctx: DynamicContext): string {
   const sections: string[] = []
 
-  // 当前时间
+  // 当前时间（含时区和分钟精度，补充 SDK preset 的 currentDate 日期级信息）
   const now = new Date()
   const timeStr = now.toLocaleString('en-US', {
     weekday: 'long',
