@@ -43,30 +43,38 @@ let healthCache: HealthCache | null = null
 /**
  * 将原始健康数据转换为电量条格式
  *
+ * 使用比例分配：将所有 checks 均匀分布到 cellCount 格中，
+ * 确保无论后端返回多少条数据，进度条都能填满。
+ *
  * @param checks 健康检查记录列表（按时间正序）
  * @param cellCount 电量条格数（默认 25）
  * @returns 电量条数据
  */
 function buildHealthBar(checks: HealthCheckRecord[], cellCount = 25): HealthBarCell[] {
+  // 无数据时全部灰色
+  if (checks.length === 0) {
+    return Array.from({ length: cellCount }, () => ({
+      status: 'gray' as HealthBarCellStatus,
+      startTime: '',
+      endTime: '',
+    }))
+  }
+
   const cells: HealthBarCell[] = []
+  const total = checks.length
 
-  // 每格代表 2 次检测
-  const checksPerCell = 2
-
-  // 从最旧数据向新分组（左边是旧，右边是新）
   for (let i = 0; i < cellCount; i++) {
-    const startIdx = i * checksPerCell
-    const endIdx = startIdx + checksPerCell
+    const startIdx = Math.floor((i / cellCount) * total)
+    const endIdx = Math.floor(((i + 1) / cellCount) * total)
     const cellChecks = checks.slice(startIdx, endIdx)
 
     let status: HealthBarCellStatus = 'gray'
-    if (cellChecks.length === 2) {
+    if (cellChecks.length > 0) {
       const healthyCount = cellChecks.filter((c) => c.healthy).length
-      if (healthyCount === 2) status = 'green'
-      else if (healthyCount === 1) status = 'yellow'
+      const ratio = healthyCount / cellChecks.length
+      if (ratio >= 1) status = 'green'
+      else if (ratio >= 0.5) status = 'yellow'
       else status = 'red'
-    } else if (cellChecks.length === 1 && cellChecks[0]) {
-      status = cellChecks[0].healthy ? 'green' : 'red'
     }
 
     cells.push({
