@@ -209,6 +209,7 @@ export interface ApiKeyResponse {
   lastUsedAt: string | null
   totalCost: number | string
   requestCount: number
+  quotaLimit: number | string | null
   createdAt: string
   updatedAt: string
 }
@@ -222,6 +223,7 @@ export interface ApiKeyCreateResponse {
   type: ApiKeyType
   status: ApiKeyStatus
   expiresAt: string | null
+  quotaLimit: number | string | null
   createdAt: string
 }
 
@@ -230,6 +232,7 @@ export interface ApiKeyCreateParams {
   name: string
   description?: string
   expiresAt?: string
+  quotaLimit?: number | null
 }
 
 /** 更新 API Key 的请求参数 */
@@ -237,6 +240,7 @@ export interface ApiKeyUpdateParams {
   name?: string
   description?: string
   status?: ApiKeyStatus
+  quotaLimit?: number | null
 }
 
 /** Cloud 模型配置（单个模型） */

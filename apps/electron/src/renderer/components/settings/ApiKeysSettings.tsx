@@ -20,6 +20,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Pencil,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,6 +82,20 @@ function formatKeyDisplay(key: string): string {
   return `${key.slice(0, 7)}...${key.slice(-4)}`
 }
 
+/** 安全地将 number | string 转为数字 */
+function toNum(val: number | string | null | undefined): number {
+  if (val == null) return 0
+  return typeof val === 'string' ? parseFloat(val) : val
+}
+
+/** 格式化限额显示 */
+function formatQuota(apiKey: ApiKeyResponse): string {
+  if (apiKey.quotaLimit == null) return '不限制'
+  const remaining = Math.max(0, toNum(apiKey.quotaLimit) - toNum(apiKey.totalCost))
+  if (remaining <= 0) return '已用完'
+  return `剩余 ${remaining.toFixed(2)} 积分`
+}
+
 // ===== 子组件 =====
 
 /** 状态 Badge */
@@ -102,6 +117,8 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
   const [open, setOpen] = React.useState(false)
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
+  const [quotaMode, setQuotaMode] = React.useState<'unlimited' | 'custom'>('unlimited')
+  const [quotaValue, setQuotaValue] = React.useState('')
   const [createdKey, setCreatedKey] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
   const [showKey, setShowKey] = React.useState(false)
@@ -110,6 +127,10 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
 
   const handleCreate = async (): Promise<void> => {
     if (!name.trim()) return
+    if (quotaMode === 'custom' && (!quotaValue || parseFloat(quotaValue) <= 0)) {
+      setError('请输入有效的初始额度')
+      return
+    }
 
     setCreating(true)
     setError(null)
@@ -118,6 +139,7 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
       const response = await window.electronAPI.cloudApiKeys.create({
         name: name.trim(),
         description: description.trim() || undefined,
+        quotaLimit: quotaMode === 'custom' ? parseFloat(quotaValue) : undefined,
       })
 
       if (response.success && response.data) {
@@ -149,6 +171,8 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
     setTimeout(() => {
       setName('')
       setDescription('')
+      setQuotaMode('unlimited')
+      setQuotaValue('')
       setCreatedKey(null)
       setCopied(false)
       setShowKey(false)
@@ -223,6 +247,45 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
                 placeholder="用于描述此 API Key 的用途"
               />
             </div>
+            <div className="space-y-2">
+              <Label>用量限额</Label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="create-quota-mode"
+                    checked={quotaMode === 'unlimited'}
+                    onChange={() => setQuotaMode('unlimited')}
+                    className="accent-primary"
+                  />
+                  不限制
+                </label>
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="create-quota-mode"
+                    checked={quotaMode === 'custom'}
+                    onChange={() => setQuotaMode('custom')}
+                    className="accent-primary"
+                  />
+                  设置初始额度
+                </label>
+              </div>
+              {quotaMode === 'custom' && (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={quotaValue}
+                    onChange={(e) => setQuotaValue(e.target.value)}
+                    placeholder="输入积分数"
+                    className="w-40"
+                  />
+                  <span className="text-sm text-muted-foreground">积分</span>
+                </div>
+              )}
+            </div>
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
@@ -258,6 +321,227 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
   )
 }
 
+/** 编辑 API Key 对话框 */
+function EditApiKeyDialog({
+  apiKey,
+  open,
+  onClose,
+  onSaved,
+}: {
+  apiKey: ApiKeyResponse
+  open: boolean
+  onClose: () => void
+  onSaved: () => void
+}): React.ReactElement {
+  const [name, setName] = React.useState(apiKey.name)
+  const [description, setDescription] = React.useState(apiKey.description ?? '')
+  const [quotaMode, setQuotaMode] = React.useState<'unlimited' | 'custom'>(
+    apiKey.quotaLimit != null ? 'custom' : 'unlimited',
+  )
+  const [adjustAmount, setAdjustAmount] = React.useState('')
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  // Reset form when dialog opens with new key
+  React.useEffect(() => {
+    if (open) {
+      setName(apiKey.name)
+      setDescription(apiKey.description ?? '')
+      setQuotaMode(apiKey.quotaLimit != null ? 'custom' : 'unlimited')
+      setAdjustAmount('')
+      setError(null)
+    }
+  }, [open, apiKey])
+
+  const currentQuotaLimit = toNum(apiKey.quotaLimit)
+  const currentTotalCost = toNum(apiKey.totalCost)
+  const currentRemaining = Math.max(0, currentQuotaLimit - currentTotalCost)
+
+  const handleSave = async (): Promise<void> => {
+    if (!name.trim()) {
+      setError('名称不能为空')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+
+    try {
+      let newQuotaLimit: number | null | undefined
+
+      if (quotaMode === 'unlimited') {
+        // Switch to unlimited
+        newQuotaLimit = null
+      } else if (apiKey.quotaLimit == null) {
+        // Switching from unlimited to custom — need initial amount
+        const amount = parseFloat(adjustAmount)
+        if (!adjustAmount || isNaN(amount) || amount <= 0) {
+          setError('请输入有效的初始额度')
+          setSaving(false)
+          return
+        }
+        // New quotaLimit = totalCost + initial amount (so remaining = amount)
+        newQuotaLimit = currentTotalCost + amount
+      } else if (adjustAmount && parseFloat(adjustAmount) !== 0) {
+        // Adjusting existing quota
+        const amount = parseFloat(adjustAmount)
+        if (isNaN(amount)) {
+          setError('请输入有效的数字')
+          setSaving(false)
+          return
+        }
+        const newLimit = currentQuotaLimit + amount
+        if (newLimit < currentTotalCost) {
+          setError(`不能减少超过剩余额度（当前剩余 ${currentRemaining.toFixed(2)} 积分）`)
+          setSaving(false)
+          return
+        }
+        newQuotaLimit = newLimit
+      }
+
+      const params: Partial<import('@proma/shared').ApiKeyUpdateParams> = {}
+      if (name.trim() !== apiKey.name) params.name = name.trim()
+      if (description.trim() !== (apiKey.description ?? '')) {
+        params.description = description.trim() || undefined
+      }
+      if (newQuotaLimit !== undefined) params.quotaLimit = newQuotaLimit
+
+      if (Object.keys(params).length === 0) {
+        onClose()
+        return
+      }
+
+      await window.electronAPI.cloudApiKeys.update(apiKey.id, params)
+      onSaved()
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>编辑 API Key</DialogTitle>
+          <DialogDescription>修改名称、描述或用量限额</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="edit-name">名称</Label>
+            <Input
+              id="edit-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="API Key 名称"
+              maxLength={100}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="edit-desc">描述</Label>
+            <Input
+              id="edit-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="用于描述此 API Key 的用途"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>用量限额</Label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="edit-quota-mode"
+                  checked={quotaMode === 'unlimited'}
+                  onChange={() => setQuotaMode('unlimited')}
+                  className="accent-primary"
+                />
+                不限制
+              </label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="edit-quota-mode"
+                  checked={quotaMode === 'custom'}
+                  onChange={() => setQuotaMode('custom')}
+                  className="accent-primary"
+                />
+                自定义限额
+              </label>
+            </div>
+
+            {quotaMode === 'custom' && (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                {apiKey.quotaLimit != null ? (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">当前剩余</span>
+                      <span className="font-medium">{currentRemaining.toFixed(2)} 积分</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        step="1"
+                        value={adjustAmount}
+                        onChange={(e) => setAdjustAmount(e.target.value)}
+                        placeholder="输入调整数量（正数增加，负数减少）"
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-muted-foreground shrink-0">积分</span>
+                    </div>
+                    {adjustAmount && !isNaN(parseFloat(adjustAmount)) && (
+                      <p className="text-xs text-muted-foreground">
+                        调整后剩余：{Math.max(0, currentRemaining + parseFloat(adjustAmount)).toFixed(2)} 积分
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={adjustAmount}
+                      onChange={(e) => setAdjustAmount(e.target.value)}
+                      placeholder="输入初始额度"
+                      className="w-40"
+                    />
+                    <span className="text-sm text-muted-foreground">积分</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button onClick={handleSave} disabled={saving || !name.trim()}>
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                保存中...
+              </>
+            ) : (
+              '保存'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /** API Key 表格行 */
 function ApiKeyRow({
   apiKey,
@@ -267,6 +551,7 @@ function ApiKeyRow({
   onRefresh: () => void
 }): React.ReactElement {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
+  const [editDialogOpen, setEditDialogOpen] = React.useState(false)
   const [copied, setCopied] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [toggling, setToggling] = React.useState(false)
@@ -347,10 +632,21 @@ function ApiKeyRow({
           {formatCost(apiKey.totalCost)}
         </TableCell>
         <TableCell className="text-muted-foreground text-sm">
+          {formatQuota(apiKey)}
+        </TableCell>
+        <TableCell className="text-muted-foreground text-sm">
           {formatDate(apiKey.lastUsedAt)}
         </TableCell>
         <TableCell>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setEditDialogOpen(true)}
+              title="编辑"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -405,6 +701,13 @@ function ApiKeyRow({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditApiKeyDialog
+        apiKey={apiKey}
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        onSaved={onRefresh}
+      />
     </>
   )
 }
@@ -563,8 +866,9 @@ export function ApiKeysSettings(): React.ReactElement {
                   <TableHead>状态</TableHead>
                   <TableHead>请求次数</TableHead>
                   <TableHead>消耗金额</TableHead>
+                  <TableHead>限额</TableHead>
                   <TableHead>最后使用</TableHead>
-                  <TableHead className="w-20"></TableHead>
+                  <TableHead className="w-24"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
