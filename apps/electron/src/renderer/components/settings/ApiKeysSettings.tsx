@@ -75,7 +75,7 @@ function formatDate(dateString: string | null): string {
 /** 格式化费用（积分） */
 function formatCost(cost: number | string): string {
   const num = typeof cost === 'string' ? parseFloat(cost) : cost
-  return `${num.toFixed(4)} 积分`
+  return `${num.toFixed(2)} 积分`
 }
 
 /** 格式化 API Key 显示（只显示前缀和后4位） */
@@ -881,8 +881,8 @@ export function ApiKeysSettings(): React.ReactElement {
                   <TableHead>名称</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>请求次数</TableHead>
-                  <TableHead>消耗金额</TableHead>
+                  <TableHead>请求</TableHead>
+                  <TableHead>消耗</TableHead>
                   <TableHead>限额</TableHead>
                   <TableHead>最后使用</TableHead>
                   <TableHead className="w-24"></TableHead>
