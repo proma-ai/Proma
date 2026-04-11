@@ -242,7 +242,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           type: 'assistant-turn',
           assistantMessages: [aMsg],
           turnMessages: [msg],
-          model: sessionModelId || aMsg.message?.model,
+          model: aMsg._channelModelId || aMsg.message?.model || sessionModelId,
           createdAt: meta.createdAt,
         }
       } else {
@@ -599,7 +599,7 @@ export function SDKMessageRenderer({
     const blocks = aMsg.message?.content
     if (!Array.isArray(blocks) || blocks.length === 0) return null
 
-    const model = sessionModelId || aMsg.message?.model
+    const model = aMsg._channelModelId || aMsg.message?.model || sessionModelId
     const meta = extractMeta(message)
 
     // 检测是否有主要内容（text 块）
@@ -884,9 +884,11 @@ export interface MessageGroupRendererProps {
 }
 
 /**
- * WeakMap 缓存：为没有 uuid 的 group 生成稳定的 fallback ID
+ * WeakMap 缓存：为没有 uuid 的消息生成稳定的 fallback ID
+ * 使用 message 对象（而非 group 对象）作为 key，因为 group 在 useMemo 重算时会
+ * 被重建为新对象，而 group.message 引用的底层 SDK message 对象是稳定的。
  */
-const groupIdCache = new WeakMap<MessageGroup, string>()
+const messageIdCache = new WeakMap<object, string>()
 let fallbackIdCounter = 0
 
 /**
@@ -895,26 +897,30 @@ let fallbackIdCounter = 0
 export function getGroupId(group: MessageGroup): string {
   if (group.type === 'user') {
     if (group.message.uuid) return group.message.uuid
-    // 没有 uuid：使用缓存的稳定 ID
-    if (!groupIdCache.has(group)) {
-      groupIdCache.set(group, `user-${++fallbackIdCounter}`)
+    // 没有 uuid：使用基于 message 对象引用的缓存 ID（message 引用在重渲染间稳定）
+    if (!messageIdCache.has(group.message)) {
+      messageIdCache.set(group.message, `user-${++fallbackIdCounter}`)
     }
-    return groupIdCache.get(group)!
+    return messageIdCache.get(group.message)!
   }
   if (group.type === 'system') {
-    if (!groupIdCache.has(group)) {
-      groupIdCache.set(group, `system-${group.message.subtype ?? 'unknown'}-${++fallbackIdCounter}`)
+    if (!messageIdCache.has(group.message)) {
+      messageIdCache.set(group.message, `system-${group.message.subtype ?? 'unknown'}-${++fallbackIdCounter}`)
     }
-    return groupIdCache.get(group)!
+    return messageIdCache.get(group.message)!
   }
   // assistant-turn：取首条 assistant 消息的 uuid
   const first = group.assistantMessages[0]
   if (first?.uuid) return first.uuid
-  // 没有 uuid：使用缓存的稳定 ID
-  if (!groupIdCache.has(group)) {
-    groupIdCache.set(group, `turn-${++fallbackIdCounter}`)
+  // 没有 uuid：使用基于首条 assistant message 对象引用的缓存 ID
+  if (first) {
+    if (!messageIdCache.has(first)) {
+      messageIdCache.set(first, `turn-${++fallbackIdCounter}`)
+    }
+    return messageIdCache.get(first)!
   }
-  return groupIdCache.get(group)!
+  // 极端情况：空 turn
+  return `turn-empty-${++fallbackIdCounter}`
 }
 
 /**

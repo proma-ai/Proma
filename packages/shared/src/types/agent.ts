@@ -214,6 +214,8 @@ export interface SDKAssistantMessage {
   uuid?: string
   error?: { message: string; errorType?: string }
   isReplay?: boolean
+  /** 渠道配置的模型 ID，持久化/流式期间注入，用于正确匹配模型显示名 */
+  _channelModelId?: string
 }
 
 /** SDK user 消息 */

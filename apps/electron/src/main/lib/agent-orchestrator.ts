@@ -173,6 +173,9 @@ function isSessionNotFoundError(errorMessage: string, stderr?: string): boolean 
 /** 最大自动重试次数 */
 const MAX_AUTO_RETRIES = 3
 
+/** 单次 API 调用最长无响应时间（毫秒），超时后触发自动重试 */
+const IDLE_TIMEOUT_MS = 120_000
+
 /** 计算重试延迟（指数退避：1s, 2s, 4s） */
 function getRetryDelayMs(attempt: number): number {
   return Math.min(1000 * Math.pow(2, attempt - 1), 8000)
@@ -835,6 +838,12 @@ export class AgentOrchestrator {
       return
     }
 
+    // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
+    // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
+    // finally 块会通过 generation 匹配来安全清理，不影响正常流程
+    const runGeneration = Date.now()
+    this.activeSessions.set(sessionId, runGeneration)
+
     let apiKey: string
     if (channel.provider === 'proma') {
       // Proma 官方渠道：使用系统 API Key（由 Cloud 服务管理）
@@ -933,11 +942,7 @@ export class AgentOrchestrator {
     } as unknown as SDKMessage
     appendSDKMessages(sessionId, [userSDKMsg])
 
-    // 6. 注册活跃会话（用时间戳作为 generation 标识，区分同一 session 的不同运行轮次）
-    const runGeneration = Date.now()
-    this.activeSessions.set(sessionId, runGeneration)
-
-    // 7. 状态初始化
+    // 6. 状态初始化
     const accumulatedMessages: SDKMessage[] = []
     let resolvedModel = modelId || DEFAULT_MODEL_ID
     let titleGenerationStarted = false
@@ -1120,6 +1125,32 @@ export class AgentOrchestrator {
         },
       )
 
+      /**
+       * 判断 Bash 命令是否是只读的（计划模式下安全可执行）
+       * 检测写操作特征：文件重定向、破坏性命令、包管理写操作、git 写操作等
+       */
+      const isBashCommandReadOnly = (command: string): boolean => {
+        // 输出重定向：匹配未被数字或 & 前置的 > 符号（排除 2>/dev/null、&> 等 fd 重定向）
+        if (/(?<![0-9&])>/.test(command)) return false
+        // 破坏性文件操作
+        if (/\b(rm|rmdir)\s/.test(command)) return false
+        if (/\bsed\s+[^|&;]*-i/.test(command)) return false  // sed -i 原地编辑
+        if (/\b(chmod|chown|chattr|truncate)\s/.test(command)) return false
+        if (/\b(mv|cp)\s/.test(command)) return false
+        if (/\b(mkdir|touch|mktemp)\s/.test(command)) return false
+        // 包管理器写操作
+        if (/\b(npm|pnpm|yarn|bun)\s+(install|i\b|add|remove|uninstall|update|upgrade|link|unlink)\b/.test(command)) return false
+        if (/\bpip[23]?\s+(install|uninstall|upgrade)\b/.test(command)) return false
+        if (/\b(apt|apt-get|brew|yum|dnf)\s+(install|remove|purge|uninstall|upgrade)\b/.test(command)) return false
+        // Git 写操作
+        if (/\bgit\s+(commit|push|checkout\s+-[bB]|branch\s+-[mMdD]|merge\b|rebase\b|reset\b|stash\s+(drop|pop)\b|add\b|apply\b|cherry-pick\b)/.test(command)) return false
+        // 进程控制
+        if (/\b(kill|killall|pkill)\s/.test(command)) return false
+        // 脚本执行（具有潜在副作用，如 node script.js / python main.py）
+        if (/\b(node|python[23]?|ruby|perl|php)\s+[^-]/.test(command)) return false
+        return true
+      }
+
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
       const PLAN_MODE_ALLOWED_TOOLS = new Set([
         'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
@@ -1230,6 +1261,14 @@ export class AgentOrchestrator {
                 }
               }
             }
+            // Bash 工具：只读命令（find、grep、cat 等）允许执行，写操作拒绝
+            if (toolName === 'Bash') {
+              const command = typeof input.command === 'string' ? input.command : ''
+              if (isBashCommandReadOnly(command)) {
+                return { behavior: 'allow' as const, updatedInput: input }
+              }
+              return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
+            }
             // MCP 工具（以 mcp__ 开头）允许调用（调研用）
             if (toolName.startsWith('mcp__')) {
               return { behavior: 'allow' as const, updatedInput: input }
@@ -1247,6 +1286,8 @@ export class AgentOrchestrator {
       }
 
       // 13. 构建 Adapter 查询选项
+      // 检测用户选用的模型是否为 Claude 系列，决定 SubAgent 是否使用独立模型分层
+      const claudeAvailable = (modelId || DEFAULT_MODEL_ID).toLowerCase().includes('claude')
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
@@ -1280,6 +1321,7 @@ export class AgentOrchestrator {
             sessionId,
             permissionMode: initialPermissionMode,
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
+            claudeAvailable,
           }),
         },
         resumeSessionId: existingSdkSessionId,
@@ -1312,7 +1354,8 @@ export class AgentOrchestrator {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
         // 内置 SubAgent 定义（code-reviewer / explorer / researcher）
-        agents: buildBuiltinAgents(),
+        // claudeAvailable=false 时 SubAgent 省略 model 字段，自动继承主 Agent 模型
+        agents: buildBuiltinAgents(claudeAvailable),
         onStderr: (data: string) => {
           stderrChunks.push(data)
           console.error(`[Agent SDK stderr] ${data}`)
@@ -1437,6 +1480,25 @@ export class AgentOrchestrator {
             }
           })()
 
+          // Idle timeout 守卫：普通单轮对话无响应时触发重试
+          // （Watchdog 仅覆盖 startedTaskIds.size > 0 的 Teams 场景）
+          const idleAbort = new AbortController()
+          let lastActivityAt = Date.now()
+          const idleWatcherDone = (async () => {
+            const CHECK_INTERVAL_MS = 30_000
+            while (!loopAbort.signal.aborted) {
+              await timerWithAbort(CHECK_INTERVAL_MS, loopAbort.signal)
+              if (loopAbort.signal.aborted) break
+              if (Date.now() - lastActivityAt >= IDLE_TIMEOUT_MS) {
+                console.log(
+                  `[Agent 编排] Idle timeout: 超过 ${IDLE_TIMEOUT_MS / 1000}s 无 SDK 事件，触发重试`,
+                )
+                idleAbort.abort()
+                break
+              }
+            }
+          })()
+
           // 手动事件循环：Promise.race（SDKMessage vs Watchdog 中断）
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // Teams 活跃时延迟 result 消息，避免前端提前标记 teammates 为 stopped
@@ -1454,9 +1516,15 @@ export class AgentOrchestrator {
               loopAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
             })
 
+            const idleAbortPromise = new Promise<null>((resolve) => {
+              if (idleAbort.signal.aborted) { resolve(null); return }
+              idleAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
+            })
+
             const raceResult = await Promise.race([
               pendingNext.then((r) => ({ kind: 'event' as const, result: r })),
               abortPromise.then(() => ({ kind: 'abort' as const, result: null })),
+              idleAbortPromise.then(() => ({ kind: 'idle_timeout' as const, result: null })),
             ])
 
             if (raceResult.kind === 'abort') {
@@ -1472,11 +1540,33 @@ export class AgentOrchestrator {
               break
             }
 
+            if (raceResult.kind === 'idle_timeout') {
+              // Idle timeout：强制中止 SDK 子进程，触发外层重试
+              console.log(`[Agent 编排] Idle timeout 处理：强制中止 SDK 子进程，准备重试`)
+              this.adapter.abort(sessionId)
+              pendingNext?.catch(() => {})
+              pendingNext = null
+              // 等待 generator finally 块执行完毕（最多 1s），防止旧 finally 与新 query 注册产生竞态
+              const returnPromise = queryIterator.return?.(undefined as never).catch(() => {})
+              await Promise.race([
+                returnPromise,
+                new Promise<void>((r) => setTimeout(r, 1000)),
+              ])
+              lastRetryableError = `Agent 响应超时（${IDLE_TIMEOUT_MS / 1000}s 无输出），正在自动重试`
+              this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+              accumulatedMessages.length = 0
+              shouldRetryFromError = true
+              break
+            }
+
             const iterResult = raceResult.result
             if (!iterResult || iterResult.done) break
 
             pendingNext = null
             const msg = iterResult.value
+
+            // 收到 SDK 事件：重置 idle 计时器
+            lastActivityAt = Date.now()
 
             // 检测 assistant 消息中的 SDK 错误
             if (msg.type === 'assistant') {
@@ -1593,6 +1683,10 @@ export class AgentOrchestrator {
                     accumulatedMessages.push(msg)
                   }
                 } else {
+                  // 为 assistant 消息注入渠道 modelId，确保持久化后能正确匹配模型显示名
+                  if (msg.type === 'assistant' && modelId) {
+                    (msg as Record<string, unknown>)._channelModelId = modelId
+                  }
                   accumulatedMessages.push(msg)
                 }
               }
@@ -1603,9 +1697,29 @@ export class AgentOrchestrator {
               }
             }
 
-            // Turn 结束时：持久化累积消息
+            // Turn 结束时：持久化累积消息，并检测 0-token 空响应
             if (msg.type === 'result') {
-              capturedResultSubtype = (msg as { subtype?: string }).subtype
+              const resultMsg = msg as import('@proma/shared').SDKResultMessage
+              capturedResultSubtype = resultMsg.subtype
+
+              // 检测"成功但 0 输出"：API 返回 HTTP 200 但模型未产出任何 token
+              // 根因：tool_result 后无文本触发的已知 Anthropic bug（见 sdk-python#958）
+              // 此时 SDK 正常结束 turn，不会自行报错，需要在此层拦截并重试
+              if (
+                resultMsg.subtype === 'success' &&
+                resultMsg.usage.output_tokens === 0 &&
+                attempt <= MAX_AUTO_RETRIES
+              ) {
+                console.log(
+                  `[Agent 编排] 检测到 0-token 空响应 (output_tokens=0, subtype=success)，触发自动重试 (attempt=${attempt})`,
+                )
+                lastRetryableError = 'Agent 返回空响应（0 输出 tokens），正在自动重试'
+                this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+                accumulatedMessages.length = 0
+                shouldRetryFromError = true
+                break
+              }
+
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
             }
@@ -1655,9 +1769,9 @@ export class AgentOrchestrator {
             }
           }
 
-          // 清理 Watchdog（事件循环正常结束或被 Watchdog 中断）
+          // 清理 Watchdog 和 idle watcher（事件循环正常结束或被中断）
           if (!loopAbort.signal.aborted) loopAbort.abort()
-          await watchdogDone
+          await Promise.all([watchdogDone, idleWatcherDone])
 
           if (abortedByWatchdog) {
             console.log(`[Agent 编排] Watchdog 中断了事件循环，将触发 auto-resume`)

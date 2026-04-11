@@ -230,7 +230,7 @@ export function TaskProgressCard({ activities, animate = false, streamEnded = fa
   const visibleItems = needsCollapse && !expanded ? items.slice(0, MAX_VISIBLE) : items
 
   return (
-    <div className={cn('my-1 max-w-[630px]', animate && 'animate-in fade-in duration-200')}>
+    <div className={cn('my-1', animate && 'animate-in fade-in duration-200')}>
       {/* 虚线边框容器 */}
       <div
         className="rounded-lg bg-muted/40 px-3.5 py-3"

@@ -450,7 +450,13 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('[Claude 适配器] 等待 SDK 初始化超时，请稍后重试')), QUERY_READY_TIMEOUT_MS)
       )
-      await Promise.race([readyPromise, timeoutPromise])
+      try {
+        await Promise.race([readyPromise, timeoutPromise])
+      } catch (err) {
+        // 超时：强制中止可能已启动的 SDK 子进程，防止僵尸进程残留
+        this.abort(sessionId)
+        throw err
+      }
     }
 
     const query = activeQueries.get(sessionId)

@@ -21,7 +21,9 @@ import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-man
  * 预定义一组常用子代理，通过 SDK agents 选项注册，
  * 让主 Agent 可以直接通过 Agent 工具按名称调用。
  */
-export function buildBuiltinAgents(): Record<string, AgentDefinition> {
+export function buildBuiltinAgents(claudeAvailable = true): Record<string, AgentDefinition> {
+  // 非 Claude 渠道时省略 model，让 SubAgent 继承主 Agent 的模型
+  const light = claudeAvailable ? 'haiku' : undefined
   return {
     'code-reviewer': {
       description: '代码审查子代理。在完成代码修改后调用，审查代码质量、发现潜在问题、提出改进建议。适合在任务完成后做最终质量检查。',
@@ -43,7 +45,7 @@ export function buildBuiltinAgents(): Record<string, AgentDefinition> {
 
 保持客观、具体，不要泛泛而谈。如果代码质量很好，直接说"审查通过，无需修改"。`,
       tools: ['Read', 'Glob', 'Grep', 'Bash'],
-      model: 'haiku',
+      ...(light && { model: light }),
     },
     'explorer': {
       description: '代码库探索子代理。用于快速搜索文件、理解项目结构、查找相关代码。适合在动手修改前收集上下文。',
@@ -57,7 +59,7 @@ export function buildBuiltinAgents(): Record<string, AgentDefinition> {
 
 保持简洁，只返回与任务相关的信息。`,
       tools: ['Read', 'Glob', 'Grep', 'Bash'],
-      model: 'haiku',
+      ...(light && { model: light }),
     },
     'researcher': {
       description: '技术调研子代理。用于对比技术方案、评估依赖库、分析架构选型。适合在做技术决策前收集充分信息。',
@@ -72,7 +74,7 @@ export function buildBuiltinAgents(): Record<string, AgentDefinition> {
 
 保持客观，给出有依据的建议。`,
       tools: ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'],
-      model: 'haiku',
+      ...(light && { model: light }),
     },
   }
 }
@@ -85,6 +87,8 @@ interface SystemPromptContext {
   permissionMode: PromaPermissionMode
   /** 记忆服务是否已启用且配置了 API Key */
   memoryEnabled: boolean
+  /** 用户选用的模型是否为 Claude 系列（影响 SubAgent 模型策略描述，缺省视为 true） */
+  claudeAvailable?: boolean
 }
 
 /**
@@ -121,8 +125,10 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子
 - **大文件写入**：使用 Write 写入超过约 10,000 字（特别是中文/日文/韩文等 CJK 字符）时，主动拆分为多次写入——先 Write 首段，再用 Edit 追加后续段落，避免 token 截断导致文件内容不完整`)
 
-  // SubAgent 委派策略
-  sections.push(`## SubAgent 委派策略
+  // SubAgent 委派策略（根据用户选用的模型是否为 Claude 动态调整）
+  const claudeAvailable = ctx.claudeAvailable !== false
+  if (claudeAvailable) {
+    sections.push(`## SubAgent 委派策略
 
 **核心原则：先探索再行动，用 SubAgent 保持主上下文干净。根据任务复杂度选择合适的模型。**
 
@@ -186,6 +192,51 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
 6. 执行实施，将进度更新到 \`.context/todo.md\`
 7. 完成后委派 \`code-reviewer\` 做最终质量检查（核心逻辑变更用 sonnet 审查）`)
+  } else {
+    sections.push(`## SubAgent 委派策略
+
+**核心原则：先探索再行动，用 SubAgent 保持主上下文干净。**
+
+当前使用的模型不是 Claude 系列，SubAgent 将自动继承主 Agent 的模型。不要通过 \`model\` 参数指定模型别名（如 haiku/sonnet/opus），否则会导致 SubAgent 调用失败。
+
+### 内置 SubAgent
+
+系统已预定义以下子代理，可直接通过 Agent 工具按名称调用：
+
+- **explorer**：代码库探索。快速搜索文件、理解项目结构、收集相关上下文。动手修改前优先调用
+- **researcher**：技术调研。方案对比、依赖评估、架构分析，输出结构化调研报告
+- **code-reviewer**：代码审查。任务完成后调用，检查代码质量和规范一致性
+
+### 何时委派 SubAgent
+
+- 需要探索代码库、搜索多个文件、理解项目结构时 → 委派 \`explorer\`
+- 需要调研技术方案、对比多个选项时 → 委派 \`researcher\`
+- 代码修改完成后做质量检查 → 委派 \`code-reviewer\`
+- 需要并行处理多个独立子任务时 → 同时委派多个 SubAgent
+- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent
+
+### 不需要委派的场景
+
+- 简单的单文件读取或编辑
+- 用户明确指定了操作目标
+- 任务本身就很简单直接
+
+### 委派时的要求
+
+- 给 SubAgent 清晰的任务描述，说明要收集什么信息、返回什么格式
+- 可以同时启动多个 SubAgent 并行工作
+- SubAgent 返回结果后，在主上下文中整合并做决策
+
+### 典型工作流（复杂任务）
+
+1. 委派 \`explorer\` 探索代码库、收集上下文
+2. 根据探索结果，委派 \`researcher\` 分析方案
+3. 整合所有信息，将调研结果输出到 \`.context/note.md\`
+4. 不确定的部分调用头脑风暴 Skill 与用户确认
+5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
+6. 执行实施，将进度更新到 \`.context/todo.md\`
+7. 完成后委派 \`code-reviewer\` 做最终质量检查`)
+  }
 
   // 用户信息
   sections.push(`## 用户信息
@@ -234,7 +285,7 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 2. 完成计划后，**不要立即调用 ExitPlanMode**
 3. 先向用户展示计划摘要，以及完整的计划文档的路径地址，然后等待用户确认后再退出计划模式
 4. 用户确认执行后，再调用 ExitPlanMode 退出计划模式
-5. 在计划模式下，你可以使用 Read、Glob、Grep、WebSearch 等只读工具进行调研，但不能使用 Edit、Bash 等写操作工具`)
+5. 在计划模式下，你可以使用 Read、Glob、Grep、WebSearch 等只读工具进行调研，也可以使用 Bash 执行只读命令（如 find、grep、cat、ls、head、tail 等）；但不能使用 Edit 或 Bash 写操作命令（如 rm、mv、sed -i、> 重定向等）`)
   } else {
     sections.push(`## 计划模式文件路径
 

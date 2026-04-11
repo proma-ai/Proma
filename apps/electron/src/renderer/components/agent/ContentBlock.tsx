@@ -320,7 +320,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
     return (
       <div
         className={cn(
-          animate && 'animate-in fade-in slide-in-from-left-1 duration-150 fill-mode-both',
+          animate && 'animate-in fade-in duration-150 fill-mode-both',
         )}
         style={animate ? { animationDelay: delay } : undefined}
       >
@@ -396,7 +396,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   return (
     <div
       className={cn(
-        animate && 'animate-in fade-in slide-in-from-left-1 duration-150 fill-mode-both',
+        animate && 'animate-in fade-in duration-150 fill-mode-both',
       )}
       style={animate ? { animationDelay: delay } : undefined}
     >
@@ -456,8 +456,8 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
   const [shouldCollapse, setShouldCollapse] = React.useState(false)
   const contentRef = React.useRef<HTMLDivElement>(null)
 
-  // 检测内容是否超过阈值行数
-  React.useEffect(() => {
+  // 检测内容是否超过阈值行数（useLayoutEffect：在 paint 前同步执行，避免「展开→收起」闪屏）
+  React.useLayoutEffect(() => {
     if (!contentRef.current) return
     const el = contentRef.current
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 22

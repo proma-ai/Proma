@@ -23,6 +23,8 @@ import {
   agentSidePanelOpenMapAtom,
   applyAgentEvent,
   liveMessagesMapAtom,
+  agentSessionModelMapAtom,
+  agentModelIdAtom,
   agentPermissionModeMapAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
@@ -317,6 +319,13 @@ export function useGlobalAgentListeners(): void {
             // 避免 AssistantTurnRenderer 因缺少时间戳导致 header 时间消失
             if (typeof msgRecord._createdAt !== 'number') {
               msgRecord._createdAt = Date.now()
+            }
+
+            // 为 assistant 消息注入渠道 modelId，确保流式期间就绑定正确模型
+            if (msgRecord.type === 'assistant' && !msgRecord._channelModelId) {
+              const sessionModelMap = store.get(agentSessionModelMapAtom)
+              const defaultModelId = store.get(agentModelIdAtom)
+              msgRecord._channelModelId = sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
             }
 
             store.set(liveMessagesMapAtom, (prev) => {
