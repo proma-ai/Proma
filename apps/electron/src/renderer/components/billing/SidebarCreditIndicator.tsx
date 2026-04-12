@@ -22,6 +22,13 @@ function getBarColor(percent: number): string {
   return 'bg-emerald-500'
 }
 
+/** 纯积分模式：根据余额阈值返回指示色 */
+function getCreditThresholdColor(credits: number): string {
+  if (credits < 20) return 'bg-red-500'
+  if (credits < 50) return 'bg-amber-500'
+  return 'bg-emerald-500'
+}
+
 export function SidebarCreditIndicator(): React.ReactElement | null {
   const credits = useAtomValue(creditsDisplayAtom)
   const billing = useAtomValue(billingInfoAtom)
@@ -41,24 +48,34 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
   const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
     ? parseFloat(billing.subscriptionQuotaRemaining)
     : (billing.subscriptionQuotaRemaining ?? 0)
-  const subTotal = typeof billing.subscriptionQuotaTotal === 'string'
-    ? parseFloat(billing.subscriptionQuotaTotal)
-    : (billing.subscriptionQuotaTotal ?? 0)
 
   const creditsVal = isNaN(rawCredits) ? 0 : rawCredits
   const subRemainingVal = isNaN(subRemaining) ? 0 : subRemaining
-  const subTotalVal = isNaN(subTotal) ? 0 : subTotal
   const totalAvailable = creditsVal + subRemainingVal
 
-  // 进度百分比：(剩余额度 / 总额度上限) * 100
-  // 总额度上限 = 预充值余额 + 订阅总额度（预充值部分视为 100% 可用）
-  const totalCapacity = creditsVal + subTotalVal
-  const percent = totalCapacity > 0 ? Math.min(100, (totalAvailable / totalCapacity) * 100) : 0
+  // 进度百分比：基于当前正在消费的订阅包，而非所有订阅总和
+  // - 有当前消费中的订阅包 → 进度条 = 该包剩余 / 该包总额度
+  // - 所有订阅已用完或无订阅，仍有积分 → 100%（积分无固定容量上限）
+  // - 无任何额度 → 0%
+  const curQuota = typeof billing.currentSubscriptionQuota === 'string'
+    ? parseFloat(billing.currentSubscriptionQuota) : (billing.currentSubscriptionQuota ?? 0)
+  const curUsed = typeof billing.currentSubscriptionUsed === 'string'
+    ? parseFloat(billing.currentSubscriptionUsed) : (billing.currentSubscriptionUsed ?? 0)
+
+  let percent: number
+  const hasCurrentSub = curQuota > 0
+  if (hasCurrentSub) {
+    percent = Math.min(100, ((curQuota - curUsed) / curQuota) * 100)
+  } else if (creditsVal > 0) {
+    percent = 100
+  } else {
+    percent = 0
+  }
 
   const hasSubscription = billing.hasActiveSubscription
   const isLow = totalAvailable < 1
 
-  const barColor = getBarColor(percent)
+  const barColor = hasCurrentSub ? getBarColor(percent) : getCreditThresholdColor(creditsVal)
   const iconColor = isLow ? 'text-orange-500' : hasSubscription ? 'text-purple-500' : 'text-muted-foreground'
 
   return (
@@ -71,15 +88,22 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
           >
             <Wallet size={15} className={cn(iconColor, 'shrink-0')} />
 
-            {/* 进度条 */}
-            <div className="flex-1 min-w-0">
-              <div className="h-1.5 rounded-full bg-muted/80 overflow-hidden">
-                <div
-                  className={cn('h-full rounded-full transition-all duration-500', barColor)}
-                  style={{ width: `${Math.max(2, percent)}%` }}
-                />
+            {hasCurrentSub ? (
+              /* 订阅模式：进度条 */
+              <div className="flex-1 min-w-0">
+                <div className="h-1.5 rounded-full bg-muted/80 overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all duration-500', barColor)}
+                    style={{ width: `${Math.max(2, percent)}%` }}
+                  />
+                </div>
               </div>
-            </div>
+            ) : (
+              /* 纯积分模式：阈值色小圆点 */
+              <div className="flex-1 min-w-0 flex items-center">
+                <div className={cn('size-2 rounded-full', barColor)} />
+              </div>
+            )}
 
             {/* 余额数字 */}
             <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">

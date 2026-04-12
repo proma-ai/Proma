@@ -101,6 +101,9 @@ export interface BillingInfo {
   subscriptionQuotaUsed: number
   subscriptionQuotaRemaining: number
   hasActiveSubscription: boolean
+  /** 当前正在消费的订阅包（FIFO 第一个有剩余额度的） */
+  currentSubscriptionQuota?: number
+  currentSubscriptionUsed?: number
 }
 
 // ===== 订阅相关类型 =====

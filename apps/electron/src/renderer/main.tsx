@@ -402,6 +402,24 @@ function BillingInitializer(): null {
     return unsubBillingChanged
   }, [user, setBillingInfo])
 
+  // 窗口获得焦点时刷新余额（用户切回 App 时拿到最新数据）
+  useEffect(() => {
+    if (!isCloudMode() || !user) return
+
+    const refreshOnFocus = (): void => {
+      window.electronAPI.cloudBilling.getBilling().then((result) => {
+        if (result.success && result.data) {
+          setBillingInfo(result.data)
+        }
+      }).catch(() => {
+        // 刷新失败不影响使用
+      })
+    }
+
+    window.addEventListener('focus', refreshOnFocus)
+    return () => window.removeEventListener('focus', refreshOnFocus)
+  }, [user, setBillingInfo])
+
   return null
 }
 
