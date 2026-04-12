@@ -105,6 +105,8 @@ import type {
   AgentTeamData,
   MoveSessionToWorkspaceInput,
   ForkSessionInput,
+  RewindSessionInput,
+  RewindSessionResult,
   AgentMessageSearchResult,
   FeishuConfig,
   FeishuConfigInput,
@@ -358,6 +360,9 @@ export interface ElectronAPI {
 
   /** 分叉 Agent 会话 */
   forkAgentSession: (input: ForkSessionInput) => Promise<AgentSessionMeta>
+
+  /** 快照回退（同一会话内回退到指定点，恢复文件 + 截断对话） */
+  rewindSession: (input: RewindSessionInput) => Promise<RewindSessionResult>
 
   /** 生成 Agent 会话标题 */
   generateAgentTitle: (input: AgentGenerateTitleInput) => Promise<string | null>
@@ -1185,6 +1190,10 @@ const electronAPI: ElectronAPI = {
 
   forkAgentSession: (input: ForkSessionInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.FORK_SESSION, input)
+  },
+
+  rewindSession: (input: RewindSessionInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REWIND_SESSION, input)
   },
 
   generateAgentTitle: (input: AgentGenerateTitleInput) => {

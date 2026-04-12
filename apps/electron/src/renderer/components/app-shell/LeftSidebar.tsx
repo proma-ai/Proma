@@ -736,7 +736,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
       {/* 顶部留空，避开 macOS 红绿灯 */}
-      <div className="pt-[50px]">
+      <div className="pt-[30px]">
         {/* 模式切换器 + 折叠按钮 */}
         <div className="flex items-start gap-1.5 px-3">
           <div className="flex-1 min-w-0">

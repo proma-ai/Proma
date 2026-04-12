@@ -63,6 +63,8 @@ import type {
   AgentTeamData,
   MoveSessionToWorkspaceInput,
   ForkSessionInput,
+  RewindSessionInput,
+  RewindSessionResult,
   FeishuConfigInput,
   FeishuConfig,
   FeishuBridgeState,
@@ -133,7 +135,7 @@ import {
   autoArchiveAgentSessions,
   searchAgentSessionMessages,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
@@ -840,6 +842,17 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.FORK_SESSION,
     async (_, input: ForkSessionInput): Promise<AgentSessionMeta> => {
       return forkAgentSession(input)
+    }
+  )
+
+  // 快照回退（同一会话内回退到指定点）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REWIND_SESSION,
+    async (_, input: RewindSessionInput): Promise<RewindSessionResult> => {
+      return rewindAgentSession(
+        input.sessionId,
+        input.assistantMessageUuid,
+      )
     }
   )
 

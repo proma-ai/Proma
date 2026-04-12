@@ -24,11 +24,55 @@ import {
   agentWorkspacesAtom,
   currentAgentWorkspaceIdAtom,
 } from '@/atoms/agent-atoms'
+import { workspaceListHeightAtom } from '@/atoms/sidebar-atoms'
 import type { AgentWorkspace } from '@proma/shared'
 
 export function WorkspaceSelector(): React.ReactElement {
   const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
+  const [listHeight, setListHeight] = useAtom(workspaceListHeightAtom)
+
+  // 高度拖拽调整
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const resizing = React.useRef(false)
+  const startY = React.useRef(0)
+  const startH = React.useRef(0)
+  const cleanupResizeRef = React.useRef<(() => void) | null>(null)
+
+  React.useEffect(() => {
+    return () => { cleanupResizeRef.current?.() }
+  }, [])
+
+  const handleResizeStart = React.useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      resizing.current = true
+      startY.current = e.clientY
+      // 用实际渲染高度作为起点，避免 maxHeight > 实际高度时不跟手
+      startH.current = listRef.current?.getBoundingClientRect().height ?? 120
+
+      const onMove = (ev: MouseEvent): void => {
+        if (!resizing.current) return
+        const delta = ev.clientY - startY.current
+        const next = Math.min(400, Math.max(80, startH.current + delta))
+        setListHeight(next)
+      }
+      const onUp = (): void => {
+        resizing.current = false
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        cleanupResizeRef.current = null
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+      cleanupResizeRef.current = onUp
+    },
+    [setListHeight],
+  )
 
   // 新建状态
   const [creating, setCreating] = React.useState(false)
@@ -267,7 +311,11 @@ export function WorkspaceSelector(): React.ReactElement {
         </div>
 
         {/* 工作区列表 */}
-        <div className="max-h-[120px] overflow-y-auto scrollbar-thin flex flex-col p-1">
+        <div
+          ref={listRef}
+          className="overflow-y-auto scrollbar-thin flex flex-col p-1"
+          style={{ maxHeight: listHeight }}
+        >
           {workspaces.map((ws) => (
             <div key={ws.id} className="relative">
               {/* 上方插入指示线 */}
@@ -356,6 +404,14 @@ export function WorkspaceSelector(): React.ReactElement {
               />
             </div>
           )}
+        </div>
+
+        {/* 拖拽调整高度的 handle */}
+        <div
+          onMouseDown={handleResizeStart}
+          className="h-1 cursor-row-resize group/resize flex items-center justify-center hover:bg-foreground/[0.06] transition-colors titlebar-no-drag"
+        >
+          <div className="w-8 h-[2px] rounded-full bg-foreground/0 group-hover/resize:bg-foreground/20 transition-colors" />
         </div>
       </div>
 

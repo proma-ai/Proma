@@ -33,6 +33,16 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { FeishuNotifyToggle } from '@/components/chat/FeishuNotifyToggle'
 import {
@@ -1143,6 +1153,51 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [sessionId, openSession, setAgentSessions])
 
+  /** 快照回退：同一会话内回退到指定消息点，恢复文件 + 截断对话 */
+  const [rewindTargetUuid, setRewindTargetUuid] = React.useState<string | null>(null)
+
+  const handleRewindRequest = React.useCallback((assistantMessageUuid: string): void => {
+    setRewindTargetUuid(assistantMessageUuid)
+  }, [])
+
+  const handleRewindConfirm = React.useCallback(async (): Promise<void> => {
+    if (!rewindTargetUuid) return
+    const targetUuid = rewindTargetUuid
+    setRewindTargetUuid(null)
+
+    try {
+      const result = await window.electronAPI.rewindSession({
+        sessionId,
+        assistantMessageUuid: targetUuid,
+      })
+
+      // 刷新消息列表
+      store.set(agentMessageRefreshAtom, (prev) => {
+        const map = new Map(prev)
+        map.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
+        return map
+      })
+
+      if (result.fileRewind?.canRewind) {
+        const fileCount = result.fileRewind.filesChanged?.length ?? 0
+        toast.success('已回退到此处', {
+          description: fileCount > 0 ? `${fileCount} 个文件已恢复` : '文件无变化',
+        })
+      } else if (result.fileRewind?.error) {
+        toast.warning('已回退对话', {
+          description: `文件恢复不可用：${result.fileRewind.error}`,
+        })
+      } else {
+        toast.success('已回退到此处')
+      }
+    } catch (error) {
+      console.error('[AgentView] 回退失败:', error)
+      toast.error('回退失败', {
+        description: error instanceof Error ? error.message : '未知错误',
+      })
+    }
+  }, [rewindTargetUuid, sessionId, store])
+
   // 监听快捷键系统分发的 stop-generation 事件（Cmd+.）
   React.useEffect(() => {
     const handler = (): void => {
@@ -1172,6 +1227,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const canSend = (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   return (
+    <>
     <AgentSessionProvider sessionId={sessionId}>
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0 max-w-[min(72rem,100%)] mx-auto">
@@ -1193,6 +1249,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetry={handleRetry}
           onRetryInNewSession={handleRetryInNewSession}
           onFork={handleFork}
+          onRewind={handleRewindRequest}
           onCompact={handleCompact}
           onGoToBilling={handleGoToBilling}
         />
@@ -1420,5 +1477,30 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )}
       </div>
     </AgentSessionProvider>
+
+    {/* 回退确认弹窗 */}
+    <AlertDialog
+      open={rewindTargetUuid !== null}
+      onOpenChange={(v) => { if (!v) setRewindTargetUuid(null) }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认回退</AlertDialogTitle>
+          <AlertDialogDescription>
+            回退将截断该消息之后的所有对话，并恢复文件到该时刻的状态。此操作不可撤销，确定要回退吗？
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleRewindConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            回退
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }

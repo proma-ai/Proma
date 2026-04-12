@@ -532,12 +532,12 @@ export interface AgentSessionMeta {
   archived?: boolean
   /** 附加的外部目录路径列表（绝对路径，作为 SDK additionalDirectories 传递） */
   attachedDirectories?: string[]
-  /** 分叉来源：源会话的 SDK session ID（首次发消息时用于 resume + forkSession） */
-  forkedFromSdkSessionId?: string
-  /** 分叉截断点：源会话中的消息 uuid（inclusive） */
-  forkAtMessageUuid?: string
-  /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中） */
+  /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中，首次 resume 后清除） */
   forkSourceDir?: string
+  /** 分叉来源：源会话的 SDK session ID（用于 rewind 时读取源会话的 file-history-snapshot 和备份文件） */
+  forkSourceSdkSessionId?: string
+  /** 回退后的 resume 截断点：下次发消息时传给 SDK resumeSessionAt（消费后清除） */
+  resumeAtMessageUuid?: string
   /** 最后一次流式执行是否被用户主动中断 */
   stoppedByUser?: boolean
   /** 创建时间戳 */
@@ -750,6 +750,28 @@ export interface ForkSessionInput {
   sessionId: string
   /** SDK 消息 uuid（截断点，inclusive）。省略时复制全部历史 */
   upToMessageUuid?: string
+}
+
+/** 快照回退输入（同一会话内回退到指定点） */
+export interface RewindSessionInput {
+  /** Proma 会话 ID */
+  sessionId: string
+  /** 回退到哪条 assistant message（inclusive，截断该消息之后的一切） */
+  assistantMessageUuid: string
+}
+
+/** 快照回退结果 */
+export interface RewindSessionResult {
+  /** 截断后剩余的消息数 */
+  remainingMessages: number
+  /** 文件恢复结果（enableFileCheckpointing 启用时可用） */
+  fileRewind?: {
+    canRewind: boolean
+    error?: string
+    filesChanged?: string[]
+    insertions?: number
+    deletions?: number
+  }
 }
 
 // ===== 后台任务管理 =====
@@ -1131,6 +1153,8 @@ export const AGENT_IPC_CHANNELS = {
   MOVE_SESSION_TO_WORKSPACE: 'agent:move-session-to-workspace',
   /** 分叉会话（从指定消息处创建新会话） */
   FORK_SESSION: 'agent:fork-session',
+  /** 快照回退（同一会话内回退到指定点，恢复文件 + 截断对话） */
+  REWIND_SESSION: 'agent:rewind-session',
 
   // 工作区管理
   /** 获取工作区列表 */

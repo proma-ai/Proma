@@ -210,6 +210,16 @@ export function stopAgent(sessionId: string): void {
 }
 
 /**
+ * 快照回退：回退到指定消息点，恢复文件 + 截断对话
+ */
+export async function rewindAgentSession(
+  sessionId: string,
+  assistantMessageUuid: string,
+): Promise<import('@proma/shared').RewindSessionResult> {
+  return orchestrator.rewindSession(sessionId, assistantMessageUuid)
+}
+
+/**
  * 检查指定会话是否正在运行
  */
 export function isAgentSessionActive(sessionId: string): boolean {

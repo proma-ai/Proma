@@ -17,11 +17,11 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { existsSync, mkdirSync, symlinkSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, symlinkSync, readFileSync, writeFileSync, accessSync, chmodSync, constants as fsConstants } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload } from '@proma/shared'
+import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult } from '@proma/shared'
 import { SAFE_TOOLS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -34,7 +34,7 @@ import { getCloudApiConfig } from '@proma/cloud'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode, setWorkspacePermissionMode } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir } from './config-paths'
 import { getWorkspaceAttachedDirectories } from './agent-workspace-manager'
@@ -286,25 +286,46 @@ function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
  * 通过 symlink 桥接 extraResources → SDK 的 vendor 目录。
  */
 function ensureRipgrepAvailable(cliPath: string): void {
-  if (!app.isPackaged) return
-
   try {
     const sdkDir = dirname(cliPath)
     const arch = process.arch
     const platform = process.platform
-    const expectedDir = join(sdkDir, 'vendor', 'ripgrep', `${arch}-${platform}`)
+    const rgDir = join(sdkDir, 'vendor', 'ripgrep', `${arch}-${platform}`)
+    const rgPath = join(rgDir, 'rg')
+
+    // 检查 rg 是否已经可执行（而不是仅检查目录存在）
+    try {
+      accessSync(rgPath, fsConstants.X_OK)
+      return // 已可执行，无需修复
+    } catch {
+      // 不可执行或不存在，继续修复
+    }
+
+    // 情况 1：rg 文件存在但缺少执行权限（pnpm 安装不保留权限）
+    if (existsSync(rgPath)) {
+      chmodSync(rgPath, 0o755)
+      console.log(`[Agent 编排] ripgrep 权限修复成功: ${rgPath}`)
+      return
+    }
+
+    // 情况 2（仅打包环境）：rg 文件不存在，通过 symlink 桥接 extraResources
+    if (!app.isPackaged) return
+
     const resourcesRipgrep = join(process.resourcesPath, 'vendor', 'ripgrep')
-
-    if (existsSync(expectedDir)) return
-
     if (!existsSync(resourcesRipgrep)) {
       console.warn(`[Agent 编排] ripgrep 资源不存在: ${resourcesRipgrep}`)
       return
     }
 
+    // 同时修复 extraResources 中 rg 的权限
+    const resourcesRg = join(resourcesRipgrep, 'rg')
+    if (existsSync(resourcesRg)) {
+      try { chmodSync(resourcesRg, 0o755) } catch { /* 忽略 */ }
+    }
+
     mkdirSync(join(sdkDir, 'vendor', 'ripgrep'), { recursive: true })
-    symlinkSync(resourcesRipgrep, expectedDir, 'junction')
-    console.log(`[Agent 编排] ripgrep symlink 创建成功: ${expectedDir} → ${resourcesRipgrep}`)
+    symlinkSync(resourcesRipgrep, rgDir, 'junction')
+    console.log(`[Agent 编排] ripgrep symlink 创建成功: ${rgDir} → ${resourcesRipgrep}`)
   } catch (error) {
     console.warn('[Agent 编排] ripgrep symlink 创建失败:', error)
   }
@@ -911,25 +932,16 @@ export class AgentOrchestrator {
     const sessionMeta = getAgentSessionMeta(sessionId)
     let existingSdkSessionId = sessionMeta?.sdkSessionId
 
-    // 4.1 检测延迟 fork 元数据：首次发消息时消费，使用 resume + forkSession 让 SDK 在当前目录创建分叉
-    let isForkResume = false
-    let forkResumeSessionAt: string | undefined
-    let forkSourceDir: string | undefined
-    if (!existingSdkSessionId && sessionMeta?.forkedFromSdkSessionId) {
-      existingSdkSessionId = sessionMeta.forkedFromSdkSessionId
-      forkResumeSessionAt = sessionMeta.forkAtMessageUuid
-      forkSourceDir = sessionMeta.forkSourceDir
-      isForkResume = true
-      console.log(`[Agent 编排] 检测到延迟 fork: 源 SDK session=${existingSdkSessionId}, 截断点=${forkResumeSessionAt || '全部'}, 源目录=${forkSourceDir || '无'}`)
-      // 清除 fork 元数据（只消费一次）
-      updateAgentSessionMeta(sessionId, {
-        forkedFromSdkSessionId: undefined,
-        forkAtMessageUuid: undefined,
-        forkSourceDir: undefined,
-      })
+    // 4.1 检测回退后的 resume 截断点（快照回退功能）
+    let rewindResumeAt: string | undefined
+    if (sessionMeta?.resumeAtMessageUuid) {
+      rewindResumeAt = sessionMeta.resumeAtMessageUuid
+      // 消费一次后清除
+      updateAgentSessionMeta(sessionId, { resumeAtMessageUuid: undefined })
+      console.log(`[Agent 编排] 检测到回退 resume: resumeSessionAt=${rewindResumeAt}`)
     }
 
-    console.log(`[Agent 编排] Resume 状态: sdkSessionId=${existingSdkSessionId || '无'}, proma sessionId=${sessionId}, fork=${isForkResume}`)
+    console.log(`[Agent 编排] Resume 状态: sdkSessionId=${existingSdkSessionId || '无'}, proma sessionId=${sessionId}`)
 
     // 5. 持久化用户消息（SDKMessage 格式）
     const userSDKMsg: SDKMessage = {
@@ -997,11 +1009,14 @@ export class AgentOrchestrator {
         }
       }
 
-      // 9.4.1 Fork resume: 使用源会话的 cwd，让 SDK 能找到源 session 文件
-      // fork 后 SDK 会创建新 session，后续 resume 使用新 sdkSessionId 在新 cwd 下工作
-      if (isForkResume && forkSourceDir) {
-        agentCwd = forkSourceDir
-        console.log(`[Agent 编排] Fork resume: 使用源会话 cwd=${forkSourceDir}`)
+      // 9.4.1 Fork 后首次 resume：使用源 cwd 让 SDK 找到 session 文件
+      // SDK forkSession() 在源 cwd 的项目哈希下创建新 session 文件，
+      // 首次 resume 需要从该目录查找，之后 SDK 会在新 cwd 下创建新数据
+      if (sessionMeta?.forkSourceDir) {
+        agentCwd = sessionMeta.forkSourceDir
+        console.log(`[Agent 编排] Fork 首次 resume: 使用源会话 cwd=${sessionMeta.forkSourceDir}`)
+        // 消费一次后清除
+        updateAgentSessionMeta(sessionId, { forkSourceDir: undefined })
       }
 
       // 9.5 确保 SDK 项目设置（plansDirectory → .context）
@@ -1325,9 +1340,8 @@ export class AgentOrchestrator {
           }),
         },
         resumeSessionId: existingSdkSessionId,
-        // 延迟 fork：首次发消息时让 SDK 在当前 cwd 的项目空间创建分叉 session
-        ...(isForkResume && { forkSession: true }),
-        ...(isForkResume && forkResumeSessionAt && { resumeSessionAt: forkResumeSessionAt }),
+        // 回退后 resume：从指定消息处继续（SDK 在同一 JSONL 内创建分支）
+        ...(rewindResumeAt && { resumeSessionAt: rewindResumeAt }),
         ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
         ...(workspaceSlug && { plugins: [{ type: 'local' as const, path: getAgentWorkspacePath(workspaceSlug) }] }),
         // 合并用户附加目录 + 工作区附加目录 + 工作区文件目录
@@ -1347,6 +1361,8 @@ export class AgentOrchestrator {
           }
           return allDirs.length > 0 ? { additionalDirectories: allDirs } : {}
         })(),
+        // 启用文件检查点，支持 rewindFiles 回退
+        enableFileCheckpointing: true,
         // SDK 0.2.52+ 新增选项（从 settings 读取）
         ...(appSettings.agentThinking && { thinking: appSettings.agentThinking }),
         effort: appSettings.agentEffort ?? 'high',
@@ -2122,6 +2138,88 @@ export class AgentOrchestrator {
       await this.adapter.setPermissionMode(sessionId, mode)
     }
     console.log(`[Agent 编排] 运行中权限模式已切换: sessionId=${sessionId}, mode=${mode}`)
+  }
+
+  // ===== 快照回退 =====
+
+  /**
+   * 回退会话到指定消息点
+   *
+   * 1. 直接从 SDK JSONL 的 file-history-snapshot 恢复文件到目标时刻的状态
+   * 2. 截断 Proma JSONL 到 assistantMessageUuid（inclusive）
+   * 3. 记录 resumeAtMessageUuid，下次发消息时 SDK 从该点分支继续
+   *
+   * 文件恢复通过解析 SDK JSONL 中的快照完成，无需运行中的 Query。
+   * 文件恢复失败时仍然截断对话（优雅降级）。
+   */
+  async rewindSession(
+    sessionId: string,
+    assistantMessageUuid: string,
+  ): Promise<RewindSessionResult> {
+    // 0. 阻止运行中会话回退（JSONL 并发写入会损坏文件）
+    if (this.activeSessions.has(sessionId)) {
+      throw new Error('会话正在运行中，请停止后再回退')
+    }
+
+    const sessionMeta = getAgentSessionMeta(sessionId)
+    if (!sessionMeta?.sdkSessionId) {
+      throw new Error('会话没有 SDK session ID，无法回退')
+    }
+
+    // 0.5 从 SDK session JSONL 解析对应的 user message UUID（rewindFiles 需要）
+    let projectDir: string | undefined
+    let workspaceSlug: string | undefined
+    if (sessionMeta.workspaceId) {
+      const ws = getAgentWorkspace(sessionMeta.workspaceId)
+      if (ws) {
+        workspaceSlug = ws.slug
+        projectDir = getAgentSessionWorkspacePath(ws.slug, sessionMeta.id)
+      }
+    }
+    const userMessageUuid = resolveUserUuidFromSDK(sessionMeta.sdkSessionId, assistantMessageUuid, projectDir, sessionMeta.forkSourceSdkSessionId)
+    console.log(`[Agent 编排] 回退: 解析 user uuid=${userMessageUuid || '未找到'} (assistant uuid=${assistantMessageUuid}, forkSource=${sessionMeta.forkSourceSdkSessionId ?? 'none'})`)
+
+    // 1. 文件恢复：直接从 SDK JSONL 的 file-history-snapshot 恢复，无需临时 Query
+    let fileRewindResult: { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } | undefined
+    if (userMessageUuid === '__LAST_TURN__') {
+      // 最后一个 turn：当前文件系统已是该 turn 完成后的状态，无需回退文件
+      console.log(`[Agent 编排] 回退: 最后一个 turn，跳过文件恢复`)
+      fileRewindResult = { canRewind: true, filesChanged: [] }
+    } else if (userMessageUuid) {
+      try {
+        // 确定 cwd（文件的基准路径）
+        let cwd = homedir()
+        if (projectDir) cwd = projectDir
+        // 收集附加目录（与发消息时相同的来源：工作区附加目录 + 工作区文件目录）
+        const rewindAttachedDirs: string[] = []
+        if (workspaceSlug) {
+          rewindAttachedDirs.push(...getWorkspaceAttachedDirectories(workspaceSlug))
+          rewindAttachedDirs.push(getWorkspaceFilesDir(workspaceSlug))
+        }
+        console.log(`[Agent 编排] 回退: 直接从 snapshot 恢复文件 (cwd=${cwd}, forkSource=${sessionMeta.forkSourceSdkSessionId ?? 'none'}, attachedDirs=${rewindAttachedDirs.length})`)
+        fileRewindResult = rewindFilesFromSnapshot(sessionMeta.sdkSessionId, userMessageUuid, cwd, projectDir, sessionMeta.forkSourceSdkSessionId, rewindAttachedDirs)
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        console.warn('[Agent 编排] 文件恢复失败，继续截断对话:', errMsg)
+        if (err instanceof Error && err.stack) console.warn('[Agent 编排] 文件恢复错误堆栈:', err.stack)
+        fileRewindResult = { canRewind: false, error: errMsg }
+      }
+    } else {
+      fileRewindResult = { canRewind: false, error: '无法从 SDK session 中解析 user message UUID' }
+    }
+
+    // 2. 截断 Proma JSONL
+    const kept = truncateSDKMessages(sessionId, assistantMessageUuid)
+
+    // 3. 记录 resumeAtMessageUuid，下次发消息时 SDK 从此点继续
+    updateAgentSessionMeta(sessionId, { resumeAtMessageUuid: assistantMessageUuid })
+
+    console.log(`[Agent 编排] 回退完成: sessionId=${sessionId}, 保留 ${kept.length} 条消息, 文件恢复=${fileRewindResult?.canRewind ?? '跳过'}`)
+
+    return {
+      remainingMessages: kept.length,
+      fileRewind: fileRewindResult,
+    }
   }
 
   /** 中止所有活跃的 Agent 会话（应用退出时调用） */
