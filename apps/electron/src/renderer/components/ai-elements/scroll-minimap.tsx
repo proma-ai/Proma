@@ -275,7 +275,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const thumbTopPct = scrollRange > 0 ? (scrollTop / scrollRange) * (100 - thumbHeightPct) : 0
 
   return (
-    <div className="absolute right-1 top-0 bottom-0 z-10 flex pointer-events-none">
+    <div className="absolute right-1 top-0 bottom-0 z-30 flex pointer-events-none">
       {/* ── 迷你地图悬停区域（面板 + 横杠） ── */}
       <div className="flex items-start h-full">
         {/* 展开面板 */}

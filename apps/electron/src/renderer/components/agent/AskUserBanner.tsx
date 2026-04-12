@@ -32,7 +32,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
   const [answers, setAnswers] = React.useState<Map<number, QuestionAnswer>>(new Map())
   const [submitting, setSubmitting] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState(0)
-  const [focusedOptIdx, setFocusedOptIdx] = React.useState(0)
+  const [focusedOptIdx, setFocusedOptIdx] = React.useState(-1)
 
   const request = requests[0] ?? null
   const questions = request?.questions ?? []
@@ -49,7 +49,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
 
   React.useEffect(() => {
     setActiveTab(0)
-    setFocusedOptIdx(0)
+    setFocusedOptIdx(-1)
     const firstOpt = questions[0]?.options[0]
     setAnswers(firstOpt
       ? new Map([[0, { ...EMPTY_ANSWER, selected: [firstOpt.label] }]])
@@ -58,7 +58,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
 
   // 切换 Tab 时重置焦点并默认选中第一个选项
   React.useEffect(() => {
-    setFocusedOptIdx(0)
+    setFocusedOptIdx(-1)
     setAnswers((prev) => {
       if (prev.has(activeTab)) return prev
       const firstOpt = questions[activeTab]?.options[0]
@@ -94,9 +94,11 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
 
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
-        const nextIdx = e.key === 'ArrowDown'
-          ? (curFocusIdx + 1) % itemCount
-          : (curFocusIdx - 1 + itemCount) % itemCount
+        const nextIdx = curFocusIdx === -1
+          ? (e.key === 'ArrowDown' ? 0 : itemCount - 1)
+          : e.key === 'ArrowDown'
+            ? (curFocusIdx + 1) % itemCount
+            : (curFocusIdx - 1 + itemCount) % itemCount
         setFocusedOptIdx(nextIdx)
         // 移动焦点同时选中
         if (nextIdx < q.options.length) {
