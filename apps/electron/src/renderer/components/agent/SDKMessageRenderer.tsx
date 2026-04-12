@@ -554,7 +554,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         const hasDuration = durationMs != null
         if (!hasDuration && !hasActions && !stoppedByUser) return null
         return (
-          <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start animate-in fade-in duration-200">
+          <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
             {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
             {textContent && <CopyButton content={textContent} />}
             {onFork && lastUuid && (

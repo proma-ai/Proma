@@ -880,9 +880,9 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
               ))
             )}
 
-            {/* 有实时助手内容时：仅追加运行指示器 */}
-            {hasLiveAssistantContent && (streaming || retrying) && (
-              <div className="pl-[56px] mt-0.5">
+            {/* 有实时助手内容时：显示运行指示器或占位（防止 streaming 结束到 Actions Bar 出现之间的高度跳动） */}
+            {hasLiveAssistantContent && (
+              <div className="pl-[56px] mt-0.5 min-h-[28px]">
                 {retrying && <RetryingNotice retrying={retrying} />}
                 {streaming && <AgentRunningIndicator startedAt={startedAt} />}
               </div>
