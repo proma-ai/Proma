@@ -11,7 +11,7 @@
  */
 
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useSetAtom } from 'jotai'
 import {
   Check,
   ShieldCheck,
@@ -21,7 +21,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { allPendingExitPlanRequestsAtom } from '@/atoms/agent-atoms'
+import { allPendingExitPlanRequestsAtom, agentStreamingStatesAtom, finalizeStreamingActivities } from '@/atoms/agent-atoms'
 import type { ExitPlanModeAction, ExitPlanAllowedPrompt } from '@proma/shared'
 
 /** 选项定义 */
@@ -70,6 +70,7 @@ interface ExitPlanModeBannerProps {
 
 export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): React.ReactElement | null {
   const [allRequests, setAllRequests] = useAtom(allPendingExitPlanRequestsAtom)
+  const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const requests = allRequests.get(sessionId) ?? []
   const [focusedIdx, setFocusedIdx] = React.useState(0)
   const [showFeedback, setShowFeedback] = React.useState(false)
@@ -118,6 +119,27 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
   }
 
   handleActionRef.current = handleAction
+
+  /** 关闭计划审批 & 终止 Agent */
+  const handleDismiss = (): void => {
+    setStreamingStates((prev) => {
+      const current = prev.get(sessionId)
+      if (!current || !current.running) return prev
+      const map = new Map(prev)
+      map.set(sessionId, {
+        ...current,
+        running: false,
+        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+      })
+      return map
+    })
+    setAllRequests((prev) => {
+      const map = new Map(prev)
+      map.delete(sessionId)
+      return map
+    })
+    window.electronAPI.stopAgent(sessionId).catch(console.error)
+  }
 
   // 键盘导航：只在 requestId 变化时重建 handler，内部通过 ref 读取最新值
   React.useEffect(() => {
@@ -185,7 +207,15 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2 mb-1">
           <FileText className="size-4 text-primary" />
-          <span className="text-sm font-medium text-foreground">Agent 计划待审批</span>
+          <span className="text-sm font-medium text-foreground flex-1">Agent 计划待审批</span>
+          <button
+            type="button"
+            className="size-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+            onClick={handleDismiss}
+            title="关闭并终止 Agent"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
         <p className="text-xs text-muted-foreground">
           Agent 已完成计划，请选择如何继续

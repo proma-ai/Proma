@@ -9,10 +9,10 @@
  */
 
 import * as React from 'react'
-import { useAtom } from 'jotai'
+import { useAtom, useSetAtom } from 'jotai'
 import { Shield, ShieldAlert, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { allPendingPermissionRequestsAtom } from '@/atoms/agent-atoms'
+import { allPendingPermissionRequestsAtom, agentStreamingStatesAtom, finalizeStreamingActivities } from '@/atoms/agent-atoms'
 import type { DangerLevel } from '@proma/shared'
 
 /** 危险等级对应的图标颜色 */
@@ -38,6 +38,7 @@ interface PermissionBannerProps {
 
 export function PermissionBanner({ sessionId }: PermissionBannerProps): React.ReactElement | null {
   const [allRequests, setAllRequests] = useAtom(allPendingPermissionRequestsAtom)
+  const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const requests = allRequests.get(sessionId) ?? []
   const [responding, setResponding] = React.useState(false)
   const respondRef = React.useRef<(behavior: 'allow' | 'deny', alwaysAllow?: boolean) => void>()
@@ -61,6 +62,27 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [request?.requestId])
+
+  /** 关闭权限请求 & 终止 Agent */
+  const handleDismiss = (): void => {
+    setStreamingStates((prev) => {
+      const current = prev.get(sessionId)
+      if (!current || !current.running) return prev
+      const map = new Map(prev)
+      map.set(sessionId, {
+        ...current,
+        running: false,
+        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+      })
+      return map
+    })
+    setAllRequests((prev) => {
+      const map = new Map(prev)
+      map.delete(sessionId)
+      return map
+    })
+    window.electronAPI.stopAgent(sessionId).catch(console.error)
+  }
 
   if (!request) return null
 
@@ -114,9 +136,19 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground font-mono">
-          {formatToolName(request.toolName)}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground font-mono">
+            {formatToolName(request.toolName)}
+          </span>
+          <button
+            type="button"
+            className="size-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+            onClick={handleDismiss}
+            title="关闭并终止 Agent"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* 命令/操作内容 */}

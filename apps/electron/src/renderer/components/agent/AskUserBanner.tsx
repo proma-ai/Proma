@@ -6,10 +6,10 @@
  */
 
 import * as React from 'react'
-import { useAtom } from 'jotai'
-import { Send } from 'lucide-react'
+import { useAtom, useSetAtom } from 'jotai'
+import { Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { allPendingAskUserRequestsAtom } from '@/atoms/agent-atoms'
+import { allPendingAskUserRequestsAtom, agentStreamingStatesAtom, finalizeStreamingActivities } from '@/atoms/agent-atoms'
 import type { AskUserQuestion } from '@proma/shared'
 
 interface QuestionAnswer {
@@ -27,6 +27,7 @@ interface AskUserBannerProps {
 
 export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactElement | null {
   const [allRequests, setAllRequests] = useAtom(allPendingAskUserRequestsAtom)
+  const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const requests = allRequests.get(sessionId) ?? []
   const [answers, setAnswers] = React.useState<Map<number, QuestionAnswer>>(new Map())
   const [submitting, setSubmitting] = React.useState(false)
@@ -115,6 +116,30 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [request?.requestId])
 
+  /** 关闭问题 & 终止 Agent */
+  const handleDismiss = (): void => {
+    // 立即标记 streaming 停止，避免 UI 残留
+    setStreamingStates((prev) => {
+      const current = prev.get(sessionId)
+      if (!current || !current.running) return prev
+      const map = new Map(prev)
+      map.set(sessionId, {
+        ...current,
+        running: false,
+        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+      })
+      return map
+    })
+    // 清除当前 session 所有待处理的 AskUser 请求
+    setAllRequests((prev) => {
+      const map = new Map(prev)
+      map.delete(sessionId)
+      return map
+    })
+    // 终止 Agent
+    window.electronAPI.stopAgent(sessionId).catch(console.error)
+  }
+
   if (!request) return null
 
   const getAnswer = (idx: number): QuestionAnswer => answers.get(idx) ?? EMPTY_ANSWER
@@ -189,9 +214,19 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-foreground">Proma Agent 需要你的输入</span>
-          {requests.length > 1 && (
-            <span className="text-xs text-muted-foreground">(+{requests.length - 1})</span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {requests.length > 1 && (
+              <span className="text-xs text-muted-foreground">(+{requests.length - 1})</span>
+            )}
+            <button
+              type="button"
+              className="size-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+              onClick={handleDismiss}
+              title="关闭并终止 Agent"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Tab 栏（多问题时显示） */}

@@ -1,9 +1,13 @@
 /**
- * StickyUserMessage — 用户最新消息悬浮置顶条
+ * StickyUserMessage — 用户消息悬浮置顶条
  *
- * 当用户最近一条消息完全滚出 Conversation 视口顶部时，
- * 在顶部显示一个精简版悬浮条，点击可回滚到原始消息位置。
+ * 当任意用户消息完全滚出 Conversation 视口顶部时，
+ * 在顶部显示该消息的精简版悬浮条，点击可回滚到原始消息位置。
  * 必须放在 StickToBottom（Conversation）内部使用。
+ *
+ * 核心逻辑：遍历所有 [data-message-role="user"] DOM 节点，
+ * 找到最后一个 bottom < containerTop 的节点（即视口上方最近的用户消息），
+ * 匹配其 data-message-id 到 userMessages 数据列表，显示对应内容。
  */
 
 import * as React from 'react'
@@ -19,67 +23,88 @@ interface StickyAttachment {
   isImage: boolean
 }
 
-interface StickyUserMessageProps {
-  lastUserGroupId: string | null
+interface UserMessageData {
+  id: string | null
   text: string
   attachments: StickyAttachment[]
 }
 
-/** 计算 node 相对于 container 的实际顶部偏移（递归累积 offsetTop） */
-function getOffsetTopRelativeTo(node: HTMLElement, container: HTMLElement): number {
-  let top = 0
-  let el: HTMLElement | null = node
-  while (el && el !== container) {
-    top += el.offsetTop
-    el = el.offsetParent as HTMLElement | null
-  }
-  return top
+interface StickyUserMessageProps {
+  userMessages: UserMessageData[]
 }
 
-export function StickyUserMessage({ lastUserGroupId, text, attachments }: StickyUserMessageProps): React.ReactElement {
+export function StickyUserMessage({ userMessages }: StickyUserMessageProps): React.ReactElement {
   const { scrollRef, stopScroll, state: stickyState } = useStickToBottomContext()
   const userProfile = useAtomValue(userProfileAtom)
-  const [isSticky, setIsSticky] = React.useState(false)
 
-  // 检测最后一条用户消息是否已完全滚出视口顶部
+  // 当前悬浮展示的消息
+  const [stickyMessage, setStickyMessage] = React.useState<UserMessageData | null>(null)
+
+  // 构建 id → data 查找表
+  const messageMap = React.useMemo(() => {
+    const map = new Map<string, UserMessageData>()
+    for (const msg of userMessages) {
+      if (msg.id) map.set(msg.id, msg)
+    }
+    return map
+  }, [userMessages])
+
   React.useEffect(() => {
     const el = scrollRef.current
-    if (!el || !lastUserGroupId) {
-      setIsSticky(false)
+    if (!el || userMessages.length === 0) {
+      setStickyMessage(null)
       return
     }
 
     const check = () => {
+      const containerRect = el.getBoundingClientRect()
       const nodes = el.querySelectorAll<HTMLElement>('[data-message-role="user"]')
-      const lastNode = nodes[nodes.length - 1]
-      if (!lastNode) {
-        setIsSticky(false)
-        return
+
+      // 从后往前找第一个完全在视口上方的用户消息节点
+      let found: UserMessageData | null = null
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const node = nodes[i]!
+        const nodeRect = node.getBoundingClientRect()
+        if (nodeRect.bottom < containerRect.top) {
+          // 找到了视口上方最近的用户消息
+          const msgId = node.getAttribute('data-message-id')
+          if (msgId) {
+            found = messageMap.get(msgId) ?? null
+          }
+          break
+        }
       }
-      const offsetTop = getOffsetTopRelativeTo(lastNode, el)
-      const nodeBottom = offsetTop + lastNode.offsetHeight
-      setIsSticky(nodeBottom < el.scrollTop)
+      setStickyMessage(found)
     }
 
     el.addEventListener('scroll', check, { passive: true })
-    const observer = new ResizeObserver(check)
-    observer.observe(el)
 
-    // 初始检查
-    check()
+    // 监听容器尺寸变化
+    const resizeObserver = new ResizeObserver(check)
+    resizeObserver.observe(el)
+
+    // 监听内容区域 DOM 变化（流式输出、消息加载后及时检测）
+    const contentEl = el.firstElementChild as HTMLElement | null
+    if (contentEl) {
+      resizeObserver.observe(contentEl)
+    }
+
+    // 延迟一帧执行初始检查，确保 DOM 已完成渲染
+    const rafId = requestAnimationFrame(check)
 
     return () => {
       el.removeEventListener('scroll', check)
-      observer.disconnect()
+      resizeObserver.disconnect()
+      cancelAnimationFrame(rafId)
     }
-  }, [scrollRef, lastUserGroupId])
+  }, [scrollRef, userMessages, messageMap])
 
   // 点击回滚到原始消息
   const scrollToOriginal = React.useCallback(() => {
     const el = scrollRef.current
-    if (!el || !lastUserGroupId) return
+    if (!el || !stickyMessage?.id) return
 
-    const target = el.querySelector<HTMLElement>(`[data-message-id="${lastUserGroupId}"]`)
+    const target = el.querySelector<HTMLElement>(`[data-message-id="${stickyMessage.id}"]`)
     if (!target) return
 
     stopScroll()
@@ -87,13 +112,16 @@ export function StickyUserMessage({ lastUserGroupId, text, attachments }: Sticky
     stickyState.velocity = 0
     stickyState.accumulated = 0
 
-    const offsetTop = getOffsetTopRelativeTo(target, el)
-    el.scrollTo({ top: Math.max(0, offsetTop - 24), behavior: 'smooth' })
-  }, [scrollRef, stopScroll, stickyState, lastUserGroupId])
+    const containerRect = el.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    const targetScrollTop = el.scrollTop + (targetRect.top - containerRect.top)
+    el.scrollTo({ top: Math.max(0, targetScrollTop - 24), behavior: 'smooth' })
+  }, [scrollRef, stopScroll, stickyState, stickyMessage])
 
-  const hasContent = text || attachments.length > 0
+  const isSticky = stickyMessage !== null
+  const hasContent = stickyMessage && (stickyMessage.text || stickyMessage.attachments.length > 0)
 
-  if (!hasContent) return <></>
+  if (!hasContent && !isSticky) return <></>
 
   return (
     <div
@@ -117,14 +145,14 @@ export function StickyUserMessage({ lastUserGroupId, text, attachments }: Sticky
           </div>
 
           {/* 文本内容：最多两行 */}
-          {text && (
-            <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">{text}</p>
+          {stickyMessage?.text && (
+            <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">{stickyMessage.text}</p>
           )}
 
           {/* 附件 badges */}
-          {attachments.length > 0 && (
+          {stickyMessage && stickyMessage.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
-              {attachments.map((att) => {
+              {stickyMessage.attachments.map((att) => {
                 const Icon = att.isImage ? FileImage : FileText
                 return (
                   <div

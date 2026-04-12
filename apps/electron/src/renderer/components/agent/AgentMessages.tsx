@@ -803,28 +803,32 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
     }
   }, [sessionId, minimapItems, setMinimapCache])
 
-  // 最后一条用户消息的数据 — 供 StickyUserMessage 使用
-  const lastUserMessageData = React.useMemo(() => {
+  // 所有用户消息的数据 — 供 StickyUserMessage 使用
+  const allUserMessagesData = React.useMemo(() => {
     if (useSDKRenderer) {
-      const lastUserGroup = [...allGroups].reverse().find((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
-      if (!lastUserGroup) return null
-      const rawText = extractUserText(lastUserGroup.message) ?? ''
-      const { files, text } = sdkParseAttachedFiles(rawText)
-      return {
-        id: getGroupId(lastUserGroup),
-        text,
-        attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
-      }
+      return allGroups
+        .filter((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
+        .map((g) => {
+          const rawText = extractUserText(g.message) ?? ''
+          const { files, text } = sdkParseAttachedFiles(rawText)
+          return {
+            id: getGroupId(g),
+            text,
+            attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
+          }
+        })
     }
     // 旧格式回退
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
-    if (!lastUserMsg) return null
-    const { files, text } = parseAttachedFiles(lastUserMsg.content ?? '')
-    return {
-      id: lastUserMsg.id ?? null,
-      text,
-      attachments: files.map((f) => ({ filename: f.filename, isImage: isImageFile(f.filename) })),
-    }
+    return messages
+      .filter((m) => m.role === 'user')
+      .map((m) => {
+        const { files, text } = parseAttachedFiles(m.content ?? '')
+        return {
+          id: m.id ?? null,
+          text,
+          attachments: files.map((f) => ({ filename: f.filename, isImage: isImageFile(f.filename) })),
+        }
+      })
   }, [useSDKRenderer, allGroups, messages])
 
   // 实时消息中是否已有可渲染的助手内容
@@ -912,12 +916,8 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
       </ConversationContent>
       <ScrollMinimap items={minimapItems} />
       <ConversationScrollButton />
-      {lastUserMessageData && (
-        <StickyUserMessage
-          lastUserGroupId={lastUserMessageData.id}
-          text={lastUserMessageData.text}
-          attachments={lastUserMessageData.attachments}
-        />
+      {allUserMessagesData.length > 0 && (
+        <StickyUserMessage userMessages={allUserMessagesData} />
       )}
     </Conversation>
   )
