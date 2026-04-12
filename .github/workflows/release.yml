@@ -33,10 +33,8 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
-            vendor_platforms: "--platform darwin-arm64 --platform darwin-x64"
           - os: windows-latest
             platform: win
-            vendor_platforms: "--platform win32-x64"
 
     runs-on: ${{ matrix.os }}
 
@@ -65,10 +63,6 @@ jobs:
 
       - name: 安装依赖
         run: bun install
-
-      - name: 下载 Bun 二进制
-        run: bun run scripts/download-bun.ts ${{ matrix.vendor_platforms }}
-        working-directory: apps/electron
 
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书
