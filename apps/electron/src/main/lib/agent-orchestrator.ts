@@ -181,6 +181,14 @@ function getRetryDelayMs(attempt: number): number {
   return Math.min(1000 * Math.pow(2, attempt - 1), 8000)
 }
 
+/** 判定是否为可能长时间执行的工具（抑制 idle timeout） */
+function isLongRunningTool(toolName: string): boolean {
+  return toolName === 'Bash'
+    || toolName === 'Agent'
+    || toolName === 'TaskOutput'
+    || toolName.startsWith('mcp__')
+}
+
 /**
  * 可中断的定时器
  *
@@ -246,21 +254,17 @@ function resolveSDKCliPath(): string {
 /**
  * 获取 Agent SDK 运行时可执行文件
  *
- * 优先级：Node.js → Bun → which node 同步查找 → 字符串 'node'
+ * 优先级：Node.js（缓存）→ which node 同步查找
  *
  * 当 runtimeStatusCache 尚未初始化时（应用启动竞态），
- * 降级到 'node' 字符串可能因 Electron 进程 PATH 不含 node 而触发 ENOENT。
- * 此时用 which/where 同步查找作为兜底，避免 SDK spawn 失败。
+ * 用 which/where 同步查找作为兜底，避免 SDK spawn 失败。
+ * 如果 Node.js 完全不可用，抛出明确错误。
  */
-function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
+function getAgentExecutable(): { type: 'node'; path: string } {
   const status = getRuntimeStatus()
 
   if (status?.node?.available && status.node.path) {
     return { type: 'node', path: status.node.path }
-  }
-
-  if (status?.bun?.available && status.bun.path) {
-    return { type: 'bun', path: status.bun.path }
   }
 
   // runtimeStatusCache 未就绪时，同步查找 node 路径
@@ -274,10 +278,13 @@ function getAgentExecutable(): { type: 'node' | 'bun'; path: string } {
       return { type: 'node', path: nodePath }
     }
   } catch {
-    // 忽略查找失败，继续降级
+    // 忽略查找失败
   }
 
-  return { type: 'node', path: 'node' }
+  throw new Error(
+    'Node.js 运行时未找到。Agent 功能需要系统安装 Node.js (v18+)。' +
+      '请访问 https://nodejs.org 下载安装后重启 Proma。',
+  )
 }
 
 /**
@@ -958,7 +965,7 @@ export class AgentOrchestrator {
     const accumulatedMessages: SDKMessage[] = []
     let resolvedModel = modelId || DEFAULT_MODEL_ID
     let titleGenerationStarted = false
-    let agentExec: { type: 'node' | 'bun'; path: string } | undefined
+    let agentExec: { type: 'node'; path: string } | undefined
     let agentCwd: string | undefined
     let workspaceSlug: string | undefined
     let workspace: import('@proma/shared').AgentWorkspace | undefined
@@ -984,8 +991,7 @@ export class AgentOrchestrator {
         `[Agent 编排] 启动 SDK — CLI: ${cliPath}, 运行时: ${agentExec.type} (${agentExec.path}), 模型: ${modelId || DEFAULT_MODEL_ID}, resume: ${existingSdkSessionId ?? '无'}`,
       )
 
-      const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null'
-      const executableArgs = agentExec.type === 'bun' ? [`--env-file=${nullDevice}`] : []
+      const executableArgs: string[] = []
 
       // 确定 Agent 工作目录
       agentCwd = homedir()
@@ -1180,8 +1186,17 @@ export class AgentOrchestrator {
       /** 正在等待用户交互（AskUser / ExitPlanMode 审批 / 权限确认），idle watcher 应暂停计时 */
       let waitingForUserInput = false
 
+      /** 长耗时工具正在执行时为 true，抑制 idle timeout（Bash、MCP、Agent 等） */
+      let longRunningToolActive = false
+
       // 动态 canUseTool：每次调用读取当前权限模式，支持运行中切换
       const canUseTool = async (toolName: string, input: Record<string, unknown>, options: CanUseToolOptions): Promise<PermissionResult> => {
+        // 长耗时工具：标记执行状态，抑制 idle timeout
+        // （工具完成后由事件循环中的 tool_result 清除）
+        if (isLongRunningTool(toolName)) {
+          longRunningToolActive = true
+        }
+
         const currentMode = getPermissionMode()
 
         // ── 参数校验守卫（所有模式、所有工具，优先于权限检查） ──
@@ -1524,8 +1539,8 @@ export class AgentOrchestrator {
             while (!loopAbort.signal.aborted) {
               await timerWithAbort(CHECK_INTERVAL_MS, loopAbort.signal)
               if (loopAbort.signal.aborted) break
-              // 等待用户交互时（AskUser / 权限确认 / ExitPlanMode 审批）暂停 idle 计时
-              if (waitingForUserInput) {
+              // 等待用户交互 或 长耗时工具执行中 时暂停 idle 计时
+              if (waitingForUserInput || longRunningToolActive) {
                 lastActivityAt = Date.now()
                 continue
               }
@@ -1721,6 +1736,7 @@ export class AgentOrchestrator {
                   const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
                   if (hasToolResult) {
                     accumulatedMessages.push(msg)
+                    longRunningToolActive = false // 工具执行完毕，恢复 idle timeout
                   }
                 } else {
                   // 为 assistant 消息注入渠道 modelId，确保持久化后能正确匹配模型显示名
@@ -1739,6 +1755,7 @@ export class AgentOrchestrator {
 
             // Turn 结束时：持久化累积消息，并检测 0-token 空响应
             if (msg.type === 'result') {
+              longRunningToolActive = false // turn 结束，兜底清除
               const resultMsg = msg as import('@proma/shared').SDKResultMessage
               capturedResultSubtype = resultMsg.subtype
 

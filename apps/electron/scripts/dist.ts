@@ -18,7 +18,6 @@
  */
 
 import { spawnSync } from 'child_process'
-import { existsSync } from 'fs'
 import { join } from 'path'
 
 // ============================================
@@ -168,7 +167,7 @@ function main(): void {
   console.log(`  ${color.bold}详细日志${color.reset}: ${opts.verbose ? '开启' : '关闭'}`)
   printSeparator()
 
-  const totalSteps = 6
+  const totalSteps = 5
   let step = 0
 
   // ── 步骤 1: 构建主进程 ──
@@ -206,23 +205,7 @@ function main(): void {
   )
   printStepResult(results[results.length - 1])
 
-  // ── 步骤 5: 检查 Vendor 文件 ──
-  step++
-  printStepStart(step, totalSteps, '检查 Vendor 依赖')
-  const vendorPath = join(import.meta.dir, '..', 'vendor', 'bun')
-  const vendorExists = existsSync(vendorPath)
-  if (!vendorExists) {
-    console.log(`${color.yellow}  vendor/bun 目录不存在，正在下载...${color.reset}`)
-    results.push(
-      runStep('下载 Vendor 依赖', 'bun', ['run', 'build:vendor:current'], { verbose: opts.verbose })
-    )
-  } else {
-    console.log(`${color.green}  vendor/bun 已存在，跳过下载${color.reset}`)
-    results.push({ name: '检查 Vendor 依赖', duration: 0, success: true, skipped: true })
-  }
-  printStepResult(results[results.length - 1])
-
-  // ── 步骤 6: electron-builder 打包 ──
+  // ── 步骤 5: electron-builder 打包 ──
   step++
   printStepStart(step, totalSteps, 'Electron Builder 打包')
 

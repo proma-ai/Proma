@@ -69,11 +69,6 @@ mac:
         - x64
   # macOS 额外资源
   extraResources:
-    # Bun 二进制（download-bun.ts 使用 darwin-${arch} 命名）
-    - from: "vendor/bun/darwin-${arch}"
-      to: "vendor/bun"
-      filter:
-        - "**/*"
     # 根据架构选择正确的 ripgrep（实际位于 packages/core 的 node_modules 中）
     - from: "../../packages/core/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/${arch}-darwin"
       to: "vendor/ripgrep"
@@ -105,11 +100,6 @@ win:
         - x64
   # Windows 额外资源
   extraResources:
-    # Bun 二进制
-    - from: "vendor/bun/win32-${arch}"
-      to: "vendor/bun"
-      filter:
-        - "**/*"
     - from: "../../packages/core/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32"
       to: "vendor/ripgrep"
       filter:
