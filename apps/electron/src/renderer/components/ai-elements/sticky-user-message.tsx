@@ -126,46 +126,49 @@ export function StickyUserMessage({ userMessages }: StickyUserMessageProps): Rea
   return (
     <div
       className={cn(
-        'absolute left-0 right-9 top-0 z-20 transition-all duration-150 ease-out',
+        'absolute left-0 right-0 top-0 z-20 transition-all duration-150 ease-out',
         isSticky
           ? 'opacity-100 translate-y-0 pointer-events-auto'
           : 'opacity-0 -translate-y-2 pointer-events-none'
       )}
     >
-      <div
-        className="ml-6 mr-[9px] mt-2 rounded-xl bg-background/95 backdrop-blur-sm border border-border/40 shadow-sm cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={scrollToOriginal}
-      >
-        <div className="px-3.5 py-2.5">
-          {/* 头部：头像 + 用户名 + 提示 */}
-          <div className="flex items-center gap-2 mb-1">
-            <UserAvatar avatar={userProfile.avatar} size={18} />
-            <span className="text-xs font-medium text-foreground/60">{userProfile.userName}</span>
-            <ChevronUp className="size-3 text-muted-foreground ml-auto" />
-          </div>
-
-          {/* 文本内容：最多两行 */}
-          {stickyMessage?.text && (
-            <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">{stickyMessage.text}</p>
-          )}
-
-          {/* 附件 badges */}
-          {stickyMessage && stickyMessage.attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {stickyMessage.attachments.map((att) => {
-                const Icon = att.isImage ? FileImage : FileText
-                return (
-                  <div
-                    key={att.filename}
-                    className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
-                  >
-                    <Icon className="size-3 shrink-0" />
-                    <span className="truncate max-w-[150px]">{att.filename}</span>
-                  </div>
-                )
-              })}
+      {/* 复用 ConversationContent(px-8) + Message(px-2.5) 的 padding 链，保证与内容区等宽 */}
+      <div className="mx-8 px-2.5 pt-2">
+        <div
+          className="ml-[46px] rounded-xl bg-background/95 backdrop-blur-sm border border-border/40 shadow-sm cursor-pointer hover:bg-accent/50 transition-colors"
+          onClick={scrollToOriginal}
+        >
+          <div className="px-3.5 py-2.5">
+            {/* 头部：头像 + 用户名 + 提示 */}
+            <div className="flex items-center gap-2 mb-1">
+              <UserAvatar avatar={userProfile.avatar} size={18} />
+              <span className="text-xs font-medium text-foreground/60">{userProfile.userName}</span>
+              <ChevronUp className="size-3 text-muted-foreground ml-auto" />
             </div>
-          )}
+
+            {/* 文本内容：最多两行 */}
+            {stickyMessage?.text && (
+              <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">{stickyMessage.text}</p>
+            )}
+
+            {/* 附件 badges */}
+            {stickyMessage && stickyMessage.attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {stickyMessage.attachments.map((att) => {
+                  const Icon = att.isImage ? FileImage : FileText
+                  return (
+                    <div
+                      key={att.filename}
+                      className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
+                    >
+                      <Icon className="size-3 shrink-0" />
+                      <span className="truncate max-w-[150px]">{att.filename}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

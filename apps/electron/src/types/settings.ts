@@ -88,6 +88,8 @@ export interface AppSettings {
   sendWithCmdEnter?: boolean
   /** 用户自定义快捷键覆盖 */
   shortcutOverrides?: ShortcutOverrides
+  /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */
+  appIconVariant?: string
 }
 
 /** 持久化的标签页状态 */
@@ -114,6 +116,12 @@ export const SETTINGS_IPC_CHANNELS = {
   UPDATE: 'settings:update',
   GET_SYSTEM_THEME: 'settings:get-system-theme',
   ON_SYSTEM_THEME_CHANGED: 'settings:system-theme-changed',
+} as const
+
+/** 应用图标 IPC 通道 */
+export const APP_ICON_IPC_CHANNELS = {
+  /** 设置应用图标（variant ID） */
+  SET: 'app-icon:set',
 } as const
 
 /** 快速任务窗口 IPC 通道 */

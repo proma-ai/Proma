@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { getSettings } from './lib/settings-service'
 
 // 商业版固定为 Cloud 模式
 process.env.PROMA_MODE = 'cloud'
@@ -321,9 +322,15 @@ if (!gotTheLock) {
     }
 
     // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
+    // 如果用户有保存的图标偏好则使用，否则用默认图标
     if (process.platform === 'darwin' && app.dock) {
-      const dockIconPath = join(__dirname, '../resources/icon.png')
-      if (existsSync(dockIconPath)) {
+      const { resolveAppIconPath } = require('./ipc')
+      const settings = getSettings()
+      const variantId = settings.appIconVariant
+      const dockIconPath = variantId
+        ? resolveAppIconPath(variantId)
+        : join(__dirname, '../resources/icon.png')
+      if (dockIconPath && existsSync(dockIconPath)) {
         app.dock.setIcon(dockIconPath)
       }
     }

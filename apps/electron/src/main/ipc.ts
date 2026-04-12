@@ -4,9 +4,11 @@
  * 负责注册主进程和渲染进程之间的通信处理器
  */
 
-import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
+import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
+import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, APP_ICON_IPC_CHANNELS } from '../types'
 import type { QuickTaskSubmitInput } from '../types'
 import type {
   RuntimeStatus,
@@ -209,6 +211,19 @@ const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
  * - channel:*: 渠道管理相关
  * - chat:*: 对话管理 + 消息发送 + 流式事件
  */
+/**
+ * 解析应用图标变体的文件路径
+ * dev 模式: __dirname/resources/proma-logos/proma-{id}.png
+ * 生产模式: __dirname/resources/proma-logos/proma-{id}.png（build:resources 阶段已复制）
+ */
+export function resolveAppIconPath(variantId: string): string | null {
+  if (!variantId || variantId === 'default') {
+    // 默认图标
+    return join(__dirname, 'resources/icon.png')
+  }
+  return join(__dirname, 'resources/proma-logos', `proma-${variantId}.png`)
+}
+
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
 
@@ -655,6 +670,35 @@ export function registerIpcHandlers(): void {
       win.webContents.send(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, isDark)
     })
   })
+
+  // ===== 应用图标切换 =====
+
+  ipcMain.handle(
+    APP_ICON_IPC_CHANNELS.SET,
+    async (_, variantId: string): Promise<boolean> => {
+      try {
+        // 解析图标文件路径
+        const iconPath = resolveAppIconPath(variantId)
+        if (!iconPath || !existsSync(iconPath)) {
+          console.warn('[图标] 图标文件不存在:', iconPath)
+          return false
+        }
+
+        // macOS: 设置 Dock 图标
+        if (process.platform === 'darwin' && app.dock) {
+          app.dock.setIcon(iconPath)
+        }
+
+        // 持久化到设置
+        await updateSettings({ appIconVariant: variantId })
+        console.log(`[图标] 已切换到: ${variantId}`)
+        return true
+      } catch (error) {
+        console.error('[图标] 切换失败:', error)
+        return false
+      }
+    }
+  )
 
   // ===== 环境检测相关 =====
 

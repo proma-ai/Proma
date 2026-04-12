@@ -1534,6 +1534,9 @@ export class AgentOrchestrator {
           // （Watchdog 仅覆盖 startedTaskIds.size > 0 的 Teams 场景）
           const idleAbort = new AbortController()
           let lastActivityAt = Date.now()
+          // 追踪是否有工具调用正在执行中（tool_use 已发出但 tool_result 尚未收到）
+          // 执行 bun run dev 等长时间 Bash 命令时此标志为 true，应暂停 idle 计时
+          let hasActiveTool = false
           const idleWatcherDone = (async () => {
             const CHECK_INTERVAL_MS = 30_000
             while (!loopAbort.signal.aborted) {
@@ -1541,6 +1544,11 @@ export class AgentOrchestrator {
               if (loopAbort.signal.aborted) break
               // 等待用户交互 或 长耗时工具执行中 时暂停 idle 计时
               if (waitingForUserInput || longRunningToolActive) {
+                lastActivityAt = Date.now()
+                continue
+              }
+              // 有工具正在执行中（如长时间 Bash 命令）：暂停 idle 计时，避免误杀
+              if (hasActiveTool) {
                 lastActivityAt = Date.now()
                 continue
               }
@@ -1622,6 +1630,23 @@ export class AgentOrchestrator {
 
             // 收到 SDK 事件：重置 idle 计时器
             lastActivityAt = Date.now()
+
+            // 追踪工具执行状态：assistant 含 tool_use 时标记为活跃，收到 tool_result 时清除
+            // 用于 idle watcher 区分"API SSE stall"和"工具正在执行中"
+            if (msg.type === 'assistant') {
+              const assistantContent = (msg as SDKAssistantMessage).message?.content
+              if (Array.isArray(assistantContent) && assistantContent.some((b: { type: string }) => b.type === 'tool_use')) {
+                hasActiveTool = true
+              }
+            } else if (msg.type === 'user') {
+              const userContent = (msg as { message?: { content?: Array<{ type: string }> } }).message?.content
+              if (Array.isArray(userContent) && userContent.some((b) => b.type === 'tool_result')) {
+                hasActiveTool = false
+              }
+            } else if (msg.type === 'result') {
+              // Turn 正常结束，清除工具活跃标志
+              hasActiveTool = false
+            }
 
             // 检测 assistant 消息中的 SDK 错误
             if (msg.type === 'assistant') {
