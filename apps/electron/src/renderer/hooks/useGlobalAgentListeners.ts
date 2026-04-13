@@ -348,21 +348,23 @@ export function useGlobalAgentListeners(): void {
         const legacyEvents = payloadToLegacyEvents(payload)
 
         for (const event of legacyEvents) {
-          // 更新流式状态
-          store.set(agentStreamingStatesAtom, (prev) => {
-            const current: AgentStreamState = prev.get(sessionId) ?? {
-              running: true,
-              content: '',
-              toolActivities: [],
-              teammates: [],
-              model: undefined,
-              startedAt: Date.now(),
-            }
-            const next = applyAgentEvent(current, event)
-            const map = new Map(prev)
-            map.set(sessionId, next)
-            return map
-          })
+          // 更新流式状态（prompt_suggestion 不影响流式状态，跳过以避免在 session 结束后用默认值 running:true 重新激活）
+          if (event.type !== 'prompt_suggestion') {
+            store.set(agentStreamingStatesAtom, (prev) => {
+              const current: AgentStreamState = prev.get(sessionId) ?? {
+                running: true,
+                content: '',
+                toolActivities: [],
+                teammates: [],
+                model: undefined,
+                startedAt: Date.now(),
+              }
+              const next = applyAgentEvent(current, event)
+              const map = new Map(prev)
+              map.set(sessionId, next)
+              return map
+            })
+          }
 
           // 自动打开侧面板：检测到 Agent/Task 工具启动或 teammate 任务开始时
           if (

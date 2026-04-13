@@ -738,7 +738,8 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
   const allSDKMessages = React.useMemo(() => {
     const persisted = persistedSDKMessages ?? []
     const live = liveMessages ?? []
-    return [...persisted, ...live]
+    const liveSet = new Set(live)
+    return [...persisted.filter(m => !liveSet.has(m)), ...live]
   }, [persistedSDKMessages, liveMessages])
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置

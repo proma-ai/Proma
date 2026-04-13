@@ -23,6 +23,74 @@ import type { CanUseToolOptions, PermissionResult } from '../agent-permission-se
 /** SDK Query 对象类型（从动态导入中推断） */
 type SDKQuery = ReturnType<typeof import('@anthropic-ai/claude-agent-sdk').query>
 
+/** SDK 用户消息类型 */
+type SDKUserMessage = import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
+
+// ============================================================================
+// 长生命周期消息通道
+// ============================================================================
+
+/**
+ * 异步消息队列，作为 SDK streamInput 的持久化 AsyncGenerator。
+ *
+ * 解决的问题：SDK 的 streamInput() 在消费完 AsyncGenerator 后会调用 endInput()
+ * 关闭 CLI 的 stdin。如果使用单次 yield 的 generator，第一轮对话结束后 stdin 即关闭，
+ * 导致后续所有工具权限请求（sendRequest）因 inputClosed=true 而抛出 "Stream closed"。
+ *
+ * 此队列通过保持 generator 永不结束（直到 abort 信号）来避免 endInput() 被过早调用。
+ */
+interface MessageChannel {
+  /** 向队列推送消息（非阻塞） */
+  enqueue: (msg: SDKUserMessage) => void
+  /** 供 SDK streamInput() 消费的长生命周期 AsyncGenerator */
+  generator: AsyncGenerator<SDKUserMessage>
+}
+
+function createMessageChannel(signal: AbortSignal): MessageChannel {
+  const queue: SDKUserMessage[] = []
+  let resolver: ((value: void) => void) | null = null
+  let done = signal.aborted // 防御：signal 已 aborted 时直接标记结束
+
+  // abort 时标记结束，唤醒可能阻塞的 generator
+  if (!done) {
+    signal.addEventListener('abort', () => {
+      done = true
+      if (resolver) {
+        const r = resolver
+        resolver = null
+        r()
+      }
+    }, { once: true })
+  }
+
+  async function* generator(): AsyncGenerator<SDKUserMessage> {
+    while (!done) {
+      if (queue.length > 0) {
+        yield queue.shift()!
+      } else {
+        // 等待新消息入队或 abort 信号
+        await new Promise<void>((resolve) => { resolver = resolve })
+      }
+    }
+    // 排空剩余消息
+    while (queue.length > 0) {
+      yield queue.shift()!
+    }
+  }
+
+  return {
+    enqueue: (msg: SDKUserMessage) => {
+      queue.push(msg)
+      if (resolver) {
+        const r = resolver
+        resolver = null
+        r()
+      }
+    },
+    generator: generator(),
+  }
+}
+
 // ============================================================================
 // Claude 适配器专用查询选项
 // ============================================================================
@@ -249,6 +317,9 @@ const activeControllers = new Map<string, AbortController>()
 /** 活跃的 SDK Query 对象映射（sessionId → query），用于队列消息注入 */
 const activeQueries = new Map<string, SDKQuery>()
 
+/** 活跃的消息通道映射（sessionId → channel），供后续消息注入 */
+const activeChannels = new Map<string, MessageChannel>()
+
 /** Query 就绪 Promise（在 SDK init 完成前缓冲队列消息） */
 const queryReadyPromises = new Map<string, Promise<void>>()
 const queryReadyResolvers = new Map<string, () => void>()
@@ -270,6 +341,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
       activeQueries.delete(sessionId)
     }
 
+    activeChannels.delete(sessionId)
+
     const controller = activeControllers.get(sessionId)
     if (controller) {
       controller.abort()
@@ -290,6 +363,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     }
     activeControllers.clear()
     activeQueries.clear()
+    activeChannels.clear()
     queryReadyPromises.clear()
     queryReadyResolvers.clear()
   }
@@ -369,28 +443,31 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         toolUseConcurrency: 1,
       } as import('@anthropic-ai/claude-agent-sdk').Options
 
-      // 将初始 prompt 包装为 AsyncIterable<SDKUserMessage>，
-      // 启用 SDK 的流式输入模式，使 Query.streamInput() 可用于后续队列消息注入。
-      // 如果用 string prompt，SDK 以单次输入模式运行，streamInput() 不可用。
-      async function* initialPromptStream(): AsyncGenerator<import('@anthropic-ai/claude-agent-sdk').SDKUserMessage> {
-        yield {
-          type: 'user' as const,
-          session_id: options.sessionId,
-          message: {
-            role: 'user' as const,
-            content: options.prompt,
-          },
-          parent_tool_use_id: null,
-        }
-      }
+      // 使用持久化消息通道替代单次 yield 的 generator。
+      // 单次 yield generator 在消费完后，SDK 的 streamInput() 会调用 endInput()
+      // 关闭 CLI stdin，导致后续轮次的工具权限请求因 inputClosed=true 而失败。
+      // 持久化通道在整个会话期间保持 generator 不结束，stdin 持续开放。
+      const channel = createMessageChannel(controller.signal)
+
+      // 将初始 prompt 入队
+      channel.enqueue({
+        type: 'user' as const,
+        session_id: options.sessionId,
+        message: {
+          role: 'user' as const,
+          content: options.prompt,
+        },
+        parent_tool_use_id: null,
+      } as import('@anthropic-ai/claude-agent-sdk').SDKUserMessage)
 
       const queryIterator = sdk.query({
-        prompt: initialPromptStream(),
+        prompt: channel.generator,
         options: sdkOptions,
       })
 
-      // 保存 Query 引用，供队列消息注入使用
+      // 保存 Query 和 Channel 引用，供后续消息注入使用
       activeQueries.set(options.sessionId, queryIterator)
+      activeChannels.set(options.sessionId, channel)
 
       // 通知 Query 已就绪，解除 sendQueuedMessage 的等待
       const resolveReady = queryReadyResolvers.get(options.sessionId)
@@ -432,6 +509,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     } finally {
       activeControllers.delete(options.sessionId)
       activeQueries.delete(options.sessionId)
+      activeChannels.delete(options.sessionId)
       queryReadyPromises.delete(options.sessionId)
       queryReadyResolvers.delete(options.sessionId)
     }
@@ -440,28 +518,30 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
   /**
    * 向活跃查询注入队列消息
    *
-   * 通过 SDK Query.streamInput() 方法在查询进行中注入用户消息。
-   * 如果 SDK 尚未完成初始化，会自动等待（带超时保护）。
+   * 通过持久化消息通道直接入队，由 SDK streamInput() 的长生命周期 generator 消费。
+   * 不再单独调用 query.streamInput()，避免触发 endInput() 关闭 CLI stdin。
    */
   async sendQueuedMessage(sessionId: string, message: SDKUserMessageInput): Promise<void> {
     // 等待 Query 就绪（SDK init 可能需要几秒）
     const readyPromise = queryReadyPromises.get(sessionId)
     if (readyPromise) {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('[Claude 适配器] 等待 SDK 初始化超时，请稍后重试')), QUERY_READY_TIMEOUT_MS)
-      )
-      await Promise.race([readyPromise, timeoutPromise])
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error('[Claude 适配器] 等待 SDK 初始化超时，请稍后重试')), QUERY_READY_TIMEOUT_MS)
+      })
+      try {
+        await Promise.race([readyPromise, timeoutPromise])
+      } finally {
+        clearTimeout(timeoutHandle)
+      }
     }
 
-    const query = activeQueries.get(sessionId)
-    if (!query) {
-      throw new Error(`[Claude 适配器] 无活跃查询可注入队列消息: ${sessionId}`)
+    const channel = activeChannels.get(sessionId)
+    if (!channel) {
+      throw new Error(`[Claude 适配器] 无活跃消息通道可注入队列消息: ${sessionId}`)
     }
-    // 构造单元素 AsyncIterable 注入消息
-    async function* singleMessage() {
-      yield message as import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
-    }
-    await query.streamInput(singleMessage())
+    // 通过消息通道入队，generator 会自动 yield 给 SDK
+    channel.enqueue(message as import('@anthropic-ai/claude-agent-sdk').SDKUserMessage)
     console.log(`[Claude 适配器] 队列消息已注入: sessionId=${sessionId}, uuid=${message.uuid}, priority=${message.priority}`)
   }
 
