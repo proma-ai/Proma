@@ -37,13 +37,16 @@ type SDKUserMessage = import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
  * 关闭 CLI 的 stdin。如果使用单次 yield 的 generator，第一轮对话结束后 stdin 即关闭，
  * 导致后续所有工具权限请求（sendRequest）因 inputClosed=true 而抛出 "Stream closed"。
  *
- * 此队列通过保持 generator 永不结束（直到 abort 信号）来避免 endInput() 被过早调用。
+ * Generator 在会话期间保持活跃以支持工具权限注入。收到 result 后由 adapter 调用 close()，
+ * 让 SDK 自然调用 endInput() 关闭 stdin，子进程检测到 EOF 后退出，iterator 返回 done:true。
  */
 interface MessageChannel {
   /** 向队列推送消息（非阻塞） */
   enqueue: (msg: SDKUserMessage) => void
   /** 供 SDK streamInput() 消费的长生命周期 AsyncGenerator */
   generator: AsyncGenerator<SDKUserMessage>
+  /** 优雅关闭：标记 generator 结束，排空剩余消息后返回，让 SDK 自然调用 endInput() 关闭 stdin */
+  close: () => void
 }
 
 function createMessageChannel(signal: AbortSignal): MessageChannel {
@@ -88,6 +91,14 @@ function createMessageChannel(signal: AbortSignal): MessageChannel {
       }
     },
     generator: generator(),
+    close: () => {
+      done = true
+      if (resolver) {
+        const r = resolver
+        resolver = null
+        r()
+      }
+    },
   }
 }
 
@@ -443,10 +454,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         toolUseConcurrency: 1,
       } as import('@anthropic-ai/claude-agent-sdk').Options
 
-      // 使用持久化消息通道替代单次 yield 的 generator。
-      // 单次 yield generator 在消费完后，SDK 的 streamInput() 会调用 endInput()
-      // 关闭 CLI stdin，导致后续轮次的工具权限请求因 inputClosed=true 而失败。
-      // 持久化通道在整个会话期间保持 generator 不结束，stdin 持续开放。
+      // 使用持久化消息通道：在查询期间保持 generator 活跃以支持工具权限注入，
+      // 收到 result 后调用 channel.close() 让 SDK 自然关闭 stdin 并退出子进程。
       const channel = createMessageChannel(controller.signal)
 
       // 将初始 prompt 入队
@@ -502,6 +511,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
               options.onContextWindow?.(firstEntry.contextWindow)
             }
           }
+          // result 表示当前轮次完成，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
+          // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
+          // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
+          channel.close()
         }
 
         yield sdkMessage as SDKMessage

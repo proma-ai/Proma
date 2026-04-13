@@ -819,6 +819,7 @@ export class AgentOrchestrator {
     if (this.activeSessions.has(sessionId)) {
       console.warn(`[Agent 编排] 会话 ${sessionId} 正在处理中，拒绝新请求`)
       callbacks.onError('上一条消息仍在处理中，请稍候再试')
+      callbacks.onComplete([], { startedAt: input.startedAt })
       return
     }
 
@@ -844,6 +845,7 @@ export class AgentOrchestrator {
 安装完成后请重启应用。`
 
         callbacks.onError(errorMsg)
+        callbacks.onComplete([], { startedAt: input.startedAt })
         return
       }
     }
@@ -852,6 +854,7 @@ export class AgentOrchestrator {
     const channel = getChannelById(channelId)
     if (!channel) {
       callbacks.onError('渠道不存在')
+      callbacks.onComplete([], { startedAt: input.startedAt })
       return
     }
 
@@ -859,6 +862,9 @@ export class AgentOrchestrator {
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
     const runGeneration = Date.now()
+    // 优先使用渲染进程传来的 startedAt（确保 STREAM_COMPLETE 竞态保护比较的是同一个值），
+    // 否则用本地 runGeneration 作为回退（headless 模式等无渲染进程场景）
+    const streamStartedAt = input.startedAt ?? runGeneration
     this.activeSessions.set(sessionId, runGeneration)
 
     let apiKey: string
@@ -876,10 +882,12 @@ export class AgentOrchestrator {
             console.log('[Agent 编排] Token 已刷新，System API Key 重新获取成功')
           } catch {
             callbacks.onError('获取 Proma 官方渠道 API Key 失败，请检查登录状态')
+            callbacks.onComplete([], { startedAt: streamStartedAt })
             return
           }
         } else {
           callbacks.onError('登录已过期，请重新登录')
+          callbacks.onComplete([], { startedAt: streamStartedAt })
           return
         }
       }
@@ -888,6 +896,7 @@ export class AgentOrchestrator {
         apiKey = decryptApiKey(channelId)
       } catch {
         callbacks.onError('解密 API Key 失败')
+        callbacks.onComplete([], { startedAt: streamStartedAt })
         return
       }
     }
@@ -971,6 +980,7 @@ export class AgentOrchestrator {
         const errMsg = `SDK CLI 文件不存在: ${cliPath}`
         console.error(`[Agent 编排] ${errMsg}`)
         callbacks.onError(errMsg)
+        callbacks.onComplete([], { startedAt: streamStartedAt })
         return
       }
 
@@ -1442,7 +1452,7 @@ export class AgentOrchestrator {
           // 等待期间如果会话被中止，退出
           if (!this.activeSessions.has(sessionId)) {
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-            callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
+            callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
             return
           }
         }
@@ -1491,6 +1501,10 @@ export class AgentOrchestrator {
           let deferredResultMessage: SDKMessage | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
+          // result 收到后的安全超时：adapter 层 channel.close() 应让 iterator 自然关闭，
+          // 此 timeout 仅作安全网，防止极端情况下 iterator 仍未关闭
+          let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
+          const RESULT_DRAIN_TIMEOUT_MS = 2_000
 
           while (!loopAbort.signal.aborted) {
             if (!pendingNext) {
@@ -1502,10 +1516,24 @@ export class AgentOrchestrator {
               loopAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
             })
 
-            const raceResult = await Promise.race([
+            const racePromises: Array<Promise<{ kind: string; result: IteratorResult<SDKMessage> | null }>> = [
               pendingNext.then((r) => ({ kind: 'event' as const, result: r })),
               abortPromise.then(() => ({ kind: 'abort' as const, result: null })),
-            ])
+            ]
+            if (drainTimeoutPromise) {
+              racePromises.push(drainTimeoutPromise.then(() => ({ kind: 'drain_timeout' as const, result: null })))
+            }
+
+            const raceResult = await Promise.race(racePromises)
+
+            if (raceResult.kind === 'drain_timeout') {
+              // 安全网：channel.close() 后 SDK 仍未在超时内关闭 iterator，强制退出
+              console.warn(`[Agent 编排] drain timeout: SDK iterator 在 result 后 ${RESULT_DRAIN_TIMEOUT_MS}ms 内未关闭，强制退出`)
+              pendingNext?.catch(() => {})
+              pendingNext = null
+              queryIterator.return?.(undefined as never).catch(() => {})
+              break
+            }
 
             if (raceResult.kind === 'abort') {
               // Watchdog 触发：终止事件循环，但不中止 SDK 会话
@@ -1621,7 +1649,7 @@ export class AgentOrchestrator {
                 if (!loopAbort.signal.aborted) loopAbort.abort()
                 await watchdogDone
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
-                callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
+                callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
                 return
               }
             }
@@ -1660,6 +1688,13 @@ export class AgentOrchestrator {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
+              // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
+              // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
+              if (!drainTimeoutPromise) {
+                drainTimeoutPromise = new Promise((resolve) =>
+                  setTimeout(() => resolve('drain_timeout'), RESULT_DRAIN_TIMEOUT_MS),
+                )
+              }
             }
 
             // 过滤 SDK 内部生成的 user 消息（如 Skill 展开文本），避免在前端渲染为用户消息
@@ -1822,7 +1857,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration, resultSubtype: capturedResultSubtype })
+          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
 
           break  // 成功完成，退出重试循环
 
@@ -1843,7 +1878,7 @@ export class AgentOrchestrator {
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             // 持久化中断状态到会话 meta
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
-            callbacks.onComplete(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: runGeneration })
+            callbacks.onComplete(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
             return
           }
 
@@ -1970,7 +2005,7 @@ export class AgentOrchestrator {
           }
 
           callbacks.onError(userFacingError)
-          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
+          callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
 
           // 根据错误类型决定是否保留 sdkSessionId
           const shouldClearSession = !apiError || apiError.statusCode >= 500
@@ -2010,7 +2045,7 @@ export class AgentOrchestrator {
         appendSDKMessages(sessionId, [retryErrorSDKMsg])
 
         callbacks.onError(`重试 ${MAX_AUTO_RETRIES} 次后仍然失败: ${lastRetryableError}`)
-        callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: runGeneration })
+        callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
       }
 
     } finally {

@@ -357,7 +357,9 @@ export function useGlobalAgentListeners(): void {
                 toolActivities: [],
                 teammates: [],
                 model: undefined,
-                startedAt: Date.now(),
+                // startedAt 留空：让 STREAM_COMPLETE 竞态保护跳过时间戳比较，
+                // 正常流程中 handleSend 已设置了正确的 startedAt，此 fallback 仅在极端情况下触发
+                startedAt: undefined,
               }
               const next = applyAgentEvent(current, event)
               const map = new Map(prev)
@@ -539,9 +541,12 @@ export function useGlobalAgentListeners(): void {
         // 竞态保护：通过 startedAt 区分新旧流，防止旧流的 complete 事件重置新流的 running 状态
         store.set(agentStreamingStatesAtom, (prev) => {
           const current = prev.get(data.sessionId)
-          if (!current || !current.running) return prev
-          // 如果当前流有 startedAt 且比 complete 事件的更新，说明这是旧流的 complete — 忽略
-          if (current.startedAt != null && (data.startedAt == null || current.startedAt > data.startedAt)) return prev
+          if (!current || !current.running) {
+            return prev
+          }
+          if (current.startedAt != null && (data.startedAt == null || current.startedAt > data.startedAt)) {
+            return prev
+          }
           const map = new Map(prev)
           map.set(data.sessionId, {
             ...current,

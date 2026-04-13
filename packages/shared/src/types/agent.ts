@@ -718,6 +718,8 @@ export interface AgentSendInput {
   mentionedSkills?: string[]
   /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
   mentionedMcpServers?: string[]
+  /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
+  startedAt?: number
 }
 
 // ===== Agent 队列消息 =====
