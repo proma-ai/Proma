@@ -145,11 +145,26 @@ export async function initializeTheme(
   setSystemIsDark(isDark)
 
   // 监听系统主题变化
-  const cleanup = window.electronAPI.onSystemThemeChanged((newIsDark) => {
+  const cleanupSystem = window.electronAPI.onSystemThemeChanged((newIsDark) => {
     setSystemIsDark(newIsDark)
   })
 
-  return cleanup
+  // 监听用户手动切换主题（跨窗口同步，如 Quick Task 面板）
+  const cleanupThemeSettings = window.electronAPI.onThemeSettingsChanged((payload) => {
+    const mode = payload.themeMode as ThemeMode
+    const style = (payload.themeStyle || 'default') as ThemeStyle
+    setThemeMode(mode)
+    cacheThemeMode(mode)
+    if (setThemeStyle) {
+      setThemeStyle(style)
+      cacheThemeStyle(style)
+    }
+  })
+
+  return () => {
+    cleanupSystem()
+    cleanupThemeSettings()
+  }
 }
 
 /**

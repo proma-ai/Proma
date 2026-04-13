@@ -649,8 +649,21 @@ export function registerIpcHandlers(): void {
   // 更新应用设置
   ipcMain.handle(
     SETTINGS_IPC_CHANNELS.UPDATE,
-    async (_, updates: Partial<AppSettings>): Promise<AppSettings> => {
-      return updateSettings(updates)
+    async (event, updates: Partial<AppSettings>): Promise<AppSettings> => {
+      const result = await updateSettings(updates)
+
+      // 主题相关设置变化时，广播给所有窗口（跨窗口同步，如 Quick Task 面板）
+      if (updates.themeMode !== undefined || updates.themeStyle !== undefined) {
+        const payload = { themeMode: result.themeMode, themeStyle: result.themeStyle }
+        BrowserWindow.getAllWindows().forEach((win) => {
+          // 跳过发起者窗口，避免重复应用
+          if (win.webContents.id !== event.sender.id) {
+            win.webContents.send(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, payload)
+          }
+        })
+      }
+
+      return result
     }
   )
 

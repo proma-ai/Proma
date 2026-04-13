@@ -1004,15 +1004,9 @@ export class AgentOrchestrator {
         }
       }
 
-      // 9.4.1 Fork 后首次 resume：使用源 cwd 让 SDK 找到 session 文件
-      // SDK forkSession() 在源 cwd 的项目哈希下创建新 session 文件，
-      // 首次 resume 需要从该目录查找，之后 SDK 会在新 cwd 下创建新数据
-      if (sessionMeta?.forkSourceDir) {
-        agentCwd = sessionMeta.forkSourceDir
-        console.log(`[Agent 编排] Fork 首次 resume: 使用源会话 cwd=${sessionMeta.forkSourceDir}`)
-        // 消费一次后清除
-        updateAgentSessionMeta(sessionId, { forkSourceDir: undefined })
-      }
+      // 9.4.1 Fork session JSONL 迁移已在 forkAgentSession 中完成，
+      // fork 后的会话直接使用自己的 cwd，无需回退到源目录。
+      // forkSourceDir 仅作为备用参考字段保留，不再影响 agentCwd。
 
       // 9.5 确保 SDK 项目设置（plansDirectory → .context）
       {

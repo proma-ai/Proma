@@ -116,6 +116,8 @@ export const SETTINGS_IPC_CHANNELS = {
   UPDATE: 'settings:update',
   GET_SYSTEM_THEME: 'settings:get-system-theme',
   ON_SYSTEM_THEME_CHANGED: 'settings:system-theme-changed',
+  /** 用户手动切换主题时广播给所有窗口 */
+  ON_THEME_SETTINGS_CHANGED: 'settings:theme-settings-changed',
 } as const
 
 /** 应用图标 IPC 通道 */

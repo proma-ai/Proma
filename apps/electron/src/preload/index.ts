@@ -290,6 +290,9 @@ export interface ElectronAPI {
   /** 订阅系统主题变化事件（返回清理函数） */
   onSystemThemeChanged: (callback: (isDark: boolean) => void) => () => void
 
+  /** 订阅用户手动切换主题事件（跨窗口同步，返回清理函数） */
+  onThemeSettingsChanged: (callback: (payload: { themeMode: string; themeStyle: string }) => void) => () => void
+
   // ===== 应用图标切换 =====
 
   /** 设置应用图标变体（传入 variant ID，如 'blue'、'cyberpunk'，'default' 恢复默认） */
@@ -1097,6 +1100,12 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, isDark: boolean): void => callback(isDark)
     ipcRenderer.on(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, listener)
     return () => { ipcRenderer.removeListener(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, listener) }
+  },
+
+  onThemeSettingsChanged: (callback: (payload: { themeMode: string; themeStyle: string }) => void) => {
+    const listener = (_: unknown, payload: { themeMode: string; themeStyle: string }): void => callback(payload)
+    ipcRenderer.on(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener) }
   },
 
   // 应用图标切换

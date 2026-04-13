@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, copyFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, dirname } from 'node:path'
 import {
@@ -505,8 +505,9 @@ export function migrateChatToAgentSession(conversationId: string, agentSessionId
  * 直接调用 SDK 的 forkSession() 独立函数完成 JSONL 复制和 UUID 重映射，
  * 新会话立即获得 sdkSessionId，无需延迟到首次发消息。
  *
- * forkSourceDir 用于首次 resume 时定位 SDK session 文件（因 fork 后的 session
- * 存储在源 cwd 的项目哈希下），orchestrator 首次 resume 后会清除该字段。
+ * forkSourceDir 记录源会话的工作目录，仅作为元数据参考保留。
+ * SDK session JSONL 已在 fork 创建时复制到新会话的 project-hash 目录下，
+ * orchestrator 无需在运行时切换 cwd。
  *
  * process.env.CLAUDE_CONFIG_DIR 已在模块加载时设置，无需在此处临时修改。
  *
@@ -572,6 +573,33 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   newMeta.sdkSessionId = forkResult.sessionId
   newMeta.forkSourceDir = sourceDir
   newMeta.forkSourceSdkSessionId = sourceMeta.sdkSessionId
+
+  // 4.5 将 SDK session JSONL 复制到 fork 自己的 project-hash 目录
+  // SDK forkSession() 在源 cwd 的 project-hash 下创建 JSONL（如 projects/<hash-of-sourceDir>/<newId>.jsonl），
+  // 但 fork 会话的 cwd 是新的 session 目录（不同 project-hash），resume 时 SDK 会找不到。
+  // 这里直接将 JSONL 复制到 fork 目标 cwd 的 project-hash 下，让后续每轮 resume 都能直接命中。
+  if (sourceDir && sourceMeta.workspaceId) {
+    const ws = getAgentWorkspace(sourceMeta.workspaceId)
+    if (ws) {
+      const destCwd = getAgentSessionWorkspacePath(ws.slug, newMeta.id)
+      const sourceJsonl = findSdkSessionJsonl(forkResult.sessionId)
+      if (sourceJsonl) {
+        // SDK 使用简单的字符替换计算 project-hash：path.replace(/[^a-zA-Z0-9]/g, '-')
+        const destProjectHash = destCwd.replace(/[^a-zA-Z0-9]/g, '-')
+        const sdkProjectsDir = join(getSdkConfigDir(), 'projects', destProjectHash)
+        if (!existsSync(sdkProjectsDir)) mkdirSync(sdkProjectsDir, { recursive: true })
+        const destJsonl = join(sdkProjectsDir, `${forkResult.sessionId}.jsonl`)
+        try {
+          copyFileSync(sourceJsonl, destJsonl)
+          console.log(`[Agent 会话] 已将 SDK session JSONL 复制到 fork 目标目录: ${destJsonl}`)
+        } catch (err) {
+          console.warn(`[Agent 会话] 复制 SDK session JSONL 失败，fork 后首轮可能触发上下文回填:`, err)
+        }
+      } else {
+        console.warn(`[Agent 会话] 未找到 SDK session JSONL (${forkResult.sessionId})，fork 后首轮可能触发上下文回填`)
+      }
+    }
+  }
 
   // 5. 复制源会话工作区文件到新会话目录（排除 .claude/ 和 .context/，它们会自动创建）
   if (sourceDir && sourceMeta.workspaceId) {
