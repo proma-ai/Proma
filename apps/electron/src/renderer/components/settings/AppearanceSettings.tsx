@@ -214,7 +214,13 @@ function AppIconPicker(): React.ReactElement {
     })
   }, [])
 
+  const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+
   const handleIconSelect = React.useCallback(async (variantId: string) => {
+    if (isWindows) {
+      toast.error('Windows 系统暂不支持更换应用图标')
+      return
+    }
     if (variantId === activeIcon || isLoading) return
     setIsLoading(true)
     try {
@@ -230,7 +236,7 @@ function AppIconPicker(): React.ReactElement {
     } finally {
       setIsLoading(false)
     }
-  }, [activeIcon, isLoading])
+  }, [activeIcon, isLoading, isWindows])
 
   return (
     <SettingsSection

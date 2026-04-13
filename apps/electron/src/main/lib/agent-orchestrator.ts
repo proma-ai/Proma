@@ -173,20 +173,9 @@ function isSessionNotFoundError(errorMessage: string, stderr?: string): boolean 
 /** 最大自动重试次数 */
 const MAX_AUTO_RETRIES = 3
 
-/** 单次 API 调用最长无响应时间（毫秒），超时后触发自动重试 */
-const IDLE_TIMEOUT_MS = 120_000
-
 /** 计算重试延迟（指数退避：1s, 2s, 4s） */
 function getRetryDelayMs(attempt: number): number {
   return Math.min(1000 * Math.pow(2, attempt - 1), 8000)
-}
-
-/** 判定是否为可能长时间执行的工具（抑制 idle timeout） */
-function isLongRunningTool(toolName: string): boolean {
-  return toolName === 'Bash'
-    || toolName === 'Agent'
-    || toolName === 'TaskOutput'
-    || toolName.startsWith('mcp__')
 }
 
 /**
@@ -1183,20 +1172,8 @@ export class AgentOrchestrator {
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
       let planModeEntered = initialPermissionMode === 'plan'
 
-      /** 正在等待用户交互（AskUser / ExitPlanMode 审批 / 权限确认），idle watcher 应暂停计时 */
-      let waitingForUserInput = false
-
-      /** 长耗时工具正在执行时为 true，抑制 idle timeout（Bash、MCP、Agent 等） */
-      let longRunningToolActive = false
-
       // 动态 canUseTool：每次调用读取当前权限模式，支持运行中切换
       const canUseTool = async (toolName: string, input: Record<string, unknown>, options: CanUseToolOptions): Promise<PermissionResult> => {
-        // 长耗时工具：标记执行状态，抑制 idle timeout
-        // （工具完成后由事件循环中的 tool_result 清除）
-        if (isLongRunningTool(toolName)) {
-          longRunningToolActive = true
-        }
-
         const currentMode = getPermissionMode()
 
         // ── 参数校验守卫（所有模式、所有工具，优先于权限检查） ──
@@ -1235,24 +1212,19 @@ export class AgentOrchestrator {
           if (!planModeEntered) {
             return { behavior: 'allow' as const, updatedInput: input }
           }
-          waitingForUserInput = true
-          try {
-            const result = await handleExitPlanMode(input, options.signal)
-            if (result.behavior === 'allow' && 'targetMode' in result && result.targetMode) {
-              // 更新 Map，后续 canUseTool 调用使用新模式
-              this.sessionPermissionModes.set(sessionId, result.targetMode)
-              planModeEntered = false
-              // 同步通知 SDK 侧切换权限模式
-              if (this.adapter.setPermissionMode) {
-                this.adapter.setPermissionMode(sessionId, result.targetMode).catch((err: unknown) => {
-                  console.warn(`[Agent 编排] SDK 权限模式切换失败:`, err)
-                })
-              }
+          const result = await handleExitPlanMode(input, options.signal)
+          if (result.behavior === 'allow' && 'targetMode' in result && result.targetMode) {
+            // 更新 Map，后续 canUseTool 调用使用新模式
+            this.sessionPermissionModes.set(sessionId, result.targetMode)
+            planModeEntered = false
+            // 同步通知 SDK 侧切换权限模式
+            if (this.adapter.setPermissionMode) {
+              this.adapter.setPermissionMode(sessionId, result.targetMode).catch((err: unknown) => {
+                console.warn(`[Agent 编排] SDK 权限模式切换失败:`, err)
+              })
             }
-            return result
-          } finally {
-            waitingForUserInput = false
           }
+          return result
         }
 
         // EnterPlanMode：标记进入状态，通知渲染进程
@@ -1264,17 +1236,12 @@ export class AgentOrchestrator {
 
         // AskUserQuestion：始终走交互式问答流程，不受权限模式影响
         if (toolName === 'AskUserQuestion') {
-          waitingForUserInput = true
-          try {
-            return await askUserService.handleAskUserQuestion(
-              sessionId, input, options.signal,
-              (request: AskUserRequest) => {
-                this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'ask_user_request', request } })
-              },
-            )
-          } finally {
-            waitingForUserInput = false
-          }
+          return askUserService.handleAskUserQuestion(
+            sessionId, input, options.signal,
+            (request: AskUserRequest) => {
+              this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'ask_user_request', request } })
+            },
+          )
         }
 
         // ── 普通工具的权限分派 ──
@@ -1320,14 +1287,8 @@ export class AgentOrchestrator {
             return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
           }
 
-          case 'acceptEdits': {
-            waitingForUserInput = true
-            try {
-              return await acceptEditsCanUseTool(toolName, input, options)
-            } finally {
-              waitingForUserInput = false
-            }
-          }
+          case 'acceptEdits':
+            return acceptEditsCanUseTool(toolName, input, options)
 
           default:
             return { behavior: 'allow' as const, updatedInput: input }
@@ -1530,38 +1491,6 @@ export class AgentOrchestrator {
             }
           })()
 
-          // Idle timeout 守卫：普通单轮对话无响应时触发重试
-          // （Watchdog 仅覆盖 startedTaskIds.size > 0 的 Teams 场景）
-          const idleAbort = new AbortController()
-          let lastActivityAt = Date.now()
-          // 追踪是否有工具调用正在执行中（tool_use 已发出但 tool_result 尚未收到）
-          // 执行 bun run dev 等长时间 Bash 命令时此标志为 true，应暂停 idle 计时
-          let hasActiveTool = false
-          const idleWatcherDone = (async () => {
-            const CHECK_INTERVAL_MS = 30_000
-            while (!loopAbort.signal.aborted) {
-              await timerWithAbort(CHECK_INTERVAL_MS, loopAbort.signal)
-              if (loopAbort.signal.aborted) break
-              // 等待用户交互 或 长耗时工具执行中 时暂停 idle 计时
-              if (waitingForUserInput || longRunningToolActive) {
-                lastActivityAt = Date.now()
-                continue
-              }
-              // 有工具正在执行中（如长时间 Bash 命令）：暂停 idle 计时，避免误杀
-              if (hasActiveTool) {
-                lastActivityAt = Date.now()
-                continue
-              }
-              if (Date.now() - lastActivityAt >= IDLE_TIMEOUT_MS) {
-                console.log(
-                  `[Agent 编排] Idle timeout: 超过 ${IDLE_TIMEOUT_MS / 1000}s 无 SDK 事件，触发重试`,
-                )
-                idleAbort.abort()
-                break
-              }
-            }
-          })()
-
           // 手动事件循环：Promise.race（SDKMessage vs Watchdog 中断）
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // Teams 活跃时延迟 result 消息，避免前端提前标记 teammates 为 stopped
@@ -1579,15 +1508,9 @@ export class AgentOrchestrator {
               loopAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
             })
 
-            const idleAbortPromise = new Promise<null>((resolve) => {
-              if (idleAbort.signal.aborted) { resolve(null); return }
-              idleAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
-            })
-
             const raceResult = await Promise.race([
               pendingNext.then((r) => ({ kind: 'event' as const, result: r })),
               abortPromise.then(() => ({ kind: 'abort' as const, result: null })),
-              idleAbortPromise.then(() => ({ kind: 'idle_timeout' as const, result: null })),
             ])
 
             if (raceResult.kind === 'abort') {
@@ -1603,50 +1526,11 @@ export class AgentOrchestrator {
               break
             }
 
-            if (raceResult.kind === 'idle_timeout') {
-              // Idle timeout：强制中止 SDK 子进程，触发外层重试
-              console.log(`[Agent 编排] Idle timeout 处理：强制中止 SDK 子进程，准备重试`)
-              this.adapter.abort(sessionId)
-              pendingNext?.catch(() => {})
-              pendingNext = null
-              // 等待 generator finally 块执行完毕（最多 1s），防止旧 finally 与新 query 注册产生竞态
-              const returnPromise = queryIterator.return?.(undefined as never).catch(() => {})
-              await Promise.race([
-                returnPromise,
-                new Promise<void>((r) => setTimeout(r, 1000)),
-              ])
-              lastRetryableError = `Agent 响应超时（${IDLE_TIMEOUT_MS / 1000}s 无输出），正在自动重试`
-              this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-              accumulatedMessages.length = 0
-              shouldRetryFromError = true
-              break
-            }
-
             const iterResult = raceResult.result
             if (!iterResult || iterResult.done) break
 
             pendingNext = null
             const msg = iterResult.value
-
-            // 收到 SDK 事件：重置 idle 计时器
-            lastActivityAt = Date.now()
-
-            // 追踪工具执行状态：assistant 含 tool_use 时标记为活跃，收到 tool_result 时清除
-            // 用于 idle watcher 区分"API SSE stall"和"工具正在执行中"
-            if (msg.type === 'assistant') {
-              const assistantContent = (msg as SDKAssistantMessage).message?.content
-              if (Array.isArray(assistantContent) && assistantContent.some((b: { type: string }) => b.type === 'tool_use')) {
-                hasActiveTool = true
-              }
-            } else if (msg.type === 'user') {
-              const userContent = (msg as { message?: { content?: Array<{ type: string }> } }).message?.content
-              if (Array.isArray(userContent) && userContent.some((b) => b.type === 'tool_result')) {
-                hasActiveTool = false
-              }
-            } else if (msg.type === 'result') {
-              // Turn 正常结束，清除工具活跃标志
-              hasActiveTool = false
-            }
 
             // 检测 assistant 消息中的 SDK 错误
             if (msg.type === 'assistant') {
@@ -1761,7 +1645,6 @@ export class AgentOrchestrator {
                   const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
                   if (hasToolResult) {
                     accumulatedMessages.push(msg)
-                    longRunningToolActive = false // 工具执行完毕，恢复 idle timeout
                   }
                 } else {
                   // 为 assistant 消息注入渠道 modelId，确保持久化后能正确匹配模型显示名
@@ -1778,30 +1661,9 @@ export class AgentOrchestrator {
               }
             }
 
-            // Turn 结束时：持久化累积消息，并检测 0-token 空响应
+            // Turn 结束时：持久化累积消息
             if (msg.type === 'result') {
-              longRunningToolActive = false // turn 结束，兜底清除
-              const resultMsg = msg as import('@proma/shared').SDKResultMessage
-              capturedResultSubtype = resultMsg.subtype
-
-              // 检测"成功但 0 输出"：API 返回 HTTP 200 但模型未产出任何 token
-              // 根因：tool_result 后无文本触发的已知 Anthropic bug（见 sdk-python#958）
-              // 此时 SDK 正常结束 turn，不会自行报错，需要在此层拦截并重试
-              if (
-                resultMsg.subtype === 'success' &&
-                resultMsg.usage.output_tokens === 0 &&
-                attempt <= MAX_AUTO_RETRIES
-              ) {
-                console.log(
-                  `[Agent 编排] 检测到 0-token 空响应 (output_tokens=0, subtype=success)，触发自动重试 (attempt=${attempt})`,
-                )
-                lastRetryableError = 'Agent 返回空响应（0 输出 tokens），正在自动重试'
-                this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-                accumulatedMessages.length = 0
-                shouldRetryFromError = true
-                break
-              }
-
+              capturedResultSubtype = (msg as { subtype?: string }).subtype
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
             }
@@ -1851,9 +1713,9 @@ export class AgentOrchestrator {
             }
           }
 
-          // 清理 Watchdog 和 idle watcher（事件循环正常结束或被中断）
+          // 清理 Watchdog（事件循环正常结束或被 Watchdog 中断）
           if (!loopAbort.signal.aborted) loopAbort.abort()
-          await Promise.all([watchdogDone, idleWatcherDone])
+          await watchdogDone
 
           if (abortedByWatchdog) {
             console.log(`[Agent 编排] Watchdog 中断了事件循环，将触发 auto-resume`)

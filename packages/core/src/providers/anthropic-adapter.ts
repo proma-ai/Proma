@@ -196,31 +196,6 @@ function appendContinuationMessages(
 
 // ===== 适配器实现 =====
 
-/**
- * 根据模型差异化 thinking budget 配置
- *
- * 验证后的模型上限（budget_tokens 必须 < max_tokens）：
- * - Opus 4.6: max_tokens 最高 128k，推荐 budget ≤ 32k
- * - Opus 4.5: max_tokens 最高 64k，推荐 budget ≤ 24k
- * - Sonnet 4.x: max_tokens 最高 64k，推荐 budget 10k–24k
- *
- * maxTokens = budget + THINKING_OUTPUT_HEADROOM（为非 thinking 输出内容预留空间）
- */
-const THINKING_OUTPUT_HEADROOM = 8192
-
-function getThinkingConfig(modelId: string): { budget: number; maxTokens: number } {
-  if (/^claude-opus-4[-.]/.test(modelId) || modelId === 'claude-opus-4') {
-    // Opus 4.x：预算充足以支撑复杂长会话推理，防止 thinking block 截断
-    return { budget: 32000, maxTokens: 32000 + THINKING_OUTPUT_HEADROOM }
-  }
-  if (/^claude-sonnet-4[-.]/.test(modelId) || modelId === 'claude-sonnet-4') {
-    // Sonnet 4.x：适度提升，兼顾质量与响应速度
-    return { budget: 20000, maxTokens: 20000 + THINKING_OUTPUT_HEADROOM }
-  }
-  // 其他模型兜底（保持原有值 budget=16384/maxTokens=32768，对所有已知模型均合法）
-  return { budget: 16384, maxTokens: 32768 }
-}
-
 export class AnthropicAdapter implements ProviderAdapter {
   readonly providerType = 'anthropic' as const
 
@@ -229,9 +204,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     const messages = toAnthropicMessages(input)
 
     // 启用思考时需要更大的 max_tokens（budget_tokens 必须 < max_tokens）
-    // Opus 4.x 支持更大的 thinking budget，按模型差异化配置防止 thinking block 截断
-    const { budget: thinkingBudget, maxTokens: thinkingMaxTokens } = getThinkingConfig(input.modelId)
-    const maxTokens = input.thinkingEnabled ? thinkingMaxTokens : 8192
+    const thinkingBudget = 16384
+    const maxTokens = input.thinkingEnabled ? thinkingBudget + 16384 : 8192
 
     const body: Record<string, unknown> = {
       model: input.modelId,
