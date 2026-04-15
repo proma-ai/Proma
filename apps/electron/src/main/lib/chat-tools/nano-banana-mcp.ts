@@ -28,6 +28,8 @@ interface GeminiPart {
   thoughtSignature?: string
   /** snake_case 兼容（部分 API 版本） */
   thought_signature?: string
+  /** Flash 思考模式下的 reasoning part，不应作为输出图展示 */
+  thought?: boolean
 }
 
 interface GeminiContent {
@@ -144,7 +146,7 @@ function buildGeminiRequest(
   prompt: string,
   referenceImageParts: GeminiPart[],
   history: GeminiContent[],
-  options: { aspectRatio?: string; imageSize?: string },
+  options: { aspectRatio?: string; imageSize?: string; numberOfImages?: number },
 ): Record<string, unknown> {
   // 多轮对话中 model 响应含 thoughtSignature 时，新 user 的 text part 也必须带签名
   const needsSignature = history.length > 0 && historyHasThoughtSignature(history)
@@ -173,6 +175,7 @@ function buildGeminiRequest(
   if (options.imageSize && options.imageSize !== 'auto') {
     imageConfig.imageSize = options.imageSize
   }
+  // NOTE: numberOfImages is not forwarded — the field is rejected by the API (400).
   if (Object.keys(imageConfig).length > 0) {
     generationConfig.imageConfig = imageConfig
   }
@@ -186,7 +189,7 @@ function buildGeminiRequest(
 async function callGeminiAndBuildResult(
   prompt: string,
   sessionId: string,
-  options: { aspectRatio?: string; imageSize?: string; referenceImagePaths?: string[]; cwd?: string },
+  options: { aspectRatio?: string; imageSize?: string; referenceImagePaths?: string[]; cwd?: string; numberOfImages?: number },
 ): Promise<McpToolResult> {
   const credentials = getToolCredentials('nano-banana')
   const model = credentials.model?.trim() || DEFAULT_MODEL
@@ -221,6 +224,7 @@ async function callGeminiAndBuildResult(
       ...(requestBody as Record<string, unknown>),
       model,
       image_size: options.imageSize || 'auto',
+      numberOfImages: options.numberOfImages || 1,
     }
 
     console.log(`[Nano Banana MCP] 云端调用: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
@@ -244,15 +248,18 @@ async function callGeminiAndBuildResult(
 
     data = await cloudResponse.json() as GeminiResponse
   } else {
-    // 本地 Gemini 直连
+    // 本地 Nano Banana 直连
     const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
-    const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${credentials.apiKey}`
+    const url = `${baseUrl}/v3/gemini-image/v1beta1/models/${model}:generateContent`
 
-    console.log(`[Nano Banana MCP] 调用 Gemini API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
+    console.log(`[Nano Banana MCP] 调用 Nano Banana API: model=${model}, prompt="${prompt.slice(0, 50)}..."`)
 
     const localResponse = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${credentials.apiKey}`,
+      },
       body: JSON.stringify(requestBody),
     })
 
@@ -288,8 +295,9 @@ async function callGeminiAndBuildResult(
   const textParts: string[] = []
   const savedWorkspacePaths: string[] = []
 
-  // 解析响应：提取图片和文本
+  // 解析响应：提取图片和文本（跳过 thought parts，它们是推理过程图，不作为输出）
   for (const part of parts) {
+    if (part.thought) continue
     if (part.inlineData) {
       // 保存图片到附件目录（供 UI 渲染）
       const ext = part.inlineData.mimeType === 'image/jpeg' ? '.jpg' : '.png'
@@ -386,6 +394,7 @@ export async function injectNanoBananaMcpServer(
           referenceImagePaths: z.array(z.string()).optional().describe('File paths of reference images for editing. Can be absolute paths or relative paths (resolved from cwd). Extract from <attached_files> entries or @file:{path} mentions when the user wants to edit uploaded/referenced images.'),
           aspectRatio: z.enum(['1:1', '16:9', '4:3', '9:16', '3:4']).optional().describe('Aspect ratio (default 1:1)'),
           imageSize: z.enum(['auto', '1K', '2K', '4K']).optional().describe('Resolution (default auto)'),
+          numberOfImages: z.number().int().min(1).max(4).optional().describe('Number of images to generate (1-4, default 1)'),
         },
         async (args) => {
           try {
@@ -394,6 +403,7 @@ export async function injectNanoBananaMcpServer(
               imageSize: args.imageSize,
               referenceImagePaths: args.referenceImagePaths,
               cwd: agentCwd,
+              numberOfImages: args.numberOfImages,
             })
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)

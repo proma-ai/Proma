@@ -481,6 +481,48 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
   }
 }
 
+/** base64 data URL 中 MIME 类型到文件扩展名的映射（仅允许安全的图片格式） */
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+}
+
+/** 将 base64 data URL 上传到 OSS，返回公开访问 URL */
+async function uploadDataUrlToOss(dataUrl: string): Promise<string> {
+  const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!matches || !matches[1] || !matches[2]) throw new Error('无效的 data URL 格式')
+
+  const contentType: string = matches[1]
+  const base64Data: string = matches[2]
+  const ext = MIME_TO_EXT[contentType] ?? 'png'
+
+  // 使用 ArrayBuffer 传入 fetch body，兼容 TypeScript DOM 类型
+  const buffer = Buffer.from(base64Data, 'base64')
+  const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+
+  const signRes = await getApiClient().post<{ uploadUrl: string; ossPath: string }>('/oss/sign', {
+    filename: `avatar.${ext}`,
+    contentType,
+    prefix: 'avatars',
+  })
+  const { uploadUrl } = signRes.data
+
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: arrayBuffer as ArrayBuffer,
+  })
+  if (!uploadRes.ok) {
+    throw new Error(`OSS 上传失败: ${uploadRes.status} ${uploadRes.statusText}`)
+  }
+
+  // 去掉签名参数，返回公开访问 URL（与 proma-frontend 保持一致）
+  const url = new URL(uploadUrl)
+  return `${url.origin}${url.pathname}`
+}
+
 /** 更新 Cloud 用户档案 */
 export async function updateCloudProfile(data: { name?: string; image?: string }): Promise<CloudAuthIpcResponse> {
   if (!cachedAccessToken) {
@@ -488,7 +530,14 @@ export async function updateCloudProfile(data: { name?: string; image?: string }
   }
 
   try {
-    const user = await getAuthApi().updateProfile(data)
+    const updateData = { ...data }
+
+    // 如果 image 是 base64 data URL，先上传到 OSS 再存 URL
+    if (updateData.image?.startsWith('data:')) {
+      updateData.image = await uploadDataUrlToOss(updateData.image)
+    }
+
+    const user = await getAuthApi().updateProfile(updateData)
     cachedUser = toUserInfo(user)
     broadcastAuthStateChanged()
     return { success: true, user: cachedUser }

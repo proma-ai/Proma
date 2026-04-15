@@ -403,8 +403,8 @@ function NanoBananaSettings(): React.ReactElement {
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
                 <p className="font-medium text-foreground text-sm">计费说明（积分）</p>
-                <p><span className="font-medium text-foreground">Nano Banana 2</span>（Flash）：auto 0.73 · 1K 1.10 · 2K 1.31 · 4K 2.19</p>
-                <p><span className="font-medium text-foreground">Nano Banana Pro</span>：1K 1.46 · 2K 1.46 · 4K 2.92</p>
+                <p><span className="font-medium text-foreground">Nano Banana 2</span>（Flash）：auto 0.78 · 1K 0.78 · 2K 1.17 · 4K 1.56</p>
+                <p><span className="font-medium text-foreground">Nano Banana Pro</span>：auto 1.17 · 1K 1.17 · 2K 1.17 · 4K 2.34</p>
               </div>
 
               <div className="space-y-1.5">
@@ -417,13 +417,13 @@ function NanoBananaSettings(): React.ReactElement {
                     <SelectItem value="gemini-3.1-flash-image-preview">
                       <div className="text-left">
                         <div className="font-medium">Nano Banana 2</div>
-                        <div className="text-xs text-muted-foreground">auto 0.73 · 1K 1.10 · 2K 1.31 · 4K 2.19 积分</div>
+                        <div className="text-xs text-muted-foreground">auto 0.78 · 1K 0.78 · 2K 1.17 · 4K 1.56 积分</div>
                       </div>
                     </SelectItem>
                     <SelectItem value="gemini-3-pro-image-preview">
                       <div className="text-left">
                         <div className="font-medium">Nano Banana Pro</div>
-                        <div className="text-xs text-muted-foreground">1K 1.46 · 2K 1.46 · 4K 2.92 积分</div>
+                        <div className="text-xs text-muted-foreground">auto 1.17 · 1K 1.17 · 2K 1.17 · 4K 2.34 积分</div>
                       </div>
                     </SelectItem>
                   </SelectContent>
