@@ -9,16 +9,44 @@ import { join } from 'node:path'
 import { mkdirSync, existsSync, cpSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
-/** 配置目录名称 */
-const CONFIG_DIR_NAME = '.proma'
+/**
+ * 获取配置目录名称
+ *
+ * 开发模式下返回 '.proma-dev'，正式版本返回 '.proma'。
+ *
+ * 检测优先级：
+ * 1. PROMA_DEV=1 环境变量（显式覆盖）
+ * 2. Electron app.isPackaged（未打包 = 开发模式）
+ * 3. 兜底 '.proma'
+ */
+let _configDirName: string | undefined
+
+export function getConfigDirName(): string {
+  if (_configDirName === undefined) {
+    if (process.env.PROMA_DEV === '1') {
+      _configDirName = '.proma-dev'
+    } else {
+      try {
+        const { app } = require('electron')
+        _configDirName = app.isPackaged ? '.proma' : '.proma-dev'
+      } catch {
+        _configDirName = '.proma'
+      }
+    }
+    const mode = _configDirName === '.proma-dev' ? '开发模式' : '正式版本'
+    console.log(`[配置] 配置目录: ~/${_configDirName}/（${mode}）`)
+  }
+  return _configDirName
+}
 
 /**
  * 获取配置目录路径
  *
- * 返回 ~/.proma/，如果目录不存在则自动创建。
+ * 开发模式返回 ~/.proma-dev/，正式版本返回 ~/.proma/。
+ * 如果目录不存在则自动创建。
  */
 export function getConfigDir(): string {
-  const configDir = join(homedir(), CONFIG_DIR_NAME)
+  const configDir = join(homedir(), getConfigDirName())
 
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true })
@@ -396,7 +424,7 @@ export function seedDefaultSkills(): void {
   const { app } = require('electron')
   const bundledDir = app.isPackaged
     ? join(process.resourcesPath, 'default-skills')
-    : join(__dirname, '../../default-skills')
+    : join(__dirname, '../default-skills')
 
   if (!existsSync(bundledDir)) {
     console.log('[配置] 未找到内置 default-skills 目录，跳过')

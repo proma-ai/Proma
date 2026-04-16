@@ -10,11 +10,11 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Loader2 } from 'lucide-react'
 import { appModeAtom } from '@/atoms/app-mode'
 import { currentAgentWorkspaceIdAtom, agentSettingsReadyAtom } from '@/atoms/agent-atoms'
-import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 
@@ -24,9 +24,30 @@ export function WelcomeView(): React.ReactElement {
   const agentSettingsReady = useAtomValue(agentSettingsReadyAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
   const [tabs, setTabs] = useAtom(tabsAtom)
-  const [layout, setLayout] = useAtom(splitLayoutAtom)
+  const setActiveTabId = useSetAtom(activeTabIdAtom)
   const { createChat, createAgent } = useCreateSession()
   const initRef = React.useRef<string | null>(null)
+
+  // 将高频变化的值收集到 ref 中，避免污染 useEffect 依赖数组（否则 tabs/draftSessionIds
+  // 引用变化会导致重复触发，而 createChat/createAgent 每次渲染都是新引用）
+  const latestRef = React.useRef({
+    tabs,
+    draftSessionIds,
+    currentWorkspaceId,
+    setTabs,
+    setActiveTabId,
+    createChat,
+    createAgent,
+  })
+  latestRef.current = {
+    tabs,
+    draftSessionIds,
+    currentWorkspaceId,
+    setTabs,
+    setActiveTabId,
+    createChat,
+    createAgent,
+  }
 
   React.useEffect(() => {
     // 如果已经为当前模式初始化过，则跳过
@@ -43,77 +64,94 @@ export function WelcomeView(): React.ReactElement {
       window.electronAPI.listConversations().then((freshConversations) => {
         // 如果 mode 已切换，丢弃过期回调
         if (initRef.current !== currentMode) return
+        const {
+          tabs: currentTabs,
+          draftSessionIds: currentDrafts,
+          setTabs: currentSetTabs,
+          setActiveTabId: currentSetActiveTabId,
+          createChat: currentCreateChat,
+        } = latestRef.current
+
         // 1. 优先复用现有非归档、非 draft 会话
         const existing = freshConversations.find(
-          (c) => !c.archived && !draftSessionIds.has(c.id),
+          (c) => !c.archived && !currentDrafts.has(c.id),
         )
         if (existing) {
-          const result = openTab(tabs, layout, {
+          const result = openTab(currentTabs, {
             type: 'chat',
             sessionId: existing.id,
             title: existing.title,
           })
-          setTabs(result.tabs)
-          setLayout(result.layout)
+          currentSetTabs(result.tabs)
+          currentSetActiveTabId(result.activeTabId)
           return
         }
         // 2. 检查是否已有 draft 会话，复用而不是创建新的
         const draftSession = freshConversations.find(
-          (c) => !c.archived && draftSessionIds.has(c.id),
+          (c) => !c.archived && currentDrafts.has(c.id),
         )
         if (draftSession) {
-          const result = openTab(tabs, layout, {
+          const result = openTab(currentTabs, {
             type: 'chat',
             sessionId: draftSession.id,
             title: draftSession.title,
           })
-          setTabs(result.tabs)
-          setLayout(result.layout)
+          currentSetTabs(result.tabs)
+          currentSetActiveTabId(result.activeTabId)
           return
         }
         // 3. 没有任何会话时才创建新的 draft 会话
-        createChat({ draft: true })
+        currentCreateChat({ draft: true })
       }).catch(console.error)
     } else {
       window.electronAPI.listAgentSessions().then((freshSessions) => {
         // 如果 mode 已切换，丢弃过期回调
         if (initRef.current !== currentMode) return
+        const {
+          tabs: currentTabs,
+          draftSessionIds: currentDrafts,
+          currentWorkspaceId: currentWs,
+          setTabs: currentSetTabs,
+          setActiveTabId: currentSetActiveTabId,
+          createAgent: currentCreateAgent,
+        } = latestRef.current
+
         // Agent 模式：按当前工作区过滤
         // 1. 优先复用现有非归档、非 draft 会话
         const existing = freshSessions.find(
-          (s) => !s.archived && s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id),
+          (s) => !s.archived && s.workspaceId === currentWs && !currentDrafts.has(s.id),
         )
         if (existing) {
-          const result = openTab(tabs, layout, {
+          const result = openTab(currentTabs, {
             type: 'agent',
             sessionId: existing.id,
             title: existing.title,
           })
-          setTabs(result.tabs)
-          setLayout(result.layout)
+          currentSetTabs(result.tabs)
+          currentSetActiveTabId(result.activeTabId)
           return
         }
         // 2. 检查是否已有 draft 会话（当前工作区），复用而不是创建新的
         const draftSession = freshSessions.find(
-          (s) => !s.archived && s.workspaceId === currentWorkspaceId && draftSessionIds.has(s.id),
+          (s) => !s.archived && s.workspaceId === currentWs && currentDrafts.has(s.id),
         )
         if (draftSession) {
-          const result = openTab(tabs, layout, {
+          const result = openTab(currentTabs, {
             type: 'agent',
             sessionId: draftSession.id,
             title: draftSession.title,
           })
-          setTabs(result.tabs)
-          setLayout(result.layout)
+          currentSetTabs(result.tabs)
+          currentSetActiveTabId(result.activeTabId)
           return
         }
         // 3. 没有任何会话时才创建新的 draft 会话
-        createAgent({ draft: true })
+        currentCreateAgent({ draft: true })
       }).catch(console.error)
     }
-  }, [mode, agentSettingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, agentSettingsReady])
 
-  // 短暂的过渡状态（通常几十毫秒内就会被 SplitContainer 替换）
+  // 短暂的过渡状态（通常几十毫秒内就会被 TabContent 替换）
   return (
     <div className="flex h-full items-center justify-center">
       <Loader2 className="size-5 animate-spin text-muted-foreground/40" />

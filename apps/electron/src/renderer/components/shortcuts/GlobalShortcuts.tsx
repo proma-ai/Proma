@@ -16,9 +16,8 @@ import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import {
   tabsAtom,
-  splitLayoutAtom,
-  sidebarCollapsedAtom,
   activeTabIdAtom,
+  sidebarCollapsedAtom,
   closeTab,
   openTab,
 } from '@/atoms/tab-atoms'
@@ -30,6 +29,7 @@ import {
   agentChannelIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
+  workingDoneSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import {
   chatPendingMessageAtom,
@@ -40,6 +40,7 @@ import {
 import { activeViewAtom } from '@/atoms/active-view'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { useShortcut } from '@/hooks/useShortcut'
+import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import {
   initShortcutRegistry,
   updateShortcutOverrides,
@@ -62,8 +63,11 @@ export function GlobalShortcuts(): null {
 
   // Tab 管理（用于关闭标签页）
   const [tabs, setTabs] = useAtom(tabsAtom)
-  const [layout, setLayout] = useAtom(splitLayoutAtom)
-  const activeTabId = useAtomValue(activeTabIdAtom)
+  const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
+  const setWorkingDone = useSetAtom(workingDoneSessionIdsAtom)
+
+  // 关闭活跃标签后同步副作用（与 TabBar.handleClose 共用）
+  const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
 
   // 初始化：挂载注册表 + 加载用户配置
   useEffect(() => {
@@ -87,10 +91,25 @@ export function GlobalShortcuts(): null {
 
   const handleCloseTab = useCallback(() => {
     if (!activeTabId) return
-    const result = closeTab(tabs, layout, activeTabId)
+    const closedTabId = activeTabId
+    const result = closeTab(tabs, activeTabId, activeTabId)
     setTabs(result.tabs)
-    setLayout(result.layout)
-  }, [activeTabId, tabs, layout, setTabs, setLayout])
+    setActiveTabId(result.activeTabId)
+
+    // 关闭的是当前活跃标签（必然），同步 appMode/currentXxxId 到新激活的标签
+    const newActiveTab = result.activeTabId
+      ? result.tabs.find((t) => t.id === result.activeTabId) ?? null
+      : null
+    syncActiveTabSideEffects(newActiveTab)
+
+    // 从 Working Done 集合移除
+    setWorkingDone((prev) => {
+      if (!prev.has(closedTabId)) return prev
+      const next = new Set(prev)
+      next.delete(closedTabId)
+      return next
+    })
+  }, [activeTabId, tabs, setTabs, setActiveTabId, setWorkingDone, syncActiveTabSideEffects])
 
   // 监听菜单 IPC 事件（Cmd+W 被 Electron 菜单拦截后通过 IPC 转发）
   useEffect(() => {
@@ -219,14 +238,13 @@ export function GlobalShortcuts(): null {
 
           // 打开新标签页
           const currentTabs = store.get(tabsAtom)
-          const currentLayout = store.get(splitLayoutAtom)
-          const result = openTab(currentTabs, currentLayout, {
+          const result = openTab(currentTabs, {
             type: 'agent',
             sessionId: meta.id,
             title: data.text.slice(0, 30),
           })
           store.set(tabsAtom, result.tabs)
-          store.set(splitLayoutAtom, result.layout)
+          store.set(activeTabIdAtom, result.activeTabId)
 
           // 设置待发送消息（附件引用已内联到消息文本中）
           store.set(agentPendingPromptAtom, {
@@ -265,14 +283,13 @@ export function GlobalShortcuts(): null {
 
           // 打开新标签页
           const currentTabs = store.get(tabsAtom)
-          const currentLayout = store.get(splitLayoutAtom)
-          const tabResult = openTab(currentTabs, currentLayout, {
+          const tabResult = openTab(currentTabs, {
             type: 'chat',
             sessionId: meta.id,
             title: data.text.slice(0, 30),
           })
           store.set(tabsAtom, tabResult.tabs)
-          store.set(splitLayoutAtom, tabResult.layout)
+          store.set(activeTabIdAtom, tabResult.activeTabId)
 
           // 设置待发送消息（含已保存的附件）
           store.set(chatPendingMessageAtom, {

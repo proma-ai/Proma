@@ -284,6 +284,9 @@ export interface ElectronAPI {
   /** 更新应用设置 */
   updateSettings: (updates: Partial<AppSettings>) => Promise<AppSettings>
 
+  /** 同步更新应用设置（用于 beforeunload 场景） */
+  updateSettingsSync: (updates: Partial<AppSettings>) => boolean
+
   /** 获取系统主题（是否深色模式） */
   getSystemTheme: () => Promise<boolean>
 
@@ -1090,6 +1093,10 @@ const electronAPI: ElectronAPI = {
 
   updateSettings: (updates: Partial<AppSettings>) => {
     return ipcRenderer.invoke(SETTINGS_IPC_CHANNELS.UPDATE, updates)
+  },
+
+  updateSettingsSync: (updates: Partial<AppSettings>) => {
+    return ipcRenderer.sendSync(SETTINGS_IPC_CHANNELS.UPDATE_SYNC, updates)
   },
 
   getSystemTheme: () => {

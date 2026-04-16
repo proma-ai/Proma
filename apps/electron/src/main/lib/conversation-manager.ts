@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync } from 'node:fs'
+import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import {
   getConversationsIndexPath,
@@ -34,18 +35,9 @@ const INDEX_VERSION = 1
  */
 function readIndex(): ConversationsIndex {
   const indexPath = getConversationsIndexPath()
-
-  if (!existsSync(indexPath)) {
-    return { version: INDEX_VERSION, conversations: [] }
-  }
-
-  try {
-    const raw = readFileSync(indexPath, 'utf-8')
-    return JSON.parse(raw) as ConversationsIndex
-  } catch (error) {
-    console.error('[对话管理] 读取索引文件失败:', error)
-    return { version: INDEX_VERSION, conversations: [] }
-  }
+  const data = readJsonFileSafe<ConversationsIndex>(indexPath)
+  if (data) return data
+  return { version: INDEX_VERSION, conversations: [] }
 }
 
 /**
@@ -55,7 +47,7 @@ function writeIndex(index: ConversationsIndex): void {
   const indexPath = getConversationsIndexPath()
 
   try {
-    writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+    writeJsonFileAtomic(indexPath, index)
   } catch (error) {
     console.error('[对话管理] 写入索引文件失败:', error)
     throw new Error('写入对话索引失败')

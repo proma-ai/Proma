@@ -12,6 +12,7 @@
 import type { PromaPermissionMode, AgentDefinition } from '@proma/shared'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-manager'
+import { getConfigDirName } from './config-paths'
 
 // ===== 内置 SubAgent 定义 =====
 
@@ -245,19 +246,20 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 
   // 工作区信息
   if (ctx.workspaceName && ctx.workspaceSlug) {
+    const configDirName = getConfigDirName()
     sections.push(`## 工作区
 
 - 工作区名称: ${ctx.workspaceName}
-- 工作区根目录: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/
-- 当前会话目录（cwd）: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/${ctx.sessionId}/
-- MCP 配置: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/mcp.json（顶层 key 是 \`servers\`）
-- Skills 目录: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/skills/
+- 工作区根目录: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/
+- 当前会话目录（cwd）: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/${ctx.sessionId}/
+- MCP 配置: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/mcp.json（顶层 key 是 \`servers\`）
+- Skills 目录: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/skills/
 
 ### .context 目录层级
 
 存在两个 \`.context/\` 目录，用途不同：
 - **会话级** \`.context/\`（当前 cwd 下）：当前会话的临时工作台，存放本次任务的 todo.md、plan/、临时笔记等
-- **工作区级** \`~/.proma/agent-workspaces/${ctx.workspaceSlug}/workspace-files/.context/\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等
+- **工作区级** \`~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/workspace-files/.context/\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等
 
 选择写入哪个目录时：
 - 只与当前任务相关的内容 → 会话级 \`.context/\`

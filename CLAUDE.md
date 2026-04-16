@@ -27,7 +27,7 @@ proma-v2/
 │   ├── core/       # AI Provider 适配器、代码高亮服务 (v0.2.2)
 │   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock) (v0.1.3)
 └── apps/
-    └── electron/   # Electron 桌面应用 (v0.8.0)
+    └── electron/   # Electron 桌面应用 (v0.9.5)
         └── src/
             ├── main/       # 主进程 + 服务层 (main/lib/)
             ├── preload/    # IPC 上下文桥接
@@ -56,10 +56,10 @@ proma-v2/
 - **依赖**：`@proma/core`、`beautiful-mermaid`、`shiki`、Radix UI
 - **Peer 依赖**：`react@^18.3.0`、`react-dom@^18.3.0`
 
-#### @proma/electron (v0.8.0)
+#### @proma/electron (v0.9.5)
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
-  - `@anthropic-ai/claude-agent-sdk@0.2.87` - Agent SDK
+  - `@anthropic-ai/claude-agent-sdk@0.2.111` - Agent SDK
   - `@larksuiteoapi/node-sdk` - 飞书集成
   - Radix UI、TipTap、Tailwind CSS
   - 文件解析：`pdf-parse`、`officeparser`、`word-extractor`
@@ -135,7 +135,7 @@ bun run generate:icons    # 生成应用图标
 | **构建工具** | Vite | 6.0.3 |
 | **打包工具** | esbuild | 0.24.0+ |
 | **分发工具** | Electron Builder | 25.1.8 |
-| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.2.87 |
+| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.2.111 |
 | **飞书 SDK** | @larksuiteoapi/node-sdk | 最新 |
 
 ## 核心架构
@@ -371,7 +371,7 @@ bun run generate:icons    # 生成应用图标
 
 ## Agent SDK 集成架构
 
-基于 `@anthropic-ai/claude-agent-sdk@0.2.87` 实现 Agent 模式，与 Chat 模式并行。
+基于 `@anthropic-ai/claude-agent-sdk@0.2.111` 实现 Agent 模式，与 Chat 模式并行。
 
 ### 核心流程
 
@@ -418,6 +418,23 @@ React UI 更新
 - **全局 IPC 监听**：`useGlobalAgentListeners`（`renderer/hooks/`）在 `main.tsx` 顶层挂载，通过 `useStore()` 直接操作 atoms，永不销毁。确保页面切换（如设置页）时流式输出、权限请求不丢失
 - **权限请求排队**：权限/AskUser 请求按 sessionId 入队到 Map atoms（`allPendingPermissionRequestsAtom` / `allPendingAskUserRequestsAtom`），不区分当前/后台会话，SDK Promise 等待用户回来响应
 - **工作区隔离**：每个工作区独立的 MCP Server 配置和 cwd，Agent 会话按工作区过滤
+
+### SDK 版本升级注意事项
+
+**`@anthropic-ai/claude-agent-sdk` 0.2.111 起 `options.env` 语义为"叠加"**
+
+- SDK 将 `options.env` **叠加到 `process.env`** 之上传递给子进程（0.2.110 及之前是替换）
+- Shell 中可能存在的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`ANTHROPIC_MODEL` 等变量会通过 `process.env` 叠加泄漏到 SDK 子进程
+- **加固方案**：`agent-orchestrator.ts` 的 `buildSdkEnv()` 末尾会遍历 `process.env`，对所有未被 sdkEnv 显式管理的 `ANTHROPIC_*` 键显式置空字符串，强制覆盖叠加回流
+- **修改 `buildSdkEnv()` 时的检查清单**：
+  1. ✅ 保留 `cleanEnv` 的 `ANTHROPIC_` 前缀过滤
+  2. ✅ 保留末尾的 `ANTHROPIC_*` 空字符串覆盖循环
+  3. ✅ 新增的 SDK 识别的环境变量必须显式加入 `sdkEnv`（否则会被空字符串循环误覆盖）
+- 若未来升级到后续大版本导致语义再次变化，需重新评估本加固逻辑
+
+**关键 Breaking Changes（升级参考）**：
+- `0.2.91`: `sandbox.failIfUnavailable` 默认从 `false` 变为 `true`（目前项目未使用 sandbox 选项）
+- `0.2.111`: `options.env` 从"替换"变为"叠加"，见上文加固方案
 
 ### 共享类型（`@proma/shared`）
 

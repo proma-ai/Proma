@@ -16,7 +16,17 @@ import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { useAtomValue } from 'jotai'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { MessageResponse, remarkMentions } from './message'
+import type { RemarkPluginFn } from './message'
 import { cn } from '@/lib/utils'
+
+/** 悬浮条专用 remark 插件（仅 mention，不保留换行） */
+const STICKY_REMARK_PLUGINS: RemarkPluginFn[] = [remarkMentions]
+
+/** 去除 fenced code block，替换为 [code] 占位符 */
+function stripCodeBlocks(text: string): string {
+  return text.replace(/```[\s\S]*?```/g, ' [code] ')
+}
 
 interface StickyAttachment {
   filename: string
@@ -146,9 +156,16 @@ export function StickyUserMessage({ userMessages }: StickyUserMessageProps): Rea
               <ChevronUp className="size-3 text-muted-foreground ml-auto" />
             </div>
 
-            {/* 文本内容：最多两行 */}
+            {/* 文本内容：最多两行，支持 Markdown 渲染 */}
             {stickyMessage?.text && (
-              <p className="text-sm text-foreground/80 line-clamp-2 leading-relaxed">{stickyMessage.text}</p>
+              <div className="text-sm text-foreground/80 line-clamp-2 leading-relaxed [&>div]:inline">
+                <MessageResponse
+                  className="prose-p:my-0 prose-p:inline prose-headings:my-0 prose-headings:text-sm prose-pre:hidden prose-ul:my-0 prose-ol:my-0"
+                  remarkPlugins={STICKY_REMARK_PLUGINS}
+                >
+                  {stripCodeBlocks(stickyMessage.text)}
+                </MessageResponse>
+              </div>
             )}
 
             {/* 附件 badges */}

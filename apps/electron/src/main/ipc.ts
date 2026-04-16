@@ -667,6 +667,19 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 同步更新应用设置（用于 beforeunload 场景）
+  ipcMain.on(
+    SETTINGS_IPC_CHANNELS.UPDATE_SYNC,
+    (event, updates: Partial<AppSettings>) => {
+      try {
+        updateSettings(updates)
+        event.returnValue = true
+      } catch {
+        event.returnValue = false
+      }
+    }
+  )
+
   // 获取系统主题（是否深色模式）
   ipcMain.handle(
     SETTINGS_IPC_CHANNELS.GET_SYSTEM_THEME,

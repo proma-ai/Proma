@@ -55,7 +55,7 @@ function htmlToMarkdown(html: string): string {
 
     switch (tagName) {
       case 'p':
-        return children + '\n\n'
+        return children + '\n'
       case 'br':
         return '\n'
       case 'strong':
@@ -83,7 +83,7 @@ function htmlToMarkdown(html: string): string {
         const langMatch = langClass.match(/language-(\w+)/)
         const lang = langMatch ? langMatch[1] : ''
         const codeContent = codeEl ? processNode(codeEl) : children
-        return `\`\`\`${lang}\n${codeContent}\n\`\`\`\n\n`
+        return `\`\`\`${lang}\n${codeContent}\n\`\`\`\n`
       }
       case 'a': {
         const href = el.getAttribute('href') || ''
@@ -92,25 +92,25 @@ function htmlToMarkdown(html: string): string {
       case 'ul':
         return Array.from(el.children)
           .map((li) => `- ${processNode(li).trim()}`)
-          .join('\n') + '\n\n'
+          .join('\n') + '\n'
       case 'ol':
         return Array.from(el.children)
           .map((li, i) => `${i + 1}. ${processNode(li).trim()}`)
-          .join('\n') + '\n\n'
+          .join('\n') + '\n'
       case 'li':
         return children
       case 'blockquote':
         return children
           .split('\n')
           .map((line) => `> ${line}`)
-          .join('\n') + '\n\n'
-      case 'h1': return `# ${children}\n\n`
-      case 'h2': return `## ${children}\n\n`
-      case 'h3': return `### ${children}\n\n`
-      case 'h4': return `#### ${children}\n\n`
-      case 'h5': return `##### ${children}\n\n`
-      case 'h6': return `###### ${children}\n\n`
-      case 'hr': return '---\n\n'
+          .join('\n') + '\n'
+      case 'h1': return `# ${children}\n`
+      case 'h2': return `## ${children}\n`
+      case 'h3': return `### ${children}\n`
+      case 'h4': return `#### ${children}\n`
+      case 'h5': return `##### ${children}\n`
+      case 'h6': return `###### ${children}\n`
+      case 'hr': return '---\n'
       case 'span': {
         // Mention 节点：根据 data-mention-suggestion-char 区分类型
         const dataType = el.getAttribute('data-type')
@@ -370,6 +370,20 @@ export function RichTextInput({
           isComposingRef.current = false
           return false
         },
+        copy: (_view, event) => {
+          // 复制时只写纯文本，避免粘贴到外部应用时出现多余空行
+          const selection = window.getSelection()
+          if (!selection || selection.isCollapsed || !event.clipboardData) return false
+          const range = selection.getRangeAt(0)
+          const fragment = range.cloneContents()
+          const tempDiv = document.createElement('div')
+          tempDiv.appendChild(fragment)
+          const text = htmlToMarkdown(tempDiv.innerHTML) || selection.toString()
+          event.preventDefault()
+          event.clipboardData.setData('text/plain', text)
+          event.clipboardData.setData('text/html', '')
+          return true
+        },
       },
       handlePaste: (view, event) => {
         // 拦截粘贴的文件（图片等）
@@ -435,15 +449,45 @@ export function RichTextInput({
           event.preventDefault()
           // 检查是否在列表项内（遍历祖先节点）
           let isInList = false
+          let listItemNode = null
           for (let d = $from.depth; d > 0; d--) {
-            if ($from.node(d).type.name === 'listItem') { isInList = true; break }
+            if ($from.node(d).type.name === 'listItem') {
+              isInList = true
+              listItemNode = $from.node(d)
+              break
+            }
           }
           if (isInList && editor) {
-            editor.chain().focus().splitListItem('listItem').run()
+            // 空列表项再次按 Enter：退出列表，回到普通输入
+            if (listItemNode && listItemNode.textContent === '') {
+              editor.chain().focus().liftListItem('listItem').run()
+            } else {
+              editor.chain().focus().splitListItem('listItem').run()
+            }
           } else if (editor) {
-            editor.chain().focus().setHardBreak().run()
+            editor.chain().focus().splitBlock().run()
           }
           return true
+        }
+
+        // Backspace：空列表项时退出列表
+        if (event.key === 'Backspace') {
+          const { state } = view
+          const { $from } = state.selection
+          let isInList = false
+          let listItemNode = null
+          for (let d = $from.depth; d > 0; d--) {
+            if ($from.node(d).type.name === 'listItem') {
+              isInList = true
+              listItemNode = $from.node(d)
+              break
+            }
+          }
+          if (isInList && listItemNode && listItemNode.textContent === '' && editor) {
+            event.preventDefault()
+            editor.chain().focus().liftListItem('listItem').run()
+            return true
+          }
         }
 
         return false
@@ -573,6 +617,15 @@ export function RichTextInput({
         }
         .ProseMirror p {
           font-style: normal;
+          margin: 0;
+        }
+        .ProseMirror ul,
+        .ProseMirror ol {
+          margin: 0;
+          padding-left: 1.5em;
+        }
+        .ProseMirror li {
+          margin: 0;
         }
         .ProseMirror p.is-editor-empty:first-child::before {
           content: attr(data-placeholder);

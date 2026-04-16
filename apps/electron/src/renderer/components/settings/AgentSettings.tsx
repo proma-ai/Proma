@@ -10,11 +10,10 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Settings, RefreshCw } from 'lucide-react'
+import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Settings, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -135,9 +134,12 @@ export function AgentSettings(): React.ReactElement {
     )
   }
 
+  /** 配置目录名称：开发模式用 .proma-dev，正式版用 .proma */
+  const configDirName = import.meta.env.DEV ? '.proma-dev' : '.proma'
+
   /** 构建 MCP 配置提示词 */
   const buildMcpPrompt = (): string => {
-    const configPath = `~/.proma/agent-workspaces/${workspaceSlug}/mcp.json`
+    const configPath = `~/${configDirName}/agent-workspaces/${workspaceSlug}/mcp.json`
     const currentConfig = JSON.stringify(mcpConfig, null, 2)
 
     return `请帮我配置当前工作区的 MCP 服务器，你要主动来帮我实现，你可以采用联网搜索深度研究来尝试，当前环境已经有 Claude Agent SDK 了，除非不确定的时候才来问我，否则默认将帮我完成安装，而不是指导我。
@@ -175,7 +177,7 @@ mcp.json 格式如下：
 
   /** 构建 Skill 配置提示词 */
   const buildSkillPrompt = (): string => {
-    const skillsDir = `~/.proma/agent-workspaces/${workspaceSlug}/skills/`
+    const skillsDir = `~/${configDirName}/agent-workspaces/${workspaceSlug}/skills/`
     const skillList = skills.length > 0
       ? skills.map((s) => `- ${s.name}: ${s.description ?? '无描述'}`).join('\n')
       : '暂无 Skill'
@@ -873,7 +875,7 @@ function ImportSkillFromWorkspaceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 px-6 pb-6">
+        <div className="space-y-4 overflow-y-auto px-6 pb-6 max-h-[60vh]">
           {availableWorkspaces.length === 0 ? (
             <SettingsCard divided={false}>
               <div className="py-10 text-center text-sm text-muted-foreground">
@@ -906,7 +908,7 @@ function ImportSkillFromWorkspaceDialog({
                       {workspace.skills.length} 个
                     </span>
                   </div>
-                  <ScrollArea className="max-h-[420px] pr-4">
+                  <div className="pr-1">
                     <div className="grid gap-3 sm:grid-cols-2">
                     {workspace.skills.map((skill) => (
                       <SettingsCard key={skill.slug} divided={false} className="overflow-hidden">
@@ -928,7 +930,7 @@ function ImportSkillFromWorkspaceDialog({
                             </div>
                           </div>
 
-                          <div className="min-h-[40px] text-sm leading-6 text-muted-foreground">
+                          <div className="line-clamp-3 min-h-[40px] text-sm leading-6 text-muted-foreground">
                             {skill.description ?? '暂无描述'}
                           </div>
 
@@ -944,7 +946,7 @@ function ImportSkillFromWorkspaceDialog({
                       </SettingsCard>
                     ))}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1004,6 +1006,7 @@ function BuiltinAgentTools(): React.ReactElement {
 
   const memoryTool = tools.find((t) => t.meta.id === 'memory')
   const nanoBananaTool = tools.find((t) => t.meta.id === 'nano-banana')
+  const webSearchTool = tools.find((t) => t.meta.id === 'web-search')
 
   /** 跳转到工具设置页 */
   const goToToolSettings = (): void => {
@@ -1035,6 +1038,14 @@ function BuiltinAgentTools(): React.ReactElement {
       icon: <ImagePlus className="size-4" />,
       enabled: nanoBananaTool?.enabled ?? false,
       available: nanoBananaTool?.available ?? false,
+    },
+    {
+      id: 'web-search',
+      name: '联网搜索',
+      description: '实时搜索互联网获取最新信息',
+      icon: <Search className="size-4" />,
+      enabled: webSearchTool?.enabled ?? false,
+      available: webSearchTool?.available ?? false,
     },
   ]
 
@@ -1140,11 +1151,11 @@ function AgentAdvancedSettings(): React.ReactElement {
           onClick={() => setCollapsed(!collapsed)}
           className="flex items-center gap-2 hover:text-foreground/80 transition-colors"
         >
+          <span>Agent 高级设置</span>
           {collapsed
             ? <ChevronRight size={16} className="text-muted-foreground" />
             : <ChevronDown size={16} className="text-muted-foreground" />
           }
-          <span>Agent 高级设置</span>
         </button>
       }
       description={collapsed ? undefined : '控制 Agent 的思考模式、推理深度和资源限制'}

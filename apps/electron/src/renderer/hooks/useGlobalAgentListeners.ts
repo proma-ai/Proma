@@ -32,6 +32,7 @@ import {
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
+  workingDoneSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import {
   notificationsEnabledAtom,
@@ -40,7 +41,7 @@ import {
   sendDesktopNotification,
 } from '@/atoms/notifications'
 import { appModeAtom } from '@/atoms/app-mode'
-import { tabsAtom, splitLayoutAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
@@ -257,10 +258,9 @@ export function useGlobalAgentListeners(): void {
     /** 构建导航到指定会话的回调 */
     const makeNavigateToSession = (sessionId: string, sessionTitle: string) => () => {
       const tabs = store.get(tabsAtom)
-      const layout = store.get(splitLayoutAtom)
-      const result = openTab(tabs, layout, { type: 'agent', sessionId, title: sessionTitle })
+      const result = openTab(tabs, { type: 'agent', sessionId, title: sessionTitle })
       store.set(tabsAtom, result.tabs)
-      store.set(splitLayoutAtom, result.layout)
+      store.set(activeTabIdAtom, result.activeTabId)
       store.set(appModeAtom, 'agent')
       store.set(currentAgentSessionIdAtom, sessionId)
       const sessions = store.get(agentSessionsAtom)
@@ -306,10 +306,30 @@ export function useGlobalAgentListeners(): void {
     }).catch(console.error)
 
     // ===== 1. 流式事件 =====
+    // [FLASH-DEBUG] 事件频率计数器
+    let eventCount = 0
+    let lastLogTime = Date.now()
     const cleanupEvent = window.electronAPI.onAgentStreamEvent(
       (streamEvent: AgentStreamEvent) => {
+        // [FLASH-DEBUG] 每 2 秒输出一次事件频率
+        eventCount++
+        const now = Date.now()
+        if (now - lastLogTime >= 2000) {
+          console.log(`[FLASH-DEBUG] GlobalListener: ${eventCount} events in ${((now - lastLogTime) / 1000).toFixed(1)}s (${(eventCount / ((now - lastLogTime) / 1000)).toFixed(1)} evt/s)`)
+          eventCount = 0
+          lastLogTime = now
+        }
+
         unstable_batchedUpdates(() => {
         const { sessionId, payload } = streamEvent
+
+        // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
+        const knownSessions = store.get(agentSessionsAtom)
+        if (!knownSessions.some((s) => s.id === sessionId)) {
+          window.electronAPI.listAgentSessions()
+            .then((sessions) => store.set(agentSessionsAtom, sessions))
+            .catch(console.error)
+        }
 
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
         if (payload.kind === 'sdk_message') {
@@ -348,6 +368,19 @@ export function useGlobalAgentListeners(): void {
         const legacyEvents = payloadToLegacyEvents(payload)
 
         for (const event of legacyEvents) {
+          // 会话首次进入 running 时，从 Working Done 集合移除（它会出现在 Running 组）
+          if (event.type !== 'prompt_suggestion') {
+            const prevState = store.get(agentStreamingStatesAtom).get(sessionId)
+            if (!prevState || !prevState.running) {
+              store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
+                if (!prev.has(sessionId)) return prev
+                const next = new Set(prev)
+                next.delete(sessionId)
+                return next
+              })
+            }
+          }
+
           // 更新流式状态（prompt_suggestion 不影响流式状态，跳过以避免在 session 结束后用默认值 running:true 重新激活）
           if (event.type !== 'prompt_suggestion') {
             store.set(agentStreamingStatesAtom, (prev) => {
@@ -517,6 +550,7 @@ export function useGlobalAgentListeners(): void {
     // ===== 2. 流式完成 =====
     const cleanupComplete = window.electronAPI.onAgentStreamComplete(
       (data: AgentStreamCompletePayload) => {
+        console.log(`[FLASH-DEBUG] STREAM_COMPLETE for session=${data.sessionId.slice(0, 8)}, stoppedByUser=${data.stoppedByUser}, resultSubtype=${data.resultSubtype}`)
         unstable_batchedUpdates(() => {
         // 发送桌面通知（任务完成，始终播放提示音）
         const enabled = store.get(notificationsEnabledAtom)
@@ -565,6 +599,13 @@ export function useGlobalAgentListeners(): void {
             return next
           })
         }
+
+        // 添加到 Working Done 集合（保持到 Tab 关闭）
+        store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
+          const next = new Set(prev)
+          next.add(data.sessionId)
+          return next
+        })
 
         // 标记用户主动打断状态
         if (data.stoppedByUser) {

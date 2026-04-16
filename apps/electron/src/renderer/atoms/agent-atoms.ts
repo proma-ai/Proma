@@ -427,6 +427,9 @@ export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed
 /** 已完成但用户尚未查看的会话 ID 集合 */
 export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
 
+/** Working 区域"已完成"组：本次 App 会话中完成且 Tab 仍打开的会话 ID（关闭 Tab 时移除） */
+export const workingDoneSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
 /**
  * 每个会话的指示点状态（只包含非 idle 的会话）
  * 优先级：blocked > running > completed > idle
