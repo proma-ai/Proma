@@ -179,6 +179,7 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   // === Doubao / 豆包 ===
   doubao: DoubaoLogo,
   'ep-202': DoubaoLogo,
+  seed: DoubaoLogo,
 
   // === Zhipu / 智谱 ===
   zhipu: ZhipuLogo,

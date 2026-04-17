@@ -20,7 +20,7 @@ import {
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
 } from '@/atoms/agent-atoms'
-import { tabsAtom, splitLayoutAtom, openTab } from '@/atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
 
@@ -76,14 +76,13 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       // 6. 打开 Agent 会话 Tab 并激活
       const sessionTitle = session.title ?? '新 Agent 会话'
       const tabs = store.get(tabsAtom)
-      const layout = store.get(splitLayoutAtom)
-      const result = openTab(tabs, layout, {
+      const result = openTab(tabs, {
         type: 'agent',
         sessionId: session.id,
         title: sessionTitle,
       })
       store.set(tabsAtom, result.tabs)
-      store.set(splitLayoutAtom, result.layout)
+      store.set(activeTabIdAtom, result.activeTabId)
       store.set(currentAgentSessionIdAtom, session.id)
 
       // 7. 通知用户

@@ -712,6 +712,7 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
 
 function FeishuConfigTab(): React.ReactElement {
   const botStates = useAtomValue(feishuBotStatesAtom)
+  const setBotStates = useSetAtom(feishuBotStatesAtom)
   const [bots, setBots] = React.useState<FeishuBotConfig[]>([])
   const [loading, setLoading] = React.useState(true)
 
@@ -738,7 +739,20 @@ function FeishuConfigTab(): React.ReactElement {
     }
   }, [])
 
-  React.useEffect(() => { loadBots() }, [loadBots])
+  // 进入 Tab 时同步最新状态，避免因启动时序问题导致颜色显示错误
+  const refreshStates = React.useCallback(async () => {
+    try {
+      const multiState = await window.electronAPI.getFeishuMultiStatus?.()
+      if (multiState?.bots) {
+        setBotStates(multiState.bots)
+      }
+    } catch { /* 忽略 */ }
+  }, [setBotStates])
+
+  React.useEffect(() => {
+    loadBots()
+    refreshStates()
+  }, [loadBots, refreshStates])
 
   const handleAddBot = React.useCallback(async () => {
     try {

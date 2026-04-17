@@ -160,7 +160,7 @@ export function AppearanceSettings(): React.ReactElement {
   }, [setThemeMode, setThemeStyle, systemIsDark])
 
   return (
-    <>
+    <div className="space-y-6">
       <SettingsSection
         title="外观设置"
         description="自定义应用的视觉风格"
@@ -198,7 +198,7 @@ export function AppearanceSettings(): React.ReactElement {
       </SettingsSection>
 
       <AppIconPicker />
-    </>
+    </div>
   )
 }
 

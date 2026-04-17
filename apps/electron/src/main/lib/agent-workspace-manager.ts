@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync } from 'node:fs'
+import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -31,25 +32,17 @@ const INDEX_VERSION = 2
 /** 读取工作区索引文件，自动执行版本迁移 */
 function readIndex(): AgentWorkspacesIndex {
   const indexPath = getAgentWorkspacesIndexPath()
+  const data = readJsonFileSafe<AgentWorkspacesIndex>(indexPath)
 
-  if (!existsSync(indexPath)) {
-    return { version: INDEX_VERSION, workspaces: [] }
-  }
-
-  try {
-    const raw = readFileSync(indexPath, 'utf-8')
-    const index = JSON.parse(raw) as AgentWorkspacesIndex
-
+  if (data) {
     // 版本迁移
-    if ((index.version ?? 1) < INDEX_VERSION) {
-      migrateIndex(index)
+    if ((data.version ?? 1) < INDEX_VERSION) {
+      migrateIndex(data)
     }
-
-    return index
-  } catch (error) {
-    console.error('[Agent 工作区] 读取索引文件失败:', error)
-    return { version: INDEX_VERSION, workspaces: [] }
+    return data
   }
+
+  return { version: INDEX_VERSION, workspaces: [] }
 }
 
 function migrateIndex(index: AgentWorkspacesIndex): void {
@@ -92,7 +85,7 @@ function writeIndex(index: AgentWorkspacesIndex): void {
   const indexPath = getAgentWorkspacesIndexPath()
 
   try {
-    writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+    writeJsonFileAtomic(indexPath, index)
   } catch (error) {
     console.error('[Agent 工作区] 写入索引文件失败:', error)
     throw new Error('写入 Agent 工作区索引失败')

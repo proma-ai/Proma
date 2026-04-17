@@ -9,10 +9,17 @@ import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
 import { environmentCheckResultAtom } from './atoms/environment'
 import { conversationsAtom } from './atoms/chat-atoms'
-import { tabsAtom, splitLayoutAtom, openTab } from './atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
+  // [FLASH-DEBUG] 监控 App 组件重渲染（如果看到频繁日志，说明根组件被频繁重渲染）
+  const appRenderCountRef = React.useRef(0)
+  appRenderCountRef.current++
+  if (appRenderCountRef.current > 1) {
+    console.warn(`[FLASH-DEBUG] App re-render #${appRenderCountRef.current}, isLoading/showOnboarding may have changed`)
+  }
+
   const setEnvironmentResult = useSetAtom(environmentCheckResultAtom)
   const store = useStore()
   const [isLoading, setIsLoading] = React.useState(true)
@@ -56,14 +63,13 @@ export default function App(): React.ReactElement {
 
         // 打开对话标签页
         const tabs = store.get(tabsAtom)
-        const layout = store.get(splitLayoutAtom)
-        const result = openTab(tabs, layout, {
+        const result = openTab(tabs, {
           type: 'chat',
           sessionId: meta.id,
           title: meta.title,
         })
         store.set(tabsAtom, result.tabs)
-        store.set(splitLayoutAtom, result.layout)
+        store.set(activeTabIdAtom, result.activeTabId)
       }
     } catch (error) {
       console.error('[App] 创建欢迎对话失败:', error)

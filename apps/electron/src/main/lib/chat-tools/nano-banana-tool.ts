@@ -99,6 +99,7 @@ export const NANO_BANANA_TOOL_META: ChatToolMeta = {
 - prompt: 详细描述想要生成的图片内容，用英文描述效果最佳
 - aspectRatio: 可选宽高比 "1:1"(默认) / "16:9" / "4:3" / "9:16" / "3:4"
 - imageSize: 可选分辨率 "auto"(默认) / "1K" / "2K" / "4K"
+- numberOfImages: 可选生成数量 1-4（默认 1），用户要求多张时设置
 - useReferenceImages: 当用户上传了参考图或要求修改之前生成的图片时设为 true
 
 **使用技巧：**

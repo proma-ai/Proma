@@ -18,7 +18,7 @@
  */
 
 import * as React from 'react'
-import Markdown from 'react-markdown'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -199,26 +199,188 @@ export function MessageAction({
 
 // ===== MessageResponse Markdown 渲染 =====
 
+// ----- mdast 节点类型（remark 自定义插件用） -----
+
+interface MdastTextNode {
+  type: 'text'
+  value: string
+}
+
+interface MdastLinkNode {
+  type: 'link'
+  url: string
+  children: MdastNode[]
+}
+
+interface MdastBreakNode {
+  type: 'break'
+}
+
+interface MdastGenericNode {
+  type: string
+  children?: MdastNode[]
+  value?: string
+}
+
+type MdastNode = MdastTextNode | MdastLinkNode | MdastBreakNode | MdastGenericNode
+
+interface MdastParent {
+  type: string
+  children: MdastNode[]
+}
+
+// ----- mdast 工具函数 -----
+
+/** 递归遍历 mdast text 节点（自动跳过 code / inlineCode 子树） */
+function walkMdastText(
+  node: MdastParent,
+  visitor: (node: MdastTextNode, index: number, parent: MdastParent) => number | void
+): void {
+  if (!node.children) return
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i]!
+    if (child.type === 'text') {
+      const result = visitor(child as MdastTextNode, i, node)
+      if (typeof result === 'number') i = result - 1
+    } else if (child.type !== 'code' && child.type !== 'inlineCode') {
+      const asParent = child as MdastParent
+      if (asParent.children) walkMdastText(asParent, visitor)
+    }
+  }
+}
+
+// ----- MentionChip 组件 -----
+
+type MentionType = 'file' | 'skill' | 'mcp'
+
+const MENTION_STYLES: Record<MentionType, { icon: typeof FileText; className: string }> = {
+  file: { icon: FileText, className: 'bg-primary/10 text-primary' },
+  skill: { icon: Sparkles, className: 'bg-[hsl(270_60%_60%/0.15)] text-[hsl(270_60%_50%)]' },
+  mcp: { icon: Server, className: 'bg-[hsl(160_60%_45%/0.15)] text-[hsl(160_60%_35%)]' },
+}
+
+function MentionChip({ type, value }: { type: MentionType; value: string }): React.ReactElement {
+  const style = MENTION_STYLES[type]
+  const Icon = style.icon
+  const display = type === 'file' ? (value.split('/').pop() || value) : value
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline',
+        style.className
+      )}
+      title={type === 'file' ? value : undefined}
+    >
+      <Icon className="size-3 inline shrink-0" />
+      {display}
+    </span>
+  )
+}
+
+// ----- remarkMentions：将 @file: /skill: #mcp: 转为 mention:// link 节点 -----
+
+const MENTION_PATTERN = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)/g
+
+export function remarkMentions() {
+  return (tree: MdastParent) => {
+    walkMdastText(tree, (node, index, parent) => {
+      const text = node.value
+      MENTION_PATTERN.lastIndex = 0
+      if (!MENTION_PATTERN.test(text)) return
+      MENTION_PATTERN.lastIndex = 0
+
+      const parts: MdastNode[] = []
+      let lastIdx = 0
+      let m: RegExpExecArray | null
+
+      while ((m = MENTION_PATTERN.exec(text)) !== null) {
+        if (m.index > lastIdx) {
+          parts.push({ type: 'text', value: text.slice(lastIdx, m.index) })
+        }
+        const mType: MentionType = m[1] ? 'file' : m[2] ? 'skill' : 'mcp'
+        const mValue = m[1] || m[2] || m[3]
+        parts.push({
+          type: 'link',
+          url: `mention://${mType}/${mValue}`,
+          children: [{ type: 'text', value: m[0] }],
+        })
+        lastIdx = m.index + m[0].length
+      }
+
+      if (lastIdx < text.length) {
+        parts.push({ type: 'text', value: text.slice(lastIdx) })
+      }
+
+      parent.children.splice(index, 1, ...parts)
+      return index + parts.length
+    })
+  }
+}
+
+// ----- remarkPreserveBreaks：在 text 节点中将 \n 转为 break 节点（跳过代码块） -----
+
+export function remarkPreserveBreaks() {
+  return (tree: MdastParent) => {
+    walkMdastText(tree, (node, index, parent) => {
+      const text = node.value
+      if (!text.includes('\n')) return
+
+      const lines = text.split('\n')
+      const parts: MdastNode[] = []
+
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) parts.push({ type: 'break' })
+        if (lines[i]) parts.push({ type: 'text', value: lines[i] })
+      }
+
+      parent.children.splice(index, 1, ...parts)
+      return index + parts.length
+    })
+  }
+}
+
+/** remark 插件函数签名 */
+export type RemarkPluginFn = () => (tree: MdastParent) => void
+
 interface MessageResponseProps {
   /** Markdown 内容 */
   children: string
   className?: string
   /** 基础目录路径，用于解析相对文件路径（如 Agent 会话工作目录） */
   basePath?: string
+  /** 额外的 remark 插件（追加到内置 remarkGfm + remarkMath 之后） */
+  remarkPlugins?: RemarkPluginFn[]
 }
 
 /** 稳定引用的插件数组，避免 react-markdown 每帧重建插件管线 */
 const REMARK_PLUGINS = [remarkGfm, remarkMath]
 const REHYPE_PLUGINS = [rehypeKatex]
 
+/** 允许 mention:// 协议通过 URL 清洗（react-markdown 默认只放行 http/https） */
+function mentionUrlTransform(url: string): string {
+  if (url.startsWith('mention://')) return url
+  return defaultUrlTransform(url)
+}
+
 // ===== Memo'd Markdown 子组件（稳定引用，避免 react-markdown 每帧重建组件映射） =====
 
-/** 外部链接渲染器 */
+/** mention:// URL 匹配 */
+const MENTION_URL_RE = /^mention:\/\/(file|skill|mcp)\/(.+)$/
+
+/** 外部链接 / mention chip 渲染器 */
 const MarkdownLink = React.memo(function MarkdownLink({
   href,
   children: linkChildren,
   ...linkProps
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): React.ReactElement {
+  // mention:// 协议 → 渲染为 MentionChip
+  if (href) {
+    const mentionMatch = MENTION_URL_RE.exec(href)
+    if (mentionMatch) {
+      return <MentionChip type={mentionMatch[1] as MentionType} value={mentionMatch[2] ?? ''} />
+    }
+  }
+
   return (
     <a
       {...linkProps}
@@ -302,7 +464,13 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
 
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */
 export const MessageResponse = React.memo(
-  function MessageResponse({ children, className, basePath }: MessageResponseProps): React.ReactElement {
+  function MessageResponse({ children, className, basePath, remarkPlugins }: MessageResponseProps): React.ReactElement {
+    // 合并内置 + 外部 remark 插件（保持引用稳定）
+    const mergedRemarkPlugins = React.useMemo(
+      () => remarkPlugins ? [...REMARK_PLUGINS, ...remarkPlugins] : REMARK_PLUGINS,
+      [remarkPlugins]
+    )
+
     // 稳定引用的 components 对象，避免 react-markdown 每帧重建组件映射
     const components = React.useMemo(() => ({
       a: MarkdownLink,
@@ -323,8 +491,9 @@ export const MessageResponse = React.memo(
         )}
       >
         <Markdown
-          remarkPlugins={REMARK_PLUGINS}
+          remarkPlugins={mergedRemarkPlugins}
           rehypePlugins={REHYPE_PLUGINS}
+          urlTransform={mentionUrlTransform}
           components={components}
         >
           {children}
@@ -332,7 +501,10 @@ export const MessageResponse = React.memo(
       </div>
     )
   },
-  (prevProps, nextProps) => prevProps.children === nextProps.children && prevProps.basePath === nextProps.basePath
+  (prevProps, nextProps) =>
+    prevProps.children === nextProps.children &&
+    prevProps.basePath === nextProps.basePath &&
+    prevProps.remarkPlugins === nextProps.remarkPlugins
 )
 
 // ===== UserMessageContent 可折叠用户消息 =====
@@ -340,65 +512,8 @@ export const MessageResponse = React.memo(
 /** 折叠行数阈值 */
 const COLLAPSE_LINE_THRESHOLD = 4
 
-/** 将文本中的 @file:路径、/skill:名称、#mcp:名称 替换为样式化 chip */
-const MENTION_RE = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)/g
-
-function renderTextWithMentions(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  // 重置 lastIndex（全局正则复用时需要）
-  MENTION_RE.lastIndex = 0
-
-  while ((match = MENTION_RE.exec(text)) !== null) {
-    // 添加 match 前的纯文本
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
-    }
-
-    const key = `mention-${match.index}`
-
-    if (match[1]) {
-      // @file: 文件引用 — 蓝色 chip
-      const filePath = match[1]
-      const fileName = filePath.split('/').pop() || filePath
-      parts.push(
-        <span key={key} className="inline-flex items-center gap-0.5 bg-primary/10 text-primary rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline" title={filePath}>
-          <FileText className="size-3 inline shrink-0" />
-          {fileName}
-        </span>
-      )
-    } else if (match[2]) {
-      // /skill: Skill 引用 — 紫色 chip
-      const skillName = match[2]
-      parts.push(
-        <span key={key} className="inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline bg-[hsl(270_60%_60%/0.15)] text-[hsl(270_60%_50%)]">
-          <Sparkles className="size-3 inline shrink-0" />
-          {skillName}
-        </span>
-      )
-    } else if (match[3]) {
-      // #mcp: MCP 引用 — 绿色 chip
-      const mcpName = match[3]
-      parts.push(
-        <span key={key} className="inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline bg-[hsl(160_60%_45%/0.15)] text-[hsl(160_60%_35%)]">
-          <Server className="size-3 inline shrink-0" />
-          {mcpName}
-        </span>
-      )
-    }
-
-    lastIndex = match.index + match[0].length
-  }
-
-  // 添加剩余文本
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
-  }
-
-  return parts.length > 0 ? parts : text
-}
+/** 用户消息专用 remark 插件（mention chip + 保留换行） */
+const USER_REMARK_PLUGINS: RemarkPluginFn[] = [remarkMentions, remarkPreserveBreaks]
 
 interface UserMessageContentProps extends HTMLAttributes<HTMLDivElement> {
   children: string
@@ -436,12 +551,12 @@ export const UserMessageContent = React.memo(
         <div
           ref={contentRef}
           className={cn(
-            'whitespace-pre-wrap overflow-hidden transition-[max-height] duration-200 text-[15px] leading-[1.6]',
+            'overflow-hidden transition-[max-height] duration-200',
             '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
             shouldCollapse && !isExpanded && 'max-h-[6.5em]'
           )}
         >
-          {renderTextWithMentions(children)}
+          <MessageResponse className="prose-p:my-0.5 prose-headings:my-1.5" remarkPlugins={USER_REMARK_PLUGINS}>{children}</MessageResponse>
         </div>
         {shouldCollapse && (
           <button

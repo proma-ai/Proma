@@ -100,20 +100,14 @@ export interface PersistedTabSettings {
     sessionId: string
     title: string
   }>
-  splitLayout: {
-    mode: 'single' | 'horizontal-2' | 'vertical-2' | 'grid-4'
-    panels: Array<{
-      index: number
-      activeTabId: string | null
-    }>
-    focusedPanelIndex: number
-  }
+  activeTabId: string | null
 }
 
 /** 设置 IPC 通道 */
 export const SETTINGS_IPC_CHANNELS = {
   GET: 'settings:get',
   UPDATE: 'settings:update',
+  UPDATE_SYNC: 'settings:update-sync',
   GET_SYSTEM_THEME: 'settings:get-system-theme',
   ON_SYSTEM_THEME_CHANGED: 'settings:system-theme-changed',
   /** 用户手动切换主题时广播给所有窗口 */

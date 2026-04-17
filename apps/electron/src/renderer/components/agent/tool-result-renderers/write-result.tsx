@@ -1,8 +1,9 @@
 /**
- * Write 工具结果渲染器 — 简洁成功消息
+ * Write 工具结果渲染器 — 内容视图
  */
 
 import * as React from 'react'
+import { cn } from '@/lib/utils'
 
 interface WriteResultRendererProps {
   result: string
@@ -19,15 +20,32 @@ export function WriteResultRenderer({ result, isError, input }: WriteResultRende
     )
   }
 
-  const filePath = typeof input.file_path === 'string' ? input.file_path : ''
-  const filename = filePath.split('/').pop() ?? filePath
   const content = typeof input.content === 'string' ? input.content : ''
-  const lineCount = content ? content.split('\n').length : 0
+
+  if (!content) {
+    const filePath = typeof input.file_path === 'string' ? input.file_path : ''
+    const filename = filePath.split(/[/\\]/).pop() ?? filePath
+    return (
+      <div className="text-[12px] text-muted-foreground">
+        已写入 <span className="font-mono text-foreground/70">{filename || '文件'}</span>
+      </div>
+    )
+  }
+
+  const lines = content.split('\n')
 
   return (
-    <div className="text-[12px] text-muted-foreground">
-      已写入 <span className="font-mono text-foreground/70">{filename || '文件'}</span>
-      {lineCount > 0 && <span>, {lineCount} 行</span>}
+    <div className="rounded-md font-mono text-[12px] leading-relaxed overflow-x-auto bg-zinc-900 dark:bg-zinc-950">
+      {lines.map((line, i) => (
+        <div key={i} className="flex bg-green-500/10">
+          <span className="shrink-0 w-10 text-right pr-3 select-none text-green-400/60 text-[11px]">
+            +
+          </span>
+          <span className={cn('flex-1 whitespace-pre-wrap break-all text-green-300')}>
+            {line || '\u200B'}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

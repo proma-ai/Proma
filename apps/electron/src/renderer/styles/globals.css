@@ -112,7 +112,7 @@
 
   /* 苍穹暮色 (ocean-dark) */
   .theme-ocean-dark {
-    --background: 210 35% 11%;            /* #121c26 背景（侧边栏） */
+    --background: 210 35% 13%;            /* #182434 背景（侧边栏） */
     --foreground: 210 20% 92%;            /* #e7ebef 前景文字 */
     --content-area: 210 40% 8%;           /* #0c141d 内容区域 */
     --muted: 210 30% 14%;                 /* #19242e 次要背景 */

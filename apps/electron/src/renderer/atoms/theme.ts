@@ -98,6 +98,8 @@ export const resolvedThemeAtom = atom<'light' | 'dark'>((get) => {
  * 在 <html> 元素上切换 dark 类名和特殊风格类名。
  */
 export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = 'default', systemIsDark: boolean = true): void {
+  // [FLASH-DEBUG] 主题 DOM 操作会影响整个页面
+  console.log(`[FLASH-DEBUG] applyThemeToDOM called: mode=${themeMode}, style=${themeStyle}, systemIsDark=${systemIsDark}`)
   const html = document.documentElement
 
   // 移除所有特殊风格类

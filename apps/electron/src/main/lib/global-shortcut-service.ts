@@ -9,7 +9,7 @@
  * - 主进程：globalShortcut.register，系统级生效
  */
 
-import { globalShortcut } from 'electron'
+import { app, globalShortcut } from 'electron'
 import { getSettings } from './settings-service'
 
 /** 全局快捷键 ID → 回调映射 */
@@ -124,7 +124,9 @@ export function reregisterAllGlobalShortcuts(): Record<string, boolean> {
  * 在 app.will-quit / before-quit 时调用。
  */
 export function unregisterAllGlobalShortcuts(): void {
-  globalShortcut.unregisterAll()
+  if (app.isReady()) {
+    globalShortcut.unregisterAll()
+  }
   registeredAccelerators.clear()
   globalCallbacks.clear()
   console.log('[全局快捷键] 已注销所有')

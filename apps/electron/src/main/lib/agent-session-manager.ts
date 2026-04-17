@@ -9,6 +9,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, copyFileSync } from 'node:fs'
+import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, dirname } from 'node:path'
 import {
@@ -48,18 +49,9 @@ const INDEX_VERSION = 1
  */
 function readIndex(): AgentSessionsIndex {
   const indexPath = getAgentSessionsIndexPath()
-
-  if (!existsSync(indexPath)) {
-    return { version: INDEX_VERSION, sessions: [] }
-  }
-
-  try {
-    const raw = readFileSync(indexPath, 'utf-8')
-    return JSON.parse(raw) as AgentSessionsIndex
-  } catch (error) {
-    console.error('[Agent 会话] 读取索引文件失败:', error)
-    return { version: INDEX_VERSION, sessions: [] }
-  }
+  const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
+  if (data) return data
+  return { version: INDEX_VERSION, sessions: [] }
 }
 
 /**
@@ -69,7 +61,7 @@ function writeIndex(index: AgentSessionsIndex): void {
   const indexPath = getAgentSessionsIndexPath()
 
   try {
-    writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+    writeJsonFileAtomic(indexPath, index)
   } catch (error) {
     console.error('[Agent 会话] 写入索引文件失败:', error)
     throw new Error('写入 Agent 会话索引失败')
@@ -535,12 +527,32 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
     }
   }
 
+  // 2.5 确定目标消息所属的 SDK session ID
+  // 当会话经历过 "session not found" 恢复后，sdkSessionId 会被替换为新的，
+  // 但旧消息仍保留在 Proma JSONL 中，其 session_id 指向旧的 SDK session。
+  // 这里从 JSONL 中查找目标消息的实际 session_id，确保 fork 调用使用正确的 SDK session。
+  let forkSourceSdkSessionId = sourceMeta.sdkSessionId
+  if (upToMessageUuid) {
+    const allMessages = getAgentSessionSDKMessages(sessionId)
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const m = allMessages[i]!
+      if ('uuid' in m && (m as { uuid?: string }).uuid === upToMessageUuid) {
+        const msgSessionId = (m as { session_id?: string }).session_id
+        if (msgSessionId && msgSessionId !== sourceMeta.sdkSessionId) {
+          console.log(`[Agent 会话] fork 目标消息属于旧 SDK session ${msgSessionId}（当前为 ${sourceMeta.sdkSessionId}），使用消息所属 session 进行 fork`)
+          forkSourceSdkSessionId = msgSessionId
+        }
+        break
+      }
+    }
+  }
+
   // 3. 调用 SDK 原生 forkSession
   // process.env.CLAUDE_CONFIG_DIR 已在模块加载时设置，SDK 会自动读取
   const sdk = await import('@anthropic-ai/claude-agent-sdk')
   let forkResult: Awaited<ReturnType<typeof sdk.forkSession>>
   try {
-    forkResult = await sdk.forkSession(sourceMeta.sdkSessionId, {
+    forkResult = await sdk.forkSession(forkSourceSdkSessionId, {
       upToMessageId: upToMessageUuid,
       dir: sourceDir,
     })
@@ -548,7 +560,7 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
     // 指定 dir 失败时，让 SDK 自动搜索所有项目目录
     if (sourceDir) {
       console.warn(`[Agent 会话] forkSession 指定 dir 失败，改用全局搜索:`, err)
-      forkResult = await sdk.forkSession(sourceMeta.sdkSessionId, {
+      forkResult = await sdk.forkSession(forkSourceSdkSessionId, {
         upToMessageId: upToMessageUuid,
       })
     } else {
@@ -567,12 +579,12 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   updateAgentSessionMeta(newMeta.id, {
     sdkSessionId: forkResult.sessionId,
     forkSourceDir: sourceDir,
-    forkSourceSdkSessionId: sourceMeta.sdkSessionId,
+    forkSourceSdkSessionId: forkSourceSdkSessionId,
   })
   // 同步返回值（updateAgentSessionMeta 已写入磁盘，这里让调用方拿到最新值）
   newMeta.sdkSessionId = forkResult.sessionId
   newMeta.forkSourceDir = sourceDir
-  newMeta.forkSourceSdkSessionId = sourceMeta.sdkSessionId
+  newMeta.forkSourceSdkSessionId = forkSourceSdkSessionId
 
   // 4.5 将 SDK session JSONL 复制到 fork 自己的 project-hash 目录
   // SDK forkSession() 在源 cwd 的 project-hash 下创建 JSONL（如 projects/<hash-of-sourceDir>/<newId>.jsonl），

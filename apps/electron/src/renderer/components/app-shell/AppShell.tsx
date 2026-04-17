@@ -1,9 +1,9 @@
 /**
  * AppShell - 应用主布局容器
  *
- * 布局结构：[LeftSidebar 可折叠] | [MainArea: TabBar + SplitContainer] | [RightSidePanel 可折叠]
+ * 布局结构：[LeftSidebar 可折叠] | [MainArea: TabBar + TabContent] | [RightSidePanel 可折叠]
  *
- * MainArea 支持多标签页 + 分屏，Settings 视图为独立覆盖。
+ * MainArea 支持多标签页，Settings 视图为独立覆盖。
  */
 
 import * as React from 'react'
@@ -84,7 +84,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
 
         {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
         <div className="flex-1 min-w-0 p-2 relative z-[60]">
-          {/* 主内容区域（TabBar + SplitContainer） */}
+          {/* 主内容区域（TabBar + TabContent） */}
           <MainArea />
         </div>
 
