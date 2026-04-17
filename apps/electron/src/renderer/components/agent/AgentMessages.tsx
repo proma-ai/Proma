@@ -40,7 +40,7 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, type MessageGroup } from './SDKMessageRenderer'
 import type { AgentMessage, AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { ToolActivity, AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -742,6 +742,12 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
     return [...persisted.filter(m => !liveSet.has(m)), ...live]
   }, [persistedSDKMessages, liveMessages])
 
+  // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
+  // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
+  // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
+  // 直到整个 stream 结束（stream state 被删除）才消失。
+  const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
+
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
     if (!useSDKRenderer) return []
@@ -882,7 +888,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
             )}
 
             {/* 有实时助手内容时：显示运行指示器或占位（防止 streaming 结束到 Actions Bar 出现之间的高度跳动） */}
-            {hasLiveAssistantContent && (
+            {hasLiveAssistantContent && !suppressAgentRunning && (
               <div className="pl-[56px] mt-0.5 min-h-[28px]">
                 {retrying && <RetryingNotice retrying={retrying} />}
                 {streaming && <AgentRunningIndicator startedAt={startedAt} />}
@@ -891,7 +897,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
 
             {/* 无实时助手内容时：显示完整气泡（含头像/名称/时间） */}
             {/* 注意：工具活动已通过 SDK 渲染路径（liveGroups）展示，此处不再使用 ToolActivityList */}
-            {!hasLiveAssistantContent && (streaming || smoothContent || retrying) && (
+            {!hasLiveAssistantContent && !suppressAgentRunning && (streaming || smoothContent || retrying) && (
               <Message from="assistant">
                 <MessageHeader
                   model={agentStreamingModel}
@@ -911,6 +917,10 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
                 </MessageContent>
               </Message>
             )}
+
+            {/* 压缩中指示器：由 isCompacting flag 驱动的尾部元素，compact_boundary 到达时 flag 翻 false 自然消失，
+                视觉上被流中新出现的"上下文已压缩"分隔符无缝替换 */}
+            {streamState?.isCompacting && <CompactingIndicator />}
 
           </>
         )}

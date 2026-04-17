@@ -824,11 +824,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
 
-      // 3. 异步发送到后端（'now' 优先级立即注入 SDK + 持久化 JSONL）
+      // 3. 异步发送到后端（立即软中断当前 turn，再注入消息作为新一轮输入）
       window.electronAPI.queueAgentMessage({
         sessionId,
         userMessage: effectiveText,
         uuid: localUuid,
+        interrupt: true,
       }).catch((error) => {
         console.error('[AgentView] 追加消息失败:', error)
         toast.error('追加消息失败', { description: String(error) })
@@ -1023,8 +1024,28 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const handleCompact = React.useCallback((): void => {
     if (!agentChannelId || streaming) return
 
-    // 初始化流式状态（startedAt 由渲染进程生成，传递给主进程原样回传）
     const streamStartedAt = Date.now()
+    const localUuid = crypto.randomUUID()
+
+    // 1. 立即注入合成用户消息（/compact 气泡立刻可见，与普通发送路径一致）
+    const syntheticMsg: import('@proma/shared').SDKMessage = {
+      type: 'user',
+      uuid: localUuid,
+      message: {
+        content: [{ type: 'text', text: '/compact' }],
+      },
+      parent_tool_use_id: null,
+      _createdAt: streamStartedAt,
+    } as unknown as import('@proma/shared').SDKMessage
+
+    store.set(liveMessagesMapAtom, (prev) => {
+      const map = new Map(prev)
+      const current = map.get(sessionId) ?? []
+      map.set(sessionId, [...current, syntheticMsg])
+      return map
+    })
+
+    // 2. 初始化流式状态 + 乐观设 isCompacting=true（SDK compacting 事件之前就显示"正在压缩..."分隔符）
     setStreamingStates((prev) => {
       const map = new Map(prev)
       const current = prev.get(sessionId) ?? {
@@ -1035,7 +1056,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
       }
-      map.set(sessionId, { ...current, running: true, startedAt: streamStartedAt })
+      map.set(sessionId, { ...current, running: true, startedAt: streamStartedAt, isCompacting: true, compactInFlight: true })
       return map
     })
 
@@ -1046,8 +1067,26 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
-    }).catch(console.error)
-  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates])
+    }).catch((error) => {
+      console.error('[AgentView] /compact 发送失败:', error)
+      // 回滚：移除合成用户消息 + 清除 isCompacting flag
+      store.set(liveMessagesMapAtom, (prev) => {
+        const map = new Map(prev)
+        const current = (map.get(sessionId) ?? []).filter(
+          (m) => (m as unknown as { uuid?: string }).uuid !== localUuid,
+        )
+        map.set(sessionId, current)
+        return map
+      })
+      setStreamingStates((prev) => {
+        const map = new Map(prev)
+        const current = prev.get(sessionId)
+        if (!current) return prev
+        map.set(sessionId, { ...current, isCompacting: false, compactInFlight: false })
+        return map
+      })
+    })
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates, store])
 
   /** 复制错误信息到剪贴板 */
   const handleCopyError = React.useCallback(async (): Promise<void> => {

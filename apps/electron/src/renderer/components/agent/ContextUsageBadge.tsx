@@ -1,23 +1,26 @@
 /**
- * ContextUsageBadge — 上下文使用量徽章
+ * ContextUsageBadge — 上下文使用量指示器
  *
- * 常驻显示在输入框工具栏，展示当前 Agent 会话的上下文占用情况：
- * - 有数据时显示 "Xk / Yk"（已用 / 总窗口大小）
- * - 无数据时不显示（首次请求前无 usage 数据）
- * - 压缩中时显示 Loader2 旋转图标
- * - 使用量接近压缩阈值（窗口 × 0.775 × 80%）时显示琥珀色警告
- * - hover tooltip 显示 token 用量明细
+ * 输入框工具栏上的一个 36×36 圆形按钮：
+ * - 内部为 16px 圆环，按 displayTokens / displayWindow 比例渲染
+ * - hover / click 弹出 Popover，内含 token 明细 + 手动压缩按钮
+ * - 压缩中时按钮位置显示 Loader2 旋转图标
+ * - 占用接近压缩阈值（窗口 × 0.775 × 80%）时圆环变琥珀色
+ * - 无数据时不显示
  */
 
 import * as React from 'react'
 import { Loader2, Minimize2 } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 /** 压缩阈值比例（SDK 在 ~77.5% 窗口大小时自动压缩） */
 const COMPACT_THRESHOLD_RATIO = 0.775
 /** 显示警告的阈值（压缩阈值的 80%） */
 const WARNING_RATIO = 0.80
+/** Popover hover 关闭延迟（ms），与 AgentThinkingPopover 一致 */
+const HOVER_CLOSE_DELAY = 150
 
 interface ContextUsageBadgeProps {
   inputTokens?: number
@@ -42,34 +45,69 @@ function formatTokens(tokens: number): string {
   return `${tokens}`
 }
 
-/** 构建多行 tooltip 文本 */
-function buildTooltipLines(props: {
-  inputTokens: number
-  outputTokens?: number
-  cacheReadTokens?: number
-  cacheCreationTokens?: number
-  contextWindow?: number
+/** 圆环进度指示器 — 16×16 SVG，描边 2px */
+interface UsageRingProps {
+  ratio: number
   isWarning: boolean
-}): string {
-  const lines: string[] = []
+}
+function UsageRing({ ratio, isWarning }: UsageRingProps): React.ReactElement {
+  const radius = 8
+  const circumference = 2 * Math.PI * radius
+  const clamped = Math.max(0, Math.min(1, ratio))
+  const dashOffset = circumference * (1 - clamped)
 
-  // 纯输入 = 总上下文 - 缓存读取 - 缓存写入
-  const pureInput = props.inputTokens - (props.cacheReadTokens ?? 0) - (props.cacheCreationTokens ?? 0)
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 20 20"
+      className={cn(
+        'shrink-0 transition-colors',
+        isWarning ? 'text-amber-500 dark:text-amber-400' : 'text-foreground/70',
+      )}
+      aria-hidden="true"
+    >
+      <circle
+        cx="10"
+        cy="10"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity="0.2"
+        strokeWidth="2"
+      />
+      <circle
+        cx="10"
+        cy="10"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        transform="rotate(-90 10 10)"
+        style={{ transition: 'stroke-dashoffset 300ms ease-out' }}
+      />
+    </svg>
+  )
+}
 
-  if (pureInput > 0) lines.push(`输入: ${pureInput.toLocaleString()}`)
-  if (props.outputTokens) lines.push(`输出: ${props.outputTokens.toLocaleString()}`)
-  if (props.cacheCreationTokens) lines.push(`缓存写入: ${props.cacheCreationTokens.toLocaleString()}`)
-  if (props.cacheReadTokens) lines.push(`缓存读取: ${props.cacheReadTokens.toLocaleString()}`)
-
-  if (props.contextWindow) {
-    lines.push(`上下文窗口: ${props.contextWindow.toLocaleString()}`)
-  }
-
-  if (props.isWarning) {
-    lines.push('点击手动压缩')
-  }
-
-  return lines.join('\n')
+/** Popover 里的一行 key/value */
+interface DetailRowProps {
+  label: string
+  value: string
+  emphasized?: boolean
+}
+function DetailRow({ label, value, emphasized }: DetailRowProps): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-4 text-xs">
+      <span className="text-foreground/70">{label}</span>
+      <span className={cn('tabular-nums', emphasized ? 'font-medium text-foreground' : 'text-foreground/90')}>
+        {value}
+      </span>
+    </div>
+  )
 }
 
 export function ContextUsageBadge({
@@ -94,13 +132,35 @@ export function ContextUsageBadge({
     stableRef.current = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }
   }
 
-  // 压缩中 → 始终显示 spinner
+  const [open, setOpen] = React.useState(false)
+  const closeTimerRef = React.useRef<number | null>(null)
+
+  const cancelClose = React.useCallback(() => {
+    if (closeTimerRef.current != null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleClose = React.useCallback(() => {
+    cancelClose()
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY)
+  }, [cancelClose])
+
+  React.useEffect(() => cancelClose, [cancelClose])
+
+  // 压缩中 → 按钮位置显示 spinner
   if (isCompacting) {
     return (
-      <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
-        <span>压缩中...</span>
-      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-[36px] rounded-full text-muted-foreground cursor-default"
+        disabled
+      >
+        <Loader2 className="size-4 animate-spin" />
+      </Button>
     )
   }
 
@@ -124,77 +184,91 @@ export function ContextUsageBadge({
     ? displayTokens / compactThreshold >= WARNING_RATIO
     : false
 
-  // 显示文本：已用 / 总窗口
-  const displayText = displayWindow
-    ? `${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`
-    : formatTokens(displayTokens)
+  const ratio = displayWindow ? displayTokens / displayWindow : 0
 
-  const tooltipText = buildTooltipLines({
-    inputTokens: displayTokens,
-    outputTokens: displayOutput,
-    cacheReadTokens: displayCacheRead,
-    cacheCreationTokens: displayCacheCreation,
-    contextWindow: displayWindow,
-    isWarning,
-  })
+  // 纯输入 = 总上下文 - 缓存读取 - 缓存写入
+  const pureInput = displayTokens - (displayCacheRead ?? 0) - (displayCacheCreation ?? 0)
 
-  // 占用百分比（相对完整窗口）
-  const percentText = displayWindow
-    ? `${Math.round((displayTokens / displayWindow) * 100)}%`
+  const percent = displayWindow
+    ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
 
-  // 压缩按钮的 tooltip 文案
-  const compactTooltip = isProcessing
-    ? '对话进行中，无法压缩'
-    : '手动压缩上下文'
+  const handleCompactClick = (): void => {
+    if (isProcessing) return
+    onCompact()
+    setOpen(false)
+  }
 
   return (
-    <div className="flex items-center gap-0.5">
-      {/* 上下文用量显示 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className={cn(
-              'flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs transition-colors',
-              isWarning
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-muted-foreground',
-            )}
-          >
-            <span>{displayText}</span>
-            {percentText && (
-              <span className={cn('tabular-nums', isWarning && 'font-medium')}>{percentText}</span>
-            )}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          <p className="whitespace-pre-line text-left">{tooltipText}</p>
-        </TooltipContent>
-      </Tooltip>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'size-[36px] rounded-full',
+            isWarning ? 'text-amber-600 dark:text-amber-400' : 'text-foreground/60 hover:text-foreground',
+          )}
+          onMouseEnter={() => {
+            cancelClose()
+            setOpen(true)
+          }}
+          onMouseLeave={scheduleClose}
+        >
+          <UsageRing ratio={ratio} isWarning={isWarning} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="center"
+        sideOffset={8}
+        className="w-auto min-w-[220px] p-2.5"
+        onMouseEnter={cancelClose}
+        onMouseLeave={scheduleClose}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="flex flex-col gap-1.5">
+          {pureInput > 0 && <DetailRow label="输入" value={pureInput.toLocaleString()} />}
+          {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
+          {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
+          {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
 
-      {/* 压缩按钮 — 始终可见 */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
+          {displayWindow ? (
+            <>
+              <div className="h-px bg-border my-0.5" />
+              <DetailRow
+                label="上下文"
+                value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
+                emphasized
+              />
+              {percent != null && (
+                <DetailRow
+                  label="占用"
+                  value={`${percent}%`}
+                  emphasized={isWarning}
+                />
+              )}
+            </>
+          ) : null}
+
+          <div className="h-px bg-border my-0.5" />
+          <Button
             type="button"
+            variant={isWarning ? 'default' : 'outline'}
+            size="sm"
             className={cn(
-              'flex items-center justify-center size-[22px] rounded transition-colors',
-              isProcessing
-                ? 'text-muted-foreground/40 cursor-not-allowed'
-                : isWarning
-                  ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 cursor-pointer'
-                  : 'text-muted-foreground hover:bg-muted cursor-pointer',
+              'h-7 text-xs gap-1.5',
+              isWarning && 'bg-amber-500 hover:bg-amber-600 text-white',
             )}
-            onClick={!isProcessing ? onCompact : undefined}
+            onClick={handleCompactClick}
             disabled={isProcessing}
           >
             <Minimize2 className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          <p>{compactTooltip}</p>
-        </TooltipContent>
-      </Tooltip>
-    </div>
+            {isProcessing ? '对话进行中' : '手动压缩'}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

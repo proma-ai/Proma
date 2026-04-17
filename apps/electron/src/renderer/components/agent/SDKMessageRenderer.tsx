@@ -79,13 +79,17 @@ function CompactBoundaryDivider(): React.ReactElement {
   )
 }
 
-// ===== system 消息：正在压缩指示器 =====
+// ===== system 消息：正在压缩指示器（与 CompactBoundaryDivider 同款横线样式，pill 内带 spinner） =====
 
-function CompactingIndicator(): React.ReactElement {
+export function CompactingIndicator(): React.ReactElement {
   return (
-    <div className="flex items-center gap-2 my-2 px-1 text-[12px] text-muted-foreground/70">
-      <Loader2 className="size-3 animate-spin" />
-      <span>正在压缩上下文...</span>
+    <div className="flex items-center gap-3 my-4 px-1">
+      <div className="flex-1 h-px bg-border/40" />
+      <span className="shrink-0 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
+        <Loader2 className="size-3 animate-spin" />
+        正在压缩...
+      </span>
+      <div className="flex-1 h-px bg-border/40" />
     </div>
   )
 }
@@ -262,6 +266,10 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       }
     } else {
       // result, tool_progress 等 → 归入当前 turn
+      // prompt_suggestion 不属于对话转录，不入 turn，避免被当作文本附加到助手消息末尾
+      if ((msg as { type: string }).type === 'prompt_suggestion') {
+        continue
+      }
       if (currentTurn) {
         currentTurn.turnMessages.push(msg)
       }
@@ -295,6 +303,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
     for (let i = result.length - 1; i >= 0; i--) {
       const prev = result[i]!
       if (prev.type === 'user') break // 真正的用户输入阻断合并
+      if (prev.type === 'system' && (prev.message as SDKSystemMessage).subtype === 'compact_boundary') break // 压缩边界阻断合并
       if (prev.type === 'assistant-turn') {
         if (prev.model === group.model) {
           mergeTargetIdx = i
@@ -371,6 +380,15 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
   // 从 turnMessages 中提取 result 消息的耗时和用量
   const { durationMs, usage } = extractTurnUsage(turn.turnMessages)
+
+  // 该 turn 是否被软中断（aborted_streaming / aborted_tools）
+  // 用于在消息底部显示“已被用户中断”徽章，独立于会话级 stoppedByUser 标记
+  const isInterruptedTurn = turn.turnMessages.some((m) => {
+    if (m.type !== 'result') return false
+    const reason = (m as { terminal_reason?: string }).terminal_reason
+    return reason === 'aborted_streaming' || reason === 'aborted_tools'
+  })
+  const showStoppedBadge = stoppedByUser || isInterruptedTurn
 
   // 构建 Agent/Task tool_use → 子代理内容块映射
   const agentToolIds = new Set<string>()
@@ -552,7 +570,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
           : undefined
         const hasActions = !!(textContent || (onFork && lastUuid) || (onRewind && lastUuid))
         const hasDuration = durationMs != null
-        if (!hasDuration && !hasActions && !stoppedByUser) return null
+        if (!hasDuration && !hasActions && !showStoppedBadge) return null
         return (
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
             {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
@@ -567,7 +585,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
                 <Undo2 className="size-3.5" />
               </MessageAction>
             )}
-            {stoppedByUser && (
+            {showStoppedBadge && (
               <Badge variant="outline" className="text-xs text-muted-foreground/70 border-muted-foreground/30 shrink-0">
                 已被用户中断
               </Badge>
@@ -659,9 +677,7 @@ export function SDKMessageRenderer({
       return <CompactBoundaryDivider />
     }
 
-    if (subtype === 'compacting') {
-      return <CompactingIndicator />
-    }
+    // compacting 事件已由 isCompacting flag 驱动的尾部指示器接管（见 AgentMessages），此处不再渲染持久条目
 
     return null
   }

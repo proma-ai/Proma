@@ -361,6 +361,26 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     }
   }
 
+  /**
+   * 软中断当前 turn（用户流式追加并要求立即打断时使用）。
+   *
+   * 调用 SDK 的 query.interrupt()：停止当前 turn 但保留子进程与消息通道。
+   * 调用后 SDK 会 yield 一条 result（subtype: 'interrupt'），随后从 channel
+   * 继续读取下一条用户输入——此方法通常紧跟 sendQueuedMessage() 使用。
+   *
+   * 若查询已不存在（如已经 abort 过），静默返回。
+   */
+  async interruptQuery(sessionId: string): Promise<void> {
+    const query = activeQueries.get(sessionId)
+    if (!query) return
+    try {
+      await query.interrupt()
+      console.log(`[Claude 适配器] 已软中断当前 turn: sessionId=${sessionId}`)
+    } catch (error) {
+      console.warn(`[Claude 适配器] 软中断失败: sessionId=${sessionId}`, error)
+    }
+  }
+
   dispose(): void {
     for (const [, query] of activeQueries) {
       try {
@@ -504,17 +524,27 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
 
         // 捕获 result 中的 contextWindow
         if (msg.type === 'result') {
-          const resultMsg = msg as { modelUsage?: Record<string, { contextWindow?: number }> }
+          const resultMsg = msg as {
+            modelUsage?: Record<string, { contextWindow?: number }>
+            terminal_reason?: string
+          }
           if (resultMsg.modelUsage) {
             const firstEntry = Object.values(resultMsg.modelUsage)[0]
             if (firstEntry?.contextWindow) {
               options.onContextWindow?.(firstEntry.contextWindow)
             }
           }
-          // result 表示当前轮次完成，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
-          // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
-          // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
-          channel.close()
+          // 被软中断（query.interrupt()）产生的 result：不关闭通道，
+          // 让 SDK 继续读取通道中已排队的下一条用户消息并开启新一轮 turn。
+          const wasAborted =
+            resultMsg.terminal_reason === 'aborted_streaming' ||
+            resultMsg.terminal_reason === 'aborted_tools'
+          if (!wasAborted) {
+            // result 表示当前轮次完成，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
+            // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
+            // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
+            channel.close()
+          }
         }
 
         yield sdkMessage as SDKMessage

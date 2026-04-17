@@ -125,6 +125,12 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
+  /**
+   * 压缩流程是否进行中（含收尾窗口）。
+   * 从用户点击压缩 / SDK compacting 事件开始 → 到整个 stream 结束（state 被删除）前一直为 true。
+   * 用于抑制压缩分隔符切换期间 AgentRunningIndicator 的短暂闪烁。
+   */
+  compactInFlight?: boolean
   /** 流式开始时间戳（用于思考计时持久化） */
   startedAt?: number
   /** 重试状态（扩展版） */
@@ -704,7 +710,7 @@ export function applyAgentEvent(
       }
 
     case 'compacting':
-      return { ...prev, isCompacting: true }
+      return { ...prev, isCompacting: true, compactInFlight: true }
 
     case 'compact_complete':
       return { ...prev, isCompacting: false }

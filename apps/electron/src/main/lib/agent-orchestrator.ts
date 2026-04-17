@@ -1699,9 +1699,15 @@ export class AgentOrchestrator {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
-              // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
-              // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
-              if (!drainTimeoutPromise) {
+              // 软中断（aborted_streaming / aborted_tools）场景下，adapter 保留 channel
+              // 等待队列中的后续用户消息继续 drive Query，此处跳过 drain 超时以免误关闭事件循环
+              const resultTerminalReason = (msg as { terminal_reason?: string }).terminal_reason
+              const isAbortedByInterrupt =
+                resultTerminalReason === 'aborted_streaming' ||
+                resultTerminalReason === 'aborted_tools'
+              if (!isAbortedByInterrupt && !drainTimeoutPromise) {
+                // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
+                // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
                 drainTimeoutPromise = new Promise((resolve) =>
                   setTimeout(() => resolve('drain_timeout'), RESULT_DRAIN_TIMEOUT_MS),
                 )
@@ -2215,6 +2221,7 @@ export class AgentOrchestrator {
     text: string,
     _priority?: string,
     presetUuid?: string,
+    opts?: { interrupt?: boolean },
   ): Promise<string> {
     if (!this.activeSessions.has(sessionId)) {
       throw new Error(`[Agent 编排] 会话未运行，无法追加消息: ${sessionId}`)
@@ -2242,8 +2249,19 @@ export class AgentOrchestrator {
     }
 
     try {
+      // 用户希望"立即打断当前输出并续跑新消息"：先软中断，再把消息压入通道
+      // - interrupt() 让 SDK 结束当前 turn 并 yield 一个 aborted result
+      // - 随后通道里的 'now' 消息会作为下一轮 turn 的用户输入被消费
+      if (opts?.interrupt && this.adapter.interruptQuery) {
+        try {
+          await this.adapter.interruptQuery(sessionId)
+        } catch (error) {
+          console.warn(`[Agent 编排] 软中断失败（将继续追加消息）:`, error)
+        }
+      }
+
       await this.adapter.sendQueuedMessage(sessionId, sdkMessage)
-      console.log(`[Agent 编排] 追加消息已注入: sessionId=${sessionId}, uuid=${uuid}`)
+      console.log(`[Agent 编排] 追加消息已注入: sessionId=${sessionId}, uuid=${uuid}, interrupt=${!!opts?.interrupt}`)
 
       // 立即持久化到 JSONL
       const persistMsg: SDKMessage = {
