@@ -4,7 +4,7 @@
  * 挂载 React 应用，初始化主题系统。
  */
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { useSetAtom, useAtomValue, useStore } from 'jotai'
 import App from './App'
@@ -53,6 +53,10 @@ import {
   notificationSoundsAtom,
   initializeNotifications,
 } from './atoms/notifications'
+import {
+  stickyUserMessageEnabledAtom,
+  initializeUiPreferences,
+} from './atoms/ui-preferences'
 import { useGlobalAgentListeners } from './hooks/useGlobalAgentListeners'
 import { useGlobalChatListeners } from './hooks/useGlobalChatListeners'
 import { tabsAtom, activeTabIdAtom } from './atoms/tab-atoms'
@@ -112,9 +116,23 @@ function ThemeInitializer(): null {
   }, [setThemeMode, setSystemIsDark, setThemeStyle])
 
   // 响应式应用主题到 DOM
+  // 用 useMemo 计算"实际会影响 DOM 的状态签名"作为唯一依赖：
+  // special 模式下 systemIsDark 不影响最终 class，避免系统主题变化时触发无意义的
+  // applyThemeToDOM 调用（配合 applyThemeToDOM 内部的幂等检查双重兜底）。
+  const themeSignature = useMemo(() => {
+    if (themeMode === 'special') {
+      return `special:${themeStyle}`
+    }
+    if (themeMode === 'system') {
+      return `system:${systemIsDark ? 'dark' : 'light'}`
+    }
+    return themeMode
+  }, [themeMode, themeStyle, systemIsDark])
+
   useEffect(() => {
     applyThemeToDOM(themeMode, themeStyle, systemIsDark)
-  }, [themeMode, themeStyle, systemIsDark])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themeSignature])
 
   return null
 }
@@ -474,6 +492,21 @@ function NotificationsInitializer(): null {
 }
 
 /**
+ * UI 偏好初始化组件
+ *
+ * 从主进程加载 UI 偏好设置（悬浮置顶条等）。
+ */
+function UiPreferencesInitializer(): null {
+  const setStickyUserMessageEnabled = useSetAtom(stickyUserMessageEnabledAtom)
+
+  useEffect(() => {
+    initializeUiPreferences(setStickyUserMessageEnabled)
+  }, [setStickyUserMessageEnabled])
+
+  return null
+}
+
+/**
  * Chat IPC 监听器初始化组件
  *
  * 全局挂载，永不销毁。确保 Chat 流式事件
@@ -818,6 +851,7 @@ if (isQuickTaskWindow) {
       <ModelHealthInitializer />
       <AgentSettingsInitializer />
       <NotificationsInitializer />
+      <UiPreferencesInitializer />
       <ChatListenersInitializer />
       <AgentListenersInitializer />
       <ChatToolInitializer />

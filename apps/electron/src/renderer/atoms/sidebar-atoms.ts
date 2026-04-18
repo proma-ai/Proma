@@ -18,3 +18,14 @@ export const workspaceListHeightAtom = atomWithStorage<number>(
   'proma-workspace-list-height',
   120,
 )
+
+/**
+ * Agent 模式侧边栏上区（Working/置顶 Tab）的高度（px）。
+ *
+ * 用户可通过拖拽分割条调整，持久化到 localStorage。
+ * 负值表示未初始化，运行时首次渲染按容器高度的 40% 计算初始值。
+ */
+export const agentSidebarTopHeightAtom = atomWithStorage<number>(
+  'proma-agent-sidebar-top-height',
+  -1,
+)

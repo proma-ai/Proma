@@ -54,7 +54,7 @@ import {
   updateTabTitle,
 } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
-import { sidebarViewModeAtom } from '@/atoms/sidebar-atoms'
+import { sidebarViewModeAtom, agentSidebarTopHeightAtom } from '@/atoms/sidebar-atoms'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import { hasUpdateAtom } from '@/atoms/updater'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
@@ -214,6 +214,62 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // 归档 & 搜索状态
   const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
   const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
+
+  // Agent 模式上区（Working/置顶）可拖拽高度
+  /** -1 表示未初始化，首次渲染时按容器 40% 计算 */
+  const [agentTopHeight, setAgentTopHeight] = useAtom(agentSidebarTopHeightAtom)
+  const agentSplitContainerRef = React.useRef<HTMLDivElement>(null)
+  const agentTopResizing = React.useRef(false)
+  const agentTopResizeCleanup = React.useRef<(() => void) | null>(null)
+
+  React.useEffect(() => {
+    return () => { agentTopResizeCleanup.current?.() }
+  }, [])
+
+  React.useEffect(() => {
+    if (agentTopHeight > 0) return
+    const el = agentSplitContainerRef.current
+    if (!el) return
+    const h = el.getBoundingClientRect().height
+    if (h > 0) {
+      setAgentTopHeight(Math.round(h * 0.4))
+    }
+  }, [agentTopHeight, setAgentTopHeight, mode, viewMode])
+
+  const handleAgentTopResizeStart = React.useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const container = agentSplitContainerRef.current
+      if (!container) return
+      agentTopResizing.current = true
+      const startY = e.clientY
+      const startH = Math.max(0, agentTopHeight)
+      const containerHeight = container.getBoundingClientRect().height
+      const minH = 80
+      const maxH = Math.max(minH, Math.floor(containerHeight * 0.7))
+
+      const onMove = (ev: MouseEvent): void => {
+        if (!agentTopResizing.current) return
+        const delta = ev.clientY - startY
+        const next = Math.min(maxH, Math.max(minH, startH + delta))
+        setAgentTopHeight(next)
+      }
+      const onUp = (): void => {
+        agentTopResizing.current = false
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        agentTopResizeCleanup.current = null
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+      agentTopResizeCleanup.current = onUp
+    },
+    [agentTopHeight, setAgentTopHeight],
+  )
 
   // per-conversation/session Map atoms（删除时清理）
   const setConvModels = useSetAtom(conversationModelsAtom)
@@ -870,147 +926,211 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </div>
       )}
 
-      {/* Agent 模式：Working / 置顶 统一区域（Tab 切换） */}
-      {mode === 'agent' && viewMode === 'active' && (
-        <div className="pt-3 px-3">
-          {/* Tab 切换按钮 */}
-          <div className="flex items-center gap-1 mb-1">
-            <button
-              onClick={() => setAgentSubTab('working')}
-              className={cn(
-                'px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag',
-                agentSubTab === 'working'
-                  ? 'bg-foreground/[0.08] text-foreground/80'
-                  : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
-              )}
-            >
-              Working
-              {hasWorkingSessions && agentSubTab !== 'working' && (
-                <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] bg-foreground/10 text-foreground/50">
-                  {workingGroups.todo.length + workingGroups.running.length + workingGroups.done.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setAgentSubTab('pinned')}
-              className={cn(
-                'px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag',
-                agentSubTab === 'pinned'
-                  ? 'bg-foreground/[0.08] text-foreground/80'
-                  : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
-              )}
-            >
-              置顶
-              {pinnedAgentSessions.length > 0 && agentSubTab !== 'pinned' && (
-                <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] bg-foreground/10 text-foreground/50">
-                  {pinnedAgentSessions.length}
-                </span>
-              )}
-            </button>
-          </div>
+      {/* Agent 模式 active 视图：可拖拽双区（上 Working/置顶 + 下 最近会话） */}
+      {mode === 'agent' && viewMode === 'active' ? (
+        <div ref={agentSplitContainerRef} className="flex-1 flex flex-col min-h-0">
+          {/* 上区：Working / 置顶 Tab（高度可拖拽） */}
+          <div
+            style={{ height: agentTopHeight > 0 ? agentTopHeight : undefined }}
+            className="flex flex-col min-h-0 flex-shrink-0 overflow-hidden"
+          >
+            {/* Tab 切换按钮 */}
+            <div className="pt-2 px-3 flex-shrink-0">
+              <div className="flex items-center gap-1 mb-0.5">
+                <button
+                  onClick={() => setAgentSubTab('working')}
+                  className={cn(
+                    'px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag',
+                    agentSubTab === 'working'
+                      ? 'bg-foreground/[0.08] text-foreground/80'
+                      : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
+                  )}
+                >
+                  Working
+                  {hasWorkingSessions && agentSubTab !== 'working' && (
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] bg-foreground/10 text-foreground/50">
+                      {workingGroups.todo.length + workingGroups.running.length + workingGroups.done.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setAgentSubTab('pinned')}
+                  className={cn(
+                    'px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag',
+                    agentSubTab === 'pinned'
+                      ? 'bg-foreground/[0.08] text-foreground/80'
+                      : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
+                  )}
+                >
+                  置顶
+                  {pinnedAgentSessions.length > 0 && agentSubTab !== 'pinned' && (
+                    <span className="ml-1.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] bg-foreground/10 text-foreground/50">
+                      {pinnedAgentSessions.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
 
-          {/* Working Tab 内容 */}
-          {agentSubTab === 'working' && (
-            <div className="pt-1 pb-1">
-              {hasWorkingSessions ? (
-                <>
-                  {workingGroups.todo.length > 0 && (
-                    <>
-                      <SectionDivider label="待处理" />
-                      <div className="flex flex-col gap-0.5">
-                        {workingGroups.todo.map((session) => (
-                          <AgentSessionItem
-                            key={`working-todo-${session.id}`}
-                            session={session}
-                            active={session.id === activeTabId}
-                            hovered={session.id === hoveredId}
-                            indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                            showPinIcon={false}
-                            onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                            onRequestDelete={() => handleRequestDelete(session.id)}
-                            onRequestMove={() => setMoveTargetId(session.id)}
-                            onRename={handleAgentRename}
-                            onTogglePin={handleTogglePinAgent}
-                            onToggleArchive={handleToggleArchiveAgent}
-                            onMouseEnter={() => setHoveredId(session.id)}
-                            onMouseLeave={() => setHoveredId(null)}
-                          />
-                        ))}
-                      </div>
-                    </>
+            {/* Tab 内容（自己滚动） */}
+            <div className="flex-1 overflow-y-auto scrollbar-none px-3 pb-1 min-h-0">
+              {/* Working Tab 内容 */}
+              {agentSubTab === 'working' && (
+                <div className="pt-0.5 pb-0.5">
+                  {hasWorkingSessions ? (() => {
+                    const nonEmptyCount =
+                      (workingGroups.todo.length > 0 ? 1 : 0) +
+                      (workingGroups.running.length > 0 ? 1 : 0) +
+                      (workingGroups.done.length > 0 ? 1 : 0)
+                    const showDivider = nonEmptyCount > 1
+                    return (
+                      <>
+                        {workingGroups.todo.length > 0 && (
+                          <>
+                            {showDivider && <SectionDivider label="待处理" />}
+                            <div className="flex flex-col gap-0.5">
+                              {workingGroups.todo.map((session) => (
+                                <AgentSessionItem
+                                  key={`working-todo-${session.id}`}
+                                  session={session}
+                                  active={session.id === activeTabId}
+                                  hovered={session.id === hoveredId}
+                                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                                  showPinIcon={false}
+                                  onSelect={() => handleSelectAgentSession(session.id, session.title)}
+                                  onRequestDelete={() => handleRequestDelete(session.id)}
+                                  onRequestMove={() => setMoveTargetId(session.id)}
+                                  onRename={handleAgentRename}
+                                  onTogglePin={handleTogglePinAgent}
+                                  onToggleArchive={handleToggleArchiveAgent}
+                                  onMouseEnter={() => setHoveredId(session.id)}
+                                  onMouseLeave={() => setHoveredId(null)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                        {workingGroups.running.length > 0 && (
+                          <>
+                            {showDivider && <SectionDivider label="运行中" />}
+                            <div className="flex flex-col gap-0.5">
+                              {workingGroups.running.map((session) => (
+                                <AgentSessionItem
+                                  key={`working-running-${session.id}`}
+                                  session={session}
+                                  active={session.id === activeTabId}
+                                  hovered={session.id === hoveredId}
+                                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                                  showPinIcon={false}
+                                  onSelect={() => handleSelectAgentSession(session.id, session.title)}
+                                  onRequestDelete={() => handleRequestDelete(session.id)}
+                                  onRequestMove={() => setMoveTargetId(session.id)}
+                                  onRename={handleAgentRename}
+                                  onTogglePin={handleTogglePinAgent}
+                                  onToggleArchive={handleToggleArchiveAgent}
+                                  onMouseEnter={() => setHoveredId(session.id)}
+                                  onMouseLeave={() => setHoveredId(null)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                        {workingGroups.done.length > 0 && (
+                          <>
+                            {showDivider && <SectionDivider label="已完成" />}
+                            <div className="flex flex-col gap-0.5">
+                              {workingGroups.done.map((session) => (
+                                <AgentSessionItem
+                                  key={`working-done-${session.id}`}
+                                  session={session}
+                                  active={session.id === activeTabId}
+                                  hovered={session.id === hoveredId}
+                                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                                  showPinIcon={false}
+                                  onSelect={() => handleSelectAgentSession(session.id, session.title)}
+                                  onRequestDelete={() => handleRequestDelete(session.id)}
+                                  onRequestMove={() => setMoveTargetId(session.id)}
+                                  onRename={handleAgentRename}
+                                  onTogglePin={handleTogglePinAgent}
+                                  onToggleArchive={handleToggleArchiveAgent}
+                                  onMouseEnter={() => setHoveredId(session.id)}
+                                  onMouseLeave={() => setHoveredId(null)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )
+                  })() : (
+                    <div className="px-2 py-3 text-[11px] text-foreground/30 text-center select-none">
+                      暂无进行中的会话
+                    </div>
                   )}
-                  {workingGroups.running.length > 0 && (
-                    <>
-                      <SectionDivider label="运行中" />
-                      <div className="flex flex-col gap-0.5">
-                        {workingGroups.running.map((session) => (
-                          <AgentSessionItem
-                            key={`working-running-${session.id}`}
-                            session={session}
-                            active={session.id === activeTabId}
-                            hovered={session.id === hoveredId}
-                            indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                            showPinIcon={false}
-                            onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                            onRequestDelete={() => handleRequestDelete(session.id)}
-                            onRequestMove={() => setMoveTargetId(session.id)}
-                            onRename={handleAgentRename}
-                            onTogglePin={handleTogglePinAgent}
-                            onToggleArchive={handleToggleArchiveAgent}
-                            onMouseEnter={() => setHoveredId(session.id)}
-                            onMouseLeave={() => setHoveredId(null)}
-                          />
-                        ))}
-                      </div>
-                    </>
+                </div>
+              )}
+
+              {/* 置顶 Tab 内容 */}
+              {agentSubTab === 'pinned' && (
+                <div className="pt-0.5 pb-0.5">
+                  {pinnedAgentSessions.length > 0 ? (
+                    <div className="flex flex-col gap-0.5">
+                      {pinnedAgentSessions.map((session) => (
+                        <AgentSessionItem
+                          key={`pinned-${session.id}`}
+                          session={session}
+                          active={session.id === activeTabId}
+                          hovered={session.id === hoveredId}
+                          indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                          showPinIcon={false}
+                          onSelect={() => handleSelectAgentSession(session.id, session.title)}
+                          onRequestDelete={() => handleRequestDelete(session.id)}
+                          onRequestMove={() => setMoveTargetId(session.id)}
+                          onRename={handleAgentRename}
+                          onTogglePin={handleTogglePinAgent}
+                          onToggleArchive={handleToggleArchiveAgent}
+                          onMouseEnter={() => setHoveredId(session.id)}
+                          onMouseLeave={() => setHoveredId(null)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-2 py-3 text-[11px] text-foreground/30 text-center select-none">
+                      暂无置顶会话
+                    </div>
                   )}
-                  {workingGroups.done.length > 0 && (
-                    <>
-                      <SectionDivider label="已完成" />
-                      <div className="flex flex-col gap-0.5">
-                        {workingGroups.done.map((session) => (
-                          <AgentSessionItem
-                            key={`working-done-${session.id}`}
-                            session={session}
-                            active={session.id === activeTabId}
-                            hovered={session.id === hoveredId}
-                            indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                            showPinIcon={false}
-                            onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                            onRequestDelete={() => handleRequestDelete(session.id)}
-                            onRequestMove={() => setMoveTargetId(session.id)}
-                            onRename={handleAgentRename}
-                            onTogglePin={handleTogglePinAgent}
-                            onToggleArchive={handleToggleArchiveAgent}
-                            onMouseEnter={() => setHoveredId(session.id)}
-                            onMouseLeave={() => setHoveredId(null)}
-                          />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              ) : (
-                <div className="px-2 py-3 text-[11px] text-foreground/30 text-center select-none">
-                  暂无进行中的会话
                 </div>
               )}
             </div>
-          )}
+          </div>
 
-          {/* 置顶 Tab 内容 */}
-          {agentSubTab === 'pinned' && (
-            <div className="pt-1 pb-1">
-              {pinnedAgentSessions.length > 0 ? (
+          {/* 拖拽分割条：默认 1px 细线，hover 扩为 4px 热区 */}
+          <div
+            onMouseDown={handleAgentTopResizeStart}
+            className="h-px bg-border/60 hover:h-1 hover:bg-foreground/[0.08] cursor-row-resize titlebar-no-drag flex-shrink-0 transition-[height,background-color] duration-75"
+          />
+
+          {/* 下区标题：最近会话 */}
+          <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none flex-shrink-0">
+            最近会话
+          </div>
+
+          {/* 下区：历史会话列表 */}
+          <div className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-none min-h-0">
+            {agentSessionGroups.map((group) => (
+              <div key={group.label} className="mb-1">
+                <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                  {group.label}
+                </div>
                 <div className="flex flex-col gap-0.5">
-                  {pinnedAgentSessions.map((session) => (
+                  {group.items.map((session) => (
                     <AgentSessionItem
-                      key={`pinned-${session.id}`}
+                      key={session.id}
                       session={session}
                       active={session.id === activeTabId}
                       hovered={session.id === hoveredId}
                       indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                      showPinIcon={false}
+                      showPinIcon={!!session.pinned}
                       onSelect={() => handleSelectAgentSession(session.id, session.title)}
                       onRequestDelete={() => handleRequestDelete(session.id)}
                       onRequestMove={() => setMoveTargetId(session.id)}
@@ -1022,86 +1142,84 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     />
                   ))}
                 </div>
-              ) : (
-                <div className="px-2 py-3 text-[11px] text-foreground/30 text-center select-none">
-                  暂无置顶会话
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 归档视图标题栏（置顶区域下方） */}
-      {viewMode === 'archived' && (
-        <div className="px-6 pt-3 pb-1">
-          <div className="text-[12px] font-medium text-foreground/40">
-            已归档{mode === 'agent' ? '会话' : '对话'}
+              </div>
+            ))}
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {/* 归档视图标题栏 */}
+          {viewMode === 'archived' && (
+            <div className="px-6 pt-3 pb-1">
+              <div className="text-[12px] font-medium text-foreground/40">
+                已归档{mode === 'agent' ? '会话' : '对话'}
+              </div>
+            </div>
+          )}
 
-      {/* 列表区域：根据模式切换 */}
-      <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-none">
-        {mode === 'chat' ? (
-          /* Chat 模式：对话按日期分组 */
-          conversationGroups.map((group) => (
-            <div key={group.label} className="mb-1">
-              <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
-                {group.label}
-              </div>
-              <div className="flex flex-col gap-0.5">
-                {group.items.map((conv) => (
-                  <ConversationItem
-                    key={conv.id}
-                    conversation={conv}
-                    active={conv.id === activeTabId}
-                    hovered={conv.id === hoveredId}
-                    streaming={streamingIds.has(conv.id)}
-                    showPinIcon={!!conv.pinned}
-                    onSelect={() => handleSelectConversation(conv.id, conv.title)}
-                    onRequestDelete={() => handleRequestDelete(conv.id)}
-                    onRename={handleRename}
-                    onTogglePin={handleTogglePin}
-                    onToggleArchive={handleToggleArchive}
-                    onMouseEnter={() => setHoveredId(conv.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
-        ) : (
-          /* Agent 模式：Agent 会话按日期分组 */
-          agentSessionGroups.map((group) => (
-            <div key={group.label} className="mb-1">
-              <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
-                {group.label}
-              </div>
-              <div className="flex flex-col gap-0.5">
-                {group.items.map((session) => (
-                  <AgentSessionItem
-                    key={session.id}
-                    session={session}
-                    active={session.id === activeTabId}
-                    hovered={session.id === hoveredId}
-                    indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                    showPinIcon={!!session.pinned}
-                    onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                    onRequestDelete={() => handleRequestDelete(session.id)}
-                    onRequestMove={() => setMoveTargetId(session.id)}
-                    onRename={handleAgentRename}
-                    onTogglePin={handleTogglePinAgent}
-                    onToggleArchive={handleToggleArchiveAgent}
-                    onMouseEnter={() => setHoveredId(session.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+          {/* Chat 模式 / 归档视图：单列表布局 */}
+          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-none">
+            {mode === 'chat' ? (
+              /* Chat 模式：对话按日期分组 */
+              conversationGroups.map((group) => (
+                <div key={group.label} className="mb-1">
+                  <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                    {group.label}
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    {group.items.map((conv) => (
+                      <ConversationItem
+                        key={conv.id}
+                        conversation={conv}
+                        active={conv.id === activeTabId}
+                        hovered={conv.id === hoveredId}
+                        streaming={streamingIds.has(conv.id)}
+                        showPinIcon={!!conv.pinned}
+                        onSelect={() => handleSelectConversation(conv.id, conv.title)}
+                        onRequestDelete={() => handleRequestDelete(conv.id)}
+                        onRename={handleRename}
+                        onTogglePin={handleTogglePin}
+                        onToggleArchive={handleToggleArchive}
+                        onMouseEnter={() => setHoveredId(conv.id)}
+                        onMouseLeave={() => setHoveredId(null)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              /* Agent 模式归档：Agent 会话按日期分组 */
+              agentSessionGroups.map((group) => (
+                <div key={group.label} className="mb-1">
+                  <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                    {group.label}
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    {group.items.map((session) => (
+                      <AgentSessionItem
+                        key={session.id}
+                        session={session}
+                        active={session.id === activeTabId}
+                        hovered={session.id === hoveredId}
+                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                        showPinIcon={!!session.pinned}
+                        onSelect={() => handleSelectAgentSession(session.id, session.title)}
+                        onRequestDelete={() => handleRequestDelete(session.id)}
+                        onRequestMove={() => setMoveTargetId(session.id)}
+                        onRename={handleAgentRename}
+                        onTogglePin={handleTogglePinAgent}
+                        onToggleArchive={handleToggleArchiveAgent}
+                        onMouseEnter={() => setHoveredId(session.id)}
+                        onMouseLeave={() => setHoveredId(null)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
 
       {/* Cloud 模式：从云端下载全部对话按钮 */}
       <CloudSidebarDownloadButton />

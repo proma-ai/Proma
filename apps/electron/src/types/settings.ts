@@ -88,6 +88,8 @@ export interface AppSettings {
   sendWithCmdEnter?: boolean
   /** 用户自定义快捷键覆盖 */
   shortcutOverrides?: ShortcutOverrides
+  /** 是否显示用户消息悬浮置顶条（默认 true） */
+  stickyUserMessageEnabled?: boolean
   /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */
   appIconVariant?: string
 }

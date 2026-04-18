@@ -92,31 +92,66 @@ export const resolvedThemeAtom = atom<'light' | 'dark'>((get) => {
   return mode
 })
 
+/** 所有特殊风格 class（用于清理旧值） */
+const ALL_THEME_STYLE_CLASSES = [
+  'theme-ocean-light',
+  'theme-ocean-dark',
+  'theme-forest-light',
+  'theme-forest-dark',
+  'theme-slate-light',
+  'theme-slate-dark',
+] as const
+
 /**
  * 应用主题到 DOM
  *
  * 在 <html> 元素上切换 dark 类名和特殊风格类名。
+ *
+ * 幂等实现：先计算目标 class 状态，与当前 DOM 对比，一致时直接 return，
+ * 不触发任何 classList mutation。避免与 vibrancy + backdrop-blur 合成层叠加
+ * 导致 Chromium 重建合成层造成的全屏闪烁。
  */
 export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = 'default', systemIsDark: boolean = true): void {
-  // [FLASH-DEBUG] 主题 DOM 操作会影响整个页面
-  console.log(`[FLASH-DEBUG] applyThemeToDOM called: mode=${themeMode}, style=${themeStyle}, systemIsDark=${systemIsDark}`)
   const html = document.documentElement
 
-  // 移除所有特殊风格类
-  html.classList.remove('theme-ocean-light', 'theme-ocean-dark', 'theme-forest-light', 'theme-forest-dark', 'theme-slate-light', 'theme-slate-dark')
+  // 计算目标状态
+  let targetStyleClass: string | null = null
+  let targetIsDark: boolean
 
   if (themeMode === 'special' && themeStyle !== 'default') {
-    // 特殊风格模式：根据风格决定 dark 类
-    const isDark = themeStyle.endsWith('-dark')
-    html.classList.toggle('dark', isDark)
-    html.classList.add(`theme-${themeStyle}`)
+    targetStyleClass = `theme-${themeStyle}`
+    targetIsDark = themeStyle.endsWith('-dark')
+  } else if (themeMode === 'system') {
+    targetIsDark = systemIsDark
   } else {
-    // 普通模式
-    let isDark = themeMode === 'dark'
-    if (themeMode === 'system') {
-      isDark = systemIsDark
+    targetIsDark = themeMode === 'dark'
+  }
+
+  // 读取当前状态
+  const currentIsDark = html.classList.contains('dark')
+  const currentStyleClass = ALL_THEME_STYLE_CLASSES.find((c) => html.classList.contains(c)) ?? null
+
+  // 与目标一致 → 直接跳过，避免触发 CSS 重新级联
+  if (currentIsDark === targetIsDark && currentStyleClass === targetStyleClass) {
+    return
+  }
+
+  // [FLASH-DEBUG] 仅在真正发生 DOM 变更时打印
+  console.log(
+    `[FLASH-DEBUG] applyThemeToDOM apply: mode=${themeMode}, style=${themeStyle}, systemIsDark=${systemIsDark}, diff={dark: ${currentIsDark}→${targetIsDark}, style: ${currentStyleClass}→${targetStyleClass}}`
+  )
+
+  // 只修改确实需要变的 class
+  if (currentStyleClass !== targetStyleClass) {
+    if (currentStyleClass) {
+      html.classList.remove(currentStyleClass)
     }
-    html.classList.toggle('dark', isDark)
+    if (targetStyleClass) {
+      html.classList.add(targetStyleClass)
+    }
+  }
+  if (currentIsDark !== targetIsDark) {
+    html.classList.toggle('dark', targetIsDark)
   }
 }
 
