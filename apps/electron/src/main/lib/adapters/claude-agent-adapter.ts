@@ -19,6 +19,7 @@ import type {
   SDKMessage,
 } from '@proma/shared'
 import type { CanUseToolOptions, PermissionResult } from '../agent-permission-service'
+import { TRANSIENT_NETWORK_PATTERN } from '../error-patterns'
 
 /** SDK Query 对象类型（从动态导入中推断） */
 type SDKQuery = ReturnType<typeof import('@anthropic-ai/claude-agent-sdk').query>
@@ -259,6 +260,27 @@ export function mapSDKErrorToTypedError(
       message: '当前对话的上下文已超出模型限制，请压缩上下文或开启新会话',
       canRetry: false,
     },
+  }
+
+  // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）：
+  // assistant.error 路径下，SDK 常常把这类错误标记为 errorType='unknown'，
+  // 这里从 detailedMessage / originalError 兜底匹配，归类为可重试的 network_error。
+  const looksLikeNetwork =
+    (!errorMap[errorCode]) &&
+    (TRANSIENT_NETWORK_PATTERN.test(detailedMessage ?? '') || TRANSIENT_NETWORK_PATTERN.test(originalError ?? ''))
+  if (looksLikeNetwork) {
+    return {
+      code: 'network_error',
+      title: '网络异常',
+      message: detailedMessage || '上游 API 连接中断',
+      actions: [
+        { key: 's', label: '设置', action: 'settings' },
+        { key: 'r', label: '重试', action: 'retry' },
+      ],
+      canRetry: true,
+      retryDelayMs: 1000,
+      originalError,
+    }
   }
 
   const mapped = errorMap[errorCode] || {

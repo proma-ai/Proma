@@ -26,6 +26,7 @@ import { SAFE_TOOLS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { isPromptTooLongError, friendlyErrorMessage, mapSDKErrorToTypedError, extractErrorDetails } from './adapters/claude-agent-adapter'
+import { isTransientNetworkError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
@@ -144,10 +145,11 @@ function isAutoRetryableTypedError(error: TypedError): boolean {
   return AUTO_RETRYABLE_ERROR_CODES.has(error.code)
 }
 
-/** 判断 catch 块中的 API 错误是否可自动重试（HTTP 429 / 5xx / 已知可恢复错误模式） */
+/** 判断 catch 块中的 API 错误是否可自动重试（HTTP 429 / 5xx / 已知可恢复错误模式 / 瞬时网络错误） */
 function isAutoRetryableCatchError(
   apiError: { statusCode: number; message: string } | null,
   rawErrorMessage?: string,
+  stderr?: string,
 ): boolean {
   if (apiError) {
     if (apiError.statusCode === 429 || apiError.statusCode >= 500) return true
@@ -156,6 +158,8 @@ function isAutoRetryableCatchError(
   if (rawErrorMessage) {
     if (rawErrorMessage.includes('context_management')) return true
   }
+  // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）
+  if (isTransientNetworkError(rawErrorMessage, stderr)) return true
   return false
 }
 
@@ -171,11 +175,22 @@ function isSessionNotFoundError(errorMessage: string, stderr?: string): boolean 
 }
 
 /** 最大自动重试次数 */
-const MAX_AUTO_RETRIES = 3
+const MAX_AUTO_RETRIES = 8
 
-/** 计算重试延迟（指数退避：1s, 2s, 4s） */
+/** 重试单次延迟上限（毫秒） */
+const RETRY_MAX_DELAY_MS = 10_000
+
+/**
+ * 计算重试延迟（指数退避 + ±20% jitter）
+ *
+ * 基础序列：1s, 2s, 4s, 8s, 10s, 10s, 10s, 10s（cap = 10s）
+ * 叠加 ±20% 随机抖动，避免大量 session 同时重试造成惊群。
+ * 最坏情况累计等待 ≈ 55s。
+ */
 function getRetryDelayMs(attempt: number): number {
-  return Math.min(1000 * Math.pow(2, attempt - 1), 8000)
+  const base = Math.min(1000 * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS)
+  const jitter = base * (Math.random() * 0.4 - 0.2)
+  return Math.max(0, Math.round(base + jitter))
 }
 
 /**
@@ -1964,11 +1979,11 @@ export class AgentOrchestrator {
           }
 
           // 判断是否可重试
-          if (isAutoRetryableCatchError(apiError, rawErrorMessage) && attempt <= MAX_AUTO_RETRIES) {
+          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && attempt <= MAX_AUTO_RETRIES) {
             lastRetryableError = apiError
               ? `API Error ${apiError.statusCode}: ${apiError.message}`
               : (error instanceof Error ? error.message : '未知错误')
-            console.log(`[Agent 编排] 可重试错误 (catch): ${lastRetryableError}`)
+            console.log(`[Agent 编排] 可重试错误 (catch, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
             // 保存部分内容
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             accumulatedMessages.length = 0

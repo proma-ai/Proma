@@ -278,6 +278,10 @@ function baseStyles(): string {
       --code-bg: #f3f1ec;
       --content-bg: #fafaf8;
       --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.08);
+      --accent-border: rgba(37, 99, 235, 0.45);
+      --table-row-alt: rgba(0, 0, 0, 0.025);
+      --mark-bg: #fff3a3;
       --scrollbar: rgba(0, 0, 0, 0.18);
     }
     @media (prefers-color-scheme: dark) {
@@ -294,6 +298,10 @@ function baseStyles(): string {
         --code-bg: #2a2a2a;
         --content-bg: #1e1e1e;
         --accent: #58a6ff;
+        --accent-soft: rgba(88, 166, 255, 0.10);
+        --accent-border: rgba(88, 166, 255, 0.55);
+        --table-row-alt: rgba(255, 255, 255, 0.03);
+        --mark-bg: rgba(255, 220, 100, 0.28);
         --scrollbar: rgba(255, 255, 255, 0.18);
       }
     }
@@ -904,7 +912,8 @@ function markdownPreviewHtml(filePath: string, filename: string, textContent: st
     padding-bottom: 0.25em;
   }
   .markdown-body h3 { font-size: 1.2em; }
-  .markdown-body h4 { font-size: 1.05em; }
+  .markdown-body h4 { font-size: 1.05em; color: var(--text-secondary); }
+  .markdown-body h5, .markdown-body h6 { font-size: 0.95em; color: var(--text-secondary); }
   .markdown-body p { margin: 0.9em 0; }
   .markdown-body code {
     background: var(--code-bg);
@@ -912,6 +921,7 @@ function markdownPreviewHtml(filePath: string, filename: string, textContent: st
     border-radius: 5px;
     font-size: 0.88em;
     font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+    border: 1px solid var(--border);
   }
   .markdown-body pre {
     background: var(--code-bg);
@@ -921,24 +931,92 @@ function markdownPreviewHtml(filePath: string, filename: string, textContent: st
     margin: 1.2em 0;
     font-size: 13px;
     line-height: 1.6;
+    border: 1px solid var(--border);
   }
-  .markdown-body pre code { background: none; padding: 0; font-size: inherit; }
+  .markdown-body pre code { background: none; padding: 0; font-size: inherit; border: none; }
   .markdown-body blockquote {
-    border-left: 3px solid var(--border);
-    padding: 0.2em 0 0.2em 16px;
-    color: var(--text-muted);
+    border-left: 4px solid var(--accent-border);
+    background: var(--accent-soft);
+    padding: 0.6em 1em 0.6em 1.1em;
+    color: var(--text);
     margin: 1.2em 0;
-    font-style: italic;
+    border-radius: 0 8px 8px 0;
   }
-  .markdown-body ul, .markdown-body ol { padding-left: 2em; margin: 0.6em 0; }
+  .markdown-body blockquote > :first-child { margin-top: 0; }
+  .markdown-body blockquote > :last-child { margin-bottom: 0; }
+  .markdown-body blockquote blockquote {
+    border-left-color: var(--border);
+    background: transparent;
+    margin: 0.6em 0;
+  }
+  .markdown-body ul, .markdown-body ol { padding-left: 1.8em; margin: 0.6em 0; }
   .markdown-body li { margin: 0.35em 0; }
+  .markdown-body li > p { margin: 0.3em 0; }
+  .markdown-body ul.contains-task-list { padding-left: 0.4em; list-style: none; }
+  .markdown-body li.task-list-item { list-style: none; padding-left: 0; }
+  .markdown-body li.task-list-item input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 3px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    background: var(--bg);
+    cursor: default;
+    position: relative;
+  }
+  .markdown-body li.task-list-item input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .markdown-body li.task-list-item input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 0px;
+    width: 4px; height: 8px;
+    border: solid white;
+    border-width: 0 1.8px 1.8px 0;
+    transform: rotate(45deg);
+  }
   .markdown-body a { color: var(--accent); text-decoration: none; }
   .markdown-body a:hover { text-decoration: underline; }
-  .markdown-body table { border-collapse: collapse; margin: 1.2em 0; width: 100%; font-size: 0.95em; }
-  .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 8px 14px; text-align: left; }
-  .markdown-body th { background: var(--code-bg); font-weight: 600; }
+  .markdown-body table {
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 1.2em 0;
+    width: 100%;
+    font-size: 0.95em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .markdown-body th, .markdown-body td {
+    border-bottom: 1px solid var(--border);
+    padding: 9px 14px;
+    text-align: left;
+  }
+  .markdown-body th + th, .markdown-body td + td { border-left: 1px solid var(--border); }
+  .markdown-body tr:last-child td { border-bottom: none; }
+  .markdown-body th { background: var(--code-bg); font-weight: 600; color: var(--text); }
+  .markdown-body tbody tr:nth-child(even) { background: var(--table-row-alt); }
   .markdown-body img { max-width: 100%; border-radius: 8px; }
   .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+  .markdown-body kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 0.82em;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: var(--text);
+    vertical-align: 1px;
+  }
+  .markdown-body mark { background: var(--mark-bg); color: var(--text); padding: 0 3px; border-radius: 3px; }
+  .markdown-body del { color: var(--text-muted); }
+  .markdown-body strong { font-weight: 600; color: var(--text); }
 </style></head><body>
   ${toolbarHtml(filePath, filename, true, true)}
   <div class="content">
@@ -951,9 +1029,17 @@ function markdownPreviewHtml(filePath: string, filename: string, textContent: st
   <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
   <script>
     function renderMarkdown(raw) {
-      document.getElementById('md-content').innerHTML = typeof marked !== 'undefined'
-        ? marked.parse(raw)
-        : '<pre>' + raw.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
+      var html;
+      if (typeof marked !== 'undefined') {
+        marked.setOptions({ gfm: true, breaks: false });
+        html = marked.parse(raw);
+        // Tag task lists for styling (marked renders <input type="checkbox"> inside <li>)
+        html = html.replace(/<li>(\s*<input [^>]*type="checkbox"[^>]*>)/g, '<li class="task-list-item">$1');
+        html = html.replace(/<ul>(\s*<li class="task-list-item">)/g, '<ul class="contains-task-list">$1');
+      } else {
+        html = '<pre>' + raw.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
+      }
+      document.getElementById('md-content').innerHTML = html;
     }
     renderMarkdown(${JSON.stringify(textContent)});
   </script>
