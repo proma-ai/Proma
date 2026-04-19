@@ -14,8 +14,25 @@ import { cn } from '@/lib/utils'
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
 /** 视频扩展名 */
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov'])
-/** 代码/结构化文本扩展名 */
-const CODE_EXTS = new Set(['json', 'xml', 'html', 'htm', 'md', 'markdown'])
+/**
+ * 代码/结构化文本扩展名
+ * 需与主进程 file-preview-service.ts 的 CODE_EXTENSIONS + MARKDOWN_EXTENSIONS 保持一致，
+ * 否则消息中的相对路径无法被识别为可点击 chip。
+ */
+const CODE_EXTS = new Set([
+  'md', 'markdown',
+  'json', 'jsonc', 'json5',
+  'xml', 'html', 'htm',
+  'txt', 'log', 'csv',
+  'yaml', 'yml', 'toml', 'ini', 'env', 'lock',
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  'py', 'go', 'rs', 'java', 'kt', 'swift',
+  'c', 'h', 'cpp', 'hpp', 'cs',
+  'sh', 'bash', 'zsh', 'fish',
+  'css', 'scss', 'less',
+  'sql', 'rb', 'php',
+  'diff', 'patch',
+])
 /** 文档扩展名 */
 const DOC_EXTS = new Set(['pdf', 'docx'])
 
