@@ -54,19 +54,21 @@ class DingTalkBridgeManager {
 
   /** 启动单个 Bot */
   async startBot(botId: string): Promise<void> {
-    // 如果已有实例，先停止
-    const existing = this.bridges.get(botId)
-    if (existing) {
-      existing.stop()
-      this.bridges.delete(botId)
-    }
-
     const botConfig = getDingTalkBotById(botId)
     if (!botConfig) {
       throw new Error(`Bot ${botId} 不存在`)
     }
     if (!botConfig.enabled) {
       throw new Error(`Bot "${botConfig.name}" 未启用`)
+    }
+
+    // 复用已有实例（保留 commandHandler 中的 chatBindings），仅重建连接
+    const existing = this.bridges.get(botId)
+    if (existing) {
+      existing.stop()
+      existing.updateConfig(botConfig)
+      await existing.start()
+      return
     }
 
     const bridge = new DingTalkBridge(botConfig)
@@ -83,9 +85,8 @@ class DingTalkBridgeManager {
     }
   }
 
-  /** 重启单个 Bot（配置变更后调用） */
+  /** 重启单个 Bot（配置变更后调用，复用实例保留绑定） */
   async restartBot(botId: string): Promise<void> {
-    this.stopBot(botId)
     await this.startBot(botId)
   }
 

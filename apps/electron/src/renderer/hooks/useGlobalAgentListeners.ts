@@ -21,6 +21,9 @@ import {
   agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
   agentSidePanelOpenMapAtom,
+  fileBrowserAutoRevealAtom,
+  recentlyModifiedPathsAtom,
+  RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
   liveMessagesMapAtom,
   agentSessionModelMapAtom,
@@ -46,6 +49,9 @@ import type { AgentStreamState } from '@/atoms/agent-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
+
+/** 触发右侧文件浏览器自动定位的写入类工具集合 */
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
 
 // ============================================================================
 // Phase 1 临时兼容层：将 AgentStreamPayload 转换为旧 AgentEvent
@@ -436,6 +442,27 @@ export function useGlobalAgentListeners(): void {
             })
           }
 
+          // Agent 修改文件时，触发右侧文件浏览器自动定位（展开父目录 + 滚动 + 高亮）
+          if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
+            const input = event.input as Record<string, unknown> | undefined
+            const targetPath =
+              (input?.file_path as string | undefined)
+              ?? (input?.path as string | undefined)
+              ?? (input?.notebook_path as string | undefined)
+            if (typeof targetPath === 'string' && targetPath.length > 0) {
+              const now = Date.now()
+              store.set(fileBrowserAutoRevealAtom, { sessionId, path: targetPath, ts: now })
+              // 同时记入「最近修改」状态，用于 60s 内左侧竖条标记
+              store.set(recentlyModifiedPathsAtom, (prev) => {
+                const map = new Map(prev)
+                const inner = new Map(map.get(sessionId) ?? new Map())
+                inner.set(targetPath, now)
+                map.set(sessionId, inner)
+                return map
+              })
+            }
+          }
+
           // 处理后台任务事件
           if (event.type === 'task_backgrounded') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
@@ -752,11 +779,31 @@ export function useGlobalAgentListeners(): void {
         .catch(console.error)
     })
 
+    // 定期清理 60s 前的「最近修改」标记，避免 atom 无限增长
+    const pruneTimer = setInterval(() => {
+      const cutoff = Date.now() - RECENTLY_MODIFIED_TTL_MS
+      store.set(recentlyModifiedPathsAtom, (prev) => {
+        let changed = false
+        const next = new Map<string, Map<string, number>>()
+        for (const [sid, inner] of prev) {
+          const filtered = new Map<string, number>()
+          for (const [p, t] of inner) {
+            if (t > cutoff) filtered.set(p, t)
+            else changed = true
+          }
+          if (filtered.size > 0) next.set(sid, filtered)
+          else changed = true
+        }
+        return changed ? next : prev
+      })
+    }, 15_000)
+
     return () => {
       cleanupEvent()
       cleanupComplete()
       cleanupError()
       cleanupTitleUpdated()
+      clearInterval(pruneTimer)
     }
   }, [store]) // store 引用稳定，effect 只执行一次
 }

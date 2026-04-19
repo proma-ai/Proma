@@ -130,6 +130,11 @@ class DingTalkBridge {
     })
   }
 
+  /** 更新 Bot 配置（重连时复用实例，避免丢失 chatBindings） */
+  updateConfig(botConfig: DingTalkBotConfig): void {
+    this.botConfig = botConfig
+  }
+
   /** 获取当前状态 */
   getStatus(): DingTalkBridgeState {
     return { ...this.state }

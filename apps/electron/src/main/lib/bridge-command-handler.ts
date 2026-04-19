@@ -16,7 +16,7 @@ import {
   getAgentWorkspace,
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
-import { runAgentHeadless, agentEventBus, stopAgent } from './agent-service'
+import { runAgentHeadless, agentEventBus, stopAgent, isAgentSessionActive } from './agent-service'
 import { getSettings } from './settings-service'
 import { getAgentWorkspacePath } from './config-paths'
 import { readdirSync } from 'node:fs'
@@ -522,6 +522,12 @@ export class BridgeCommandHandler {
 
     if (binding.mode !== 'agent') {
       await this.send(chatId, 'Chat 模式暂未实现，请使用 /agent 切换到 Agent 模式。', contextData)
+      return
+    }
+
+    // 并发保护：如果该会话的 Agent 仍在运行，直接拒绝，不要触碰 buffer
+    if (isAgentSessionActive(binding.sessionId)) {
+      await this.send(chatId, '❌ 上一条消息仍在处理中，请稍候再试', contextData)
       return
     }
 

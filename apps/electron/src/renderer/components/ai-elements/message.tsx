@@ -279,21 +279,20 @@ function MentionChip({ type, value }: { type: MentionType; value: string }): Rea
 
 // ----- remarkMentions：将 @file: /skill: #mcp: 转为 mention:// link 节点 -----
 
-const MENTION_PATTERN = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)/g
-
 export function remarkMentions() {
   return (tree: MdastParent) => {
     walkMdastText(tree, (node, index, parent) => {
       const text = node.value
-      MENTION_PATTERN.lastIndex = 0
-      if (!MENTION_PATTERN.test(text)) return
-      MENTION_PATTERN.lastIndex = 0
+      // 每次调用创建独立正则实例，避免 /g 状态在并发 remark pipeline 间互相干扰
+      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)/g
+      if (!mentionPattern.test(text)) return
+      mentionPattern.lastIndex = 0
 
       const parts: MdastNode[] = []
       let lastIdx = 0
       let m: RegExpExecArray | null
 
-      while ((m = MENTION_PATTERN.exec(text)) !== null) {
+      while ((m = mentionPattern.exec(text)) !== null) {
         if (m.index > lastIdx) {
           parts.push({ type: 'text', value: text.slice(lastIdx, m.index) })
         }

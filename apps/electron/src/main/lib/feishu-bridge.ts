@@ -28,7 +28,7 @@ import type {
 } from '@proma/shared'
 import { FEISHU_IPC_CHANNELS, AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getDecryptedBotAppSecret } from './feishu-config'
-import { agentEventBus, runAgentHeadless, stopAgent } from './agent-service'
+import { agentEventBus, runAgentHeadless, stopAgent, isAgentSessionActive } from './agent-service'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
 import {
   listAgentWorkspacesByUpdatedAt,
@@ -1122,6 +1122,17 @@ class FeishuBridge {
       await this.createNewSession(msgCtx, 'agent')
       binding = this.chatBindings.get(chatId)
       if (!binding) return
+    }
+
+    // 并发保护：如果该会话的 Agent 仍在运行，直接拒绝，不要触碰 buffer
+    if (isAgentSessionActive(binding.sessionId)) {
+      try {
+        const prefix = this.resolveContextPrefix(chatId)
+        await this.sendCardMessage(chatId, buildErrorCard(`${prefix}上一条消息仍在处理中，请稍候再试`))
+      } catch (error) {
+        console.error(`[飞书 Bridge] 发送忙碌错误卡片失败:`, error)
+      }
+      return
     }
 
     // 保存飞书图片和文件到 session 工作目录，构建文件引用

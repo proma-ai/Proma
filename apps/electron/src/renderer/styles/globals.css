@@ -784,3 +784,13 @@
 .prose code::after {
   content: none;
 }
+
+/* ===== FileBrowser 自动定位的高亮脉冲 ===== */
+@keyframes file-browser-flash {
+  0%   { background-color: hsl(var(--primary) / 0.18); }
+  50%  { background-color: hsl(var(--primary) / 0.22); }
+  100% { background-color: transparent; }
+}
+.file-browser-row-flash {
+  animation: file-browser-flash 1.2s ease-out;
+}

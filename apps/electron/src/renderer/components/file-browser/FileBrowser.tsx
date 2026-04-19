@@ -42,9 +42,38 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { workspaceFilesVersionAtom } from '@/atoms/agent-atoms'
+import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import type { FileEntry } from '@proma/shared'
 import { FileTypeIcon } from './FileTypeIcon'
+
+/** 计算目标路径相对 rootPath 的祖先目录集合（不含 rootPath 自身、含目标的所有上级） */
+function computeRevealAncestors(rootPath: string, targetPath: string): Set<string> {
+  const ancestors = new Set<string>()
+  if (!rootPath || !targetPath) return ancestors
+  // 归一化：移除尾部分隔符
+  const root = rootPath.replace(/[/\\]+$/, '')
+  if (targetPath === root) return ancestors
+  const sep = targetPath.includes('\\') ? '\\' : '/'
+  if (!targetPath.startsWith(root + sep)) return ancestors
+  // 取相对 root 的部分，逐级累加
+  const relative = targetPath.slice(root.length + sep.length)
+  const parts = relative.split(/[/\\]/).filter(Boolean)
+  // 文件本身不算祖先，只到父目录
+  let current = root
+  for (let i = 0; i < parts.length - 1; i++) {
+    current = current + sep + parts[i]
+    ancestors.add(current)
+  }
+  return ancestors
+}
+
+/** 判断目标路径是否落在 rootPath 内 */
+function isPathUnderRoot(rootPath: string, targetPath: string): boolean {
+  if (!rootPath || !targetPath) return false
+  const root = rootPath.replace(/[/\\]+$/, '')
+  if (targetPath === root) return true
+  return targetPath.startsWith(root + '/') || targetPath.startsWith(root + '\\')
+}
 
 interface FileBrowserProps {
   rootPath: string
@@ -61,6 +90,36 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty }: File
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const filesVersion = useAtomValue(workspaceFilesVersionAtom)
+
+  // ===== Agent 写入文件时的自动定位 =====
+  const autoReveal = useAtomValue(fileBrowserAutoRevealAtom)
+  // 仅当目标路径落在本实例 rootPath 内才响应；以 ts 标识本次脉冲
+  const revealForThisRoot = React.useMemo(() => {
+    if (!autoReveal || !rootPath) return null
+    if (!isPathUnderRoot(rootPath, autoReveal.path)) return null
+    return autoReveal
+  }, [autoReveal, rootPath])
+  const revealAncestors = React.useMemo(
+    () => revealForThisRoot ? computeRevealAncestors(rootPath, revealForThisRoot.path) : new Set<string>(),
+    [revealForThisRoot, rootPath],
+  )
+  const revealTarget = revealForThisRoot?.path ?? null
+  const revealTs = revealForThisRoot?.ts ?? 0
+
+  // ===== 最近修改的文件路径（60s 内显示左侧竖条） =====
+  const recentlyModifiedMap = useAtomValue(recentlyModifiedPathsAtom)
+  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const recentlyModifiedSet = React.useMemo<Set<string>>(() => {
+    if (!currentSessionId) return new Set()
+    const inner = recentlyModifiedMap.get(currentSessionId)
+    if (!inner) return new Set()
+    // 仅保留落在本实例 rootPath 下的路径
+    const set = new Set<string>()
+    for (const p of inner.keys()) {
+      if (isPathUnderRoot(rootPath, p)) set.add(p)
+    }
+    return set
+  }, [recentlyModifiedMap, currentSessionId, rootPath])
 
   // 选中状态
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set())
@@ -236,6 +295,10 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty }: File
           renamingPath={renamingPath}
           moving={moving}
           refreshVersion={filesVersion}
+          revealAncestors={revealAncestors}
+          revealTarget={revealTarget}
+          revealTs={revealTs}
+          recentlyModifiedSet={recentlyModifiedSet}
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
           onStartRename={handleStartRename}
@@ -327,6 +390,14 @@ interface FileTreeItemProps {
   moving: boolean
   /** 文件版本号，变化时已展开的文件夹自动重新加载子项 */
   refreshVersion: number
+  /** 自动定位：祖先目录路径集合（命中则自动展开） */
+  revealAncestors: Set<string>
+  /** 自动定位：目标文件路径（命中则滚动 + 高亮脉冲） */
+  revealTarget: string | null
+  /** 自动定位脉冲时间戳，变化时重新触发 */
+  revealTs: number
+  /** 最近修改的路径集合（命中则在行左侧显示竖条标记） */
+  recentlyModifiedSet: Set<string>
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onShowInFolder: (entry: FileEntry) => void
   onStartRename: (entry: FileEntry) => void
@@ -345,6 +416,10 @@ function FileTreeItem({
   renamingPath,
   moving,
   refreshVersion,
+  revealAncestors,
+  revealTarget,
+  revealTs,
+  recentlyModifiedSet,
   onSelect,
   onShowInFolder,
   onStartRename,
@@ -357,6 +432,8 @@ function FileTreeItem({
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [childrenLoaded, setChildrenLoaded] = React.useState(false)
+  const [flash, setFlash] = React.useState(false)
+  const rowRef = React.useRef<HTMLDivElement>(null)
 
   // 当 refreshVersion 变化时，已展开的文件夹自动重新加载子项
   React.useEffect(() => {
@@ -366,6 +443,42 @@ function FileTreeItem({
         .catch((err) => console.error('[FileTreeItem] 刷新子目录失败:', err))
     }
   }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ===== Agent 自动定位：祖先目录自动展开 + 目标行滚动到中心 + 0.8s 高亮脉冲 =====
+  React.useEffect(() => {
+    if (revealTs === 0) return
+    // 祖先目录：自动展开（必要时加载子项）
+    if (entry.isDirectory && revealAncestors.has(entry.path) && !expanded) {
+      let cancelled = false
+      const run = async (): Promise<void> => {
+        if (!childrenLoaded) {
+          try {
+            const items = await window.electronAPI.listDirectory(entry.path)
+            if (!cancelled) {
+              setChildren(items)
+              setChildrenLoaded(true)
+            }
+          } catch (err) {
+            console.error('[FileTreeItem] reveal 加载子目录失败:', err)
+            return
+          }
+        }
+        if (!cancelled) setExpanded(true)
+      }
+      run()
+      return () => { cancelled = true }
+    }
+    // 目标行：滚动到可视区中心 + 高亮脉冲
+    if (revealTarget && entry.path === revealTarget) {
+      // 等下一帧渲染稳定后再 scroll
+      requestAnimationFrame(() => {
+        rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+      setFlash(true)
+      const t = setTimeout(() => setFlash(false), 1200)
+      return () => clearTimeout(t)
+    }
+  }, [revealTs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 重命名编辑状态
   const [editName, setEditName] = React.useState('')
@@ -497,14 +610,23 @@ function FileTreeItem({
   return (
     <>
       <div
+        ref={rowRef}
         className={cn(
-          'flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg',
+          'relative flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg transition-colors',
           isSelected ? 'bg-accent' : 'hover:bg-accent/50',
+          flash && 'file-browser-row-flash',
         )}
         style={{ paddingLeft }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
       >
+        {recentlyModifiedSet.has(entry.path) && (
+          <span
+            aria-label="最近被 Agent 修改"
+            className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/80"
+            style={{ left: paddingLeft - 6 }}
+          />
+        )}
         {/* 展开/收起图标 */}
         {entry.isDirectory ? (
           <ChevronRight
@@ -620,6 +742,10 @@ function FileTreeItem({
           renamingPath={renamingPath}
           moving={moving}
           refreshVersion={refreshVersion}
+          revealAncestors={revealAncestors}
+          revealTarget={revealTarget}
+          revealTs={revealTs}
+          recentlyModifiedSet={recentlyModifiedSet}
           onSelect={onSelect}
           onShowInFolder={onShowInFolder}
           onStartRename={onStartRename}
