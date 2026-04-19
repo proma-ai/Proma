@@ -112,6 +112,7 @@ function isEditableType(previewType: string): boolean {
 /** 通用语言 ID（用于 Monaco） */
 function detectLanguage(filePath: string, ext: string): string {
   const base = basename(filePath).toLowerCase()
+  if (isEnvFile(base)) return 'bash'
   if (SPECIAL_FILENAME_LANG[base]) return SPECIAL_FILENAME_LANG[base]
   return EXT_LANG_MAP[ext] || 'plaintext'
 }
@@ -222,6 +223,15 @@ const PDF_EXTENSIONS = new Set(['.pdf'])
 /** 支持 DOCX 预览的扩展名 */
 const DOCX_EXTENSIONS = new Set(['.docx'])
 
+/**
+ * 是否为 .env 系列文件（.env、.env.local、.env.production、.env.development.local 等）
+ * 这类文件的 extname 会被识别为 .local/.production 等无意义后缀，需要单独判定。
+ */
+function isEnvFile(filename: string): boolean {
+  const lower = filename.toLowerCase()
+  return lower === '.env' || lower.startsWith('.env.')
+}
+
 /** 获取预览类型 */
 function getPreviewType(filePath: string, ext: string): 'image' | 'video' | 'markdown' | 'code' | 'pdf' | 'docx' | 'unsupported' {
   if (IMAGE_EXTENSIONS.has(ext)) return 'image'
@@ -230,8 +240,11 @@ function getPreviewType(filePath: string, ext: string): 'image' | 'video' | 'mar
   if (CODE_EXTENSIONS.has(ext)) return 'code'
   if (PDF_EXTENSIONS.has(ext)) return 'pdf'
   if (DOCX_EXTENSIONS.has(ext)) return 'docx'
+  const base = basename(filePath).toLowerCase()
+  // .env 系列（.env / .env.local / .env.production 等）
+  if (isEnvFile(base)) return 'code'
   // 无扩展名 / 不识别 → 检查特殊文件名（.gitignore、Dockerfile、bun.lock 等）
-  if (SPECIAL_FILENAME_LANG[basename(filePath).toLowerCase()]) return 'code'
+  if (SPECIAL_FILENAME_LANG[base]) return 'code'
   return 'unsupported'
 }
 
@@ -1410,11 +1423,35 @@ function watchExternalChange(previewWindow: BrowserWindow, state: PreviewWindowS
 }
 
 /**
+ * 解析待预览的文件路径
+ * - 绝对路径：直接 resolve
+ * - 相对路径：依次尝试 basePaths，返回第一个存在的；都不存在则返回基于第一个 base 的拼接结果
+ *   （让后续 statSync 抛出更明确的错误，而不是被相对 process.cwd 误导）
+ */
+function resolveTargetPath(filePath: string, basePaths?: string[]): string {
+  if (filePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(filePath)) {
+    return resolve(filePath)
+  }
+  if (basePaths && basePaths.length > 0) {
+    for (const base of basePaths) {
+      if (!base) continue
+      const candidate = resolve(base, filePath)
+      if (existsSync(candidate)) return candidate
+    }
+    return resolve(basePaths[0]!, filePath)
+  }
+  return resolve(filePath)
+}
+
+/**
  * 在新窗口中预览文件
  * 不支持的文件类型会调用系统默认应用打开
+ *
+ * @param filePath 绝对路径或相对路径
+ * @param basePaths 当 filePath 为相对路径时，依次尝试这些基础目录解析（主 cwd + 附加目录）
  */
-export function openFilePreview(filePath: string): void {
-  const safePath = resolve(filePath)
+export function openFilePreview(filePath: string, basePaths?: string[]): void {
+  const safePath = resolveTargetPath(filePath, basePaths)
   const filename = basename(safePath)
   const ext = extname(safePath).toLowerCase()
   const previewType = getPreviewType(safePath, ext)

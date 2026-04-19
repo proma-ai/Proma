@@ -17,6 +17,7 @@ import {
   MessageActions,
   MessageResponse,
   UserMessageContent,
+  BasePathsProvider,
 } from '@/components/ai-elements/message'
 import {
   Conversation,
@@ -60,6 +61,8 @@ interface AgentMessagesProps {
   liveMessages?: SDKMessage[]
   /** 当前会话工作目录，用于解析相对文件路径 */
   sessionPath?: string | null
+  /** 附加目录列表（与 sessionPath 一并用作相对路径解析候选） */
+  attachedDirs?: string[]
   /** 最后一轮是否被用户中断 */
   stoppedByUser?: boolean
   onRetry?: () => void
@@ -457,13 +460,14 @@ function RetryAttemptItem({
 interface AgentMessageItemProps {
   message: AgentMessage
   sessionPath?: string | null
+  attachedDirs?: string[]
   onRetry?: () => void
   onRetryInNewSession?: () => void
   onCompact?: () => void
   onGoToBilling?: () => void
 }
 
-function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, onCompact, onGoToBilling }: AgentMessageItemProps): React.ReactElement | null {
+function AgentMessageItem({ message, sessionPath, attachedDirs, onRetry, onRetryInNewSession, onCompact, onGoToBilling }: AgentMessageItemProps): React.ReactElement | null {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
 
@@ -519,7 +523,7 @@ function AgentMessageItem({ message, sessionPath, onRetry, onRetryInNewSession, 
           )}
           <ToolResultInlineImages activities={toolActivities} />
           {message.content && (
-            <MessageResponse basePath={sessionPath || undefined}>{message.content}</MessageResponse>
+            <MessageResponse basePath={sessionPath || undefined} basePaths={attachedDirs}>{message.content}</MessageResponse>
           )}
         </MessageContent>
         {/* 操作栏：左侧靠左排列 */}
@@ -663,7 +667,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact, onGoToBilling }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -842,6 +846,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
   const hasLiveAssistantContent = allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
 
   return (
+    <BasePathsProvider basePaths={attachedDirs}>
     <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? 'opacity-100 transition-opacity duration-200' : 'opacity-0'}>
       <ScrollPositionManager id={sessionId} ready={ready} />
       <ConversationContent>
@@ -878,6 +883,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
                   <AgentMessageItem
                     message={msg}
                     sessionPath={sessionPath}
+                    attachedDirs={attachedDirs}
                     onRetry={onRetry}
                     onRetryInNewSession={onRetryInNewSession}
                     onCompact={onCompact}
@@ -908,7 +914,7 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
                   {retrying && <RetryingNotice retrying={retrying} />}
                   {smoothContent ? (
                     <>
-                      <MessageResponse basePath={sessionPath || undefined}>{smoothContent}</MessageResponse>
+                      <MessageResponse basePath={sessionPath || undefined} basePaths={attachedDirs}>{smoothContent}</MessageResponse>
                       {streaming && <AgentRunningIndicator startedAt={startedAt} />}
                     </>
                   ) : (
@@ -931,5 +937,6 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
         <StickyUserMessage userMessages={allUserMessagesData} />
       )}
     </Conversation>
+    </BasePathsProvider>
   )
 }

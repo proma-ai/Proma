@@ -341,12 +341,25 @@ export function remarkPreserveBreaks() {
 /** remark 插件函数签名 */
 export type RemarkPluginFn = () => (tree: MdastParent) => void
 
+/**
+ * 附加 basePaths 上下文 — 用于把"附加目录候选"穿透到 MarkdownInlineCode 而不必逐层透传 props。
+ * AgentMessages 在顶层用 BasePathsProvider 包裹，FilePathChip 渲染时会自动取到。
+ */
+const BasePathsContext = React.createContext<string[] | undefined>(undefined)
+
+/** 提供附加目录候选给所有内嵌的 MessageResponse */
+export function BasePathsProvider({ basePaths, children }: { basePaths?: string[]; children: React.ReactNode }): React.ReactElement {
+  return <BasePathsContext.Provider value={basePaths}>{children}</BasePathsContext.Provider>
+}
+
 interface MessageResponseProps {
   /** Markdown 内容 */
   children: string
   className?: string
   /** 基础目录路径，用于解析相对文件路径（如 Agent 会话工作目录） */
   basePath?: string
+  /** 额外的基础目录候选（如附加目录），点击 chip 时由主进程依次解析 */
+  basePaths?: string[]
   /** 额外的 remark 插件（追加到内置 remarkGfm + remarkMath 之后） */
   remarkPlugins?: RemarkPluginFn[]
 }
@@ -434,8 +447,11 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
   children: codeChildren,
   className: codeClassName,
   basePath,
+  basePaths,
   ...codeProps
-}: React.HTMLAttributes<HTMLElement> & { basePath?: string }): React.ReactElement {
+}: React.HTMLAttributes<HTMLElement> & { basePath?: string; basePaths?: string[] }): React.ReactElement {
+  // 兜底：从 context 读附加 basePaths（避免穿透 SDKMessageRenderer / ContentBlock 等中间层）
+  const ctxBasePaths = React.useContext(BasePathsContext)
   if (codeClassName) {
     return <code className={codeClassName} {...codeProps}>{codeChildren}</code>
   }
@@ -446,8 +462,17 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
     if (isAbsoluteFilePath(text)) {
       return <FilePathChip filePath={text.trim()} />
     }
-    if (basePath && isRelativeFilePath(text)) {
-      return <FilePathChip filePath={text.trim()} basePath={basePath} />
+    // 相对路径：合并 basePath（主 cwd）+ basePaths（props 或 context 提供的附加目录）作为候选
+    const merged: string[] = []
+    if (basePath) merged.push(basePath)
+    const allExtra = basePaths || ctxBasePaths
+    if (allExtra) {
+      for (const p of allExtra) {
+        if (p && !merged.includes(p)) merged.push(p)
+      }
+    }
+    if (merged.length > 0 && isRelativeFilePath(text)) {
+      return <FilePathChip filePath={text.trim()} basePaths={merged} />
     }
   }
 
@@ -463,7 +488,7 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
 
 /** 使用 react-markdown 渲染 assistant 消息内容，代码块使用 Shiki 语法高亮 */
 export const MessageResponse = React.memo(
-  function MessageResponse({ children, className, basePath, remarkPlugins }: MessageResponseProps): React.ReactElement {
+  function MessageResponse({ children, className, basePath, basePaths, remarkPlugins }: MessageResponseProps): React.ReactElement {
     // 合并内置 + 外部 remark 插件（保持引用稳定）
     const mergedRemarkPlugins = React.useMemo(
       () => remarkPlugins ? [...REMARK_PLUGINS, ...remarkPlugins] : REMARK_PLUGINS,
@@ -475,9 +500,9 @@ export const MessageResponse = React.memo(
       a: MarkdownLink,
       pre: MarkdownPre,
       code: (props: React.HTMLAttributes<HTMLElement>) => (
-        <MarkdownInlineCode {...props} basePath={basePath} />
+        <MarkdownInlineCode {...props} basePath={basePath} basePaths={basePaths} />
       ),
-    }), [basePath])
+    }), [basePath, basePaths])
 
     return (
       <div
@@ -503,6 +528,7 @@ export const MessageResponse = React.memo(
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     prevProps.basePath === nextProps.basePath &&
+    prevProps.basePaths === nextProps.basePaths &&
     prevProps.remarkPlugins === nextProps.remarkPlugins
 )
 

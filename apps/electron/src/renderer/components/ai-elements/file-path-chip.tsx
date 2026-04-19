@@ -64,40 +64,52 @@ function getFileIcon(ext: string): React.ReactElement {
 interface FilePathChipProps {
   /** 文件路径（绝对或相对） */
   filePath: string
-  /** 基础目录路径，用于解析相对路径 */
+  /** 基础目录路径（向后兼容，单值） */
   basePath?: string
+  /** 多个候选基础目录（如主 cwd + 附加目录），点击时由主进程依次解析 */
+  basePaths?: string[]
   className?: string
 }
 
 /** 文件路径芯片 — 可点击，触发文件预览 */
-export function FilePathChip({ filePath, basePath, className }: FilePathChipProps): React.ReactElement {
+export function FilePathChip({ filePath, basePath, basePaths, className }: FilePathChipProps): React.ReactElement {
   const filename = getFileName(filePath)
   const ext = getExtension(filename)
 
-  // 解析完整路径：绝对路径直接使用，相对路径拼接 basePath
-  const fullPath = React.useMemo(() => {
-    const trimmed = filePath.trim()
-    if (trimmed.startsWith('/') || /^[A-Z]:\\/.test(trimmed)) {
-      return trimmed
+  const trimmedPath = filePath.trim()
+  const isAbsolute = trimmedPath.startsWith('/') || /^[A-Z]:\\/.test(trimmedPath)
+
+  // 候选基础目录列表：优先使用 basePaths；否则退化到 basePath 单值
+  const candidateBases = React.useMemo<string[]>(() => {
+    if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
+    if (basePath) return [basePath]
+    return []
+  }, [basePath, basePaths])
+
+  // 用于 title 提示：绝对路径直接展示；相对路径展示首个候选拼接（仅作提示）
+  const displayPath = React.useMemo(() => {
+    if (isAbsolute) return trimmedPath
+    if (candidateBases.length > 0) {
+      const base = candidateBases[0]!
+      return base.endsWith('/') ? `${base}${trimmedPath}` : `${base}/${trimmedPath}`
     }
-    if (basePath) {
-      // 拼接时确保分隔符正确
-      return basePath.endsWith('/') ? `${basePath}${trimmed}` : `${basePath}/${trimmed}`
-    }
-    return trimmed
-  }, [filePath, basePath])
+    return trimmedPath
+  }, [trimmedPath, isAbsolute, candidateBases])
 
   const handleClick = React.useCallback(() => {
-    window.electronAPI.previewFile(fullPath).catch((error: unknown) => {
+    // 绝对路径直接预览；相对路径把候选 basePaths 交给主进程依次尝试
+    const target = isAbsolute ? trimmedPath : trimmedPath
+    const bases = isAbsolute ? undefined : (candidateBases.length > 0 ? candidateBases : undefined)
+    window.electronAPI.previewFile(target, bases).catch((error: unknown) => {
       console.error('[FilePathChip] 预览文件失败:', error)
     })
-  }, [fullPath])
+  }, [trimmedPath, isAbsolute, candidateBases])
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      title={fullPath}
+      title={displayPath}
       className={cn(
         'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
         'bg-primary/10 text-primary hover:bg-primary/20',
