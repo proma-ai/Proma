@@ -75,6 +75,7 @@ import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { UpdateDialog } from './components/settings/UpdateDialog'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
+import { TabSwitcher } from './components/tabs/TabSwitcher'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -860,6 +861,7 @@ if (isQuickTaskWindow) {
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />
       <GlobalShortcuts />
+      <TabSwitcher />
       <App />
       <UpdateDialog />
       <Toaster position="top-right" />

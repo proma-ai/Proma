@@ -46,8 +46,20 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
   const focusedOptIdxRef = React.useRef(focusedOptIdx)
   focusedOptIdxRef.current = focusedOptIdx
   const submitRef = React.useRef<(() => void) | null>(null)
+  const autoAdvanceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearAutoAdvanceTimer = React.useCallback((): void => {
+    if (autoAdvanceTimerRef.current != null) {
+      clearTimeout(autoAdvanceTimerRef.current)
+      autoAdvanceTimerRef.current = null
+    }
+  }, [])
+
+  // 组件卸载时清理未触发的跳转定时器
+  React.useEffect(() => clearAutoAdvanceTimer, [clearAutoAdvanceTimer])
 
   React.useEffect(() => {
+    clearAutoAdvanceTimer()
     setActiveTab(0)
     setFocusedOptIdx(-1)
     const firstOpt = questions[0]?.options[0]
@@ -269,7 +281,16 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
           answer={getAnswer(activeTab)}
           focusedIndex={focusedOptIdx}
           showBadge={questions.length === 1}
-          onToggleOption={(label) => toggleOptionByState(activeTab, currentQuestion, label)}
+          onToggleOption={(label) => {
+            toggleOptionByState(activeTab, currentQuestion, label)
+            if (!currentQuestion.multiSelect && !isLastTab) {
+              clearAutoAdvanceTimer()
+              autoAdvanceTimerRef.current = setTimeout(() => {
+                autoAdvanceTimerRef.current = null
+                setActiveTab((prev) => prev + 1)
+              }, 150)
+            }
+          }}
           onToggleCustom={() => toggleCustomByState(activeTab)}
           onCustomTextChange={(text) => setAnswers((prev) => {
             const map = new Map(prev)

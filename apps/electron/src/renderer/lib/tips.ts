@@ -35,6 +35,7 @@ export const TIPS: Tip[] = [
   { id: 'mac-shortcut-stop', text: '按 ⌘. 中断 AI 响应', platform: 'mac' },
   { id: 'mac-shortcut-close', text: '按 ⌘W 关闭当前标签页', platform: 'mac' },
   { id: 'mac-shortcut-zoom', text: '按 ⌘+ / ⌘- 可以放大或缩小界面，⌘0 重置', platform: 'mac' },
+  { id: 'mac-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'mac' },
 
   // Windows 快捷键
   { id: 'win-shortcut-new', text: '按 Ctrl+N 快速创建新对话', platform: 'windows' },
@@ -47,6 +48,7 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-stop', text: '按 Ctrl+. 中断 AI 响应', platform: 'windows' },
   { id: 'win-shortcut-close', text: '按 Ctrl+W 关闭当前标签页', platform: 'windows' },
   { id: 'win-shortcut-zoom', text: '按 Ctrl++ / Ctrl+- 可以放大或缩小界面，Ctrl+0 重置', platform: 'windows' },
+  { id: 'win-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'windows' },
 
   // 通用
   { id: 'tip-agent-file', text: 'Agent 模式下输入 @ 可以引用工作区文件', platform: 'all' },
