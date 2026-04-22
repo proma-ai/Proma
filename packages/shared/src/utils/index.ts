@@ -9,3 +9,4 @@ export function noop(): void {
 
 export { diffCapabilities } from './capabilities-diff'
 export type { CapabilityChange } from './capabilities-diff'
+export { calcTotalAvailable } from './billing'

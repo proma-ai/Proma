@@ -13,6 +13,7 @@ import type {
   SubscriptionTier,
   SubscriptionStatusResponse,
 } from '@proma/shared'
+import { calcTotalAvailable } from '@proma/shared'
 
 // ===== 账单状态 =====
 
@@ -57,15 +58,11 @@ export const subscriptionStatusAtom = atom<SubscriptionStatusResponse | null>(nu
 
 // ===== 派生 Atoms =====
 
-/** 余额显示（格式化后的字符串，包含订阅额度） */
+/** 余额显示（格式化后的字符串，包含订阅额度和企业分配额度） */
 export const creditsDisplayAtom = atom<string>((get) => {
   const billing = get(billingInfoAtom)
   if (!billing) return '0.00 积分'
-  const credits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
-  const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
-    ? parseFloat(billing.subscriptionQuotaRemaining)
-    : (billing.subscriptionQuotaRemaining ?? 0)
-  const total = (isNaN(credits) ? 0 : credits) + (isNaN(subRemaining) ? 0 : subRemaining)
+  const total = calcTotalAvailable(billing)
   return `${total.toFixed(2)} 积分`
 })
 
