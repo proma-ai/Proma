@@ -8,6 +8,7 @@ import * as React from 'react'
 import { useAtomValue } from 'jotai'
 import { Badge } from '@/components/ui/badge'
 import { billingInfoAtom, isVipAtom, discountLevelAtom } from '@/atoms/cloud-billing'
+import { calcTotalAvailable } from '@proma/shared'
 
 function formatCurrency(value: number | string | null | undefined): string {
   if (value === null || value === undefined) return '0.00 积分'
@@ -26,11 +27,9 @@ export function BalanceCard(): React.ReactElement | null {
   const discountPercent = discountLevel > 0 ? Math.round((1 - discountLevel) * 100) : 0
   const hasSubscription = billing.hasActiveSubscription
 
-  const rawCredits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
-  const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
-    ? parseFloat(billing.subscriptionQuotaRemaining)
-    : (billing.subscriptionQuotaRemaining ?? 0)
-  const totalAvailable = (isNaN(rawCredits) ? 0 : rawCredits) + (isNaN(subRemaining) ? 0 : subRemaining)
+  const totalAvailable = calcTotalAvailable(billing)
+  const hasEnterprise = billing.enterprise != null
+  const enterpriseBalance = billing.enterpriseAllocatedBalance ?? 0
 
   return (
     <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
@@ -67,6 +66,15 @@ export function BalanceCard(): React.ReactElement | null {
               </div>
             ) : (
               <div />
+            )}
+            {hasEnterprise && (
+              <div className="col-span-2">
+                <p className="text-[11px] text-muted-foreground">
+                  企业额度
+                  <span className="ml-1 text-muted-foreground/60">来自: {billing.enterprise?.name}</span>
+                </p>
+                <p className="text-sm font-semibold mt-0.5">{formatCurrency(enterpriseBalance)}</p>
+              </div>
             )}
             <div>
               <p className="text-[11px] text-muted-foreground">本月用量</p>

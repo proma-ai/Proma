@@ -9,11 +9,12 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Wallet, Sparkles } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { creditsDisplayAtom, billingInfoAtom } from '@/atoms/cloud-billing'
+import { billingInfoAtom } from '@/atoms/cloud-billing'
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { isCloudMode } from '@/lib/mode'
 import { isCloudAuthenticatedAtom } from '@/atoms/cloud-auth'
 import { cn } from '@/lib/utils'
+import { calcTotalAvailable } from '@proma/shared'
 
 /** 根据百分比返回进度条颜色 */
 function getBarColor(percent: number): string {
@@ -30,7 +31,6 @@ function getCreditThresholdColor(credits: number): string {
 }
 
 export function SidebarCreditIndicator(): React.ReactElement | null {
-  const credits = useAtomValue(creditsDisplayAtom)
   const billing = useAtomValue(billingInfoAtom)
   const isAuthenticated = useAtomValue(isCloudAuthenticatedAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
@@ -43,15 +43,11 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
     setSettingsOpen(true)
   }
 
-  // 计算可用额度
-  const rawCredits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
-  const subRemaining = typeof billing.subscriptionQuotaRemaining === 'string'
-    ? parseFloat(billing.subscriptionQuotaRemaining)
-    : (billing.subscriptionQuotaRemaining ?? 0)
+  // 计算可用额度（含企业分配额度）
+  const totalAvailable = calcTotalAvailable(billing)
 
+  const rawCredits = typeof billing.credits === 'string' ? parseFloat(billing.credits) : billing.credits
   const creditsVal = isNaN(rawCredits) ? 0 : rawCredits
-  const subRemainingVal = isNaN(subRemaining) ? 0 : subRemaining
-  const totalAvailable = creditsVal + subRemainingVal
 
   // 进度百分比：基于当前正在消费的订阅包，而非所有订阅总和
   // - 有当前消费中的订阅包 → 进度条 = 该包剩余 / 该包总额度
@@ -119,7 +115,12 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          剩余 {credits}
+          <p>剩余 {totalAvailable < 10 ? totalAvailable.toFixed(2) : Math.floor(totalAvailable)} 积分</p>
+          {billing.enterprise != null && (billing.enterpriseAllocatedBalance ?? 0) > 0 && (
+            <p className="text-muted-foreground">
+              含企业额度 {(billing.enterpriseAllocatedBalance ?? 0).toFixed(2)} 积分
+            </p>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
