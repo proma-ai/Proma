@@ -88,6 +88,13 @@ export interface OrderRecord {
   completed_at: string | null
 }
 
+/** 企业基础信息（账单响应内嵌） */
+export interface EnterpriseBrief {
+  id: string
+  name: string
+  role: 'ADMIN' | 'MEMBER'
+}
+
 /** 账单信息 */
 export interface BillingInfo {
   billingMode: BillingMode
@@ -104,6 +111,10 @@ export interface BillingInfo {
   /** 当前正在消费的订阅包（FIFO 第一个有剩余额度的） */
   currentSubscriptionQuota?: number
   currentSubscriptionUsed?: number
+  /** 企业信息（仅企业成员返回，非成员为 null） */
+  enterprise?: EnterpriseBrief | null
+  /** 企业分配额度（非成员时后端返回 0） */
+  enterpriseAllocatedBalance?: number
 }
 
 // ===== 订阅相关类型 =====
