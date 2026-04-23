@@ -412,7 +412,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
             <p>所有模型价格与官方保持一致</p>
             <p>1 积分 = ¥1，订阅有效期 31 天，到期后未使用积分清零</p>
             <p>支持重复购买叠加，优先消耗先购买的积分 (FIFO)</p>
-            <p>低价模型 (lc-* 开头) 按 1x 倍率计费，其他模型按 7.3x 倍率计费（美元计价标准）</p>
+            <p>低价模型 (lc-* 开头) 按 1x 倍率计费，其他模型按 7.8x 倍率计费（美元计价标准）</p>
           </div>
         </div>
       </div>
