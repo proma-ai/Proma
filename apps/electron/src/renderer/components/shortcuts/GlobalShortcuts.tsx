@@ -53,8 +53,8 @@ import {
  */
 export function GlobalShortcuts(): null {
   const [appMode, setAppMode] = useAtom(appModeAtom)
-  const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSearchOpen = useSetAtom(searchDialogOpenAtom)
+  const [settingsOpen, setSettingsOpen] = useAtom(settingsOpenAtom)
+  const [searchOpen, setSearchOpen] = useAtom(searchDialogOpenAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const setShortcutOverrides = useSetAtom(shortcutOverridesAtom)
   const shortcutOverrides = useAtomValue(shortcutOverridesAtom)
@@ -90,6 +90,16 @@ export function GlobalShortcuts(): null {
   // ===== 关闭标签页逻辑 =====
 
   const handleCloseTab = useCallback(() => {
+    // 浮窗优先：有浮窗打开时 Cmd+W 先关闭浮窗而非 tab
+    if (settingsOpen) {
+      setSettingsOpen(false)
+      return
+    }
+    if (searchOpen) {
+      setSearchOpen(false)
+      return
+    }
+
     if (!activeTabId) return
     const closedTabId = activeTabId
     const result = closeTab(tabs, activeTabId, activeTabId)
@@ -109,7 +119,7 @@ export function GlobalShortcuts(): null {
       next.delete(closedTabId)
       return next
     })
-  }, [activeTabId, tabs, setTabs, setActiveTabId, setWorkingDone, syncActiveTabSideEffects])
+  }, [settingsOpen, setSettingsOpen, searchOpen, setSearchOpen, activeTabId, tabs, setTabs, setActiveTabId, setWorkingDone, syncActiveTabSideEffects])
 
   // 监听菜单 IPC 事件（Cmd+W 被 Electron 菜单拦截后通过 IPC 转发）
   useEffect(() => {

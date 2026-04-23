@@ -1,6 +1,19 @@
 import { app, BrowserWindow, Menu, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
+
+// Dev 与正式版使用独立的 userData 目录，避免共享 Chromium SingletonLock 导致 dev 启动被静默退出
+// 必须在任何会读取 userData 路径的模块加载之前执行
+if (!app.isPackaged) {
+  app.setPath('userData', join(app.getPath('appData'), '@proma/electron-dev'))
+}
+
+// 单实例锁：防止重复启动同一个版本（dev/prod 因 userData 已隔离，互不影响）
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
+
 import { getSettings } from './lib/settings-service'
 
 // 商业版固定为 Cloud 模式
@@ -272,141 +285,135 @@ app.on('open-url', (event, url) => {
   handleDeepLink(url)
 })
 
-// ===== 单实例锁 =====
-// 确保只有一个实例运行：第二个实例会退出，deep-link URL 通过 second-instance 传递
+// ===== 单实例锁的第二实例处理 =====
+// 单实例锁本身已在文件顶部执行（失败时已直接退出）
+// 这里只处理第一个实例中收到的 second-instance 事件
 
-const gotTheLock = app.requestSingleInstanceLock()
+// Windows/Linux: 第二个实例的 deep-link URL 通过此事件传递
+app.on('second-instance', (_event, argv) => {
+  const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
+  if (url) {
+    handleDeepLink(url)
+  }
+  showAndFocusMainWindow()
+})
 
-if (!gotTheLock) {
-  // 第二个实例：直接退出，不执行任何初始化
-  app.quit()
-} else {
-  // Windows/Linux: 第二个实例的 deep-link URL 通过此事件传递
-  app.on('second-instance', (_event, argv) => {
-    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
-    if (url) {
-      handleDeepLink(url)
+app.whenReady().then(async () => {
+  // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
+  // 必须在其他初始化之前执行，确保环境变量正确加载
+  await initializeRuntime()
+
+  // 同步默认 Skills 模板到 ~/.proma/default-skills/
+  seedDefaultSkills()
+
+  // 升级所有工作区中版本过旧的默认 Skills
+  upgradeDefaultSkillsInWorkspaces()
+
+  // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
+  migrateFlowSessions()
+
+  // Create application menu
+  const menu = createApplicationMenu()
+  Menu.setApplicationMenu(menu)
+
+  // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
+  startChatToolsWatcher()
+
+  // Register IPC handlers
+  registerIpcHandlers()
+
+  // Cloud 模式：注册 Cloud IPC 处理器
+  if (isCloudMode()) {
+    await registerCloudIpcHandlers()
+    // 同步服务依赖 Cloud 认证，在 Cloud IPC 初始化后注册
+    registerSyncIpcHandlers()
+  }
+
+  // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
+  // 如果用户有保存的图标偏好则使用，否则用默认图标
+  if (process.platform === 'darwin' && app.dock) {
+    const { resolveAppIconPath } = require('./ipc')
+    const settings = getSettings()
+    const variantId = settings.appIconVariant
+    const dockIconPath = variantId
+      ? resolveAppIconPath(variantId)
+      : join(__dirname, '../resources/icon.png')
+    if (dockIconPath && existsSync(dockIconPath)) {
+      app.dock.setIcon(dockIconPath)
     }
-    showAndFocusMainWindow()
-  })
+  }
 
-  app.whenReady().then(async () => {
-    // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
-    // 必须在其他初始化之前执行，确保环境变量正确加载
-    await initializeRuntime()
+  // Create system tray icon
+  createTray()
 
-    // 同步默认 Skills 模板到 ~/.proma/default-skills/
-    seedDefaultSkills()
+  // Create main window (will be shown when ready)
+  createWindow()
 
-    // 升级所有工作区中版本过旧的默认 Skills
-    upgradeDefaultSkillsInWorkspaces()
+  // 启动工作区文件监听（Agent MCP/Skills + 文件浏览器自动刷新）
+  if (mainWindow) {
+    startWorkspaceWatcher(mainWindow)
+  }
 
-    // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
-    migrateFlowSessions()
+  // 生产环境下初始化自动更新
+  if (app.isPackaged && mainWindow) {
+    initAutoUpdater(mainWindow)
+  }
 
-    // Create application menu
-    const menu = createApplicationMenu()
-    Menu.setApplicationMenu(menu)
+  // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
+  createQuickTaskWindow()
 
-    // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
-    startChatToolsWatcher()
+  // 注册全局快捷键
+  registerGlobalShortcut('quick-task', toggleQuickTaskWindow)
+  registerGlobalShortcut('show-main-window', showAndFocusMainWindow)
 
-    // Register IPC handlers
-    registerIpcHandlers()
-
-    // Cloud 模式：注册 Cloud IPC 处理器
-    if (isCloudMode()) {
-      await registerCloudIpcHandlers()
-      // 同步服务依赖 Cloud 认证，在 Cloud IPC 初始化后注册
-      registerSyncIpcHandlers()
-    }
-
-    // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
-    // 如果用户有保存的图标偏好则使用，否则用默认图标
-    if (process.platform === 'darwin' && app.dock) {
-      const { resolveAppIconPath } = require('./ipc')
-      const settings = getSettings()
-      const variantId = settings.appIconVariant
-      const dockIconPath = variantId
-        ? resolveAppIconPath(variantId)
-        : join(__dirname, '../resources/icon.png')
-      if (dockIconPath && existsSync(dockIconPath)) {
-        app.dock.setIcon(dockIconPath)
-      }
-    }
-
-    // Create system tray icon
-    createTray()
-
-    // Create main window (will be shown when ready)
-    createWindow()
-
-    // 启动工作区文件监听（Agent MCP/Skills + 文件浏览器自动刷新）
-    if (mainWindow) {
-      startWorkspaceWatcher(mainWindow)
-    }
-
-    // 生产环境下初始化自动更新
-    if (app.isPackaged && mainWindow) {
-      initAutoUpdater(mainWindow)
-    }
-
-    // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
-    createQuickTaskWindow()
-
-    // 注册全局快捷键
-    registerGlobalShortcut('quick-task', toggleQuickTaskWindow)
-    registerGlobalShortcut('show-main-window', showAndFocusMainWindow)
-
-    // Cloud 模式：窗口就绪后自动执行增量同步
-    if (isCloudMode() && mainWindow) {
-      mainWindow.once('ready-to-show', () => {
-        scheduleAutoSync(mainWindow!)
-      })
-    }
-
-    // 启动所有已注册的 Bridge（飞书/钉钉/微信等）
-    await startAllBridges()
-
-    app.on('activate', () => {
-      // 直接检查 mainWindow 引用，避免 getAllWindows() 包含 DevTools 等其他窗口导致误判
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        createWindow()
-      } else {
-        // 窗口已存在但可能被隐藏（macOS 关闭按钮 = hide），重新显示
-        showAndFocusMainWindow()
-      }
+  // Cloud 模式：窗口就绪后自动执行增量同步
+  if (isCloudMode() && mainWindow) {
+    mainWindow.once('ready-to-show', () => {
+      scheduleAutoSync(mainWindow!)
     })
-  })
+  }
 
-  app.on('window-all-closed', () => {
-    // 非 macOS：关闭所有窗口时退出应用
-    // macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
-    if (process.platform !== 'darwin') {
-      app.quit()
+  // 启动所有已注册的 Bridge（飞书/钉钉/微信等）
+  await startAllBridges()
+
+  app.on('activate', () => {
+    // 直接检查 mainWindow 引用，避免 getAllWindows() 包含 DevTools 等其他窗口导致误判
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+    } else {
+      // 窗口已存在但可能被隐藏（macOS 关闭按钮 = hide），重新显示
+      showAndFocusMainWindow()
     }
   })
+})
 
-  app.on('before-quit', () => {
-    // 标记正在退出，让 close 事件不再阻止关闭
-    setQuitting()
+app.on('window-all-closed', () => {
+  // 非 macOS：关闭所有窗口时退出应用
+  // macOS：保持应用运行（可通过 tray 或 Dock 重新打开）
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
 
-    // 中止所有活跃的 Agent 和 Chat 子进程
-    stopAllAgents()
-    stopAllGenerations()
-    // 清理更新器定时器
-    cleanupUpdater()
-    // 停止工作区文件监听
-    stopWorkspaceWatcher()
-    // 停止 Chat 工具配置文件监听
-    stopChatToolsWatcher()
-    // 停止所有 Bridge
-    stopAllBridges()
-    // 注销全局快捷键
-    unregisterAllGlobalShortcuts()
-    // 销毁快速任务窗口
-    destroyQuickTaskWindow()
-    // Clean up system tray before quitting
-    destroyTray()
-  })
-}
+app.on('before-quit', () => {
+  // 标记正在退出，让 close 事件不再阻止关闭
+  setQuitting()
+
+  // 中止所有活跃的 Agent 和 Chat 子进程
+  stopAllAgents()
+  stopAllGenerations()
+  // 清理更新器定时器
+  cleanupUpdater()
+  // 停止工作区文件监听
+  stopWorkspaceWatcher()
+  // 停止 Chat 工具配置文件监听
+  stopChatToolsWatcher()
+  // 停止所有 Bridge
+  stopAllBridges()
+  // 注销全局快捷键
+  unregisterAllGlobalShortcuts()
+  // 销毁快速任务窗口
+  destroyQuickTaskWindow()
+  // Clean up system tray before quitting
+  destroyTray()
+})
