@@ -54,33 +54,32 @@ export function BalanceCard(): React.ReactElement | null {
           </div>
 
           {/* 右侧：统计数据 */}
-          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-right">
-            <div>
+          <div className="flex items-start gap-x-8 gap-y-3 text-right flex-wrap justify-end">
+            <div className="min-w-[88px]">
               <p className="text-[11px] text-muted-foreground">预充值</p>
               <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.credits)}</p>
             </div>
-            {hasSubscription ? (
-              <div>
+            {hasSubscription && (
+              <div className="min-w-[88px]">
                 <p className="text-[11px] text-muted-foreground">订阅剩余</p>
                 <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.subscriptionQuotaRemaining)}</p>
               </div>
-            ) : (
-              <div />
             )}
             {hasEnterprise && (
-              <div className="col-span-2">
-                <p className="text-[11px] text-muted-foreground">
-                  团队额度
-                  <span className="ml-1 text-muted-foreground/60">来自: {billing.enterprise?.name}</span>
+              <div className="min-w-[88px] max-w-[220px]">
+                <p className="text-[11px] text-muted-foreground truncate" title={billing.enterprise?.name}>
+                  {billing.enterprise?.name && (
+                    <span className="ml-1 text-muted-foreground/60">{billing.enterprise.name}</span>
+                  )}
                 </p>
                 <p className="text-sm font-semibold mt-0.5">{formatCurrency(enterpriseBalance)}</p>
               </div>
             )}
-            <div>
+            <div className="min-w-[88px]">
               <p className="text-[11px] text-muted-foreground">本月用量</p>
               <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuotaMonthly)}</p>
             </div>
-            <div>
+            <div className="min-w-[88px]">
               <p className="text-[11px] text-muted-foreground">累计用量</p>
               <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuota)}</p>
             </div>
