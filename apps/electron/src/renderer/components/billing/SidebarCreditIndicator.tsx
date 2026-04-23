@@ -118,7 +118,7 @@ export function SidebarCreditIndicator(): React.ReactElement | null {
           <p>剩余 {totalAvailable < 10 ? totalAvailable.toFixed(2) : Math.floor(totalAvailable)} 积分</p>
           {billing.enterprise != null && Number(billing.enterpriseAllocatedBalance ?? 0) > 0 && (
             <p className="text-muted-foreground">
-              含企业额度 {Number(billing.enterpriseAllocatedBalance ?? 0).toFixed(2)} 积分
+              含团队额度 {Number(billing.enterpriseAllocatedBalance ?? 0).toFixed(2)} 积分
             </p>
           )}
         </TooltipContent>

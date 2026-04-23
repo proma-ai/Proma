@@ -70,7 +70,7 @@ export function BalanceCard(): React.ReactElement | null {
             {hasEnterprise && (
               <div className="col-span-2">
                 <p className="text-[11px] text-muted-foreground">
-                  企业额度
+                  团队额度
                   <span className="ml-1 text-muted-foreground/60">来自: {billing.enterprise?.name}</span>
                 </p>
                 <p className="text-sm font-semibold mt-0.5">{formatCurrency(enterpriseBalance)}</p>
