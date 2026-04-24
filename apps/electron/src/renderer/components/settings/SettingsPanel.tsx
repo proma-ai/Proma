@@ -57,7 +57,7 @@ const TUTORIAL_TAB: TabItem = { id: 'tutorial', label: '教程', icon: <Graduati
 const SHORTCUTS_TAB: TabItem = { id: 'shortcuts', label: '快捷键', icon: <Keyboard size={16} /> }
 
 /** Cloud 模式专属 Tab */
-const BILLING_TAB: TabItem = { id: 'billing', label: '账单', icon: <CreditCard size={16} /> }
+const BILLING_TAB: TabItem = { id: 'billing', label: '订阅', icon: <CreditCard size={16} /> }
 
 /** Cloud 模式专属 Tab - API Key 管理 */
 const API_TAB: TabItem = { id: 'api', label: 'API', icon: <KeyRound size={16} /> }

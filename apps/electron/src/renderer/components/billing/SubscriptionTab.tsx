@@ -18,6 +18,7 @@ import {
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
 import { DeveloperLetterDialog } from './DeveloperLetterDialog'
+import { TeamPromoBanner } from './TeamPromoBanner'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
 import type { SubscriptionTier } from '@proma/shared'
 
@@ -402,6 +403,9 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
             )
           })}
         </div>
+
+        {/* 团队版推广 */}
+        <TeamPromoBanner />
       </div>
 
       {/* 积分计费说明 */}
@@ -409,10 +413,9 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <div className="flex items-start gap-2">
           <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
           <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
-            <p>所有模型价格与官方保持一致</p>
-            <p>1 积分 = ¥1，订阅有效期 31 天，到期后未使用积分清零</p>
+            <p>所有模型价格与官方 API 美元计价保持一致</p>
+            <p>1 积分 = ¥1 = $0.128，订阅有效期 31 天，到期后未使用积分清零（团队采用单独计费层），</p>
             <p>支持重复购买叠加，优先消耗先购买的积分 (FIFO)</p>
-            <p>低价模型 (lc-* 开头) 按 1x 倍率计费，其他模型按 7.8x 倍率计费（美元计价标准）</p>
           </div>
         </div>
       </div>
