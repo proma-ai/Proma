@@ -1,13 +1,12 @@
 /**
  * DeveloperLetterDialog - 开发者信封弹窗
  *
- * 信封翻开动画 → 信纸滑出 → 开发者声明 → 3项确认 → 立即订阅
+ * 信封翻开动画 → 信纸滑出 → 开发者声明 → 立即订阅
  */
 
 import * as React from "react";
 import { Dialog, DialogPortal, DialogOverlay } from "@/components/ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -27,29 +26,6 @@ export function DeveloperLetterDialog({
   selectedTierName,
   loading,
 }: DeveloperLetterDialogProps): React.ReactElement {
-  const [checked, setChecked] = React.useState<boolean[]>([
-    false,
-    false,
-    false,
-  ]);
-
-  const allChecked = checked.every(Boolean);
-
-  // 打开时重置勾选状态
-  React.useEffect(() => {
-    if (open) {
-      setChecked([false, false, false]);
-    }
-  }, [open]);
-
-  const handleCheck = (index: number, value: boolean) => {
-    setChecked((prev) => {
-      const next = [...prev];
-      next[index] = value;
-      return next;
-    });
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPortal>
@@ -156,11 +132,7 @@ export function DeveloperLetterDialog({
                     className="w-full bg-stone-800 hover:bg-stone-700 text-white mt-4 flex-shrink-0"
                     size="default"
                     disabled={loading}
-                    onClick={() => {
-                      if (allChecked) {
-                        onConfirm();
-                      }
-                    }}
+                    onClick={() => onConfirm()}
                   >
                     {loading ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
