@@ -4,31 +4,21 @@
  * 信封翻开动画 → 信纸滑出 → 开发者声明 → 3项确认 → 立即订阅
  */
 
-import * as React from 'react'
-import {
-  Dialog,
-  DialogPortal,
-  DialogOverlay,
-} from '@/components/ui/dialog'
-import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Button } from '@/components/ui/button'
-import { Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import * as React from "react";
+import { Dialog, DialogPortal, DialogOverlay } from "@/components/ui/dialog";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface DeveloperLetterDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-  selectedTierName: string
-  loading: boolean
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+  selectedTierName: string;
+  loading: boolean;
 }
-
-const CONFIRMATIONS = [
-  '我已了解低价模型无法保证 100% 稳定性和性能，且不提供额外服务',
-  '低价模型可能因上游供应问题无法保证随时可用',
-  '我可以在需要时自行切换到 Proma 官方模型以获得最佳效果',
-] as const
 
 export function DeveloperLetterDialog({
   open,
@@ -37,24 +27,28 @@ export function DeveloperLetterDialog({
   selectedTierName,
   loading,
 }: DeveloperLetterDialogProps): React.ReactElement {
-  const [checked, setChecked] = React.useState<boolean[]>([false, false, false])
+  const [checked, setChecked] = React.useState<boolean[]>([
+    false,
+    false,
+    false,
+  ]);
 
-  const allChecked = checked.every(Boolean)
+  const allChecked = checked.every(Boolean);
 
   // 打开时重置勾选状态
   React.useEffect(() => {
     if (open) {
-      setChecked([false, false, false])
+      setChecked([false, false, false]);
     }
-  }, [open])
+  }, [open]);
 
   const handleCheck = (index: number, value: boolean) => {
     setChecked((prev) => {
-      const next = [...prev]
-      next[index] = value
-      return next
-    })
-  }
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -62,8 +56,8 @@ export function DeveloperLetterDialog({
         <DialogOverlay />
         <DialogPrimitive.Content
           className={cn(
-            'fixed left-[50%] top-[50%] z-[100] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] titlebar-no-drag',
-            'focus:outline-none',
+            "fixed left-[50%] top-[50%] z-[100] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] titlebar-no-drag",
+            "focus:outline-none",
           )}
           onPointerDownOutside={() => onOpenChange(false)}
         >
@@ -87,8 +81,8 @@ export function DeveloperLetterDialog({
           <div
             className="relative mx-auto w-full max-w-md"
             style={{
-              perspective: '800px',
-              animation: 'envelope-fade-in 0.4s ease-out forwards',
+              perspective: "800px",
+              animation: "envelope-fade-in 0.4s ease-out forwards",
             }}
           >
             {/* 信封体 */}
@@ -100,76 +94,79 @@ export function DeveloperLetterDialog({
               <div className="pt-6 pb-8 px-6">
                 {/* 信纸 */}
                 <div
-                  className="relative bg-white dark:bg-stone-50 rounded-xl shadow-lg px-6 py-6"
+                  className="relative bg-white dark:bg-stone-50 rounded-xl shadow-lg px-6 py-6 flex flex-col max-h-[70vh]"
                   style={{
-                    animation: 'letter-slide-up 0.5s ease-out 0.6s both',
+                    animation: "letter-slide-up 0.5s ease-out 0.6s both",
                   }}
                 >
-                  {/* 信纸内容 */}
-                  <div className="space-y-4 text-stone-700">
+                  {/* 信纸内容（可滚动） */}
+                  <div className="space-y-4 text-stone-700 overflow-y-auto min-h-0 flex-1">
                     <p className="text-base font-medium">你好，</p>
 
                     <div className="text-sm leading-relaxed space-y-3">
                       <p>
-                        感谢你选择 <span className="font-semibold text-stone-900">{selectedTierName}</span> 方案。
+                        感谢你选择{" "}
+                        <span className="font-semibold text-stone-900">
+                          {selectedTierName}
+                        </span>{" "}
+                        方案。
+                      </p>
+                      <p>在你开始订阅之前，我想和你坦诚地聊几句。</p>
+                      <p>
+                        我希望能帮助大家快速上手 Agent
+                        模式，同时把更多精力投入到 Proma 的持续迭代中。
                       </p>
                       <p>
-                        在你开始订阅之前，我想和你坦诚地聊几句。
+                        首先 Proma 全部模型都直接调用官方
+                        API，并且不记录任何的用户使用数据，可以 100% 保证 Proma
+                        这一侧的数据安全与 Agent 安全。
                       </p>
                       <p>
-                        我希望能帮助大家快速上手 Agent 模式，同时把更多精力投入到 Proma 的持续迭代中。
+                        我们的所有模型价格与官方保持一致，我们的价格无法做到比官方更低，我们会通过人民币与美金换算倍率来换算相应的价格（1
+                        积分 = ¥1 =
+                        $0.128），这里存在小幅度的汇率差，这也是我们增加毛利率保持健康冷静运营的方式之一。
                       </p>
                       <p>
-                        其中最大的门槛之一就是价格，如果完全按照官网 API 的价格来，很多用户可能会望而却步。
+                        Agent
+                        模式下会大幅加快积分的消耗，因为这会产生大量的模型请求，我们推荐可以切换不同的模型对任务进行尝试。除了性能极佳的
+                        Opus 4.7 外，Sonnet 4.6\Kimi K2.6 以及 DeepSeek V4 Pro
+                        都可以在一些相对不那么复杂的任务上表现的还不错。
                       </p>
                       <p>
-                        AI 模型存在一个「不可能三角」—— <span className="font-medium text-stone-900">性能、稳定性、价格</span>，三者很难同时满足。低价模型（如 lc-claude-opus-4-6）换算下来相当于 <span className="font-medium text-stone-900">1 人民币 ≈ 1 美金</span> 的使用成本。之所以能以远低于官方的价格提供，是因为依赖第三方渠道。这意味着供应可能不稳定，性能也可能与官方有差异。
+                        无论 AI 如何发展，Agent
+                        能力如何强劲，请一定要记住人需要承担的责任，人永远是更好的上下文组织者和决策者。管理好预期的同时多加探索和讨论，切勿盲信国内自媒体瞎吹，没有什么是一键生成还能具备不可替代的价值的东西，一切的白领价值都来自于你无法传递的经验和洞察，Proma
+                        会帮助你放大你的能力，保持冷静理性行事。
                       </p>
                       <p>
-                        如果你在意性能和稳定性，建议在合适的场景下自行切换到我们正常官方模型（除 lc-* 外均为官方模型），以获得最佳效果。
+                        欢迎添加我的微信{" "}
+                        <span className="font-mono font-semibold">
+                          geekthings
+                        </span>
+                        ，加入我们的用户社区一起讨论 Proma 的使用和 AI
+                        相关的话题。
                       </p>
                       <p className="text-right text-stone-500 text-xs pt-1">
                         —— Erlich，Proma 开发者
                       </p>
                     </div>
-
-                    {/* 分隔线 */}
-                    <div className="border-t border-stone-200 pt-4">
-                      <p className="text-xs text-stone-500 mb-3">请确认以下事项：</p>
-                      <div className="space-y-3">
-                        {CONFIRMATIONS.map((text, i) => (
-                          <label
-                            key={i}
-                            className="flex items-start gap-2.5 cursor-pointer group"
-                          >
-                            <Checkbox
-                              checked={checked[i]}
-                              onCheckedChange={(v) => handleCheck(i, v === true)}
-                              className="mt-0.5 shrink-0"
-                            />
-                            <span className="text-xs leading-relaxed text-stone-600 group-hover:text-stone-800 transition-colors">
-                              {text}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 订阅按钮 */}
-                    <Button
-                      className="w-full"
-                      size="sm"
-                      disabled={!allChecked || loading}
-                      onClick={() => {
-                        if (allChecked) {
-                          onConfirm()
-                        }
-                      }}
-                    >
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      立即订阅
-                    </Button>
                   </div>
+
+                  {/* 订阅按钮（固定在底部，不随内容滚动） */}
+                  <Button
+                    className="w-full bg-stone-800 hover:bg-stone-700 text-white mt-4 flex-shrink-0"
+                    size="default"
+                    disabled={loading}
+                    onClick={() => {
+                      if (allChecked) {
+                        onConfirm();
+                      }
+                    }}
+                  >
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
+                    立即订阅
+                  </Button>
                 </div>
               </div>
             </div>
@@ -178,17 +175,17 @@ export function DeveloperLetterDialog({
             <div
               className="absolute top-0 left-0 right-0 z-10"
               style={{
-                transformOrigin: 'top center',
-                animation: 'envelope-flap-open 0.6s ease-in-out 0.3s both',
-                transformStyle: 'preserve-3d',
+                transformOrigin: "top center",
+                animation: "envelope-flap-open 0.6s ease-in-out 0.3s both",
+                transformStyle: "preserve-3d",
               }}
             >
               <div
                 className="w-full bg-[#c49660] dark:bg-[#7a5a10]"
                 style={{
-                  clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
-                  height: '80px',
-                  backfaceVisibility: 'hidden',
+                  clipPath: "polygon(0 0, 100% 0, 50% 100%)",
+                  height: "80px",
+                  backfaceVisibility: "hidden",
                 }}
               />
             </div>
@@ -196,5 +193,5 @@ export function DeveloperLetterDialog({
         </DialogPrimitive.Content>
       </DialogPortal>
     </Dialog>
-  )
+  );
 }
