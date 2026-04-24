@@ -56,10 +56,10 @@ interface TabItem {
 
 /** 基础 Tabs（所有模式都有） */
 const BASE_TABS: TabItem[] = [
-  { id: "general", label: "通用", icon: <Settings size={16} /> },
-  { id: "channels", label: "模型", icon: <Radio size={16} /> },
-  { id: "prompts", label: "提示词", icon: <BookOpen size={16} /> },
-  { id: "proxy", label: "代理", icon: <Globe size={16} /> },
+  { id: "general", label: "通用设置", icon: <Settings size={16} /> },
+  { id: "channels", label: "模型配置", icon: <Radio size={16} /> },
+  { id: "prompts", label: "提示词管理", icon: <BookOpen size={16} /> },
+  { id: "proxy", label: "代理设置", icon: <Globe size={16} /> },
 ];
 
 /** Cloud 模式专属 Tab */
@@ -86,34 +86,34 @@ const USAGE_TAB: TabItem = {
 /** Agent 模式专属 Tab */
 const AGENT_TAB: TabItem = {
   id: "agent",
-  label: "配置",
+  label: "Agent 配置",
   icon: <Plug size={16} />,
 };
 const TOOLS_TAB: TabItem = {
   id: "tools",
-  label: "工具",
+  label: "Chat 工具",
   icon: <Wrench size={16} />,
 };
 const BOTS_TAB: TabItem = {
   id: "bots",
-  label: "机器人",
+  label: "远程连接",
   icon: <Bot size={16} />,
 };
 const TUTORIAL_TAB: TabItem = {
   id: "tutorial",
-  label: "教程",
+  label: "Proma 教程",
   icon: <GraduationCap size={16} />,
 };
 const SHORTCUTS_TAB: TabItem = {
   id: "shortcuts",
-  label: "快捷键",
+  label: "快捷键管理",
   icon: <Keyboard size={16} />,
 };
 
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
-  { id: "appearance", label: "外观", icon: <Palette size={16} /> },
-  { id: "about", label: "关于", icon: <Info size={16} /> },
+  { id: "appearance", label: "外观设置", icon: <Palette size={16} /> },
+  { id: "about", label: "关于/更新", icon: <Info size={16} /> },
 ];
 
 /** 根据标签页 id 渲染对应内容 */

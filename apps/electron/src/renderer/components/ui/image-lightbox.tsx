@@ -40,7 +40,7 @@ export function ImageLightbox({
         {/* 遮罩层 — 点击关闭 */}
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-[200] bg-black/80 titlebar-no-drag',
+            'fixed inset-0 z-[200] bg-black/20 titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}

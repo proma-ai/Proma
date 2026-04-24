@@ -226,7 +226,7 @@ bun run generate:icons    # 生成应用图标
 |----------|--------|----------|------|
 | **Anthropic** | `anthropic-adapter.ts` | Messages API | extended_thinking、多模态 |
 | **OpenAI** | `openai-adapter.ts` | Chat Completions | 标准 OpenAI 协议 |
-| **DeepSeek** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **DeepSeek** | `anthropic-adapter.ts` | Messages API | Anthropic 兼容 |
 | **Moonshot** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
 | **智谱 AI** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
 | **MiniMax** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |

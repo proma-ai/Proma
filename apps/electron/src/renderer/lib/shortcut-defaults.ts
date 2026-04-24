@@ -131,10 +131,10 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   },
   {
     id: 'stop-generation',
-    name: '停止生成',
+    name: '停止 Agent',
     description: '中断当前 AI 响应',
-    defaultMac: 'Cmd+.',
-    defaultWin: 'Ctrl+.',
+    defaultMac: 'Cmd+Shift+Backspace',
+    defaultWin: 'Ctrl+Shift+Backspace',
     category: 'edit',
   },
   {

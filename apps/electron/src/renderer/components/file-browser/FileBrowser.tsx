@@ -21,6 +21,7 @@ import {
   MoreHorizontal,
   FolderInput,
   Pencil,
+  MessageSquarePlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -83,9 +84,11 @@ interface FileBrowserProps {
   embedded?: boolean
   /** 隐藏"目录为空"提示（当外部已有附加目录等内容时使用） */
   hideEmpty?: boolean
+  /** 点击添加到聊天（非文件夹文件悬浮时显示按钮） */
+  onAddToChat?: (entry: FileEntry) => void
 }
 
-export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddToChat }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -307,6 +310,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty }: File
           onDelete={handleRequestDelete}
           onMove={handleMove}
           onRefresh={loadRoot}
+          onAddToChat={onAddToChat}
         />
       ))}
     </div>
@@ -406,6 +410,7 @@ interface FileTreeItemProps {
   onDelete: (entry: FileEntry) => void
   onMove: (entry: FileEntry) => void
   onRefresh: () => Promise<void>
+  onAddToChat?: (entry: FileEntry) => void
 }
 
 function FileTreeItem({
@@ -428,6 +433,7 @@ function FileTreeItem({
   onDelete,
   onMove,
   onRefresh,
+  onAddToChat,
 }: FileTreeItemProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
@@ -666,12 +672,29 @@ function FileTreeItem({
           <span className="truncate text-xs flex-1">{entry.name}</span>
         )}
 
-        {/* 三点菜单按钮（始终占位，避免选中时行高跳动） */}
+        {/* 右侧操作按钮占位（始终占位，避免行高跳动） */}
         <div
-          className={cn('flex-shrink-0', !showMenu && 'invisible')}
+          className={cn(
+            'flex-shrink-0',
+            !(showMenu || (onAddToChat && !entry.isDirectory && !isRenaming)) && 'invisible',
+          )}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {/* 非文件夹：添加到聊天按钮（悬浮时显示） */}
+          {onAddToChat && !entry.isDirectory && !isRenaming && !showMenu && (
+            <button
+              type="button"
+              className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70 text-muted-foreground hover:text-foreground invisible group-hover:visible focus-visible:visible"
+              title="添加到聊天"
+              aria-label="添加到聊天"
+              onClick={() => onAddToChat(entry)}
+            >
+              <MessageSquarePlus className="size-3.5" />
+            </button>
+          )}
+          {/* 文件夹/选中状态：三点菜单 */}
+          {showMenu && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -681,8 +704,16 @@ function FileTreeItem({
                 <MoreHorizontal className="size-3.5" />
               </button>
             </DropdownMenuTrigger>
-            {showMenu && (
               <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
+                {onAddToChat && !entry.isDirectory && selectedCount === 1 && (
+                  <DropdownMenuItem
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                    onSelect={() => onAddToChat(entry)}
+                  >
+                    <MessageSquarePlus />
+                    添加到聊天
+                  </DropdownMenuItem>
+                )}
                 {selectedCount === 1 && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"
@@ -718,8 +749,8 @@ function FileTreeItem({
                   {selectedCount > 1 ? `删除选中 (${selectedCount})` : '删除'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            )}
           </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -754,6 +785,7 @@ function FileTreeItem({
           onDelete={onDelete}
           onMove={onMove}
           onRefresh={handleRefreshAfterDelete}
+          onAddToChat={onAddToChat}
         />
       ))}
     </>

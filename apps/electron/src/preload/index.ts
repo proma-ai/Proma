@@ -360,6 +360,9 @@ export interface ElectronAPI {
   /** 切换 Agent 会话置顶状态 */
   togglePinAgentSession: (id: string) => Promise<AgentSessionMeta>
 
+  /** 切换 Agent 会话手动工作中状态 */
+  toggleManualWorkingAgentSession: (id: string) => Promise<AgentSessionMeta>
+
   /** 切换 Agent 会话归档状态 */
   toggleArchiveAgentSession: (id: string) => Promise<AgentSessionMeta>
 
@@ -588,6 +591,9 @@ export interface ElectronAPI {
 
   /** 用系统默认应用打开附加目录文件（无工作区路径限制） */
   openAttachedFile: (filePath: string) => Promise<void>
+
+  /** 读取附加目录文件内容为 base64（限制在已附加目录范围内） */
+  readAttachedFile: (filePath: string, sessionId?: string, workspaceSlug?: string) => Promise<string>
 
   /** 在文件管理器中显示附加目录文件（无工作区路径限制） */
   showAttachedInFolder: (filePath: string) => Promise<void>
@@ -1202,6 +1208,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_PIN, id)
   },
 
+  toggleManualWorkingAgentSession: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_MANUAL_WORKING, id)
+  },
+
   toggleArchiveAgentSession: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_ARCHIVE, id)
   },
@@ -1521,6 +1531,10 @@ const electronAPI: ElectronAPI = {
 
   openAttachedFile: (filePath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_ATTACHED_FILE, filePath)
+  },
+
+  readAttachedFile: (filePath: string, sessionId?: string, workspaceSlug?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_ATTACHED_FILE, filePath, sessionId, workspaceSlug)
   },
 
   showAttachedInFolder: (filePath: string) => {

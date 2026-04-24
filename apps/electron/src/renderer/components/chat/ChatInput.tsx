@@ -28,6 +28,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   conversationDraftsAtom,
 } from '@/atoms/chat-atoms'
@@ -329,15 +330,22 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             {/* 右侧：发送 / 停止按钮 */}
             <div className="flex items-center gap-1.5">
               {streaming ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
-                  onClick={onStop}
-                >
-                  <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
+                      onClick={onStop}
+                    >
+                      <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+                  </TooltipContent>
+                </Tooltip>
               ) : (
                 <Button
                   type="button"

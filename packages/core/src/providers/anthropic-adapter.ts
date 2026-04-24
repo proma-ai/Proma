@@ -7,8 +7,10 @@
  * - 图片格式：{ type: 'image', source: { type: 'base64', media_type, data } }
  * - SSE 解析：content_block_delta → text，thinking_delta → reasoning，tool_use 支持
  * - 认证：x-api-key + Authorization: Bearer
+ * - 同时适配 Anthropic 原生 API 和 DeepSeek Anthropic 兼容 API
  */
 
+import type { ProviderType } from '@proma/shared'
 import type {
   ProviderAdapter,
   ProviderRequest,
@@ -19,7 +21,7 @@ import type {
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
-import { normalizeAnthropicBaseUrl } from './url-utils.ts'
+import { normalizeAnthropicBaseUrl, normalizeBaseUrl } from './url-utils.ts'
 
 // ===== Anthropic 特有类型 =====
 
@@ -197,10 +199,22 @@ function appendContinuationMessages(
 // ===== 适配器实现 =====
 
 export class AnthropicAdapter implements ProviderAdapter {
-  readonly providerType = 'anthropic' as const
+  readonly providerType: ProviderType
+
+  constructor(providerType: ProviderType = 'anthropic') {
+    this.providerType = providerType
+  }
+
+  /** 根据 provider 类型选择 URL 规范化方式 */
+  private normalizeUrl(baseUrl: string): string {
+    if (this.providerType === 'deepseek') {
+      return normalizeBaseUrl(baseUrl)
+    }
+    return normalizeAnthropicBaseUrl(baseUrl)
+  }
 
   buildStreamRequest(input: StreamRequestInput): ProviderRequest {
-    const url = normalizeAnthropicBaseUrl(input.baseUrl)
+    const url = this.normalizeUrl(input.baseUrl)
     const messages = toAnthropicMessages(input)
 
     // 启用思考时需要更大的 max_tokens（budget_tokens 必须 < max_tokens）
@@ -292,7 +306,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {
-    const url = normalizeAnthropicBaseUrl(input.baseUrl)
+    const url = this.normalizeUrl(input.baseUrl)
 
     return {
       url: `${url}/messages`,

@@ -192,6 +192,7 @@ export function getAcceleratorDisplay(accelerator: string): string {
       .replace(/Shift\+/gi, '⇧')
       .replace(/Alt\+/gi, '⌥')
       .replace(/Ctrl\+/gi, '⌃')
+      .replace(/Backspace/gi, '⌫')
   }
   return accelerator
 }

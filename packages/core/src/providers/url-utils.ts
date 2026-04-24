@@ -17,12 +17,21 @@
  * - "https://proxy.example.com/v2/" → "https://proxy.example.com/v2"
  * - "https://proxy.example.com/v1/messages" → "https://proxy.example.com/v1"
  * - "https://proxy.example.com/v1/messages/" → "https://proxy.example.com/v1"
+ * - "https://api.deepseek.com/anthropic" → 不变（已有非版本路径）
  */
 export function normalizeAnthropicBaseUrl(baseUrl: string): string {
   let url = baseUrl.trim().replace(/\/+$/, '')
   url = url.replace(/\/messages$/, '')
   if (!url.match(/\/v\d+$/)) {
-    url = `${url}/v1`
+    // 仅对根路径或纯域名追加 /v1；已有路径（如 deepseek /anthropic）保持原样
+    try {
+      const pathname = new URL(url).pathname
+      if (pathname === '/' || pathname === '') {
+        url = `${url}/v1`
+      }
+    } catch {
+      url = `${url}/v1`
+    }
   }
   return url
 }

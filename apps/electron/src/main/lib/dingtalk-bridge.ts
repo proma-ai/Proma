@@ -18,7 +18,10 @@ import type {
 } from '@proma/shared'
 import { DINGTALK_IPC_CHANNELS } from '@proma/shared'
 import { getDecryptedBotClientSecret } from './dingtalk-config'
-import { BridgeCommandHandler } from './bridge-command-handler'
+import { BridgeCommandHandler, type BridgeAttachment } from './bridge-command-handler'
+import { inferImageMediaType, saveImageToSession, inferExtension, MAX_IMAGE_SIZE } from './bridge-attachment-utils'
+import { getAgentWorkspace } from './agent-workspace-manager'
+import { getSettings } from './settings-service'
 
 // ===== 类型声明 =====
 
@@ -61,12 +64,31 @@ interface DWClientDownStream {
 interface DingTalkRobotMessage {
   msgtype: string
   text?: { content: string }
+  /** msgtype === 'picture' 时使用 */
+  content?: { downloadCode?: string; pictureDownloadCode?: string }
+  /** msgtype === 'richText' 时使用 */
+  richText?: {
+    richText?: Array<{
+      text?: string
+      type?: string
+      downloadCode?: string
+      pictureDownloadCode?: string
+    }>
+  }
   senderNick: string
   senderId: string
   conversationId: string
   conversationType: '1' | '2'  // 1=单聊, 2=群聊
   sessionWebhook: string
   sessionWebhookExpiredTime: number
+  /** 机器人标识，用于图片下载 API */
+  robotCode?: string
+}
+
+interface DingTalkImageAttachment {
+  id: string
+  data: Buffer
+  mediaType: string
 }
 
 // ===== Bridge 实例 =====
@@ -78,6 +100,18 @@ class DingTalkBridge {
   /** 每个实例独立的 webhook 缓存 */
   private webhookCache = new Map<string, string>()
   private readonly MAX_WEBHOOK_CACHE = 200
+
+  /** 消息处理队列（串行化，避免同一 chatId 并发创建 session） */
+  private messageQueue: Promise<void> = Promise.resolve()
+
+  /** 图片缓冲（纯图片消息等待文字触发） */
+  private pendingImages = new Map<string, { images: DingTalkImageAttachment[]; createdAt: number }>()
+  private static readonly PENDING_IMAGES_TTL = 10 * 60 * 1000 // 10 minutes
+  private static readonly PENDING_IMAGES_MAX = 20
+  private pendingImagesCleanupTimer: ReturnType<typeof setInterval> | null = null
+
+  /** access_token 缓存 */
+  private accessToken: { value: string; expiresAt: number } | null = null
 
   /** Bot 配置（构造时传入，workspace 切换时同步更新） */
   botConfig: DingTalkBotConfig
@@ -177,6 +211,7 @@ class DingTalkBridge {
 
       await this.client.connect()
       this.commandHandler.subscribe()
+      this.pendingImagesCleanupTimer = setInterval(() => this.cleanExpiredPendingImages(), 20 * 60 * 1000)
 
       this.updateStatus({ status: 'connected', connectedAt: Date.now() })
       console.log(`[钉钉 Bridge/${this.botConfig.name}] Stream 连接已建立`)
@@ -200,6 +235,13 @@ class DingTalkBridge {
       this.client = null
     }
     this.commandHandler.unsubscribe()
+    if (this.pendingImagesCleanupTimer) {
+      clearInterval(this.pendingImagesCleanupTimer)
+      this.pendingImagesCleanupTimer = null
+    }
+    this.pendingImages.clear()
+    this.messageQueue = Promise.resolve()
+    this.accessToken = null
     this.updateStatus({ status: 'disconnected' })
     console.log(`[钉钉 Bridge/${this.botConfig.name}] 已停止`)
   }
@@ -237,34 +279,228 @@ class DingTalkBridge {
     }
   }
 
-  /** 处理机器人消息 */
+  /** 处理机器人消息（串行排队，避免并发竞争） */
   private handleRobotMessage(msg: DWClientDownStream): void {
-    try {
-      const data = JSON.parse(msg.data) as DingTalkRobotMessage
-      const text = data.text?.content?.trim() ?? ''
-
-      console.log(`[钉钉 Bridge/${this.botConfig.name}] 收到消息:`, {
-        msgId: msg.headers.messageId,
-        senderNick: data.senderNick,
-        text: text.length > 100 ? text.slice(0, 100) + '...' : text,
-        conversationType: data.conversationType,
-      })
-
-      if (!text) return
-
-      // 缓存 webhook
-      const chatId = data.conversationId
-      this.cacheWebhook(chatId, data.sessionWebhook)
-
-      // 委托给通用命令处理器
-      this.commandHandler.handleIncomingMessage(chatId, text, {
-        sessionWebhook: data.sessionWebhook,
-      }).catch((error) => {
+    this.messageQueue = this.messageQueue
+      .then(() => this.processRobotMessage(msg))
+      .catch((error) => {
         console.error(`[钉钉 Bridge/${this.botConfig.name}] 处理消息失败:`, error)
       })
+  }
+
+  private cleanExpiredPendingImages(): void {
+    const now = Date.now()
+    for (const [chatId, entry] of this.pendingImages) {
+      if (now - entry.createdAt > DingTalkBridge.PENDING_IMAGES_TTL) {
+        console.log(`[钉钉 Bridge/${this.botConfig.name}] 清理过期图片缓冲: ${chatId.slice(0, 8)}... (${entry.images.length} 张)`)
+        this.pendingImages.delete(chatId)
+      }
+    }
+  }
+
+  private async processRobotMessage(msg: DWClientDownStream): Promise<void> {
+    let data: DingTalkRobotMessage
+    try {
+      data = JSON.parse(msg.data) as DingTalkRobotMessage
     } catch (error) {
       console.error(`[钉钉 Bridge/${this.botConfig.name}] 解析消息失败:`, error, msg.data)
+      return
     }
+
+    const chatId = data.conversationId
+    const ctx = { sessionWebhook: data.sessionWebhook }
+    this.cacheWebhook(chatId, data.sessionWebhook)
+
+    // 根据 msgtype 提取文本 + 图片下载码
+    let text = ''
+    const downloadCodes: string[] = []
+
+    if (data.msgtype === 'text') {
+      text = data.text?.content?.trim() ?? ''
+    } else if (data.msgtype === 'picture') {
+      const code = data.content?.downloadCode || data.content?.pictureDownloadCode
+      if (code) downloadCodes.push(code)
+    } else if (data.msgtype === 'richText') {
+      for (const node of data.richText?.richText ?? []) {
+        if (node.text) text += node.text
+        const code = node.downloadCode || node.pictureDownloadCode
+        if (node.type === 'picture' && code) downloadCodes.push(code)
+      }
+      text = text.trim()
+    } else {
+      console.log(`[钉钉 Bridge/${this.botConfig.name}] 跳过不支持的消息类型: ${data.msgtype}`)
+      return
+    }
+
+    console.log(`[钉钉 Bridge/${this.botConfig.name}] 收到消息:`, {
+      msgId: msg.headers.messageId,
+      senderNick: data.senderNick,
+      text: text.length > 100 ? text.slice(0, 100) + '...' : text,
+      imageCount: downloadCodes.length,
+      conversationType: data.conversationType,
+    })
+
+    // 下载图片（使用消息中的 robotCode，而非 clientId）
+    const robotCode = data.robotCode || this.botConfig.clientId
+    const downloads: DingTalkImageAttachment[] = []
+    for (let idx = 0; idx < downloadCodes.length; idx++) {
+      try {
+        const buf = await this.downloadDingTalkImage(downloadCodes[idx]!, robotCode)
+        const mediaType = inferImageMediaType(buf)
+        if (buf.length > MAX_IMAGE_SIZE) {
+          console.warn(`[钉钉 Bridge/${this.botConfig.name}] 图片较大: ${(buf.length / 1024 / 1024).toFixed(1)}MB`)
+        }
+        downloads.push({ id: `${msg.headers.messageId}-${idx}`, data: buf, mediaType })
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error)
+        console.error(`[钉钉 Bridge/${this.botConfig.name}] 图片下载失败:`, errMsg)
+        await this.replyTextViaWebhook(data.sessionWebhook, '⚠️ 一张图片下载失败，已跳过')
+      }
+    }
+
+    if (!text && downloads.length === 0) return
+
+    // 清理过期缓冲
+    this.cleanExpiredPendingImages()
+
+    // 纯图片 → 缓冲，等待文字触发
+    if (!text && downloads.length > 0) {
+      const entry = this.pendingImages.get(chatId)
+      const existing = entry ? entry.images : []
+      const merged = [...existing, ...downloads].slice(-DingTalkBridge.PENDING_IMAGES_MAX)
+      this.pendingImages.set(chatId, { images: merged, createdAt: entry?.createdAt ?? Date.now() })
+      await this.replyTextViaWebhook(
+        data.sessionWebhook,
+        `📎 已收到 ${merged.length} 张图片，请继续发送文字消息以触发处理。`,
+      )
+      return
+    }
+
+    // 文字消息：合并缓冲
+    const pendingEntry = this.pendingImages.get(chatId)
+    const pending = pendingEntry ? pendingEntry.images : []
+    const allImages = [...pending, ...downloads]
+    this.pendingImages.delete(chatId)
+
+    if (allImages.length === 0) {
+      await this.commandHandler.handleIncomingMessage(chatId, text, ctx)
+      return
+    }
+
+    // 命令消息携带图片：把图片放回缓冲，仅处理命令
+    if (text.startsWith('/')) {
+      this.pendingImages.set(chatId, { images: allImages, createdAt: Date.now() })
+      await this.commandHandler.handleIncomingMessage(chatId, text, ctx)
+      return
+    }
+
+    // 有图片：先检查 session 是否正在运行，避免保存图片后消息被拦截
+    if (this.commandHandler.isSessionActive(chatId)) {
+      this.pendingImages.set(chatId, { images: allImages, createdAt: Date.now() })
+      await this.replyTextViaWebhook(data.sessionWebhook, '❌ 上一条消息仍在处理中，图片已暂存，请稍候再试')
+      return
+    }
+
+    // 先验证 workspace 是否有效，避免 ensureBinding 创建孤儿 binding
+    const preCheckWorkspaceId = this.botConfig.defaultWorkspaceId ?? getSettings().agentWorkspaceId ?? ''
+    if (!preCheckWorkspaceId || !getAgentWorkspace(preCheckWorkspaceId)) {
+      await this.replyTextViaWebhook(data.sessionWebhook, '⚠️ 当前未设置工作区，无法保存图片')
+      return
+    }
+
+    const binding = this.commandHandler.ensureBinding(chatId)
+    if (!binding) {
+      await this.replyTextViaWebhook(data.sessionWebhook, '请先在 Proma 设置中选择 Agent 渠道。')
+      return
+    }
+    const workspace = getAgentWorkspace(binding.workspaceId)
+    if (!workspace) {
+      await this.replyTextViaWebhook(data.sessionWebhook, '⚠️ 当前未设置工作区，无法保存图片')
+      return
+    }
+
+    const attachments: BridgeAttachment[] = allImages.map((img) => {
+      const hint = `dingtalk-${img.id}`
+      const absolutePath = saveImageToSession(
+        workspace.slug,
+        binding.sessionId,
+        hint,
+        img.mediaType,
+        img.data,
+      )
+      const label = `${hint}.${inferExtension(img.mediaType)}`
+      return { absolutePath, label, kind: 'image' as const }
+    })
+
+    await this.commandHandler.handleIncomingMessage(chatId, text, ctx, attachments)
+  }
+
+  /** 通过 sessionWebhook 发送纯文本（用于提示/警告） */
+  private async replyTextViaWebhook(webhook: string, text: string): Promise<void> {
+    try {
+      const resp = await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msgtype: 'text', text: { content: text } }),
+      })
+      if (!resp.ok) {
+        console.warn(`[钉钉 Bridge/${this.botConfig.name}] webhook 回复失败: HTTP ${resp.status}`)
+      }
+    } catch (error) {
+      console.error(`[钉钉 Bridge/${this.botConfig.name}] webhook 发送失败:`, error)
+    }
+  }
+
+  /** 获取 access_token（带缓存，过期前 5 分钟刷新） */
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken && Date.now() < this.accessToken.expiresAt) {
+      return this.accessToken.value
+    }
+    const secret = getDecryptedBotClientSecret(this.botConfig.id)
+    const resp = await fetch('https://api.dingtalk.com/v1.0/oauth2/accessToken', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appKey: this.botConfig.clientId,
+        appSecret: secret,
+      }),
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(`获取 access_token 失败: HTTP ${resp.status} ${body}`)
+    }
+    const data = await resp.json() as { accessToken: string; expireIn?: number; expiresIn?: number }
+    const expireSeconds = data.expireIn ?? data.expiresIn ?? 7200
+    this.accessToken = {
+      value: data.accessToken,
+      expiresAt: Date.now() + Math.max(60, expireSeconds - 300) * 1000,
+    }
+    return data.accessToken
+  }
+
+  /** 通过 downloadCode 下载钉钉图片 */
+  private async downloadDingTalkImage(downloadCode: string, robotCode: string): Promise<Buffer> {
+    const token = await this.getAccessToken()
+    const resp = await fetch('https://api.dingtalk.com/v1.0/robot/messageFiles/download', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-acs-dingtalk-access-token': token,
+      },
+      body: JSON.stringify({
+        downloadCode,
+        robotCode,
+      }),
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(`换取下载 URL 失败: HTTP ${resp.status} ${body}`)
+    }
+    const { downloadUrl } = await resp.json() as { downloadUrl: string }
+    if (!downloadUrl) throw new Error('钉钉返回空 downloadUrl')
+    const bin = await fetch(downloadUrl)
+    if (!bin.ok) throw new Error(`下载图片失败: HTTP ${bin.status}`)
+    return Buffer.from(await bin.arrayBuffer())
   }
 
   /** 缓存 webhook */

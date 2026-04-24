@@ -45,7 +45,7 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-mode', text: '按 Ctrl+Shift+M 快速切换 Chat / Agent 模式', platform: 'windows' },
   { id: 'win-shortcut-focus', text: '按 Ctrl+L 快速跳转到输入框', platform: 'windows' },
   { id: 'win-shortcut-clear', text: '按 Ctrl+K 清除当前对话上下文', platform: 'windows' },
-  { id: 'win-shortcut-stop', text: '按 Ctrl+. 中断 AI 响应', platform: 'windows' },
+  { id: 'win-shortcut-stop', text: '按 Ctrl+Shift+Backspace 中断 AI 响应', platform: 'windows' },
   { id: 'win-shortcut-close', text: '按 Ctrl+W 关闭当前标签页', platform: 'windows' },
   { id: 'win-shortcut-zoom', text: '按 Ctrl++ / Ctrl+- 可以放大或缩小界面，Ctrl+0 重置', platform: 'windows' },
   { id: 'win-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'windows' },

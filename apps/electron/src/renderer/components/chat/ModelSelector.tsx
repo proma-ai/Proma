@@ -323,7 +323,7 @@ export function ModelSelector({
                             'flex items-center gap-3 w-[calc(100%-1rem)] px-4 py-1.5 mx-2 rounded-lg text-left transition-colors',
                             'hover:bg-accent',
                             isHighlighted && 'bg-accent',
-                            isSelected && 'bg-accent/30 border-l-3 border-l-primary'
+                            isSelected && 'bg-foreground/10 border-l-3 border-l-primary'
                           )}
                         >
                           <img

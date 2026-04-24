@@ -81,7 +81,7 @@ export const WECHAT_MESSAGE_STATE = {
 export interface WeChatMessageItem {
   type: number
   text_item?: { text: string }
-  image_item?: { url?: string; media?: WeChatMediaInfo }
+  image_item?: { url?: string; aeskey?: string; media?: WeChatMediaInfo }
   voice_item?: { media?: WeChatMediaInfo; text?: string; playtime?: number }
   file_item?: { media?: WeChatMediaInfo; file_name?: string; len?: string }
   video_item?: { media?: WeChatMediaInfo; video_size?: number }
@@ -92,6 +92,7 @@ export interface WeChatMediaInfo {
   encrypt_query_param: string
   aes_key: string
   encrypt_type: number
+  full_url?: string
 }
 
 /** iLink 收到的微信消息 */

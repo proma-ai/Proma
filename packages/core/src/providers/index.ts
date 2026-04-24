@@ -28,7 +28,7 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['proma', new PromaAdapter()],         // Proma 官方
   ['anthropic', new AnthropicAdapter()],
   ['openai', new OpenAIAdapter()],
-  ['deepseek', new OpenAIAdapter()],      // DeepSeek 使用 OpenAI 兼容协议
+  ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['moonshot', new OpenAIAdapter()],      // Moonshot/Kimi 使用 OpenAI 兼容协议
   ['zhipu', new OpenAIAdapter()],         // 智谱 AI 使用 OpenAI 兼容协议
   ['minimax', new OpenAIAdapter()],       // MiniMax 使用 OpenAI 兼容协议

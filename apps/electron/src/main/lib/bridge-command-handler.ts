@@ -19,6 +19,7 @@ import {
 import { runAgentHeadless, agentEventBus, stopAgent, isAgentSessionActive } from './agent-service'
 import { getSettings } from './settings-service'
 import { getAgentWorkspacePath } from './config-paths'
+import { buildAttachedFilesBlock } from './bridge-attachment-utils'
 import { readdirSync } from 'node:fs'
 
 // ===== 接口定义 =====
@@ -27,6 +28,16 @@ import { readdirSync } from 'node:fs'
 export interface BridgePlatformAdapter {
   /** 发送纯文本回复。meta 是平台专属的上下文数据（如微信的 contextToken） */
   sendText(chatId: string, text: string, meta?: unknown): Promise<void>
+}
+
+/** 已保存到磁盘的附件引用，由各 Bridge 预处理后传入 handler */
+export interface BridgeAttachment {
+  /** 附件绝对路径 */
+  absolutePath: string
+  /** 在 <attached_files> 中显示的标签 */
+  label: string
+  /** 附件类型，用于未来扩展路由（当前仅信息） */
+  kind: 'image' | 'file'
 }
 
 /** 命令处理器配置 */
@@ -95,12 +106,61 @@ export class BridgeCommandHandler {
   // ===== 公开 API =====
 
   /** 处理收到的消息（自动区分命令 vs 普通消息） */
-  async handleIncomingMessage(chatId: string, text: string, contextData?: unknown): Promise<void> {
-    if (text.startsWith('/')) {
+  async handleIncomingMessage(
+    chatId: string,
+    text: string,
+    contextData?: unknown,
+    attachments?: BridgeAttachment[],
+  ): Promise<void> {
+    if (text.trimStart().startsWith('/')) {
+      // 命令消息不携带附件（附件由 Bridge 缓冲，等普通消息触发）
       await this.handleCommand(chatId, text, contextData)
     } else {
-      await this.handleUserMessage(chatId, text, contextData)
+      await this.handleUserMessage(chatId, text, contextData, attachments)
     }
+  }
+
+  /**
+   * 获取或自动创建 chatId 对应的 binding
+   * 用于 Bridge 在保存图片/文件前预先拿到 sessionId 和 workspaceId
+   * 如果未配置 Agent 渠道，返回 null
+   */
+  ensureBinding(chatId: string): BridgeChatBinding | null {
+    const existing = this.chatBindings.get(chatId)
+    if (existing) return existing
+
+    const settings = getSettings()
+    const channelId = settings.agentChannelId
+    if (!channelId) return null
+
+    const workspaceId = this.config.getDefaultWorkspaceId?.() ?? settings.agentWorkspaceId ?? ''
+
+    const session = createAgentSession(
+      `${this.config.platformName}会话`,
+      channelId,
+      workspaceId || undefined,
+    )
+
+    const binding: BridgeChatBinding = {
+      chatId,
+      sessionId: session.id,
+      workspaceId,
+      channelId,
+      modelId: settings.agentModelId ?? undefined,
+      mode: 'agent',
+    }
+    this.chatBindings.set(chatId, binding)
+    this.sessionToChat.set(session.id, chatId)
+    this.log(`为 ${chatId.slice(0, 8)}... 创建会话: ${session.id.slice(0, 8)}`)
+    this.notifySessionCreated(session.id, session.title)
+    return binding
+  }
+
+  /** 检查指定 chatId 的 session 是否正在运行 */
+  isSessionActive(chatId: string): boolean {
+    const binding = this.chatBindings.get(chatId)
+    if (!binding) return false
+    return isAgentSessionActive(binding.sessionId)
   }
 
   /** 订阅 Agent EventBus（Bridge 连接建立后调用） */
@@ -485,7 +545,12 @@ export class BridgeCommandHandler {
 
   // ===== Agent 消息路由 =====
 
-  private async handleUserMessage(chatId: string, text: string, contextData?: unknown): Promise<void> {
+  private async handleUserMessage(
+    chatId: string,
+    text: string,
+    contextData?: unknown,
+    attachments?: BridgeAttachment[],
+  ): Promise<void> {
     const settings = getSettings()
     const channelId = settings.agentChannelId
     if (!channelId) {
@@ -495,29 +560,14 @@ export class BridgeCommandHandler {
 
     let binding = this.chatBindings.get(chatId)
 
-    // 自动创建会话
+    // 自动创建会话（复用 ensureBinding）
     if (!binding) {
-      const workspaceId = this.config.getDefaultWorkspaceId?.() ?? settings.agentWorkspaceId ?? ''
-
-      const session = createAgentSession(
-        `${this.config.platformName}会话`,
-        channelId,
-        workspaceId || undefined,
-      )
-
-      binding = {
-        chatId,
-        sessionId: session.id,
-        workspaceId,
-        channelId,
-        modelId: settings.agentModelId ?? undefined,
-        mode: 'agent',
+      const result = this.ensureBinding(chatId)
+      if (!result) {
+        await this.send(chatId, '请先在 Proma 设置中选择 Agent 渠道。', contextData)
+        return
       }
-      this.chatBindings.set(chatId, binding)
-      this.sessionToChat.set(session.id, chatId)
-      this.log(`为 ${chatId.slice(0, 8)}... 创建会话: ${session.id.slice(0, 8)}`)
-
-      this.notifySessionCreated(session.id, session.title)
+      binding = result
     }
 
     if (binding.mode !== 'agent') {
@@ -551,9 +601,16 @@ export class BridgeCommandHandler {
     const latestChannelId = latestSettings.agentChannelId || binding.channelId
     const modelId = latestSettings.agentModelId || binding.modelId
 
+    // 如果有附件，拼接 <attached_files> 块到用户消息前
+    const fileReferences = attachments?.length
+      ? buildAttachedFilesBlock(attachments.map(a => ({ label: a.label, path: a.absolutePath })))
+      : ''
+    const effectiveText = text.trim() || (attachments?.length ? '请查看上面附加的文件。' : '')
+    const userMessage = fileReferences + effectiveText
+
     const input = {
       sessionId: binding.sessionId,
-      userMessage: text,
+      userMessage,
       channelId: latestChannelId,
       modelId,
       workspaceId: binding.workspaceId,

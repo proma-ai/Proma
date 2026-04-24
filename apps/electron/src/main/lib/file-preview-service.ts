@@ -14,7 +14,7 @@
  * 所有预览窗口自动跟随系统主题（light/dark）。
  */
 
-import { BrowserWindow, shell, nativeTheme, ipcMain, dialog } from 'electron'
+import { BrowserWindow, shell, nativeTheme, ipcMain, dialog, screen } from 'electron'
 import { resolve, basename, extname, join, dirname } from 'node:path'
 import {
   readFileSync,
@@ -1310,9 +1310,14 @@ function docxPreviewHtml(filePath: string, filename: string, base64Data: string)
 /** 创建预览窗口并绑定脏状态关闭确认 */
 function createPreviewWindow(filename: string): BrowserWindow {
   const isMac = process.platform === 'darwin'
+  const { workArea } = screen.getPrimaryDisplay()
+  const width = Math.min(1200, workArea.width)
+  const height = workArea.height
   const previewWindow = new BrowserWindow({
-    width: 880,
-    height: 920,
+    width,
+    height,
+    x: workArea.x + Math.max(0, Math.floor((workArea.width - width) / 2)),
+    y: workArea.y,
     minWidth: 480,
     minHeight: 360,
     title: filename,
@@ -1323,10 +1328,17 @@ function createPreviewWindow(filename: string): BrowserWindow {
       preload: join(__dirname, 'file-preview-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      zoomFactor: 1.15,
     },
   })
 
   previewWindow.setMenuBarVisibility(false)
+
+  previewWindow.webContents.on('did-finish-load', () => {
+    if (!previewWindow.isDestroyed()) {
+      previewWindow.webContents.setZoomFactor(1.15)
+    }
+  })
 
   // 在 'closed' 触发时 webContents 已销毁，提前缓存 id 用于状态查找/清理
   const wcId = previewWindow.webContents.id

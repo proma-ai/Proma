@@ -855,11 +855,27 @@ export function registerIpcHandlers(): void {
     async (_, id: string): Promise<AgentSessionMeta> => {
       const sessions = listAgentSessions()
       const current = sessions.find((s) => s.id === id)
-      if (!current) throw new Error(`Agent 会话不存在: ${id}`)
+      if (!current) throw new Error(`Agent session not found: ${id}`)
       const newPinned = !current.pinned
       // 置顶时自动取消归档
       const updates: Partial<AgentSessionMeta> = { pinned: newPinned }
       if (newPinned && current.archived) {
+        updates.archived = false
+      }
+      return updateAgentSessionMeta(id, updates)
+    }
+  )
+
+  // 切换 Agent 会话手动工作中状态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TOGGLE_MANUAL_WORKING,
+    async (_, id: string): Promise<AgentSessionMeta> => {
+      const sessions = listAgentSessions()
+      const current = sessions.find((s) => s.id === id)
+      if (!current) throw new Error(`Agent session not found: ${id}`)
+      const newManualWorking = !current.manualWorking
+      const updates: Partial<AgentSessionMeta> = { manualWorking: newManualWorking }
+      if (newManualWorking && current.archived) {
         updates.archived = false
       }
       return updateAgentSessionMeta(id, updates)
@@ -872,7 +888,7 @@ export function registerIpcHandlers(): void {
     async (_, id: string): Promise<AgentSessionMeta> => {
       const sessions = listAgentSessions()
       const current = sessions.find((s) => s.id === id)
-      if (!current) throw new Error(`Agent 会话不存在: ${id}`)
+      if (!current) throw new Error(`Agent session not found: ${id}`)
       const newArchived = !current.archived
       // 归档时自动取消置顶
       const updates: Partial<AgentSessionMeta> = { archived: newArchived }
@@ -1737,6 +1753,61 @@ export function registerIpcHandlers(): void {
     async (_, filePath: string): Promise<void> => {
       const { openFilePreview } = await import('./lib/file-preview-service')
       openFilePreview(filePath)
+    }
+  )
+
+  // 读取附加目录文件内容为 base64（限制在已附加目录范围内，用于侧面板添加到聊天）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_ATTACHED_FILE,
+    async (_, filePath: string, sessionId?: string, workspaceSlug?: string): Promise<string> => {
+      if (!filePath || typeof filePath !== 'string') {
+        throw new Error('无效的文件路径')
+      }
+
+      const { resolve, sep } = await import('node:path')
+      const { readFile, stat, realpath } = await import('node:fs/promises')
+
+      // 使用 realpath 解析符号链接，防止 symlink 绕过路径检查
+      const safePath = await realpath(resolve(filePath)).catch(() => {
+        throw new Error(`文件不存在: ${filePath}`)
+      })
+
+      // 收集所有允许的目录：会话附加目录 + 工作区附加目录 + 工作区文件目录
+      const allowedDirs: string[] = []
+
+      if (sessionId) {
+        const meta = getAgentSessionMeta(sessionId)
+        if (meta?.attachedDirectories) {
+          allowedDirs.push(...meta.attachedDirectories)
+        }
+      }
+      if (workspaceSlug) {
+        allowedDirs.push(...getWorkspaceAttachedDirectories(workspaceSlug))
+        allowedDirs.push(getWorkspaceFilesDir(workspaceSlug))
+      }
+
+      // 还允许访问 agent-workspaces 根目录下的文件（session 文件等）
+      allowedDirs.push(getAgentWorkspacesDir())
+
+      const resolvedAllowedDirs = await Promise.all(
+        allowedDirs.map((dir) => realpath(resolve(dir)).catch(() => resolve(dir)))
+      )
+      const isAllowed = resolvedAllowedDirs.some((dir) => safePath.startsWith(dir + sep) || safePath === dir)
+      if (!isAllowed) {
+        throw new Error('访问路径不在允许范围内')
+      }
+
+      const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 MB
+      const fileStat = await stat(safePath).catch(() => null)
+      if (!fileStat) {
+        throw new Error(`文件不存在: ${filePath}`)
+      }
+      if (fileStat.size > MAX_FILE_SIZE) {
+        throw new Error(`文件过大（${Math.round(fileStat.size / 1024 / 1024)}MB），最大支持 20MB`)
+      }
+
+      const buffer = await readFile(safePath)
+      return buffer.toString('base64')
     }
   )
 

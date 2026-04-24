@@ -21,7 +21,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
-import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
+import { PROMA_OFFICIAL_CHANNEL_ID, PROVIDER_DEFAULT_URLS } from '@proma/shared'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { normalizeAnthropicBaseUrl, normalizeBaseUrl } from '@proma/core'
@@ -204,9 +204,37 @@ export function removeOfficialChannel(): void {
  * 获取所有渠道
  *
  * 返回的渠道中 apiKey 保持加密状态。
+ * 首次调用时，如果没有任何 DeepSeek 渠道，自动创建预设渠道。
  */
 export function listChannels(): Channel[] {
   const config = readConfig()
+
+  // 首次使用：如果没有 DeepSeek 渠道，自动创建预设（使用 Anthropic 协议）
+  const hasDeepSeek = config.channels.some(
+    (c) => c.provider === 'deepseek' || c.baseUrl.includes('api.deepseek.com'),
+  )
+  if (!hasDeepSeek) {
+    const now = Date.now()
+    const presetChannel: Channel = {
+      id: randomUUID(),
+      name: 'DeepSeek',
+      provider: 'anthropic',
+      baseUrl: PROVIDER_DEFAULT_URLS.deepseek,
+      apiKey: encryptApiKey(''),
+      models: [
+        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+      ],
+      enabled: false,
+      createdAt: now,
+      updatedAt: now,
+    }
+    config.channels.push(presetChannel)
+    writeConfig(config)
+    console.log('[渠道管理] 已自动创建 DeepSeek 预设渠道')
+    return config.channels
+  }
+
   return config.channels
 }
 
@@ -343,9 +371,9 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'proma':
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
-        return await testAnthropic(channel.baseUrl, apiKey, proxyUrl)
-      case 'openai':
       case 'deepseek':
+        return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
+      case 'openai':
       case 'moonshot':
       case 'zhipu':
       case 'minimax':
@@ -365,11 +393,19 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 }
 
 /**
- * 测试 Anthropic API 连接
+ * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek）
+ *
+ * DeepSeek 的 Anthropic API 端点无需 /v1 前缀（如 https://api.deepseek.com/anthropic/messages）
  */
-async function testAnthropic(baseUrl: string, apiKey: string, proxyUrl?: string): Promise<ChannelTestResult> {
-  const url = normalizeAnthropicBaseUrl(baseUrl)
+async function testAnthropicCompatible(
+  baseUrl: string,
+  apiKey: string,
+  proxyUrl?: string,
+  provider: ProviderType = 'anthropic',
+): Promise<ChannelTestResult> {
+  const url = provider === 'deepseek' ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
+  const testModel = provider === 'deepseek' ? 'deepseek-v4-pro' : 'claude-sonnet-4-6'
 
   const response = await fetchFn(`${url}/messages`, {
     method: 'POST',
@@ -380,7 +416,7 @@ async function testAnthropic(baseUrl: string, apiKey: string, proxyUrl?: string)
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
+      model: testModel,
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),
@@ -400,7 +436,7 @@ async function testAnthropic(baseUrl: string, apiKey: string, proxyUrl?: string)
 }
 
 /**
- * 测试 OpenAI 兼容 API 连接（OpenAI / DeepSeek / Custom）
+ * 测试 OpenAI 兼容 API 连接（OpenAI / Custom）
  */
 async function testOpenAICompatible(baseUrl: string, apiKey: string, proxyUrl?: string): Promise<ChannelTestResult> {
   const url = normalizeBaseUrl(baseUrl)
@@ -464,9 +500,9 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
       case 'proma':
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
-        return await testAnthropic(input.baseUrl, input.apiKey, proxyUrl)
-      case 'openai':
       case 'deepseek':
+        return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+      case 'openai':
       case 'moonshot':
       case 'zhipu':
       case 'minimax':
@@ -501,9 +537,9 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'proma':
         return { success: false, message: '官方渠道模型由服务端管理', models: [] }
       case 'anthropic':
-        return await fetchAnthropicModels(input.baseUrl, input.apiKey, proxyUrl)
-      case 'openai':
       case 'deepseek':
+        return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+      case 'openai':
       case 'moonshot':
       case 'zhipu':
       case 'minimax':
@@ -533,13 +569,18 @@ interface AnthropicModelItem {
 }
 
 /**
- * 从 Anthropic API 拉取模型列表
+ * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek）
  *
- * 先规范化 baseUrl 确保包含 /v1，再请求 /models。
+ * DeepSeek 的 Anthropic API 端点无需 /v1 前缀。
  * 文档: https://docs.anthropic.com/en/api/models-list
  */
-async function fetchAnthropicModels(baseUrl: string, apiKey: string, proxyUrl?: string): Promise<FetchModelsResult> {
-  const url = normalizeAnthropicBaseUrl(baseUrl)
+async function fetchAnthropicCompatibleModels(
+  baseUrl: string,
+  apiKey: string,
+  proxyUrl?: string,
+  provider: ProviderType = 'anthropic',
+): Promise<FetchModelsResult> {
+  const url = provider === 'deepseek' ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
 
   const response = await fetchFn(`${url}/models`, {
@@ -586,7 +627,7 @@ interface OpenAIModelItem {
 }
 
 /**
- * 从 OpenAI 兼容 API 拉取模型列表（OpenAI / DeepSeek / Custom）
+ * 从 OpenAI 兼容 API 拉取模型列表（OpenAI / Custom）
  *
  * API: GET {baseUrl}/models
  * 通用 OpenAI 兼容格式，适用于大部分第三方供应商。

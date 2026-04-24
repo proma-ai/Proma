@@ -71,7 +71,7 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   proma: '/chat',
   anthropic: '/v1/messages',
   openai: '/chat/completions',
-  deepseek: '/chat/completions',
+  deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
   moonshot: '/chat/completions',
   zhipu: '/chat/completions',
@@ -89,12 +89,22 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   let trimmed = baseUrl.trim().replace(/\/+$/, '')
 
-  if (provider === 'anthropic') {
+  if (provider === 'anthropic' || provider === 'deepseek') {
     // 去除用户误填的 /messages 后缀，与 normalizeAnthropicBaseUrl 保持一致
     trimmed = trimmed.replace(/\/messages$/, '')
+    if (provider === 'deepseek') {
+      return `${trimmed}/messages`
+    }
     if (trimmed.match(/\/v\d+$/)) {
       return `${trimmed}/messages`
     }
+    // 已有非根路径（如 DeepSeek 的 /anthropic）时不追加 /v1
+    try {
+      const pathname = new URL(trimmed).pathname
+      if (pathname !== '/' && pathname !== '') {
+        return `${trimmed}/messages`
+      }
+    } catch {}
     return `${trimmed}/v1/messages`
   }
 
@@ -214,12 +224,19 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [models, name, provider, baseUrl, apiKey, enabled, scheduleAutoSave])
 
-  // 切换供应商时自动更新 Base URL
+  // 切换供应商时自动更新 Base URL，DeepSeek 自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
     setTestResult(null)
+    // DeepSeek 预设模型：首次切换到 DeepSeek 且无模型时自动填充
+    if (p === 'deepseek' && models.length === 0) {
+      setModels([
+        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+      ])
+    }
   }
 
   /** 添加模型 */

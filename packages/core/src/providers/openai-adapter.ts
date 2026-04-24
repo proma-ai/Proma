@@ -2,11 +2,11 @@
  * OpenAI 兼容供应商适配器
  *
  * 实现 OpenAI Chat Completions API 的消息转换、请求构建和 SSE 解析。
- * 同时适用于 OpenAI、DeepSeek 和自定义 OpenAI 兼容 API。
+ * 同时适用于 OpenAI 和自定义 OpenAI 兼容 API。
  * 特点：
  * - 角色：system / user / assistant / tool
  * - 图片格式：{ type: 'image_url', image_url: { url: 'data:mime;base64,...' } }
- * - SSE 解析：choices[0].delta.content + reasoning_content（DeepSeek）+ tool_calls
+ * - SSE 解析：choices[0].delta.content + reasoning_content + tool_calls
  * - 认证：Authorization: Bearer
  */
 

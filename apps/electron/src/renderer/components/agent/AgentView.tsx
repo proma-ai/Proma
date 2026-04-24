@@ -44,6 +44,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { FeishuNotifyToggle } from '@/components/chat/FeishuNotifyToggle'
 import {
   agentStreamingStatesAtom,
@@ -439,14 +440,31 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         setPersistedSDKMessages(sdkMsgs)
         setMessagesLoaded(true)
 
-        // 消息加载完成后，同步清除流式状态和实时消息，
+        // 消息加载完成后，同步清除流式展示状态和实时消息，
         // 确保 React 在一次渲染中同时显示持久化消息并移除流式气泡/实时消息，
         // 避免「实时消息已清 → 持久化消息未到」的空档闪烁
+        // 注意：保留 inputTokens/contextWindow 以维持上下文用量圆环显示
         setStreamingStates((prev) => {
           const state = prev.get(sessionId)
           if (!state || state.running) return prev  // 仍在运行中，不清除
           const map = new Map(prev)
-          map.delete(sessionId)
+          if (state.inputTokens !== undefined) {
+            // 保留 usage 数据，仅清除流式展示字段
+            map.set(sessionId, {
+              running: false,
+              content: '',
+              toolActivities: [],
+              teammates: [],
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              cacheReadTokens: state.cacheReadTokens,
+              cacheCreationTokens: state.cacheCreationTokens,
+              contextWindow: state.contextWindow,
+              model: state.model,
+            })
+          } else {
+            map.delete(sessionId)
+          }
           return map
         })
         setLiveMessagesMap((prev) => {
@@ -462,19 +480,16 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       .catch(console.error)
   }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, store])
 
-  // 从会话元数据初始化附加目录
+  // 从会话元数据初始化附加目录（仅冷启动水合，后续由 handleAttachFolder/handleDetachDirectory 实时写入）
   React.useEffect(() => {
     const meta = sessions.find((s) => s.id === sessionId)
     const dirs = meta?.attachedDirectories ?? []
     setAttachedDirsMap((prev) => {
       const existing = prev.get(sessionId)
-      // 避免不必要的更新
-      if (JSON.stringify(existing) === JSON.stringify(dirs)) return prev
+      if (existing != null) return prev
       const map = new Map(prev)
       if (dirs.length > 0) {
         map.set(sessionId, dirs)
-      } else {
-        map.delete(sessionId)
       }
       return map
     })
@@ -503,6 +518,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const streamStartedAt = Date.now()
       setStreamingStates((prev) => {
         const map = new Map(prev)
+        const existing = prev.get(sessionId)
         map.set(sessionId, {
           running: true,
           content: '',
@@ -510,6 +526,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           teammates: [],
           model: snapshot.modelId,
           startedAt: streamStartedAt,
+          inputTokens: existing?.inputTokens,
+          contextWindow: existing?.contextWindow,
         })
         return map
       })
@@ -546,8 +564,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       window.electronAPI.sendAgentMessage(input).catch((error) => {
         console.error('[AgentView] 自动发送配置消息失败:', error)
         setStreamingStates((prev) => {
+          const current = prev.get(sessionId)
+          if (!current) return prev
           const map = new Map(prev)
-          map.delete(sessionId)
+          map.set(sessionId, { ...current, running: false })
           return map
         })
       })
@@ -867,20 +887,38 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (pendingFiles.length > 0) {
       const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
       if (workspace) {
-        const filesToSave = pendingFiles.map((f) => ({
-          filename: f.filename,
-          data: window.__pendingAgentFileData?.get(f.id) || '',
-        }))
-        try {
-          const saved = await window.electronAPI.saveFilesToAgentSession({
-            workspaceSlug: workspace.slug,
-            sessionId,
-            files: filesToSave,
-          })
-          const refs = saved.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
+        // 区分：已有 sourcePath 的文件（从侧面板添加）直接引用，其余需要保存
+        const existingFiles = pendingFiles.filter((f) => f.sourcePath)
+        const newFiles = pendingFiles.filter((f) => !f.sourcePath)
+
+        const allRefs: Array<{ filename: string; targetPath: string }> = []
+
+        // 已有路径的文件直接引用
+        for (const f of existingFiles) {
+          allRefs.push({ filename: f.filename, targetPath: f.sourcePath! })
+        }
+
+        // 新上传的文件保存到 session 目录
+        if (newFiles.length > 0) {
+          const filesToSave = newFiles.map((f) => ({
+            filename: f.filename,
+            data: window.__pendingAgentFileData?.get(f.id) || '',
+          }))
+          try {
+            const saved = await window.electronAPI.saveFilesToAgentSession({
+              workspaceSlug: workspace.slug,
+              sessionId,
+              files: filesToSave,
+            })
+            allRefs.push(...saved)
+          } catch (error) {
+            console.error('[AgentView] 保存附件到 session 失败:', error)
+          }
+        }
+
+        if (allRefs.length > 0) {
+          const refs = allRefs.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
           fileReferences += `<attached_files>\n${refs}\n</attached_files>\n\n`
-        } catch (error) {
-          console.error('[AgentView] 保存附件到 session 失败:', error)
         }
       }
 
@@ -933,6 +971,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const streamStartedAt = Date.now()
     setStreamingStates((prev) => {
       const map = new Map(prev)
+      const existing = prev.get(sessionId)
       map.set(sessionId, {
         running: true,
         content: '',
@@ -940,6 +979,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         teammates: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
+        inputTokens: existing?.inputTokens,
+        contextWindow: existing?.contextWindow,
       })
       return map
     })
@@ -989,9 +1030,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     window.electronAPI.sendAgentMessage(input).catch((error) => {
       console.error('[AgentView] 发送消息失败:', error)
       setStreamingStates((prev) => {
-        if (!prev.has(sessionId)) return prev
+        const current = prev.get(sessionId)
+        if (!current) return prev
         const map = new Map(prev)
-        map.delete(sessionId)
+        map.set(sessionId, { ...current, running: false })
         return map
       })
     })
@@ -1121,6 +1163,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const streamStartedAt = Date.now()
     setStreamingStates((prev) => {
       const map = new Map(prev)
+      const existing = prev.get(sessionId)
       map.set(sessionId, {
         running: true,
         content: '',
@@ -1128,6 +1171,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         teammates: [],
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
+        inputTokens: existing?.inputTokens,
+        contextWindow: existing?.contextWindow,
       })
       return map
     })
@@ -1252,7 +1297,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [rewindTargetUuid, sessionId, store])
 
-  // 监听快捷键系统分发的 stop-generation 事件（Cmd+.）
+  // 监听快捷键系统分发的 stop-generation 事件
   React.useEffect(() => {
     const handler = (): void => {
       if (streaming) handleStop()
@@ -1499,15 +1544,22 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
               <div className="flex items-center gap-1.5">
                 {streaming && !hasTextInput ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
-                    onClick={handleStop}
-                  >
-                    <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
+                        onClick={handleStop}
+                      >
+                        <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+                    </TooltipContent>
+                  </Tooltip>
                 ) : (
                   <Button
                     type="button"

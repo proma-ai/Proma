@@ -190,7 +190,7 @@ export function GlobalShortcuts(): null {
     }, []),
   )
 
-  // Cmd+. → 停止生成（通过 CustomEvent 分发到 ChatView/AgentView）
+  // Cmd+Shift+Backspace → 停止 Agent（通过 CustomEvent 分发到 ChatView/AgentView）
   useShortcut(
     'stop-generation',
     useCallback(() => {

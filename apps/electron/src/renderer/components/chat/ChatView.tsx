@@ -419,7 +419,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     window.electronAPI.stopGeneration(conversationId).catch(console.error)
   }, [conversationId, setStreamingStates])
 
-  // 监听快捷键系统分发的 stop-generation 事件（Cmd+.）
+  // 监听快捷键系统分发的 stop-generation 事件
   React.useEffect(() => {
     const handler = (): void => {
       if (isStreaming) handleStop()
