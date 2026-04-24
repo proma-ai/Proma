@@ -62,6 +62,27 @@ const BASE_TABS: TabItem[] = [
   { id: "proxy", label: "代理", icon: <Globe size={16} /> },
 ];
 
+/** Cloud 模式专属 Tab */
+const BILLING_TAB: TabItem = {
+  id: "billing",
+  label: "立即订阅",
+  icon: <CreditCard size={16} />,
+};
+
+/** Cloud 模式专属 Tab - API Key 管理 */
+const API_TAB: TabItem = {
+  id: "api",
+  label: "开放 API",
+  icon: <KeyRound size={16} />,
+};
+
+/** Cloud 模式专属 Tab - 用量日志 */
+const USAGE_TAB: TabItem = {
+  id: "usage",
+  label: "用量日志",
+  icon: <ScrollText size={16} />,
+};
+
 /** Agent 模式专属 Tab */
 const AGENT_TAB: TabItem = {
   id: "agent",
@@ -87,27 +108,6 @@ const SHORTCUTS_TAB: TabItem = {
   id: "shortcuts",
   label: "快捷键",
   icon: <Keyboard size={16} />,
-};
-
-/** Cloud 模式专属 Tab */
-const BILLING_TAB: TabItem = {
-  id: "billing",
-  label: "订阅",
-  icon: <CreditCard size={16} />,
-};
-
-/** Cloud 模式专属 Tab - API Key 管理 */
-const API_TAB: TabItem = {
-  id: "api",
-  label: "API",
-  icon: <KeyRound size={16} />,
-};
-
-/** Cloud 模式专属 Tab - 用量日志 */
-const USAGE_TAB: TabItem = {
-  id: "usage",
-  label: "日志",
-  icon: <ScrollText size={16} />,
 };
 
 /** 尾部 Tabs */
@@ -163,9 +163,15 @@ export function SettingsPanel({
   const hasUpdate = useAtomValue(hasUpdateAtom);
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom);
 
-  // Agent 模式时在渠道后插入 Agent Tab，记忆/工具 tab 两种模式都显示，Cloud 模式插入 Billing Tab
+  // Cloud 模式专属 Tab 置顶，随后是 BASE_TABS；Agent 模式在渠道后插入 Agent Tab，记忆/工具 tab 两种模式都显示
   const tabs = React.useMemo(() => {
-    const result = [...BASE_TABS];
+    const result: TabItem[] = [];
+    if (isCloudMode()) {
+      result.push(BILLING_TAB);
+      result.push(API_TAB);
+      result.push(USAGE_TAB);
+    }
+    result.push(...BASE_TABS);
     if (appMode === "agent") {
       result.push(AGENT_TAB);
     }
@@ -173,11 +179,6 @@ export function SettingsPanel({
     result.push(BOTS_TAB);
     result.push(TUTORIAL_TAB);
     result.push(SHORTCUTS_TAB);
-    if (isCloudMode()) {
-      result.push(BILLING_TAB);
-      result.push(API_TAB);
-      result.push(USAGE_TAB);
-    }
     result.push(...TAIL_TABS);
     return result;
   }, [appMode]);
