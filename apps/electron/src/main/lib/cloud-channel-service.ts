@@ -168,7 +168,6 @@ export async function initOfficialChannel(): Promise<void> {
 
     if (models.length > 0) {
       syncOfficialChannel(models)
-      broadcastOfficialChannelUpdated()
       console.log(`[Cloud Channel] 官方渠道已同步，共 ${models.length} 个模型`)
     }
 
@@ -177,6 +176,11 @@ export async function initOfficialChannel(): Promise<void> {
 
     // 同步云端工具默认配置
     syncCloudToolDefaults()
+
+    // 所有同步完成后广播，保证渲染进程刷新时读到的是最新数据
+    if (models.length > 0) {
+      broadcastOfficialChannelUpdated()
+    }
   } catch (error) {
     // 未认证或网络错误时静默跳过
     const message = isApiError(error) ? error.message : (error instanceof Error ? error.message : '未知错误')
@@ -195,10 +199,12 @@ export async function refreshOfficialModels(): Promise<BillingIpcResponse<void>>
     const models = flattenModels(groups)
 
     syncOfficialChannel(models)
-    broadcastOfficialChannelUpdated()
 
     // 拉取 Agent 专用模型
     await fetchAndSyncAgentModels()
+
+    // 所有同步完成后再广播，确保渲染进程刷新时能读到最新 agentModels
+    broadcastOfficialChannelUpdated()
 
     return { success: true }
   } catch (error) {
@@ -259,4 +265,37 @@ function syncCloudToolDefaults(): void {
   })
 
   console.log('[Cloud Channel] 云端工具默认配置已同步')
+}
+
+// ===== 定时刷新官方模型列表 =====
+
+const MODELS_POLL_INTERVAL = 20 * 60 * 1000 // 20 分钟
+
+let modelsPollTimer: NodeJS.Timeout | null = null
+
+async function pollOfficialModels(): Promise<void> {
+  try {
+    await refreshOfficialModels()
+    console.log('[Cloud Channel] 定时刷新官方模型列表成功')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    console.warn('[Cloud Channel] 定时刷新官方模型列表失败:', message)
+  }
+}
+
+/** 启动模型列表定时轮询（每 20 分钟） */
+export function startModelsPolling(): void {
+  if (modelsPollTimer) return
+  pollOfficialModels()
+  modelsPollTimer = setInterval(() => { pollOfficialModels() }, MODELS_POLL_INTERVAL)
+  console.log('[Cloud Channel] 官方模型定时轮询已启动（间隔 20 分钟）')
+}
+
+/** 停止模型列表定时轮询 */
+export function stopModelsPolling(): void {
+  if (modelsPollTimer) {
+    clearInterval(modelsPollTimer)
+    modelsPollTimer = null
+    console.log('[Cloud Channel] 官方模型定时轮询已停止')
+  }
 }

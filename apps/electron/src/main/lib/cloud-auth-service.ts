@@ -348,8 +348,9 @@ export async function logout(): Promise<CloudAuthIpcResponse> {
   tokenStorage.clearTokens()
   // 清理官方渠道（延迟导入避免循环依赖）
   try {
-    const { cleanupOfficialChannel } = await import('./cloud-channel-service')
+    const { cleanupOfficialChannel, stopModelsPolling } = await import('./cloud-channel-service')
     cleanupOfficialChannel()
+    stopModelsPolling()
   } catch {
     // 清理失败不影响登出
   }

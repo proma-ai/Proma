@@ -49,6 +49,7 @@ import {
 import {
   initOfficialChannel,
   refreshOfficialModels,
+  startModelsPolling,
 } from './lib/cloud-channel-service'
 import {
   listApiKeys,
@@ -334,6 +335,9 @@ export async function registerCloudIpcHandlers(): Promise<void> {
   // 启动健康数据主动轮询（每 3 分钟）
   startHealthPolling()
 
+  // 启动官方模型列表定时轮询（每 20 分钟）
+  startModelsPolling()
+
   // ===== 用量日志 =====
 
   ipcMain.handle(
@@ -364,5 +368,5 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 + 用量日志 处理器')
+  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 + 用量日志 + 模型轮询 处理器')
 }

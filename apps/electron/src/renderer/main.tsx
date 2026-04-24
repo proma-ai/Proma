@@ -452,6 +452,7 @@ function BillingInitializer(): null {
  */
 function OfficialChannelInitializer(): null {
   const user = useAtomValue(cloudUserAtom)
+  const setChannels = useSetAtom(channelsAtom)
 
   useEffect(() => {
     if (!isCloudMode() || !user) return
@@ -463,14 +464,16 @@ function OfficialChannelInitializer(): null {
 
     // 订阅官方渠道更新事件（主进程初始化完成后会广播）
     const unsubOfficialChannel = window.electronAPI.cloudBilling.onOfficialChannelUpdated(() => {
-      // 渠道更新后，依赖 listChannels 的组件会在下次渲染时刷新
-      console.log('[官方渠道] 收到更新通知')
+      console.log('[官方渠道] 收到更新通知，刷新渠道列表')
+      window.electronAPI.listChannels()
+        .then((channels) => setChannels(channels))
+        .catch((err) => console.warn('[官方渠道] 刷新渠道列表失败:', err))
     })
 
     return () => {
       unsubOfficialChannel()
     }
-  }, [user])
+  }, [user, setChannels])
 
   return null
 }
