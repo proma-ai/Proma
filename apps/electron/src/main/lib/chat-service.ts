@@ -38,8 +38,8 @@ import { executeToolCalls } from './chat-tool-executor'
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
 
-/** 最大工具续接轮数（防止无限循环，每轮可含多个工具调用） */
-const MAX_TOOL_ROUNDS = 20
+/** 最大工具续接轮数（安全上限，防止极端情况下的无限循环） */
+const MAX_TOOL_ROUNDS = 999
 
 // ===== 默认系统提示词 =====
 

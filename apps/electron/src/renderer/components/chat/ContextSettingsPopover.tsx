@@ -53,10 +53,6 @@ export function ContextSettingsPopover(): React.ReactElement {
 
   const handleSliderChange = (values: number[]): void => {
     const newValue = sliderPositionToValue(values[0]!)
-    // 暂不允许选择 infinite
-    if (newValue === 'infinite') {
-      return
-    }
     setContextLength(newValue)
   }
 
@@ -106,11 +102,6 @@ export function ContextSettingsPopover(): React.ReactElement {
                 ∞
               </span>
             </div>
-
-            {/* 无限上下文提示 */}
-            <p className="text-[10px] text-muted-foreground">
-              ∞ 无限上下文（即将推出）
-            </p>
           </div>
         </div>
       </PopoverContent>

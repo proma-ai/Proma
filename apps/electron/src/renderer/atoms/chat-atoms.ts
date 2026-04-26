@@ -138,10 +138,10 @@ export const currentConversationAtom = atom<ConversationMeta | null>((get) => {
   return conversations.find((c) => c.id === currentId) ?? null
 })
 
-/** 上下文长度（持久化到 localStorage，默认 20 轮） */
+/** 上下文长度（持久化到 localStorage，默认不限制） */
 export const contextLengthAtom = atomWithStorage<ContextLengthValue>(
   'proma-context-length',
-  20,
+  'infinite',
 )
 
 /** 并排模式 */

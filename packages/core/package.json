@@ -18,7 +18,7 @@
     "shiki": "^3.22.0"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": ">=0.2.9",
+    "@anthropic-ai/claude-agent-sdk": ">=0.2.120",
     "@anthropic-ai/sdk": ">=0.70.0",
     "@modelcontextprotocol/sdk": ">=1.0.0"
   },

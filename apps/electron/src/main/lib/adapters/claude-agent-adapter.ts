@@ -109,12 +109,8 @@ function createMessageChannel(signal: AbortSignal): MessageChannel {
 
 /** Claude SDK 查询选项（扩展通用 AgentQueryInput） */
 export interface ClaudeAgentQueryOptions extends AgentQueryInput {
-  /** SDK CLI 路径 */
+  /** SDK native binary 路径（claude 或 claude.exe） */
   sdkCliPath: string
-  /** 运行时可执行文件 */
-  executable: { type: 'node' | 'bun'; path: string }
-  /** 运行时额外参数 */
-  executableArgs: string[]
   /** 环境变量（含 API Key、Base URL、代理等） */
   env: Record<string, string | undefined>
   /** 最大轮次（undefined = SDK 默认） */
@@ -447,9 +443,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
       const sdkOptions = {
         // 基础字段
         pathToClaudeCodeExecutable: options.sdkCliPath,
-        executable: options.executable.type,
-        executableArgs: options.executableArgs,
-        model: options.model || 'claude-sonnet-4-5-20250929',
+        model: options.model || 'claude-sonnet-4-6',
         ...(options.maxTurns != null && { maxTurns: options.maxTurns }),
         permissionMode: options.sdkPermissionMode,
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,

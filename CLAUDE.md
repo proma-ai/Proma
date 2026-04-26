@@ -59,7 +59,7 @@ proma-v2/
 #### @proma/electron (v0.9.5)
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
-  - `@anthropic-ai/claude-agent-sdk@0.2.111` - Agent SDK
+  - `@anthropic-ai/claude-agent-sdk@0.2.120` - Agent SDK
   - `@larksuiteoapi/node-sdk` - 飞书集成
   - Radix UI、TipTap、Tailwind CSS
   - 文件解析：`pdf-parse`、`officeparser`、`word-extractor`
@@ -135,7 +135,7 @@ bun run generate:icons    # 生成应用图标
 | **构建工具** | Vite | 6.0.3 |
 | **打包工具** | esbuild | 0.24.0+ |
 | **分发工具** | Electron Builder | 25.1.8 |
-| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.2.111 |
+| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.2.120 |
 | **飞书 SDK** | @larksuiteoapi/node-sdk | 最新 |
 
 ## 核心架构
@@ -320,32 +320,43 @@ bun run generate:icons    # 生成应用图标
 
 **Agent SDK 打包要求（必须遵守）：**
 - `@anthropic-ai/claude-agent-sdk` 必须使用 `--external` 参数排除在 esbuild 打包之外
-- SDK 必须通过 electron-builder 的 `files` 配置包含到应用中，而不是 `extraResources`
-- 在 `electron-builder.yml` 的 `files` 配置中添加：
+- **0.2.113+ 架构变化**：SDK 主包已不再携带 JS CLI 入口（`cli.js`）和 `vendor/ripgrep/`，改为按平台分发 native binary（`claude` / `claude.exe`，单文件 214-252 MB），通过 `optionalDependencies` 安装到 `@anthropic-ai/claude-agent-sdk-{platform}-{arch}/` 子包
+- `apps/electron/package.json` 必须显式声明当前 CI 矩阵覆盖的平台子包为 `optionalDependencies`（darwin-arm64 / darwin-x64 / win32-x64），否则 bun workspace 不会把它们链接到 `apps/electron/node_modules/`
+- `electron-builder.yml` 的 `files` 配置要同时包含主包和所有平台子包：
   ```yaml
   files:
     - dist/**/*
     - package.json
     - node_modules/@anthropic-ai/claude-agent-sdk/**/*
+    - node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**/*
+    - node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**/*
+    - node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*
     - "!node_modules/@proma/**"
   ```
-- 这样 SDK 会被复制到 `app/node_modules/@anthropic-ai/claude-agent-sdk`，与 dist 和 package.json 同级
-- Node.js 的模块解析会从 `app/dist/main.cjs` 向上查找，能正确找到 `app/node_modules/` 下的 SDK
+- SDK 主包和同级平台子包会被复制到 `app/node_modules/@anthropic-ai/`，Node.js 的模块解析能从 `app/dist/main.cjs` 找到
+- `agent-orchestrator.ts` 中 `resolveSDKCliPath()` 解析到 SDK 主包入口后，沿 `..` 到 `@anthropic-ai/` 同级目录，再拼 `claude-agent-sdk-${platform}-${arch}/{claude|claude.exe}` 得到 binary 路径
 
-**为什么不使用 extraResources：**
-- `extraResources` 会将文件复制到 `Contents/Resources/` 目录
-- 使用 `to: app/node_modules/...` 路径时，Node.js 模块解析可能无法正确找到
-- 直接使用 `files` 配置更简单可靠，确保 SDK 在正确的 node_modules 路径下
+**跨平台打包限制：**
+- optionalDependencies 的平台子包由包管理器按 `os`/`cpu` 字段筛选：Apple Silicon runner 只会装 darwin-arm64，不会装 darwin-x64（cpu 不匹配）
+- 因此当前 CI（macos-latest + windows-latest）**不支持在单个 macOS runner 上同时打 arm64 + x64 DMG**
+- 若要发布 darwin-x64 版本，需要在 macos-13（x64 runner）单独跑一次构建
+- Windows runner 默认 x64，打 win32-x64 正常
+
+**不使用 extraResources 放 binary 的原因：**
+- `extraResources` 会将文件复制到 `Contents/Resources/` 目录，路径与 node_modules 解析不一致
+- 直接使用 `files` 配置让 Node.js 的模块解析能正确找到 SDK
 
 **修改打包配置时的检查清单：**
 1. ✅ 确认 SDK 在 esbuild 中使用 `--external` 参数
-2. ✅ 确认 SDK 在 `files` 配置中被正确包含
-3. ✅ 本地测试打包后的应用 Agent 功能（使用 `CSC_IDENTITY_AUTO_DISCOVERY=false bunx electron-builder --mac --dir` 快速测试）
+2. ✅ 确认 SDK 主包 + 所有目标平台子包都在 `files` 配置中
+3. ✅ 确认 `apps/electron/package.json` 的 `optionalDependencies` 列出了所有目标平台子包
+4. ✅ `bun install` 后验证 `apps/electron/node_modules/@anthropic-ai/claude-agent-sdk-{platform}-{arch}/` symlink 存在且 binary 可执行
+5. ✅ 本地测试打包后的应用 Agent 功能（`CSC_IDENTITY_AUTO_DISCOVERY=false bun run dist:fast`）
 
 **其他依赖的打包策略：**
 - **原则**：只有 `electron` 和 `@anthropic-ai/claude-agent-sdk` 需要标记为 `--external`
 - `electron`：由 Electron 运行时提供，必须 external
-- `@anthropic-ai/claude-agent-sdk`：有特殊打包要求（symlink、vendor 等），必须 external + 在 files 中包含
+- `@anthropic-ai/claude-agent-sdk`：有特殊打包要求（含 214 MB native binary），必须 external + 在 files 中包含主包和平台子包
 - **所有其他依赖**（如 `electron-updater`、`undici`、`chokidar` 等）：应该让 esbuild 打包进 `main.cjs`
   - ✅ 优点：避免遗漏子依赖，简化 electron-builder 配置
   - ❌ 如果标记为 external：必须在 `electron-builder.yml` 的 `files` 中手动列出所有子依赖
@@ -371,7 +382,7 @@ bun run generate:icons    # 生成应用图标
 
 ## Agent SDK 集成架构
 
-基于 `@anthropic-ai/claude-agent-sdk@0.2.111` 实现 Agent 模式，与 Chat 模式并行。
+基于 `@anthropic-ai/claude-agent-sdk@0.2.120` 实现 Agent 模式，与 Chat 模式并行。
 
 ### 核心流程
 
@@ -421,20 +432,25 @@ React UI 更新
 
 ### SDK 版本升级注意事项
 
-**`@anthropic-ai/claude-agent-sdk` 0.2.111 起 `options.env` 语义为"叠加"**
+**`@anthropic-ai/claude-agent-sdk` 0.2.113+ `options.env` 语义为"替换"**
 
-- SDK 将 `options.env` **叠加到 `process.env`** 之上传递给子进程（0.2.110 及之前是替换）
-- Shell 中可能存在的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`ANTHROPIC_MODEL` 等变量会通过 `process.env` 叠加泄漏到 SDK 子进程
-- **加固方案**：`agent-orchestrator.ts` 的 `buildSdkEnv()` 末尾会遍历 `process.env`，对所有未被 sdkEnv 显式管理的 `ANTHROPIC_*` 键显式置空字符串，强制覆盖叠加回流
+- SDK 将 `options.env` **替换** 传递给子进程（0.2.111/0.2.112 短暂改为叠加，0.2.113 恢复替换）
+- 如果传 `env` 时只给 `ANTHROPIC_*` 相关变量，子进程会丢失 `PATH` / `HOME` / `SHELL` 等关键变量，导致 SDK 调用 `npx` / `git` 等命令失败
+- **正确做法**：`agent-orchestrator.ts` 的 `buildSdkEnv()` 末尾显式 `{ ...cleanEnv, ...customEnv }` 合并 `process.env`，再剥离不希望泄漏的 `ANTHROPIC_*` 变量
 - **修改 `buildSdkEnv()` 时的检查清单**：
-  1. ✅ 保留 `cleanEnv` 的 `ANTHROPIC_` 前缀过滤
-  2. ✅ 保留末尾的 `ANTHROPIC_*` 空字符串覆盖循环
-  3. ✅ 新增的 SDK 识别的环境变量必须显式加入 `sdkEnv`（否则会被空字符串循环误覆盖）
+  1. ✅ 基于 `process.env` 合并，保证 PATH / HOME / SHELL 等继承到子进程
+  2. ✅ 过滤掉不希望泄漏的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`ANTHROPIC_MODEL` 等
+  3. ✅ 新增的 SDK 识别的环境变量必须显式加入 `sdkEnv`
 - 若未来升级到后续大版本导致语义再次变化，需重新评估本加固逻辑
 
 **关键 Breaking Changes（升级参考）**：
 - `0.2.91`: `sandbox.failIfUnavailable` 默认从 `false` 变为 `true`（目前项目未使用 sandbox 选项）
-- `0.2.111`: `options.env` 从"替换"变为"叠加"，见上文加固方案
+- `0.2.111`: `options.env` 从"替换"变为"叠加"
+- `0.2.113`:
+  - `options.env` 回退为"替换"
+  - **SDK 包结构重构**：删除 `cli.js`，改为平台 native binary（通过 `@anthropic-ai/claude-agent-sdk-{platform}-{arch}` optionalDependency 分发），ripgrep 编译进 binary
+  - 详见上方"打包配置注意事项"段落
+- `0.2.120`: `query()` 省略 `settingSources` 时默认加载所有来源（Proma 已显式传 `['user', 'project']`，不受影响）
 
 ### 共享类型（`@proma/shared`）
 
