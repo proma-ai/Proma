@@ -35,7 +35,7 @@ const APP_VERSION: string = (() => {
 })()
 
 // 【商业版】下载地址指向官网，合并 upstream 时勿改为开源仓库地址
-const GITHUB_RELEASES_URL = 'https://proma.cool/download'
+const DOWNLOAD_URL = 'https://proma.cool/download'
 
 /** 更新状态卡片 */
 function UpdateCard(): React.ReactElement | null {
@@ -59,7 +59,8 @@ function UpdateCard(): React.ReactElement | null {
   }
 
   const handleGoToDownload = (): void => {
-    const url = release?.html_url || GITHUB_RELEASES_URL
+    // 【商业版】始终指向官网下载页，不使用 GitHub release 地址
+    const url = DOWNLOAD_URL
     window.electronAPI.openExternal(url)
   }
 
