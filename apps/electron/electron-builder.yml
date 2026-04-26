@@ -66,15 +66,14 @@ mac:
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   notarize: true
+  # 不指定 arch，由 CLI flag (--arm64 / --x64) 决定。
+  # 原因：如果同时列 [arm64, x64]，每个 runner 都会打双架构；而 bun 只装宿主平台的
+  # claude-agent-sdk native optional dep，另一个架构的 glob 会静默跳过，导致该架构
+  # DMG 缺少 claude binary。upload-release.ts 又会把 out/ 下所有产物都上传到 OSS，
+  # 最终 intel runner 打出的残缺 arm64 DMG 会覆盖 arm64 runner 打出的完整版。
   target:
     - target: dmg
-      arch:
-        - arm64
-        - x64
     - target: zip
-      arch:
-        - arm64
-        - x64
 
 # DMG 配置
 dmg:
