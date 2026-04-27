@@ -372,6 +372,8 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
       case 'deepseek':
+      case 'kimi-api':
+      case 'kimi-coding':
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
       case 'openai':
       case 'moonshot':
@@ -393,9 +395,10 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 }
 
 /**
- * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek）
+ * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan）
  *
- * DeepSeek 的 Anthropic API 端点无需 /v1 前缀（如 https://api.deepseek.com/anthropic/messages）
+ * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
+ * Kimi Coding Plan 必须发送 User-Agent: KimiCLI/*，否则返回 403。
  */
 async function testAnthropicCompatible(
   baseUrl: string,
@@ -403,18 +406,41 @@ async function testAnthropicCompatible(
   proxyUrl?: string,
   provider: ProviderType = 'anthropic',
 ): Promise<ChannelTestResult> {
-  const url = provider === 'deepseek' ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
+  const isNonVersionedPath =
+    provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding'
+  const url = isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
-  const testModel = provider === 'deepseek' ? 'deepseek-v4-pro' : 'claude-sonnet-4-6'
+
+  let testModel: string
+  switch (provider) {
+    case 'deepseek':
+      testModel = 'deepseek-v4-pro'
+      break
+    case 'kimi-api':
+      testModel = 'kimi-k2.6'
+      break
+    case 'kimi-coding':
+      testModel = 'kimi-for-coding'
+      break
+    default:
+      testModel = 'claude-sonnet-4-6'
+  }
+
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  }
+  if (provider === 'kimi-coding') {
+    headers.Authorization = `Bearer ${apiKey}`
+    headers['User-Agent'] = 'KimiCLI/1.3'
+  } else {
+    headers['x-api-key'] = apiKey
+    headers.Authorization = `Bearer ${apiKey}`
+  }
 
   const response = await fetchFn(`${url}/messages`, {
     method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      Authorization: `Bearer ${apiKey}`,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       model: testModel,
       max_tokens: 1,
@@ -501,6 +527,8 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
       case 'deepseek':
+      case 'kimi-api':
+      case 'kimi-coding':
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'moonshot':
@@ -538,6 +566,8 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
         return { success: false, message: '官方渠道模型由服务端管理', models: [] }
       case 'anthropic':
       case 'deepseek':
+      case 'kimi-api':
+      case 'kimi-coding':
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'moonshot':
@@ -569,9 +599,10 @@ interface AnthropicModelItem {
 }
 
 /**
- * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek）
+ * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan）
  *
- * DeepSeek 的 Anthropic API 端点无需 /v1 前缀。
+ * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
+ * Kimi Coding Plan 必须发送 User-Agent: KimiCLI/*。
  * 文档: https://docs.anthropic.com/en/api/models-list
  */
 async function fetchAnthropicCompatibleModels(
@@ -580,16 +611,25 @@ async function fetchAnthropicCompatibleModels(
   proxyUrl?: string,
   provider: ProviderType = 'anthropic',
 ): Promise<FetchModelsResult> {
-  const url = provider === 'deepseek' ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
+  const isNonVersionedPath =
+    provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding'
+  const url = isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
+
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+  }
+  if (provider === 'kimi-coding') {
+    headers.Authorization = `Bearer ${apiKey}`
+    headers['User-Agent'] = 'KimiCLI/1.3'
+  } else {
+    headers['x-api-key'] = apiKey
+    headers.Authorization = `Bearer ${apiKey}`
+  }
 
   const response = await fetchFn(`${url}/models`, {
     method: 'GET',
-    headers: {
-      'x-api-key': apiKey,
-      Authorization: `Bearer ${apiKey}`,
-      'anthropic-version': '2023-06-01',
-    },
+    headers,
   })
 
   if (response.status === 401) {

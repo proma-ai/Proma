@@ -237,6 +237,8 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   deepseek: DeepSeekLogo,
   google: GeminiLogo,
   moonshot: MoonshotLogo,
+  'kimi-api': MoonshotLogo,
+  'kimi-coding': MoonshotLogo,
   zhipu: ZhipuLogo,
   minimax: MiniMaxLogo,
   doubao: DoubaoLogo,

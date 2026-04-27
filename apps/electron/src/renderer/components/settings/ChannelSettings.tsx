@@ -3,7 +3,8 @@
  *
  * 分为两个区块：
  * 1. 渠道管理 — 所有渠道列表 + 添加/编辑/删除（渠道同时用于 Chat 和 Agent）
- * 2. Agent 供应商 — 从已启用的 Anthropic 渠道中通过 Switch 开关启用多个 Agent 供应商
+ * 2. Agent 供应商 — 从已启用的 Anthropic 兼容渠道（Anthropic / DeepSeek / Kimi）中
+ *    通过 Switch 开关启用多个 Agent 供应商
  */
 
 import * as React from 'react'
@@ -11,7 +12,7 @@ import { useAtom, useSetAtom } from 'jotai'
 import { Plus, Pencil, Trash2, Shield, RefreshCw, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
+import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID, isAgentCompatibleProvider } from '@proma/shared'
 import type { Channel } from '@proma/shared'
 import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
@@ -166,9 +167,9 @@ export function ChannelSettings(): React.ReactElement {
   const officialChannel = channels.find((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
   const userChannels = channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID)
 
-  // Agent 供应商渠道（Anthropic 兼容 + Proma 官方，已启用）
+  // Agent 供应商渠道（Proma 官方 + Anthropic 兼容：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan，已启用）
   const agentProviderChannels = channels.filter(
-    (c) => (c.provider === 'anthropic' || c.provider === 'proma') && c.enabled
+    (c) => (c.provider === 'proma' || isAgentCompatibleProvider(c.provider)) && c.enabled
   )
   // 官方渠道排在最前
   const sortedAgentProviders = [
@@ -244,7 +245,7 @@ export function ChannelSettings(): React.ReactElement {
         ) : sortedAgentProviders.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-8 text-center">
-              暂无可用的 Agent 供应商，请先在上方添加 Anthropic 渠道并启用，或登录 Proma 官方账户
+              暂无可用的 Agent 供应商，请先在上方添加 Anthropic / DeepSeek / Kimi 渠道并启用，或登录 Proma 官方账户
             </div>
           </SettingsCard>
         ) : (
@@ -288,7 +289,7 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
   const description = [
     PROVIDER_LABELS[channel.provider],
     enabledCount > 0 ? `${enabledCount} 个模型已启用` : undefined,
-    channel.provider === 'anthropic' ? '可用于 Agent' : undefined,
+    isAgentCompatibleProvider(channel.provider) ? '可用于 Agent' : undefined,
   ]
     .filter(Boolean)
     .join(' · ')

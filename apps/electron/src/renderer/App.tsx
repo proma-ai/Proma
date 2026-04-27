@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
 import { useStore } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
@@ -7,7 +6,6 @@ import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
-import { environmentCheckResultAtom } from './atoms/environment'
 import { conversationsAtom } from './atoms/chat-atoms'
 import { tabsAtom, activeTabIdAtom, openTab } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
@@ -20,23 +18,16 @@ export default function App(): React.ReactElement {
     console.warn(`[FLASH-DEBUG] App re-render #${appRenderCountRef.current}, isLoading/showOnboarding may have changed`)
   }
 
-  const setEnvironmentResult = useSetAtom(environmentCheckResultAtom)
   const store = useStore()
   const [isLoading, setIsLoading] = React.useState(true)
   const [showOnboarding, setShowOnboarding] = React.useState(false)
 
-  // 初始化：检查 onboarding 状态和环境
+  // 初始化：检查是否需要显示 Onboarding
+  // SDK 0.2.113+ 自带 claude native binary，不再依赖宿主 Node/Git，启动路径不做环境检测。
   React.useEffect(() => {
     const initialize = async () => {
       try {
-        // 1. 获取设置，检查是否需要 onboarding
         const settings = await window.electronAPI.getSettings()
-
-        // 2. 执行环境检测（无论是否完成 onboarding）
-        const envResult = await window.electronAPI.checkEnvironment()
-        setEnvironmentResult(envResult)
-
-        // 3. 判断是否显示 onboarding
         if (!settings.onboardingCompleted) {
           setShowOnboarding(true)
         }
@@ -48,7 +39,7 @@ export default function App(): React.ReactElement {
     }
 
     initialize()
-  }, [setEnvironmentResult])
+  }, [])
 
   // 完成 onboarding 回调：创建欢迎对话
   const handleOnboardingComplete = async () => {

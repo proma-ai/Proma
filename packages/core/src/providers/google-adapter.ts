@@ -117,6 +117,17 @@ function toGoogleContents(input: StreamRequestInput): GoogleContent[] {
         return { role, parts: buildMessageParts(msg.content, historyImages) }
       }
 
+      // Gemini 思考模型要求历史消息中包含 thought 标记的推理部分
+      if (msg.role === 'assistant' && msg.reasoning) {
+        return {
+          role,
+          parts: [
+            { text: msg.reasoning, thought: true },
+            { text: msg.content },
+          ],
+        }
+      }
+
       return { role, parts: [{ text: msg.content }] }
     })
 

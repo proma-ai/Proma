@@ -42,6 +42,7 @@ export interface OpenAIToolCall {
 export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | OpenAIContentBlock[] | null
+  reasoning_content?: string
   tool_calls?: OpenAIToolCall[]
   tool_call_id?: string
 }
@@ -120,6 +121,8 @@ function toOpenAIMessages(input: StreamRequestInput): OpenAIMessage[] {
     if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
       const historyImages = readImageAttachments(msg.attachments)
       messages.push({ role, content: buildMessageContent(msg.content, historyImages) })
+    } else if (msg.role === 'assistant' && msg.reasoning) {
+      messages.push({ role, content: msg.content, reasoning_content: msg.reasoning })
     } else {
       messages.push({ role, content: msg.content })
     }

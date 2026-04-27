@@ -77,7 +77,11 @@ function toPromaMessages(input: StreamRequestInput): OpenAIMessage[] {
       const historyImages = readImageAttachments(msg.attachments)
       messages.push({ role, content: buildMessageContent(msg.content, historyImages) })
     } else {
-      messages.push({ role, content: msg.content })
+      const openaiMsg: OpenAIMessage = { role, content: msg.content }
+      if (msg.role === 'assistant' && msg.reasoning) {
+        openaiMsg.reasoning_content = msg.reasoning
+      }
+      messages.push(openaiMsg)
     }
   }
 

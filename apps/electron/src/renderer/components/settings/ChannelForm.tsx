@@ -58,7 +58,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'deepseek', 'google', 'moonshot', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'deepseek', 'google', 'moonshot', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -74,6 +74,8 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
   moonshot: '/chat/completions',
+  'kimi-api': '/messages',
+  'kimi-coding': '/messages',
   zhipu: '/chat/completions',
   minimax: '/chat/completions',
   doubao: '/chat/completions',
@@ -89,16 +91,17 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   let trimmed = baseUrl.trim().replace(/\/+$/, '')
 
-  if (provider === 'anthropic' || provider === 'deepseek') {
+  if (provider === 'anthropic' || provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {
     // 去除用户误填的 /messages 后缀，与 normalizeAnthropicBaseUrl 保持一致
     trimmed = trimmed.replace(/\/messages$/, '')
-    if (provider === 'deepseek') {
+    // DeepSeek / Kimi 的 baseUrl 已带非版本路径（/anthropic、/coding/v1），直接拼 /messages
+    if (provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {
       return `${trimmed}/messages`
     }
     if (trimmed.match(/\/v\d+$/)) {
       return `${trimmed}/messages`
     }
-    // 已有非根路径（如 DeepSeek 的 /anthropic）时不追加 /v1
+    // 已有非根路径时不追加 /v1
     try {
       const pathname = new URL(trimmed).pathname
       if (pathname !== '/' && pathname !== '') {
@@ -224,18 +227,28 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [models, name, provider, baseUrl, apiKey, enabled, scheduleAutoSave])
 
-  // 切换供应商时自动更新 Base URL，DeepSeek 自动添加预设模型
+  // 切换供应商时自动更新 Base URL，DeepSeek / Kimi 自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
     setTestResult(null)
-    // DeepSeek 预设模型：首次切换到 DeepSeek 且无模型时自动填充
-    if (p === 'deepseek' && models.length === 0) {
-      setModels([
-        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
-        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-      ])
+    // 预设模型：首次切换到对应 provider 且无模型时自动填充
+    if (models.length === 0) {
+      if (p === 'deepseek') {
+        setModels([
+          { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+          { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+        ])
+      } else if (p === 'kimi-api') {
+        setModels([
+          { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
+        ])
+      } else if (p === 'kimi-coding') {
+        setModels([
+          { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
+        ])
+      }
     }
   }
 

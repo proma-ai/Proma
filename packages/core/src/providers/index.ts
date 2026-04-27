@@ -16,6 +16,7 @@ import { PromaAdapter } from './proma-adapter.ts'
 export * from './types.ts'
 export * from './sse-reader.ts'
 export * from './url-utils.ts'
+export * from './thinking-capability.ts'
 
 // 导出适配器类
 export { AnthropicAdapter } from './anthropic-adapter.ts'
@@ -30,6 +31,8 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['openai', new OpenAIAdapter()],
   ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['moonshot', new OpenAIAdapter()],      // Moonshot/Kimi 使用 OpenAI 兼容协议
+  ['kimi-api', new AnthropicAdapter('kimi-api')],       // Kimi API 的 Anthropic 协议端点
+  ['kimi-coding', new AnthropicAdapter('kimi-coding')], // Kimi Coding Plan 订阅制（强制 User-Agent）
   ['zhipu', new OpenAIAdapter()],         // 智谱 AI 使用 OpenAI 兼容协议
   ['minimax', new OpenAIAdapter()],       // MiniMax 使用 OpenAI 兼容协议
   ['doubao', new OpenAIAdapter()],        // 豆包使用 OpenAI 兼容协议

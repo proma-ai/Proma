@@ -77,7 +77,7 @@ jobs:
             bun-${{ runner.os }}-
 
       - name: 安装依赖
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # macOS 代码签名准备
       - name: 导入 macOS 签名证书

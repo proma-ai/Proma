@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta } from '@proma/shared'
+import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
 import { SAFE_TOOLS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -405,11 +405,12 @@ export class AgentOrchestrator {
    * 构建 SDK 环境变量
    *
    * 注入 API Key、Base URL、代理、Shell 配置等。
+   * 对 Kimi Coding Plan：使用 Bearer 认证（ANTHROPIC_AUTH_TOKEN），注入 User-Agent。
    */
   private async buildSdkEnv(
     apiKey: string,
     baseUrl: string | undefined,
-    useAuthToken = false,
+    provider: ProviderType,
   ): Promise<Record<string, string | undefined>> {
     const DEFAULT_ANTHROPIC_URL = 'https://api.anthropic.com'
 
@@ -427,11 +428,6 @@ export class AgentOrchestrator {
 
     const sdkEnv: Record<string, string | undefined> = {
       ...cleanEnv,
-      // 注入认证凭证：Proma 官方渠道使用 AUTH_TOKEN（Bearer），其他渠道使用 API_KEY（x-api-key）
-      ...(useAuthToken
-        ? { ANTHROPIC_AUTH_TOKEN: apiKey }
-        : { ANTHROPIC_API_KEY: apiKey }
-      ),
       // 提升输出 token 上限，避免 "exceeded 32000 output token maximum" 错误
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000',
       // 启用 Tasks 功能
@@ -442,10 +438,28 @@ export class AgentOrchestrator {
       CLAUDE_CONFIG_DIR: getSdkConfigDir(),
     }
 
-    // 显式控制 ANTHROPIC_BASE_URL：仅在用户配置了自定义 Base URL 时注入
-    // 使用统一的 normalizeAnthropicBaseUrlForSdk 规范化，SDK 内部会自动拼接 /v1/messages
+    // 认证方式按 provider 分支
+    // - Proma 官方渠道：AUTH_TOKEN（Bearer，商业版 Cloud 后端只认 Bearer）
+    // - Kimi Coding Plan：只认 Bearer，且必须伪装成 coding agent（User-Agent）
+    //   用 ANTHROPIC_AUTH_TOKEN 让 SDK 发 Authorization: Bearer，
+    //   通过 ANTHROPIC_CUSTOM_HEADERS 注入 User-Agent
+    // - 其它：ANTHROPIC_API_KEY（SDK 内部会同时带上 x-api-key 和 Bearer）
+    if (provider === 'proma') {
+      sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
+    } else if (provider === 'kimi-coding') {
+      sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
+      sdkEnv.ANTHROPIC_CUSTOM_HEADERS = 'User-Agent: KimiCLI/1.3'
+    } else {
+      sdkEnv.ANTHROPIC_API_KEY = apiKey
+    }
+
+    // 显式控制 ANTHROPIC_BASE_URL：
+    // - Proma 渠道：上层已处理 sdkBaseUrl 的 /api/v1 剥离，这里直接透传，不再 normalize
+    // - 其它渠道：使用 normalizeAnthropicBaseUrlForSdk 规范化，SDK 内部会自动拼接 /v1/messages
     if (baseUrl && baseUrl !== DEFAULT_ANTHROPIC_URL) {
-      sdkEnv.ANTHROPIC_BASE_URL = normalizeAnthropicBaseUrlForSdk(baseUrl)
+      sdkEnv.ANTHROPIC_BASE_URL = provider === 'proma'
+        ? baseUrl
+        : normalizeAnthropicBaseUrlForSdk(baseUrl)
     }
 
     const proxyUrl = await getEffectiveProxyUrl()
@@ -882,19 +896,26 @@ export class AgentOrchestrator {
     delete process.env.ANTHROPIC_API_KEY
     delete process.env.ANTHROPIC_AUTH_TOKEN
     delete process.env.ANTHROPIC_BASE_URL
+    delete process.env.ANTHROPIC_CUSTOM_HEADERS
     if (channel.provider === 'proma') {
+      // Proma 官方渠道：Bearer 认证
       process.env.ANTHROPIC_AUTH_TOKEN = apiKey
+    } else if (channel.provider === 'kimi-coding') {
+      // Kimi Coding Plan：只用 Bearer + 必须带 User-Agent
+      process.env.ANTHROPIC_AUTH_TOKEN = apiKey
+      process.env.ANTHROPIC_CUSTOM_HEADERS = 'User-Agent: KimiCLI/1.3'
     } else {
       process.env.ANTHROPIC_API_KEY = apiKey
     }
     if (sdkBaseUrl) {
-      // 非 proma 渠道应用规范化逻辑，确保 process.env 与 sdkEnv 中的 URL 一致
+      // Proma 渠道的 sdkBaseUrl 已在上层处理（剥离 /api/v1），不再 normalize；
+      // 其它渠道使用规范化逻辑，确保 process.env 与 sdkEnv 中的 URL 一致
       process.env.ANTHROPIC_BASE_URL = channel.provider === 'proma'
         ? sdkBaseUrl
         : normalizeAnthropicBaseUrlForSdk(sdkBaseUrl)
     }
 
-    const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl, channel.provider === 'proma')
+    const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl, channel.provider)
 
     // 诊断日志：记录关键认证参数
     if (channel.provider === 'proma') {

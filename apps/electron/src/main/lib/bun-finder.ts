@@ -1,9 +1,15 @@
 /**
  * Bun 运行时路径检测模块
  *
- * 负责在不同环境下检测 Bun 二进制文件的位置：
- * - 开发环境：优先使用系统 PATH 中的 bun，其次检查 vendor 目录
- * - 打包环境：从应用资源目录中查找打包的 bun
+ * Bun 是 Proma 的可选组件（不影响核心 Agent 功能，SDK 自带编译好的 claude 二进制）。
+ * 仅用于：
+ * - 系统状态展示（设置页显示用户是否装了 Bun）
+ * - 用户可能从终端用 Bun 跑自定义脚本时的路径探测
+ *
+ * 检测顺序（统一逻辑，开发/打包一致）：
+ * 1. 打包产物内 vendor/bun/（当前默认不打包，留给未来可选打包扩展）
+ * 2. 系统 PATH（which bun / where bun）
+ * 3. 开发仓库 apps/electron/vendor/bun/{platform-arch}/（dev 用）
  */
 
 import { existsSync } from 'fs'
@@ -162,93 +168,54 @@ export function validateBunExecutable(bunPath: string): string | null {
 /**
  * 检测并返回 Bun 运行时状态
  *
- * 检测顺序：
- * 1. 打包环境：使用打包的 Bun
- * 2. 开发环境：
- *    a. 系统 PATH 中的 Bun（优先，因为开发者可能想用自己的版本）
- *    b. vendor 目录中的 Bun
+ * Bun 是可选组件 —— Claude Agent SDK 0.2.113+ 分发了按平台编译的 claude native
+ * binary，核心功能不依赖 Bun。这里的检测结果只用于：
+ * - 系统运行时状态卡片展示
+ * - 用户执行依赖 Bun 的自定义脚本时提供可用性提示
+ *
+ * 检测顺序：bundled（若存在） → 系统 PATH → 开发 vendor 目录
+ * 全部未命中时返回 available: false 但 **不视为错误**（error 置 null）。
  *
  * @returns Bun 运行时状态
  */
 export async function detectBunRuntime(): Promise<BunRuntimeStatus> {
-  console.log('[Bun 检测] 开始检测 Bun 运行时...')
+  console.log('[Bun 检测] 开始检测 Bun 运行时（可选组件）...')
 
-  // 1. 打包环境：使用打包的 Bun
-  if (app.isPackaged) {
-    const bundledPath = getBundledBunPath()
+  const candidates: Array<{
+    getPath: () => string | null
+    source: 'bundled' | 'system' | 'vendor'
+  }> = [
+    { getPath: getBundledBunPath, source: 'bundled' },
+    { getPath: getSystemBunPath, source: 'system' },
+    { getPath: getVendorBunPath, source: 'vendor' },
+  ]
 
-    if (bundledPath) {
-      const version = validateBunExecutable(bundledPath)
+  for (const { getPath, source } of candidates) {
+    const bunPath = getPath()
+    if (!bunPath) continue
 
-      if (version) {
-        console.log(`[Bun 检测] 找到打包的 Bun: ${bundledPath} (${version})`)
-        return {
-          available: true,
-          path: bundledPath,
-          version,
-          source: 'bundled',
-          error: null,
-        }
-      } else {
-        console.warn(`[Bun 检测] 打包的 Bun 无法执行: ${bundledPath}`)
-      }
-    } else {
-      console.warn('[Bun 检测] 打包环境中未找到 Bun 二进制文件')
+    const version = validateBunExecutable(bunPath)
+    if (!version) {
+      console.warn(`[Bun 检测] ${source} 位置的 Bun 无法执行: ${bunPath}`)
+      continue
     }
 
-    // 打包环境下如果没有找到，返回错误
+    console.log(`[Bun 检测] 找到 Bun (${source}): ${bunPath} (${version})`)
     return {
-      available: false,
-      path: null,
-      version: null,
-      source: null,
-      error: '打包环境中未找到可用的 Bun 运行时',
+      available: true,
+      path: bunPath,
+      version,
+      source,
+      error: null,
     }
   }
 
-  // 2. 开发环境：优先使用系统 PATH
-  const systemPath = getSystemBunPath()
-
-  if (systemPath) {
-    const version = validateBunExecutable(systemPath)
-
-    if (version) {
-      console.log(`[Bun 检测] 找到系统 Bun: ${systemPath} (${version})`)
-      return {
-        available: true,
-        path: systemPath,
-        version,
-        source: 'system',
-        error: null,
-      }
-    }
-  }
-
-  // 3. 开发环境：检查 vendor 目录
-  const vendorPath = getVendorBunPath()
-
-  if (vendorPath) {
-    const version = validateBunExecutable(vendorPath)
-
-    if (version) {
-      console.log(`[Bun 检测] 找到 vendor Bun: ${vendorPath} (${version})`)
-      return {
-        available: true,
-        path: vendorPath,
-        version,
-        source: 'vendor',
-        error: null,
-      }
-    }
-  }
-
-  // 未找到任何 Bun
-  console.warn('[Bun 检测] 未找到可用的 Bun 运行时')
+  console.log('[Bun 检测] 未找到 Bun（可选，不影响 Proma 核心功能）')
   return {
     available: false,
     path: null,
     version: null,
     source: null,
-    error: '未找到可用的 Bun 运行时。请安装 Bun 或运行 bun run build:vendor',
+    error: null,
   }
 }

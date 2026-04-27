@@ -15,6 +15,8 @@ export type ProviderType =
   | 'deepseek'
   | 'google'
   | 'moonshot'
+  | 'kimi-api'
+  | 'kimi-coding'
   | 'zhipu'
   | 'minimax'
   | 'doubao'
@@ -37,6 +39,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   deepseek: 'https://api.deepseek.com/anthropic',
   google: 'https://generativelanguage.googleapis.com',
   moonshot: 'https://api.moonshot.cn/v1',
+  'kimi-api': 'https://api.moonshot.cn/anthropic',
+  'kimi-coding': 'https://api.kimi.com/coding/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   minimax: 'https://api.minimax.chat/v1',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -53,12 +57,34 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   openai: 'OpenAI',
   deepseek: 'DeepSeek',
   google: 'Google',
-  moonshot: 'Moonshot / Kimi',
+  moonshot: 'Moonshot / Kimi (OpenAI 协议)',
+  'kimi-api': 'Kimi API (Anthropic 协议)',
+  'kimi-coding': 'Kimi Coding Plan',
   zhipu: '智谱 AI',
   minimax: 'MiniMax',
   doubao: '豆包',
   qwen: '通义千问',
   custom: 'OpenAI 兼容格式',
+}
+
+/**
+ * 支持 Agent 模式的供应商类型
+ *
+ * Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点，
+ * 因此所有 Anthropic 协议兼容的供应商都可以用于 Agent。
+ */
+export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  'anthropic',
+  'deepseek',
+  'kimi-api',
+  'kimi-coding',
+])
+
+/**
+ * 判断供应商是否兼容 Agent 模式
+ */
+export function isAgentCompatibleProvider(provider: ProviderType): boolean {
+  return AGENT_COMPATIBLE_PROVIDERS.has(provider)
 }
 
 /**

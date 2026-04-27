@@ -25,6 +25,9 @@ npmRebuild: false
 # 通用文件配置
 files:
   - dist/**/*
+  # 排除 build:resources 脚本拷到 dist/resources 的副本（electron-builder 已通过
+  # buildResources 从 resources/ 直接使用 icon/plist，避免产物里重复打包一份）
+  - "!dist/resources/**"
   - package.json
   # 包含 SDK 主包到 app/node_modules/@anthropic-ai/ 目录中（与 dist 和 package.json 同级）
   - node_modules/@anthropic-ai/claude-agent-sdk/**/*
@@ -35,7 +38,6 @@ files:
   - node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**/*
   - node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**/*
   - node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*
-  - node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**/*
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
   - "!node_modules/@proma/**"
 
