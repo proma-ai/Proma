@@ -935,6 +935,8 @@ export interface AskUserQuestionOption {
   label: string
   /** 选项说明 */
   description?: string
+  /** 选项预览内容（聚焦时展示，支持 Markdown） */
+  preview?: string
 }
 
 /** AskUserQuestion 工具的问题定义 */
@@ -965,7 +967,7 @@ export interface AskUserRequest {
 export interface AskUserResponse {
   /** 请求 ID */
   requestId: string
-  /** 用户答案（问题索引字符串 → 答案文本） */
+  /** 用户答案（问题文本 → 答案文本，与 SDK 约定一致） */
   answers: Record<string, string>
 }
 

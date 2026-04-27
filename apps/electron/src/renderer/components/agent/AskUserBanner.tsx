@@ -8,6 +8,8 @@
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import { Send, X } from 'lucide-react'
+import Markdown, { defaultUrlTransform } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { allPendingAskUserRequestsAtom, agentStreamingStatesAtom, finalizeStreamingActivities } from '@/atoms/agent-atoms'
 import type { AskUserQuestion } from '@proma/shared'
@@ -19,6 +21,13 @@ interface QuestionAnswer {
 }
 
 const EMPTY_ANSWER: QuestionAnswer = { selected: [], customText: '', showCustom: false }
+
+const PREVIEW_REMARK_PLUGINS = [remarkGfm]
+
+function safeUrlTransform(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return defaultUrlTransform(url)
+}
 
 /** AskUserBanner 属性接口 */
 interface AskUserBannerProps {
@@ -185,11 +194,14 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
     try {
       const answersRecord: Record<string, string> = {}
       for (let i = 0; i < questions.length; i++) {
+        const q = questions[i]
+        if (!q) continue
         const answer = getAnswer(i)
+        const key = q.question || String(i)
         if (answer.showCustom && answer.customText.trim()) {
-          answersRecord[String(i)] = answer.customText.trim()
+          answersRecord[key] = answer.customText.trim()
         } else if (answer.selected.length > 0) {
-          answersRecord[String(i)] = answer.selected.join(', ')
+          answersRecord[key] = answer.selected.join(', ')
         }
       }
       await window.electronAPI.respondAskUser({ requestId: request.requestId, answers: answersRecord })
@@ -347,6 +359,10 @@ function QuestionCard({
   onSubmit: () => void
 }): React.ReactElement {
   const optionCount = question.options.length
+  const previewOption = focusedIndex >= 0 && focusedIndex < optionCount
+    ? question.options[focusedIndex]
+    : question.options.find((o) => answer.selected.includes(o.label))
+  const previewContent = previewOption?.preview
 
   return (
     <div className="space-y-2">
@@ -429,6 +445,15 @@ function QuestionCard({
           }}
           autoFocus
         />
+      )}
+
+      {/* 选项 Preview（聚焦或选中时展示） */}
+      {previewContent && (
+        <div className="mt-2 rounded-lg bg-muted/40 p-3 text-xs prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-headings:my-0.5 prose-li:my-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <Markdown remarkPlugins={PREVIEW_REMARK_PLUGINS} urlTransform={safeUrlTransform}>
+            {previewContent}
+          </Markdown>
+        </div>
       )}
     </div>
   )

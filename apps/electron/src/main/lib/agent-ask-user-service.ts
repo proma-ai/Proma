@@ -124,7 +124,7 @@ export class AgentAskUserService {
    * 从工具输入中解析问题列表
    *
    * SDK AskUserQuestion 工具输入格式：
-   * { questions: [{ question, header, options: [{ label, description }], multiSelect }] }
+   * { questions: [{ question, header, options: [{ label, description, preview }], multiSelect }] }
    */
   private parseQuestions(input: Record<string, unknown>): AskUserQuestion[] {
     const rawQuestions = input.questions
@@ -136,6 +136,7 @@ export class AgentAskUserService {
         ? (raw.options as Array<Record<string, unknown>>).map((o): AskUserQuestionOption => ({
             label: typeof o.label === 'string' ? o.label : '',
             description: typeof o.description === 'string' ? o.description : undefined,
+            preview: typeof o.preview === 'string' ? o.preview.slice(0, 10_000) : undefined,
           }))
         : []
 
