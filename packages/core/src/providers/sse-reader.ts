@@ -10,7 +10,7 @@
  * - 累积工具调用信息（tool use 支持）
  */
 
-import type { ProviderAdapter, ProviderRequest, StreamEventCallback, ToolCall } from './types.ts'
+import type { ProviderAdapter, ProviderRequest, StreamEventCallback, ThinkingBlock, ToolCall } from './types.ts'
 
 // ===== 流式请求 =====
 
@@ -32,8 +32,15 @@ export interface StreamSSEOptions {
 export interface StreamSSEResult {
   /** 累积的完整文本内容 */
   content: string
-  /** 累积的推理内容 */
+  /** 累积的推理内容（扁平文本，所有思考块拼接） */
   reasoning: string
+  /**
+   * 结构化的思考块（每块含 thinking 文本和可选 signature）
+   *
+   * 思考+工具模式下必须原样（含签名）回传给 Anthropic 协议家族服务端：
+   * 签名缺失时会被 DeepSeek v4 等服务端以 "content[].thinking must be passed back" 拒绝。
+   */
+  thinkingBlocks: ThinkingBlock[]
   /** 本轮返回的工具调用列表 */
   toolCalls: ToolCall[]
   /** 停止原因（'tool_use' 表示需要执行工具后继续） */
@@ -85,6 +92,10 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   const pendingToolCalls = new Map<string, { id: string; name: string; args: string; metadata?: Record<string, unknown> }>()
   let currentToolCallId: string | undefined
 
+  // 思考块追踪（Anthropic 协议：每个 thinking 块由多个 thinking_delta + signature_delta 组成）
+  const thinkingBlocks: ThinkingBlock[] = []
+  let currentThinking: ThinkingBlock | null = null
+
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -115,6 +126,27 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
             content += event.delta
           } else if (event.type === 'reasoning') {
             reasoning += event.delta
+            // 同步追加到当前思考块
+            if (currentThinking) {
+              currentThinking.thinking += event.delta
+            } else {
+              // 容错：有些 Provider 不发 content_block_start，直接发 thinking_delta
+              currentThinking = { thinking: event.delta }
+              thinkingBlocks.push(currentThinking)
+            }
+          } else if (event.type === 'reasoning_signature') {
+            if (currentThinking) {
+              currentThinking.signature = (currentThinking.signature ?? '') + event.signature
+            } else {
+              // 容错：signature_delta 出现时没有活跃思考块，自建一个
+              currentThinking = { thinking: '', signature: event.signature }
+              thinkingBlocks.push(currentThinking)
+            }
+          } else if (event.type === 'reasoning_block_start') {
+            currentThinking = { thinking: '' }
+            thinkingBlocks.push(currentThinking)
+          } else if (event.type === 'reasoning_block_stop') {
+            currentThinking = null
           } else if (event.type === 'tool_call_start') {
             currentToolCallId = event.toolCallId
             pendingToolCalls.set(event.toolCallId, {
@@ -169,7 +201,7 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   }
 
   onEvent({ type: 'done', stopReason })
-  return { content, reasoning, toolCalls, stopReason }
+  return { content, reasoning, thinkingBlocks, toolCalls, stopReason }
 }
 
 // ===== 非流式标题请求 =====

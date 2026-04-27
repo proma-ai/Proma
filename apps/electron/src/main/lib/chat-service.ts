@@ -359,7 +359,7 @@ export async function sendMessage(
           continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
         })
 
-        const { content, toolCalls, stopReason } = await streamSSE({
+        const { content, reasoning, thinkingBlocks, toolCalls, stopReason } = await streamSSE({
           request,
           adapter,
           signal: controller.signal,
@@ -404,7 +404,7 @@ export async function sendMessage(
 
         continuationMessages = [
           ...continuationMessages,
-          { role: 'assistant' as const, content, toolCalls },
+          { role: 'assistant' as const, content, reasoning, thinkingBlocks, toolCalls },
           { role: 'tool' as const, results: toolResults },
         ]
         pendingToolResults = true

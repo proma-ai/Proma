@@ -49,6 +49,8 @@ interface AnthropicContentBlock {
   }
   // thinking 字段
   thinking?: string
+  /** thinking 块签名（Anthropic 协议 + DeepSeek v4：续接回传时必须包含） */
+  signature?: string
   // tool_use 字段
   id?: string
   name?: string
@@ -80,6 +82,8 @@ interface AnthropicSSEEvent {
     text?: string
     /** 思考内容增量 (thinking_delta) */
     thinking?: string
+    /** 思考签名增量 (signature_delta) */
+    signature?: string
     /** 工具参数 JSON 增量 (input_json_delta) */
     partial_json?: string
     /** message_delta 的 stop_reason */
@@ -134,6 +138,14 @@ function buildMessageContent(
  * 将统一消息历史转换为 Anthropic 格式
  *
  * 包含历史消息附件的处理（修复了原始版本丢失历史附件的 Bug）。
+ *
+ * **为什么历史 assistant 消息不回传 thinking 块**：
+ * Anthropic 协议要求 thinking 块带 `signature`（服务端签发的加密签名）才能合法回传。
+ * 但我们持久化到 JSONL 的只有 `reasoning` 文本，签名不会持久化（也无法跨轮次保持有效）。
+ * 若把无签名的历史 thinking 块发回服务端，DeepSeek v4 / Anthropic 原生都会以
+ * "content[].thinking must be passed back" / 签名验证失败拒绝请求。
+ * 所以 history 只发 `text`；thinking 块仅在**当前这次 send 的续接消息**里回传
+ * （见 appendContinuationMessages，那里用刚抓到的带签名的块）。
  */
 function toAnthropicMessages(
   input: StreamRequestInput,
@@ -150,17 +162,6 @@ function toAnthropicMessages(
       if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
         const historyImages = readImageAttachments(msg.attachments)
         return { role, content: buildMessageContent(msg.content, historyImages) }
-      }
-
-      // Anthropic extended thinking 要求后续请求必须传回上一轮的 thinking block
-      if (msg.role === 'assistant' && msg.reasoning) {
-        const blocks: AnthropicContentBlock[] = [
-          { type: 'thinking', thinking: msg.reasoning },
-        ]
-        if (msg.content) {
-          blocks.push({ type: 'text', text: msg.content })
-        }
-        return { role, content: blocks }
       }
 
       return { role, content: msg.content }
@@ -189,14 +190,41 @@ function toAnthropicTools(tools: ToolDefinition[]): Array<Record<string, unknown
 
 /**
  * 将续接消息追加到 Anthropic 消息列表
+ *
+ * 块顺序遵循 Anthropic 协议：thinking → text → tool_use。
+ *
+ * 思考块回传策略：
+ * - 优先用结构化的 `thinkingBlocks`（每块含 thinking + 可选 signature），严格对齐服务端
+ *   原始块结构，DeepSeek v4 / Anthropic 原生都要求签名匹配
+ * - 若 thinkingBlocks 缺失但有扁平 `reasoning` 文本，降级成单个无签名 thinking 块
+ * - 当前请求关闭思考时**不**回传任何 thinking 块（否则服务端判定思考仍激活）
  */
 function appendContinuationMessages(
   messages: AnthropicMessage[],
   continuationMessages: ContinuationMessage[],
+  thinkingEnabled: boolean,
 ): void {
   for (const contMsg of continuationMessages) {
     if (contMsg.role === 'assistant') {
       const content: AnthropicContentBlock[] = []
+
+      if (thinkingEnabled) {
+        if (contMsg.thinkingBlocks && contMsg.thinkingBlocks.length > 0) {
+          for (const block of contMsg.thinkingBlocks) {
+            const thinkingBlock: AnthropicContentBlock = {
+              type: 'thinking',
+              thinking: block.thinking,
+            }
+            if (block.signature) {
+              thinkingBlock.signature = block.signature
+            }
+            content.push(thinkingBlock)
+          }
+        } else if (contMsg.reasoning && contMsg.reasoning.length > 0) {
+          content.push({ type: 'thinking', thinking: contMsg.reasoning })
+        }
+      }
+
       if (contMsg.content) {
         content.push({ type: 'text', text: contMsg.content })
       }
@@ -329,13 +357,21 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     // 工具续接消息
     if (input.continuationMessages && input.continuationMessages.length > 0) {
-      appendContinuationMessages(messages, input.continuationMessages)
+      appendContinuationMessages(messages, input.continuationMessages, !!input.thinkingEnabled)
+    }
+
+    const requestBody = JSON.stringify(body)
+
+    // 调试：开启 PROMA_DEBUG_REQUEST 时打印请求体，便于排查思考+工具场景的消息结构
+    const procReq = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    if (procReq?.env?.PROMA_DEBUG_REQUEST) {
+      console.log('[Request]', this.providerType, input.modelId, '→', requestBody.slice(0, 4000))
     }
 
     return {
       url: `${url}/messages`,
       headers: this.buildHeaders(input.apiKey),
-      body: JSON.stringify(body),
+      body: requestBody,
     }
   }
 
@@ -344,19 +380,37 @@ export class AnthropicAdapter implements ProviderAdapter {
       const event = JSON.parse(jsonLine) as AnthropicSSEEvent
       const events: StreamEvent[] = []
 
-      // 工具调用开始
-      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        events.push({
-          type: 'tool_call_start',
-          toolCallId: event.content_block.id || '',
-          toolName: event.content_block.name || '',
-        })
+      // 调试：开启 PROMA_DEBUG_SSE 时打印原始事件，便于排查 Provider 的 SSE 格式差异
+      const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+      if (proc?.env?.PROMA_DEBUG_SSE) {
+        console.log('[SSE]', jsonLine.slice(0, 400))
+      }
+
+      // 内容块开始
+      if (event.type === 'content_block_start') {
+        if (event.content_block?.type === 'tool_use') {
+          events.push({
+            type: 'tool_call_start',
+            toolCallId: event.content_block.id || '',
+            toolName: event.content_block.name || '',
+          })
+        } else if (event.content_block?.type === 'thinking') {
+          events.push({ type: 'reasoning_block_start' })
+        }
+      }
+
+      if (event.type === 'content_block_stop') {
+        // 无法从 stop 事件判断具体块类型，但 sse-reader 会忽略不相关的停止
+        events.push({ type: 'reasoning_block_stop' })
       }
 
       if (event.type === 'content_block_delta') {
-        // 推理内容（thinking_delta 的内容在 delta.thinking 字段中）
+        // 推理文本增量
         if (event.delta?.type === 'thinking_delta' && event.delta?.thinking) {
           events.push({ type: 'reasoning', delta: event.delta.thinking })
+        } else if (event.delta?.type === 'signature_delta' && event.delta?.signature) {
+          // 推理签名增量（Anthropic 协议：thinking 块必须附带 signature 才能在续接里回传）
+          events.push({ type: 'reasoning_signature', signature: event.delta.signature })
         } else if (event.delta?.type === 'input_json_delta' && event.delta?.partial_json) {
           // 工具参数 JSON 增量
           events.push({

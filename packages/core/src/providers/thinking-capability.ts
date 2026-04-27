@@ -49,6 +49,12 @@ function startsWith(modelId: string, prefix: string): boolean {
 /**
  * 根据模型 ID 推断思考协议能力
  *
+ * 匹配策略：
+ * - 优先按**模型 ID** 识别 DeepSeek v4（历史遗留：用户早期配的 DeepSeek 渠道 providerType 是
+ *   'anthropic'，不是 'deepseek'；只靠 providerType 匹配会落到 manual-only，导致
+ *   思考关闭时不发 `thinking` 字段、而 DeepSeek v4 默认开思考 → 报「thinking must be passed back」）
+ * - 再按 providerType 兜底
+ *
  * @param providerType 供应商类型
  * @param modelId 模型 ID
  */
@@ -56,11 +62,14 @@ export function detectThinkingCapability(
   providerType: ProviderType,
   modelId: string,
 ): ThinkingCapability {
-  // DeepSeek：v4 系列走 effort-based；其它（v3 / reasoner 等）保持旧 manual 协议
+  // DeepSeek v4 系列（按模型 ID 识别，不依赖 providerType）：
+  // effort-based-max 模式会在思考关闭时显式发 `{type:'disabled'}`，这是 DeepSeek v4 的硬要求
+  if (startsWith(modelId, 'deepseek-v4')) {
+    return { mode: 'effort-based-max', disableStrategy: 'explicit-disabled' }
+  }
+
+  // DeepSeek 其它模型（v3 / reasoner 等）：旧 manual 协议
   if (providerType === 'deepseek') {
-    if (startsWith(modelId, 'deepseek-v4')) {
-      return { mode: 'effort-based-max', disableStrategy: 'explicit-disabled' }
-    }
     return { mode: 'manual-only', disableStrategy: 'explicit-disabled' }
   }
 
@@ -80,7 +89,7 @@ export function detectThinkingCapability(
     return { mode: 'adaptive-only', disableStrategy: 'omit-field' }
   }
 
-  // Claude Opus 4.7：adaptive 唯一模式
+  // Claude Opus 4.7:adaptive 唯一模式
   if (startsWith(modelId, 'claude-opus-4-7')) {
     return { mode: 'adaptive-only', disableStrategy: 'explicit-disabled' }
   }

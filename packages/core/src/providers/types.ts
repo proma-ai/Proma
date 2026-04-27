@@ -74,12 +74,36 @@ export interface ToolResult {
 }
 
 /**
+ * Anthropic 协议的 thinking 块
+ *
+ * Anthropic extended thinking 输出的每个 thinking 块由流式 `thinking_delta`
+ * 拼出的文本内容 + `signature_delta` 拼出的签名组成。多轮工具调用时必须把这些
+ * 块**原样**（含签名）回传给服务端，否则：
+ * - Anthropic 原生：拒绝请求（签名验证失败或缺失）
+ * - DeepSeek v4 / Kimi K2 Thinking 等 Anthropic 兼容端点：以
+ *   "reasoning_content is missing" / "content[].thinking must be passed back" 拒绝
+ */
+export interface ThinkingBlock {
+  thinking: string
+  signature?: string
+}
+
+/**
  * 续接消息（工具调用后传回给模型的消息）
  *
  * 供应商无关格式，各适配器负责转换为供应商特定格式。
+ *
+ * `thinkingBlocks` 在思考+工具场景下必须回传（保留签名和块结构）；
+ * `reasoning` 是向后兼容的扁平字段，当 `thinkingBlocks` 缺失时作为 fallback。
  */
 export type ContinuationMessage =
-  | { role: 'assistant'; content: string; toolCalls: ToolCall[] }
+  | {
+      role: 'assistant'
+      content: string
+      reasoning?: string
+      thinkingBlocks?: ThinkingBlock[]
+      toolCalls: ToolCall[]
+    }
   | { role: 'tool'; results: ToolResult[] }
 
 // ===== 流式事件 =====
@@ -94,6 +118,22 @@ export interface StreamChunkEvent {
 export interface StreamReasoningEvent {
   type: 'reasoning'
   delta: string
+}
+
+/** 推理签名事件（Anthropic 协议的 signature_delta） */
+export interface StreamReasoningSignatureEvent {
+  type: 'reasoning_signature'
+  signature: string
+}
+
+/** 推理块开始事件（content_block_start with type=thinking） */
+export interface StreamReasoningBlockStartEvent {
+  type: 'reasoning_block_start'
+}
+
+/** 推理块结束事件（content_block_stop 对应 thinking 块） */
+export interface StreamReasoningBlockStopEvent {
+  type: 'reasoning_block_stop'
 }
 
 /** 流式错误事件 */
@@ -129,6 +169,9 @@ export interface StreamToolCallDeltaEvent {
 export type StreamEvent =
   | StreamChunkEvent
   | StreamReasoningEvent
+  | StreamReasoningSignatureEvent
+  | StreamReasoningBlockStartEvent
+  | StreamReasoningBlockStopEvent
   | StreamErrorEvent
   | StreamDoneEvent
   | StreamToolCallStartEvent
