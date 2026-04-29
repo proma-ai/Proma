@@ -538,7 +538,18 @@ function AgentMessageItem({ message, sessionPath, attachedDirs, onRetry, onRetry
   }
 
   if (message.role === 'status' && message.errorCode) {
-    // TypedError 消息 - 复用普通消息格式，简单显示错误
+    // ⚠️ LEGACY / DEPRECATED — Path 1 错误渲染（旧版 AgentMessage 数据模型）
+    //
+    // 该分支仅在 useSDKRenderer = false（没有持久化 SDK 消息）时才会被走到，
+    // 日常使用几乎不会触发。新代码统一走 SDKMessageRenderer.ErrorMessage（Path 2），
+    // 其操作按钮（重试 / 在新会话中重试 / 压缩上下文）已经在 Path 2 完整实现。
+    //
+    // TODO: 未来版本将移除此 Legacy 分支以及所有 Path 1 遗留代码
+    //   - AgentMessageItem 的 onRetry / onRetryInNewSession / onCompact 参数
+    //   - AgentMessagesProps 中对应的回调定义（若不再被 Path 2 以外使用）
+    //   - 本 if 分支（第 538-587 行区域）
+    //
+    // 保留时间：观察几个版本，确认没有会话走 useSDKRenderer = false 分支后再删。
     return (
       <Message from="assistant">
         <MessageHeader
@@ -870,6 +881,9 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
                     basePath={sessionPath || undefined}
                     onFork={isLive ? undefined : onFork}
                     onRewind={isLive ? undefined : onRewind}
+                    onRetry={isLive ? undefined : onRetry}
+                    onRetryInNewSession={isLive ? undefined : onRetryInNewSession}
+                    onCompact={isLive ? undefined : onCompact}
                     isStreaming={isLive || undefined}
                     stoppedByUser={isLastAssistantTurn || undefined}
                     sessionModelId={sessionModelId}

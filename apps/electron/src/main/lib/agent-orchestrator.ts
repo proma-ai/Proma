@@ -24,7 +24,7 @@ import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput,
 import { SAFE_TOOLS } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
-import { isPromptTooLongError, friendlyErrorMessage, mapSDKErrorToTypedError, extractErrorDetails } from './adapters/claude-agent-adapter'
+import { isPromptTooLongError, friendlyErrorMessage, mapSDKErrorToTypedError, extractErrorDetails, shouldKeepChannelOpen } from './adapters/claude-agent-adapter'
 import { isTransientNetworkError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
@@ -1676,13 +1676,19 @@ export class AgentOrchestrator {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
-              // 软中断（aborted_streaming / aborted_tools）场景下，adapter 保留 channel
-              // 等待队列中的后续用户消息继续 drive Query，此处跳过 drain 超时以免误关闭事件循环
+              // 软中断 / 延迟工具 / hook 暂停等场景下，adapter 保留 channel
+              // 等待队列或后续消息继续 drive Query，此处跳过 drain 超时以免误关闭事件循环。
+              // 完整白名单见 adapters/claude-agent-adapter.ts 的 CONTINUABLE_TERMINAL_REASONS。
               const resultTerminalReason = (msg as { terminal_reason?: string }).terminal_reason
-              const isAbortedByInterrupt =
-                resultTerminalReason === 'aborted_streaming' ||
-                resultTerminalReason === 'aborted_tools'
-              if (!isAbortedByInterrupt && !drainTimeoutPromise) {
+              const keepChannelOpen = shouldKeepChannelOpen(resultTerminalReason)
+              // 分类打点：跟踪线上哪种 terminal_reason 最常见，配合 deferred_tool_use 回填决策
+              const hasDeferredTool = (msg as { deferred_tool_use?: unknown }).deferred_tool_use != null
+              console.log(
+                `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}, ` +
+                `terminal_reason=${resultTerminalReason ?? 'undefined'}, keepChannelOpen=${keepChannelOpen}` +
+                (hasDeferredTool ? ', hasDeferredTool=true' : ''),
+              )
+              if (!keepChannelOpen && !drainTimeoutPromise) {
                 // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
                 // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
                 drainTimeoutPromise = new Promise((resolve) =>
@@ -2175,8 +2181,10 @@ export class AgentOrchestrator {
 
   /** 中止所有活跃的 Agent 会话（应用退出时调用） */
   stopAll(): void {
-    if (this.activeSessions.size === 0) return
-    console.log(`[Agent 编排] 正在中止所有活跃会话 (${this.activeSessions.size} 个)...`)
+    if (this.activeSessions.size > 0) {
+      console.log(`[Agent 编排] 正在中止所有活跃会话 (${this.activeSessions.size} 个)...`)
+    }
+    // 即便 activeSessions 为空，也要调 dispose 清理可能残留的 pidMap / 子进程
     this.adapter.dispose()
     this.activeSessions.clear()
     this.sessionPermissionModes.clear()

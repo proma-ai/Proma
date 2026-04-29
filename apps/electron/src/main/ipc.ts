@@ -212,16 +212,23 @@ const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
  * - chat:*: 对话管理 + 消息发送 + 流式事件
  */
 /**
+ * 打包内置资源目录
+ * dev: __dirname/resources（build:resources 阶段拷贝）
+ * prod: process.resourcesPath（electron-builder extraResources 产物）
+ */
+function getBundledResourcesDir(): string {
+  return app.isPackaged ? process.resourcesPath : join(__dirname, 'resources')
+}
+
+/**
  * 解析应用图标变体的文件路径
- * dev 模式: __dirname/resources/proma-logos/proma-{id}.png
- * 生产模式: __dirname/resources/proma-logos/proma-{id}.png（build:resources 阶段已复制）
  */
 export function resolveAppIconPath(variantId: string): string | null {
+  const resourcesDir = getBundledResourcesDir()
   if (!variantId || variantId === 'default') {
-    // 默认图标
-    return join(__dirname, 'resources/icon.png')
+    return join(resourcesDir, 'icon.png')
   }
-  return join(__dirname, 'resources/proma-logos', `proma-${variantId}.png`)
+  return join(resourcesDir, 'proma-logos', `proma-${variantId}.png`)
 }
 
 export function registerIpcHandlers(): void {
@@ -562,8 +569,8 @@ export function registerIpcHandlers(): void {
       const { writeFileSync, readFileSync, existsSync } = await import('node:fs')
       const { join, normalize, sep, extname: pathExtname } = await import('node:path')
 
-      // 解析到应用内置 resources 目录
-      const resourcesDir = normalize(join(__dirname, 'resources'))
+      // 解析到应用内置 resources 目录（dev 用 __dirname/resources，prod 用 process.resourcesPath）
+      const resourcesDir = normalize(getBundledResourcesDir())
       const fullPath = normalize(join(resourcesDir, resourceRelativePath))
 
       // 安全校验：防止路径穿越（追加 sep 防止 resources-evil 绕过）

@@ -1044,7 +1044,7 @@ function markdownPreviewHtml(filePath: string, filename: string, textContent: st
     function renderMarkdown(raw) {
       var html;
       if (typeof marked !== 'undefined') {
-        marked.setOptions({ gfm: true, breaks: false });
+        marked.setOptions({ gfm: true, breaks: true });
         html = marked.parse(raw);
         // Tag task lists for styling (marked renders <input type="checkbox"> inside <li>)
         html = html.replace(/<li>(\s*<input [^>]*type="checkbox"[^>]*>)/g, '<li class="task-list-item">$1');

@@ -18,7 +18,6 @@ import {
   tabsAtom,
   activeTabIdAtom,
   sidebarCollapsedAtom,
-  closeTab,
   openTab,
 } from '@/atoms/tab-atoms'
 import { shortcutOverridesAtom, sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
@@ -29,7 +28,6 @@ import {
   agentChannelIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
-  workingDoneSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import {
   chatPendingMessageAtom,
@@ -40,7 +38,7 @@ import {
 import { activeViewAtom } from '@/atoms/active-view'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { useShortcut } from '@/hooks/useShortcut'
-import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
+import { useCloseTab } from '@/hooks/useCloseTab'
 import {
   initShortcutRegistry,
   updateShortcutOverrides,
@@ -62,12 +60,11 @@ export function GlobalShortcuts(): null {
   const { createChat, createAgent } = useCreateSession()
 
   // Tab 管理（用于关闭标签页）
-  const [tabs, setTabs] = useAtom(tabsAtom)
-  const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
-  const setWorkingDone = useSetAtom(workingDoneSessionIdsAtom)
+  const activeTabId = useAtomValue(activeTabIdAtom)
 
-  // 关闭活跃标签后同步副作用（与 TabBar.handleClose 共用）
-  const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
+  // 统一关闭逻辑：与 TabBar.handleClose 共用
+  // 含 Agent 子进程 stop + 流式中的确认对话框（修复 Issue #357）
+  const { requestClose } = useCloseTab()
 
   // 初始化：挂载注册表 + 加载用户配置
   useEffect(() => {
@@ -101,25 +98,8 @@ export function GlobalShortcuts(): null {
     }
 
     if (!activeTabId) return
-    const closedTabId = activeTabId
-    const result = closeTab(tabs, activeTabId, activeTabId)
-    setTabs(result.tabs)
-    setActiveTabId(result.activeTabId)
-
-    // 关闭的是当前活跃标签（必然），同步 appMode/currentXxxId 到新激活的标签
-    const newActiveTab = result.activeTabId
-      ? result.tabs.find((t) => t.id === result.activeTabId) ?? null
-      : null
-    syncActiveTabSideEffects(newActiveTab)
-
-    // 从 Working Done 集合移除
-    setWorkingDone((prev) => {
-      if (!prev.has(closedTabId)) return prev
-      const next = new Set(prev)
-      next.delete(closedTabId)
-      return next
-    })
-  }, [settingsOpen, setSettingsOpen, searchOpen, setSearchOpen, activeTabId, tabs, setTabs, setActiveTabId, setWorkingDone, syncActiveTabSideEffects])
+    requestClose(activeTabId)
+  }, [settingsOpen, setSettingsOpen, searchOpen, setSearchOpen, activeTabId, requestClose])
 
   // 监听菜单 IPC 事件（Cmd+W 被 Electron 菜单拦截后通过 IPC 转发）
   useEffect(() => {

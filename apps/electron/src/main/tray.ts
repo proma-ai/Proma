@@ -9,8 +9,11 @@ let tray: Tray | null = null
  * 所有平台统一使用 Template 图标
  */
 function getTrayIconPath(): string {
-  // resources 在 build:resources 阶段被复制到 dist/ 下，与 main.cjs 同级
-  const resourcesDir = join(__dirname, 'resources/proma-logos')
+  // dev: __dirname/resources（build:resources 拷贝产物）
+  // prod: process.resourcesPath（electron-builder extraResources 产物）
+  const resourcesDir = app.isPackaged
+    ? join(process.resourcesPath, 'proma-logos')
+    : join(__dirname, 'resources/proma-logos')
   return join(resourcesDir, 'iconTemplate.png')
 }
 

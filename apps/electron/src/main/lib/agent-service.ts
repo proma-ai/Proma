@@ -27,7 +27,7 @@ import type {
   AgentQueueMessageInput,
   PromaPermissionMode,
 } from '@proma/shared'
-import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
+import { ClaudeAgentAdapter, scanAndKillOrphanedClaudeSubprocesses } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
@@ -229,6 +229,16 @@ export function isAgentSessionActive(sessionId: string): boolean {
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
 export function stopAllAgents(): void {
   orchestrator.stopAll()
+}
+
+/**
+ * 退出前最后兜底：扫描并强杀所有孤儿 claude-agent-sdk 子进程
+ *
+ * 必须在 stopAllAgents() 之后调用。针对 pidMap 未覆盖、dispose 漏杀等极端场景。
+ * 同步执行，不 await，确保 before-quit 能在 Electron 超时前完成。
+ */
+export function killOrphanedClaudeSubprocesses(): void {
+  scanAndKillOrphanedClaudeSubprocesses()
 }
 
 /**

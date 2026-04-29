@@ -20,6 +20,7 @@ import type {
 } from '@proma/shared'
 import type { CanUseToolOptions, PermissionResult } from '../agent-permission-service'
 import { TRANSIENT_NETWORK_PATTERN } from '../error-patterns'
+import { spawn as spawnChild, execFileSync } from 'node:child_process'
 
 /** SDK Query 对象类型（从动态导入中推断） */
 type SDKQuery = ReturnType<typeof import('@anthropic-ai/claude-agent-sdk').query>
@@ -199,6 +200,35 @@ export function friendlyErrorMessage(raw: string): string {
 }
 
 // ============================================================================
+// Terminal reason 白名单
+// ============================================================================
+
+/**
+ * 表示"本轮结束但会话应继续"的 terminal_reason 白名单。
+ *
+ * SDK 0.2.96+ 在 SDKResultMessage 引入 `terminal_reason` 字段后，某些值并不代表
+ * 会话真正结束，而是期望 host 保留 stdin 通道、驱动下一轮：
+ * - `aborted_streaming` / `aborted_tools`：query.interrupt() 软中断，等队列续轮
+ * - `tool_deferred`：工具被延迟执行（配套 result.deferred_tool_use），等异步回填
+ * - `hook_stopped` / `stop_hook_prevented`：hook 层面的暂停，host 可继续注入消息
+ *
+ * 未列在此集合中的 terminal_reason（含 `undefined` 的旧版行为、`completed`、
+ * `max_turns`、`prompt_too_long`、各类 error 等）一律按"本轮结束 + 关闭通道"处理。
+ */
+export const CONTINUABLE_TERMINAL_REASONS: ReadonlySet<string> = new Set([
+  'aborted_streaming',
+  'aborted_tools',
+  'tool_deferred',
+  'hook_stopped',
+  'stop_hook_prevented',
+])
+
+/** 判断 result.terminal_reason 是否应保留消息通道以等待下一轮 */
+export function shouldKeepChannelOpen(terminalReason: string | undefined): boolean {
+  return terminalReason != null && CONTINUABLE_TERMINAL_REASONS.has(terminalReason)
+}
+
+// ============================================================================
 // 错误映射
 // ============================================================================
 
@@ -356,6 +386,63 @@ const queryReadyResolvers = new Map<string, () => void>()
 /** SDK init 超时时间（毫秒） */
 const QUERY_READY_TIMEOUT_MS = 60_000
 
+/**
+ * 活跃会话的 claude 子进程 PID 映射（sessionId → pid）
+ *
+ * 通过 spawnClaudeCodeProcess hook 在子进程启动时记录。
+ * 异常场景下 SDK 自身的 2s SIGTERM + 5s SIGKILL 兜底可能失效（见 Issue #357 残留分析），
+ * abort() / dispose() 在 close 后再做一轮平台差异化 force-kill 兜底。
+ */
+const pidMap = new Map<string, number>()
+
+/** 延时 force-kill 的 timer 句柄，用于 dispose / 重复 abort 时取消 */
+const forceKillTimers = new Map<string, NodeJS.Timeout>()
+
+/** abort 后等待 SDK 自身兜底（2s+5s）再检测并强杀的延时 */
+const FORCE_KILL_GRACE_MS = 10_000
+
+/**
+ * 平台差异化强制终止：macOS/Linux 用 SIGKILL，Windows 用 taskkill /F /T 级联杀子孙
+ *
+ * Windows 备注：Node 的 process.kill 对原生 binary 只发 TerminateProcess，且不级联子进程，
+ * 必须用 taskkill /T 才能杀掉 claude.exe 下挂的 bash / MCP 等孙进程。
+ */
+export function forceKillClaudeProcess(pid: number): void {
+  try {
+    // 存活探测：dead 会抛 ESRCH
+    process.kill(pid, 0)
+  } catch {
+    return
+  }
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore' })
+    } else {
+      process.kill(pid, 'SIGKILL')
+    }
+    console.warn(`[Claude 适配器] force-killed residual claude pid=${pid}`)
+  } catch (error) {
+    console.warn(`[Claude 适配器] force-kill pid=${pid} 失败:`, error)
+  }
+}
+
+function scheduleForceKill(sessionId: string, pid: number): void {
+  // 取消旧 timer 防止累积（快速重复 abort 同一 session 的场景）
+  const old = forceKillTimers.get(sessionId)
+  if (old) clearTimeout(old)
+
+  const timer = setTimeout(() => {
+    forceKillTimers.delete(sessionId)
+    // 仍是同一个 pid 才杀（防止期间 SDK 自己已清理、又被其他会话复用 pid）
+    if (pidMap.get(sessionId) === pid) {
+      forceKillClaudeProcess(pid)
+      pidMap.delete(sessionId)
+    }
+  }, FORCE_KILL_GRACE_MS)
+  timer.unref?.()
+  forceKillTimers.set(sessionId, timer)
+}
+
 export class ClaudeAgentAdapter implements AgentProviderAdapter {
 
   abort(sessionId: string): void {
@@ -376,6 +463,13 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     if (controller) {
       controller.abort()
       activeControllers.delete(sessionId)
+    }
+
+    // 兜底 force-kill：SDK 内部有 2s SIGTERM + 5s SIGKILL，但某些场景仍会残留（见 Issue #357）
+    // 给 SDK 足够时间自行清理，超时后仍存活则按平台差异强杀
+    const pid = pidMap.get(sessionId)
+    if (pid) {
+      scheduleForceKill(sessionId, pid)
     }
   }
 
@@ -400,6 +494,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
   }
 
   dispose(): void {
+    for (const timer of forceKillTimers.values()) {
+      clearTimeout(timer)
+    }
+    forceKillTimers.clear()
     for (const [, query] of activeQueries) {
       try {
         query.close()
@@ -410,6 +508,14 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     for (const [, controller] of activeControllers) {
       controller.abort()
     }
+
+    // 应用退出场景：对所有已知 PID 立即强杀（不等 10s grace）
+    // dispose() 通常由 stopAll / before-quit 调用，用户已经决定清场
+    for (const [sessionId, pid] of pidMap) {
+      forceKillClaudeProcess(pid)
+      pidMap.delete(sessionId)
+    }
+
     activeControllers.clear()
     activeQueries.clear()
     activeChannels.clear()
@@ -488,6 +594,39 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         // 强制顺序执行工具，防止并发 tool_use 导致 400 错误
         // 根因：多个 tool_use 并发时若结果未完整批量提交会触发 invalid_request_error
         toolUseConcurrency: 1,
+
+        // 自定义 spawn：记录 PID 以供 abort/dispose 做 force-kill 兜底（Issue #357）
+        // 注意：一旦提供 spawnClaudeCodeProcess，SDK 会完全绕过 spawnLocalProcess，
+        // 因此 options.stderr 回调需要在这里手动转发，否则 extractApiError / 重试判断全部失效
+        spawnClaudeCodeProcess: (spawnOpts: import('@anthropic-ai/claude-agent-sdk').SpawnOptions) => {
+          const child = spawnChild(spawnOpts.command, spawnOpts.args, {
+            cwd: spawnOpts.cwd,
+            env: spawnOpts.env,
+            signal: spawnOpts.signal,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          })
+          // 手动转发 stderr（SDK 默认在 spawnLocalProcess 里做，自定义 spawn 需自己做）
+          // 同时必须消费 stderr 流避免缓冲区满（默认 64KB）导致子进程挂起
+          if (options.onStderr) {
+            const onStderr = options.onStderr
+            child.stderr?.on('data', (chunk: Buffer) => {
+              try { onStderr(chunk.toString()) } catch { /* 用户回调异常不影响流 */ }
+            })
+          } else {
+            // 即便上层不关心，也要 resume() 流否则缓冲会阻塞
+            child.stderr?.resume()
+          }
+          if (child.pid) {
+            pidMap.set(options.sessionId, child.pid)
+            child.once('exit', () => {
+              // 仅当当前记录就是这个 pid 时才清理，防止并发会话误删
+              if (pidMap.get(options.sessionId) === child.pid) {
+                pidMap.delete(options.sessionId)
+              }
+            })
+          }
+          return child as unknown as import('@anthropic-ai/claude-agent-sdk').SpawnedProcess
+        },
       } as import('@anthropic-ai/claude-agent-sdk').Options
 
       // 使用持久化消息通道：在查询期间保持 generator 活跃以支持工具权限注入，
@@ -550,13 +689,15 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
               options.onContextWindow?.(firstEntry.contextWindow)
             }
           }
-          // 被软中断（query.interrupt()）产生的 result：不关闭通道，
-          // 让 SDK 继续读取通道中已排队的下一条用户消息并开启新一轮 turn。
-          const wasAborted =
-            resultMsg.terminal_reason === 'aborted_streaming' ||
-            resultMsg.terminal_reason === 'aborted_tools'
-          if (!wasAborted) {
-            // result 表示当前轮次完成，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
+          // 被软中断 / 延迟工具 / hook 暂停等场景产生的 result：不关闭通道，
+          // 让 SDK 继续读取通道中已排队（或后续注入）的消息并开启新一轮 turn。
+          // 完整白名单见 CONTINUABLE_TERMINAL_REASONS。
+          //
+          // 注意：keep-open 场景本身就是"等待用户决策"（权限审批、Exit Plan、AskUser 等），
+          // 不在此处加闲置超时——用户离开再回来继续交互是合法的，强行超时会破坏体验。
+          // 若用户关闭 Tab，TabBar/GlobalShortcuts 会主动调 stopAgent → abort() 终止子进程。
+          if (!shouldKeepChannelOpen(resultMsg.terminal_reason)) {
+            // result 表示本轮真正结束，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
             // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
             // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
             channel.close()
@@ -566,6 +707,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         yield sdkMessage as SDKMessage
       }
     } finally {
+      // 注意：pidMap 的清理由 child.on('exit') 触发，不在这里清除
+      // 原因：finally 可能先于子进程真正退出执行，此时仍需保留 PID 以便 abort/dispose 兜底
       activeControllers.delete(options.sessionId)
       activeQueries.delete(options.sessionId)
       activeChannels.delete(options.sessionId)
@@ -636,5 +779,65 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
       mode as import('@anthropic-ai/claude-agent-sdk').PermissionMode,
     )
     console.log(`[Claude 适配器] 权限模式已切换: sessionId=${sessionId}, mode=${mode}`)
+  }
+}
+
+/**
+ * 扫描并强杀所有孤儿 claude-agent-sdk 子进程（应用退出最后兜底）
+ *
+ * 使用场景：app.on('before-quit') 里 stopAllAgents() 之后调用。
+ * 针对 pidMap 未覆盖、child 'exit' 事件未触发、dispose 漏杀等极端场景的最后一道防线。
+ *
+ * 匹配条件：父进程是当前进程 + 命令行含 "claude-agent-sdk"
+ *
+ * - macOS/Linux: `pgrep -P <pid>` 找所有子进程，再用 ps 过滤匹配的再 SIGKILL
+ * - Windows: PowerShell 查 ParentProcessId + CommandLine 匹配后 Stop-Process
+ *   （wmic 在 Win11 已被 deprecated，部分版本不再预装）
+ *
+ * 所有 execFileSync 都加 3s timeout，防止在异常进程表 / 权限不足等场景挂死 before-quit
+ */
+export function scanAndKillOrphanedClaudeSubprocesses(): void {
+  const parentPid = process.pid
+  const SCAN_TIMEOUT_MS = 3_000
+  try {
+    if (process.platform === 'win32') {
+      execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${parentPid} -and $_.CommandLine -like '*claude-agent-sdk*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+        ],
+        { stdio: 'ignore', timeout: SCAN_TIMEOUT_MS },
+      )
+    } else {
+      let childPids: string
+      try {
+        childPids = execFileSync('pgrep', ['-P', String(parentPid)], {
+          encoding: 'utf8',
+          timeout: SCAN_TIMEOUT_MS,
+        })
+      } catch {
+        return // 无子进程 / pgrep 未安装 / 超时
+      }
+      for (const line of childPids.split('\n')) {
+        const pid = parseInt(line.trim(), 10)
+        if (!pid) continue
+        try {
+          const cmd = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], {
+            encoding: 'utf8',
+            timeout: SCAN_TIMEOUT_MS,
+          })
+          if (cmd.includes('claude-agent-sdk')) {
+            process.kill(pid, 'SIGKILL')
+            console.warn(`[Claude 适配器] 退出扫描: 强杀孤儿 claude 子进程 pid=${pid}`)
+          }
+        } catch {
+          // ps 失败 / 进程已退出 / 超时，跳过
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[Claude 适配器] 退出扫描执行失败:', error)
   }
 }
