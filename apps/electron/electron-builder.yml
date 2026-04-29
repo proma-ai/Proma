@@ -111,9 +111,10 @@ nsis:
   createStartMenuShortcut: true
 
 # ============================================
-# 发布配置
-# 每个平台的 build job 通过 --publish always 直接上传到 GitHub Release。
-# electron-builder 会自动创建/复用 Release，并在多架构并行上传时合并 latest-mac.yml。
+# 发布配置（商业版）
+# CI 打包步骤用 --publish never，产物由 scripts/upload-release.ts 上传到阿里云 OSS。
+# 此处 provider=generic + url 仅用于 electron-updater 运行时从 Proma 更新服务器
+# 拉取 latest-mac.yml / latest.yml 实现应用自动更新，不影响发布流程本身。
 # ============================================
 publish:
   provider: generic

@@ -37,7 +37,6 @@ import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
-import { Button } from '@/components/ui/button'
 import type {
   SDKMessage,
   SDKAssistantMessage,
