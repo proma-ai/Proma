@@ -229,7 +229,7 @@ export function cleanupOfficialChannel(): void {
 // ===== 云端工具默认配置 =====
 
 /** 需要自动配置的云端内置工具 */
-const CLOUD_TOOLS = ['web-search', 'nano-banana'] as const
+const CLOUD_TOOLS = ['web-search', 'nano-banana', 'gpt-image-2'] as const
 
 /**
  * 同步云端工具默认配置
@@ -262,6 +262,14 @@ function syncCloudToolDefaults(): void {
     cloudMode: 'true',
     model: existingNb.model || 'gemini-3.1-flash-image-preview',
     useCloud: existingNb.useCloud ?? 'true',
+  })
+
+  // [Proma Cloud] GPT Image 2（仅云端，无需 model / apiKey）
+  const existingGpt = rawConfig.toolCredentials?.['gpt-image-2'] ?? {}
+  updateToolCredentials('gpt-image-2', {
+    ...existingGpt,
+    cloudMode: 'true',
+    useCloud: existingGpt.useCloud ?? 'true',
   })
 
   console.log('[Cloud Channel] 云端工具默认配置已同步')

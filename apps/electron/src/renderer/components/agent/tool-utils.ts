@@ -68,6 +68,7 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   EnterPlanMode: Map,
   ExitPlanMode: MapPinOff,
   generate_image: ImagePlus,
+  generate_image_gpt: ImagePlus, // [Proma Cloud]
   TaskOutput: Layers,
   TaskStop: OctagonX,
   AskUserQuestion: MessageCircleQuestion,
@@ -118,6 +119,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   EnterPlanMode: '正在生成计划',
   ExitPlanMode: '正在退出计划',
   generate_image: '生成图片',
+  generate_image_gpt: 'GPT Image 2 生成图片', // [Proma Cloud]
   TaskOutput: '获取任务输出',
   TaskStop: '停止任务',
   AskUserQuestion: '等待用户输入',
@@ -310,7 +312,8 @@ export function getInputSummary(
       return parts.length > 0 ? parts.join(' · ') : null
     }
 
-    case 'generate_image': {
+    case 'generate_image':
+    case 'generate_image_gpt': { // [Proma Cloud]
       const prompt = input.prompt
       if (typeof prompt === 'string') {
         return prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt

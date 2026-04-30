@@ -516,6 +516,91 @@ function NanoBananaSettings(): React.ReactElement {
   )
 }
 
+/** [Proma Cloud] GPT Image 2 生图工具设置区域（仅云端模式） */
+function GptImage2Settings(): React.ReactElement {
+  const [enabled, setEnabled] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+  const [cloudAvailable, setCloudAvailable] = React.useState(false)
+  const setChatTools = useSetAtom(chatToolsAtom)
+
+  React.useEffect(() => {
+    Promise.all([
+      window.electronAPI.getChatTools(),
+      window.electronAPI.getChatToolCredentials('gpt-image-2'),
+    ]).then(([tools, credentials]) => {
+      const tool = tools.find((t) => t.meta.id === 'gpt-image-2')
+      if (tool) setEnabled(tool.enabled)
+      setCloudAvailable(credentials.cloudMode === 'true')
+    }).catch((err: unknown) => {
+      console.error('[GPT Image 2 设置] 加载失败:', err)
+    }).finally(() => {
+      setLoading(false)
+    })
+  }, [])
+
+  const handleToggle = async (checked: boolean): Promise<void> => {
+    try {
+      await window.electronAPI.updateChatToolState('gpt-image-2', { enabled: checked })
+      setEnabled(checked)
+      await refreshChatTools(setChatTools)
+    } catch (error) {
+      console.error('[GPT Image 2 设置] 切换失败:', error)
+    }
+  }
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
+  }
+
+  if (!cloudAvailable) {
+    return (
+      <SettingsSection
+        title="GPT Image 2"
+        description="AI 图片生成与编辑（仅 Proma Cloud 用户可用）"
+      >
+        <SettingsCard divided={false}>
+          <div className="p-4">
+            <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 mb-1">
+                <Cloud size={14} className="shrink-0" />
+                <span className="font-medium text-foreground">仅限 Proma Cloud 用户</span>
+              </div>
+              <p className="text-xs">GPT Image 2 图片生成功能需要通过 Proma Cloud 提供，请确认您已登录 Proma 云端账户。</p>
+            </div>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+    )
+  }
+
+  return (
+    <SettingsSection
+      title="GPT Image 2"
+      description="启用后 AI 可以使用 GPT Image 2 生成和编辑图片（通过 Proma Cloud）"
+      action={
+        <Switch checked={enabled} onCheckedChange={handleToggle} />
+      }
+    >
+      <SettingsCard divided={false}>
+        <div className="space-y-4 p-4">
+          <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
+            <Cloud size={14} className="shrink-0" />
+            <span className="font-medium">通过 Proma Cloud 提供</span>
+          </div>
+
+          <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground text-sm">计费说明（积分/张）</p>
+            <p><span className="font-medium text-foreground">Low</span>：1024 系列 0.08-0.09 · 2K/4K 0.37</p>
+            <p><span className="font-medium text-foreground">Medium</span>：1024 系列 0.64-0.83 · 2K/4K 3.31</p>
+            <p><span className="font-medium text-foreground">High</span>：1024 系列 2.57-3.29 · 2K/4K 13.17</p>
+            <p className="text-xs text-muted-foreground/80 mt-1">支持 7 种尺寸：1024×1024/1024×1536/1536×1024/2048×2048/2048×1152/3840×2160/2160×3840</p>
+          </div>
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
+
 /** 自定义工具列表区域 */
 function CustomToolsSection(): React.ReactElement | null {
   const tools = useAtomValue(chatToolsAtom)
@@ -602,6 +687,9 @@ export function ToolSettings(): React.ReactElement {
 
       {/* Nano Banana 生图工具 */}
       <NanoBananaSettings />
+
+      {/* [Proma Cloud] GPT Image 2 生图工具 */}
+      <GptImage2Settings />
 
       {/* 自定义工具 */}
       <CustomToolsSection />

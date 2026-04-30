@@ -15,6 +15,8 @@ import { isCustomHttpToolCall, executeHttpTool } from './chat-tools/http-tool-ex
 import { isAgentRecommendToolCall, executeAgentRecommendTool } from './chat-tools/agent-recommend-tool'
 import { isNanoBananaToolCall, executeNanoBananaTool } from './chat-tools/nano-banana-tool'
 import type { NanoBananaContext } from './chat-tools/nano-banana-tool'
+import { isGptImage2ToolCall, executeGptImage2Tool } from './chat-tools/gpt-image-2-tool' // [Proma Cloud]
+import type { GptImage2Context } from './chat-tools/gpt-image-2-tool' // [Proma Cloud]
 import { getChatToolsConfig } from './chat-tool-config'
 
 /** 工具执行上下文 */
@@ -63,6 +65,15 @@ export async function executeToolCalls(
         previousAssistantAttachments: context.previousAssistantAttachments,
       }
       result = await executeNanoBananaTool(tc, nanoBananaContext)
+    // [Proma Cloud] GPT Image 2 tool dispatch
+    } else if (isGptImage2ToolCall(tc.name)) {
+      const gptImageContext: GptImage2Context = {
+        conversationId: context.conversationId,
+        currentAttachments: context.currentAttachments,
+        previousUserAttachments: context.previousUserAttachments,
+        previousAssistantAttachments: context.previousAssistantAttachments,
+      }
+      result = await executeGptImage2Tool(tc, gptImageContext)
     } else if (isCustomHttpToolCall(tc.name)) {
       const config = getChatToolsConfig()
       const meta = config.customTools.find((t) => t.id === tc.name)

@@ -618,6 +618,23 @@ export class AgentOrchestrator {
   }
 
   /**
+   * [Proma Cloud] 注入 SDK 内置生图工具（GPT Image 2，仅云端）
+   */
+  private async injectGptImage2Tools(
+    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
+    mcpServers: Record<string, Record<string, unknown>>,
+    sessionId: string,
+    agentCwd?: string,
+  ): Promise<void> {
+    try {
+      const { injectGptImage2McpServer } = await import('./chat-tools/gpt-image-2-mcp')
+      await injectGptImage2McpServer(sdk, mcpServers, sessionId, agentCwd)
+    } catch (err) {
+      console.error(`[Agent 编排] 注入 GPT Image 2 MCP 失败:`, err)
+    }
+  }
+
+  /**
    * 生成 Agent 会话标题
    *
    * 使用 Provider 适配器系统，支持所有渠道。任何错误返回 null。
@@ -1097,6 +1114,7 @@ export class AgentOrchestrator {
       const mcpServers = this.buildMcpServers(workspaceSlug)
       await this.injectMemoryTools(sdk, mcpServers)
       await this.injectNanoBananaTools(sdk, mcpServers, sessionId, agentCwd)
+      await this.injectGptImage2Tools(sdk, mcpServers, sessionId, agentCwd) // [Proma Cloud]
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {

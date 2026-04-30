@@ -31,6 +31,12 @@ import {
   NANO_BANANA_TOOL_DEFINITIONS,
   isNanoBananaAvailable,
 } from './chat-tools/nano-banana-tool'
+// [Proma Cloud] GPT Image 2 生图工具
+import {
+  GPT_IMAGE_2_TOOL_META,
+  GPT_IMAGE_2_TOOL_DEFINITIONS,
+  isGptImage2Available,
+} from './chat-tools/gpt-image-2-tool'
 
 // ===== 内置工具注册 =====
 
@@ -62,6 +68,12 @@ const BUILTIN_TOOLS: BuiltinToolEntry[] = [
     meta: NANO_BANANA_TOOL_META,
     getDefinitions: () => NANO_BANANA_TOOL_DEFINITIONS,
     checkAvailable: isNanoBananaAvailable,
+  },
+  // [Proma Cloud] GPT Image 2
+  {
+    meta: GPT_IMAGE_2_TOOL_META,
+    getDefinitions: () => GPT_IMAGE_2_TOOL_DEFINITIONS,
+    checkAvailable: isGptImage2Available,
   },
 ]
 
