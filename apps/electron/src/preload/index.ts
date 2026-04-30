@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, APP_ICON_IPC_CHANNELS } from '../types'
@@ -77,6 +77,10 @@ import type {
   SyncProgressEvent,
   FileSearchResult,
   EnvironmentCheckResult,
+  InstallerManifest,
+  InstallerDownloadRequest,
+  InstallerDownloadResult,
+  InstallerProgressPayload,
   ProxyConfig,
   SystemProxyDetectResult,
   GitHubRelease,
@@ -142,6 +146,12 @@ export interface ElectronAPI {
    * @returns 运行时状态，包含 Bun、Git 等信息
    */
   getRuntimeStatus: () => Promise<RuntimeStatus | null>
+
+  /**
+   * 重新初始化运行时状态（重新跑 Node / Bun / Git / Shell 检测）
+   * 用户安装完 Git / Node 后触发，强制刷新缓存
+   */
+  reinitRuntime: () => Promise<RuntimeStatus>
 
   /**
    * 获取指定目录的 Git 仓库状态
@@ -305,6 +315,25 @@ export interface ElectronAPI {
 
   /** 执行环境检测 */
   checkEnvironment: () => Promise<EnvironmentCheckResult>
+
+  // ===== 第三方安装包（Git / Node.js）相关 =====
+
+  /** 获取安装包清单（远程，失败回退内置） */
+  fetchInstallerManifest: () => Promise<InstallerManifest>
+
+  /** 开始下载指定安装包，resolve 时文件已落地并通过 sha256 校验 */
+  downloadInstaller: (req: InstallerDownloadRequest) => Promise<InstallerDownloadResult>
+
+  /** 取消指定 key 的进行中下载 */
+  cancelInstallerDownload: (key: string) => Promise<boolean>
+
+  /** 拉起已下载的安装程序（等效双击） */
+  launchInstaller: (filePath: string) => Promise<void>
+
+  /** 订阅下载进度事件，返回取消订阅函数 */
+  onInstallerProgress: (
+    callback: (payload: InstallerProgressPayload) => void,
+  ) => () => void
 
   // ===== 代理配置相关 =====
 
@@ -928,6 +957,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_RUNTIME_STATUS)
   },
 
+  reinitRuntime: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.REINIT_RUNTIME)
+  },
+
   getGitRepoStatus: (dirPath: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_GIT_REPO_STATUS, dirPath)
   },
@@ -1129,6 +1162,25 @@ const electronAPI: ElectronAPI = {
   // 环境检测
   checkEnvironment: () => {
     return ipcRenderer.invoke(ENVIRONMENT_IPC_CHANNELS.CHECK)
+  },
+
+  // 第三方安装包（Git / Node.js）
+  fetchInstallerManifest: () => {
+    return ipcRenderer.invoke(INSTALLER_IPC_CHANNELS.MANIFEST)
+  },
+  downloadInstaller: (req: InstallerDownloadRequest) => {
+    return ipcRenderer.invoke(INSTALLER_IPC_CHANNELS.DOWNLOAD, req)
+  },
+  cancelInstallerDownload: (key: string) => {
+    return ipcRenderer.invoke(INSTALLER_IPC_CHANNELS.CANCEL, key)
+  },
+  launchInstaller: (filePath: string) => {
+    return ipcRenderer.invoke(INSTALLER_IPC_CHANNELS.LAUNCH, filePath)
+  },
+  onInstallerProgress: (callback: (payload: InstallerProgressPayload) => void) => {
+    const listener = (_: unknown, payload: InstallerProgressPayload) => callback(payload)
+    ipcRenderer.on(INSTALLER_IPC_CHANNELS.PROGRESS, listener)
+    return () => ipcRenderer.off(INSTALLER_IPC_CHANNELS.PROGRESS, listener)
   },
 
   // 代理配置

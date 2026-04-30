@@ -722,28 +722,48 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 
-  const { displayedContent: smoothContent } = useSmoothStream({
+  const { displayedContent: rawSmoothContent } = useSmoothStream({
     content: streamingContent,
     isStreaming: streaming,
   })
 
+  // 防闪屏守卫：useSmoothStream 通过 useEffect 重置 displayedContent，比 render 晚一帧。
+  // 当 streamingContent 已清空但 smoothContent 仍持有旧值时，
+  // 会导致 fallback 气泡与持久化消息同时渲染一帧（重复内容闪烁）。
+  // 用原始 streamingContent 作为守卫：内容已清空且不在流式中，立即归零。
+  const smoothContent = (streaming || streamingContent) ? rawSmoothContent : ''
+
   /**
    * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
    * 强制 resize="instant" 避免中间高度变化触发平滑滚动动画。
+   *
+   * 使用 render-phase 计算避免 useEffect 延迟一帧的问题：
+   * - streaming 变 false 的第一帧就能立即切到 instant，防止闪动
+   * - 后续通过 ref+timeout 延迟 150ms 才允许切回 smooth
    */
-  const [transitioning, setTransitioning] = React.useState(false)
+  const [transitioningCooldown, setTransitioningCooldown] = React.useState(false)
+  const wasStreamingRef = React.useRef(streaming)
+
+  // render-phase 判断：是否处于需要 instant resize 的过渡期
+  // liveMessages 非空说明持久化消息还没加载完（加载完后会清空 liveMessages）
+  const needsInstant = !streaming && (!!streamingContent || !!smoothContent || (liveMessages != null && liveMessages.length > 0))
+
   React.useEffect(() => {
-    if (streaming) {
-      setTransitioning(false)
-      return
+    // 刚从 streaming → not-streaming：启动 cooldown
+    if (wasStreamingRef.current && !streaming) {
+      setTransitioningCooldown(true)
     }
-    if (streamingContent || smoothContent) {
-      setTransitioning(true)
-      return
-    }
-    const timer = setTimeout(() => setTransitioning(false), 150)
+    wasStreamingRef.current = streaming
+  }, [streaming])
+
+  React.useEffect(() => {
+    if (needsInstant) return
+    // 过渡完成后延迟 150ms 才关闭 cooldown，给 StickToBottom 时间稳定
+    const timer = setTimeout(() => setTransitioningCooldown(false), 150)
     return () => clearTimeout(timer)
-  }, [streaming, streamingContent, smoothContent])
+  }, [needsInstant])
+
+  const transitioning = needsInstant || transitioningCooldown
 
   // 判断是否使用新的 SDKMessage 渲染路径
   const useSDKRenderer = persistedSDKMessages && persistedSDKMessages.length > 0
@@ -908,8 +928,10 @@ export function AgentMessages({ sessionId, sessionModelId, messages, messagesLoa
             )}
 
             {/* 有实时助手内容时：显示运行指示器或占位（防止 streaming 结束到 Actions Bar 出现之间的高度跳动） */}
+            {/* 不使用 mt：ConversationContent 的 gap-1(4px) 已提供间距，
+                匹配内部 MessageActions 的 gap-0.5(2px)+mt-0.5(2px)=4px 间距 */}
             {hasLiveAssistantContent && !suppressAgentRunning && (
-              <div className="pl-[56px] mt-0.5 min-h-[28px]">
+              <div className="pl-[56px] min-h-[28px]">
                 {retrying && <RetryingNotice retrying={retrying} />}
                 {streaming && <AgentRunningIndicator startedAt={startedAt} />}
               </div>

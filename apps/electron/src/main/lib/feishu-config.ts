@@ -129,9 +129,9 @@ export function saveFeishuBotConfig(input: FeishuBotConfigInput): FeishuBotConfi
       enabled: input.enabled,
       appId: input.appId.trim(),
       appSecret: input.appSecret ? encryptSecret(input.appSecret) : existing.appSecret,
-      defaultWorkspaceId: input.defaultWorkspaceId,
-      defaultChannelId: input.defaultChannelId,
-      defaultModelId: input.defaultModelId,
+      defaultWorkspaceId: input.defaultWorkspaceId ?? existing.defaultWorkspaceId,
+      defaultChannelId: input.defaultChannelId ?? existing.defaultChannelId,
+      defaultModelId: input.defaultModelId ?? existing.defaultModelId,
     }
     config.bots[idx] = updated
     writeMultiConfig(config)
@@ -202,6 +202,8 @@ export function saveFeishuConfig(input: FeishuConfigInput): FeishuConfig {
     appId: input.appId,
     appSecret: input.appSecret,
     defaultWorkspaceId: input.defaultWorkspaceId,
+    defaultChannelId: first?.defaultChannelId,
+    defaultModelId: first?.defaultModelId,
   }
   const saved = saveFeishuBotConfig(botInput)
   return {

@@ -388,16 +388,15 @@ function baseStyles(): string {
       justify-content: center;
       background: var(--content-bg);
     }
-    /* 自定义细滚动条：默认透明，hover 容器才显示 */
+    /* 自定义细滚动条 */
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb {
-      background: transparent;
+      background: var(--scrollbar);
       border-radius: 10px;
       border: 2px solid transparent;
       background-clip: content-box;
     }
-    *:hover::-webkit-scrollbar-thumb { background: var(--scrollbar); background-clip: content-box; }
     ::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar) !important; }
   `
 }

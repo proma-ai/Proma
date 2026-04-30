@@ -810,26 +810,53 @@ export class AgentOrchestrator {
     // 0.5 清除上一轮中断标记
     try { updateAgentSessionMeta(sessionId, { stoppedByUser: false }) } catch { /* 会话可能已删除 */ }
 
+    // 环境 / 配置类错误的统一上报：持久化为 TypedError 消息，由 SDKMessageRenderer 渲染
+    const reportPreflightError = (typedError: TypedError) => {
+      const errorContent = typedError.title
+        ? `${typedError.title}: ${typedError.message}`
+        : typedError.message
+      const errorSDKMsg: SDKMessage = {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: errorContent }],
+        },
+        parent_tool_use_id: null,
+        error: { message: typedError.message, errorType: typedError.code },
+        _createdAt: Date.now(),
+        _errorCode: typedError.code,
+        _errorTitle: typedError.title,
+        _errorDetails: typedError.details,
+        _errorCanRetry: typedError.canRetry,
+        _errorActions: typedError.actions,
+      } as unknown as SDKMessage
+      try { appendSDKMessages(sessionId, [errorSDKMsg]) } catch (e) {
+        console.error('[Agent 编排] 持久化 preflight error 失败:', e)
+      }
+      callbacks.onError(errorContent)
+      callbacks.onComplete([], { startedAt: input.startedAt })
+    }
+
     // 1. Windows 平台：检查 Shell 环境可用性
     if (process.platform === 'win32') {
       const runtimeStatus = getRuntimeStatus()
       const shellStatus = runtimeStatus?.shell
 
       if (shellStatus && !shellStatus.gitBash?.available && !shellStatus.wsl?.available) {
-        const errorMsg = `Windows 平台需要 Git Bash 或 WSL 环境才能运行 Agent。
-
-当前状态：
-- Git Bash: ${shellStatus.gitBash?.error || '未检测到'}
-- WSL: ${shellStatus.wsl?.error || '未检测到'}
-
-解决方案：
-1. 安装 Git for Windows（推荐）: https://git-scm.com/download/win
-2. 或启用 WSL: https://learn.microsoft.com/zh-cn/windows/wsl/install
-
-安装完成后请重启应用。`
-
-        callbacks.onError(errorMsg)
-        callbacks.onComplete([], { startedAt: input.startedAt })
+        reportPreflightError({
+          code: 'windows_shell_missing',
+          title: 'Windows 环境未就绪',
+          message:
+            '需要 Git Bash 或 WSL 才能运行 Agent。建议安装 Git for Windows（自带 Git Bash），安装完成后点「打开环境检测」刷新状态。',
+          details: [
+            `Git Bash: ${shellStatus.gitBash?.error || '未检测到'}`,
+            `WSL: ${shellStatus.wsl?.error || '未检测到'}`,
+          ],
+          actions: [
+            { key: 'e', label: '打开环境检测', action: 'open_environment_check' },
+            { key: 'g', label: '去官方下载 Git', action: 'open_external', payload: 'https://git-scm.com/download/win' },
+          ],
+          canRetry: false,
+        })
         return
       }
     }
@@ -837,8 +864,15 @@ export class AgentOrchestrator {
     // 2. 获取渠道信息并解密 API Key
     const channel = getChannelById(channelId)
     if (!channel) {
-      callbacks.onError('渠道不存在')
-      callbacks.onComplete([], { startedAt: input.startedAt })
+      reportPreflightError({
+        code: 'channel_not_found',
+        title: '渠道不存在',
+        message: '当前会话引用的渠道已被删除或不可用，请在设置中重新选择。',
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
+        canRetry: false,
+      })
       return
     }
 
@@ -966,10 +1000,33 @@ export class AgentOrchestrator {
       const cliPath = resolveSDKCliPath()
 
       if (!existsSync(cliPath)) {
-        const errMsg = `SDK native binary 不存在: ${cliPath}。请确保已安装对应平台的 @anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch} optional dependency`
-        console.error(`[Agent 编排] ${errMsg}`)
-        callbacks.onError(errMsg)
-        callbacks.onComplete([], { startedAt: streamStartedAt })
+        const subpkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+        console.error(`[Agent 编排] SDK native binary 不存在: ${cliPath}`)
+        reportPreflightError({
+          code: 'claude_binary_not_found',
+          title: 'Claude 核心未就绪',
+          message:
+            '应用安装包里缺少 Claude Agent SDK 的核心可执行文件（claude.exe）。这通常是打包时未包含当前平台的 SDK 组件导致。请重新下载最新安装包，或提交 issue 告知我们。',
+          details: [
+            `缺失文件: ${cliPath}`,
+            `需要的子包: ${subpkg}`,
+          ],
+          actions: [
+            {
+              key: 'd',
+              label: '下载最新安装包',
+              action: 'open_external',
+              payload: 'https://proma.cool/download',
+            },
+            {
+              key: 'i',
+              label: '报告问题',
+              action: 'open_external',
+              payload: 'https://github.com/ErlichLiu/Proma/issues/new',
+            },
+          ],
+          canRetry: false,
+        })
         return
       }
 
@@ -1091,7 +1148,7 @@ export class AgentOrchestrator {
       const initialPermissionMode: PromaPermissionMode = permissionModeOverride
         ?? (workspaceSlug
           ? getWorkspacePermissionMode(workspaceSlug)
-          : (appSettings.agentPermissionMode ?? 'acceptEdits'))
+          : (appSettings.agentPermissionMode ?? 'auto'))
       // 注册到 Map，支持运行中动态切换
       this.sessionPermissionModes.set(sessionId, initialPermissionMode)
       console.log(`[Agent 编排] 权限模式: ${initialPermissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)
@@ -1112,8 +1169,8 @@ export class AgentOrchestrator {
         )
       }
 
-      // 始终创建 acceptEdits 权限回调（运行中可能切换到 acceptEdits）
-      const acceptEditsCanUseTool = permissionService.createCanUseTool(
+      // 始终创建 auto 权限回调（运行中可能切换到 auto）
+      const autoCanUseTool = permissionService.createCanUseTool(
         sessionId,
         (request: PermissionRequest) => {
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
@@ -1240,24 +1297,15 @@ export class AgentOrchestrator {
             return { behavior: 'allow' as const, updatedInput: input }
 
           case 'plan': {
-            // Plan 模式：只允许只读工具 + Write 到 .context/plan/ 目录
+            // Plan 模式：只允许只读工具 + Write/Edit 任意 .md 文件（计划文档）
             if (PLAN_MODE_ALLOWED_TOOLS.has(toolName)) {
               return { behavior: 'allow' as const, updatedInput: input }
             }
-            // 允许 Write 到 .context/plan/ 目录（Proma 自定义路径）
-            // 以及 .context/ 下直接子文件 .md（SDK 生成的 plan 文件如 .context/<slug>.md）
-            if (toolName === 'Write') {
+            // 允许 Write/Edit 到任意 .md 文件（计划文档一定是 markdown；非 .md 仍被拒）
+            if (toolName === 'Write' || toolName === 'Edit') {
               const filePath = typeof input.file_path === 'string' ? input.file_path : ''
-              if (filePath.includes('.context/plan/')) {
+              if (filePath.toLowerCase().endsWith('.md')) {
                 return { behavior: 'allow' as const, updatedInput: input }
-              }
-              // SDK plan 文件：.context/<slug>.md — 仅允许直接子文件，防止 path traversal
-              const ctxIdx = filePath.lastIndexOf('.context/')
-              if (ctxIdx !== -1) {
-                const afterCtx = filePath.substring(ctxIdx + '.context/'.length)
-                if (afterCtx.endsWith('.md') && !afterCtx.includes('/') && !afterCtx.includes('..')) {
-                  return { behavior: 'allow' as const, updatedInput: input }
-                }
               }
             }
             // Bash 工具：只读命令（find、grep、cat 等）允许执行，写操作拒绝
@@ -1276,8 +1324,8 @@ export class AgentOrchestrator {
             return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
           }
 
-          case 'acceptEdits':
-            return acceptEditsCanUseTool(toolName, input, options)
+          case 'auto':
+            return autoCanUseTool(toolName, input, options)
 
           default:
             return { behavior: 'allow' as const, updatedInput: input }
@@ -1302,11 +1350,11 @@ export class AgentOrchestrator {
         // 当提供 canUseTool 回调时必须为 false，否则 CLI 同时收到
         // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
         // 两个矛盾的指令，导致 ExitPlanMode/AskUserQuestion 等交互式工具失败。
-        // canUseTool 已完整处理所有权限模式（plan/acceptEdits/bypassPermissions），
+        // canUseTool 已完整处理所有权限模式（plan/auto/bypassPermissions），
         // Worker 子代理在 bypassPermissions 模式下也会被自动放行。
         allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
-        ...(initialPermissionMode === 'acceptEdits' && { allowedTools: [...SAFE_TOOLS] }),
+        ...(initialPermissionMode === 'auto' && { allowedTools: [...SAFE_TOOLS] }),
         // claude_code preset 提供基础环境信息（platform/shell/OS/git/model/知识截止日期等）
         // buildSystemPrompt 追加 Proma 特有指令（角色定义、SubAgent 策略、工作区信息等）
         systemPrompt: {
@@ -2018,7 +2066,6 @@ export class AgentOrchestrator {
             console.log(`[Agent 编排] 保留 sdkSessionId (API 错误 ${apiError?.statusCode})`)
           }
 
-          throw error
         }
       }
 

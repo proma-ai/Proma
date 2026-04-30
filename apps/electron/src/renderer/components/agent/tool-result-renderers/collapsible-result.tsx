@@ -31,15 +31,16 @@ export function CollapsibleResult({
   renderContent,
   className,
 }: CollapsibleResultProps): React.ReactElement {
+  const safeContent = content ?? ''
   const [expanded, setExpanded] = React.useState(false)
-  const needsCollapse = content.length > threshold
+  const needsCollapse = safeContent.length > threshold
 
   const displayContent = React.useMemo(() => {
-    if (!needsCollapse || expanded) return content
-    const lines = content.split('\n')
-    if (lines.length <= previewLines) return content
+    if (!needsCollapse || expanded) return safeContent
+    const lines = safeContent.split('\n')
+    if (lines.length <= previewLines) return safeContent
     return lines.slice(0, previewLines).join('\n')
-  }, [content, needsCollapse, expanded, previewLines])
+  }, [safeContent, needsCollapse, expanded, previewLines])
 
   return (
     <div className={cn('relative', className)}>
@@ -59,7 +60,7 @@ export function CollapsibleResult({
           ) : (
             <>
               <ChevronDown className="size-3" />
-              显示全部 ({content.length.toLocaleString()} 字符, {content.split('\n').length} 行)
+              显示全部 ({safeContent.length.toLocaleString()} 字符, {safeContent.split('\n').length} 行)
             </>
           )}
         </button>

@@ -641,7 +641,8 @@ class FeishuBridge {
       groupName,
     }
 
-    // 加锁：防止命令回复触发的事件被重入处理
+    // 加锁：防止同一聊天的消息并发处理（飞书 SDK 回调不 await，多条消息可能同时执行）
+    if (this.processingChats.has(chatId)) return
     this.processingChats.add(chatId)
     try {
       // 命令路由

@@ -114,9 +114,9 @@ export class AgentExitPlanService {
         pending.resolve({
           behavior: 'allow' as const,
           updatedInput: pending.toolInput,
-          targetMode: 'acceptEdits',
+          targetMode: 'auto',
         })
-        return { sessionId, targetMode: 'acceptEdits' }
+        return { sessionId, targetMode: 'auto' }
       }
       case 'deny': {
         // 拒绝计划

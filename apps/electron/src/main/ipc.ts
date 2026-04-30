@@ -7,7 +7,7 @@
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, APP_ICON_IPC_CHANNELS } from '../types'
 import type { QuickTaskSubmitInput } from '../types'
 import type {
@@ -46,6 +46,9 @@ import type {
   FileEntry,
   FileSearchResult,
   EnvironmentCheckResult,
+  InstallerManifest,
+  InstallerDownloadRequest,
+  InstallerDownloadResult,
   ProxyConfig,
   SystemProxyDetectResult,
   GitHubRelease,
@@ -84,7 +87,7 @@ import type {
   SDKMessage,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
-import { getRuntimeStatus, getGitRepoStatus } from './lib/runtime-init'
+import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
   listChannels,
@@ -121,6 +124,12 @@ import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-se
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { checkEnvironment } from './lib/environment-checker'
+import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
+import {
+  cancelInstallerDownload,
+  downloadInstaller,
+  launchInstaller,
+} from './lib/installer-downloader'
 import { getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
 import { detectSystemProxy } from './lib/system-proxy-detector'
 import {
@@ -241,6 +250,14 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.GET_RUNTIME_STATUS,
     async (): Promise<RuntimeStatus | null> => {
       return getRuntimeStatus()
+    }
+  )
+
+  // 重新初始化运行时（用户安装完 Git/Node 后触发，Windows 场景常用）
+  ipcMain.handle(
+    IPC_CHANNELS.REINIT_RUNTIME,
+    async (): Promise<RuntimeStatus> => {
+      return reinitializeRuntime()
     }
   )
 
@@ -748,6 +765,46 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== 第三方安装包（Git / Node.js）相关 =====
+
+  ipcMain.handle(
+    INSTALLER_IPC_CHANNELS.MANIFEST,
+    async (): Promise<InstallerManifest> => {
+      return fetchInstallerManifest()
+    }
+  )
+
+  ipcMain.handle(
+    INSTALLER_IPC_CHANNELS.DOWNLOAD,
+    async (event, req: InstallerDownloadRequest): Promise<InstallerDownloadResult> => {
+      const manifest = await fetchInstallerManifest()
+      const source = findInstallerSource(manifest, req.id, req.arch)
+      if (!source) {
+        throw new Error(`未找到安装包：id=${req.id}, arch=${req.arch}`)
+      }
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (!window) {
+        throw new Error('发起下载的窗口已关闭')
+      }
+      const key = `${req.id}:${req.arch}`
+      return downloadInstaller(source, key, window)
+    }
+  )
+
+  ipcMain.handle(
+    INSTALLER_IPC_CHANNELS.CANCEL,
+    async (_event, key: string): Promise<boolean> => {
+      return cancelInstallerDownload(key)
+    }
+  )
+
+  ipcMain.handle(
+    INSTALLER_IPC_CHANNELS.LAUNCH,
+    async (_event, filePath: string): Promise<void> => {
+      await launchInstaller(filePath)
+    }
+  )
+
   // ===== 代理配置相关 =====
 
   // 获取代理配置
@@ -1183,7 +1240,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_PERMISSION_MODE,
     async (_, workspaceSlug: string, mode: PromaPermissionMode): Promise<void> => {
-      const validModes = new Set<string>(['acceptEdits', 'bypassPermissions', 'plan'])
+      const validModes = new Set<string>(['auto', 'bypassPermissions', 'plan'])
       if (!validModes.has(mode)) {
         throw new Error(`无效的权限模式: ${mode}`)
       }

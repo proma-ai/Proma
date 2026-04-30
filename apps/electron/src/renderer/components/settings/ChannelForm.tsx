@@ -23,8 +23,10 @@ import {
   Download,
   Info,
   Search,
-  Check,
 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useSetAtom } from 'jotai'
+import { channelFormDirtyAtom } from '@/atoms/settings-tab'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,6 +44,16 @@ import type {
   ProviderType,
 } from '@proma/shared'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   SettingsSection,
   SettingsCard,
@@ -144,8 +156,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [fetchingModels, setFetchingModels] = React.useState(false)
   const [fetchResult, setFetchResult] = React.useState<FetchModelsResult | null>(null)
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false)
-  /** auto-save 状态指示 */
-  const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saving' | 'saved'>('idle')
+  const [showExitDialog, setShowExitDialog] = React.useState(false)
+
+  const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
 
   // 编辑模式下加载明文 API Key（官方渠道跳过）
   React.useEffect(() => {
@@ -175,7 +188,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     currentEnabled: boolean,
   ) => {
     if (!isEdit || !channel) return
-    setAutoSaveStatus('saving')
     try {
       await window.electronAPI.updateChannel(channel.id, {
         name: currentName,
@@ -185,11 +197,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         models: currentModels,
         enabled: currentEnabled,
       })
-      setAutoSaveStatus('saved')
-      setTimeout(() => setAutoSaveStatus('idle'), 1500)
+      toast.success('已保存', { id: 'auto-save-success' })
     } catch (error) {
       console.error('[模型配置表单] auto-save 失败:', error)
-      setAutoSaveStatus('idle')
+      toast.error('自动保存失败，请检查后手动重试', { id: 'auto-save-error' })
     }
   }, [isEdit, channel])
 
@@ -333,9 +344,9 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }
 
-  /** 创建渠道（仅新建模式） */
-  const handleCreate = async (): Promise<void> => {
-    if (!name.trim() || !apiKey.trim()) return
+  /** 执行创建渠道 */
+  const doCreate = React.useCallback(async (): Promise<boolean> => {
+    if (!name.trim() || !apiKey.trim()) return false
 
     setSaving(true)
     try {
@@ -348,12 +359,25 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         enabled,
       }
       await window.electronAPI.createChannel(input)
-      onSaved()
+      toast.success('渠道创建成功')
+      return true
     } catch (error) {
       console.error('[模型配置表单] 创建失败:', error)
+      toast.error('渠道创建失败，请检查配置后重试')
+      return false
     } finally {
       setSaving(false)
     }
+  }, [name, provider, baseUrl, apiKey, models, enabled])
+
+  /** 创建渠道（仅新建模式） */
+  const handleCreate = async (): Promise<void> => {
+    if (models.length === 0) {
+      toast.warning('尚未配置模型，建议先从供应商获取或手动添加', { id: 'no-models-warn' })
+      return
+    }
+    const ok = await doCreate()
+    if (ok) onSaved()
   }
 
   /** 保存渠道（编辑模式 + 官方渠道） */
@@ -404,6 +428,56 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }
 
+  /** 检测表单是否有未保存内容 */
+  const isDirty = !isEdit && (name.trim() !== '' || apiKey.trim() !== '' || models.length > 0)
+  const hasNoModels = !isEdit && models.length === 0
+
+  /** 返回按钮：创建模式下有未保存内容时拦截 */
+  const handleBack = (): void => {
+    if (!isEdit && isDirty) {
+      setShowExitDialog(true)
+      return
+    }
+    if (isEdit) {
+      onSaved()
+    } else {
+      onCancel()
+    }
+  }
+
+  /** 放弃编辑 */
+  const handleDiscard = (): void => {
+    setShowExitDialog(false)
+    onCancel()
+  }
+
+  /** 保存并关闭（从弹窗触发） */
+  const handleSaveAndClose = async (): Promise<void> => {
+    const ok = await doCreate()
+    if (ok) {
+      setShowExitDialog(false)
+      onSaved()
+    }
+  }
+
+  // 同步表单 dirty 状态到全局 atom（供 SettingsPanel 拦截侧边栏导航）
+  React.useEffect(() => {
+    setChannelFormDirty(isDirty)
+    return () => { setChannelFormDirty(false) }
+  }, [isDirty, setChannelFormDirty])
+
+  // 拦截窗口关闭（Cmd+W / Alt+F4 / 点击窗口 X）
+  React.useEffect(() => {
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent): void => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
+
   // ===== 模型分区 =====
   const enabledModels = models.filter((m) => m.enabled)
   const availableModels = React.useMemo(() => {
@@ -423,21 +497,13 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           variant="ghost"
           size="icon"
           className="h-8 w-8"
-          onClick={() => { isEdit ? onSaved() : onCancel() }}
+          onClick={handleBack}
         >
           <ArrowLeft size={18} />
         </Button>
         <h3 className="text-lg font-medium text-foreground flex-1">
           {isPromaOfficial ? 'Proma 官方渠道' : isEdit ? '编辑渠道' : '添加渠道'}
         </h3>
-        {/* 编辑模式：auto-save 状态 */}
-        {isEdit && autoSaveStatus !== 'idle' && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {autoSaveStatus === 'saving' && <Loader2 size={12} className="animate-spin" />}
-            {autoSaveStatus === 'saved' && <Check size={12} className="text-emerald-500" />}
-            <span>{autoSaveStatus === 'saving' ? '保存中...' : '已保存'}</span>
-          </span>
-        )}
         <div className="flex items-center gap-2">
           {isPromaOfficial ? (
             <Button
@@ -757,6 +823,29 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           )}
         </SettingsCard>
       </SettingsSection>
+
+      {/* 退出拦截弹窗 */}
+      <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃未保存的更改？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {hasNoModels
+                ? '当前尚未配置模型，建议先配置模型再保存。'
+                : '您填写的内容尚未保存，确定要放弃编辑吗？'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleDiscard}>放弃编辑</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleSaveAndClose}
+              disabled={saving || !name.trim() || !apiKey.trim()}
+            >
+              {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : '保存并关闭'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

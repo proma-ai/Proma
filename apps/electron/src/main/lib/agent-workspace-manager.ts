@@ -759,10 +759,10 @@ function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): v
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
 }
 
-/** 获取工作区权限模式，默认 'acceptEdits'，支持旧值自动迁移 */
+/** 获取工作区权限模式，默认 'auto'，支持旧值自动迁移 */
 export function getWorkspacePermissionMode(workspaceSlug: string): PromaPermissionMode {
   const config = readWorkspaceConfig(workspaceSlug)
-  return config.permissionMode ? migratePermissionMode(config.permissionMode) : 'acceptEdits'
+  return config.permissionMode ? migratePermissionMode(config.permissionMode) : 'auto'
 }
 
 export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPermissionMode): void {

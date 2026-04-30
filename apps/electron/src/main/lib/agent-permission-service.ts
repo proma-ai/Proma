@@ -52,17 +52,22 @@ export type PermissionUpdate = {
   destination: PermissionUpdateDestination
 }
 
-/** SDK PermissionResult（匹配 SDK 0.2.63） */
+/** SDK PermissionDecisionClassification（匹配 SDK 0.2.120） */
+type PermissionDecisionClassification = 'user_temporary' | 'user_permanent' | 'user_reject'
+
+/** SDK PermissionResult（匹配 SDK 0.2.120） */
 export type PermissionResult = {
   behavior: 'allow'
   updatedInput?: Record<string, unknown>
   updatedPermissions?: PermissionUpdate[]
   toolUseID?: string
+  decisionClassification?: PermissionDecisionClassification
 } | {
   behavior: 'deny'
   message: string
   interrupt?: boolean
   toolUseID?: string
+  decisionClassification?: PermissionDecisionClassification
 }
 
 /** canUseTool 回调的 options 参数（匹配 SDK CanUseTool） */
@@ -73,6 +78,9 @@ export interface CanUseToolOptions {
   decisionReason?: string
   toolUseID: string
   agentID?: string
+  title?: string
+  displayName?: string
+  description?: string
 }
 
 /** 待处理的权限请求 */
@@ -102,10 +110,10 @@ export class AgentPermissionService {
   private sessionWhitelists = new Map<string, SessionWhitelist>()
 
   /**
-   * 创建 canUseTool 回调（仅 acceptEdits 模式使用）
+   * 创建 canUseTool 回调（auto 模式及 escalation 场景使用）
    *
-   * SDK 的 acceptEdits 模式自动处理文件编辑允许，仅在 SDK 认为需要确认时调用此回调。
-   * 返回的函数签名匹配 SDK 的 CanUseTool 类型。
+   * SDK 的 auto 模式内置 classifier 自动处理大多数权限决策，仅在 classifier 无法判断时
+   * 才调用此回调（escalation）。返回的函数签名匹配 SDK 的 CanUseTool 类型。
    */
   createCanUseTool(
     sessionId: string,
@@ -128,6 +136,11 @@ export class AgentPermissionService {
 
       // 会话白名单检查（用户之前选择了"始终允许"）
       if (this.isWhitelisted(sessionId, toolName, input)) return allow()
+
+      // auto 模式本地 classifier：只读工具（Read/Glob/Grep/WebSearch/WebFetch 及只读 Bash 命令）自动放行
+      // 原因：CLI 的 --permission-prompt-tool stdio 会把每次 tool 调用都转发给 canUseTool，
+      // SDK 的 auto classifier 对只读操作未必真的放行，这里做本地兜底避免用户被无意义的审批打扰
+      if (this.isReadOnlyTool(toolName, input)) return allow()
 
       // 需要询问用户：构建请求并发送到 UI
       const request = this.buildPermissionRequest(sessionId, toolName, input, options)
@@ -304,6 +317,9 @@ export class AgentPermissionService {
       command,
       dangerLevel: this.assessDangerLevel(toolName, input),
       decisionReason: options.decisionReason,
+      sdkDisplayName: options.displayName,
+      sdkTitle: options.title,
+      sdkDescription: options.description,
     }
   }
 

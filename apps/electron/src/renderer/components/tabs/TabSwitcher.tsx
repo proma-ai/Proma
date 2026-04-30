@@ -25,6 +25,7 @@ import {
   agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
+  agentWorkspacesAtom,
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 
@@ -39,6 +40,7 @@ export function TabSwitcher(): React.ReactElement | null {
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
 
@@ -226,6 +228,13 @@ export function TabSwitcher(): React.ReactElement | null {
             const status = indicatorMap.get(tab.id) ?? 'idle'
             const indicatorColor = getIndicatorColor(status, tab.type)
             const indicatorPulse = status === 'running' || status === 'blocked'
+            const wsName = tab.type === 'agent'
+              ? (() => {
+                  const session = agentSessions.find((s) => s.id === tab.sessionId)
+                  if (!session?.workspaceId) return undefined
+                  return agentWorkspaces.find((w) => w.id === session.workspaceId)?.name
+                })()
+              : undefined
             return (
               <div
                 key={tab.id}
@@ -253,6 +262,11 @@ export function TabSwitcher(): React.ReactElement | null {
                   <MessageSquare className="w-4 h-4 shrink-0 opacity-60" />
                 )}
                 <span className="flex-1 truncate">{tab.title || '新对话'}</span>
+                {wsName && (
+                  <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-foreground/[0.06] text-[11px] leading-4 text-foreground/40 font-medium truncate max-w-[100px]">
+                    {wsName}
+                  </span>
+                )}
               </div>
             )
           })}

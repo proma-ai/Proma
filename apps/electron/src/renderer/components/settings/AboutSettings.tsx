@@ -262,7 +262,10 @@ function EnvironmentCard(): React.ReactElement {
           status={nodejsStatus}
           version={result?.nodejs.version}
           requirement="推荐 22 LTS，最低 18 LTS"
-          downloadUrl={result?.nodejs.downloadUrl || 'https://nodejs.org/'}
+          action={{
+            type: 'openExternal',
+            url: result?.nodejs.downloadUrl || 'https://nodejs.org/',
+          }}
           statusText={
             result && nodejsStatus === 'warning'
               ? `v${result.nodejs.version} (建议升级到 22 LTS 以获得最佳体验)`
@@ -276,7 +279,10 @@ function EnvironmentCard(): React.ReactElement {
           status={gitStatus}
           version={result?.git.version}
           requirement="版本 >= 2.0"
-          downloadUrl={result?.git.downloadUrl || 'https://git-scm.com/'}
+          action={{
+            type: 'openExternal',
+            url: result?.git.downloadUrl || 'https://git-scm.com/',
+          }}
         />
 
         {/* Windows 提示 */}
@@ -362,7 +368,7 @@ function ShellEnvironmentCard(): React.ReactElement | null {
           status={shell.gitBash?.available ? 'success' : 'error'}
           version={shell.gitBash?.version ?? undefined}
           requirement="Git for Windows 自带"
-          downloadUrl="https://git-scm.com/download/win"
+          action={{ type: 'download', installerId: 'git-for-windows' }}
           statusText={
             shell.gitBash?.available
               ? `${shell.gitBash.path}`
@@ -376,7 +382,10 @@ function ShellEnvironmentCard(): React.ReactElement | null {
           status={shell.wsl?.available ? 'success' : 'error'}
           version={shell.wsl?.version ? `WSL ${shell.wsl.version}` : undefined}
           requirement="WSL 1 或 WSL 2"
-          downloadUrl="https://learn.microsoft.com/zh-cn/windows/wsl/install"
+          action={{
+            type: 'openExternal',
+            url: 'https://learn.microsoft.com/zh-cn/windows/wsl/install',
+          }}
           statusText={
             shell.wsl?.available
               ? `默认发行版: ${shell.wsl.defaultDistro || '未设置'} (${shell.wsl.distros.join(', ')})`

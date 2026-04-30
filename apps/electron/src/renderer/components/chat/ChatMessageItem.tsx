@@ -231,7 +231,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
 
         {/* 操作按钮（非 streaming 时显示，hover 时可见） */}
         {(message.content || message.error || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
-          <MessageActions className="pl-[46px] mt-0.5">
+          <MessageActions className="pl-[46px] mt-0.5 min-h-[28px]">
             <CopyButton content={message.content} />
             {message.role === 'assistant' && conversationId && (
               <MigrateToAgentButton conversationId={conversationId} />

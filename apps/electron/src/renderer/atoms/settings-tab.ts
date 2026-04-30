@@ -23,3 +23,9 @@ export const settingsTabAtom = atom<SettingsTab>('channels')
 
 /** 设置浮窗是否打开 */
 export const settingsOpenAtom = atom(false)
+
+/** 渠道创建表单是否有未保存内容（用于拦截导航离开） */
+export const channelFormDirtyAtom = atom(false)
+
+/** 外部请求关闭设置面板（如 Cmd+W），SettingsPanel 监听后弹出确认对话框 */
+export const settingsCloseRequestedAtom = atom(false)

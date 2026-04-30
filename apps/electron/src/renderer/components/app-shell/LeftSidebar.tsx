@@ -311,6 +311,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
   }, [currentWorkspaceId, workspaces])
 
+  const workspaceNameMap = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const w of workspaces) map.set(w.id, w.name)
+    return map
+  }, [workspaces])
+
   React.useEffect(() => {
     if (!currentWorkspaceSlug || mode !== 'agent') {
       setCapabilities(null)
@@ -833,7 +839,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="h-full flex flex-col items-center bg-background/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
+        className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300"
         style={{ width: 48, flexShrink: 0 }}
       >
         {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -902,7 +908,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="h-full flex flex-col bg-background/95 backdrop-blur-xl rounded-2xl shadow-xl transition-[width] duration-300"
+      className="h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
       {/* 顶部留空，避开 macOS 红绿灯 */}
@@ -916,7 +922,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 onClick={() => setSidebarCollapsed(true)}
-                className="mt-2 size-[36px] flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                className="mt-2 size-[36px] flex-shrink-0 flex items-center justify-center rounded-[10px] bg-muted text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors titlebar-no-drag"
               >
                 <PanelLeftClose size={14} />
               </button>
@@ -1078,6 +1084,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                                 isInWorkingSection={workingSessionIds.has(session.id)}
                                 showPinIcon={false}
                                 leftAccent={accent}
+                                workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
                                 onSelect={() => handleSelectAgentSession(session.id, session.title)}
                                 onRequestDelete={() => handleRequestDelete(session.id)}
                                 onRequestMove={() => setMoveTargetId(session.id)}
@@ -1562,6 +1569,8 @@ interface AgentSessionItemProps {
   isInWorkingSection?: boolean
   /** 行左侧状态色块；未传则不显示 */
   leftAccent?: SessionLeftAccent
+  /** 工作区名称 Badge（跨工作区列表时显示） */
+  workspaceName?: string
   onSelect: () => void
   onRequestDelete: () => void
   onRequestMove: () => void
@@ -1581,6 +1590,7 @@ function AgentSessionItem({
   showPinIcon,
   isInWorkingSection,
   leftAccent,
+  workspaceName,
   onSelect,
   onRequestDelete,
   onRequestMove,
@@ -1674,6 +1684,11 @@ function AgentSessionItem({
               <Pin size={11} className="flex-shrink-0 text-primary/60" />
             )}
             <span className="truncate">{session.title}</span>
+            {workspaceName && (
+              <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-foreground/[0.06] text-[10px] leading-4 text-foreground/40 font-medium truncate max-w-[80px]">
+                {workspaceName}
+              </span>
+            )}
           </div>
         )}
       </div>

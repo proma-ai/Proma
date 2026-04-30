@@ -254,7 +254,7 @@ function AgentSettingsInitializer(): null {
       }
 
       if (settings.agentPermissionMode) {
-        // 迁移旧权限模式值（auto/smart/supervised → acceptEdits/bypassPermissions/plan）
+        // 迁移旧权限模式值（acceptEdits/smart/supervised → auto）
         setPermissionMode(migratePermissionMode(settings.agentPermissionMode))
       }
       if (settings.agentThinking) {

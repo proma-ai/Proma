@@ -36,6 +36,9 @@ export * from './agent-provider'
 // 环境检测相关类型
 export * from './environment'
 
+// 第三方安装包（Git、Node.js 等）相关类型
+export * from './installer'
+
 // GitHub Release 相关类型
 export * from './github'
 

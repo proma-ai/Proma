@@ -72,7 +72,7 @@ const SPECIAL_STYLES: SpecialStyle[] = [
     id: 'ocean-light',
     name: '晴空碧海',
     variant: 'light',
-    preview: { left: '#b8d4e5', right: '#d4e5f0' },
+    preview: { left: '#c9dded', right: '#e2edf5' },
   },
   {
     id: 'forest-light',

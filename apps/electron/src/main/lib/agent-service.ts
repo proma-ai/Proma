@@ -122,6 +122,20 @@ export async function runAgent(
         }
       },
     })
+  } catch (err) {
+    console.error('[Agent 服务] runAgent 未处理异常:', err)
+    const errorMessage = err instanceof Error ? err.message : '未知错误'
+    if (!webContents.isDestroyed()) {
+      webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+        sessionId: input.sessionId,
+        error: errorMessage,
+      })
+      webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
+        sessionId: input.sessionId,
+        messages: [],
+        stoppedByUser: false,
+      })
+    }
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
     // 避免被拒绝的请求误删仍在运行的会话映射
@@ -188,6 +202,15 @@ export async function runAgentHeadless(
         }
       },
     })
+  } catch (err) {
+    console.error('[Agent 服务] runAgentHeadless 未处理异常:', err)
+    const errorMessage = err instanceof Error ? err.message : '未知错误'
+    callbacks.onError(errorMessage)
+    callbacks.onComplete()
+    if (wc && !wc.isDestroyed()) {
+      wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: input.sessionId, error: errorMessage })
+      wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId: input.sessionId, messages: [], stoppedByUser: false })
+    }
   } finally {
     if (!orchestrator.isActive(input.sessionId)) {
       sessionWebContents.delete(input.sessionId)

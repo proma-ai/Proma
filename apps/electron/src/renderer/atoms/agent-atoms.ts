@@ -322,7 +322,7 @@ export const RECENTLY_MODIFIED_TTL_MS = 60_000
 // ===== 权限系统 Atoms =====
 
 /** 工作区默认权限模式（初始化和新会话使用） */
-export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('acceptEdits')
+export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('auto')
 
 /** Per-session 权限模式 Map — sessionId → PromaPermissionMode */
 export const agentPermissionModeMapAtom = atom<Map<string, PromaPermissionMode>>(new Map())

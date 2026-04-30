@@ -331,6 +331,12 @@ export type ErrorCode =
   | 'image_too_large'
   | 'prompt_too_long'
   | 'provider_error'
+  // 环境 / 配置类错误（本地可修复）
+  | 'windows_shell_missing'
+  | 'channel_not_found'
+  | 'api_key_decrypt_failed'
+  | 'claude_binary_not_found'
+  | 'session_busy'
   | 'unknown_error'
 
 /** 恢复操作 */
@@ -340,7 +346,17 @@ export interface RecoveryAction {
   /** 操作标签 */
   label: string
   /** 操作类型 */
-  action: 'settings' | 'retry' | 'cancel' | 'compact' | string
+  action:
+    | 'settings'
+    | 'retry'
+    | 'cancel'
+    | 'compact'
+    | 'open_environment_check'
+    | 'open_channel_settings'
+    | 'open_external'
+    | (string & {})
+  /** 操作附带的载荷，例如 open_external 的 URL */
+  payload?: string
 }
 
 /** 类型化错误 */
@@ -1009,20 +1025,20 @@ export interface ExitPlanModeResponse {
 // ===== 权限系统类型 =====
 
 /** Proma 权限模式（直接映射 SDK 原生模式） */
-export type PromaPermissionMode = 'acceptEdits' | 'bypassPermissions' | 'plan'
+export type PromaPermissionMode = 'auto' | 'bypassPermissions' | 'plan'
 
 /** 权限模式定义顺序（用于循环切换） */
-export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['acceptEdits', 'bypassPermissions', 'plan']
+export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['auto', 'bypassPermissions', 'plan']
 
 /** 迁移旧权限模式值到新模式 */
 export function migratePermissionMode(mode: string): PromaPermissionMode {
-  if (mode === 'acceptEdits' || mode === 'bypassPermissions' || mode === 'plan') return mode
+  if (mode === 'auto' || mode === 'bypassPermissions' || mode === 'plan') return mode
   const migration: Record<string, PromaPermissionMode> = {
-    auto: 'bypassPermissions',
-    smart: 'acceptEdits',
-    supervised: 'acceptEdits',
+    acceptEdits: 'auto',
+    smart: 'auto',
+    supervised: 'auto',
   }
-  return migration[mode] ?? 'acceptEdits'
+  return migration[mode] ?? 'auto'
 }
 
 /** 危险等级 */
@@ -1038,14 +1054,20 @@ export interface PermissionRequest {
   toolName: string
   /** 工具输入参数 */
   toolInput: Record<string, unknown>
-  /** 操作描述（人类可读） */
+  /** 操作描述（人类可读，Proma 生成） */
   description: string
-  /** 具体命令（Bash 工具时有值） */
+  /** 具体命令（Bash 工具时有值��� */
   command?: string
   /** 危险等级 */
   dangerLevel: DangerLevel
   /** SDK 提供的原因说明 */
   decisionReason?: string
+  /** SDK 提供的工具显示名称，如 "Write" */
+  sdkDisplayName?: string
+  /** SDK 提供的操作标题，如 "Write to /path/to/file.ts" */
+  sdkTitle?: string
+  /** SDK 提供的详细描述，如 "Claude wants to write 200 lines to /path/to/file.ts" */
+  sdkDescription?: string
 }
 
 /** 权限响应（渲染进程 → 主进程） */

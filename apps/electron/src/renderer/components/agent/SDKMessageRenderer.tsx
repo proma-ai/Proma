@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2 } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -36,6 +36,7 @@ import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
+import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import type {
   SDKMessage,
@@ -47,6 +48,7 @@ import type {
   AgentEventUsage,
   SDKToolUseBlock,
   SDKToolResultBlock,
+  RecoveryAction,
 } from '@proma/shared'
 import type { ToolActivity } from '@/atoms/agent-atoms'
 
@@ -572,7 +574,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
           </div>
         )}
       </MessageContent>
-      {/* 操作栏：左侧耗时标签 + 右侧操作按钮（流式输出中隐藏） */}
+      {/* 操作栏：流式输出完成后显示操作按钮 */}
       {!isStreaming && (() => {
         const textContent = topLevelBlocks
           .filter((b) => b.type === 'text' && 'text' in b)
@@ -866,10 +868,18 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
   const errorTitle = typeof msgAny._errorTitle === 'string' ? msgAny._errorTitle : undefined
   const errorCode = typeof msgAny._errorCode === 'string' ? msgAny._errorCode : undefined
   const isBillingError = errorCode === 'billing_error'
+  const errorDetails = Array.isArray(msgAny._errorDetails)
+    ? (msgAny._errorDetails as string[])
+    : undefined
+  const errorActions = Array.isArray(msgAny._errorActions)
+    ? (msgAny._errorActions as RecoveryAction[])
+    : undefined
   const isPromptTooLong = errorCode === 'prompt_too_long'
 
+  const setEnvDialogOpen = useSetAtom(environmentCheckDialogOpenAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
+  const [detailsOpen, setDetailsOpen] = React.useState(false)
 
   const contentText = message.message?.content
     ?.filter((b) => b.type === 'text' && 'text' in b)
@@ -881,7 +891,55 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
     setSettingsOpen(true)
   }
 
-  const hasActions = !!(onRetry || onRetryInNewSession || (isPromptTooLong && onCompact))
+  const handleRecoveryAction = (action: RecoveryAction) => {
+    switch (action.action) {
+      case 'open_environment_check':
+        setEnvDialogOpen(true)
+        break
+      case 'open_channel_settings':
+        setSettingsTab('channels')
+        setSettingsOpen(true)
+        break
+      case 'settings':
+        setSettingsOpen(true)
+        break
+      case 'open_external':
+        if (action.payload) {
+          window.electronAPI.openExternal(action.payload)
+        }
+        break
+      case 'retry':
+        onRetry?.()
+        break
+      case 'compact':
+        onCompact?.()
+        break
+      default:
+        console.warn('[ErrorMessage] 未处理的 recovery action:', action)
+    }
+  }
+
+  const iconForAction = (action: RecoveryAction['action']) => {
+    switch (action) {
+      case 'open_environment_check':
+        return <Wrench className="size-3.5 mr-1.5" />
+      case 'open_channel_settings':
+      case 'settings':
+        return <Settings className="size-3.5 mr-1.5" />
+      case 'open_external':
+        return <ExternalLink className="size-3.5 mr-1.5" />
+      case 'retry':
+        return <RotateCw className="size-3.5 mr-1.5" />
+      case 'compact':
+        return <Minimize2 className="size-3.5 mr-1.5" />
+      default:
+        return null
+    }
+  }
+
+  const hasStructuredActions = !!(errorActions && errorActions.length > 0)
+  const hasLegacyActions = !!(onRetry || onRetryInNewSession || (isPromptTooLong && onCompact))
+  const hasActions = hasStructuredActions || hasLegacyActions
 
   return (
     <Message from="assistant">
@@ -901,6 +959,24 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         <div className="text-destructive">
           <MessageResponse>{contentText}</MessageResponse>
         </div>
+        {errorDetails && errorDetails.length > 0 && (
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((v) => !v)}
+              className="underline-offset-2 hover:underline"
+            >
+              {detailsOpen ? '收起诊断详情' : '查看诊断详情'}
+            </button>
+            {detailsOpen && (
+              <ul className="mt-1.5 space-y-0.5 list-disc list-inside">
+                {errorDetails.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {isBillingError ? (
           <div className="mt-3">
             <Button size="sm" onClick={handleGoToBilling}>
@@ -909,20 +985,32 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
             </Button>
           </div>
         ) : hasActions && (
-          <div className="flex items-center gap-2 mt-3">
-            {isPromptTooLong && onCompact && (
+          <div className="flex items-center flex-wrap gap-2 mt-3">
+            {hasStructuredActions &&
+              errorActions!.map((a, i) => (
+                <Button
+                  key={`${a.action}-${i}`}
+                  size="sm"
+                  variant={i === 0 ? 'default' : 'outline'}
+                  onClick={() => handleRecoveryAction(a)}
+                >
+                  {iconForAction(a.action)}
+                  {a.label}
+                </Button>
+              ))}
+            {!hasStructuredActions && isPromptTooLong && onCompact && (
               <Button size="sm" onClick={onCompact}>
                 <Minimize2 className="size-3.5 mr-1.5" />
                 压缩上下文
               </Button>
             )}
-            {onRetry && (
+            {!hasStructuredActions && onRetry && (
               <Button size="sm" variant={isPromptTooLong ? 'outline' : 'default'} onClick={onRetry}>
                 <RotateCw className="size-3.5 mr-1.5" />
                 重试
               </Button>
             )}
-            {onRetryInNewSession && (
+            {!hasStructuredActions && onRetryInNewSession && (
               <Button
                 size="sm"
                 variant="outline"

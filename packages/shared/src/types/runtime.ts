@@ -190,6 +190,8 @@ export interface ShellEnvResult {
 export const IPC_CHANNELS = {
   /** 获取运行时状态 */
   GET_RUNTIME_STATUS: 'runtime:get-status',
+  /** 重新初始化运行时（用户安装完 Git/Node 后触发） */
+  REINIT_RUNTIME: 'runtime:reinit',
   /** 获取指定目录的 Git 仓库状态 */
   GET_GIT_REPO_STATUS: 'git:get-repo-status',
   /** 在系统默认浏览器中打开外部链接 */

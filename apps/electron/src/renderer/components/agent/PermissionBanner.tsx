@@ -138,7 +138,7 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground font-mono">
-            {formatToolName(request.toolName)}
+            {request.sdkDisplayName ?? formatToolName(request.toolName)}
           </span>
           <button
             type="button"
@@ -152,20 +152,29 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
       </div>
 
       {/* 命令/操作内容 */}
-      <div className="px-3 pb-2">
+      <div className="px-3 pb-2 space-y-1.5">
+        {/* SDK 可读标题（优先展示，描述操作意图） */}
+        {request.sdkTitle && (
+          <p className="text-xs text-foreground">{request.sdkTitle}</p>
+        )}
+        {/* SDK 详细描述（与标题不同时才展示） */}
+        {request.sdkDescription && request.sdkDescription !== request.sdkTitle && (
+          <p className="text-xs text-muted-foreground">{request.sdkDescription}</p>
+        )}
+        {/* Bash 命令：始终展示代码块 */}
         {request.command ? (
           <pre className="text-xs font-mono bg-background/50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto">
             {request.command}
           </pre>
-        ) : Object.keys(request.toolInput).length > 0 ? (
+        ) : !request.sdkTitle && Object.keys(request.toolInput).length > 0 ? (
           <pre className="text-xs font-mono bg-background/50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto">
             {JSON.stringify(request.toolInput, null, 2)}
           </pre>
-        ) : (
+        ) : !request.sdkTitle ? (
           <p className="text-xs text-muted-foreground">
             {request.description}
           </p>
-        )}
+        ) : null}
       </div>
 
       {/* 操作按钮 */}

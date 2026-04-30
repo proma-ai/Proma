@@ -117,7 +117,7 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   /** 最大轮次（undefined = SDK 默认） */
   maxTurns?: number
   /** SDK 权限模式（直接使用 SDK 原生模式） */
-  sdkPermissionMode: 'acceptEdits' | 'bypassPermissions' | 'plan'
+  sdkPermissionMode: 'acceptEdits' | 'bypassPermissions' | 'plan' | 'auto' | 'default' | 'dontAsk'
   /** 是否跳过权限检查 */
   allowDangerouslySkipPermissions: boolean
   /** 自定义权限处理器（匹配 SDK CanUseTool 签名） */
@@ -767,7 +767,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
    * 动态切换活跃查询的权限模式
    *
    * 通过 SDK Query.setPermissionMode() 方法在查询进行中切换权限模式。
-   * 典型场景：Plan 模式审批通过后切换到 bypassPermissions 或 acceptEdits。
+   * 典型场景：Plan 模式审批通过后切换到 bypassPermissions 或 auto。
    */
   async setPermissionMode(sessionId: string, mode: string): Promise<void> {
     const query = activeQueries.get(sessionId)

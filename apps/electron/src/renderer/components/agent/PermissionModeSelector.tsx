@@ -20,10 +20,10 @@ const MODE_CONFIG: Record<PromaPermissionMode, {
   label: string
   description: string
 }> = {
-  acceptEdits: {
+  auto: {
     icon: Compass,
-    label: '自动编辑',
-    description: '文件编辑自动允许，危险操作需确认',
+    label: '自动模式',
+    description: 'SDK 内置审批器自动判断，危险操作才需确认',
   },
   bypassPermissions: {
     icon: Zap,

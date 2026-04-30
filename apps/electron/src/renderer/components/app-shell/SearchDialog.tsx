@@ -19,6 +19,7 @@ import { conversationsAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
+  agentWorkspacesAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { useOpenSession } from '@/hooks/useOpenSession'
@@ -103,9 +104,22 @@ export function SearchDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(searchDialogOpenAtom)
   const conversations = useAtomValue(conversationsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const openSession = useOpenSession()
+
+  const workspaceNameMap = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const w of agentWorkspaces) map.set(w.id, w.name)
+    return map
+  }, [agentWorkspaces])
+
+  const getAgentWorkspaceName = React.useCallback((sessionId: string): string | undefined => {
+    const session = agentSessions.find((s) => s.id === sessionId)
+    if (!session?.workspaceId) return undefined
+    return workspaceNameMap.get(session.workspaceId)
+  }, [agentSessions, workspaceNameMap])
 
   const [query, setQuery] = React.useState('')
   const [searchQuery, setSearchQuery] = React.useState('')
@@ -371,6 +385,14 @@ export function SearchDialog(): React.ReactElement {
                   <span className="flex-1 min-w-0 truncate text-[13px] text-foreground/80">
                     <HighlightText text={result.title} query={searchQuery} />
                   </span>
+                  {result.type === 'agent' && (() => {
+                    const wsName = getAgentWorkspaceName(result.id)
+                    return wsName ? (
+                      <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-foreground/[0.06] text-[10px] leading-4 text-foreground/40 font-medium truncate max-w-[80px]">
+                        {wsName}
+                      </span>
+                    ) : null
+                  })()}
                   {result.archived && (
                     <Archive size={12} className="flex-shrink-0 text-foreground/30" />
                   )}
@@ -411,6 +433,14 @@ export function SearchDialog(): React.ReactElement {
                       <span className="flex-1 min-w-0 truncate text-[13px] text-foreground/80">
                         {result.title}
                       </span>
+                      {result.type === 'agent' && (() => {
+                        const wsName = getAgentWorkspaceName(result.id)
+                        return wsName ? (
+                          <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-foreground/[0.06] text-[10px] leading-4 text-foreground/40 font-medium truncate max-w-[80px]">
+                            {wsName}
+                          </span>
+                        ) : null
+                      })()}
                       {result.archived && (
                         <Archive size={12} className="flex-shrink-0 text-foreground/30" />
                       )}

@@ -18,6 +18,16 @@ import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ChannelForm } from './ChannelForm'
 import { ModelHealthTable } from './ModelHealthTable'
 
@@ -33,6 +43,7 @@ export function ChannelSettings(): React.ReactElement {
   const [, setAgentModelId] = useAtom(agentModelIdAtom)
   const [agentChannelIds, setAgentChannelIds] = useAtom(agentChannelIdsAtom)
   const setGlobalChannels = useSetAtom(channelsAtom)
+  const [deleteTarget, setDeleteTarget] = React.useState<Channel | null>(null)
 
   /** 加载渠道列表 */
   const loadChannels = React.useCallback(async (): Promise<Channel[]> => {
@@ -53,29 +64,35 @@ export function ChannelSettings(): React.ReactElement {
     loadChannels()
   }, [loadChannels])
 
-  /** 删除渠道 */
-  const handleDelete = async (channel: Channel): Promise<void> => {
-    if (!confirm(`确定删除渠道「${channel.name}」？此操作不可恢复。`)) return
+  /** 删除渠道（通过弹窗确认） */
+  const handleDeleteRequest = (channel: Channel): void => {
+    setDeleteTarget(channel)
+  }
 
+  /** 确认删除 */
+  const handleDeleteConfirm = async (): Promise<void> => {
+    if (!deleteTarget) return
+    const target = deleteTarget
     try {
-      await window.electronAPI.deleteChannel(channel.id)
+      await window.electronAPI.deleteChannel(target.id)
 
       // 从 Agent 渠道列表中移除
-      const newIds = agentChannelIds.filter((id) => id !== channel.id)
+      const newIds = agentChannelIds.filter((id) => id !== target.id)
       setAgentChannelIds(newIds)
 
       // 如果删除的是当前选中的 Agent 渠道，清空选择
-      if (agentChannelId === channel.id) {
+      if (agentChannelId === target.id) {
         setAgentChannelId(null)
         setAgentModelId(null)
       }
 
       await window.electronAPI.updateSettings({
         agentChannelIds: newIds,
-        ...(agentChannelId === channel.id && { agentChannelId: undefined, agentModelId: undefined }),
+        ...(agentChannelId === target.id && { agentChannelId: undefined, agentModelId: undefined }),
       })
 
       await loadChannels()
+      setDeleteTarget(null)
     } catch (error) {
       console.error('[渠道设置] 删除渠道失败:', error)
     }
@@ -227,7 +244,7 @@ export function ChannelSettings(): React.ReactElement {
                   setEditingChannel(channel)
                   setViewMode('edit')
                 }}
-                onDelete={() => handleDelete(channel)}
+                onDelete={() => handleDeleteRequest(channel)}
                 onToggle={() => handleToggle(channel)}
               />
             ))}
@@ -271,6 +288,22 @@ export function ChannelSettings(): React.ReactElement {
           </SettingsCard>
         )}
       </SettingsSection>
+
+      {/* 删除确认弹窗 */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除渠道？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除渠道「{deleteTarget?.name}」？此操作不可恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm}>确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

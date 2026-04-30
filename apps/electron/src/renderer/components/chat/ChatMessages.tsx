@@ -209,20 +209,28 @@ export function ChatMessages({
   /**
    * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
    * 强制 resize="instant" 避免中间高度变化触发平滑滚动动画。
+   *
+   * render-phase 计算保证第一帧就能切到 instant（不依赖 useEffect 延迟）。
    */
-  const [transitioning, setTransitioning] = React.useState(false)
+  const [transitioningCooldown, setTransitioningCooldown] = React.useState(false)
+  const wasStreamingRef = React.useRef(streaming)
+
+  const needsInstant = !streaming && (!!streamingContent || !!smoothContent)
+
   React.useEffect(() => {
-    if (streaming) {
-      setTransitioning(false)
-      return
+    if (wasStreamingRef.current && !streaming) {
+      setTransitioningCooldown(true)
     }
-    if (streamingContent || smoothContent) {
-      setTransitioning(true)
-      return
-    }
-    const timer = setTimeout(() => setTransitioning(false), 150)
+    wasStreamingRef.current = streaming
+  }, [streaming])
+
+  React.useEffect(() => {
+    if (needsInstant) return
+    const timer = setTimeout(() => setTransitioningCooldown(false), 150)
     return () => clearTimeout(timer)
-  }, [streaming, streamingContent, smoothContent])
+  }, [needsInstant])
+
+  const transitioning = needsInstant || transitioningCooldown
 
   /**
    * 淡入控制：切换对话时先隐藏，等 StickToBottom 定位完成后再显示。
@@ -409,6 +417,8 @@ export function ChatMessages({
                     streaming && !smoothReasoning && <MessageLoading startedAt={startedAt} />
                   )}
                 </MessageContent>
+                {/* 操作栏占位：预留与 MessageActions 相同高度，防止流式结束时布局跳动 */}
+                <div className="pl-[46px] mt-0.5 min-h-[28px]" />
               </Message>
             )}
           </>

@@ -10,6 +10,7 @@ import { useAtomValue } from 'jotai'
 import { tabsAtom } from '@/atoms/tab-atoms'
 import { ChatView } from '@/components/chat'
 import { AgentView } from '@/components/agent'
+import { TabErrorBoundary } from './TabErrorBoundary'
 
 export interface TabContentProps {
   tabId: string
@@ -35,8 +36,16 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
   }
 
   if (tab.type === 'chat') {
-    return <ChatView conversationId={tab.sessionId} key={tab.sessionId} />
+    return (
+      <TabErrorBoundary key={tab.sessionId} sessionId={tab.sessionId}>
+        <ChatView conversationId={tab.sessionId} />
+      </TabErrorBoundary>
+    )
   }
 
-  return <AgentView sessionId={tab.sessionId} key={tab.sessionId} />
+  return (
+    <TabErrorBoundary key={tab.sessionId} sessionId={tab.sessionId}>
+      <AgentView sessionId={tab.sessionId} />
+    </TabErrorBoundary>
+  )
 }

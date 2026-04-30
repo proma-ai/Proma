@@ -77,23 +77,23 @@
 
   /* 晴空碧海 (ocean-light) */
   .theme-ocean-light {
-    --background: 205 45% 91%;            /* #deeaf2 背景 */
+    --background: 205 35% 94%;            /* #ecf2f7 背景（侧边栏）- 调浅 */
     --foreground: 210 30% 15%;            /* #1b2632 前景文字 */
-    --content-area: 205 40% 97%;          /* #f4f8fa 内容区域 */
-    --muted: 205 40% 85%;                 /* #c9dbe8 次要背景 */
+    --content-area: 205 30% 97%;          /* #f4f7fa 内容区域 */
+    --muted: 205 35% 88%;                 /* #d7e4ef 次要背景 */
     --muted-foreground: 210 15% 40%;      /* #576675 次要文字 */
-    --border: 205 35% 78%;                /* #b3cadb 边框 */
+    --border: 205 30% 82%;                /* #c3d5e5 边框 */
     --primary: 205 50% 50%;               /* #408abf 主色 */
     --primary-foreground: 0 0% 100%;      /* #ffffff 主色前景 */
-    --secondary: 205 40% 88%;             /* #d4e2ed 二级背景 */
+    --secondary: 205 35% 91%;             /* #e2ebf3 二级背景 */
     --secondary-foreground: 210 30% 20%;  /* #243342 二级前景 */
-    --accent: 205 45% 78%;                /* #aecbe0 强调背景 */
+    --accent: 205 35% 82%;                /* #c1d6e7 强调背景 */
     --accent-foreground: 205 50% 30%;     /* #265373 强调文字 */
     --ring: 205 50% 50%;                  /* #408abf 聚焦环 */
-    --card: 205 40% 97%;                  /* #f4f8fa 卡片背景 */
+    --card: 205 30% 97%;                  /* #f4f7fa 卡片背景 */
     --card-foreground: 210 30% 15%;       /* #1b2632 卡片前景 */
-    --input: 205 40% 88%;                 /* #d4e2ed 输入框背景 */
-    --popover: 205 40% 97%;               /* #f4f8fa 弹出层 */
+    --input: 205 35% 91%;                 /* #e2ebf3 输入框背景 */
+    --popover: 205 30% 97%;               /* #f4f7fa 弹出层 */
     --popover-foreground: 210 30% 15%;    /* #1b2632 弹出前景 */
     --dialog: 0 0% 100%;                  /* #ffffff 弹窗背景 */
     --dialog-foreground: 210 30% 15%;     /* #1b2632 弹窗前景 */
@@ -106,8 +106,8 @@
     /* 代码块背景 - 蓝调 */
     --code-bg: 210 35% 14%;               /* #172030 深蓝 */
     /* 虚线边框色 */
-    --dashed-border: 205 50% 50% / 0.35;
-    --dashed-border-hover: 205 50% 50% / 0.50;
+    --dashed-border: 205 50% 50% / 0.30;
+    --dashed-border-hover: 205 50% 50% / 0.45;
   }
 
   /* 苍穹暮色 (ocean-dark) */
@@ -329,7 +329,7 @@
 }
 
 /* 特殊主题外层缝隙背景色覆盖 */
-.theme-ocean-light .shell-bg { background: linear-gradient(135deg, hsl(205 40% 85%) 0%, hsl(205 35% 88%) 100%); }
+.theme-ocean-light .shell-bg { background: linear-gradient(135deg, hsl(205 35% 88%) 0%, hsl(205 30% 91%) 100%); }
 .theme-ocean-dark .shell-bg  { background: linear-gradient(135deg, hsl(210 45% 5%) 0%, hsl(210 35% 7%) 100%); }
 .theme-forest-light .shell-bg { background: linear-gradient(135deg, hsl(140 15% 90%) 0%, hsl(140 15% 92%) 100%); }
 .theme-forest-dark .shell-bg { background: linear-gradient(135deg, hsl(150 20% 5%) 0%, hsl(150 18% 7%) 100%); }
@@ -386,7 +386,7 @@
 /* 晴空碧海：浅蓝背景 + 深蓝文字 */
 .theme-ocean-light .session-item-selected,
 .theme-ocean-light .workspace-item-selected {
-  background: hsl(205 45% 78%) !important;  /* 浅蓝色背景 */
+  background: hsl(205 35% 82%) !important;  /* 浅蓝色背景 */
   color: hsl(205 50% 25%) !important;       /* 深蓝色文字 */
 }
 .theme-ocean-light .session-item-selected *,

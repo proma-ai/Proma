@@ -3,7 +3,7 @@
  *
  * 仿照 Claude Code 的计划审批 UI，提供 4 个选项：
  * 1. 批准并自动执行 — 切换到 bypassPermissions
- * 2. 批准，手动审批编辑 — 切换到 acceptEdits
+ * 2. 批准，手动审批编辑 — 切换到 auto
  * 3. 拒绝计划 — deny
  * 4. 提供反馈 — 自由输入修改意见
  *

@@ -519,6 +519,9 @@ function BotConfigCard({ bot, state, onSaved, onRemoved }: BotConfigCardProps): 
         enabled: true,
         appId: appId.trim(),
         appSecret: appSecret || '',
+        defaultWorkspaceId: bot.defaultWorkspaceId,
+        defaultChannelId: bot.defaultChannelId,
+        defaultModelId: bot.defaultModelId,
       })
       toast.success(`Bot "${name}" 已保存`)
       onSaved()
@@ -761,6 +764,9 @@ function FeishuConfigTab(): React.ReactElement {
         enabled: false,
         appId: '',
         appSecret: '',
+        defaultWorkspaceId: undefined,
+        defaultChannelId: undefined,
+        defaultModelId: undefined,
       })
       setBots((prev) => [...prev, saved])
     } catch {

@@ -25,11 +25,21 @@ import {
 // Cloud 模式专属图标
 import { CreditCard, KeyRound, ScrollText } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { settingsTabAtom } from "@/atoms/settings-tab";
+import { settingsTabAtom, channelFormDirtyAtom, settingsCloseRequestedAtom } from "@/atoms/settings-tab";
 import type { SettingsTab } from "@/atoms/settings-tab";
 import { appModeAtom } from "@/atoms/app-mode";
 import { hasUpdateAtom } from "@/atoms/updater";
 import { hasEnvironmentIssuesAtom } from "@/atoms/environment";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ChannelSettings } from "./ChannelSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProxySettings } from "./ProxySettings";
@@ -159,9 +169,59 @@ export function SettingsPanel({
   onClose,
 }: SettingsPanelProps): React.ReactElement {
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom);
+  const channelFormDirty = useAtomValue(channelFormDirtyAtom);
+  const [closeRequested, setCloseRequested] = useAtom(settingsCloseRequestedAtom);
   const appMode = useAtomValue(appModeAtom);
   const hasUpdate = useAtomValue(hasUpdateAtom);
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom);
+
+  /** 统一的退出拦截对话框状态 */
+  type PendingAction = { type: 'tab'; tabId: SettingsTab } | { type: 'close' } | null
+  const [pendingAction, setPendingAction] = React.useState<PendingAction>(null)
+  const showNavDialog = pendingAction !== null
+
+  /** 执行待处理的操作 */
+  const executePendingAction = (): void => {
+    if (!pendingAction) return
+    if (pendingAction.type === 'tab') {
+      setActiveTab(pendingAction.tabId)
+    } else {
+      onClose?.()
+    }
+    setPendingAction(null)
+  }
+
+  /** 取消待处理的操作 */
+  const cancelPendingAction = (): void => {
+    setPendingAction(null)
+  }
+
+  /** 切换标签页时检测是否有未保存内容 */
+  const handleTabChange = (tabId: SettingsTab): void => {
+    if (tabId === activeTab) return
+    if (activeTab === 'channels' && channelFormDirty) {
+      setPendingAction({ type: 'tab', tabId })
+      return
+    }
+    setActiveTab(tabId)
+  }
+
+  /** 关闭设置面板时检测是否有未保存内容 */
+  const handleClose = (): void => {
+    if (activeTab === 'channels' && channelFormDirty) {
+      setPendingAction({ type: 'close' })
+      return
+    }
+    onClose?.()
+  }
+
+  // Cmd+W 等外部关闭请求：弹出确认对话框
+  React.useEffect(() => {
+    if (closeRequested && activeTab === 'channels') {
+      setPendingAction({ type: 'close' })
+      setCloseRequested(false)
+    }
+  }, [closeRequested, activeTab, setCloseRequested])
 
   // Cloud 模式专属 Tab 置顶，随后是 BASE_TABS；Agent 模式在渠道后插入 Agent Tab，记忆/工具 tab 两种模式都显示
   const tabs = React.useMemo(() => {
@@ -195,7 +255,7 @@ export function SettingsPanel({
         </h2>
         {onClose && (
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md p-1.5 text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
           >
             <X size={16} />
@@ -211,7 +271,7 @@ export function SettingsPanel({
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={cn(
                   "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
                   activeTab === tab.id
@@ -234,6 +294,22 @@ export function SettingsPanel({
           <div className="px-6 py-4">{renderTabContent(activeTab)}</div>
         </ScrollArea>
       </div>
+
+      {/* 退出拦截弹窗（侧边栏导航 / X 关闭 / Cmd+W） */}
+      <AlertDialog open={showNavDialog} onOpenChange={(open) => { if (!open) cancelPendingAction() }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃未保存的更改？</AlertDialogTitle>
+            <AlertDialogDescription>
+              当前渠道配置尚未保存，确定要离开吗？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelPendingAction}>留在当前页</AlertDialogCancel>
+            <AlertDialogAction onClick={executePendingAction}>放弃并离开</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
