@@ -17,11 +17,12 @@ import type {
   StreamEvent,
   TitleRequestInput,
   ImageAttachmentData,
+  ContinuationMessage,
 } from './types.ts'
 import {
   type OpenAIMessage,
+  type OpenAIToolCall,
   toOpenAITools,
-  appendContinuationMessages,
   parseOpenAICompatSSE,
 } from './openai-adapter.ts'
 
@@ -94,6 +95,62 @@ function toPromaMessages(input: StreamRequestInput): OpenAIMessage[] {
   return messages
 }
 
+// ===========================================================================
+// [Proma Cloud 特有 / FORK-DIVERGENCE] 续接消息拼接
+// ---------------------------------------------------------------------------
+// 本函数是 Proma Cloud 特供实现，与上游公共 openai-adapter.appendContinuationMessages
+// 刻意分叉，请勿替换回通用实现。
+//
+// 原因：
+// - Proma /chat 端点会根据模型路由到 DeepSeek v4 官方 /chat/completions（见
+//   proma-api app/routers/chat.py _resolve_upstream）或 new-api 转发至 Kimi K2
+//   Thinking 等上游。DeepSeek v4 / Kimi K2 Thinking 在多轮工具调用中，**必须**
+//   在续接 assistant 消息上回传上一轮的 `reasoning_content`，否则服务端会以
+//   `content[].thinking must be passed back` / `reasoning_content is missing` 拒绝。
+// - 上游通用 OpenAI 协议版本（openai-adapter.appendContinuationMessages）不带
+//   reasoning_content（OpenAI 官方不认此字段），所以不能直接复用。
+//
+// 策略（与 AnthropicAdapter.appendContinuationMessages 保持一致）：
+// - `thinkingEnabled=true` 且 `contMsg.reasoning` 非空时填 `reasoning_content`
+// - `thinkingEnabled=false` 时一律不填（否则服务端会以为思考仍激活）
+// - 仅透传扁平 `reasoning`，不传 `thinkingBlocks.signature`：Proma /chat 是 OpenAI
+//   协议链路，没有签名概念
+//
+// 若未来上游把通用 openai-adapter 也改成支持 reasoning_content，请**仍然保留**本地
+// 副本，直到可以确认两条路径已经汇合（以及 OpenAI 官方渠道不会被污染）。
+// ===========================================================================
+function appendPromaContinuationMessages(
+  messages: OpenAIMessage[],
+  continuationMessages: ContinuationMessage[],
+  thinkingEnabled: boolean,
+): void {
+  for (const contMsg of continuationMessages) {
+    if (contMsg.role === 'assistant') {
+      const assistantMsg: OpenAIMessage = {
+        role: 'assistant',
+        content: contMsg.content || null,
+        tool_calls: contMsg.toolCalls.map<OpenAIToolCall>((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        })),
+      }
+      if (thinkingEnabled && contMsg.reasoning && contMsg.reasoning.length > 0) {
+        assistantMsg.reasoning_content = contMsg.reasoning
+      }
+      messages.push(assistantMsg)
+    } else if (contMsg.role === 'tool') {
+      for (const result of contMsg.results) {
+        messages.push({
+          role: 'tool',
+          content: result.content,
+          tool_call_id: result.toolCallId,
+        })
+      }
+    }
+  }
+}
+
 // ===== 适配器实现 =====
 
 export class PromaAdapter implements ProviderAdapter {
@@ -116,8 +173,10 @@ export class PromaAdapter implements ProviderAdapter {
     }
 
     // 工具续接消息
+    // [Proma Cloud 特有] 使用本地 appendPromaContinuationMessages 回传 reasoning_content
+    // 以满足 DeepSeek v4 / Kimi K2 Thinking 等上游的"必须 pass back thinking"要求。
     if (input.continuationMessages && input.continuationMessages.length > 0) {
-      appendContinuationMessages(messages, input.continuationMessages)
+      appendPromaContinuationMessages(messages, input.continuationMessages, !!input.thinkingEnabled)
     }
 
     return {
