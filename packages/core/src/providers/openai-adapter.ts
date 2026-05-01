@@ -190,6 +190,22 @@ export function appendContinuationMessages(
 export function parseOpenAICompatSSE(jsonLine: string): StreamEvent[] {
   try {
     const chunk = JSON.parse(jsonLine) as OpenAIChunkData
+
+    // 上游通过 SSE body 透传的错误（如 new-api 的 model_price_error）
+    const errorField = (chunk as Record<string, unknown>).error
+    if (errorField) {
+      let errorMessage: string
+      if (typeof errorField === 'string') {
+        errorMessage = errorField
+      } else if (typeof errorField === 'object' && errorField !== null) {
+        const errObj = errorField as { message?: string; error?: { message?: string } }
+        errorMessage = errObj.error?.message ?? errObj.message ?? JSON.stringify(errorField)
+      } else {
+        errorMessage = String(errorField)
+      }
+      return [{ type: 'error', error: errorMessage }]
+    }
+
     const delta = chunk.choices?.[0]?.delta
     const events: StreamEvent[] = []
 

@@ -163,6 +163,9 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
                 pending.args += event.argumentsDelta
               }
             }
+          } else if (event.type === 'error') {
+            onEvent(event)
+            throw new Error(event.error)
           } else if (event.type === 'done' && event.stopReason) {
             stopReason = event.stopReason
           }
