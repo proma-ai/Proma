@@ -70,7 +70,7 @@ import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, FeishuNotificationSentPayload, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
-import { diffCapabilities, migratePermissionMode, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
+import { diffCapabilities, migratePermissionMode, PROMA_OFFICIAL_CHANNEL_ID, calcTotalAvailable } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { UpdateDialog } from './components/settings/UpdateDialog'
@@ -385,6 +385,27 @@ function CloudAuthInitializer(): null {
   return null
 }
 
+const LOW_BALANCE_THRESHOLD = 50
+const LOW_BALANCE_WARN_INTERVAL_MS = 24 * 60 * 60 * 1000
+const LOW_BALANCE_WARNED_KEY = 'proma-low-balance-warned-at'
+
+function checkLowBalanceWarning(totalAvailable: number): void {
+  if (totalAvailable >= LOW_BALANCE_THRESHOLD) return
+
+  try {
+    const lastWarned = parseInt(localStorage.getItem(LOW_BALANCE_WARNED_KEY) ?? '0', 10)
+    if (Date.now() - lastWarned < LOW_BALANCE_WARN_INTERVAL_MS) return
+    localStorage.setItem(LOW_BALANCE_WARNED_KEY, String(Date.now()))
+  } catch {
+    return
+  }
+
+  toast.warning(
+    `当前可用额度仅剩 ${totalAvailable < 10 ? totalAvailable.toFixed(2) : Math.floor(totalAvailable)} 积分，建议及时充值以避免 Agent 运行中断`,
+    { duration: 8000 },
+  )
+}
+
 /**
  * Cloud 账单初始化组件
  *
@@ -439,6 +460,13 @@ function BillingInitializer(): null {
     window.addEventListener('focus', refreshOnFocus)
     return () => window.removeEventListener('focus', refreshOnFocus)
   }, [user, setBillingInfo])
+
+  // 低余额预警：billingInfo 变化时检查总可用额度
+  const billing = useAtomValue(billingInfoAtom)
+  useEffect(() => {
+    if (!isCloudMode() || !user || !billing) return
+    checkLowBalanceWarning(calcTotalAvailable(billing))
+  }, [billing, user])
 
   return null
 }

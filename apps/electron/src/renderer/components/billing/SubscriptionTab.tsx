@@ -250,7 +250,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
               const quota = typeof sub.quota === 'string' ? parseFloat(sub.quota) : sub.quota
               const used = typeof sub.used_quota === 'string' ? parseFloat(sub.used_quota) : sub.used_quota
               const remaining = quota - used
-              const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
+              const percent = quota > 0 ? Math.max(0, Math.min(100, (remaining / quota) * 100)) : 0
               const daysLeft = Math.max(0, Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
 
               return (
@@ -271,7 +271,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                     <Progress value={percent} className="h-2" />
                     <div className="flex items-center justify-between mt-1.5">
                       <p className="text-[11px] text-muted-foreground">
-                        已使用 {formatCurrency(used)} / {formatCurrency(quota)}
+                        剩余 {formatCurrency(remaining)} / {formatCurrency(quota)}
                       </p>
                       <p className="text-[11px] text-muted-foreground">
                         {formatDate(sub.expires_at)} 到期
