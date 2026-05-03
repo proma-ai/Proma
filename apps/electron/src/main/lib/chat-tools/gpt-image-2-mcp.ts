@@ -114,7 +114,9 @@ async function downloadImageAsBase64(url: string): Promise<{ base64: string; mim
   }
 }
 
-// ===== 调用上游并构建 MCP 结果 =====
+// ===== Edit 模式支持的 size 白名单 =====
+// 上游 /v3/gpt-image-2-edit 只支持这三种尺寸，不支持 2K/4K/auto
+const EDIT_SUPPORTED_SIZES = new Set(['1024x1024', '1024x1536', '1536x1024'])
 
 async function callGptImage2AndBuildResult(
   prompt: string,
@@ -133,13 +135,31 @@ async function callGptImage2AndBuildResult(
     return { content: [{ type: 'text' as const, text: '云端生图失败：未登录' }] }
   }
 
-  const refDataUrls = options.referenceImagePaths?.length
-    ? readReferenceImagesAsDataUrl(options.referenceImagePaths, options.cwd)
+  // 截断参考图数量：默认上限 3 张，防止模型误传过多历史图
+  const MAX_REFERENCE_IMAGES = 3
+  const truncatedPaths = options.referenceImagePaths?.slice(0, MAX_REFERENCE_IMAGES)
+  if (options.referenceImagePaths && options.referenceImagePaths.length > MAX_REFERENCE_IMAGES) {
+    console.warn(
+      `[GPT Image 2 MCP] 参考图数量 ${options.referenceImagePaths.length} 超过上限 ${MAX_REFERENCE_IMAGES}，已截断为最前 ${MAX_REFERENCE_IMAGES} 张`,
+    )
+  }
+
+  const refDataUrls = truncatedPaths?.length
+    ? readReferenceImagesAsDataUrl(truncatedPaths, options.cwd)
     : []
+
+  const isEditMode = refDataUrls.length > 0
+
+  // Edit 模式的 size 强制校验：上游编辑端点只支持 3 种尺寸，不支持 2K/4K/auto
+  let resolvedSize = options.size || '1024x1024'
+  if (isEditMode && !EDIT_SUPPORTED_SIZES.has(resolvedSize)) {
+    console.warn(`[GPT Image 2 MCP] Edit 模式不支持 size="${resolvedSize}"，已降级为 1024x1024`)
+    resolvedSize = '1024x1024'
+  }
 
   const body: Record<string, unknown> = {
     prompt,
-    size: options.size || '1024x1024',
+    size: resolvedSize,
     quality: options.quality || 'medium',
     n: options.numberOfImages || 1,
   }
@@ -259,12 +279,24 @@ export async function injectGptImage2McpServer(
     tools: [
       sdk.tool(
         'generate_image_gpt',
-        'Generate or edit images using GPT Image 2. Supports text-to-image generation and reference-image editing. Pass referenceImagePaths (absolute or relative to cwd) to invoke the edit endpoint with the given image(s). When the user uploads images (listed in <attached_files>) or mentions image files via @file:{path}, pass their paths via referenceImagePaths.',
+        `Generate or edit images using GPT Image 2.
+
+MODES:
+- Text-to-image (no referenceImagePaths): Uses /v3/gpt-image-2-text-to-image. Supports all sizes including 2K/4K/auto.
+- Edit (with referenceImagePaths): Uses /v3/gpt-image-2-edit. ONLY supports 1024x1024/1024x1536/1536x1024 — never pass 2K/4K/auto in edit mode.
+
+SELECTING REFERENCE IMAGES (when user asks to edit/modify/adjust):
+1. Candidate sources in the working directory:
+   - User-uploaded images listed in <attached_files> or referenced via @file:{path}
+   - Previously generated images under ./generated-images/ (you'll see the exact paths in prior tool results)
+2. You MAY proactively use the Read tool on candidate image files to visually inspect them before deciding which ones best match the user's intent. Read supports PNG/JPG/WebP and returns the image for you to see.
+3. Pass up to 3 of the most relevant reference image paths in referenceImagePaths (absolute or relative to cwd). Prefer the most recent/relevant ones; do NOT blindly pass every image you've ever generated.
+4. For simple "continue editing the last image" requests, the single most recent generated image is usually sufficient.`,
         {
           prompt: z.string().describe('Detailed description of the image to generate or the edits to make. Up to 32000 chars; English works best.'),
-          referenceImagePaths: z.array(z.string()).optional().describe('File paths of reference images for editing.'),
-          size: z.enum(['1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto']).optional().describe('Image size. 1024x1024=square, 1024x1536=portrait, 1536x1024=landscape, 2048x2048=2K square, 2048x1152=2K landscape, 3840x2160=4K landscape, 2160x3840=4K portrait, auto=let model decide. Default 1024x1024.'),
-          quality: z.enum(['low', 'medium', 'high']).optional().describe('Generation quality (default medium).'),
+          referenceImagePaths: z.array(z.string()).max(3).optional().describe('Up to 3 reference image paths for editing (absolute or relative to cwd). Use the Read tool first if you want to visually inspect candidates before choosing. Pass the most relevant recent images only — not every image in history.'),
+          size: z.enum(['1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto']).optional().describe('Image size. For text-to-image: all values supported. For edit mode (referenceImagePaths set): ONLY 1024x1024/1024x1536/1536x1024. Default 1024x1024.'),
+          quality: z.enum(['low', 'medium', 'high']).optional().describe('Generation quality. Default is "medium". Only use "high" when the user explicitly requests best/high quality. Only use "low" when the user explicitly requests fast/cheap/draft. If the user does not mention quality, always use "medium".'),
           numberOfImages: z.number().int().min(1).max(10).optional().describe('Number of images to generate (1-10, default 1).'),
           background: z.enum(['transparent', 'opaque', 'auto']).optional().describe('Background handling.'),
         },
@@ -272,7 +304,7 @@ export async function injectGptImage2McpServer(
           try {
             return await callGptImage2AndBuildResult(args.prompt, sessionId, {
               size: args.size,
-              quality: args.quality,
+              quality: args.quality || 'medium',
               numberOfImages: args.numberOfImages,
               background: args.background,
               referenceImagePaths: args.referenceImagePaths,

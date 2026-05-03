@@ -13,7 +13,7 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs'
 import { extname, basename, join, isAbsolute, normalize } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { dialog, BrowserWindow } from 'electron'
+import { dialog, BrowserWindow, nativeImage } from 'electron'
 import {
   getConfigDir,
   getConversationAttachmentsDir,
@@ -85,6 +85,74 @@ const FILE_FILTERS = [
  */
 export function isImageAttachment(mediaType: string): boolean {
   return IMAGE_MIME_TYPES.has(mediaType)
+}
+
+// ===== 图片压缩 =====
+
+/** 图片压缩阈值：任意维度超过此像素时触发等比缩放 */
+const IMAGE_MAX_DIMENSION = 2000
+
+/**
+ * 对用户上传的图片做等比例压缩
+ *
+ * 当图片宽或高超过 IMAGE_MAX_DIMENSION（2000px）时，等比缩放至不超过该限制。
+ * - JPEG → 保持 JPEG，90 质量
+ * - PNG / GIF / WebP → 输出 PNG（nativeImage 原生支持格式）
+ * 如果图片尺寸未超标或压缩失败，原样返回。
+ *
+ * @param base64Data 图片的 base64 原始数据（不含 data URL 前缀）
+ * @param mediaType  原始 MIME 类型
+ * @returns 压缩后的 { data, mediaType }
+ */
+export function compressImageIfNeeded(
+  base64Data: string,
+  mediaType: string,
+): { data: string; mediaType: string } {
+  if (!IMAGE_MIME_TYPES.has(mediaType)) {
+    return { data: base64Data, mediaType }
+  }
+
+  try {
+    const buffer = Buffer.from(base64Data, 'base64')
+    const img = nativeImage.createFromBuffer(buffer)
+    const { width, height } = img.getSize()
+
+    if (width === 0 || height === 0) {
+      // 无法解析尺寸（不支持格式等），原样返回
+      return { data: base64Data, mediaType }
+    }
+
+    if (width <= IMAGE_MAX_DIMENSION && height <= IMAGE_MAX_DIMENSION) {
+      return { data: base64Data, mediaType }
+    }
+
+    const scale = Math.min(IMAGE_MAX_DIMENSION / width, IMAGE_MAX_DIMENSION / height)
+    const newWidth = Math.round(width * scale)
+    const newHeight = Math.round(height * scale)
+
+    const resized = img.resize({ width: newWidth, height: newHeight })
+
+    let compressedBuffer: Buffer
+    let outputMediaType = mediaType
+
+    if (mediaType === 'image/jpeg') {
+      compressedBuffer = resized.toJPEG(90)
+    } else {
+      // PNG、GIF、WebP 均输出为 PNG
+      compressedBuffer = resized.toPNG()
+      outputMediaType = 'image/png'
+    }
+
+    console.log(
+      `[附件服务] 图片压缩: ${width}x${height} → ${newWidth}x${newHeight}, ` +
+      `${(buffer.length / 1024).toFixed(1)}KB → ${(compressedBuffer.length / 1024).toFixed(1)}KB`,
+    )
+
+    return { data: compressedBuffer.toString('base64'), mediaType: outputMediaType }
+  } catch (error) {
+    console.warn('[附件服务] 图片压缩失败，使用原图:', error)
+    return { data: base64Data, mediaType }
+  }
 }
 
 /**

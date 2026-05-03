@@ -27,10 +27,15 @@ export interface ToolExecutionContext {
   conversationId: string
   /** 当前用户消息的附件列表 */
   currentAttachments?: FileAttachment[]
-  /** 前一轮用户消息的附件 */
+  /** 前一轮用户消息的附件（保留用于 Nano Banana 等旧工具） */
   previousUserAttachments?: FileAttachment[]
-  /** 前一轮助手消息的附件 */
+  /** 前一轮助手消息的附件（保留用于 Nano Banana 等旧工具） */
   previousAssistantAttachments?: FileAttachment[]
+  /**
+   * 最近 N 轮对话中所有消息的附件（user + assistant），按时间倒序
+   * 由 chat-service 提取，供 GPT Image 2 等多轮参考图工具使用
+   */
+  recentRoundsAttachments?: FileAttachment[]
 }
 
 /**
@@ -70,8 +75,7 @@ export async function executeToolCalls(
       const gptImageContext: GptImage2Context = {
         conversationId: context.conversationId,
         currentAttachments: context.currentAttachments,
-        previousUserAttachments: context.previousUserAttachments,
-        previousAssistantAttachments: context.previousAssistantAttachments,
+        recentRoundsAttachments: context.recentRoundsAttachments,
       }
       result = await executeGptImage2Tool(tc, gptImageContext)
     } else if (isCustomHttpToolCall(tc.name)) {

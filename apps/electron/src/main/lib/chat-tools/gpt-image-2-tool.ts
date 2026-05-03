@@ -28,10 +28,17 @@ interface GptImage2Response {
 
 export interface GptImage2Context {
   conversationId: string
+  /** 本轮用户消息附带的图片 */
   currentAttachments?: FileAttachment[]
-  previousUserAttachments?: FileAttachment[]
-  previousAssistantAttachments?: FileAttachment[]
+  /**
+   * 最近 N 轮对话中所有消息的附件（user + assistant 生成图）
+   * 按时间倒序（最新在前），由 chat-service 按 DEFAULT_REFERENCE_ROUNDS 计算
+   */
+  recentRoundsAttachments?: FileAttachment[]
 }
+
+/** 默认带进 edit 模式的参考图轮数上限 */
+export const DEFAULT_REFERENCE_ROUNDS = 3
 
 // ===== 工具元数据 =====
 
@@ -57,8 +64,10 @@ export const GPT_IMAGE_2_TOOL_META: ChatToolMeta = {
 
 **参数说明：**
 - prompt: 详细描述想要生成的图片内容（支持中英文，英文效果更佳，最长 32000 字）
-- size: "1024x1024"(方形,默认) / "1024x1536"(竖图) / "1536x1024"(横图) / "2048x2048"(2K方形) / "2048x1152"(2K横图) / "3840x2160"(4K横图) / "2160x3840"(4K竖图) / "auto"
-- quality: "low"(快/便宜) / "medium"(平衡,默认) / "high"(精/慢/贵)
+- size:
+  - 文生图模式（useReferenceImages=false）："1024x1024"(方形,默认) / "1024x1536"(竖图) / "1536x1024"(横图) / "2048x2048"(2K方形) / "2048x1152"(2K横图) / "3840x2160"(4K横图) / "2160x3840"(4K竖图) / "auto"
+  - 图片编辑模式（useReferenceImages=true）：**只能使用** "1024x1024" / "1024x1536" / "1536x1024"，不支持 2K/4K 和 auto
+- quality: "low"(快/便宜) / "medium"(平衡,**默认，用户未明确指定时始终使用此值**) / "high"(精/慢/贵，仅用户明确要求高质量时使用)
 - numberOfImages: 1-10，默认 1
 - background: "transparent"(透明,仅 PNG) / "opaque" / "auto"
 - useReferenceImages: 当用户上传了参考图或要求修改之前生成的图片时设为 true（走编辑接口）
@@ -70,7 +79,7 @@ export const GPT_IMAGE_2_TOOL_META: ChatToolMeta = {
 export const GPT_IMAGE_2_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'generate_image_gpt',
-    description: 'Generate or edit images using GPT Image 2. Pass useReferenceImages="true" to edit uploaded images instead of generating from scratch.',
+    description: 'Generate or edit images using GPT Image 2. Pass useReferenceImages="true" to edit uploaded images instead of generating from scratch. IMPORTANT: when useReferenceImages="true", only sizes 1024x1024/1024x1536/1536x1024 are supported — do NOT use 2K/4K/auto sizes in edit mode.',
     parameters: {
       type: 'object',
       properties: {
@@ -80,12 +89,12 @@ export const GPT_IMAGE_2_TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         size: {
           type: 'string',
-          description: 'Image size. 1024x1024=square, 1024x1536=portrait, 1536x1024=landscape, 2048x2048=2K square, 2048x1152=2K landscape, 3840x2160=4K landscape, 2160x3840=4K portrait, auto=let model decide. Default 1024x1024.',
+          description: 'Image size. For text-to-image (useReferenceImages=false): 1024x1024=square, 1024x1536=portrait, 1536x1024=landscape, 2048x2048=2K square, 2048x1152=2K landscape, 3840x2160=4K landscape, 2160x3840=4K portrait, auto=let model decide. For edit mode (useReferenceImages=true): ONLY 1024x1024, 1024x1536, 1536x1024 are supported. Default 1024x1024.',
           enum: ['1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto'],
         },
         quality: {
           type: 'string',
-          description: 'Generation quality (low=fast/cheap, high=best/expensive). Default medium.',
+          description: 'Generation quality. Default is "medium". Only use "high" when the user explicitly requests best/high quality. Only use "low" when the user explicitly requests fast/cheap/draft quality. If the user does not mention quality, always use "medium".',
           enum: ['low', 'medium', 'high'],
         },
         numberOfImages: {
@@ -99,7 +108,7 @@ export const GPT_IMAGE_2_TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         useReferenceImages: {
           type: 'string',
-          description: 'Set to "true" to use uploaded reference images for editing.',
+          description: 'Set to "true" to use uploaded reference images or previously generated images for editing. When true, size must be one of: 1024x1024, 1024x1536, 1536x1024.',
           enum: ['true', 'false'],
         },
       },
@@ -107,6 +116,10 @@ export const GPT_IMAGE_2_TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
 ]
+
+// ===== Edit 模式支持的 size 白名单 =====
+// 上游 /v3/gpt-image-2-edit 只支持这三种尺寸，不支持 2K/4K/auto
+const EDIT_SUPPORTED_SIZES = new Set(['1024x1024', '1024x1536', '1536x1024'])
 
 // ===== 可用性检查（仅云端） =====
 
@@ -125,16 +138,27 @@ export function isGptImage2ToolCall(toolName: string): boolean {
 
 // ===== 辅助：收集参考图（base64） =====
 
+/**
+ * 收集编辑模式的参考图（base64 data URL 格式）
+ *
+ * 策略：
+ * 1. 本轮用户上传的新图排在最前（最明确的编辑目标）
+ * 2. 最近 N 轮历史消息的所有图片（按时间倒序，assistant 生成 + user 上传）
+ * 3. 以 localPath 去重，避免同一张图被多次打包
+ *
+ * 最终一起作为 image 数组传给上游 edit 端点（API 支持数组）。
+ */
 function collectReferenceImagesAsBase64(context: GptImage2Context): string[] {
-  const all: FileAttachment[] = [
-    ...(context.previousUserAttachments ?? []),
-    ...(context.previousAssistantAttachments ?? []),
-    ...(context.currentAttachments ?? []),
-  ]
+  const ordered: FileAttachment[] = []
+  for (const a of context.currentAttachments ?? []) ordered.push(a)
+  for (const a of context.recentRoundsAttachments ?? []) ordered.push(a)
 
+  const seen = new Set<string>()
   const result: string[] = []
-  for (const a of all) {
+  for (const a of ordered) {
     if (!isImageAttachment(a.mediaType)) continue
+    if (seen.has(a.localPath)) continue
+    seen.add(a.localPath)
     try {
       const base64 = readAttachmentAsBase64(a.localPath)
       result.push(`data:${a.mediaType};base64,${base64}`)
@@ -216,13 +240,21 @@ export async function executeGptImage2Tool(
       }
     }
 
-    const size = (toolCall.arguments.size as string | undefined) || '1024x1024'
+    const requestedSize = (toolCall.arguments.size as string | undefined) || '1024x1024'
     const quality = (toolCall.arguments.quality as string | undefined) || 'medium'
     const background = toolCall.arguments.background as string | undefined
     const useReferenceImages = toolCall.arguments.useReferenceImages === 'true'
     const numberOfImages = typeof toolCall.arguments.numberOfImages === 'number'
       ? Math.min(Math.max(Math.round(toolCall.arguments.numberOfImages), 1), 10)
       : 1
+
+    // Edit 模式的 size 强制校验：上游编辑端点只支持 3 种尺寸，不支持 2K/4K/auto
+    // 如果模型传了不支持的尺寸，降级到默认值 1024x1024 并记录警告
+    let size = requestedSize
+    if (useReferenceImages && !EDIT_SUPPORTED_SIZES.has(size)) {
+      console.warn(`[GPT Image 2] Edit 模式不支持 size="${size}"，已降级为 1024x1024`)
+      size = '1024x1024'
+    }
 
     // 收集参考图（编辑模式才传）
     let imageField: string | string[] | undefined

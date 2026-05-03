@@ -77,6 +77,17 @@ function toPromaMessages(input: StreamRequestInput): OpenAIMessage[] {
     if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
       const historyImages = readImageAttachments(msg.attachments)
       messages.push({ role, content: buildMessageContent(msg.content, historyImages) })
+    } else if (msg.role === 'assistant' && msg.attachments && msg.attachments.length > 0) {
+      // assistant 消息包含生成的图片附件（如 GPT Image 2 生成结果）
+      // 将其嵌入历史，让模型在后续轮次中能看到自己生成的图片
+      const assistantImages = readImageAttachments(msg.attachments)
+      const content: PromaContentBlock[] = buildImageBlocks(assistantImages)
+      if (msg.content) {
+        content.push({ type: 'text', text: msg.content })
+      }
+      const openaiMsg: OpenAIMessage = { role, content }
+      if (msg.reasoning) openaiMsg.reasoning_content = msg.reasoning
+      messages.push(openaiMsg)
     } else {
       const openaiMsg: OpenAIMessage = { role, content: msg.content }
       if (msg.role === 'assistant' && msg.reasoning) {

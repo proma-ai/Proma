@@ -34,12 +34,40 @@ import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { getEnabledTools } from './chat-tool-registry'
 import { executeToolCalls } from './chat-tool-executor'
+import { DEFAULT_REFERENCE_ROUNDS } from './chat-tools/gpt-image-2-tool'
 
 /** 活跃的 AbortController 映射（conversationId → controller） */
 const activeControllers = new Map<string, AbortController>()
 
 /** 最大工具续接轮数（安全上限，防止极端情况下的无限循环） */
 const MAX_TOOL_ROUNDS = 999
+
+/**
+ * 提取最近 N 轮消息中的所有附件（按时间倒序，最新在前）
+ *
+ * "一轮" 定义为一次 user → assistant 的往返，以 user 消息为计数锚点。
+ * 同时收集 user 上传的图和 assistant 生成的图，供多轮编辑场景使用。
+ */
+function collectRecentRoundsAttachments(
+  history: ChatMessage[],
+  maxRounds: number,
+): FileAttachment[] {
+  const result: FileAttachment[] = []
+  let roundCount = 0
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i]
+    if (!msg) continue
+    if (msg.role === 'user') {
+      roundCount++
+      if (roundCount > maxRounds) break
+    }
+    if (msg.attachments && msg.attachments.length > 0) {
+      result.push(...msg.attachments)
+    }
+  }
+  return result
+}
 
 // ===== 默认系统提示词 =====
 
@@ -372,15 +400,17 @@ export async function sendMessage(
         }
 
         // 执行工具调用（通过统一执行器）
-        // 提取前一轮对话的附件（用于参考图支持）
+        // 提取前一轮对话的附件（用于 Nano Banana 等旧工具），以及最近 N 轮全部附件（用于 GPT Image 2 多轮参考图）
         const lastUserMsg = fullHistory.filter((m) => m.role === 'user').at(-1)
         const lastAssistantMsg = fullHistory.filter((m) => m.role === 'assistant').at(-1)
+        const recentRoundsAttachments = collectRecentRoundsAttachments(fullHistory, DEFAULT_REFERENCE_ROUNDS)
         const toolResults = await executeToolCalls(toolCalls, {
           webContents,
           conversationId,
           currentAttachments: attachments,
           previousUserAttachments: lastUserMsg?.attachments,
           previousAssistantAttachments: lastAssistantMsg?.attachments,
+          recentRoundsAttachments,
         })
 
         // 累积工具结果到持久化数据

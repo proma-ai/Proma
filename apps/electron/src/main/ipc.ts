@@ -118,6 +118,7 @@ import {
   readAttachmentAsBase64,
   deleteAttachment,
   openFileDialog,
+  compressImageIfNeeded,
 } from './lib/attachment-service'
 import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
@@ -537,7 +538,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHAT_IPC_CHANNELS.SAVE_ATTACHMENT,
     async (_, input: AttachmentSaveInput): Promise<AttachmentSaveResult> => {
-      return saveAttachment(input)
+      // 用户上传的图片若超过 2000×2000 像素，等比压缩后再存储
+      const { data: compressedData, mediaType: compressedMediaType } =
+        compressImageIfNeeded(input.data, input.mediaType)
+      return saveAttachment({ ...input, data: compressedData, mediaType: compressedMediaType })
     }
   )
 
