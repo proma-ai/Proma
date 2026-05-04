@@ -264,8 +264,14 @@ export function mapSDKErrorToTypedError(
     },
     'billing_error': {
       code: 'billing_error',
-      title: '账单错误',
-      message: '您的账户存在账单问题',
+      title: '余额不足',
+      message: '余额不足，请充值后继续使用',
+      canRetry: false,
+    },
+    'insufficient_quota': {
+      code: 'billing_error',
+      title: '余额不足',
+      message: '余额不足，请充值后继续使用',
       canRetry: false,
     },
     'rate_limited': {

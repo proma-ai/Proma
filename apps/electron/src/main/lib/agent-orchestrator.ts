@@ -86,36 +86,52 @@ export interface SessionCallbacks {
  * "401 {\"error\":{\"message\":\"...\"}}"
  * "API error: 400 Bad Request ..."
  */
+/** 从 stderr 中找到第一个完整的 JSON 对象（通过平衡括号匹配，支持嵌套）*/
+function extractFirstJsonObject(text: string): object | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!
+    if (escape) { escape = false; continue }
+    if (ch === '\\' && inString) { escape = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        try { return JSON.parse(text.slice(start, i + 1)) } catch { return null }
+      }
+    }
+  }
+  return null
+}
+
 function extractApiError(stderr: string): { statusCode: number; message: string } | null {
   if (!stderr) return null
 
-  // 模式 1：JSON 错误格式 - "401 {...}"
-  const jsonMatch = stderr.match(/(\d{3})\s+(\{[^}]*"error"[^}]*\})/s)
-  if (jsonMatch) {
-    try {
-      const statusCode = parseInt(jsonMatch[1]!)
-      const errorObj = JSON.parse(jsonMatch[2]!)
-      const message = errorObj.error?.message || errorObj.message || '未知错误'
-      return { statusCode, message }
-    } catch {
-      // JSON 解析失败，继续尝试其他模式
+  // 模式 1：JSON 错误格式 - "401 {...}" 或 "API error (attempt X/Y): 401 401 {...}"
+  // 用平衡括号提取 JSON，支持 proma-api 的嵌套格式 {"type":"error","error":{...}}
+  const statusMatch = stderr.match(/(\d{3})\s+\{/)
+    ?? stderr.match(/API error[^:]*:\s+(\d{3})\s+\d{3}\s+\{/)
+  if (statusMatch) {
+    const statusCode = parseInt(statusMatch[1]!)
+    if (statusCode >= 400 && statusCode < 600) {
+      const jsonStart = stderr.indexOf('{', statusMatch.index! + statusMatch[0]!.length - 1)
+      const errorObj = extractFirstJsonObject(stderr.slice(jsonStart))
+      if (errorObj) {
+        const obj = errorObj as Record<string, unknown>
+        const nested = obj.error as Record<string, unknown> | undefined
+        const message = (nested?.message as string) || (obj.message as string) || '未知错误'
+        return { statusCode, message }
+      }
     }
   }
 
-  // 模式 2：API error 格式 - "API error (attempt X/Y): 401 401 {...}"
-  const apiErrorMatch = stderr.match(/API error[^:]*:\s+(\d{3})\s+\d{3}\s+(\{.*?\})/s)
-  if (apiErrorMatch) {
-    try {
-      const statusCode = parseInt(apiErrorMatch[1]!)
-      const errorObj = JSON.parse(apiErrorMatch[2]!)
-      const message = errorObj.error?.message || errorObj.message || '未知错误'
-      return { statusCode, message }
-    } catch {
-      // JSON 解析失败
-    }
-  }
-
-  // 模式 3：直接的状态码 + 消息
+  // 模式 2：直接的状态码 + 消息
   const simpleMatch = stderr.match(/(\d{3})[:\s]+(.+?)(?:\n|$)/i)
   if (simpleMatch) {
     const statusCode = parseInt(simpleMatch[1]!)
