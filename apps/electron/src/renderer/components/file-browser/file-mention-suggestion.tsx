@@ -3,94 +3,138 @@
  *
  * 工厂函数，创建用于 @ 引用文件的 TipTap Suggestion 配置。
  * 输入 @ 后异步搜索工作区文件，弹出 FileMentionList 浮动列表。
+ * 弹窗底部锚定在光标上方，展开文件夹时向上生长。
  */
 
 import type React from 'react'
 import { ReactRenderer } from '@tiptap/react'
-import type { SuggestionOptions } from '@tiptap/suggestion'
+import type { SuggestionOptions, SuggestionProps } from '@tiptap/suggestion'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
-import type { FileIndexEntry } from '@proma/shared'
+import type { FileIndexEntry, FileSearchResult } from '@proma/shared'
 import { createMentionPopup, positionPopup } from '@/components/agent/mention-popup-utils'
 
-/**
- * 创建文件 @ 引用的 Suggestion 配置
- *
- * @param workspacePathRef 当前工作区根路径引用
- * @param mentionActiveRef 是否正在 mention 模式（用于阻止 Enter 发送消息）
- * @param attachedDirsRef 附加目录路径列表引用（搜索时一并扫描）
- */
 export function createFileMentionSuggestion(
   workspacePathRef: React.RefObject<string | null>,
   mentionActiveRef: React.MutableRefObject<boolean>,
   attachedDirsRef?: React.RefObject<string[]>,
   mentionItemCountRef?: React.MutableRefObject<number>,
+  sessionAttachedDirsRef?: React.RefObject<string[]>,
 ): Omit<SuggestionOptions<FileIndexEntry>, 'editor'> {
+  let lastResult: FileSearchResult | null = null
+
   return {
     char: '@',
     allowSpaces: false,
 
-    // 异步搜索文件
     items: async ({ query }): Promise<FileIndexEntry[]> => {
       const wsPath = workspacePathRef.current
-      if (!wsPath) return []
+      if (!wsPath) {
+        console.warn('[FileMention] workspacePath is null, mention disabled')
+        return []
+      }
 
       try {
         const additionalPaths = attachedDirsRef?.current ?? []
+        const sessionPaths = sessionAttachedDirsRef?.current ?? []
+
         const result = await window.electronAPI.searchWorkspaceFiles(
           wsPath,
           query ?? '',
           20,
           additionalPaths.length > 0 ? additionalPaths : undefined,
+          sessionPaths.length > 0 ? sessionPaths : undefined,
         )
+        lastResult = result
         return result.entries
-      } catch {
+      } catch(e) {
+        console.error('[FileMention] search failed:', e)
+        lastResult = null
         return []
       }
     },
 
-    // 渲染下拉列表
     render: () => {
       let renderer: ReactRenderer<FileMentionRef> | null = null
       let popup: HTMLDivElement | null = null
+      let resizeObserver: ResizeObserver | null = null
+      let latestClientRect: (() => DOMRect | null) | null | undefined = null
+
+      function splitEntries(result: FileSearchResult | null) {
+        return {
+          sessionEntries: result?.sessionEntries ?? [],
+          workspaceEntries: result?.workspaceEntries ?? [],
+        }
+      }
+
+      function createRenderer(props: SuggestionProps<FileIndexEntry>) {
+        const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
+        renderer = new ReactRenderer(FileMentionList, {
+          props: {
+            sessionEntries,
+            workspaceEntries,
+            onSelect: (item: { name: string; path: string; type: 'file' | 'dir' }) => {
+              props.command({ id: item.path, label: item.name })
+            },
+          },
+          editor: props.editor,
+        })
+      }
+
+      function anchorPopup() {
+        if (!popup) return
+        positionPopup(popup, latestClientRect?.(), { anchorBottom: true })
+      }
 
       return {
         onStart(props) {
           mentionActiveRef.current = true
           if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
-          renderer = new ReactRenderer(FileMentionList, {
-            props: {
-              items: props.items,
-              selectedIndex: 0,
-              onSelect: (item: FileIndexEntry) => {
-                props.command({ id: item.path, label: item.name })
-              },
-            },
-            editor: props.editor,
-          })
 
-          popup = createMentionPopup(renderer.element)
-          positionPopup(popup, props.clientRect?.())
+          try {
+            latestClientRect = props.clientRect
+            createRenderer(props)
+            popup = createMentionPopup(renderer!.element)
+            anchorPopup()
+
+            resizeObserver = new ResizeObserver(() => {
+              anchorPopup()
+            })
+            resizeObserver.observe(popup!)
+          } catch (e) {
+            console.error('[FileMention] render popup failed:', e)
+          }
         },
 
         onUpdate(props) {
           if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
+          latestClientRect = props.clientRect
+
+          const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
           renderer?.updateProps({
-            items: props.items,
-            onSelect: (item: FileIndexEntry) => {
+            sessionEntries,
+            workspaceEntries,
+            onSelect: (item: { name: string; path: string; type: 'file' | 'dir' }) => {
               props.command({ id: item.path, label: item.name })
             },
           })
-          positionPopup(popup, props.clientRect?.())
+          anchorPopup()
         },
 
         onKeyDown(props) {
-          return renderer?.ref?.onKeyDown({ event: props.event }) ?? false
+          if (renderer?.ref) {
+            return renderer.ref.onKeyDown({ event: props.event })
+          }
+          return false
         },
 
         onExit() {
           mentionActiveRef.current = false
           if (mentionItemCountRef) mentionItemCountRef.current = 0
+          lastResult = null
+          latestClientRect = null
+          resizeObserver?.disconnect()
+          resizeObserver = null
           popup?.remove()
           popup = null
           renderer?.destroy()

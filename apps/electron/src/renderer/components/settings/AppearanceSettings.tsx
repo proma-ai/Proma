@@ -24,6 +24,7 @@ import {
   applyThemeToDOM,
 } from '@/atoms/theme'
 import { cn } from '@/lib/utils'
+import { detectIsWindows } from '@/lib/platform'
 import type { ThemeMode, ThemeStyle } from '../../../types'
 
 // ===== Logo 资源导入（用于图标选择器） =====
@@ -214,7 +215,7 @@ function AppIconPicker(): React.ReactElement {
     })
   }, [])
 
-  const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   const handleIconSelect = React.useCallback(async (variantId: string) => {
     if (isWindows) {

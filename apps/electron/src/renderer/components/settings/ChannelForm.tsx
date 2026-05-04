@@ -380,54 +380,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     if (ok) onSaved()
   }
 
-  /** 保存渠道（编辑模式 + 官方渠道） */
-  const saveChannel = async (): Promise<void> => {
-    if (isPromaOfficial && channel) {
-      // 官方渠道只更新模型启用状态
-      await window.electronAPI.updateChannel(channel.id, { models })
-    } else if (isEdit && channel) {
-      await window.electronAPI.updateChannel(channel.id, {
-        name,
-        provider,
-        baseUrl,
-        apiKey: apiKey || undefined,
-        models,
-        enabled,
-      })
-    }
-  }
-
-  /** 提交表单（编辑模式 + 官方渠道） */
-  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault()
-
-    // 官方渠道只保存模型启用状态
-    if (isPromaOfficial) {
-      setSaving(true)
-      try {
-        await saveChannel()
-        onSaved()
-      } catch (error) {
-        console.error('[渠道表单] 保存失败:', error)
-      } finally {
-        setSaving(false)
-      }
-      return
-    }
-
-    if (!name.trim() || !apiKey.trim()) return
-
-    setSaving(true)
-    try {
-      await saveChannel()
-      onSaved()
-    } catch (error) {
-      console.error('[模型配置表单] 保存失败:', error)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   /** 检测表单是否有未保存内容 */
   const isDirty = !isEdit && (name.trim() !== '' || apiKey.trim() !== '' || models.length > 0)
   const hasNoModels = !isEdit && models.length === 0
@@ -477,7 +429,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-
   // ===== 模型分区 =====
   const enabledModels = models.filter((m) => m.enabled)
   const availableModels = React.useMemo(() => {
@@ -504,49 +455,17 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         <h3 className="text-lg font-medium text-foreground flex-1">
           {isPromaOfficial ? 'Proma 官方渠道' : isEdit ? '编辑渠道' : '添加渠道'}
         </h3>
-        <div className="flex items-center gap-2">
-          {isPromaOfficial ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={onCancel}
-            >
-              返回
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={onCancel}
-              >
-                取消
-              </Button>
-              {!isEdit && (
-                <Button
-                  size="sm"
-                  onClick={handleCreate}
-                  disabled={saving || !name.trim() || !apiKey.trim()}
-                >
-                  {saving && <Loader2 size={14} className="animate-spin" />}
-                  <span>创建</span>
-                </Button>
-              )}
-              {isEdit && (
-                <Button
-                  size="sm"
-                  type="submit"
-                  disabled={saving || !name.trim() || (!isEdit && !apiKey.trim())}
-                >
-                  {saving && <Loader2 size={14} className="animate-spin" />}
-                  <span>保存修改</span>
-                </Button>
-              )}
-            </>
-          )}
-        </div>
+        {/* 新建模式：创建按钮（官方渠道无创建动作） */}
+        {!isEdit && !isPromaOfficial && (
+          <Button
+            size="sm"
+            onClick={handleCreate}
+            disabled={saving || !name.trim() || !apiKey.trim()}
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            <span>创建</span>
+          </Button>
+        )}
       </div>
 
       {/* 官方渠道提示 */}

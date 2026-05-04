@@ -201,6 +201,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const agentChannelId = sessionChannelMap.get(sessionId) ?? defaultChannelId
   const agentModelId = sessionModelMap.get(sessionId) ?? defaultModelId
   const agentChannelIds = useAtomValue(agentChannelIdsAtom)
+  const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
@@ -402,19 +403,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       .catch(() => setWorkspaceFilesPath(null))
   }, [workspaceSlug])
 
-  // 合并工作区文件目录、工作区级附加目录和会话级附加目录，供 @ 引用搜索
-  const allAttachedDirs = React.useMemo(() => {
-    const dirs = [...attachedDirs]
-    // 添加工作区级附加目录
+  // 工作区级目录（workspace shared files + 工作区级附加目录），@ 引用标记为工作区文件
+  const workspaceDirs = React.useMemo(() => {
+    const dirs: string[] = []
+    if (workspaceFilesPath) dirs.push(workspaceFilesPath)
     for (const d of wsAttachedDirs) {
       if (!dirs.includes(d)) dirs.push(d)
     }
-    // 添加工作区共享文件目录
-    if (workspaceFilesPath && !dirs.includes(workspaceFilesPath)) {
-      dirs.unshift(workspaceFilesPath)
-    }
     return dirs
-  }, [attachedDirs, wsAttachedDirs, workspaceFilesPath])
+  }, [workspaceFilesPath, wsAttachedDirs])
 
   // 监听消息刷新版本号
   const refreshMap = useAtomValue(agentMessageRefreshAtom)
@@ -560,6 +557,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         modelId: snapshot.modelId,
         workspaceId: snapshot.workspaceId,
         startedAt: streamStartedAt,
+        permissionModeOverride: permissionMode,
       }
       window.electronAPI.sendAgentMessage(input).catch((error) => {
         console.error('[AgentView] 自动发送配置消息失败:', error)
@@ -572,8 +570,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         })
       })
     })
-  }, [messagesLoaded, pendingPrompt, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates])
-
+  }, [messagesLoaded, pendingPrompt, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setPendingPrompt, setStreamingStates, permissionMode])
   // ===== 附件处理 =====
 
   /** 为文件生成唯一文件名（避免粘贴多张图片时文件名重复导致覆盖） */
@@ -780,6 +777,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
 
+    // 自动将选中的渠道加入 Agent 可用渠道白名单
+    const updatedChannelIds = agentChannelIds.includes(option.channelId)
+      ? agentChannelIds
+      : [...agentChannelIds, option.channelId]
+    if (updatedChannelIds !== agentChannelIds) {
+      setAgentChannelIds(updatedChannelIds)
+    }
+
     // 同时更新全局默认值（新会话继承）
     setDefaultChannelId(option.channelId)
     setDefaultModelId(option.modelId)
@@ -788,8 +793,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     window.electronAPI.updateSettings({
       agentChannelId: option.channelId,
       agentModelId: option.modelId,
+      agentChannelIds: updatedChannelIds,
     }).catch(console.error)
-  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId])
+  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds])
 
   /** 构建 externalSelectedModel 给 ModelSelector */
   const externalSelectedModel = React.useMemo(() => {
@@ -1012,6 +1018,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
+      permissionModeOverride: permissionMode,
       ...(attachedDirs.length > 0 && { additionalDirectories: attachedDirs }),
       // 解析用户消息中的 Skill/MCP 引用，传递结构化元数据给后端
       ...(() => {
@@ -1037,7 +1044,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [inputContent, pendingFiles, attachedDirs, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap])
+  }, [inputContent, pendingFiles, attachedDirs, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
@@ -1109,6 +1116,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
+      permissionModeOverride: permissionMode,
     }).catch((error) => {
       console.error('[AgentView] /compact 发送失败:', error)
       // 回滚：移除合成用户消息 + 清除 isCompacting flag
@@ -1128,7 +1136,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates, store])
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates, store, permissionMode])
 
   /** 复制错误信息到剪贴板 */
   const handleCopyError = React.useCallback(async (): Promise<void> => {
@@ -1184,8 +1192,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
+      permissionModeOverride: permissionMode,
     }).catch(console.error)
-  }, [messages, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates])
+  }, [messages, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
 
   /** 在新会话中重试：创建新会话 + 切换 tab + 发送引用旧会话的提示词 */
   const handleRetryInNewSession = React.useCallback(async (): Promise<void> => {
@@ -1223,11 +1232,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         channelId: agentChannelId,
         modelId: agentModelId || undefined,
         workspaceId: currentWorkspaceId || undefined,
+        permissionModeOverride: permissionMode,
       }).catch(console.error)
     } catch (error) {
       console.error('[AgentView] 在新会话中重试失败:', error)
     }
-  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, openSession, setAgentSessions, setStreamingStates])
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, openSession, setAgentSessions, setStreamingStates, permissionMode])
 
   /** 分叉会话：从指定消息处创建新会话并自动切换 */
   const handleFork = React.useCallback(async (upToMessageUuid: string): Promise<void> => {
@@ -1461,7 +1471,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               collapsible
               workspacePath={sessionPath}
               workspaceSlug={workspaceSlug}
-              attachedDirs={allAttachedDirs}
+              attachedDirs={workspaceDirs}
+              sessionAttachedDirs={attachedDirs}
               htmlValue={inputHtmlContent}
               onHtmlChange={setInputHtmlContent}
               sendWithCmdEnter={sendWithCmdEnter}

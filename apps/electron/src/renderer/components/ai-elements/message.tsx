@@ -259,17 +259,26 @@ const MENTION_STYLES: Record<MentionType, { icon: typeof FileText; className: st
   mcp: { icon: Server, className: 'bg-[hsl(160_60%_45%/0.15)] text-[hsl(160_60%_35%)]' },
 }
 
+function safeDecode(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
 function MentionChip({ type, value }: { type: MentionType; value: string }): React.ReactElement {
   const style = MENTION_STYLES[type]
   const Icon = style.icon
-  const display = type === 'file' ? (value.split('/').pop() || value) : value
+  const decoded = safeDecode(value)
+  const display = type === 'file' ? (decoded.split('/').pop() || decoded) : decoded
   return (
     <span
       className={cn(
         'inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline',
         style.className
       )}
-      title={type === 'file' ? value : undefined}
+      title={type === 'file' ? decoded : undefined}
     >
       <Icon className="size-3 inline shrink-0" />
       {display}
@@ -297,10 +306,13 @@ export function remarkMentions() {
           parts.push({ type: 'text', value: text.slice(lastIdx, m.index) })
         }
         const mType: MentionType = m[1] ? 'file' : m[2] ? 'skill' : 'mcp'
-        const mValue = m[1] || m[2] || m[3]
+        const mValue = m[1] ?? m[2] ?? m[3] ?? ''
+        // 新版 htmlToMarkdown 已 encodeURIComponent，旧消息是原始路径
+        const alreadyEncoded = /%[0-9A-Fa-f]{2}/.test(mValue)
+        const safeValue = alreadyEncoded ? mValue : encodeURIComponent(mValue)
         parts.push({
           type: 'link',
-          url: `mention://${mType}/${mValue}`,
+          url: `mention://${mType}/${safeValue}`,
           children: [{ type: 'text', value: m[0] }],
         })
         lastIdx = m.index + m[0].length

@@ -35,7 +35,7 @@ import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk } from '@proma/
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
-import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode, setWorkspacePermissionMode } from './agent-workspace-manager'
+import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName } from './config-paths'
 import { getWorkspaceAttachedDirectories } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
@@ -1178,14 +1178,18 @@ export class AgentOrchestrator {
       }
 
       // 12. 读取应用设置 + 获取权限模式
+      // 注意：不从 workspace config 读取权限模式，避免跨窗口状态污染
       const appSettings = getSettings()
       const initialPermissionMode: PromaPermissionMode = permissionModeOverride
-        ?? (workspaceSlug
-          ? getWorkspacePermissionMode(workspaceSlug)
-          : (appSettings.agentPermissionMode ?? 'auto'))
+        ?? (appSettings.agentPermissionMode ?? 'auto')
       // 注册到 Map，支持运行中动态切换
       this.sessionPermissionModes.set(sessionId, initialPermissionMode)
       console.log(`[Agent 编排] 权限模式: ${initialPermissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)
+
+      // 当初始模式为 plan 时，通知渲染进程展示计划模式 UI（如「Agent 正在规划」横幅）
+      if (initialPermissionMode === 'plan') {
+        this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'enter_plan_mode', sessionId } })
+      }
 
       /** 读取当前会话的实时权限模式（支持运行中切换） */
       const getPermissionMode = (): PromaPermissionMode =>

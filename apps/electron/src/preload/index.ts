@@ -481,6 +481,12 @@ export interface ElectronAPI {
   /** 从源工作区同步更新已导入的 Skill */
   updateSkillFromSource: (targetSlug: string, skillSlug: string) => Promise<SkillMeta>
 
+  /** 读取 SKILL.md 全文内容 */
+  readSkillContent: (workspaceSlug: string, skillSlug: string) => Promise<string>
+
+  /** 写入 SKILL.md 全文内容 */
+  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string) => Promise<void>
+
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
 
@@ -503,6 +509,9 @@ export interface ElectronAPI {
 
   /** 设置工作区权限模式 */
   setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => Promise<void>
+
+  /** 热切换指定会话的权限模式（运行中生效，仅影响该 session） */
+  updateSessionPermissionMode: (sessionId: string, mode: PromaPermissionMode) => Promise<void>
 
   /** 获取全局记忆配置 */
   getMemoryConfig: () => Promise<MemoryConfig>
@@ -640,7 +649,7 @@ export interface ElectronAPI {
   getPathForFile: (file: File) => string
 
   /** 搜索工作区文件（用于 @ 引用，支持附加目录） */
-  searchWorkspaceFiles: (rootPath: string, query: string, limit?: number, additionalPaths?: string[]) => Promise<FileSearchResult>
+  searchWorkspaceFiles: (rootPath: string, query: string, limit?: number, additionalPaths?: string[], sessionPaths?: string[]) => Promise<FileSearchResult>
 
   // ===== 系统提示词管理 =====
 
@@ -1385,6 +1394,23 @@ const electronAPI: ElectronAPI = {
     )
   },
 
+  readSkillContent: (workspaceSlug: string, skillSlug: string) => {
+    return ipcRenderer.invoke(
+      AGENT_IPC_CHANNELS.READ_SKILL_CONTENT,
+      workspaceSlug,
+      skillSlug,
+    )
+  },
+
+  writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string) => {
+    return ipcRenderer.invoke(
+      AGENT_IPC_CHANNELS.WRITE_SKILL_CONTENT,
+      workspaceSlug,
+      skillSlug,
+      content,
+    )
+  },
+
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {
     const listener = (_: unknown, event: AgentStreamEvent): void => callback(event)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_EVENT, listener)
@@ -1421,6 +1447,10 @@ const electronAPI: ElectronAPI = {
 
   setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERMISSION_MODE, workspaceSlug, mode)
+  },
+
+  updateSessionPermissionMode: (sessionId: string, mode: PromaPermissionMode) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_PERMISSION_MODE, sessionId, mode)
   },
 
   getMemoryConfig: () => {
@@ -1609,8 +1639,8 @@ const electronAPI: ElectronAPI = {
     return webUtils.getPathForFile(file)
   },
 
-  searchWorkspaceFiles: (rootPath: string, query: string, limit = 20, additionalPaths?: string[]) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES, rootPath, query, limit, additionalPaths)
+  searchWorkspaceFiles: (rootPath: string, query: string, limit = 20, additionalPaths?: string[], sessionPaths?: string[]) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES, rootPath, query, limit, additionalPaths, sessionPaths)
   },
 
   // 系统提示词管理

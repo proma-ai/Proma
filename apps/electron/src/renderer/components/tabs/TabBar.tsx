@@ -30,6 +30,8 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { TabBarItem } from './TabBarItem'
 import { TabCloseConfirmDialog } from './TabCloseConfirmDialog'
 import { useCloseTab } from '@/hooks/useCloseTab'
+import { detectIsWindows } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 
 export function TabBar(): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
@@ -153,7 +155,7 @@ function TabBarInner({
   const enterTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const leaveTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
-
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
   React.useEffect(() => {
     return () => {
       if (enterTimerRef.current) clearTimeout(enterTimerRef.current)
@@ -199,7 +201,7 @@ function TabBarInner({
     <div className="flex items-end h-[34px] tabbar-bg relative">
       <div className="absolute inset-0 titlebar-drag-region" />
 
-      <div className="relative flex items-end flex-1 min-w-0 overflow-x-clip titlebar-no-drag">
+      <div className={cn("relative flex items-end flex-1 min-w-0 overflow-x-clip titlebar-no-drag", isWindows && "pr-[140px]")}>
         {tabs.map((tab) => (
           <TabBarItem
             key={tab.id}

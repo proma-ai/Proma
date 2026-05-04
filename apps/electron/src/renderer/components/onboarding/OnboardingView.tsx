@@ -22,20 +22,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { TutorialViewer } from '@/components/tutorial/TutorialViewer'
 import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
 import { isShellEnvironmentOkAtom } from '@/atoms/environment'
+import { detectIsWindows } from '@/lib/platform'
 
 interface OnboardingViewProps {
   /** 完成回调（进入主界面） */
   onComplete: () => void
-}
-
-function detectIsWindows(): boolean {
-  const platform =
-    typeof navigator !== 'undefined' &&
-    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
-  if (typeof platform === 'string' && platform.toLowerCase().includes('win')) {
-    return true
-  }
-  return typeof navigator !== 'undefined' && /win/i.test(navigator.platform || '')
 }
 
 export function OnboardingView({ onComplete }: OnboardingViewProps) {

@@ -378,21 +378,6 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
     }
   }
 
-  // 如果只有错误消息
-  if (enrichedBlocks.length === 0 && hasError && errorContent) {
-    return (
-      <ErrorMessage
-        message={errorContent}
-        onRetry={onRetry}
-        onRetryInNewSession={onRetryInNewSession}
-        onCompact={onCompact}
-      />
-    )
-  }
-
-  // 如果没有任何内容
-  if (enrichedBlocks.length === 0 && !hasError) return null
-
   // 从 turnMessages 中提取 result 消息的耗时和用量
   const { durationMs, usage } = extractTurnUsage(turn.turnMessages)
 
@@ -527,6 +512,21 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
     return { taskActivities: _taskActivities, firstTaskIndex: _firstTaskIndex, historicalTaskSubjects: _historicalTaskSubjects }
   }, [topLevelBlocks, turn.turnMessages, allMessages])
+
+  // 如果只有错误消息
+  if (enrichedBlocks.length === 0 && hasError && errorContent) {
+    return (
+      <ErrorMessage
+        message={errorContent}
+        onRetry={onRetry}
+        onRetryInNewSession={onRetryInNewSession}
+        onCompact={onCompact}
+      />
+    )
+  }
+
+  // 如果没有任何内容
+  if (enrichedBlocks.length === 0 && !hasError) return null
 
   return (
     <Message from="assistant">

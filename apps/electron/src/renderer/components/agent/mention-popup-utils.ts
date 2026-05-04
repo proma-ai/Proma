@@ -5,6 +5,7 @@
  * - 初始隐藏（防闪烁）
  * - rAF 定位后显示
  * - 右侧/顶部边界限制
+ * - 可选底部锚定（弹窗向上生长）
  */
 
 const POPUP_GAP = 4
@@ -21,10 +22,16 @@ export function createMentionPopup(content: HTMLElement): HTMLDivElement {
   return popup
 }
 
-/** 定位弹窗到光标位置上方，含边界限制 */
+export interface PositionOptions {
+  /** 底部锚定：弹窗底部固定对齐光标上方，高度变化时向上生长 */
+  anchorBottom?: boolean
+}
+
+/** 定位弹窗到光标位置 */
 export function positionPopup(
   popup: HTMLDivElement | null,
   rect: DOMRect | null | undefined,
+  options?: PositionOptions,
 ): void {
   if (!rect || !popup) return
 
@@ -38,12 +45,22 @@ export function positionPopup(
     const left = Math.min(rect.left, window.innerWidth - popupWidth - VIEWPORT_PADDING)
     popup.style.left = `${Math.max(VIEWPORT_PADDING, left)}px`
 
-    // 垂直定位：优先向上弹出，空间不足时向下
-    const spaceAbove = rect.top
-    if (spaceAbove >= popupHeight + POPUP_GAP) {
-      popup.style.top = `${rect.top - popupHeight - POPUP_GAP}px`
+    if (options?.anchorBottom) {
+      // 底部锚定：弹窗底部固定在光标上方，向上生长
+      const bottom = rect.top - POPUP_GAP
+      let top = bottom - popupHeight
+      if (top < VIEWPORT_PADDING) {
+        top = VIEWPORT_PADDING
+      }
+      popup.style.top = `${top}px`
     } else {
-      popup.style.top = `${rect.bottom + POPUP_GAP}px`
+      // 垂直定位：优先向上弹出，空间不足时向下
+      const spaceAbove = rect.top
+      if (spaceAbove >= popupHeight + POPUP_GAP) {
+        popup.style.top = `${rect.top - popupHeight - POPUP_GAP}px`
+      } else {
+        popup.style.top = `${rect.bottom + POPUP_GAP}px`
+      }
     }
 
     popup.style.visibility = 'visible'

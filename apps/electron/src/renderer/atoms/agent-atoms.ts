@@ -327,6 +327,26 @@ export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('auto')
 /** Per-session 权限模式 Map — sessionId → PromaPermissionMode */
 export const agentPermissionModeMapAtom = atom<Map<string, PromaPermissionMode>>(new Map())
 
+/**
+ * 按 sessionId 派生该 session 的持久化权限模式。
+ * 返回 `undefined`（session 不存在或未设置）或具体的 PromaPermissionMode 字符串，
+ * jotai 用 === 比较，只有值真正变化时才通知下游——避免流式中无关字段更新引发 re-render。
+ */
+export const sessionPersistedPermissionModeAtom = atomFamily((sessionId: string) =>
+  atom((get) => {
+    const sessions = get(agentSessionsAtom)
+    return sessions.find((s) => s.id === sessionId)?.permissionMode
+  }),
+)
+
+/** 按 sessionId 派生该 session 是否存在于列表中（冷启动判断用） */
+export const sessionExistsAtom = atomFamily((sessionId: string) =>
+  atom((get) => {
+    const sessions = get(agentSessionsAtom)
+    return sessions.some((s) => s.id === sessionId)
+  }),
+)
+
 /** Agent 思考模式 */
 export const agentThinkingAtom = atom<ThinkingConfig | undefined>(undefined)
 

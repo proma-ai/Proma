@@ -251,6 +251,14 @@ function AgentSettingsInitializer(): null {
             }).catch(console.error)
           }
         }
+      } else {
+        // 兜底：agentChannelId 存在但不在 agentChannelIds 白名单中，自动修复不一致
+        const currentIds = settings.agentChannelIds?.filter((id) => channelIds.has(id)) ?? []
+        if (!currentIds.includes(resolvedChannelId)) {
+          const fixedIds = [...currentIds, resolvedChannelId]
+          setAgentChannelIds(fixedIds)
+          window.electronAPI.updateSettings({ agentChannelIds: fixedIds }).catch(console.error)
+        }
       }
 
       if (settings.agentPermissionMode) {

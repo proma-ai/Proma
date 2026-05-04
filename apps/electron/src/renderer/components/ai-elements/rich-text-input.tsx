@@ -119,7 +119,7 @@ function htmlToMarkdown(html: string): string {
         if (dataType === 'mention') {
           if (suggestionChar === '/') return `/skill:${dataId}`
           if (suggestionChar === '#') return `#mcp:${dataId}`
-          return `@file:${dataId}`
+          return `@file:${encodeURIComponent(dataId)}`
         }
         return children
       }
@@ -188,8 +188,10 @@ interface RichTextInputProps {
   workspacePath?: string | null
   /** 工作区 slug（启用 / Skill 和 # MCP 功能时需要） */
   workspaceSlug?: string | null
-  /** 附加目录路径列表（@ 引用时一并搜索） */
+  /** 附加目录路径列表（工作区级，@ 引用时标记为工作区文件） */
   attachedDirs?: string[]
+  /** 会话级附加目录路径列表（@ 引用时标记为会话文件） */
+  sessionAttachedDirs?: string[]
   /** HTML 草稿值（切换会话恢复时使用，保留 mention 等富文本结构） */
   htmlValue?: string
   /** HTML 值变更回调（用于保存富文本草稿） */
@@ -219,6 +221,7 @@ export function RichTextInput({
   workspacePath,
   workspaceSlug,
   attachedDirs = [],
+  sessionAttachedDirs = [],
   htmlValue,
   onHtmlChange,
   sendWithCmdEnter = false,
@@ -249,9 +252,12 @@ export function RichTextInput({
   // 工作区路径引用（给 Suggestion 使用）
   const workspacePathRef = useRef<string | null>(workspacePath ?? null)
   workspacePathRef.current = workspacePath ?? null
-  // 附加目录路径引用（给 Suggestion 使用）
+  // 工作区级附加目录路径引用（给 Suggestion 使用，标记为 workspace）
   const attachedDirsRef = useRef<string[]>(attachedDirs)
   attachedDirsRef.current = attachedDirs
+  // 会话级附加目录路径引用（给 Suggestion 使用，标记为 session）
+  const sessionAttachedDirsRef = useRef<string[]>(sessionAttachedDirs)
+  sessionAttachedDirsRef.current = sessionAttachedDirs
   // 工作区 slug 引用（给 Skill/MCP Suggestion 使用）
   const workspaceSlugRef = useRef<string | null>(workspaceSlug ?? null)
   workspaceSlugRef.current = workspaceSlug ?? null
@@ -261,7 +267,7 @@ export function RichTextInput({
 
   // Mention Suggestion 配置（稳定引用，不随 workspacePath 变化重建）
   const mentionSuggestion = useMemo(
-    () => createFileMentionSuggestion(workspacePathRef, mentionActiveRef, attachedDirsRef, mentionItemCountRef),
+    () => createFileMentionSuggestion(workspacePathRef, mentionActiveRef, attachedDirsRef, mentionItemCountRef, sessionAttachedDirsRef),
     [],
   )
 

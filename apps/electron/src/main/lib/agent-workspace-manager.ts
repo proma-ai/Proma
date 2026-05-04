@@ -149,19 +149,27 @@ export function getAgentWorkspace(id: string): AgentWorkspace | undefined {
   return index.workspaces.find((w) => w.id === id)
 }
 
-/** 将 ~/.proma/default-skills/ 复制到工作区 skills/ 目录 */
+/** 将 ~/.proma/default-skills/ 的内容逐个复制到工作区 skills/ 目录 */
 function copyDefaultSkills(workspaceSlug: string): void {
   const defaultDir = getDefaultSkillsDir()
   const targetDir = getWorkspaceSkillsDir(workspaceSlug)
 
   try {
     const entries = readdirSync(defaultDir, { withFileTypes: true })
-    if (entries.length === 0) return
+    if (entries.length === 0) {
+      console.warn(`[Agent 工作区] 默认 Skills 模板为空，工作区 Skills 未初始化: ${workspaceSlug}`)
+      return
+    }
 
-    cpSync(defaultDir, targetDir, { recursive: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const source = join(defaultDir, entry.name)
+      const target = join(targetDir, entry.name)
+      cpSync(source, target, { recursive: true })
+    }
     console.log(`[Agent 工作区] 已复制默认 Skills 到: ${workspaceSlug}`)
-  } catch {
-    // 模板目录不存在，跳过
+  } catch (err) {
+    console.error(`[Agent 工作区] 复制默认 Skills 失败 (${workspaceSlug}):`, err)
   }
 }
 
@@ -715,6 +723,21 @@ function resolveSkillDir(workspaceSlug: string, skillSlug: string): string | nul
   const inactive = join(getInactiveSkillsDir(workspaceSlug), skillSlug)
   if (existsSync(inactive)) return inactive
   return null
+}
+
+export function readWorkspaceSkillContent(workspaceSlug: string, skillSlug: string): string {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const mdPath = join(dir, 'SKILL.md')
+  if (!existsSync(mdPath)) throw new Error(`SKILL.md 不存在: ${mdPath}`)
+  return readFileSync(mdPath, 'utf-8')
+}
+
+export function writeWorkspaceSkillContent(workspaceSlug: string, skillSlug: string, content: string): void {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  writeFileSync(join(dir, 'SKILL.md'), content, 'utf-8')
+  console.log(`[Agent 工作区] 已更新 SKILL.md: ${workspaceSlug}/${skillSlug}`)
 }
 
 /** 简单 semver 比较：a 是否比 b 更新 */

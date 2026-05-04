@@ -191,6 +191,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const [currentAgentSessionId, setCurrentAgentSessionId] = useAtom(currentAgentSessionIdAtom)
   const agentIndicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
+  const unviewedCompletedSessionIds = useAtomValue(unviewedCompletedSessionIdsAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
   const agentModelId = useAtomValue(agentModelIdAtom)
@@ -1067,10 +1068,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   {agentSubTab === 'working' && (
                     <div className="pt-0.5 pb-0.5">
                       {hasWorkingSessions ? (() => {
-                        const workingItems: Array<{ session: AgentSessionMeta; accent: SessionLeftAccent; keyPrefix: string }> = [
+                        const workingItems: Array<{ session: AgentSessionMeta; accent?: SessionLeftAccent; keyPrefix: string }> = [
                           ...workingGroups.todo.map((s) => ({ session: s, accent: 'orange' as const, keyPrefix: 'working-todo' })),
                           ...workingGroups.running.map((s) => ({ session: s, accent: 'blue' as const, keyPrefix: 'working-running' })),
-                          ...workingGroups.done.map((s) => ({ session: s, accent: 'green' as const, keyPrefix: 'working-done' })),
+                          ...workingGroups.done.map((s) => ({ session: s, accent: unviewedCompletedSessionIds.has(s.id) ? 'green' as const : undefined, keyPrefix: 'working-done' })),
                         ]
                         return (
                           <div className="flex flex-col gap-0.5">

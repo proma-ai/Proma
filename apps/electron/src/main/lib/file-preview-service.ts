@@ -27,6 +27,8 @@ import {
   type FSWatcher,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { resolveOverlayColors } from './titlebar-overlay'
+import { getSettings } from './settings-service'
 
 /** 文件大小限制：50MB */
 const MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -1309,9 +1311,30 @@ function docxPreviewHtml(filePath: string, filename: string, base64Data: string)
 /** 创建预览窗口并绑定脏状态关闭确认 */
 function createPreviewWindow(filename: string): BrowserWindow {
   const isMac = process.platform === 'darwin'
+  const isWindows = process.platform === 'win32'
   const { workArea } = screen.getPrimaryDisplay()
   const width = Math.min(1200, workArea.width)
   const height = workArea.height
+
+  const titleBarOptions = isMac
+    ? {
+        titleBarStyle: 'hiddenInset' as const,
+        trafficLightPosition: { x: 16, y: 14 },
+      }
+    : isWindows
+      ? (() => {
+          const settings = getSettings()
+          return {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: resolveOverlayColors(
+              settings.themeMode,
+              settings.themeStyle,
+              nativeTheme.shouldUseDarkColors
+            ),
+          }
+        })()
+      : {}
+
   const previewWindow = new BrowserWindow({
     width,
     height,
@@ -1320,8 +1343,7 @@ function createPreviewWindow(filename: string): BrowserWindow {
     minWidth: 480,
     minHeight: 360,
     title: filename,
-    titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    trafficLightPosition: isMac ? { x: 16, y: 14 } : undefined,
+    ...titleBarOptions,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#fafaf8',
     webPreferences: {
       preload: join(__dirname, 'file-preview-preload.cjs'),

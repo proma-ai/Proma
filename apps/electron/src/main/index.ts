@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, screen, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -15,6 +15,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 import { getSettings } from './lib/settings-service'
+import { resolveOverlayColors } from './lib/titlebar-overlay'
 
 // 商业版固定为 Cloud 模式
 process.env.PROMA_MODE = 'cloud'
@@ -174,22 +175,43 @@ function createWindow(): void {
     console.warn('App icon not found at:', iconPath)
   }
 
+  const isMac = process.platform === 'darwin'
+  const isWindows = process.platform === 'win32'
+
+  const titleBarOptions = isMac
+    ? {
+        titleBarStyle: 'hiddenInset' as const,
+        trafficLightPosition: { x: 18, y: 18 },
+        vibrancy: 'under-window' as const,
+        visualEffectState: 'followWindow' as const,
+      }
+    : isWindows
+      ? (() => {
+          const settings = getSettings()
+          return {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: resolveOverlayColors(
+              settings.themeMode,
+              settings.themeStyle,
+              nativeTheme.shouldUseDarkColors
+            ),
+          }
+        })()
+      : {}
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
     icon: iconExists ? iconPath : undefined,
-    show: false, // Don't show until ready
+    show: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
-    titleBarStyle: 'hiddenInset', // macOS style
-    trafficLightPosition: { x: 18, y: 18 },
-    vibrancy: 'under-window', // macOS glass effect
-    visualEffectState: 'followWindow',
+    ...titleBarOptions,
   })
 
   // Load the renderer
