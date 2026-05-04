@@ -1633,6 +1633,16 @@ export class AgentOrchestrator {
                 if (isPromptTooLongError(detailedMessage, originalError)) {
                   errorCode = 'prompt_too_long'
                 }
+                // SDK 对 proma 402 有时不设置 errorType，从消息内容兜底检测
+                if (errorCode === 'unknown_error' && channel.provider === 'proma') {
+                  const errorRaw = JSON.stringify(assistantMsg.error ?? {})
+                  const contentRaw = JSON.stringify(assistantMsg.message?.content ?? [])
+                  const haystack = [errorRaw, contentRaw, detailedMessage, originalError].join(' ')
+                  if (['insufficient_quota', '积分不足', '余额不足', 'payment_required'].some(s => haystack.includes(s))) {
+                    errorCode = 'billing_error'
+                    console.log(`[Agent 编排] Proma billing error detected from message content`)
+                  }
+                }
                 const typedError = mapSDKErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
 
                 // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
@@ -2037,7 +2047,7 @@ export class AgentOrchestrator {
 
           let userFacingError: string
           if (isBillingError) {
-            userFacingError = '余额不足，请充值后继续使用'
+            userFacingError = '余额不足，叠加订阅后继续（订阅不自动扣费，支持任意数量叠加）'
           } else if (apiError) {
             userFacingError = friendlyErrorMessage(`API 错误 (${apiError.statusCode}):\n${apiError.message}`)
           } else {
@@ -2061,7 +2071,7 @@ export class AgentOrchestrator {
               type: 'assistant',
               message: {
                 content: [{ type: 'text', text: isBillingError
-                  ? '余额不足，请充值后继续使用'
+                  ? '余额不足，叠加订阅后继续（订阅不自动扣费，支持任意数量叠加）'
                   : isPromptTooLong
                     ? '上下文过长：当前对话的上下文已超出模型限制，请压缩上下文或开启新会话'
                     : userFacingError }],

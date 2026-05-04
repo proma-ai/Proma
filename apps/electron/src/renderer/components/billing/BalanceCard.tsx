@@ -79,10 +79,6 @@ export function BalanceCard(): React.ReactElement | null {
               <p className="text-[11px] text-muted-foreground">本月用量</p>
               <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuotaMonthly)}</p>
             </div>
-            <div className="min-w-[88px]">
-              <p className="text-[11px] text-muted-foreground">累计用量</p>
-              <p className="text-sm font-semibold mt-0.5">{formatCurrency(billing.usedQuota)}</p>
-            </div>
           </div>
         </div>
       </div>

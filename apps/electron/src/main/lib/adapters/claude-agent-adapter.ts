@@ -265,13 +265,13 @@ export function mapSDKErrorToTypedError(
     'billing_error': {
       code: 'billing_error',
       title: '余额不足',
-      message: '余额不足，请充值后继续使用',
+      message: '余额不足，叠加订阅后继续（订阅不自动扣费，支持任意数量叠加）',
       canRetry: false,
     },
     'insufficient_quota': {
       code: 'billing_error',
       title: '余额不足',
-      message: '余额不足，请充值后继续使用',
+      message: '余额不足，叠加订阅后继续（订阅不自动扣费，支持任意数量叠加）',
       canRetry: false,
     },
     'rate_limited': {
@@ -325,7 +325,7 @@ export function mapSDKErrorToTypedError(
   return {
     code: mapped.code,
     title: mapped.title,
-    message: detailedMessage || mapped.message,
+    message: mapped.code === 'billing_error' ? mapped.message : (detailedMessage || mapped.message),
     actions: [
       { key: 's', label: '设置', action: 'settings' },
       ...(mapped.canRetry ? [{ key: 'r', label: '重试', action: 'retry' }] : []),
