@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
@@ -411,11 +411,34 @@ ${skillList}
   return (
     <div className="space-y-4">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full">
-          <TabsTrigger value="skills" className="flex-1">Skills</TabsTrigger>
-          <TabsTrigger value="mcp" className="flex-1">MCP</TabsTrigger>
-          <TabsTrigger value="tools" className="flex-1">内置工具</TabsTrigger>
-        </TabsList>
+        <div className="relative flex rounded-xl bg-muted p-1">
+          <div
+            className={cn(
+              'mode-slider absolute top-1 bottom-1 w-[calc(33.333%-3px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
+              activeTab === 'skills' && 'translate-x-0',
+              activeTab === 'mcp' && 'translate-x-[100%]',
+              activeTab === 'tools' && 'translate-x-[200%]',
+            )}
+          />
+          {[
+            { value: 'skills', label: 'Skills' },
+            { value: 'mcp', label: 'MCP' },
+            { value: 'tools', label: '内置工具' },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setActiveTab(value)}
+              className={cn(
+                'relative z-[1] flex-1 flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                activeTab === value
+                  ? 'mode-btn-selected text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {/* ===== Skills Tab ===== */}
         <TabsContent value="skills" className="mt-4 space-y-4">
