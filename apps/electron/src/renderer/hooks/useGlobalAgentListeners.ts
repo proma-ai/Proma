@@ -643,7 +643,8 @@ export function useGlobalAgentListeners(): void {
 
         // 如果用户当前不在查看该会话，标记为"未查看的已完成"
         const currentSessionId = store.get(currentAgentSessionIdAtom)
-        if (data.sessionId !== currentSessionId) {
+        const isViewingCompletedSession = data.sessionId === currentSessionId && document.hasFocus()
+        if (!isViewingCompletedSession) {
           store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
             const next = new Set(prev)
             next.add(data.sessionId)

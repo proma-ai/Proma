@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
+import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -71,24 +72,55 @@ import {
   agentPlanModeSessionsAtom,
   agentPermissionModeMapAtom,
   agentDefaultPermissionModeAtom,
+  sessionPersistedPermissionModeAtom,
   agentSessionPathMapAtom,
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
-import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
-import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption, SDKMessage } from '@proma/shared'
+import type { AgentSendInput, AgentPendingFile, AgentSavedFile, ModelOption, SDKMessage } from '@proma/shared'
 import { PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { fileToBase64 } from '@/lib/file-utils'
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+
+interface SDKMessageRecord {
+  type?: string
+  parent_tool_use_id?: string | null
+  isSynthetic?: boolean
+  message?: {
+    content?: unknown
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getUserTextFromSDKMessage(message: SDKMessage): string | null {
+  const sdkMessage = message as unknown as SDKMessageRecord
+  if (sdkMessage.type !== 'user' || sdkMessage.parent_tool_use_id || sdkMessage.isSynthetic) {
+    return null
+  }
+
+  const content = sdkMessage.message?.content
+  if (!Array.isArray(content)) return null
+  if (content.some((block) => isRecord(block) && block.type === 'tool_result')) return null
+
+  const texts = content
+    .filter((block) => isRecord(block) && block.type === 'text' && typeof block.text === 'string')
+    .map((block) => (block as { text: string }).text)
+
+  return texts.length > 0 ? texts.join('\n') : null
+}
 
 // ===== 思考模式 Hover Popover =====
 
@@ -178,7 +210,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     console.log(`[FLASH-DEBUG] AgentView(${sessionId.slice(0, 8)}) render #${renderCountRef.current}`)
   }
 
-  const [messages, setMessages] = React.useState<AgentMessage[]>([])
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>([])
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const streamingStates = useAtomValue(agentStreamingStatesAtom)
@@ -204,7 +235,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSettingsTab = useSetAtom(settingsTabAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const globalWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const sessions = useAtomValue(agentSessionsAtom)
@@ -255,7 +285,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const isPlanMode = planModeSessions.has(sessionId)
   const permissionModeMap = useAtomValue(agentPermissionModeMapAtom)
   const defaultPermissionMode = useAtomValue(agentDefaultPermissionModeAtom)
-  const permissionMode = permissionModeMap.get(sessionId) ?? defaultPermissionMode
+  const persistedPermissionMode = useAtomValue(sessionPersistedPermissionModeAtom(sessionId))
+  const permissionMode = permissionModeMap.get(sessionId) ?? persistedPermissionMode ?? defaultPermissionMode
   const isPermissionPlanMode = permissionMode === 'plan'
   const store = useStore()
   const suggestionsMap = useAtomValue(agentPromptSuggestionsAtom)
@@ -427,13 +458,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (!isCurrentlyStreaming) {
       setMessagesLoaded(false)
     }
-    // 并行加载旧格式（用于 Team 数据重建）和新格式（用于 UI 渲染）
-    const loadOldMessages = window.electronAPI.getAgentSessionMessages(sessionId)
-    const loadSDKMessages = window.electronAPI.getAgentSessionSDKMessages(sessionId)
-
-    Promise.all([loadOldMessages, loadSDKMessages])
-      .then(([msgs, sdkMsgs]) => {
-        setMessages(msgs)
+    window.electronAPI.getAgentSessionSDKMessages(sessionId)
+      .then((sdkMsgs) => {
         setPersistedSDKMessages(sdkMsgs)
         setMessagesLoaded(true)
 
@@ -528,15 +554,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         })
         return map
       })
-
-      // 乐观更新：显示用户消息
-      const tempUserMsg: AgentMessage = {
-        id: `temp-${Date.now()}`,
-        role: 'user',
-        content: snapshot.message,
-        createdAt: Date.now(),
-      }
-      setMessages((prev) => [...prev, tempUserMsg])
 
       // 乐观更新：SDKMessage 格式（Phase 4）
       const tempUserSDKMsg: SDKMessage = {
@@ -939,24 +956,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     // 2. 构建最终消息
     const finalMessage = fileReferences + effectiveText
 
-    // 防御性快照：将当前流式 assistant 内容保存到消息列表
-    // 避免重置流式状态时丢失前一轮回复（竞态场景：complete 事件到达但 STREAM_COMPLETE 尚未到达）
-    const prevStream = store.get(agentStreamingStatesAtom).get(sessionId)
-    if (prevStream && prevStream.content && !prevStream.running) {
-      setMessages((prev) => {
-        // 仅在最后一条不是 assistant 消息时追加（避免重复）
-        const lastMsg = prev[prev.length - 1]
-        if (lastMsg?.role === 'assistant') return prev
-        return [...prev, {
-          id: `snapshot-${Date.now()}`,
-          role: 'assistant' as const,
-          content: prevStream.content,
-          createdAt: Date.now(),
-          model: prevStream.model,
-        }]
-      })
-    }
-
     // 清除打断状态（上一轮的打断标记不再显示）
     store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
       if (!prev.has(sessionId)) return prev
@@ -990,15 +989,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
       return map
     })
-
-    // 乐观更新：立即显示用户消息
-    const tempUserMsg: AgentMessage = {
-      id: `temp-${Date.now()}`,
-      role: 'user',
-      content: finalMessage,
-      createdAt: Date.now(),
-    }
-    setMessages((prev) => [...prev, tempUserMsg])
 
     // 乐观更新：SDKMessage 格式的用户消息（Phase 4）
     const tempUserSDKMsg: SDKMessage = {
@@ -1062,12 +1052,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     window.electronAPI.stopAgent(sessionId).catch(console.error)
   }, [sessionId, setStreamingStates])
-
-  /** 余额不足时跳转到账单设置 */
-  const handleGoToBilling = React.useCallback((): void => {
-    setSettingsTab('billing')
-    setSettingsOpen(true)
-  }, [setSettingsTab, setSettingsOpen])
 
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
@@ -1156,8 +1140,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (!agentChannelId || streaming) return
 
     // 找到最后一条用户消息
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
-    if (!lastUserMsg) return
+    const lastUserMessage = [...persistedSDKMessages]
+      .reverse()
+      .map(getUserTextFromSDKMessage)
+      .find((text): text is string => text !== null)
+    if (!lastUserMessage) return
 
     // 清除错误状态
     setAgentStreamErrors((prev) => {
@@ -1187,14 +1174,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     window.electronAPI.sendAgentMessage({
       sessionId,
-      userMessage: lastUserMsg.content,
+      userMessage: lastUserMessage,
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
       permissionModeOverride: permissionMode,
     }).catch(console.error)
-  }, [messages, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
+  }, [persistedSDKMessages, sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
 
   /** 在新会话中重试：创建新会话 + 切换 tab + 发送引用旧会话的提示词 */
   const handleRetryInNewSession = React.useCallback(async (): Promise<void> => {
@@ -1347,7 +1334,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <AgentMessages
           sessionId={sessionId}
           sessionModelId={agentModelId || undefined}
-          messages={messages}
           messagesLoaded={messagesLoaded}
           persistedSDKMessages={persistedSDKMessages}
           streaming={streaming}
@@ -1361,7 +1347,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onFork={handleFork}
           onRewind={handleRewindRequest}
           onCompact={handleCompact}
-          onGoToBilling={handleGoToBilling}
         />
 
         {/* 权限请求横幅 */}
@@ -1501,6 +1486,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                         window.electronAPI.updateSettings({ agentThinking: next })
                       }}
                     />
+                    <SpeechButton className="size-[36px] rounded-full" />
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button

@@ -8,8 +8,19 @@ import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electro
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, APP_ICON_IPC_CHANNELS } from '../types'
-import type { QuickTaskSubmitInput } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS } from '../types'
+import type {
+  QuickTaskSubmitInput,
+  VoiceDictationAudioChunkInput,
+  VoiceDictationCommitInput,
+  VoiceDictationCommitResult,
+  VoiceDictationResizeInput,
+  VoiceDictationSettings,
+  VoiceDictationSettingsUpdate,
+  VoiceDictationStartInput,
+  VoiceDictationStopInput,
+  VoiceDictationTestResult,
+} from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -28,7 +39,6 @@ import type {
   FileDialogResult,
   RecentMessagesResult,
   AgentSessionMeta,
-  AgentMessage,
   AgentSendInput,
   AgentWorkspace,
   AgentGenerateTitleInput,
@@ -124,6 +134,7 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { setDockBadgeCount } from './lib/dock-badge-service'
 import { updateWindowTitleBarOverlay } from './lib/titlebar-overlay'
 import { checkEnvironment } from './lib/environment-checker'
 import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
@@ -138,7 +149,6 @@ import {
   listAgentSessions,
   createAgentSession,
   getAgentSessionMeta,
-  getAgentSessionMessages,
   getAgentSessionSDKMessages,
   updateAgentSessionMeta,
   deleteAgentSession,
@@ -173,8 +183,6 @@ import {
   readWorkspaceSkillContent,
   writeWorkspaceSkillContent,
   toggleWorkspaceSkill,
-  getWorkspacePermissionMode,
-  setWorkspacePermissionMode,
   getWorkspaceAttachedDirectories,
   attachWorkspaceDirectory,
   detachWorkspaceDirectory,
@@ -765,6 +773,15 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== Dock/Launcher 角标 =====
+
+  ipcMain.handle(
+    DOCK_BADGE_IPC_CHANNELS.SET_COUNT,
+    async (_, count: number): Promise<boolean> => {
+      return setDockBadgeCount(count)
+    }
+  )
+
   // ===== 环境检测相关 =====
 
   // 执行环境检测
@@ -870,14 +887,6 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string): Promise<AgentSessionMeta> => {
       return createAgentSession(title, channelId, workspaceId)
-    }
-  )
-
-  // 获取 Agent 会话消息
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_MESSAGES,
-    async (_, id: string): Promise<AgentMessage[]> => {
-      return getAgentSessionMessages(id)
     }
   )
 
@@ -1257,29 +1266,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 获取工作区权限模式
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_PERMISSION_MODE,
-    async (_, workspaceSlug: string): Promise<PromaPermissionMode> => {
-      return getWorkspacePermissionMode(workspaceSlug)
-    }
-  )
-
-  // 设置工作区权限模式（持久化到工作区配置）
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.SET_PERMISSION_MODE,
-    async (_, workspaceSlug: string, mode: PromaPermissionMode): Promise<void> => {
-      const validModes = new Set<string>(['auto', 'bypassPermissions', 'plan'])
-      if (!validModes.has(mode)) {
-        throw new Error(`无效的权限模式: ${mode}`)
-      }
-      // 持久化到工作区配置
-      setWorkspacePermissionMode(workspaceSlug, mode)
-      // 注意：不再广播到该工作区下其他运行中的 session，
-      // 避免跨窗口状态污染（每个 session 独立维护自己的权限模式）
-    }
-  )
-
   // 热切换指定会话的权限模式（运行中生效，不广播）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_SESSION_PERMISSION_MODE,
@@ -1518,12 +1504,6 @@ export function registerIpcHandlers(): void {
         // 如果用户选择了新的权限模式，通知渲染进程更新 UI
         if (targetMode) {
           const meta = getAgentSessionMeta(sessionId)
-          if (meta?.workspaceId) {
-            const ws = getAgentWorkspace(meta.workspaceId)
-            if (ws) {
-              setWorkspacePermissionMode(ws.slug, targetMode)
-            }
-          }
           // 持久化到 session meta，和 cycleMode 路径保持一致（重启后该 session 能恢复）
           if (meta) {
             try {
@@ -2640,6 +2620,103 @@ export function registerIpcHandlers(): void {
     async (): Promise<Record<string, boolean>> => {
       const { reregisterAllGlobalShortcuts } = await import('./lib/global-shortcut-service')
       return reregisterAllGlobalShortcuts()
+    }
+  )
+
+  // ===== 语音输入 =====
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.GET_SETTINGS,
+    async (): Promise<VoiceDictationSettings> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      return getVoiceDictationSettings()
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.UPDATE_SETTINGS,
+    async (_, updates: VoiceDictationSettingsUpdate): Promise<VoiceDictationSettings> => {
+      const { updateVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      return updateVoiceDictationSettings(updates)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.TEST_CONNECTION,
+    async (_, updates?: VoiceDictationSettingsUpdate): Promise<VoiceDictationTestResult> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { testDoubaoAsrConnection } = await import('./lib/doubao-asr-service')
+      const settings = { ...getVoiceDictationSettings(), ...(updates ?? {}) }
+      return testDoubaoAsrConnection(settings)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.TOGGLE,
+    async (event): Promise<void> => {
+      const { toggleVoiceDictationWindow } = await import('./lib/voice-dictation-window')
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+      toggleVoiceDictationWindow({ targetIsProma: !!sourceWindow })
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.START,
+    async (event, input: VoiceDictationStartInput): Promise<void> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { startDoubaoAsrSession } = await import('./lib/doubao-asr-service')
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) throw new Error('语音输入窗口不存在')
+      await startDoubaoAsrSession(input.sessionId, getVoiceDictationSettings(), win)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.SEND_AUDIO,
+    async (_, input: VoiceDictationAudioChunkInput): Promise<void> => {
+      const { sendDoubaoAsrAudio } = await import('./lib/doubao-asr-service')
+      sendDoubaoAsrAudio(input.sessionId, input.data)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.STOP,
+    async (_, input: VoiceDictationStopInput): Promise<void> => {
+      const { stopDoubaoAsrSession } = await import('./lib/doubao-asr-service')
+      await stopDoubaoAsrSession(input.sessionId)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.CANCEL,
+    async (_, input: VoiceDictationStopInput): Promise<void> => {
+      const { cancelDoubaoAsrSession } = await import('./lib/doubao-asr-service')
+      cancelDoubaoAsrSession(input.sessionId)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.COMMIT,
+    async (_, input: VoiceDictationCommitInput): Promise<VoiceDictationCommitResult> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { commitVoiceDictationText } = await import('./lib/text-output-service')
+      return commitVoiceDictationText(input.text, getVoiceDictationSettings())
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.HIDE,
+    async (): Promise<void> => {
+      const { hideVoiceDictationWindow } = await import('./lib/voice-dictation-window')
+      hideVoiceDictationWindow()
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.RESIZE,
+    async (_, input: VoiceDictationResizeInput): Promise<void> => {
+      const { resizeVoiceDictationWindow } = await import('./lib/voice-dictation-window')
+      resizeVoiceDictationWindow(input.height)
     }
   )
 }

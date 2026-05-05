@@ -1177,11 +1177,11 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 无 resume，已回填历史上下文（最近 ${MAX_CONTEXT_MESSAGES} 条消息）`)
       }
 
-      // 12. 读取应用设置 + 获取权限模式
-      // 注意：不从 workspace config 读取权限模式，避免跨窗口状态污染
+      // 12. 读取应用设置并确定权限模式
+      // 权限模式只属于当前 session；新会话默认完全自动模式。
       const appSettings = getSettings()
       const initialPermissionMode: PromaPermissionMode = permissionModeOverride
-        ?? (appSettings.agentPermissionMode ?? 'auto')
+        ?? 'bypassPermissions'
       // 注册到 Map，支持运行中动态切换
       this.sessionPermissionModes.set(sessionId, initialPermissionMode)
       console.log(`[Agent 编排] 权限模式: ${initialPermissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)

@@ -2,7 +2,7 @@
  * TaskBadge — 单个后台任务徽章
  *
  * 显示任务类型、ID、耗时和 Spinner。
- * 点击后滚动到对应的 ToolActivityItem。
+ * 点击后滚动到对应的实时工具调用。
  */
 
 import * as React from 'react'
@@ -52,7 +52,7 @@ function shortenId(id: string): string {
 /**
  * TaskBadge 组件
  *
- * 显示运行中的后台任务，点击后滚动到对应的 ToolActivityItem。
+ * 显示运行中的后台任务，点击后滚动到对应的实时工具调用。
  */
 export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement {
   // 本地计时器（Shell 任务），Agent 任务使用事件驱动的 elapsedSeconds

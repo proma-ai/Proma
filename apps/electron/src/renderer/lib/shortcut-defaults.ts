@@ -165,6 +165,15 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'global',
     global: true,
   },
+  {
+    id: 'voice-dictation',
+    name: '语音输入',
+    description: '唤起豆包流式语音输入浮窗',
+    defaultMac: 'Ctrl+`',
+    defaultWin: 'Ctrl+`',
+    category: 'global',
+    global: true,
+  },
 ]
 
 /** 按 ID 索引的快捷键 Map（用于快速查找） */

@@ -21,7 +21,7 @@ import type { ToolActivity } from '@/atoms/agent-atoms'
 
 // ===== 数据类型 =====
 
-/** Task 工具名集合（用于聚合判断，与 ToolActivityItem / SDKMessageRenderer 共享语义）
+/** Task 工具名集合（用于聚合判断，与 SDKMessageRenderer 共享语义）
  * 注意：TaskGet/TaskList 是只读查询工具，不纳入聚合，保留为普通工具活动行 */
 export const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
 

@@ -7,7 +7,8 @@
 
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, TaskUsage, SDKMessage } from '@proma/shared'
+import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, TaskUsage, SDKMessage } from '@proma/shared'
+import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -260,7 +261,6 @@ export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())
 /** Per-session 模型 ID Map — sessionId → modelId */
 export const agentSessionModelMapAtom = atom<Map<string, string>>(new Map())
 export const currentAgentSessionIdAtom = atom<string | null>(null)
-export const currentAgentMessagesAtom = atom<AgentMessage[]>([])
 export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>>(new Map())
 
 /**
@@ -321,8 +321,8 @@ export const RECENTLY_MODIFIED_TTL_MS = 60_000
 
 // ===== 权限系统 Atoms =====
 
-/** 工作区默认权限模式（初始化和新会话使用） */
-export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('auto')
+/** 新会话默认权限模式 */
+export const agentDefaultPermissionModeAtom = atom<PromaPermissionMode>('bypassPermissions')
 
 /** Per-session 权限模式 Map — sessionId → PromaPermissionMode */
 export const agentPermissionModeMapAtom = atom<Map<string, PromaPermissionMode>>(new Map())
@@ -477,6 +477,16 @@ export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>
 
 /** Working 区域"已完成"组：本次 App 会话中完成且 Tab 仍打开的会话 ID（关闭 Tab 时移除） */
 export const workingDoneSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
+/** Dock/Launcher 角标数量：未查看完成会话 + 待处理阻塞请求 */
+export const dockBadgeCountAtom = atom<number>((get) => {
+  return calculateDockBadgeCount({
+    unviewedCompletedCount: get(unviewedCompletedSessionIdsAtom).size,
+    pendingPermissionCount: countPendingRequests(get(allPendingPermissionRequestsAtom)),
+    pendingAskUserCount: countPendingRequests(get(allPendingAskUserRequestsAtom)),
+    pendingExitPlanCount: countPendingRequests(get(allPendingExitPlanRequestsAtom)),
+  })
+})
 
 /**
  * 每个会话的指示点状态（只包含非 idle 的会话）
@@ -951,7 +961,7 @@ export interface BackgroundTask {
   id: string
   /** 任务类型 */
   type: 'agent' | 'shell'
-  /** 关联的工具调用 ID（用于滚动定位到 ToolActivityItem） */
+  /** 关联的工具调用 ID（用于滚动定位到实时工具调用） */
   toolUseId: string
   /** 任务开始时间戳 */
   startTime: number

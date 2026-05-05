@@ -1,6 +1,6 @@
 /**
- * 工具活动项的可复用工具函数和常量
- * 从 ToolActivityItem.tsx 中提取，供多处复用
+ * 工具展示的可复用函数和常量。
+ * 供 SDK 内容块、任务进度卡片等组件复用。
  */
 
 import type { LucideIcon } from 'lucide-react'

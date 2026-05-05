@@ -361,7 +361,10 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
 
         {/* 展开内容 */}
         {childrenExpanded && (
-          <div className="pl-5 mt-1.5 space-y-2 border-l-2 border-primary/20 ml-[5px] animate-in fade-in slide-in-from-top-1 duration-150">
+          <div className={cn(
+            'pl-5 mt-1.5 space-y-2 border-l-2 border-primary/20 ml-[5px]',
+            animate && 'animate-in fade-in slide-in-from-top-1 duration-150',
+          )}>
             {/* 提示词：可折叠行 */}
             {agentPrompt && <PromptRow prompt={agentPrompt} dimmed={dimmed} />}
 
@@ -372,7 +375,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
                 block={childBlock}
                 allMessages={allMessages}
                 basePath={basePath}
-                animate
+                animate={animate}
                 index={ci}
                 dimmed
                 isStreaming={isStreaming}
@@ -427,7 +430,10 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
       </button>
 
       {expanded && toolResult?.result && (
-        <div className="ml-5.5 mt-1 mb-2 pl-3 border-l-2 border-border/30 animate-in fade-in slide-in-from-top-1 duration-150">
+        <div className={cn(
+          'ml-5.5 mt-1 mb-2 pl-3 border-l-2 border-border/30',
+          animate && 'animate-in fade-in slide-in-from-top-1 duration-150',
+        )}>
           <ToolResultRenderer
             toolName={block.name}
             input={block.input}

@@ -52,11 +52,17 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
       if (!filename || win.isDestroyed()) return
 
       // filename 格式: {slug}/mcp.json 或 {slug}/skills/xxx/SKILL.md 或 {slug}/{sessionId}/file.txt
+      const normalizedFilename = filename.replace(/\\/g, '/')
+      const pathParts = normalizedFilename.split('/').filter(Boolean)
+
+      // 仅忽略工作区顶层 config.json；会话目录内同名文件仍属于用户文件。
+      if (pathParts.length === 2 && pathParts[1] === 'config.json') {
+        return
+      }
+
       const isCapabilitiesChange =
-        filename.endsWith('/mcp.json') ||
-        filename.endsWith('\\mcp.json') ||
-        filename.includes('/skills/') ||
-        filename.includes('\\skills/')
+        normalizedFilename.endsWith('/mcp.json') ||
+        normalizedFilename.includes('/skills/')
 
       if (isCapabilitiesChange) {
         // MCP/Skills 变化 → 通知侧边栏刷新

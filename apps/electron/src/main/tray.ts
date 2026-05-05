@@ -1,8 +1,18 @@
 import { Tray, Menu, app, nativeImage, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { listAgentSessions } from './lib/agent-session-manager'
+import { listAgentWorkspaces } from './lib/agent-workspace-manager'
+import { createTrayMenuModel, type TrayRecentSessionItem } from './lib/tray-menu-model'
 
 let tray: Tray | null = null
+
+export interface TrayActions {
+  showMainWindow: () => void
+  openAgentSession: (sessionId: string, title: string) => void
+  createChatSession: () => void
+  createAgentSession: () => void
+}
 
 /**
  * 获取托盘图标路径
@@ -29,11 +39,81 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
+function getDefaultTrayActions(): TrayActions {
+  return {
+    showMainWindow,
+    openAgentSession: () => showMainWindow(),
+    createChatSession: () => showMainWindow(),
+    createAgentSession: () => showMainWindow(),
+  }
+}
+
+function createRecentSessionMenuItem(
+  item: TrayRecentSessionItem,
+  actions: TrayActions,
+): Electron.MenuItemConstructorOptions {
+  return {
+    label: item.title,
+    sublabel: item.subtitle,
+    click: () => actions.openAgentSession(item.id, item.title),
+  }
+}
+
+function buildTrayMenu(actions: TrayActions): Menu {
+  const model = createTrayMenuModel(listAgentSessions(), listAgentWorkspaces())
+  const recentItems = model.recentSessions.map((item) => createRecentSessionMenuItem(item, actions))
+  const moreItems = model.moreSessions.map((item) => createRecentSessionMenuItem(item, actions))
+
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: '最近', enabled: false },
+    ...(recentItems.length > 0
+      ? recentItems
+      : [{ label: '暂无最近会话', enabled: false }]),
+    ...(moreItems.length > 0
+      ? [{
+          label: '更多',
+          submenu: moreItems,
+        }]
+      : []),
+    { type: 'separator' },
+    {
+      label: '新建对话',
+      click: () => actions.createChatSession(),
+    },
+    {
+      label: '新建 Agent 会话',
+      click: () => actions.createAgentSession(),
+    },
+    { type: 'separator' },
+    {
+      label: '打开 Proma',
+      click: () => actions.showMainWindow(),
+    },
+    { type: 'separator' },
+    {
+      label: '退出 Proma',
+      click: () => {
+        app.quit()
+      },
+    },
+  ]
+
+  return Menu.buildFromTemplate(template)
+}
+
+function updateTrayMenu(actions: TrayActions): Menu | null {
+  if (!tray) return null
+  const contextMenu = buildTrayMenu(actions)
+  tray.setContextMenu(contextMenu)
+  return contextMenu
+}
+
 /**
  * 创建系统托盘图标和菜单
  */
-export function createTray(): Tray | null {
+export function createTray(actionsInput?: Partial<TrayActions>): Tray | null {
   const iconPath = getTrayIconPath()
+  const actions = { ...getDefaultTrayActions(), ...actionsInput }
 
   if (!existsSync(iconPath)) {
     console.warn('Tray icon not found at:', iconPath)
@@ -55,28 +135,18 @@ export function createTray(): Tray | null {
     // 设置 tooltip
     tray.setToolTip('Proma')
 
-    // 创建右键菜单
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: '显示 Proma',
-        click: () => showMainWindow()
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: '退出 Proma',
-        click: () => {
-          app.quit()
-        }
-      }
-    ])
-
-    tray.setContextMenu(contextMenu)
+    updateTrayMenu(actions)
 
     // 点击行为：始终弹出菜单（与右键一致）
     tray.on('click', () => {
-      tray?.popUpContextMenu()
+      const contextMenu = updateTrayMenu(actions)
+      if (contextMenu) {
+        tray?.popUpContextMenu(contextMenu)
+      }
+    })
+
+    tray.on('right-click', () => {
+      updateTrayMenu(actions)
     })
 
     console.log('System tray created')

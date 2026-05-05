@@ -538,7 +538,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
       <MessageContent>
         <div className={cn('space-y-2')}>
           {topLevelBlocks.map((block, i) => {
-              // Task 工具块：聚合为卡片（同 ToolActivityList 路径的逻辑，此处用索引定位）
+              // Task 工具块：聚合为卡片，此处用索引定位首个任务工具
               if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
                 if (i === firstTaskIndex) {
                   return <TaskProgressCard key="task-progress-card" activities={taskActivities} streamEnded={!isStreaming} historicalTaskSubjects={historicalTaskSubjects} />

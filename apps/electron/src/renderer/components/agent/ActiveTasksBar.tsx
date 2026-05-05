@@ -2,7 +2,7 @@
  * ActiveTasksBar — 后台任务实时视图
  *
  * 显示在 AgentView 输入框上方，水平排列运行中的后台任务。
- * 点击任务徽章滚动到对应的 ToolActivityItem。
+ * 点击任务徽章滚动到对应的实时工具调用。
  */
 
 import * as React from 'react'

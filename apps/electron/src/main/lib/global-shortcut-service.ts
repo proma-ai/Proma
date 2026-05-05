@@ -22,6 +22,7 @@ const registeredAccelerators = new Map<string, string>()
 const GLOBAL_SHORTCUT_DEFAULTS: Record<string, { mac: string; win: string }> = {
   'quick-task': { mac: 'Alt+Space', win: 'Alt+Space' },
   'show-main-window': { mac: 'CommandOrControl+Shift+P', win: 'CommandOrControl+Shift+P' },
+  'voice-dictation': { mac: 'Ctrl+`', win: 'Ctrl+`' },
 }
 
 const isMac = process.platform === 'darwin'
@@ -30,7 +31,7 @@ const isMac = process.platform === 'darwin'
  * 获取某全局快捷键当前生效的 Electron accelerator 字符串
  *
  * 优先使用用户自定义，否则使用默认值。
- * 将 Cmd/Ctrl 统一转为 Electron 的 CommandOrControl。
+ * 将 Cmd 统一转为 Electron 的 CommandOrControl；Ctrl 保持为物理 Control 键。
  */
 function getGlobalAccelerator(id: string): string {
   const settings = getSettings()
@@ -53,7 +54,6 @@ function getGlobalAccelerator(id: string): string {
   // 转换为 Electron 标准格式
   return accelerator
     .replace(/Cmd\+/gi, 'CommandOrControl+')
-    .replace(/Ctrl\+/gi, 'CommandOrControl+')
 }
 
 /**

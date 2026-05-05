@@ -178,11 +178,6 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     // 附件清理由 ChatView 的 handleSend 负责
   }, [canSend, content, onSend])
 
-  /** 语音识别结果 */
-  const handleSpeechTranscript = React.useCallback((text: string): void => {
-    setContent(content + (content ? ' ' : '') + text)
-  }, [content, setContent])
-
   /** 粘贴文件回调 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {
     addFilesAsAttachments(files)
@@ -318,7 +313,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
 
               <FeishuNotifyToggle sessionId={conversationId} />
 
-              <SpeechButton onTranscript={handleSpeechTranscript} />
+              <SpeechButton className="size-[36px] rounded-full" />
 
               <ToolSelectorPopover />
 

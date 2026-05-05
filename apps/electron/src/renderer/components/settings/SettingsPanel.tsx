@@ -21,6 +21,7 @@ import {
   GraduationCap,
   X,
   Keyboard,
+  Mic,
 } from "lucide-react";
 // Cloud 模式专属图标
 import { CreditCard, KeyRound, ScrollText } from "lucide-react";
@@ -56,6 +57,7 @@ import { isCloudMode } from "@/lib/mode";
 import { BotHubSettings } from "./BotHubSettings";
 import { TutorialViewer } from "../tutorial/TutorialViewer";
 import { ShortcutSettings } from "./ShortcutSettings";
+import { VoiceInputSettings } from "./VoiceInputSettings";
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -119,6 +121,11 @@ const SHORTCUTS_TAB: TabItem = {
   label: "快捷键管理",
   icon: <Keyboard size={16} />,
 };
+const VOICE_INPUT_TAB: TabItem = {
+  id: "voice-input",
+  label: "语音输入",
+  icon: <Mic size={16} />,
+};
 
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
@@ -158,6 +165,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <TutorialViewer />;
     case "shortcuts":
       return <ShortcutSettings />;
+    case "voice-input":
+      return <VoiceInputSettings />;
   }
 }
 
@@ -236,6 +245,7 @@ export function SettingsPanel({
       result.push(AGENT_TAB);
     }
     result.push(TOOLS_TAB);
+    result.push(VOICE_INPUT_TAB);
     result.push(BOTS_TAB);
     result.push(TUTORIAL_TAB);
     result.push(SHORTCUTS_TAB);

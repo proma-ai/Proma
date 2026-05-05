@@ -66,7 +66,14 @@ import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
+import {
+  createVoiceDictationWindow,
+  toggleVoiceDictationWindow,
+  destroyVoiceDictationWindow,
+  shouldSuppressVoiceDictationActivate,
+} from './lib/voice-dictation-window'
 import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/global-shortcut-service'
+import { TRAY_IPC_CHANNELS } from '../types'
 
 const PROTOCOL_NAME = 'proma'
 
@@ -139,6 +146,10 @@ function ensureWindowOnScreen(win: BrowserWindow): void {
 
 /** 显示并聚焦主窗口，确保窗口在可见区域；若窗口已销毁则重新创建 */
 function showAndFocusMainWindow(): void {
+  if (process.platform === 'darwin') {
+    app.show()
+  }
+
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
     return
@@ -320,6 +331,25 @@ app.on('second-instance', (_event, argv) => {
   showAndFocusMainWindow()
 })
 
+function sendToMainWindow(channel: string, data?: unknown): void {
+  showAndFocusMainWindow()
+
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+
+  const send = (): void => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, data)
+    }
+  }
+
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', send)
+  } else {
+    send()
+  }
+}
+
 app.whenReady().then(async () => {
   // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
   // 必须在其他初始化之前执行，确保环境变量正确加载
@@ -365,11 +395,22 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Create system tray icon
-  createTray()
-
   // Create main window (will be shown when ready)
   createWindow()
+
+  // Create system tray icon
+  createTray({
+    showMainWindow: showAndFocusMainWindow,
+    openAgentSession: (sessionId, title) => {
+      sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
+    },
+    createChatSession: () => {
+      sendToMainWindow(TRAY_IPC_CHANNELS.CREATE_SESSION, { mode: 'chat' })
+    },
+    createAgentSession: () => {
+      sendToMainWindow(TRAY_IPC_CHANNELS.CREATE_SESSION, { mode: 'agent' })
+    },
+  })
 
   // 启动工作区文件监听（Agent MCP/Skills + 文件浏览器自动刷新）
   if (mainWindow) {
@@ -383,10 +424,14 @@ app.whenReady().then(async () => {
 
   // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
   createQuickTaskWindow()
+  createVoiceDictationWindow()
 
   // 注册全局快捷键
   registerGlobalShortcut('quick-task', toggleQuickTaskWindow)
   registerGlobalShortcut('show-main-window', showAndFocusMainWindow)
+  registerGlobalShortcut('voice-dictation', () => {
+    toggleVoiceDictationWindow({ targetIsProma: mainWindow?.isFocused() === true })
+  })
 
   // Cloud 模式：窗口就绪后自动执行增量同步
   if (isCloudMode() && mainWindow) {
@@ -399,6 +444,10 @@ app.whenReady().then(async () => {
   await startAllBridges()
 
   app.on('activate', () => {
+    if (shouldSuppressVoiceDictationActivate()) {
+      return
+    }
+
     // 直接检查 mainWindow 引用，避免 getAllWindows() 包含 DevTools 等其他窗口导致误判
     if (!mainWindow || mainWindow.isDestroyed()) {
       createWindow()
@@ -439,6 +488,7 @@ app.on('before-quit', () => {
   unregisterAllGlobalShortcuts()
   // 销毁快速任务窗口
   destroyQuickTaskWindow()
+  destroyVoiceDictationWindow()
   // Clean up system tray before quitting
   destroyTray()
 })

@@ -1,6 +1,6 @@
 {
   "name": "@proma/shared",
-  "version": "0.1.17",
+  "version": "0.1.19",
   "license": "Apache-2.0",
   "description": "Shared types, configs and utilities for proma",
   "type": "module",
