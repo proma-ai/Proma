@@ -12,9 +12,15 @@ import {
   SettingsSecretInput,
   SettingsSection,
   SettingsSelect,
+  SettingsSegmentedControl,
   SettingsToggle,
 } from './primitives'
 import type { VoiceDictationSettings } from '../../../types'
+
+const SOURCE_OPTIONS = [
+  { value: 'cloud', label: 'Proma 官方' },
+  { value: 'custom', label: '我的豆包 API' },
+]
 
 const ENDPOINT_OPTIONS = [
   { value: 'async', label: '双向流式优化版' },
@@ -96,6 +102,10 @@ export function VoiceInputSettings(): React.ReactElement {
     )
   }
 
+  const cloudAvailable = settings.cloudMode
+  const usingCloud = cloudAvailable && settings.useCloud
+  const customCredentialsReady = !!settings.appId && !!settings.accessToken && !!settings.resourceId
+
   return (
     <div className="space-y-6">
       <SettingsSection
@@ -106,33 +116,43 @@ export function VoiceInputSettings(): React.ReactElement {
             variant="outline"
             size="sm"
             onClick={handleTest}
-            disabled={testing || !settings.appId || !settings.accessToken || !settings.resourceId}
+            disabled={testing || (!usingCloud && !customCredentialsReady)}
           >
             {testing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <TestTube2 className="mr-1.5 size-3.5" />}
             测试连接
           </Button>
         }
       >
-        <div className="rounded-lg bg-muted/55 px-4 py-3 text-sm text-muted-foreground shadow-sm">
-          <div className="mb-1.5 font-medium text-foreground">配置方式</div>
-          <div className="space-y-1 leading-relaxed">
-            <p>
-              打开
-              <a
-                href={VOLCENGINE_SPEECH_SERVICE_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="mx-1 inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-              >
-                火山引擎语音服务控制台
-                <ExternalLink className="size-3" />
-              </a>
-              ，选择旧版服务界面。
-            </p>
-            <p>找到“豆包流式语音识别模型2.0”类目，选择已申请对应权限的应用。</p>
-            <p>在页面下方对照填写 APP ID、Access Token 和 Resource ID，然后点击“测试连接”。</p>
+        {usingCloud ? (
+          <div className="rounded-lg bg-muted/55 px-4 py-3 text-sm text-muted-foreground shadow-sm">
+            <div className="mb-1.5 font-medium text-foreground">Proma 官方额度</div>
+            <div className="space-y-1 leading-relaxed">
+              <p>语音识别请求会通过 proma-api 创建会话、鉴权、扣费并记录日志。</p>
+              <p>按实际 PCM 音频时长计费，当前价格约为 2 积分/小时。</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-lg bg-muted/55 px-4 py-3 text-sm text-muted-foreground shadow-sm">
+            <div className="mb-1.5 font-medium text-foreground">自配豆包凭证</div>
+            <div className="space-y-1 leading-relaxed">
+              <p>
+                打开
+                <a
+                  href={VOLCENGINE_SPEECH_SERVICE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mx-1 inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                >
+                  火山引擎语音服务控制台
+                  <ExternalLink className="size-3" />
+                </a>
+                ，选择旧版服务界面。
+              </p>
+              <p>找到“豆包流式语音识别模型2.0”类目，选择已申请对应权限的应用。</p>
+              <p>在页面下方对照填写 APP ID、Access Token 和 Resource ID，然后点击“测试连接”。</p>
+            </div>
+          </div>
+        )}
         <SettingsCard>
           <SettingsToggle
             label="启用语音输入"
@@ -140,27 +160,40 @@ export function VoiceInputSettings(): React.ReactElement {
             checked={settings.enabled}
             onCheckedChange={(enabled) => update({ enabled })}
           />
-          <SettingsInput
-            label="豆包 APP ID"
-            description="对应 X-Api-App-Key，请填写火山引擎控制台中的 APP ID。"
-            value={settings.appId}
-            onChange={(appId) => update({ appId })}
-            placeholder="请输入 APP ID"
-          />
-          <SettingsSecretInput
-            label="豆包 Access Token"
-            description="对应 X-Api-Access-Key，保存时会加密。"
-            value={settings.accessToken}
-            onChange={(accessToken) => update({ accessToken })}
-            placeholder="请输入 Access Token"
-          />
-          <SettingsInput
-            label="Resource ID"
-            description="默认使用豆包语音识别模型 2.0 小时版。"
-            value={settings.resourceId}
-            onChange={(resourceId) => update({ resourceId })}
-            placeholder="volc.seedasr.sauc.duration"
-          />
+          {cloudAvailable && (
+            <SettingsSegmentedControl
+              label="服务来源"
+              description="可以使用 Proma 官方额度，也可以改用自己的火山引擎豆包凭证。"
+              value={usingCloud ? 'cloud' : 'custom'}
+              onValueChange={(source) => update({ useCloud: source === 'cloud' })}
+              options={SOURCE_OPTIONS}
+            />
+          )}
+          {!usingCloud && (
+            <>
+              <SettingsInput
+                label="豆包 APP ID"
+                description="对应 X-Api-App-Key，请填写火山引擎控制台中的 APP ID。"
+                value={settings.appId}
+                onChange={(appId) => update({ appId })}
+                placeholder="请输入 APP ID"
+              />
+              <SettingsSecretInput
+                label="豆包 Access Token"
+                description="对应 X-Api-Access-Key，保存时会加密。"
+                value={settings.accessToken}
+                onChange={(accessToken) => update({ accessToken })}
+                placeholder="请输入 Access Token"
+              />
+              <SettingsInput
+                label="Resource ID"
+                description="默认使用豆包语音识别模型 2.0 小时版。"
+                value={settings.resourceId}
+                onChange={(resourceId) => update({ resourceId })}
+                placeholder="volc.seedasr.sauc.duration"
+              />
+            </>
+          )}
           <SettingsSelect
             label="连接模式"
             description="优化版只在结果变化时返回新包，实时体验更好。"

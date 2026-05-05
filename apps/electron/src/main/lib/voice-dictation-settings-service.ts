@@ -5,12 +5,15 @@
  */
 
 import { safeStorage } from 'electron'
+import { isCloudMode } from '@proma/cloud'
 import type { VoiceDictationSettings, VoiceDictationSettingsUpdate } from '../../types'
 import { getSettings, updateSettings } from './settings-service'
 
 const DEFAULT_VOICE_DICTATION_SETTINGS: VoiceDictationSettings = {
   enabled: false,
   provider: 'doubao',
+  cloudMode: false,
+  useCloud: false,
   appId: '',
   accessToken: '',
   resourceId: 'volc.seedasr.sauc.duration',
@@ -43,9 +46,12 @@ function decryptSecret(value: string): string {
 export function getVoiceDictationSettings(): VoiceDictationSettings {
   const raw = getSettings().voiceDictation ?? {}
   const encryptedAccessToken = raw.accessToken ?? raw.accessKey ?? ''
+  const cloudMode = isCloudMode()
   return {
     ...DEFAULT_VOICE_DICTATION_SETTINGS,
     ...raw,
+    cloudMode,
+    useCloud: cloudMode ? raw.useCloud ?? true : false,
     appId: raw.appId ?? raw.appKey ?? '',
     accessToken: decryptSecret(encryptedAccessToken),
   }
@@ -56,10 +62,13 @@ export function updateVoiceDictationSettings(
   updates: VoiceDictationSettingsUpdate,
 ): VoiceDictationSettings {
   const current = getVoiceDictationSettings()
+  const cloudMode = isCloudMode()
   const next: VoiceDictationSettings = {
     ...current,
     ...updates,
     provider: 'doubao',
+    cloudMode,
+    useCloud: cloudMode ? updates.useCloud ?? current.useCloud : false,
   }
 
   updateSettings({

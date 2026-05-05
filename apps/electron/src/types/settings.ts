@@ -37,6 +37,10 @@ export interface VoiceDictationSettings {
   enabled: boolean
   /** 语音识别供应商 */
   provider: VoiceDictationProvider
+  /** 是否处于 Proma Cloud 商业模式，可使用官方语音额度 */
+  cloudMode: boolean
+  /** Cloud 模式下是否使用 Proma 官方语音额度；false 表示使用用户自配豆包凭证 */
+  useCloud: boolean
   /** 豆包 APP ID，对应 X-Api-App-Key 请求头 */
   appId: string
   /** 豆包 Access Token，对应 X-Api-Access-Key 请求头 */

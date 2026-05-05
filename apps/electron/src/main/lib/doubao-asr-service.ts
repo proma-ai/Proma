@@ -6,6 +6,7 @@
  */
 
 import type { BrowserWindow } from 'electron'
+import { getCloudApiConfig } from '@proma/cloud'
 import { randomUUID } from 'node:crypto'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import WebSocket from 'ws'
@@ -15,6 +16,7 @@ import type {
   VoiceDictationStateEvent,
 } from '../../types'
 import { VOICE_DICTATION_IPC_CHANNELS } from '../../types'
+import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 
 const PROTOCOL_VERSION = 0b0001
 const HEADER_SIZE = 0b0001
@@ -66,12 +68,53 @@ interface ActiveSession {
   ws: WebSocket
   win: BrowserWindow
   closed: boolean
+  mode: 'cloud' | 'direct'
 }
+
+interface CloudSpeechResponse {
+  text?: string
+  is_final?: boolean
+  isFinal?: boolean
+  error?: string | {
+    code?: string
+    message?: string
+  }
+}
+
+type WebSocketRawData = Buffer | ArrayBuffer | Buffer[]
+type WebSocketTextSender = { send: (data: string) => void }
 
 const activeSessions = new Map<string, ActiveSession>()
 
+function isUsingCloud(settings: VoiceDictationSettings): boolean {
+  return settings.cloudMode && settings.useCloud !== false
+}
+
 function getEndpoint(settings: VoiceDictationSettings): string {
   return settings.endpointMode === 'duplex' ? DUPLEX_ENDPOINT : ASYNC_ENDPOINT
+}
+
+async function getCloudSpeechToken(): Promise<string> {
+  const token = await tryRefreshAuthToken() ?? getAuthToken()
+  if (!token) {
+    throw new Error('请先登录 Proma Cloud 后再使用官方语音输入')
+  }
+  return token
+}
+
+async function buildCloudSpeechUrl(settings: VoiceDictationSettings): Promise<string> {
+  const token = await getCloudSpeechToken()
+  const { baseUrl } = getCloudApiConfig()
+  const url = new URL(baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/speech/recognize`
+  url.searchParams.set('token', token)
+  url.searchParams.set('model_id', 'doubao-asr-bigmodel')
+  url.searchParams.set('endpoint_mode', settings.endpointMode)
+  if (settings.language) {
+    url.searchParams.set('language', settings.language)
+  }
+  return url.toString()
 }
 
 function buildHeader(
@@ -255,10 +298,48 @@ function parseServerMessage(data: Buffer): ParsedServerMessage | null {
   return parseServerPayload(parsed, flags === FLAG_SERVER_LAST_SEQUENCE)
 }
 
+function rawDataToBuffer(message: WebSocketRawData): Buffer {
+  if (Array.isArray(message)) return Buffer.concat(message)
+  if (Buffer.isBuffer(message)) return message
+  return Buffer.from(message)
+}
+
+function parseCloudSpeechMessage(message: WebSocketRawData): ParsedServerMessage | null {
+  const text = rawDataToBuffer(message).toString('utf-8')
+  const parsed = JSON.parse(text) as CloudSpeechResponse
+
+  if (parsed.error) {
+    if (typeof parsed.error === 'string') {
+      throw new Error(parsed.error)
+    }
+    throw new Error(parsed.error.message || parsed.error.code || '云端语音输入失败')
+  }
+
+  if (!parsed.text) return null
+  return {
+    text: parsed.text,
+    isFinal: parsed.is_final ?? parsed.isFinal ?? false,
+  }
+}
+
+function sendTextFrame(ws: WebSocket, text: string): void {
+  (ws as unknown as WebSocketTextSender).send(text)
+}
+
 /** 测试豆包 ASR 连接，仅验证 WebSocket 握手和鉴权 Header。 */
 export async function testDoubaoAsrConnection(
   settings: VoiceDictationSettings,
 ): Promise<{ success: boolean; message: string }> {
+  if (isUsingCloud(settings)) {
+    try {
+      await getCloudSpeechToken()
+      return { success: true, message: 'Proma 官方语音输入已就绪' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '请先登录 Proma Cloud'
+      return { success: false, message }
+    }
+  }
+
   if (!settings.appId || !settings.accessToken || !settings.resourceId) {
     return { success: false, message: '请先填写 APP ID、Access Token 和 Resource ID' }
   }
@@ -296,24 +377,39 @@ export async function startDoubaoAsrSession(
   settings: VoiceDictationSettings,
   win: BrowserWindow,
 ): Promise<void> {
-  if (!settings.appId || !settings.accessToken || !settings.resourceId) {
+  const useCloud = isUsingCloud(settings)
+  if (!useCloud && (!settings.appId || !settings.accessToken || !settings.resourceId)) {
     throw new Error('请先填写豆包 ASR 凭证')
   }
 
   await stopDoubaoAsrSession(sessionId)
-  sendState(win, { sessionId, status: 'connecting', message: '正在连接豆包 ASR...' })
+  sendState(win, {
+    sessionId,
+    status: 'connecting',
+    message: useCloud ? '正在连接 Proma 官方语音输入...' : '正在连接豆包 ASR...',
+  })
+
+  const url = useCloud ? await buildCloudSpeechUrl(settings) : getEndpoint(settings)
 
   await new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(getEndpoint(settings), {
-      headers: {
-        'X-Api-App-Key': settings.appId,
-        'X-Api-Access-Key': settings.accessToken,
-        'X-Api-Resource-Id': settings.resourceId,
-        'X-Api-Connect-Id': randomUUID(),
-      },
-    })
+    const ws = useCloud
+      ? new WebSocket(url)
+      : new WebSocket(url, {
+          headers: {
+            'X-Api-App-Key': settings.appId,
+            'X-Api-Access-Key': settings.accessToken,
+            'X-Api-Resource-Id': settings.resourceId,
+            'X-Api-Connect-Id': randomUUID(),
+          },
+        })
 
-    const active: ActiveSession = { sessionId, ws, win, closed: false }
+    const active: ActiveSession = {
+      sessionId,
+      ws,
+      win,
+      closed: false,
+      mode: useCloud ? 'cloud' : 'direct',
+    }
     activeSessions.set(sessionId, active)
 
     const timer = setTimeout(() => {
@@ -324,19 +420,18 @@ export async function startDoubaoAsrSession(
 
     ws.once('open', () => {
       clearTimeout(timer)
-      ws.send(buildClientRequest(settings))
+      if (!useCloud) {
+        ws.send(buildClientRequest(settings))
+      }
       sendState(win, { sessionId, status: 'recording', message: '正在听写' })
       resolve()
     })
 
-    ws.on('message', (message: Buffer | ArrayBuffer | Buffer[]) => {
-      const buffer = Array.isArray(message)
-        ? Buffer.concat(message)
-        : Buffer.isBuffer(message)
-          ? message
-          : Buffer.from(message)
+    ws.on('message', (message: WebSocketRawData) => {
       try {
-        const parsed = parseServerMessage(buffer)
+        const parsed = active.mode === 'cloud'
+          ? parseCloudSpeechMessage(message)
+          : parseServerMessage(rawDataToBuffer(message))
         if (parsed) {
           sendTranscript(win, {
             sessionId,
@@ -349,7 +444,9 @@ export async function startDoubaoAsrSession(
         sendState(win, {
           sessionId,
           status: 'error',
-          message: `解析 ASR 响应失败: ${messageText}`,
+          message: active.mode === 'cloud'
+            ? `云端语音输入失败: ${messageText}`
+            : `解析 ASR 响应失败: ${messageText}`,
         })
       }
     })
@@ -373,7 +470,7 @@ export function sendDoubaoAsrAudio(sessionId: string, data: ArrayBuffer): void {
   if (!active || active.closed || active.ws.readyState !== WebSocket.OPEN) return
   const audio = Buffer.from(data)
   if (audio.length === 0) return
-  active.ws.send(buildAudioFrame(audio, false))
+  active.ws.send(active.mode === 'cloud' ? audio : buildAudioFrame(audio, false))
 }
 
 export async function stopDoubaoAsrSession(sessionId: string): Promise<void> {
@@ -381,7 +478,11 @@ export async function stopDoubaoAsrSession(sessionId: string): Promise<void> {
   if (!active || active.closed) return
 
   if (active.ws.readyState === WebSocket.OPEN) {
-    active.ws.send(buildAudioFrame(Buffer.alloc(0), true))
+    if (active.mode === 'cloud') {
+      sendTextFrame(active.ws, 'stop')
+    } else {
+      active.ws.send(buildAudioFrame(Buffer.alloc(0), true))
+    }
     setTimeout(() => {
       if (!active.closed) active.ws.close()
     }, 800)
