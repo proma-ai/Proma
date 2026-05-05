@@ -5,6 +5,7 @@
 import * as React from 'react'
 
 const WINDOW_HEIGHT_BUFFER = 16
+const LINE_HEIGHT = 28
 const MIN_TRANSCRIPT_HEIGHT = 34
 const MAX_TRANSCRIPT_HEIGHT = 260
 const MAX_WINDOW_HEIGHT = 540
@@ -64,7 +65,7 @@ export function useVoiceWindowLayout(input: VoiceWindowLayoutInput): VoiceWindow
     const rootVerticalPadding =
       Number.parseFloat(rootStyle.paddingTop) +
       Number.parseFloat(rootStyle.paddingBottom)
-    const transcriptNaturalHeight = Math.max(MIN_TRANSCRIPT_HEIGHT, transcriptBox.scrollHeight)
+    const transcriptNaturalHeight = Math.ceil(Math.max(MIN_TRANSCRIPT_HEIGHT, transcriptBox.scrollHeight))
     const fixedHeight = Math.ceil(
       rootVerticalPadding +
       header.getBoundingClientRect().height +
@@ -85,7 +86,8 @@ export function useVoiceWindowLayout(input: VoiceWindowLayoutInput): VoiceWindow
         ? viewportMaxTranscriptHeight
         : null
     const nextTranscriptHeight = nextTranscriptMaxHeight ?? transcriptNaturalHeight
-    const nextHeight = Math.ceil(fixedHeight + nextTranscriptHeight + WINDOW_HEIGHT_BUFFER)
+    const extraBuffer = nextTranscriptMaxHeight === null ? LINE_HEIGHT : 0
+    const nextHeight = Math.ceil(fixedHeight + nextTranscriptHeight + WINDOW_HEIGHT_BUFFER + extraBuffer)
 
     setTranscriptMaxHeight((current) => {
       if (current === null && nextTranscriptMaxHeight === null) return current
@@ -95,7 +97,7 @@ export function useVoiceWindowLayout(input: VoiceWindowLayoutInput): VoiceWindow
       return nextTranscriptMaxHeight
     })
 
-    if (Math.abs(nextHeight - lastWindowHeightRef.current) < 2) return
+    if (Math.abs(nextHeight - lastWindowHeightRef.current) < 1) return
     lastWindowHeightRef.current = nextHeight
     window.electronAPI.resizeVoiceDictation({ height: nextHeight }).catch(console.error)
   }, [])

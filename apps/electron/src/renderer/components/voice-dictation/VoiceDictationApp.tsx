@@ -350,7 +350,7 @@ export function VoiceDictationApp(): React.ReactElement {
 
   const busy = status === 'connecting' || status === 'recording' || status === 'stopping'
   return (
-    <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden bg-background px-3 pt-3 pb-4">
+    <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden bg-background px-3 pt-3 pb-2">
       <div ref={panelRef} className="flex min-h-0 w-full flex-col overflow-hidden">
         <div ref={headerRef} className="flex shrink-0 items-center justify-between px-3 pt-1 pb-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -413,10 +413,10 @@ export function VoiceDictationApp(): React.ReactElement {
             <div className="h-px bg-border/70" />
             <div
               ref={transcriptBoxRef}
-              className="box-border min-h-[34px] px-3 pt-2.5 text-[15px] leading-7 text-foreground [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              className="box-border min-h-[34px] px-3 pt-2.5 pb-2.5 text-[15px] leading-7 text-foreground [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
               style={{
                 maxHeight: transcriptMaxHeight ?? undefined,
-                overflowY: transcriptMaxHeight === null ? 'visible' : 'auto',
+                overflowY: 'auto',
               }}
             >
               <div className="whitespace-pre-wrap break-words">
@@ -426,7 +426,6 @@ export function VoiceDictationApp(): React.ReactElement {
                   </span>
                 )}
               </div>
-              {transcript && <div aria-hidden="true" className="h-12" />}
             </div>
           </div>
         </div>
