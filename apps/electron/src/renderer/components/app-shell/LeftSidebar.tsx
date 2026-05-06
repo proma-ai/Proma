@@ -65,6 +65,7 @@ import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
 import { MoveSessionDialog } from '@/components/agent/MoveSessionDialog'
+import { detectIsMac } from '@/lib/platform'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -182,6 +183,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const selectedModel = useAtomValue(selectedModelAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
+  const isMac = React.useMemo(() => detectIsMac(), [])
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
   const promptConfig = useAtomValue(promptConfigAtom)
@@ -843,8 +845,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300"
         style={{ width: 48, flexShrink: 0 }}
       >
-        {/* 顶部留空，避开 macOS 红绿灯 */}
-        <div className="pt-[50px]" />
+        {/* macOS 需要避开左上角红绿灯，其他平台保留紧凑呼吸感。 */}
+        <div className={cn(isMac ? 'pt-[50px]' : 'pt-2')} />
 
         {/* 展开按钮 */}
         <div className="pt-2">
@@ -912,8 +914,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       className="h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
-      {/* 顶部留空，避开 macOS 红绿灯 */}
-      <div className="pt-[30px]">
+      {/* macOS 需要避开左上角红绿灯，其他平台不占用这块空间。 */}
+      <div className={cn(isMac ? 'pt-[30px]' : 'pt-1')}>
         {/* 模式切换器 + 折叠按钮 */}
         <div className="flex items-start gap-1.5 px-3">
           <div className="flex-1 min-w-0">

@@ -27,6 +27,7 @@ import {
   workspaceAttachedDirectoriesMapAtom,
   agentPendingFilesAtom,
 } from '@/atoms/agent-atoms'
+import { detectIsWindows } from '@/lib/platform'
 import type { FileEntry, AgentPendingFile } from '@proma/shared'
 
 interface SidePanelProps {
@@ -38,6 +39,7 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
   // per-session 侧面板状态（默认打开）
   const sidePanelOpenMap = useAtomValue(agentSidePanelOpenMapAtom)
   const setSidePanelOpenMap = useSetAtom(agentSidePanelOpenMapAtom)
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   const isOpen = sidePanelOpenMap.get(sessionId) ?? true
 
@@ -262,7 +264,8 @@ export function SidePanel({ sessionId, sessionPath }: SidePanelProps): React.Rea
       {/* 面板内容 */}
       <div
         className={cn(
-          'w-[320px] h-full flex flex-col titlebar-no-drag pt-0.5',
+          'w-[320px] h-full flex flex-col titlebar-no-drag',
+          isWindows ? 'pt-[34px]' : 'pt-0.5',
           shouldAnimate && 'transition-opacity duration-300',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}

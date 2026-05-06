@@ -116,6 +116,22 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
 
+function installWindowsZoomInFallback(win: BrowserWindow): void {
+  if (process.platform !== 'win32') return
+
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return
+
+    // Windows 下主键盘的 Ctrl++ 常会以 Ctrl+= 上报；小键盘加号也需要兜底。
+    const key = input.key.toLowerCase()
+    if (!['=', '+', 'numadd', 'add'].includes(key)) return
+
+    event.preventDefault()
+    const currentZoomLevel = win.webContents.getZoomLevel()
+    win.webContents.setZoomLevel(Math.min(currentZoomLevel + 0.5, 9))
+  })
+}
+
 /**
  * 检查窗口是否在可用显示器范围内
  * 处理外接显示器断开后窗口位于不可见区域的情况
@@ -224,6 +240,7 @@ function createWindow(): void {
     },
     ...titleBarOptions,
   })
+  installWindowsZoomInFallback(mainWindow)
 
   // Load the renderer
   const isDev = !app.isPackaged
