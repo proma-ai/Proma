@@ -130,6 +130,8 @@ async function buildCloudSpeechUrl(settings: VoiceDictationSettings): Promise<st
   if (hotwords.length > 0) {
     url.searchParams.set('hotwords', JSON.stringify(hotwords))
   }
+  url.searchParams.set('end_window_size', String(DICTATION_END_WINDOW_SIZE_MS))
+  url.searchParams.set('force_to_speech_time', String(DICTATION_FORCE_TO_SPEECH_TIME_MS))
   return url.toString()
 }
 
