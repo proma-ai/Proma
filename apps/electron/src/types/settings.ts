@@ -53,6 +53,8 @@ export interface VoiceDictationSettings {
   endpointMode: VoiceDictationEndpointMode
   /** 输出方式 */
   outputMode: VoiceDictationOutputMode
+  /** 自定义热词，按行或逗号分隔，启动识别时直传给豆包 ASR */
+  customHotwords: string
 }
 
 /** 语音输入设置更新 */

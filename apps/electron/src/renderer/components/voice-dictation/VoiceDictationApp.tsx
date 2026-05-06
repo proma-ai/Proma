@@ -7,7 +7,8 @@ import { Check, Clipboard, Loader2, Mic, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { VoiceDictationCommitResult, VoiceDictationSettings, VoiceDictationStateEvent, VoiceDictationTranscriptEvent } from '../../../types'
 import { CHUNK_BYTES, concatAudioBuffers, floatTo16BitPcm, splitChunk } from './voice-audio-utils'
-import { normalizeVoiceDictationText } from './voice-text-normalizer'
+import { mergeVoiceDictationTranscript, normalizeVoiceDictationText } from './voice-text-normalizer'
+import type { VoiceDictationTranscriptMergeState } from './voice-text-normalizer'
 import { useVoiceWindowLayout } from './use-voice-window-layout'
 
 const MAX_QUEUED_CHUNKS = 60
@@ -24,6 +25,10 @@ export function VoiceDictationApp(): React.ReactElement {
 
   const sessionIdRef = React.useRef<string | null>(null)
   const transcriptRef = React.useRef('')
+  const transcriptMergeStateRef = React.useRef<VoiceDictationTranscriptMergeState>({
+    finalizedText: '',
+    partialText: '',
+  })
   const streamRef = React.useRef<MediaStream | null>(null)
   const audioContextRef = React.useRef<AudioContext | null>(null)
   const processorRef = React.useRef<ScriptProcessorNode | null>(null)
@@ -249,6 +254,10 @@ export function VoiceDictationApp(): React.ReactElement {
     pendingAudioRef.current = []
     setTranscript('')
     transcriptRef.current = ''
+    transcriptMergeStateRef.current = {
+      finalizedText: '',
+      partialText: '',
+    }
     setCommitResult(null)
     setStatus('recording')
     setMessage('请开始说话')
@@ -317,8 +326,14 @@ export function VoiceDictationApp(): React.ReactElement {
     const cleanupTranscript = window.electronAPI.onVoiceDictationTranscript((event: VoiceDictationTranscriptEvent) => {
       if (event.sessionId !== sessionIdRef.current) return
       const normalizedText = normalizeVoiceDictationText(event.text)
-      setTranscript(normalizedText)
-      transcriptRef.current = normalizedText
+      const mergedTranscript = mergeVoiceDictationTranscript(
+        transcriptMergeStateRef.current,
+        normalizedText,
+        event.isFinal,
+      )
+      transcriptMergeStateRef.current = mergedTranscript.state
+      setTranscript(mergedTranscript.text)
+      transcriptRef.current = mergedTranscript.text
       if (stoppingRef.current && event.isFinal) {
         scheduleCommit(FINAL_COMMIT_DELAY_MS)
       }

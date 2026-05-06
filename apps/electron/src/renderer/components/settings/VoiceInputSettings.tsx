@@ -13,6 +13,7 @@ import {
   SettingsSection,
   SettingsSelect,
   SettingsSegmentedControl,
+  SettingsTextarea,
   SettingsToggle,
 } from './primitives'
 import type { VoiceDictationSettings } from '../../../types'
@@ -208,6 +209,16 @@ export function VoiceInputSettings(): React.ReactElement {
             onValueChange={(language) => update({ language: language === 'auto' ? '' : language })}
             options={LANGUAGE_OPTIONS}
           />
+          {!usingCloud && (
+            <SettingsTextarea
+              label="自定义热词"
+              description="每行或逗号分隔一个词，会在本次识别请求中直传给豆包，用于改善产品名、技术词和人名识别。"
+              value={settings.customHotwords}
+              onChange={(customHotwords) => update({ customHotwords })}
+              placeholder={"Proma\nJotai\nShadcnUI\nClaude Code"}
+              minHeight={112}
+            />
+          )}
           <SettingsSelect
             label="输出方式"
             description="默认写入当前光标位置；如果唤起时 Proma 是当前激活窗口，会写入当前 Chat 或 Agent 输入框。自动粘贴失败时会保留到剪贴板。"
