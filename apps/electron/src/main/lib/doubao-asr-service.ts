@@ -126,6 +126,10 @@ async function buildCloudSpeechUrl(settings: VoiceDictationSettings): Promise<st
   if (settings.language) {
     url.searchParams.set('language', settings.language)
   }
+  const hotwords = parseCustomHotwords(settings.customHotwords)
+  if (hotwords.length > 0) {
+    url.searchParams.set('hotwords', JSON.stringify(hotwords))
+  }
   return url.toString()
 }
 
