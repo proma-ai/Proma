@@ -68,8 +68,8 @@ export function ModeSwitcher(): React.ReactElement {
   }, [mode, restoreSession])
 
   return (
-    <div className="pt-2">
-      <div className="relative flex rounded-xl bg-muted p-1">
+    <div className="pt-2 titlebar-no-drag">
+      <div className="relative flex rounded-xl bg-muted p-1 titlebar-no-drag">
         {/* 滑动背景指示器 */}
         <div
           className={cn(
@@ -82,7 +82,7 @@ export function ModeSwitcher(): React.ReactElement {
             key={value}
             onClick={() => handleModeSwitch(value)}
             className={cn(
-              'mode-btn relative z-[1] flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1 text-sm font-medium transition-colors duration-200',
+              'mode-btn titlebar-no-drag relative z-[1] flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
               mode === value
                 ? 'mode-btn-selected text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
