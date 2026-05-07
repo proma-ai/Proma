@@ -117,11 +117,11 @@ export function RegisterPage(): React.ReactElement {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="name">姓名</Label>
+          <Label htmlFor="name">名称</Label>
           <Input
             id="name"
             type="text"
-            placeholder="您的姓名"
+            placeholder="您的名称"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={loading}
