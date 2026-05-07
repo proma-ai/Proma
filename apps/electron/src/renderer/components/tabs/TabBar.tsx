@@ -5,7 +5,7 @@
  * - 点击切换标签
  * - 中键关闭标签
  * - 拖拽重排序
- * - Chrome 风格等分宽度（不滚动）
+ * - Chrome 风格等分宽度（溢出时可横向滚动）
  */
 
 import * as React from 'react'
@@ -156,6 +156,27 @@ function TabBarInner({
   const leaveTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+
+  // 滚动容器 ref
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+
+  // 鼠标滚轮横向滚动
+  const handleWheel = React.useCallback((e: React.WheelEvent) => {
+    if (scrollRef.current) {
+      e.preventDefault()
+      scrollRef.current.scrollLeft += e.deltaY || e.deltaX
+    }
+  }, [])
+
+  // 新增 tab 时自动滚动到最右
+  const prevTabCount = React.useRef(tabs.length)
+  React.useEffect(() => {
+    if (tabs.length > prevTabCount.current && scrollRef.current) {
+      scrollRef.current.scrollTo({ left: scrollRef.current.scrollWidth, behavior: 'smooth' })
+    }
+    prevTabCount.current = tabs.length
+  }, [tabs.length])
+
   React.useEffect(() => {
     return () => {
       if (enterTimerRef.current) clearTimeout(enterTimerRef.current)
@@ -205,7 +226,11 @@ function TabBarInner({
           需要交互的单个 Tab 会在 TabBarItem 内部自己声明 titlebar-no-drag。 */}
       <div className="absolute inset-0 titlebar-drag-region" />
 
-      <div className={cn("relative flex items-end flex-1 min-w-0 overflow-x-clip titlebar-drag-region", isWindows && "pr-[140px]")}>
+      <div
+        ref={scrollRef}
+        onWheel={handleWheel}
+        className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none titlebar-drag-region", isWindows && "pr-[140px]")}
+      >
         {tabs.map((tab) => (
           <TabBarItem
             key={tab.id}

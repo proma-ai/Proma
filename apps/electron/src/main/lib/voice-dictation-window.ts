@@ -15,8 +15,8 @@ let voiceDictationTargetCaptured = false
 let suppressMainWindowActivateUntil = 0
 
 const WINDOW_WIDTH = 480
-const WINDOW_HEIGHT = 188
-const MIN_WINDOW_HEIGHT = 176
+const WINDOW_HEIGHT = 160
+const MIN_WINDOW_HEIGHT = 148
 const WINDOW_MARGIN = 12
 const ACTIVATE_SUPPRESSION_MS = 1800
 
@@ -31,8 +31,8 @@ export function createVoiceDictationWindow(): void {
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
     frame: false,
-    transparent: false,
-    backgroundColor: '#111113',
+    transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
@@ -121,8 +121,9 @@ export function resizeVoiceDictationWindow(height: number): void {
   const nextHeight = Math.max(MIN_WINDOW_HEIGHT, Math.min(maxHeight, Math.round(height)))
   const maxY = display.workArea.y + display.workArea.height - nextHeight - WINDOW_MARGIN
   voiceDictationWindow.setBounds({
-    ...bounds,
+    x: bounds.x,
     y: Math.min(bounds.y, maxY),
+    width: WINDOW_WIDTH,
     height: nextHeight,
   })
 }

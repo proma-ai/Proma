@@ -200,17 +200,20 @@ export function sendDesktopNotification(
   enabled: boolean,
   options?: DesktopNotificationOptions
 ): void {
-  // 提示音在 focus 判断之前播放，确保阻塞操作始终有声音提醒
-  if (options?.playSound && options.soundType) {
-    playNotificationSoundForType(options.soundType, options.sounds ?? {})
-  }
+  // 将音频播放和系统通知推迟到下一个宏任务，避免在 React batchedUpdates
+  // 同步调用栈中阻塞主线程（audio.currentTime seek + Notification 创建会导致掉帧）
+  setTimeout(() => {
+    if (options?.playSound && options.soundType) {
+      playNotificationSoundForType(options.soundType, options.sounds ?? {})
+    }
 
-  if (!enabled) return
-  if (!options?.force && document.hasFocus()) return
+    if (!enabled) return
+    if (!options?.force && document.hasFocus()) return
 
-  const notification = new Notification(title, { body, silent: true })
-  notification.onclick = () => {
-    window.focus()
-    options?.onNavigate?.()
-  }
+    const notification = new Notification(title, { body, silent: true })
+    notification.onclick = () => {
+      window.focus()
+      options?.onNavigate?.()
+    }
+  }, 0)
 }

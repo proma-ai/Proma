@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { ExternalLink, Loader2, TestTube2 } from 'lucide-react'
+import { ExternalLink, Loader2, TestTube2, Mic, MicOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +16,7 @@ import {
   SettingsTextarea,
   SettingsToggle,
 } from './primitives'
-import type { VoiceDictationSettings } from '../../../types'
+import type { VoiceDictationSettings, MicPermissionResult } from '../../../types'
 
 const SOURCE_OPTIONS = [
   { value: 'cloud', label: 'Proma 官方' },
@@ -49,6 +49,17 @@ export function VoiceInputSettings(): React.ReactElement {
   const [settings, setSettings] = React.useState<VoiceDictationSettings | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
+  const [micPermission, setMicPermission] = React.useState<MicPermissionResult | null>(null)
+  const [requestingPermission, setRequestingPermission] = React.useState(false)
+
+  const refreshMicPermission = React.useCallback(async () => {
+    try {
+      const result = await window.electronAPI.checkMicrophonePermission()
+      setMicPermission(result)
+    } catch (error) {
+      console.error('[语音输入] 检查麦克风权限失败:', error)
+    }
+  }, [])
 
   React.useEffect(() => {
     window.electronAPI.getVoiceDictationSettings()
@@ -57,6 +68,25 @@ export function VoiceInputSettings(): React.ReactElement {
         console.error('[语音输入] 加载设置失败:', error)
         toast.error('加载语音输入设置失败')
       })
+    refreshMicPermission()
+  }, [refreshMicPermission])
+
+  const handleRequestMicPermission = React.useCallback(async () => {
+    setRequestingPermission(true)
+    try {
+      const result = await window.electronAPI.requestMicrophonePermission()
+      setMicPermission(result)
+      if (result.status === 'granted') {
+        toast.success('麦克风权限已授权')
+      } else if (result.status === 'denied') {
+        toast.error('麦克风权限已被拒绝，请在系统设置中允许')
+      }
+    } catch (error) {
+      console.error('[语音输入] 请求麦克风权限失败:', error)
+      toast.error('请求麦克风权限失败')
+    } finally {
+      setRequestingPermission(false)
+    }
   }, [])
 
   const update = React.useCallback(async (updates: Partial<VoiceDictationSettings>) => {
@@ -149,11 +179,60 @@ export function VoiceInputSettings(): React.ReactElement {
                 </a>
                 ，选择旧版服务界面。
               </p>
-              <p>找到“豆包流式语音识别模型2.0”类目，选择已申请对应权限的应用。</p>
-              <p>在页面下方对照填写 APP ID、Access Token 和 Resource ID，然后点击“测试连接”。</p>
+              <p>找到"豆包流式语音识别模型2.0"类目，选择已申请对应权限的应用。</p>
+              <p>在页面下方对照填写 APP ID、Access Token 和 Resource ID，然后点击"测试连接"。</p>
             </div>
           </div>
         )}
+
+        {/* 麦克风权限状态 */}
+        {micPermission && (
+          <div className="rounded-lg border px-4 py-3 text-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {micPermission.status === 'granted' ? (
+                  <Mic className="size-4 text-green-500" />
+                ) : micPermission.status === 'denied' ? (
+                  <MicOff className="size-4 text-destructive" />
+                ) : micPermission.status === 'not-determined' ? (
+                  <Mic className="size-4 text-amber-500" />
+                ) : (
+                  <Mic className="size-4 text-muted-foreground" />
+                )}
+                <div>
+                  <span className="font-medium text-foreground">麦克风权限</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {micPermission.status === 'granted'
+                      ? '已授权，语音输入可正常使用'
+                      : micPermission.status === 'denied'
+                      ? '已被系统阻止，请在系统设置中允许 Proma 访问麦克风'
+                      : micPermission.status === 'not-determined'
+                      ? '未授权，使用语音输入前需要先授权'
+                      : '当前系统不支持预检，录音时将自动弹出权限请求'}
+                  </span>
+                </div>
+              </div>
+              {(micPermission.status === 'not-determined' || micPermission.status === 'denied') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestMicPermission}
+                  disabled={requestingPermission}
+                >
+                  {requestingPermission ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  ) : micPermission.status === 'not-determined' ? (
+                    <Mic className="mr-1.5 size-3.5" />
+                  ) : (
+                    <MicOff className="mr-1.5 size-3.5" />
+                  )}
+                  {micPermission.status === 'not-determined' ? '允许麦克风权限' : '重新请求权限'}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
         <SettingsCard>
           <SettingsToggle
             label="启用语音输入"

@@ -1,14 +1,12 @@
 /**
  * 自动更新核心模块
  *
- * 仅检测新版本并通知用户，不做自动下载/安装。
- * 用户通过 GitHub Releases 页面手动下载覆盖安装。
- *
+ * 检测新版本 → 自动后台下载 → 用户确认后重启安装。
  * 仅在打包后的生产环境中工作。
  */
 
 import { autoUpdater } from 'electron-updater'
-import type { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import type { UpdateStatus } from './updater-types'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
 
@@ -34,7 +32,14 @@ export function getUpdateStatus(): UpdateStatus {
 
 /** 手动触发检查更新 */
 export async function checkForUpdates(): Promise<void> {
+  // 已在下载中或已下载完成，不重复检查
+  if (currentStatus.status === 'downloading' || currentStatus.status === 'downloaded') {
+    console.log('[更新] 跳过检查：已在下载中或已下载完成')
+    return
+  }
+
   try {
+    setStatus({ status: 'checking' })
     await autoUpdater.checkForUpdates()
   } catch (err) {
     console.error('[更新] 检查更新失败:', err)
@@ -43,6 +48,19 @@ export async function checkForUpdates(): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
     })
   }
+}
+
+/** 退出并安装已下载的更新 */
+export function quitAndInstall(): void {
+  // 移除所有窗口的 close 监听器，避免 preventDefault 阻止退出
+  for (const w of BrowserWindow.getAllWindows()) {
+    w.removeAllListeners('close')
+  }
+
+  // 延迟调用确保 IPC 响应已发送回渲染进程
+  setImmediate(() => {
+    autoUpdater.quitAndInstall(true, true)
+  })
 }
 
 /** 清理更新器资源（定时器等） */
@@ -61,7 +79,6 @@ export function cleanupUpdater(): void {
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   win = mainWindow
 
-  // 配置 electron-updater 日志，转发到 console
   autoUpdater.logger = {
     info: (...args: unknown[]) => console.log('[更新-updater]', ...args),
     warn: (...args: unknown[]) => console.warn('[更新-updater]', ...args),
@@ -69,9 +86,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     debug: (...args: unknown[]) => console.log('[更新-updater:debug]', ...args),
   }
 
-  // 禁用自动下载和自动安装，仅做版本检测
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
+  // 自动下载，退出时自动安装
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
 
   // 监听更新事件
   autoUpdater.on('checking-for-update', () => {
@@ -87,6 +104,27 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
       releaseNotes: typeof info.releaseNotes === 'string'
         ? info.releaseNotes
         : undefined,
+    })
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    setStatus({
+      status: 'downloading',
+      version: (currentStatus as { version?: string }).version || '',
+      progress: {
+        percent: progress.percent,
+        transferred: progress.transferred,
+        total: progress.total,
+        bytesPerSecond: progress.bytesPerSecond,
+      },
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[更新] 下载完成:', info.version)
+    setStatus({
+      status: 'downloaded',
+      version: info.version,
     })
   })
 
@@ -124,5 +162,5 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     win = null
   })
 
-  console.log('[更新] 版本检测模块已初始化（仅检测，不自动下载/安装）')
+  console.log('[更新] 自动更新模块已初始化（自动下载，用户确认后安装）')
 }

@@ -7,8 +7,8 @@
  */
 
 import * as React from 'react'
-import { FileText, FileImage, FileVideo, FileCode } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 
 /** 图片扩展名 */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
@@ -52,17 +52,20 @@ function getExtension(filename: string): string {
   return filename.slice(dot + 1).toLowerCase()
 }
 
-/** 根据扩展名获取文件图标 */
-function getFileIcon(ext: string): React.ReactElement {
-  const iconClass = 'size-3 shrink-0'
-  if (IMAGE_EXTS.has(ext)) return <FileImage className={iconClass} />
-  if (VIDEO_EXTS.has(ext)) return <FileVideo className={iconClass} />
-  if (CODE_EXTS.has(ext)) return <FileCode className={iconClass} />
-  return <FileText className={iconClass} />
+/**
+ * 从路径中剥离末尾的行号/列号后缀（如 :42 或 :42:15）
+ * Agent 模式下模型常输出 file_path:line_number 格式
+ */
+function stripLineCol(filePath: string): { path: string; suffix: string } {
+  const m = filePath.match(/^(.+?)(:\d+(?::\d+)?)$/)
+  if (m && !m[1]!.endsWith(':')) {
+    return { path: m[1]!, suffix: m[2]! }
+  }
+  return { path: filePath, suffix: '' }
 }
 
 interface FilePathChipProps {
-  /** 文件路径（绝对或相对） */
+  /** 文件路径（绝对或相对，可能带行号后缀） */
   filePath: string
   /** 基础目录路径（向后兼容，单值） */
   basePath?: string
@@ -73,11 +76,12 @@ interface FilePathChipProps {
 
 /** 文件路径芯片 — 可点击，触发文件预览 */
 export function FilePathChip({ filePath, basePath, basePaths, className }: FilePathChipProps): React.ReactElement {
-  const filename = getFileName(filePath)
-  const ext = getExtension(filename)
-
   const trimmedPath = filePath.trim()
-  const isAbsolute = trimmedPath.startsWith('/') || /^[A-Z]:\\/.test(trimmedPath)
+  const { path: cleanPath, suffix: lineColSuffix } = stripLineCol(trimmedPath)
+
+  const filename = getFileName(cleanPath)
+
+  const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:\\/.test(cleanPath)
 
   // 候选基础目录列表：优先使用 basePaths；否则退化到 basePath 单值
   const candidateBases = React.useMemo<string[]>(() => {
@@ -91,19 +95,17 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     if (isAbsolute) return trimmedPath
     if (candidateBases.length > 0) {
       const base = candidateBases[0]!
-      return base.endsWith('/') ? `${base}${trimmedPath}` : `${base}/${trimmedPath}`
+      return base.endsWith('/') ? `${base}${cleanPath}` : `${base}/${cleanPath}`
     }
     return trimmedPath
-  }, [trimmedPath, isAbsolute, candidateBases])
+  }, [trimmedPath, cleanPath, isAbsolute, candidateBases])
 
   const handleClick = React.useCallback(() => {
-    // 绝对路径直接预览；相对路径把候选 basePaths 交给主进程依次尝试
-    const target = isAbsolute ? trimmedPath : trimmedPath
-    const bases = isAbsolute ? undefined : (candidateBases.length > 0 ? candidateBases : undefined)
-    window.electronAPI.previewFile(target, bases).catch((error: unknown) => {
+    const bases = candidateBases.length > 0 ? candidateBases : undefined
+    window.electronAPI.previewFile(cleanPath, bases).catch((error: unknown) => {
       console.error('[FilePathChip] 预览文件失败:', error)
     })
-  }, [trimmedPath, isAbsolute, candidateBases])
+  }, [cleanPath, candidateBases])
 
   return (
     <button
@@ -118,8 +120,8 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
         className
       )}
     >
-      {getFileIcon(ext)}
-      <span className="truncate max-w-[240px]">{filename}</span>
+      <FileTypeIcon name={filename} isDirectory={false} size={14} />
+      <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
     </button>
   )
 }
@@ -135,15 +137,18 @@ export function isAbsoluteFilePath(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed.length < 2) return false
 
+  // 剥离末尾行号后缀再检测
+  const { path: clean } = stripLineCol(trimmed)
+
   // macOS/Linux 绝对路径：以 / 开头，至少两级
-  if (trimmed.startsWith('/') && /^\/[^\n]+\/[^\n]+$/.test(trimmed)) {
+  if (clean.startsWith('/') && /^\/[^\n]+\/[^\n]+$/.test(clean)) {
     // 排除常见的非路径模式（如 /regex/ 模式）
-    if (trimmed.endsWith('/') && !trimmed.includes('.')) return false
+    if (clean.endsWith('/') && !clean.includes('.')) return false
     return true
   }
 
   // Windows 绝对路径
-  if (/^[A-Z]:\\/.test(trimmed)) return true
+  if (/^[A-Z]:\\/.test(clean)) return true
 
   return false
 }
@@ -160,16 +165,19 @@ export function isRelativeFilePath(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed.length < 3) return false
 
+  // 剥离末尾行号后缀再检测
+  const { path: clean } = stripLineCol(trimmed)
+
   // 提取扩展名
-  const ext = getExtension(trimmed)
+  const ext = getExtension(clean)
   if (!ext || !ALL_PREVIEWABLE_EXTS.has(ext)) return false
 
   // 必须看起来像文件路径：允许 字母数字、点、横线、下划线、斜杠
   // 排除含空格或特殊字符的（太可能是其他内容）
-  if (!/^[\w./@-]+$/.test(trimmed)) return false
+  if (!/^[\w./@-]+$/.test(clean)) return false
 
   // 排除以点开头的隐藏文件（如 .gitignore），但保留含子路径的目录相对路径（如 .context/file.md）
-  if (trimmed.startsWith('.') && !trimmed.startsWith('./') && !trimmed.includes('/')) return false
+  if (clean.startsWith('.') && !clean.startsWith('./') && !clean.includes('/')) return false
 
   return true
 }

@@ -10,6 +10,7 @@ export interface TrayRecentSessionItem {
 }
 
 export interface TrayMenuModel {
+  runningSessions: TrayRecentSessionItem[]
   recentSessions: TrayRecentSessionItem[]
   moreSessions: TrayRecentSessionItem[]
 }
@@ -34,17 +35,26 @@ function toRecentSessionItem(
 export function createTrayMenuModel(
   sessions: AgentSessionMeta[],
   workspaces: AgentWorkspace[],
+  runningSessionIds: Set<string> = new Set(),
 ): TrayMenuModel {
   const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]))
-  const activeSessions = sessions
-    .filter((session) => !session.archived)
+  const visibleSessions = sessions
+    .filter((session) => !session.archived || runningSessionIds.has(session.id))
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt)
+
+  const runningSessions = visibleSessions
+    .filter((session) => runningSessionIds.has(session.id))
+    .map((session) => toRecentSessionItem(session, workspacesById))
+
+  const recentSessions = visibleSessions
+    .filter((session) => !runningSessionIds.has(session.id))
     .slice(0, TRAY_MORE_LIMIT)
     .map((session) => toRecentSessionItem(session, workspacesById))
 
   return {
-    recentSessions: activeSessions.slice(0, TRAY_RECENT_LIMIT),
-    moreSessions: activeSessions.slice(TRAY_RECENT_LIMIT),
+    runningSessions,
+    recentSessions: recentSessions.slice(0, TRAY_RECENT_LIMIT),
+    moreSessions: recentSessions.slice(TRAY_RECENT_LIMIT),
   }
 }

@@ -26,8 +26,14 @@ interface ReleaseCache {
 
 let releaseCache: ReleaseCache | null = null
 
-/** 缓存有效期（5 分钟） */
-const CACHE_TTL = 5 * 60 * 1000
+/** 单个 Release 缓存（按 tag） */
+const tagCache = new Map<string, { data: GitHubRelease; timestamp: number }>()
+
+/** 缓存有效期（30 分钟） */
+const CACHE_TTL = 30 * 60 * 1000
+
+/** Rate limit 冷却标记 */
+let rateLimitUntil = 0
 
 /**
  * 从 GitHub API 获取 releases
@@ -36,6 +42,11 @@ const CACHE_TTL = 5 * 60 * 1000
  * @returns Release 数据
  */
 async function fetchFromGitHub<T>(endpoint: string): Promise<T> {
+  // Rate limit 冷却期内直接跳过
+  if (Date.now() < rateLimitUntil) {
+    throw new Error('GitHub API rate limit cooldown')
+  }
+
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO.owner}/${GITHUB_REPO.repo}${endpoint}`
 
   console.log(`[GitHub Release] 正在请求: ${url}`)
@@ -46,6 +57,12 @@ async function fetchFromGitHub<T>(endpoint: string): Promise<T> {
       'User-Agent': 'Proma-Desktop-App',
     },
   })
+
+  if (response.status === 403 || response.status === 429) {
+    // Rate limited — 冷却 15 分钟
+    rateLimitUntil = Date.now() + 15 * 60 * 1000
+    throw new Error('GitHub API rate limit exceeded, cooling down for 15 minutes')
+  }
 
   if (!response.ok) {
     const errorText = await response.text()
@@ -150,13 +167,24 @@ export async function listReleases(
  */
 export async function getReleaseByTag(tag: string): Promise<GitHubRelease | null> {
   try {
+    // 检查缓存
+    const cached = tagCache.get(tag)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data
+    }
+
     const release = await fetchFromGitHub<GitHubRelease>(
       `/releases/tags/${tag}`
     )
     console.log(`[GitHub Release] 获取 Release: ${tag}`)
+
+    tagCache.set(tag, { data: release, timestamp: Date.now() })
     return release
   } catch (error) {
     console.error(`[GitHub Release] 获取 Release ${tag} 失败:`, error)
+    // 返回过期缓存
+    const cached = tagCache.get(tag)
+    if (cached) return cached.data
     return null
   }
 }

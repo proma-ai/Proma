@@ -121,6 +121,12 @@ export interface VoiceDictationTestResult {
   message: string
 }
 
+/** 麦克风权限检查结果 */
+export interface MicPermissionResult {
+  status: 'granted' | 'denied' | 'not-determined' | 'unsupported'
+  platform: NodeJS.Platform
+}
+
 /** 用户自定义快捷键覆盖（持久化到 settings.json） */
 export interface ShortcutOverrides {
   [shortcutId: string]: {
@@ -273,6 +279,10 @@ export const VOICE_DICTATION_IPC_CHANNELS = {
   STATE: 'voice-dictation:state',
   /** 主窗口插入文本 */
   INSERT_TEXT: 'voice-dictation:insert-text',
+  /** 检查麦克风权限状态 */
+  CHECK_MIC_PERMISSION: 'voice-dictation:check-mic-permission',
+  /** 请求麦克风权限 */
+  REQUEST_MIC_PERMISSION: 'voice-dictation:request-mic-permission',
 } as const
 
 /** 快速任务提交输入 */

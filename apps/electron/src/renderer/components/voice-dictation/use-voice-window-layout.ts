@@ -4,7 +4,7 @@
 
 import * as React from 'react'
 
-const WINDOW_HEIGHT_BUFFER = 16
+const WINDOW_HEIGHT_BUFFER = 6
 const LINE_HEIGHT = 28
 const MIN_TRANSCRIPT_HEIGHT = 34
 const MAX_TRANSCRIPT_HEIGHT = 260
@@ -86,7 +86,7 @@ export function useVoiceWindowLayout(input: VoiceWindowLayoutInput): VoiceWindow
         ? viewportMaxTranscriptHeight
         : null
     const nextTranscriptHeight = nextTranscriptMaxHeight ?? transcriptNaturalHeight
-    const extraBuffer = nextTranscriptMaxHeight === null ? LINE_HEIGHT : 0
+    const extraBuffer = nextTranscriptMaxHeight === null ? 8 : 0
     const nextHeight = Math.ceil(fixedHeight + nextTranscriptHeight + WINDOW_HEIGHT_BUFFER + extraBuffer)
 
     setTranscriptMaxHeight((current) => {

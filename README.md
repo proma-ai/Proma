@@ -1,157 +1,278 @@
 # Proma
 
+Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agent、工作区、Skills、MCP、远程机器人和记忆能力放在同一个开源客户端里。
+
+它不是只面向闲聊的聊天框，而是一个可以长期沉淀个人工作流的 Agent 工作台：简单问题用 Chat，复杂任务交给 Agent，数据和配置尽量留在本地。
+
+![Proma 海报](https://img.erlich.fun/personal-blog/uPic/pb.png)
+
 <video width="560" controls>
   <source src="https://img.erlich.fun/personal-blog/uPic/%E7%AE%80%E5%8D%95%E4%BB%8B%E7%BB%8D%20Proma.mp4" type="video/mp4">
 </video>
 
-> **📖 新手？从这里开始 →** [**Proma 使用教程系列(点击此处)**](./tutorial/tutorial.md) — 从零开始配置环境、连接大模型，3-5 分钟即可上手。
+[English README](./README.en.md) | [新手教程](./tutorial/tutorial.md) | [下载开源版](https://github.com/ErlichLiu/Proma/releases) | [下载商业版](https://proma.cool/download)
 
-下一代集成通用 Agent 的 AI 桌面应用，支持对话、Agent、Agent Teams **等能力**，本地优先、多供应商支持、完全开源。支持远程通过飞书机器人与 Agent 对话和交互，甚至把 Proma Agent 拉进群组替你完成工作，跟同事实现 Agent 协作，让你用手机也可以处理很多必要的工作。
+## 现在能做什么
 
-[English version README.md](./README.en.md)
-
-### ✦ 核心能力
-
-> **Chat** · 多模型对话 &nbsp;│&nbsp; **Agent** · 自主通用 Agent &nbsp;│&nbsp; **Agent Teams** · 多 Agent 协同 &nbsp;│&nbsp; **Skills & MCP** · 可扩展工具链
->
-> **飞书远程** · 手机也能用 Agent &nbsp;│&nbsp; **记忆** · 跨会话理解你 &nbsp;│&nbsp; **多供应商** · Anthropic / OpenAI / Google / DeepSeek / MiniMax / Kimi / 智谱 &nbsp;│&nbsp; **本地优先** · 数据全在你手里
-
-![Proma 海报](https://img.erlich.fun/personal-blog/uPic/pb.png)
-
-### 并行运行的商业版本
-同时 Proma 也支持商业的版本，如果你需要未来更多的**云端功能**｜**稳定靠谱的 API** ｜**更划算省心的订阅包**｜**简单的使用体验**，也欢迎支持 Proma 的商业版本：https://proma.cool/download 即可下载使用，订阅包低至官方价 4 折。
-
-Proma 的核心意义不在于替代任何一款软件，目前只实现了 Proma 的基础设施部分，接下来 Proma 将继续实现多 Agents 协同工作（个人与他人）、Agents 与外部的链接、Tools 和 Skills 固化，以及利用对用户的理解和记忆实现主动提供软件和建议的能力等，Proma 正在借助 VibeCoding 工具在飞速进化，欢迎大家 PR。
-
-## Proma 截图
-
-### Chat 模式
-Proma 的聊天模式，支持多模型切换，支持附加文件对话。
-
-![Proma Chat Mode](https://img.erlich.fun/personal-blog/uPic/tBXRKI.png)
-
-### Agent 模式
-Proma Agent 模式，通用 Agent 能力，支持 Cladue 全系列、Minimax M2.1、Kimi K2.5、智谱 GLM 等模型，支持第三方渠道。优雅、简洁、丝滑、确信的流式输出。
-
-![Proma Agent Mode](https://img.erlich.fun/personal-blog/uPic/3ZHWyA.png)
-
-### Agent Teams
-Agent Teams 或者 Agent 蜂群将会是 2026 年 Agent 主要的发展方向之一，Proma 也已经支持 Agent Teams 能力，并且可以自动根据用户的任务复杂度自动组件 Agent Teams，实际测试可以将复杂任务的处理能力和效果提高至少 5% - 20%。当运行 Agent Teams 时你将在右侧看到具体的 Agent 的工作状态。（也可以通过自然语言主动要求使用 Agent Teams，并为每个 Agent 指定它的工作或研究范围）
-![Proma Agent Teams](https://img.erlich.fun/personal-blog/uPic/vNVpRu.png)
-
-### Skill & MCP
-Proma Skills 和 MCP，默认内置 Brainstorming 和办公软件 Skill，支持通过对话就能自动帮助你寻找和安装 Skills。
-
-![Proma Default Skills and Mcp](https://img.erlich.fun/personal-blog/uPic/PNBOSt.png)
-
-### 通过飞书远程使用 Proma / 支持私聊和群组
-Proma 支持通过使用飞书机器人的方式来远程使用 Proma Agent 能力，支持切换工作区（/workspace 命令），支持创建新会话（/new 命令），这样就可以实现类似截图中的效果，可以为不同的工作区先配置上（或直接通过 Proma Agent 来帮你配置）对应的 Skills / MCP 以及文件附录等资源，即可远程也能让 Proma Agent 帮你完成工作。譬如远程帮你进行调研，并将调研文件通过邮件或其他方式发送到同事的邮箱、远程合并 PR 或者修复紧急的 Bug 并推送上线等。
-
-也支持将 Proma Agent 拉进你的飞书群组，可以跟同事共享你积攒下来的 Skills 和 MCP 能力，利用本地的文件和飞书文档一起完成更智能的 Agent 协作，甚至可以直接用 Proma Agent 来完成对外部用户的服务。
-
-![Proma Lark Demo](https://img.erlich.fun/personal-blog/uPic/nNu4wA.png)
-
-实际的配置过程很简单，但我也知道这对于任何新手来说认知压力会比较大，但请相信我克服这种恐惧，3 分钟足够。
-
-![Proma Lark Config](https://img.erlich.fun/personal-blog/uPic/wTQisd.png)
-
-![Proma Lark Command](https://img.erlich.fun/personal-blog/uPic/tvzfZp.png)
-
-### 记忆能力
-Proma 记忆功能，Chat 和 Agent 共享记忆，让 AI 真正了解你、记住你的偏好和习惯。
-![Proma memory settings](https://img.erlich.fun/personal-blog/uPic/94B0LN.png)
-
-![Proma memory dmeo](https://img.erlich.fun/personal-blog/uPic/Wi8QfB.png)
-
-
-### Proma 渠道配置功能
-
-Proma 全协议大模型渠道支持，支持国内外所有渠道模型，通过 Base URL + API KEY 配置。
-
-![Proma Mutili Provider Support](https://img.erlich.fun/personal-blog/uPic/uPPazd.png)
-
-## 特性
-
-- **多供应商支持** — Anthropic、OpenAI、Google、DeepSeek、Moonshot、智谱 GLM、MiniMax、豆包、通义千问，以及任何 OpenAI 兼容端点
-- **AI Agent 模式** — 基于 Claude Agent SDK 0.2.84 的自主通用 Agent，支持工作区隔离和权限管理
-- **Agent Teams** — 多 Agent 协同工作，自动组建团队处理复杂任务，提升 5-20% 效果
-- **远程全天候使用 Proma** — 基于飞书/Lark 的机器人能力，实现远程使用 Proma Agent，支持私聊和群组，搭配工作区的 Skill 和 MCP 实现远程工作
-- **Skills & MCP** — 可扩展工具链，默认内置 Brainstorming 和办公软件 Skill，支持通过对话自动寻找和安装 Skills
-- **流式输出 & 思考模式** — 实时流式响应，可视化扩展思考过程
-- **丰富渲染** — Mermaid 图表、语法高亮代码块、Markdown、数学公式（KaTeX）
-- **附件 & 文档解析** — 上传图片，解析 PDF/Office/文本文件内容到对话中
-- **记忆功能** — Chat 和 Agent 共享记忆，AI 记住你的偏好、习惯和上下文，跨会话持续理解你
-- **本地优先** — 所有数据存储在 `~/.proma/`，JSON + JSONL 格式，无数据库，完全可移植
-- **主题切换** — 亮色/暗色模式，跟随系统偏好
-- **自动更新** — 内置 Electron Updater，自动检测和安装更新
+- **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
+- **Agent 模式**：基于 `@anthropic-ai/claude-agent-sdk` 的通用 Agent，支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
+- **Agent Teams / Tasks**：复杂任务可以拆分为多个子 Agent / Task，右侧面板展示团队工作状态和任务输出。
+- **Skills & MCP**：每个工作区可以独立配置 Skills、MCP Server 和工作区文件，适合沉淀可复用能力。
+- **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
+- **记忆与工具**：Chat 和 Agent 可共享记忆能力，并支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
+- **本地优先**：会话、工作区、附件、配置、Skills 等默认存储在 `~/.proma/`，使用 JSON / JSONL 文件组织，不依赖本地数据库。
+- **桌面体验**：自动更新、代理设置、文件预览、全局快捷键、快速任务窗口、语音输入、亮色 / 暗色 / 跟随系统主题。
 
 ## 快速开始
 
-下载适合你平台的最新版本：
+### 下载安装
 
-**[下载 Proma](https://github.com/ErlichLiu/Proma/releases)**
+从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本。当前 release notes 以 `v0.9.12` 为准，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
 
-## 配置指南
+如果你希望开箱即用、减少 API 配置成本，也可以使用 [Proma 商业版](https://proma.cool/download)。商业版和开源版并行运行，主要区别是商业版提供内置渠道和订阅方案。
 
-### 添加渠道
+### 首次配置
 
-进入 **设置 > 渠道管理**，点击 **添加渠道**，选择供应商并输入 API Key。Proma 会自动填充正确的 API 地址。点击 **测试连接** 验证，然后 **获取模型** 加载可用模型列表。
+1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，尤其是 Git、Node.js / Bun 以及可用的 Shell。
+2. 进入 **设置 > 渠道**，添加至少一个 AI 供应商渠道，填写 Base URL、API Key 和模型列表。
+3. Chat 模式可以使用 OpenAI、Anthropic、Google 或 OpenAI 兼容协议的渠道。
+4. Agent 模式需要 Anthropic 协议或 Anthropic 兼容协议渠道，例如 Anthropic、DeepSeek、Kimi API、Kimi Coding Plan。
+5. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
+6. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
 
-### Agent 模式（仅限 Anthropic）
+## 模式选择
 
-Agent 模式需要一个 **Anthropic** 渠道。添加后，进入 **设置 > Agent** 选择你的 Anthropic 渠道和模型（推荐 Claude Sonnet 4 / Opus 4）。底层使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk)。
+### Chat 适合
 
-### 特殊供应商端点
+- 日常问答、解释、翻译、润色、轻量代码讨论。
+- 读取附件内容后做总结、改写、比较。
+- 使用联网搜索或记忆工具增强一次性对话。
+- 同时对比多个模型输出，或用不同系统提示词做探索。
 
-MiniMax、Kimi（Moonshot）和智谱 GLM 使用专用 API 端点 — 选择供应商时会自动配置。三者均支持**编程会员**套餐的 API 访问：
+### Agent 适合
 
-| 供应商 | Chat 模式 | Agent 模式 | 备注 |
-|--------|----------|-----------|------|
-| MiniMax | `https://api.minimaxi.com/v1` | `https://api.minimaxi.com/anthropic` | 支持 MiniMax Pro 会员 |
-| Kimi | `https://api.moonshot.cn/v1` | `https://api.moonshot.cn/anthropic` | 支持 Moonshot 开发者套餐 |
-| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `https://open.bigmodel.cn/api/anthropic` | 支持智谱开发者套餐 |
+- 修改、创建、整理本地文件。
+- 调研、编写报告、处理多步骤任务。
+- 使用 MCP、Skills、Shell、Git、项目文件等外部上下文。
+- 需要权限确认、计划模式、后台任务或远程机器人持续跟进的工作。
+
+简单说：**只需要回答时用 Chat，需要行动和交付结果时用 Agent。**
+
+## 截图
+
+### Chat 快速分析
+
+用 Chat 处理轻量但真实的分析任务：整理读者关注点、生成对比表，并把首屏文案快速定稿。
+
+![Proma Chat 快速分析](./docs/assets/screenshots/proma-chat-demo.png)
+
+### Agent 工作台
+
+Agent 在工作区里读取文件、推进任务、输出表格化结论，并把可复用文件保留在右侧工作区面板中。
+
+![Proma Agent 工作台](./docs/assets/screenshots/proma-agent-demo.png)
+
+### Skills
+
+每个工作区都可以沉淀专属 Skills。截图中的 `feedback-synthesis` 用于把用户反馈、访谈记录和 issue 聚合成主题、证据与优先级建议。
+
+![Proma 工作区 Skills](./docs/assets/screenshots/proma-skills-demo.png)
+
+### Skills & MCP
+
+同一个工作区可以管理 stdio / HTTP MCP Server，按需启用或关闭，让 Agent 在不同项目里获得不同的外部上下文。
+
+![Proma MCP 配置](./docs/assets/screenshots/proma-mcp-demo.png)
+
+### 流式语音输入(支持全局输入)
+Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用和 Proma 外部使用：
+- Proma 内部使用：Ctrl + ` 触发识别，再次按下结束自动输入到 Proma 内对应的输入框
+- Proma 外部使用：Ctrl + ` 触发识别，再次按下结束自动输入到当前的光标所在处，如无光标则默认写入到剪贴板
+- 
+![Proma 语音输入](./docs/assets/screenshots/proma-typeless-input.png)
+
+## 支持的模型渠道
+
+| 供应商 | Chat | Agent | 协议说明 |
+| --- | --- | --- | --- |
+| Anthropic | 支持 | 支持 | Anthropic Messages API |
+| DeepSeek | 支持 | 支持 | Anthropic 兼容协议 |
+| Kimi API | 支持 | 支持 | Anthropic 兼容协议 |
+| Kimi Coding Plan | 支持 | 支持 | Anthropic 兼容协议，使用专用认证头 |
+| OpenAI | 支持 | 暂不支持 | Chat Completions |
+| Google | 支持 | 暂不支持 | Gemini Generative Language API |
+| 智谱 AI | 支持 | 支持 | Anthropic 兼容协议 |
+| MiniMax | 支持 | 支持 | Anthropic 兼容协议 |
+| 豆包 | 支持 | 支持 | Anthropic 兼容协议 |
+| 通义千问 | 支持 | 支持 | Anthropic 兼容协议 |
+| 自定义端点 | 支持 | 暂不支持 | OpenAI 兼容协议 |
+
+Agent 模式底层使用 Claude Agent SDK，因此目前要求渠道提供 Anthropic 或 Anthropic 兼容协议。Chat 模式则通过 `@proma/core` 的 Provider Adapter 统一接入不同协议。
+
+## 本地数据
+
+Proma 采用本地文件存储，方便备份、迁移和排查问题。
+
+```text
+~/.proma/
+├── channels.json
+├── conversations.json
+├── conversations/
+│   └── {conversation-id}.jsonl
+├── agent-sessions.json
+├── agent-sessions/
+│   └── {session-id}.jsonl
+├── agent-workspaces/
+│   └── {workspace-slug}/
+│       ├── workspace-files/
+│       ├── mcp.json
+│       └── skills/
+├── attachments/
+├── user-profile.json
+├── settings.json
+└── sdk-config/
+```
+
+API Key 会通过 Electron `safeStorage` 加密后写入 `channels.json`。Proma 不使用本地数据库，核心数据结构以 JSON 配置和 JSONL 追加日志为主。
+
+## 开发
+
+Proma 是 Bun workspace monorepo。
+
+```text
+proma-v2/
+├── packages/
+│   ├── shared/     # 共享类型、IPC 常量、配置、工具函数
+│   ├── core/       # Provider Adapter、SSE、代码高亮
+│   └── ui/         # 共享 React UI 组件
+└── apps/
+    └── electron/   # Electron 桌面应用
+```
+
+当前主要包版本：
+
+| 包 | 版本 | 职责 |
+| --- | --- | --- |
+| `@proma/electron` | `0.9.12` | Electron 桌面应用 |
+| `@proma/shared` | `0.1.17` | 共享类型、IPC 常量、配置和工具 |
+| `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
+| `@proma/ui` | `0.1.3` | 共享 React UI 组件 |
+
+常用命令：
+
+```bash
+# 安装依赖
+bun install
+
+# 开发模式：自动启动 Vite + Electron + 热重载
+bun run dev
+
+# 构建 Electron 应用
+bun run electron:build
+
+# 构建并运行
+bun run electron:start
+
+# 类型检查
+bun run typecheck
+
+# 测试
+bun test
+```
+
+Electron 子应用内也提供更细的脚本：
+
+```bash
+cd apps/electron
+
+bun run dev:vite
+bun run dev:electron
+bun run build:main
+bun run build:preload
+bun run build:renderer
+bun run dist:fast
+```
 
 ## 技术栈
 
-- **运行时** — Bun 1.2.5+
-- **桌面框架** — Electron 39.5.1
-- **前端框架** — React 18.3.1
-- **状态管理** — Jotai 2.17.1
-- **UI 组件** — Radix UI
-- **样式** — Tailwind CSS 3.4.17
-- **富文本编辑器** — TipTap 3.19.0
-- **代码高亮** — Shiki 3.22.0
-- **构建工具** — Vite 6.0.3（渲染进程）+ esbuild 0.24.0+（主进程/预加载）
-- **打包工具** — Electron Builder 25.1.8
-- **语言** — TypeScript 5.0.0+
-- **Agent SDK** — @anthropic-ai/claude-agent-sdk 0.2.120
-- **飞书 SDK** — @larksuiteoapi/node-sdk
+| 层级 | 技术 |
+| --- | --- |
+| 运行时 | Bun |
+| 桌面框架 | Electron 39 |
+| 前端 | React 18 + TypeScript |
+| 状态管理 | Jotai |
+| 样式 | Tailwind CSS + Radix UI |
+| 富文本输入 | TipTap |
+| Markdown / 图表 / 公式 | React Markdown + Beautiful Mermaid + KaTeX |
+| 代码高亮 | Shiki |
+| 构建 | Vite + esbuild |
+| 分发 | electron-builder |
+| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.2.123` |
+
+## 架构概览
+
+Proma 的核心通信路径是：
+
+```text
+shared 类型和 IPC 常量
+  -> main/ipc.ts 注册处理器
+  -> preload/index.ts 暴露 window.electronAPI
+  -> renderer Jotai atoms 和 React 组件调用
+```
+
+主进程服务集中在 `apps/electron/src/main/lib/`：
+
+- `agent-orchestrator.ts`：Agent 编排、环境变量、SDK 调用、事件流、错误处理。
+- `agent-session-manager.ts`：Agent 会话索引和 JSONL 消息持久化。
+- `agent-workspace-manager.ts`：工作区、MCP、Skills 和工作区文件管理。
+- `chat-service.ts`：Chat 流式调用、Provider Adapter、工具活动。
+- `conversation-manager.ts`：Chat 会话索引和消息存储。
+- `channel-manager.ts`：渠道 CRUD、API Key 加密、连接测试、模型获取。
+- `feishu-bridge.ts` / `dingtalk-bridge.ts` / `wechat-bridge.ts`：远程机器人桥接。
+- `memory-service.ts`、`chat-tool-*`、`document-parser.ts`、`workspace-watcher.ts`：记忆、工具、文档解析和文件监听。
+
+渲染进程以 Jotai 管理状态，关键 atoms 位于 `apps/electron/src/renderer/atoms/`。Agent IPC 监听器在应用顶层全局挂载，避免切换页面时丢失流式事件、权限请求或后台任务状态。
+
+## 打包注意事项
+
+`@anthropic-ai/claude-agent-sdk` 在 `0.2.113+` 后改为平台 native binary 分发。Proma 的 esbuild 配置会把 SDK 标记为 external，`electron-builder.yml` 会把 SDK 主包和平台子包一起打进安装包。
+
+修改打包配置时请特别确认：
+
+- 主进程 esbuild 保持 `--external:@anthropic-ai/claude-agent-sdk`。
+- `apps/electron/package.json` 的 `optionalDependencies` 包含目标平台的 SDK 子包。
+- `apps/electron/electron-builder.yml` 的 `files` 包含 SDK 主包和平台子包。
+- 其它普通 npm 依赖通常应由 esbuild 打包进 `main.cjs`，不要随意 external。
+
+更完整的工程约定见 [AGENTS.md](./AGENTS.md)。
+
+## 贡献
+
+欢迎修 Bug、补文档、加测试、完善体验，也欢迎围绕真实场景提交新的 Skills、MCP 配置或 Agent 工作流。
+
+提交 PR 前建议先确认：
+
+- 使用 Bun 运行脚本，不混用 npm / pnpm lockfile。
+- 状态管理使用 Jotai。
+- 尽量保持本地优先，优先使用配置文件和 JSON / JSONL。
+- TypeScript 不使用 `any`，对象结构优先使用 `interface`。
+- 新增 IPC 时同步修改 shared 类型、main handler、preload bridge 和 renderer 调用。
+- 影响包行为时递增对应 package 的 patch 版本。
+- 能用测试覆盖的行为尽量补上测试，尤其是共享逻辑、IPC 契约和持久化格式。
+
+Proma 目前设有 PR 赠金计划。提交 PR 时可以在描述中留下邮箱，方便后续发放。
+
+![Proma PR Bounty](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
 
 ## 致谢
 
-Proma 的诞生离不开这些优秀的开源项目：
+- [Shiki](https://shiki.style/)：代码高亮。
+- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid)：Mermaid 图表渲染。
+- [Cherry Studio](https://github.com/CherryHQ/cherry-studio)：多供应商桌面 AI 产品启发。
+- [Lobe Icons](https://github.com/lobehub/lobe-icons)：AI / LLM 品牌图标。
+- [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss)：Agent SDK 集成模式参考。
+- [MemOS](https://memos.openmem.net)：记忆能力参考与集成。
 
-- [Shiki](https://shiki.style/) — 语法高亮
-- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid) — 图表渲染
-- [Cherry Studio](https://github.com/CherryHQ/cherry-studio) — 多供应商桌面 AI 的灵感来源
-- [Lobe Icons](https://github.com/lobehub/lobe-icons) — AI/LLM 品牌图标集
-- [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss) — Agent SDK 集成模式参考
-- [MemOS](https://memos.openmem.net) - Proma 的记忆功能实现
+## 许可证
 
-## 参与贡献
-
-欢迎大家参与 Proma 的开发！无论是修复 Bug、新增功能还是改进文档，我们都非常欢迎你的贡献。
-
-**PR 赠金活动** — Proma 目前设有 PR 赠金计划，对合并的 PR 自动给予慷慨的赠金，支持在 Claude Code 等产品中使用，帮助大家更好地进行 AI 辅助开发。提交 PR 时请在描述中留下你的邮箱信息即可。
-
-![Proma Given](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
-
-
-## 赞助支持（招募中）
-AI 时代最能玩梗，但又一语中的炒作组织，惊叹于对这个 AI 时代的精准嘲讽，点透疯癫。微信公众号搜索：**葬 AI**
-
-![葬 AI](https://img.erlich.fun/personal-blog/uPic/zang-ai.png)
-
-## 开源许可
-
-[MIT](./LICENSE)
+当前 workspace 包在 `package.json` 中声明为 `Apache-2.0`。根目录许可证文件尚未补齐时，请以仓库实际发布内容和各包声明为准。

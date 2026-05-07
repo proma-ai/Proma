@@ -16,8 +16,11 @@ directories:
 # 压缩配置
 compression: normal
 
-# ASAR 打包配置（禁用 ASAR，避免 SDK symlink 路径越界问题）
-asar: false
+# ASAR 打包配置
+# 启用 ASAR 归档，将 SDK native binary 解压到 app.asar.unpacked/ 避免路径问题
+asar: true
+asarUnpack:
+  - "node_modules/@anthropic-ai/**"
 
 # 跳过 npm install（代码已被 esbuild/Vite 打包，npm 不识别 workspace:* 协议）
 npmRebuild: false

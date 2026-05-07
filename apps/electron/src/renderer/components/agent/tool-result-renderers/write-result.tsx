@@ -4,6 +4,7 @@
 
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { FilePathChip } from '@/components/ai-elements/file-path-chip'
 
 interface WriteResultRendererProps {
   result: string
@@ -24,10 +25,9 @@ export function WriteResultRenderer({ result, isError, input }: WriteResultRende
 
   if (!content) {
     const filePath = typeof input.file_path === 'string' ? input.file_path : ''
-    const filename = filePath.split(/[/\\]/).pop() ?? filePath
     return (
-      <div className="text-[12px] text-muted-foreground">
-        已写入 <span className="font-mono text-foreground/70">{filename || '文件'}</span>
+      <div className="text-[12px] text-muted-foreground flex items-center gap-1">
+        已写入 {filePath ? <FilePathChip filePath={filePath} /> : <span className="font-mono text-foreground/70">文件</span>}
       </div>
     )
   }

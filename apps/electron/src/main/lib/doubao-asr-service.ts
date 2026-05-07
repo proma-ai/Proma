@@ -135,6 +135,7 @@ async function buildCloudSpeechUrl(settings: VoiceDictationSettings): Promise<st
   return url.toString()
 }
 
+
 function parseCustomHotwords(value: string): DoubaoAsrHotword[] {
   const seen = new Set<string>()
   const hotwords: DoubaoAsrHotword[] = []
@@ -502,6 +503,7 @@ export async function startDoubaoAsrSession(
     ws.on('close', () => {
       active.closed = true
       activeSessions.delete(sessionId)
+      sendState(win, { sessionId, status: 'idle', message: 'asr_session_ended' })
     })
 
     ws.once('error', (error: Error) => {

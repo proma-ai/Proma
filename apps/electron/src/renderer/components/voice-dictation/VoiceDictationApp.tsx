@@ -7,8 +7,8 @@ import { Check, Clipboard, Loader2, Mic, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { VoiceDictationCommitResult, VoiceDictationSettings, VoiceDictationStateEvent, VoiceDictationTranscriptEvent } from '../../../types'
 import { CHUNK_BYTES, concatAudioBuffers, floatTo16BitPcm, splitChunk } from './voice-audio-utils'
-import { mergeVoiceDictationTranscript, normalizeVoiceDictationText } from './voice-text-normalizer'
-import type { VoiceDictationTranscriptMergeState } from './voice-text-normalizer'
+import { mergeVoiceDictationTranscript } from './voice-transcript-merge'
+import type { VoiceDictationTranscriptMergeState } from './voice-transcript-merge'
 import { useVoiceWindowLayout } from './use-voice-window-layout'
 
 const MAX_QUEUED_CHUNKS = 60
@@ -26,8 +26,9 @@ export function VoiceDictationApp(): React.ReactElement {
   const sessionIdRef = React.useRef<string | null>(null)
   const transcriptRef = React.useRef('')
   const transcriptMergeStateRef = React.useRef<VoiceDictationTranscriptMergeState>({
-    finalizedText: '',
-    partialText: '',
+    committedText: '',
+    currentSessionText: '',
+    currentSessionId: '',
   })
   const streamRef = React.useRef<MediaStream | null>(null)
   const audioContextRef = React.useRef<AudioContext | null>(null)
@@ -59,6 +60,8 @@ export function VoiceDictationApp(): React.ReactElement {
     document.documentElement.style.background = 'hsl(var(--background))'
     document.body.style.overflow = 'hidden'
     document.documentElement.style.overflow = 'hidden'
+    document.body.style.margin = '0'
+    document.body.style.padding = '0'
   }, [])
 
   React.useEffect(() => {
@@ -255,12 +258,29 @@ export function VoiceDictationApp(): React.ReactElement {
     setTranscript('')
     transcriptRef.current = ''
     transcriptMergeStateRef.current = {
-      finalizedText: '',
-      partialText: '',
+      committedText: '',
+      currentSessionText: '',
+      currentSessionId: '',
     }
     setCommitResult(null)
     setStatus('recording')
     setMessage('请开始说话')
+
+    // 预检麦克风权限
+    const permission = await window.electronAPI.checkMicrophonePermission()
+    if (permission.status === 'denied') {
+      setStatus('error')
+      setMessage('麦克风权限已被系统阻止，请在系统设置中允许 Proma 访问麦克风')
+      return
+    }
+    if (permission.status === 'not-determined') {
+      const requested = await window.electronAPI.requestMicrophonePermission()
+      if (requested.status !== 'granted') {
+        setStatus('error')
+        setMessage('需要麦克风权限才能使用语音输入')
+        return
+      }
+    }
 
     const nextSessionId = crypto.randomUUID()
     setSessionId(nextSessionId)
@@ -325,11 +345,11 @@ export function VoiceDictationApp(): React.ReactElement {
 
     const cleanupTranscript = window.electronAPI.onVoiceDictationTranscript((event: VoiceDictationTranscriptEvent) => {
       if (event.sessionId !== sessionIdRef.current) return
-      const normalizedText = normalizeVoiceDictationText(event.text)
       const mergedTranscript = mergeVoiceDictationTranscript(
         transcriptMergeStateRef.current,
-        normalizedText,
+        event.text,
         event.isFinal,
+        event.sessionId,
       )
       transcriptMergeStateRef.current = mergedTranscript.state
       setTranscript(mergedTranscript.text)
@@ -343,6 +363,26 @@ export function VoiceDictationApp(): React.ReactElement {
       if (event.sessionId && event.sessionId !== sessionIdRef.current) return
       if (event.status === 'connecting') {
         setStatus('recording')
+        return
+      }
+      // ASR 连接被服务端关闭（VAD 静音超时），如果仍在录音则自动重连
+      if (event.status === 'idle' && event.message === 'asr_session_ended' && !stoppingRef.current) {
+        const nextSessionId = crypto.randomUUID()
+        setSessionId(nextSessionId)
+        sessionIdRef.current = nextSessionId
+        asrReadyRef.current = false
+        queuedAudioRef.current = []
+        window.electronAPI.startVoiceDictation({ sessionId: nextSessionId })
+          .then(() => {
+            if (sessionIdRef.current !== nextSessionId) return
+            asrReadyRef.current = true
+            flushQueuedAudio()
+          })
+          .catch((error) => {
+            const textMessage = error instanceof Error ? error.message : '未知错误'
+            setStatus('error')
+            setMessage(textMessage)
+          })
         return
       }
       setStatus(event.status)
@@ -361,26 +401,34 @@ export function VoiceDictationApp(): React.ReactElement {
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
       cleanupAudio()
     }
-  }, [cleanupAudio, scheduleCommit, startRecording, stopRecording])
+  }, [cleanupAudio, flushQueuedAudio, scheduleCommit, startRecording, stopRecording])
 
   const busy = status === 'connecting' || status === 'recording' || status === 'stopping'
   return (
-    <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden bg-background px-3 pt-3 pb-2">
+    <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden rounded-xl bg-background px-2 pt-2 pb-1.5">
       <div ref={panelRef} className="flex min-h-0 w-full flex-col overflow-hidden">
-        <div ref={headerRef} className="flex shrink-0 items-center justify-between px-3 pt-1 pb-3">
+        <div ref={headerRef} className="flex shrink-0 items-center justify-between px-2 pt-0.5 pb-2">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={`relative flex size-8 items-center justify-center rounded-full ${status === 'error' ? 'bg-destructive/12 text-destructive' : 'bg-primary/12 text-primary'}`}>
-              {status === 'recording' && (
-                <span
-                  className="absolute inset-0 rounded-full bg-primary/20 transition-transform duration-100"
-                  style={{ transform: `scale(${1 + volume * 0.35})` }}
-                />
-              )}
+            <div
+              className={`relative flex size-8 items-center justify-center rounded-full ${status === 'error' ? 'bg-destructive/12 text-destructive' : 'bg-primary/12 text-primary'}`}
+            >
               {status === 'connecting' || status === 'stopping'
                 ? <Loader2 className="size-4 animate-spin" />
                 : status === 'completed'
                   ? <Check className="size-4" />
-                  : <Mic className="size-4" />}
+                  : status === 'recording'
+                    ? (
+                      <div className="flex items-center gap-[3px] h-4">
+                        {[0.6, 1, 0.75, 0.9, 0.5].map((scale, i) => (
+                          <span
+                            key={i}
+                            className="w-[3px] rounded-full bg-primary transition-all duration-100"
+                            style={{ height: `${Math.max(4, Math.round(volume * scale * 16))}px` }}
+                          />
+                        ))}
+                      </div>
+                    )
+                    : <Mic className="size-4" />}
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">Proma 语音输入</div>
@@ -412,7 +460,7 @@ export function VoiceDictationApp(): React.ReactElement {
           </div>
         </div>
 
-        <div className="min-h-0 px-3">
+        <div className="min-h-0 px-2">
           <div className="overflow-hidden rounded-lg bg-muted/45">
             <div ref={hintBarRef} className="flex min-h-8 shrink-0 items-center justify-between gap-3 px-3 py-1.5 text-xs leading-4 text-muted-foreground">
               <span className="truncate">
@@ -434,7 +482,7 @@ export function VoiceDictationApp(): React.ReactElement {
                 overflowY: 'auto',
               }}
             >
-              <div className="whitespace-pre-wrap break-words">
+              <div className="whitespace-pre-wrap break-words overflow-hidden">
                 {transcript || (
                   <span className="text-muted-foreground/60">
                     {status === 'idle' ? '等待 Ctrl+～ 唤起' : '请开始说话'}

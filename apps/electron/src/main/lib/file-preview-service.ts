@@ -1456,20 +1456,79 @@ function watchExternalChange(previewWindow: BrowserWindow, state: PreviewWindowS
 }
 
 /**
+ * 在目录中递归搜索指定文件名（用于路径失效时的 fallback）
+ * 限制搜索深度和目录数量，避免阻塞主进程
+ */
+function searchFileInDir(dir: string, targetName: string, maxDepth = 8): string | null {
+  const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache', 'target'])
+  let scanned = 0
+  const MAX_SCANNED = 500
+
+  function walk(current: string, depth: number): string | null {
+    if (depth > maxDepth || scanned > MAX_SCANNED) return null
+    try {
+      const entries = require('fs').readdirSync(current, { withFileTypes: true }) as import('fs').Dirent[]
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name === targetName) {
+          return join(current, entry.name)
+        }
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory() && !SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
+          scanned++
+          const found = walk(join(current, entry.name), depth + 1)
+          if (found) return found
+        }
+      }
+    } catch { /* permission denied etc */ }
+    return null
+  }
+
+  return walk(dir, 0)
+}
+
+/**
  * 解析待预览的文件路径
- * - 绝对路径：直接 resolve
- * - 相对路径：依次尝试 basePaths，返回第一个存在的；都不存在则返回基于第一个 base 的拼接结果
- *   （让后续 statSync 抛出更明确的错误，而不是被相对 process.cwd 误导）
+ * - 绝对路径：直接 resolve，不存在时 fallback 搜索
+ * - 相对路径：依次尝试 basePaths，返回第一个存在的；都不存在则 fallback 搜索
  */
 function resolveTargetPath(filePath: string, basePaths?: string[]): string {
+  // 直接解析
   if (filePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(filePath)) {
-    return resolve(filePath)
+    const direct = resolve(filePath)
+    if (existsSync(direct)) return direct
+    // fallback: 用文件名在 basePaths 中搜索
+    const name = basename(direct)
+    if (basePaths) {
+      for (const base of basePaths) {
+        if (!base) continue
+        const found = searchFileInDir(base, name)
+        if (found) return found
+      }
+    }
+    // 从路径中提取 agent-workspaces 根目录作为搜索范围
+    const awIdx = filePath.indexOf('agent-workspaces')
+    if (awIdx !== -1) {
+      const wsRoot = filePath.slice(0, awIdx + 'agent-workspaces'.length)
+      if (existsSync(wsRoot)) {
+        const found = searchFileInDir(wsRoot, name)
+        if (found) return found
+      }
+    }
+    return direct
   }
   if (basePaths && basePaths.length > 0) {
     for (const base of basePaths) {
       if (!base) continue
       const candidate = resolve(base, filePath)
       if (existsSync(candidate)) return candidate
+    }
+    // fallback: 用文件名搜索
+    const name = basename(filePath)
+    for (const base of basePaths) {
+      if (!base) continue
+      const found = searchFileInDir(base, name)
+      if (found) return found
     }
     return resolve(basePaths[0]!, filePath)
   }
@@ -1489,17 +1548,29 @@ export function openFilePreview(filePath: string, basePaths?: string[]): void {
   const ext = extname(safePath).toLowerCase()
   const previewType = getPreviewType(safePath, ext)
 
+  if (!existsSync(safePath)) {
+    dialog.showErrorBox('文件不存在', `找不到文件：\n${safePath}\n\n原始路径：${filePath}`)
+    return
+  }
+
   // 不支持的类型，直接用系统默认应用打开
   if (previewType === 'unsupported') {
-    shell.openPath(safePath)
+    shell.openPath(safePath).then(err => { if (err) console.error('[文件预览] 系统打开失败:', err) })
     return
   }
 
   // 检查文件大小
-  const stat = statSync(safePath)
+  let stat: ReturnType<typeof statSync>
+  try {
+    stat = statSync(safePath)
+  } catch (err) {
+    console.error('[文件预览] 读取文件信息失败:', err)
+    shell.openPath(safePath).then(e => { if (e) console.error('[文件预览] 系统打开失败:', e) })
+    return
+  }
   if (stat.size > MAX_FILE_SIZE) {
     console.warn(`[文件预览] 文件过大 (${(stat.size / 1024 / 1024).toFixed(1)}MB)，使用系统应用打开`)
-    shell.openPath(safePath)
+    shell.openPath(safePath).then(err => { if (err) console.error('[文件预览] 系统打开失败:', err) })
     return
   }
 

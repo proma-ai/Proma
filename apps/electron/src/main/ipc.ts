@@ -20,6 +20,7 @@ import type {
   VoiceDictationStartInput,
   VoiceDictationStopInput,
   VoiceDictationTestResult,
+  MicPermissionResult,
 } from '../types'
 import type {
   RuntimeStatus,
@@ -2717,6 +2718,22 @@ export function registerIpcHandlers(): void {
     async (_, input: VoiceDictationResizeInput): Promise<void> => {
       const { resizeVoiceDictationWindow } = await import('./lib/voice-dictation-window')
       resizeVoiceDictationWindow(input.height)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.CHECK_MIC_PERMISSION,
+    async (): Promise<MicPermissionResult> => {
+      const { checkMicrophonePermission } = await import('./lib/microphone-permission-service')
+      return checkMicrophonePermission()
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.REQUEST_MIC_PERMISSION,
+    async (): Promise<MicPermissionResult> => {
+      const { requestMicrophonePermission } = await import('./lib/microphone-permission-service')
+      return requestMicrophonePermission()
     }
   )
 }

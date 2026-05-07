@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { listAgentSessions } from './lib/agent-session-manager'
 import { listAgentWorkspaces } from './lib/agent-workspace-manager'
+import { isAgentSessionActive } from './lib/agent-service'
 import { createTrayMenuModel, type TrayRecentSessionItem } from './lib/tray-menu-model'
 
 let tray: Tray | null = null
@@ -60,11 +61,25 @@ function createRecentSessionMenuItem(
 }
 
 function buildTrayMenu(actions: TrayActions): Menu {
-  const model = createTrayMenuModel(listAgentSessions(), listAgentWorkspaces())
+  const sessions = listAgentSessions()
+  const runningSessionIds = new Set(
+    sessions
+      .filter((session) => isAgentSessionActive(session.id))
+      .map((session) => session.id)
+  )
+  const model = createTrayMenuModel(sessions, listAgentWorkspaces(), runningSessionIds)
+  const runningItems = model.runningSessions.map((item) => createRecentSessionMenuItem(item, actions))
   const recentItems = model.recentSessions.map((item) => createRecentSessionMenuItem(item, actions))
   const moreItems = model.moreSessions.map((item) => createRecentSessionMenuItem(item, actions))
 
   const template: Electron.MenuItemConstructorOptions[] = [
+    ...(runningItems.length > 0
+      ? [
+          { label: '运行中', enabled: false },
+          ...runningItems,
+          { type: 'separator' as const },
+        ]
+      : []),
     { label: '最近', enabled: false },
     ...(recentItems.length > 0
       ? recentItems
