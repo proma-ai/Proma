@@ -41,7 +41,7 @@ export function createFileMentionSuggestion(
         const result = await window.electronAPI.searchWorkspaceFiles(
           wsPath,
           query ?? '',
-          20,
+          200,
           additionalPaths.length > 0 ? additionalPaths : undefined,
           sessionPaths.length > 0 ? sessionPaths : undefined,
         )

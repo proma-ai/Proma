@@ -4,6 +4,7 @@ import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
 import { TutorialBanner } from './components/tutorial/TutorialBanner'
 import { EnvironmentCheckDialog } from './components/environment/EnvironmentCheckDialog'
+import { MigrationImportDialog } from './components/migration/MigrationImportDialog'
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
@@ -87,6 +88,7 @@ export default function App(): React.ReactElement {
     return (
       <TooltipProvider delayDuration={200}>
         <OnboardingView onComplete={handleOnboardingComplete} />
+        <MigrationImportDialog />
       </TooltipProvider>
     )
   }
@@ -103,6 +105,7 @@ export default function App(): React.ReactElement {
       </CloudAuthGate>
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
+      <MigrationImportDialog />
     </TooltipProvider>
   )
 }

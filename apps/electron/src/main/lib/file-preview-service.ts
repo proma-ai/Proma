@@ -1518,6 +1518,18 @@ function resolveTargetPath(filePath: string, basePaths?: string[]): string {
     return direct
   }
   if (basePaths && basePaths.length > 0) {
+    // 相对路径首段若与某个 basePath 的 basename 相同，说明路径是相对于该目录的父目录写的
+    // 例如：workspace-files/.context/note.md，workspace-files 是附加目录名，应从其父目录解析
+    const firstSegment = filePath.split('/')[0]
+    if (firstSegment) {
+      for (const base of basePaths) {
+        if (!base) continue
+        if (basename(base) === firstSegment) {
+          const candidate = resolve(dirname(base), filePath)
+          if (existsSync(candidate)) return candidate
+        }
+      }
+    }
     for (const base of basePaths) {
       if (!base) continue
       const candidate = resolve(base, filePath)

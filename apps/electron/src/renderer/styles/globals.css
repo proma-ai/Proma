@@ -385,46 +385,54 @@
 /* ===== 碧海主题：会话/工作区选中状态 ===== */
 /* 晴空碧海：浅蓝背景 + 深蓝文字 */
 .theme-ocean-light .session-item-selected,
-.theme-ocean-light .workspace-item-selected {
+.theme-ocean-light .workspace-item-selected,
+.theme-ocean-light .tab-item-selected {
   background: hsl(205 35% 82%) !important;  /* 浅蓝色背景 */
   color: hsl(205 50% 25%) !important;       /* 深蓝色文字 */
 }
 .theme-ocean-light .session-item-selected *,
-.theme-ocean-light .workspace-item-selected * {
+.theme-ocean-light .workspace-item-selected *,
+.theme-ocean-light .tab-item-selected * {
   color: inherit !important;
 }
 
 /* 苍穹暮色：深蓝背景 + 亮蓝文字 */
 .theme-ocean-dark .session-item-selected.session-item-selected,
-.theme-ocean-dark .workspace-item-selected.workspace-item-selected {
+.theme-ocean-dark .workspace-item-selected.workspace-item-selected,
+.theme-ocean-dark .tab-item-selected.tab-item-selected {
   background-color: hsl(210 40% 18%) !important;  /* 深蓝色背景 */
   color: hsl(205 70% 75%) !important;       /* 亮蓝色文字 */
 }
 .theme-ocean-dark .session-item-selected *,
-.theme-ocean-dark .workspace-item-selected * {
+.theme-ocean-dark .workspace-item-selected *,
+.theme-ocean-dark .tab-item-selected * {
   color: inherit !important;
 }
 
 /* ===== 森系主题：会话/工作区选中状态 ===== */
 /* 森息晨光：浅绿背景 + 深绿文字 */
 .theme-forest-light .session-item-selected,
-.theme-forest-light .workspace-item-selected {
+.theme-forest-light .workspace-item-selected,
+.theme-forest-light .tab-item-selected {
   background: hsl(145 25% 82%) !important;  /* 浅绿色背景 */
   color: hsl(150 35% 25%) !important;       /* 深绿色文字 */
 }
 .theme-forest-light .session-item-selected *,
-.theme-forest-light .workspace-item-selected * {
+.theme-forest-light .workspace-item-selected *,
+.theme-forest-light .tab-item-selected * {
   color: inherit !important;
 }
 
 /* 森息夜语：深绿背景 + 亮绿文字 */
 .theme-forest-dark .session-item-selected.session-item-selected,
-.theme-forest-dark .workspace-item-selected.workspace-item-selected {
+.theme-forest-dark .workspace-item-selected.workspace-item-selected,
+.theme-forest-dark .tab-item-selected.tab-item-selected {
   background-color: hsl(150 25% 18%) !important;  /* 深绿色背景 */
   color: hsl(150 40% 70%) !important;       /* 亮绿色文字 */
 }
 .theme-forest-dark .session-item-selected *,
-.theme-forest-dark .workspace-item-selected * {
+.theme-forest-dark .workspace-item-selected *,
+.theme-forest-dark .tab-item-selected * {
   color: inherit !important;
 }
 
@@ -441,24 +449,58 @@
 /* ===== 莫兰迪主题：会话/工作区选中状态 ===== */
 /* 莫兰迪夜：淡紫灰背景 + 温暖杏粉文字 */
 .theme-slate-dark .session-item-selected.session-item-selected,
-.theme-slate-dark .workspace-item-selected.workspace-item-selected {
+.theme-slate-dark .workspace-item-selected.workspace-item-selected,
+.theme-slate-dark .tab-item-selected.tab-item-selected {
   background-color: hsl(260 10% 22%) !important;  /* 淡紫灰背景 */
   color: hsl(15 30% 75%) !important;        /* 淡杏粉文字 */
 }
 .theme-slate-dark .session-item-selected *,
-.theme-slate-dark .workspace-item-selected * {
+.theme-slate-dark .workspace-item-selected *,
+.theme-slate-dark .tab-item-selected * {
   color: inherit !important;
 }
 
 /* ===== 云朵舞者主题：会话/工作区选中状态 ===== */
 .theme-slate-light .session-item-selected,
-.theme-slate-light .workspace-item-selected {
+.theme-slate-light .workspace-item-selected,
+.theme-slate-light .tab-item-selected {
   background: hsl(40 8% 84%) !important;    /* 温暖灰背景 */
   color: hsl(40 10% 25%) !important;        /* 深暖灰文字 */
 }
 .theme-slate-light .session-item-selected *,
-.theme-slate-light .workspace-item-selected * {
+.theme-slate-light .workspace-item-selected *,
+.theme-slate-light .tab-item-selected * {
   color: inherit !important;
+}
+
+/* ===== 工作区 Badge 文字颜色（追踪 workspace-item-selected 的字色） ===== */
+/* 默认主题（light / dark / system）兜底色：与原先 text-foreground/40 保持一致 */
+.workspace-badge {
+  color: hsl(var(--foreground) / 0.4);
+}
+/* 晴空碧海 */
+.theme-ocean-light .workspace-badge {
+  color: hsl(205 50% 25%);
+}
+/* 苍穹暮色 */
+.theme-ocean-dark .workspace-badge {
+  color: hsl(205 70% 75%);
+}
+/* 森息晨光 */
+.theme-forest-light .workspace-badge {
+  color: hsl(150 35% 25%);
+}
+/* 森息夜语 */
+.theme-forest-dark .workspace-badge {
+  color: hsl(150 40% 70%);
+}
+/* 云朵舞者 */
+.theme-slate-light .workspace-badge {
+  color: hsl(40 10% 25%);
+}
+/* 莫兰迪夜 */
+.theme-slate-dark .workspace-badge {
+  color: hsl(15 30% 75%);
 }
 
 /* ===== TabBar 背景 ===== */

@@ -14,6 +14,27 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0)
 }
 
+// macOS 文件关联：在 app ready 之前注册 open-file 事件
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  handleMigrationFileOpen(filePath)
+})
+
+// Windows/macOS 文件关联 + deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
+app.on('second-instance', (_event, argv) => {
+  // 优先检查 OAuth deep-link
+  const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
+  if (url) {
+    handleDeepLink(url)
+  }
+  // 检查文件关联
+  const fileArg = argv.find((arg) => arg.endsWith('.proma-backup') || arg.endsWith('.proma-share'))
+  if (fileArg) {
+    handleMigrationFileOpen(fileArg)
+  }
+  showAndFocusMainWindow()
+})
+
 import { getSettings } from './lib/settings-service'
 import { resolveOverlayColors } from './lib/titlebar-overlay'
 
@@ -76,6 +97,14 @@ import { registerGlobalShortcut, unregisterAllGlobalShortcuts } from './lib/glob
 import { TRAY_IPC_CHANNELS } from '../types'
 
 const PROTOCOL_NAME = 'proma'
+
+const MIGRATION_IPC_OPEN = 'migration:open-import-file'
+
+function handleMigrationFileOpen(filePath: string): void {
+  if (filePath.endsWith('.proma-backup') || filePath.endsWith('.proma-share')) {
+    sendToMainWindow(MIGRATION_IPC_OPEN, { filePath })
+  }
+}
 
 // ===== Bridge 注册（新增 Bridge 只需在此添加一个 registerBridge 调用） =====
 
@@ -333,19 +362,6 @@ function handleDeepLink(url: string): void {
 app.on('open-url', (event, url) => {
   event.preventDefault()
   handleDeepLink(url)
-})
-
-// ===== 单实例锁的第二实例处理 =====
-// 单实例锁本身已在文件顶部执行（失败时已直接退出）
-// 这里只处理第一个实例中收到的 second-instance 事件
-
-// Windows/Linux: 第二个实例的 deep-link URL 通过此事件传递
-app.on('second-instance', (_event, argv) => {
-  const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
-  if (url) {
-    handleDeepLink(url)
-  }
-  showAndFocusMainWindow()
 })
 
 function sendToMainWindow(channel: string, data?: unknown): void {

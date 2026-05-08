@@ -1017,6 +1017,27 @@ export interface ElectronAPI {
   onTrayOpenAgentSession: (callback: (data: TrayOpenAgentSessionData) => void) => () => void
   /** 订阅菜单栏创建会话事件 */
   onTrayCreateSession: (callback: (data: TrayCreateSessionData) => void) => () => void
+
+  // ===== 数据迁移 =====
+
+  /** 获取工作区导出预览信息 */
+  migrationGetExportPreview: (workspaceId: string) => Promise<unknown>
+  /** 获取所有工作区的 Skills/MCP 预览（团队分发模式） */
+  migrationGetShareExportPreview: () => Promise<unknown>
+  /** 执行导出 */
+  migrationExport: (options: unknown) => Promise<{ success: boolean; filePath: string }>
+  /** 执行 v2 多工作区导出 */
+  migrationExportV2: (options: unknown) => Promise<{ success: boolean; filePath: string }>
+  /** 解析导入文件，返回预览信息 */
+  migrationParseImportFile: (filePath: string) => Promise<unknown>
+  /** 确认导入 */
+  migrationConfirmImport: (options: unknown) => Promise<{ success: boolean }>
+  /** 打开文件选择对话框（选择 .proma-backup 或 .proma-share） */
+  migrationOpenFileDialog: () => Promise<string | null>
+  /** 打开文件保存对话框（选择导出路径） */
+  migrationSaveFileDialog: (mode: string) => Promise<string | null>
+  /** 订阅双击迁移文件触发的导入事件 */
+  onMigrationOpenImportFile: (callback: (data: { filePath: string }) => void) => () => void
 }
 
 /**
@@ -2245,6 +2266,44 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: TrayCreateSessionData): void => callback(data)
     ipcRenderer.on(TRAY_IPC_CHANNELS.CREATE_SESSION, listener)
     return () => { ipcRenderer.removeListener(TRAY_IPC_CHANNELS.CREATE_SESSION, listener) }
+  },
+
+  migrationGetExportPreview: (workspaceId: string) => {
+    return ipcRenderer.invoke('migration:getExportPreview', workspaceId)
+  },
+
+  migrationGetShareExportPreview: () => {
+    return ipcRenderer.invoke('migration:getShareExportPreview')
+  },
+
+  migrationExport: (options: unknown) => {
+    return ipcRenderer.invoke('migration:export', options)
+  },
+
+  migrationExportV2: (options: unknown) => {
+    return ipcRenderer.invoke('migration:exportV2', options)
+  },
+
+  migrationParseImportFile: (filePath: string) => {
+    return ipcRenderer.invoke('migration:parseImportFile', filePath)
+  },
+
+  migrationConfirmImport: (options: unknown) => {
+    return ipcRenderer.invoke('migration:confirmImport', options)
+  },
+
+  migrationOpenFileDialog: () => {
+    return ipcRenderer.invoke('migration:openFileDialog')
+  },
+
+  migrationSaveFileDialog: (mode: string) => {
+    return ipcRenderer.invoke('migration:saveFileDialog', mode)
+  },
+
+  onMigrationOpenImportFile: (callback: (data: { filePath: string }) => void) => {
+    const listener = (_: unknown, data: { filePath: string }): void => callback(data)
+    ipcRenderer.on('migration:open-import-file', listener)
+    return () => { ipcRenderer.removeListener('migration:open-import-file', listener) }
   },
 }
 

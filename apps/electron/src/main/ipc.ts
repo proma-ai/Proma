@@ -1983,6 +1983,8 @@ export function registerIpcHandlers(): void {
       const safeRoot = resolve(rootPath)
       const ignoreDirs = new Set(['node_modules', '.git', 'dist', '.next', '__pycache__', '.venv', 'build', '.cache'])
       const ignoreFiles = new Set(['.DS_Store', '.Spotlight-V100', '.Trashes', 'Thumbs.db', 'desktop.ini'])
+      const BROWSE_LIMIT_PER_GROUP = 2000
+      const BROWSE_TOTAL_CAP = 3000
 
       // 按来源分组收集文件
       type Entry = { name: string; path: string; type: 'file' | 'dir'; source: 'session' | 'workspace' }
@@ -2082,16 +2084,28 @@ export function registerIpcHandlers(): void {
         })
       }
 
+      // 目录优先排序：确保截断前所有目录（特别是顶层目录）排在前面
+      function sortDirsFirst(entries: Entry[]): void {
+        entries.sort((a, b) => {
+          if (a.type === 'dir' && b.type !== 'dir') return -1
+          if (a.type !== 'dir' && b.type === 'dir') return 1
+          return a.path.length - b.path.length || a.name.localeCompare(b.name)
+        })
+      }
+
       const q = query.toLowerCase()
 
       if (!q) {
-        // 空 query：每个分组返回较多条目，避免截断
-        const perGroup = Math.max(limit, 100)
-        const sessionSlice = rootEntries.slice(0, perGroup)
-        const workspaceSlice = workspaceEntries.slice(0, perGroup)
-        const combined = [...sessionSlice, ...workspaceSlice].slice(0, perGroup * 2)
+        // 空 query：目录优先排序后再截断，保证文件夹结构完整可见
+        sortDirsFirst(rootEntries)
+        sortDirsFirst(workspaceEntries)
+        const maxPerGroup = Math.max(limit, BROWSE_LIMIT_PER_GROUP)
+        const sessionSlice = rootEntries.slice(0, maxPerGroup)
+        const workspaceSlice = workspaceEntries.slice(0, maxPerGroup)
+        const combined = [...sessionSlice, ...workspaceSlice]
+        const capped = combined.length > BROWSE_TOTAL_CAP ? combined.slice(0, BROWSE_TOTAL_CAP) : combined
         return {
-          entries: combined,
+          entries: capped,
           total: rootEntries.length + workspaceEntries.length,
           sessionEntries: sessionSlice,
           workspaceEntries: workspaceSlice,
@@ -2103,13 +2117,27 @@ export function registerIpcHandlers(): void {
       sortGroup(sessionMatched, q)
       sortGroup(workspaceMatched, q)
 
-      const halfLimit = Math.max(1, Math.floor(limit / 2))
-      const sessionSlice = sessionMatched.slice(0, halfLimit)
-      const workspaceSlice = workspaceMatched.slice(0, halfLimit)
-      const combined = [...sessionSlice, ...workspaceSlice].slice(0, limit)
+      const totalMatched = sessionMatched.length + workspaceMatched.length
+      let sessionSlice: Entry[]
+      let workspaceSlice: Entry[]
+      if (totalMatched <= limit) {
+        sessionSlice = sessionMatched
+        workspaceSlice = workspaceMatched
+      } else {
+        const sessionQuota = Math.max(
+          sessionMatched.length > 0 ? 1 : 0,
+          Math.round(limit * sessionMatched.length / totalMatched),
+        )
+        const workspaceQuota = Math.max(
+          workspaceMatched.length > 0 ? 1 : 0,
+          limit - sessionQuota,
+        )
+        sessionSlice = sessionMatched.slice(0, sessionQuota)
+        workspaceSlice = workspaceMatched.slice(0, workspaceQuota)
+      }
 
       return {
-        entries: combined,
+        entries: [...sessionSlice, ...workspaceSlice],
         total: sessionMatched.length + workspaceMatched.length,
         sessionEntries: sessionSlice,
         workspaceEntries: workspaceSlice,
@@ -2736,4 +2764,63 @@ export function registerIpcHandlers(): void {
       return requestMicrophonePermission()
     }
   )
+
+  // ===== 数据迁移 =====
+
+  ipcMain.handle('migration:getExportPreview', async (_, workspaceId: string) => {
+    const { getExportPreview } = await import('./lib/migration-service')
+    return getExportPreview(workspaceId)
+  })
+
+  ipcMain.handle('migration:getShareExportPreview', async () => {
+    const { getShareExportPreview } = await import('./lib/migration-service')
+    return getShareExportPreview()
+  })
+
+  ipcMain.handle('migration:export', async (_, options) => {
+    const { exportData } = await import('./lib/migration-service')
+    return exportData(options)
+  })
+
+  ipcMain.handle('migration:exportV2', async (_, options) => {
+    const { exportDataV2 } = await import('./lib/migration-service')
+    return exportDataV2(options)
+  })
+
+  ipcMain.handle('migration:parseImportFile', async (_, filePath: string) => {
+    const { parseImportFile } = await import('./lib/migration-service')
+    return parseImportFile(filePath)
+  })
+
+  ipcMain.handle('migration:confirmImport', async (_, options) => {
+    const { confirmImport } = await import('./lib/migration-service')
+    return confirmImport(options)
+  })
+
+  ipcMain.handle('migration:openFileDialog', async () => {
+    const { dialog } = await import('electron')
+    const result = await dialog.showOpenDialog({
+      title: '选择迁移文件',
+      filters: [
+        { name: 'Proma 迁移文件', extensions: ['proma-backup', 'proma-share'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('migration:saveFileDialog', async (_, mode: string) => {
+    const { dialog } = await import('electron')
+    const ext = mode === 'personal' ? 'proma-backup' : 'proma-share'
+    const defaultName = `proma-migration-${new Date().toISOString().slice(0, 10)}.${ext}`
+    const result = await dialog.showSaveDialog({
+      title: '保存迁移文件',
+      defaultPath: defaultName,
+      filters: [
+        { name: mode === 'personal' ? 'Proma 个人备份' : 'Proma 分享包', extensions: [ext] },
+      ],
+    })
+    return result.canceled ? null : result.filePath
+  })
 }

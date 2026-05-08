@@ -1023,9 +1023,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     <button
                       onClick={() => setAgentSubTab('working')}
                       className={cn(
-                        'px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag inline-flex items-center',
+                        'flex-1 justify-center px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag inline-flex items-center',
                         agentSubTab === 'working'
-                          ? 'bg-foreground/[0.08] text-foreground/80'
+                          ? 'tab-item-selected bg-foreground/[0.08] text-foreground/80'
                           : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
                       )}
                     >
@@ -1044,9 +1044,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     <button
                       onClick={() => setAgentSubTab('pinned')}
                       className={cn(
-                        'px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag inline-flex items-center',
+                        'flex-1 justify-center px-2.5 py-0.5 rounded-md text-[12px] font-medium transition-colors titlebar-no-drag inline-flex items-center',
                         agentSubTab === 'pinned'
-                          ? 'bg-foreground/[0.08] text-foreground/80'
+                          ? 'tab-item-selected bg-foreground/[0.08] text-foreground/80'
                           : 'text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.04]'
                       )}
                     >
@@ -1688,7 +1688,7 @@ function AgentSessionItem({
             )}
             <span className="truncate">{session.title}</span>
             {workspaceName && (
-              <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-foreground/[0.06] text-[10px] leading-4 text-foreground/40 font-medium truncate max-w-[80px]">
+              <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
                 {workspaceName}
               </span>
             )}

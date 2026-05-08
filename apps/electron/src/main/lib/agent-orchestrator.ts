@@ -2151,7 +2151,8 @@ export class AgentOrchestrator {
         this.queuedMessageUuids.delete(sessionId)
       }
       permissionService.clearSessionPending(sessionId)
-      askUserService.clearSessionPending(sessionId)
+      // askUserService 不在 turn 结束时清理——AskUserQuestion 的生命周期由用户交互决定，
+      // 仅在会话真正删除时（DELETE_SESSION IPC）才清理。
       exitPlanService.clearSessionPending(sessionId)
     }
   }

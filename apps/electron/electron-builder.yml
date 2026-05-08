@@ -73,11 +73,16 @@ mac:
   notarize: true
   extendInfo:
     NSMicrophoneUsageDescription: "Proma 需要访问麦克风，用于将你的语音实时转写为文本。"
-  # 不指定 arch，由 CLI flag (--arm64 / --x64) 决定。
-  # 原因：如果同时列 [arm64, x64]，每个 runner 都会打双架构；而 bun 只装宿主平台的
-  # claude-agent-sdk native optional dep，另一个架构的 glob 会静默跳过，导致该架构
-  # DMG 缺少 claude binary。upload-release.ts 又会把 out/ 下所有产物都上传到 OSS，
-  # 最终 intel runner 打出的残缺 arm64 DMG 会覆盖 arm64 runner 打出的完整版。
+  fileAssociations:
+    - ext: proma-backup
+      name: Proma Personal Backup
+      role: Editor
+    - ext: proma-share
+      name: Proma Share Package
+      role: Editor
+  # 架构由 CLI 参数控制（CI 矩阵分别传 --arm64 / --x64），
+  # 每个 runner 只构建其宿主架构对应的产物，与 bun 按 os/cpu 装好的
+  # @anthropic-ai/claude-agent-sdk-darwin-{arch} native binary 对齐。
   target:
     - target: dmg
     - target: zip
@@ -101,6 +106,13 @@ dmg:
 # ============================================
 win:
   icon: resources/icon.ico
+  fileAssociations:
+    - ext: proma-backup
+      name: Proma Personal Backup
+      icon: resources/icon.ico
+    - ext: proma-share
+      name: Proma Share Package
+      icon: resources/icon.ico
   target:
     - target: nsis
       arch:
