@@ -26,6 +26,12 @@ const GLOBAL_SHORTCUT_DEFAULTS: Record<string, { mac: string; win: string }> = {
 }
 
 const isMac = process.platform === 'darwin'
+const VOICE_DICTATION_SHORTCUT_ID = 'voice-dictation'
+
+function shouldRegisterGlobalShortcut(id: string): boolean {
+  if (id !== VOICE_DICTATION_SHORTCUT_ID) return true
+  return getSettings().voiceDictation?.enabled === true
+}
 
 /**
  * 获取某全局快捷键当前生效的 Electron accelerator 字符串
@@ -53,7 +59,9 @@ function getGlobalAccelerator(id: string): string {
 
   // 转换为 Electron 标准格式
   return accelerator
-    .replace(/Cmd\+/gi, 'CommandOrControl+')
+    .split('+')
+    .map((part) => part.trim().toLowerCase() === 'cmd' ? 'CommandOrControl' : part)
+    .join('+')
 }
 
 /**
@@ -64,6 +72,11 @@ function getGlobalAccelerator(id: string): string {
 function registerOne(id: string): boolean {
   const callback = globalCallbacks.get(id)
   if (!callback) return false
+
+  if (!shouldRegisterGlobalShortcut(id)) {
+    console.log(`[全局快捷键] 跳过注册: ${id} 未启用`)
+    return false
+  }
 
   const accelerator = getGlobalAccelerator(id)
   if (!accelerator) return false

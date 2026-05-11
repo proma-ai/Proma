@@ -836,3 +836,13 @@
 .file-browser-row-flash {
   animation: file-browser-flash 1.2s ease-out;
 }
+
+/* ===== 语音输入浮窗拖动区域 ===== */
+.voice-dictation-drag-region {
+  -webkit-app-region: drag;
+  cursor: move;
+}
+
+.voice-dictation-no-drag {
+  -webkit-app-region: no-drag;
+}

@@ -227,9 +227,8 @@ bun run generate:icons    # 生成应用图标
 | **Anthropic** | `anthropic-adapter.ts` | Messages API | extended_thinking、多模态 |
 | **OpenAI** | `openai-adapter.ts` | Chat Completions | 标准 OpenAI 协议 |
 | **DeepSeek** | `anthropic-adapter.ts` | Messages API | Anthropic 兼容 |
-| **Moonshot** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
 | **智谱 AI** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
-| **MiniMax** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
+| **MiniMax** | `anthropic-adapter.ts` | Messages API | Anthropic 兼容 |
 | **豆包** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
 | **通义千问** | `openai-adapter.ts` | Chat Completions | OpenAI 兼容 |
 | **Google** | `google-adapter.ts` | Generative Language API | Gemini 系列 |
@@ -476,7 +475,7 @@ React UI 更新
 
 ### 已实现功能
 
-- ✅ **多 Provider 支持**：Anthropic、OpenAI、DeepSeek、Moonshot、智谱、MiniMax、豆包、通义千问、Google、自定义端点
+- ✅ **多 Provider 支持**：Anthropic、OpenAI、DeepSeek、Kimi、智谱、MiniMax、豆包、通义千问、Google、自定义端点
 - ✅ **Agent SDK 集成**：基于 Codex Agent SDK 的完整 Agent 模式
 - ✅ **飞书集成**：消息同步、任务通知、OAuth 认证（68KB 核心服务）
 - ✅ **工作区管理**：多工作区隔离、MCP Server 配置、Skills 管理

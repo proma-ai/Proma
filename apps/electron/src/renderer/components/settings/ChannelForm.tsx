@@ -34,6 +34,7 @@ import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
   PROMA_OFFICIAL_CHANNEL_ID,
+  isAgentCompatibleProvider,
 } from '@proma/shared'
 import type {
   Channel,
@@ -65,12 +66,13 @@ import {
 interface ChannelFormProps {
   /** 编辑模式下传入已有渠道，创建模式传 null */
   channel: Channel | null
-  onSaved: () => void
+  onSaved: (channel?: Channel) => void
+  onAgentEligibilityChange?: (channel: Channel, eligible: boolean) => void | Promise<void>
   onCancel: () => void
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'deepseek', 'google', 'moonshot', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -85,11 +87,10 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   openai: '/chat/completions',
   deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
-  moonshot: '/chat/completions',
   'kimi-api': '/messages',
   'kimi-coding': '/messages',
   zhipu: '/chat/completions',
-  minimax: '/chat/completions',
+  minimax: '/v1/messages',
   doubao: '/chat/completions',
   qwen: '/chat/completions',
   custom: '/chat/completions',
@@ -103,9 +104,16 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   let trimmed = baseUrl.trim().replace(/\/+$/, '')
 
-  if (provider === 'anthropic' || provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {
+  if (provider === 'anthropic' || provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding' || provider === 'minimax') {
     // 去除用户误填的 /messages 后缀，与 normalizeAnthropicBaseUrl 保持一致
     trimmed = trimmed.replace(/\/messages$/, '')
+    // MiniMax 的 Anthropic 协议根路径为 /anthropic，实际 API 位于 /v1/messages
+    if (provider === 'minimax') {
+      if (trimmed.match(/\/v\d+$/)) {
+        return `${trimmed}/messages`
+      }
+      return `${trimmed}/v1/messages`
+    }
     // DeepSeek / Kimi 的 baseUrl 已带非版本路径（/anthropic、/coding/v1），直接拼 /messages
     if (provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {
       return `${trimmed}/messages`
@@ -129,7 +137,11 @@ function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
 /** auto-save 防抖延迟 */
 const AUTO_SAVE_DELAY = 600
 
-export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): React.ReactElement {
+function isAgentEligibleChannel(channel: Pick<Channel, 'provider' | 'enabled'>): boolean {
+  return channel.enabled && isAgentCompatibleProvider(channel.provider)
+}
+
+export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCancel }: ChannelFormProps): React.ReactElement {
   const isEdit = channel !== null
   const isPromaOfficial = channel?.id === PROMA_OFFICIAL_CHANNEL_ID
 
@@ -159,6 +171,11 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [showExitDialog, setShowExitDialog] = React.useState(false)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
+  const lastAgentEligibleRef = React.useRef(channel ? isAgentEligibleChannel(channel) : false)
+
+  React.useEffect(() => {
+    lastAgentEligibleRef.current = channel ? isAgentEligibleChannel(channel) : false
+  }, [channel])
 
   // 编辑模式下加载明文 API Key（官方渠道跳过）
   React.useEffect(() => {
@@ -189,7 +206,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   ) => {
     if (!isEdit || !channel) return
     try {
-      await window.electronAPI.updateChannel(channel.id, {
+      const savedChannel = await window.electronAPI.updateChannel(channel.id, {
         name: currentName,
         provider: currentProvider,
         baseUrl: currentBaseUrl,
@@ -197,12 +214,17 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         models: currentModels,
         enabled: currentEnabled,
       })
+      const eligible = isAgentEligibleChannel(savedChannel)
+      if (eligible !== lastAgentEligibleRef.current) {
+        lastAgentEligibleRef.current = eligible
+        await onAgentEligibilityChange?.(savedChannel, eligible)
+      }
       toast.success('已保存', { id: 'auto-save-success' })
     } catch (error) {
       console.error('[模型配置表单] auto-save 失败:', error)
       toast.error('自动保存失败，请检查后手动重试', { id: 'auto-save-error' })
     }
-  }, [isEdit, channel])
+  }, [isEdit, channel, onAgentEligibilityChange])
 
   /** 触发防抖 auto-save */
   const scheduleAutoSave = React.useCallback((
@@ -238,7 +260,7 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [models, name, provider, baseUrl, apiKey, enabled, scheduleAutoSave])
 
-  // 切换供应商时自动更新 Base URL，DeepSeek / Kimi 自动添加预设模型
+  // 切换供应商时自动更新 Base URL，Anthropic 兼容渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
     setProvider(p)
@@ -258,6 +280,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       } else if (p === 'kimi-coding') {
         setModels([
           { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
+        ])
+      } else if (p === 'minimax') {
+        setModels([
+          { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', enabled: true },
         ])
       }
     }
@@ -345,8 +371,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   }
 
   /** 执行创建渠道 */
-  const doCreate = React.useCallback(async (): Promise<boolean> => {
-    if (!name.trim() || !apiKey.trim()) return false
+  const doCreate = React.useCallback(async (): Promise<Channel | null> => {
+    if (!name.trim() || !apiKey.trim()) return null
 
     setSaving(true)
     try {
@@ -358,17 +384,20 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         models,
         enabled,
       }
-      await window.electronAPI.createChannel(input)
+      const savedChannel = await window.electronAPI.createChannel(input)
+      if (isAgentEligibleChannel(savedChannel)) {
+        await onAgentEligibilityChange?.(savedChannel, true)
+      }
       toast.success('渠道创建成功')
-      return true
+      return savedChannel
     } catch (error) {
       console.error('[模型配置表单] 创建失败:', error)
       toast.error('渠道创建失败，请检查配置后重试')
-      return false
+      return null
     } finally {
       setSaving(false)
     }
-  }, [name, provider, baseUrl, apiKey, models, enabled])
+  }, [name, provider, baseUrl, apiKey, models, enabled, onAgentEligibilityChange])
 
   /** 创建渠道（仅新建模式） */
   const handleCreate = async (): Promise<void> => {
@@ -376,8 +405,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       toast.warning('尚未配置模型，建议先从供应商获取或手动添加', { id: 'no-models-warn' })
       return
     }
-    const ok = await doCreate()
-    if (ok) onSaved()
+    const savedChannel = await doCreate()
+    if (savedChannel) onSaved(savedChannel)
   }
 
   /** 检测表单是否有未保存内容 */
@@ -405,10 +434,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
 
   /** 保存并关闭（从弹窗触发） */
   const handleSaveAndClose = async (): Promise<void> => {
-    const ok = await doCreate()
-    if (ok) {
+    const savedChannel = await doCreate()
+    if (savedChannel) {
       setShowExitDialog(false)
-      onSaved()
+      onSaved(savedChannel)
     }
   }
 

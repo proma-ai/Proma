@@ -14,7 +14,6 @@ export type ProviderType =
   | 'openai'
   | 'deepseek'
   | 'google'
-  | 'moonshot'
   | 'kimi-api'
   | 'kimi-coding'
   | 'zhipu'
@@ -38,11 +37,10 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com/anthropic',
   google: 'https://generativelanguage.googleapis.com',
-  moonshot: 'https://api.moonshot.cn/v1',
   'kimi-api': 'https://api.moonshot.cn/anthropic',
   'kimi-coding': 'https://api.kimi.com/coding/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-  minimax: 'https://api.minimax.chat/v1',
+  minimax: 'https://api.minimaxi.com/anthropic',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   custom: '',
@@ -57,11 +55,10 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   openai: 'OpenAI',
   deepseek: 'DeepSeek',
   google: 'Google',
-  moonshot: 'Moonshot / Kimi (OpenAI 协议)',
   'kimi-api': 'Kimi API (Anthropic 协议)',
   'kimi-coding': 'Kimi Coding Plan',
   zhipu: '智谱 AI',
-  minimax: 'MiniMax',
+  minimax: 'MiniMax (API&编程包)',
   doubao: '豆包',
   qwen: '通义千问',
   custom: 'OpenAI 兼容格式',
@@ -78,6 +75,7 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'deepseek',
   'kimi-api',
   'kimi-coding',
+  'minimax',
 ])
 
 /**

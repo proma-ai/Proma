@@ -421,7 +421,7 @@ export class AgentOrchestrator {
    * 构建 SDK 环境变量
    *
    * 注入 API Key、Base URL、代理、Shell 配置等。
-   * 对 Kimi Coding Plan：使用 Bearer 认证（ANTHROPIC_AUTH_TOKEN），注入 User-Agent。
+   * 对 Kimi Coding Plan / MiniMax Coding Plan：使用 Bearer 认证（ANTHROPIC_AUTH_TOKEN）。
    */
   private async buildSdkEnv(
     apiKey: string,
@@ -457,14 +457,19 @@ export class AgentOrchestrator {
     // 认证方式按 provider 分支
     // - Proma 官方渠道：AUTH_TOKEN（Bearer，商业版 Cloud 后端只认 Bearer）
     // - Kimi Coding Plan：只认 Bearer，且必须伪装成 coding agent（User-Agent）
-    //   用 ANTHROPIC_AUTH_TOKEN 让 SDK 发 Authorization: Bearer，
-    //   通过 ANTHROPIC_CUSTOM_HEADERS 注入 User-Agent
+    // - MiniMax Coding Plan：Claude Code 场景使用 Bearer（ANTHROPIC_AUTH_TOKEN）
+    // - 通过 ANTHROPIC_AUTH_TOKEN 让 SDK 发 Authorization: Bearer；
+    //   Kimi 额外通过 ANTHROPIC_CUSTOM_HEADERS 注入 User-Agent
     // - 其它：ANTHROPIC_API_KEY（SDK 内部会同时带上 x-api-key 和 Bearer）
     if (provider === 'proma') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
     } else if (provider === 'kimi-coding') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
       sdkEnv.ANTHROPIC_CUSTOM_HEADERS = 'User-Agent: KimiCLI/1.3'
+    } else if (provider === 'minimax') {
+      sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
+      sdkEnv.API_TIMEOUT_MS = '3000000'
+      sdkEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
     } else {
       sdkEnv.ANTHROPIC_API_KEY = apiKey
     }
@@ -971,6 +976,9 @@ export class AgentOrchestrator {
       // Kimi Coding Plan：只用 Bearer + 必须带 User-Agent
       process.env.ANTHROPIC_AUTH_TOKEN = apiKey
       process.env.ANTHROPIC_CUSTOM_HEADERS = 'User-Agent: KimiCLI/1.3'
+    } else if (channel.provider === 'minimax') {
+      // MiniMax Coding Plan：Claude Code 兼容配置使用 Bearer
+      process.env.ANTHROPIC_AUTH_TOKEN = apiKey
     } else {
       process.env.ANTHROPIC_API_KEY = apiKey
     }

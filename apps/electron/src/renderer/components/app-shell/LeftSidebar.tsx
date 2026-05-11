@@ -11,14 +11,14 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Hammer } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Hammer, Bot, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom } from '@/atoms/active-view'
-import { appModeAtom } from '@/atoms/app-mode'
+import { appModeAtom, type AppMode } from '@/atoms/app-mode'
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
@@ -153,6 +153,17 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
   return groups
 }
 
+const RAIL_STATUS_CLASS: Record<SessionIndicatorStatus, string> = {
+  idle: 'hidden',
+  running: 'bg-blue-500 animate-pulse',
+  blocked: 'bg-orange-500',
+  completed: 'bg-emerald-500',
+}
+
+function getRailInitial(title: string): string {
+  return title.trim().slice(0, 1).toUpperCase() || '·'
+}
+
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
@@ -201,6 +212,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const setSessionModelMap = useSetAtom(agentSessionModelMapAtom)
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
+  const setMode = useSetAtom(appModeAtom)
 
   // 工作区能力（MCP + Skill 计数）
   const [capabilities, setCapabilities] = React.useState<WorkspaceCapabilities | null>(null)
@@ -793,6 +805,118 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [filteredAgentSessions]
   )
 
+  const handleRailModeSwitch = React.useCallback((targetMode: AppMode) => {
+    setViewMode('active')
+    if (targetMode === mode) return
+
+    const isChatMode = targetMode === 'chat'
+    const sessions = isChatMode ? conversations : agentSessions
+    const lastId = isChatMode ? currentConversationId : currentAgentSessionId
+
+    if (lastId) {
+      const match = sessions.find((s) => s.id === lastId)
+      if (match) {
+        openSession(targetMode, match.id, match.title)
+        return
+      }
+    }
+
+    const tab = tabs.find((t) => t.type === targetMode)
+    if (tab) {
+      openSession(targetMode, tab.sessionId, tab.title)
+      return
+    }
+
+    const recent = sessions.find((s) => !s.archived && !draftSessionIds.has(s.id))
+    if (recent) {
+      openSession(targetMode, recent.id, recent.title)
+      return
+    }
+
+    setMode(targetMode)
+  }, [
+    mode,
+    conversations,
+    agentSessions,
+    currentConversationId,
+    currentAgentSessionId,
+    tabs,
+    draftSessionIds,
+    openSession,
+    setMode,
+    setViewMode,
+  ])
+
+  const railRecentItems = React.useMemo(() => {
+    if (mode === 'chat') {
+      return conversations
+        .filter((c) => !c.archived && !draftSessionIds.has(c.id))
+        .sort((a, b) => {
+          const activeDelta = Number(b.id === activeTabId) - Number(a.id === activeTabId)
+          if (activeDelta !== 0) return activeDelta
+          const streamingDelta = Number(streamingIds.has(b.id)) - Number(streamingIds.has(a.id))
+          if (streamingDelta !== 0) return streamingDelta
+          const pinnedDelta = Number(!!b.pinned) - Number(!!a.pinned)
+          if (pinnedDelta !== 0) return pinnedDelta
+          return b.updatedAt - a.updatedAt
+        })
+        .slice(0, 5)
+        .map((conversation) => ({
+          id: conversation.id,
+          title: conversation.title,
+          type: 'chat' as const,
+          initial: getRailInitial(conversation.title),
+          active: conversation.id === activeTabId,
+          status: streamingIds.has(conversation.id) ? 'running' as const : 'idle' as const,
+          pinned: !!conversation.pinned,
+        }))
+    }
+
+    return agentSessions
+      .filter((session) =>
+        !session.archived
+        && !draftSessionIds.has(session.id)
+        && (!currentWorkspaceId || session.workspaceId === currentWorkspaceId)
+      )
+      .sort((a, b) => {
+        const statusA = agentIndicatorMap.get(a.id) ?? (unviewedCompletedSessionIds.has(a.id) ? 'completed' : 'idle')
+        const statusB = agentIndicatorMap.get(b.id) ?? (unviewedCompletedSessionIds.has(b.id) ? 'completed' : 'idle')
+        const priority = (session: AgentSessionMeta, status: SessionIndicatorStatus): number => {
+          if (session.id === activeTabId) return 0
+          if (status === 'blocked') return 1
+          if (status === 'running') return 2
+          if (workingSessionIds.has(session.id)) return 3
+          if (session.pinned) return 4
+          if (status === 'completed') return 5
+          return 6
+        }
+        const priorityDelta = priority(a, statusA) - priority(b, statusB)
+        if (priorityDelta !== 0) return priorityDelta
+        return b.updatedAt - a.updatedAt
+      })
+      .slice(0, 5)
+      .map((session) => ({
+        id: session.id,
+        title: session.title,
+        type: 'agent' as const,
+        initial: getRailInitial(session.title),
+        active: session.id === activeTabId,
+        status: agentIndicatorMap.get(session.id) ?? (unviewedCompletedSessionIds.has(session.id) ? 'completed' as const : 'idle' as const),
+        pinned: !!session.pinned,
+      }))
+  }, [
+    mode,
+    conversations,
+    agentSessions,
+    draftSessionIds,
+    currentWorkspaceId,
+    activeTabId,
+    streamingIds,
+    agentIndicatorMap,
+    unviewedCompletedSessionIds,
+    workingSessionIds,
+  ])
+
   // 删除确认弹窗（collapsed/expanded 共享）
   const deleteDialog = (
     <AlertDialog
@@ -842,34 +966,83 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300"
-        style={{ width: 48, flexShrink: 0 }}
+        className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300 px-2"
+        style={{ width: 60, flexShrink: 0 }}
       >
         {/* macOS 需要避开左上角红绿灯，其他平台保留紧凑呼吸感。 */}
         <div className={cn(isMac ? 'pt-[50px]' : 'pt-2')} />
 
-        {/* 展开按钮 */}
+        {/* 展开按钮：mini rail 的唯一布局控制入口 */}
         <div className="pt-2">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
+                aria-label="展开侧边栏"
                 onClick={() => setSidebarCollapsed(false)}
-                className="p-2 rounded-[10px] text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground transition-colors titlebar-no-drag"
+                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/60 bg-muted hover:bg-foreground/[0.08] hover:text-foreground transition-colors titlebar-no-drag"
               >
-                <PanelLeftOpen size={18} />
+                <PanelLeftOpen size={17} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">展开侧边栏</TooltipContent>
           </Tooltip>
         </div>
 
-        {/* 新对话/会话按钮 */}
-        <div className="pt-2">
+        <div className="my-3 h-px w-8 bg-border/70" />
+
+        {/* 模式切换 */}
+        <div className="flex flex-col items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
+                aria-label="切换到 Agent 模式"
+                onClick={() => handleRailModeSwitch('agent')}
+                className={cn(
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
+                  mode === 'agent'
+                    ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+                    : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
+                )}
+              >
+                <Bot size={18} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Agent 模式</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="切换到 Chat 模式"
+                onClick={() => handleRailModeSwitch('chat')}
+                className={cn(
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag',
+                  mode === 'chat'
+                    ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+                    : 'text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/75'
+                )}
+              >
+                <MessageSquare size={17} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Chat 模式</TooltipContent>
+          </Tooltip>
+        </div>
+
+        <div className="my-3 h-px w-8 bg-border/70" />
+
+        {/* 高频操作 */}
+        <div className="flex flex-col items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
                 onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-                className="p-2 rounded-[10px] text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
+                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
               >
                 <Plus size={16} />
               </button>
@@ -878,18 +1051,73 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               {mode === 'agent' ? '新会话' : '新对话'}
             </TooltipContent>
           </Tooltip>
-        </div>
 
-        {/* 弹性空间 */}
-        <div className="flex-1" />
-
-        {/* 用户头像（点击打开设置） */}
-        <div className="pb-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                type="button"
+                aria-label="搜索"
+                onClick={() => setSearchDialogOpen(true)}
+                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 bg-primary/5 hover:bg-primary/10 hover:text-foreground/70 transition-colors titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
+              >
+                <Search size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">搜索</TooltipContent>
+          </Tooltip>
+        </div>
+
+        <div className="my-3 h-px w-8 bg-border/70" />
+
+        {/* 最近/关键会话入口 */}
+        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-none">
+          <div className="flex flex-col items-center gap-1.5 pb-2">
+            {railRecentItems.map((item) => (
+              <Tooltip key={`${item.type}-${item.id}`}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={`打开${item.type === 'agent' ? 'Agent 会话' : 'Chat 对话'}：${item.title}`}
+                    onClick={() => {
+                      if (item.type === 'agent') {
+                        handleSelectAgentSession(item.id, item.title)
+                      } else {
+                        handleSelectConversation(item.id, item.title)
+                      }
+                    }}
+                    className={cn(
+                      'relative size-10 flex items-center justify-center overflow-hidden rounded-[12px] transition-colors titlebar-no-drag',
+                      item.active
+                        ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+                        : 'text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/80'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full pointer-events-none',
+                        RAIL_STATUS_CLASS[item.status]
+                      )}
+                    />
+                    <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {item.type === 'agent' ? 'Agent' : 'Chat'} · {item.title}
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </div>
+
+        {/* 用户头像（点击打开设置） */}
+        <div className="pt-3 pb-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="打开设置"
                 onClick={() => setSettingsOpen(true)}
-                className="relative p-1 rounded-[10px] transition-colors titlebar-no-drag hover:bg-foreground/5"
+                className="relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag hover:bg-foreground/5"
               >
                 <UserAvatar avatar={userProfile.avatar} size={28} />
                 {(hasUpdate || hasEnvironmentIssues) && (
@@ -925,7 +1153,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 onClick={() => setSidebarCollapsed(true)}
-                className="mt-2 size-[36px] flex-shrink-0 flex items-center justify-center rounded-[10px] bg-muted text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                className="mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] bg-muted text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors titlebar-no-drag"
               >
                 <PanelLeftClose size={14} />
               </button>

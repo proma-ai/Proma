@@ -34,6 +34,8 @@ export function MigrationImportDialog(): React.ReactElement {
     importPreview,
     pathMappings,
     workspaceMappings,
+    conflictResolution,
+    hasConflicts,
     importConfirming,
     importResult,
     isV2,
@@ -41,6 +43,7 @@ export function MigrationImportDialog(): React.ReactElement {
     handleConfirmImport,
     handlePathMapping,
     handleWorkspaceMapping,
+    setConflictResolution,
     reset,
   } = useMigrationImport(open ? initialFilePath : null)
 
@@ -123,6 +126,9 @@ export function MigrationImportDialog(): React.ReactElement {
                   workspaceMappings={workspaceMappings}
                   localWorkspaces={localWorkspaces}
                   onWorkspaceMapping={handleWorkspaceMapping}
+                  hasConflicts={hasConflicts}
+                  conflictResolution={conflictResolution}
+                  onConflictResolutionChange={setConflictResolution}
                 />
               ) : (
                 <V1ContentSummary preview={importPreview} />
@@ -268,9 +274,12 @@ interface V2ContentSummaryProps {
   workspaceMappings: Array<{ sourceSlug: string; action: string; targetWorkspaceId?: string; newWorkspaceName?: string }>
   localWorkspaces: Array<{ id: string; name: string; slug: string }>
   onWorkspaceMapping: (sourceSlug: string, mapping: Record<string, unknown>) => void
+  hasConflicts: boolean
+  conflictResolution: 'overwrite' | 'skip'
+  onConflictResolutionChange: (value: 'overwrite' | 'skip') => void
 }
 
-function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorkspaceMapping }: V2ContentSummaryProps): React.ReactElement {
+function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorkspaceMapping, hasConflicts, conflictResolution, onConflictResolutionChange }: V2ContentSummaryProps): React.ReactElement {
   const wsCount = preview.workspaces?.length ?? 0
 
   return (
@@ -316,6 +325,14 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
                 <div className="flex items-center gap-4 pl-5 text-xs text-muted-foreground">
                   {ws.skillNames.length > 0 && <span>Skills: {ws.skillNames.length} 个</span>}
                   {ws.mcpServerNames.length > 0 && <span>MCP: {ws.mcpServerNames.length} 个</span>}
+                  {((ws.conflictingSkills?.length ?? 0) > 0 || (ws.conflictingMcpServers?.length ?? 0) > 0) && (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      冲突: {[
+                        (ws.conflictingSkills?.length ?? 0) > 0 ? `${ws.conflictingSkills.length} 个 Skill` : '',
+                        (ws.conflictingMcpServers?.length ?? 0) > 0 ? `${ws.conflictingMcpServers.length} 个 MCP` : '',
+                      ].filter(Boolean).join('、')}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 pl-5">
                   <span className="text-xs text-muted-foreground">操作：</span>
@@ -363,6 +380,28 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
           })}
         </div>
       </div>
+
+      {hasConflicts && (
+        <div className="flex items-start gap-3 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 dark:bg-amber-950/20 dark:border-amber-800">
+          <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 space-y-2">
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+              检测到同名 Skills / MCP 已存在于本地
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-600 dark:text-amber-500">冲突处理：</span>
+              <select
+                value={conflictResolution}
+                onChange={(e) => onConflictResolutionChange(e.target.value as 'overwrite' | 'skip')}
+                className="text-xs border border-amber-300 dark:border-amber-700 rounded px-2 py-1 bg-background"
+              >
+                <option value="overwrite">用导入版本覆盖本地（推荐）</option>
+                <option value="skip">保留本地版本，跳过冲突项</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

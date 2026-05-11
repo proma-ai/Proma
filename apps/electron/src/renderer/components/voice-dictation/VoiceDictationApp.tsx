@@ -32,6 +32,7 @@ export function VoiceDictationApp(): React.ReactElement {
   })
   const streamRef = React.useRef<MediaStream | null>(null)
   const audioContextRef = React.useRef<AudioContext | null>(null)
+  const sourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null)
   const processorRef = React.useRef<ScriptProcessorNode | null>(null)
   const pendingAudioRef = React.useRef<ArrayBuffer[]>([])
   const queuedAudioRef = React.useRef<ArrayBuffer[]>([])
@@ -75,6 +76,8 @@ export function VoiceDictationApp(): React.ReactElement {
   const cleanupAudio = React.useCallback((clearBufferedAudio = true) => {
     processorRef.current?.disconnect()
     processorRef.current = null
+    sourceRef.current?.disconnect()
+    sourceRef.current = null
     audioContextRef.current?.close().catch(() => {})
     audioContextRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -194,21 +197,41 @@ export function VoiceDictationApp(): React.ReactElement {
     }
   }, [cleanupAudio])
 
+  const requestMicrophoneStream = React.useCallback(async (): Promise<MediaStream> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('当前环境不支持麦克风采集')
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: { ideal: 1 },
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+        },
+      })
+    } catch (error) {
+      if (isConstraintError(error)) {
+        return navigator.mediaDevices.getUserMedia({ audio: true })
+      }
+      throw error
+    }
+  }, [])
+
   const startAudioCapture = React.useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    })
+    const stream = await requestMicrophoneStream()
     streamRef.current = stream
 
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextCtor) {
+      throw new Error('当前环境不支持音频处理')
+    }
+
     const audioContext = new AudioContextCtor()
     audioContextRef.current = audioContext
     const source = audioContext.createMediaStreamSource(stream)
+    sourceRef.current = source
     const processor = audioContext.createScriptProcessor(4096, 1, 1)
     processorRef.current = processor
 
@@ -237,13 +260,27 @@ export function VoiceDictationApp(): React.ReactElement {
 
     source.connect(processor)
     processor.connect(audioContext.destination)
-  }, [sendAudioChunk])
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume()
+      } catch {
+        throw new Error('音频处理启动失败，请重新触发语音输入或检查系统音频权限')
+      }
+    }
+  }, [requestMicrophoneStream, sendAudioChunk])
 
   const startRecording = React.useCallback(async () => {
     const refreshSettings = window.electronAPI.getVoiceDictationSettings()
       .then((latest) => {
         settingsRef.current = latest
         return latest
+      })
+      .catch((error) => {
+        if (settingsRef.current?.enabled) {
+          console.warn('[语音输入] 刷新设置失败，继续使用已缓存设置:', error)
+          return settingsRef.current
+        }
+        throw error
       })
 
     stoppingRef.current = false
@@ -266,6 +303,16 @@ export function VoiceDictationApp(): React.ReactElement {
     setStatus('recording')
     setMessage('请开始说话')
 
+    const cachedSettings = settingsRef.current
+    const settings = cachedSettings?.enabled ? cachedSettings : await refreshSettings
+    settingsRef.current = settings
+    if (!settings.enabled) {
+      setStatus('error')
+      setMessage('请先在设置中启用语音输入')
+      cleanupAudio()
+      return
+    }
+
     // 预检麦克风权限
     const permission = await window.electronAPI.checkMicrophonePermission()
     if (permission.status === 'denied') {
@@ -287,22 +334,12 @@ export function VoiceDictationApp(): React.ReactElement {
     sessionIdRef.current = nextSessionId
 
     const audioCapture = startAudioCapture().catch((error) => {
-      const textMessage = error instanceof Error ? error.message : '未知错误'
+      const textMessage = getMicrophoneErrorMessage(error)
       setStatus('error')
       setMessage(textMessage)
       cleanupAudio()
       throw error
     })
-
-    const cachedSettings = settingsRef.current
-    const settings = cachedSettings?.enabled ? cachedSettings : await refreshSettings
-    settingsRef.current = settings
-    if (!settings.enabled) {
-      setStatus('error')
-      setMessage('请先在设置中启用语音输入')
-      cleanupAudio()
-      return
-    }
 
     window.electronAPI.startVoiceDictation({ sessionId: nextSessionId })
       .then(() => {
@@ -332,7 +369,7 @@ export function VoiceDictationApp(): React.ReactElement {
   React.useEffect(() => {
     const cleanupShown = window.electronAPI.onVoiceDictationShown(() => {
       startRecording().catch((error) => {
-        const textMessage = error instanceof Error ? error.message : '未知错误'
+        const textMessage = getMicrophoneErrorMessage(error)
         setStatus('error')
         setMessage(textMessage)
         cleanupAudio()
@@ -407,7 +444,7 @@ export function VoiceDictationApp(): React.ReactElement {
   return (
     <div ref={rootRef} className="box-border flex h-screen w-screen flex-col overflow-hidden rounded-xl bg-background px-2 pt-2 pb-1.5">
       <div ref={panelRef} className="flex min-h-0 w-full flex-col overflow-hidden">
-        <div ref={headerRef} className="flex shrink-0 items-center justify-between px-2 pt-0.5 pb-2">
+        <div ref={headerRef} className="voice-dictation-drag-region flex shrink-0 items-center justify-between px-2 pt-0.5 pb-2">
           <div className="flex items-center gap-3 min-w-0">
             <div
               className={`relative flex size-8 items-center justify-center rounded-full ${status === 'error' ? 'bg-destructive/12 text-destructive' : 'bg-primary/12 text-primary'}`}
@@ -436,13 +473,13 @@ export function VoiceDictationApp(): React.ReactElement {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="voice-dictation-no-drag flex items-center gap-1.5">
             {busy && (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-8 rounded-full text-destructive"
+                className="voice-dictation-no-drag size-8 rounded-full text-destructive"
                 onClick={() => stopRecording().catch(console.error)}
               >
                 <Square className="size-3.5" fill="currentColor" strokeWidth={0} />
@@ -452,7 +489,7 @@ export function VoiceDictationApp(): React.ReactElement {
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 rounded-full text-muted-foreground"
+              className="voice-dictation-no-drag size-8 rounded-full text-muted-foreground"
               onClick={cancelAndHide}
             >
               <X className="size-4" />
@@ -501,4 +538,38 @@ declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext
   }
+}
+
+function isConstraintError(error: unknown): boolean {
+  return error instanceof DOMException &&
+    (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError')
+}
+
+function getMicrophoneErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    switch (error.name) {
+      case 'NotAllowedError':
+      case 'PermissionDeniedError':
+        return '麦克风权限被系统阻止，请在 Windows 设置 > 隐私和安全性 > 麦克风中允许 Proma 访问'
+      case 'NotFoundError':
+      case 'DevicesNotFoundError':
+        return '没有检测到可用麦克风，请检查输入设备是否已连接并启用'
+      case 'NotReadableError':
+      case 'TrackStartError':
+        return '麦克风当前无法读取，可能被其他应用占用或被系统隐私设置阻止'
+      case 'OverconstrainedError':
+      case 'ConstraintNotSatisfiedError':
+        return '当前麦克风不支持请求的采集参数，请切换输入设备后重试'
+      case 'SecurityError':
+        return '当前窗口被系统阻止访问麦克风，请检查应用权限设置'
+      default:
+        break
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return '未知麦克风错误'
 }

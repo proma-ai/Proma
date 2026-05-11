@@ -3,7 +3,7 @@
  *
  * 分为两个区块：
  * 1. 渠道管理 — 所有渠道列表 + 添加/编辑/删除（渠道同时用于 Chat 和 Agent）
- * 2. Agent 供应商 — 从已启用的 Anthropic 兼容渠道（Anthropic / DeepSeek / Kimi）中
+ * 2. Agent 供应商 — 从已启用的 Anthropic 兼容渠道（Anthropic / DeepSeek / Kimi / MiniMax）中
  *    通过 Switch 开关启用多个 Agent 供应商
  */
 
@@ -44,6 +44,16 @@ export function ChannelSettings(): React.ReactElement {
   const [agentChannelIds, setAgentChannelIds] = useAtom(agentChannelIdsAtom)
   const setGlobalChannels = useSetAtom(channelsAtom)
   const [deleteTarget, setDeleteTarget] = React.useState<Channel | null>(null)
+  const agentChannelIdsRef = React.useRef(agentChannelIds)
+  const agentChannelIdRef = React.useRef(agentChannelId)
+
+  React.useEffect(() => {
+    agentChannelIdsRef.current = agentChannelIds
+  }, [agentChannelIds])
+
+  React.useEffect(() => {
+    agentChannelIdRef.current = agentChannelId
+  }, [agentChannelId])
 
   /** 加载渠道列表 */
   const loadChannels = React.useCallback(async (): Promise<Channel[]> => {
@@ -63,6 +73,40 @@ export function ChannelSettings(): React.ReactElement {
   React.useEffect(() => {
     loadChannels()
   }, [loadChannels])
+
+  const syncAgentChannelEligibility = React.useCallback(async (
+    channel: Channel,
+    eligible: boolean,
+  ): Promise<void> => {
+    const currentIds = agentChannelIdsRef.current
+
+    if (eligible) {
+      if (currentIds.includes(channel.id)) return
+      const newIds = [...currentIds, channel.id]
+      agentChannelIdsRef.current = newIds
+      setAgentChannelIds(newIds)
+      await window.electronAPI.updateSettings({ agentChannelIds: newIds }).catch(console.error)
+      return
+    }
+
+    if (!currentIds.includes(channel.id)) return
+    const newIds = currentIds.filter((id) => id !== channel.id)
+    agentChannelIdsRef.current = newIds
+    setAgentChannelIds(newIds)
+
+    const updates: Parameters<typeof window.electronAPI.updateSettings>[0] = {
+      agentChannelIds: newIds,
+    }
+    if (agentChannelIdRef.current === channel.id) {
+      agentChannelIdRef.current = null
+      setAgentChannelId(null)
+      setAgentModelId(null)
+      updates.agentChannelId = undefined
+      updates.agentModelId = undefined
+    }
+
+    await window.electronAPI.updateSettings(updates).catch(console.error)
+  }, [setAgentChannelIds, setAgentChannelId, setAgentModelId])
 
   /** 删除渠道（通过弹窗确认） */
   const handleDeleteRequest = (channel: Channel): void => {
@@ -101,21 +145,11 @@ export function ChannelSettings(): React.ReactElement {
   /** 切换渠道启用状态 */
   const handleToggle = async (channel: Channel): Promise<void> => {
     try {
-      await window.electronAPI.updateChannel(channel.id, { enabled: !channel.enabled })
-
-      // 如果禁用渠道，同时从 Agent 列表中移除
-      if (channel.enabled) {
-        const newIds = agentChannelIds.filter((id) => id !== channel.id)
-        setAgentChannelIds(newIds)
-        await window.electronAPI.updateSettings({ agentChannelIds: newIds })
-
-        // 如果禁用的是当前选中的 Agent 渠道，清空选择
-        if (agentChannelId === channel.id) {
-          setAgentChannelId(null)
-          setAgentModelId(null)
-          await window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined })
-        }
-      }
+      const savedChannel = await window.electronAPI.updateChannel(channel.id, { enabled: !channel.enabled })
+      await syncAgentChannelEligibility(
+        savedChannel,
+        savedChannel.enabled && isAgentCompatibleProvider(savedChannel.provider),
+      )
 
       await loadChannels()
     } catch (error) {
@@ -175,6 +209,7 @@ export function ChannelSettings(): React.ReactElement {
       <ChannelForm
         channel={editingChannel}
         onSaved={handleFormSaved}
+        onAgentEligibilityChange={syncAgentChannelEligibility}
         onCancel={handleFormCancel}
       />
     )
@@ -184,7 +219,7 @@ export function ChannelSettings(): React.ReactElement {
   const officialChannel = channels.find((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
   const userChannels = channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID)
 
-  // Agent 供应商渠道（Proma 官方 + Anthropic 兼容：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan，已启用）
+  // Agent 供应商渠道（Proma 官方 + Anthropic 兼容：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax，已启用）
   const agentProviderChannels = channels.filter(
     (c) => (c.provider === 'proma' || isAgentCompatibleProvider(c.provider)) && c.enabled
   )
@@ -262,7 +297,7 @@ export function ChannelSettings(): React.ReactElement {
         ) : sortedAgentProviders.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-8 text-center">
-              暂无可用的 Agent 供应商，请先在上方添加 Anthropic / DeepSeek / Kimi 渠道并启用，或登录 Proma 官方账户
+              暂无可用的 Agent 供应商，请先在上方添加 Anthropic / DeepSeek / Kimi / MiniMax 渠道并启用，或登录 Proma 官方账户
             </div>
           </SettingsCard>
         ) : (

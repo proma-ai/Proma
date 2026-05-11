@@ -6,6 +6,7 @@
 
 import { useCallback } from 'react'
 import { MicIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,9 +28,20 @@ export function SpeechButton({
   className,
 }: SpeechButtonProps): React.ReactElement {
   const handleClick = useCallback((): void => {
-    window.electronAPI.toggleVoiceDictation().catch((error) => {
-      console.error('[语音输入] 唤起浮窗失败:', error)
-    })
+    void (async () => {
+      try {
+        const settings = await window.electronAPI.getVoiceDictationSettings()
+        if (!settings.enabled) {
+          toast.info('请先在设置中打开语音输入开关')
+          return
+        }
+
+        await window.electronAPI.toggleVoiceDictation()
+      } catch (error) {
+        console.error('[语音输入] 唤起浮窗失败:', error)
+        toast.error('唤起语音输入失败')
+      }
+    })()
   }, [])
 
   return (

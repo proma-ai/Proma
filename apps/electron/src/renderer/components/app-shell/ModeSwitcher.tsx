@@ -68,21 +68,22 @@ export function ModeSwitcher(): React.ReactElement {
   }, [mode, restoreSession])
 
   return (
-    <div className="pt-2 titlebar-no-drag">
-      <div className="relative flex rounded-xl bg-muted p-1 titlebar-no-drag">
+    <div className="pt-2 titlebar-drag-region select-none">
+      <div className="relative flex rounded-xl bg-muted p-1 titlebar-drag-region">
         {/* 滑动背景指示器 */}
         <div
           className={cn(
-            'mode-slider absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
+            'mode-slider pointer-events-none absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
             mode === 'agent' ? 'translate-x-0' : 'translate-x-full'
           )}
         />
         {modes.map(({ value, label, icon }) => (
           <button
             key={value}
+            type="button"
             onClick={() => handleModeSwitch(value)}
             className={cn(
-              'mode-btn titlebar-no-drag relative z-[1] flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+              'mode-btn titlebar-no-drag relative z-[1] h-8 flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-0 text-sm font-medium transition-colors duration-200 select-none',
               mode === value
                 ? 'mode-btn-selected text-foreground'
                 : 'text-muted-foreground hover:text-foreground'

@@ -84,6 +84,7 @@ export interface ConfirmImportOptions {
   newWorkspaceName?: string
   /** key: 原始路径, value: 新路径 (null = 移除) */
   pathMappings: Record<string, string | null>
+  conflictResolution?: 'overwrite' | 'skip'
 }
 
 interface MigrationManifest {
@@ -153,6 +154,8 @@ export interface WorkspaceImportPreview {
   mcpServerNames: string[]
   existsLocally: boolean
   localWorkspaceId?: string
+  conflictingSkills: string[]
+  conflictingMcpServers: string[]
 }
 
 export interface ImportPreviewV2 {
@@ -180,6 +183,7 @@ export interface ConfirmImportOptionsV2 {
   targetWorkspaceId?: string
   createNewWorkspace?: boolean
   newWorkspaceName?: string
+  conflictResolution?: 'overwrite' | 'skip'
 }
 
 // ─── 导出 ────────────────────────────────────────────────────────────────────
@@ -642,6 +646,31 @@ export async function parseImportFile(filePath: string): Promise<ImportPreview |
       const mcpServerNames = mcpConfig?.servers ? Object.keys(mcpConfig.servers) : []
 
       const localWs = localBySlug.get(entry.workspaceSlug)
+
+      let conflictingSkills: string[] = []
+      let conflictingMcpServers: string[] = []
+
+      if (localWs) {
+        const localSkillsDir = getWorkspaceSkillsDir(localWs.slug)
+        if (existsSync(localSkillsDir)) {
+          const localSkillSet = new Set(
+            readdirSync(localSkillsDir, { withFileTypes: true })
+              .filter((e) => e.isDirectory())
+              .map((e) => e.name)
+          )
+          conflictingSkills = skillNames.filter((name) => localSkillSet.has(name))
+        }
+
+        const localMcpPath = getWorkspaceMcpPath(localWs.slug)
+        if (existsSync(localMcpPath)) {
+          const localMcp = readJsonSafe<{ servers?: Record<string, unknown> }>(localMcpPath)
+          if (localMcp?.servers) {
+            const localServerSet = new Set(Object.keys(localMcp.servers))
+            conflictingMcpServers = mcpServerNames.filter((name) => localServerSet.has(name))
+          }
+        }
+      }
+
       return {
         workspaceSlug: entry.workspaceSlug,
         workspaceName: entry.workspaceName,
@@ -649,6 +678,8 @@ export async function parseImportFile(filePath: string): Promise<ImportPreview |
         mcpServerNames,
         existsLocally: !!localWs,
         localWorkspaceId: localWs?.id,
+        conflictingSkills,
+        conflictingMcpServers,
       }
     })
 
@@ -750,7 +781,8 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
     }
 
     // v1.0 原有逻辑
-    const { targetWorkspaceId, createNewWorkspace, newWorkspaceName } = options as ConfirmImportOptions
+    const { targetWorkspaceId, createNewWorkspace, newWorkspaceName, conflictResolution } = options as ConfirmImportOptions
+    const overwrite = conflictResolution === 'overwrite'
     let targetWorkspace: AgentWorkspace | undefined
     if (createNewWorkspace) {
       const { createAgentWorkspace } = await import('./agent-workspace-manager')
@@ -768,10 +800,10 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
       await _importSessions(tempDir, targetWorkspace)
     }
     if (manifest.components.includes('skills')) {
-      _importSkills(tempDir, targetWorkspace)
+      _importSkills(tempDir, targetWorkspace, overwrite)
     }
     if (manifest.components.includes('mcp')) {
-      _importMcp(tempDir, targetWorkspace)
+      _importMcp(tempDir, targetWorkspace, overwrite)
     }
     if (manifest.components.includes('channels')) {
       _importChannels(tempDir, manifest.mode)
@@ -795,8 +827,9 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
 }
 
 async function _confirmImportV2(options: ConfirmImportOptionsV2): Promise<{ success: boolean }> {
-  const { tempDir, manifest, pathMappings, workspaceMappings } = options
+  const { tempDir, manifest, pathMappings, workspaceMappings, conflictResolution } = options
   const v2Manifest = manifest as MigrationManifestV2
+  const overwrite = conflictResolution === 'overwrite'
 
   const { createAgentWorkspace } = await import('./agent-workspace-manager')
 
@@ -835,10 +868,10 @@ async function _confirmImportV2(options: ConfirmImportOptionsV2): Promise<{ succ
 
   for (const { sourceSlug, target } of resolvedMappings) {
     if (v2Manifest.components.includes('skills')) {
-      _importSkillsV2(tempDir, sourceSlug, target)
+      _importSkillsV2(tempDir, sourceSlug, target, overwrite)
     }
     if (v2Manifest.components.includes('mcp')) {
-      _importMcpV2(tempDir, sourceSlug, target)
+      _importMcpV2(tempDir, sourceSlug, target, overwrite)
     }
     _importWorkspaceConfigV2(tempDir, sourceSlug, target, pathMappings)
   }
@@ -938,31 +971,35 @@ async function _importSessions(tempDir: string, targetWorkspace: AgentWorkspace)
   }
 }
 
-function _importSkills(tempDir: string, targetWorkspace: AgentWorkspace) {
+function _importSkills(tempDir: string, targetWorkspace: AgentWorkspace, overwrite = false) {
   const activeDir = join(tempDir, 'skills/active')
   if (existsSync(activeDir)) {
     const targetSkillsDir = getWorkspaceSkillsDir(targetWorkspace.slug)
     for (const skillName of readdirSync(activeDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
       const src = join(activeDir, skillName)
       const dest = join(targetSkillsDir, skillName)
-      if (!existsSync(dest)) {
-        cpSync(src, dest, { recursive: true })
+      if (existsSync(dest)) {
+        if (!overwrite) continue
+        rmSync(dest, { recursive: true, force: true })
       }
+      cpSync(src, dest, { recursive: true })
     }
   }
 }
 
-function _importMcp(tempDir: string, targetWorkspace: AgentWorkspace) {
+function _importMcp(tempDir: string, targetWorkspace: AgentWorkspace, overwrite = false) {
   const srcMcp = join(tempDir, 'config/mcp.json')
   if (!existsSync(srcMcp)) return
   const destMcp = getWorkspaceMcpPath(targetWorkspace.slug)
-  // 合并已有 mcp.json 中没有的 server
   if (existsSync(destMcp)) {
     const existing = readJsonSafe<{ servers?: Record<string, unknown> }>(destMcp) ?? {}
     const imported = readJsonSafe<{ servers?: Record<string, unknown> }>(srcMcp) ?? {}
-    const merged = { ...existing, servers: { ...imported.servers, ...existing.servers } }
+    const merged = overwrite
+      ? { ...existing, servers: { ...existing.servers, ...imported.servers } }
+      : { ...existing, servers: { ...imported.servers, ...existing.servers } }
     writeFileSync(destMcp, JSON.stringify(merged, null, 2), 'utf-8')
   } else {
+    mkdirSync(getAgentWorkspacePath(targetWorkspace.slug), { recursive: true })
     cpSync(srcMcp, destMcp)
   }
 }
@@ -1071,16 +1108,18 @@ function _importPersonalFiles(tempDir: string) {
 
 // ─── v2 导入辅助函数 ─────────────────────────────────────────────────────────
 
-function _importSkillsV2(tempDir: string, sourceSlug: string, targetWorkspace: AgentWorkspace) {
+function _importSkillsV2(tempDir: string, sourceSlug: string, targetWorkspace: AgentWorkspace, overwrite = false) {
   const activeDir = join(tempDir, `workspaces/${sourceSlug}/skills/active`)
   if (existsSync(activeDir)) {
     const targetSkillsDir = getWorkspaceSkillsDir(targetWorkspace.slug)
     for (const entry of readdirSync(activeDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const dest = join(targetSkillsDir, entry.name)
-      if (!existsSync(dest)) {
-        cpSync(join(activeDir, entry.name), dest, { recursive: true })
+      if (existsSync(dest)) {
+        if (!overwrite) continue
+        rmSync(dest, { recursive: true, force: true })
       }
+      cpSync(join(activeDir, entry.name), dest, { recursive: true })
     }
   }
 
@@ -1090,14 +1129,16 @@ function _importSkillsV2(tempDir: string, sourceSlug: string, targetWorkspace: A
     for (const entry of readdirSync(inactiveDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const dest = join(targetInactiveDir, entry.name)
-      if (!existsSync(dest)) {
-        cpSync(join(inactiveDir, entry.name), dest, { recursive: true })
+      if (existsSync(dest)) {
+        if (!overwrite) continue
+        rmSync(dest, { recursive: true, force: true })
       }
+      cpSync(join(inactiveDir, entry.name), dest, { recursive: true })
     }
   }
 }
 
-function _importMcpV2(tempDir: string, sourceSlug: string, targetWorkspace: AgentWorkspace) {
+function _importMcpV2(tempDir: string, sourceSlug: string, targetWorkspace: AgentWorkspace, overwrite = false) {
   const srcMcp = join(tempDir, `workspaces/${sourceSlug}/config/mcp.json`)
   if (!existsSync(srcMcp)) return
 
@@ -1105,10 +1146,12 @@ function _importMcpV2(tempDir: string, sourceSlug: string, targetWorkspace: Agen
   if (existsSync(destMcp)) {
     const existing = readJsonSafe<{ servers?: Record<string, unknown> }>(destMcp) ?? {}
     const imported = readJsonSafe<{ servers?: Record<string, unknown> }>(srcMcp) ?? {}
-    const merged = { ...existing, servers: { ...imported.servers, ...existing.servers } }
+    const merged = overwrite
+      ? { ...existing, servers: { ...existing.servers, ...imported.servers } }
+      : { ...existing, servers: { ...imported.servers, ...existing.servers } }
     writeFileSync(destMcp, JSON.stringify(merged, null, 2), 'utf-8')
   } else {
-    mkdirSync(join(getAgentWorkspacePath(targetWorkspace.slug)), { recursive: true })
+    mkdirSync(getAgentWorkspacePath(targetWorkspace.slug), { recursive: true })
     cpSync(srcMcp, destMcp)
   }
 }

@@ -24,7 +24,7 @@ import type {
 import { PROMA_OFFICIAL_CHANNEL_ID, PROVIDER_DEFAULT_URLS } from '@proma/shared'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { normalizeAnthropicBaseUrl, normalizeBaseUrl } from '@proma/core'
+import { normalizeAnthropicBaseUrl, normalizeBaseUrl, normalizeVersionedAnthropicBaseUrl } from '@proma/core'
 
 /** 当前配置版本 */
 const CONFIG_VERSION = 1
@@ -374,11 +374,10 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
+      case 'minimax':
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
       case 'openai':
-      case 'moonshot':
       case 'zhipu':
-      case 'minimax':
       case 'doubao':
       case 'qwen':
       case 'custom':
@@ -395,7 +394,7 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 }
 
 /**
- * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan）
+ * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax）
  *
  * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
  * Kimi Coding Plan 必须发送 User-Agent: KimiCLI/*，否则返回 403。
@@ -408,7 +407,9 @@ async function testAnthropicCompatible(
 ): Promise<ChannelTestResult> {
   const isNonVersionedPath =
     provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding'
-  const url = isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
+  const url = provider === 'minimax'
+    ? normalizeVersionedAnthropicBaseUrl(baseUrl)
+    : isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
 
   let testModel: string
@@ -422,6 +423,9 @@ async function testAnthropicCompatible(
     case 'kimi-coding':
       testModel = 'kimi-for-coding'
       break
+    case 'minimax':
+      testModel = 'MiniMax-M2.7'
+      break
     default:
       testModel = 'claude-sonnet-4-6'
   }
@@ -433,6 +437,8 @@ async function testAnthropicCompatible(
   if (provider === 'kimi-coding') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = 'KimiCLI/1.3'
+  } else if (provider === 'minimax') {
+    headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey
     headers.Authorization = `Bearer ${apiKey}`
@@ -529,11 +535,10 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
+      case 'minimax':
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
-      case 'moonshot':
       case 'zhipu':
-      case 'minimax':
       case 'doubao':
       case 'qwen':
       case 'custom':
@@ -568,11 +573,10 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'deepseek':
       case 'kimi-api':
       case 'kimi-coding':
+      case 'minimax':
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
-      case 'moonshot':
       case 'zhipu':
-      case 'minimax':
       case 'doubao':
       case 'qwen':
       case 'custom':
@@ -599,7 +603,7 @@ interface AnthropicModelItem {
 }
 
 /**
- * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan）
+ * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax）
  *
  * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
  * Kimi Coding Plan 必须发送 User-Agent: KimiCLI/*。
@@ -613,7 +617,9 @@ async function fetchAnthropicCompatibleModels(
 ): Promise<FetchModelsResult> {
   const isNonVersionedPath =
     provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding'
-  const url = isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
+  const url = provider === 'minimax'
+    ? normalizeVersionedAnthropicBaseUrl(baseUrl)
+    : isNonVersionedPath ? normalizeBaseUrl(baseUrl) : normalizeAnthropicBaseUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
 
   const headers: Record<string, string> = {
@@ -622,6 +628,8 @@ async function fetchAnthropicCompatibleModels(
   if (provider === 'kimi-coding') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = 'KimiCLI/1.3'
+  } else if (provider === 'minimax') {
+    headers.Authorization = `Bearer ${apiKey}`
   } else {
     headers['x-api-key'] = apiKey
     headers.Authorization = `Bearer ${apiKey}`

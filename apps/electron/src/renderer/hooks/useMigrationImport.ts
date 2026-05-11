@@ -38,6 +38,8 @@ export interface WorkspaceImportPreviewItem {
   mcpServerNames: string[]
   existsLocally: boolean
   localWorkspaceId?: string
+  conflictingSkills: string[]
+  conflictingMcpServers: string[]
 }
 
 export interface WorkspaceImportMapping {
@@ -52,6 +54,8 @@ interface UseMigrationImportReturn {
   importPreview: ImportPreview | null
   pathMappings: Record<string, string | null>
   workspaceMappings: WorkspaceImportMapping[]
+  conflictResolution: 'overwrite' | 'skip'
+  hasConflicts: boolean
   importConfirming: boolean
   importResult: { success: boolean; error?: string } | null
   isV2: boolean
@@ -59,6 +63,7 @@ interface UseMigrationImportReturn {
   handleConfirmImport: () => Promise<void>
   handlePathMapping: (originalPath: string, newValue: string | null) => void
   handleWorkspaceMapping: (sourceSlug: string, mapping: Partial<WorkspaceImportMapping>) => void
+  setConflictResolution: (value: 'overwrite' | 'skip') => void
   reset: () => void
 }
 
@@ -67,10 +72,17 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
   const [pathMappings, setPathMappings] = useState<Record<string, string | null>>({})
   const [workspaceMappings, setWorkspaceMappings] = useState<WorkspaceImportMapping[]>([])
+  const [conflictResolution, setConflictResolution] = useState<'overwrite' | 'skip'>('overwrite')
   const [importConfirming, setImportConfirming] = useState(false)
   const [importResult, setImportResult] = useState<{ success: boolean; error?: string } | null>(null)
 
   const isV2 = importPreview?.manifest.version === '2.0' && !!importPreview.workspaces
+
+  const hasConflicts = importPreview?.workspaces?.some((ws) => {
+    const mapping = workspaceMappings.find((m) => m.sourceSlug === ws.workspaceSlug)
+    if (!mapping || mapping.action !== 'merge') return false
+    return (ws.conflictingSkills?.length ?? 0) > 0 || (ws.conflictingMcpServers?.length ?? 0) > 0
+  }) ?? false
 
   const initFromPreview = useCallback((preview: ImportPreview) => {
     const initialPathMappings: Record<string, string | null> = {}
@@ -144,6 +156,7 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
         tempDir: importPreview.tempDir,
         manifest: importPreview.manifest,
         pathMappings,
+        conflictResolution: hasConflicts ? conflictResolution : undefined,
         ...(isV2 ? { workspaceMappings } : {}),
       })
       setImportResult({ success: true })
@@ -153,7 +166,7 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
     } finally {
       setImportConfirming(false)
     }
-  }, [importPreview, pathMappings, workspaceMappings, isV2])
+  }, [importPreview, pathMappings, workspaceMappings, isV2, conflictResolution, hasConflicts])
 
   const handlePathMapping = useCallback((originalPath: string, newValue: string | null) => {
     setPathMappings((prev) => ({ ...prev, [originalPath]: newValue }))
@@ -170,6 +183,7 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
     setImportPreview(null)
     setPathMappings({})
     setWorkspaceMappings([])
+    setConflictResolution('overwrite')
     setImportConfirming(false)
     setImportResult(null)
   }, [])
@@ -179,6 +193,8 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
     importPreview,
     pathMappings,
     workspaceMappings,
+    conflictResolution,
+    hasConflicts,
     importConfirming,
     importResult,
     isV2,
@@ -186,6 +202,7 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
     handleConfirmImport,
     handlePathMapping,
     handleWorkspaceMapping,
+    setConflictResolution,
     reset,
   }
 }

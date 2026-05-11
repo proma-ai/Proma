@@ -457,7 +457,9 @@ app.whenReady().then(async () => {
 
   // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
   createQuickTaskWindow()
-  createVoiceDictationWindow()
+  if (getSettings().voiceDictation?.enabled === true) {
+    createVoiceDictationWindow()
+  }
 
   // 注册全局快捷键
   registerGlobalShortcut('quick-task', toggleQuickTaskWindow)

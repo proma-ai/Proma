@@ -37,6 +37,23 @@ export function normalizeAnthropicBaseUrl(baseUrl: string): string {
 }
 
 /**
+ * 规范化带版本路径的 Anthropic 兼容 Base URL。
+ *
+ * 某些网关以 `/anthropic` 作为协议根路径，但实际 API 仍位于 `/v1/messages`。
+ * 例如：
+ * - "https://api.minimaxi.com/anthropic" → "https://api.minimaxi.com/anthropic/v1"
+ * - "https://api.minimaxi.com/anthropic/v1/messages" → "https://api.minimaxi.com/anthropic/v1"
+ */
+export function normalizeVersionedAnthropicBaseUrl(baseUrl: string): string {
+  let url = baseUrl.trim().replace(/\/+$/, '')
+  url = url.replace(/\/messages$/, '')
+  if (!url.match(/\/v\d+$/)) {
+    url = `${url}/v1`
+  }
+  return url
+}
+
+/**
  * 规范化 Anthropic Base URL（用于 Agent SDK 环境变量 ANTHROPIC_BASE_URL）
  *
  * SDK 内部会自动拼接 /v1/messages，所以这里需要去除用户误填的路径后缀，

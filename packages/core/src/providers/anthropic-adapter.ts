@@ -7,7 +7,7 @@
  * - 图片格式：{ type: 'image', source: { type: 'base64', media_type, data } }
  * - SSE 解析：content_block_delta → text，thinking_delta → reasoning，tool_use 支持
  * - 认证：x-api-key + Authorization: Bearer（Kimi Coding Plan 只用 Bearer）
- * - 同时适配 Anthropic 原生 API、DeepSeek、Kimi API、Kimi Coding Plan
+ * - 同时适配 Anthropic 原生 API、DeepSeek、Kimi API、Kimi Coding Plan、MiniMax
  *
  * 思考模式按模型能力分支（见 thinking-capability.ts）：
  * - Opus 4.7 / Mythos Preview：adaptive 唯一模式（发 `{type: 'adaptive'}`）
@@ -15,6 +15,7 @@
  * - DeepSeek v4 系列：`{type: 'enabled'}` + `output_config.effort = 'max'`
  * - 更老的 Claude 系列及 DeepSeek v3：manual（旧版 `{type: 'enabled', budget_tokens}`）
  * - Kimi（kimi-api / kimi-coding）：不发 thinking 字段（K2 系列非 reasoning 模型）
+ * - MiniMax：不发 thinking 字段，接收服务端返回的 thinking 块
  *
  * Kimi Coding Plan 特殊要求：
  * - Base URL：`https://api.kimi.com/coding/v1`
@@ -33,7 +34,7 @@ import type {
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
-import { normalizeAnthropicBaseUrl, normalizeBaseUrl } from './url-utils.ts'
+import { normalizeAnthropicBaseUrl, normalizeBaseUrl, normalizeVersionedAnthropicBaseUrl } from './url-utils.ts'
 import { detectThinkingCapability } from './thinking-capability.ts'
 
 // ===== Anthropic 特有类型 =====
@@ -261,6 +262,10 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   /** 根据 provider 类型选择 URL 规范化方式 */
   private normalizeUrl(baseUrl: string): string {
+    // MiniMax：baseUrl 是 /anthropic 协议根路径，实际请求需要 /v1/messages。
+    if (this.providerType === 'minimax') {
+      return normalizeVersionedAnthropicBaseUrl(baseUrl)
+    }
     // DeepSeek / Kimi：baseUrl 本身已含非版本路径（如 /anthropic、/coding/v1），不追加 /v1
     if (
       this.providerType === 'deepseek' ||
@@ -289,6 +294,10 @@ export class AnthropicAdapter implements ProviderAdapter {
       base['User-Agent'] = 'KimiCLI/1.3'
       return base
     }
+    if (this.providerType === 'minimax') {
+      base['Authorization'] = `Bearer ${apiKey}`
+      return base
+    }
     // 其它渠道：保持双认证头（Anthropic 原生 + Bearer 兼容）
     base['x-api-key'] = apiKey
     base['Authorization'] = `Bearer ${apiKey}`
@@ -304,7 +313,9 @@ export class AnthropicAdapter implements ProviderAdapter {
     // adaptive / effort-based 模式：max_tokens 作为「思考+回答」的总硬上限，给充足空间
     const manualThinkingBudget = 16384
     let maxTokens: number
-    if (!input.thinkingEnabled) {
+    if (this.providerType === 'minimax') {
+      maxTokens = 2048
+    } else if (!input.thinkingEnabled) {
       maxTokens = 8192
     } else if (capability.mode === 'manual-only') {
       maxTokens = manualThinkingBudget + 16384

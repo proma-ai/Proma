@@ -31,6 +31,12 @@ export type VoiceDictationEndpointMode = 'async' | 'duplex'
 /** 语音输入输出方式 */
 export type VoiceDictationOutputMode = 'auto' | 'clipboard' | 'proma-input'
 
+/** 语音输入浮窗位置 */
+export interface VoiceDictationWindowPosition {
+  x: number
+  y: number
+}
+
 /** 语音输入设置（渲染进程读取到的是解密后的值） */
 export interface VoiceDictationSettings {
   /** 是否启用语音输入 */
@@ -55,6 +61,8 @@ export interface VoiceDictationSettings {
   outputMode: VoiceDictationOutputMode
   /** 自定义热词，按行或逗号分隔，启动识别时直传给豆包 ASR */
   customHotwords: string
+  /** 语音输入浮窗上次拖动后的位置 */
+  windowPosition?: VoiceDictationWindowPosition
 }
 
 /** 语音输入设置更新 */

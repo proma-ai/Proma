@@ -28,26 +28,69 @@ let initialized = false
 
 interface ParsedAccelerator {
   cmd: boolean
+  ctrl: boolean
   shift: boolean
   alt: boolean
   key: string
 }
 
+function normalizeKeyName(key: string): string {
+  if (key === ' ') return 'space'
+
+  const keyMap: Record<string, string> = {
+    arrowup: 'up',
+    arrowdown: 'down',
+    arrowleft: 'left',
+    arrowright: 'right',
+    escape: 'esc',
+    return: 'enter',
+    '+': 'plus',
+  }
+  const mapped = keyMap[key.toLowerCase()]
+  return (mapped ?? key).toLowerCase()
+}
+
+function isModifierName(part: string): boolean {
+  const key = part.toLowerCase()
+  return [
+    'cmd',
+    'command',
+    'meta',
+    'super',
+    'ctrl',
+    'control',
+    'cmdorctrl',
+    'commandorcontrol',
+    'shift',
+    'alt',
+    'option',
+  ].includes(key)
+}
+
 /**
  * 解析快捷键字符串为结构化对象
  *
- * 支持格式：'Cmd+Shift+M'、'Ctrl+K'、'Cmd+,'
+ * 支持格式：'Cmd+Shift+M'、'Ctrl+K'、'CmdOrCtrl+,'
  */
 function parseAccelerator(accelerator: string): ParsedAccelerator {
   const parts = accelerator.split('+').map((p) => p.trim())
-  const key = (parts[parts.length - 1] ?? '').toLowerCase()
-  const modifiers = parts.slice(0, -1).map((m) => m.toLowerCase())
+  const isModifierOnly = parts.length > 0 && parts.every(isModifierName)
+  const key = isModifierOnly ? '' : normalizeKeyName(parts[parts.length - 1] ?? '')
+  const modifiers = (isModifierOnly ? parts : parts.slice(0, -1)).map((m) => m.toLowerCase())
+  const hasCmdOrCtrl =
+    modifiers.includes('cmdorctrl') || modifiers.includes('commandorcontrol')
 
   return {
     cmd:
       modifiers.includes('cmd') ||
+      modifiers.includes('command') ||
+      modifiers.includes('meta') ||
+      modifiers.includes('super') ||
+      (isMac && hasCmdOrCtrl),
+    ctrl:
       modifiers.includes('ctrl') ||
-      modifiers.includes('cmdorctrl'),
+      modifiers.includes('control') ||
+      (!isMac && hasCmdOrCtrl),
     shift: modifiers.includes('shift'),
     alt: modifiers.includes('alt') || modifiers.includes('option'),
     key,
@@ -61,15 +104,17 @@ function parseAccelerator(accelerator: string): ParsedAccelerator {
  */
 function matchesParsed(e: KeyboardEvent, parsed: ParsedAccelerator): boolean {
   // 修饰键匹配
-  const cmdMatch = isMac ? e.metaKey : e.ctrlKey
-  if (parsed.cmd !== cmdMatch) return false
+  if (parsed.cmd !== e.metaKey) return false
+  if (parsed.ctrl !== e.ctrlKey) return false
   if (parsed.shift !== e.shiftKey) return false
   if (parsed.alt !== e.altKey) return false
-  // macOS 上不应有 Ctrl 被意外按下（除非快捷键要求）
-  if (isMac && !parsed.cmd && e.ctrlKey) return false
 
   // 按键匹配
-  const eventKey = e.key.toLowerCase()
+  if (!parsed.key) {
+    return ['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)
+  }
+
+  const eventKey = normalizeKeyName(e.key)
   return eventKey === parsed.key
 }
 
@@ -188,11 +233,17 @@ export function getAcceleratorDisplay(accelerator: string): string {
   if (!accelerator) return ''
   if (isMac) {
     return accelerator
-      .replace(/Cmd\+/gi, '⌘')
-      .replace(/Shift\+/gi, '⇧')
-      .replace(/Alt\+/gi, '⌥')
-      .replace(/Ctrl\+/gi, '⌃')
-      .replace(/Backspace/gi, '⌫')
+      .split('+')
+      .map((part) => {
+        const normalized = part.trim().toLowerCase()
+        if (['cmd', 'command', 'meta', 'super'].includes(normalized)) return '⌘'
+        if (['ctrl', 'control'].includes(normalized)) return '⌃'
+        if (normalized === 'shift') return '⇧'
+        if (['alt', 'option'].includes(normalized)) return '⌥'
+        if (normalized === 'backspace') return '⌫'
+        return part
+      })
+      .join('')
   }
   return accelerator
 }
@@ -213,6 +264,7 @@ export function checkConflict(
     const existingParsed = parseAccelerator(existingAccel)
     if (
       parsed.cmd === existingParsed.cmd &&
+      parsed.ctrl === existingParsed.ctrl &&
       parsed.shift === existingParsed.shift &&
       parsed.alt === existingParsed.alt &&
       parsed.key === existingParsed.key

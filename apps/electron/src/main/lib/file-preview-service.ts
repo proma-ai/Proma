@@ -26,7 +26,7 @@ import {
   watch as fsWatch,
   type FSWatcher,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { resolveOverlayColors } from './titlebar-overlay'
 import { getSettings } from './settings-service'
 
@@ -1535,6 +1535,13 @@ function resolveTargetPath(filePath: string, basePaths?: string[]): string {
       const candidate = resolve(base, filePath)
       if (existsSync(candidate)) return candidate
     }
+    // 尝试从 home 目录解析（处理 "Workspace/..." 或 ".proma/..." 等缺少 home 前缀的路径）
+    const home = homedir()
+    const homeCandidate = resolve(home, filePath)
+    if (existsSync(homeCandidate)) return homeCandidate
+    // 尝试作为根路径解析（处理前导 "/" 被剥离的绝对路径，如 "Users/erlich/..."）
+    const rootCandidate = resolve('/', filePath)
+    if (existsSync(rootCandidate)) return rootCandidate
     // fallback: 用文件名搜索
     const name = basename(filePath)
     for (const base of basePaths) {
@@ -1544,6 +1551,11 @@ function resolveTargetPath(filePath: string, basePaths?: string[]): string {
     }
     return resolve(basePaths[0]!, filePath)
   }
+  // 无 basePaths 时也尝试 home 目录和根目录
+  const homeCandidate = resolve(homedir(), filePath)
+  if (existsSync(homeCandidate)) return homeCandidate
+  const rootCandidate = resolve('/', filePath)
+  if (existsSync(rootCandidate)) return rootCandidate
   return resolve(filePath)
 }
 
