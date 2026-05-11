@@ -969,8 +969,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300 px-2"
         style={{ width: 60, flexShrink: 0 }}
       >
-        {/* macOS 需要避开左上角红绿灯，其他平台保留紧凑呼吸感。 */}
-        <div className={cn(isMac ? 'pt-[50px]' : 'pt-2')} />
+        {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
+        <div className={cn('titlebar-drag-region', isMac ? 'pt-[50px]' : 'pt-2')} />
 
         {/* 展开按钮：mini rail 的唯一布局控制入口 */}
         <div className="pt-2">
@@ -1142,8 +1142,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       className="h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
-      {/* macOS 需要避开左上角红绿灯，其他平台不占用这块空间。 */}
-      <div className={cn(isMac ? 'pt-[30px]' : 'pt-1')}>
+      {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
+      <div className={cn('titlebar-drag-region', isMac ? 'pt-[30px]' : 'pt-1')}>
         {/* 模式切换器 + 折叠按钮 */}
         <div className="flex items-start gap-1.5 px-3">
           <div className="flex-1 min-w-0">
