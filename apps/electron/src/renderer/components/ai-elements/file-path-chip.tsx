@@ -3,12 +3,21 @@
  *
  * 在 Agent 消息中检测到文件路径时，渲染为可点击的芯片。
  * 支持绝对路径和相对路径（相对于 basePath 解析）。
- * 点击后通过 IPC 在新窗口中预览文件。
+ * 点击后在右侧内联面板中预览文件。
  */
 
 import * as React from 'react'
+import { useStore } from 'jotai'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
+import { previewFileMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+
+/** 文件存在性缓存（模块级共享，避免重复 IPC）。key = filePath + basePaths */
+const fileExistsCache = new Map<string, boolean>()
+function existsCacheKey(filePath: string, bases: string[]): string {
+  return `${filePath}\0${bases.join('\0')}`
+}
 
 /** 图片扩展名 */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
@@ -83,6 +92,10 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:\\/.test(cleanPath)
 
+  const chipRef = React.useRef<HTMLButtonElement>(null)
+  const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
+  const store = useStore()
+
   // 候选基础目录列表：优先使用 basePaths；否则退化到 basePath 单值
   const candidateBases = React.useMemo<string[]>(() => {
     if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
@@ -90,33 +103,92 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     return []
   }, [basePath, basePaths])
 
-  // 用于 title 提示：绝对路径直接展示；相对路径展示首个候选拼接（仅作提示）
+  // 用于 title 提示：绝对路径直接展示；相对路径优先匹配首段对应的 base 目录
   const displayPath = React.useMemo(() => {
     if (isAbsolute) return trimmedPath
     if (candidateBases.length > 0) {
+      const firstSegment = cleanPath.split('/')[0]
+      if (firstSegment) {
+        for (const base of candidateBases) {
+          const baseName = base.endsWith('/') ? base.slice(0, -1).split('/').pop() : base.split('/').pop()
+          if (baseName === firstSegment) {
+            const parentDir = base.endsWith('/')
+              ? base.slice(0, base.slice(0, -1).lastIndexOf('/'))
+              : base.slice(0, base.lastIndexOf('/'))
+            return parentDir.endsWith('/') ? `${parentDir}${cleanPath}` : `${parentDir}/${cleanPath}`
+          }
+        }
+      }
       const base = candidateBases[0]!
       return base.endsWith('/') ? `${base}${cleanPath}` : `${base}/${cleanPath}`
     }
     return trimmedPath
   }, [trimmedPath, cleanPath, isAbsolute, candidateBases])
 
+  // IntersectionObserver 懒检查文件是否存在
+  React.useEffect(() => {
+    const el = chipRef.current
+    if (!el) return
+
+    const key = existsCacheKey(cleanPath, candidateBases)
+    if (fileExistsCache.has(key)) {
+      setFileStatus(fileExistsCache.get(key) ? 'resolved' : 'broken')
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return
+        observer.disconnect()
+        const bases = candidateBases.length > 0 ? candidateBases : undefined
+        const sessionId = store.get(currentAgentSessionIdAtom)
+        window.electronAPI.resolveFilePath(cleanPath, { sessionId: sessionId ?? undefined, candidateBasePaths: bases })
+          .then((resolved) => {
+            const exists = resolved !== null
+            fileExistsCache.set(key, exists)
+            setFileStatus(exists ? 'resolved' : 'broken')
+          })
+          .catch(() => { /* IPC 失败不标记 */ })
+      },
+      { threshold: 0 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [cleanPath, candidateBases, store])
+
   const handleClick = React.useCallback(() => {
-    const bases = candidateBases.length > 0 ? candidateBases : undefined
-    window.electronAPI.previewFile(cleanPath, bases).catch((error: unknown) => {
-      console.error('[FilePathChip] 预览文件失败:', error)
+    const sessionId = store.get(currentAgentSessionIdAtom)
+    if (!sessionId) return
+
+    store.set(previewFileMapAtom, (prev) => {
+      const m = new Map(prev)
+      m.set(sessionId, {
+        filePath: cleanPath,
+        previewOnly: true,
+        basePaths: candidateBases.length > 0 ? candidateBases : undefined,
+      })
+      return m
     })
-  }, [cleanPath, candidateBases])
+    store.set(previewPanelOpenMapAtom, (prev) => {
+      const m = new Map(prev)
+      m.set(sessionId, true)
+      return m
+    })
+  }, [store, cleanPath, candidateBases])
 
   return (
     <button
+      ref={chipRef}
       type="button"
       onClick={handleClick}
-      title={displayPath}
+      title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
       className={cn(
         'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
-        'bg-primary/10 text-primary hover:bg-primary/20',
         'cursor-pointer transition-colors duration-150',
         'align-baseline not-prose',
+        fileStatus === 'broken'
+          ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
+          : 'bg-primary/10 text-primary hover:bg-primary/20',
         className
       )}
     >

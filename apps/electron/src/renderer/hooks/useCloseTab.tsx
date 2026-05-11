@@ -19,9 +19,13 @@ import {
 } from '@/atoms/tab-atoms'
 import {
   agentRunningSessionIdsAtom,
-  agentSidePanelOpenMapAtom,
   workingDoneSessionIdsAtom,
+  agentDiffPanelTabAtom,
+  agentDiffRefreshVersionAtom,
+  agentDiffUnseenChangesAtom,
+  agentDiffUnseenFilesAtom,
 } from '@/atoms/agent-atoms'
+import { previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import {
   conversationModelsAtom,
   conversationContextLengthAtom,
@@ -55,7 +59,12 @@ export function useCloseTab(): UseCloseTabReturn {
   const setConvThinking = useSetAtom(conversationThinkingEnabledAtom)
   const setConvParallel = useSetAtom(conversationParallelModeAtom)
   const setConvPromptId = useSetAtom(conversationPromptIdAtom)
-  const setAgentSidePanelOpen = useSetAtom(agentSidePanelOpenMapAtom)
+  const setPreviewPanelOpen = useSetAtom(previewPanelOpenMapAtom)
+  const setPreviewFile = useSetAtom(previewFileMapAtom)
+  const setDiffPanelTab = useSetAtom(agentDiffPanelTabAtom)
+  const setDiffRefreshVersion = useSetAtom(agentDiffRefreshVersionAtom)
+  const setDiffUnseen = useSetAtom(agentDiffUnseenChangesAtom)
+  const setDiffUnseenFiles = useSetAtom(agentDiffUnseenFilesAtom)
 
   const cleanupMapAtoms = React.useCallback((tabId: string) => {
     const deleteKey = <T,>(prev: Map<string, T>): Map<string, T> => {
@@ -69,8 +78,13 @@ export function useCloseTab(): UseCloseTabReturn {
     setConvThinking(deleteKey)
     setConvParallel(deleteKey)
     setConvPromptId(deleteKey)
-    setAgentSidePanelOpen(deleteKey)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setAgentSidePanelOpen])
+    setPreviewPanelOpen(deleteKey)
+    setPreviewFile(deleteKey)
+    setDiffPanelTab(deleteKey)
+    setDiffRefreshVersion(deleteKey)
+    setDiffUnseen(deleteKey)
+    setDiffUnseenFiles(deleteKey)
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles])
 
   const executeClose = React.useCallback((tabId: string) => {
     const tab = tabs.find((t) => t.id === tabId)

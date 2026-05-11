@@ -96,6 +96,83 @@ export interface GitRepoStatus {
   remoteUrl: string | null
 }
 
+/** 变更文件状态 */
+export type ChangedFileStatus = 'modified' | 'deleted' | 'untracked'
+
+/** 文件来源标识 */
+export type ChangeSource = 'session' | 'workspace' | 'both' | 'none'
+
+/** 单个变更文件条目 */
+export interface ChangedFileEntry {
+  /** 文件路径（相对于仓库根） */
+  filePath: string
+  /** 变更状态 */
+  status: ChangedFileStatus
+  /** 新增行数 */
+  additions: number
+  /** 删除行数 */
+  deletions: number
+  /** 文件来源 */
+  source: ChangeSource
+  /** 所属 Git 仓库根目录 */
+  gitRoot: string
+}
+
+/** 单个未追踪文件条目 */
+export interface UntrackedFileEntry {
+  /** 文件路径（相对于仓库根） */
+  filePath: string
+  /** 所属 Git 仓库根目录 */
+  gitRoot: string
+}
+
+/** 未暂存变更结果 */
+export interface UnstagedChangesResult {
+  /** 是否为 Git 仓库 */
+  isGitRepo: boolean
+  /** 已追踪文件的变更列表 */
+  files: ChangedFileEntry[]
+  /** 未追踪文件列表 */
+  untrackedFiles: UntrackedFileEntry[]
+  /** Git 仓库根目录名数组（多仓库场景用于分组显示） */
+  gitRootNames: string[]
+}
+
+/** 获取文件 Diff 的输入 */
+export interface GetFileDiffInput {
+  dirPath: string
+  filePath: string
+  /** 文件所属 Git 仓库根，多仓库场景下必须传入 */
+  gitRoot?: string
+  /** 当前 Agent 会话 ID，用于主进程校验可访问路径 */
+  sessionId?: string
+}
+
+/** Revert 文件变更的输入 */
+export interface RevertFileInput {
+  dirPath: string
+  filePath: string
+  /** 文件所属 Git 仓库根，多仓库场景下必须传入 */
+  gitRoot?: string
+  /** 当前 Agent 会话 ID，用于主进程校验可访问路径 */
+  sessionId?: string
+}
+
+/** 文件预览/附加目录 IPC 的访问上下文 */
+export interface FileAccessOptions {
+  /** 当前 Agent 会话 ID，主进程据此查会话和工作区授权目录 */
+  sessionId?: string
+  /** 工作区 slug；通常可由 sessionId 推导，少数无 session 调用可显式传入 */
+  workspaceSlug?: string
+  /** 路径解析候选目录；主进程会先过滤到已授权目录内再使用 */
+  candidateBasePaths?: string[]
+}
+
+/** 已授权本地文件的 proma-file URL */
+export interface ResolvedFileUrl {
+  url: string
+}
+
 /**
  * Git Bash 运行时状态（Windows 平台）
  */
@@ -108,6 +185,14 @@ export interface GitBashStatus {
   version: string | null
   /** 错误信息（如果不可用）*/
   error: string | null
+}
+
+/** 系统编辑器应用信息 */
+export interface EditorApp {
+  /** 显示名称，如 "Visual Studio Code" */
+  name: string
+  /** .app 路径，如 "/Applications/Visual Studio Code.app" */
+  path: string
 }
 
 /**
@@ -194,8 +279,21 @@ export const IPC_CHANNELS = {
   REINIT_RUNTIME: 'runtime:reinit',
   /** 获取指定目录的 Git 仓库状态 */
   GET_GIT_REPO_STATUS: 'git:get-repo-status',
+  /** 获取未暂存的变更文件列表 */
+  GET_UNSTAGED_CHANGES: 'git:get-unstaged-changes',
+  /** 获取单个文件的 diff */
+  GET_FILE_DIFF: 'git:get-file-diff',
+  /** 获取未追踪文件内容 */
+  GET_UNTRACKED_CONTENT: 'git:get-untracked-content',
+  /** 还原文件变更 */
+  REVERT_FILE: 'git:revert-file',
+  GET_DIFF_CONTENTS: 'git:get-diff-contents',
   /** 在系统默认浏览器中打开外部链接 */
   OPEN_EXTERNAL: 'shell:open-external',
+  /** 用系统默认应用打开任意文件 */
+  SYSTEM_OPEN_FILE: 'shell:system-open-file',
+  /** 扫描系统中可用的编辑器应用 */
+  SCAN_EDITORS: 'shell:scan-editors',
 } as const
 
 /**

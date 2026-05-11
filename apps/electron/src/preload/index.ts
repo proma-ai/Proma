@@ -178,6 +178,17 @@ export interface ElectronAPI {
    */
   getGitRepoStatus: (dirPath: string) => Promise<GitRepoStatus | null>
 
+  /** 获取未暂存的变更文件列表 */
+  getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => Promise<import('@proma/shared').UnstagedChangesResult>
+  /** 获取单个文件的 diff */
+  getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => Promise<string>
+  /** 获取未追踪文件内容 */
+  getUntrackedContent: (input: import('@proma/shared').GetFileDiffInput) => Promise<string>
+  /** 还原文件变更 */
+  revertFile: (input: import('@proma/shared').RevertFileInput) => Promise<void>
+  /** 获取文件新旧版本内容 */
+  getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => Promise<{ oldContent: string; newContent: string } | null>
+
   // ===== 通用工具 =====
 
   /** 在系统默认浏览器中打开外部链接 */
@@ -624,11 +635,32 @@ export interface ElectronAPI {
   /** 用系统默认应用打开文件 */
   openFile: (filePath: string) => Promise<void>
 
+  /** 用系统默认应用打开任意文件（无工作区限制） */
+  systemOpenFile: (filePath: string, appName?: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
+
+  /** 扫描系统中可用的编辑器应用（仅 macOS） */
+  scanEditors: () => Promise<import('@proma/shared').EditorApp[]>
+
   /** 在系统文件管理器中显示文件 */
   showInFolder: (filePath: string) => Promise<void>
 
-  /** 在新窗口中预览文件（相对路径会按 basePaths 依次解析） */
-  previewFile: (filePath: string, basePaths?: string[]) => Promise<void>
+  /** 解析文件路径并读取内容（供内联预览使用） */
+  resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; content: string } | null>
+
+  /** 写入文本文件（供 Markdown 内联编辑使用） */
+  writeTextFile: (filePath: string, content: string, access?: import('@proma/shared').FileAccessOptions) => Promise<boolean>
+
+  /** 仅解析文件路径（供 PDF/图片等用 file:// 加载） */
+  resolveFilePath: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').ResolvedFileUrl | null>
+
+  /** 为内联 PDF 预览生成临时 HTML 文件，返回文件路径 */
+  preparePdfPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ tmpHtmlUrl: string } | null>
+
+  /** 读取文件为 base64（带路径校验，供内联图片预览等） */
+  readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => Promise<string | null>
+
+  /** DOCX 转 HTML（内联预览） */
+  docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; html: string } | null>
 
   /** 重命名文件/目录 */
   renameFile: (filePath: string, newName: string) => Promise<void>
@@ -636,23 +668,20 @@ export interface ElectronAPI {
   /** 移动文件/目录到目标目录 */
   moveFile: (filePath: string, targetDir: string) => Promise<void>
 
-  /** 列出附加目录内容（无工作区路径限制） */
-  listAttachedDirectory: (dirPath: string) => Promise<FileEntry[]>
-
-  /** 用系统默认应用打开附加目录文件（无工作区路径限制） */
-  openAttachedFile: (filePath: string) => Promise<void>
+  /** 列出附加目录内容 */
+  listAttachedDirectory: (dirPath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<FileEntry[]>
 
   /** 读取附加目录文件内容为 base64（限制在已附加目录范围内） */
   readAttachedFile: (filePath: string, sessionId?: string, workspaceSlug?: string) => Promise<string>
 
-  /** 在文件管理器中显示附加目录文件（无工作区路径限制） */
-  showAttachedInFolder: (filePath: string) => Promise<void>
+  /** 在文件管理器中显示附加目录文件 */
+  showAttachedInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 重命名附加目录文件/目录（无工作区路径限制） */
-  renameAttachedFile: (filePath: string, newName: string) => Promise<void>
+  renameAttachedFile: (filePath: string, newName: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 移动附加目录文件/目录（无工作区路径限制） */
-  moveAttachedFile: (filePath: string, targetDir: string) => Promise<void>
+  moveAttachedFile: (filePath: string, targetDir: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 检查路径类型（文件 or 目录），用于拖拽检测 */
   checkPathsType: (paths: string[]) => Promise<{ directories: string[]; files: string[] }>
@@ -1055,6 +1084,26 @@ const electronAPI: ElectronAPI = {
 
   getGitRepoStatus: (dirPath: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_GIT_REPO_STATUS, dirPath)
+  },
+
+  getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_UNSTAGED_CHANGES, dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId)
+  },
+
+  getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_FILE_DIFF, input)
+  },
+
+  getUntrackedContent: (input: import('@proma/shared').GetFileDiffInput) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_UNTRACKED_CONTENT, input)
+  },
+
+  revertFile: (input: import('@proma/shared').RevertFileInput) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.REVERT_FILE, input)
+  },
+
+  getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_DIFF_CONTENTS, input)
   },
 
   // 通用工具
@@ -1667,12 +1716,40 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FILE, filePath)
   },
 
+  systemOpenFile: (filePath: string, appName?: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_OPEN_FILE, filePath, appName, access)
+  },
+
+  scanEditors: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SCAN_EDITORS)
+  },
+
   showInFolder: (filePath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_IN_FOLDER, filePath)
   },
 
-  previewFile: (filePath: string, basePaths?: string[]) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.PREVIEW_FILE, filePath, basePaths)
+  resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:resolve-and-read', filePath, access) as Promise<{ resolvedPath: string; content: string } | null>
+  },
+
+  writeTextFile: (filePath: string, content: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:write-text', filePath, content, access) as Promise<boolean>
+  },
+
+  resolveFilePath: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:resolve-path', filePath, access) as Promise<import('@proma/shared').ResolvedFileUrl | null>
+  },
+
+  preparePdfPreview: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:prepare-pdf-preview', filePath, access) as Promise<{ tmpHtmlUrl: string } | null>
+  },
+
+  readBinaryBase64: (filePath: string, access?: import('@proma/shared').FileAccessOptions, maxSize?: number) => {
+    return ipcRenderer.invoke('file:read-binary-base64', filePath, access, maxSize) as Promise<string | null>
+  },
+
+  docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:docx-to-html', filePath, access) as Promise<{ resolvedPath: string; html: string } | null>
   },
 
   renameFile: (filePath: string, newName: string) => {
@@ -1683,28 +1760,24 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_FILE, filePath, targetDir)
   },
 
-  listAttachedDirectory: (dirPath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY, dirPath)
-  },
-
-  openAttachedFile: (filePath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_ATTACHED_FILE, filePath)
+  listAttachedDirectory: (dirPath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY, dirPath, access)
   },
 
   readAttachedFile: (filePath: string, sessionId?: string, workspaceSlug?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_ATTACHED_FILE, filePath, sessionId, workspaceSlug)
   },
 
-  showAttachedInFolder: (filePath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_ATTACHED_IN_FOLDER, filePath)
+  showAttachedInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_ATTACHED_IN_FOLDER, filePath, access)
   },
 
-  renameAttachedFile: (filePath: string, newName: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RENAME_ATTACHED_FILE, filePath, newName)
+  renameAttachedFile: (filePath: string, newName: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RENAME_ATTACHED_FILE, filePath, newName, access)
   },
 
-  moveAttachedFile: (filePath: string, targetDir: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE, filePath, targetDir)
+  moveAttachedFile: (filePath: string, targetDir: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE, filePath, targetDir, access)
   },
 
   checkPathsType: (paths: string[]) => {

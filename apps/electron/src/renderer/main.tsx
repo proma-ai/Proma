@@ -806,7 +806,7 @@ function TabStatePersistenceInitializer(): null {
         ...agentSessions.map((s) => s.id),
       ])
 
-      // 过滤掉已被删除的会话，同时校验数据结构
+      // 过滤 diff 类型 Tab（不持久化），同时过滤掉已被删除的会话
       const validTabs = tabState.tabs.filter(
         (t): t is TabItem =>
           typeof t === 'object' &&

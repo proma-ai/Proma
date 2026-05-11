@@ -5,8 +5,9 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
+import { existsSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS } from '../types'
 import type {
@@ -96,9 +97,15 @@ import type {
   WeChatConfig,
   WeChatBridgeState,
   SDKMessage,
+  GetFileDiffInput,
+  RevertFileInput,
+  FileAccessOptions,
+  ResolvedFileUrl,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
+import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents } from './lib/git-diff-service'
+import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
   listChannels,
@@ -224,6 +231,95 @@ import { wechatBridge } from './lib/wechat-bridge'
 /** 文件浏览器中需要隐藏的系统文件 */
 const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
 
+/** 已知编辑器应用名称白名单（macOS） */
+const KNOWN_EDITORS = [
+  'Visual Studio Code', 'Cursor', 'Sublime Text', 'Windsurf',
+  'Zed', 'CotEditor', 'IntelliJ IDEA', 'Xcode', 'TextEdit',
+]
+
+/**
+ * 检查路径是否在允许的目录范围内（解析 symlink）
+ *
+ * extraAllowedPaths 来自 renderer 的 basePaths（用户通过 UI 附加的目录），
+ * 虽然 renderer 不可信，但附加目录功能本身就允许用户授权 workspaces 外的路径访问。
+ * 攻击者需要先控制 renderer 才能伪造 basePaths，此时已有更大的攻击面。
+ */
+function realpathOrResolve(path: string): string {
+  try {
+    return realpathSync(resolve(path))
+  } catch {
+    return resolve(path)
+  }
+}
+
+function getAuthorizedRoots(options?: FileAccessOptions): string[] {
+  const roots: string[] = [
+    getAgentWorkspacesDir(),
+    join(tmpdir(), 'proma-preview'),
+  ]
+
+  const workspaceSlugs = new Set<string>()
+
+  if (options?.sessionId) {
+    const meta = getAgentSessionMeta(options.sessionId)
+    if (meta?.attachedDirectories) {
+      roots.push(...meta.attachedDirectories)
+    }
+    if (meta?.workspaceId) {
+      const workspace = getAgentWorkspace(meta.workspaceId)
+      if (workspace?.slug) workspaceSlugs.add(workspace.slug)
+    }
+  }
+
+  if (options?.workspaceSlug) {
+    workspaceSlugs.add(options.workspaceSlug)
+  }
+
+  for (const slug of workspaceSlugs) {
+    roots.push(getWorkspaceFilesDir(slug))
+    roots.push(...getWorkspaceAttachedDirectories(slug))
+  }
+
+  return roots
+}
+
+function isUnderRoot(resolvedPath: string, root: string): boolean {
+  const resolvedRoot = realpathOrResolve(root)
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep)
+}
+
+function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
+  let resolved: string
+  try {
+    resolved = realpathSync(resolve(filePath))
+  } catch {
+    return false
+  }
+  return getAuthorizedRoots(options).some((root) => isUnderRoot(resolved, root))
+}
+
+function normalizeFileAccessOptions(value?: FileAccessOptions | string[]): FileAccessOptions | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  return {
+    sessionId: typeof value.sessionId === 'string' ? value.sessionId : undefined,
+    workspaceSlug: typeof value.workspaceSlug === 'string' ? value.workspaceSlug : undefined,
+    candidateBasePaths: Array.isArray(value.candidateBasePaths)
+      ? value.candidateBasePaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : undefined,
+  }
+}
+
+function getAllowedCandidateBasePaths(options?: FileAccessOptions): string[] | undefined {
+  const allowed = options?.candidateBasePaths?.filter((p) => isPathAllowed(p, options)) ?? []
+  return allowed.length > 0 ? allowed : undefined
+}
+
+function ensurePathAllowed(filePath: string, options?: FileAccessOptions): boolean {
+  if (isPathAllowed(filePath, options)) return true
+  console.warn('[IPC] 拒绝越界路径:', filePath)
+  return false
+}
+
 /**
  * 注册 IPC 处理器
  *
@@ -287,6 +383,85 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 获取未暂存的变更文件列表
+  ipcMain.handle(
+    IPC_CHANNELS.GET_UNSTAGED_CHANGES,
+    async (_, dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => {
+      if (!dirPath || typeof dirPath !== 'string') {
+        console.warn('[IPC] git:get-unstaged-changes 收到无效的目录路径')
+        return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
+      }
+      const access = normalizeFileAccessOptions({ sessionId })
+      if (!ensurePathAllowed(dirPath, access)) {
+        return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
+      }
+      const allowedSessionPath = sessionPath && isPathAllowed(sessionPath, access) ? sessionPath : undefined
+      const allowedWorkspaceFilesPath = workspaceFilesPath && isPathAllowed(workspaceFilesPath, access) ? workspaceFilesPath : undefined
+      const allowedExtraPaths = extraPaths?.filter((p) => isPathAllowed(p, access))
+      return getUnstagedChanges(dirPath, allowedSessionPath, allowedWorkspaceFilesPath, allowedExtraPaths)
+    }
+  )
+
+  // 获取单个文件的 diff
+  ipcMain.handle(
+    IPC_CHANNELS.GET_FILE_DIFF,
+    async (_, input: GetFileDiffInput) => {
+      const { dirPath, filePath, gitRoot, sessionId } = input
+      if (!dirPath || !filePath || typeof dirPath !== 'string' || typeof filePath !== 'string') {
+        console.warn('[IPC] git:get-file-diff 收到无效参数')
+        return ''
+      }
+      const access = normalizeFileAccessOptions({ sessionId })
+      if (!ensurePathAllowed(dirPath, access) || (gitRoot && !ensurePathAllowed(gitRoot, access))) return ''
+      return getFileDiff(dirPath, filePath, gitRoot)
+    }
+  )
+
+  // 获取未追踪文件内容
+  ipcMain.handle(
+    IPC_CHANNELS.GET_UNTRACKED_CONTENT,
+    async (_, input: GetFileDiffInput) => {
+      const { dirPath, filePath, gitRoot, sessionId } = input
+      if (!dirPath || !filePath || typeof dirPath !== 'string' || typeof filePath !== 'string') {
+        console.warn('[IPC] git:get-untracked-content 收到无效参数')
+        return ''
+      }
+      const access = normalizeFileAccessOptions({ sessionId })
+      if (!ensurePathAllowed(dirPath, access) || (gitRoot && !ensurePathAllowed(gitRoot, access))) return ''
+      return getUntrackedContent(dirPath, filePath, gitRoot)
+    }
+  )
+
+  // 还原文件变更
+  ipcMain.handle(
+    IPC_CHANNELS.REVERT_FILE,
+    async (_, input: RevertFileInput) => {
+      const { dirPath, filePath, gitRoot, sessionId } = input
+      if (!dirPath || !filePath || typeof dirPath !== 'string' || typeof filePath !== 'string') {
+        console.warn('[IPC] git:revert-file 收到无效参数')
+        return
+      }
+      const access = normalizeFileAccessOptions({ sessionId })
+      if (!ensurePathAllowed(dirPath, access) || (gitRoot && !ensurePathAllowed(gitRoot, access))) return
+      await revertFile(dirPath, filePath, gitRoot)
+    }
+  )
+
+  // 获取文件新旧版本内容
+  ipcMain.handle(
+    IPC_CHANNELS.GET_DIFF_CONTENTS,
+    async (_, input: GetFileDiffInput) => {
+      const { dirPath, filePath, gitRoot, sessionId } = input
+      if (!dirPath || !filePath || typeof dirPath !== 'string' || typeof filePath !== 'string') {
+        console.warn('[IPC] git:get-diff-contents 收到无效参数')
+        return null
+      }
+      const access = normalizeFileAccessOptions({ sessionId })
+      if (!ensurePathAllowed(dirPath, access) || (gitRoot && !ensurePathAllowed(gitRoot, access))) return null
+      return getDiffContents(dirPath, filePath, gitRoot)
+    }
+  )
+
   // 在系统默认浏览器中打开外部链接
   ipcMain.handle(
     IPC_CHANNELS.OPEN_EXTERNAL,
@@ -301,6 +476,56 @@ export function registerIpcHandlers(): void {
         return
       }
       await shell.openExternal(url)
+    }
+  )
+
+  // 用系统默认应用打开任意文件（appName 需在 KNOWN_EDITORS 白名单内）
+  ipcMain.handle(
+    IPC_CHANNELS.SYSTEM_OPEN_FILE,
+    async (_, filePath: string, appName?: string, access?: FileAccessOptions | string[]): Promise<void> => {
+      const { resolve } = await import('node:path')
+      const absPath = resolve(filePath)
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(absPath, options)) {
+        console.warn('[IPC] shell:system-open-file 拒绝越界路径:', absPath)
+        return
+      }
+      if (process.platform === 'darwin') {
+        const { spawnSync } = await import('node:child_process')
+        if (appName) {
+          if (!KNOWN_EDITORS.includes(appName)) {
+            console.warn('[IPC] shell:system-open-file 拒绝未知应用:', appName)
+            return
+          }
+          spawnSync('open', ['-a', appName, absPath], { timeout: 5000 })
+        } else {
+          spawnSync('open', [absPath], { timeout: 5000 })
+        }
+      } else {
+        await shell.openPath(absPath)
+      }
+    }
+  )
+
+  // 扫描系统中的编辑器应用（仅 macOS）
+  ipcMain.handle(
+    IPC_CHANNELS.SCAN_EDITORS,
+    async (): Promise<import('@proma/shared').EditorApp[]> => {
+      if (process.platform !== 'darwin') return []
+      const { existsSync } = await import('node:fs')
+      const { homedir } = await import('node:os')
+      const home = homedir()
+
+      const editors = KNOWN_EDITORS.map((name) => {
+        const searchPaths = name === 'Xcode' || name === 'TextEdit'
+          ? [`/Applications/${name}.app`]
+          : [`/Applications/${name}.app`, `${home}/Applications/${name}.app`]
+        return { name, paths: searchPaths }
+      })
+
+      return editors
+        .filter((e) => e.paths.some((p) => existsSync(p)))
+        .map((e) => ({ name: e.name, path: e.paths.find((p) => existsSync(p))! }))
     }
   )
 
@@ -1766,12 +1991,103 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 在新窗口中预览文件（允许任意绝对路径；相对路径按 basePaths 依次解析）
+  // 解析文件路径并读取内容（供内联预览使用）
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.PREVIEW_FILE,
-    async (_, filePath: string, basePaths?: string[]): Promise<void> => {
-      const { openFilePreview } = await import('./lib/file-preview-service')
-      openFilePreview(filePath, basePaths)
+    'file:resolve-and-read',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; content: string } | null> => {
+      const { resolveAndReadFile, resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const allowedBasePaths = getAllowedCandidateBasePaths(options)
+      const resolved = resolveFilePath(filePath, allowedBasePaths)
+      if (!resolved || !isPathAllowed(resolved, options)) {
+        console.warn('[IPC] file:resolve-and-read 拒绝越界路径:', resolved ?? filePath)
+        return null
+      }
+      const result = resolveAndReadFile(resolved)
+      return result
+    }
+  )
+
+  // 写入文本文件（供 Markdown 内联编辑使用）
+  ipcMain.handle(
+    'file:write-text',
+    async (_, filePath: string, content: string, access?: FileAccessOptions | string[]): Promise<boolean> => {
+      if (typeof content !== 'string') return false
+      const { writeFileSync } = await import('node:fs')
+      const { resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const allowedBasePaths = getAllowedCandidateBasePaths(options)
+      const resolved = resolveFilePath(filePath, allowedBasePaths)
+      if (!resolved || !isPathAllowed(resolved, options)) {
+        console.warn('[IPC] file:write-text 拒绝越界路径:', resolved ?? filePath)
+        return false
+      }
+      writeFileSync(resolved, content, 'utf-8')
+      return true
+    }
+  )
+
+  // 仅解析文件路径（供 PDF/图片等用 file:// 加载）
+  ipcMain.handle(
+    'file:resolve-path',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<ResolvedFileUrl | null> => {
+      const { resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const result = resolveFilePath(filePath, getAllowedCandidateBasePaths(options))
+      if (result && !isPathAllowed(result, options)) {
+        console.warn('[IPC] file:resolve-path 拒绝越界路径:', result)
+        return null
+      }
+      return result ? { url: registerPromaFilePath(result) } : null
+    }
+  )
+
+  // 为内联 PDF 预览生成临时 HTML 文件，返回文件路径
+  ipcMain.handle(
+    'file:prepare-pdf-preview',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ tmpHtmlUrl: string } | null> => {
+      const { preparePdfPreview, resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const allowedBasePaths = getAllowedCandidateBasePaths(options)
+      const resolved = resolveFilePath(filePath, allowedBasePaths)
+      if (!resolved || !isPathAllowed(resolved, options)) {
+        console.warn('[IPC] file:prepare-pdf-preview 拒绝越界路径:', resolved ?? filePath)
+        return null
+      }
+      const result = preparePdfPreview(resolved)
+      return result ? { tmpHtmlUrl: result.tmpHtmlUrl } : null
+    }
+  )
+
+  // DOCX 转 HTML（内联预览使用 mammoth）
+  ipcMain.handle(
+    'file:docx-to-html',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<{ resolvedPath: string; html: string } | null> => {
+      const { convertDocxToHtml, resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const allowedBasePaths = getAllowedCandidateBasePaths(options)
+      const resolved = resolveFilePath(filePath, allowedBasePaths)
+      if (!resolved || !isPathAllowed(resolved, options)) {
+        console.warn('[IPC] file:docx-to-html 拒绝越界路径:', resolved ?? filePath)
+        return null
+      }
+      const result = await convertDocxToHtml(resolved)
+      return result
+    }
+  )
+
+  // 读取文件为 base64（带路径校验，供内联图片预览等使用）
+  ipcMain.handle(
+    'file:read-binary-base64',
+    async (_, filePath: string, access?: FileAccessOptions | string[], maxSize?: number): Promise<string | null> => {
+      const { readFileSync, statSync } = await import('node:fs')
+      const { resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const resolved = resolveFilePath(filePath, getAllowedCandidateBasePaths(options))
+      if (!resolved || !isPathAllowed(resolved, options)) return null
+      const st = statSync(resolved)
+      if (maxSize && st.size > maxSize) return null
+      return readFileSync(resolved).toString('base64')
     }
   )
 
@@ -1780,7 +2096,11 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.RENAME_FILE,
     async (_, filePath: string, newName: string): Promise<void> => {
       const { renameSync } = await import('node:fs')
-      const { resolve, dirname, join } = await import('node:path')
+      const { resolve, dirname, join, sep } = await import('node:path')
+
+      if (newName.includes('/') || newName.includes('\\') || newName.includes('..') || newName.includes(sep)) {
+        throw new Error('文件名不能包含路径分隔符或 ".."')
+      }
 
       const safePath = resolve(filePath)
       const workspacesRoot = resolve(getAgentWorkspacesDir())
@@ -1814,14 +2134,18 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 列出附加目录内容（无工作区路径限制，用于用户附加的外部目录）
+  // 列出附加目录内容
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY,
-    async (_, dirPath: string): Promise<FileEntry[]> => {
+    async (_, dirPath: string, access?: FileAccessOptions | string[]): Promise<FileEntry[]> => {
       const { readdirSync } = await import('node:fs')
       const { resolve } = await import('node:path')
 
       const safePath = resolve(dirPath)
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(safePath, options)) {
+        throw new Error('访问路径不在允许范围内')
+      }
       const entries: FileEntry[] = []
       const items = readdirSync(safePath, { withFileTypes: true })
 
@@ -1845,16 +2169,6 @@ export function registerIpcHandlers(): void {
       })
 
       return entries
-    }
-  )
-
-  // 在 Proma 内置预览窗口打开附加目录文件（无工作区路径限制；
-  // 不支持的格式由 openFilePreview 内部 fallback 到系统默认应用）
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.OPEN_ATTACHED_FILE,
-    async (_, filePath: string): Promise<void> => {
-      const { openFilePreview } = await import('./lib/file-preview-service')
-      openFilePreview(filePath)
     }
   )
 
@@ -1913,38 +2227,56 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 在文件管理器中显示附加目录文件（无工作区路径限制）
+  // 在文件管理器中显示附加目录文件
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SHOW_ATTACHED_IN_FOLDER,
-    async (_, filePath: string): Promise<void> => {
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<void> => {
       const { resolve } = await import('node:path')
-      shell.showItemInFolder(resolve(filePath))
+      const safePath = resolve(filePath)
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(safePath, options)) {
+        console.warn('[IPC] show-attached-in-folder 拒绝越界路径:', safePath)
+        return
+      }
+      shell.showItemInFolder(safePath)
     }
   )
 
-  // 重命名附加目录文件/目录（无工作区路径限制）
+  // 重命名附加目录文件/目录
   ipcMain.handle(
     AGENT_IPC_CHANNELS.RENAME_ATTACHED_FILE,
-    async (_, filePath: string, newName: string): Promise<void> => {
+    async (_, filePath: string, newName: string, access?: FileAccessOptions | string[]): Promise<void> => {
       const { renameSync } = await import('node:fs')
-      const { resolve, dirname, join } = await import('node:path')
+      const { resolve, dirname, join, sep } = await import('node:path')
 
+      if (newName.includes('/') || newName.includes('\\') || newName.includes('..') || newName.includes(sep)) {
+        throw new Error('文件名不能包含路径分隔符或 ".."')
+      }
       const safePath = resolve(filePath)
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(safePath, options)) {
+        throw new Error('访问路径不在允许范围内')
+      }
       const newPath = join(dirname(safePath), newName)
       renameSync(safePath, newPath)
       console.log(`[附加目录] 已重命名: ${safePath} → ${newPath}`)
     }
   )
 
-  // 移动附加目录文件/目录（无工作区路径限制）
+  // 移动附加目录文件/目录
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE,
-    async (_, filePath: string, targetDir: string): Promise<void> => {
+    async (_, filePath: string, targetDir: string, access?: FileAccessOptions | string[]): Promise<void> => {
       const { renameSync } = await import('node:fs')
       const { resolve, basename, join } = await import('node:path')
 
       const safePath = resolve(filePath)
-      const newPath = join(resolve(targetDir), basename(safePath))
+      const safeTarget = resolve(targetDir)
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(safePath, options) || !isPathAllowed(safeTarget, options)) {
+        throw new Error('访问路径不在允许范围内')
+      }
+      const newPath = join(safeTarget, basename(safePath))
       renameSync(safePath, newPath)
       console.log(`[附加目录] 已移动: ${safePath} → ${newPath}`)
     }

@@ -25,6 +25,7 @@ import { common, createLowlight } from 'lowlight'
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
 import { createSkillMentionSuggestion, createMcpMentionSuggestion } from '@/components/agent/mention-suggestions'
 
@@ -33,105 +34,6 @@ let lastFocusedRichTextInputId: string | null = null
 
 // 创建 lowlight 实例，使用常见语言
 const lowlight = createLowlight(common)
-
-// ===== HTML → Markdown 转换 =====
-
-/** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
-function htmlToMarkdown(html: string): string {
-  if (!html || html === '<p></p>') return ''
-
-  const div = document.createElement('div')
-  div.innerHTML = html
-
-  function processNode(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent || ''
-    }
-
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return ''
-    }
-
-    const el = node as HTMLElement
-    const tagName = el.tagName.toLowerCase()
-    const children = Array.from(el.childNodes).map(processNode).join('')
-
-    switch (tagName) {
-      case 'p':
-        return children + '\n'
-      case 'br':
-        return '\n'
-      case 'strong':
-      case 'b':
-        return `**${children}**`
-      case 'em':
-      case 'i':
-        return `*${children}*`
-      case 'u':
-        return `<u>${children}</u>`
-      case 's':
-      case 'strike':
-      case 'del':
-        return `~~${children}~~`
-      case 'code':
-        // 检查是否在 pre 内（代码块）
-        if (el.parentElement?.tagName.toLowerCase() === 'pre') {
-          return children
-        }
-        return `\`${children}\``
-      case 'pre': {
-        // 代码块 - 获取语言类型
-        const codeEl = el.querySelector('code')
-        const langClass = codeEl?.className || ''
-        const langMatch = langClass.match(/language-(\w+)/)
-        const lang = langMatch ? langMatch[1] : ''
-        const codeContent = codeEl ? processNode(codeEl) : children
-        return `\`\`\`${lang}\n${codeContent}\n\`\`\`\n`
-      }
-      case 'a': {
-        const href = el.getAttribute('href') || ''
-        return `[${children}](${href})`
-      }
-      case 'ul':
-        return Array.from(el.children)
-          .map((li) => `- ${processNode(li).trim()}`)
-          .join('\n') + '\n'
-      case 'ol':
-        return Array.from(el.children)
-          .map((li, i) => `${i + 1}. ${processNode(li).trim()}`)
-          .join('\n') + '\n'
-      case 'li':
-        return children
-      case 'blockquote':
-        return children
-          .split('\n')
-          .map((line) => `> ${line}`)
-          .join('\n') + '\n'
-      case 'h1': return `# ${children}\n`
-      case 'h2': return `## ${children}\n`
-      case 'h3': return `### ${children}\n`
-      case 'h4': return `#### ${children}\n`
-      case 'h5': return `##### ${children}\n`
-      case 'h6': return `###### ${children}\n`
-      case 'hr': return '---\n'
-      case 'span': {
-        // Mention 节点：根据 data-mention-suggestion-char 区分类型
-        const dataType = el.getAttribute('data-type')
-        const dataId = el.getAttribute('data-id') || ''
-        const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
-        if (dataType === 'mention') {
-          if (suggestionChar === '/') return `/skill:${dataId}`
-          if (suggestionChar === '#') return `#mcp:${dataId}`
-          return `@file:${dataId}`
-        }
-        return children
-      }
-      default: return children
-    }
-  }
-
-  return processNode(div).trim()
-}
 
 // ===== 行数计算 =====
 
@@ -187,6 +89,8 @@ interface RichTextInputProps {
   autoFocusTrigger?: string | null
   /** 是否支持手动折叠（内容较长时显示折叠按钮） */
   collapsible?: boolean
+  /** 是否启用 Mention 功能（@ 文件、/ Skill、# MCP） */
+  enableMentions?: boolean
   /** 工作区根路径（启用 @ 引用文件功能时需要） */
   workspacePath?: string | null
   /** 工作区 slug（启用 / Skill 和 # MCP 功能时需要） */
@@ -221,6 +125,7 @@ export function RichTextInput({
   disabled = false,
   autoFocusTrigger,
   collapsible = false,
+  enableMentions,
   workspacePath,
   workspaceSlug,
   attachedDirs = [],
@@ -266,8 +171,8 @@ export function RichTextInput({
   const workspaceSlugRef = useRef<string | null>(workspaceSlug ?? null)
   workspaceSlugRef.current = workspaceSlug ?? null
 
-  // 是否启用 Mention 功能（需要工作区路径或 slug）
-  const hasMentionSupport = !!(workspacePath || workspaceSlug)
+  // 是否启用 Mention 功能：Agent 首帧可能尚未拿到路径/slug，但扩展必须先注册。
+  const hasMentionSupport = enableMentions ?? (workspacePath !== undefined || workspaceSlug !== undefined)
 
   // Mention Suggestion 配置（稳定引用，不随 workspacePath 变化重建）
   const mentionSuggestion = useMemo(
@@ -315,7 +220,7 @@ export function RichTextInput({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
-      // Mention 扩展：仅在 Agent 模式（有工作区）时启用
+      // Mention 扩展：启用时注册，路径/slug 后续通过 ref 异步更新
       // @ 引用文件、/ 触发 Skill、# 触发 MCP
       ...(hasMentionSupport ? [
         Mention.extend({

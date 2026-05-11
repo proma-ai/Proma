@@ -4,7 +4,7 @@
  * 显示指定根路径下的文件树，支持：
  * - 文件夹懒加载展开（Chevron 旋转动画）
  * - 单击选中、Cmd/Ctrl+Click 多选
- * - 选中后显示三点菜单（打开 / 在文件夹中显示 / 重命名 / 移动 / 删除）
+ * - 悬浮/选中后显示三点菜单（添加到聊天 / 在文件夹中显示 / 重命名 / 移动 / 删除）
  * - 文件/文件夹删除（带确认对话框）
  * - 原位重命名（含同名检查）
  * - 自动刷新
@@ -84,11 +84,13 @@ interface FileBrowserProps {
   embedded?: boolean
   /** 隐藏"目录为空"提示（当外部已有附加目录等内容时使用） */
   hideEmpty?: boolean
-  /** 点击添加到聊天（非文件夹文件悬浮时显示按钮） */
+  /** 点击添加到聊天（在文件操作菜单中显示） */
   onAddToChat?: (entry: FileEntry) => void
+  /** 单击文件时在内联预览面板中显示（替代外部窗口预览） */
+  onFilePreview?: (filePath: string) => void
 }
 
-export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddToChat }: FileBrowserProps): React.ReactElement {
+export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddToChat, onFilePreview }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -311,6 +313,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
           onMove={handleMove}
           onRefresh={loadRoot}
           onAddToChat={onAddToChat}
+          onFilePreview={onFilePreview}
         />
       ))}
     </div>
@@ -411,6 +414,7 @@ interface FileTreeItemProps {
   onMove: (entry: FileEntry) => void
   onRefresh: () => Promise<void>
   onAddToChat?: (entry: FileEntry) => void
+  onFilePreview?: (filePath: string) => void
 }
 
 function FileTreeItem({
@@ -434,6 +438,7 @@ function FileTreeItem({
   onMove,
   onRefresh,
   onAddToChat,
+  onFilePreview,
 }: FileTreeItemProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const [children, setChildren] = React.useState<FileEntry[]>([])
@@ -522,19 +527,16 @@ function FileTreeItem({
     setExpanded(!expanded)
   }
 
-  /** 点击行为：选中 + 文件夹展开/收起 */
+  /** 点击行为：选中 + 文件夹展开/收起 / 文件预览 */
   const handleClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
+    const isMulti = e.metaKey || e.ctrlKey
     onSelect(entry, e)
-    if (entry.isDirectory && !e.metaKey && !e.ctrlKey) {
-      toggleDir()
-    }
-  }
-
-  /** 双击预览文件 */
-  const handleDoubleClick = (): void => {
-    if (!entry.isDirectory) {
-      window.electronAPI.previewFile(entry.path).catch(console.error)
+    if (isMulti) return
+    if (entry.isDirectory) {
+      void toggleDir()
+    } else {
+      onFilePreview?.(entry.path)
     }
   }
 
@@ -611,7 +613,8 @@ function FileTreeItem({
   }
 
   const paddingLeft = 8 + depth * 16
-  const showMenu = isSelected && selectedCount > 0 && !isRenaming
+  const showMenu = !isRenaming
+  const menuSelectedCount = isSelected ? selectedCount : 1
 
   return (
     <>
@@ -624,7 +627,6 @@ function FileTreeItem({
         )}
         style={{ paddingLeft }}
         onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
       >
         {recentlyModifiedSet.has(entry.path) && (
           <span
@@ -672,40 +674,33 @@ function FileTreeItem({
           <span className="truncate text-xs flex-1">{entry.name}</span>
         )}
 
-        {/* 右侧操作按钮占位（始终占位，避免行高跳动） */}
+        {/* 右侧操作按钮占位（始终占位，避免行宽跳动） */}
         <div
-          className={cn(
-            'flex-shrink-0',
-            !(showMenu || (onAddToChat && !entry.isDirectory && !isRenaming)) && 'invisible',
-          )}
+          className="flex-shrink-0"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {/* 非文件夹：添加到聊天按钮（悬浮时显示） */}
-          {onAddToChat && !entry.isDirectory && !isRenaming && !showMenu && (
-            <button
-              type="button"
-              className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70 text-muted-foreground hover:text-foreground invisible group-hover:visible focus-visible:visible"
-              title="添加到聊天"
-              aria-label="添加到聊天"
-              onClick={() => onAddToChat(entry)}
-            >
-              <MessageSquarePlus className="size-3.5" />
-            </button>
-          )}
-          {/* 文件夹/选中状态：三点菜单 */}
+          {/* 悬浮/选中状态：三点菜单 */}
           {showMenu && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70"
+                className={cn(
+                  'h-6 w-6 rounded flex items-center justify-center hover:bg-accent/70 text-muted-foreground hover:text-foreground',
+                  !isSelected && 'invisible group-hover:visible focus-visible:visible data-[state=open]:visible',
+                )}
+                title="更多操作"
+                aria-label="更多操作"
+                onClick={(e) => {
+                  if (!isSelected) onSelect(entry, e)
+                }}
               >
                 <MoreHorizontal className="size-3.5" />
               </button>
             </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
-                {onAddToChat && !entry.isDirectory && selectedCount === 1 && (
+                {onAddToChat && !entry.isDirectory && menuSelectedCount === 1 && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"
                     onSelect={() => onAddToChat(entry)}
@@ -714,7 +709,7 @@ function FileTreeItem({
                     添加到聊天
                   </DropdownMenuItem>
                 )}
-                {selectedCount === 1 && (
+                {menuSelectedCount === 1 && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"
                     onSelect={() => onShowInFolder(entry)}
@@ -729,9 +724,9 @@ function FileTreeItem({
                   onSelect={() => { void onMove(entry) }}
                 >
                   <FolderInput />
-                  {selectedCount > 1 ? `移动选中 (${selectedCount})` : '移动到...'}
+                  {menuSelectedCount > 1 ? `移动选中 (${menuSelectedCount})` : '移动到...'}
                 </DropdownMenuItem>
-                {selectedCount === 1 && (
+                {menuSelectedCount === 1 && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"
                     onSelect={() => onStartRename(entry)}
@@ -746,7 +741,7 @@ function FileTreeItem({
                   onSelect={() => onDelete(entry)}
                 >
                   <Trash2 />
-                  {selectedCount > 1 ? `删除选中 (${selectedCount})` : '删除'}
+                  {menuSelectedCount > 1 ? `删除选中 (${menuSelectedCount})` : '删除'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
           </DropdownMenu>
@@ -786,6 +781,7 @@ function FileTreeItem({
           onMove={onMove}
           onRefresh={handleRefreshAfterDelete}
           onAddToChat={onAddToChat}
+          onFilePreview={onFilePreview}
         />
       ))}
     </>

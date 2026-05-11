@@ -1,0 +1,22 @@
+/* Diff 滚动条 — overlay 在代码上方，不占布局空间 */
+.diff-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.diff-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.diff-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 3px;
+}
+
+.diff-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.35);
+}
+
+.diff-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}

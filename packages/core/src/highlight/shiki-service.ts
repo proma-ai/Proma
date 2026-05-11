@@ -24,7 +24,7 @@ const DEFAULT_LANGS: BundledLanguage[] = [
 ]
 
 /** 默认加载的主题 */
-const DEFAULT_THEMES: BundledTheme[] = ['github-light', 'github-dark']
+const DEFAULT_THEMES: BundledTheme[] = ['github-light', 'github-dark', 'one-light', 'one-dark-pro']
 
 /** 常见语言别名映射 */
 const LANGUAGE_ALIASES: Record<string, string> = {

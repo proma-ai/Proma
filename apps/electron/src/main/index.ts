@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -20,6 +20,12 @@ app.on('open-file', (event, filePath) => {
   handleMigrationFileOpen(filePath)
 })
 
+// 注册自定义协议方案为"特权"（必须在 app ready 之前）
+// 用于内联预览本地文件（renderer 用 iframe 加载 proma-file:// 资源）
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+])
+
 // Windows/macOS 文件关联 + deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
 app.on('second-instance', (_event, argv) => {
   // 优先检查 OAuth deep-link
@@ -37,6 +43,7 @@ app.on('second-instance', (_event, argv) => {
 
 import { getSettings } from './lib/settings-service'
 import { resolveOverlayColors } from './lib/titlebar-overlay'
+import { handlePromaFileRequest } from './lib/local-file-protocol'
 
 // 商业版固定为 Cloud 模式
 process.env.PROMA_MODE = 'cloud'
@@ -384,6 +391,10 @@ function sendToMainWindow(channel: string, data?: unknown): void {
 }
 
 app.whenReady().then(async () => {
+  // 注册自定义协议 proma-file:// 用于内联预览本地文件。
+  // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
+  protocol.handle('proma-file', handlePromaFileRequest)
+
   // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
   // 必须在其他初始化之前执行，确保环境变量正确加载
   await initializeRuntime()

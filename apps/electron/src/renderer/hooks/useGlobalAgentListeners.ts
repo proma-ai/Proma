@@ -20,7 +20,6 @@ import {
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
-  agentSidePanelOpenMapAtom,
   fileBrowserAutoRevealAtom,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
@@ -34,8 +33,12 @@ import {
   finalizeStreamingActivities,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
+  agentWorkspacesAtom,
+  agentAttachedDirectoriesMapAtom,
+  workspaceAttachedDirectoriesMapAtom,
   unviewedCompletedSessionIdsAtom,
   workingDoneSessionIdsAtom,
+  agentSessionPathMapAtom,
 } from '@/atoms/agent-atoms'
 import {
   notificationsEnabledAtom,
@@ -46,12 +49,32 @@ import {
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
+import { agentDiffRefreshVersionAtom, agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { autoPreviewEnabledAtom, previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
+
+/** 会改变 git 工作树状态的子命令（用于识别 Bash 中触发 diff 刷新的 git 操作） */
+const GIT_MUTATING_SUBCOMMANDS = /\bgit\s+(commit|checkout|reset|restore|stash|clean|add|rm|mv|pull|merge|rebase|cherry-pick|revert|switch|am|apply)\b/
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
+function getParentDir(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const idx = normalized.lastIndexOf('/')
+  if (idx <= 0) return ''
+  return normalized.slice(0, idx)
+}
+
+function uniqueTruthyPaths(paths: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(paths.filter((p): p is string => typeof p === 'string' && p.length > 0)))
+}
 
 // ============================================================================
 // Phase 1 临时兼容层：将 AgentStreamPayload 转换为旧 AgentEvent
@@ -281,6 +304,11 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
+    /** 正在执行的写工具：toolUseId → { path, sessionId } */
+    const pendingWriteTools = new Map<string, { path: string; sessionId: string }>()
+    /** 正在执行的 git 突变 Bash 命令：toolUseId → sessionId（完成后触发 diff 刷新） */
+    const pendingGitMutateTools = new Map<string, string>()
+
     /** 构建导航到指定会话的回调 */
     const makeNavigateToSession = (sessionId: string, sessionTitle: string) => () => {
       const tabs = store.get(tabsAtom)
@@ -321,6 +349,93 @@ export function useGlobalAgentListeners(): void {
         }
       )
     }
+
+    const workspaceFilesPathCache = new Map<string, string>()
+    const autoPreviewSeq = new Map<string, number>()
+
+    const getWorkspaceIdForSession = (sid: string): string | null => {
+      const session = store.get(agentSessionsAtom).find((s) => s.id === sid)
+      return session?.workspaceId ?? store.get(currentAgentWorkspaceIdAtom)
+    }
+
+    const getWorkspaceSlugForSession = (sid: string): string | null => {
+      const workspaceId = getWorkspaceIdForSession(sid)
+      if (!workspaceId) return null
+      return store.get(agentWorkspacesAtom).find((w) => w.id === workspaceId)?.slug ?? null
+    }
+
+    const getWorkspaceFilesPathForSession = async (sid: string): Promise<string | null> => {
+      const slug = getWorkspaceSlugForSession(sid)
+      if (!slug) return null
+      const cached = workspaceFilesPathCache.get(slug)
+      if (cached) return cached
+      try {
+        const path = await window.electronAPI.getWorkspaceFilesPath(slug)
+        workspaceFilesPathCache.set(slug, path)
+        return path
+      } catch {
+        return null
+      }
+    }
+
+    const buildAutoPreviewFile = async (sid: string, targetPath: string) => {
+      const sessionPath = store.get(agentSessionPathMapAtom).get(sid) ?? ''
+      const parentDir = getParentDir(targetPath)
+      const dirPath = isAbsolutePath(targetPath) ? parentDir : (sessionPath || parentDir)
+      const workspaceId = getWorkspaceIdForSession(sid)
+      const workspaceFilesPath = await getWorkspaceFilesPathForSession(sid)
+      const sessionAttachedDirs = store.get(agentAttachedDirectoriesMapAtom).get(sid) ?? []
+      const workspaceAttachedDirs = workspaceId
+        ? (store.get(workspaceAttachedDirectoriesMapAtom).get(workspaceId) ?? [])
+        : []
+      const basePaths = uniqueTruthyPaths([
+        sessionPath,
+        workspaceFilesPath,
+        dirPath,
+        ...sessionAttachedDirs,
+        ...workspaceAttachedDirs,
+      ])
+
+      let previewOnly = true
+      if (dirPath) {
+        try {
+          const status = await window.electronAPI.getGitRepoStatus(dirPath)
+          previewOnly = status?.isRepo !== true
+        } catch {
+          previewOnly = true
+        }
+      }
+
+      return {
+        filePath: targetPath,
+        dirPath: dirPath || undefined,
+        previewOnly,
+        basePaths: basePaths.length > 0 ? basePaths : undefined,
+      }
+    }
+
+    const setAutoPreviewFile = (sid: string, targetPath: string, openPanel: boolean) => {
+      const seq = (autoPreviewSeq.get(sid) ?? 0) + 1
+      autoPreviewSeq.set(sid, seq)
+      return buildAutoPreviewFile(sid, targetPath)
+        .then((previewFile) => {
+          if (autoPreviewSeq.get(sid) !== seq) return null
+          store.set(previewFileMapAtom, (prev) => {
+            const m = new Map(prev)
+            m.set(sid, previewFile)
+            return m
+          })
+          if (openPanel) {
+            store.set(previewPanelOpenMapAtom, (prev) => {
+              if (prev.get(sid)) return prev
+              const m = new Map(prev); m.set(sid, true); return m
+            })
+          }
+          return previewFile
+        })
+        .catch(() => null)
+    }
+
     // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
     window.electronAPI.listAgentSessions().then((sessions) => {
       const stoppedIds = new Set<string>(
@@ -431,17 +546,7 @@ export function useGlobalAgentListeners(): void {
             })
           }
 
-          // 自动打开侧面板：检测到 Agent/Task 工具启动或 teammate 任务开始时
-          if (
-            (event.type === 'tool_start' && (event.toolName === 'Agent' || event.toolName === 'Task')) ||
-            event.type === 'task_started'
-          ) {
-            store.set(agentSidePanelOpenMapAtom, (prev) => {
-              const map = new Map(prev)
-              map.set(sessionId, true)
-              return map
-            })
-          }
+          // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态
 
           // Agent 修改文件时，触发右侧文件浏览器自动定位（展开父目录 + 滚动 + 高亮）
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
@@ -450,6 +555,7 @@ export function useGlobalAgentListeners(): void {
               (input?.file_path as string | undefined)
               ?? (input?.path as string | undefined)
               ?? (input?.notebook_path as string | undefined)
+            pendingWriteTools.set(event.toolUseId, { path: targetPath || '', sessionId })
             if (typeof targetPath === 'string' && targetPath.length > 0) {
               const now = Date.now()
               store.set(fileBrowserAutoRevealAtom, { sessionId, path: targetPath, ts: now })
@@ -461,6 +567,19 @@ export function useGlobalAgentListeners(): void {
                 map.set(sessionId, inner)
                 return map
               })
+              // Agent 开始改文件时，自动切换预览面板到该文件
+              if (store.get(autoPreviewEnabledAtom)) {
+                setAutoPreviewFile(sessionId, targetPath, false)
+              }
+            }
+          }
+
+          // Bash 工具执行 git 突变命令时，标记为待刷新（完成后刷新 diff 列表）
+          if (event.type === 'tool_start' && event.toolName === 'Bash') {
+            const input = event.input as Record<string, unknown> | undefined
+            const command = typeof input?.command === 'string' ? input.command : ''
+            if (command && GIT_MUTATING_SUBCOMMANDS.test(command)) {
+              pendingGitMutateTools.set(event.toolUseId, sessionId)
             }
           }
 
@@ -502,6 +621,64 @@ export function useGlobalAgentListeners(): void {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
               prev.filter((t) => t.toolUseId !== event.toolUseId)
             )
+            // Agent 写类工具完成时，递增 diff 刷新版本号并切换预览文件
+            if (pendingWriteTools.has(event.toolUseId)) {
+              const entry = pendingWriteTools.get(event.toolUseId)!
+              const writtenPath = entry.path
+              pendingWriteTools.delete(event.toolUseId)
+              store.set(agentDiffRefreshVersionAtom, (prev) => {
+                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              })
+              if (writtenPath) {
+                const autoPreviewEnabled = store.get(autoPreviewEnabledAtom)
+                const previewPromise = autoPreviewEnabled
+                  ? setAutoPreviewFile(sessionId, writtenPath, true)
+                  : buildAutoPreviewFile(sessionId, writtenPath)
+
+                previewPromise.then((previewFile) => {
+                  if (!previewFile || previewFile.previewOnly) return
+
+                  store.set(agentDiffUnseenChangesAtom, (prev) => {
+                    const m = new Map(prev); m.set(sessionId, true); return m
+                  })
+                  store.set(agentDiffUnseenFilesAtom, (prev) => {
+                    const m = new Map(prev)
+                    const s = new Set(m.get(sessionId) ?? [])
+                    s.add(writtenPath)
+                    m.set(sessionId, s)
+                    return m
+                  })
+
+                  // 只有当前文件确实能显示 git diff 时，才切到「文件改动」。
+                  if (autoPreviewEnabled && store.get(agentSidePanelOpenAtom)) {
+                    store.set(agentDiffPanelTabAtom, (prev) => {
+                      if (prev.get(sessionId) === 'changes') return prev
+                      const m = new Map(prev); m.set(sessionId, 'changes'); return m
+                    })
+                  }
+
+                  // auto-preview 已展示该文件，标记为已查看
+                  if (autoPreviewEnabled) {
+                    store.set(agentDiffUnseenFilesAtom, (prev) => {
+                      const s = prev.get(sessionId)
+                      if (!s?.has(writtenPath)) return prev
+                      const m = new Map(prev)
+                      const next = new Set(s)
+                      next.delete(writtenPath)
+                      m.set(sessionId, next)
+                      return m
+                    })
+                  }
+                }).catch(() => { /* auto preview should never break streaming */ })
+              }
+            }
+            // Bash git 突变命令完成时，仅刷新 diff 列表（不标记 unseen，避免红点）
+            if (pendingGitMutateTools.has(event.toolUseId)) {
+              pendingGitMutateTools.delete(event.toolUseId)
+              store.set(agentDiffRefreshVersionAtom, (prev) => {
+                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              })
+            }
           } else if (event.type === 'shell_killed') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
               const task = prev.find((t) => t.id === event.shellId)
@@ -709,6 +886,18 @@ export function useGlobalAgentListeners(): void {
           // 清理后台任务
           store.set(backgroundTasksAtomFamily(data.sessionId), [])
 
+          // 清理该 session 关联的未完成写工具记录，防止内存泄漏
+          for (const [toolId, entry] of pendingWriteTools) {
+            if (entry.sessionId === data.sessionId) {
+              pendingWriteTools.delete(toolId)
+            }
+          }
+          for (const [toolId, sid] of pendingGitMutateTools) {
+            if (sid === data.sessionId) {
+              pendingGitMutateTools.delete(toolId)
+            }
+          }
+
           // 注意：liveMessages 的清理已移至 AgentView 消息加载完成后执行，
           // 与 streamingState 清理同步，避免「实时消息已清 → 持久化消息未到」的空档闪烁
 
@@ -800,12 +989,23 @@ export function useGlobalAgentListeners(): void {
       })
     }, 15_000)
 
+    // 窗口重新聚焦时刷新 diff（在外部编辑器改了文件后切回 Proma）
+    const onWindowFocus = () => {
+      const activeSessionId = store.get(currentAgentSessionIdAtom)
+      if (!activeSessionId) return
+      store.set(agentDiffRefreshVersionAtom, (prev) => {
+        const m = new Map(prev); m.set(activeSessionId, (prev.get(activeSessionId) ?? 0) + 1); return m
+      })
+    }
+    window.addEventListener('focus', onWindowFocus)
+
     return () => {
       cleanupEvent()
       cleanupComplete()
       cleanupError()
       cleanupTitleUpdated()
       clearInterval(pruneTimer)
+      window.removeEventListener('focus', onWindowFocus)
     }
   }, [store]) // store 引用稳定，effect 只执行一次
 }

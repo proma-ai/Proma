@@ -145,6 +145,22 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     defaultWin: 'Ctrl+W',
     category: 'app',
   },
+  {
+    id: 'toggle-preview-panel',
+    name: '切换预览面板',
+    description: '显示或隐藏内联 Diff/文件预览面板',
+    defaultMac: 'Cmd+\\',
+    defaultWin: 'Ctrl+\\',
+    category: 'navigation',
+  },
+  {
+    id: 'toggle-right-panel',
+    name: '切换文件面板',
+    description: '显示或隐藏右侧文件面板',
+    defaultMac: 'Cmd+Shift+B',
+    defaultWin: 'Ctrl+Shift+B',
+    category: 'app',
+  },
 
   // 全局快捷键（由主进程 globalShortcut 注册，应用外也生效）
   {

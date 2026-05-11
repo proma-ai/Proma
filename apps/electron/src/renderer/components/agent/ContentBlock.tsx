@@ -439,6 +439,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
             input={block.input}
             result={toolResult.result}
             isError={isError}
+            basePath={basePath}
           />
         </div>
       )}

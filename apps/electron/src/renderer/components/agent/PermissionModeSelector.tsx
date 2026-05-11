@@ -10,6 +10,7 @@ import * as React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { Zap, Compass, Map as MapIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, sessionPersistedPermissionModeAtom, sessionExistsAtom } from '@/atoms/agent-atoms'
 import type { PromaPermissionMode } from '@proma/shared'
 import { PROMA_PERMISSION_MODE_ORDER } from '@proma/shared'
@@ -97,14 +98,15 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => { cycleMode(); requestAnimationFrame(() => document.querySelector<HTMLElement>('.ProseMirror')?.focus()) }}
-            className="flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium transition-colors text-muted-foreground hover:text-foreground"
+            className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
           >
-            <Icon className="size-3.5" />
-            <span className="hidden sm:inline">{config.label}</span>
-          </button>
+            <Icon className="size-5" />
+          </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-[200px]">
           <p className="font-medium">{config.label}模式</p>

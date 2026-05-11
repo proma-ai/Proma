@@ -71,6 +71,39 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const showRightPanel = appMode === 'agent' && !!currentSessionId
 
+  // 右侧面板可拖拽宽度
+  const [rightPanelWidth, setRightPanelWidth] = React.useState(320)
+  const dragging = React.useRef(false)
+
+  const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    const startX = e.clientX
+    const startWidth = rightPanelWidth
+    let rafId = 0
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging.current) return
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        const delta = startX - ev.clientX
+        const newWidth = Math.max(200, Math.min(500, startWidth + delta))
+        setRightPanelWidth(newWidth)
+      })
+    }
+
+    const onMouseUp = () => {
+      dragging.current = false
+      if (rafId) cancelAnimationFrame(rafId)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [rightPanelWidth])
+
   return (
     <AppShellProvider value={contextValue}>
       {/* 可拖动标题栏区域，用于窗口拖动 */}
@@ -88,10 +121,17 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
           <MainArea />
         </div>
 
-        {/* 右侧边栏：Agent 文件面板，带圆角和内边距 */}
+        {/* 右侧边栏：Agent 文件面板，拖拽手柄在间距中间 */}
         {showRightPanel && (
-          <div className={cn('relative z-[60] transition-[padding] duration-300 ease-in-out', isPanelOpen ? 'p-2 pl-0' : 'p-0')}>
-            <RightSidePanel />
+          <div className={cn('relative z-[60] flex items-stretch transition-[padding] duration-300 ease-in-out', isPanelOpen ? 'p-2 pl-0' : 'p-0')}>
+            {/* 拖拽手柄 — 绝对定位，居中于主区域和右侧面板的缝隙 */}
+            {isPanelOpen && (
+              <div
+                className="absolute left-0 top-0 bottom-0 w-[8px] -translate-x-1/2 cursor-col-resize active:bg-primary/50 transition-colors z-10"
+                onMouseDown={handleMouseDown}
+              />
+            )}
+            <RightSidePanel width={rightPanelWidth} />
           </div>
         )}
       </div>

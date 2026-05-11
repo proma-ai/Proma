@@ -6,7 +6,7 @@
  */
 
 import { atom } from 'jotai'
-import { atomFamily } from 'jotai/utils'
+import { atomFamily, atomWithStorage } from 'jotai/utils'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, TaskUsage, SDKMessage } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 
@@ -284,14 +284,32 @@ export const workspaceFilesVersionAtom = atom(0)
 
 // ===== 侧面板 Atoms =====
 
-/** 侧面板是否打开（per-session Map） */
+/** 侧面板是否打开（全局共享，所有会话共用一个状态） */
+export const agentSidePanelOpenAtom = atomWithStorage<boolean>('proma-agent-sidepanel-open', true)
+
+/** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 
-/** 当前会话的侧面板是否打开（派生只读，供 AppShell 使用，避免全 Map 订阅导致无关重渲染） */
+/** 侧面板当前 Tab：'files' | 'changes'（per-session Map） */
+export const agentDiffPanelTabAtom = atom<Map<string, 'files' | 'changes'>>(new Map())
+
+/** Diff 视图模式：'split' | 'unified' */
+export const agentDiffViewModeAtom = atom<'split' | 'unified'>('split')
+
+/** Diff 刷新版本号 — 按 session 隔离，Agent 写工具完成时递增 */
+export const agentDiffRefreshVersionAtom = atom(new Map<string, number>())
+
+/** 是否有未查看的代码改动 — 按 session 隔离 */
+export const agentDiffUnseenChangesAtom = atom(new Map<string, boolean>())
+
+/** Agent 本轮刚修改但用户尚未查看的文件路径 — 按 session 隔离，Map<sessionId, Set<filePath>> */
+export const agentDiffUnseenFilesAtom = atom(new Map<string, Set<string>>())
+
+/** 当前会话的侧面板是否打开（派生只读：全局共享，但仅在有当前会话且为 Agent 模式时显示） */
 export const currentSessionSidePanelOpenAtom = atom<boolean>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return false
-  return get(agentSidePanelOpenMapAtom).get(currentId) ?? true
+  return get(agentSidePanelOpenAtom)
 })
 
 /** 当前会话的工作路径 Map — sessionId → path */
