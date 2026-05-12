@@ -16,6 +16,7 @@ import {
   Upload,
   CheckCircle2,
   XCircle,
+  AlertTriangle,
   Loader2,
   ChevronDown,
   ChevronRight,
@@ -47,6 +48,13 @@ interface WsSelection {
   mcpServers: Set<string>
 }
 
+interface ExportResult {
+  success: boolean
+  filePath?: string
+  error?: string
+  warnings?: string[]
+}
+
 const COMPONENT_LABELS: Record<MigrationComponent, string> = {
   sessions: '会话记录',
   skills: 'Skills',
@@ -62,7 +70,7 @@ export function MigrationSettings(): React.ReactElement {
     new Set(['sessions', 'skills', 'mcp'])
   )
   const [exporting, setExporting] = React.useState(false)
-  const [exportResult, setExportResult] = React.useState<{ success: boolean; filePath?: string; error?: string } | null>(null)
+  const [exportResult, setExportResult] = React.useState<ExportResult | null>(null)
 
   // ── 多工作区选择状态 ──────────────────────────────
   const [shareDetailMode, setShareDetailMode] = React.useState<ShareDetailMode>('default')
@@ -147,16 +155,16 @@ export function MigrationSettings(): React.ReactElement {
           components,
           outputPath,
           workspaceSelections,
-        }) as { success: boolean; filePath: string }
-        setExportResult({ success: true, filePath: result.filePath })
+        }) as { success: boolean; filePath: string; warnings?: string[] }
+        setExportResult({ success: true, filePath: result.filePath, warnings: result.warnings })
       } else {
         // personal 模式：全量备份所有工作区
         const result = await window.electronAPI.migrationExportV2({
           mode: exportMode,
           components,
           outputPath,
-        }) as { success: boolean; filePath: string }
-        setExportResult({ success: true, filePath: result.filePath })
+        }) as { success: boolean; filePath: string; warnings?: string[] }
+        setExportResult({ success: true, filePath: result.filePath, warnings: result.warnings })
       }
     } catch (err) {
       setExportResult({ success: false, error: err instanceof Error ? err.message : '导出失败' })
@@ -441,6 +449,19 @@ export function MigrationSettings(): React.ReactElement {
               </div>
             )}
           </div>
+
+          {exportResult?.success && exportResult.warnings && exportResult.warnings.length > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200/70 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+              <div className="min-w-0 space-y-1">
+                <p>导出已完成，但有 {exportResult.warnings.length} 个项目无法读取，已跳过。</p>
+                <p className="break-all text-xs opacity-90" title={exportResult.warnings.join('\n')}>
+                  {exportResult.warnings[0]}
+                  {exportResult.warnings.length > 1 ? ' 等' : ''}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </SettingsSection>
 

@@ -8,7 +8,7 @@
  * 导入时自动检测跨平台差异并提示用户处理路径映射。
  */
 
-import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, rmSync, type Dirent } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { homedir, platform, arch, tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -48,6 +48,12 @@ export interface ExportOptions {
   /** 为空则导出全量会话 */
   sessionIds?: string[]
   outputPath: string
+}
+
+export interface ExportResult {
+  success: boolean
+  filePath: string
+  warnings?: string[]
 }
 
 export interface ExportPreview {
@@ -253,8 +259,9 @@ export async function getShareExportPreview(): Promise<ShareExportPreview> {
   return { workspaces, agentSessionCount, chatConversationCount }
 }
 
-export async function exportData(options: ExportOptions): Promise<{ success: boolean; filePath: string }> {
+export async function exportData(options: ExportOptions): Promise<ExportResult> {
   const { mode, workspaceId, components, sessionIds, outputPath } = options
+  const warnings: string[] = []
 
   const workspace = getAgentWorkspace(workspaceId)
   if (!workspace) throw new Error(`工作区不存在: ${workspaceId}`)
@@ -276,8 +283,8 @@ export async function exportData(options: ExportOptions): Promise<{ success: boo
 
   zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'))
 
-  if (components.includes('sessions')) _addSessions(zip, workspace, sessionIds)
-  if (components.includes('skills')) _addSkills(zip, workspace)
+  if (components.includes('sessions')) _addSessions(zip, workspace, sessionIds, warnings)
+  if (components.includes('skills')) _addSkills(zip, workspace, warnings)
   if (components.includes('mcp')) _addMcp(zip, workspace, mode)
   if (components.includes('channels')) _addChannels(zip, mode)
   if (components.includes('chattools')) _addChatTools(zip, mode)
@@ -285,11 +292,12 @@ export async function exportData(options: ExportOptions): Promise<{ success: boo
   if (mode === 'personal') _addPersonalFiles(zip)
 
   zip.writeZip(outputPath)
-  return { success: true, filePath: outputPath }
+  return buildExportResult(outputPath, warnings)
 }
 
-export async function exportDataV2(options: ExportOptionsV2): Promise<{ success: boolean; filePath: string }> {
+export async function exportDataV2(options: ExportOptionsV2): Promise<ExportResult> {
   const { mode, components, sessionIds, outputPath, workspaceSelections } = options
+  const warnings: string[] = []
 
   const allWorkspaces = listAgentWorkspaces()
   const wsMap = new Map(allWorkspaces.map((w) => [w.id, w]))
@@ -333,12 +341,12 @@ export async function exportDataV2(options: ExportOptionsV2): Promise<{ success:
   zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'))
 
   if (components.includes('sessions')) {
-    _addSessionsMultiWorkspace(zip, targetWorkspaces.map((t) => t.workspace), sessionIds)
+    _addSessionsMultiWorkspace(zip, targetWorkspaces.map((t) => t.workspace), sessionIds, warnings)
   }
 
   if (components.includes('skills')) {
     for (const { workspace, skillSlugs } of targetWorkspaces) {
-      _addSkillsV2(zip, workspace, skillSlugs)
+      _addSkillsV2(zip, workspace, skillSlugs, warnings)
     }
   }
 
@@ -357,10 +365,10 @@ export async function exportDataV2(options: ExportOptionsV2): Promise<{ success:
   if (mode === 'personal') _addPersonalFiles(zip)
 
   zip.writeZip(outputPath)
-  return { success: true, filePath: outputPath }
+  return buildExportResult(outputPath, warnings)
 }
 
-function _addSessions(zip: AdmZip, workspace: AgentWorkspace, filterIds?: string[]) {
+function _addSessions(zip: AdmZip, workspace: AgentWorkspace, filterIds: string[] | undefined, warnings: string[]) {
   const sessionsIndexPath = getAgentSessionsIndexPath()
   if (existsSync(sessionsIndexPath)) {
     const index = readJsonSafe<{ version: number; sessions: Array<{ id: string; workspaceId: string }> }>(sessionsIndexPath)
@@ -376,7 +384,7 @@ function _addSessions(zip: AdmZip, workspace: AgentWorkspace, filterIds?: string
       }
       const workDir = join(getAgentWorkspacePath(workspace.slug), session.id)
       if (existsSync(workDir)) {
-        _addDirToZip(zip, workDir, `sessions/workspace-data/${session.id}`)
+        _addDirToZip(zip, workDir, `sessions/workspace-data/${session.id}`, warnings)
       }
     }
 
@@ -402,7 +410,7 @@ function _addSessions(zip: AdmZip, workspace: AgentWorkspace, filterIds?: string
   }
 }
 
-function _addSessionsMultiWorkspace(zip: AdmZip, workspaces: AgentWorkspace[], filterIds?: string[]) {
+function _addSessionsMultiWorkspace(zip: AdmZip, workspaces: AgentWorkspace[], filterIds: string[] | undefined, warnings: string[]) {
   const wsIds = new Set(workspaces.map((w) => w.id))
 
   const sessionsIndexPath = getAgentSessionsIndexPath()
@@ -422,7 +430,7 @@ function _addSessionsMultiWorkspace(zip: AdmZip, workspaces: AgentWorkspace[], f
       if (ws) {
         const workDir = join(getAgentWorkspacePath(ws.slug), session.id)
         if (existsSync(workDir)) {
-          _addDirToZip(zip, workDir, `sessions/workspace-data/${session.id}`)
+          _addDirToZip(zip, workDir, `sessions/workspace-data/${session.id}`, warnings)
         }
       }
     }
@@ -449,11 +457,11 @@ function _addSessionsMultiWorkspace(zip: AdmZip, workspaces: AgentWorkspace[], f
   }
 }
 
-function _addSkills(zip: AdmZip, workspace: AgentWorkspace) {
+function _addSkills(zip: AdmZip, workspace: AgentWorkspace, warnings: string[]) {
   const skillsDir = getWorkspaceSkillsDir(workspace.slug)
-  if (existsSync(skillsDir)) _addDirToZip(zip, skillsDir, 'skills/active')
+  if (existsSync(skillsDir)) _addDirToZip(zip, skillsDir, 'skills/active', warnings)
   const inactiveDir = getInactiveSkillsDir(workspace.slug)
-  if (existsSync(inactiveDir)) _addDirToZip(zip, inactiveDir, 'skills/inactive')
+  if (existsSync(inactiveDir)) _addDirToZip(zip, inactiveDir, 'skills/inactive', warnings)
 }
 
 function _addMcp(zip: AdmZip, workspace: AgentWorkspace, mode: MigrationMode) {
@@ -531,14 +539,14 @@ function _addWorkspaceConfig(zip: AdmZip, workspace: AgentWorkspace) {
 
 // ─── v2 导出辅助函数 ─────────────────────────────────────────────────────────
 
-function _addSkillsV2(zip: AdmZip, workspace: AgentWorkspace, selectedSlugs?: string[]) {
+function _addSkillsV2(zip: AdmZip, workspace: AgentWorkspace, selectedSlugs: string[] | undefined, warnings: string[]) {
   const prefix = `workspaces/${workspace.slug}`
   const skillsDir = getWorkspaceSkillsDir(workspace.slug)
   if (existsSync(skillsDir)) {
     for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       if (selectedSlugs && !selectedSlugs.includes(entry.name)) continue
-      _addDirToZip(zip, join(skillsDir, entry.name), `${prefix}/skills/active/${entry.name}`)
+      _addDirToZip(zip, join(skillsDir, entry.name), `${prefix}/skills/active/${entry.name}`, warnings)
     }
   }
   const inactiveDir = getInactiveSkillsDir(workspace.slug)
@@ -546,7 +554,7 @@ function _addSkillsV2(zip: AdmZip, workspace: AgentWorkspace, selectedSlugs?: st
     for (const entry of readdirSync(inactiveDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       if (selectedSlugs && !selectedSlugs.includes(entry.name)) continue
-      _addDirToZip(zip, join(inactiveDir, entry.name), `${prefix}/skills/inactive/${entry.name}`)
+      _addDirToZip(zip, join(inactiveDir, entry.name), `${prefix}/skills/inactive/${entry.name}`, warnings)
     }
   }
 }
@@ -1269,16 +1277,41 @@ function readJsonSafe<T>(filePath: string): T | null {
   }
 }
 
+function buildExportResult(filePath: string, warnings: string[]): ExportResult {
+  if (warnings.length === 0) return { success: true, filePath }
+  return { success: true, filePath, warnings }
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function addExportWarning(warnings: string[], message: string): void {
+  warnings.push(message)
+  console.warn(`[数据迁移] ${message}`)
+}
+
 /** 递归将本地目录的所有文件加入 zip 指定前缀路径 */
-function _addDirToZip(zip: AdmZip, srcDir: string, zipPrefix: string): void {
-  const entries = readdirSync(srcDir, { withFileTypes: true })
+function _addDirToZip(zip: AdmZip, srcDir: string, zipPrefix: string, warnings: string[]): void {
+  let entries: Dirent[]
+  try {
+    entries = readdirSync(srcDir, { withFileTypes: true })
+  } catch (error) {
+    addExportWarning(warnings, `已跳过无法读取的目录: ${srcDir} (${formatErrorMessage(error)})`)
+    return
+  }
+
   for (const entry of entries) {
     const fullPath = join(srcDir, entry.name)
     const entryZipPath = `${zipPrefix}/${entry.name}`
     if (entry.isDirectory()) {
-      _addDirToZip(zip, fullPath, entryZipPath)
+      _addDirToZip(zip, fullPath, entryZipPath, warnings)
     } else {
-      zip.addLocalFile(fullPath, zipPrefix)
+      try {
+        zip.addLocalFile(fullPath, zipPrefix)
+      } catch (error) {
+        addExportWarning(warnings, `已跳过无法读取的备份项目: ${fullPath} (${formatErrorMessage(error)})`)
+      }
     }
   }
 }

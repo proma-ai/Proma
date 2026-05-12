@@ -260,6 +260,25 @@ export function isPromptTooLongError(...messages: string[]): boolean {
   return PROMPT_TOO_LONG_PATTERNS.some((p) => combined.includes(p))
 }
 
+/** 从 assistant.error 文本中兜底提取 HTTP 状态码 */
+function extractHttpStatusFromErrorText(...messages: string[]): number | null {
+  const combined = messages.filter(Boolean).join('\n')
+  const patterns = [
+    /API Error:\s*(\d{3})/i,
+    /API error[^:]*:\s+(\d{3})/i,
+    /\b(?:HTTP|status|statusCode)\s*[:=]?\s*(\d{3})\b/i,
+    /\b(\d{3})\s+\{[^}]*"error"/is,
+  ]
+
+  for (const pattern of patterns) {
+    const match = combined.match(pattern)
+    const statusCode = match?.[1] ? parseInt(match[1], 10) : NaN
+    if (statusCode >= 400 && statusCode < 600) return statusCode
+  }
+
+  return null
+}
+
 /** 将 SDK 错误映射为 TypedError */
 export function mapSDKErrorToTypedError(
   errorCode: string,
@@ -297,6 +316,30 @@ export function mapSDKErrorToTypedError(
       message: 'API 服务当前过载，请稍后再试',
       canRetry: true,
     },
+    'provider_error': {
+      code: 'provider_error',
+      title: '服务繁忙',
+      message: 'API 服务当前过载或暂时异常，请稍后再试',
+      canRetry: true,
+    },
+    'service_error': {
+      code: 'service_error',
+      title: '服务错误',
+      message: 'API 服务暂时异常，请稍后再试',
+      canRetry: true,
+    },
+    'api_error': {
+      code: 'service_error',
+      title: '服务错误',
+      message: 'API 服务暂时异常，请稍后再试',
+      canRetry: true,
+    },
+    'service_unavailable': {
+      code: 'service_unavailable',
+      title: '服务暂时不可用',
+      message: 'API 服务暂时不可用，请稍后再试',
+      canRetry: true,
+    },
     'prompt_too_long': {
       code: 'prompt_too_long',
       title: '上下文过长',
@@ -316,6 +359,32 @@ export function mapSDKErrorToTypedError(
       code: 'network_error',
       title: '网络异常',
       message: detailedMessage || '上游 API 连接中断',
+      actions: [
+        { key: 's', label: '设置', action: 'settings' },
+        { key: 'r', label: '重试', action: 'retry' },
+      ],
+      canRetry: true,
+      retryDelayMs: 1000,
+      originalError,
+    }
+  }
+
+  const httpStatus = extractHttpStatusFromErrorText(detailedMessage, originalError)
+  if (httpStatus != null && (httpStatus === 429 || httpStatus >= 500)) {
+    const isRateLimited = httpStatus === 429
+    const isUnavailable = httpStatus === 503
+    return {
+      code: isRateLimited
+        ? 'rate_limited'
+        : (isUnavailable ? 'service_unavailable' : 'service_error'),
+      title: isRateLimited
+        ? '请求频率限制'
+        : (isUnavailable ? '服务暂时不可用' : '服务错误'),
+      message: detailedMessage || (
+        isRateLimited
+          ? '请求过于频繁，请稍后再试'
+          : `API 服务暂时异常 (${httpStatus})，请稍后再试`
+      ),
       actions: [
         { key: 's', label: '设置', action: 'settings' },
         { key: 'r', label: '重试', action: 'retry' },

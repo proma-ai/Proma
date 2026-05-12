@@ -190,22 +190,28 @@ function isSessionNotFoundError(errorMessage: string, stderr?: string): boolean 
 }
 
 /** 最大自动重试次数 */
-const MAX_AUTO_RETRIES = 8
+const MAX_AUTO_RETRIES = 25
+
+/** 自动重试累计等待预算（毫秒） */
+const MAX_AUTO_RETRY_WAIT_MS = 5 * 60_000
 
 /** 重试单次延迟上限（毫秒） */
-const RETRY_MAX_DELAY_MS = 10_000
+const RETRY_MAX_DELAY_MS = 15_000
 
 /**
  * 计算重试延迟（指数退避 + ±20% jitter）
  *
- * 基础序列：1s, 2s, 4s, 8s, 10s, 10s, 10s, 10s（cap = 10s）
+ * 基础序列：1s, 2s, 4s, 8s, 15s, 15s...（cap = 15s）
  * 叠加 ±20% 随机抖动，避免大量 session 同时重试造成惊群。
- * 最坏情况累计等待 ≈ 55s。
+ * 累计等待会被限制在 5 分钟以内。
  */
-function getRetryDelayMs(attempt: number): number {
+function getRetryDelayMs(attempt: number, elapsedRetryDelayMs: number): number {
+  const remainingMs = MAX_AUTO_RETRY_WAIT_MS - elapsedRetryDelayMs
+  if (remainingMs <= 0) return 0
+
   const base = Math.min(1000 * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS)
   const jitter = base * (Math.random() * 0.4 - 0.2)
-  return Math.max(0, Math.round(base + jitter))
+  return Math.min(remainingMs, Math.max(0, Math.round(base + jitter)))
 }
 
 /**
@@ -1493,7 +1499,11 @@ export class AgentOrchestrator {
 
       // 14. 遍历 Adapter 产出的 AgentEvent 流（含自动重试 + Watchdog 死锁检测）
       let lastRetryableError: string | undefined
+      let retryDelayElapsedMs = 0
+      let retryAttemptsScheduled = 0
       let retrySucceeded = false
+      const canAutoRetry = (attempt: number): boolean =>
+        attempt <= MAX_AUTO_RETRIES && retryDelayElapsedMs < MAX_AUTO_RETRY_WAIT_MS
 
       // Agent Teams 追踪
       const startedTaskIds = new Set<string>()
@@ -1509,10 +1519,17 @@ export class AgentOrchestrator {
       for (let attempt = 1; attempt <= MAX_AUTO_RETRIES + 1; attempt++) {
         // 非首次尝试：等待 + 发送重试事件到 UI
         if (attempt > 1) {
-          const delayMs = getRetryDelayMs(attempt - 1)
+          const retryAttempt = attempt - 1
+          const delayMs = getRetryDelayMs(retryAttempt, retryDelayElapsedMs)
+          if (delayMs <= 0) {
+            console.log(`[Agent 编排] 自动重试等待预算已耗尽 (${MAX_AUTO_RETRY_WAIT_MS}ms)，停止重试`)
+            break
+          }
+          retryDelayElapsedMs += delayMs
+          retryAttemptsScheduled = retryAttempt
           const delaySec = delayMs / 1000
           const attemptData: RetryAttempt = {
-            attempt: attempt - 1,
+            attempt: retryAttempt,
             timestamp: Date.now(),
             reason: lastRetryableError ?? '未知错误',
             errorMessage: lastRetryableError ?? '',
@@ -1521,14 +1538,14 @@ export class AgentOrchestrator {
 
           this.eventBus.emit(sessionId, {
             kind: 'proma_event',
-            event: { type: 'retry', status: 'starting', attempt: attempt - 1, maxAttempts: MAX_AUTO_RETRIES, delaySeconds: delaySec, reason: lastRetryableError ?? '未知错误' },
+            event: { type: 'retry', status: 'starting', attempt: retryAttempt, maxAttempts: MAX_AUTO_RETRIES, delaySeconds: delaySec, reason: lastRetryableError ?? '未知错误' },
           })
           this.eventBus.emit(sessionId, {
             kind: 'proma_event',
             event: { type: 'retry', status: 'attempt', attemptData },
           })
 
-          console.log(`[Agent 编排] 第 ${attempt - 1} 次重试，等待 ${delaySec}s...`)
+          console.log(`[Agent 编排] 第 ${retryAttempt} 次重试，等待 ${delaySec}s...`)
           await new Promise((r) => setTimeout(r, delayMs))
 
           // 等待期间如果会话被中止，退出
@@ -1658,7 +1675,7 @@ export class AgentOrchestrator {
                 const typedError = mapSDKErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
 
                 // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
-                if (isSessionNotFoundError(detailedMessage, originalError) && existingSdkSessionId && attempt <= MAX_AUTO_RETRIES) {
+                if (isSessionNotFoundError(detailedMessage, originalError) && existingSdkSessionId && canAutoRetry(attempt)) {
                   existingSdkSessionId = undefined
                   lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, accumulatedMessages, queryStartedAt)
                   shouldRetryFromError = true
@@ -1693,7 +1710,7 @@ export class AgentOrchestrator {
                 }
 
                 // 判断是否可自动重试
-                if (isAutoRetryableTypedError(typedError) && attempt <= MAX_AUTO_RETRIES) {
+                if (isAutoRetryableTypedError(typedError) && canAutoRetry(attempt)) {
                   lastRetryableError = typedError.title
                     ? `${typedError.title}: ${typedError.message}`
                     : typedError.message
@@ -1992,7 +2009,7 @@ export class AgentOrchestrator {
           const rawErrorMessage = error instanceof Error ? error.message : ''
 
           // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
-          if (isSessionNotFoundError(rawErrorMessage, stderrOutput) && existingSdkSessionId && attempt <= MAX_AUTO_RETRIES) {
+          if (isSessionNotFoundError(rawErrorMessage, stderrOutput) && existingSdkSessionId && canAutoRetry(attempt)) {
             existingSdkSessionId = undefined
             lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, accumulatedMessages, queryStartedAt)
             stderrChunks.length = 0
@@ -2031,7 +2048,7 @@ export class AgentOrchestrator {
           }
 
           // 判断是否可重试
-          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && attempt <= MAX_AUTO_RETRIES) {
+          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && canAutoRetry(attempt)) {
             lastRetryableError = apiError
               ? `API Error ${apiError.statusCode}: ${apiError.message}`
               : (error instanceof Error ? error.message : '未知错误')
@@ -2127,13 +2144,16 @@ export class AgentOrchestrator {
 
       // 重试循环结束（达到最大次数仍失败）
       if (!retrySucceeded && lastRetryableError) {
+        const retryFailureMessage = retryDelayElapsedMs >= MAX_AUTO_RETRY_WAIT_MS
+          ? '重试等待已达到 5 分钟后仍然失败'
+          : `重试 ${retryAttemptsScheduled || MAX_AUTO_RETRIES} 次后仍然失败`
         this.eventBus.emit(sessionId, {
           kind: 'proma_event',
-          event: { type: 'retry', status: 'failed', attemptData: { attempt: MAX_AUTO_RETRIES, timestamp: Date.now(), reason: lastRetryableError, errorMessage: `重试 ${MAX_AUTO_RETRIES} 次后仍然失败`, delaySeconds: 0 } },
+          event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled || MAX_AUTO_RETRIES, timestamp: Date.now(), reason: lastRetryableError, errorMessage: retryFailureMessage, delaySeconds: 0 } },
         })
 
         // 保存错误消息
-        const retryErrorContent = `重试 ${MAX_AUTO_RETRIES} 次后仍然失败: ${lastRetryableError}`
+        const retryErrorContent = `${retryFailureMessage}: ${lastRetryableError}`
         const retryErrorSDKMsg: SDKMessage = {
           type: 'assistant',
           message: {
@@ -2147,7 +2167,7 @@ export class AgentOrchestrator {
         } as unknown as SDKMessage
         appendSDKMessages(sessionId, [retryErrorSDKMsg])
 
-        callbacks.onError(`重试 ${MAX_AUTO_RETRIES} 次后仍然失败: ${lastRetryableError}`)
+        callbacks.onError(`${retryFailureMessage}: ${lastRetryableError}`)
         callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
       }
 

@@ -1063,9 +1063,9 @@ export interface ElectronAPI {
   /** 获取所有工作区的 Skills/MCP 预览（团队分发模式） */
   migrationGetShareExportPreview: () => Promise<unknown>
   /** 执行导出 */
-  migrationExport: (options: unknown) => Promise<{ success: boolean; filePath: string }>
+  migrationExport: (options: unknown) => Promise<MigrationExportResult>
   /** 执行 v2 多工作区导出 */
-  migrationExportV2: (options: unknown) => Promise<{ success: boolean; filePath: string }>
+  migrationExportV2: (options: unknown) => Promise<MigrationExportResult>
   /** 解析导入文件，返回预览信息 */
   migrationParseImportFile: (filePath: string) => Promise<unknown>
   /** 确认导入 */
@@ -1076,6 +1076,12 @@ export interface ElectronAPI {
   migrationSaveFileDialog: (mode: string) => Promise<string | null>
   /** 订阅双击迁移文件触发的导入事件 */
   onMigrationOpenImportFile: (callback: (data: { filePath: string }) => void) => () => void
+}
+
+interface MigrationExportResult {
+  success: boolean
+  filePath: string
+  warnings?: string[]
 }
 
 /**
