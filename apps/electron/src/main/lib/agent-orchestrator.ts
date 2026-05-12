@@ -373,6 +373,35 @@ function buildContextPrompt(sessionId: string, currentUserMessage: string, sessi
   return `<conversation_history>${sessionInfoBlock}\n${lines.join('\n')}\n</conversation_history>\n\n${currentUserMessage}`
 }
 
+/**
+ * 构建 Session 恢复 prompt
+ *
+ * 当 SDK resume 失败（session 过期、thinking signature 不兼容等）时，
+ * 注入 <session_recovery> 标签指向当前会话的完整 JSONL 历史文件，
+ * 让 Agent 自己读取完整历史后无缝继续工作。
+ */
+function buildRecoveryPrompt(
+  sessionId: string,
+  currentUserMessage: string,
+  sessionHint: { agentCwd: string },
+): string {
+  const meta = getAgentSessionMeta(sessionId)
+  const title = meta ? escapeContextAttr(meta.title) : sessionId
+  const historyPath = `~/${getConfigDirName()}/agent-sessions/${sessionId}.jsonl`
+
+  const recoveryBlock =
+    `<session_recovery>\n` +
+    `你正在接续一个已有的 Agent 会话（因模型切换等原因需要重新建立连接）。\n` +
+    `当前会话的完整历史记录在下方路径中，请先读取它以恢复上下文，然后继续处理用户的最新请求。\n` +
+    `<session id="${sessionId}" title="${title}" cwd="${sessionHint.agentCwd}">\n` +
+    `History path: ${historyPath}\n` +
+    `</session>\n` +
+    `</session_recovery>`
+
+  console.log(`[Agent 编排] buildRecoveryPrompt: 注入 session 自引用 → ${historyPath}`)
+  return `${recoveryBlock}\n\n${currentUserMessage}`
+}
+
 function escapeContextAttr(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -839,9 +868,11 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Resume 失败恢复：清除 SDK resume 关系，改用 Proma 已持久化的上下文回填重跑。
+   * Resume 失败恢复：清除 SDK resume 关系，注入 session 自引用让 Agent 读取完整历史继续工作。
    *
    * 适用于 SDK session 过期、thinking signature 跨模型不兼容等场景。
+   * 使用 <session_recovery> 标签指向当前会话的 JSONL 历史文件，Agent 会自动读取并恢复上下文，
+   * 比 buildContextPrompt（仅注入 20 条摘要）提供完整得多的上下文连续性。
    */
   private prepareResumeFallbackRecovery(
     sessionId: string,
@@ -854,12 +885,14 @@ export class AgentOrchestrator {
     retryReason: string,
   ): string {
     console.log(`[Agent 编排] ${logMessage}`)
+    // 先持久化当前已累积的消息，确保 JSONL 文件包含最新内容
+    this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
+    accumulatedMessages.length = 0
+    // 清除失效的 SDK session，新 SDK 会话产生的 sdkSessionId 会通过 onSessionId 回调自动保存
     try { updateAgentSessionMeta(sessionId, { sdkSessionId: undefined }) } catch { /* 忽略 */ }
     queryOptions.resumeSessionId = undefined
     queryOptions.resumeSessionAt = undefined
-    queryOptions.prompt = buildContextPrompt(sessionId, contextualMessage, { agentCwd })
-    this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-    accumulatedMessages.length = 0
+    queryOptions.prompt = buildRecoveryPrompt(sessionId, contextualMessage, { agentCwd })
     return retryReason
   }
 

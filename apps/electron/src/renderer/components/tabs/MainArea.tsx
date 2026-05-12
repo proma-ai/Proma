@@ -85,36 +85,15 @@ export function MainArea(): React.ReactElement {
         variant="grow"
         className="bg-content-area rounded-2xl shadow-xl"
       >
-        {previewOpen && previewSessionId ? (
-          <div className="flex flex-1 min-h-0" data-split-container>
-            {/* 左侧：TabBar + TabContent */}
-            <div
-              className="flex flex-col min-w-0 h-full"
-              style={{ flex: `0 0 calc(${splitRatio * 100}% - 4px)` }}
-            >
-              <TabBar />
-              {tabs.length === 0 ? (
-                <WelcomeView />
-              ) : activeTabId ? (
-                <div className="flex-1 min-h-0 titlebar-no-drag">
-                  <TabContent tabId={activeTabId} />
-                </div>
-              ) : null}
-            </div>
-
-            {/* 拖拽手柄 */}
-            <div
-              className="w-[8px] cursor-col-resize bg-border/40 hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0 self-stretch"
-              onMouseDown={handlePreviewDragStart}
-            />
-
-            {/* 右侧：PreviewPanel */}
-            <div className="flex-1 min-w-0 h-full overflow-hidden">
-              <PreviewPanel sessionId={previewSessionId} />
-            </div>
-          </div>
-        ) : (
-          <>
+        <div className="flex flex-1 min-h-0" data-split-container>
+          {/* 左侧：TabBar + TabContent（始终保持在同一 DOM 位置，避免 Tab 切换时 unmount） */}
+          <div
+            className="flex flex-col min-w-0 h-full"
+            style={previewOpen && previewSessionId
+              ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
+              : { flex: '1 1 auto' }
+            }
+          >
             <TabBar />
             {tabs.length === 0 ? (
               <WelcomeView />
@@ -123,8 +102,23 @@ export function MainArea(): React.ReactElement {
                 <TabContent tabId={activeTabId} />
               </div>
             ) : null}
-          </>
-        )}
+          </div>
+
+          {previewOpen && previewSessionId && (
+            <>
+              {/* 拖拽手柄 */}
+              <div
+                className="w-[8px] cursor-col-resize bg-border/40 hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0 self-stretch"
+                onMouseDown={handlePreviewDragStart}
+              />
+
+              {/* 右侧：PreviewPanel */}
+              <div className="flex-1 min-w-0 h-full overflow-hidden">
+                <PreviewPanel sessionId={previewSessionId} />
+              </div>
+            </>
+          )}
+        </div>
       </Panel>
       <SettingsDialog />
     </>
