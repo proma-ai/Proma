@@ -192,10 +192,16 @@ export function appendAgentMessage(id: string, message: AgentMessage): void {
   }
 }
 
+/** 单条 SDKMessage 序列化后最大长度（UTF-16 code units，超出则截断内容） */
+const MAX_SDK_MESSAGE_LENGTH = 256 * 1024 // ~256K chars
+/** 截断后保留的预览文本长度 */
+const TRUNCATED_PREVIEW_LENGTH = 2000
+
 /**
  * 追加 SDKMessage 到会话的 JSONL 文件（Phase 4 新持久化格式）
  *
  * 每条 SDKMessage 单独一行 JSON。读取时通过 `type` 字段区分新旧格式。
+ * 超过 256K chars 的消息会被自动截断以防止存储膨胀。
  */
 export function appendSDKMessages(id: string, messages: SDKMessage[]): void {
   if (messages.length === 0) return
@@ -203,12 +209,68 @@ export function appendSDKMessages(id: string, messages: SDKMessage[]): void {
   const filePath = getAgentSessionMessagesPath(id)
 
   try {
-    const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n'
+    const lines = messages.map((m) => {
+      const serialized = JSON.stringify(m)
+      if (serialized.length <= MAX_SDK_MESSAGE_LENGTH) return serialized
+      const sanitized = JSON.stringify(sanitizeOversizedMessage(m, serialized.length))
+      if (sanitized.length > MAX_SDK_MESSAGE_LENGTH) {
+        console.warn(`[Agent 会话] 消息截断后仍超限 (${(sanitized.length / 1024).toFixed(0)}K chars), session=${id}`)
+      }
+      return sanitized
+    }).join('\n') + '\n'
     appendFileSync(filePath, lines, 'utf-8')
   } catch (error) {
     console.error(`[Agent 会话] 追加 SDKMessage 失败 (${id}):`, error)
     throw new Error('追加 SDKMessage 失败')
   }
+}
+
+/**
+ * 截断超大 SDKMessage 的内容，保留元数据结构。
+ * 处理三类膨胀源：超长 text block、超大 tool_result、内嵌 base64 图片。
+ */
+function sanitizeOversizedMessage(msg: SDKMessage, originalLength: number): SDKMessage {
+  const truncationNote = `\n[内容已截断: 原始 ${(originalLength / 1024).toFixed(0)}K chars 超出存储限制]`
+  const truncationThreshold = MAX_SDK_MESSAGE_LENGTH / 2
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const clone: any = JSON.parse(JSON.stringify(msg))
+  const content = clone.message?.content
+  if (Array.isArray(content)) {
+    for (let i = 0; i < content.length; i++) {
+      const block = content[i]
+      if (!block || typeof block !== 'object') continue
+
+      // 截断超长 text block
+      if (block.type === 'text' && typeof block.text === 'string' && block.text.length > truncationThreshold) {
+        block.text = block.text.slice(0, TRUNCATED_PREVIEW_LENGTH) + truncationNote
+      }
+
+      // 截断超大 tool_result
+      if (block.type === 'tool_result') {
+        if (typeof block.content === 'string' && block.content.length > truncationThreshold) {
+          block.content = block.content.slice(0, TRUNCATED_PREVIEW_LENGTH) + truncationNote
+        }
+        // 剥离 base64 图片数据
+        if (Array.isArray(block.content)) {
+          block.content = block.content.map((item: Record<string, unknown>) => {
+            if (item?.type === 'image' && (item.source as Record<string, unknown>)?.data) {
+              const dataLen = String((item.source as Record<string, unknown>).data).length
+              return { type: 'image', _truncated: true, _originalLength: dataLen }
+            }
+            return item
+          })
+        }
+      }
+    }
+  }
+
+  // 截断 error.message
+  if (clone.error && typeof clone.error === 'object' && typeof clone.error.message === 'string' && clone.error.message.length > truncationThreshold) {
+    clone.error.message = clone.error.message.slice(0, TRUNCATED_PREVIEW_LENGTH) + truncationNote
+  }
+
+  return clone as SDKMessage
 }
 
 /**

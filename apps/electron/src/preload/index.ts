@@ -662,6 +662,9 @@ export interface ElectronAPI {
   /** DOCX 转 HTML（内联预览） */
   docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; html: string } | null>
 
+  /** XLSX/PPTX 转 HTML（内联预览） */
+  officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').OfficePreviewResult | null>
+
   /** 重命名文件/目录 */
   renameFile: (filePath: string, newName: string) => Promise<void>
 
@@ -1750,6 +1753,10 @@ const electronAPI: ElectronAPI = {
 
   docxToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
     return ipcRenderer.invoke('file:docx-to-html', filePath, access) as Promise<{ resolvedPath: string; html: string } | null>
+  },
+
+  officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke('file:office-to-html', filePath, access) as Promise<import('@proma/shared').OfficePreviewResult | null>
   },
 
   renameFile: (filePath: string, newName: string) => {

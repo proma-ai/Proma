@@ -94,6 +94,33 @@ import { fileToBase64 } from '@/lib/file-utils'
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+const LONG_TEXT_ATTACHMENT_THRESHOLD = 500
+
+function formatClipboardTimestamp(date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+function looksLikeMarkdown(text: string): boolean {
+  return [
+    /^#{1,6}\s+\S/m,
+    /```[\s\S]*?```/,
+    /^\s*\|.+\|\s*\n\s*\|[\s:-]+\|/m,
+    /^---\n[\s\S]*?\n---\n/,
+    /^\s*> .+/m,
+    /^\s*[-*+]\s+\S/m,
+    /^\s*\d+\.\s+\S/m,
+    /\[[^\]]+\]\([^)]+\)/,
+  ].some((pattern) => pattern.test(text))
+}
+
+function createClipboardTextFile(text: string): File {
+  const isMarkdown = looksLikeMarkdown(text)
+  const extension = isMarkdown ? 'md' : 'txt'
+  const mediaType = isMarkdown ? 'text/markdown' : 'text/plain'
+  const filename = `clipboard-${formatClipboardTimestamp()}.${extension}`
+  return new File([text], filename, { type: mediaType })
+}
 
 interface SDKMessageRecord {
   type?: string
@@ -774,6 +801,21 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   /** 粘贴文件处理 */
   const handlePasteFiles = React.useCallback((files: File[]): void => {
     addFilesAsAttachments(files)
+  }, [addFilesAsAttachments])
+
+  /** 粘贴超长文本时转为待发送附件，避免把大段内容直接塞进输入框 */
+  const handlePasteLongText = React.useCallback((text: string): void => {
+    const file = createClipboardTextFile(text)
+    addFilesAsAttachments([file])
+      .then(() => {
+        toast.success('已将超长文本转为附件', {
+          description: file.name,
+        })
+      })
+      .catch((error) => {
+        console.error('[AgentView] 超长文本转附件失败:', error)
+        toast.error('超长文本转附件失败')
+      })
   }, [addFilesAsAttachments])
 
   /** 拖放处理 */
@@ -1532,6 +1574,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onChange={setInputContent}
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
+              onPasteLongText={handlePasteLongText}
+              longTextPasteThreshold={LONG_TEXT_ATTACHMENT_THRESHOLD}
               placeholder={
                 agentChannelId && hasAvailableModel
                   ? sendWithCmdEnter

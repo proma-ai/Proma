@@ -164,8 +164,25 @@ const RAIL_STATUS_CLASS: Record<SessionIndicatorStatus, string> = {
   completed: 'bg-emerald-500',
 }
 
+const SIDEBAR_DRAG_STRIP_HEIGHT = {
+  collapsedMac: 50,
+  expandedMac: 30,
+  collapsed: 8,
+  expanded: 4,
+} as const
+
 function getRailInitial(title: string): string {
   return title.trim().slice(0, 1).toUpperCase() || '·'
+}
+
+function SidebarWindowDragStrip({ height }: { height: number }): React.ReactElement {
+  return (
+    <div
+      aria-hidden="true"
+      className="sidebar-window-drag-strip"
+      style={{ height }}
+    />
+  )
 }
 
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
@@ -980,9 +997,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300 px-2"
+        className="relative h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300 px-2"
         style={{ width: 60, flexShrink: 0 }}
       >
+        <SidebarWindowDragStrip
+          height={isMac ? SIDEBAR_DRAG_STRIP_HEIGHT.collapsedMac : SIDEBAR_DRAG_STRIP_HEIGHT.collapsed}
+        />
+
         {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
         <div className={cn('titlebar-drag-region', isMac ? 'pt-[50px]' : 'pt-2')} />
 
@@ -1153,9 +1174,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
+      className="relative h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
       style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
     >
+      <SidebarWindowDragStrip
+        height={isMac ? SIDEBAR_DRAG_STRIP_HEIGHT.expandedMac : SIDEBAR_DRAG_STRIP_HEIGHT.expanded}
+      />
+
       {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
       <div className={cn('titlebar-drag-region', isMac ? 'pt-[30px]' : 'pt-1')}>
         {/* 模式切换器 + 折叠按钮 */}

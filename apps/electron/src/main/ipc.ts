@@ -2054,7 +2054,7 @@ export function registerIpcHandlers(): void {
         console.warn('[IPC] file:prepare-pdf-preview 拒绝越界路径:', resolved ?? filePath)
         return null
       }
-      const result = preparePdfPreview(resolved)
+      const result = await preparePdfPreview(resolved)
       return result ? { tmpHtmlUrl: result.tmpHtmlUrl } : null
     }
   )
@@ -2073,6 +2073,22 @@ export function registerIpcHandlers(): void {
       }
       const result = await convertDocxToHtml(resolved)
       return result
+    }
+  )
+
+  // XLSX/PPTX 转 HTML（内联预览使用 OOXML 解析）
+  ipcMain.handle(
+    'file:office-to-html',
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').OfficePreviewResult | null> => {
+      const { convertOfficeToHtml, resolveFilePath } = await import('./lib/file-preview-service')
+      const options = normalizeFileAccessOptions(access)
+      const allowedBasePaths = getAllowedCandidateBasePaths(options)
+      const resolved = resolveFilePath(filePath, allowedBasePaths)
+      if (!resolved || !isPathAllowed(resolved, options)) {
+        console.warn('[IPC] file:office-to-html 拒绝越界路径:', resolved ?? filePath)
+        return null
+      }
+      return convertOfficeToHtml(resolved)
     }
   )
 

@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
-import { agentDiffUnseenFilesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
 import type { ChangedFileEntry, ChangeSource, UntrackedFileEntry } from '@proma/shared'
 
 /** 按目录分组后的数据结构 */
@@ -72,21 +72,19 @@ export function DiffChangesList({
   // Agent 本轮刚修改但尚未查看的文件
   const unseenFilesMap = useAtomValue(agentDiffUnseenFilesAtom)
   const setUnseenFilesMap = useSetAtom(agentDiffUnseenFilesAtom)
-  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const unseenFiles = unseenFilesMap.get(currentSessionId ?? '') ?? new Set<string>()
+  const unseenFiles = unseenFilesMap.get(sessionId) ?? new Set<string>()
 
   const markFileAsSeen = React.useCallback((filePath: string) => {
-    if (!currentSessionId) return
     setUnseenFilesMap((prev) => {
-      const s = prev.get(currentSessionId)
+      const s = prev.get(sessionId)
       if (!s?.has(filePath)) return prev
       const m = new Map(prev)
       const next = new Set(s)
       next.delete(filePath)
-      m.set(currentSessionId, next)
+      m.set(sessionId, next)
       return m
     })
-  }, [currentSessionId, setUnseenFilesMap])
+  }, [sessionId, setUnseenFilesMap])
 
   const fetchChanges = React.useCallback(async () => {
     if (!dirPath) return // sessionPath 为空时跳过，避免空字符串被过滤导致找不到仓库

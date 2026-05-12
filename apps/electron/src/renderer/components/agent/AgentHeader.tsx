@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentSessionsAtom, agentSidePanelOpenAtom, workspaceFilesVersionAtom } from '@/atoms/agent-atoms'
 import { previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { registerShortcut } from '@/lib/shortcut-registry'
 
 /** AgentHeader 属性接口 */
@@ -23,6 +24,7 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   const sessions = useAtomValue(agentSessionsAtom)
   const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setTabs = useSetAtom(tabsAtom)
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -61,10 +63,13 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
     }
 
     try {
-      await window.electronAPI.updateAgentSessionTitle(session.id, trimmed)
-      // 刷新会话列表以同步侧边栏
-      const sessions = await window.electronAPI.listAgentSessions()
-      setAgentSessions(sessions)
+      const updated = await window.electronAPI.updateAgentSessionTitle(session.id, trimmed)
+      // 同步更新标签页标题
+      setTabs((prev) => updateTabTitle(prev, updated.id, updated.title))
+      // 同步更新侧边栏会话列表
+      setAgentSessions((prev) =>
+        prev.map((s) => (s.id === updated.id ? updated : s))
+      )
     } catch (error) {
       console.error('[AgentHeader] 更新标题失败:', error)
     }

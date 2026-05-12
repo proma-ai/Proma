@@ -953,19 +953,17 @@ export function useGlobalAgentListeners(): void {
     )
 
     // ===== 4. 标题更新 =====
-    const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(() => {
+    const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(({ sessionId, title }) => {
+      // 先使用事件 payload 立即同步标签页，避免依赖会话列表旧快照比较。
+      store.set(tabsAtom, (tabs) => updateTabTitle(tabs, sessionId, title))
+      store.set(agentSessionsAtom, (prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
+      )
+      // 保留全量刷新语义：外部桥接会复用该事件通知新会话/绑定变化。
       window.electronAPI
         .listAgentSessions()
         .then((sessions) => {
-          const prevSessions = store.get(agentSessionsAtom)
           store.set(agentSessionsAtom, sessions)
-          // 同步更新标签页标题（比较新旧标题，有变化才更新）
-          for (const session of sessions) {
-            const prev = prevSessions.find((s) => s.id === session.id)
-            if (prev && prev.title !== session.title) {
-              store.set(tabsAtom, (tabs) => updateTabTitle(tabs, session.id, session.title))
-            }
-          }
         })
         .catch(console.error)
     })

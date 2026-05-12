@@ -319,6 +319,17 @@
   app-region: drag;
 }
 
+/* Left sidebar sits above the global titlebar layer, so it owns a stable top drag strip. */
+.sidebar-window-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 /* 深色特殊主题 dialog 光晕效果 */
 .theme-ocean-dark [data-radix-dialog-content],
 .theme-forest-dark [data-radix-dialog-content],
@@ -835,6 +846,130 @@
 }
 .file-browser-row-flash {
   animation: file-browser-flash 1.2s ease-out;
+}
+
+/* ===== Office 内联预览 ===== */
+.office-preview-host {
+  min-height: 100%;
+  padding: 12px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+}
+
+.office-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.office-preview-title {
+  color: hsl(var(--foreground) / 0.72);
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.office-preview-notice,
+.office-empty {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.office-preview-notice {
+  border: 1px solid hsl(var(--border) / 0.45);
+  border-radius: 8px;
+  background: hsl(var(--muted) / 0.24);
+  padding: 8px 10px;
+}
+
+.office-sheet,
+.office-slide {
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 8px;
+  background: hsl(var(--background) / 0.72);
+  overflow: hidden;
+}
+
+.office-sheet h3,
+.office-slide h3 {
+  margin: 0;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.office-sheet h3 {
+  padding: 10px 12px;
+  border-bottom: 1px solid hsl(var(--border) / 0.45);
+}
+
+.office-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+}
+
+.office-table-wrap table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.office-table-wrap th,
+.office-table-wrap td {
+  max-width: 280px;
+  min-width: 72px;
+  border-right: 1px solid hsl(var(--border) / 0.35);
+  border-bottom: 1px solid hsl(var(--border) / 0.35);
+  padding: 6px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.office-table-wrap thead th,
+.office-row-heading {
+  position: sticky;
+  z-index: 1;
+  background: hsl(var(--muted) / 0.36);
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+}
+
+.office-table-wrap thead th {
+  top: 0;
+}
+
+.office-row-heading {
+  left: 0;
+  min-width: 44px;
+  text-align: right;
+}
+
+.office-slide {
+  padding: 12px;
+}
+
+.office-slide-index {
+  margin-bottom: 6px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.office-slide ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: hsl(var(--foreground) / 0.82);
+  line-height: 1.6;
+}
+
+.office-slide li + li {
+  margin-top: 4px;
 }
 
 /* ===== 语音输入浮窗拖动区域 ===== */

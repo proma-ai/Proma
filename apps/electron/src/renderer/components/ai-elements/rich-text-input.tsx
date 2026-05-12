@@ -79,6 +79,10 @@ interface RichTextInputProps {
   onSubmit: () => void
   /** 粘贴文件回调（拦截粘贴的文件） */
   onPasteFiles?: (files: File[]) => void
+  /** 粘贴超长文本回调（由调用方决定是否转换为附件） */
+  onPasteLongText?: (text: string) => void
+  /** 触发超长文本粘贴回调的字符数阈值 */
+  longTextPasteThreshold?: number
   /** 占位文字 */
   placeholder?: string
   /** 是否显示建议样式（斜体占位符） */
@@ -119,6 +123,8 @@ export function RichTextInput({
   onChange,
   onSubmit,
   onPasteFiles,
+  onPasteLongText,
+  longTextPasteThreshold,
   placeholder = '有什么可以帮助到你的呢？',
   suggestionActive = false,
   className,
@@ -148,6 +154,11 @@ export function RichTextInput({
   // 保持 onPasteFiles 引用最新
   const onPasteFilesRef = useRef(onPasteFiles)
   onPasteFilesRef.current = onPasteFiles
+  // 保持超长文本粘贴配置最新
+  const onPasteLongTextRef = useRef(onPasteLongText)
+  onPasteLongTextRef.current = onPasteLongText
+  const longTextPasteThresholdRef = useRef(longTextPasteThreshold)
+  longTextPasteThresholdRef.current = longTextPasteThreshold
   // 保持 onHtmlChange 引用最新
   const onHtmlChangeRef = useRef(onHtmlChange)
   onHtmlChangeRef.current = onHtmlChange
@@ -312,6 +323,21 @@ export function RichTextInput({
         if (clipboardItems && clipboardItems.length > 0 && onPasteFilesRef.current) {
           event.preventDefault()
           onPasteFilesRef.current(Array.from(clipboardItems))
+          return true
+        }
+
+        const threshold = longTextPasteThresholdRef.current
+        const plainText = event.clipboardData?.getData('text/plain') ?? ''
+        const html = event.clipboardData?.getData('text/html') ?? ''
+        const text = html ? (htmlToMarkdown(html).trim() || plainText) : plainText
+        if (
+          threshold &&
+          threshold > 0 &&
+          (plainText.length >= threshold || text.length >= threshold) &&
+          onPasteLongTextRef.current
+        ) {
+          event.preventDefault()
+          onPasteLongTextRef.current(text)
           return true
         }
         return false

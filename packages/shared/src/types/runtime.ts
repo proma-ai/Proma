@@ -173,6 +173,17 @@ export interface ResolvedFileUrl {
   url: string
 }
 
+/** Office 文件内联预览类型 */
+export type OfficePreviewKind = 'spreadsheet' | 'presentation'
+
+/** Office 文件内联预览结果 */
+export interface OfficePreviewResult {
+  resolvedPath: string
+  kind: OfficePreviewKind
+  html: string
+  text: string
+}
+
 /**
  * Git Bash 运行时状态（Windows 平台）
  */

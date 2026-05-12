@@ -189,14 +189,25 @@ const FRIENDLY_ERROR_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
     pattern: /not logged in|please run \/login/i,
     message: '请检查是否选择了正确的 Proma 供应渠道和模型',
   },
+  {
+    pattern: /validation error/i,
+    message: 'API 请求格式校验失败，请重试或开启新会话',
+  },
 ]
+
+/** 错误消息最大保留长度（超出部分截断，防止存储膨胀） */
+const MAX_ERROR_MESSAGE_LENGTH = 5000
 
 /** 将 SDK 原始错误消息转换为用户友好的提示（无匹配则返回原文） */
 export function friendlyErrorMessage(raw: string): string {
+  const isLong = raw.length > MAX_ERROR_MESSAGE_LENGTH
+  const sample = isLong ? raw.slice(0, MAX_ERROR_MESSAGE_LENGTH) : raw
   for (const { pattern, message } of FRIENDLY_ERROR_MESSAGES) {
-    if (pattern.test(raw)) return message
+    if (pattern.test(sample)) return message
   }
-  return raw
+  return isLong
+    ? sample + `\n\n[错误详情过长 (${(raw.length / 1024).toFixed(0)}KB)，已截断]`
+    : raw
 }
 
 // ============================================================================
