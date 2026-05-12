@@ -83,6 +83,7 @@ import 'katex/dist/katex.min.css'
 // ===== 窗口类型检测 =====
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
+const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 
 /**
  * 主题初始化组件
@@ -923,6 +924,16 @@ if (isQuickTaskWindow) {
       <React.StrictMode>
         <ThemeInitializer />
         <VoiceDictationApp />
+        <Toaster position="top-right" />
+      </React.StrictMode>
+    )
+  })
+} else if (isDetachedPreviewWindow) {
+  import('./components/diff/DetachedPreviewApp').then(({ DetachedPreviewApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <DetachedPreviewApp />
         <Toaster position="top-right" />
       </React.StrictMode>
     )

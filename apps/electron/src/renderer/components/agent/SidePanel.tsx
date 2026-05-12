@@ -42,7 +42,7 @@ interface SidePanelProps {
   width?: number
 }
 
-export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 320 }: SidePanelProps): React.ReactElement {
+export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 280 }: SidePanelProps): React.ReactElement {
   // per-session 侧面板状态（默认打开）
   const [isOpen, setIsOpen] = useAtom(agentSidePanelOpenAtom)
   const isWindows = React.useMemo(() => detectIsWindows(), [])

@@ -7,7 +7,8 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'
-import { X } from 'lucide-react'
+import { Maximize2, X } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   previewPanelOpenMapAtom,
   previewFileMapAtom,
@@ -34,6 +35,23 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
     setOpenMap((prev) => { const m = new Map(prev); m.set(sessionId, false); return m })
   }, [sessionId, setOpenMap])
 
+  const handleOpenDetachedPreview = React.useCallback(() => {
+    if (!currentFile) return
+    const slash = currentFile.filePath.lastIndexOf('/')
+    const fallbackDirPath = slash > 0 ? currentFile.filePath.slice(0, slash) : sessionPath
+    window.electronAPI.openDetachedPreview({
+      sessionId,
+      filePath: currentFile.filePath,
+      dirPath: currentFile.dirPath || sessionPath || fallbackDirPath,
+      gitRoot: currentFile.gitRoot,
+      previewOnly: currentFile.previewOnly,
+      basePaths: currentFile.basePaths,
+      title: currentFile.filePath.split('/').pop(),
+    }).catch((err) => {
+      console.error('[PreviewPanel] 打开独立预览窗口失败:', err)
+    })
+  }, [currentFile, sessionId, sessionPath])
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-content-area titlebar-no-drag">
       {/* 顶部栏：文件名 + 关闭 */}
@@ -41,14 +59,40 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
         <span className="text-xs text-muted-foreground truncate">
           {currentFile ? currentFile.filePath.split('/').pop() : '文件预览'}
         </span>
-        <button
-          type="button"
-          onClick={handleClosePanel}
-          className="ml-auto flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-          title="关闭预览面板"
-        >
-          <X className="size-3.5" />
-        </button>
+        <div className="ml-auto flex items-center gap-0.5">
+          {currentFile && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleOpenDetachedPreview}
+                  className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+                  aria-label="在单独窗口打开预览"
+                >
+                  <Maximize2 className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>在单独窗口打开预览</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleClosePanel}
+                className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+                aria-label="关闭预览面板"
+              >
+                <X className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>关闭预览面板</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       {/* 内容区 */}

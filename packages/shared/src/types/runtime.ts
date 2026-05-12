@@ -148,6 +148,29 @@ export interface GetFileDiffInput {
   sessionId?: string
 }
 
+/** 独立预览窗口输入 */
+export interface DetachedPreviewWindowInput {
+  /** 当前 Agent 会话 ID，用于主进程校验可访问路径 */
+  sessionId: string
+  /** 要预览的文件路径 */
+  filePath: string
+  /** Diff 模式下的工作目录；纯预览模式下作为路径解析候选 */
+  dirPath: string
+  /** 文件所属 Git 仓库根，多仓库场景下必须传入 */
+  gitRoot?: string
+  /** true = 纯文件预览，false/undefined = diff 模式 */
+  previewOnly?: boolean
+  /** 候选基础目录（previewOnly 模式下用于路径解析） */
+  basePaths?: string[]
+  /** 窗口标题 */
+  title?: string
+}
+
+/** 独立预览窗口数据 */
+export interface DetachedPreviewWindowData extends DetachedPreviewWindowInput {
+  id: string
+}
+
 /** Revert 文件变更的输入 */
 export interface RevertFileInput {
   dirPath: string
@@ -305,6 +328,10 @@ export const IPC_CHANNELS = {
   SYSTEM_OPEN_FILE: 'shell:system-open-file',
   /** 扫描系统中可用的编辑器应用 */
   SCAN_EDITORS: 'shell:scan-editors',
+  /** 打开独立预览窗口 */
+  OPEN_DETACHED_PREVIEW: 'preview:open-detached',
+  /** 获取独立预览窗口数据 */
+  GET_DETACHED_PREVIEW_DATA: 'preview:get-detached-data',
 } as const
 
 /**

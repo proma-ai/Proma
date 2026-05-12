@@ -287,6 +287,9 @@ export const workspaceFilesVersionAtom = atom(0)
 /** 侧面板是否打开（全局共享，所有会话共用一个状态） */
 export const agentSidePanelOpenAtom = atomWithStorage<boolean>('proma-agent-sidepanel-open', true)
 
+/** 侧面板宽度（全局共享，用户拖拽后持久化） */
+export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-sidepanel-width', 280)
+
 /** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 

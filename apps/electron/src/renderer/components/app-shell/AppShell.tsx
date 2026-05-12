@@ -7,16 +7,23 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { LeftSidebar } from './LeftSidebar'
 import { RightSidePanel } from './RightSidePanel'
 import { MainArea } from '@/components/tabs/MainArea'
 import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellContext'
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
-import { currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
+
+const MIN_RIGHT_PANEL_WIDTH = 220
+const MAX_RIGHT_PANEL_WIDTH = 420
+
+function clampRightPanelWidth(width: number): number {
+  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width))
+}
 
 export interface AppShellProps {
   /** Context 值，用于传递给子组件 */
@@ -72,14 +79,21 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const showRightPanel = appMode === 'agent' && !!currentSessionId
 
   // 右侧面板可拖拽宽度
-  const [rightPanelWidth, setRightPanelWidth] = React.useState(320)
+  const [rightPanelWidth, setRightPanelWidth] = useAtom(agentSidePanelWidthAtom)
   const dragging = React.useRef(false)
+  const clampedRightPanelWidth = clampRightPanelWidth(rightPanelWidth)
+
+  React.useEffect(() => {
+    if (clampedRightPanelWidth !== rightPanelWidth) {
+      setRightPanelWidth(clampedRightPanelWidth)
+    }
+  }, [clampedRightPanelWidth, rightPanelWidth, setRightPanelWidth])
 
   const handleMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     dragging.current = true
     const startX = e.clientX
-    const startWidth = rightPanelWidth
+    const startWidth = clampedRightPanelWidth
     let rafId = 0
 
     const onMouseMove = (ev: MouseEvent) => {
@@ -88,7 +102,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       rafId = requestAnimationFrame(() => {
         rafId = 0
         const delta = startX - ev.clientX
-        const newWidth = Math.max(200, Math.min(500, startWidth + delta))
+        const newWidth = clampRightPanelWidth(startWidth + delta)
         setRightPanelWidth(newWidth)
       })
     }
@@ -102,7 +116,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [rightPanelWidth])
+  }, [clampedRightPanelWidth, setRightPanelWidth])
 
   return (
     <AppShellProvider value={contextValue}>
@@ -131,7 +145,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
                 onMouseDown={handleMouseDown}
               />
             )}
-            <RightSidePanel width={rightPanelWidth} />
+            <RightSidePanel width={clampedRightPanelWidth} />
           </div>
         )}
       </div>

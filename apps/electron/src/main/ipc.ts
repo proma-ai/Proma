@@ -98,6 +98,7 @@ import type {
   WeChatBridgeState,
   SDKMessage,
   GetFileDiffInput,
+  DetachedPreviewWindowInput,
   RevertFileInput,
   FileAccessOptions,
   ResolvedFileUrl,
@@ -459,6 +460,30 @@ export function registerIpcHandlers(): void {
       const access = normalizeFileAccessOptions({ sessionId })
       if (!ensurePathAllowed(dirPath, access) || (gitRoot && !ensurePathAllowed(gitRoot, access))) return null
       return getDiffContents(dirPath, filePath, gitRoot)
+    }
+  )
+
+  // 打开独立预览窗口
+  ipcMain.handle(
+    IPC_CHANNELS.OPEN_DETACHED_PREVIEW,
+    async (event, input: DetachedPreviewWindowInput): Promise<string | null> => {
+      if (!input || typeof input.sessionId !== 'string' || typeof input.filePath !== 'string' || typeof input.dirPath !== 'string') {
+        console.warn('[IPC] preview:open-detached 收到无效参数')
+        return null
+      }
+      const { openDetachedPreviewWindow } = await import('./lib/detached-preview-window')
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+      return openDetachedPreviewWindow(input, sourceWindow)
+    }
+  )
+
+  // 获取独立预览窗口数据
+  ipcMain.handle(
+    IPC_CHANNELS.GET_DETACHED_PREVIEW_DATA,
+    async (_, previewId: string) => {
+      if (!previewId || typeof previewId !== 'string') return null
+      const { getDetachedPreviewWindowData } = await import('./lib/detached-preview-window')
+      return getDetachedPreviewWindowData(previewId)
     }
   )
 

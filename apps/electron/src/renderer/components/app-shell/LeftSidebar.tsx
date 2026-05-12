@@ -1175,7 +1175,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   return (
     <div
       className="relative h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
-      style={{ width: width ?? 280, minWidth: 180, flexShrink: 1 }}
+      style={{ width: width ?? 240, minWidth: 170, flexShrink: 1 }}
     >
       <SidebarWindowDragStrip
         height={isMac ? SIDEBAR_DRAG_STRIP_HEIGHT.expandedMac : SIDEBAR_DRAG_STRIP_HEIGHT.expanded}

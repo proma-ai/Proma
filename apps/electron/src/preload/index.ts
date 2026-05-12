@@ -111,6 +111,8 @@ import type {
   RewindSessionInput,
   RewindSessionResult,
   AgentMessageSearchResult,
+  DetachedPreviewWindowData,
+  DetachedPreviewWindowInput,
   FeishuConfig,
   FeishuConfigInput,
   FeishuBridgeState,
@@ -188,6 +190,10 @@ export interface ElectronAPI {
   revertFile: (input: import('@proma/shared').RevertFileInput) => Promise<void>
   /** 获取文件新旧版本内容 */
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => Promise<{ oldContent: string; newContent: string } | null>
+  /** 在独立窗口打开当前文件预览 */
+  openDetachedPreview: (input: DetachedPreviewWindowInput) => Promise<string | null>
+  /** 获取独立预览窗口数据 */
+  getDetachedPreviewData: (previewId: string) => Promise<DetachedPreviewWindowData | null>
 
   // ===== 通用工具 =====
 
@@ -1107,6 +1113,14 @@ const electronAPI: ElectronAPI = {
 
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_DIFF_CONTENTS, input)
+  },
+
+  openDetachedPreview: (input: DetachedPreviewWindowInput) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.OPEN_DETACHED_PREVIEW, input) as Promise<string | null>
+  },
+
+  getDetachedPreviewData: (previewId: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_DETACHED_PREVIEW_DATA, previewId) as Promise<DetachedPreviewWindowData | null>
   },
 
   // 通用工具
