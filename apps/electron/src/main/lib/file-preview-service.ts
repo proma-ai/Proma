@@ -6,9 +6,10 @@
  */
 
 import { basename, join, dirname, extname, resolve, posix as pathPosix } from 'node:path'
-import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
 import type { OfficePreviewResult } from '@proma/shared'
@@ -35,9 +36,25 @@ function getPreviewTmpDir(): string {
 
 function writeTempHtml(html: string): string {
   const tmpDir = getPreviewTmpDir()
-  const tmpFile = join(tmpDir, `preview-${Date.now()}.html`)
-  writeFileSync(tmpFile, html, 'utf-8')
+  const contentHash = createHash('md5').update(html).digest('hex').slice(0, 16)
+  const tmpFile = join(tmpDir, `preview-${contentHash}.html`)
+  if (!existsSync(tmpFile)) {
+    writeFileSync(tmpFile, html, 'utf-8')
+  }
   return tmpFile
+}
+
+/** 清理所有临时预览文件 */
+export function cleanPreviewTmpDir(): number {
+  const dir = join(tmpdir(), 'proma-preview')
+  if (!existsSync(dir)) return 0
+  let count = 0
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)); count++ } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return count
 }
 
 // ─── 路径解析 ───

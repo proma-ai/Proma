@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'crypto'
-import { createWriteStream, promises as fsp } from 'fs'
+import { createWriteStream, existsSync, promises as fsp } from 'fs'
 import { get as httpsGet } from 'https'
 import { get as httpGet, IncomingMessage } from 'http'
 import path from 'path'
@@ -259,4 +259,18 @@ export async function launchInstaller(filePath: string): Promise<void> {
   if (errorMsg) {
     throw new Error(`无法拉起安装程序：${errorMsg}`)
   }
+}
+
+/** 清理已下载的安装包缓存目录 */
+export async function cleanInstallerDir(): Promise<number> {
+  const dir = getInstallerDir()
+  if (!existsSync(dir)) return 0
+  let count = 0
+  try {
+    const files = await fsp.readdir(dir)
+    for (const f of files) {
+      try { await fsp.unlink(path.join(dir, f)); count++ } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return count
 }

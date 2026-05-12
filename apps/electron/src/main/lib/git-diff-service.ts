@@ -7,7 +7,7 @@
 
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
-import { isAbsolute, join, resolve } from 'path'
+import { basename, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
 import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 
@@ -23,7 +23,7 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 function normalizeSafePath(root: string, filePath: string): string | null {
   if (!filePath || typeof filePath !== 'string') return null
   const resolvedRoot = resolve(root)
-  const rootWithSep = resolvedRoot.endsWith('/') ? resolvedRoot : resolvedRoot + '/'
+  const rootWithSep = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep
 
   if (isAbsolute(filePath)) {
     let resolvedFile: string
@@ -98,14 +98,14 @@ function computeSource(
   let inWorkspace = false
 
   if (sessionPath) {
-    const normalized = sessionPath.endsWith('/') ? sessionPath : sessionPath + '/'
+    const normalized = sessionPath.endsWith(sep) ? sessionPath : sessionPath + sep
     if (absolutePath.startsWith(normalized)) {
       inSession = true
     }
   }
 
   if (workspaceFilesPath) {
-    const normalized = workspaceFilesPath.endsWith('/') ? workspaceFilesPath : workspaceFilesPath + '/'
+    const normalized = workspaceFilesPath.endsWith(sep) ? workspaceFilesPath : workspaceFilesPath + sep
     if (absolutePath.startsWith(normalized)) {
       inWorkspace = true
     }
@@ -173,8 +173,8 @@ export async function getUnstagedChanges(
 
   // 候选目录绝对路径（用于过滤：只显示落在某个候选目录内的文件）
   const candidateRoots = candidates.map((c) => {
-    const r = c.replace(/\/+$/, '')
-    return r + '/'
+    const r = c.replace(/[/\\]+$/, '')
+    return r + sep
   })
   const isUnderAnyCandidate = (absPath: string): boolean => {
     return candidateRoots.some((root) => absPath === root.slice(0, -1) || absPath.startsWith(root))
@@ -240,7 +240,7 @@ export async function getUnstagedChanges(
     isGitRepo: true,
     files: allFiles,
     untrackedFiles: allUntracked,
-    gitRootNames: gitRoots.map((r) => r.split('/').pop() || r),
+    gitRootNames: gitRoots.map((r) => basename(r)),
   }
 }
 

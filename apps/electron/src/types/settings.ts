@@ -205,6 +205,10 @@ export interface AppSettings {
   appIconVariant?: string
   /** 语音输入设置（Access Token 以加密态存储，由专用服务解密后返回渲染进程） */
   voiceDictation?: VoiceDictationPersistedSettings
+  /** 启动时自动清理临时文件（proma-preview、proma-installers），默认 true */
+  autoCleanupTempOnStart?: boolean
+  /** 自动清理 N 天前已归档会话的 SDK 数据（0 = 禁用，默认 0） */
+  autoCleanupArchivedDays?: number
 }
 
 /** 持久化的标签页状态 */
@@ -333,4 +337,14 @@ export const TRAY_IPC_CHANNELS = {
   OPEN_AGENT_SESSION: 'tray:open-agent-session',
   /** 创建新会话 */
   CREATE_SESSION: 'tray:create-session',
+} as const
+
+/** 存储管理 IPC 通道 */
+export const STORAGE_IPC_CHANNELS = {
+  /** 计算各目录存储统计 */
+  GET_STATS: 'storage:get-stats',
+  /** 按选项清理存储 */
+  CLEANUP: 'storage:cleanup',
+  /** 仅清理临时文件（启动时/快速清理） */
+  CLEANUP_TEMP: 'storage:cleanup-temp',
 } as const

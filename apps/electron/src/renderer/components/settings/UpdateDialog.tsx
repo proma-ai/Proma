@@ -33,6 +33,18 @@ export function UpdateDialog(): React.ReactElement | null {
   const [release, setRelease] = React.useState<GitHubRelease | null>(null)
   const [dialogVersion, setDialogVersion] = React.useState<string | null>(null)
   const shownVersionRef = React.useRef<string | null>(null)
+  const postponedDownloadedVersionRef = React.useRef<string | null>(null)
+
+  const fetchRelease = React.useCallback((version: string) => {
+    window.electronAPI
+      .getReleaseByTag(`v${version}`)
+      .then((r) => {
+        if (r) setRelease(r)
+      })
+      .catch((err) => {
+        console.error('[更新弹窗] 获取 Release 信息失败:', err)
+      })
+  }, [])
 
   React.useEffect(() => {
     if (
@@ -42,25 +54,37 @@ export function UpdateDialog(): React.ReactElement | null {
     ) {
       const version = updateStatus.version
       shownVersionRef.current = version
+      postponedDownloadedVersionRef.current = null
       setDialogVersion(version)
+      setRelease(null)
 
-      window.electronAPI
-        .getReleaseByTag(`v${version}`)
-        .then((r) => {
-          if (r) setRelease(r)
-        })
-        .catch((err) => {
-          console.error('[更新弹窗] 获取 Release 信息失败:', err)
-        })
+      fetchRelease(version)
 
       setOpen(true)
     }
 
-    // 下载完成时如果弹窗已关闭，重新打开
-    if (updateStatus.status === 'downloaded' && !open && dialogVersion) {
+    // 下载完成时如果弹窗已关闭，首次提醒用户；用户点过「稍后重启」后不再循环弹出。
+    if (
+      updateStatus.status === 'downloaded' &&
+      updateStatus.version &&
+      !open &&
+      postponedDownloadedVersionRef.current !== updateStatus.version
+    ) {
+      if (dialogVersion !== updateStatus.version) {
+        setDialogVersion(updateStatus.version)
+        setRelease(null)
+        fetchRelease(updateStatus.version)
+      }
       setOpen(true)
     }
-  }, [updateStatus.status, updateStatus.version, open, dialogVersion])
+  }, [updateStatus.status, updateStatus.version, open, dialogVersion, fetchRelease])
+
+  const handleOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && updateStatus.status === 'downloaded' && dialogVersion) {
+      postponedDownloadedVersionRef.current = dialogVersion
+    }
+    setOpen(nextOpen)
+  }
 
   const handleQuitAndInstall = (): void => {
     window.electronAPI.updater?.quitAndInstall()
@@ -77,7 +101,7 @@ export function UpdateDialog(): React.ReactElement | null {
   const isDownloaded = updateStatus.status === 'downloaded'
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogContent className="max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>

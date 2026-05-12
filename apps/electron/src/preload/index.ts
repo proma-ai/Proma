@@ -9,7 +9,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -111,6 +111,8 @@ import type {
   RewindSessionInput,
   RewindSessionResult,
   AgentMessageSearchResult,
+  AgentSessionReferenceSearchInput,
+  AgentSessionReferenceSearchResult,
   DetachedPreviewWindowData,
   DetachedPreviewWindowInput,
   FeishuConfig,
@@ -432,6 +434,9 @@ export interface ElectronAPI {
 
   /** 搜索 Agent 会话消息内容 */
   searchAgentSessionMessages: (query: string) => Promise<AgentMessageSearchResult[]>
+
+  /** 搜索当前工作区可引用的 Agent 会话 */
+  searchAgentSessionReferences: (input: AgentSessionReferenceSearchInput) => Promise<AgentSessionReferenceSearchResult[]>
 
   /** 迁移 Agent 会话到另一个工作区 */
   moveAgentSessionToWorkspace: (input: MoveSessionToWorkspaceInput) => Promise<AgentSessionMeta>
@@ -1076,6 +1081,17 @@ export interface ElectronAPI {
   migrationSaveFileDialog: (mode: string) => Promise<string | null>
   /** 订阅双击迁移文件触发的导入事件 */
   onMigrationOpenImportFile: (callback: (data: { filePath: string }) => void) => () => void
+
+  // ===== 存储管理 =====
+
+  /** 获取各目录存储统计 */
+  getStorageStats: () => Promise<unknown>
+  /** 按选项清理存储 */
+  cleanupStorage: (options: unknown) => Promise<unknown>
+  /** 清理临时文件（快速） */
+  cleanupTempStorage: () => Promise<unknown>
+  /** 取消迁移导入（清理临时解压目录） */
+  migrationCancelImport: (tempDir: string) => Promise<void>
 }
 
 interface MigrationExportResult {
@@ -1435,6 +1451,10 @@ const electronAPI: ElectronAPI = {
 
   searchAgentSessionMessages: (query: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MESSAGES, query)
+  },
+
+  searchAgentSessionReferences: (input: AgentSessionReferenceSearchInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_SESSION_REFERENCES, input)
   },
 
   moveAgentSessionToWorkspace: (input: MoveSessionToWorkspaceInput) => {
@@ -2404,6 +2424,24 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, data: { filePath: string }): void => callback(data)
     ipcRenderer.on('migration:open-import-file', listener)
     return () => { ipcRenderer.removeListener('migration:open-import-file', listener) }
+  },
+
+  // ===== 存储管理 =====
+
+  getStorageStats: () => {
+    return ipcRenderer.invoke(STORAGE_IPC_CHANNELS.GET_STATS)
+  },
+
+  cleanupStorage: (options: unknown) => {
+    return ipcRenderer.invoke(STORAGE_IPC_CHANNELS.CLEANUP, options)
+  },
+
+  cleanupTempStorage: () => {
+    return ipcRenderer.invoke(STORAGE_IPC_CHANNELS.CLEANUP_TEMP)
+  },
+
+  migrationCancelImport: (tempDir: string) => {
+    return ipcRenderer.invoke('migration:cancelImport', tempDir)
   },
 }
 

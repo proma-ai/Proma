@@ -8,10 +8,11 @@
 import type React from 'react'
 import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionOptions } from '@tiptap/suggestion'
-import { Sparkles, Server } from 'lucide-react'
+import { MessageSquareText, Sparkles, Server } from 'lucide-react'
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
 import { createMentionPopup, positionPopup } from './mention-popup-utils'
+import type { AgentSessionReferenceSearchResult } from '@proma/shared'
 
 // ===== 泛型工厂 =====
 
@@ -182,6 +183,49 @@ export function createMcpMentionSuggestion(
       toCommand: (item) => ({ id: item.id, label: item.name }),
     },
     workspaceSlugRef,
+    mentionActiveRef,
+    mentionItemCountRef,
+  )
+}
+
+// ===== Agent 会话引用配置 =====
+
+export type SessionMentionItem = AgentSessionReferenceSearchResult
+
+export function createSessionMentionSuggestion(
+  workspaceIdRef: React.RefObject<string | null>,
+  currentSessionIdRef: React.RefObject<string | null>,
+  mentionActiveRef: React.MutableRefObject<boolean>,
+  mentionItemCountRef: React.MutableRefObject<number>,
+) {
+  return createMentionSuggestion<SessionMentionItem>(
+    {
+      char: '&',
+      emptyText: '无匹配会话',
+      fetchItems: async (_slug, q) => {
+        const workspaceId = workspaceIdRef.current
+        if (!workspaceId) return []
+        return window.electronAPI.searchAgentSessionReferences({
+          workspaceId,
+          excludeSessionId: currentSessionIdRef.current ?? undefined,
+          query: q,
+          limit: 20,
+        })
+      },
+      keyExtractor: (item) => item.sessionId,
+      renderItem: (item) => (
+        <>
+          <MessageSquareText className="size-3.5 text-sky-500 flex-shrink-0" />
+          <span className="truncate font-medium flex-1 min-w-0">{item.title}</span>
+          {item.snippet && (
+            <span className="truncate text-[10px] text-muted-foreground/50 max-w-[120px]">{item.snippet}</span>
+          )}
+        </>
+      ),
+      toCommand: (item) => ({ id: item.sessionId, label: item.title }),
+    },
+    // 会话引用不依赖 slug，但复用通用 mention 工厂时需要一个非空 ref 才会触发 fetchItems。
+    workspaceIdRef,
     mentionActiveRef,
     mentionItemCountRef,
   )

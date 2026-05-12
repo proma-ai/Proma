@@ -526,6 +526,9 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
             {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
             {allGroups.map((group, idx) => {
               const isLive = liveGroupSet.has(group)
+              const isErrorGroup = group.type === 'assistant-turn'
+                && group.assistantMessages.some((m) => !!m.error)
+              const shouldDisableActions = isLive && !isErrorGroup
               // 仅在最后一个 assistant-turn 上显示"已被用户中断" badge
               const isLastAssistantTurn = !streaming && stoppedByUser
                 && group.type === 'assistant-turn'
@@ -536,11 +539,11 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                   group={group}
                   allMessages={allSDKMessages}
                   basePath={sessionPath || undefined}
-                  onFork={isLive ? undefined : onFork}
-                  onRewind={isLive ? undefined : onRewind}
-                  onRetry={isLive ? undefined : onRetry}
-                  onRetryInNewSession={isLive ? undefined : onRetryInNewSession}
-                  onCompact={isLive ? undefined : onCompact}
+                  onFork={shouldDisableActions ? undefined : onFork}
+                  onRewind={shouldDisableActions ? undefined : onRewind}
+                  onRetry={shouldDisableActions ? undefined : onRetry}
+                  onRetryInNewSession={shouldDisableActions ? undefined : onRetryInNewSession}
+                  onCompact={shouldDisableActions ? undefined : onCompact}
                   isStreaming={isLive || undefined}
                   stoppedByUser={isLastAssistantTurn || undefined}
                   sessionModelId={sessionModelId}

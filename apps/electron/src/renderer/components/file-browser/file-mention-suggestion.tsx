@@ -9,6 +9,7 @@
 import type React from 'react'
 import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionOptions, SuggestionProps } from '@tiptap/suggestion'
+import { toast } from 'sonner'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry, FileSearchResult } from '@proma/shared'
@@ -22,6 +23,7 @@ export function createFileMentionSuggestion(
   sessionAttachedDirsRef?: React.RefObject<string[]>,
 ): Omit<SuggestionOptions<FileIndexEntry>, 'editor'> {
   let lastResult: FileSearchResult | null = null
+  let missingWorkspaceToastShown = false
 
   return {
     char: '@',
@@ -31,8 +33,15 @@ export function createFileMentionSuggestion(
       const wsPath = workspacePathRef.current
       if (!wsPath) {
         console.warn('[FileMention] workspacePath is null, mention disabled')
+        if (!missingWorkspaceToastShown) {
+          toast.warning('暂时无法引用文件', {
+            description: '当前 Agent 会话没有可用的工作区路径。请在顶部选择工作区，或新建 Agent 会话后重试。',
+          })
+          missingWorkspaceToastShown = true
+        }
         return []
       }
+      missingWorkspaceToastShown = false
 
       try {
         const additionalPaths = attachedDirsRef?.current ?? []

@@ -50,6 +50,12 @@ import type {
   SDKToolResultBlock,
   RecoveryAction,
 } from '@proma/shared'
+import {
+  THINKING_SIGNATURE_ERROR_CODE,
+  THINKING_SIGNATURE_ERROR_TITLE,
+  THINKING_SIGNATURE_ERROR_MESSAGE,
+  isThinkingSignatureError,
+} from '@proma/shared'
 import type { ToolActivity } from '@/atoms/agent-atoms'
 
 // ===== SDKMessageRenderer Props =====
@@ -570,7 +576,9 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         {/* 如果有错误但也有内容块，在末尾显示错误 */}
         {hasError && errorContent && topLevelBlocks.length > 0 && (
           <div className="mt-3 text-sm text-destructive">
-            {errorContent.error?.message ?? '未知错误'}
+            {isThinkingSignatureError(errorContent.error?.message)
+              ? `${THINKING_SIGNATURE_ERROR_TITLE}：${THINKING_SIGNATURE_ERROR_MESSAGE}`
+              : (errorContent.error?.message ?? '未知错误')}
           </div>
         )}
       </MessageContent>
@@ -885,6 +893,16 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
     ?.filter((b) => b.type === 'text' && 'text' in b)
     .map((b) => (b as { text: string }).text)
     .join('\n') ?? errorText
+  const isThinkingSignature = errorCode === THINKING_SIGNATURE_ERROR_CODE ||
+    isThinkingSignatureError(contentText, errorText)
+  const displayTitle = errorTitle ?? (isThinkingSignature ? THINKING_SIGNATURE_ERROR_TITLE : undefined)
+  const displayContentText = isThinkingSignature ? THINKING_SIGNATURE_ERROR_MESSAGE : contentText
+  const displayedErrorActions = (errorActions ?? []).filter((action) => {
+    if (action.action === 'retry' && !onRetry) return false
+    if (action.action === 'compact' && !onCompact) return false
+    if (action.action === 'retry_in_new_session' && !onRetryInNewSession) return false
+    return true
+  })
 
   const handleGoToBilling = (): void => {
     setSettingsTab('billing')
@@ -914,6 +932,9 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
       case 'compact':
         onCompact?.()
         break
+      case 'retry_in_new_session':
+        onRetryInNewSession?.()
+        break
       default:
         console.warn('[ErrorMessage] 未处理的 recovery action:', action)
     }
@@ -932,12 +953,14 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         return <RotateCw className="size-3.5 mr-1.5" />
       case 'compact':
         return <Minimize2 className="size-3.5 mr-1.5" />
+      case 'retry_in_new_session':
+        return <Plus className="size-3.5 mr-1.5" />
       default:
         return null
     }
   }
 
-  const hasStructuredActions = !!(errorActions && errorActions.length > 0)
+  const hasStructuredActions = displayedErrorActions.length > 0
   const hasLegacyActions = !!(onRetry || onRetryInNewSession || (isPromptTooLong && onCompact))
   const hasActions = hasStructuredActions || hasLegacyActions
 
@@ -953,11 +976,11 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         }
       />
       <MessageContent>
-        {errorTitle && (
-          <div className="text-sm font-medium text-destructive mb-1">{errorTitle}</div>
+        {displayTitle && (
+          <div className="text-sm font-medium text-destructive mb-1">{displayTitle}</div>
         )}
         <div className="text-destructive">
-          <MessageResponse>{contentText}</MessageResponse>
+          <MessageResponse>{displayContentText}</MessageResponse>
         </div>
         {errorDetails && errorDetails.length > 0 && (
           <div className="mt-2 text-[11px] text-muted-foreground">
@@ -987,7 +1010,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         ) : hasActions && (
           <div className="flex items-center flex-wrap gap-2 mt-3">
             {hasStructuredActions &&
-              errorActions!.map((a, i) => (
+              displayedErrorActions.map((a, i) => (
                 <Button
                   key={`${a.action}-${i}`}
                   size="sm"
@@ -1004,13 +1027,23 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
                 压缩上下文
               </Button>
             )}
+            {!hasStructuredActions && isThinkingSignature && onRetryInNewSession && (
+              <Button
+                size="sm"
+                onClick={onRetryInNewSession}
+                title="新建对话并引用当前会话继续"
+              >
+                <Plus className="size-3.5 mr-1.5" />
+                在新对话继续
+              </Button>
+            )}
             {!hasStructuredActions && onRetry && (
-              <Button size="sm" variant={isPromptTooLong ? 'outline' : 'default'} onClick={onRetry}>
+              <Button size="sm" variant={isPromptTooLong || isThinkingSignature ? 'outline' : 'default'} onClick={onRetry}>
                 <RotateCw className="size-3.5 mr-1.5" />
                 重试
               </Button>
             )}
-            {!hasStructuredActions && onRetryInNewSession && (
+            {!hasStructuredActions && !isThinkingSignature && onRetryInNewSession && (
               <Button
                 size="sm"
                 variant="outline"
@@ -1025,7 +1058,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         )}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
-        <CopyButton content={contentText} />
+        <CopyButton content={displayContentText} />
       </MessageActions>
     </Message>
   )

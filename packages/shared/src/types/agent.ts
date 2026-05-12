@@ -330,6 +330,7 @@ export type ErrorCode =
   | 'invalid_request'
   | 'image_too_large'
   | 'prompt_too_long'
+  | 'thinking_signature_invalid'
   | 'provider_error'
   // 环境 / 配置类错误（本地可修复）
   | 'windows_shell_missing'
@@ -626,6 +627,36 @@ export interface AgentMessageSearchResult {
   archived?: boolean
 }
 
+/**
+ * Agent 会话引用搜索输入
+ */
+export interface AgentSessionReferenceSearchInput {
+  /** 当前工作区 ID，仅搜索该工作区下的会话 */
+  workspaceId: string
+  /** 搜索关键词，匹配标题或消息内容 */
+  query?: string
+  /** 排除当前会话，避免引用自己 */
+  excludeSessionId?: string
+  /** 最大返回数量 */
+  limit?: number
+}
+
+/**
+ * Agent 会话引用搜索结果
+ */
+export interface AgentSessionReferenceSearchResult {
+  /** 会话 ID */
+  sessionId: string
+  /** 会话标题 */
+  title: string
+  /** 更新时间戳 */
+  updatedAt: number
+  /** 命中消息片段；标题命中时可为空 */
+  snippet?: string
+  /** 命中来源 */
+  matchSource: 'title' | 'message' | 'recent'
+}
+
 // ===== Agent 标题生成输入 =====
 
 /** Agent 标题生成输入 */
@@ -738,6 +769,8 @@ export interface AgentSendInput {
   mentionedSkills?: string[]
   /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
   mentionedMcpServers?: string[]
+  /** 用户通过会话引用 mention 指定的 Agent 会话 ID 列表 */
+  mentionedSessionIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
 }
@@ -1193,6 +1226,8 @@ export const AGENT_IPC_CHANNELS = {
   TOGGLE_ARCHIVE: 'agent:toggle-archive',
   /** 搜索会话消息内容 */
   SEARCH_MESSAGES: 'agent:search-messages',
+  /** 搜索当前工作区可引用的 Agent 会话 */
+  SEARCH_SESSION_REFERENCES: 'agent:search-session-references',
   /** 迁移会话到另一个工作区 */
   MOVE_SESSION_TO_WORKSPACE: 'agent:move-session-to-workspace',
   /** 分叉会话（从指定消息处创建新会话） */

@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { RefreshCw, Loader2, CheckCircle2, AlertCircle, Info, Terminal, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import { RefreshCw, Loader2, CheckCircle2, AlertCircle, Info, Terminal, ChevronDown, ChevronUp, ExternalLink, RotateCw } from 'lucide-react'
 import type { EnvironmentCheckResult, RuntimeStatus } from '@proma/shared'
 import {
   SettingsSection,
@@ -64,6 +64,10 @@ function UpdateCard(): React.ReactElement | null {
     window.electronAPI.openExternal(url)
   }
 
+  const handleQuitAndInstall = (): void => {
+    window.electronAPI.updater?.quitAndInstall()
+  }
+
   // 当检测到新版本时，获取完整的 release 信息
   React.useEffect(() => {
     if (status.status === 'available' && status.version && !release) {
@@ -81,7 +85,7 @@ function UpdateCard(): React.ReactElement | null {
     }
   }, [status.status, status.version, release])
 
-  const isChecking = checking || status.status === 'checking'
+  const isChecking = checking || status.status === 'checking' || status.status === 'downloading'
   const hasReleaseNotes = status.releaseNotes || release?.body
 
   return (
@@ -92,7 +96,15 @@ function UpdateCard(): React.ReactElement | null {
           <StatusText status={status.status} version={status.version} error={status.error} />
 
           {/* 操作按钮 */}
-          {status.status === 'available' ? (
+          {status.status === 'downloaded' ? (
+            <button
+              onClick={handleQuitAndInstall}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+              立即重启
+            </button>
+          ) : status.status === 'available' ? (
             <button
               onClick={handleGoToDownload}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -161,6 +173,20 @@ function StatusText({ status, version, error }: {
         <span className="text-xs text-primary flex items-center gap-1">
           <ExternalLink className="h-3 w-3" />
           新版本 v{version} 可用
+        </span>
+      )
+    case 'downloading':
+      return (
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          正在下载 v{version}
+        </span>
+      )
+    case 'downloaded':
+      return (
+        <span className="text-xs text-primary flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          更新 v{version} 已就绪
         </span>
       )
     case 'not-available':

@@ -18,6 +18,11 @@ import type {
   JsonSchemaOutputFormat,
   SDKMessage,
 } from '@proma/shared'
+import {
+  THINKING_SIGNATURE_ERROR_MESSAGE,
+  THINKING_SIGNATURE_ERROR_TITLE,
+  isThinkingSignatureError as matchesThinkingSignatureError,
+} from '@proma/shared'
 import type { CanUseToolOptions, PermissionResult } from '../agent-permission-service'
 import { TRANSIENT_NETWORK_PATTERN } from '../error-patterns'
 import { spawn as spawnChild, execFileSync } from 'node:child_process'
@@ -260,6 +265,10 @@ export function isPromptTooLongError(...messages: string[]): boolean {
   return PROMPT_TOO_LONG_PATTERNS.some((p) => combined.includes(p))
 }
 
+export function isThinkingSignatureError(...messages: string[]): boolean {
+  return matchesThinkingSignatureError(...messages)
+}
+
 /** 从 assistant.error 文本中兜底提取 HTTP 状态码 */
 function extractHttpStatusFromErrorText(...messages: string[]): number | null {
   const combined = messages.filter(Boolean).join('\n')
@@ -285,6 +294,21 @@ export function mapSDKErrorToTypedError(
   detailedMessage: string,
   originalError: string,
 ): TypedError {
+  if (isThinkingSignatureError(detailedMessage, originalError)) {
+    return {
+      code: 'thinking_signature_invalid',
+      title: THINKING_SIGNATURE_ERROR_TITLE,
+      message: THINKING_SIGNATURE_ERROR_MESSAGE,
+      actions: [
+        { key: 'n', label: '在新对话继续', action: 'retry_in_new_session' },
+        { key: 'r', label: '重试', action: 'retry' },
+      ],
+      canRetry: true,
+      retryDelayMs: 1000,
+      originalError,
+    }
+  }
+
   const errorMap: Record<string, { code: ErrorCode; title: string; message: string; canRetry: boolean }> = {
     'authentication_failed': {
       code: 'invalid_api_key',

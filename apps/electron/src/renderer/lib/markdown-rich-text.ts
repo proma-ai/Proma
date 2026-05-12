@@ -396,6 +396,7 @@ export function htmlToMarkdown(html: string): string {
         if (dataType === 'mention') {
           if (suggestionChar === '/') return `/skill:${dataId}`
           if (suggestionChar === '#') return `#mcp:${dataId}`
+          if (suggestionChar === '&') return `&session:${dataId}`
           return `@file:${dataId}`
         }
         return children

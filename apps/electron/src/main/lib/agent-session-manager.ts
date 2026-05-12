@@ -27,7 +27,15 @@ import { getAgentWorkspace } from './agent-workspace-manager'
 if (!process.env.CLAUDE_CONFIG_DIR) {
   process.env.CLAUDE_CONFIG_DIR = getSdkConfigDir()
 }
-import type { AgentSessionMeta, AgentMessage, SDKMessage, ForkSessionInput, AgentMessageSearchResult } from '@proma/shared'
+import type {
+  AgentSessionMeta,
+  AgentMessage,
+  SDKMessage,
+  ForkSessionInput,
+  AgentMessageSearchResult,
+  AgentSessionReferenceSearchInput,
+  AgentSessionReferenceSearchResult,
+} from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
 import { clearNanoBananaAgentHistory } from './chat-tools/nano-banana-mcp'
 
@@ -440,6 +448,48 @@ export function deleteAgentSession(id: string): void {
 
   // 清理 Nano Banana 生图历史
   clearNanoBananaAgentHistory(id)
+
+  // 清理 SDK 关联数据（file-history 和 projects 下的 session JSONL）
+  const sdkSessionIds = [removed.sdkSessionId, removed.forkSourceSdkSessionId].filter(Boolean) as string[]
+  if (sdkSessionIds.length > 0) {
+    const sdkConfigDir = getSdkConfigDir()
+
+    const fileHistoryDir = join(sdkConfigDir, 'file-history')
+    for (const sid of sdkSessionIds) {
+      const histDir = join(fileHistoryDir, sid)
+      if (existsSync(histDir)) {
+        try {
+          rmSync(histDir, { recursive: true, force: true })
+          console.log(`[Agent 会话] 已清理 file-history: ${sid}`)
+        } catch (e) {
+          console.warn(`[Agent 会话] 清理 file-history 失败 (${sid}):`, e)
+        }
+      }
+    }
+
+    const projectsDir = join(sdkConfigDir, 'projects')
+    if (existsSync(projectsDir)) {
+      try {
+        for (const hashDir of readdirSync(projectsDir)) {
+          const projPath = join(projectsDir, hashDir)
+          for (const sid of sdkSessionIds) {
+            const sessionFile = join(projPath, `${sid}.jsonl`)
+            if (existsSync(sessionFile)) {
+              try {
+                unlinkSync(sessionFile)
+                console.log(`[Agent 会话] 已清理 SDK session 文件: ${sessionFile}`)
+              } catch (e) {
+                console.warn('[Agent 会话] 清理 SDK session 文件失败:', e)
+              }
+            }
+          }
+          try {
+            if (readdirSync(projPath).length === 0) rmSync(projPath, { recursive: true })
+          } catch { /* ignore */ }
+        }
+      } catch { /* ignore */ }
+    }
+  }
 }
 
 /**
@@ -1175,6 +1225,121 @@ export function searchAgentSessionMessages(query: string): AgentMessageSearchRes
       }
     } catch {
       // 跳过读取失败的文件
+    }
+  }
+
+  return results
+}
+
+function extractTextFromPersistedMessage(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return ''
+  const record = parsed as {
+    content?: unknown
+    message?: { content?: Array<{ type: string; text?: string }> }
+  }
+
+  if (typeof record.content === 'string') {
+    return record.content
+  }
+
+  if (Array.isArray(record.message?.content)) {
+    return record.message.content
+      .filter((b) => b.type === 'text' && b.text)
+      .map((b) => b.text!)
+      .join('\n')
+  }
+
+  return ''
+}
+
+function createSnippet(text: string, matchIndex: number, matchLength: number): string {
+  const snippetStart = Math.max(0, matchIndex - 48)
+  const snippetEnd = Math.min(text.length, matchIndex + matchLength + 48)
+  return (snippetStart > 0 ? '...' : '') +
+    text.slice(snippetStart, snippetEnd) +
+    (snippetEnd < text.length ? '...' : '')
+}
+
+function findSessionMessageSnippet(sessionId: string, query: string): string | undefined {
+  if (!query || query.length < 2) return undefined
+
+  const filePath = getAgentSessionMessagesPath(sessionId)
+  if (!existsSync(filePath)) return undefined
+
+  const queryLower = query.toLowerCase()
+  try {
+    const raw = readFileSync(filePath, 'utf-8')
+    const lines = raw.split('\n').filter((line) => line.trim())
+
+    for (const line of lines) {
+      const textContent = extractTextFromPersistedMessage(JSON.parse(line))
+      if (!textContent) continue
+
+      const matchIndex = textContent.toLowerCase().indexOf(queryLower)
+      if (matchIndex === -1) continue
+
+      return createSnippet(textContent, matchIndex, query.length)
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
+}
+
+/**
+ * 搜索当前工作区可引用的 Agent 会话。
+ *
+ * 仅返回当前工作区、未归档、非当前会话的结果；无关键词时返回最近更新的会话。
+ */
+export function searchAgentSessionReferences(input: AgentSessionReferenceSearchInput): AgentSessionReferenceSearchResult[] {
+  const workspaceId = input?.workspaceId?.trim()
+  if (!workspaceId) return []
+
+  const query = (input?.query ?? '').trim()
+  const queryLower = query.toLowerCase()
+  const requestedLimit = Number.isFinite(input?.limit) ? input.limit! : 20
+  const limit = Math.min(Math.max(requestedLimit, 1), 50)
+
+  const candidates = listAgentSessions()
+    .filter((session) => session.workspaceId === workspaceId)
+    .filter((session) => !session.archived)
+    .filter((session) => session.id !== input?.excludeSessionId)
+
+  const results: AgentSessionReferenceSearchResult[] = []
+
+  for (const session of candidates) {
+    if (results.length >= limit) break
+
+    if (!queryLower) {
+      results.push({
+        sessionId: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        matchSource: 'recent',
+      })
+      continue
+    }
+
+    if (session.title.toLowerCase().includes(queryLower)) {
+      results.push({
+        sessionId: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        matchSource: 'title',
+      })
+      continue
+    }
+
+    const snippet = findSessionMessageSnippet(session.id, query)
+    if (snippet) {
+      results.push({
+        sessionId: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        snippet,
+        matchSource: 'message',
+      })
     }
   }
 

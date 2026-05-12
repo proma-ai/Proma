@@ -6,10 +6,10 @@
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
 import { join, resolve, sep } from 'node:path'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
   VoiceDictationAudioChunkInput,
@@ -82,6 +82,7 @@ import type {
   ForkSessionInput,
   RewindSessionInput,
   RewindSessionResult,
+  AgentSessionReferenceSearchInput,
   FeishuConfigInput,
   FeishuConfig,
   FeishuBridgeState,
@@ -166,6 +167,7 @@ import {
   forkAgentSession,
   autoArchiveAgentSessions,
   searchAgentSessionMessages,
+  searchAgentSessionReferences,
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveFilesToWorkspaceFiles, isAgentSessionActive, queueAgentMessage, updateAgentPermissionMode, rewindAgentSession } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
@@ -173,6 +175,8 @@ import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
 import { getAgentTeamData, readAgentOutputFile } from './lib/agent-team-reader'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir } from './lib/config-paths'
+import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
+import type { CleanupOptions } from './lib/storage-service'
 import {
   listAgentWorkspaces,
   createAgentWorkspace,
@@ -1243,6 +1247,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.SEARCH_MESSAGES,
     async (_, query: string) => {
       return searchAgentSessionMessages(query)
+    }
+  )
+
+  // 搜索当前工作区可引用的 Agent 会话
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SEARCH_SESSION_REFERENCES,
+    async (_, input: AgentSessionReferenceSearchInput) => {
+      return searchAgentSessionReferences(input)
     }
   )
 
@@ -2982,6 +2994,55 @@ export function registerIpcHandlers(): void {
 
   runAutoArchive()
   setInterval(runAutoArchive, 24 * 60 * 60 * 1000)
+
+  // ===== 存储管理 =====
+
+  ipcMain.handle(STORAGE_IPC_CHANNELS.GET_STATS, async () => {
+    return calculateStorageStats()
+  })
+
+  ipcMain.handle(STORAGE_IPC_CHANNELS.CLEANUP, async (_, options: CleanupOptions) => {
+    return cleanupStorage(options)
+  })
+
+  ipcMain.handle(STORAGE_IPC_CHANNELS.CLEANUP_TEMP, async () => {
+    return cleanupTempFiles()
+  })
+
+  // 迁移取消时清理临时解压目录
+  ipcMain.handle('migration:cancelImport', async (_, tempDir: string) => {
+    if (tempDir && existsSync(tempDir) && tempDir.includes('proma-import-')) {
+      rmSync(tempDir, { recursive: true, force: true })
+      console.log(`[迁移] 已清理临时目录: ${tempDir}`)
+    }
+  })
+
+  // 启动时自动清理临时文件
+  const runStartupCleanup = async (): Promise<void> => {
+    try {
+      const settings = getSettings()
+      if (settings.autoCleanupTempOnStart !== false) {
+        const result = await cleanupTempFiles()
+        if (result.freedBytes > 0) {
+          console.log(`[存储清理] 启动时清理了 ${(result.freedBytes / 1024 / 1024).toFixed(1)} MB 临时文件`)
+        }
+      }
+      const archiveDays = settings.autoCleanupArchivedDays ?? 0
+      if (archiveDays > 0) {
+        const result = await cleanupStorage({
+          categories: ['agent-sessions', 'sdk-config'],
+          orphansOnly: false,
+          archivedBeforeDays: archiveDays,
+        })
+        if (result.freedBytes > 0) {
+          console.log(`[存储清理] 启动时清理了 ${(result.freedBytes / 1024 / 1024).toFixed(1)} MB 归档数据`)
+        }
+      }
+    } catch (e) {
+      console.error('[存储清理] 启动时清理失败:', e)
+    }
+  }
+  runStartupCleanup()
 
   // ===== 快速任务窗口 =====
 

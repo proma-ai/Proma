@@ -179,6 +179,10 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
   }, [])
 
   const reset = useCallback(() => {
+    // 清理主进程中的临时解压目录
+    if (importPreview?.tempDir) {
+      window.electronAPI.migrationCancelImport(importPreview.tempDir).catch(() => {})
+    }
     setImporting(false)
     setImportPreview(null)
     setPathMappings({})
@@ -186,7 +190,7 @@ export function useMigrationImport(initialFilePath?: string | null): UseMigratio
     setConflictResolution('overwrite')
     setImportConfirming(false)
     setImportResult(null)
-  }, [])
+  }, [importPreview?.tempDir])
 
   return {
     importing,

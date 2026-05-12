@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Hammer, Bot, MessageSquare } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Hammer, Bot, MessageSquare, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -80,6 +80,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import type { ActiveView } from '@/atoms/active-view'
 import type { ConversationMeta, AgentSessionMeta, WorkspaceCapabilities } from '@proma/shared'
 import { CloudSidebarDownloadButton, CloudSidebarCreditIndicator } from './CloudSidebarExtension'
@@ -1702,120 +1716,114 @@ function ConversationItem({
 
   const isPinned = !!conversation.pinned
 
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        startEdit()
-      }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      className={cn(
-        'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
-        active
-          ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'hover:bg-primary/5'
-      )}
-    >
-      {/* 流式状态左侧竖线条（与 Agent 保持一致） */}
-      {streaming && (
-        <span
-          className="absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full bg-emerald-500 animate-pulse pointer-events-none"
-          aria-hidden="true"
-        />
-      )}
-      <div className="flex-1 min-w-0">
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={saveTitle}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-transparent text-[13px] leading-5 text-foreground border-b border-primary/50 outline-none px-0 py-0"
-            maxLength={100}
-          />
-        ) : (
-          <div className={cn(
-            'truncate text-[13px] leading-5 flex items-center gap-1.5',
-            active ? 'text-foreground' : 'text-foreground/80'
-          )}>
-            {/* 置顶标记 */}
-            {showPinIcon && (
-              <Pin size={11} className="flex-shrink-0 text-primary/60" />
-            )}
-            <span className="truncate">{conversation.title}</span>
-          </div>
-        )}
-      </div>
+  const menuItems = (
+    MenuItem: typeof ContextMenuItem | typeof DropdownMenuItem,
+    MenuSeparator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
+  ) => (
+    <>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(conversation.id)}>
+        {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+        {isPinned ? '取消置顶' : '置顶对话'}
+      </MenuItem>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => startEdit()}>
+        <Pencil size={14} />
+        重命名
+      </MenuItem>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onToggleArchive(conversation.id)}>
+        {conversation.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+        {conversation.archived ? '取消归档' : '归档'}
+      </MenuItem>
+      <MenuSeparator className="my-0.5" />
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete()}>
+        <Trash2 size={14} />
+        删除对话
+      </MenuItem>
+    </>
+  )
 
-      {/* 操作按钮组（hover 时可见） */}
-      <div className={cn(
-        'flex items-center gap-0.5 flex-shrink-0 transition-all duration-100 overflow-hidden',
-        hovered && !editing ? 'opacity-100' : 'opacity-0 w-0 pointer-events-none'
-      )}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onTogglePin(conversation.id)
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onSelect}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            startEdit()
+          }}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+          className={cn(
+            'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            active
+              ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+              : 'hover:bg-primary/5'
+          )}
+        >
+          {/* 流式状态左侧竖线条（与 Agent 保持一致） */}
+          {streaming && (
+            <span
+              className="absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full bg-emerald-500 animate-pulse pointer-events-none"
+              aria-hidden="true"
+            />
+          )}
+          <div className="flex-1 min-w-0">
+            {editing ? (
+              <input
+                ref={inputRef}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={saveTitle}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-transparent text-[13px] leading-5 text-foreground border-b border-primary/50 outline-none px-0 py-0"
+                maxLength={100}
+              />
+            ) : (
+              <div className={cn(
+                'truncate text-[13px] leading-5 flex items-center gap-1.5',
+                active ? 'text-foreground' : 'text-foreground/80'
+              )}>
+                {/* 置顶标记 */}
+                {showPinIcon && (
+                  <Pin size={11} className="flex-shrink-0 text-primary/60" />
+                )}
+                <span className="truncate">{conversation.title}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 三点菜单按钮（hover 时可见，始终占位避免跳动） */}
+          {!editing && (
+            <div
+              className="flex-shrink-0"
+              onClick={(e) => e.stopPropagation()}
             >
-              {isPinned ? <PinOff size={13} /> : <Pin size={13} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{isPinned ? '取消置顶' : '置顶对话'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                startEdit()
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
-            >
-              <Pencil size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">重命名</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onToggleArchive(conversation.id)
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
-            >
-              {conversation.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{conversation.archived ? '取消归档' : '归档'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onRequestDelete()
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-destructive/10 hover:text-destructive transition-colors"
-            >
-              <Trash2 size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">删除对话</TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={cn(
+                      'p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors',
+                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100',
+                      !hovered && 'opacity-0 pointer-events-none'
+                    )}
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
+                  {menuItems(DropdownMenuItem, DropdownMenuSeparator)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-40 z-[9999] min-w-0 p-0.5">
+        {menuItems(ContextMenuItem, ContextMenuSeparator)}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -1907,168 +1915,135 @@ function AgentSessionItem({
     }
   }
 
+  const isWorking = isInWorkingSection || session.manualWorking
+  const canMove = indicatorStatus === 'idle' || indicatorStatus === 'completed'
+
+  const menuItems = (
+    MenuItem: typeof ContextMenuItem | typeof DropdownMenuItem,
+    MenuSeparator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
+  ) => (
+    <>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id)}>
+        {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+        {session.pinned ? '取消置顶' : '置顶会话'}
+      </MenuItem>
+      <MenuItem
+        className="text-xs py-1 [&>svg]:size-3.5"
+        disabled={indicatorStatus === 'running'}
+        onSelect={() => { if (indicatorStatus !== 'running') onToggleManualWorking(session.id) }}
+      >
+        <Hammer size={14} className={isWorking ? 'fill-current' : ''} />
+        {indicatorStatus === 'running' ? '运行中无法移出' : isWorking ? '取消工作中' : '标记为工作中'}
+      </MenuItem>
+      {canMove && (
+        <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMove()}>
+          <ArrowRightLeft size={14} />
+          迁移到其他工作区
+        </MenuItem>
+      )}
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => startEdit()}>
+        <Pencil size={14} />
+        重命名
+      </MenuItem>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onToggleArchive(session.id)}>
+        {session.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+        {session.archived ? '取消归档' : '归档'}
+      </MenuItem>
+      <MenuSeparator className="my-0.5" />
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete()}>
+        <Trash2 size={14} />
+        删除会话
+      </MenuItem>
+    </>
+  )
+
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        startEdit()
-      }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      className={cn(
-        'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
-        active
-          ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'hover:bg-primary/5'
-      )}
-    >
-      {leftAccent && (
-        <span
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onSelect}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            startEdit()
+          }}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
           className={cn(
-            'absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full pointer-events-none',
-            SESSION_LEFT_ACCENT_CLASS[leftAccent]
+            'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            active
+              ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+              : 'hover:bg-primary/5'
           )}
-        />
-      )}
-      <div className="flex-1 min-w-0">
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={saveTitle}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-transparent text-[13px] leading-5 text-foreground border-b border-primary/50 outline-none px-0 py-0"
-            maxLength={100}
-          />
-        ) : (
-          <div className={cn(
-            'truncate text-[13px] leading-5 flex items-center gap-1.5',
-            active ? 'text-foreground' : 'text-foreground/80'
-          )}>
-            {showPinIcon && (
-              <Pin size={11} className="flex-shrink-0 text-primary/60" />
-            )}
-            <span className="truncate">{session.title}</span>
-            {workspaceName && (
-              <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
-                {workspaceName}
-              </span>
+        >
+          {leftAccent && (
+            <span
+              className={cn(
+                'absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full pointer-events-none',
+                SESSION_LEFT_ACCENT_CLASS[leftAccent]
+              )}
+            />
+          )}
+          <div className="flex-1 min-w-0">
+            {editing ? (
+              <input
+                ref={inputRef}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={saveTitle}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-transparent text-[13px] leading-5 text-foreground border-b border-primary/50 outline-none px-0 py-0"
+                maxLength={100}
+              />
+            ) : (
+              <div className={cn(
+                'truncate text-[13px] leading-5 flex items-center gap-1.5',
+                active ? 'text-foreground' : 'text-foreground/80'
+              )}>
+                {showPinIcon && (
+                  <Pin size={11} className="flex-shrink-0 text-primary/60" />
+                )}
+                <span className="truncate">{session.title}</span>
+                {workspaceName && (
+                  <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
+                    {workspaceName}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* 操作按钮组（hover 时可见） */}
-      <div className={cn(
-        'flex items-center gap-0.5 flex-shrink-0 transition-all duration-100 overflow-hidden',
-        hovered && !editing ? 'opacity-100' : 'opacity-0 w-0 pointer-events-none'
-      )}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onTogglePin(session.id)
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
+          {/* 三点菜单按钮（hover 时可见，始终占位避免跳动） */}
+          {!editing && (
+            <div
+              className="flex-shrink-0"
+              onClick={(e) => e.stopPropagation()}
             >
-              {session.pinned ? <PinOff size={13} /> : <Pin size={13} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{session.pinned ? '取消置顶' : '置顶会话'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (indicatorStatus !== 'running') {
-                  onToggleManualWorking(session.id)
-                }
-              }}
-              disabled={indicatorStatus === 'running'}
-              className={cn(
-                'p-1 rounded-md transition-colors',
-                indicatorStatus === 'running'
-                  ? 'text-primary/40 cursor-not-allowed'
-                  : (isInWorkingSection || session.manualWorking)
-                    ? 'text-primary hover:bg-foreground/[0.08]'
-                    : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60'
-              )}
-            >
-              <Hammer size={13} className={(isInWorkingSection || session.manualWorking) ? 'fill-current' : ''} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {indicatorStatus === 'running'
-              ? '运行中无法移出'
-              : (isInWorkingSection || session.manualWorking) ? '取消工作中' : '标记为工作中'}
-          </TooltipContent>
-        </Tooltip>
-        {(indicatorStatus === 'idle' || indicatorStatus === 'completed') && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRequestMove()
-                }}
-                className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
-              >
-                <ArrowRightLeft size={13} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">迁移到其他工作区</TooltipContent>
-          </Tooltip>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                startEdit()
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
-            >
-              <Pencil size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">重命名</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onToggleArchive(session.id)
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors"
-            >
-              {session.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{session.archived ? '取消归档' : '归档'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onRequestDelete()
-              }}
-              className="p-1 rounded-md text-foreground/30 hover:bg-destructive/10 hover:text-destructive transition-colors"
-            >
-              <Trash2 size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">删除会话</TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={cn(
+                      'p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors',
+                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100',
+                      !hovered && 'opacity-0 pointer-events-none'
+                    )}
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
+                  {menuItems(DropdownMenuItem, DropdownMenuSeparator)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-40 z-[9999] min-w-0 p-0.5">
+        {menuItems(ContextMenuItem, ContextMenuSeparator)}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
