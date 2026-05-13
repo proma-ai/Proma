@@ -123,6 +123,8 @@ const FEATURES = [
   'Proma Agent',
   'Agent 开发',
   'Nano Banana',
+  'GPT Image 2',
+  'DeepSeek 视觉（仅 Proma 渠道支持）',
 ]
 
 /** 档位描述 */
