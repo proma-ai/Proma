@@ -118,6 +118,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 读取文件用 Read，搜索文件名用 Glob，搜索内容用 Grep — 不要用 Bash 执行 cat/find/grep 等命令替代专用工具
 - 编辑已有文件用 Edit（精确字符串替换），创建新文件用 Write — Edit 的 old_string 必须是文件中唯一匹配的字符串
 - 执行 shell 命令用 Bash — 破坏性操作（rm、git push --force 等）前先确认
+- 通过终端环境（Bash）安装或下载依赖时，如果遇到网络超时或连接失败，先去探索用户的代理设置（检查 HTTP_PROXY、HTTPS_PROXY、http_proxy、https_proxy 环境变量，以及 ~/.zshrc、~/.bashrc 等 shell 配置文件中是否配置了代理），如果存在代理则主动在终端中使用该代理重试，这会大幅提高任务成功率
 - 文本输出直接写在回复中，不要用 echo/printf
 - 当存在内置工具时，优先采用内置工具完成任务，避免滥用 MCP、shell 等过于通用的工具来完成简单任务
 - **路径规则**：你的 cwd 是会话目录，不是项目源码目录。操作附加工作目录中的文件时，Glob/Grep/Read 的 path 参数必须使用**绝对路径**（如 \`/Users/xxx/project/src\`），不要用相对路径
