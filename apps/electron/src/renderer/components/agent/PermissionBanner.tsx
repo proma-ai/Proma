@@ -72,7 +72,7 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
       map.set(sessionId, {
         ...current,
         running: false,
-        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+        ...finalizeStreamingActivities(current.toolActivities),
       })
       return map
     })

@@ -48,7 +48,9 @@ import type {
   AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
   AgentAttachDirectoryInput,
+  AgentAttachFileInput,
   WorkspaceAttachDirectoryInput,
+  WorkspaceAttachFileInput,
   GetTaskOutputInput,
   GetTaskOutputResult,
   StopTaskInput,
@@ -77,7 +79,6 @@ import type {
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
-  AgentTeamData,
   MoveSessionToWorkspaceInput,
   ForkSessionInput,
   RewindSessionInput,
@@ -173,7 +174,6 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentTeamData, readAgentOutputFile } from './lib/agent-team-reader'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir } from './lib/config-paths'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -197,8 +197,11 @@ import {
   writeWorkspaceSkillContent,
   toggleWorkspaceSkill,
   getWorkspaceAttachedDirectories,
+  getWorkspaceAttachedFiles,
   attachWorkspaceDirectory,
+  attachWorkspaceFile,
   detachWorkspaceDirectory,
+  detachWorkspaceFile,
 } from './lib/agent-workspace-manager'
 import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import { getAllToolInfos } from './lib/chat-tool-registry'
@@ -270,6 +273,9 @@ function getAuthorizedRoots(options?: FileAccessOptions): string[] {
     if (meta?.attachedDirectories) {
       roots.push(...meta.attachedDirectories)
     }
+    if (meta?.attachedFiles) {
+      roots.push(...meta.attachedFiles)
+    }
     if (meta?.workspaceId) {
       const workspace = getAgentWorkspace(meta.workspaceId)
       if (workspace?.slug) workspaceSlugs.add(workspace.slug)
@@ -283,6 +289,7 @@ function getAuthorizedRoots(options?: FileAccessOptions): string[] {
   for (const slug of workspaceSlugs) {
     roots.push(getWorkspaceFilesDir(slug))
     roots.push(...getWorkspaceAttachedDirectories(slug))
+    roots.push(...getWorkspaceAttachedFiles(slug))
   }
 
   return roots
@@ -1799,24 +1806,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // ===== Agent Teams 数据 =====
-
-  // 获取 Team 聚合数据（团队配置 + 任务列表 + 收件箱）
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_TEAM_DATA,
-    async (_, sdkSessionId: string): Promise<AgentTeamData | null> => {
-      return getAgentTeamData(sdkSessionId)
-    }
-  )
-
-  // 读取 Teammate 输出文件内容
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.GET_AGENT_OUTPUT,
-    async (_, filePath: string): Promise<string> => {
-      return readAgentOutputFile(filePath)
-    }
-  )
-
   // ===== Agent 附件 =====
 
   // 保存文件到 Agent session 工作目录
@@ -1897,6 +1886,42 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 附加外部文件到 Agent 会话
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ATTACH_FILE,
+    async (_, input: AgentAttachFileInput): Promise<string[]> => {
+      const meta = getAgentSessionMeta(input.sessionId)
+      if (!meta) throw new Error(`会话不存在: ${input.sessionId}`)
+
+      const { realpathSync, statSync } = await import('node:fs')
+      const { resolve } = await import('node:path')
+      const safePath = realpathSync(resolve(input.filePath))
+      const stats = statSync(safePath)
+      if (!stats.isFile()) throw new Error('只能附加文件')
+
+      const existing = meta.attachedFiles ?? []
+      if (existing.includes(safePath)) return existing
+
+      const updated = [...existing, safePath]
+      updateAgentSessionMeta(input.sessionId, { attachedFiles: updated })
+      return updated
+    }
+  )
+
+  // 移除会话的附加文件
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DETACH_FILE,
+    async (_, input: AgentAttachFileInput): Promise<string[]> => {
+      const meta = getAgentSessionMeta(input.sessionId)
+      if (!meta) throw new Error(`会话不存在: ${input.sessionId}`)
+
+      const existing = meta.attachedFiles ?? []
+      const updated = existing.filter((f) => f !== input.filePath)
+      updateAgentSessionMeta(input.sessionId, { attachedFiles: updated })
+      return updated
+    }
+  )
+
   // 附加外部目录到工作区（所有会话可访问）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ATTACH_WORKSPACE_DIRECTORY,
@@ -1917,11 +1942,41 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 附加外部文件到工作区（所有会话可访问）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ATTACH_WORKSPACE_FILE,
+    async (_, input: WorkspaceAttachFileInput): Promise<string[]> => {
+      const { realpathSync, statSync } = await import('node:fs')
+      const { resolve } = await import('node:path')
+      const safePath = realpathSync(resolve(input.filePath))
+      const stats = statSync(safePath)
+      if (!stats.isFile()) throw new Error('只能附加文件')
+
+      return attachWorkspaceFile(input.workspaceSlug, safePath)
+    }
+  )
+
+  // 移除工作区的附加文件
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DETACH_WORKSPACE_FILE,
+    async (_, input: WorkspaceAttachFileInput): Promise<string[]> => {
+      return detachWorkspaceFile(input.workspaceSlug, input.filePath)
+    }
+  )
+
   // 获取工作区附加目录列表
   ipcMain.handle(
     AGENT_IPC_CHANNELS.GET_WORKSPACE_DIRECTORIES,
     async (_, workspaceSlug: string): Promise<string[]> => {
       return getWorkspaceAttachedDirectories(workspaceSlug)
+    }
+  )
+
+  // 获取工作区附加文件列表
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_WORKSPACE_ATTACHED_FILES,
+    async (_, workspaceSlug: string): Promise<string[]> => {
+      return getWorkspaceAttachedFiles(workspaceSlug)
     }
   )
 
@@ -1957,10 +2012,13 @@ export function registerIpcHandlers(): void {
       for (const item of items) {
         if (HIDDEN_FS_ENTRIES.has(item.name)) continue
         const fullPath = resolve(safePath, item.name)
+        const isDirectory = item.isDirectory()
+        const size = isDirectory ? undefined : statSync(fullPath).size
         entries.push({
           name: item.name,
           path: fullPath,
-          isDirectory: item.isDirectory(),
+          isDirectory,
+          size,
         })
       }
 
@@ -2009,6 +2067,43 @@ export function registerIpcHandlers(): void {
       }
 
       await shell.openPath(safePath)
+    }
+  )
+
+  // 将剪贴板文本写入临时预览文件
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WRITE_CLIPBOARD_PREVIEW,
+    async (_, filename: string, content: string): Promise<string> => {
+      if (typeof filename !== 'string' || !filename) {
+        throw new Error('filename 必须是非空字符串')
+      }
+      if (typeof content !== 'string') {
+        throw new Error('content 必须是字符串')
+      }
+
+      const { isAbsolute, join, relative, resolve } = await import('node:path')
+      const { tmpdir } = await import('node:os')
+      const { existsSync, mkdirSync } = await import('node:fs')
+      const { writeFile } = await import('node:fs/promises')
+
+      const tmpDir = join(tmpdir(), 'proma-preview')
+      if (!existsSync(tmpDir)) {
+        mkdirSync(tmpDir, { recursive: true })
+      }
+
+      // 安全文件名：替换路径分隔符和特殊字符，防止目录穿越
+      const safeFilename = filename.replace(/[<>:"/\\|?*]/g, '_').replace(/^\.+/, '_')
+      const tmpPath = resolve(tmpDir, safeFilename)
+
+      // 确保 resolve 后的路径仍在 tmpDir 内，兼容 Windows 路径分隔符
+      const relativePath = relative(tmpDir, tmpPath)
+      if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        throw new Error('文件名越界')
+      }
+
+      await writeFile(tmpPath, content, 'utf-8')
+      console.log(`[IPC] clipboard 预览文件已写入: ${tmpPath}`)
+      return tmpPath
     }
   )
 
@@ -2191,7 +2286,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY,
     async (_, dirPath: string, access?: FileAccessOptions | string[]): Promise<FileEntry[]> => {
-      const { readdirSync } = await import('node:fs')
+      const { readdirSync, statSync } = await import('node:fs')
       const { resolve } = await import('node:path')
 
       const safePath = resolve(dirPath)
@@ -2205,10 +2300,13 @@ export function registerIpcHandlers(): void {
       for (const item of items) {
         if (HIDDEN_FS_ENTRIES.has(item.name)) continue
         const fullPath = resolve(safePath, item.name)
+        const isDirectory = item.isDirectory()
+        const size = isDirectory ? undefined : statSync(fullPath).size
         entries.push({
           name: item.name,
           path: fullPath,
-          isDirectory: item.isDirectory(),
+          isDirectory,
+          size,
         })
       }
 
@@ -2241,17 +2339,22 @@ export function registerIpcHandlers(): void {
         throw new Error(`文件不存在: ${filePath}`)
       })
 
-      // 收集所有允许的目录：会话附加目录 + 工作区附加目录 + 工作区文件目录
+      // 收集所有允许的路径：会话/工作区附加目录、附加文件 + 工作区文件目录
       const allowedDirs: string[] = []
+      const allowedFiles: string[] = []
 
       if (sessionId) {
         const meta = getAgentSessionMeta(sessionId)
         if (meta?.attachedDirectories) {
           allowedDirs.push(...meta.attachedDirectories)
         }
+        if (meta?.attachedFiles) {
+          allowedFiles.push(...meta.attachedFiles)
+        }
       }
       if (workspaceSlug) {
         allowedDirs.push(...getWorkspaceAttachedDirectories(workspaceSlug))
+        allowedFiles.push(...getWorkspaceAttachedFiles(workspaceSlug))
         allowedDirs.push(getWorkspaceFilesDir(workspaceSlug))
       }
 
@@ -2261,7 +2364,11 @@ export function registerIpcHandlers(): void {
       const resolvedAllowedDirs = await Promise.all(
         allowedDirs.map((dir) => realpath(resolve(dir)).catch(() => resolve(dir)))
       )
+      const resolvedAllowedFiles = await Promise.all(
+        allowedFiles.map((file) => realpath(resolve(file)).catch(() => resolve(file)))
+      )
       const isAllowed = resolvedAllowedDirs.some((dir) => safePath.startsWith(dir + sep) || safePath === dir)
+        || resolvedAllowedFiles.some((file) => safePath === file)
       if (!isAllowed) {
         throw new Error('访问路径不在允许范围内')
       }
@@ -2362,7 +2469,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_WORKSPACE_FILES,
     async (_, rootPath: string, query: string, limit = 20, additionalPaths?: string[], sessionPaths?: string[]): Promise<FileSearchResult> => {
-      const { readdirSync } = await import('node:fs')
+      const { readdirSync, statSync } = await import('node:fs')
       const { resolve, relative, basename } = await import('node:path')
 
       const safeRoot = resolve(rootPath)
@@ -2409,37 +2516,52 @@ export function registerIpcHandlers(): void {
         }
       }
 
-      // session 目录：相对路径
-      scan(safeRoot, 0, safeRoot, rootEntries, false, 'session')
+      function addAttachedPath(pathValue: string, target: Entry[], source: 'session' | 'workspace'): void {
+        try {
+          const attachedPath = resolve(pathValue)
+          const name = basename(attachedPath)
+          if (ignoreFiles.has(name)) return
 
-      // 会话级附加目录：绝对路径，标记为 session（归入会话文件分组）
-      if (sessionPaths && sessionPaths.length > 0) {
-        for (const sp of sessionPaths) {
-          const sRoot = resolve(sp)
-          // 添加附加目录本身作为顶层条目
-          rootEntries.push({
-            name: basename(sRoot),
-            path: sRoot,
+          const stats = statSync(attachedPath)
+          if (stats.isFile()) {
+            target.push({
+              name,
+              path: attachedPath,
+              type: 'file',
+              source,
+            })
+            return
+          }
+
+          if (!stats.isDirectory()) return
+          if (ignoreDirs.has(name)) return
+
+          target.push({
+            name: name === 'workspace-files' ? '工作文件' : name,
+            path: attachedPath,
             type: 'dir',
-            source: 'session',
+            source,
           })
-          scan(sRoot, 0, sRoot, rootEntries, true, 'session')
+          scan(attachedPath, 0, attachedPath, target, true, source)
+        } catch {
+          // 忽略不存在或无权限的附加路径
         }
       }
 
-      // 工作区文件 + 工作区级附加目录：绝对路径，标记为 workspace
+      // session 目录：相对路径
+      scan(safeRoot, 0, safeRoot, rootEntries, false, 'session')
+
+      // 会话级附加路径：绝对路径，标记为 session（归入会话文件分组）
+      if (sessionPaths && sessionPaths.length > 0) {
+        for (const sp of sessionPaths) {
+          addAttachedPath(sp, rootEntries, 'session')
+        }
+      }
+
+      // 工作区文件 + 工作区级附加路径：绝对路径，标记为 workspace
       if (additionalPaths && additionalPaths.length > 0) {
         for (const addPath of additionalPaths) {
-          const addRoot = resolve(addPath)
-          // 添加附加目录本身作为顶层条目
-          const rootName = basename(addRoot)
-          workspaceEntries.push({
-            name: rootName === 'workspace-files' ? '工作文件' : rootName,
-            path: addRoot,
-            type: 'dir',
-            source: 'workspace',
-          })
-          scan(addRoot, 0, addRoot, workspaceEntries, true, 'workspace')
+          addAttachedPath(addPath, workspaceEntries, 'workspace')
         }
       }
 

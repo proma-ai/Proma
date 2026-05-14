@@ -30,6 +30,7 @@ import {
   agentChannelIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
+  agentAttachedFilesMapAtom,
 } from '@/atoms/agent-atoms'
 import {
   chatPendingMessageAtom,
@@ -46,6 +47,7 @@ import {
   initShortcutRegistry,
   updateShortcutOverrides,
 } from '@/lib/shortcut-registry'
+import { getFileParentPath } from '@/lib/file-utils'
 
 /**
  * 快捷键初始化 + 全局 Handler 注册
@@ -214,22 +216,46 @@ export function GlobalShortcuts(): null {
 
           // 处理附件：保存到 session 目录，构建 file references
           let fileReferences = ''
+          const additionalDirectories = new Set<string>()
           if (data.files && data.files.length > 0 && workspaceId) {
             const workspaces = store.get(agentWorkspacesAtom)
             const workspace = workspaces.find((w) => w.id === workspaceId)
             if (workspace) {
               try {
-                const filesToSave = data.files.map((f) => ({
+                const allRefs: Array<{ filename: string; targetPath: string }> = []
+                for (const file of data.files) {
+                  if (!file.sourcePath) continue
+                  const attachedFiles = await window.electronAPI.attachFile({
+                    sessionId: meta.id,
+                    filePath: file.sourcePath,
+                  })
+                  store.set(agentAttachedFilesMapAtom, (prev) => {
+                    const map = new Map(prev)
+                    map.set(meta.id, attachedFiles)
+                    return map
+                  })
+                  allRefs.push({ filename: file.filename, targetPath: file.sourcePath })
+                  const parentPath = getFileParentPath(file.sourcePath)
+                  if (parentPath) additionalDirectories.add(parentPath)
+                }
+
+                const filesToSave = data.files.filter((f) => f.base64).map((f) => ({
                   filename: f.filename,
-                  data: f.base64,
+                  data: f.base64!,
                 }))
-                const saved = await window.electronAPI.saveFilesToAgentSession({
-                  workspaceSlug: workspace.slug,
-                  sessionId: meta.id,
-                  files: filesToSave,
-                })
-                const refs = saved.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
-                fileReferences = `<attached_files>\n${refs}\n</attached_files>\n\n`
+                if (filesToSave.length > 0) {
+                  const saved = await window.electronAPI.saveFilesToAgentSession({
+                    workspaceSlug: workspace.slug,
+                    sessionId: meta.id,
+                    files: filesToSave,
+                  })
+                  allRefs.push(...saved)
+                }
+
+                if (allRefs.length > 0) {
+                  const refs = allRefs.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
+                  fileReferences = `<attached_files>\n${refs}\n</attached_files>\n\n`
+                }
               } catch (error) {
                 console.error('[快速任务] 保存 Agent 附件失败:', error)
               }
@@ -250,6 +276,7 @@ export function GlobalShortcuts(): null {
           store.set(agentPendingPromptAtom, {
             sessionId: meta.id,
             message: fileReferences + data.text,
+            ...(additionalDirectories.size > 0 && { additionalDirectories: Array.from(additionalDirectories) }),
           })
         } else {
           // Chat 模式：创建对话 + 保存附件到磁盘
@@ -267,6 +294,10 @@ export function GlobalShortcuts(): null {
           const savedAttachments: import('@proma/shared').FileAttachment[] = []
           if (data.files && data.files.length > 0) {
             for (const file of data.files) {
+              if (!file.base64) {
+                console.warn('[快速任务] Chat 附件缺少 base64，已跳过:', file.filename)
+                continue
+              }
               try {
                 const result = await window.electronAPI.saveAttachment({
                   conversationId: meta.id,

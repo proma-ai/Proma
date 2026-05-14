@@ -107,6 +107,7 @@ export function DetachedPreviewApp(): React.ReactElement {
           sessionId={data.sessionId}
           gitRoot={data.gitRoot}
           previewOnly={data.previewOnly}
+          readOnly={data.readOnly}
           basePaths={data.basePaths}
         />
       </div>

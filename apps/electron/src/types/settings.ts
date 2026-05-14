@@ -298,7 +298,7 @@ export interface QuickTaskSubmitInput {
   text: string
   /** 目标模式 */
   mode: 'chat' | 'agent'
-  /** 附件列表（base64 编码） */
+  /** 附件列表（base64 编码或本地路径引用） */
   files?: QuickTaskFile[]
 }
 
@@ -306,7 +306,8 @@ export interface QuickTaskSubmitInput {
 export interface QuickTaskFile {
   filename: string
   mediaType: string
-  base64: string
+  base64?: string
+  sourcePath?: string
   size: number
 }
 

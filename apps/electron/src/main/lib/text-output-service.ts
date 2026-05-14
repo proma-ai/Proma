@@ -16,11 +16,6 @@ let targetWasPromaInput = false
 export function captureVoiceDictationTarget(forcePromaInput?: boolean): boolean {
   const mainWindow = getMainWindow()
   targetWasPromaInput = forcePromaInput ?? BrowserWindow.getFocusedWindow() === mainWindow
-
-  if (!targetWasPromaInput && mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.hide()
-  }
-
   return targetWasPromaInput
 }
 

@@ -42,7 +42,7 @@ import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName } from './config-paths'
-import { getWorkspaceAttachedDirectories } from './agent-workspace-manager'
+import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext, buildBuiltinAgents } from './agent-prompt-builder'
@@ -52,16 +52,6 @@ import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { getMemoryConfig } from './memory-service'
 import { searchMemory, addMemory, formatSearchResult } from './memos-client'
-import {
-  findTeamLeadInboxPath,
-  pollInboxWithRetry,
-  markInboxAsRead,
-  formatInboxPrompt,
-  formatSummaryFallbackPrompt,
-  areAllWorkersIdle,
-  INBOX_RETRY_CONFIG,
-  type TaskNotificationSummary,
-} from './agent-team-reader'
 import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 
@@ -217,19 +207,6 @@ function getRetryDelayMs(attempt: number, elapsedRetryDelayMs: number): number {
   const base = Math.min(1000 * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS)
   const jitter = base * (Math.random() * 0.4 - 0.2)
   return Math.min(remainingMs, Math.max(0, Math.round(base + jitter)))
-}
-
-/**
- * 可中断的定时器
- *
- * 等待指定毫秒，如果 signal 被中止则立即 resolve。
- */
-function timerWithAbort(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal.aborted) { resolve(); return }
-    const tid = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => { clearTimeout(tid); resolve() }, { once: true })
-  })
 }
 
 /**
@@ -1540,11 +1517,21 @@ export class AgentOrchestrator {
         // 合并用户附加目录 + 工作区附加目录 + 工作区文件目录
         ...(() => {
           const allDirs = [...(additionalDirectories || [])]
+          for (const file of sessionMeta?.attachedFiles ?? []) {
+            const parentDir = dirname(file)
+            if (parentDir && !allDirs.includes(parentDir)) allDirs.push(parentDir)
+          }
           if (workspaceSlug) {
             // 工作区级附加目录
             const workspaceDirs = getWorkspaceAttachedDirectories(workspaceSlug)
             for (const dir of workspaceDirs) {
               if (!allDirs.includes(dir)) allDirs.push(dir)
+            }
+            // 工作区级附加文件：SDK 只接受目录，因此传入其父目录
+            const workspaceFiles = getWorkspaceAttachedFiles(workspaceSlug)
+            for (const file of workspaceFiles) {
+              const parentDir = dirname(file)
+              if (parentDir && !allDirs.includes(parentDir)) allDirs.push(parentDir)
             }
             // 工作区文件目录
             const wsFilesDir = getWorkspaceFilesDir(workspaceSlug)
@@ -1619,14 +1606,8 @@ export class AgentOrchestrator {
       const canAutoRetry = (attempt: number): boolean =>
         attempt <= MAX_AUTO_RETRIES && retryDelayElapsedMs < MAX_AUTO_RETRY_WAIT_MS
 
-      // Agent Teams 追踪
-      const startedTaskIds = new Set<string>()
-      const completedTaskIds = new Set<string>()
-      const taskNotificationSummaries: TaskNotificationSummary[] = []
-      /** 捕获到的 SDK session ID（用于 auto-resume 的 inbox 查找） */
+      /** 捕获到的 SDK session ID（用于 resume / recovery） */
       let capturedSdkSessionId = existingSdkSessionId
-      /** Watchdog 触发标记（死锁被检测到时设为 true） */
-      let abortedByWatchdog = false
       const canTryThinkingSignatureRecovery = (attempt: number): boolean =>
         !thinkingSignatureRecoveryAttempted &&
         canAutoRetry(attempt) &&
@@ -1686,41 +1667,8 @@ export class AgentOrchestrator {
           const queryIterable = this.adapter.query(queryOptions)
           const queryIterator = queryIterable[Symbol.asyncIterator]()
 
-          // Watchdog 控制器（用于死锁检测后中断事件循环）
-          const loopAbort = new AbortController()
-          abortedByWatchdog = false
-
-          // 启动 Watchdog（每 5 秒检查是否所有 Worker 已 idle 但 Task 工具仍在等待）
-          const WATCHDOG_INTERVAL_MS = 5_000
-          const watchdogDone = (async () => {
-            while (!loopAbort.signal.aborted) {
-              await timerWithAbort(WATCHDOG_INTERVAL_MS, loopAbort.signal)
-              if (loopAbort.signal.aborted) break
-
-              // 仅在有 Worker 启动且未全部完成时检查
-              if (
-                startedTaskIds.size > 0 &&
-                completedTaskIds.size < startedTaskIds.size &&
-                capturedSdkSessionId
-              ) {
-                const allIdle = await areAllWorkersIdle(capturedSdkSessionId, startedTaskIds.size)
-                if (allIdle) {
-                  console.log(
-                    `[Agent 编排] Watchdog: 所有 ${startedTaskIds.size} 个 Worker 已 idle，` +
-                    `Task 工具仍在等待 — 中断以触发 auto-resume`,
-                  )
-                  abortedByWatchdog = true
-                  loopAbort.abort()
-                  break
-                }
-              }
-            }
-          })()
-
-          // 手动事件循环：Promise.race（SDKMessage vs Watchdog 中断）
+          // 手动事件循环：Promise.race（SDKMessage vs result drain timeout）
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
-          // Teams 活跃时延迟 result 消息，避免前端提前标记 teammates 为 stopped
-          let deferredResultMessage: SDKMessage | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
           // result 收到后的安全超时：adapter 层 channel.close() 应让 iterator 自然关闭，
@@ -1728,19 +1676,13 @@ export class AgentOrchestrator {
           let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
           const RESULT_DRAIN_TIMEOUT_MS = 2_000
 
-          while (!loopAbort.signal.aborted) {
+          while (true) {
             if (!pendingNext) {
               pendingNext = queryIterator.next()
             }
 
-            const abortPromise = new Promise<null>((resolve) => {
-              if (loopAbort.signal.aborted) { resolve(null); return }
-              loopAbort.signal.addEventListener('abort', () => resolve(null), { once: true })
-            })
-
             const racePromises: Array<Promise<{ kind: string; result: IteratorResult<SDKMessage> | null }>> = [
               pendingNext.then((r) => ({ kind: 'event' as const, result: r })),
-              abortPromise.then(() => ({ kind: 'abort' as const, result: null })),
             ]
             if (drainTimeoutPromise) {
               racePromises.push(drainTimeoutPromise.then(() => ({ kind: 'drain_timeout' as const, result: null })))
@@ -1754,19 +1696,6 @@ export class AgentOrchestrator {
               pendingNext?.catch(() => {})
               pendingNext = null
               queryIterator.return?.(undefined as never).catch(() => {})
-              break
-            }
-
-            if (raceResult.kind === 'abort') {
-              // Watchdog 触发：终止事件循环，但不中止 SDK 会话
-              pendingNext?.catch(() => {})
-              pendingNext = null
-              const returnPromise = queryIterator.return?.(undefined as never).catch(() => {})
-              await Promise.race([
-                returnPromise,
-                new Promise<void>((r) => setTimeout(r, 1000)),
-              ])
-              console.log(`[Agent 编排] Watchdog 中断：已退出事件循环`)
               break
             }
 
@@ -1904,9 +1833,6 @@ export class AgentOrchestrator {
 
                 // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
                 this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
-                // 清理 Watchdog
-                if (!loopAbort.signal.aborted) loopAbort.abort()
-                await watchdogDone
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
                 callbacks.onComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
                 return
@@ -1980,45 +1906,11 @@ export class AgentOrchestrator {
               }
             }
 
-            // Agent Teams: 当有 teammate 活跃时，延迟 result 消息
             if (!shouldEmit) {
               // 跳过 SDK 内部 user 消息的前端推送
-            } else if (msg.type === 'result' && startedTaskIds.size > 0) {
-              console.log(`[Agent 编排] 延迟 result 消息（${startedTaskIds.size} 个 teammate 活跃）`)
-              deferredResultMessage = msg
             } else {
               this.eventBus.emit(sessionId, { kind: 'sdk_message', message: msg })
             }
-
-            // Agent Teams: 追踪 teammate 任务状态（从 system 消息中）
-            if (msg.type === 'system') {
-              const sysMsg = msg as import('@proma/shared').SDKSystemMessage
-              if (
-                sysMsg.subtype === 'task_started' &&
-                sysMsg.task_id &&
-                (sysMsg.task_type === 'local_agent' || sysMsg.task_type === 'remote_agent')
-              ) {
-                startedTaskIds.add(sysMsg.task_id)
-              } else if (sysMsg.subtype === 'task_notification' && sysMsg.task_id) {
-                completedTaskIds.add(sysMsg.task_id)
-                if (sysMsg.summary) {
-                  taskNotificationSummaries.push({
-                    taskId: sysMsg.task_id,
-                    status: (sysMsg.status as 'completed' | 'failed' | 'stopped') || 'completed',
-                    summary: sysMsg.summary,
-                    outputFile: sysMsg.output_file,
-                  })
-                }
-              }
-            }
-          }
-
-          // 清理 Watchdog（事件循环正常结束或被 Watchdog 中断）
-          if (!loopAbort.signal.aborted) loopAbort.abort()
-          await watchdogDone
-
-          if (abortedByWatchdog) {
-            console.log(`[Agent 编排] Watchdog 中断了事件循环，将触发 auto-resume`)
           }
 
           // 错误 break 触发了 → 继续循环
@@ -2036,87 +1928,7 @@ export class AgentOrchestrator {
           // 15. 持久化 assistant 消息
           this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
 
-          // 16. Agent Teams Auto-Resume：teammates 完成后自动收集结果并汇总
-          console.log(`[Agent 编排] Auto-resume 条件检查: startedTasks=${startedTaskIds.size}, sdkSession=${!!capturedSdkSessionId}, active=${this.activeSessions.has(sessionId)}`)
-          if (startedTaskIds.size > 0 && capturedSdkSessionId && this.activeSessions.has(sessionId)) {
-            console.log(`[Agent 编排] Agent Teams 检测到 ${startedTaskIds.size} 个 teammate，启动 auto-resume`)
-
-            // 通知前端：正在收集 teammate 结果
-            this.eventBus.emit(sessionId, {
-              kind: 'proma_event',
-              event: { type: 'waiting_resume', message: '正在收集 teammate 工作结果...' },
-            })
-
-            // 构造 resume prompt（优先 inbox，fallback 到 summaries）
-            let resumePrompt: string | null = null
-
-            const inboxInfo = await findTeamLeadInboxPath(capturedSdkSessionId)
-            console.log(`[Agent 编排] Inbox 查找结果: ${inboxInfo ? `team=${inboxInfo.teamName}` : '未找到 team'}`)
-            if (inboxInfo) {
-              const unreadMessages = await pollInboxWithRetry(
-                inboxInfo.inboxPath,
-                INBOX_RETRY_CONFIG,
-              )
-              if (unreadMessages.length > 0) {
-                await markInboxAsRead(inboxInfo.inboxPath)
-                resumePrompt = formatInboxPrompt(unreadMessages)
-                console.log(`[Agent 编排] 使用 ${unreadMessages.length} 条 inbox 消息构建 resume prompt`)
-              }
-            }
-
-            // Fallback：用 task_notification summaries
-            if (!resumePrompt && taskNotificationSummaries.length > 0) {
-              console.log(`[Agent 编排] Inbox 为空，使用 ${taskNotificationSummaries.length} 条 task summaries 作为 fallback`)
-              resumePrompt = formatSummaryFallbackPrompt(taskNotificationSummaries)
-            }
-
-            if (resumePrompt && this.activeSessions.has(sessionId)) {
-              const resumeMessageId = randomUUID()
-              this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'resume_start', messageId: resumeMessageId } })
-
-              // 创建 resume 查询（使用相同的 SDK session ID）
-              const resumeMessages: SDKMessage[] = []
-
-              try {
-                const resumeOptions: ClaudeAgentQueryOptions = {
-                  ...queryOptions,
-                  prompt: resumePrompt,
-                  resumeSessionId: capturedSdkSessionId,
-                }
-
-                for await (const resumeMsg of this.adapter.query(resumeOptions)) {
-                  if (!this.activeSessions.has(sessionId)) break
-
-                  // 跳过 replay 消息，仅累积新产生的消息
-                  const resumeMsgRecord = resumeMsg as Record<string, unknown>
-                  if ((resumeMsg.type === 'assistant' || resumeMsg.type === 'user') && !resumeMsgRecord.isReplay) {
-                    resumeMessages.push(resumeMsg)
-                  } else if (resumeMsg.type === 'system' && (resumeMsg as import('@proma/shared').SDKSystemMessage).subtype === 'compact_boundary') {
-                    resumeMessages.push(resumeMsg)
-                  }
-                  this.eventBus.emit(sessionId, { kind: 'sdk_message', message: resumeMsg })
-                }
-
-                // 持久化 resume 助手消息
-                if (resumeMessages.length > 0) {
-                  this.persistSDKMessages(sessionId, resumeMessages, Date.now() - queryStartedAt)
-                }
-
-                console.log(`[Agent 编排] Auto-resume 完成`)
-              } catch (resumeError) {
-                console.error('[Agent 编排] Auto-resume 失败:', resumeError)
-              }
-            } else if (!resumePrompt) {
-              console.log('[Agent 编排] 无可用的 resume 内容（inbox 和 summaries 均为空）')
-            }
-          }
           try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
-
-          // 发射延迟的 result 消息（auto-resume 已完成，前端可安全处理）
-          if (deferredResultMessage) {
-            console.log(`[Agent 编排] 发射延迟的 result 消息`)
-            this.eventBus.emit(sessionId, { kind: 'sdk_message', message: deferredResultMessage })
-          }
 
           // Plan 模式：Agent 完成规划后注入"接受计划"建议
           if (initialPermissionMode === 'plan' && planModeEntered && this.activeSessions.has(sessionId)) {

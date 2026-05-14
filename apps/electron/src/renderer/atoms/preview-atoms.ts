@@ -17,6 +17,8 @@ export interface PreviewFile {
   gitRoot?: string
   /** true = 纯文件预览（不显示 diff 控件），false/undefined = diff 模式 */
   previewOnly?: boolean
+  /** true = 预览只读，不允许从预览面板写回临时/源文件 */
+  readOnly?: boolean
   /** 候选基础目录（用于相对路径解析） */
   basePaths?: string[]
 }

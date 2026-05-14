@@ -160,6 +160,8 @@ export interface DetachedPreviewWindowInput {
   gitRoot?: string
   /** true = 纯文件预览，false/undefined = diff 模式 */
   previewOnly?: boolean
+  /** true = 预览只读，不允许从预览面板写回临时/源文件 */
+  readOnly?: boolean
   /** 候选基础目录（previewOnly 模式下用于路径解析） */
   basePaths?: string[]
   /** 窗口标题 */

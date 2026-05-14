@@ -178,7 +178,6 @@ bun run generate:icons    # 生成应用图标
 | `agent-ask-user-service.ts` | Agent 用户交互：AskUser 请求处理 |
 | `agent-exit-plan-service.ts` | Agent 退出计划服务 |
 | `agent-workspace-manager.ts` | 工作区管理（16KB）：MCP Server 配置、Skills 配置、工作区 CRUD |
-| `agent-team-reader.ts` | Agent 团队协作：团队配置读取 |
 | `chat-service.ts` | Chat 流式调用编排（20KB）：Provider 适配器集成、消息持久化、AbortController |
 | `conversation-manager.ts` | 对话管理（13KB）：对话 CRUD、JSONL 消息存储、置顶、上下文分割 |
 | `channel-manager.ts` | 渠道管理（16KB）：渠道 CRUD、API Key AES-256-GCM 加密（safeStorage）、连接测试、模型获取 |

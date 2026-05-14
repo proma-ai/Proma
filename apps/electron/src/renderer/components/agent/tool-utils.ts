@@ -37,8 +37,6 @@ import {
   Send,
   Server,
   Terminal,
-  UserMinus,
-  Users,
   Wrench,
   Zap,
 } from 'lucide-react'
@@ -62,8 +60,6 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   TaskUpdate: ListChecks,
   TaskGet: FileSearch,
   TaskList: List,
-  TeamCreate: Users,
-  TeamDelete: UserMinus,
   Agent: Bot,
   EnterPlanMode: Map,
   ExitPlanMode: MapPinOff,
@@ -113,8 +109,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   TaskUpdate: '更新任务',
   TaskGet: '加载任务',
   TaskList: '任务列表',
-  TeamCreate: '创建 Agent Teams',
-  TeamDelete: '删除 Agent Teams',
   Agent: 'Agent',
   EnterPlanMode: '正在生成计划',
   ExitPlanMode: '正在退出计划',
@@ -287,17 +281,6 @@ export function getInputSummary(
         return `${todos.length} 项待办`
       }
       return null
-    }
-
-    case 'TeamCreate': {
-      const parts: string[] = []
-      if (typeof input.team_name === 'string') {
-        parts.push(input.team_name)
-      }
-      if (typeof input.description === 'string') {
-        parts.push(input.description)
-      }
-      return parts.length > 0 ? parts.join(' · ') : null
     }
 
     case 'Agent': {

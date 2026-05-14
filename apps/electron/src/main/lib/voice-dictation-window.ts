@@ -11,7 +11,6 @@ import { getSettings, updateSettings } from './settings-service'
 import { captureVoiceDictationTarget } from './text-output-service'
 
 let voiceDictationWindow: BrowserWindow | null = null
-let voiceDictationTargetIsProma = false
 let voiceDictationTargetCaptured = false
 let suppressMainWindowActivateUntil = 0
 let voiceDictationWindowReady = false
@@ -197,7 +196,7 @@ function flushPendingShowIfReady(): void {
 }
 
 function captureTargetForNextSession(targetIsProma?: boolean): void {
-  voiceDictationTargetIsProma = captureVoiceDictationTarget(targetIsProma)
+  captureVoiceDictationTarget(targetIsProma)
   voiceDictationTargetCaptured = true
 }
 
@@ -230,17 +229,12 @@ export function resizeVoiceDictationWindow(height: number): void {
 }
 
 export function hideVoiceDictationWindow(): void {
-  const shouldRestoreExternalFocus = voiceDictationTargetCaptured && !voiceDictationTargetIsProma
   flushPendingVoiceDictationPositionSave()
   suppressPromaActivationBriefly()
   if (voiceDictationWindow && !voiceDictationWindow.isDestroyed() && voiceDictationWindow.isVisible()) {
     voiceDictationWindow.hide()
   }
-  if (process.platform === 'darwin' && shouldRestoreExternalFocus) {
-    app.hide()
-  }
   voiceDictationTargetCaptured = false
-  voiceDictationTargetIsProma = false
 }
 
 function suppressPromaActivationBriefly(): void {

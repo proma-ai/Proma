@@ -754,6 +754,7 @@ function isNewerVersion(a: string, b: string): boolean {
 
 interface WorkspaceConfig {
   attachedDirectories?: string[]
+  attachedFiles?: string[]
 }
 
 function getWorkspaceConfigPath(workspaceSlug: string): string {
@@ -773,6 +774,9 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
     return {
       attachedDirectories: Array.isArray(data.attachedDirectories)
         ? data.attachedDirectories.filter((dir): dir is string => typeof dir === 'string')
+        : undefined,
+      attachedFiles: Array.isArray(data.attachedFiles)
+        ? data.attachedFiles.filter((file): file is string => typeof file === 'string')
         : undefined,
     }
   } catch {
@@ -812,5 +816,35 @@ export function detachWorkspaceDirectory(workspaceSlug: string, directoryPath: s
   const updated = existing.filter((d) => d !== directoryPath)
   writeWorkspaceConfig(workspaceSlug, { ...config, attachedDirectories: updated })
   console.log(`[Agent 工作区] 已移除工作区目录: ${directoryPath} ← ${workspaceSlug}`)
+  return updated
+}
+
+// ===== 工作区级附加文件管理 =====
+
+export function getWorkspaceAttachedFiles(workspaceSlug: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  return config.attachedFiles ?? []
+}
+
+export function attachWorkspaceFile(workspaceSlug: string, filePath: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const existing = config.attachedFiles ?? []
+
+  if (existing.includes(filePath)) {
+    return existing
+  }
+
+  const updated = [...existing, filePath]
+  writeWorkspaceConfig(workspaceSlug, { ...config, attachedFiles: updated })
+  console.log(`[Agent 工作区] 已附加工作区文件: ${filePath} → ${workspaceSlug}`)
+  return updated
+}
+
+export function detachWorkspaceFile(workspaceSlug: string, filePath: string): string[] {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const existing = config.attachedFiles ?? []
+  const updated = existing.filter((f) => f !== filePath)
+  writeWorkspaceConfig(workspaceSlug, { ...config, attachedFiles: updated })
+  console.log(`[Agent 工作区] 已移除工作区文件: ${filePath} ← ${workspaceSlug}`)
   return updated
 }

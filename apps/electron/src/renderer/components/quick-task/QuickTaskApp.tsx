@@ -6,7 +6,9 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { fileToBase64 } from '@/lib/file-utils'
+import { fileToBase64, formatFileNames } from '@/lib/file-utils'
+import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { toast } from 'sonner'
 
 /** 任务模式 */
 type TaskMode = 'chat' | 'agent'
@@ -16,7 +18,8 @@ interface QuickAttachment {
   id: string
   filename: string
   mediaType: string
-  base64: string
+  base64?: string
+  sourcePath?: string
   size: number
   previewUrl?: string
 }
@@ -147,8 +150,33 @@ export function QuickTaskApp(): React.ReactElement {
   // 添加文件为附件
   const addFiles = useCallback(async (files: File[]) => {
     const newAttachments: QuickAttachment[] = []
+    const pathBackedFiles: string[] = []
+    const rejectedLargeFiles: string[] = []
+
     for (const file of files) {
       try {
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          const sourcePath = mode === 'agent' ? window.electronAPI.getPathForFile(file) : ''
+          if (!sourcePath) {
+            rejectedLargeFiles.push(file.name)
+            continue
+          }
+
+          const previewUrl = file.type.startsWith('image/')
+            ? URL.createObjectURL(file)
+            : undefined
+          newAttachments.push({
+            id: crypto.randomUUID(),
+            filename: file.name,
+            mediaType: file.type || 'application/octet-stream',
+            sourcePath,
+            size: file.size,
+            previewUrl,
+          })
+          pathBackedFiles.push(file.name)
+          continue
+        }
+
         const base64 = await fileToBase64(file)
         const previewUrl = file.type.startsWith('image/')
           ? URL.createObjectURL(file)
@@ -165,10 +193,18 @@ export function QuickTaskApp(): React.ReactElement {
         console.error('[快速任务] 读取文件失败:', err)
       }
     }
+    if (pathBackedFiles.length > 0) {
+      toast.success(`已将大文件作为附加文件引用：${formatFileNames(pathBackedFiles)}`)
+    }
+    if (rejectedLargeFiles.length > 0) {
+      toast.error(`以下文件超过 100MB，已跳过：${formatFileNames(rejectedLargeFiles)}`, {
+        description: mode === 'chat' ? 'Chat 附件暂不支持大文件。' : '无法取得本地路径，不能作为附加文件引用。',
+      })
+    }
     if (newAttachments.length > 0) {
       setAttachments((prev) => [...prev, ...newAttachments])
     }
-  }, [])
+  }, [mode])
 
   // 移除附件
   const removeAttachment = useCallback((id: string) => {
@@ -217,14 +253,19 @@ export function QuickTaskApp(): React.ReactElement {
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim()
     if ((!trimmed && attachments.length === 0) || isSubmitting) return
+    const pathOnlyAttachments = attachments.filter((att) => att.sourcePath && !att.base64)
+    if (mode === 'chat' && pathOnlyAttachments.length > 0) {
+      toast.error(`Chat 暂不支持大文件附加，已保留在快速任务窗口：${formatFileNames(pathOnlyAttachments.map((att) => att.filename))}`)
+      return
+    }
 
     setIsSubmitting(true)
     try {
       await window.electronAPI.submitQuickTask({
         text: trimmed,
         mode,
-        files: attachments.map(({ filename, mediaType, base64, size }) => ({
-          filename, mediaType, base64, size,
+        files: attachments.map(({ filename, mediaType, base64, sourcePath, size }) => ({
+          filename, mediaType, base64, sourcePath, size,
         })),
       })
       setText('')

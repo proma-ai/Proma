@@ -35,10 +35,13 @@ import {
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   agentAttachedDirectoriesMapAtom,
+  agentAttachedFilesMapAtom,
   workspaceAttachedDirectoriesMapAtom,
+  workspaceAttachedFilesMapAtom,
   unviewedCompletedSessionIdsAtom,
   workingDoneSessionIdsAtom,
   agentSessionPathMapAtom,
+  agentDiffRefreshVersionAtom,
 } from '@/atoms/agent-atoms'
 import {
   notificationsEnabledAtom,
@@ -49,7 +52,7 @@ import {
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
-import { agentDiffRefreshVersionAtom, agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { autoPreviewEnabledAtom, previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
@@ -70,6 +73,20 @@ function getParentDir(path: string): string {
   const idx = normalized.lastIndexOf('/')
   if (idx <= 0) return ''
   return normalized.slice(0, idx)
+}
+
+/** cyrb53: 快速字符串 hash，遍历完整内容避免边缘碰撞 */
+function cyrb53(str: string): string {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16)
 }
 
 function uniqueTruthyPaths(paths: Array<string | null | undefined>): string[] {
@@ -119,10 +136,6 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         return [{ type: 'model_resolved', model: evt.model }]
       case 'permission_mode_changed':
         return [{ type: 'permission_mode_changed', mode: evt.mode }]
-      case 'waiting_resume':
-        return [{ type: 'waiting_resume', message: evt.message }]
-      case 'resume_start':
-        return [{ type: 'resume_start', messageId: evt.messageId }]
       case 'retry': {
         const events: AgentEvent[] = []
         if (evt.status === 'starting' && evt.attempt != null && evt.maxAttempts != null) {
@@ -385,15 +398,21 @@ export function useGlobalAgentListeners(): void {
       const workspaceId = getWorkspaceIdForSession(sid)
       const workspaceFilesPath = await getWorkspaceFilesPathForSession(sid)
       const sessionAttachedDirs = store.get(agentAttachedDirectoriesMapAtom).get(sid) ?? []
+      const sessionAttachedFiles = store.get(agentAttachedFilesMapAtom).get(sid) ?? []
       const workspaceAttachedDirs = workspaceId
         ? (store.get(workspaceAttachedDirectoriesMapAtom).get(workspaceId) ?? [])
+        : []
+      const workspaceAttachedFiles = workspaceId
+        ? (store.get(workspaceAttachedFilesMapAtom).get(workspaceId) ?? [])
         : []
       const basePaths = uniqueTruthyPaths([
         sessionPath,
         workspaceFilesPath,
         dirPath,
         ...sessionAttachedDirs,
+        ...sessionAttachedFiles,
         ...workspaceAttachedDirs,
+        ...workspaceAttachedFiles,
       ])
 
       let previewOnly = true
@@ -533,7 +552,6 @@ export function useGlobalAgentListeners(): void {
                 running: true,
                 content: '',
                 toolActivities: [],
-                teammates: [],
                 model: undefined,
                 // startedAt 留空：让 STREAM_COMPLETE 竞态保护跳过时间戳比较，
                 // 正常流程中 handleSend 已设置了正确的 startedAt，此 fallback 仅在极端情况下触发
@@ -813,7 +831,7 @@ export function useGlobalAgentListeners(): void {
           map.set(data.sessionId, {
             ...current,
             running: false,
-            ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+            ...finalizeStreamingActivities(current.toolActivities),
           })
           return map
         })
@@ -987,13 +1005,69 @@ export function useGlobalAgentListeners(): void {
       })
     }, 15_000)
 
-    // 窗口重新聚焦时刷新 diff（在外部编辑器改了文件后切回 Proma）
-    const onWindowFocus = () => {
+    // 窗口重新聚焦时检测当前预览文件是否有外部修改，有变化才刷新
+    /** sessionId:filePath → 内容 hash（用于检测外部编辑器修改） */
+    const fileContentHashMap = new Map<string, string>()
+    const HASH_MAX = 100
+    let focusCheckSeq = 0
+    const bumpDiffRefresh = (sessionId: string) => {
+      store.set(agentDiffRefreshVersionAtom, (prev) => {
+        const m = new Map(prev)
+        m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
+        return m
+      })
+    }
+
+    const onWindowFocus = async () => {
       const activeSessionId = store.get(currentAgentSessionIdAtom)
       if (!activeSessionId) return
-      store.set(agentDiffRefreshVersionAtom, (prev) => {
-        const m = new Map(prev); m.set(activeSessionId, (prev.get(activeSessionId) ?? 0) + 1); return m
-      })
+
+      const previewFile = store.get(previewFileMapAtom).get(activeSessionId)
+      if (!previewFile || previewFile.previewOnly !== true) {
+        bumpDiffRefresh(activeSessionId)
+        return
+      }
+
+      const candidateBasePaths = uniqueTruthyPaths([
+        ...(previewFile.basePaths ?? []),
+        previewFile.dirPath,
+        previewFile.gitRoot,
+        getParentDir(previewFile.filePath),
+        store.get(agentSessionPathMapAtom).get(activeSessionId),
+      ])
+      const hashKey = `${activeSessionId}:${previewFile.filePath}:${candidateBasePaths.join('\u001f')}`
+      const seq = ++focusCheckSeq
+
+      try {
+        const result = await window.electronAPI.resolveAndReadFile(previewFile.filePath, {
+          sessionId: activeSessionId,
+          candidateBasePaths: candidateBasePaths.length > 0 ? candidateBasePaths : undefined,
+        })
+
+        // 丢弃过期结果（快速切换窗口时）
+        if (seq !== focusCheckSeq) return
+
+        const content = result?.content ?? ''
+        // cyrb53 hash：遍历完整内容，避免边缘碰撞
+        const hash = cyrb53(content)
+        const prevHash = fileContentHashMap.get(hashKey)
+
+        if (prevHash === undefined || prevHash !== hash) {
+          // 首次建立 hash 基准时也刷新一次，避免用户离开窗口后首次外部修改被吞掉。
+          bumpDiffRefresh(activeSessionId)
+        }
+        fileContentHashMap.set(hashKey, hash)
+
+        // LRU 淘汰：限制 Map 大小
+        if (fileContentHashMap.size > HASH_MAX) {
+          const oldestKey = fileContentHashMap.keys().next().value
+          if (oldestKey !== undefined) fileContentHashMap.delete(oldestKey)
+        }
+      } catch {
+        // 读取失败时删除旧 hash，并触发一次刷新让预览进入真实失败/空状态。
+        fileContentHashMap.delete(hashKey)
+        bumpDiffRefresh(activeSessionId)
+      }
     }
     window.addEventListener('focus', onWindowFocus)
 

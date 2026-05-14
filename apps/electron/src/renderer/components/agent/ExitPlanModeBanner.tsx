@@ -129,7 +129,7 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       map.set(sessionId, {
         ...current,
         running: false,
-        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+        ...finalizeStreamingActivities(current.toolActivities),
       })
       return map
     })

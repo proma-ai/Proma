@@ -7,10 +7,10 @@
  * - 保存：base64 解码 → 写入文件
  * - 读取：文件 → base64 编码（用于 API 发送）
  * - 删除：单个文件或整个对话附件目录
- * - 文件选择对话框：Electron dialog → 读取选中文件
+ * - 文件选择对话框：Electron dialog → 小文件读取为 base64，大文件返回本地路径引用
  */
 
-import { readFileSync, writeFileSync, unlinkSync, existsSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, existsSync, rmSync, statSync } from 'node:fs'
 import { extname, basename, join, isAbsolute, normalize } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { dialog, BrowserWindow, nativeImage } from 'electron'
@@ -24,7 +24,11 @@ import type {
   AttachmentSaveInput,
   AttachmentSaveResult,
   FileDialogResult,
+  FileDialogFile,
+  FileDialogLargeFile,
+  FileDialogSkippedFile,
 } from '@proma/shared'
+import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
 
 /** 支持的图片 MIME 类型 */
 const IMAGE_MIME_TYPES = new Set([
@@ -175,6 +179,12 @@ export function getMimeType(ext: string): string {
 export function saveAttachment(input: AttachmentSaveInput): AttachmentSaveResult {
   const { conversationId, filename, mediaType, data } = input
 
+  // 防御性检查：base64 数据量不应超过 100MB 限制
+  // base64 字符串长度 × 0.75 ≈ 原始字节数
+  if (data.length * 0.75 > MAX_ATTACHMENT_SIZE) {
+    throw new Error(`文件 ${filename} 超过 100MB 大小限制，无法保存`)
+  }
+
   // 确保目录存在
   const dir = getConversationAttachmentsDir(conversationId)
 
@@ -276,7 +286,7 @@ export function deleteConversationAttachments(conversationId: string): void {
  * 打开文件选择对话框
  *
  * 弹出 Electron 文件选择对话框，支持多选，
- * 读取选中的文件并返回 base64 编码数据。
+ * 读取选中的小文件并返回 base64 编码数据；超过内存导入上限的大文件仅返回路径。
  *
  * @returns 选中的文件列表
  */
@@ -296,20 +306,65 @@ export async function openFileDialog(): Promise<FileDialogResult> {
     return { files: [] }
   }
 
-  const files = result.filePaths.map((filePath) => {
-    const buffer = readFileSync(filePath)
+  const files: FileDialogFile[] = []
+  const largeFiles: FileDialogLargeFile[] = []
+  const skippedFiles: FileDialogSkippedFile[] = []
+
+  for (const filePath of result.filePaths) {
     const filename = basename(filePath)
     const ext = extname(filePath)
     const mediaType = getMimeType(ext)
 
-    return {
-      filename,
-      mediaType,
-      data: buffer.toString('base64'),
-      size: buffer.length,
+    let fileSize: number
+    try {
+      const fileStat = statSync(filePath)
+      if (!fileStat.isFile()) {
+        skippedFiles.push({
+          filename,
+          mediaType,
+          path: filePath,
+          reason: 'unreadable',
+          message: '不是普通文件',
+        })
+        continue
+      }
+      fileSize = fileStat.size
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法获取文件大小'
+      console.warn(`[附件服务] 无法获取文件大小，跳过: ${filePath}`, error)
+      skippedFiles.push({ filename, mediaType, path: filePath, reason: 'unreadable', message })
+      continue
     }
-  })
 
-  console.log(`[附件服务] 文件对话框选择了 ${files.length} 个文件`)
-  return { files }
+    if (fileSize > MAX_ATTACHMENT_SIZE) {
+      largeFiles.push({
+        filename,
+        mediaType,
+        size: fileSize,
+        path: filePath,
+      })
+      continue
+    }
+
+    try {
+      const buffer = readFileSync(filePath)
+      files.push({
+        filename,
+        mediaType,
+        data: buffer.toString('base64'),
+        size: buffer.length,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '读取文件失败'
+      console.warn(`[附件服务] 读取文件失败，跳过: ${filePath}`, error)
+      skippedFiles.push({ filename, mediaType, size: fileSize, path: filePath, reason: 'unreadable', message })
+    }
+  }
+
+  console.log(`[附件服务] 文件对话框选择了 ${files.length} 个内存附件，${largeFiles.length} 个大文件引用，${skippedFiles.length} 个跳过`)
+  return {
+    files,
+    ...(largeFiles.length > 0 && { largeFiles }),
+    ...(skippedFiles.length > 0 && { skippedFiles }),
+  }
 }

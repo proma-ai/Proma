@@ -9,6 +9,9 @@ import type { ProviderType } from './channel'
 
 // ===== 附件相关 =====
 
+/** 附件文件大小上限：100MB */
+export const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024
+
 /** 文件附件 */
 export interface FileAttachment {
   /** 附件唯一标识 */
@@ -45,13 +48,35 @@ export interface AttachmentSaveResult {
 
 /** 文件选择对话框结果 */
 export interface FileDialogResult {
-  /** 选择的文件列表 */
-  files: Array<{
-    filename: string
-    mediaType: string
-    data: string
-    size: number
-  }>
+  /** 已读取为 base64 的小文件列表 */
+  files: FileDialogFile[]
+  /** 超过内存导入上限的大文件，仅返回路径，供 Agent 作为附加文件引用 */
+  largeFiles?: FileDialogLargeFile[]
+  /** 无法读取或无法识别的文件 */
+  skippedFiles?: FileDialogSkippedFile[]
+}
+
+export interface FileDialogFile {
+  filename: string
+  mediaType: string
+  data: string
+  size: number
+}
+
+export interface FileDialogLargeFile {
+  filename: string
+  mediaType: string
+  size: number
+  path: string
+}
+
+export interface FileDialogSkippedFile {
+  filename: string
+  mediaType?: string
+  size?: number
+  path?: string
+  reason: 'unreadable'
+  message?: string
 }
 
 // ===== 工具调用相关 =====

@@ -15,7 +15,7 @@ import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { cp, readdir } from 'node:fs/promises'
 import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS } from '@proma/shared'
+import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import type {
   AgentSendInput,
   AgentGenerateTitleInput,
@@ -324,6 +324,14 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
     usedPaths.add(targetPath)
 
     mkdirSync(dirname(targetPath), { recursive: true })
+
+    // 防御性检查：base64 字符串长度估算是否超 100MB 限制
+    // base64 编码膨胀率约 4/3，data.length * 0.75 ≈ 原始字节数
+    if (file.data.length * 0.75 > MAX_ATTACHMENT_SIZE) {
+      console.warn(`[Agent 服务] 文件超过 100MB 限制，跳过: ${file.filename} (预估 ${(file.data.length * 0.75 / 1024 / 1024).toFixed(1)}MB)`)
+      continue
+    }
+
     const buffer = Buffer.from(file.data, 'base64')
     writeFileSync(targetPath, buffer)
 
@@ -364,6 +372,12 @@ export function saveFilesToWorkspaceFiles(input: AgentSaveWorkspaceFilesInput): 
     usedPaths.add(targetPath)
 
     mkdirSync(dirname(targetPath), { recursive: true })
+
+    if (file.data.length * 0.75 > MAX_ATTACHMENT_SIZE) {
+      console.warn(`[Agent 服务] 工作区文件超过 100MB 限制，跳过: ${file.filename} (预估 ${(file.data.length * 0.75 / 1024 / 1024).toFixed(1)}MB)`)
+      continue
+    }
+
     const buffer = Buffer.from(file.data, 'base64')
     writeFileSync(targetPath, buffer)
 

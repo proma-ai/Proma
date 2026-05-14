@@ -25,6 +25,7 @@ function makeSignature(input: DetachedPreviewWindowInput): string {
     dirPath: input.dirPath,
     gitRoot: input.gitRoot,
     previewOnly: input.previewOnly === true,
+    readOnly: input.readOnly === true,
     basePaths: input.basePaths ?? [],
   })
 }

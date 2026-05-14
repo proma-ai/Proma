@@ -105,7 +105,7 @@ export function ConversationScrollButton({
   return (
     <Button
       className={cn(
-        'absolute bottom-[26px] right-[55px] rounded-[17px] size-9',
+        'absolute bottom-[26px] left-1/2 -translate-x-1/2 rounded-[17px] size-9',
         'border-[0.5px] border-border',
         className
       )}

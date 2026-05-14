@@ -39,8 +39,10 @@ import {
 } from '@/hooks/useConversationSettings'
 import { FeishuNotifyToggle } from './FeishuNotifyToggle'
 import { cn } from '@/lib/utils'
-import { fileToBase64 } from '@/lib/file-utils'
+import { fileToBase64, formatFileNames } from '@/lib/file-utils'
+import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
+import { toast } from 'sonner'
 
 interface ChatInputProps {
   /** 当前对话 ID */
@@ -92,7 +94,22 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
    * File → base64 → saveAttachment IPC → 创建 blob URL → 添加到 atom
    */
   const addFilesAsAttachments = React.useCallback(async (files: File[]): Promise<void> => {
+    const oversized: string[] = []
+    const okFiles: File[] = []
+
     for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        oversized.push(file.name)
+      } else {
+        okFiles.push(file)
+      }
+    }
+
+    if (oversized.length > 0) {
+      toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(oversized)}`)
+    }
+
+    for (const file of okFiles) {
       try {
         const base64 = await fileToBase64(file)
 
@@ -128,9 +145,24 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   const handleOpenFileDialog = React.useCallback(async (): Promise<void> => {
     try {
       const result = await window.electronAPI.openFileDialog()
-      if (result.files.length === 0) return
+      const largeFiles = result.largeFiles ?? []
+      const skippedFiles = result.skippedFiles ?? []
+      if (result.files.length === 0 && largeFiles.length === 0 && skippedFiles.length === 0) return
+
+      if (largeFiles.length > 0) {
+        toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(largeFiles.map((f) => f.filename))}`)
+      }
+      if (skippedFiles.length > 0) {
+        toast.warning(`以下文件无法读取，已跳过：${formatFileNames(skippedFiles.map((f) => f.filename))}`)
+      }
+
+      const oversized: string[] = []
 
       for (const fileInfo of result.files) {
+        if (fileInfo.size > MAX_ATTACHMENT_SIZE) {
+          oversized.push(fileInfo.filename)
+          continue
+        }
         const previewUrl = fileInfo.mediaType.startsWith('image/')
           ? `data:${fileInfo.mediaType};base64,${fileInfo.data}`
           : undefined
@@ -150,6 +182,10 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         window.__pendingAttachmentData.set(pendingAttachment.id, fileInfo.data)
 
         setPendingAttachments((prev) => [...prev, pendingAttachment])
+      }
+
+      if (oversized.length > 0) {
+        toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(oversized)}`)
       }
     } catch (error) {
       console.error('[ChatInput] 文件选择对话框失败:', error)

@@ -11,7 +11,6 @@ import { Pencil, Check, X, PanelRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentSessionsAtom, agentSidePanelOpenAtom, workspaceFilesVersionAtom } from '@/atoms/agent-atoms'
-import { previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { registerShortcut } from '@/lib/shortcut-registry'
 
@@ -32,9 +31,6 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   // 文件面板切换状态（全局共享）
   const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
   const filesVersion = useAtomValue(workspaceFilesVersionAtom)
-  const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
-  const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
-  const previewOpen = previewOpenMap.get(sessionId) ?? false
   const hasFileChanges = filesVersion > 0
 
   const togglePanel = React.useCallback(() => {
@@ -132,8 +128,8 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
               <Pencil className="size-3.5" />
             </button>
           </div>
-          {/* 文件面板打开按钮（面板关闭或预览面板打开时显示） */}
-          {(!isPanelOpen || previewOpen) && (
+          {/* 文件面板打开按钮（面板关闭时显示） */}
+          {!isPanelOpen && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

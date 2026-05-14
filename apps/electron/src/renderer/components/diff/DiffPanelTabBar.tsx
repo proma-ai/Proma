@@ -11,10 +11,17 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { agentDiffUnseenChangesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 
+type DiffPanelTab = 'files' | 'changes'
+
 interface DiffPanelTabBarProps {
-  activeTab: 'files' | 'changes'
-  onTabChange: (tab: 'files' | 'changes') => void
+  activeTab: DiffPanelTab
+  onTabChange: (tab: DiffPanelTab) => void
   onClose?: () => void
+}
+
+interface PreviousTabState {
+  sessionId: string | null
+  activeTab: DiffPanelTab
 }
 
 export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTabBarProps): React.ReactElement {
@@ -22,12 +29,32 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const unseenChanges = unseenMap.get(currentSessionId ?? '') ?? false
+  const prevTabStateRef = React.useRef<PreviousTabState>({ sessionId: currentSessionId, activeTab })
+
+  const clearUnseen = React.useCallback((sessionId = currentSessionId) => {
+    if (!sessionId) return
+    setUnseenMap((prev) => {
+      if (prev.get(sessionId) === false) return prev
+      const m = new Map(prev)
+      m.set(sessionId, false)
+      return m
+    })
+  }, [currentSessionId, setUnseenMap])
+
+  // 同一会话内，从「文件改动」切走时，说明用户已经看过当前改动。
+  React.useEffect(() => {
+    const previous = prevTabStateRef.current
+    if (previous.sessionId === currentSessionId && previous.activeTab === 'changes' && activeTab !== 'changes') {
+      clearUnseen(currentSessionId)
+    }
+    prevTabStateRef.current = { sessionId: currentSessionId, activeTab }
+  }, [activeTab, currentSessionId, clearUnseen])
 
   const handleChangesClick = () => {
-    if (currentSessionId) {
-      setUnseenMap((prev) => { const m = new Map(prev); m.set(currentSessionId, false); return m })
+    clearUnseen()
+    if (activeTab !== 'changes') {
+      onTabChange('changes')
     }
-    onTabChange('changes')
   }
 
   return (

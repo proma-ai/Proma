@@ -14,7 +14,9 @@ import { MessageAction } from '@/components/ai-elements/message'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, FileAttachment } from '@proma/shared'
-import { fileToBase64 } from '@/lib/file-utils'
+import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { fileToBase64, formatFileNames } from '@/lib/file-utils'
+import { toast } from 'sonner'
 
 interface NewInlineAttachment {
   filename: string
@@ -121,7 +123,26 @@ export function InlineEditForm({ message, onSubmit, onCancel }: InlineEditFormPr
   const handleSelectAttachments = React.useCallback(async (): Promise<void> => {
     try {
       const result = await window.electronAPI.openFileDialog()
-      addPendingAttachments(result.files.map((file) => ({
+      const largeFiles = result.largeFiles ?? []
+      const skippedFiles = result.skippedFiles ?? []
+      if (largeFiles.length > 0) {
+        toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(largeFiles.map((file) => file.filename))}`)
+      }
+      if (skippedFiles.length > 0) {
+        toast.warning(`以下文件无法读取，已跳过：${formatFileNames(skippedFiles.map((file) => file.filename))}`)
+      }
+      const oversized: string[] = []
+      const okFiles = result.files.filter((file) => {
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          oversized.push(file.filename)
+          return false
+        }
+        return true
+      })
+      if (oversized.length > 0) {
+        toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(oversized)}`)
+      }
+      addPendingAttachments(okFiles.map((file) => ({
         filename: file.filename,
         mediaType: file.mediaType,
         size: file.size,
@@ -133,8 +154,20 @@ export function InlineEditForm({ message, onSubmit, onCancel }: InlineEditFormPr
   }, [addPendingAttachments])
 
   const handleDropFiles = React.useCallback(async (files: File[]): Promise<void> => {
+    const oversized: string[] = []
+    const okFiles = files.filter((file) => {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        oversized.push(file.name)
+        return false
+      }
+      return true
+    })
+    if (oversized.length > 0) {
+      toast.error(`以下文件超过 100MB，Chat 附件暂不支持，已跳过：${formatFileNames(oversized)}`)
+    }
+
     const converted: NewInlineAttachment[] = []
-    for (const file of files) {
+    for (const file of okFiles) {
       try {
         const base64 = await fileToBase64(file)
         converted.push({

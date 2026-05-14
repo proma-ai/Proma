@@ -12,7 +12,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 
 - **Chat mode**: multi-model conversations, attachments, image input, Markdown / Mermaid / KaTeX / code highlighting, parallel conversations, system prompts, and context controls.
 - **Agent mode**: general-purpose Agent powered by `@anthropic-ai/claude-agent-sdk`, with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions.
-- **Agent Teams / Tasks**: complex tasks can be split into multiple sub-agents or tasks, with the right-side panel showing team progress and task output.
+- **SubAgents / Tasks**: complex tasks can be delegated through the Claude Agent SDK Agent tool, with sub-agent calls and results shown in the message stream.
 - **Skills & MCP**: each workspace can manage its own Skills, MCP servers, and workspace files.
 - **Remote bots**: Lark / Feishu bot bridging is supported, with DingTalk and WeChat bridge entry points also present in the app.
 - **Memory and tools**: Chat and Agent can share memory, with web search, built-in Chat tools, and Agent recommendation helpers.
@@ -261,6 +261,16 @@ Before opening a PR, please check:
 Proma currently has a PR bounty program. You can leave your email in the PR description for follow-up.
 
 ![Proma PR Bounty](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=ErlichLiu%2FProma&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ErlichLiu/Proma&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ErlichLiu/Proma&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ErlichLiu/Proma&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## Credits
 

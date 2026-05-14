@@ -149,7 +149,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       map.set(sessionId, {
         ...current,
         running: false,
-        ...finalizeStreamingActivities(current.toolActivities, current.teammates),
+        ...finalizeStreamingActivities(current.toolActivities),
       })
       return map
     })

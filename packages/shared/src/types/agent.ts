@@ -277,7 +277,7 @@ export interface SDKToolProgressMessage {
   tool_name: string
   parent_tool_use_id: string | null
   elapsed_time_seconds?: number
-  /** Agent Teams: 所属 teammate 任务 ID */
+  /** 所属 SDK 子任务 / SubAgent 任务 ID */
   task_id?: string
   session_id?: string
 }
@@ -390,7 +390,7 @@ export interface AgentEventUsage {
   contextWindow?: number
 }
 
-/** Teammate 任务用量统计 */
+/** SDK 子任务 / SubAgent 用量统计 */
 export interface TaskUsage {
   /** 总 Token 数 */
   totalTokens: number
@@ -495,9 +495,6 @@ export type AgentEvent =
   | { type: 'prompt_suggestion'; suggestion: string }
   // 模型确认（SDK 确认实际使用的模型）
   | { type: 'model_resolved'; model: string }
-  // Auto-Resume（Teams 完成后自动收集结果）
-  | { type: 'waiting_resume'; message: string }
-  | { type: 'resume_start'; messageId: string }
   // 权限模式变更（Plan → bypassPermissions 等）
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
 
@@ -514,8 +511,6 @@ export type PromaEvent =
   | { type: 'enter_plan_mode'; sessionId: string }
   | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
   | { type: 'model_resolved'; model: string }
-  | { type: 'waiting_resume'; message: string }
-  | { type: 'resume_start'; messageId: string }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
 
 
@@ -549,6 +544,8 @@ export interface AgentSessionMeta {
   archived?: boolean
   /** 附加的外部目录路径列表（绝对路径，作为 SDK additionalDirectories 传递） */
   attachedDirectories?: string[]
+  /** 附加的外部文件路径列表（绝对路径，发送时以父目录作为 SDK additionalDirectories） */
+  attachedFiles?: string[]
   /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中，首次 resume 后清除） */
   forkSourceDir?: string
   /** 分叉来源：源会话的 SDK session ID（用于 rewind 时读取源会话的 file-history-snapshot 和备份文件） */
@@ -909,6 +906,8 @@ export interface FileEntry {
   path: string
   /** 是否为目录 */
   isDirectory: boolean
+  /** 文件大小（字节）。目录为空 */
+  size?: number
   /** 子条目（懒加载，仅目录展开时填充） */
   children?: FileEntry[]
 }
@@ -976,12 +975,28 @@ export interface AgentAttachDirectoryInput {
   directoryPath: string
 }
 
+/** 附加/分离文件的输入参数 */
+export interface AgentAttachFileInput {
+  /** 会话 ID */
+  sessionId: string
+  /** 文件的绝对路径 */
+  filePath: string
+}
+
 /** 工作区级附加/分离目录的输入参数 */
 export interface WorkspaceAttachDirectoryInput {
   /** 工作区 slug */
   workspaceSlug: string
   /** 目录的绝对路径 */
   directoryPath: string
+}
+
+/** 工作区级附加/分离文件的输入参数 */
+export interface WorkspaceAttachFileInput {
+  /** 工作区 slug */
+  workspaceSlug: string
+  /** 文件的绝对路径 */
+  filePath: string
 }
 
 // ===== AskUserQuestion 交互式问答类型 =====
@@ -1119,86 +1134,6 @@ export interface PermissionResponse {
   alwaysAllow: boolean
 }
 
-// ===== Agent Teams 数据类型 =====
-
-/** Team 配置（~/.claude/teams/{name}/config.json） */
-export interface TeamConfig {
-  /** 团队名称 */
-  name: string
-  /** 团队描述 */
-  description?: string
-  /** 创建时间戳 */
-  createdAt: number
-  /** 领导 Agent ID */
-  leadAgentId?: string
-  /** 领导 Agent 的 SDK 会话 ID */
-  leadSessionId?: string
-  /** 团队成员列表 */
-  members: TeamMember[]
-}
-
-/** Team 成员 */
-export interface TeamMember {
-  /** Agent ID */
-  agentId: string
-  /** 显示名称 */
-  name: string
-  /** Agent 类型（如 'general-purpose', 'Explore'） */
-  agentType: string
-  /** 使用的模型 */
-  model?: string
-  /** 颜色标识 */
-  color?: string
-  /** 加入时间戳 */
-  joinedAt?: number
-}
-
-/** 任务项（~/.claude/tasks/{teamName}/） */
-export interface TaskItem {
-  /** 任务 ID */
-  id: string
-  /** 任务标题 */
-  subject: string
-  /** 任务描述 */
-  description?: string
-  /** 进行中的显示文本 */
-  activeForm?: string
-  /** 负责人 Agent 名称 */
-  owner?: string
-  /** 任务状态 */
-  status: 'pending' | 'in_progress' | 'completed'
-  /** 阻塞的任务 ID 列表 */
-  blocks: string[]
-  /** 被阻塞的任务 ID 列表 */
-  blockedBy: string[]
-}
-
-/** 解析后的收件箱消息 */
-export interface ParsedMailboxMessage {
-  /** 发送者名称 */
-  from: string
-  /** 消息文本 */
-  text: string
-  /** 摘要 */
-  summary?: string
-  /** 时间戳 */
-  timestamp?: string
-  /** 解析后的消息类型 */
-  parsedType: 'idle_notification' | 'shutdown_request' | 'shutdown_approved' | 'task_assignment' | 'text'
-}
-
-/** Agent Team 聚合数据（IPC 返回） */
-export interface AgentTeamData {
-  /** 团队名称 */
-  teamName: string
-  /** 团队配置 */
-  team: TeamConfig
-  /** 任务列表 */
-  tasks: TaskItem[]
-  /** 收件箱消息（agent 名称 → 消息列表） */
-  inboxes: Record<string, ParsedMailboxMessage[]>
-}
-
 // ===== IPC 通道常量 =====
 
 /**
@@ -1312,12 +1247,22 @@ export const AGENT_IPC_CHANNELS = {
   ATTACH_DIRECTORY: 'agent:attach-directory',
   /** 移除会话的附加目录 */
   DETACH_DIRECTORY: 'agent:detach-directory',
+  /** 附加外部文件到 Agent 会话 */
+  ATTACH_FILE: 'agent:attach-file',
+  /** 移除会话的附加文件 */
+  DETACH_FILE: 'agent:detach-file',
   /** 附加外部目录到工作区（所有会话共享） */
   ATTACH_WORKSPACE_DIRECTORY: 'agent:attach-workspace-directory',
   /** 移除工作区的附加目录 */
   DETACH_WORKSPACE_DIRECTORY: 'agent:detach-workspace-directory',
+  /** 附加外部文件到工作区（所有会话共享） */
+  ATTACH_WORKSPACE_FILE: 'agent:attach-workspace-file',
+  /** 移除工作区的附加文件 */
+  DETACH_WORKSPACE_FILE: 'agent:detach-workspace-file',
   /** 获取工作区附加目录列表 */
   GET_WORKSPACE_DIRECTORIES: 'agent:get-workspace-directories',
+  /** 获取工作区附加文件列表 */
+  GET_WORKSPACE_ATTACHED_FILES: 'agent:get-workspace-attached-files',
 
   // 文件系统操作
   /** 获取 session 工作路径 */
@@ -1348,6 +1293,8 @@ export const AGENT_IPC_CHANNELS = {
   READ_ATTACHED_FILE: 'agent:read-attached-file',
   /** 搜索工作区文件（用于 @ 引用） */
   SEARCH_WORKSPACE_FILES: 'agent:search-workspace-files',
+  /** 将文本内容写入临时预览文件并返回绝对路径 */
+  WRITE_CLIPBOARD_PREVIEW: 'agent:write-clipboard-preview',
 
   // 标题自动生成通知（主进程 → 渲染进程推送）
   /** 标题已更新（首次对话完成后自动生成） */
@@ -1372,12 +1319,6 @@ export const AGENT_IPC_CHANNELS = {
   // ExitPlanMode 计划审批
   /** ExitPlanMode 响应（渲染进程 → 主进程） */
   EXIT_PLAN_MODE_RESPOND: 'agent:exit-plan-mode:respond',
-
-  // Agent Teams 数据
-  /** 获取 Team 聚合数据（sdkSessionId → AgentTeamData | null） */
-  GET_TEAM_DATA: 'agent:get-team-data',
-  /** 读取 Teammate 输出文件（filePath → string） */
-  GET_AGENT_OUTPUT: 'agent:get-agent-output',
 
   // 队列消息（Agent 运行中排队发送）
   /** 排队发送消息 */

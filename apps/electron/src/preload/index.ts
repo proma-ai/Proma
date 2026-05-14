@@ -44,7 +44,9 @@ import type {
   AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
   AgentAttachDirectoryInput,
+  AgentAttachFileInput,
   WorkspaceAttachDirectoryInput,
+  WorkspaceAttachFileInput,
   GetTaskOutputInput,
   GetTaskOutputResult,
   StopTaskInput,
@@ -105,7 +107,6 @@ import type {
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
-  AgentTeamData,
   MoveSessionToWorkspaceInput,
   ForkSessionInput,
   RewindSessionInput,
@@ -595,14 +596,6 @@ export interface ElectronAPI {
   /** 获取所有待处理的交互请求快照（渲染进程重载后恢复状态） */
   getPendingRequests: () => Promise<PendingRequestsSnapshot>
 
-  // ===== Agent Teams 数据 =====
-
-  /** 获取 Team 聚合数据（团队配置 + 任务列表 + 收件箱） */
-  getAgentTeamData: (sdkSessionId: string) => Promise<AgentTeamData | null>
-
-  /** 读取 Teammate 输出文件内容 */
-  getAgentOutput: (filePath: string) => Promise<string>
-
   // ===== Agent 附件 =====
 
   /** 保存文件到 Agent session 工作目录 */
@@ -623,14 +616,29 @@ export interface ElectronAPI {
   /** 移除会话的附加目录 */
   detachDirectory: (input: AgentAttachDirectoryInput) => Promise<string[]>
 
+  /** 附加外部文件到 Agent 会话 */
+  attachFile: (input: AgentAttachFileInput) => Promise<string[]>
+
+  /** 移除会话的附加文件 */
+  detachFile: (input: AgentAttachFileInput) => Promise<string[]>
+
   /** 附加外部目录到工作区（所有会话可访问） */
   attachWorkspaceDirectory: (input: WorkspaceAttachDirectoryInput) => Promise<string[]>
 
   /** 移除工作区的附加目录 */
   detachWorkspaceDirectory: (input: WorkspaceAttachDirectoryInput) => Promise<string[]>
 
+  /** 附加外部文件到工作区（所有会话可访问） */
+  attachWorkspaceFile: (input: WorkspaceAttachFileInput) => Promise<string[]>
+
+  /** 移除工作区的附加文件 */
+  detachWorkspaceFile: (input: WorkspaceAttachFileInput) => Promise<string[]>
+
   /** 获取工作区附加目录列表 */
   getWorkspaceDirectories: (workspaceSlug: string) => Promise<string[]>
+
+  /** 获取工作区附加文件列表 */
+  getWorkspaceAttachedFiles: (workspaceSlug: string) => Promise<string[]>
 
   // ===== Agent 文件系统操作 =====
 
@@ -645,6 +653,9 @@ export interface ElectronAPI {
 
   /** 用系统默认应用打开文件 */
   openFile: (filePath: string) => Promise<void>
+
+  /** 将剪贴板文本写入临时预览文件并返回绝对路径 */
+  writeClipboardPreview: (filename: string, content: string) => Promise<string>
 
   /** 用系统默认应用打开任意文件（无工作区限制） */
   systemOpenFile: (filePath: string, appName?: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
@@ -1683,15 +1694,6 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PENDING_REQUESTS)
   },
 
-  // Agent Teams 数据
-  getAgentTeamData: (sdkSessionId: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_TEAM_DATA, sdkSessionId)
-  },
-
-  getAgentOutput: (filePath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_AGENT_OUTPUT, filePath)
-  },
-
   // 工作区文件变化通知
   onCapabilitiesChanged: (callback: () => void) => {
     const listener = (): void => callback()
@@ -1730,6 +1732,14 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DETACH_DIRECTORY, input)
   },
 
+  attachFile: (input: AgentAttachFileInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ATTACH_FILE, input)
+  },
+
+  detachFile: (input: AgentAttachFileInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DETACH_FILE, input)
+  },
+
   attachWorkspaceDirectory: (input: WorkspaceAttachDirectoryInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ATTACH_WORKSPACE_DIRECTORY, input)
   },
@@ -1738,8 +1748,20 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DETACH_WORKSPACE_DIRECTORY, input)
   },
 
+  attachWorkspaceFile: (input: WorkspaceAttachFileInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ATTACH_WORKSPACE_FILE, input)
+  },
+
+  detachWorkspaceFile: (input: WorkspaceAttachFileInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DETACH_WORKSPACE_FILE, input)
+  },
+
   getWorkspaceDirectories: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_DIRECTORIES, workspaceSlug)
+  },
+
+  getWorkspaceAttachedFiles: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_ATTACHED_FILES, workspaceSlug)
   },
 
   // Agent 文件系统操作
@@ -1757,6 +1779,10 @@ const electronAPI: ElectronAPI = {
 
   openFile: (filePath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FILE, filePath)
+  },
+
+  writeClipboardPreview: (filename: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_CLIPBOARD_PREVIEW, filename, content)
   },
 
   systemOpenFile: (filePath: string, appName?: string, access?: import('@proma/shared').FileAccessOptions) => {

@@ -78,6 +78,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const [scrollMetrics, setScrollMetrics] = React.useState({ scrollTop: 0, scrollHeight: 1, clientHeight: 1 })
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
+  const openTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const searchInputRef = React.useRef<HTMLInputElement>(null)
   const trackRef = React.useRef<HTMLDivElement>(null)
 
@@ -87,6 +88,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     return () => {
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+      if (openTimerRef.current) clearTimeout(openTimerRef.current)
     }
   }, [])
 
@@ -143,14 +145,35 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
 
   // ── 鼠标进出控制（仅迷你地图区域） ──
 
+  /** 鼠标进入后需停留此时间（ms）才展开面板，防止掠过时闪烁 */
+  const OPEN_DELAY = 180
+
   const handleMouseEnter = (): void => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
     setIsLeaving(false)
-    setHovered(true)
+
+    // 面板已打开则无需重复触发
+    if (hovered) return
+
+    // 延迟打开：鼠标需在触发条上停留足够时间
+    if (!openTimerRef.current) {
+      openTimerRef.current = setTimeout(() => {
+        setHovered(true)
+        openTimerRef.current = undefined
+      }, OPEN_DELAY)
+    }
   }
 
   const handleMouseLeave = (): void => {
+    // 尚未打开就离开了 → 取消打开定时器
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current)
+      openTimerRef.current = undefined
+    }
+
+    if (!hovered) return
+
     closeTimerRef.current = setTimeout(() => {
       setIsLeaving(true)
       fadeTimerRef.current = setTimeout(() => {

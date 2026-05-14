@@ -160,12 +160,18 @@ function TabBarInner({
   // 滚动容器 ref
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
-  // 鼠标滚轮横向滚动
-  const handleWheel = React.useCallback((e: React.WheelEvent) => {
-    if (scrollRef.current) {
+  // 鼠标滚轮横向滚动（使用原生事件监听器以支持 preventDefault）
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const handleWheel = (e: WheelEvent) => {
       e.preventDefault()
-      scrollRef.current.scrollLeft += e.deltaY || e.deltaX
+      el.scrollLeft += e.deltaY || e.deltaX
     }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
   }, [])
 
   // 新增 tab 时自动滚动到最右
@@ -228,7 +234,6 @@ function TabBarInner({
 
       <div
         ref={scrollRef}
-        onWheel={handleWheel}
         className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none titlebar-drag-region", isWindows && "pr-[140px]")}
       >
         {tabs.map((tab) => (

@@ -16,6 +16,7 @@ import {
 import {
   agentSessionPathMapAtom,
 } from '@/atoms/agent-atoms'
+import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { DiffTabContent } from './DiffTabContent'
 
 interface PreviewPanelProps {
@@ -45,6 +46,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
       dirPath: currentFile.dirPath || sessionPath || fallbackDirPath,
       gitRoot: currentFile.gitRoot,
       previewOnly: currentFile.previewOnly,
+      readOnly: currentFile.readOnly,
       basePaths: currentFile.basePaths,
       title: currentFile.filePath.split('/').pop(),
     }).catch((err) => {
@@ -89,7 +91,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>关闭预览面板</p>
+              <p>关闭预览面板 ({getAcceleratorDisplay(getActiveAccelerator('toggle-preview-panel'))})</p>
             </TooltipContent>
           </Tooltip>
         </div>
@@ -99,11 +101,13 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
       <div className="flex-1 min-h-0 overflow-hidden">
         {currentFile ? (
           <DiffTabContent
+            key={`${sessionId}:${currentFile.filePath}`}
             filePath={currentFile.filePath}
             dirPath={currentFile.dirPath || sessionPath}
             sessionId={sessionId}
             gitRoot={currentFile.gitRoot}
             previewOnly={currentFile.previewOnly}
+            readOnly={currentFile.readOnly}
             basePaths={currentFile.basePaths}
           />
         ) : (

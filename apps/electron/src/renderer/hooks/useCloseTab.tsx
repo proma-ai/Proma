@@ -26,6 +26,7 @@ import {
   agentDiffUnseenFilesAtom,
 } from '@/atoms/agent-atoms'
 import { previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
+import { clearPreviewCacheForSession } from '@/components/diff/DiffTabContent'
 import {
   conversationModelsAtom,
   conversationContextLengthAtom,
@@ -84,6 +85,7 @@ export function useCloseTab(): UseCloseTabReturn {
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
     setDiffUnseenFiles(deleteKey)
+    clearPreviewCacheForSession(tabId)
   }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles])
 
   const executeClose = React.useCallback((tabId: string) => {
