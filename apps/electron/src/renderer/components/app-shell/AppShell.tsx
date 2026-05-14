@@ -125,7 +125,8 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
 
       <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
         {/* 左侧边栏：可折叠，带圆角和内边距 */}
-        <div className="p-2 pr-0 relative z-[60]">
+        {/* titlebar-drag-region：wrapper 的 p-2 间隙也须可拖拽，否则 z-[60] 会把全局 z-50 drag 层挡住 */}
+        <div className="p-2 pr-0 relative z-[60] titlebar-drag-region">
           <LeftSidebar />
         </div>
 
