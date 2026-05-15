@@ -9,7 +9,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
-import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
+import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
   GitRepoStatus,
@@ -343,6 +343,17 @@ export interface ElectronAPI {
 
   /** 订阅用户手动切换主题事件（跨窗口同步，返回清理函数） */
   onThemeSettingsChanged: (callback: (payload: { themeMode: string; themeStyle: string }) => void) => () => void
+
+  // ===== Scratch Pad =====
+
+  /** 从磁盘加载 scratch-pad.md */
+  loadScratchPad: () => Promise<string>
+
+  /** 异步保存内容到 scratch-pad.md */
+  saveScratchPad: (content: string) => Promise<boolean>
+
+  /** 同步保存内容到 scratch-pad.md（beforeunload 场景） */
+  saveScratchPadSync: (content: string) => boolean
 
   // ===== 应用图标切换 =====
 
@@ -1343,6 +1354,19 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, payload: { themeMode: string; themeStyle: string }): void => callback(payload)
     ipcRenderer.on(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener)
     return () => { ipcRenderer.removeListener(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, listener) }
+  },
+
+  // Scratch Pad 持久化
+  loadScratchPad: () => {
+    return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.LOAD)
+  },
+
+  saveScratchPad: (content: string) => {
+    return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.SAVE, content)
+  },
+
+  saveScratchPadSync: (content: string) => {
+    return ipcRenderer.sendSync(SCRATCH_PAD_IPC_CHANNELS.SAVE_SYNC, content)
   },
 
   // 应用图标切换

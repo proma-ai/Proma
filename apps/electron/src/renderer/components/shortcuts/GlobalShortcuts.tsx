@@ -161,7 +161,7 @@ export function GlobalShortcuts(): null {
   useShortcut(
     'toggle-mode',
     useCallback(
-      () => setAppMode(appMode === 'chat' ? 'agent' : 'chat'),
+      () => { if (appMode !== 'scratch') setAppMode(appMode === 'chat' ? 'agent' : 'chat') },
       [appMode, setAppMode],
     ),
   )

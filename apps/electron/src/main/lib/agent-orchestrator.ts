@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
+import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
 import {
   SAFE_TOOLS,
   THINKING_SIGNATURE_ERROR_CODE,
@@ -451,6 +451,44 @@ function supports1MContext(modelId: string): boolean {
   // DeepSeek V4 系列（deepseek-v4-pro、deepseek-v4-flash）
   if (m.includes('deepseek-v4')) return true
   return false
+}
+
+/**
+ * 聚合一次 SDK 调用涉及的所有附加目录（去重，保持插入顺序）。
+ *
+ * 发消息（sendMessage）和回退恢复文件（rewindSession）必须使用同一份聚合结果，
+ * 否则 SDK 写入 file-history-snapshot 时使用的目录范围，与回退时校验路径越界的目录范围不一致，
+ * 会导致 attachedDirectories 内的文件在回退时被静默跳过（"会话回退、代码不回退"）。
+ *
+ * 来源：
+ *   1. extraDirs：调用方传入的临时附加目录（例如 sendMessage 时用户当次提交的目录）
+ *   2. 会话级 attachedDirectories + attachedFiles 的父目录
+ *   3. 工作区级 attachedDirectories + attachedFiles 的父目录
+ *   4. 工作区文件目录 workspace-files/
+ */
+function collectAttachedDirectories(params: {
+  sessionMeta?: AgentSessionMeta
+  workspaceSlug?: string
+  extraDirs?: string[]
+}): string[] {
+  const { sessionMeta, workspaceSlug, extraDirs } = params
+  const result: string[] = []
+  const push = (dir: string | undefined | null) => {
+    if (!dir) return
+    if (!result.includes(dir)) result.push(dir)
+  }
+
+  for (const d of extraDirs ?? []) push(d)
+  for (const d of sessionMeta?.attachedDirectories ?? []) push(d)
+  for (const file of sessionMeta?.attachedFiles ?? []) push(dirname(file))
+
+  if (workspaceSlug) {
+    for (const d of getWorkspaceAttachedDirectories(workspaceSlug)) push(d)
+    for (const f of getWorkspaceAttachedFiles(workspaceSlug)) push(dirname(f))
+    push(getWorkspaceFilesDir(workspaceSlug))
+  }
+
+  return result
 }
 
 // ===== AgentOrchestrator =====
@@ -1514,31 +1552,13 @@ export class AgentOrchestrator {
         ...(rewindResumeAt && { resumeSessionAt: rewindResumeAt }),
         ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
         ...(workspaceSlug && { plugins: [{ type: 'local' as const, path: getAgentWorkspacePath(workspaceSlug) }] }),
-        // 合并用户附加目录 + 工作区附加目录 + 工作区文件目录
+        // 合并附加目录：用户当次输入 + 会话级 + 工作区级（详见 collectAttachedDirectories）
         ...(() => {
-          const allDirs = [...(additionalDirectories || [])]
-          for (const file of sessionMeta?.attachedFiles ?? []) {
-            const parentDir = dirname(file)
-            if (parentDir && !allDirs.includes(parentDir)) allDirs.push(parentDir)
-          }
-          if (workspaceSlug) {
-            // 工作区级附加目录
-            const workspaceDirs = getWorkspaceAttachedDirectories(workspaceSlug)
-            for (const dir of workspaceDirs) {
-              if (!allDirs.includes(dir)) allDirs.push(dir)
-            }
-            // 工作区级附加文件：SDK 只接受目录，因此传入其父目录
-            const workspaceFiles = getWorkspaceAttachedFiles(workspaceSlug)
-            for (const file of workspaceFiles) {
-              const parentDir = dirname(file)
-              if (parentDir && !allDirs.includes(parentDir)) allDirs.push(parentDir)
-            }
-            // 工作区文件目录
-            const wsFilesDir = getWorkspaceFilesDir(workspaceSlug)
-            if (!allDirs.includes(wsFilesDir)) {
-              allDirs.push(wsFilesDir)
-            }
-          }
+          const allDirs = collectAttachedDirectories({
+            extraDirs: additionalDirectories,
+            sessionMeta,
+            workspaceSlug,
+          })
           return allDirs.length > 0 ? { additionalDirectories: allDirs } : {}
         })(),
         // 启用文件检查点，支持 rewindFiles 回退
@@ -1595,7 +1615,7 @@ export class AgentOrchestrator {
 
       console.log(`[Agent 编排] 开始通过 Adapter 遍历事件流...`)
 
-      // 14. 遍历 Adapter 产出的 AgentEvent 流（含自动重试 + Watchdog 死锁检测）
+      // 14. 遍历 Adapter 产出的 AgentEvent 流（含自动重试）
       let lastRetryableError: string | undefined
       let retryDelayElapsedMs = 0
       let retryAttemptsScheduled = 0
@@ -2291,12 +2311,9 @@ export class AgentOrchestrator {
         // 确定 cwd（文件的基准路径）
         let cwd = homedir()
         if (projectDir) cwd = projectDir
-        // 收集附加目录（与发消息时相同的来源：工作区附加目录 + 工作区文件目录）
-        const rewindAttachedDirs: string[] = []
-        if (workspaceSlug) {
-          rewindAttachedDirs.push(...getWorkspaceAttachedDirectories(workspaceSlug))
-          rewindAttachedDirs.push(getWorkspaceFilesDir(workspaceSlug))
-        }
+        // 收集附加目录（必须与 sendMessage 中传给 SDK 的 additionalDirectories 一致，
+        // 否则会话级 attachedDirectories 内的文件会因路径越界检查被静默跳过）
+        const rewindAttachedDirs = collectAttachedDirectories({ sessionMeta, workspaceSlug })
         console.log(`[Agent 编排] 回退: 直接从 snapshot 恢复文件 (cwd=${cwd}, forkSource=${sessionMeta.forkSourceSdkSessionId ?? 'none'}, attachedDirs=${rewindAttachedDirs.length})`)
         fileRewindResult = rewindFilesFromSnapshot(sessionMeta.sdkSessionId, userMessageUuid, cwd, projectDir, sessionMeta.forkSourceSdkSessionId, rewindAttachedDirs)
       } catch (err) {

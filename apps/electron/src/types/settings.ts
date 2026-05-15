@@ -201,6 +201,8 @@ export interface AppSettings {
   shortcutOverrides?: ShortcutOverrides
   /** 是否显示用户消息悬浮置顶条（默认 true） */
   stickyUserMessageEnabled?: boolean
+  /** 上次是否在 Scratch Pad 页（用于重启恢复） */
+  scratchPadActive?: boolean
   /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */
   appIconVariant?: string
   /** 语音输入设置（Access Token 以加密态存储，由专用服务解密后返回渲染进程） */
@@ -226,6 +228,16 @@ export const SETTINGS_IPC_CHANNELS = {
   ON_SYSTEM_THEME_CHANGED: 'settings:system-theme-changed',
   /** 用户手动切换主题时广播给所有窗口 */
   ON_THEME_SETTINGS_CHANGED: 'settings:theme-settings-changed',
+} as const
+
+/** Scratch Pad IPC 通道 */
+export const SCRATCH_PAD_IPC_CHANNELS = {
+  /** 从磁盘加载 scratch-pad.md 内容 */
+  LOAD: 'scratch-pad:load',
+  /** 保存内容到 scratch-pad.md */
+  SAVE: 'scratch-pad:save',
+  /** 同步保存（beforeunload 场景） */
+  SAVE_SYNC: 'scratch-pad:save-sync',
 } as const
 
 /** 应用图标 IPC 通道 */

@@ -10,15 +10,17 @@ interface OverlayColors {
 
 const OVERLAY_HEIGHT = 40
 
+// Colors are computed as: alpha-composite of hsl(--muted / 0.5) over hsl(--content-area),
+// matching the actual rendered TabBar background color to eliminate the visual seam on Windows.
 const THEME_COLORS: Record<string, { color: string; symbolColor: string }> = {
-  'default-light': { color: '#ffffff', symbolColor: '#0a0a0a' },
-  'default-dark': { color: '#121212', symbolColor: '#fafafa' },
-  'ocean-light': { color: '#ecf2f7', symbolColor: '#1b2632' },
-  'ocean-dark': { color: '#182434', symbolColor: '#e7ebef' },
-  'forest-light': { color: '#eff5f1', symbolColor: '#1d3026' },
-  'forest-dark': { color: '#212c26', symbolColor: '#e3e8e5' },
-  'slate-light': { color: '#e3e1dc', symbolColor: '#312f2a' },
-  'slate-dark': { color: '#1d1b20', symbolColor: '#e9e6e3' },
+  'default-light': { color: '#fafafa', symbolColor: '#0a0a0a' },
+  'default-dark': { color: '#1c1c1c', symbolColor: '#fafafa' },
+  'ocean-light': { color: '#e6eef5', symbolColor: '#1b2632' },
+  'ocean-dark': { color: '#131c26', symbolColor: '#e7ebef' },
+  'forest-light': { color: '#ecf1ee', symbolColor: '#1d3026' },
+  'forest-dark': { color: '#16201b', symbolColor: '#e3e8e5' },
+  'slate-light': { color: '#e6e4df', symbolColor: '#312f2a' },
+  'slate-dark': { color: '#1f1c21', symbolColor: '#e9e6e3' },
 }
 
 export function resolveOverlayColors(

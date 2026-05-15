@@ -13,9 +13,10 @@
 import * as React from 'react'
 import { ChevronRight, XCircle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getToolIcon } from '@/components/agent/tool-utils'
+import { getToolIcon, extractFilePath } from '@/components/agent/tool-utils'
 import { getToolPhrase } from '@/components/agent/tool-phrase'
 import { ToolResultRenderer } from '@/components/agent/tool-result-renderers'
+import { PreviewOpenButton } from '@/components/agent/tool-result-renderers/preview-open-button'
 
 export interface ChatToolBlockProps {
   toolName: string
@@ -41,6 +42,12 @@ export function ChatToolBlock({
   const phrase = getToolPhrase(toolName, input)
   const ToolIcon = getToolIcon(toolName)
   const displayLabel = isCompleted ? phrase.label : phrase.loadingLabel
+  const filePath = extractFilePath(input)
+  const isPreviewable = (
+    (toolName === 'Read' || toolName === 'Edit' || toolName === 'Write') &&
+    isCompleted &&
+    filePath
+  )
 
   const delay = animate && index < 10 ? `${index * 30}ms` : '0ms'
 
@@ -74,6 +81,10 @@ export function ChatToolBlock({
             expanded && 'rotate-90 opacity-100',
           )}
         />
+
+        {isPreviewable && (
+          <PreviewOpenButton filePath={filePath} expanded={expanded} />
+        )}
       </button>
 
       {expanded && result && (

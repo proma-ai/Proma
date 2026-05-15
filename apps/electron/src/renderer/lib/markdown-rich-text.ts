@@ -303,7 +303,7 @@ export function htmlToMarkdown(html: string): string {
         return `<video controls src="${src}"${title ? ` title="${title}"` : ''}></video>\n`
       }
       case 'p':
-        return children + '\n'
+        return children + '\n\n'
       case 'br':
         return '\n'
       case 'strong':
@@ -373,6 +373,7 @@ export function htmlToMarkdown(html: string): string {
         return children
       case 'blockquote':
         return children
+          .replace(/\n+$/, '')
           .split('\n')
           .map((line) => `> ${line}`)
           .join('\n') + '\n'

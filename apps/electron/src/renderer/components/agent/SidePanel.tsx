@@ -450,7 +450,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                         </Tooltip>
                       </div>
                       {/* 会话文件内容区（独立滚动） */}
-                      <div className="flex-1 min-h-0 overflow-y-auto">
+                      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
                         {/* 附加文件列表 */}
                         {attachedFiles.length > 0 && (
                           <AttachedFilesSection
@@ -532,7 +532,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                       )}
                     </div>
                     {/* 工作区文件内容区（独立滚动） */}
-                    <div className="flex-1 min-h-0 overflow-y-auto pb-1">
+                    <div className="flex-1 min-h-0 overflow-y-auto pb-1 scrollbar-thin">
                       {/* 工作区级附加文件 */}
                       {wsAttachedFiles.length > 0 && (
                         <AttachedFilesSection

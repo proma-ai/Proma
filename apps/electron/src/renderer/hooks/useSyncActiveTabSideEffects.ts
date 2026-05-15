@@ -47,6 +47,13 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
         return
       }
 
+      if (newActiveTab.type === 'scratch') {
+        // Scratch Pad 不改变侧边栏 chat/agent 状态
+        setCurrentConversationId(null)
+        setCurrentAgentSessionId(null)
+        return
+      }
+
       // Agent
       setAppMode('agent')
       setCurrentAgentSessionId(newActiveTab.sessionId)

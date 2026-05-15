@@ -209,7 +209,7 @@ export function removeOfficialChannel(): void {
 export function listChannels(): Channel[] {
   const config = readConfig()
 
-  // 首次使用：如果没有 DeepSeek 渠道，自动创建预设（使用 Anthropic 协议）
+  // 首次使用：如果没有 DeepSeek 渠道，自动创建预设
   const hasDeepSeek = config.channels.some(
     (c) => c.provider === 'deepseek' || c.baseUrl.includes('api.deepseek.com'),
   )
@@ -218,7 +218,7 @@ export function listChannels(): Channel[] {
     const presetChannel: Channel = {
       id: randomUUID(),
       name: 'DeepSeek',
-      provider: 'anthropic',
+      provider: 'deepseek',
       baseUrl: PROVIDER_DEFAULT_URLS.deepseek,
       apiKey: encryptApiKey(''),
       models: [

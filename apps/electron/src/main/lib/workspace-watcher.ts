@@ -20,6 +20,16 @@ import { getAgentWorkspacesDir } from './config-paths'
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
 
+// 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴
+const HIGH_NOISE_SEGMENTS = new Set([
+  'node_modules', '.next', '.nuxt', '.git', 'dist', 'build',
+  '.cache', '__pycache__', '.turbo', '.parcel-cache', '.svelte-kit',
+])
+
+function isHighNoisePath(normalizedPath: string): boolean {
+  return normalizedPath.split('/').some((seg) => HIGH_NOISE_SEGMENTS.has(seg))
+}
+
 let watcher: FSWatcher | null = null
 
 /** 附加目录监听器：路径 → FSWatcher */
@@ -53,6 +63,10 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
 
       // filename 格式: {slug}/mcp.json 或 {slug}/skills/xxx/SKILL.md 或 {slug}/{sessionId}/file.txt
       const normalizedFilename = filename.replace(/\\/g, '/')
+
+      // 跳过 node_modules / .next 等高频变动目录，防止大规模工作区触发 IPC 事件风暴
+      if (isHighNoisePath(normalizedFilename)) return
+
       const pathParts = normalizedFilename.split('/').filter(Boolean)
 
       // 仅忽略工作区顶层 config.json；会话目录内同名文件仍属于用户文件。

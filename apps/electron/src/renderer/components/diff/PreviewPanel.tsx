@@ -109,6 +109,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
             previewOnly={currentFile.previewOnly}
             readOnly={currentFile.readOnly}
             basePaths={currentFile.basePaths}
+            onEmptyDiff={handleClosePanel}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-xs">

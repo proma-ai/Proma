@@ -21,7 +21,13 @@ import type { SessionIndicatorStatus } from './agent-atoms'
 // ===== 类型定义 =====
 
 /** 标签页类型（Settings 不作为 Tab，保留独立视图） */
-export type TabType = 'chat' | 'agent'
+export type TabType = 'chat' | 'agent' | 'scratch'
+
+/** Scratch Pad 专用的固定 sessionId */
+export const SCRATCH_PAD_ID = '__scratch-pad__'
+
+/** Scratch Pad 标签默认标题 */
+export const SCRATCH_PAD_TITLE = 'Scratch Pad'
 
 /** 标签页数据 */
 export interface TabItem {
@@ -68,6 +74,11 @@ export interface TabMinimapItem {
 }
 export const tabMinimapCacheAtom = atom<Map<string, TabMinimapItem[]>>(new Map())
 
+/** Scratch Pad 编辑内容（HTML 字符串，供 TipTap 编辑器使用） */
+export const scratchPadContentAtom = atom<string>('')
+/** Scratch Pad 内容是否已从磁盘加载 */
+export const scratchPadLoadedAtom = atom<boolean>(false)
+
 // ===== 派生 Atoms =====
 
 /** 当前活跃标签 */
@@ -84,6 +95,7 @@ export const tabStreamingMapAtom = atom<Map<string, boolean>>((get) => {
   const agentRunning = get(agentRunningSessionIdsAtom)
   const map = new Map<string, boolean>()
   for (const tab of tabs) {
+    if (tab.type === 'scratch') continue
     if (tab.type === 'chat') {
       map.set(tab.id, chatStreaming.has(tab.sessionId))
     } else if (tab.type === 'agent') {
@@ -101,6 +113,7 @@ export const tabIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((ge
   const unviewedCompletedIds = get(unviewedCompletedSessionIdsAtom)
   const map = new Map<string, SessionIndicatorStatus>()
   for (const tab of tabs) {
+    if (tab.type === 'scratch') continue
     if (tab.type === 'chat') {
       map.set(tab.id, chatStreaming.has(tab.sessionId) ? 'running' : 'idle')
     } else if (tab.type === 'agent') {
@@ -139,12 +152,15 @@ export function openTab(
   }
 }
 
-/** 关闭标签页 */
+/** 关闭标签页（scratch tab 不可关闭） */
 export function closeTab(
   tabs: TabItem[],
   activeTabId: string | null,
   tabId: string,
 ): { tabs: TabItem[]; activeTabId: string | null } {
+  // Scratch Pad 不可关闭
+  if (tabId === SCRATCH_PAD_ID) return { tabs, activeTabId }
+
   const tabIndex = tabs.findIndex((t) => t.id === tabId)
   if (tabIndex === -1) return { tabs, activeTabId }
 
@@ -164,13 +180,15 @@ export function closeTab(
   return { tabs: newTabs, activeTabId: newActiveTabId }
 }
 
-/** 重排标签顺序 */
+/** 重排标签顺序（scratch tab 固定在第 0 位，不可移动） */
 export function reorderTabs(
   tabs: TabItem[],
   fromIndex: number,
   toIndex: number,
 ): TabItem[] {
   if (fromIndex === toIndex) return tabs
+  // Scratch 不可移出第 0 位
+  if (tabs[0]?.id === SCRATCH_PAD_ID && (fromIndex === 0 || toIndex === 0)) return tabs
   const newTabs = [...tabs]
   const [moved] = newTabs.splice(fromIndex, 1)
   newTabs.splice(toIndex, 0, moved!)
@@ -186,4 +204,24 @@ export function updateTabTitle(
   return tabs.map((t) =>
     t.sessionId === sessionId ? { ...t, title } : t
   )
+}
+
+/** 确保 Scratch Pad 标签存在并位于首位 */
+export function ensureScratchPadTab(tabs: TabItem[]): TabItem[] {
+  const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID)
+  if (scratchTab) {
+    // 已存在，确保在第一位
+    const idx = tabs.indexOf(scratchTab)
+    if (idx === 0) return tabs
+    const rest = tabs.filter((t) => t.id !== SCRATCH_PAD_ID)
+    return [scratchTab, ...rest]
+  }
+  // 不存在，创建并插入第一位
+  const newTab: TabItem = {
+    id: SCRATCH_PAD_ID,
+    type: 'scratch',
+    sessionId: SCRATCH_PAD_ID,
+    title: SCRATCH_PAD_TITLE,
+  }
+  return [newTab, ...tabs]
 }

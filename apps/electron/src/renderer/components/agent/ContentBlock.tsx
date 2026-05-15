@@ -21,9 +21,10 @@ import { useAtomValue } from 'jotai'
 import { thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
 import { MessageResponse } from '@/components/ai-elements/message'
-import { getToolIcon } from './tool-utils'
+import { getToolIcon, extractFilePath } from './tool-utils'
 import { getToolPhrase } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
+import { PreviewOpenButton } from './tool-result-renderers/preview-open-button'
 import { formatDuration } from './AgentMessages'
 import type {
   SDKContentBlock,
@@ -304,6 +305,12 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
 
   // 运行中显示进行时短语，完成或非流式（已终止）显示完成态短语
   const displayLabel = (isCompleted || !isStreaming) ? phrase.label : phrase.loadingLabel
+  const filePath = extractFilePath(block.input)
+  const isPreviewable = (
+    (block.name === 'Read' || block.name === 'Edit' || block.name === 'Write') &&
+    isCompleted &&
+    filePath
+  )
 
   const delay = animate && index < 10 ? `${index * 30}ms` : '0ms'
 
@@ -427,6 +434,10 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
             expanded && 'rotate-90 opacity-100',
           )}
         />
+
+        {isPreviewable && (
+          <PreviewOpenButton filePath={filePath} expanded={expanded} />
+        )}
       </button>
 
       {expanded && toolResult?.result && (

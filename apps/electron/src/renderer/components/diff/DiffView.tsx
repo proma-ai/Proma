@@ -3,6 +3,9 @@
  *
  * 接收 old/new 文件内容，使用 @pierre/diffs/react 的 MultiFileDiff 渲染。
  * 背景使用 Proma 主题色（disableBackground），滚动条自定义样式。
+ *
+ * 超过 MAX_DIFF_LINES 行的文件不渲染 diff（避免 Myers 算法 O(N*D) 阻塞主线程），
+ * 改为纯文本预览。
  */
 
 import * as React from 'react'
@@ -12,6 +15,9 @@ import type { FileContents } from '@pierre/diffs'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import './diff-scroll.css'
 
+/** 单侧超过此行数的文件不计算 diff，避免 Myers O(N*D) + shiki 阻塞主线程 */
+const MAX_DIFF_LINES = 5_000
+
 interface DiffViewProps {
   oldContent: string
   newContent: string
@@ -19,8 +25,21 @@ interface DiffViewProps {
   viewMode: 'split' | 'unified'
 }
 
+function countLines(content: string): number {
+  if (!content) return 0
+  let count = 1
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') count++
+  }
+  return count
+}
+
 export const DiffView = React.memo(function DiffView({ oldContent, newContent, filePath, viewMode }: DiffViewProps): React.ReactElement {
   const theme = useAtomValue(resolvedThemeAtom)
+
+  const oldLines = React.useMemo(() => countLines(oldContent), [oldContent])
+  const newLines = React.useMemo(() => countLines(newContent), [newContent])
+  const tooLarge = oldLines > MAX_DIFF_LINES || newLines > MAX_DIFF_LINES
 
   const oldFile: FileContents = React.useMemo(() => ({
     name: filePath,
@@ -103,6 +122,24 @@ export const DiffView = React.memo(function DiffView({ oldContent, newContent, f
       }
     `,
   }), [viewMode, theme])
+
+  if (tooLarge) {
+    return (
+      <div className="h-full bg-content-area overflow-auto">
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center text-muted-foreground px-4">
+            <p className="text-[13px] font-medium mb-1">文件过大，无法显示差异对比</p>
+            <p className="text-[12px]">
+              旧文件 {oldLines.toLocaleString()} 行，新文件 {newLines.toLocaleString()} 行
+            </p>
+            <p className="text-[12px] text-muted-foreground/60 mt-2">
+              请使用命令行 <code className="px-1 py-0.5 rounded bg-muted text-[11px]">git diff</code> 查看
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full diff-scroll bg-content-area overflow-auto">

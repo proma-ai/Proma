@@ -86,6 +86,8 @@ export function TabBar(): React.ReactElement {
           agentWorkspaceId: session.workspaceId,
         }).catch(console.error)
       }
+    } else if (tab.type === 'scratch') {
+      // Scratch Pad 不改变侧边栏 chat/agent 状态
     }
   }, [setActiveTabId, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 

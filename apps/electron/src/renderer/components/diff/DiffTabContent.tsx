@@ -105,9 +105,11 @@ interface DiffTabContentProps {
   readOnly?: boolean
   /** 候选基础目录（previewOnly 模式下用于路径解析） */
   basePaths?: string[]
+  /** diff 模式下检测到内容为空（无差异）时回调，用于自动关闭预览面板 */
+  onEmptyDiff?: () => void
 }
 
-export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths }: DiffTabContentProps): React.ReactElement {
+export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, onEmptyDiff }: DiffTabContentProps): React.ReactElement {
   const [viewMode, setViewMode] = useAtom(agentDiffViewModeAtom)
   const [oldContent, setOldContent] = React.useState('')
   const [newContent, setNewContent] = React.useState('')
@@ -396,6 +398,19 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     refresh()
     return () => { cancelled = true }
   }, [refreshVersion, previewOnly, filePath, dirPath, gitRoot, sessionId, getContentCacheKey])
+
+  // diff 模式：内容加载完成后若新旧一致（无差异），通知父组件关闭预览面板
+  const emptyDiffFiredRef = React.useRef(false)
+  React.useEffect(() => {
+    emptyDiffFiredRef.current = false
+  }, [filePath, sessionId])
+  React.useEffect(() => {
+    if (previewOnly || loading || emptyDiffFiredRef.current) return
+    if (oldContent === newContent) {
+      emptyDiffFiredRef.current = true
+      onEmptyDiff?.()
+    }
+  }, [previewOnly, loading, oldContent, newContent, onEmptyDiff])
 
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;

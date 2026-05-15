@@ -575,3 +575,12 @@ export function getSdkConfigDir(): string {
 
   return dir
 }
+
+/**
+ * 获取 Scratch Pad 文件路径
+ *
+ * @returns ~/.proma/scratch-pad.md
+ */
+export function getScratchPadPath(): string {
+  return join(getConfigDir(), 'scratch-pad.md')
+}
