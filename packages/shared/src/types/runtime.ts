@@ -334,6 +334,14 @@ export const IPC_CHANNELS = {
   OPEN_DETACHED_PREVIEW: 'preview:open-detached',
   /** 获取独立预览窗口数据 */
   GET_DETACHED_PREVIEW_DATA: 'preview:get-detached-data',
+  /** 最小化窗口 */
+  WINDOW_MINIMIZE: 'window:minimize',
+  /** 最大化/还原窗口 */
+  WINDOW_MAXIMIZE: 'window:maximize',
+  /** 关闭窗口 */
+  WINDOW_CLOSE: 'window:close',
+  /** 窗口是否最大化 */
+  WINDOW_IS_MAXIMIZED: 'window:is-maximized',
 } as const
 
 /**

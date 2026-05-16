@@ -236,7 +236,7 @@ function TabBarInner({
 
       <div
         ref={scrollRef}
-        className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none titlebar-drag-region", isWindows && "pr-[140px]")}
+        className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none titlebar-drag-region", isWindows && "pr-[112px]")}
       >
         {tabs.map((tab) => (
           <TabBarItem

@@ -330,6 +330,47 @@
   app-region: drag;
 }
 
+/* Windows 自定义窗口控制按钮 */
+.window-controls {
+  height: 28px;
+  gap: 1px;
+}
+
+.window-control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  background: transparent;
+  border: none;
+  cursor: default;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.window-control-btn:hover {
+  background-color: hsl(var(--muted) / 0.35);
+  color: hsl(var(--foreground));
+}
+
+.window-control-btn:active {
+  background-color: hsl(var(--muted) / 0.5);
+}
+
+.window-control-close:hover {
+  background-color: #c42b1c;
+  color: #fff;
+}
+
+.window-control-close:active {
+  background-color: #a01d11;
+  color: #fff;
+}
+
 /* 深色特殊主题 dialog 光晕效果 */
 .theme-ocean-dark [data-radix-dialog-content],
 .theme-forest-dark [data-radix-dialog-content],

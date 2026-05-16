@@ -42,7 +42,6 @@ app.on('second-instance', (_event, argv) => {
 })
 
 import { getSettings } from './lib/settings-service'
-import { resolveOverlayColors } from './lib/titlebar-overlay'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
 
 // 商业版固定为 Cloud 模式
@@ -249,17 +248,7 @@ function createWindow(): void {
         visualEffectState: 'followWindow' as const,
       }
     : isWindows
-      ? (() => {
-          const settings = getSettings()
-          return {
-            titleBarStyle: 'hidden' as const,
-            titleBarOverlay: resolveOverlayColors(
-              settings.themeMode,
-              settings.themeStyle,
-              nativeTheme.shouldUseDarkColors
-            ),
-          }
-        })()
+      ? { titleBarStyle: 'hidden' as const }
       : {}
 
   mainWindow = new BrowserWindow({

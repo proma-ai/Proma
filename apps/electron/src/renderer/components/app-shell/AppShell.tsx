@@ -15,6 +15,7 @@ import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellC
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { WindowControls } from '@/components/WindowControls'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
@@ -122,6 +123,9 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
     <AppShellProvider value={contextValue}>
       {/* 可拖动标题栏区域，用于窗口拖动 */}
       <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-50" />
+
+      {/* Windows 自定义窗口控制按钮（最小化/最大化/关闭） */}
+      <WindowControls />
 
       <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
         {/* 左侧边栏：可折叠，带圆角和内边距 */}

@@ -203,6 +203,19 @@ export interface ElectronAPI {
   /** 在系统默认浏览器中打开外部链接 */
   openExternal: (url: string) => Promise<void>
 
+  // ===== 窗口控制（Windows 自定义标题栏）=====
+
+  /** 最小化窗口 */
+  windowMinimize: () => Promise<void>
+  /** 最大化/还原窗口 */
+  windowMaximize: () => Promise<void>
+  /** 关闭窗口 */
+  windowClose: () => Promise<void>
+  /** 窗口是否处于最大化状态 */
+  windowIsMaximized: () => Promise<boolean>
+  /** 订阅窗口最大化/还原事件 */
+  onWindowResize: (callback: () => void) => () => void
+
   // ===== 渠道管理相关 =====
 
   /** 获取所有渠道列表（apiKey 保持加密态） */
@@ -1176,6 +1189,29 @@ const electronAPI: ElectronAPI = {
   // 通用工具
   openExternal: (url: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url)
+  },
+
+  // 窗口控制
+  windowMinimize: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE)
+  },
+
+  windowMaximize: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MAXIMIZE)
+  },
+
+  windowClose: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE)
+  },
+
+  windowIsMaximized: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED)
+  },
+
+  onWindowResize: (callback: () => void) => {
+    const handler = (): void => callback()
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
   },
 
   // 渠道管理

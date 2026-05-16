@@ -147,7 +147,7 @@ import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-se
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
 import { setDockBadgeCount } from './lib/dock-badge-service'
-import { updateWindowTitleBarOverlay } from './lib/titlebar-overlay'
+
 import { checkEnvironment } from './lib/environment-checker'
 import { fetchInstallerManifest, findInstallerSource } from './lib/installer-manifest'
 import {
@@ -962,8 +962,6 @@ export function registerIpcHandlers(): void {
           if (win.webContents.id !== event.sender.id) {
             win.webContents.send(SETTINGS_IPC_CHANNELS.ON_THEME_SETTINGS_CHANGED, payload)
           }
-          // Windows: 更新标题栏 overlay 颜色
-          updateWindowTitleBarOverlay(win)
         })
       }
 
@@ -999,12 +997,6 @@ export function registerIpcHandlers(): void {
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send(SETTINGS_IPC_CHANNELS.ON_SYSTEM_THEME_CHANGED, isDark)
     })
-    // Windows: system 模式下同步更新标题栏 overlay
-    if (process.platform === 'win32' && getSettings().themeMode === 'system') {
-      BrowserWindow.getAllWindows().forEach((win) => {
-        updateWindowTitleBarOverlay(win)
-      })
-    }
   })
 
   // ===== Scratch Pad 持久化 =====
@@ -3468,4 +3460,40 @@ export function registerIpcHandlers(): void {
     })
     return result.canceled ? null : result.filePath
   })
+
+  // ===== 窗口控制（Windows 自定义标题栏按钮）=====
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_MINIMIZE,
+    async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) win.minimize()
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_MAXIMIZE,
+    async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) {
+        win.isMaximized() ? win.unmaximize() : win.maximize()
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_CLOSE,
+    async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) win.close()
+    }
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW_IS_MAXIMIZED,
+    async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return win && !win.isDestroyed() ? win.isMaximized() : false
+    }
+  )
 }
