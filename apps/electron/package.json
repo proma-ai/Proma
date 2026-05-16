@@ -86,6 +86,8 @@
     "@tiptap/extension-link": "^3.19.0",
     "@tiptap/extension-mention": "^3.19.0",
     "@tiptap/extension-placeholder": "^3.19.0",
+    "@tiptap/extension-task-item": "3.19.0",
+    "@tiptap/extension-task-list": "3.19.0",
     "@tiptap/extension-underline": "^3.19.0",
     "@tiptap/pm": "^3.19.0",
     "@tiptap/react": "^3.19.0",

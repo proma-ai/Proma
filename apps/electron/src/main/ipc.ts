@@ -5,8 +5,8 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
-import { join, resolve, sep } from 'node:path'
-import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve, sep, dirname } from 'node:path'
+import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS } from '@proma/shared'
@@ -1050,6 +1050,48 @@ export function registerIpcHandlers(): void {
         console.error('[ScratchPad] 同步保存失败:', err)
         event.returnValue = false
       }
+    }
+  )
+
+  // 导出为 Markdown 到指定目录
+  ipcMain.handle(
+    SCRATCH_PAD_IPC_CHANNELS.EXPORT,
+    async (_, markdown: string, dirPath: string, filename: string): Promise<string> => {
+      let filePath: string
+      if (!filename) {
+        // 完整文件路径模式（来自保存对话框）
+        filePath = dirPath
+        const dir = dirname(filePath)
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true })
+        }
+      } else {
+        if (!existsSync(dirPath)) {
+          mkdirSync(dirPath, { recursive: true })
+        }
+        filePath = join(dirPath, filename)
+      }
+      writeFileSync(filePath, markdown, 'utf-8')
+      console.log('[ScratchPad] 已导出:', filePath)
+      return filePath
+    }
+  )
+
+  // 打开保存对话框，返回用户选择的路径
+  ipcMain.handle(
+    SCRATCH_PAD_IPC_CHANNELS.CHOOSE_EXPORT_PATH,
+    async (_, defaultName: string): Promise<string | null> => {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return null
+      const result = await dialog.showSaveDialog(win, {
+        title: '导出 Scratch Pad 为 Markdown',
+        defaultPath: defaultName,
+        filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+      return result.canceled ? null : result.filePath
     }
   )
 

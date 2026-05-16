@@ -1,11 +1,15 @@
-import { Node, mergeAttributes } from '@tiptap/core'
+import { Node, mergeAttributes, nodeInputRule } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import TaskListExt from '@tiptap/extension-task-list'
+import TaskItemExt from '@tiptap/extension-task-item'
 import DOMPurify from 'dompurify'
 import katex from 'katex'
-import { highlightCode, highlightCodeSync } from '@proma/core'
+import { getDisplayName, highlightCode, highlightCodeSync } from '@proma/core'
 import type { FileAccessOptions } from '@proma/shared'
 
 type FileAccessRef = { current: FileAccessOptions | undefined }
+/** 传 null 表示当前编辑器无会话/文件上下文（如 ScratchPad），跳过路径解析。 */
+type FileAccessRefOrNull = FileAccessRef | null
 type ThemeRef = { current: string }
 
 function isExternalUrl(src: string): boolean {
@@ -36,8 +40,14 @@ function setClass(el: HTMLElement, className: string): void {
   el.className = className
 }
 
-function resolveMediaSrc(src: string, fileAccessRef: FileAccessRef, apply: (src: string) => void): () => void {
+function resolveMediaSrc(src: string, fileAccessRef: FileAccessRefOrNull, apply: (src: string) => void): () => void {
+  // 外链 / data-URL / blob / file 协议：直接 apply，不走 IPC
   if (!src || isExternalUrl(src)) {
+    apply(src)
+    return () => {}
+  }
+  // 无会话上下文：直接显示原始 src（ScratchPad 等无文件解析需求的场景）
+  if (fileAccessRef === null) {
     apply(src)
     return () => {}
   }
@@ -87,7 +97,7 @@ function createStaticHtmlView(
   }
 }
 
-function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: FileAccessRef) {
+function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: FileAccessRefOrNull) {
   const figure = document.createElement('figure')
   figure.contentEditable = 'false'
   setClass(figure, 'not-prose my-3')
@@ -137,7 +147,7 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
   }
 }
 
-function createMarkdownVideoView(initialNode: ProseMirrorNode, fileAccessRef: FileAccessRef) {
+function createMarkdownVideoView(initialNode: ProseMirrorNode, fileAccessRef: FileAccessRefOrNull) {
   const figure = document.createElement('figure')
   figure.contentEditable = 'false'
   setClass(figure, 'not-prose my-3')
@@ -213,15 +223,35 @@ function createMathView(initialNode: ProseMirrorNode, displayMode: boolean) {
 function createShikiCodeBlockView(initialNode: ProseMirrorNode, themeRef: ThemeRef) {
   const dom = document.createElement('div')
   dom.contentEditable = 'false'
-  setClass(dom, 'not-prose my-3 overflow-hidden rounded-md border border-border/40 bg-muted/30')
+  setClass(dom, 'not-prose my-3 overflow-hidden rounded-md border border-border/40')
 
+  // 头部栏：语言标签 + 复制按钮
   const header = document.createElement('div')
-  setClass(header, 'flex h-8 items-center justify-between border-b border-border/30 px-3 text-xs text-muted-foreground')
+  setClass(header, 'flex h-8 items-center justify-between border-b border-border/30 px-3 text-xs text-muted-foreground bg-muted/30')
   const label = document.createElement('span')
+  label.className = 'font-medium select-none'
   header.appendChild(label)
 
+  const copyBtn = document.createElement('button')
+  copyBtn.type = 'button'
+  copyBtn.className = 'flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground'
+  copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>复制</span>'
+  let copyTimeout: ReturnType<typeof setTimeout> | null = null
+  copyBtn.addEventListener('click', () => {
+    const code = (dom as any).__currentCode ?? ''
+    navigator.clipboard.writeText(code).then(() => {
+      copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>已复制</span>'
+      if (copyTimeout) clearTimeout(copyTimeout)
+      copyTimeout = setTimeout(() => {
+        copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>复制</span>'
+      }, 2000)
+    }).catch(() => {})
+  })
+  header.appendChild(copyBtn)
+
   const body = document.createElement('div')
-  setClass(body, '[&_.shiki]:!m-0 [&_.shiki]:!rounded-none [&_.shiki]:!bg-transparent [&_.shiki]:overflow-x-auto [&_.shiki]:p-4 [&_.shiki_code]:text-[13px] [&_.shiki_code]:leading-[1.6]')
+  setClass(body, '[&_.shiki]:!m-0 [&_.shiki]:!rounded-none [&_.shiki]:!bg-transparent [&_.shiki]:overflow-x-auto [&_.shiki]:p-4 [&_.shiki_code]:text-[13px] [&_.shiki_code]:leading-[1.6] [&_.shiki_code]:font-mono')
+  body.style.backgroundColor = 'hsl(var(--code-bg))'
 
   dom.appendChild(header)
   dom.appendChild(body)
@@ -230,7 +260,8 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, themeRef: ThemeR
 
   const renderFallback = (code: string) => {
     const pre = document.createElement('pre')
-    pre.className = 'm-0 overflow-x-auto p-4 text-[13px] leading-[1.6]'
+    pre.className = 'm-0 overflow-x-auto p-4 text-[13px] leading-[1.6] font-mono'
+    pre.style.backgroundColor = 'hsl(var(--code-bg))'
     const codeEl = document.createElement('code')
     codeEl.textContent = code
     pre.appendChild(codeEl)
@@ -241,7 +272,8 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, themeRef: ThemeR
     const currentGeneration = ++generation
     const code = node.textContent
     const language = String(node.attrs.language ?? 'text') || 'text'
-    label.textContent = language === 'text' ? 'Code' : language
+    label.textContent = getDisplayName(language)
+    ;(dom as any).__currentCode = code
 
     const sync = highlightCodeSync({ code, language, theme: themeRef.current })
     if (sync) {
@@ -270,6 +302,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, themeRef: ThemeR
     },
     destroy() {
       generation += 1
+      if (copyTimeout) clearTimeout(copyTimeout)
     },
     ignoreMutation() {
       return true
@@ -277,7 +310,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, themeRef: ThemeR
   }
 }
 
-export function createMarkdownImage(fileAccessRef: FileAccessRef): Node {
+export function createMarkdownImage(fileAccessRef: FileAccessRefOrNull): Node {
   return Node.create({
     name: 'markdownImage',
     group: 'block',
@@ -316,7 +349,7 @@ export function createMarkdownImage(fileAccessRef: FileAccessRef): Node {
   })
 }
 
-export function createMarkdownVideo(fileAccessRef: FileAccessRef): Node {
+export function createMarkdownVideo(fileAccessRef: FileAccessRefOrNull): Node {
   return Node.create({
     name: 'markdownVideo',
     group: 'block',
@@ -450,6 +483,20 @@ export const MathInline = Node.create({
   addNodeView() {
     return ({ node }) => createMathView(node, false)
   },
+
+  /**
+   * 输入触发：`$x^2$ ` 末尾空格触发；内层不能含 `$` 或换行。
+   * 匹配到的整段（含 `$..$`）会被替换为节点，尾随空格保留在节点之后。
+   */
+  addInputRules() {
+    return [
+      nodeInputRule({
+        find: /(?:^|[\s(])\$([^$\n]{1,200})\$$/,
+        type: this.type,
+        getAttributes: (match) => ({ latex: match[1] ?? '' }),
+      }),
+    ]
+  },
 })
 
 export const MathBlock = Node.create({
@@ -474,6 +521,20 @@ export const MathBlock = Node.create({
 
   addNodeView() {
     return ({ node }) => createMathView(node, true)
+  },
+
+  /**
+   * 输入触发：在段落首输入 `$$<latex>$$` 后按下一个非 `$` 字符（通常是空格或回车前）触发。
+   * 使用基于行首锚定的规则：`^\$\$([\s\S]+?)\$\$$`。
+   */
+  addInputRules() {
+    return [
+      nodeInputRule({
+        find: /^\$\$([\s\S]+?)\$\$$/,
+        type: this.type,
+        getAttributes: (match) => ({ latex: (match[1] ?? '').trim() }),
+      }),
+    ]
   },
 })
 
@@ -516,49 +577,23 @@ export function createShikiCodeBlock(themeRef: ThemeRef): Node {
   })
 }
 
-export const TaskList = Node.create({
-  name: 'taskList',
-  group: 'block',
-  content: 'taskItem+',
-
-  parseHTML() {
-    return [{ tag: 'ul[data-type="taskList"]' }]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['ul', mergeAttributes(HTMLAttributes, { 'data-type': 'taskList', class: 'not-prose my-2 space-y-1 pl-0' }), 0]
-  },
+/**
+ * 任务列表 — 使用 @tiptap/extension-task-list / task-item 官方扩展。
+ * 默认 parseHTML 即 `ul[data-type="taskList"]` / `li[data-type="taskItem"]`，
+ * 与 markdown-rich-text.ts 的 enhanceMarkdownHtml 输出一致。
+ *
+ * 官方扩展自带：
+ *  - inputRule `^\s*\[([\sxX])\]\s$`（在 listItem 中输入 `[ ]` 或 `[x]` + 空格 → 转为 taskItem）
+ *  - Enter 拆分 / Tab 缩进 / Shift+Tab 升级
+ *  - checkbox 双向勾选
+ */
+export const TaskList = TaskListExt.configure({
+  HTMLAttributes: { class: 'not-prose my-2 space-y-1 pl-0' },
 })
 
-export const TaskItem = Node.create({
-  name: 'taskItem',
-  content: 'paragraph block*',
-  defining: true,
-
-  addAttributes() {
-    return {
-      checked: {
-        default: false,
-        parseHTML: (element) => element.getAttribute('data-checked') === 'true',
-        renderHTML: (attrs) => ({ 'data-checked': attrs.checked ? 'true' : 'false' }),
-      },
-    }
-  },
-
-  parseHTML() {
-    return [{ tag: 'li[data-type="taskItem"]' }]
-  },
-
-  renderHTML({ node, HTMLAttributes }) {
-    return [
-      'li',
-      mergeAttributes(HTMLAttributes, { 'data-type': 'taskItem', class: 'flex items-start gap-2' }),
-      ['label', { contenteditable: 'false', class: 'mt-[0.2em] inline-flex shrink-0 items-center' },
-        ['input', { type: 'checkbox', checked: node.attrs.checked ? 'checked' : undefined, disabled: 'disabled' }],
-      ],
-      ['div', { class: 'min-w-0 flex-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0' }, 0],
-    ]
-  },
+export const TaskItem = TaskItemExt.configure({
+  nested: true,
+  HTMLAttributes: { class: 'flex items-start gap-2' },
 })
 
 export const MarkdownTableBlock = Node.create({

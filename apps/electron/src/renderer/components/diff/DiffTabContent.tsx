@@ -10,6 +10,7 @@ import { Code2, Copy, Check, Eye, Pencil, RefreshCw, Save, X } from 'lucide-reac
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
@@ -200,12 +201,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setImageDataUrl('')
     setImageZoom(0.25)
     setImageNaturalSize({ w: 0, h: 0 })
-    setLoading(true)
+    setLoading(!isLegacyOffice)
     setMarkdownEditing(false)
     setMarkdownSourceMode(false)
     setMarkdownDraft('')
     setMarkdownSaving(false)
-  }, [filePath, sessionId, previewOnly])
+  }, [filePath, sessionId, previewOnly, isLegacyOffice])
 
   // non-passive wheel listener for pinch-to-zoom on image
   React.useEffect(() => {
@@ -266,7 +267,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setLoading(false)
       return // 缓存命中，直接返回，不执行 load()
     } else {
-      setLoading(true)
+      if (!isLegacyOffice) setLoading(true)
       setOldContent('')
       setNewContent('')
       setDocxHtml('')
@@ -411,6 +412,30 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       onEmptyDiff?.()
     }
   }, [previewOnly, loading, oldContent, newContent, onEmptyDiff])
+
+  // previewOnly 模式：加载完成后若内容无法预览，弹 Toast 通知用户
+  const toastedPreviewFailRef = React.useRef('')
+  React.useEffect(() => {
+    if (!previewOnly || loading) return
+    const key = `${filePath}:${ext}`
+    if (toastedPreviewFailRef.current === key) return
+    let message: string | null = null
+    if (isLegacyOffice) {
+      message = `暂不支持 ${ext.toUpperCase().slice(1)} 格式内联预览`
+    } else if (isPdf && !pdfSrc) {
+      message = 'PDF 文件过大，无法在此预览'
+    } else if (isDocx && !docxHtml) {
+      message = '无法加载 DOCX 预览'
+    } else if (isOfficePreview && !officeHtml) {
+      message = `无法加载 ${ext === '.pptx' ? 'PPTX' : 'Excel'} 预览`
+    } else if (isImage && !imageDataUrl) {
+      message = '图片文件过大，无法在此预览'
+    }
+    if (message) {
+      toastedPreviewFailRef.current = key
+      toast.warning(message)
+    }
+  }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
 
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;
@@ -633,12 +658,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   title={filePath.split('/').pop() || 'PDF'}
                 />
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-[12px] gap-1 px-4 text-center">
-                <p>该 PDF 文件过大，无法在此预览</p>
-                <p className="text-[11px] text-muted-foreground/60">请在系统中打开查看</p>
-              </div>
-            )
+            ) : null
           ) : isImage ? (
             imageDataUrl ? (
               <div className="relative h-full">
@@ -694,42 +714,22 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-[12px] gap-1 px-4 text-center">
-                {imagePath ? <p>加载中...</p> : (
-                  <>
-                    <p>该图片文件过大，无法在此预览</p>
-                    <p className="text-[11px] text-muted-foreground/60">请在系统中打开查看</p>
-                  </>
-                )}
-              </div>
-            )
+            ) : null
           ) : isDocx ? (
             docxHtml ? (
               <div
                 className="prose prose-sm dark:prose-invert max-w-none px-4 py-3"
                 dangerouslySetInnerHTML={{ __html: docxHtml }}
               />
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">无法加载 DOCX</div>
-            )
+            ) : null
           ) : isOfficePreview ? (
             officeHtml ? (
               <div
                 className="office-preview-host"
                 dangerouslySetInnerHTML={{ __html: officeHtml }}
               />
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">
-                无法加载 {ext === '.pptx' ? 'PPTX' : 'Excel'} 预览
-              </div>
-            )
-          ) : isLegacyOffice ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-[12px] gap-1 px-4 text-center">
-              <p>暂不支持旧版 {ext.toUpperCase().slice(1)} 内联预览</p>
-              <p className="text-[11px] text-muted-foreground/60">请在系统中打开，或转换为 {ext === '.xls' ? 'XLSX' : ext === '.ppt' ? 'PPTX' : 'DOCX'} 后预览</p>
-            </div>
-          ) : isMarkdown ? (
+            ) : null
+          ) : isLegacyOffice ? null : isMarkdown ? (
             markdownEditing && markdownSourceMode ? (
               <textarea
                 value={markdownDraft}

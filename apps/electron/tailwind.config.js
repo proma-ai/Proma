@@ -64,10 +64,15 @@ export default {
           from: { transform: 'translateX(0)' },
           to: { transform: 'translateX(100%)' },
         },
+        'preview-slide-out': {
+          '0%': { opacity: '1', transform: 'translateX(0)' },
+          '100%': { opacity: '0', transform: 'translateX(16px)' },
+        },
       },
       animation: {
         'in': 'slide-in-from-top 0.3s ease-out',
         'out': 'slide-out-to-right 0.2s ease-in',
+        'preview-slide-out': 'preview-slide-out 0.25s ease-out forwards',
       },
     },
   },

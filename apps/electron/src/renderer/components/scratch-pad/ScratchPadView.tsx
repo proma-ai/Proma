@@ -3,17 +3,41 @@
  *
  * 基于 TipTap 的轻量 Markdown 编辑器，内容持久化到 ~/.proma/scratch-pad.md。
  * 自动保存由 ScratchPadPersistence 组件通过监听 scratchPadContentAtom 统一管理。
+ *
+ * 支持：Markdown 快捷输入、图片粘贴、Todo 列表（- [ ] 触发）、代码高亮（lowlight）、数学公式（$..$ / $$..$$ 触发）、导出为 Markdown
  */
 
 import * as React from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import MarkdownIt from 'markdown-it'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useAtom, useAtomValue } from 'jotai'
-import { scratchPadContentAtom, scratchPadLoadedAtom } from '@/atoms/tab-atoms'
-
-const md = new MarkdownIt({ breaks: true, linkify: true })
+import { FileDown } from 'lucide-react'
+import { scratchPadContentAtom, scratchPadLoadedAtom, tabsAtom, activeTabIdAtom } from '@/atoms/tab-atoms'
+import { currentAgentWorkspaceIdAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
+import { lowlight } from '@/lib/lowlight'
+import { htmlToMarkdown, markdownToHtml } from '@/lib/markdown-rich-text'
+import {
+  MarkdownTableBlock,
+  MathBlock,
+  MathInline,
+  RawHtmlBlock,
+  RawHtmlInline,
+  TaskItem,
+  TaskList,
+  createMarkdownImage,
+  createMarkdownVideo,
+} from '@/components/diff/markdown-preview-extensions'
 
 export function ScratchPadView(): React.ReactElement {
   const [content, setContent] = useAtom(scratchPadContentAtom)
@@ -24,21 +48,108 @@ export function ScratchPadView(): React.ReactElement {
   const contentRef = React.useRef(content)
   contentRef.current = content
 
+  const extensions = React.useMemo(() => [
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3] },
+      codeBlock: false, // 用 CodeBlockLowlight 替代：支持 ``` 触发、可编辑、可删除
+    }),
+    Placeholder.configure({
+      placeholder: '在此随意书写… 支持 Markdown 快捷输入',
+    }),
+    CodeBlockLowlight.configure({ lowlight }),
+    // ScratchPad 无会话/文件上下文，传 null 跳过路径解析（仅支持 data-URL / 外链 / file: 协议）
+    createMarkdownImage(null),
+    createMarkdownVideo(null),
+    RawHtmlBlock,
+    RawHtmlInline,
+    MathBlock,
+    MathInline,
+    TaskList,
+    TaskItem,
+    MarkdownTableBlock,
+  ], [])
+
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-      }),
-      Placeholder.configure({
-        placeholder: '在此随意书写… 支持 Markdown 快捷输入',
-      }),
-    ],
+    extensions,
     content: content || '',
     onUpdate: ({ editor }) => {
       setContent(editor.getHTML())
     },
     immediatelyRender: false,
   })
+
+  // ===== 导出 =====
+
+  // 导出目标上下文
+  const workspaces = useAtomValue(agentWorkspacesAtom)
+  const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const tabs = useAtomValue(tabsAtom)
+  const activeTabId = useAtomValue(activeTabIdAtom)
+
+  const currentWorkspace = React.useMemo(
+    () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,
+    [workspaces, currentWorkspaceId],
+  )
+
+  const activeSessionId = React.useMemo(() => {
+    const activeTab = tabs.find((t) => t.id === activeTabId)
+    if (activeTab?.type === 'agent') return activeTab.sessionId
+    const agentTab = [...tabs].reverse().find((t) => t.type === 'agent')
+    return agentTab?.sessionId ?? null
+  }, [tabs, activeTabId])
+
+  const activeSessionTitle = React.useMemo(() => {
+    const agentTab = tabs.find((t) => t.sessionId === activeSessionId && t.type === 'agent')
+    return agentTab?.title ?? null
+  }, [tabs, activeSessionId])
+
+  const makeFilename = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `scratch-pad-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.md`
+  }
+
+  const handleExport = React.useCallback(
+    async (target: 'session' | 'workspace') => {
+      if (!editor || editor.isEmpty) return
+      // htmlToMarkdown 能正确处理本编辑器的所有自定义节点（math/task/markdownImage/table 等），
+      // 而通用 turndown 不认识这些 data-type 节点，会丢内容。
+      const markdownContent = htmlToMarkdown(editor.getHTML())
+      const filename = makeFilename()
+
+      try {
+        let dirPath: string | null = null
+        if (target === 'session' && activeSessionId && currentWorkspaceId) {
+          dirPath = await window.electronAPI.getAgentSessionPath(currentWorkspaceId, activeSessionId)
+        } else if (target === 'workspace' && currentWorkspace?.slug) {
+          dirPath = await window.electronAPI.getWorkspaceFilesPath(currentWorkspace.slug)
+        }
+        if (!dirPath) return
+        await window.electronAPI.exportScratchPad(markdownContent, dirPath, filename)
+      } catch (err) {
+        console.error('[ScratchPad] 导出失败:', err)
+      }
+    },
+    [editor, activeSessionId, currentWorkspaceId, currentWorkspace],
+  )
+
+  const handleBrowseExport = React.useCallback(async () => {
+    if (!editor || editor.isEmpty) return
+
+    const filename = makeFilename()
+    const filePath = await window.electronAPI.chooseExportPath(filename)
+    if (!filePath) return
+
+    try {
+      const markdownContent = htmlToMarkdown(editor.getHTML())
+      // 传空 filename 触发 IPC 的完整路径模式，由 Node.js path.dirname 安全处理
+      await window.electronAPI.exportScratchPad(markdownContent, filePath, '')
+    } catch (err) {
+      console.error('[ScratchPad] 导出失败:', err)
+    }
+  }, [editor])
+
+  // ===== 内容同步 =====
 
   // 仅在初始加载或编辑器重新挂载时同步内容到编辑器。
   // content 不加入 deps：用户每次输入都会更新 atom，若加入 deps 会导致
@@ -53,20 +164,45 @@ export function ScratchPadView(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, editor])
 
-  // 粘贴时自动将 Markdown 转为 HTML 插入
+  // ===== 粘贴处理 =====
+
+  // 粘贴时：图片转 data URL 插入；含 markdown 标记的文本走 markdownToHtml 转 HTML 注入
   React.useEffect(() => {
     const el = containerRef.current
     if (!el || !editor) return
 
     const handlePaste = (e: ClipboardEvent): void => {
+      // 检测剪贴板中的图片
+      const items = e.clipboardData?.items
+      if (items) {
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            e.preventDefault()
+            e.stopPropagation()
+            const file = item.getAsFile()
+            if (!file) return
+            const reader = new FileReader()
+            reader.onload = () => {
+              editor.chain().focus().insertContent({
+                type: 'markdownImage',
+                attrs: { src: reader.result as string, alt: '', title: '' },
+              }).run()
+            }
+            reader.readAsDataURL(file)
+            return
+          }
+        }
+      }
+
       const text = e.clipboardData?.getData('text/plain')
       if (!text) return
-      if (!/[#*>\-`[\]~|]/.test(text)) return
+      // markdown 触发字符：#标题 *强调 >引用 -列表 `代码 [链接 ~删除 |表格 $公式
+      if (!/[#*>\-`[\]~|$]/.test(text)) return
 
       e.preventDefault()
       e.stopPropagation()
       try {
-        const html = md.render(text)
+        const html = markdownToHtml(text)
         editor.chain().focus().insertContent(html).run()
       } catch {
         // 转换失败，回退到纯文本插入
@@ -94,10 +230,53 @@ export function ScratchPadView(): React.ReactElement {
           )}
         </div>
       </div>
-      <div className="h-[28px] border-t border-border/40 px-4 flex items-center">
+      <div className="h-[28px] border-t border-border/40 px-4 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground/60">
           Scratch Pad — 内容自动保存到本地
         </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="text-[11px] text-muted-foreground/60 hover:text-foreground flex items-center gap-1 transition-colors"
+              title="导出为 Markdown"
+            >
+              <FileDown className="w-3 h-3" />
+              导出
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuPortal>
+          <DropdownMenuContent align="end" side="top" className="min-w-[240px] z-[9999]">
+            <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+              导出为 Markdown
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => handleExport('session')}
+              disabled={!activeSessionId}
+              className="flex flex-col items-start"
+            >
+              <span className="text-xs">保存到会话目录</span>
+              <span className="text-[10px] text-muted-foreground">
+                {activeSessionTitle ?? '无活跃会话'}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => handleExport('workspace')}
+              disabled={!currentWorkspace}
+              className="flex flex-col items-start"
+            >
+              <span className="text-xs">保存到工作区目录</span>
+              <span className="text-[10px] text-muted-foreground">
+                {currentWorkspace?.name ?? '无当前工作区'}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={handleBrowseExport}>
+              浏览选择位置...
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenu>
       </div>
     </div>
   )

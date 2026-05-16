@@ -355,6 +355,12 @@ export interface ElectronAPI {
   /** 同步保存内容到 scratch-pad.md（beforeunload 场景） */
   saveScratchPadSync: (content: string) => boolean
 
+  /** 导出 ScratchPad 内容为 Markdown 文件到指定目录 */
+  exportScratchPad: (markdown: string, dirPath: string, filename: string) => Promise<string>
+
+  /** 打开原生保存对话框，返回用户选择的路径 */
+  chooseExportPath: (defaultName: string) => Promise<string | null>
+
   // ===== 应用图标切换 =====
 
   /** 设置应用图标变体（传入 variant ID，如 'blue'、'cyberpunk'，'default' 恢复默认） */
@@ -1367,6 +1373,14 @@ const electronAPI: ElectronAPI = {
 
   saveScratchPadSync: (content: string) => {
     return ipcRenderer.sendSync(SCRATCH_PAD_IPC_CHANNELS.SAVE_SYNC, content)
+  },
+
+  exportScratchPad: (markdown: string, dirPath: string, filename: string) => {
+    return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.EXPORT, markdown, dirPath, filename)
+  },
+
+  chooseExportPath: (defaultName: string) => {
+    return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.CHOOSE_EXPORT_PATH, defaultName)
   },
 
   // 应用图标切换

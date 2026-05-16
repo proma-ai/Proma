@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react'
-import { highlightCode, highlightToTokens } from '@proma/core'
+import { getDisplayName, highlightCode, highlightToTokens } from '@proma/core'
 import type { HighlightToken, HighlightTokensResult } from '@proma/core'
 
 /** react-markdown 传入的 <code> 元素 props */
@@ -69,34 +69,6 @@ function extractCodeInfo(children: React.ReactNode): { language: string; code: s
     language: langMatch?.[1] ?? '',
     code: extractText(props.children),
   }
-}
-
-/**
- * 不规则语言显示名称（无法通过首字母大写自动生成的）
- * 其余语言自动 capitalize 首字母
- */
-const DISPLAY_NAMES: Record<string, string> = {
-  js: 'JavaScript', javascript: 'JavaScript',
-  ts: 'TypeScript', typescript: 'TypeScript',
-  tsx: 'TSX', jsx: 'JSX',
-  py: 'Python', rb: 'Ruby',
-  cpp: 'C++', 'c++': 'C++',
-  cs: 'C#', csharp: 'C#',
-  kt: 'Kotlin', rs: 'Rust',
-  sh: 'Shell', zsh: 'Shell',
-  yml: 'YAML', md: 'Markdown',
-  tf: 'Terraform',
-  html: 'HTML', css: 'CSS', scss: 'SCSS', less: 'LESS',
-  json: 'JSON', xml: 'XML', sql: 'SQL',
-  graphql: 'GraphQL', php: 'PHP',
-  plaintext: 'Text', text: 'Text',
-}
-
-/** 获取语言显示名称，未匹配的自动首字母大写 */
-function getDisplayName(lang: string): string {
-  if (!lang) return 'Code'
-  const key = lang.toLowerCase()
-  return DISPLAY_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
 }
 
 // ===== SVG 图标路径常量 =====

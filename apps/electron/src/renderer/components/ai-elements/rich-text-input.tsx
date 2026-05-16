@@ -21,19 +21,16 @@ import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import Mention from '@tiptap/extension-mention'
-import { common, createLowlight } from 'lowlight'
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
 import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion } from '@/components/agent/mention-suggestions'
 
 const VOICE_DICTATION_INSERT_EVENT = 'proma:insert-voice-dictation-text'
 let lastFocusedRichTextInputId: string | null = null
-
-// 创建 lowlight 实例，使用常见语言
-const lowlight = createLowlight(common)
 
 // ===== 行数计算 =====
 

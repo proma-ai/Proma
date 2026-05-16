@@ -238,6 +238,10 @@ export const SCRATCH_PAD_IPC_CHANNELS = {
   SAVE: 'scratch-pad:save',
   /** 同步保存（beforeunload 场景） */
   SAVE_SYNC: 'scratch-pad:save-sync',
+  /** 导出为 Markdown 到指定目录 */
+  EXPORT: 'scratch-pad:export',
+  /** 打开保存对话框选择导出路径 */
+  CHOOSE_EXPORT_PATH: 'scratch-pad:choose-export-path',
 } as const
 
 /** 应用图标 IPC 通道 */

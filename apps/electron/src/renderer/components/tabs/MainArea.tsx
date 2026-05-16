@@ -31,6 +31,25 @@ export function MainArea(): React.ReactElement {
     activeTab?.type === 'agent' && (previewOpenMap.get(activeTab.sessionId) ?? false)
   const previewSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
 
+  // 关闭动画状态：当 previewOpen 从 true → false 时，播放退出动画再移除 DOM
+  const [closing, setClosing] = React.useState(false)
+  const prevPreviewStateRef = React.useRef({ open: previewOpen, sessionId: previewSessionId })
+
+  React.useEffect(() => {
+    const prev = prevPreviewStateRef.current
+    // 同一 session 的预览从开启变为关闭时，触发关闭动画
+    if (prev.open && !previewOpen && prev.sessionId === previewSessionId) {
+      setClosing(true)
+    }
+    // 预览重新打开或切换 session 时，取消关闭动画
+    if (previewOpen || prev.sessionId !== previewSessionId) {
+      setClosing(false)
+    }
+    prevPreviewStateRef.current = { open: previewOpen, sessionId: previewSessionId }
+  }, [previewOpen, previewSessionId])
+
+  const showPreview = (previewOpen || closing) && previewSessionId
+
   const handlePreviewDragStart = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     previewDragging.current = true
@@ -79,20 +98,35 @@ export function MainArea(): React.ReactElement {
     }
   }, [tabs, activeTabId, setActiveTabId])
 
+  // 关闭动画期间右侧面板的定位样式（脱离 flex 流，叠加在左侧上方）
+  const closingOverlayStyle: React.CSSProperties | undefined = closing
+    ? {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: `${splitRatio * 100}%`,
+        zIndex: 1,
+        display: 'flex',
+      }
+    : undefined
+
   return (
     <>
       <Panel
         variant="grow"
         className="bg-content-area rounded-2xl shadow-xl"
       >
-        <div className="flex flex-1 min-h-0" data-split-container>
+        <div className="flex flex-1 min-h-0 relative" data-split-container>
           {/* 左侧：TabBar + TabContent（始终保持在同一 DOM 位置，避免 Tab 切换时 unmount） */}
           <div
             className="flex flex-col min-w-0 h-full"
-            style={previewOpen && previewSessionId
-              ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
-              : { flex: '1 1 auto' }
-            }
+            style={{
+              ...(previewOpen && previewSessionId
+                ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
+                : { flex: '1 1 auto' }),
+              transition: 'flex 0.25s ease-out',
+            }}
           >
             <TabBar />
             {tabs.length === 0 ? (
@@ -104,19 +138,25 @@ export function MainArea(): React.ReactElement {
             ) : null}
           </div>
 
-          {previewOpen && previewSessionId && (
-            <>
-              {/* 拖拽手柄 */}
-              <div
-                className="w-[8px] cursor-col-resize bg-border/40 hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0 self-stretch"
-                onMouseDown={handlePreviewDragStart}
-              />
-
-              {/* 右侧：PreviewPanel */}
+          {/* 右侧：预览面板。关闭动画期间脱离 flex 流，absolute 叠加 */}
+          {showPreview && (
+            <div
+              className={closing ? 'animate-preview-slide-out' : 'flex flex-1 min-w-0'}
+              style={closingOverlayStyle}
+              onAnimationEnd={(e) => {
+                if (closing && e.target === e.currentTarget) setClosing(false)
+              }}
+            >
+              {!closing && (
+                <div
+                  className="w-[8px] cursor-col-resize bg-border/40 hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0 self-stretch"
+                  onMouseDown={handlePreviewDragStart}
+                />
+              )}
               <div className="flex-1 min-w-0 h-full overflow-hidden">
                 <PreviewPanel sessionId={previewSessionId} />
               </div>
-            </>
+            </div>
           )}
         </div>
       </Panel>
