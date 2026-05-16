@@ -97,7 +97,7 @@ import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-uti
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
-const LONG_TEXT_ATTACHMENT_THRESHOLD = 500
+const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
 
 function formatClipboardTimestamp(date = new Date()): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
