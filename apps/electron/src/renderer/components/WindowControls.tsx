@@ -15,7 +15,12 @@ export function WindowControls(): React.ReactElement | null {
     if (!isWindows) return
     window.electronAPI.windowIsMaximized().then(setIsMaximized)
     const unsub = window.electronAPI.onWindowResize(() => {
-      window.electronAPI.windowIsMaximized().then(setIsMaximized)
+      window.electronAPI.windowIsMaximized().then((next) => {
+        // 只在状态实际变化时 setState，避免每次 resize 都触发重渲染——
+        // Windows 上每次重渲染都会让 Chromium 重算可拖拽区域，期间存在数十 ms 的 stale 窗口，
+        // 用户在此窗口内点击按钮会被 OS 误判为标题栏点击。
+        setIsMaximized((prev) => (prev === next ? prev : next))
+      })
     })
     return unsub
   }, [isWindows])

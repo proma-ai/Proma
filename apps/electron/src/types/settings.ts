@@ -211,6 +211,17 @@ export interface AppSettings {
   autoCleanupTempOnStart?: boolean
   /** 自动清理 N 天前已归档会话的 SDK 数据（0 = 禁用，默认 0） */
   autoCleanupArchivedDays?: number
+  /** 主窗口状态（大小、位置、是否最大化） */
+  mainWindowState?: MainWindowState
+}
+
+/** 主窗口大小、位置和最大化状态 */
+export interface MainWindowState {
+  width: number
+  height: number
+  x: number
+  y: number
+  isMaximized: boolean
 }
 
 /** 持久化的标签页状态 */

@@ -26,6 +26,12 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ])
 
+// Windows: 禁用 LCD 次像素抗锯齿（ClearType），改用灰度 AA。
+// ClearType 是为浅色背景+深色文字设计的，在深色代码块背景下会产生彩色边缘，导致文字模糊。
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('disable-lcd-text')
+}
+
 // Windows/macOS 文件关联 + deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
 app.on('second-instance', (_event, argv) => {
   // 优先检查 OAuth deep-link
@@ -41,7 +47,7 @@ app.on('second-instance', (_event, argv) => {
   showAndFocusMainWindow()
 })
 
-import { getSettings } from './lib/settings-service'
+import { getSettings, updateSettings } from './lib/settings-service'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
 
 // 商业版固定为 Cloud 模式
@@ -229,6 +235,22 @@ function getIconPath(): string {
   }
 }
 
+function saveMainWindowState(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const isMaximized = mainWindow.isMaximized()
+  // 最大化时用恢复尺寸（unmaximize 后的尺寸），避免记录最大化的全屏 bounds
+  const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+  updateSettings({
+    mainWindowState: {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      isMaximized,
+    },
+  })
+}
+
 function createWindow(): void {
   const iconPath = getIconPath()
   const iconExists = existsSync(iconPath)
@@ -251,9 +273,13 @@ function createWindow(): void {
       ? { titleBarStyle: 'hidden' as const }
       : {}
 
+  const savedState = getSettings().mainWindowState
+  const initialBounds = savedState
+    ? { width: savedState.width, height: savedState.height, x: savedState.x, y: savedState.y }
+    : { width: 1400, height: 900 }
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    ...initialBounds,
     minWidth: 800,
     minHeight: 600,
     icon: iconExists ? iconPath : undefined,
@@ -276,11 +302,25 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'))
   }
 
-  // 窗口就绪后最大化显示
+  // 窗口就绪后，按保存的状态决定是否最大化
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.maximize()
+    if (savedState?.isMaximized ?? true) {
+      mainWindow?.maximize()
+    }
     mainWindow?.show()
   })
+
+  // 持久化窗口大小和位置（防抖 500ms，避免频繁写入）
+  let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleWindowStateSave = (): void => {
+    if (windowStateSaveTimer) clearTimeout(windowStateSaveTimer)
+    windowStateSaveTimer = setTimeout(() => {
+      windowStateSaveTimer = null
+      saveMainWindowState()
+    }, 500)
+  }
+  mainWindow.on('resize', scheduleWindowStateSave)
+  mainWindow.on('move', scheduleWindowStateSave)
 
   // 拦截页面内导航，外部链接用系统浏览器打开，防止 Electron 窗口被覆盖
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -305,6 +345,12 @@ function createWindow(): void {
   if (process.platform === 'darwin') {
     mainWindow.on('close', (event) => {
       if (!getIsQuitting()) {
+        // 隐藏前先刷新挂起的窗口状态保存
+        if (windowStateSaveTimer) {
+          clearTimeout(windowStateSaveTimer)
+          windowStateSaveTimer = null
+        }
+        saveMainWindowState()
         event.preventDefault()
         mainWindow?.hide()
         app.hide()

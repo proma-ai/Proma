@@ -396,6 +396,16 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
                 resultText={toolResult?.result}
               />
             )}
+
+            {/* 底部收起按钮 */}
+            <button
+              type="button"
+              onClick={() => setChildrenExpanded(false)}
+              className="flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors"
+            >
+              <ChevronUp className="size-3" />
+              <span>收起</span>
+            </button>
           </div>
         )}
       </div>

@@ -53,7 +53,7 @@ export function WelcomeEmptyState(): React.ReactElement {
   }, [mode, setMode])
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-6 px-4 animate-in fade-in duration-500">
+    <div className="flex h-full flex-col items-center justify-center gap-6 px-4">
       {/* 问候语 */}
       <h1 className="text-[26px] font-semibold tracking-tight text-foreground">
         {displayName}，{greeting}

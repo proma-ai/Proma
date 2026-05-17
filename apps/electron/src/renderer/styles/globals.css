@@ -330,8 +330,18 @@
   app-region: drag;
 }
 
-/* Windows 自定义窗口控制按钮 */
+/* Windows 自定义窗口控制按钮
+ *
+ * 可点击性关键点（解决 Windows 用户点击失效 / 需要双击的 bug）：
+ * 1. 容器本身就是 no-drag 矩形，不靠"在 drag 区里挖三个小洞"——避免 Chromium hitmask
+ *    在小矩形 + 高 DPI 缩放下的像素对齐误差。
+ * 2. AppShell 的 drag-region 在 Windows 上不再延伸到按钮区域（见 AppShell.tsx 的 right-[126px]），
+ *    drag 与 no-drag 区域彻底解耦，OS hitmask 不会再误判。
+ * 3. 按钮尺寸与位置使用整数 px，避免 125%/150%/175% DPI 下四舍五入收缩。
+ */
 .window-controls {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   height: 28px;
   gap: 1px;
 }
@@ -710,7 +720,8 @@
 }
 
 .code-block-wrapper pre.shiki {
-  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  /* Cascadia Code 是 Windows 11 预装字体，优先级提高；Courier New 作为 Windows 10 最终兜底 */
+  font-family: 'Fira Code', 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', Consolas, 'Courier New', monospace;
   background-color: hsl(var(--code-bg)) !important;
 }
 

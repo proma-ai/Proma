@@ -15,6 +15,7 @@
 import { execSync } from 'child_process'
 import { app } from 'electron'
 import type { ShellEnvResult } from '@proma/shared'
+import { loadWindowsEnv } from './windows-env'
 
 /**
  * 获取用户默认 Shell 路径
@@ -191,7 +192,12 @@ function applyFallbackPaths(): void {
  * @returns Shell 环境加载结果
  */
 export async function loadShellEnv(): Promise<ShellEnvResult> {
-  // 仅在 macOS 上执行
+  // Windows：从注册表加载完整 PATH
+  if (process.platform === 'win32') {
+    return loadWindowsEnv()
+  }
+
+  // 仅在 macOS 上执行后续逻辑
   if (process.platform !== 'darwin') {
     return {
       success: true,

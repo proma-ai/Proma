@@ -16,16 +16,43 @@ import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { GitBashStatus } from '@proma/shared'
+import { getGitForWindowsInstallPath } from './windows-env'
 
 /**
- * Git for Windows 常见安装路径
+ * 获取 Git for Windows 常见安装路径列表
+ *
+ * 在调用时读取 process.env，确保 loadWindowsEnv() 已执行后路径完整。
  */
-const COMMON_GIT_BASH_PATHS = [
-  'C:\\Program Files\\Git\\bin\\bash.exe',
-  'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-  'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-  'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
-]
+function getCommonGitBashPaths(): string[] {
+  const paths: string[] = []
+  const scoop = process.env.SCOOP
+  const localAppData = process.env.LOCALAPPDATA
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+
+  // 包管理器安装位置（优先检测）
+  if (scoop) {
+    paths.push(
+      join(scoop, 'apps', 'git', 'current', 'bin', 'bash.exe'),
+      join(scoop, 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+    )
+  }
+  if (localAppData) {
+    paths.push(
+      join(localAppData, 'scoop', 'apps', 'git', 'current', 'bin', 'bash.exe'),
+      join(localAppData, 'scoop', 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+    )
+  }
+
+  // 官方安装器默认位置
+  paths.push(
+    join(programFiles, 'Git', 'bin', 'bash.exe'),
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
+    'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+  )
+
+  return paths
+}
 
 /**
  * 验证 bash.exe 路径并获取版本
@@ -56,52 +83,6 @@ function verifyBashPath(bashPath: string): string | null {
   } catch {
     return null
   }
-}
-
-/**
- * 从注册表读取 Git for Windows 安装路径
- *
- * @returns Git 安装根目录路径，失败返回 null
- */
-function getGitInstallPathFromRegistry(): string | null {
-  try {
-    // 尝试从 HKLM（系统级安装）读取
-    const hklmOutput = execSync(
-      'reg query "HKLM\\SOFTWARE\\GitForWindows" /v InstallPath',
-      {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    )
-
-    // 解析注册表输出（示例："InstallPath    REG_SZ    C:\Program Files\Git"）
-    const pathMatch = hklmOutput.match(/InstallPath\s+REG_SZ\s+(.+)/)
-    if (pathMatch?.[1]) {
-      return pathMatch[1].trim()
-    }
-  } catch {
-    // HKLM 失败，尝试 HKCU（用户级安装）
-    try {
-      const hkcuOutput = execSync(
-        'reg query "HKCU\\SOFTWARE\\GitForWindows" /v InstallPath',
-        {
-          encoding: 'utf-8',
-          timeout: 5000,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        },
-      )
-
-      const pathMatch = hkcuOutput.match(/InstallPath\s+REG_SZ\s+(.+)/)
-      if (pathMatch?.[1]) {
-        return pathMatch[1].trim()
-      }
-    } catch {
-      // 注册表读取失败
-    }
-  }
-
-  return null
 }
 
 /**
@@ -156,7 +137,7 @@ export async function detectGitBash(): Promise<GitBashStatus> {
   }
 
   // 策略 1：检查常见安装路径
-  for (const path of COMMON_GIT_BASH_PATHS) {
+  for (const path of getCommonGitBashPaths()) {
     const version = verifyBashPath(path)
     if (version) {
       console.log(`[Git Bash 检测] 找到 Git Bash (常见路径): ${path} (${version})`)
@@ -170,7 +151,7 @@ export async function detectGitBash(): Promise<GitBashStatus> {
   }
 
   // 策略 2：从注册表读取安装路径
-  const gitInstallPath = getGitInstallPathFromRegistry()
+  const gitInstallPath = getGitForWindowsInstallPath()
   if (gitInstallPath) {
     const candidatePaths = [
       join(gitInstallPath, 'bin', 'bash.exe'),

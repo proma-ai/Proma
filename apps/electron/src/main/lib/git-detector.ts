@@ -6,7 +6,9 @@
 
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
+import { join } from 'path'
 import type { GitRuntimeStatus, GitRepoStatus } from '@proma/shared'
+import { getGitForWindowsInstallPath } from './windows-env'
 
 /**
  * 从系统 PATH 查找 Git
@@ -32,13 +34,50 @@ function findGitPath(): string | null {
     // Git 未安装
   }
 
-  // Windows 上额外检查常见安装位置
+  // Windows 上额外检查其他安装位置
   if (process.platform === 'win32') {
-    const commonPaths = [
-      'C:\\Program Files\\Git\\cmd\\git.exe',
+    const commonPaths: string[] = []
+
+    // 从注册表读取 Git for Windows 安装路径
+    const regInstallPath = getGitForWindowsInstallPath()
+    if (regInstallPath) {
+      commonPaths.push(
+        join(regInstallPath, 'cmd', 'git.exe'),
+        join(regInstallPath, 'bin', 'git.exe'),
+      )
+    }
+
+    // 常见包管理器的默认安装位置
+    const scoop = process.env.SCOOP
+    const localAppData = process.env.LOCALAPPDATA
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+
+    if (scoop) {
+      commonPaths.push(
+        join(scoop, 'apps', 'git', 'current', 'cmd', 'git.exe'),
+        join(scoop, 'apps', 'git', 'current', 'bin', 'git.exe'),
+        join(scoop, 'shims', 'git.exe'),
+      )
+    }
+    if (localAppData) {
+      commonPaths.push(
+        join(localAppData, 'scoop', 'apps', 'git', 'current', 'cmd', 'git.exe'),
+        join(localAppData, 'scoop', 'apps', 'git', 'current', 'bin', 'git.exe'),
+      )
+    }
+
+    // Chocolatey 默认位置
+    commonPaths.push(
+      'C:\\ProgramData\\chocolatey\\bin\\git.exe',
+    )
+
+    // 官方安装器默认位置
+    commonPaths.push(
+      join(programFiles, 'Git', 'cmd', 'git.exe'),
+      join(programFiles, 'Git', 'bin', 'git.exe'),
       'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
-      'C:\\Program Files\\Git\\bin\\git.exe',
-    ]
+      'C:\\Program Files (x86)\\Git\\bin\\git.exe',
+    )
 
     for (const path of commonPaths) {
       if (existsSync(path)) {
@@ -200,11 +239,41 @@ export function detectGitBashWindows(): string | null {
     return null
   }
 
-  const commonPaths = [
-    'C:\\Program Files\\Git\\bin\\bash.exe',
+  const commonPaths: string[] = []
+
+  // 从注册表读取 Git 安装路径
+  const regInstallPath = getGitForWindowsInstallPath()
+  if (regInstallPath) {
+    commonPaths.push(
+      join(regInstallPath, 'bin', 'bash.exe'),
+      join(regInstallPath, 'usr', 'bin', 'bash.exe'),
+    )
+  }
+
+  // 常见包管理器的安装位置
+  const scoop = process.env.SCOOP
+  const localAppData = process.env.LOCALAPPDATA
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files'
+
+  if (scoop) {
+    commonPaths.push(
+      join(scoop, 'apps', 'git', 'current', 'bin', 'bash.exe'),
+      join(scoop, 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+    )
+  }
+  if (localAppData) {
+    commonPaths.push(
+      join(localAppData, 'scoop', 'apps', 'git', 'current', 'bin', 'bash.exe'),
+      join(localAppData, 'scoop', 'apps', 'git', 'current', 'usr', 'bin', 'bash.exe'),
+    )
+  }
+
+  // 官方安装器默认位置
+  commonPaths.push(
+    join(programFiles, 'Git', 'bin', 'bash.exe'),
     'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
-  ]
+    join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
+  )
 
   for (const path of commonPaths) {
     if (existsSync(path)) {

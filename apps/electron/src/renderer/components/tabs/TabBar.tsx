@@ -230,13 +230,13 @@ function TabBarInner({
     <div className="flex items-end h-[34px] tabbar-bg relative">
       {/* 顶部 TabBar 的空白区域必须保持可拖拽，尤其是 macOS/Windows 自定义标题栏。
           注意：不要把 titlebar-no-drag 加到下面的整条 flex 容器上，否则标签右侧空白会再次失去拖拽能力。
-          前景 flex 容器也必须是 drag-region，因为它会覆盖在背景拖拽层之上。
+          Windows 上背景拖拽层避开右上角 WindowControls 区域（126px），防止 hitmask 重叠。
           需要交互的单个 Tab 会在 TabBarItem 内部自己声明 titlebar-no-drag。 */}
-      <div className="absolute inset-0 titlebar-drag-region" />
+      <div className={cn("absolute inset-0 titlebar-drag-region", isWindows && "right-[126px]")} />
 
       <div
         ref={scrollRef}
-        className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none titlebar-drag-region", isWindows && "pr-[112px]")}
+        className={cn("relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none", isWindows && "pr-[126px]")}
       >
         {tabs.map((tab) => (
           <TabBarItem

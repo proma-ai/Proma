@@ -286,7 +286,7 @@ export function SettingsPanel({
       {/* 下方主体：左导航 + 右内容 */}
       <div className="flex flex-1 min-h-0">
         {/* 左侧 Tab 导航 */}
-        <div className="w-[160px] border-r border-border/50 pt-3 px-2 flex-shrink-0">
+        <div className="w-[160px] border-r border-border/50 pt-3 px-2 flex-shrink-0 overflow-y-auto">
           <nav className="flex flex-col gap-0.5">
             {tabs.map((tab) => (
               <button

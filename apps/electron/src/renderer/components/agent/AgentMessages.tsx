@@ -387,12 +387,15 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const channels = useAtomValue(channelsAtom)
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
+  // 空会话无需淡入过渡（无消息则无滚动位置问题）
+  const [skipFadeIn, setSkipFadeIn] = React.useState(false)
   const prevSessionIdRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
     if (sessionId !== prevSessionIdRef.current) {
       prevSessionIdRef.current = sessionId
       setReady(false)
+      setSkipFadeIn(false)
     }
   }, [sessionId])
 
@@ -409,6 +412,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
     }
 
     if ((!persistedSDKMessages || persistedSDKMessages.length === 0) && !streaming) {
+      setSkipFadeIn(true)
       setReady(true)
       return
     }
@@ -585,7 +589,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   return (
     <BasePathsProvider basePaths={attachedDirs}>
-    <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? 'opacity-100 transition-opacity duration-200' : 'opacity-0'}>
+    <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
       <ScrollPositionManager id={sessionId} ready={ready} />
       <ConversationContent>
         {!hasContent && !streaming ? (
