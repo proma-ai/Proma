@@ -116,7 +116,9 @@ export function StickyUserMessage({ userMessages }: StickyUserMessageProps): Rea
     const el = scrollRef.current
     if (!el || !stickyMessage?.id) return
 
-    const target = el.querySelector<HTMLElement>(`[data-message-id="${stickyMessage.id}"]`)
+    const target = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+      (node) => node.getAttribute('data-message-id') === stickyMessage.id
+    )
     if (!target) return
 
     stopScroll()

@@ -22,6 +22,8 @@ import { createRequire } from 'node:module'
 import { app } from 'electron'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
 import {
+  PROMA_DEFAULT_PERMISSION_MODE,
+  PROMA_PERMISSION_MODE_CONFIG,
   SAFE_TOOLS,
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_MESSAGE,
@@ -914,7 +916,7 @@ export class AgentOrchestrator {
   /**
    * 持久化累积的 SDKMessage（Phase 4: 直接存储原始 SDKMessage）
    *
-   * 只持久化 assistant、user、result 和 compact_boundary system 消息
+   * 只持久化 assistant、user、result 和需要长期可见的 system 消息
    * （跳过 tool_progress、compacting 等临时消息）。
    */
   private persistSDKMessages(
@@ -926,7 +928,7 @@ export class AgentOrchestrator {
 
     const toPersist = accumulatedMessages.filter(
       (m) => m.type === 'assistant' || m.type === 'user' || m.type === 'result'
-        || (m.type === 'system' && (m as import('@proma/shared').SDKSystemMessage).subtype === 'compact_boundary')
+        || (m.type === 'system' && ['compact_boundary', 'permission_denied'].includes((m as import('@proma/shared').SDKSystemMessage).subtype ?? ''))
     ).filter((m) => {
       // 过滤 SDK 内部生成的 user 文本消息（如 Skill 展开 prompt），与实时流过滤逻辑一致
       if (m.type === 'user') {
@@ -1318,10 +1320,10 @@ export class AgentOrchestrator {
       }
 
       // 12. 读取应用设置并确定权限模式
-      // 权限模式只属于当前 session；新会话默认完全自动模式。
+      // 权限模式只属于当前 session；新会话默认自动审批模式。
       const appSettings = getSettings()
       const initialPermissionMode: PromaPermissionMode = permissionModeOverride
-        ?? 'bypassPermissions'
+        ?? PROMA_DEFAULT_PERMISSION_MODE
       // 注册到 Map，支持运行中动态切换
       this.sessionPermissionModes.set(sessionId, initialPermissionMode)
       console.log(`[Agent 编排] 权限模式: ${initialPermissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)
@@ -1524,7 +1526,7 @@ export class AgentOrchestrator {
         sdkCliPath: cliPath,
         env: sdkEnv,
         ...(maxTurns != null && { maxTurns }),
-        sdkPermissionMode: initialPermissionMode,
+        sdkPermissionMode: PROMA_PERMISSION_MODE_CONFIG[initialPermissionMode].sdkMode,
         // 当提供 canUseTool 回调时必须为 false，否则 CLI 同时收到
         // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
         // 两个矛盾的指令，导致 ExitPlanMode/AskUserQuestion 等交互式工具失败。
@@ -1883,7 +1885,7 @@ export class AgentOrchestrator {
               }
             } else if (msg.type === 'system') {
               const sysMsg = msg as import('@proma/shared').SDKSystemMessage
-              if (sysMsg.subtype === 'compact_boundary') {
+              if (sysMsg.subtype === 'compact_boundary' || sysMsg.subtype === 'permission_denied') {
                 accumulatedMessages.push(msg)
               }
             }

@@ -2,8 +2,8 @@
  * ExitPlanModeBanner — Agent ExitPlanMode 计划审批横幅
  *
  * 仿照 Claude Code 的计划审批 UI，提供 4 个选项：
- * 1. 批准并自动执行 — 切换到 bypassPermissions
- * 2. 批准，手动审批编辑 — 切换到 auto
+ * 1. 批准并完全自动执行 — 切换到 bypassPermissions
+ * 2. 批准并自动审批 — 切换到 auto
  * 3. 拒绝计划 — deny
  * 4. 提供反馈 — 自由输入修改意见
  *
@@ -36,15 +36,15 @@ interface PlanOption {
 const PLAN_OPTIONS: PlanOption[] = [
   {
     action: 'approve_auto',
-    label: '批准并自动执行',
-    description: '自动批准所有后续操作',
+    label: '批准并完全自动执行',
+    description: '后续工具调用全部自动允许',
     icon: <Check className="size-3.5" />,
     variant: 'default',
   },
   {
     action: 'approve_edit',
-    label: '批准，手动审批编辑',
-    description: '后续文件修改需要逐一确认',
+    label: '批准并自动审批',
+    description: '使用 SDK 自动审批器判断后续操作',
     icon: <ShieldCheck className="size-3.5" />,
     variant: 'secondary',
   },

@@ -25,6 +25,8 @@ import { getToolIcon, extractFilePath } from './tool-utils'
 import { getToolPhrase } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
 import { PreviewOpenButton } from './tool-result-renderers/preview-open-button'
+import { getTaskGetStatusLabel, parseTaskGetResult, type ParsedTaskGetResult } from './tool-result-renderers/task-get-result'
+import { parseTaskListResult, type ParsedTaskListItem } from './tool-result-renderers/task-list-result'
 import { formatDuration } from './AgentMessages'
 import type {
   SDKContentBlock,
@@ -273,6 +275,65 @@ function renderLabelWithDiffColors(label: string, toolName: string): React.React
   })
 }
 
+function TaskGetCollapsedSummary({ task }: { task: ParsedTaskGetResult }): React.ReactElement {
+  const blockPreview = task.blocks.length > 0
+    ? `${task.blocks[0]}${task.blocks.length > 1 ? ` +${task.blocks.length - 1}` : ''}`
+    : undefined
+
+  return (
+    <>
+      {task.subject && (
+        <>
+          <span className="shrink-0 text-muted-foreground/35">·</span>
+          <span className="min-w-0 truncate text-[14px] font-medium text-foreground/75">
+            {task.subject}
+          </span>
+        </>
+      )}
+      {task.description && (
+        <span className="hidden min-w-0 truncate text-[13px] text-muted-foreground/60 sm:inline">
+          {task.description}
+        </span>
+      )}
+      {task.status && (
+        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+          {getTaskGetStatusLabel(task.status)}
+        </span>
+      )}
+      {blockPreview && (
+        <span className="shrink-0 rounded-sm bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground/70">
+          关联 {blockPreview}
+        </span>
+      )}
+    </>
+  )
+}
+
+function TaskListCollapsedSummary({ tasks }: { tasks: ParsedTaskListItem[] }): React.ReactElement {
+  const completedCount = tasks.filter((task) => task.status === 'completed').length
+  const activeCount = tasks.filter((task) => task.status === 'in_progress').length
+  const pendingCount = tasks.filter((task) => task.status === 'pending').length
+
+  return (
+    <>
+      <span className="shrink-0 text-muted-foreground/35">·</span>
+      <span className="shrink-0 rounded-full bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground/75">
+        {completedCount}/{tasks.length} 已完成
+      </span>
+      {activeCount > 0 && (
+        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+          {activeCount} 进行中
+        </span>
+      )}
+      {pendingCount > 0 && (
+        <span className="hidden shrink-0 rounded-full bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground/65 sm:inline">
+          {pendingCount} 待处理
+        </span>
+      )}
+    </>
+  )
+}
+
 // ===== 工具调用块 =====
 
 interface ToolUseBlockProps {
@@ -290,6 +351,17 @@ interface ToolUseBlockProps {
 function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed = false, childBlocks, basePath, isStreaming }: ToolUseBlockProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false)
   const toolResult = useToolResult(block.id, allMessages)
+  const resultText = toolResult?.result
+  const isError = toolResult?.isError === true
+  const shouldShowResult = !!resultText
+  const taskGetSummary = React.useMemo(() => {
+    if (block.name !== 'TaskGet' || !resultText || isError) return null
+    return parseTaskGetResult(resultText)
+  }, [block.name, resultText, isError])
+  const taskListSummary = React.useMemo(() => {
+    if (block.name !== 'TaskList' || !resultText || isError) return null
+    return parseTaskListResult(resultText)
+  }, [block.name, resultText, isError])
   const isAgentTool = block.name === 'Agent' || block.name === 'Task'
   const hasChildren = isAgentTool && childBlocks && childBlocks.length > 0
   const subAgentMeta = useSubAgentMeta(block.id, allMessages)
@@ -301,7 +373,6 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   const ToolIcon = getToolIcon(block.name)
 
   const isCompleted = toolResult !== null
-  const isError = toolResult?.isError === true
 
   // 运行中显示进行时短语，完成或非流式（已终止）显示完成态短语
   const displayLabel = (isCompleted || !isStreaming) ? phrase.label : phrase.loadingLabel
@@ -422,7 +493,10 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
     >
       <button
         type="button"
-        className="flex items-center gap-2 py-0.5 text-left hover:opacity-70 transition-opacity group"
+        className={cn(
+          'flex w-full max-w-full items-center gap-2 py-0.5 text-left transition-opacity group',
+          'hover:opacity-70',
+        )}
         onClick={() => setExpanded(!expanded)}
       >
         {!isCompleted && isStreaming ? (
@@ -435,12 +509,25 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
 
         <span className={cn(
           'truncate text-[14px]',
+          taskGetSummary || taskListSummary ? 'shrink-0' : 'min-w-0 flex-1',
           dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
         )}>{renderLabelWithDiffColors(displayLabel, block.name)}</span>
 
+        {taskGetSummary && (
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <TaskGetCollapsedSummary task={taskGetSummary} />
+          </span>
+        )}
+
+        {taskListSummary && (
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <TaskListCollapsedSummary tasks={taskListSummary} />
+          </span>
+        )}
+
         <ChevronRight
           className={cn(
-            'shrink-0 size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-all duration-150',
+            'ml-auto shrink-0 size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-all duration-150',
             expanded && 'rotate-90 opacity-100',
           )}
         />
@@ -450,7 +537,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         )}
       </button>
 
-      {expanded && toolResult?.result && (
+      {shouldShowResult && resultText && expanded && (
         <div className={cn(
           'ml-5.5 mt-1 mb-2 pl-3 border-l-2 border-border/30',
           animate && 'animate-in fade-in slide-in-from-top-1 duration-150',
@@ -458,7 +545,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           <ToolResultRenderer
             toolName={block.name}
             input={block.input}
-            result={toolResult.result}
+            result={resultText}
             isError={isError}
             basePath={basePath}
           />

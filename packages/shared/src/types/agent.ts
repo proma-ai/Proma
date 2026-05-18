@@ -250,7 +250,7 @@ export interface SDKResultMessage {
   session_id?: string
 }
 
-/** SDK system 消息（init / compact_boundary / task_started / task_progress / task_notification） */
+/** SDK system 消息（init / compact_boundary / permission_denied / task_started / task_progress / task_notification） */
 export interface SDKSystemMessage {
   type: 'system'
   subtype?: string
@@ -266,6 +266,11 @@ export interface SDKSystemMessage {
   summary?: string
   output_file?: string
   last_tool_name?: string
+  /** permission_denied 相关字段 */
+  tool_name?: string
+  message?: string
+  decision_reason_type?: string
+  decision_reason?: string
   usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number }
   [key: string]: unknown
 }
@@ -556,7 +561,7 @@ export interface AgentSessionMeta {
   manualWorking?: boolean
   /** 最后一次流式执行是否被用户主动中断 */
   stoppedByUser?: boolean
-  /** 该会话当前的权限模式（持久化到磁盘，重启后恢复）。未设置时新会话默认 bypassPermissions */
+  /** 该会话当前的权限模式（持久化到磁盘，重启后恢复）。未设置时新会话默认 auto */
   permissionMode?: PromaPermissionMode
   /** 创建时间戳 */
   createdAt: number
@@ -1080,21 +1085,50 @@ export interface ExitPlanModeResponse {
 
 // ===== 权限系统类型 =====
 
-/** Proma 权限模式（直接映射 SDK 原生模式） */
-export type PromaPermissionMode = 'auto' | 'bypassPermissions' | 'plan'
+/** 当前 Proma 支持的权限模式，值直接映射 SDK 原生 permissionMode */
+export const PROMA_PERMISSION_MODES = ['auto', 'bypassPermissions', 'plan'] as const
+
+export type PromaPermissionMode = typeof PROMA_PERMISSION_MODES[number]
+
+export const PROMA_DEFAULT_PERMISSION_MODE: PromaPermissionMode = 'auto'
+
+export interface PromaPermissionModeConfig {
+  /** 对应 Claude Agent SDK 的 permissionMode */
+  sdkMode: PromaPermissionMode
+  label: string
+  description: string
+}
+
+/** Proma 权限模式的单一配置来源 */
+export const PROMA_PERMISSION_MODE_CONFIG = {
+  auto: {
+    sdkMode: 'auto',
+    label: '自动审批',
+    description: 'SDK 内置审批器自动判断，危险操作才需确认',
+  },
+  bypassPermissions: {
+    sdkMode: 'bypassPermissions',
+    label: '完全自动',
+    description: '所有工具调用自动允许',
+  },
+  plan: {
+    sdkMode: 'plan',
+    label: '计划模式',
+    description: '仅规划不执行，查看工具使用计划',
+  },
+} as const satisfies Record<PromaPermissionMode, PromaPermissionModeConfig>
 
 /** 权限模式定义顺序（用于循环切换） */
-export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['auto', 'bypassPermissions', 'plan']
+export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = PROMA_PERMISSION_MODES
 
-/** 迁移旧权限模式值到新模式 */
+export function isPromaPermissionMode(mode: string): mode is PromaPermissionMode {
+  return (PROMA_PERMISSION_MODES as readonly string[]).includes(mode)
+}
+
+/** 规范化权限模式：不匹配当前三种模式时统一回到默认自动审批 */
 export function migratePermissionMode(mode: string): PromaPermissionMode {
-  if (mode === 'auto' || mode === 'bypassPermissions' || mode === 'plan') return mode
-  const migration: Record<string, PromaPermissionMode> = {
-    acceptEdits: 'auto',
-    smart: 'auto',
-    supervised: 'auto',
-  }
-  return migration[mode] ?? 'auto'
+  if (isPromaPermissionMode(mode)) return mode
+  return PROMA_DEFAULT_PERMISSION_MODE
 }
 
 /** 危险等级 */
@@ -1118,6 +1152,10 @@ export interface PermissionRequest {
   dangerLevel: DangerLevel
   /** SDK 提供的原因说明 */
   decisionReason?: string
+  /** SDK 提供的原因分类，如 classifier / safetyCheck / rule */
+  decisionReasonType?: string
+  /** SDK auto safety check 是否允许交给 classifier 审批 */
+  classifierApprovable?: boolean
   /** SDK 提供的工具显示名称，如 "Write" */
   sdkDisplayName?: string
   /** SDK 提供的操作标题，如 "Write to /path/to/file.ts" */

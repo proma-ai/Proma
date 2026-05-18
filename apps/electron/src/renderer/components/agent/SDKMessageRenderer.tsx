@@ -17,7 +17,8 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
-import { TaskProgressCard, TASK_TOOL_NAMES } from './TaskProgressCard'
+import { TaskProgressCard } from './TaskProgressCard'
+import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
 import { DurationBadge } from './AgentMessages'
 import {
   Message,
@@ -83,6 +84,44 @@ function CompactBoundaryDivider(): React.ReactElement {
         上下文已压缩
       </span>
       <div className="flex-1 h-px bg-border/40" />
+    </div>
+  )
+}
+
+function formatSystemToolName(toolName: string): string {
+  const parts = toolName.split('__')
+  if (parts[0] === 'mcp' && parts.length >= 3) {
+    return `${parts[1]} / ${parts.slice(2).join('__')}`
+  }
+  return toolName
+}
+
+function PermissionDeniedNotice({ message }: { message: SDKSystemMessage }): React.ReactElement {
+  const toolName = typeof message.tool_name === 'string' ? formatSystemToolName(message.tool_name) : undefined
+  const denialMessage = typeof message.message === 'string' ? message.message : undefined
+  const reason = typeof message.decision_reason === 'string' ? message.decision_reason : undefined
+
+  return (
+    <div className="my-3 px-1">
+      <div className="flex items-start gap-2.5 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs text-foreground/80">
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-foreground">自动审批已拒绝操作</span>
+            {toolName && (
+              <span className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                {toolName}
+              </span>
+            )}
+          </div>
+          {denialMessage && (
+            <p className="break-words text-muted-foreground">{denialMessage}</p>
+          )}
+          {reason && reason !== denialMessage && (
+            <p className="break-words text-muted-foreground/70">{reason}</p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -158,6 +197,25 @@ export function extractUserText(message: SDKUserMessage): string | null {
   return texts.length > 0 ? texts.join('\n') : null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function extractStructuredToolResultText(message: SDKUserMessage): string | undefined {
+  const raw = message as unknown as Record<string, unknown>
+  const result = raw.toolUseResult ?? raw.tool_use_result
+  if (!isRecord(result)) return undefined
+  try {
+    return JSON.stringify(result)
+  } catch {
+    return undefined
+  }
+}
+
+function extractToolResultForTask(message: SDKUserMessage, resultBlock: SDKToolResultBlock): string | undefined {
+  return extractStructuredToolResultText(message) ?? extractToolResultText(resultBlock.content)
+}
+
 // ===== 辅助：判断 user 消息是否为真正的人类用户输入（非工具结果/子代理提示） =====
 
 function isUserInputMessage(message: SDKUserMessage): boolean {
@@ -214,7 +272,7 @@ export type MessageGroup =
  * 规则：
  * 1. user（真正用户输入）→ 单独的 user group
  * 2. assistant + user(tool_result) + assistant... → 合并为一个 assistant-turn
- * 3. system（compact_boundary / compacting）→ 独立渲染，其他归入当前 turn
+ * 3. system（compact_boundary / compacting / permission_denied）→ 独立渲染，其他归入当前 turn
  * 4. 其他类型（result, tool_progress 等）→ 归入当前 assistant-turn
  * 5. 后处理：合并相邻同模型的 assistant-turn（处理子代理切换模型导致的碎片化）
  */
@@ -264,9 +322,9 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       }
     } else if (msg.type === 'system') {
       const sysMsg = msg as SDKSystemMessage
-      // 仅需要独立渲染的 system 消息才中断 turn（compact_boundary / compacting）
+      // 仅需要独立渲染的 system 消息才中断 turn（compact_boundary / compacting / permission_denied）
       // 其他 system 消息（如 init、task_started、task_progress）归入当前 turn，不中断分组
-      if (sysMsg.subtype === 'compact_boundary' || sysMsg.subtype === 'compacting') {
+      if (sysMsg.subtype === 'compact_boundary' || sysMsg.subtype === 'compacting' || sysMsg.subtype === 'permission_denied') {
         flushTurn()
         groups.push({ type: 'system', message: sysMsg })
       } else if (currentTurn) {
@@ -311,7 +369,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
     for (let i = result.length - 1; i >= 0; i--) {
       const prev = result[i]!
       if (prev.type === 'user') break // 真正的用户输入阻断合并
-      if (prev.type === 'system' && (prev.message as SDKSystemMessage).subtype === 'compact_boundary') break // 压缩边界阻断合并
+      if (prev.type === 'system' && ['compact_boundary', 'permission_denied'].includes((prev.message as SDKSystemMessage).subtype ?? '')) break
       if (prev.type === 'assistant-turn') {
         if (prev.model === group.model) {
           mergeTargetIdx = i
@@ -331,6 +389,93 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
   }
 
   return result
+}
+
+function buildTaskProgressData(
+  topLevelBlocks: SDKContentBlock[],
+  turnMessages: SDKMessage[],
+  allMessages: SDKMessage[],
+): {
+  taskActivities: ToolActivity[]
+  firstTaskIndex: number
+  historicalTaskSubjects: Map<string, string>
+} {
+  const taskBlocks: SDKToolUseBlock[] = []
+  let firstTaskIndex = -1
+
+  for (let i = 0; i < topLevelBlocks.length; i++) {
+    const block = topLevelBlocks[i]!
+    if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
+      if (firstTaskIndex === -1) firstTaskIndex = i
+      taskBlocks.push(block as SDKToolUseBlock)
+    }
+  }
+
+  const toolResultMap = new Map<string, string>()
+  for (const msg of turnMessages) {
+    if (msg.type !== 'user') continue
+    const userMsg = msg as SDKUserMessage
+    const blocks = userMsg.message?.content
+    if (!Array.isArray(blocks)) continue
+    for (const b of blocks) {
+      if (b.type === 'tool_result') {
+        const rb = b as SDKToolResultBlock
+        const text = extractToolResultForTask(userMsg, rb)
+        if (text) toolResultMap.set(rb.tool_use_id, text)
+      }
+    }
+  }
+
+  const taskActivities: ToolActivity[] = taskBlocks.map((tb) => ({
+    toolUseId: tb.id,
+    toolName: tb.name,
+    input: tb.input as Record<string, unknown>,
+    result: toolResultMap.get(tb.id),
+    done: true,
+  }))
+
+  const historicalTaskSubjects = new Map<string, string>()
+  const globalResultMap = new Map<string, string>()
+  const pendingTaskCreates: SDKToolUseBlock[] = []
+
+  for (const msg of allMessages) {
+    if (msg.type === 'user') {
+      const userMsg = msg as SDKUserMessage
+      const blocks = userMsg.message?.content
+      if (!Array.isArray(blocks)) continue
+      for (const b of blocks) {
+        if (b.type === 'tool_result') {
+          const rb = b as SDKToolResultBlock
+          const text = extractToolResultForTask(userMsg, rb)
+          if (text) globalResultMap.set(rb.tool_use_id, text)
+        }
+      }
+    } else if (msg.type === 'assistant') {
+      const aMsg = msg as SDKAssistantMessage
+      const blocks = aMsg.message?.content
+      if (!Array.isArray(blocks)) continue
+      for (const b of blocks) {
+        if (b.type === 'tool_use' && (b as SDKToolUseBlock).name === 'TaskCreate') {
+          pendingTaskCreates.push(b as SDKToolUseBlock)
+        }
+      }
+    }
+  }
+
+  for (const tb of pendingTaskCreates) {
+    const input = tb.input as Record<string, unknown>
+    const subject = typeof input.subject === 'string'
+      ? input.subject
+      : typeof input.description === 'string'
+        ? input.description
+        : undefined
+    if (!subject) continue
+    const resultText = globalResultMap.get(tb.id)
+    const parsedResult = parseTaskCreateResult(resultText)
+    if (parsedResult?.id) historicalTaskSubjects.set(parsedResult.id, parsedResult.subject ?? subject)
+  }
+
+  return { taskActivities, firstTaskIndex, historicalTaskSubjects }
 }
 
 // ===== AssistantTurnRenderer — 渲染一个完整的 assistant turn =====
@@ -427,96 +572,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
 
   // Task 聚合数据（useMemo 防止每次渲染重算）
   const { taskActivities, firstTaskIndex, historicalTaskSubjects } = React.useMemo(() => {
-    const taskBlocks: SDKToolUseBlock[] = []
-    let _firstTaskIndex = -1
-
-    for (let i = 0; i < topLevelBlocks.length; i++) {
-      const block = topLevelBlocks[i]!
-      if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
-        if (_firstTaskIndex === -1) _firstTaskIndex = i
-        taskBlocks.push(block as SDKToolUseBlock)
-      }
-    }
-
-    // 从 turnMessages 中提取 tool_result 文本，用于 TaskProgressCard 匹配真实 taskId
-    const toolResultMap = new Map<string, string>()
-    for (const msg of turn.turnMessages) {
-      if (msg.type !== 'user') continue
-      const userMsg = msg as SDKUserMessage
-      const blocks = userMsg.message?.content
-      if (!Array.isArray(blocks)) continue
-      for (const b of blocks) {
-        if (b.type === 'tool_result') {
-          const rb = b as SDKToolResultBlock
-          const text = typeof rb.content === 'string'
-            ? rb.content
-            : Array.isArray(rb.content)
-              ? (rb.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
-              : ''
-          if (text) toolResultMap.set(rb.tool_use_id, text)
-        }
-      }
-    }
-
-    // 将 SDKToolUseBlock 转换为 ToolActivity 格式（含 result）
-    const _taskActivities: ToolActivity[] = taskBlocks.map((tb) => ({
-      toolUseId: tb.id,
-      toolName: tb.name,
-      input: tb.input as Record<string, unknown>,
-      result: toolResultMap.get(tb.id),
-      done: true,
-    }))
-
-    // 从 allMessages 中回溯历史 TaskCreate 的 taskId → subject 映射
-    // 用于"继续"后当前 turn 缺少 TaskCreate 时恢复任务名
-    const _historicalTaskSubjects = new Map<string, string>()
-    const globalResultMap = new Map<string, string>()
-    const pendingTaskCreates: SDKToolUseBlock[] = []
-    // 单次遍历：同时收集 tool_result 映射和 TaskCreate 块
-    for (const msg of allMessages) {
-      if (msg.type === 'user') {
-        const userMsg = msg as SDKUserMessage
-        const blocks = userMsg.message?.content
-        if (!Array.isArray(blocks)) continue
-        for (const b of blocks) {
-          if (b.type === 'tool_result') {
-            const rb = b as SDKToolResultBlock
-            const text = typeof rb.content === 'string'
-              ? rb.content
-              : Array.isArray(rb.content)
-                ? (rb.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
-                : ''
-            if (text) globalResultMap.set(rb.tool_use_id, text)
-          }
-        }
-      } else if (msg.type === 'assistant') {
-        const aMsg = msg as SDKAssistantMessage
-        const blocks = aMsg.message?.content
-        if (!Array.isArray(blocks)) continue
-        for (const b of blocks) {
-          if (b.type === 'tool_use' && (b as SDKToolUseBlock).name === 'TaskCreate') {
-            pendingTaskCreates.push(b as SDKToolUseBlock)
-          }
-        }
-      }
-    }
-    // 解析 TaskCreate 的真实 taskId 和 subject
-    for (const tb of pendingTaskCreates) {
-      const input = tb.input as Record<string, unknown>
-      const subject = typeof input.subject === 'string'
-        ? input.subject
-        : typeof input.description === 'string'
-          ? input.description
-          : undefined
-      if (!subject) continue
-      const resultText = globalResultMap.get(tb.id)
-      if (resultText) {
-        const match = resultText.match(/Task\s*#(\d+)/i)
-        if (match?.[1]) _historicalTaskSubjects.set(match[1], subject)
-      }
-    }
-
-    return { taskActivities: _taskActivities, firstTaskIndex: _firstTaskIndex, historicalTaskSubjects: _historicalTaskSubjects }
+    return buildTaskProgressData(topLevelBlocks, turn.turnMessages, allMessages)
   }, [topLevelBlocks, turn.turnMessages, allMessages])
 
   // 如果只有错误消息
@@ -698,6 +754,9 @@ export function SDKMessageRenderer({
 
     if (subtype === 'compact_boundary') {
       return <CompactBoundaryDivider />
+    }
+    if (subtype === 'permission_denied') {
+      return <PermissionDeniedNotice message={sysMsg} />
     }
 
     // compacting 事件已由 isCompacting flag 驱动的尾部指示器接管（见 AgentMessages），此处不再渲染持久条目
@@ -1140,6 +1199,7 @@ export function getGroupPreview(group: MessageGroup): string {
   if (group.type === 'system') {
     if (group.message.subtype === 'compact_boundary') return '上下文已压缩'
     if (group.message.subtype === 'compacting') return '正在压缩上下文...'
+    if (group.message.subtype === 'permission_denied') return '自动审批已拒绝操作'
     return ''
   }
   // assistant-turn：收集所有 text 块
@@ -1171,12 +1231,13 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
     const subtype = group.message.subtype
     if (subtype === 'compact_boundary') return <div data-message-id={groupId}><CompactBoundaryDivider /></div>
     if (subtype === 'compacting') return <div data-message-id={groupId}><CompactingIndicator /></div>
+    if (subtype === 'permission_denied') return <div data-message-id={groupId}><PermissionDeniedNotice message={group.message} /></div>
     return null
   }
 
   // assistant-turn
   return (
-    <div data-message-id={groupId}>
+    <div data-message-id={groupId} data-message-role="assistant">
       <AssistantTurnRenderer
         turn={group}
         allMessages={allMessages}

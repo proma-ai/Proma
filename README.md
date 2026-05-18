@@ -207,7 +207,7 @@ bun run dist:fast
 | 代码高亮 | Shiki |
 | 构建 | Vite + esbuild |
 | 分发 | electron-builder |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.2.123` |
+| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.3.143` |
 
 ## 架构概览
 

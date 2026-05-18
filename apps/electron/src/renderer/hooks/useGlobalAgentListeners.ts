@@ -780,7 +780,7 @@ export function useGlobalAgentListeners(): void {
               return next
             })
           } else if (event.type === 'permission_mode_changed') {
-            // 权限模式变更（如 Plan 模式退出时切换到完全自动）
+            // 权限模式变更（如 Plan 模式退出后切换到自动审批或完全自动）
             console.log(`[GlobalAgentListeners] 权限模式变更: ${event.mode}`)
             store.set(agentPermissionModeMapAtom, (prev: Map<string, import('@proma/shared').PromaPermissionMode>) => {
               const next = new Map(prev)

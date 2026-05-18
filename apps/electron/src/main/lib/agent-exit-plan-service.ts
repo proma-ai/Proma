@@ -110,7 +110,7 @@ export class AgentExitPlanService {
         return { sessionId, targetMode: 'bypassPermissions' }
       }
       case 'approve_edit': {
-        // 批准 + 保持手动审批模式
+        // 批准 + 切换到自动审批模式
         pending.resolve({
           behavior: 'allow' as const,
           updatedInput: pending.toolInput,

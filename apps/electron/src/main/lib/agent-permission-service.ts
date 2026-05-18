@@ -76,6 +76,8 @@ export interface CanUseToolOptions {
   suggestions?: PermissionUpdate[]
   blockedPath?: string
   decisionReason?: string
+  decisionReasonType?: string
+  classifierApprovable?: boolean
   toolUseID: string
   agentID?: string
   title?: string
@@ -317,6 +319,8 @@ export class AgentPermissionService {
       command,
       dangerLevel: this.assessDangerLevel(toolName, input),
       decisionReason: options.decisionReason,
+      decisionReasonType: options.decisionReasonType,
+      classifierApprovable: options.classifierApprovable,
       sdkDisplayName: options.displayName,
       sdkTitle: options.title,
       sdkDescription: options.description,

@@ -14,6 +14,8 @@ import { GrepResultRenderer } from './grep-result'
 import { GlobResultRenderer } from './glob-result'
 import { WebSearchResultRenderer } from './web-search-result'
 import { WebFetchResultRenderer } from './web-fetch-result'
+import { TaskGetResultRenderer } from './task-get-result'
+import { TaskListResultRenderer } from './task-list-result'
 import { DefaultResultRenderer } from './default-result'
 
 export interface ToolResultRendererProps {
@@ -42,6 +44,10 @@ export function ToolResultRenderer({ toolName, input, result, isError, basePath 
       return <WebSearchResultRenderer result={result} isError={isError} />
     case 'WebFetch':
       return <WebFetchResultRenderer result={result} isError={isError} />
+    case 'TaskGet':
+      return <TaskGetResultRenderer result={result} isError={isError} />
+    case 'TaskList':
+      return <TaskListResultRenderer result={result} isError={isError} />
     default:
       return <DefaultResultRenderer result={result} isError={isError} />
   }

@@ -190,8 +190,8 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
 
     case 'TaskGet': {
       const taskId = input.taskId
-      if (typeof taskId === 'string') return phrase(`加载任务 #${taskId}`)
-      return phrase('加载任务')
+      if (typeof taskId === 'string') return phrase(`查看任务 #${taskId}`)
+      return phrase('查看任务')
     }
 
     case 'TaskList': {

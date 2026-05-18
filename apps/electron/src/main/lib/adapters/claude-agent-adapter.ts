@@ -17,6 +17,7 @@ import type {
   SdkBeta,
   JsonSchemaOutputFormat,
   SDKMessage,
+  PromaPermissionMode,
 } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
@@ -121,8 +122,8 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   env: Record<string, string | undefined>
   /** 最大轮次（undefined = SDK 默认） */
   maxTurns?: number
-  /** SDK 权限模式（直接使用 SDK 原生模式） */
-  sdkPermissionMode: 'acceptEdits' | 'bypassPermissions' | 'plan' | 'auto' | 'default' | 'dontAsk'
+  /** SDK 权限模式（Proma 当前三种模式直接映射 SDK 原生模式） */
+  sdkPermissionMode: PromaPermissionMode
   /** 是否跳过权限检查 */
   allowDangerouslySkipPermissions: boolean
   /** 自定义权限处理器（匹配 SDK CanUseTool 签名） */

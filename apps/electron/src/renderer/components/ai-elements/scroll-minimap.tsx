@@ -188,7 +188,9 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const scrollToMessage = React.useCallback((id: string) => {
     const el = scrollRef.current
     if (!el) return
-    const target = el.querySelector<HTMLElement>(`[data-message-id="${id}"]`)
+    const target = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+      (node) => node.getAttribute('data-message-id') === id
+    )
     if (!target) return
 
     stopScroll()

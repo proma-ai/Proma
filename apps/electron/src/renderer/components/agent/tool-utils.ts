@@ -107,7 +107,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   TodoRead: '阅读待办',
   TaskCreate: '创建任务',
   TaskUpdate: '更新任务',
-  TaskGet: '加载任务',
+  TaskGet: '查看任务',
   TaskList: '任务列表',
   Agent: 'Agent',
   EnterPlanMode: '正在生成计划',
