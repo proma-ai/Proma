@@ -34,12 +34,6 @@ import {
   initBillingService,
   getBilling,
   checkBalance,
-  getTiers,
-  createWechatPayment,
-  createStripePayment,
-  getOrderStatus,
-  getOrders,
-  verifyVip,
   getSubscriptionTiers,
   getSubscriptionCurrent,
   createSubscriptionWechat,
@@ -200,50 +194,6 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     CLOUD_IPC_CHANNELS.CHECK_BALANCE,
     async () => {
       return checkBalance()
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.GET_TIERS,
-    async () => {
-      return getTiers()
-    },
-  )
-
-  // ===== 支付相关 =====
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.CREATE_WECHAT_PAYMENT,
-    async (_, tierId: string) => {
-      return createWechatPayment(tierId)
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.CREATE_STRIPE_PAYMENT,
-    async (_, tierId: string) => {
-      return createStripePayment(tierId)
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.GET_ORDER_STATUS,
-    async (_, orderNo: string) => {
-      return getOrderStatus(orderNo)
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.GET_ORDERS,
-    async () => {
-      return getOrders()
-    },
-  )
-
-  ipcMain.handle(
-    CLOUD_IPC_CHANNELS.VERIFY_VIP,
-    async (_, apiKey: string) => {
-      return verifyVip(apiKey)
     },
   )
 

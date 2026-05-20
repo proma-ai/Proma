@@ -13,9 +13,6 @@ import { SubscriptionTab } from './SubscriptionTab'
 import {
   billingInfoAtom,
   billingLoadingAtom,
-  paymentTiersAtom,
-  isVipAtom,
-  discountLevelAtom,
   subscriptionTiersAtom,
   subscriptionStatusAtom,
 } from '@/atoms/cloud-billing'
@@ -24,9 +21,6 @@ export function BillingSettings(): React.ReactElement {
   const billingLoading = useAtomValue(billingLoadingAtom)
   const billingInfo = useAtomValue(billingInfoAtom)
   const setBillingInfo = useSetAtom(billingInfoAtom)
-  const setTiers = useSetAtom(paymentTiersAtom)
-  const setIsVip = useSetAtom(isVipAtom)
-  const setDiscountLevel = useSetAtom(discountLevelAtom)
   const setSubTiers = useSetAtom(subscriptionTiersAtom)
   const setSubStatus = useSetAtom(subscriptionStatusAtom)
 
@@ -37,16 +31,6 @@ export function BillingSettings(): React.ReactElement {
       setBillingInfo(result.data)
     }
   }, [setBillingInfo])
-
-  /** 加载套餐列表 */
-  const refreshTiers = React.useCallback(async () => {
-    const result = await window.electronAPI.cloudBilling.getTiers()
-    if (result.success && result.data) {
-      setTiers(result.data.tiers)
-      setIsVip(result.data.is_vip)
-      setDiscountLevel(result.data.discount_level)
-    }
-  }, [setTiers, setIsVip, setDiscountLevel])
 
   /** 加载订阅档位和当前订阅 */
   const refreshSubscription = React.useCallback(async () => {
@@ -64,8 +48,8 @@ export function BillingSettings(): React.ReactElement {
 
   /** 刷新全部数据 */
   const refreshAll = React.useCallback(async () => {
-    await Promise.all([refreshBilling(), refreshTiers(), refreshSubscription()])
-  }, [refreshBilling, refreshTiers, refreshSubscription])
+    await Promise.all([refreshBilling(), refreshSubscription()])
+  }, [refreshBilling, refreshSubscription])
 
   // 初始加载
   React.useEffect(() => {

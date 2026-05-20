@@ -60,11 +60,6 @@ import type {
   BillingIpcResponse,
   BillingInfo,
   CheckBalanceResponse,
-  PaymentTiersResponse,
-  CreateWechatPaymentResponse,
-  CreateStripePaymentResponse,
-  OrderRecord,
-  VerifyVipResponse,
   ApiKeyResponse,
   ApiKeyCreateResponse,
   ApiKeyCreateParams,
@@ -829,18 +824,6 @@ export interface ElectronAPI {
     getBilling: () => Promise<BillingIpcResponse<BillingInfo>>
     /** 检查余额 */
     checkBalance: () => Promise<BillingIpcResponse<CheckBalanceResponse>>
-    /** 获取套餐列表 */
-    getTiers: () => Promise<BillingIpcResponse<PaymentTiersResponse>>
-    /** 创建微信支付 */
-    createWechatPayment: (tierId: string) => Promise<BillingIpcResponse<CreateWechatPaymentResponse>>
-    /** 创建 Stripe 支付 */
-    createStripePayment: (tierId: string) => Promise<BillingIpcResponse<CreateStripePaymentResponse>>
-    /** 查询订单状态 */
-    getOrderStatus: (orderNo: string) => Promise<BillingIpcResponse<OrderRecord>>
-    /** 获取订单历史 */
-    getOrders: () => Promise<BillingIpcResponse<OrderRecord[]>>
-    /** VIP 验证 */
-    verifyVip: (apiKey: string) => Promise<BillingIpcResponse<VerifyVipResponse>>
     /** 订阅额度不足事件（返回清理函数） */
     onQuotaExceeded: (callback: () => void) => () => void
     /** 订阅余额变动事件（对话扣费后，返回清理函数） */
@@ -2028,24 +2011,6 @@ const electronAPI: ElectronAPI = {
     },
     checkBalance: () => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CHECK_BALANCE)
-    },
-    getTiers: () => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_TIERS)
-    },
-    createWechatPayment: (tierId: string) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_WECHAT_PAYMENT, tierId)
-    },
-    createStripePayment: (tierId: string) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.CREATE_STRIPE_PAYMENT, tierId)
-    },
-    getOrderStatus: (orderNo: string) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_ORDER_STATUS, orderNo)
-    },
-    getOrders: () => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_ORDERS)
-    },
-    verifyVip: (apiKey: string) => {
-      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.VERIFY_VIP, apiKey)
     },
     onQuotaExceeded: (callback: () => void) => {
       const listener = (): void => callback()

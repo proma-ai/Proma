@@ -1,15 +1,12 @@
 /**
  * Cloud 账单状态 Atoms
  *
- * 管理渲染进程的账单/支付状态
+ * 管理渲染进程的账单/订阅状态
  */
 
 import { atom } from 'jotai'
 import type {
   BillingInfo,
-  PaymentTier,
-  PaymentMethod,
-  OrderRecord,
   SubscriptionTier,
   SubscriptionStatusResponse,
 } from '@proma/shared'
@@ -25,28 +22,6 @@ export const billingLoadingAtom = atom<boolean>(false)
 
 /** 额度不足弹窗是否显示 */
 export const quotaExceededDialogAtom = atom<boolean>(false)
-
-// ===== 支付状态 =====
-
-/** 套餐列表 */
-export const paymentTiersAtom = atom<PaymentTier[]>([])
-
-/** 是否 VIP */
-export const isVipAtom = atom<boolean>(false)
-
-/** 折扣等级 */
-export const discountLevelAtom = atom<number>(0)
-
-/** 当前选择的套餐 ID */
-export const selectedTierIdAtom = atom<string | null>(null)
-
-/** 当前选择的支付方式 */
-export const selectedPaymentMethodAtom = atom<PaymentMethod>('wechat')
-
-// ===== 订单历史 =====
-
-/** 订单列表 */
-export const orderHistoryAtom = atom<OrderRecord[]>([])
 
 // ===== 订阅状态 =====
 

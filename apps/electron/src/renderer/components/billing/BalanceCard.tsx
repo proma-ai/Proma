@@ -7,7 +7,7 @@
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
 import { Badge } from '@/components/ui/badge'
-import { billingInfoAtom, isVipAtom, discountLevelAtom } from '@/atoms/cloud-billing'
+import { billingInfoAtom } from '@/atoms/cloud-billing'
 import { calcTotalAvailable } from '@proma/shared'
 
 function formatCurrency(value: number | string | null | undefined): string {
@@ -19,12 +19,9 @@ function formatCurrency(value: number | string | null | undefined): string {
 
 export function BalanceCard(): React.ReactElement | null {
   const billing = useAtomValue(billingInfoAtom)
-  const isVip = useAtomValue(isVipAtom)
-  const discountLevel = useAtomValue(discountLevelAtom)
 
   if (!billing) return null
 
-  const discountPercent = discountLevel > 0 ? Math.round((1 - discountLevel) * 100) : 0
   const hasSubscription = billing.hasActiveSubscription
 
   const totalAvailable = calcTotalAvailable(billing)
@@ -43,11 +40,6 @@ export function BalanceCard(): React.ReactElement | null {
               {hasSubscription && (
                 <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-medium bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300">
                   订阅中
-                </Badge>
-              )}
-              {isVip && (
-                <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                  VIP {discountPercent > 0 ? `${100 - discountPercent}折` : ''}
                 </Badge>
               )}
             </div>

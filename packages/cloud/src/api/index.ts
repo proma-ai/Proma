@@ -17,9 +17,6 @@ export type { AuthApi } from './auth'
 export { createBillingApi } from './billing'
 export type { BillingApi } from './billing'
 
-export { createPaymentApi } from './payment'
-export type { PaymentApi } from './payment'
-
 export { createModelsApi } from './models'
 export type { ModelsApi } from './models'
 
