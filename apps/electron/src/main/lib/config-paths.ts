@@ -397,28 +397,12 @@ export function parseSkillVersion(skillDir: string): string {
 }
 
 /**
- * 比较两个 semver 版本字符串
- *
- * @returns 正数表示 a > b，0 表示相等，负数表示 a < b
- */
-function compareSemver(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
-
-/**
  * 从 app bundle 同步默认 Skills 到 ~/.proma/default-skills/
  *
  * 打包模式下从 process.resourcesPath/default-skills 复制。
  * 开发模式下从源码 default-skills/ 目录复制。
  *
- * - 缺失的 Skill：直接复制
- * - 已存在的 Skill：比较 version，bundled 版本更新时覆盖
+ * 按名称直接覆盖，不再比较 version——bundle 是事实来源，每次启动都用最新内容刷新。
  */
 export function seedDefaultSkills(): void {
   const { app } = require('electron')
@@ -442,20 +426,8 @@ export function seedDefaultSkills(): void {
       const source = join(bundledDir, entry.name)
       const target = join(userDir, entry.name)
 
-      if (!existsSync(target)) {
-        // 缺失的 Skill：直接复制
-        cpSync(source, target, { recursive: true })
-        console.log(`[配置] 已同步默认 Skill: ${entry.name}`)
-      } else {
-        // 已存在：比较版本，bundled 更新时覆盖
-        const bundledVer = parseSkillVersion(source)
-        const existingVer = parseSkillVersion(target)
-
-        if (compareSemver(bundledVer, existingVer) > 0) {
-          cpSync(source, target, { recursive: true, force: true })
-          console.log(`[配置] 已升级默认 Skill: ${entry.name} (${existingVer} → ${bundledVer})`)
-        }
-      }
+      cpSync(source, target, { recursive: true, force: true })
+      console.log(`[配置] 已同步默认 Skill: ${entry.name}`)
     }
   } catch (err) {
     console.warn('[配置] 同步默认 Skills 失败:', err)

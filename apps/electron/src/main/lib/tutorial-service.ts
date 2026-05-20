@@ -88,30 +88,32 @@ export function createWelcomeConversation(): ConversationMeta | null {
       size: Buffer.byteLength(cleanedContent, 'utf-8'),
     }
 
-    // 3. 追加 user 消息（携带教程附件）
+    // 3. 追加 user 消息（携带教程附件作为 AI 的参考知识库）
     const now = Date.now()
     const userMessage: ChatMessage = {
       id: randomUUID(),
       role: 'user',
-      content: '请帮我了解 Proma 的功能和使用方式，我附上了完整的使用教程作为参考。',
+      content: '你好，我是 Proma 的新用户，希望快速上手。这是完整的使用教程，作为你的参考。',
       createdAt: now,
       attachments: [attachment],
     }
     appendMessage(meta.id, userMessage)
 
-    // 4. 追加 assistant 欢迎消息
+    // 4. 追加 assistant 欢迎消息（引导式对话：先了解用户，再生成个性化最佳实践）
     const assistantMessage: ChatMessage = {
       id: randomUUID(),
       role: 'assistant',
-      content: `你好，欢迎使用 Proma！我已经阅读了完整的使用教程。你可以向我提问来快速了解 Proma，比如：
+      content: `你好，欢迎来到 Proma！Proma 是一个通用的 Agent，其实它可以完成任何事，说实话这也挺难的，因为你要构建完整的工作环境才能做到，这会涉及到一些新的概念或者思考方式，不过别担心，我们做了很多设计可以帮助你靠谱稳定的越用越好用。
 
-- Proma 可以做什么？
-- 如何配置 AI 供应商渠道？
-- Chat 和 Agent 模式有什么区别？
-- 什么是 Skills 和 MCP？
-- 如何远程使用 Proma？
+在介绍功能之前，想先认识一下你：
 
-直接输入你的问题并发送吧！`,
+1. 怎么称呼你？
+2. 你的职业或主要角色是什么？（比如独立开发者、产品经理、数据分析师、运营、学生……）
+3. 你最近在做什么工作或项目？有哪些场景或痛点想交给 AI 帮忙？
+
+了解你的背景之后，我会为你单独整理一份专属的 Proma 使用最佳实践——告诉你哪些功能最值得用、推荐的 Skills / MCP 配置，以及贴合你场景的工作流模板。
+
+直接在下面回复就好，可以一次说完，也可以分几条慢慢聊。`,
       createdAt: now + 1,
       model: 'Proma',
     }

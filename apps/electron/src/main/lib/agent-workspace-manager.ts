@@ -283,23 +283,25 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
 
 // ===== 默认 Skills 自动升级 =====
 
-/** 将所有工作区中版本过旧的默认 Skill 升级到 ~/.proma/default-skills/ 的最新版本 */
+/**
+ * 同步默认 Skills 到所有工作区。规则：
+ * - 缺失：注入到 skills/（active），让升级后新增的内置 Skill 对老用户立即可用
+ * - 已在 skills/（active）：直接覆盖为 bundle 最新内容，保持 active
+ * - 已在 skills-inactive/（用户主动停用）：直接覆盖为 bundle 最新内容，保持 inactive
+ *
+ * 按名称覆盖、不再比较 version——开发者改 Skill 不必记得 bump 版本号，
+ * 每次启动都用 bundle 最新内容刷新；用户停用决定（位置在 inactive）被尊重。
+ */
 export function upgradeDefaultSkillsInWorkspaces(): void {
   const defaultDir = getDefaultSkillsDir()
 
-  interface DefaultSkillInfo {
-    version: string
-    sourcePath: string
-  }
-  const defaultSkills = new Map<string, DefaultSkillInfo>()
+  const defaultSkills = new Map<string, string>()
 
   try {
     const entries = readdirSync(defaultDir, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      const sourcePath = join(defaultDir, entry.name)
-      const version = parseSkillVersion(sourcePath)
-      defaultSkills.set(entry.name, { version, sourcePath })
+      defaultSkills.set(entry.name, join(defaultDir, entry.name))
     }
   } catch {
     return
@@ -313,55 +315,31 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
     const activeDir = getWorkspaceSkillsDir(workspace.slug)
     const inactiveDir = getInactiveSkillsDir(workspace.slug)
 
-    // 收集工作区中所有已存在的 default skill（包括停用的，避免新增时与停用版本冲突）
-    const existingSlugs = new Set<string>()
-    for (const dir of [activeDir, inactiveDir]) {
-      if (!existsSync(dir)) continue
+    for (const [slug, sourcePath] of defaultSkills) {
+      const activePath = join(activeDir, slug)
+      const inactivePath = join(inactiveDir, slug)
+
+      if (existsSync(activePath)) {
+        cpSync(sourcePath, activePath, { recursive: true, force: true })
+        console.log(`[Agent 工作区] 已同步默认 Skill: ${workspace.slug}/${slug} (active)`)
+        continue
+      }
+
+      if (existsSync(inactivePath)) {
+        cpSync(sourcePath, inactivePath, { recursive: true, force: true })
+        console.log(`[Agent 工作区] 已同步默认 Skill: ${workspace.slug}/${slug} (inactive)`)
+        continue
+      }
+
       try {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          if (entry.isDirectory()) existingSlugs.add(entry.name)
-        }
-      } catch {
-        // 忽略读取失败
-      }
-    }
-
-    for (const [slug, info] of defaultSkills) {
-      // 已存在：检查是否需要升级（同时遍历 active / inactive 两个目录）
-      if (existingSlugs.has(slug)) {
-        for (const dir of [activeDir, inactiveDir]) {
-          const targetPath = join(dir, slug)
-          if (!existsSync(targetPath)) continue
-
-          const currentVer = parseSkillVersion(targetPath)
-          if (compareSemver(info.version, currentVer) > 0) {
-            cpSync(info.sourcePath, targetPath, { recursive: true, force: true })
-            console.log(`[Agent 工作区] 已升级 Skill: ${workspace.slug}/${slug} (${currentVer} → ${info.version})`)
-          }
-        }
-      } else {
-        // 不存在：作为新 Skill 追加到 active 目录
-        const targetPath = join(activeDir, slug)
-        try {
-          cpSync(info.sourcePath, targetPath, { recursive: true })
-          console.log(`[Agent 工作区] 已追加新 Skill: ${workspace.slug}/${slug} (v${info.version})`)
-        } catch (err) {
-          console.warn(`[Agent 工作区] 追加 Skill 失败 ${workspace.slug}/${slug}:`, err)
-        }
+        if (!existsSync(activeDir)) mkdirSync(activeDir, { recursive: true })
+        cpSync(sourcePath, activePath, { recursive: true })
+        console.log(`[Agent 工作区] 已注入新默认 Skill: ${workspace.slug}/${slug} → active`)
+      } catch (err) {
+        console.warn(`[Agent 工作区] 注入默认 Skill 失败 (${workspace.slug}/${slug}):`, err)
       }
     }
   }
-}
-
-/** 比较两个 semver 版本字符串，返回值 >0 表示 a 更新 */
-function compareSemver(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (diff !== 0) return diff
-  }
-  return 0
 }
 
 // ===== Plugin Manifest（SDK 插件发现） =====

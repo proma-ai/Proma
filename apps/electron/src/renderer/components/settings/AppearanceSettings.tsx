@@ -117,6 +117,16 @@ const SPECIAL_STYLES: readonly SpecialStyle[] = [
   },
 ]
 
+/** 各主题遮罩颜色（实心背景 + 浅色文字，与 CSS --primary 对应） */
+const STYLE_MASK_COLORS: Record<SpecialStyleId, { bg: string; text: string }> = {
+  'slate-light':  { bg: 'hsl(18, 20%, 67%)',  text: 'hsl(18, 20%, 88%)' },
+  'ocean-light':  { bg: 'hsl(205, 50%, 50%)', text: 'hsl(205, 50%, 82%)' },
+  'forest-light': { bg: 'hsl(150, 35%, 38%)', text: 'hsl(150, 35%, 75%)' },
+  'ocean-dark':   { bg: 'rgba(0,0,0,0.8)', text: 'hsl(205, 50%, 82%)' },
+  'forest-dark':  { bg: 'rgba(0,0,0,0.8)', text: 'hsl(150, 35%, 75%)' },
+  'slate-dark':   { bg: 'rgba(0,0,0,0.8)', text: 'hsl(18, 20%, 88%)' },
+}
+
 /** 图标变体定义 */
 interface IconVariant {
   id: string
@@ -352,42 +362,48 @@ function StyleCard({
   onSelect: () => void
 }): React.ReactElement {
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <button
-        type="button"
-        onClick={onSelect}
-        className={cn(
-          'relative rounded-lg overflow-hidden',
-          'w-[99px] h-[183px]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
-          isSelected
-            ? 'ring-2 ring-primary shadow-lg shadow-primary/20'
-            : 'ring-1 ring-border/50 hover:ring-border'
-        )}
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        'relative rounded-lg overflow-hidden',
+        'w-[99px] h-[183px]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+        isSelected
+          ? 'ring-2 ring-primary shadow-lg shadow-primary/20'
+          : 'ring-1 ring-border/50 hover:ring-border'
+      )}
+    >
+      <div
+        className="w-full h-full"
+        style={style.imageScale ? { transform: `scale(${style.imageScale})` } : undefined}
       >
-        <div
-          className="w-full h-full"
-          style={style.imageScale ? { transform: `scale(${style.imageScale})` } : undefined}
+        <img
+          src={style.image}
+          alt={style.name}
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-cover"
+          style={style.objectPosition ? { objectPosition: style.objectPosition } : undefined}
+          draggable={false}
+        />
+      </div>
+      <div
+        className="absolute bottom-0 left-0 right-0 h-5 flex items-end justify-center pb-0.5"
+        style={{ background: STYLE_MASK_COLORS[style.id].bg }}
+      >
+        <span
+          className="text-xs font-medium"
+          style={{ color: STYLE_MASK_COLORS[style.id].text }}
         >
-          <img
-            src={style.image}
-            alt={style.name}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-            style={style.objectPosition ? { objectPosition: style.objectPosition } : undefined}
-            draggable={false}
-          />
+          {style.name}
+        </span>
+      </div>
+      {isSelected && (
+        <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center z-10">
+          <Check className="size-2.5 text-primary-foreground" />
         </div>
-        {isSelected && (
-          <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center">
-            <Check className="size-2.5 text-primary-foreground" />
-          </div>
-        )}
-      </button>
-      <span className="text-base font-medium text-foreground">
-        {style.name}
-      </span>
-    </div>
+      )}
+    </button>
   )
 }

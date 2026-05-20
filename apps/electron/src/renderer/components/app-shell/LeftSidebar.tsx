@@ -1427,11 +1427,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 </div>
               </div>
 
-              {/* 拖拽分割条：默认 1px 细线，hover 扩为 4px 热区 */}
+              {/* 拖拽分割条 */}
               <div
                 onMouseDown={handleAgentTopResizeStart}
-                className="h-px bg-border/60 hover:h-1 hover:bg-foreground/[0.08] cursor-row-resize titlebar-no-drag flex-shrink-0 transition-[height,background-color] duration-75"
-              />
+                className="h-[8px] cursor-row-resize active:bg-primary/50 transition-colors titlebar-no-drag flex-shrink-0 flex items-center"
+              >
+                <div className="mx-3 w-full border-t border-muted-foreground/20" />
+              </div>
             </>
           )}
 
