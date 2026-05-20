@@ -265,11 +265,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
     // 实时更新只存文本 + 路径，不计算行号
     const truncated = deepSel.text.length > MAX_QUOTED_CHARS
+    const newText = truncated ? deepSel.text.slice(0, MAX_QUOTED_CHARS) : deepSel.text
+    const newFilePath = filePathRef.current
     setQuotedSelectionMap((prev) => {
+      const existing = prev.get(sessionId)
+      // 选区文本与路径都未变 → 跳过 atom 写入，避免触发 AgentView 整树重渲染
+      if (existing && existing.text === newText && existing.filePath === newFilePath) {
+        return prev
+      }
       const m = new Map(prev)
       m.set(sessionId, {
-        text: truncated ? deepSel.text.slice(0, MAX_QUOTED_CHARS) : deepSel.text,
-        filePath: filePathRef.current,
+        text: newText,
+        filePath: newFilePath,
         capturedAt: Date.now(),
       })
       return m

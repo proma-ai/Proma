@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeTheme, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeTheme, protocol, screen, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 
@@ -9,43 +9,58 @@ if (!app.isPackaged) {
 }
 
 // 单实例锁：防止重复启动同一个版本（dev/prod 因 userData 已隔离，互不影响）
+//
+// 失败的常见原因：用户升级新版本时旧版进程仍在后台运行（macOS 关闭窗口 = hide
+// 不退出）。原先此处直接 process.exit(0)，没有任何用户可见反馈——如果旧进程
+// 卡在启动期，second-instance 也唤不起窗口，用户表现就是"双击应用没反应"。
+// 改为：留下 stderr 排查线索后正常退出，让 Electron 触发已存在实例的
+// second-instance 事件，由主实例负责显示窗口。
 if (!app.requestSingleInstanceLock()) {
+  console.warn(
+    '[启动] 已有 Proma 进程持有单实例锁，本次启动将退出。\n' +
+      '  如果窗口未出现，可能旧进程已卡死。请运行 `killall Proma` 后重试。',
+  )
   app.quit()
-  process.exit(0)
+} else {
+  // 主流程：正常启动（单实例锁已获取）
+  registerProtocolsAndHandlers()
 }
 
-// macOS 文件关联：在 app ready 之前注册 open-file 事件
-app.on('open-file', (event, filePath) => {
-  event.preventDefault()
-  handleMigrationFileOpen(filePath)
-})
+function registerProtocolsAndHandlers(): void {
+  // 注册自定义协议方案为"特权"（必须在 app ready 之前）
+  // 用于内联预览本地文件（renderer 用 iframe 加载 proma-file:// 资源）
+  protocol.registerSchemesAsPrivileged([
+    { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+  ])
 
-// 注册自定义协议方案为"特权"（必须在 app ready 之前）
-// 用于内联预览本地文件（renderer 用 iframe 加载 proma-file:// 资源）
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'proma-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
-])
+  // Windows: 禁用 LCD 次像素抗锯齿（ClearType），改用灰度 AA。
+  // ClearType 是为浅色背景+深色文字设计的，在深色代码块背景下会产生彩色边缘，导致文字模糊。
+  if (process.platform === 'win32') {
+    app.commandLine.appendSwitch('disable-lcd-text')
+  }
 
-// Windows: 禁用 LCD 次像素抗锯齿（ClearType），改用灰度 AA。
-// ClearType 是为浅色背景+深色文字设计的，在深色代码块背景下会产生彩色边缘，导致文字模糊。
-if (process.platform === 'win32') {
-  app.commandLine.appendSwitch('disable-lcd-text')
+  // macOS 文件关联：在 app ready 之前注册 open-file 事件
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault()
+    handleMigrationFileOpen(filePath)
+  })
+
+  // Windows/macOS 文件关联 + OAuth deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
+  app.on('second-instance', (_event, argv) => {
+    // 优先检查 OAuth deep-link（商业版 Cloud 登录回调）
+    const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
+    if (url) {
+      handleDeepLink(url)
+    }
+    // 检查文件关联
+    const fileArg = argv.find((arg) => arg.endsWith('.proma-backup') || arg.endsWith('.proma-share'))
+    if (fileArg) {
+      handleMigrationFileOpen(fileArg)
+    }
+    showAndFocusMainWindow()
+  })
 }
 
-// Windows/macOS 文件关联 + deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
-app.on('second-instance', (_event, argv) => {
-  // 优先检查 OAuth deep-link
-  const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
-  if (url) {
-    handleDeepLink(url)
-  }
-  // 检查文件关联
-  const fileArg = argv.find((arg) => arg.endsWith('.proma-backup') || arg.endsWith('.proma-share'))
-  if (fileArg) {
-    handleMigrationFileOpen(fileArg)
-  }
-  showAndFocusMainWindow()
-})
 
 import { getSettings, updateSettings } from './lib/settings-service'
 import { handlePromaFileRequest } from './lib/local-file-protocol'
@@ -425,20 +440,26 @@ function sendToMainWindow(channel: string, data?: unknown): void {
   }
 }
 
-app.whenReady().then(async () => {
+app.whenReady().then(bootstrap).catch(handleBootstrapFailure)
+
+/**
+ * 启动主流程。所有非关键步骤用 safeRun / safeAwait 隔离，
+ * 单点失败不应阻止窗口和托盘的创建（用户至少要能看到界面）。
+ */
+async function bootstrap(): Promise<void> {
   // 注册自定义协议 proma-file:// 用于内联预览本地文件。
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
   protocol.handle('proma-file', handlePromaFileRequest)
 
   // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
   // 必须在其他初始化之前执行，确保环境变量正确加载
-  await initializeRuntime()
+  await safeAwait('initializeRuntime', () => initializeRuntime())
 
   // 同步默认 Skills 模板到 ~/.proma/default-skills/
-  seedDefaultSkills()
+  safeRun('seedDefaultSkills', seedDefaultSkills)
 
   // 升级所有工作区中版本过旧的默认 Skills
-  upgradeDefaultSkillsInWorkspaces()
+  safeRun('upgradeDefaultSkillsInWorkspaces', upgradeDefaultSkillsInWorkspaces)
 
   // 旧 Flow 数据迁移（首次检测到 flow-projects.json 时自动执行）
   migrateFlowSessions()
@@ -446,9 +467,6 @@ app.whenReady().then(async () => {
   // Create application menu
   const menu = createApplicationMenu()
   Menu.setApplicationMenu(menu)
-
-  // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
-  startChatToolsWatcher()
 
   // Register IPC handlers
   registerIpcHandlers()
@@ -493,26 +511,35 @@ app.whenReady().then(async () => {
 
   // 启动工作区文件监听（Agent MCP/Skills + 文件浏览器自动刷新）
   if (mainWindow) {
-    startWorkspaceWatcher(mainWindow)
+    safeRun('startWorkspaceWatcher', () => startWorkspaceWatcher(mainWindow!))
   }
+
+  // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
+  safeRun('startChatToolsWatcher', startChatToolsWatcher)
 
   // 生产环境下初始化自动更新
   if (app.isPackaged && mainWindow) {
-    initAutoUpdater(mainWindow)
+    safeRun('initAutoUpdater', () => initAutoUpdater(mainWindow!))
   }
 
   // 预创建快速任务窗口（隐藏状态，首次唤起秒开）
-  createQuickTaskWindow()
+  safeRun('createQuickTaskWindow', createQuickTaskWindow)
   if (getSettings().voiceDictation?.enabled === true) {
-    createVoiceDictationWindow()
+    safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
   // 注册全局快捷键
-  registerGlobalShortcut('quick-task', toggleQuickTaskWindow)
-  registerGlobalShortcut('show-main-window', showAndFocusMainWindow)
-  registerGlobalShortcut('voice-dictation', () => {
-    toggleVoiceDictationWindow({ targetIsProma: mainWindow?.isFocused() === true })
-  })
+  safeRun('registerGlobalShortcut:quick-task', () =>
+    registerGlobalShortcut('quick-task', toggleQuickTaskWindow),
+  )
+  safeRun('registerGlobalShortcut:show-main-window', () =>
+    registerGlobalShortcut('show-main-window', showAndFocusMainWindow),
+  )
+  safeRun('registerGlobalShortcut:voice-dictation', () =>
+    registerGlobalShortcut('voice-dictation', () => {
+      toggleVoiceDictationWindow({ targetIsProma: mainWindow?.isFocused() === true })
+    }),
+  )
 
   // Cloud 模式：窗口就绪后自动执行增量同步
   if (isCloudMode() && mainWindow) {
@@ -522,7 +549,7 @@ app.whenReady().then(async () => {
   }
 
   // 启动所有已注册的 Bridge（飞书/钉钉/微信等）
-  await startAllBridges()
+  await safeAwait('startAllBridges', () => startAllBridges())
 
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
@@ -537,7 +564,57 @@ app.whenReady().then(async () => {
       showAndFocusMainWindow()
     }
   })
-})
+}
+
+/** 同步启动钩子隔离：单点失败仅记录日志，不阻断启动链。 */
+function safeRun(name: string, fn: () => void): void {
+  try {
+    fn()
+  } catch (err) {
+    console.error(`[启动] ${name} 失败（已隔离）:`, err)
+  }
+}
+
+/** 异步启动钩子隔离：同 safeRun，但适用于返回 Promise 的钩子。 */
+async function safeAwait(name: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn()
+  } catch (err) {
+    console.error(`[启动] ${name} 失败（已隔离）:`, err)
+  }
+}
+
+/**
+ * whenReady 顶层兜底：理论上 bootstrap 内的 safeRun/safeAwait 已经把所有可预期
+ * 异常隔离掉了，能走到这里说明出了 bootstrap 本身控制流的意外（极端情况），
+ * 此时仍尝试创建一个降级窗口，让用户至少能看到界面、复制日志、提交反馈。
+ */
+function handleBootstrapFailure(err: unknown): void {
+  console.error('[启动] bootstrap 致命错误，进入降级模式:', err)
+
+  try {
+    const message = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    dialog.showErrorBox(
+      'Proma 启动遇到错误',
+      `部分功能可能不可用：\n\n${message}\n\n` +
+        `日志位置：${app.getPath('logs')}\n\n` +
+        `常见原因与排查：\n` +
+        `1. 旧版 Proma 进程未退出（终端运行 killall Proma 后重试）\n` +
+        `2. ~/.proma/ 配置损坏（重命名 ~/.proma 后重启）\n` +
+        `3. 系统 Keychain 无法解密保存的凭证（删除 ~/.proma/feishu.json 等后重新登录）\n\n` +
+        `如需协助请到 GitHub Issues 反馈。`,
+    )
+  } catch {
+    /* dialog 也失败，无能为力 */
+  }
+
+  try {
+    registerIpcHandlers()
+    createWindow()
+  } catch (fallbackErr) {
+    console.error('[启动] 降级窗口创建也失败:', fallbackErr)
+  }
+}
 
 app.on('window-all-closed', () => {
   // 非 macOS：关闭所有窗口时退出应用

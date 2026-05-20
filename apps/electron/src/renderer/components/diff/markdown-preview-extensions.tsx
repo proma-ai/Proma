@@ -203,13 +203,16 @@ function createShikiDecorationsPlugin(themeRef: ThemeRef): Plugin<ShikiDecoratio
   return new Plugin<ShikiDecorationState>({
     key: shikiCodeBlockPluginKey,
     state: {
-      init: (_, state) => ({
-        decorations: buildShikiDecorations(state.doc, themeRef.current),
-      }),
+      // 首次 mount 不在同步路径跑 Shiki tokenize（含数百次 highlightToTokens 调用），
+      // 让出主线程；首帧装饰由 view 启动时通过 SHIKI_REFRESH_META 异步事务触发。
+      init: () => ({ decorations: DecorationSet.empty }),
       apply: (tr, previous, _oldState, newState) => {
-        if (tr.docChanged || tr.getMeta(SHIKI_REFRESH_META)) {
+        // 仅当 view 层调度的 refresh 事务到来时才重算。文档变更不直接重算——
+        // 重算是 O(全部 codeBlock × 全部 token) 的同步操作，每次按键都跑会卡住编辑器。
+        if (tr.getMeta(SHIKI_REFRESH_META)) {
           return { decorations: buildShikiDecorations(newState.doc, themeRef.current) }
         }
+        // 普通事务（按键/光标移动）：让旧装饰跟随位置 mapping，几乎无开销。
         return { decorations: previous.decorations.map(tr.mapping, tr.doc) }
       },
     },
@@ -219,19 +222,48 @@ function createShikiDecorationsPlugin(themeRef: ThemeRef): Plugin<ShikiDecoratio
     view: (view) => {
       const pending = new Set<string>()
       let lastRequestedTheme = themeRef.current
-      requestMissingShikiLanguages(view, themeRef.current, pending)
+      let scheduleHandle: ReturnType<typeof setTimeout> | null = null
+
+      const scheduleRefresh = (currentView: EditorView, delayMs: number): void => {
+        if (scheduleHandle !== null) clearTimeout(scheduleHandle)
+        scheduleHandle = setTimeout(() => {
+          scheduleHandle = null
+          if (currentView.isDestroyed) return
+          requestMissingShikiLanguages(currentView, themeRef.current, pending)
+          currentView.dispatch(currentView.state.tr.setMeta(SHIKI_REFRESH_META, true))
+        }, delayMs)
+      }
+
+      // 首次 mount：异步触发首次装饰构建（不阻塞）。
+      scheduleRefresh(view, 0)
 
       return {
         update: (nextView, previousState) => {
-          // 主题切换通过 SHIKI_REFRESH_META 触发事务，但既不改 doc 也不改 selection，
-          // 仅靠 doc/selection 比较会漏掉「切换主题后某些语言尚未加载」的情况。
           const currentTheme = themeRef.current
           const themeChanged = currentTheme !== lastRequestedTheme
           const docChanged = previousState.doc !== nextView.state.doc
-          const selectionChanged = previousState.selection !== nextView.state.selection
-          if (!themeChanged && !docChanged && !selectionChanged) return
+          // 仅 selection 变化不触发：光标移动既不影响装饰内容，也不会引入新语言。
+          if (!themeChanged && !docChanged) return
+
           lastRequestedTheme = currentTheme
-          requestMissingShikiLanguages(nextView, currentTheme, pending)
+          if (themeChanged) {
+            // 主题切换是低频用户操作，走立即路径让视觉变化即时呈现。
+            if (scheduleHandle !== null) {
+              clearTimeout(scheduleHandle)
+              scheduleHandle = null
+            }
+            requestMissingShikiLanguages(nextView, currentTheme, pending)
+            nextView.dispatch(nextView.state.tr.setMeta(SHIKI_REFRESH_META, true))
+          } else {
+            // 文档变更：120ms 节流，避免连续按键期间反复全量重算。
+            scheduleRefresh(nextView, 120)
+          }
+        },
+        destroy: () => {
+          if (scheduleHandle !== null) {
+            clearTimeout(scheduleHandle)
+            scheduleHandle = null
+          }
         },
       }
     },

@@ -69,19 +69,24 @@ export function SkillFilesPanel({ workspaceSlug, skillSlug, onFileCountChange }:
   const [renaming, setRenaming] = React.useState<string | null>(null)
   const [renameValue, setRenameValue] = React.useState('')
 
+  const onFileCountChangeRef = React.useRef(onFileCountChange)
+  React.useEffect(() => {
+    onFileCountChangeRef.current = onFileCountChange
+  }, [onFileCountChange])
+
   const refreshTree = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
       const nodes = await window.electronAPI.listSkillFiles(workspaceSlug, skillSlug)
       setTree(nodes)
-      onFileCountChange?.(countTree(nodes).files)
+      onFileCountChangeRef.current?.(countTree(nodes).files)
     } catch (err) {
       console.error('[SkillFiles] 加载文件树失败:', err)
       toast.error('加载文件树失败')
     } finally {
       setLoading(false)
     }
-  }, [workspaceSlug, skillSlug, onFileCountChange])
+  }, [workspaceSlug, skillSlug])
 
   React.useEffect(() => {
     void refreshTree()

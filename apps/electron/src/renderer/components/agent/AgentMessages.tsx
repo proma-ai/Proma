@@ -34,7 +34,7 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
 import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -535,6 +535,13 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
     return groupIntoTurns(allSDKMessages, sessionModelId)
   }, [allSDKMessages, sessionModelId])
 
+  // 跨 turn 历史 TaskCreate id → subject 映射：顶层算一次，避免每个 AssistantTurnRenderer
+  // 都对全量 allMessages 做 O(M) 扫描（流式期间 useMemo 因 allMessages 引用变化失效，
+  // 长会话会触发 O(T × M) 雪崩）。
+  const historicalTaskSubjects = React.useMemo(() => {
+    return buildHistoricalTaskSubjects(allSDKMessages)
+  }, [allSDKMessages])
+
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
     if (!liveMessages || liveMessages.length === 0) return new Set<MessageGroup>()
@@ -621,6 +628,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                   key={getGroupId(group)}
                   group={group}
                   allMessages={allSDKMessages}
+                  historicalTaskSubjects={historicalTaskSubjects}
                   basePath={sessionPath || undefined}
                   onFork={shouldDisableActions ? undefined : onFork}
                   onRewind={shouldDisableActions ? undefined : onRewind}

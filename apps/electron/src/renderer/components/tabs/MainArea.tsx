@@ -23,6 +23,11 @@ export function MainArea(): React.ReactElement {
   const setActiveTabId = useSetAtom(activeTabIdAtom)
   const activeTab = useAtomValue(activeTabAtom)
 
+  // Tab 内容渲染降级为非紧急：TabBar 立即高亮新 tab，主区域昂贵渲染（含 PreviewPanel 中
+  // DiffTabContent → ProseMirror editor mount + Shiki tokenize）让出主线程，避免点击 tab
+  // 后必须等主区域渲染完才能看到 tab 切换效果
+  const deferredActiveTabId = React.useDeferredValue(activeTabId)
+
   const previewOpenMap = useAtomValue(previewPanelOpenMapAtom)
   const [splitRatio, setSplitRatio] = useAtom(previewSplitRatioAtom)
   const previewDragging = React.useRef(false)
@@ -141,9 +146,9 @@ export function MainArea(): React.ReactElement {
             <TabBar />
             {tabs.length === 0 ? (
               <WelcomeView />
-            ) : activeTabId ? (
+            ) : deferredActiveTabId ? (
               <div className="flex-1 min-h-0 titlebar-no-drag">
-                <TabContent tabId={activeTabId} />
+                <TabContent tabId={deferredActiveTabId} />
               </div>
             ) : null}
           </div>

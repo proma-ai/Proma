@@ -1310,7 +1310,7 @@ export class AgentOrchestrator {
       }
 
       // 12. 读取应用设置并确定权限模式
-      // 权限模式只属于当前 session；新会话默认自动审批模式。
+      // 权限模式只属于当前 session；新会话默认完全自动模式。
       const appSettings = getSettings()
       const initialPermissionMode: PromaPermissionMode = permissionModeOverride
         ?? PROMA_DEFAULT_PERMISSION_MODE

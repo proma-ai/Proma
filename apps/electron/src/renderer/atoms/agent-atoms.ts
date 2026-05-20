@@ -211,6 +211,18 @@ export const currentAgentSessionIdAtom = atom<string | null>(null)
 export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>>(new Map())
 
 /**
+ * 单个 session 的 streaming state 派生 atomFamily — 按 sessionId 切片订阅。
+ *
+ * 直接订阅 agentStreamingStatesAtom 会让任意 session 的流式更新都触发 AgentView
+ * 整树重渲染（10–30fps）。本 family 让订阅者只在本 session 的 state 引用变化时
+ * 重渲染——其他 session 的更新虽然让 base atom 变化，但派生 atom 输出引用未变，
+ * jotai 自动跳过通知。
+ */
+export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(agentStreamingStatesAtom).get(sessionId)),
+)
+
+/**
  * 实时 SDKMessage 累积 Map — Phase 2 新增
  *
  * 流式期间每条 SDKMessage 直接追加，供新 UI 渲染。
@@ -767,11 +779,21 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
  */
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
 
+/** 单个 session 的 markdown 草稿派生 atom — 按 sessionId 切片订阅 */
+export const agentSessionDraftAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(agentSessionDraftsAtom).get(sessionId) ?? ''),
+)
+
 /**
  * Agent 会话输入框 HTML 草稿 Map — 以 sessionId 为 key
  * 保存 TipTap 编辑器的原始 HTML，用于切换会话时恢复 mention 等富文本节点
  */
 export const agentSessionDraftHtmlAtom = atom<Map<string, string>>(new Map())
+
+/** 单个 session 的 HTML 草稿派生 atom — 按 sessionId 切片订阅 */
+export const agentSessionDraftHtmlAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(agentSessionDraftHtmlAtom).get(sessionId) ?? ''),
+)
 
 /**
  * 会话附加目录 Map — 以 sessionId 为 key

@@ -150,7 +150,7 @@ export function StickyUserMessage({ userMessages }: StickyUserMessageProps): Rea
       {/* 复用 ConversationContent(px-8) + Message(px-2.5) 的 padding 链，保证与内容区等宽 */}
       <div className="mx-8 px-2.5 pt-2">
         <div
-          className="ml-[46px] rounded-xl bg-background/85 backdrop-blur-md border border-border/50 shadow-md cursor-pointer hover:bg-accent/50 transition-colors"
+          className="ml-[46px] rounded-xl bg-background/95 backdrop-blur-sm border border-border/50 shadow-sm cursor-pointer hover:bg-accent/50 transition-colors"
           onClick={scrollToOriginal}
         >
           <div className="px-3.5 py-2.5">

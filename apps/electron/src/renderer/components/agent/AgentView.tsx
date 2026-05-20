@@ -53,6 +53,7 @@ import { registerShortcut } from '@/lib/shortcut-registry'
 import { previewPanelOpenMapAtom, previewFileMapAtom, autoPreviewEnabledAtom, quotedSelectionMapAtom, currentQuotedSelectionAtom } from '@/atoms/preview-atoms'
 import {
   agentStreamingStatesAtom,
+  agentSessionStreamingStateAtomFamily,
   agentChannelIdAtom,
   agentModelIdAtom,
   agentChannelIdsAtom,
@@ -64,7 +65,9 @@ import {
   agentWorkspacesAtom,
   agentStreamErrorsAtom,
   agentSessionDraftsAtom,
+  agentSessionDraftAtomFamily,
   agentSessionDraftHtmlAtom,
+  agentSessionDraftHtmlAtomFamily,
   agentPromptSuggestionsAtom,
   agentMessageRefreshAtom,
   agentDiffRefreshVersionAtom,
@@ -303,8 +306,10 @@ function AutoPreviewPopover({ enabled, onToggle }: AutoPreviewPopoverProps): Rea
 export function AgentView({ sessionId }: { sessionId: string }): React.ReactElement {
   const [persistedSDKMessages, setPersistedSDKMessages] = React.useState<SDKMessage[]>([])
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
-  const streamingStates = useAtomValue(agentStreamingStatesAtom)
-  const streamState = streamingStates.get(sessionId)
+  // 按 sessionId 切片订阅：仅本 session 的 streaming state 变化才让 AgentView 重渲染。
+  // 流式期间其他 session 的高频更新（每 token 一次）通过 base map atom 传播但派生
+  // atom 输出引用未变，订阅者跳过通知。
+  const streamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
   const streaming = streamState?.running ?? false
   const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
@@ -410,9 +415,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const wsAttachedFilesMap = useAtomValue(workspaceAttachedFilesMapAtom)
   const wsAttachedFiles = currentWorkspaceId ? (wsAttachedFilesMap.get(currentWorkspaceId) ?? []) : []
 
-  const draftsMap = useAtomValue(agentSessionDraftsAtom)
+  // 按 sessionId 切片订阅 drafts/draftHtml：仅本 session 草稿变化才让 AgentView 重渲染。
+  // 输入框每次按键都会写整 Map atom，若直接订阅整 Map，AgentView 跟着每键重渲染。
+  const inputContent = useAtomValue(agentSessionDraftAtomFamily(sessionId))
   const setDraftsMap = useSetAtom(agentSessionDraftsAtom)
-  const inputContent = draftsMap.get(sessionId) ?? ''
   const setInputContent = React.useCallback((value: string) => {
     setDraftsMap((prev) => {
       const map = new Map(prev)
@@ -424,9 +430,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftsMap])
-  const draftHtmlMap = useAtomValue(agentSessionDraftHtmlAtom)
+  const inputHtmlContent = useAtomValue(agentSessionDraftHtmlAtomFamily(sessionId))
   const setDraftHtmlMap = useSetAtom(agentSessionDraftHtmlAtom)
-  const inputHtmlContent = draftHtmlMap.get(sessionId) ?? ''
   const setInputHtmlContent = React.useCallback((html: string) => {
     setDraftHtmlMap((prev) => {
       const map = new Map(prev)

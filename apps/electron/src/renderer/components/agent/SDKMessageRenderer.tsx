@@ -394,11 +394,9 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
 function buildTaskProgressData(
   topLevelBlocks: SDKContentBlock[],
   turnMessages: SDKMessage[],
-  allMessages: SDKMessage[],
 ): {
   taskActivities: ToolActivity[]
   firstTaskIndex: number
-  historicalTaskSubjects: Map<string, string>
 } {
   const taskBlocks: SDKToolUseBlock[] = []
   let firstTaskIndex = -1
@@ -434,6 +432,17 @@ function buildTaskProgressData(
     done: true,
   }))
 
+  return { taskActivities, firstTaskIndex }
+}
+
+/**
+ * 扫描全部消息，构建跨 turn 的「历史 TaskCreate id → subject」映射。
+ *
+ * 早期把这部分逻辑放在 buildTaskProgressData 里，每个 AssistantTurnRenderer 渲染都要
+ * 跑一次 → O(T × M)；流式期间 allMessages 引用每帧变化，useMemo 缓存失效，长会话
+ * 雪崩。提升到 AgentMessages 顶层后只算一次，O(M)。
+ */
+export function buildHistoricalTaskSubjects(allMessages: SDKMessage[]): Map<string, string> {
   const historicalTaskSubjects = new Map<string, string>()
   const globalResultMap = new Map<string, string>()
   const pendingTaskCreates: SDKToolUseBlock[] = []
@@ -475,7 +484,7 @@ function buildTaskProgressData(
     if (parsedResult?.id) historicalTaskSubjects.set(parsedResult.id, parsedResult.subject ?? subject)
   }
 
-  return { taskActivities, firstTaskIndex, historicalTaskSubjects }
+  return historicalTaskSubjects
 }
 
 // ===== AssistantTurnRenderer — 渲染一个完整的 assistant turn =====
@@ -484,6 +493,8 @@ export interface AssistantTurnRendererProps {
   turn: AssistantTurn
   /** 所有消息（全局，供工具结果查找跨 turn 的结果） */
   allMessages: SDKMessage[]
+  /** 跨 turn 历史 TaskCreate id → subject 映射（由父组件 useMemo 算一次后传入） */
+  historicalTaskSubjects: Map<string, string>
   basePath?: string
   /** 分叉回调（传入最后一条 assistant 消息的 uuid） */
   onFork?: (upToMessageUuid: string) => void
@@ -503,7 +514,7 @@ export interface AssistantTurnRendererProps {
   sessionModelId?: string
 }
 
-export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
+export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
@@ -571,9 +582,9 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
   )
 
   // Task 聚合数据（useMemo 防止每次渲染重算）
-  const { taskActivities, firstTaskIndex, historicalTaskSubjects } = React.useMemo(() => {
-    return buildTaskProgressData(topLevelBlocks, turn.turnMessages, allMessages)
-  }, [topLevelBlocks, turn.turnMessages, allMessages])
+  const { taskActivities, firstTaskIndex } = React.useMemo(() => {
+    return buildTaskProgressData(topLevelBlocks, turn.turnMessages)
+  }, [topLevelBlocks, turn.turnMessages])
 
   // 如果只有错误消息
   if (enrichedBlocks.length === 0 && hasError && errorContent) {
@@ -1179,6 +1190,8 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
 export interface MessageGroupRendererProps {
   group: MessageGroup
   allMessages: SDKMessage[]
+  /** 跨 turn 历史 TaskCreate id → subject 映射（由父组件 useMemo 算一次后传入） */
+  historicalTaskSubjects: Map<string, string>
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
@@ -1270,7 +1283,7 @@ export function getGroupPreview(group: MessageGroup): string {
   return texts.join(' ').slice(0, 200)
 }
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -1295,6 +1308,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
       <AssistantTurnRenderer
         turn={group}
         allMessages={allMessages}
+        historicalTaskSubjects={historicalTaskSubjects}
         basePath={basePath}
         onFork={onFork}
         onRewind={onRewind}

@@ -48,6 +48,14 @@ export function startChatToolsWatcher(): void {
       }, DEBOUNCE_MS)
     })
 
+    // EventEmitter 在 'error' 事件无监听器时会抛出未捕获异常并终止主进程。
+    // 配置文件被外部工具替换/删除时即可能触发。
+    watcher.on('error', (err) => {
+      console.error('[Chat 工具监听] 运行时错误，关闭监听:', err)
+      try { watcher?.close() } catch { /* 已关闭 */ }
+      watcher = null
+    })
+
     console.log('[Chat 工具监听] 已启动')
   } catch (err) {
     console.error('[Chat 工具监听] 启动失败:', err)

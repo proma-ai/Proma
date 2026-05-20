@@ -1117,7 +1117,7 @@ export const PROMA_PERMISSION_MODES = ['auto', 'bypassPermissions', 'plan'] as c
 
 export type PromaPermissionMode = typeof PROMA_PERMISSION_MODES[number]
 
-export const PROMA_DEFAULT_PERMISSION_MODE: PromaPermissionMode = 'auto'
+export const PROMA_DEFAULT_PERMISSION_MODE: PromaPermissionMode = 'bypassPermissions'
 
 export interface PromaPermissionModeConfig {
   /** 对应 Claude Agent SDK 的 permissionMode */

@@ -149,6 +149,10 @@ export function RichTextInput({
   const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
   // 手动折叠状态：用户主动折叠输入框
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false)
+  // 跟踪 isExpanded 最新值（对比后再 setState，避免每键无谓 setState 触发重渲染）
+  const isExpandedRef = useRef(false)
+  // 行数检查的 rAF 调度句柄（用 rAF 节流，一帧最多检查一次）
+  const lineCheckHandleRef = useRef<number | null>(null)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
   // 跟踪 IME 输入状态（中文输入法等）
@@ -472,7 +476,10 @@ export function RichTextInput({
         lastEditorValueRef.current = ''
         onChange('')
         onHtmlChangeRef.current?.('')
-        setIsExpanded(false)
+        if (isExpandedRef.current) {
+          isExpandedRef.current = false
+          setIsExpanded(false)
+        }
         setIsManuallyCollapsed(false)
       } else {
         const markdown = htmlToMarkdown(html)
@@ -480,12 +487,32 @@ export function RichTextInput({
         onChange(markdown)
         onHtmlChangeRef.current?.(html)
 
-        // 检查行数，超过5行时展开输入框
-        const lineCount = countEditorLines(ed)
-        setIsExpanded(lineCount > 5)
+        // 行数检查用 rAF 节流：每键 doc.descendants 全文遍历 + setState 重渲染会让
+        // 输入热路径变重；延后到下一帧合并连续按键，对 UX 无影响。
+        if (lineCheckHandleRef.current !== null) {
+          cancelAnimationFrame(lineCheckHandleRef.current)
+        }
+        lineCheckHandleRef.current = requestAnimationFrame(() => {
+          lineCheckHandleRef.current = null
+          const nextExpanded = countEditorLines(ed) > 5
+          if (nextExpanded !== isExpandedRef.current) {
+            isExpandedRef.current = nextExpanded
+            setIsExpanded(nextExpanded)
+          }
+        })
       }
     },
   })
+
+  // 卸载时取消未触发的 rAF 行数检查，避免泄漏 / 在卸载组件上 setState
+  useEffect(() => {
+    return () => {
+      if (lineCheckHandleRef.current !== null) {
+        cancelAnimationFrame(lineCheckHandleRef.current)
+        lineCheckHandleRef.current = null
+      }
+    }
+  }, [])
 
   // 同步外部 value 变化（清空时）
   useEffect(() => {
@@ -499,6 +526,7 @@ export function RichTextInput({
       if (controllerValue === '') {
         editor.commands.clearContent()
         lastEditorValueRef.current = ''
+        isExpandedRef.current = false
         setIsExpanded(false)
         setIsManuallyCollapsed(false)
       } else if (htmlValue) {

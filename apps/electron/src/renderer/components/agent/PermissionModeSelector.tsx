@@ -34,7 +34,7 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
 
   // 初始化：如果当前 session 不在 Map 中，按以下优先级读回：
   // 1. session meta.permissionMode（每个 tab 独立持久化，重启恢复各自的值）
-  // 2. 默认自动审批
+  // 2. 默认完全自动模式
   // 注意：只写入当前 session，不回写到 agentDefaultPermissionModeAtom，避免跨会话污染。
   React.useEffect(() => {
     if (!sessionExistsInList) return
