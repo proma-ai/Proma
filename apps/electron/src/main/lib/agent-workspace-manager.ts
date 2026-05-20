@@ -310,22 +310,43 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
   const index = readIndex()
 
   for (const workspace of index.workspaces) {
-    const dirs = [
-      getWorkspaceSkillsDir(workspace.slug),
-      getInactiveSkillsDir(workspace.slug),
-    ]
+    const activeDir = getWorkspaceSkillsDir(workspace.slug)
+    const inactiveDir = getInactiveSkillsDir(workspace.slug)
 
-    for (const dir of dirs) {
+    // 收集工作区中所有已存在的 default skill（包括停用的，避免新增时与停用版本冲突）
+    const existingSlugs = new Set<string>()
+    for (const dir of [activeDir, inactiveDir]) {
       if (!existsSync(dir)) continue
+      try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) existingSlugs.add(entry.name)
+        }
+      } catch {
+        // 忽略读取失败
+      }
+    }
 
-      for (const [slug, info] of defaultSkills) {
-        const targetPath = join(dir, slug)
-        if (!existsSync(targetPath)) continue
+    for (const [slug, info] of defaultSkills) {
+      // 已存在：检查是否需要升级（同时遍历 active / inactive 两个目录）
+      if (existingSlugs.has(slug)) {
+        for (const dir of [activeDir, inactiveDir]) {
+          const targetPath = join(dir, slug)
+          if (!existsSync(targetPath)) continue
 
-        const currentVer = parseSkillVersion(targetPath)
-        if (compareSemver(info.version, currentVer) > 0) {
-          cpSync(info.sourcePath, targetPath, { recursive: true, force: true })
-          console.log(`[Agent 工作区] 已升级 Skill: ${workspace.slug}/${slug} (${currentVer} → ${info.version})`)
+          const currentVer = parseSkillVersion(targetPath)
+          if (compareSemver(info.version, currentVer) > 0) {
+            cpSync(info.sourcePath, targetPath, { recursive: true, force: true })
+            console.log(`[Agent 工作区] 已升级 Skill: ${workspace.slug}/${slug} (${currentVer} → ${info.version})`)
+          }
+        }
+      } else {
+        // 不存在：作为新 Skill 追加到 active 目录
+        const targetPath = join(activeDir, slug)
+        try {
+          cpSync(info.sourcePath, targetPath, { recursive: true })
+          console.log(`[Agent 工作区] 已追加新 Skill: ${workspace.slug}/${slug} (v${info.version})`)
+        } catch (err) {
+          console.warn(`[Agent 工作区] 追加 Skill 失败 ${workspace.slug}/${slug}:`, err)
         }
       }
     }

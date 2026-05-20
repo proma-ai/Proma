@@ -724,36 +724,20 @@ export class AgentOrchestrator {
   }
 
   /**
-   * 注入 SDK 内置生图工具（Nano Banana）
+   * 注入 Proma Cloud 凭据网关 MCP
+   *
+   * 为 Skill（如 proma-generate-image / proma-gpt-image-2）提供 Proma 开放 API 凭据。
+   * 不依赖工作区配置，登录后即可使用。
    */
-  private async injectNanoBananaTools(
+  private async injectPromaCloudMcp(
     sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
     mcpServers: Record<string, Record<string, unknown>>,
-    sessionId: string,
-    agentCwd?: string,
   ): Promise<void> {
     try {
-      const { injectNanoBananaMcpServer } = await import('./chat-tools/nano-banana-mcp')
-      await injectNanoBananaMcpServer(sdk, mcpServers, sessionId, agentCwd)
+      const { injectPromaCloudMcpServer } = await import('./agent-mcps/proma-cloud-mcp')
+      await injectPromaCloudMcpServer(sdk, mcpServers)
     } catch (err) {
-      console.error(`[Agent 编排] 注入 Nano Banana MCP 失败:`, err)
-    }
-  }
-
-  /**
-   * [Proma Cloud] 注入 SDK 内置生图工具（GPT Image 2，仅云端）
-   */
-  private async injectGptImage2Tools(
-    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
-    mcpServers: Record<string, Record<string, unknown>>,
-    sessionId: string,
-    agentCwd?: string,
-  ): Promise<void> {
-    try {
-      const { injectGptImage2McpServer } = await import('./chat-tools/gpt-image-2-mcp')
-      await injectGptImage2McpServer(sdk, mcpServers, sessionId, agentCwd)
-    } catch (err) {
-      console.error(`[Agent 编排] 注入 GPT Image 2 MCP 失败:`, err)
+      console.error(`[Agent 编排] 注入 Proma Cloud MCP 失败:`, err)
     }
   }
 
@@ -1268,11 +1252,12 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 将直接使用已保存的 sdkSessionId 进行 resume: ${existingSdkSessionId}`)
       }
 
-      // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
+      // 10. 构建 MCP 服务器配置 + 记忆工具 + Proma Cloud 凭据 + 自定义工具
+      // 注：生图能力通过 Skill（proma-gpt-image-2 / proma-generate-image）+ proma-cloud MCP 凭据网关实现，
+      // 不再注入 nano-banana-mcp / gpt-image-2-mcp（已废弃）
       const mcpServers = this.buildMcpServers(workspaceSlug)
       await this.injectMemoryTools(sdk, mcpServers)
-      await this.injectNanoBananaTools(sdk, mcpServers, sessionId, agentCwd)
-      await this.injectGptImage2Tools(sdk, mcpServers, sessionId, agentCwd) // [Proma Cloud]
+      await this.injectPromaCloudMcp(sdk, mcpServers)
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
