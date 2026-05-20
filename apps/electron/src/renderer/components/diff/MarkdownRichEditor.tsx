@@ -3,22 +3,26 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
+import { Markdown } from 'tiptap-markdown'
+import type { MarkdownStorage } from 'tiptap-markdown'
 import { TextSelection } from '@tiptap/pm/state'
 import type { FileAccessOptions } from '@proma/shared'
 import { cn } from '@/lib/utils'
-import { MARKDOWN_RENDERER_VERSION, htmlToMarkdown, markdownToHtml } from '@/lib/markdown-rich-text'
+import { MARKDOWN_RENDERER_VERSION, markdownToHtml } from '@/lib/markdown-rich-text'
 import {
-  MarkdownTableBlock,
   MathBlock,
   MathInline,
   RawHtmlBlock,
   RawHtmlInline,
   TaskItem,
   TaskList,
+  tableExtensions,
   createMarkdownImage,
-  createMarkdownVideo,
   createShikiCodeBlock,
+  createMarkdownVideo,
 } from './markdown-preview-extensions'
+import { MarkdownEditorToolbar } from './MarkdownEditorToolbar'
+import { TableBubbleMenu } from './TableBubbleMenu'
 
 interface MarkdownRichEditorProps {
   value: string
@@ -41,7 +45,7 @@ export function MarkdownRichEditor({
   onRequestEdit,
   disabled,
   fileAccess,
-  shikiTheme = 'one-light',
+  shikiTheme = 'github-dark',
 }: MarkdownRichEditorProps): React.ReactElement {
   const isEditable = editing && !disabled
   const markdownRendererVersion = MARKDOWN_RENDERER_VERSION
@@ -50,9 +54,9 @@ export function MarkdownRichEditor({
   const onCancelRef = React.useRef(onCancel)
   const onRequestEditRef = React.useRef(onRequestEdit)
   const fileAccessRef = React.useRef(fileAccess)
-  const shikiThemeRef = React.useRef(shikiTheme)
   const isEditableRef = React.useRef(isEditable)
   const disabledRef = React.useRef(disabled)
+  const shikiThemeRef = React.useRef(shikiTheme)
   const localMarkdownRef = React.useRef(value)
   const rendererVersionRef = React.useRef(markdownRendererVersion)
   const pendingFocusPosRef = React.useRef<number | null>(null)
@@ -61,9 +65,9 @@ export function MarkdownRichEditor({
   onCancelRef.current = onCancel
   onRequestEditRef.current = onRequestEdit
   fileAccessRef.current = fileAccess
-  shikiThemeRef.current = shikiTheme
   isEditableRef.current = isEditable
   disabledRef.current = disabled
+  shikiThemeRef.current = shikiTheme
 
   const extensions = React.useMemo(() => [
     createMarkdownImage(fileAccessRef),
@@ -74,7 +78,7 @@ export function MarkdownRichEditor({
     MathInline,
     TaskList,
     TaskItem,
-    MarkdownTableBlock,
+    ...tableExtensions,
     createShikiCodeBlock(shikiThemeRef),
     StarterKit.configure({
       codeBlock: false,
@@ -89,6 +93,11 @@ export function MarkdownRichEditor({
       HTMLAttributes: {
         class: 'text-primary underline',
       },
+    }),
+    Markdown.configure({
+      html: true,
+      tightLists: true,
+      bulletListMarker: '-',
     }),
   ], [])
 
@@ -133,7 +142,8 @@ export function MarkdownRichEditor({
     },
     onUpdate: ({ editor: ed }) => {
       if (!isEditableRef.current) return
-      const markdown = htmlToMarkdown(ed.getHTML())
+      const mdStorage = ed.storage as unknown as Record<string, MarkdownStorage>
+      const markdown = mdStorage.markdown?.getMarkdown() ?? ''
       localMarkdownRef.current = markdown
       onChangeRef.current(markdown)
     },
@@ -142,6 +152,11 @@ export function MarkdownRichEditor({
   React.useEffect(() => {
     editor?.setEditable(isEditable)
   }, [editor, isEditable])
+
+  React.useEffect(() => {
+    if (!editor) return
+    editor.view.dispatch(editor.state.tr.setMeta('markdownShikiCodeBlockRefresh', true))
+  }, [editor, shikiTheme])
 
   React.useEffect(() => {
     if (!editor) return
@@ -166,5 +181,11 @@ export function MarkdownRichEditor({
     return () => clearTimeout(timer)
   }, [editor, isEditable])
 
-  return <EditorContent editor={editor} className="min-h-full" />
+  return (
+    <div className="flex min-h-full flex-col">
+      {editing && editor && <MarkdownEditorToolbar editor={editor} />}
+      <EditorContent editor={editor} className="min-h-full flex-1" />
+      {editing && editor && <TableBubbleMenu editor={editor} />}
+    </div>
+  )
 }

@@ -43,3 +43,29 @@ export const currentSessionPreviewOpenAtom = atom<boolean>((get) => {
   if (!sessionId) return false
   return get(previewPanelOpenMapAtom).get(sessionId) ?? false
 })
+
+// ===== 引用选中文本（Quoted Selection）=====
+
+/** 从预览面板中选中的文本引用 */
+export interface QuotedSelection {
+  /** 选中的文本内容 */
+  text: string
+  /** 来源文件路径 */
+  filePath: string
+  /** 起始行号（1-based，代码文件可计算，markdown 等无法计算时为 undefined） */
+  startLine?: number
+  /** 结束行号（1-based） */
+  endLine?: number
+  /** 捕获时间戳 */
+  capturedAt: number
+}
+
+/** 每会话的引用选中文本 Map（每次新选中覆盖旧值） */
+export const quotedSelectionMapAtom = atom<Map<string, QuotedSelection>>(new Map())
+
+/** 当前会话的引用选中文本（派生） */
+export const currentQuotedSelectionAtom = atom<QuotedSelection | null>((get) => {
+  const sessionId = get(currentAgentSessionIdAtom)
+  if (!sessionId) return null
+  return get(quotedSelectionMapAtom).get(sessionId) ?? null
+})

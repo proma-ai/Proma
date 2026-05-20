@@ -6,10 +6,10 @@
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { join, resolve, relative, isAbsolute, dirname } from 'node:path'
 import {
   getAgentWorkspacesIndexPath,
   getAgentWorkspacePath,
@@ -19,7 +19,7 @@ import {
   getDefaultSkillsDir,
   parseSkillVersion,
 } from './config-paths'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
@@ -737,6 +737,212 @@ export function writeWorkspaceSkillContent(workspaceSlug: string, skillSlug: str
   if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
   writeFileSync(join(dir, 'SKILL.md'), content, 'utf-8')
   console.log(`[Agent 工作区] 已更新 SKILL.md: ${workspaceSlug}/${skillSlug}`)
+}
+
+// ===== Skill 子文件管理 =====
+
+/** 单个子文件大小上限（10 MB），超过则拒绝读入到编辑器 */
+const SKILL_FILE_SIZE_LIMIT = 10 * 1024 * 1024
+/** 文件树递归深度上限，防止异常深嵌套 */
+const SKILL_TREE_MAX_DEPTH = 8
+
+/** 把相对路径限制在 Skill 根目录内，并拒绝直接覆盖 SKILL.md */
+function resolveSkillChildPath(skillDir: string, relativePath: string, opts: { allowSkillMd?: boolean } = {}): string {
+  if (typeof relativePath !== 'string' || relativePath.length === 0) {
+    throw new Error('相对路径不能为空')
+  }
+  if (isAbsolute(relativePath)) {
+    throw new Error('禁止传入绝对路径')
+  }
+  const normalized = relativePath.replace(/\\/g, '/')
+  const resolved = resolve(skillDir, normalized)
+  const rel = relative(skillDir, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('非法路径：禁止访问 Skill 目录外')
+  }
+  // 用 lowercase 比较，避免 macOS/Windows 的大小写不敏感文件系统上 skill.md/Skill.MD 绕过保护
+  if (!opts.allowSkillMd && rel.split(/[\\/]/).join('/').toLowerCase() === 'skill.md') {
+    throw new Error('SKILL.md 由专用接口管理，请通过 readWorkspaceSkillContent / writeWorkspaceSkillContent')
+  }
+  return resolved
+}
+
+/** 用文件头判断是否为二进制文件（粗略：含 NUL 字节即视为二进制）。只读前 8KB，避免把大文件全量读入内存 */
+function isLikelyBinaryFile(absPath: string, size: number): boolean {
+  if (size === 0) return false
+  let fd: number | undefined
+  try {
+    fd = openSync(absPath, 'r')
+    const buf = Buffer.alloc(Math.min(size, 8192))
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    return buf.subarray(0, n).includes(0)
+  } catch {
+    return true
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
+function buildSkillFileTree(rootDir: string, currentDir: string, depth: number): SkillFileNode[] {
+  if (depth > SKILL_TREE_MAX_DEPTH) return []
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(currentDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const nodes: SkillFileNode[] = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue // 跳过隐藏文件，如 .source.json
+    const absPath = join(currentDir, entry.name)
+    const rel = relative(rootDir, absPath).split(/[\\/]/).join('/')
+
+    if (rel === 'SKILL.md') continue // SKILL.md 由主编辑器管理
+
+    const isDir = entry.isDirectory()
+    if (isDir) {
+      nodes.push({
+        relativePath: rel,
+        name: entry.name,
+        type: 'directory',
+        children: buildSkillFileTree(rootDir, absPath, depth + 1),
+      })
+    } else if (entry.isFile()) {
+      let size = 0
+      try {
+        size = statSync(absPath).size
+      } catch {
+        // ignore
+      }
+      nodes.push({
+        relativePath: rel,
+        name: entry.name,
+        type: 'file',
+        size,
+        isText: !isLikelyBinaryFile(absPath, size),
+      })
+    }
+  }
+
+  // 目录优先 + 名称升序
+  nodes.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  return nodes
+}
+
+export function listSkillFiles(workspaceSlug: string, skillSlug: string): SkillFileNode[] {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  return buildSkillFileTree(dir, dir, 0)
+}
+
+export function readSkillFile(workspaceSlug: string, skillSlug: string, relativePath: string): SkillFileContent {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const abs = resolveSkillChildPath(dir, relativePath)
+  if (!existsSync(abs)) throw new Error(`文件不存在: ${relativePath}`)
+
+  const st = statSync(abs)
+  if (!st.isFile()) throw new Error(`目标不是文件: ${relativePath}`)
+  if (st.size > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`文件过大（${(st.size / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+
+  const binary = isLikelyBinaryFile(abs, st.size)
+  return {
+    relativePath: relative(dir, abs).split(/[\\/]/).join('/'),
+    isText: !binary,
+    size: st.size,
+    content: binary ? undefined : readFileSync(abs, 'utf-8'),
+  }
+}
+
+export function writeSkillFile(workspaceSlug: string, skillSlug: string, relativePath: string, content: string): void {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const abs = resolveSkillChildPath(dir, relativePath)
+
+  const byteLen = Buffer.byteLength(content, 'utf-8')
+  if (byteLen > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+
+  if (existsSync(abs) && statSync(abs).isDirectory()) {
+    throw new Error(`目标是目录，无法写入文件内容: ${relativePath}`)
+  }
+
+  // 自动创建父目录
+  const parent = dirname(abs)
+  if (!existsSync(parent)) {
+    mkdirSync(parent, { recursive: true })
+  }
+
+  writeFileSync(abs, content, 'utf-8')
+  console.log(`[Agent 工作区] 已更新 Skill 子文件: ${workspaceSlug}/${skillSlug}/${relativePath}`)
+}
+
+export function createSkillEntry(
+  workspaceSlug: string,
+  skillSlug: string,
+  relativePath: string,
+  type: 'file' | 'directory',
+): void {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const abs = resolveSkillChildPath(dir, relativePath)
+
+  if (existsSync(abs)) {
+    throw new Error(`目标已存在: ${relativePath}`)
+  }
+
+  if (type === 'directory') {
+    mkdirSync(abs, { recursive: true })
+  } else {
+    const parent = dirname(abs)
+    if (!existsSync(parent)) {
+      mkdirSync(parent, { recursive: true })
+    }
+    writeFileSync(abs, '', 'utf-8')
+  }
+  console.log(`[Agent 工作区] 已创建 Skill 子${type === 'directory' ? '目录' : '文件'}: ${workspaceSlug}/${skillSlug}/${relativePath}`)
+}
+
+export function deleteSkillEntry(workspaceSlug: string, skillSlug: string, relativePath: string): void {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const abs = resolveSkillChildPath(dir, relativePath)
+  if (!existsSync(abs)) {
+    throw new Error(`目标不存在: ${relativePath}`)
+  }
+  rmSync(abs, { recursive: true, force: true })
+  console.log(`[Agent 工作区] 已删除 Skill 子项: ${workspaceSlug}/${skillSlug}/${relativePath}`)
+}
+
+export function renameSkillEntry(
+  workspaceSlug: string,
+  skillSlug: string,
+  fromRelative: string,
+  toRelative: string,
+): void {
+  const dir = resolveSkillDir(workspaceSlug, skillSlug)
+  if (!dir) throw new Error(`Skill 不存在: ${workspaceSlug}/${skillSlug}`)
+  const fromAbs = resolveSkillChildPath(dir, fromRelative)
+  const toAbs = resolveSkillChildPath(dir, toRelative)
+  if (!existsSync(fromAbs)) {
+    throw new Error(`源不存在: ${fromRelative}`)
+  }
+  if (existsSync(toAbs)) {
+    throw new Error(`目标已存在: ${toRelative}`)
+  }
+  const parent = dirname(toAbs)
+  if (!existsSync(parent)) {
+    mkdirSync(parent, { recursive: true })
+  }
+  renameSync(fromAbs, toAbs)
+  console.log(`[Agent 工作区] Skill 子项重命名: ${workspaceSlug}/${skillSlug}: ${fromRelative} → ${toRelative}`)
 }
 
 /** 简单 semver 比较：a 是否比 b 更新 */

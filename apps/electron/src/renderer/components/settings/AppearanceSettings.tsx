@@ -42,6 +42,14 @@ import proma8bitLogo from '@/assets/bots/proma-logos/proma-8bit.png'
 import promaCyberpunkLogo from '@/assets/bots/proma-logos/proma-cyberpunk.png'
 import promaFuturisticLogo from '@/assets/bots/proma-logos/proma-futuristic.png'
 
+// ===== 主题预览图片导入 =====
+import themeCloudDancer from '@/assets/theme-previews/theme-cloud-dancer.webp'
+import themeOceanLight from '@/assets/theme-previews/theme-ocean-light.webp'
+import themeForestMorning from '@/assets/theme-previews/theme-forest-morning.webp'
+import themeOceanDark from '@/assets/theme-previews/theme-ocean-dark.webp'
+import themeForestNight from '@/assets/theme-previews/theme-forest-night.webp'
+import themeMorandiNight from '@/assets/theme-previews/theme-morandi-night.webp'
+
 /** 主题选项 */
 const THEME_OPTIONS = [
   { value: 'light', label: '浅色' },
@@ -50,54 +58,62 @@ const THEME_OPTIONS = [
   { value: 'special', label: '特殊风格' },
 ]
 
+/** 特殊风格 ID（排除 default） */
+type SpecialStyleId = Exclude<ThemeStyle, 'default'>
+
 /** 特殊风格定义 */
 interface SpecialStyle {
-  id: ThemeStyle
+  id: SpecialStyleId
   name: string
   variant: 'light' | 'dark'
-  /** 预览色 */
-  preview: {
-    left: string   // 左侧色块（侧边栏）
-    right: string  // 右侧色块（主背景）
-  }
+  /** 主题预览图 */
+  image: string
+  /** 图片裁剪位置（默认居中） */
+  objectPosition?: string
+  /** 图片缩放比例（默认 1） */
+  imageScale?: number
 }
 
-const SPECIAL_STYLES: SpecialStyle[] = [
+const SPECIAL_STYLES: readonly SpecialStyle[] = [
   {
     id: 'slate-light',
     name: '云朵舞者',
     variant: 'light',
-    preview: { left: '#e8e6e2', right: '#f0efec' },
+    image: themeCloudDancer,
+    imageScale: 1.3,
   },
   {
     id: 'ocean-light',
     name: '晴空碧海',
     variant: 'light',
-    preview: { left: '#c9dded', right: '#e2edf5' },
+    image: themeOceanLight,
   },
   {
     id: 'forest-light',
     name: '森息晨光',
     variant: 'light',
-    preview: { left: '#e2e9e4', right: '#3f8361' },
+    image: themeForestMorning,
+    imageScale: 1.45,
   },
   {
     id: 'ocean-dark',
     name: '苍穹暮色',
     variant: 'dark',
-    preview: { left: '#1a2535', right: '#3a6a9b' },
+    image: themeOceanDark,
   },
   {
     id: 'forest-dark',
     name: '森息夜语',
     variant: 'dark',
-    preview: { left: '#1b2721', right: '#185337' },
+    image: themeForestNight,
   },
   {
     id: 'slate-dark',
     name: '莫兰迪夜',
     variant: 'dark',
-    preview: { left: '#272429', right: '#c9a89e' },
+    image: themeMorandiNight,
+    imageScale: 1.15,
+    objectPosition: '44% 58%',
   },
 ]
 
@@ -179,7 +195,7 @@ export function AppearanceSettings(): React.ReactElement {
           {/* 特殊风格 - 标签在上，卡片在下 */}
           <div className="px-4 py-3 space-y-2">
             <div className="text-sm font-medium text-foreground">特殊风格</div>
-            <div className="flex justify-between">
+            <div className="grid grid-cols-6 gap-3">
               {SPECIAL_STYLES.map((style) => (
                 <StyleCard
                   key={style.id}
@@ -325,7 +341,7 @@ function IconCard({
   )
 }
 
-/** 特殊风格卡片 - 交叠圆圈预览 */
+/** 特殊风格卡片 - 竖长条图片预览 */
 function StyleCard({
   style,
   isSelected,
@@ -336,35 +352,42 @@ function StyleCard({
   onSelect: () => void
 }): React.ReactElement {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        'relative flex flex-col items-center gap-2 rounded-lg p-3 transition-all',
-        isSelected && 'shadow-lg shadow-primary/20 bg-card'
-      )}
-    >
-      {/* 交叠圆圈预览 */}
-      <div className="relative w-14 h-10">
-        {/* 左圆 */}
+    <div className="flex flex-col items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onSelect}
+        className={cn(
+          'relative rounded-lg overflow-hidden',
+          'w-[99px] h-[183px]',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+          isSelected
+            ? 'ring-2 ring-primary shadow-lg shadow-primary/20'
+            : 'ring-1 ring-border/50 hover:ring-border'
+        )}
+      >
         <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 size-10 rounded-full"
-          style={{ backgroundColor: style.preview.left }}
-        />
-        {/* 右圆（叠在上面） */}
-        <div
-          className="absolute right-0 top-1/2 -translate-y-1/2 size-10 rounded-full"
-          style={{ backgroundColor: style.preview.right }}
-        />
-      </div>
-      {/* 名称 */}
-      <span className="text-xs font-medium">{style.name}</span>
-      {/* 选中标记 */}
-      {isSelected && (
-        <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center">
-          <Check className="size-2.5 text-primary-foreground" />
+          className="w-full h-full"
+          style={style.imageScale ? { transform: `scale(${style.imageScale})` } : undefined}
+        >
+          <img
+            src={style.image}
+            alt={style.name}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover"
+            style={style.objectPosition ? { objectPosition: style.objectPosition } : undefined}
+            draggable={false}
+          />
         </div>
-      )}
-    </button>
+        {isSelected && (
+          <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center">
+            <Check className="size-2.5 text-primary-foreground" />
+          </div>
+        )}
+      </button>
+      <span className="text-base font-medium text-foreground">
+        {style.name}
+      </span>
+    </div>
   )
 }

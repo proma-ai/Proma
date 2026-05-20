@@ -342,9 +342,33 @@ export const IPC_CHANNELS = {
   WINDOW_CLOSE: 'window:close',
   /** 窗口是否最大化 */
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
+  /** 截图导出：将 HTML 渲染为 PNG 图片 */
+  SCREENSHOT_CAPTURE: 'screenshot:capture',
 } as const
 
 /**
  * IPC 通道名称类型
  */
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
+
+/**
+ * 截图导出的统一配额。
+ *
+ * 渲染端做廉价预检（元素数 / 原始 HTML 字节数），失败立即向用户反馈，避免昂贵的
+ * inlineComputedStyles + IPC 传输后才被主进程拒绝。主进程兜底拦截（含 inline 样式
+ * 后的 HTML 字节数、最终像素预算），构成纵深防御。
+ */
+export const SCREENSHOT_LIMITS = {
+  /** 渲染端预检：编辑器 DOM 元素数上限。超过会导致 inlineComputedStyles 卡顿明显 */
+  MAX_ELEMENTS: 3000,
+  /** 渲染端预检：原始 outerHTML 字节数上限（不含 inline 样式）。膨胀系数 5-10× 对应主进程 12MB */
+  MAX_RAW_HTML_BYTES: 2 * 1024 * 1024,
+  /** 主进程兜底：含 inline 样式的 HTML 字节数上限 */
+  MAX_HTML_BYTES: 12 * 1024 * 1024,
+  /** 主进程兜底：渲染像素预算（width × height × scale²）。4 字节/像素 ≈ 400MB */
+  MAX_PIXELS: 100_000_000,
+  /** 输出图片宽度下限 */
+  MIN_WIDTH: 480,
+  /** 输出图片宽度上限。渲染端与主进程统一 */
+  MAX_WIDTH: 1600,
+} as const

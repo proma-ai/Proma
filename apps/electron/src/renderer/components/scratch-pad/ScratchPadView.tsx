@@ -28,16 +28,23 @@ import {
 import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/markdown-rich-text'
 import {
-  MarkdownTableBlock,
   MathBlock,
   MathInline,
   RawHtmlBlock,
   RawHtmlInline,
   TaskItem,
   TaskList,
+  tableExtensions,
   createMarkdownImage,
   createMarkdownVideo,
 } from '@/components/diff/markdown-preview-extensions'
+import { SpeechButton } from '@/components/ai-elements/speech-button'
+import {
+  SCRATCH_PAD_VOICE_INPUT_ID,
+  VOICE_DICTATION_INSERT_EVENT,
+  getLastFocusedVoiceInputId,
+  setLastFocusedVoiceInputId,
+} from '@/lib/voice-input-focus'
 
 export function ScratchPadView(): React.ReactElement {
   const [content, setContent] = useAtom(scratchPadContentAtom)
@@ -66,7 +73,7 @@ export function ScratchPadView(): React.ReactElement {
     MathInline,
     TaskList,
     TaskItem,
-    MarkdownTableBlock,
+    ...tableExtensions,
   ], [])
 
   const editor = useEditor({
@@ -164,6 +171,35 @@ export function ScratchPadView(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, editor])
 
+  // ===== 语音输入路由 =====
+
+  // 编辑器获得焦点时，把"语音输入目标"标记为 Scratch Pad；点击语音按钮 / 触发快捷键时编辑器会失焦，
+  // 但 ID 保持不变，从而确保识别完成回填的文本会路由到这里而不是被 RichTextInput / agent draft 抢走。
+  React.useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const handleFocus = (): void => {
+      setLastFocusedVoiceInputId(SCRATCH_PAD_VOICE_INPUT_ID)
+    }
+    dom.addEventListener('focus', handleFocus, true)
+    return () => dom.removeEventListener('focus', handleFocus, true)
+  }, [editor])
+
+  // 监听语音输入回填事件：仅在"上次聚焦目标"是 Scratch Pad 时消费，插入到当前光标位置
+  React.useEffect(() => {
+    if (!editor) return
+    const handler = (event: Event): void => {
+      if (getLastFocusedVoiceInputId() !== SCRATCH_PAD_VOICE_INPUT_ID) return
+      const customEvent = event as CustomEvent<{ text?: string }>
+      const text = customEvent.detail?.text?.trim()
+      if (!text) return
+      editor.chain().focus().insertContent({ type: 'text', text }).run()
+      event.preventDefault()
+    }
+    window.addEventListener(VOICE_DICTATION_INSERT_EVENT, handler)
+    return () => window.removeEventListener(VOICE_DICTATION_INSERT_EVENT, handler)
+  }, [editor])
+
   // ===== 粘贴处理 =====
 
   // 粘贴时：图片转 data URL 插入；含 markdown 标记的文本走 markdownToHtml 转 HTML 注入
@@ -215,8 +251,8 @@ export function ScratchPadView(): React.ReactElement {
   }, [editor])
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto scrollbar-thin px-8 py-6">
+    <div ref={containerRef} className="relative flex flex-col h-full">
+      <div className="flex-1 overflow-auto scrollbar-thin px-8 pt-6 pb-20">
         <div className="max-w-3xl mx-auto h-full">
           {loaded ? (
             <EditorContent
@@ -229,6 +265,10 @@ export function ScratchPadView(): React.ReactElement {
             </div>
           )}
         </div>
+      </div>
+      {/* 底部居中悬浮：圆形语音输入按钮 */}
+      <div className="absolute left-1/2 -translate-x-1/2 bottom-10 z-20">
+        <SpeechButton className="size-11 rounded-full bg-background/95 border border-border/60 shadow-md backdrop-blur hover:bg-accent text-foreground/80" />
       </div>
       <div className="h-[28px] border-t border-border/40 px-4 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground/60">

@@ -553,6 +553,24 @@ export interface ElectronAPI {
   /** 写入 SKILL.md 全文内容 */
   writeSkillContent: (workspaceSlug: string, skillSlug: string, content: string) => Promise<void>
 
+  /** 列出 Skill 目录下的子文件树（不含 SKILL.md） */
+  listSkillFiles: (workspaceSlug: string, skillSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
+
+  /** 读取 Skill 目录下的子文件内容 */
+  readSkillFile: (workspaceSlug: string, skillSlug: string, relativePath: string) => Promise<import('@proma/shared').SkillFileContent>
+
+  /** 写入 Skill 目录下的子文件内容（文本） */
+  writeSkillFile: (workspaceSlug: string, skillSlug: string, relativePath: string, content: string) => Promise<void>
+
+  /** 在 Skill 目录下创建文件或目录 */
+  createSkillEntry: (workspaceSlug: string, skillSlug: string, relativePath: string, type: 'file' | 'directory') => Promise<void>
+
+  /** 删除 Skill 目录下的文件或目录 */
+  deleteSkillEntry: (workspaceSlug: string, skillSlug: string, relativePath: string) => Promise<void>
+
+  /** 重命名/移动 Skill 目录下的文件或目录 */
+  renameSkillEntry: (workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string) => Promise<void>
+
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
 
@@ -711,6 +729,9 @@ export interface ElectronAPI {
 
   /** XLSX/PPTX 转 HTML（内联预览） */
   officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').OfficePreviewResult | null>
+
+  /** 截图导出：将 HTML 渲染为 PNG 并复制到剪贴板或保存文件 */
+  screenshotCapture: (input: { html: string; isDark: boolean; width?: number; mode: 'clipboard' | 'file'; css?: string; themeClass?: string }) => Promise<{ success: boolean; message: string; filePath?: string }>
 
   /** 重命名文件/目录 */
   renameFile: (filePath: string, newName: string) => Promise<void>
@@ -1655,6 +1676,30 @@ const electronAPI: ElectronAPI = {
     )
   },
 
+  listSkillFiles: (workspaceSlug: string, skillSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SKILL_FILES, workspaceSlug, skillSlug)
+  },
+
+  readSkillFile: (workspaceSlug: string, skillSlug: string, relativePath: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_SKILL_FILE, workspaceSlug, skillSlug, relativePath)
+  },
+
+  writeSkillFile: (workspaceSlug: string, skillSlug: string, relativePath: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_SKILL_FILE, workspaceSlug, skillSlug, relativePath, content)
+  },
+
+  createSkillEntry: (workspaceSlug: string, skillSlug: string, relativePath: string, type: 'file' | 'directory') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CREATE_SKILL_ENTRY, workspaceSlug, skillSlug, relativePath, type)
+  },
+
+  deleteSkillEntry: (workspaceSlug: string, skillSlug: string, relativePath: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_SKILL_ENTRY, workspaceSlug, skillSlug, relativePath)
+  },
+
+  renameSkillEntry: (workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RENAME_SKILL_ENTRY, workspaceSlug, skillSlug, fromRelative, toRelative)
+  },
+
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {
     const listener = (_: unknown, event: AgentStreamEvent): void => callback(event)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_EVENT, listener)
@@ -1880,6 +1925,10 @@ const electronAPI: ElectronAPI = {
 
   officeToHtml: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
     return ipcRenderer.invoke('file:office-to-html', filePath, access) as Promise<import('@proma/shared').OfficePreviewResult | null>
+  },
+
+  screenshotCapture: (input: { html: string; isDark: boolean; width?: number; mode: 'clipboard' | 'file'; css?: string; themeClass?: string }) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SCREENSHOT_CAPTURE, input) as Promise<{ success: boolean; message: string; filePath?: string }>
   },
 
   renameFile: (filePath: string, newName: string) => {

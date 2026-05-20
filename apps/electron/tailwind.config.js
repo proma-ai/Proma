@@ -66,7 +66,7 @@ export default {
         },
         'preview-slide-out': {
           '0%': { opacity: '1', transform: 'translateX(0)' },
-          '100%': { opacity: '0', transform: 'translateX(16px)' },
+          '100%': { opacity: '0', transform: 'translateX(100%)' },
         },
       },
       animation: {

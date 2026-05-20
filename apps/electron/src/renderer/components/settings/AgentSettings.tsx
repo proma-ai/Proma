@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
@@ -35,6 +35,7 @@ import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
 import type { McpServerEntry, SkillMeta, OtherWorkspaceSkillsGroup, WorkspaceMcpConfig } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { McpServerForm } from './McpServerForm'
+import { SkillFilesPanel } from './SkillFilesPanel'
 
 // ===== Types =====
 
@@ -672,19 +673,25 @@ function SkillListPanel({ skills, selectedSlug, onSelect, onDelete, onToggle, on
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate flex-1">{group.prefix}</span>
               <span className="text-[10px] tabular-nums text-muted-foreground flex-shrink-0">{group.skills.length}</span>
             </button>
-            {expandedGroups.has(group.prefix) && group.skills.map((skill) => (
-              <SkillCompactItem
-                key={skill.slug}
-                skill={skill}
-                displayName={shortName(skill.slug, group.prefix)}
-                selected={selectedSlug === skill.slug}
-                onSelect={() => onSelect(skill.slug)}
-                onDelete={() => onDelete(skill.slug, skill.name)}
-                onToggle={(enabled) => onToggle(skill.slug, enabled)}
-                onOpenFolder={() => openSkillFolder(skill.slug)}
-                onUpdate={skill.hasUpdate ? () => onUpdate(skill.slug) : undefined}
-              />
-            ))}
+            {expandedGroups.has(group.prefix) && (
+              <div className="relative">
+                <div className="absolute left-3 top-0 bottom-0 w-px bg-border/60 pointer-events-none z-10" />
+                {group.skills.map((skill) => (
+                  <SkillCompactItem
+                    key={skill.slug}
+                    skill={skill}
+                    displayName={shortName(skill.slug, group.prefix)}
+                    selected={selectedSlug === skill.slug}
+                    onSelect={() => onSelect(skill.slug)}
+                    onDelete={() => onDelete(skill.slug, skill.name)}
+                    onToggle={(enabled) => onToggle(skill.slug, enabled)}
+                    onOpenFolder={() => openSkillFolder(skill.slug)}
+                    onUpdate={skill.hasUpdate ? () => onUpdate(skill.slug) : undefined}
+                    indented
+                  />
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           group.skills.map((skill) => (
@@ -717,14 +724,16 @@ interface SkillCompactItemProps {
   onToggle: (enabled: boolean) => void
   onOpenFolder: () => void
   onUpdate?: () => void
+  indented?: boolean
 }
 
-function SkillCompactItem({ skill, displayName, selected, onSelect, onDelete, onToggle, onOpenFolder, onUpdate }: SkillCompactItemProps): React.ReactElement {
+function SkillCompactItem({ skill, displayName, selected, onSelect, onDelete, onToggle, onOpenFolder, onUpdate, indented }: SkillCompactItemProps): React.ReactElement {
   return (
     <button
       onClick={onSelect}
       className={cn(
-        'group w-full flex items-center gap-2 px-3 py-2 text-left transition-colors',
+        'group w-full flex items-center gap-2 py-2 pr-3 text-left transition-colors',
+        indented ? 'pl-5' : 'pl-3',
         selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/40',
         !skill.enabled && 'opacity-50',
       )}
@@ -786,10 +795,15 @@ function SkillDetailPanel({ skill, workspaceSlug, onSaved }: SkillDetailPanelPro
   const [editBody, setEditBody] = React.useState('')
   const [saving, setSaving] = React.useState(false)
 
+  const [detailTab, setDetailTab] = React.useState<'body' | 'files'>('body')
+  const [fileCount, setFileCount] = React.useState<number | null>(null)
+
   React.useEffect(() => {
     currentSlugRef.current = skill.slug
     setIsEditingMeta(false)
     setIsEditingBody(false)
+    setDetailTab('body')
+    setFileCount(null)
     setLoadingContent(true)
 
     window.electronAPI.readSkillContent(workspaceSlug, skill.slug)
@@ -863,24 +877,11 @@ function SkillDetailPanel({ skill, workspaceSlug, onSaved }: SkillDetailPanelPro
     : '当前工作区'
 
   return (
-    <div className="p-5 space-y-6">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <div className="rounded-xl bg-amber-500/12 p-2.5 text-amber-500 shrink-0">
-          <Sparkles size={20} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold text-foreground">{skill.name}</h3>
-          {skill.description && (
-            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{skill.description}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Metadata Section */}
-      <div className="space-y-2">
+    <div className="flex flex-col h-full p-5 gap-4 min-h-0">
+      {/* Metadata：直接展示 */}
+      <div className="shrink-0 space-y-2">
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-medium text-foreground">元数据</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">元数据</h4>
           {!isEditingMeta ? (
             <button onClick={startEditMeta} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
               <Pencil size={12} /> 编辑
@@ -896,7 +897,6 @@ function SkillDetailPanel({ skill, workspaceSlug, onSaved }: SkillDetailPanelPro
             </div>
           )}
         </div>
-
         <SettingsCard divided>
           <MetadataRow label="标识符" value={skill.slug} />
           {isEditingMeta ? (
@@ -916,43 +916,77 @@ function SkillDetailPanel({ skill, workspaceSlug, onSaved }: SkillDetailPanelPro
         </SettingsCard>
       </div>
 
-      {/* Body Section */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-medium text-foreground">说明</h4>
-          {!isEditingBody ? (
-            <button onClick={startEditBody} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
-              <Pencil size={12} /> 编辑
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setIsEditingBody(false)} disabled={saving}>
-                <X size={14} /> 取消
-              </Button>
-              <Button size="sm" onClick={() => void saveBody()} disabled={saving}>
-                <Save size={14} /> {saving ? '保存中...' : '保存'}
-              </Button>
-            </div>
-          )}
-        </div>
-
-        <SettingsCard divided={false}>
-          <div className="p-4">
-            {isEditingBody ? (
-              <textarea
-                value={editBody}
-                onChange={(e) => setEditBody(e.target.value)}
-                className="w-full min-h-[300px] bg-transparent text-sm font-mono resize-y border border-border rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-ring"
-                placeholder="输入 Skill 说明内容（支持 Markdown）..."
-              />
-            ) : (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <Markdown remarkPlugins={[remarkGfm]}>{body || '暂无说明内容'}</Markdown>
-              </div>
+      {/* Tab: 说明 / 资源文件 */}
+      <Tabs
+        value={detailTab}
+        onValueChange={(v) => setDetailTab(v as 'body' | 'files')}
+        className="flex-1 flex flex-col min-h-0"
+      >
+        <TabsList className="self-start shrink-0">
+          <TabsTrigger value="body">说明</TabsTrigger>
+          <TabsTrigger value="files">
+            资源文件
+            {fileCount !== null && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-muted-foreground/15 text-[10px] font-medium">
+                {fileCount}
+              </span>
             )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="body" className="flex-1 mt-3 min-h-0 overflow-auto">
+          <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between px-1 pb-2 shrink-0 min-h-[28px]">
+              <div className="text-xs text-muted-foreground font-mono">SKILL.md</div>
+              <div className="flex items-center gap-1">
+                {!isEditingBody ? (
+                  <button
+                    type="button"
+                    title="编辑"
+                    onClick={startEditBody}
+                    className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 text-xs"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                ) : (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => setIsEditingBody(false)} disabled={saving}>
+                      <X size={14} /> 取消
+                    </Button>
+                    <Button size="sm" onClick={() => void saveBody()} disabled={saving}>
+                      <Save size={14} /> {saving ? '保存中...' : '保存'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+            <SettingsCard divided={false}>
+              <div className="p-4">
+                {isEditingBody ? (
+                  <textarea
+                    value={editBody}
+                    onChange={(e) => setEditBody(e.target.value)}
+                    className="w-full min-h-[300px] bg-transparent text-sm font-mono resize-y border border-border rounded-md p-3 focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="输入 Skill 说明内容（支持 Markdown）..."
+                  />
+                ) : (
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <Markdown remarkPlugins={[remarkGfm]}>{body || '暂无说明内容'}</Markdown>
+                  </div>
+                )}
+              </div>
+            </SettingsCard>
           </div>
-        </SettingsCard>
-      </div>
+        </TabsContent>
+
+        <TabsContent value="files" className="flex-1 mt-3 min-h-0">
+          <SkillFilesPanel
+            workspaceSlug={workspaceSlug}
+            skillSlug={skill.slug}
+            onFileCountChange={setFileCount}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

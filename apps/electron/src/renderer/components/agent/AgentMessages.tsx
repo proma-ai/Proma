@@ -45,10 +45,19 @@ function stableStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
 }
 
+/** 消息对象引用 → 稳定 key 缓存，避免内容相同的消息产生重复 key */
+const stableKeyCache = new WeakMap<object, string>()
+let stableKeyFallbackCounter = 0
+
 function getSDKMessageStableKey(message: SDKMessage): string {
   const record = message as Record<string, unknown>
   if (typeof record.uuid === 'string' && record.uuid.length > 0) {
     return `${message.type}:uuid:${record.uuid}`
+  }
+
+  // 已缓存的消息对象直接返回，保证跨渲染稳定
+  if (stableKeyCache.has(message)) {
+    return stableKeyCache.get(message)!
   }
 
   const parentToolUseId = typeof record.parent_tool_use_id === 'string'
@@ -56,22 +65,23 @@ function getSDKMessageStableKey(message: SDKMessage): string {
     : ''
   const sessionId = typeof record.session_id === 'string' ? record.session_id : ''
 
+  let key: string
+
   if (message.type === 'result') {
     const result = record as { subtype?: unknown; terminal_reason?: unknown; result?: unknown }
-    return `result:${sessionId}:${String(result.subtype ?? '')}:${String(result.terminal_reason ?? '')}:${String(result.result ?? '')}`
-  }
-
-  if (message.type === 'system') {
+    key = `result:${sessionId}:${String(result.subtype ?? '')}:${String(result.terminal_reason ?? '')}:${String(result.result ?? '')}:${++stableKeyFallbackCounter}`
+  } else if (message.type === 'system') {
     const sys = record as { subtype?: unknown; task_id?: unknown; tool_use_id?: unknown }
-    return `system:${sessionId}:${String(sys.subtype ?? '')}:${String(sys.task_id ?? '')}:${String(sys.tool_use_id ?? '')}:${stableStringify(record)}`
-  }
-
-  if ('message' in record) {
+    key = `system:${sessionId}:${String(sys.subtype ?? '')}:${String(sys.task_id ?? '')}:${String(sys.tool_use_id ?? '')}:${stableStringify(record)}:${++stableKeyFallbackCounter}`
+  } else if ('message' in record) {
     const inner = record.message as { content?: unknown } | undefined
-    return `${message.type}:${sessionId}:${parentToolUseId}:${stableStringify(inner?.content)}`
+    key = `${message.type}:${sessionId}:${parentToolUseId}:${stableStringify(inner?.content)}:${++stableKeyFallbackCounter}`
+  } else {
+    key = `${message.type}:${sessionId}:${parentToolUseId}:${stableStringify(record)}:${++stableKeyFallbackCounter}`
   }
 
-  return `${message.type}:${sessionId}:${parentToolUseId}:${stableStringify(record)}`
+  stableKeyCache.set(message, key)
+  return key
 }
 
 /** AgentMessages 属性接口 */

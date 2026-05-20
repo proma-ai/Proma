@@ -32,19 +32,24 @@ export function MainArea(): React.ReactElement {
   const previewSessionId = activeTab?.type === 'agent' ? activeTab.sessionId : null
 
   // 关闭动画状态：当 previewOpen 从 true → false 时，播放退出动画再移除 DOM
-  const [closing, setClosing] = React.useState(false)
+  // 在 render 阶段同步派生 closing，避免中间帧出现 flex: 1 1 auto 导致左侧瞬间跳到 100% 宽
+  // （flex-basis: auto 与 calc() 之间无法插值，transition 不生效，视觉上会被解读为"重新渲染"）
+  const [closingState, setClosingState] = React.useState(false)
   const prevPreviewStateRef = React.useRef({ open: previewOpen, sessionId: previewSessionId })
 
+  let closing = closingState
+  const prev = prevPreviewStateRef.current
+  if (prev.open && !previewOpen && prev.sessionId === previewSessionId) {
+    closing = true
+  }
+  if (previewOpen || prev.sessionId !== previewSessionId) {
+    closing = false
+  }
+  if (closing !== closingState) {
+    setClosingState(closing)
+  }
+
   React.useEffect(() => {
-    const prev = prevPreviewStateRef.current
-    // 同一 session 的预览从开启变为关闭时，触发关闭动画
-    if (prev.open && !previewOpen && prev.sessionId === previewSessionId) {
-      setClosing(true)
-    }
-    // 预览重新打开或切换 session 时，取消关闭动画
-    if (previewOpen || prev.sessionId !== previewSessionId) {
-      setClosing(false)
-    }
     prevPreviewStateRef.current = { open: previewOpen, sessionId: previewSessionId }
   }, [previewOpen, previewSessionId])
 
@@ -98,18 +103,25 @@ export function MainArea(): React.ReactElement {
     }
   }, [tabs, activeTabId, setActiveTabId])
 
-  // 关闭动画期间右侧面板的定位样式（脱离 flex 流，叠加在左侧上方）
+  // 关闭动画期间右侧面板的定位样式（脱离 flex 流，保持原宽度，translateX 向右滑出）
   const closingOverlayStyle: React.CSSProperties | undefined = closing
     ? {
         position: 'absolute',
         top: 0,
-        right: 0,
         bottom: 0,
         left: `${splitRatio * 100}%`,
+        width: `${(1 - splitRatio) * 100}%`,
         zIndex: 1,
         display: 'flex',
+        pointerEvents: 'none',
       }
     : undefined
+
+  // 左侧容器宽度：预览打开时固定占 splitRatio；其他情况（含 closing 动画期间）
+  // 直接 1 1 auto 占满——closing 时右侧 absolute 脱离 flex 流，所以左侧自然占 100%。
+  const leftFlexStyle: React.CSSProperties = (previewOpen && previewSessionId)
+    ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
+    : { flex: '1 1 auto' }
 
   return (
     <>
@@ -117,16 +129,14 @@ export function MainArea(): React.ReactElement {
         variant="grow"
         className="bg-content-area rounded-2xl shadow-xl"
       >
-        <div className="flex flex-1 min-h-0 relative" data-split-container>
-          {/* 左侧：TabBar + TabContent（始终保持在同一 DOM 位置，避免 Tab 切换时 unmount） */}
+        <div className="flex flex-1 min-h-0 relative overflow-hidden" data-split-container>
+          {/* 左侧：TabBar + TabContent（始终保持在同一 DOM 位置，避免 Tab 切换时 unmount）
+              注：宽度变化不用 transition——文字逐帧 reflow 会导致行末字符抖动，
+              视觉上像"内容从右向左推送"。让左侧瞬间变宽，由右侧 absolute 滑出动画
+              覆盖期内呈现"被剥离"的视觉效果。 */}
           <div
             className="flex flex-col min-w-0 h-full"
-            style={{
-              ...(previewOpen && previewSessionId
-                ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
-                : { flex: '1 1 auto' }),
-              transition: 'flex 0.25s ease-out',
-            }}
+            style={leftFlexStyle}
           >
             <TabBar />
             {tabs.length === 0 ? (
@@ -138,13 +148,13 @@ export function MainArea(): React.ReactElement {
             ) : null}
           </div>
 
-          {/* 右侧：预览面板。关闭动画期间脱离 flex 流，absolute 叠加 */}
+          {/* 右侧：预览面板。关闭动画期间脱离 flex 流，向右滑出 */}
           {showPreview && (
             <div
               className={closing ? 'animate-preview-slide-out' : 'flex flex-1 min-w-0'}
               style={closingOverlayStyle}
               onAnimationEnd={(e) => {
-                if (closing && e.target === e.currentTarget) setClosing(false)
+                if (closing && e.target === e.currentTarget) setClosingState(false)
               }}
             >
               {!closing && (

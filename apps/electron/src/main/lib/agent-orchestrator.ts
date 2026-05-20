@@ -164,12 +164,17 @@ function isAutoRetryableCatchError(
   stderr?: string,
 ): boolean {
   if (apiError) {
+    // 529 是 Anthropic 的过载状态码，通常很快恢复；与 429 / 5xx 一并重试。
     if (apiError.statusCode === 429 || apiError.statusCode >= 500) return true
   }
   // 已知的可恢复错误模式（无 HTTP 状态码但可重试）
   if (rawErrorMessage) {
     if (rawErrorMessage.includes('context_management')) return true
   }
+  // 兜底：extractApiError 未识别但 stderr / 错误文本中包含 502 / 529 或 overloaded 关键字时也视为可重试
+  // 502 (Bad Gateway) 通常是上游网关瞬时异常，与 529 一样很快自行恢复
+  const text = `${rawErrorMessage ?? ''}\n${stderr ?? ''}`
+  if (/\b502\b|\b529\b|overloaded/i.test(text)) return true
   // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）
   if (isTransientNetworkError(rawErrorMessage, stderr)) return true
   return false

@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
+import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
@@ -49,6 +50,9 @@ const contentCache = new Map<string, CacheEntry>()
 
 /** 超过此字符数的文本文件将跳过 PierreFile 高亮，直接以纯文本展示，避免大文件卡顿 */
 const MAX_PREVIEW_CHARS = 500_000
+
+/** 选中文本最大字符数（与 Bozeman DOM 模式一致） */
+const MAX_QUOTED_CHARS = 2000
 
 /** 滚动位置持久化：key = `${sessionId}:${filePath}` */
 const scrollPositionCache = new Map<string, { top: number; left: number }>()
@@ -94,6 +98,78 @@ function cacheSet(key: string, value: CacheEntry): void {
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
   return dot >= 0 ? filePath.slice(dot).toLowerCase() : ''
+}
+
+/** 判断选区是否在容器内（穿透 Shadow DOM 边界） */
+function isSelectionInside(container: HTMLElement, selection: Selection): boolean {
+  if (selection.rangeCount === 0) return false
+  const range = selection.getRangeAt(0)
+  let node: Node | null = range.commonAncestorContainer
+  while (node) {
+    if (node === container) return true
+    const root = node.getRootNode()
+    if (root instanceof ShadowRoot) {
+      // Shadow DOM 边界：从 shadowRoot.host 继续向上
+      node = root.host
+    } else {
+      // 普通 DOM：沿 parentNode 向上
+      node = node.parentNode
+    }
+  }
+  return false
+}
+
+/** 获取容器内的选区：先查光 DOM，再遍历缓存的 ShadowRoot 集合 */
+function getDeepSelection(container: HTMLElement, shadowRoots?: Set<ShadowRoot> | null): { text: string } | null {
+  const docSel = document.getSelection()
+  if (docSel && !docSel.isCollapsed && docSel.rangeCount > 0) {
+    if (isSelectionInside(container, docSel)) {
+      const text = docSel.toString().trim()
+      if (text) return { text }
+    }
+  }
+
+  if (shadowRoots) {
+    // 直接遍历缓存的 ShadowRoot（O(n) 其中 n = ShadowRoot 数量，通常 2-3 个）
+    for (const sr of shadowRoots) {
+      // 检查 host 是否仍在 DOM 中（可能已被移除）
+      if (!container.contains(sr.host)) continue
+      const shadowSel = (sr as { getSelection?: () => Selection | null }).getSelection?.()
+      if (shadowSel && !shadowSel.isCollapsed && shadowSel.rangeCount > 0) {
+        const text = shadowSel.toString().trim()
+        if (text) return { text }
+      }
+    }
+    return null
+  }
+
+  // 兜底：无缓存时递归遍历（组件初始化瞬间可能命中一次）
+  function walk(node: Node): { text: string } | null {
+    if (node instanceof HTMLElement && node.shadowRoot) {
+      const shadowSel = (node.shadowRoot as { getSelection?: () => Selection | null }).getSelection?.()
+      if (shadowSel && !shadowSel.isCollapsed && shadowSel.rangeCount > 0) {
+        const text = shadowSel.toString().trim()
+        if (text) return { text }
+      }
+      const result = walk(node.shadowRoot)
+      if (result) return result
+    }
+    for (const child of node.childNodes) {
+      const result = walk(child)
+      if (result) return result
+    }
+    return null
+  }
+  return walk(container)
+}
+
+/** 用 TreeWalker 发现容器内所有现有 ShadowRoot（仅初始化时调用一次） */
+function discoverShadowRoots(root: Node, target: Set<ShadowRoot>): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
+  while (walker.nextNode()) {
+    const el = walker.currentNode as HTMLElement
+    if (el.shadowRoot) target.add(el.shadowRoot)
+  }
 }
 
 interface DiffTabContentProps {
@@ -148,6 +224,156 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
   const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
   const isImage = previewOnly && IMAGE_EXTS.has(ext)
+
+  // ===== 选中文本引用（Quoted Selection）=====
+
+  const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
+  const filePathRef = React.useRef(filePath)
+  filePathRef.current = filePath
+  const shadowRootsRef = React.useRef<Set<ShadowRoot>>(new Set())
+  /** 当前正在展示的截断 toast id；选中回落到上限内或选区消失时主动 dismiss */
+  const lastToastIdRef = React.useRef<string | null>(null)
+
+  const dismissTruncationToast = React.useCallback(() => {
+    if (lastToastIdRef.current) {
+      toast.dismiss(lastToastIdRef.current)
+      lastToastIdRef.current = null
+    }
+  }, [])
+
+  /** 捕获预览面板中的文本选中，写入 quotedSelectionMapAtom */
+  const handleSelectionCapture = React.useCallback(() => {
+    if (!previewOnly) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const deepSel = getDeepSelection(container, shadowRootsRef.current)
+    if (!deepSel) {
+      // 选区消失：先撤掉截断 toast，再判断是否清 Chip
+      dismissTruncationToast()
+      // 若焦点在 ProseMirror 编辑器（输入框），保留 Chip；否则清除
+      const activeEl = document.activeElement
+      if (activeEl && (activeEl.closest?.('.ProseMirror') || activeEl.closest?.('[data-input-mode]'))) return
+      setQuotedSelectionMap((prev) => {
+        const m = new Map(prev)
+        if (!m.has(sessionId)) return prev
+        m.delete(sessionId)
+        return m
+      })
+      return
+    }
+
+    // 实时更新只存文本 + 路径，不计算行号
+    const truncated = deepSel.text.length > MAX_QUOTED_CHARS
+    setQuotedSelectionMap((prev) => {
+      const m = new Map(prev)
+      m.set(sessionId, {
+        text: truncated ? deepSel.text.slice(0, MAX_QUOTED_CHARS) : deepSel.text,
+        filePath: filePathRef.current,
+        capturedAt: Date.now(),
+      })
+      return m
+    })
+    // 超过上限时按千位分档 toast；跨档时撤掉上一档，回到上限内则全部撤掉
+    if (truncated) {
+      const k = Math.floor(deepSel.text.length / 1000) * 1000
+      const id = `quoted-chars-cap:${sessionId}:${k}`
+      if (lastToastIdRef.current && lastToastIdRef.current !== id) {
+        toast.dismiss(lastToastIdRef.current)
+      }
+      toast.warning(`已选中 >${k} 字符，仅能发送前 ${MAX_QUOTED_CHARS} 字符`, {
+        id,
+        duration: 3000,
+      })
+      lastToastIdRef.current = id
+    } else {
+      dismissTruncationToast()
+    }
+  }, [previewOnly, sessionId, setQuotedSelectionMap, dismissTruncationToast])
+
+  // 监听选区变化：document selectionchange + 容器内鼠标拖拽轮询
+  React.useEffect(() => {
+    if (!previewOnly) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    // 初始化 ShadowRoot 缓存：TreeWalker 一次扫描 + MutationObserver 增量更新
+    const shadowRoots = shadowRootsRef.current
+    shadowRoots.clear()
+    discoverShadowRoots(container, shadowRoots)
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLElement && node.shadowRoot) shadowRoots.add(node.shadowRoot)
+          // 递归发现新增子树中的 shadowRoot
+          discoverShadowRoots(node, shadowRoots)
+        }
+        for (const node of m.removedNodes) {
+          if (node instanceof HTMLElement) {
+            if (node.shadowRoot) shadowRoots.delete(node.shadowRoot)
+            // 清理被移除子树中的所有 ShadowRoot 引用，避免 Set 持有已分离节点
+            const stale = new Set<ShadowRoot>()
+            discoverShadowRoots(node, stale)
+            for (const sr of stale) shadowRoots.delete(sr)
+          }
+        }
+      }
+    })
+    mo.observe(container, { childList: true, subtree: true })
+
+    let tracking = false
+    let rafId = 0
+
+    const scheduleCapture = () => {
+      // 快速路径：非拖拽时若 document 选区已折叠（输入框打字/点击），跳过昂贵的树遍历。
+      // @pierre/diffs 使用 open Shadow DOM，Chrome/Electron 会将 shadow 内选区反映到
+      // document.getSelection()，因此键盘选区（Shift+Arrow）也能通过此检查。
+      if (!tracking) {
+        const docSel = document.getSelection()
+        if (!docSel || docSel.isCollapsed) return
+        // 光 DOM 快速检查：选区不在预览容器内也跳过
+        if (!isSelectionInside(container, docSel)) return
+      }
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        handleSelectionCapture()
+      })
+    }
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) tracking = true
+    }
+    const onMouseMove = () => {
+      if (tracking) scheduleCapture()
+    }
+    const onMouseUp = () => {
+      if (tracking) {
+        tracking = false
+        scheduleCapture()
+      }
+    }
+    const onSelectionChange = () => {
+      scheduleCapture()
+    }
+
+    container.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      mo.disconnect()
+      shadowRoots.clear()
+      container.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('selectionchange', onSelectionChange)
+      // unmount / 切预览 / 切 session 时撤掉残留的截断 toast，避免贴脸 3 秒
+      dismissTruncationToast()
+    }
+  }, [previewOnly, handleSelectionCapture, dismissTruncationToast])
+
   const fileAccess = React.useMemo(() => ({
     sessionId,
     candidateBasePaths: basePaths,
@@ -758,7 +984,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                 onRequestEdit={startMarkdownEdit}
                 disabled={markdownSaving}
                 fileAccess={markdownFileAccess}
-                shikiTheme="github-dark"
+                shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}
               />
             )
           ) : newContent ? (

@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -644,8 +644,12 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
           .filter((b) => b.type === 'text' && 'text' in b)
           .map((b) => (b as { text: string }).text)
           .join('\n\n')
-        const lastUuid = turn.assistantMessages.length > 0
-          ? turn.assistantMessages[turn.assistantMessages.length - 1]?.uuid
+        // 仅取主线 assistant 消息的 uuid 作为 fork/rewind 截断点。
+        // SDK forkSession 内部会过滤掉 sidechain（parent_tool_use_id 非空的子代理消息），
+        // 若把子代理 uuid 传过去会触发 "Message <uuid> not found in session" 错误。
+        const mainlineAssistants = turn.assistantMessages.filter((m) => !m.parent_tool_use_id)
+        const lastUuid = mainlineAssistants.length > 0
+          ? mainlineAssistants[mainlineAssistants.length - 1]?.uuid
           : undefined
         const hasActions = !!(textContent || (onFork && lastUuid) || (onRewind && lastUuid))
         const hasDuration = durationMs != null
@@ -775,11 +779,38 @@ export interface AttachedFileRef {
   path: string
 }
 
-/** 解析消息中的 <attached_files> 块，返回文件列表和剩余文本 */
-export function parseAttachedFiles(content: string): { files: AttachedFileRef[]; text: string } {
+/** 解析的引用文件 */
+export interface QuotedFileRef {
+  /** 源文件路径 */
+  path: string
+  /** 源文件名 */
+  filename: string
+}
+
+/** 解析消息中的 <attached_files> 块和 <quoted_file> 块，返回文件列表、引用列表和剩余文本 */
+export function parseAttachedFiles(content: string): { files: AttachedFileRef[]; quotes: QuotedFileRef[]; text: string } {
+  const quoteRegex = /<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g
+  const quotes: QuotedFileRef[] = []
+  let quoteMatch: RegExpExecArray | null
+  while ((quoteMatch = quoteRegex.exec(content)) !== null) {
+    const pathMatch = quoteMatch[0].match(/path="([^"]*)"/)
+    if (pathMatch) {
+      // 反解 XML 实体：&amp; 必须最后做，否则会被先一步解出的 & 误伤
+      const filePath = pathMatch[1]!
+        .replace(/&quot;/g, '"')
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<')
+        .replace(/&amp;/g, '&')
+      quotes.push({ path: filePath, filename: filePath.split('/').pop() ?? filePath })
+    }
+  }
+
   const regex = /<attached_files>\n?([\s\S]*?)\n?<\/attached_files>\n*/
   const match = content.match(regex)
-  if (!match) return { files: [], text: content }
+  if (!match) {
+    const cleanText = content.replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '').trim()
+    return { files: [], quotes, text: cleanText }
+  }
 
   const files: AttachedFileRef[] = []
   const lines = match[1]!.split('\n')
@@ -790,8 +821,10 @@ export function parseAttachedFiles(content: string): { files: AttachedFileRef[];
     }
   }
 
-  const text = content.replace(regex, '').trim()
-  return { files, text }
+  let text = content.replace(regex, '')
+  text = text.replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+  text = text.trim()
+  return { files, quotes, text }
 }
 
 /** 判断文件是否为图片类型 */
@@ -866,12 +899,22 @@ function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactEleme
   )
 }
 
+/** 引用文件 Chip（显示在用户消息中，表示该消息引用了某个文件的选中内容） */
+function QuoteChip({ quote }: { quote: QuotedFileRef }): React.ReactElement {
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-md bg-primary/8 border border-primary/20 px-2.5 py-1 text-[12px] text-muted-foreground">
+      <Quote className="size-3.5 shrink-0 text-primary/60" />
+      <span className="truncate max-w-[200px]">{quote.filename}</span>
+    </div>
+  )
+}
+
 // ===== 用户输入消息渲染 =====
 
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const rawText = extractUserText(message) ?? ''
-  const { files: attachedFiles, text } = parseAttachedFiles(rawText)
+  const { files: attachedFiles, quotes, text } = parseAttachedFiles(rawText)
   const imageFiles = attachedFiles.filter((f) => isImageFile(f.filename))
   const nonImageFiles = attachedFiles.filter((f) => !isImageFile(f.filename))
   const meta = extractMeta(message as unknown as SDKMessage)
@@ -888,6 +931,14 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         </div>
       </div>
       <MessageContent>
+        {/* 引用文件 Chip */}
+        {quotes.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {quotes.map((q, i) => (
+              <QuoteChip key={`${q.path}:${i}`} quote={q} />
+            ))}
+          </div>
+        )}
         {/* 图片缩略图 */}
         {imageFiles.length > 0 && (
           <div className="flex flex-wrap gap-2.5 mb-2">
@@ -1194,7 +1245,10 @@ export function getGroupId(group: MessageGroup): string {
  */
 export function getGroupPreview(group: MessageGroup): string {
   if (group.type === 'user') {
-    return (extractUserText(group.message) ?? '').replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '').slice(0, 200)
+    return (extractUserText(group.message) ?? '')
+      .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '')
+      .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+      .slice(0, 200)
   }
   if (group.type === 'system') {
     if (group.message.subtype === 'compact_boundary') return '上下文已压缩'

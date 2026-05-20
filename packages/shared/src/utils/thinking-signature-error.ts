@@ -7,7 +7,12 @@ export function isThinkingSignatureError(...messages: Array<string | null | unde
   // API 错误消息中 signature/thinking 可能被反引号包裹（如 Invalid `signature` in `thinking` block），
   // 先去除反引号再匹配，避免 \s+ 无法跨越反引号导致检测失败。
   const combined = messages.filter(Boolean).join('\n').replace(/`/g, '')
-  return /(?:invalid\s+signature[\s\S]{0,240}thinking\s+block|thinking\s+block[\s\S]{0,240}invalid\s+signature)/i.test(combined)
+  // 三种已知形态：
+  // 1. "Invalid signature ... thinking block"（原生 Anthropic 报错）
+  // 2. "thinking block ... Invalid signature"（顺序颠倒变体）
+  // 3. "....signature: Field required"（中转/网关把 content.N.thinking.signature 路径段脱敏成 *** 后透传的 Pydantic 校验报错，
+  //    如 "***.***.***.***.***.signature: Field required"）
+  return /(?:invalid\s+signature[\s\S]{0,240}thinking\s+block|thinking\s+block[\s\S]{0,240}invalid\s+signature|\bsignature\s*:\s*field\s+required)/i.test(combined)
 }
 
 export function formatThinkingSignatureError(): string {

@@ -1,10 +1,11 @@
 import MarkdownIt from 'markdown-it'
 
 const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(?:[?#].*)?$/i
-const PREVIEW_BLOCK_RE = /^<div\s+[^>]*data-type=(["'])(?:markdown-table|raw-html-block|math-block)\1/i
+const PREVIEW_BLOCK_RE = /^<div\s+[^>]*data-type=(["'])(?:raw-html-block|math-block)\1/i
 const DETAILS_BLOCK_RE = /<details(\s[^>]*)?>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi
+const STANDALONE_HTML_MEDIA_RE = /^\s*<(?:img|video)\b[^>]*(?:\/?>|>.*?<\/video>)\s*$/i
 
-export const MARKDOWN_RENDERER_VERSION = 2
+export const MARKDOWN_RENDERER_VERSION = 3
 
 const EMOJI_SHORTCODES: Record<string, string> = {
   '+1': '👍',
@@ -34,6 +35,27 @@ function escapeAttr(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '&#10;')
+}
+
+function escapeMarkdownText(value: string): string {
+  // /m 让 ^ 匹配每行行首，确保多行文本节点中每一行的块级标记都被转义。
+  // 这是必须的：在 markdown 中，行首的 # > + - 和有序列表标记会被解析为块级元素。
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/([`*_[\]<>|])/g, '\\$1')
+    .replace(/^(\s*)([#>+-])(?=\s)/gm, '$1\\$2')
+    .replace(/^(\s*)(\d+)\.(?=\s)/gm, '$1$2\\.')
+}
+
+function escapeMarkdownLinkTarget(value: string): string {
+  return `<${value.replace(/[<>\r\n]/g, (char) => encodeURIComponent(char))}>`
+}
+
+function serializeInlineCode(value: string): string {
+  if (!value.includes('`')) return `\`${value}\``
+  const fence = value.match(/`+/g)?.sort((a, b) => b.length - a.length)[0] ?? '`'
+  const wrapper = `${fence}\``
+  return `${wrapper} ${value} ${wrapper}`
 }
 
 function isPreviewBlockHtml(value: string): boolean {
@@ -152,52 +174,6 @@ markdownIt.renderer.rules.image = (tokens, idx) => {
   return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${titleAttr}>`
 }
 
-function isMarkdownTableDelimiter(line: string): boolean {
-  const trimmed = line.trim()
-  if (!trimmed.includes('|')) return false
-
-  const cells = trimmed
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((cell) => cell.trim())
-
-  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
-}
-
-function isMarkdownTableHeader(line: string, nextLine?: string): boolean {
-  return Boolean(nextLine && line.includes('|') && isMarkdownTableDelimiter(nextLine))
-}
-
-function wrapMarkdownTables(markdown: string): string {
-  const lines = markdown.split('\n')
-  const nextLines: string[] = []
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? ''
-    if (!isMarkdownTableHeader(line, lines[i + 1])) {
-      nextLines.push(line)
-      continue
-    }
-
-    const tableLines = [line, lines[i + 1] ?? '']
-    i += 2
-    while (i < lines.length && (lines[i] ?? '').trim() && (lines[i] ?? '').includes('|')) {
-      tableLines.push(lines[i] ?? '')
-      i += 1
-    }
-    i -= 1
-
-    const tableMarkdown = tableLines.join('\n')
-    const tableHtml = markdownIt.render(tableMarkdown).trim()
-    nextLines.push(
-      `<div data-type="markdown-table" data-markdown="${escapeAttr(tableMarkdown)}" data-html="${escapeAttr(tableHtml)}"></div>`,
-    )
-  }
-
-  return nextLines.join('\n')
-}
-
 function wrapMarkdownDetailsBlocks(markdown: string): string {
   return markdown.replace(DETAILS_BLOCK_RE, (raw: string, attrs = '', summary: string, body: string) => {
     const bodyMarkdown = body.trim()
@@ -207,8 +183,69 @@ function wrapMarkdownDetailsBlocks(markdown: string): string {
   })
 }
 
+function splitMarkdownCodeRegions(markdown: string): Array<{ text: string; code: boolean }> {
+  const chunks: Array<{ text: string; code: boolean }> = []
+  const lines = markdown.split('\n')
+  let inFence: { marker: '`' | '~'; length: number } | null = null
+
+  const append = (text: string, code: boolean) => {
+    const last = chunks[chunks.length - 1]
+    if (last && last.code === code) {
+      last.text += text
+    } else {
+      chunks.push({ text, code })
+    }
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? ''
+    const lineWithBreak = i < lines.length - 1 ? `${line}\n` : line
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    const indentedCode = !inFence && /^(?: {4}|\t)/.test(line)
+    const isCode = Boolean(inFence || indentedCode)
+
+    append(lineWithBreak, isCode)
+
+    if (fenceMatch) {
+      const markerText = fenceMatch[1] ?? ''
+      const marker = markerText[0] as '`' | '~'
+      if (!inFence) {
+        inFence = { marker, length: markerText.length }
+      } else if (marker === inFence.marker && markerText.length >= inFence.length) {
+        inFence = null
+      }
+    }
+  }
+
+  return chunks
+}
+
+function separateStandaloneHtmlMediaBlocks(markdown: string): string {
+  const lines = markdown.split('\n')
+  const result: string[] = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? ''
+    result.push(line)
+    const nextLine = lines[i + 1] ?? ''
+    if (STANDALONE_HTML_MEDIA_RE.test(line) && nextLine.trim()) {
+      result.push('')
+    }
+  }
+  return result.join('\n')
+}
+
+function normalizeMarkdownLinePrefixes(markdown: string): string {
+  return markdown
+    .replace(/^[\u200b\ufeff]+(?=#{1,6}\s)/gm, '')
+    .replace(/^\u00a0{1,3}(?=#{1,6}\s)/gm, (spaces) => ' '.repeat(spaces.length))
+}
+
 function preprocessMarkdown(markdown: string): string {
-  return wrapMarkdownTables(wrapMarkdownDetailsBlocks(markdown))
+  return splitMarkdownCodeRegions(markdown)
+    .map((chunk) => chunk.code
+      ? chunk.text
+      : wrapMarkdownDetailsBlocks(separateStandaloneHtmlMediaBlocks(normalizeMarkdownLinePrefixes(chunk.text))))
+    .join('')
 }
 
 function enhanceMarkdownHtml(html: string): string {
@@ -234,13 +271,6 @@ function enhanceMarkdownHtml(html: string): string {
     li.parentElement?.setAttribute('data-type', 'taskList')
   }
 
-  for (const table of Array.from(root.querySelectorAll('table'))) {
-    const wrapper = document.createElement('div')
-    wrapper.setAttribute('data-type', 'markdown-table')
-    wrapper.dataset.html = table.outerHTML
-    table.replaceWith(wrapper)
-  }
-
   return root.innerHTML
 }
 
@@ -256,9 +286,10 @@ export function htmlToMarkdown(html: string): string {
   const div = document.createElement('div')
   div.innerHTML = html
 
-  function processNode(node: Node): string {
+  function processNode(node: Node, context: 'normal' | 'code' = 'normal'): string {
     if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent || ''
+      const text = node.textContent || ''
+      return context === 'code' ? text : escapeMarkdownText(text)
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -267,20 +298,11 @@ export function htmlToMarkdown(html: string): string {
 
     const el = node as HTMLElement
     const tagName = el.tagName.toLowerCase()
-    const children = Array.from(el.childNodes).map(processNode).join('')
+    const childContext = tagName === 'pre' || tagName === 'code' ? 'code' : 'normal'
+    const children = Array.from(el.childNodes).map((child) => processNode(child, childContext)).join('')
 
     switch (tagName) {
       case 'div':
-        if (el.getAttribute('data-type') === 'markdown-table') {
-          const tableMarkdown = el.getAttribute('data-markdown')
-          if (tableMarkdown !== null) return `${tableMarkdown}\n`
-
-          const tableHtml = el.getAttribute('data-html') || ''
-          const holder = document.createElement('div')
-          holder.innerHTML = tableHtml
-          const table = holder.querySelector('table')
-          return table ? processNode(table) : ''
-        }
         if (el.getAttribute('data-type') === 'raw-html-block') {
           const htmlMarkdown = el.getAttribute('data-markdown')
           if (htmlMarkdown !== null) return `${htmlMarkdown}\n`
@@ -295,12 +317,12 @@ export function htmlToMarkdown(html: string): string {
         const src = el.getAttribute('src') || ''
         const alt = el.getAttribute('alt') || ''
         const title = el.getAttribute('title') || ''
-        return `![${alt}](${src}${title ? ` "${title}"` : ''})`
+        return `![${escapeMarkdownText(alt)}](${escapeMarkdownLinkTarget(src)}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})`
       }
       case 'video': {
         const src = el.getAttribute('src') || el.querySelector('source')?.getAttribute('src') || ''
         const title = el.getAttribute('title') || ''
-        return `<video controls src="${src}"${title ? ` title="${title}"` : ''}></video>\n`
+        return `<video controls src="${escapeAttr(src)}"${title ? ` title="${escapeAttr(title)}"` : ''}></video>\n`
       }
       case 'p':
         return children + '\n\n'
@@ -322,7 +344,7 @@ export function htmlToMarkdown(html: string): string {
         if (el.parentElement?.tagName.toLowerCase() === 'pre') {
           return children
         }
-        return `\`${children}\``
+        return serializeInlineCode(children)
       case 'pre': {
         const codeEl = el.querySelector('code')
         const langClass = codeEl?.className || ''
@@ -333,7 +355,7 @@ export function htmlToMarkdown(html: string): string {
       }
       case 'a': {
         const href = el.getAttribute('href') || ''
-        return `[${children}](${href})`
+        return `[${children}](${escapeMarkdownLinkTarget(href)})`
       }
       case 'ul':
         if (el.getAttribute('data-type') === 'taskList') {

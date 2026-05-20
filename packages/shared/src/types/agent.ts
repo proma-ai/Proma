@@ -739,6 +739,33 @@ export interface OtherWorkspaceSkillsGroup {
   skills: SkillMeta[]
 }
 
+/** Skill 目录下的文件/子目录节点（递归树） */
+export interface SkillFileNode {
+  /** 相对于 Skill 根目录的相对路径，使用 POSIX 分隔符 */
+  relativePath: string
+  /** 末段名字（用于显示） */
+  name: string
+  /** 类型：文件 / 目录 */
+  type: 'file' | 'directory'
+  /** 文件大小（字节）；目录为 undefined */
+  size?: number
+  /** 是否为文本文件（可在内置编辑器中打开）；目录为 undefined */
+  isText?: boolean
+  /** 子节点（仅 type=directory 有值，已按目录优先 + 名称排序） */
+  children?: SkillFileNode[]
+}
+
+/** 读取 Skill 子文件的响应 */
+export interface SkillFileContent {
+  relativePath: string
+  /** 文本内容（仅 isText=true 时存在） */
+  content?: string
+  /** 是否为文本文件 */
+  isText: boolean
+  /** 文件大小（字节） */
+  size: number
+}
+
 /** 工作区能力摘要（MCP + Skill 计数） */
 export interface WorkspaceCapabilities {
   mcpServers: Array<{ name: string; enabled: boolean; type: McpTransportType }>
@@ -1263,6 +1290,18 @@ export const AGENT_IPC_CHANNELS = {
   READ_SKILL_CONTENT: 'agent:read-skill-content',
   /** 写入 SKILL.md 全文内容 */
   WRITE_SKILL_CONTENT: 'agent:write-skill-content',
+  /** 列出 Skill 目录下的子文件树（不含 SKILL.md） */
+  LIST_SKILL_FILES: 'agent:list-skill-files',
+  /** 读取 Skill 目录下的子文件内容 */
+  READ_SKILL_FILE: 'agent:read-skill-file',
+  /** 写入 Skill 目录下的子文件内容 */
+  WRITE_SKILL_FILE: 'agent:write-skill-file',
+  /** 在 Skill 目录下创建文件或目录 */
+  CREATE_SKILL_ENTRY: 'agent:create-skill-entry',
+  /** 删除 Skill 目录下的文件或目录 */
+  DELETE_SKILL_ENTRY: 'agent:delete-skill-entry',
+  /** 重命名/移动 Skill 目录下的文件或目录 */
+  RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

@@ -28,9 +28,11 @@ import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
 import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion } from '@/components/agent/mention-suggestions'
-
-const VOICE_DICTATION_INSERT_EVENT = 'proma:insert-voice-dictation-text'
-let lastFocusedRichTextInputId: string | null = null
+import {
+  VOICE_DICTATION_INSERT_EVENT,
+  getLastFocusedVoiceInputId,
+  setLastFocusedVoiceInputId,
+} from '@/lib/voice-input-focus'
 
 // ===== 行数计算 =====
 
@@ -308,7 +310,7 @@ export function RichTextInput({
       // 监听 IME 输入状态
       handleDOMEvents: {
         focus: () => {
-          lastFocusedRichTextInputId = inputIdRef.current
+          setLastFocusedVoiceInputId(inputIdRef.current)
           return false
         },
         compositionstart: () => {
@@ -549,7 +551,7 @@ export function RichTextInput({
     if (!editor || disabled) return
 
     const handler = (event: Event): void => {
-      if (lastFocusedRichTextInputId !== inputIdRef.current) return
+      if (getLastFocusedVoiceInputId() !== inputIdRef.current) return
 
       const customEvent = event as CustomEvent<{ text?: string }>
       const text = customEvent.detail?.text?.trim()

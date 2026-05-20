@@ -1033,3 +1033,288 @@
 .voice-dictation-no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* ===== Tiptap 可编辑表格样式 ===== */
+.ProseMirror table,
+.ProseMirror table.markdown-table {
+  border: 1px solid hsl(var(--foreground) / 0.22);
+  border-collapse: separate;
+  border-radius: 6px;
+  border-spacing: 0;
+  width: 100%;
+  margin: 0.75em 0;
+  overflow: hidden;
+  table-layout: auto;
+}
+
+.ProseMirror table colgroup {
+  display: table-column-group;
+}
+
+.ProseMirror table col {
+  display: table-column;
+}
+
+.ProseMirror table tr {
+  display: table-row;
+}
+
+.ProseMirror table td,
+.ProseMirror table th,
+.ProseMirror table.markdown-table td,
+.ProseMirror table.markdown-table th,
+.ProseMirror .md-td,
+.ProseMirror .md-th {
+  background-clip: padding-box;
+  border: 0 !important;
+  border-right: 1px solid hsl(var(--foreground) / 0.28) !important;
+  border-bottom: 1px solid hsl(var(--foreground) / 0.16) !important;
+  box-shadow: inset -1px 0 0 hsl(var(--background) / 0.9);
+  min-width: 48px;
+  padding: 4px 8px;
+  position: relative;
+  vertical-align: top;
+}
+
+.ProseMirror table.markdown-table td,
+.ProseMirror table.markdown-table th {
+  border-right-color: hsl(var(--foreground) / 0.28) !important;
+}
+
+.ProseMirror table td:not(:last-child)::after,
+.ProseMirror table th:not(:last-child)::after,
+.ProseMirror table.markdown-table td:not(:last-child)::after,
+.ProseMirror table.markdown-table th:not(:last-child)::after {
+  background: hsl(var(--foreground) / 0.28);
+  bottom: 0;
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  right: -1px;
+  top: 0;
+  width: 1px;
+}
+
+.ProseMirror table tr > :last-child,
+.ProseMirror table.markdown-table tr > :last-child {
+  border-right: 0 !important;
+  box-shadow: none;
+}
+
+.ProseMirror table tr:last-child > *,
+.ProseMirror table.markdown-table tr:last-child > * {
+  border-bottom: 0 !important;
+}
+
+.ProseMirror table th,
+.ProseMirror table.markdown-table th {
+  background-color: hsl(var(--muted) / 0.5);
+  font-weight: 600;
+  text-align: left;
+}
+
+.ProseMirror table tr:nth-child(even) td,
+.ProseMirror table.markdown-table tr:nth-child(even) td {
+  background-color: hsl(var(--muted) / 0.15);
+}
+
+.ProseMirror .selectedCell::after {
+  z-index: 2;
+  position: absolute;
+  content: '';
+  inset: 0;
+  background: hsl(var(--primary) / 0.12);
+  pointer-events: none;
+}
+
+.ProseMirror:not([contenteditable='true']) .selectedCell::after {
+  display: none;
+}
+
+/* ===== Tiptap 可编辑代码块 ===== */
+.ProseMirror pre.markdown-code-block {
+  background: hsl(var(--muted) / 0.45) !important;
+  color: hsl(var(--foreground)) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.dark .ProseMirror pre.markdown-code-block,
+.theme-ocean-dark .ProseMirror pre.markdown-code-block,
+.theme-slate-dark .ProseMirror pre.markdown-code-block {
+  background: hsl(var(--muted)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.theme-forest-dark .ProseMirror pre.markdown-code-block {
+  background: hsl(150 20% 9%) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.ProseMirror pre.markdown-code-block code,
+.ProseMirror pre.markdown-code-block code * {
+  background: transparent !important;
+  font: inherit;
+  padding: 0 !important;
+  -webkit-text-fill-color: currentColor;
+}
+
+.ProseMirror pre.markdown-code-block .hljs-comment,
+.ProseMirror pre.markdown-code-block .hljs-quote {
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.ProseMirror pre.markdown-code-block .hljs-keyword,
+.ProseMirror pre.markdown-code-block .hljs-selector-tag,
+.ProseMirror pre.markdown-code-block .hljs-subst,
+.ProseMirror pre.markdown-code-block .hljs-doctag,
+.ProseMirror pre.markdown-code-block .hljs-template-tag,
+.ProseMirror pre.markdown-code-block .hljs-template-variable {
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+.ProseMirror pre.markdown-code-block .hljs-string,
+.ProseMirror pre.markdown-code-block .hljs-regexp,
+.ProseMirror pre.markdown-code-block .hljs-title,
+.ProseMirror pre.markdown-code-block .hljs-section,
+.ProseMirror pre.markdown-code-block .hljs-name,
+.ProseMirror pre.markdown-code-block .hljs-selector-id,
+.ProseMirror pre.markdown-code-block .hljs-selector-class {
+  color: hsl(150 55% 34%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-string,
+.dark .ProseMirror pre.markdown-code-block .hljs-regexp,
+.dark .ProseMirror pre.markdown-code-block .hljs-title,
+.dark .ProseMirror pre.markdown-code-block .hljs-section,
+.dark .ProseMirror pre.markdown-code-block .hljs-name,
+.dark .ProseMirror pre.markdown-code-block .hljs-selector-id,
+.dark .ProseMirror pre.markdown-code-block .hljs-selector-class {
+  color: hsl(150 55% 62%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-number,
+.ProseMirror pre.markdown-code-block .hljs-literal,
+.ProseMirror pre.markdown-code-block .hljs-variable,
+.ProseMirror pre.markdown-code-block .hljs-template-variable,
+.ProseMirror pre.markdown-code-block .hljs-attribute,
+.ProseMirror pre.markdown-code-block .hljs-symbol,
+.ProseMirror pre.markdown-code-block .hljs-bullet {
+  color: hsl(24 80% 44%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-number,
+.dark .ProseMirror pre.markdown-code-block .hljs-literal,
+.dark .ProseMirror pre.markdown-code-block .hljs-variable,
+.dark .ProseMirror pre.markdown-code-block .hljs-template-variable,
+.dark .ProseMirror pre.markdown-code-block .hljs-attribute,
+.dark .ProseMirror pre.markdown-code-block .hljs-symbol,
+.dark .ProseMirror pre.markdown-code-block .hljs-bullet {
+  color: hsl(32 90% 64%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-built_in,
+.ProseMirror pre.markdown-code-block .hljs-type,
+.ProseMirror pre.markdown-code-block .hljs-class .hljs-title,
+.ProseMirror pre.markdown-code-block .hljs-function .hljs-title,
+.ProseMirror pre.markdown-code-block .hljs-title.function_ {
+  color: hsl(210 70% 45%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-built_in,
+.dark .ProseMirror pre.markdown-code-block .hljs-type,
+.dark .ProseMirror pre.markdown-code-block .hljs-class .hljs-title,
+.dark .ProseMirror pre.markdown-code-block .hljs-function .hljs-title,
+.dark .ProseMirror pre.markdown-code-block .hljs-title.function_ {
+  color: hsl(210 90% 70%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-attr,
+.ProseMirror pre.markdown-code-block .hljs-property,
+.ProseMirror pre.markdown-code-block .hljs-params,
+.ProseMirror pre.markdown-code-block .hljs-selector-attr,
+.ProseMirror pre.markdown-code-block .hljs-selector-pseudo {
+  color: hsl(270 55% 48%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-attr,
+.dark .ProseMirror pre.markdown-code-block .hljs-property,
+.dark .ProseMirror pre.markdown-code-block .hljs-params,
+.dark .ProseMirror pre.markdown-code-block .hljs-selector-attr,
+.dark .ProseMirror pre.markdown-code-block .hljs-selector-pseudo {
+  color: hsl(275 72% 74%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-operator,
+.ProseMirror pre.markdown-code-block .hljs-punctuation,
+.ProseMirror pre.markdown-code-block .hljs-meta,
+.ProseMirror pre.markdown-code-block .hljs-link {
+  color: hsl(190 72% 34%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-operator,
+.dark .ProseMirror pre.markdown-code-block .hljs-punctuation,
+.dark .ProseMirror pre.markdown-code-block .hljs-meta,
+.dark .ProseMirror pre.markdown-code-block .hljs-link {
+  color: hsl(190 78% 65%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-tag,
+.ProseMirror pre.markdown-code-block .hljs-tag .hljs-name {
+  color: hsl(345 72% 44%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-tag,
+.dark .ProseMirror pre.markdown-code-block .hljs-tag .hljs-name {
+  color: hsl(345 82% 70%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-addition {
+  color: hsl(145 58% 32%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-addition {
+  color: hsl(145 62% 64%);
+}
+
+.ProseMirror pre.markdown-code-block .hljs-deletion {
+  color: hsl(0 68% 48%);
+}
+
+.dark .ProseMirror pre.markdown-code-block .hljs-deletion {
+  color: hsl(0 78% 72%);
+}
+
+.ProseMirror .markdown-code-edit-layer {
+  background: transparent !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-size: 13px !important;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  letter-spacing: 0 !important;
+  line-height: 1.6 !important;
+  tab-size: 2;
+  white-space: pre !important;
+}
+
+.ProseMirror .markdown-code-edit-layer code {
+  background: transparent !important;
+  color: hsl(var(--foreground)) !important;
+  font: inherit !important;
+  letter-spacing: 0 !important;
+  line-height: inherit !important;
+  padding: 0 !important;
+  tab-size: inherit;
+  white-space: pre !important;
+  -webkit-text-fill-color: currentColor;
+  caret-color: hsl(var(--foreground));
+}
+
+.ProseMirror .markdown-code-edit-layer ::selection {
+  background: hsl(var(--primary) / 0.22);
+}
