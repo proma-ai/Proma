@@ -50,6 +50,34 @@ export { eventBus as agentEventBus }
  */
 const sessionWebContents = new Map<string, WebContents>()
 
+/**
+ * 已挂载 destroyed 回收钩子的 webContents 集合。
+ *
+ * 同一个主窗口 webContents 可能被多次注册（飞书 Bridge 每条消息触发一次 runAgentHeadless），
+ * 用 WeakSet 去重避免 once listener 在同一 wc 上累积，触发 MaxListenersExceededWarning。
+ */
+const wcWithCleanupHook = new WeakSet<WebContents>()
+
+/**
+ * 注册 sessionId → webContents 映射，并在 webContents 销毁时自动清理所有相关条目。
+ *
+ * 仅依赖 finally 块清理无法覆盖窗口关闭、渲染进程崩溃、headless 路径主窗口被替换等
+ * webContents 提前销毁的场景——destroyed 事件兜底。
+ */
+function registerWebContents(sessionId: string, wc: WebContents): void {
+  // 同一 sessionId 切换 webContents 时直接覆盖；旧 wc 的 destroyed 钩子仍由 WeakSet 持有，
+  // 触发时会扫描 sessionWebContents 清理所有指向旧 wc 的条目（见下方实现）。
+  sessionWebContents.set(sessionId, wc)
+  if (wcWithCleanupHook.has(wc)) return
+  wcWithCleanupHook.add(wc)
+  wc.once('destroyed', () => {
+    // 单个 wc 可能映射到多个 sessionId（同窗口多 tab），需要清理所有指向它的条目
+    for (const [sid, mappedWc] of sessionWebContents) {
+      if (mappedWc === wc) sessionWebContents.delete(sid)
+    }
+  })
+}
+
 // ===== EventBus IPC 转发中间件 =====
 
 eventBus.use((sessionId, payload, next) => {
@@ -83,7 +111,7 @@ export async function runAgent(
   webContents: WebContents,
 ): Promise<void> {
   // 更新 webContents 映射（允许覆盖 — 由 orchestrator.activeSessions 处理真正的并发保护）
-  sessionWebContents.set(input.sessionId, webContents)
+  registerWebContents(input.sessionId, webContents)
 
   // 提前查询渠道类型，用于完成后的 Cloud 余额广播
   const channel = input.channelId ? getChannelById(input.channelId) : undefined
@@ -163,7 +191,7 @@ export async function runAgentHeadless(
   const win = BrowserWindow.getAllWindows()[0]
   const wc = win && !win.isDestroyed() ? win.webContents : null
   if (wc) {
-    sessionWebContents.set(input.sessionId, wc)
+    registerWebContents(input.sessionId, wc)
   }
 
   try {

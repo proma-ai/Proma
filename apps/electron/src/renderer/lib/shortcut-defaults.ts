@@ -30,13 +30,12 @@ export interface ShortcutDefinition {
   readonly?: boolean
 }
 
-/** 用户自定义快捷键覆盖（持久化到 settings.json） */
-export interface ShortcutOverrides {
-  [shortcutId: string]: {
-    mac?: string
-    win?: string
-  }
-}
+/**
+ * 用户自定义快捷键覆盖（持久化到 settings.json）
+ *
+ * 类型在 `types/settings.ts` 中定义，此处转发以便渲染层就近使用。
+ */
+export type { ShortcutOverrides } from '../../types/settings'
 
 // ===== 分类标签 =====
 

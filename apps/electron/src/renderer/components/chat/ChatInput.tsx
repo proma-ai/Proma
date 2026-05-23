@@ -22,6 +22,7 @@ import { ToolSelectorPopover } from './ToolSelectorPopover'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
+import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -263,6 +264,95 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     return () => window.removeEventListener('proma:focus-input', handler)
   }, [])
 
+  const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
+    {
+      key: 'attach',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              onClick={handleOpenFileDialog}
+            >
+              <Paperclip className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>添加附件</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
+    { key: 'model', node: <ModelSelector /> },
+    {
+      key: 'thinking',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'size-[36px] shrink-0 rounded-full',
+                thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+              )}
+              onClick={() => setThinkingEnabled(!thinkingEnabled)}
+            >
+              <Brain className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
+    { key: 'feishu', node: <FeishuNotifyToggle sessionId={conversationId} /> },
+    { key: 'speech', node: <SpeechButton className="size-[36px] shrink-0 rounded-full" /> },
+    { key: 'tools', node: <ToolSelectorPopover /> },
+    { key: 'context', node: <ContextSettingsPopover /> },
+    { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
+  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, conversationId, onClearContext])
+
+  const trailingNode = streaming ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
+          onClick={onStop}
+        >
+          <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+      </TooltipContent>
+    </Tooltip>
+  ) : (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn(
+        'size-[36px] rounded-full',
+        canSend
+          ? 'text-primary hover:bg-primary/10'
+          : 'text-foreground/30 cursor-not-allowed'
+      )}
+      onClick={handleSend}
+      disabled={!canSend}
+    >
+      <CornerDownLeft className="size-[22px]" />
+    </Button>
+  )
+
   return (
     <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px]" data-input-mode="chat">
         {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
@@ -302,100 +392,8 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             sendWithCmdEnter={sendWithCmdEnter}
           />
 
-          {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}
-          <div className="flex items-center justify-between px-2 py-1 h-[48px] gap-4">
-            {/* 左侧工具按钮 */}
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              {/* 附件按钮 */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
-                    onClick={handleOpenFileDialog}
-                  >
-                    <Paperclip className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>添加附件</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <ModelSelector />
-
-              {/* 思考模式切换 */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      'size-[36px] rounded-full',
-                      thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
-                    )}
-                    onClick={() => setThinkingEnabled(!thinkingEnabled)}
-                  >
-                    <Brain className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <FeishuNotifyToggle sessionId={conversationId} />
-
-              <SpeechButton className="size-[36px] rounded-full" />
-
-              <ToolSelectorPopover />
-
-              <ContextSettingsPopover />
-
-              <ClearContextButton onClick={onClearContext} />
-            </div>
-
-            {/* 右侧：发送 / 停止按钮 */}
-            <div className="flex items-center gap-1.5">
-              {streaming ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
-                      onClick={onStop}
-                    >
-                      <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    'size-[36px] rounded-full',
-                    canSend
-                      ? 'text-primary hover:bg-primary/10'
-                      : 'text-foreground/30 cursor-not-allowed'
-                  )}
-                  onClick={handleSend}
-                  disabled={!canSend}
-                >
-                  <CornerDownLeft className="size-[22px]" />
-                </Button>
-              )}
-            </div>
-          </div>
+          {/* Footer 工具栏 — 容器变窄时尾部按钮自动折叠进「更多」Popover */}
+          <InputToolbarOverflow items={toolbarItems} trailing={trailingNode} />
         </div>
     </div>
   )

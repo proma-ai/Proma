@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# git worktrees (本地开发用，不应提交)
+.worktrees
+
 # output
 out
 dist

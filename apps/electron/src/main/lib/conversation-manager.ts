@@ -6,7 +6,8 @@
  * - 消息存储：~/.proma/conversations/{id}.jsonl（JSONL 格式，逐行追加）
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import {
@@ -397,13 +398,13 @@ export function autoArchiveConversations(daysThreshold: number): number {
 /**
  * 搜索对话消息内容
  *
- * 遍历所有对话的 JSONL 文件，逐行搜索 content 字段。
- * 每个对话最多返回 1 条最佳匹配，总计最多 30 条结果。
+ * 按行流式读取每个对话的 JSONL 文件，命中即早退，避免一次性加载大文件到内存。
+ * 每个对话最多返回 1 条匹配，总计达到 maxResults 即停止扫描后续会话。
  *
  * @param query 搜索关键词
  * @returns 匹配结果列表
  */
-export function searchConversationMessages(query: string): MessageSearchResult[] {
+export async function searchConversationMessages(query: string): Promise<MessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
   const index = readIndex()
@@ -417,44 +418,65 @@ export function searchConversationMessages(query: string): MessageSearchResult[]
     const filePath = getConversationMessagesPath(conv.id)
     if (!existsSync(filePath)) continue
 
-    try {
-      const raw = readFileSync(filePath, 'utf-8')
-      const lines = raw.split('\n').filter((line) => line.trim())
-
-      for (const line of lines) {
-        const msg = JSON.parse(line) as ChatMessage
-        if (!msg.content) continue
-
-        const contentLower = msg.content.toLowerCase()
-        const matchIndex = contentLower.indexOf(queryLower)
-        if (matchIndex === -1) continue
-
-        // 提取匹配上下文 snippet（匹配词前后各约 40 字符）
-        const snippetStart = Math.max(0, matchIndex - 40)
-        const snippetEnd = Math.min(msg.content.length, matchIndex + query.length + 40)
-        const snippet = (snippetStart > 0 ? '...' : '') +
-          msg.content.slice(snippetStart, snippetEnd) +
-          (snippetEnd < msg.content.length ? '...' : '')
-        const matchStart = matchIndex - snippetStart + (snippetStart > 0 ? 3 : 0)
-
-        results.push({
-          conversationId: conv.id,
-          conversationTitle: conv.title,
-          messageId: msg.id,
-          role: msg.role,
-          snippet,
-          matchStart,
-          matchLength: query.length,
-          archived: conv.archived,
-        })
-
-        // 每个对话只取 1 条匹配
-        break
-      }
-    } catch {
-      // 跳过读取失败的文件
+    const hit = await findFirstMatchInJsonl(filePath, queryLower, query.length)
+    if (hit) {
+      results.push({
+        conversationId: conv.id,
+        conversationTitle: conv.title,
+        messageId: hit.messageId,
+        role: hit.role,
+        snippet: hit.snippet,
+        matchStart: hit.matchStart,
+        matchLength: query.length,
+        archived: conv.archived,
+      })
     }
   }
 
   return results
+}
+
+/**
+ * 在单个 ChatMessage JSONL 文件中按行流式查找第一条匹配。
+ *
+ * 为什么独立成函数：保持 readline 资源的早退与清理逻辑集中，避免重复。
+ * 命中后立即 close stream，未匹配的大文件也按行读取，单行 GC 友好。
+ */
+async function findFirstMatchInJsonl(
+  filePath: string,
+  queryLower: string,
+  queryLength: number
+): Promise<{ messageId: string; role: ChatMessage['role']; snippet: string; matchStart: number } | null> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let msg: ChatMessage
+      try {
+        msg = JSON.parse(line) as ChatMessage
+      } catch {
+        continue
+      }
+      if (!msg.content) continue
+
+      const contentLower = msg.content.toLowerCase()
+      const matchIndex = contentLower.indexOf(queryLower)
+      if (matchIndex === -1) continue
+
+      const snippetStart = Math.max(0, matchIndex - 40)
+      const snippetEnd = Math.min(msg.content.length, matchIndex + queryLength + 40)
+      const snippet = (snippetStart > 0 ? '...' : '') +
+        msg.content.slice(snippetStart, snippetEnd) +
+        (snippetEnd < msg.content.length ? '...' : '')
+      const matchStart = matchIndex - snippetStart + (snippetStart > 0 ? 3 : 0)
+
+      return { messageId: msg.id, role: msg.role, snippet, matchStart }
+    }
+    return null
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
 }

@@ -1808,6 +1808,9 @@ export class AgentOrchestrator {
                   console.log(`[Agent 编排] 可重试错误 (assistant error): ${typedError.code} - ${lastRetryableError}`)
                   this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
                   accumulatedMessages.length = 0
+                  // 与 catch 路径（isAutoRetryableCatchError）和思考签名回填路径保持一致：
+                  // 重试前清空已累积的 stderr，避免 25 次重试上限内字符串无限增长
+                  stderrChunks.length = 0
                   shouldRetryFromError = true
                   break
                 }

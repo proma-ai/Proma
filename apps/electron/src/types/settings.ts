@@ -135,11 +135,18 @@ export interface MicPermissionResult {
   platform: NodeJS.Platform
 }
 
-/** 用户自定义快捷键覆盖（持久化到 settings.json） */
+/**
+ * 用户自定义快捷键覆盖（持久化到 settings.json）
+ *
+ * 字段三态语义：
+ * - `undefined`（字段缺失）→ 使用默认快捷键
+ * - 非空字符串 → 使用该自定义 accelerator
+ * - `null` → 用户已主动禁用此平台的快捷键，不注册任何监听
+ */
 export interface ShortcutOverrides {
   [shortcutId: string]: {
-    mac?: string
-    win?: string
+    mac?: string | null
+    win?: string | null
   }
 }
 

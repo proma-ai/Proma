@@ -90,6 +90,11 @@ interface FileBrowserProps {
   onFilePreview?: (filePath: string) => void
 }
 
+const TREE_ROW_HEIGHT = 32
+const TREE_ROW_HORIZONTAL_MARGIN = 8
+const TREE_INDENT_WIDTH = 16
+const MAX_STICKY_DEPTH = 4
+
 export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddToChat, onFilePreview }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
   const [loading, setLoading] = React.useState(false)
@@ -312,6 +317,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
           onDelete={handleRequestDelete}
           onMove={handleMove}
           onRefresh={loadRoot}
+          onClearSelection={() => setSelectedPaths(new Set())}
           onAddToChat={onAddToChat}
           onFilePreview={onFilePreview}
         />
@@ -413,6 +419,7 @@ interface FileTreeItemProps {
   onDelete: (entry: FileEntry) => void
   onMove: (entry: FileEntry) => void
   onRefresh: () => Promise<void>
+  onClearSelection: () => void
   onAddToChat?: (entry: FileEntry) => void
   onFilePreview?: (filePath: string) => void
 }
@@ -437,6 +444,7 @@ function FileTreeItem({
   onDelete,
   onMove,
   onRefresh,
+  onClearSelection,
   onAddToChat,
   onFilePreview,
 }: FileTreeItemProps): React.ReactElement {
@@ -612,20 +620,39 @@ function FileTreeItem({
     }
   }
 
-  const paddingLeft = 8 + depth * 16
+  // 行使用 mx-2 形成左右各 8px 留白，留白处的点击 target 是本 wrapper 而非父级
+  // py-1 容器，所以父级 handleBackgroundClick 的 target===currentTarget 判定不会命中。
+  // 这里就近处理留白点击的清选语义，保持视觉上"点空白即清选"的一致体验。
+  const handleWrapperClick = (e: React.MouseEvent): void => {
+    if (e.target === e.currentTarget) {
+      onClearSelection()
+    }
+  }
+
+  const paddingLeft = 8 + depth * TREE_INDENT_WIDTH
+  const guideLeft = TREE_ROW_HORIZONTAL_MARGIN + paddingLeft + 7
+  const stickyDepth = Math.min(depth, MAX_STICKY_DEPTH)
+  const stickyTop = stickyDepth * TREE_ROW_HEIGHT
+  // 起点 10 已足够压住普通行内元素；保持外层目录在更上层以遮住下方滚过的内层。
+  const stickyZIndex = Math.max(1, 10 - stickyDepth)
   const showMenu = !isRenaming
   const menuSelectedCount = isSelected ? selectedCount : 1
 
   return (
-    <>
+    <div className="relative" onClick={handleWrapperClick}>
       <div
         ref={rowRef}
         className={cn(
-          'relative flex items-center gap-1 py-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg transition-colors',
+          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg transition-colors',
+          entry.isDirectory && expanded && 'sticky bg-background/95 backdrop-blur-sm shadow-[0_1px_0_hsl(var(--border)/0.45)]',
           isSelected ? 'bg-accent' : 'hover:bg-accent/50',
           flash && 'file-browser-row-flash',
         )}
-        style={{ paddingLeft }}
+        style={{
+          paddingLeft,
+          top: entry.isDirectory && expanded ? stickyTop : undefined,
+          zIndex: entry.isDirectory && expanded ? stickyZIndex : undefined,
+        }}
         onClick={handleClick}
       >
         {recentlyModifiedSet.has(entry.path) && (
@@ -652,7 +679,7 @@ function FileTreeItem({
 
         {/* 文件名 / 重命名输入框 */}
         {isRenaming ? (
-          <div className="flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0">
             <input
               ref={renameInputRef}
               value={editName}
@@ -667,7 +694,9 @@ function FileTreeItem({
               maxLength={255}
             />
             {renameError && (
-              <div className="text-[10px] text-destructive mt-0.5">{renameError}</div>
+              <div className="absolute left-0 top-full mt-0.5 text-[10px] leading-4 text-destructive whitespace-nowrap pointer-events-none">
+                {renameError}
+              </div>
             )}
           </div>
         ) : (
@@ -750,40 +779,50 @@ function FileTreeItem({
       </div>
 
       {/* 子项 */}
-      {expanded && children.length === 0 && childrenLoaded && (
-        <div
-          className="text-[11px] text-muted-foreground/50 py-1"
-          style={{ paddingLeft: paddingLeft + 24 }}
-        >
-          空文件夹
+      {expanded && (
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
+            style={{ left: guideLeft }}
+          />
+          {children.length === 0 && childrenLoaded && (
+            <div
+              className="text-[11px] text-muted-foreground/50 py-1"
+              style={{ paddingLeft: paddingLeft + 24 }}
+            >
+              空文件夹
+            </div>
+          )}
+          {children.map((child) => (
+            <FileTreeItem
+              key={child.path}
+              entry={child}
+              depth={depth + 1}
+              selectedPaths={selectedPaths}
+              selectedCount={selectedCount}
+              renamingPath={renamingPath}
+              moving={moving}
+              refreshVersion={refreshVersion}
+              revealAncestors={revealAncestors}
+              revealTarget={revealTarget}
+              revealTs={revealTs}
+              recentlyModifiedSet={recentlyModifiedSet}
+              onSelect={onSelect}
+              onShowInFolder={onShowInFolder}
+              onStartRename={onStartRename}
+              onCancelRename={onCancelRename}
+              onRename={onRename}
+              onDelete={onDelete}
+              onMove={onMove}
+              onRefresh={handleRefreshAfterDelete}
+              onClearSelection={onClearSelection}
+              onAddToChat={onAddToChat}
+              onFilePreview={onFilePreview}
+            />
+          ))}
         </div>
       )}
-      {expanded && children.map((child) => (
-        <FileTreeItem
-          key={child.path}
-          entry={child}
-          depth={depth + 1}
-          selectedPaths={selectedPaths}
-          selectedCount={selectedCount}
-          renamingPath={renamingPath}
-          moving={moving}
-          refreshVersion={refreshVersion}
-          revealAncestors={revealAncestors}
-          revealTarget={revealTarget}
-          revealTs={revealTs}
-          recentlyModifiedSet={recentlyModifiedSet}
-          onSelect={onSelect}
-          onShowInFolder={onShowInFolder}
-          onStartRename={onStartRename}
-          onCancelRename={onCancelRename}
-          onRename={onRename}
-          onDelete={onDelete}
-          onMove={onMove}
-          onRefresh={handleRefreshAfterDelete}
-          onAddToChat={onAddToChat}
-          onFilePreview={onFilePreview}
-        />
-      ))}
-    </>
+    </div>
   )
 }

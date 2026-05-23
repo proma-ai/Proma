@@ -20,16 +20,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  agentWorkspacesAtom,
-  currentAgentWorkspaceIdAtom,
-} from '@/atoms/agent-atoms'
 import { workspaceListHeightAtom } from '@/atoms/sidebar-atoms'
+import { useWorkspaceActions } from '@/hooks/useWorkspaceActions'
+import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import type { AgentWorkspace } from '@proma/shared'
 
 export function WorkspaceSelector(): React.ReactElement {
-  const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
+  const { workspaces, currentWorkspaceId, selectWorkspace, createWorkspace } = useWorkspaceActions()
+  const [, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const [listHeight, setListHeight] = useAtom(workspaceListHeightAtom)
 
   // 高度拖拽调整
@@ -78,8 +76,6 @@ export function WorkspaceSelector(): React.ReactElement {
   const [creating, setCreating] = React.useState(false)
   const [newName, setNewName] = React.useState('')
   const createInputRef = React.useRef<HTMLInputElement>(null)
-  /** 防止连续 Enter 触发多次创建请求 */
-  const createInFlightRef = React.useRef(false)
 
   // 重命名状态
   const [editingId, setEditingId] = React.useState<string | null>(null)
@@ -96,11 +92,7 @@ export function WorkspaceSelector(): React.ReactElement {
   /** 切换工作区 */
   const handleSelect = (workspace: AgentWorkspace): void => {
     if (editingId) return
-    setCurrentWorkspaceId(workspace.id)
-
-    window.electronAPI.updateSettings({
-      agentWorkspaceId: workspace.id,
-    }).catch(console.error)
+    selectWorkspace(workspace.id)
   }
 
   // ===== 新建 =====
@@ -114,30 +106,8 @@ export function WorkspaceSelector(): React.ReactElement {
   }
 
   const handleCreate = async (): Promise<void> => {
-    const trimmed = newName.trim()
-    if (!trimmed) {
-      setCreating(false)
-      return
-    }
-    if (createInFlightRef.current) return
-    createInFlightRef.current = true
-
-    try {
-      const workspace = await window.electronAPI.createAgentWorkspace(trimmed)
-      setWorkspaces((prev) => [workspace, ...prev])
-      setCurrentWorkspaceId(workspace.id)
-      setCreating(false)
-
-      window.electronAPI.updateSettings({
-        agentWorkspaceId: workspace.id,
-      }).catch(console.error)
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : '创建失败'
-      toast.error(msg)
-      setCreating(false)
-    } finally {
-      createInFlightRef.current = false
-    }
+    await createWorkspace(newName)
+    setCreating(false)
   }
 
   const handleCreateKeyDown = (e: React.KeyboardEvent): void => {
@@ -208,10 +178,7 @@ export function WorkspaceSelector(): React.ReactElement {
       setWorkspaces(remaining)
 
       if (deleteTargetId === currentWorkspaceId && remaining.length > 0) {
-        setCurrentWorkspaceId(remaining[0]!.id)
-        window.electronAPI.updateSettings({
-          agentWorkspaceId: remaining[0]!.id,
-        }).catch(console.error)
+        selectWorkspace(remaining[0]!.id)
       }
     } catch (error) {
       console.error('[WorkspaceSelector] 删除工作区失败:', error)

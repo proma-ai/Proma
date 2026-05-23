@@ -24,6 +24,14 @@ import {
   agentDiffRefreshVersionAtom,
   agentDiffUnseenChangesAtom,
   agentDiffUnseenFilesAtom,
+  agentStreamingStatesAtom,
+  liveMessagesMapAtom,
+  agentSessionStreamingStateAtomFamily,
+  agentSessionDraftAtomFamily,
+  agentSessionDraftHtmlAtomFamily,
+  backgroundTasksAtomFamily,
+  sessionPersistedPermissionModeAtom,
+  sessionExistsAtom,
 } from '@/atoms/agent-atoms'
 import { previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import { clearPreviewCacheForSession } from '@/components/diff/DiffTabContent'
@@ -67,6 +75,9 @@ export function useCloseTab(): UseCloseTabReturn {
   const setDiffUnseen = useSetAtom(agentDiffUnseenChangesAtom)
   const setDiffUnseenFiles = useSetAtom(agentDiffUnseenFilesAtom)
 
+  const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
+  const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
+
   const cleanupMapAtoms = React.useCallback((tabId: string) => {
     const deleteKey = <T,>(prev: Map<string, T>): Map<string, T> => {
       if (!prev.has(tabId)) return prev
@@ -85,8 +96,23 @@ export function useCloseTab(): UseCloseTabReturn {
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
     setDiffUnseenFiles(deleteKey)
+    // tab.id === sessionId（见 tab-atoms.ts openTab）
+    // 清理重型流式数据：streamingStates（含累积 content 与 toolActivities）和 liveMessages（SDK 消息数组）
+    // 不清 agentSessionDraftsAtom / agentSessionDraftHtmlAtom / agentStreamErrorsAtom 这些
+    // base map：草稿和错误信息体积小，保留可让用户重开 tab 时恢复输入与错误回显
+    setStreamingStates(deleteKey)
+    setLiveMessagesMap(deleteKey)
+    // 清理 atomFamily 内部 atom 缓存（Jotai 对 string key 强引用 Map，不显式 remove 永不释放）。
+    // 注意：remove 仅清 family 缓存，不动 base map；下次 family(sessionId) 调用会自动重建派生
+    // atom 并读出 base map 中保留的草稿值——这正是上面"不清草稿 base map"能恢复 UX 的前提。
+    agentSessionStreamingStateAtomFamily.remove(tabId)
+    agentSessionDraftAtomFamily.remove(tabId)
+    agentSessionDraftHtmlAtomFamily.remove(tabId)
+    backgroundTasksAtomFamily.remove(tabId)
+    sessionPersistedPermissionModeAtom.remove(tabId)
+    sessionExistsAtom.remove(tabId)
     clearPreviewCacheForSession(tabId)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setStreamingStates, setLiveMessagesMap])
 
   const executeClose = React.useCallback((tabId: string) => {
     const tab = tabs.find((t) => t.id === tabId)

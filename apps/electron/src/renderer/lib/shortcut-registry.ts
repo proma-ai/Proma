@@ -130,6 +130,8 @@ function rebuildCache(): void {
     // 全局快捷键由主进程 globalShortcut 处理，不在渲染进程注册
     if (def.global) continue
     const accel = getActiveAccelerator(def.id)
+    // 用户已禁用的快捷键不进入分发缓存
+    if (accel === null) continue
     parsedCache.set(def.id, parseAccelerator(accel))
   }
 }
@@ -211,12 +213,16 @@ export function updateShortcutOverrides(overrides: ShortcutOverrides): void {
 /**
  * 获取某快捷键当前生效的 accelerator 字符串
  *
- * 优先使用用户自定义，否则使用默认值
+ * 返回值含义：
+ * - 非空字符串：当前生效的 accelerator（用户自定义或默认值）
+ * - `null`：用户已禁用此快捷键，不应注册任何监听
+ * - 空字符串：定义不存在或该平台无默认值
  */
-export function getActiveAccelerator(id: string): string {
+export function getActiveAccelerator(id: string): string | null {
   const override = currentOverrides[id]
   if (override) {
     const customAccel = isMac ? override.mac : override.win
+    if (customAccel === null) return null
     if (customAccel) return customAccel
   }
   const def = SHORTCUT_MAP.get(id)
@@ -229,7 +235,7 @@ export function getActiveAccelerator(id: string): string {
  *
  * 将内部格式转换为用户友好的显示：Cmd → ⌘，Shift → ⇧ 等
  */
-export function getAcceleratorDisplay(accelerator: string): string {
+export function getAcceleratorDisplay(accelerator: string | null): string {
   if (!accelerator) return ''
   if (isMac) {
     return accelerator
@@ -261,6 +267,8 @@ export function checkConflict(
   for (const def of DEFAULT_SHORTCUTS) {
     if (excludeId && def.id === excludeId) continue
     const existingAccel = getActiveAccelerator(def.id)
+    // 已禁用的快捷键不占用任何按键组合，不参与冲突检测
+    if (existingAccel === null || existingAccel === '') continue
     const existingParsed = parseAccelerator(existingAccel)
     if (
       parsed.cmd === existingParsed.cmd &&

@@ -8,7 +8,8 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, copyFileSync, createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, dirname } from 'node:path'
@@ -1272,13 +1273,13 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
 /**
  * 搜索 Agent 会话消息内容
  *
- * 遍历所有会话的 JSONL 文件，逐行搜索 content 字段。
- * 每个会话最多返回 1 条最佳匹配，总计最多 30 条结果。
+ * 按行流式读取每个会话的 JSONL 文件，命中即早退。兼容旧 AgentMessage 和新 SDKMessage 格式。
+ * 每个会话最多返回 1 条匹配，总计达到 maxResults 即停止扫描后续会话。
  *
  * @param query 搜索关键词
  * @returns 匹配结果列表
  */
-export function searchAgentSessionMessages(query: string): AgentMessageSearchResult[] {
+export async function searchAgentSessionMessages(query: string): Promise<AgentMessageSearchResult[]> {
   if (!query || query.length < 2) return []
 
   const index = readIndex()
@@ -1292,59 +1293,90 @@ export function searchAgentSessionMessages(query: string): AgentMessageSearchRes
     const filePath = getAgentSessionMessagesPath(session.id)
     if (!existsSync(filePath)) continue
 
-    try {
-      const raw = readFileSync(filePath, 'utf-8')
-      const lines = raw.split('\n').filter((line) => line.trim())
-
-      for (const line of lines) {
-        const parsed = JSON.parse(line)
-        // 兼容旧 AgentMessage 和新 SDKMessage 格式
-        const role = parsed.role ?? parsed.message?.role ?? 'assistant'
-        const messageId = parsed.id ?? parsed.uuid ?? parsed.message?.id ?? ''
-
-        let textContent = ''
-        if (typeof parsed.content === 'string') {
-          // 旧 AgentMessage 格式: {role, content: "..."}
-          textContent = parsed.content
-        } else if (Array.isArray(parsed.message?.content)) {
-          // 新 SDKMessage 格式: {type, message: {content: [{type:"text", text:"..."}]}}
-          textContent = parsed.message.content
-            .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
-            .map((b: { text: string }) => b.text)
-            .join('\n')
-        }
-        if (!textContent) continue
-
-        const contentLower = textContent.toLowerCase()
-        const matchIndex = contentLower.indexOf(queryLower)
-        if (matchIndex === -1) continue
-        const snippetStart = Math.max(0, matchIndex - 40)
-        const snippetEnd = Math.min(textContent.length, matchIndex + query.length + 40)
-        const snippet = (snippetStart > 0 ? '...' : '') +
-          textContent.slice(snippetStart, snippetEnd) +
-          (snippetEnd < textContent.length ? '...' : '')
-        const matchStart = matchIndex - snippetStart + (snippetStart > 0 ? 3 : 0)
-
-        results.push({
-          sessionId: session.id,
-          sessionTitle: session.title,
-          messageId,
-          role,
-          snippet,
-          matchStart,
-          matchLength: query.length,
-          archived: session.archived,
-        })
-
-        // 每个会话只取 1 条匹配
-        break
-      }
-    } catch {
-      // 跳过读取失败的文件
+    const hit = await findFirstMatchInAgentJsonl(filePath, queryLower, query.length)
+    if (hit) {
+      results.push({
+        sessionId: session.id,
+        sessionTitle: session.title,
+        messageId: hit.messageId,
+        role: hit.role,
+        snippet: hit.snippet,
+        matchStart: hit.matchStart,
+        matchLength: query.length,
+        archived: session.archived,
+      })
     }
   }
 
   return results
+}
+
+/**
+ * 在单个 Agent 会话 JSONL 中按行流式查找第一条匹配。
+ *
+ * Agent 消息存在两种历史格式（旧 AgentMessage 与新 SDKMessage），都要兼容。
+ */
+async function findFirstMatchInAgentJsonl(
+  filePath: string,
+  queryLower: string,
+  queryLength: number
+): Promise<{ messageId: string; role: AgentMessageSearchResult['role']; snippet: string; matchStart: number } | null> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let parsed: {
+        role?: string
+        id?: string
+        uuid?: string
+        content?: unknown
+        message?: { role?: string; id?: string; content?: Array<{ type: string; text?: string }> }
+      }
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      const rawRole = parsed.role ?? parsed.message?.role ?? 'assistant'
+      // 收窄到 AgentMessageSearchResult.role 允许的联合类型；不在白名单的退化为 assistant
+      const role: AgentMessageSearchResult['role'] =
+        rawRole === 'user' || rawRole === 'assistant' || rawRole === 'tool' || rawRole === 'status'
+          ? rawRole
+          : 'assistant'
+      const messageId = parsed.id ?? parsed.uuid ?? parsed.message?.id ?? ''
+
+      let textContent = ''
+      if (typeof parsed.content === 'string') {
+        textContent = parsed.content
+      } else if (Array.isArray(parsed.message?.content)) {
+        textContent = parsed.message.content
+          .filter((b) => b.type === 'text' && b.text)
+          .map((b) => b.text!)
+          .join('\n')
+      }
+      if (!textContent) continue
+
+      const contentLower = textContent.toLowerCase()
+      const matchIndex = contentLower.indexOf(queryLower)
+      if (matchIndex === -1) continue
+
+      const snippetStart = Math.max(0, matchIndex - 40)
+      const snippetEnd = Math.min(textContent.length, matchIndex + queryLength + 40)
+      const snippet = (snippetStart > 0 ? '...' : '') +
+        textContent.slice(snippetStart, snippetEnd) +
+        (snippetEnd < textContent.length ? '...' : '')
+      const matchStart = matchIndex - snippetStart + (snippetStart > 0 ? 3 : 0)
+
+      return { messageId, role, snippet, matchStart }
+    }
+    return null
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
 }
 
 function extractTextFromPersistedMessage(parsed: unknown): string {
