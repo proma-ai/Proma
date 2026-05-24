@@ -217,14 +217,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
-  const [hoveredId, setHoveredId] = React.useState<string | null>(null)
-
-  // 窗口失焦时清除 hover 状态，防止 Tooltip 残留
-  React.useEffect(() => {
-    const handleBlur = (): void => setHoveredId(null)
-    window.addEventListener('blur', handleBlur)
-    return () => window.removeEventListener('blur', handleBlur)
-  }, [])
 
   /** 待删除对话 ID，非空时显示确认弹窗 */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
@@ -542,16 +534,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }
 
   /** 选择对话（打开或聚焦标签页） */
-  const handleSelectConversation = (id: string, title: string): void => {
+  const handleSelectConversation = React.useCallback((id: string, title: string): void => {
     openSession('chat', id, title)
     setActiveView('conversations')
     setActiveItem('all-chats')
-  }
+  }, [openSession, setActiveView])
 
   /** 请求删除对话（弹出确认框） */
-  const handleRequestDelete = (id: string): void => {
+  const handleRequestDelete = React.useCallback((id: string): void => {
     setPendingDeleteId(id)
-  }
+  }, [])
 
   /** 重命名对话标题 */
   const handleRename = async (id: string, newTitle: string): Promise<void> => {
@@ -724,7 +716,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }
 
   /** 选择 Agent 会话（打开或聚焦标签页） */
-  const handleSelectAgentSession = (id: string, title: string): void => {
+  const handleSelectAgentSession = React.useCallback((id: string, title: string): void => {
     openSession('agent', id, title)
     setActiveView('conversations')
     setActiveItem('all-chats')
@@ -735,7 +727,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       next.delete(id)
       return next
     })
-  }
+  }, [openSession, setActiveView, setUnviewedCompleted])
 
   /** 重命名 Agent 会话标题 */
   const handleAgentRename = async (id: string, newTitle: string): Promise<void> => {
@@ -839,6 +831,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
     }
   }
+
+  /** 请求迁移会话到其他工作区（弹出迁移对话框） */
+  const handleRequestMove = React.useCallback((id: string): void => {
+    setMoveTargetId(id)
+  }, [])
 
   /** 迁移会话到另一个工作区后的回调 */
   const handleSessionMoved = (updatedSession: AgentSessionMeta, targetWorkspaceName: string): void => {
@@ -1301,16 +1298,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 key={`pinned-${conv.id}`}
                 conversation={conv}
                 active={conv.id === activeTabId}
-                hovered={conv.id === hoveredId}
                 streaming={streamingIds.has(conv.id)}
                 showPinIcon={false}
-                onSelect={() => handleSelectConversation(conv.id, conv.title)}
-                onRequestDelete={() => handleRequestDelete(conv.id)}
+                onSelect={handleSelectConversation}
+                onRequestDelete={handleRequestDelete}
                 onRename={handleRename}
                 onTogglePin={handleTogglePin}
                 onToggleArchive={handleToggleArchive}
-                onMouseEnter={() => setHoveredId(conv.id)}
-                onMouseLeave={() => setHoveredId(null)}
               />
             ))}
           </div>
@@ -1392,21 +1386,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                                 key={`${keyPrefix}-${session.id}`}
                                 session={session}
                                 active={session.id === activeTabId}
-                                hovered={session.id === hoveredId}
                                 indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                                 isInWorkingSection={workingSessionIds.has(session.id)}
                                 showPinIcon={false}
                                 leftAccent={accent}
                                 workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
-                                onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                                onRequestDelete={() => handleRequestDelete(session.id)}
-                                onRequestMove={() => setMoveTargetId(session.id)}
+                                onSelect={handleSelectAgentSession}
+                                onRequestDelete={handleRequestDelete}
+                                onRequestMove={handleRequestMove}
                                 onRename={handleAgentRename}
                                 onTogglePin={handleTogglePinAgent}
                                 onToggleManualWorking={handleToggleManualWorkingAgent}
                                 onToggleArchive={handleToggleArchiveAgent}
-                                onMouseEnter={() => setHoveredId(session.id)}
-                                onMouseLeave={() => setHoveredId(null)}
                               />
                             ))}
                           </div>
@@ -1428,19 +1419,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                               key={`pinned-${session.id}`}
                               session={session}
                               active={session.id === activeTabId}
-                              hovered={session.id === hoveredId}
                               indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                               isInWorkingSection={workingSessionIds.has(session.id)}
                               showPinIcon={false}
-                              onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                              onRequestDelete={() => handleRequestDelete(session.id)}
-                              onRequestMove={() => setMoveTargetId(session.id)}
+                              onSelect={handleSelectAgentSession}
+                              onRequestDelete={handleRequestDelete}
+                              onRequestMove={handleRequestMove}
                               onRename={handleAgentRename}
                               onTogglePin={handleTogglePinAgent}
                               onToggleManualWorking={handleToggleManualWorkingAgent}
                               onToggleArchive={handleToggleArchiveAgent}
-                              onMouseEnter={() => setHoveredId(session.id)}
-                              onMouseLeave={() => setHoveredId(null)}
                             />
                           ))}
                         </div>
@@ -1482,19 +1470,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                       key={session.id}
                       session={session}
                       active={session.id === activeTabId}
-                      hovered={session.id === hoveredId}
                       indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                       isInWorkingSection={workingSessionIds.has(session.id)}
                       showPinIcon={!!session.pinned}
-                      onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                      onRequestDelete={() => handleRequestDelete(session.id)}
-                      onRequestMove={() => setMoveTargetId(session.id)}
+                      onSelect={handleSelectAgentSession}
+                      onRequestDelete={handleRequestDelete}
+                      onRequestMove={handleRequestMove}
                       onRename={handleAgentRename}
                       onTogglePin={handleTogglePinAgent}
                       onToggleManualWorking={handleToggleManualWorkingAgent}
                       onToggleArchive={handleToggleArchiveAgent}
-                      onMouseEnter={() => setHoveredId(session.id)}
-                      onMouseLeave={() => setHoveredId(null)}
                     />
                   ))}
                 </div>
@@ -1528,16 +1513,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                         key={conv.id}
                         conversation={conv}
                         active={conv.id === activeTabId}
-                        hovered={conv.id === hoveredId}
                         streaming={streamingIds.has(conv.id)}
                         showPinIcon={!!conv.pinned}
-                        onSelect={() => handleSelectConversation(conv.id, conv.title)}
-                        onRequestDelete={() => handleRequestDelete(conv.id)}
+                        onSelect={handleSelectConversation}
+                        onRequestDelete={handleRequestDelete}
                         onRename={handleRename}
                         onTogglePin={handleTogglePin}
                         onToggleArchive={handleToggleArchive}
-                        onMouseEnter={() => setHoveredId(conv.id)}
-                        onMouseLeave={() => setHoveredId(null)}
                       />
                     ))}
                   </div>
@@ -1556,19 +1538,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                         key={session.id}
                         session={session}
                         active={session.id === activeTabId}
-                        hovered={session.id === hoveredId}
                         indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                         isInWorkingSection={workingSessionIds.has(session.id)}
                         showPinIcon={!!session.pinned}
-                        onSelect={() => handleSelectAgentSession(session.id, session.title)}
-                        onRequestDelete={() => handleRequestDelete(session.id)}
-                        onRequestMove={() => setMoveTargetId(session.id)}
+                        onSelect={handleSelectAgentSession}
+                        onRequestDelete={handleRequestDelete}
+                        onRequestMove={handleRequestMove}
                         onRename={handleAgentRename}
                         onTogglePin={handleTogglePinAgent}
                         onToggleManualWorking={handleToggleManualWorkingAgent}
                         onToggleArchive={handleToggleArchiveAgent}
-                        onMouseEnter={() => setHoveredId(session.id)}
-                        onMouseLeave={() => setHoveredId(null)}
                       />
                     ))}
                   </div>
@@ -1677,23 +1656,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 interface ConversationItemProps {
   conversation: ConversationMeta
   active: boolean
-  hovered: boolean
   streaming: boolean
   /** 是否在标题旁显示 Pin 图标 */
   showPinIcon: boolean
-  onSelect: () => void
-  onRequestDelete: () => void
+  onSelect: (id: string, title: string) => void
+  onRequestDelete: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
-  onMouseEnter: () => void
-  onMouseLeave: () => void
 }
 
-function ConversationItem({
+const ConversationItem = React.memo(function ConversationItem({
   conversation,
   active,
-  hovered,
   streaming,
   showPinIcon,
   onSelect,
@@ -1701,8 +1676,6 @@ function ConversationItem({
   onRename,
   onTogglePin,
   onToggleArchive,
-  onMouseEnter,
-  onMouseLeave,
 }: ConversationItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
@@ -1765,7 +1738,7 @@ function ConversationItem({
         {conversation.archived ? '取消归档' : '归档'}
       </MenuItem>
       <MenuSeparator className="my-0.5" />
-      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete()}>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete(conversation.id)}>
         <Trash2 size={14} />
         删除对话
       </MenuItem>
@@ -1778,15 +1751,13 @@ function ConversationItem({
         <div
           role="button"
           tabIndex={0}
-          onClick={onSelect}
+          onClick={() => onSelect(conversation.id, conversation.title)}
           onDoubleClick={(e) => {
             e.stopPropagation()
             startEdit()
           }}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
           className={cn(
-            'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
             active
               ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
               : 'hover:bg-primary/5'
@@ -1836,8 +1807,9 @@ function ConversationItem({
                   <button
                     className={cn(
                       'p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors',
-                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100',
-                      !hovered && 'opacity-0 pointer-events-none'
+                      'opacity-0 pointer-events-none',
+                      'group-hover:opacity-100 group-hover:pointer-events-auto',
+                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100 data-[state=open]:pointer-events-auto',
                     )}
                   >
                     <MoreHorizontal size={14} />
@@ -1856,7 +1828,7 @@ function ConversationItem({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})
 
 // ===== Agent 会话列表项 =====
 
@@ -1871,7 +1843,6 @@ const SESSION_LEFT_ACCENT_CLASS: Record<SessionLeftAccent, string> = {
 interface AgentSessionItemProps {
   session: AgentSessionMeta
   active: boolean
-  hovered: boolean
   indicatorStatus: SessionIndicatorStatus
   showPinIcon?: boolean
   /** 是否在工作中分区（auto 或 manual） */
@@ -1880,21 +1851,18 @@ interface AgentSessionItemProps {
   leftAccent?: SessionLeftAccent
   /** 工作区名称 Badge（跨工作区列表时显示） */
   workspaceName?: string
-  onSelect: () => void
-  onRequestDelete: () => void
-  onRequestMove: () => void
+  onSelect: (id: string, title: string) => void
+  onRequestDelete: (id: string) => void
+  onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
   onToggleManualWorking: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
-  onMouseEnter: () => void
-  onMouseLeave: () => void
 }
 
-function AgentSessionItem({
+const AgentSessionItem = React.memo(function AgentSessionItem({
   session,
   active,
-  hovered,
   indicatorStatus,
   showPinIcon,
   isInWorkingSection,
@@ -1907,8 +1875,6 @@ function AgentSessionItem({
   onTogglePin,
   onToggleManualWorking,
   onToggleArchive,
-  onMouseEnter,
-  onMouseLeave,
 }: AgentSessionItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
@@ -1967,7 +1933,7 @@ function AgentSessionItem({
         {indicatorStatus === 'running' ? '运行中无法移出' : isWorking ? '取消工作中' : '标记为工作中'}
       </MenuItem>
       {canMove && (
-        <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMove()}>
+        <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMove(session.id)}>
           <ArrowRightLeft size={14} />
           迁移到其他工作区
         </MenuItem>
@@ -1981,7 +1947,7 @@ function AgentSessionItem({
         {session.archived ? '取消归档' : '归档'}
       </MenuItem>
       <MenuSeparator className="my-0.5" />
-      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete()}>
+      <MenuItem className="text-xs py-1 [&>svg]:size-3.5 text-destructive" onSelect={() => onRequestDelete(session.id)}>
         <Trash2 size={14} />
         删除会话
       </MenuItem>
@@ -1994,15 +1960,13 @@ function AgentSessionItem({
         <div
           role="button"
           tabIndex={0}
-          onClick={onSelect}
+          onClick={() => onSelect(session.id, session.title)}
           onDoubleClick={(e) => {
             e.stopPropagation()
             startEdit()
           }}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
           className={cn(
-            'relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
             active
               ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
               : 'hover:bg-primary/5'
@@ -2057,8 +2021,9 @@ function AgentSessionItem({
                   <button
                     className={cn(
                       'p-1 rounded-md text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors',
-                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100',
-                      !hovered && 'opacity-0 pointer-events-none'
+                      'opacity-0 pointer-events-none',
+                      'group-hover:opacity-100 group-hover:pointer-events-auto',
+                      'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60 data-[state=open]:opacity-100 data-[state=open]:pointer-events-auto',
                     )}
                   >
                     <MoreHorizontal size={14} />
@@ -2077,4 +2042,4 @@ function AgentSessionItem({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})

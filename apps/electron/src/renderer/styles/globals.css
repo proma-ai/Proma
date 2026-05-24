@@ -36,6 +36,8 @@
     /* 虚线边框色（新会话按钮、搜索按钮） */
     --dashed-border: 0 0% 9% / 0.35;
     --dashed-border-hover: 0 0% 9% / 0.50;
+    /* Markdown 预览正文字号（medium 档默认；initializer 加载用户偏好后会覆盖） */
+    --md-preview-font-size: 15px;
   }
 
   .dark {

@@ -23,9 +23,13 @@ import {
   updateThemeStyle,
   applyThemeToDOM,
 } from '@/atoms/theme'
+import {
+  markdownFontSizeAtom,
+  updateMarkdownFontSize,
+} from '@/atoms/markdown-font-size'
 import { cn } from '@/lib/utils'
 import { detectIsWindows } from '@/lib/platform'
-import type { ThemeMode, ThemeStyle } from '../../../types'
+import type { ThemeMode, ThemeStyle, MarkdownFontSize } from '../../../types'
 
 // ===== Logo 资源导入（用于图标选择器） =====
 import promaBlackLogo from '@/assets/bots/proma-logos/proma-black.png'
@@ -56,6 +60,13 @@ const THEME_OPTIONS = [
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
   { value: 'special', label: '特殊风格' },
+]
+
+/** Markdown 字号选项 */
+const MARKDOWN_FONT_SIZE_OPTIONS = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '中' },
+  { value: 'large', label: '大' },
 ]
 
 /** 特殊风格 ID（排除 default） */
@@ -162,6 +173,7 @@ export function AppearanceSettings(): React.ReactElement {
   const [themeMode, setThemeMode] = useAtom(themeModeAtom)
   const [themeStyle, setThemeStyle] = useAtom(themeStyleAtom)
   const systemIsDark = useAtomValue(systemIsDarkAtom)
+  const [markdownFontSize, setMarkdownFontSize] = useAtom(markdownFontSizeAtom)
 
   /** 切换主题模式 */
   const handleThemeChange = React.useCallback((value: string) => {
@@ -185,6 +197,13 @@ export function AppearanceSettings(): React.ReactElement {
     updateThemeStyle(style)
     applyThemeToDOM('special', style, systemIsDark)
   }, [setThemeMode, setThemeStyle, systemIsDark])
+
+  /** 切换 Markdown 字号 */
+  const handleMarkdownFontSizeChange = React.useCallback((value: string) => {
+    const size = value as MarkdownFontSize
+    setMarkdownFontSize(size)
+    updateMarkdownFontSize(size)
+  }, [setMarkdownFontSize])
 
   return (
     <div className="space-y-6">
@@ -220,6 +239,14 @@ export function AppearanceSettings(): React.ReactElement {
           <SettingsRow
             label="界面缩放"
             description={ZOOM_HINT}
+          />
+
+          <SettingsSegmentedControl
+            label="Markdown 字号"
+            description="调整 AI 回复与 Markdown 编辑器的正文字号"
+            value={markdownFontSize}
+            onValueChange={handleMarkdownFontSizeChange}
+            options={MARKDOWN_FONT_SIZE_OPTIONS}
           />
         </SettingsCard>
       </SettingsSection>

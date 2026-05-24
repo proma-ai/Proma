@@ -162,6 +162,12 @@ export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
 /** 默认特殊风格 */
 export const DEFAULT_THEME_STYLE: ThemeStyle = 'default'
 
+/** Markdown 预览字号档位 */
+export type MarkdownFontSize = 'small' | 'medium' | 'large'
+
+/** 默认 Markdown 字号档位 */
+export const DEFAULT_MARKDOWN_FONT_SIZE: MarkdownFontSize = 'medium'
+
 /** 应用设置 */
 export interface AppSettings {
   /** 主题模式 */
@@ -208,6 +214,8 @@ export interface AppSettings {
   shortcutOverrides?: ShortcutOverrides
   /** 是否显示用户消息悬浮置顶条（默认 true） */
   stickyUserMessageEnabled?: boolean
+  /** Markdown 预览字号档位（默认 'medium'，对应 15px） */
+  markdownFontSize?: MarkdownFontSize
   /** 上次是否在 Scratch Pad 页（用于重启恢复） */
   scratchPadActive?: boolean
   /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */

@@ -1,5 +1,6 @@
 import { Node, mergeAttributes, nodeInputRule } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { Fragment } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { EditorView, ViewMutationRecord } from '@tiptap/pm/view'
@@ -14,6 +15,7 @@ import katex from 'katex'
 import { highlightCode, highlightToTokens, getDisplayName } from '@proma/core'
 import type { HighlightTokensResult } from '@proma/core'
 import type { FileAccessOptions } from '@proma/shared'
+import { extractCodeText } from '../../lib/markdown-rich-text'
 
 type FileAccessRef = { current: FileAccessOptions | undefined }
 /** 传 null 表示当前编辑器无会话/文件上下文（如 ScratchPad），跳过路径解析。 */
@@ -539,9 +541,11 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, _themeRef: Theme
 
   const editPre = document.createElement('pre')
   setClass(editPre, 'markdown-code-edit-layer m-0 min-h-[3.2em] overflow-x-auto bg-transparent p-4 font-mono text-[13px] leading-[1.6]')
+  editPre.style.whiteSpace = 'pre'
 
   const contentDOM = document.createElement('code')
   setClass(contentDOM, 'block min-h-[1.6em] whitespace-pre bg-transparent p-0 font-mono text-[13px] leading-[1.6]')
+  contentDOM.style.whiteSpace = 'pre'
   editPre.appendChild(contentDOM)
   body.appendChild(editPre)
 
@@ -874,7 +878,15 @@ export function createShikiCodeBlock(themeRef: ThemeRef): Node {
     },
 
     parseHTML() {
-      return [{ tag: 'pre', preserveWhitespace: 'full' }]
+      return [{
+        tag: 'pre',
+        preserveWhitespace: 'full',
+        getContent: (element, schema) => {
+          const code = (element as Element).querySelector('code')
+          const text = code ? extractCodeText(code) : (element.textContent || '')
+          return text ? Fragment.from(schema.text(text)) : Fragment.empty
+        },
+      }]
     },
 
     addCommands() {
