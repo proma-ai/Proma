@@ -298,4 +298,42 @@ export const FEISHU_IPC_CHANNELS = {
   GET_MULTI_STATUS: 'feishu:get-multi-status',
   /** 多 Bot 状态变化推送 */
   MULTI_STATUS_CHANGED: 'feishu:multi-status-changed',
+
+  // ===== 扫码注册（v3）=====
+
+  /** 启动扫码注册流程，返回最终的 App ID/Secret */
+  REGISTER_APP_START: 'feishu:register-app-start',
+  /** 主进程 → 渲染进程：二维码 URL 已生成 */
+  REGISTER_APP_QRCODE: 'feishu:register-app-qrcode',
+  /** 主进程 → 渲染进程：注册流程状态变化（polling/slow_down/domain_switched） */
+  REGISTER_APP_STATUS: 'feishu:register-app-status',
+  /** 取消正在进行的扫码注册流程 */
+  REGISTER_APP_CANCEL: 'feishu:register-app-cancel',
 } as const
+
+// ===== 扫码注册类型 =====
+
+export interface FeishuRegisterAppQRCode {
+  /** 扫码 URL */
+  url: string
+  /** PNG dataURL（主进程预生成，渲染层直接用 <img src> 渲染） */
+  dataUrl: string
+  /** 有效期秒数 */
+  expireIn: number
+}
+
+export interface FeishuRegisterAppStatus {
+  status: 'polling' | 'slow_down' | 'domain_switched'
+  interval?: number
+}
+
+export interface FeishuRegisterAppResult {
+  /** 创建出的飞书应用 App ID */
+  appId: string
+  /** 应用 App Secret（明文，仅一次性返回）*/
+  appSecret: string
+  /** 租户品牌（feishu / lark）*/
+  tenantBrand?: 'feishu' | 'lark'
+  /** 扫码用户的 open_id */
+  operatorOpenId?: string
+}

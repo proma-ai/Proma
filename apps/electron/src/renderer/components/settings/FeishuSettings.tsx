@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight, PlayCircle, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -29,6 +29,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { SettingsSection } from './primitives/SettingsSection'
 import { SettingsCard } from './primitives/SettingsCard'
 import { SettingsInput } from './primitives/SettingsInput'
@@ -37,7 +45,7 @@ import { SettingsRow } from './primitives/SettingsRow'
 import { feishuBotStatesAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
 import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
-import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState } from '@proma/shared'
+import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus } from '@proma/shared'
 
 // ===== 常量 =====
 
@@ -62,18 +70,152 @@ const FEISHU_SCOPES_JSON = JSON.stringify({
   scopes: {
     tenant: [
       'contact:contact.base:readonly',
-      'im:chat:readonly',
+      'drive:drive',
+      'im:chat',
+      'im:chat.announcement:write_only',
+      'im:chat.managers:write_only',
       'im:chat.members:read',
+      'im:chat.members:write_only',
+      'im:chat.tabs:write_only',
+      'im:chat.top_notice:write_only',
       'im:message',
       'im:message.group_at_msg:readonly',
       'im:message.group_msg',
       'im:message.p2p_msg:readonly',
+      'im:message.reactions:write_only',
       'im:message:send_as_bot',
       'im:resource',
+      'wiki:wiki',
     ],
     user: [],
   },
 }, null, 2)
+
+/**
+ * 视频教程入口配置。
+ * 后续把 url 填上即可在飞书配置页顶部显示视频教程卡片，留空则不渲染。
+ * 支持 B 站 / YouTube 等任意 iframe 嵌入地址，例如：
+ *   B 站：//player.bilibili.com/player.html?bvid=BVxxxxxx&autoplay=0
+ *   YouTube：https://www.youtube.com/embed/VIDEO_ID
+ *
+ * TODO: 教程视频录制完成后，把 url 填回（之前测试用过 'https://www.bilibili.com/video/BV1z8G867Epv'）。
+ */
+const FEISHU_TUTORIAL_VIDEO = {
+  url: '',
+  title: '飞书 Bot 配置视频教程',
+  description: '跟着视频一步步配，3 分钟内完成飞书 Bot 接入',
+} as const
+
+// ===== 视频教程组件 =====
+
+/** 把任意视频链接归一化为可 iframe 嵌入的 URL（B 站 / YouTube / 直链皆支持） */
+function normalizeVideoEmbedUrl(raw: string): { embedUrl: string; isIframe: boolean } | null {
+  const url = raw.trim()
+  if (!url) return null
+
+  // B 站普通页：https://www.bilibili.com/video/BVxxxxxx[?p=N] → player.bilibili.com
+  const bvMatch = url.match(/bilibili\.com\/video\/(BV[0-9A-Za-z]+)/)
+  if (bvMatch) {
+    const pMatch = url.match(/[?&]p=(\d+)/)
+    const pageParam = pMatch ? `&page=${pMatch[1]}` : ''
+    return { embedUrl: `https://player.bilibili.com/player.html?bvid=${bvMatch[1]}&autoplay=0&high_quality=1&danmaku=0${pageParam}`, isIframe: true }
+  }
+  // B 站短链（b23.tv/xxx）：无法在前端跟随重定向，让 iframe 自己处理
+  if (/^https?:\/\/b23\.tv\//.test(url)) {
+    return { embedUrl: url, isIframe: true }
+  }
+  // B 站 player 直链
+  if (/^https?:\/\/player\.bilibili\.com\//.test(url)) {
+    return { embedUrl: url, isIframe: true }
+  }
+  // YouTube watch / shorts / youtu.be → embed
+  const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/)
+  if (ytMatch) {
+    return { embedUrl: `https://www.youtube.com/embed/${ytMatch[1]}`, isIframe: true }
+  }
+  // YouTube embed 直链
+  if (/^https?:\/\/(www\.)?youtube\.com\/embed\//.test(url)) {
+    return { embedUrl: url, isIframe: true }
+  }
+  // mp4 / webm / m3u8 直链：用 video 标签
+  if (/\.(mp4|webm|m3u8)(\?.*)?$/i.test(url)) {
+    return { embedUrl: url, isIframe: false }
+  }
+  // 默认尝试当作 iframe 渲染
+  return { embedUrl: url, isIframe: true }
+}
+
+/** 飞书配置页顶部的视频教程卡片，URL 留空时不渲染。
+ *  默认展开方便新用户上手；检测到任一 Bot 已 connected（视为配置完成）会自动收起一次，
+ *  之后用户随时可以手动展开/收起。 */
+function FeishuTutorialVideo(): React.ReactElement | null {
+  const video = React.useMemo(() => normalizeVideoEmbedUrl(FEISHU_TUTORIAL_VIDEO.url), [])
+  const botStates = useAtomValue(feishuBotStatesAtom)
+  const hasConnectedBot = React.useMemo(
+    () => Object.values(botStates).some((b) => b.status === 'connected'),
+    [botStates],
+  )
+  const [expanded, setExpanded] = React.useState(true)
+  const autoCollapsedRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (hasConnectedBot && !autoCollapsedRef.current) {
+      autoCollapsedRef.current = true
+      setExpanded(false)
+    }
+  }, [hasConnectedBot])
+
+  if (!video) return null
+
+  return (
+    <SettingsSection
+      title={
+        <span className="flex items-center gap-2">
+          <PlayCircle size={16} className="text-primary" />
+          {FEISHU_TUTORIAL_VIDEO.title}
+        </span>
+      }
+      description={FEISHU_TUTORIAL_VIDEO.description}
+    >
+      <SettingsCard divided={false}>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer text-left"
+        >
+          <span className="text-sm text-muted-foreground">
+            {expanded ? '点击收起视频' : '点击展开视频教程（约 3 分钟）'}
+          </span>
+          <ChevronRight size={16} className={cn('text-muted-foreground transition-transform duration-200', expanded && 'rotate-90')} />
+        </button>
+        {expanded && (
+          <div className="px-4 pb-4 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+            <div className="relative w-full overflow-hidden rounded-md bg-black" style={{ aspectRatio: '16 / 9' }}>
+              {video.isIframe ? (
+                <iframe
+                  src={video.embedUrl}
+                  title={FEISHU_TUTORIAL_VIDEO.title}
+                  className="absolute inset-0 w-full h-full border-0"
+                  allowFullScreen
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture"
+                  referrerPolicy="no-referrer"
+                  sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+                />
+              ) : (
+                <video
+                  src={video.embedUrl}
+                  controls
+                  preload="metadata"
+                  className="absolute inset-0 w-full h-full"
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
 
 // ===== 工具组件 =====
 
@@ -114,23 +256,38 @@ function PermissionsStep(): React.ReactElement {
   }, [])
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center gap-2">
         <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center">4</span>
         <span className="font-medium text-foreground">配置权限</span>
       </div>
-      <div className="pl-7 space-y-2 text-muted-foreground">
+      <div className="pl-7 space-y-3 text-muted-foreground">
         <p>
           进入「权限管理」页面，点击下方按钮复制权限配置 JSON，
-          然后在飞书开放平台通过「批量开通」粘贴即可一键添加所有权限：
+          在飞书开放平台点击右上角「<span className="text-foreground font-medium">批量开通权限</span>」按钮，把 JSON 粘贴进去即可一次性添加所有权限。
         </p>
+
+        {/* 主操作：一键复制按钮（更显眼） */}
+        <Button
+          size="default"
+          onClick={handleCopy}
+          className={cn(
+            'gap-2 transition-all',
+            copied && 'bg-green-600 hover:bg-green-600 text-white'
+          )}
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+          <span className="font-medium">{copied ? '已复制到剪贴板' : '一键复制权限配置 JSON'}</span>
+        </Button>
+
+        {/* 次要：展开查看每个权限对应的能力 */}
         <button
           type="button"
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           onClick={() => setExpanded(!expanded)}
         >
           <ChevronRight size={14} className={cn('transition-transform duration-200', expanded && 'rotate-90')} />
-          <span>{expanded ? '收起权限详情' : '展开查看权限详情'}</span>
+          <span>{expanded ? '收起权限明细' : '查看每个权限的作用'}</span>
         </button>
         {expanded && (
           <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-0.5 animate-in fade-in-0 slide-in-from-top-1 duration-200">
@@ -139,21 +296,20 @@ function PermissionsStep(): React.ReactElement {
             <div><span className="text-foreground/70">im:message.p2p_msg:readonly</span> — 接收用户发给机器人的单聊消息</div>
             <div><span className="text-foreground/70">im:message.group_at_msg:readonly</span> — 接收群聊中 @机器人 的消息</div>
             <div><span className="text-foreground/70">im:message.group_msg</span> — 读取群聊历史消息（群聊上下文）</div>
-            <div><span className="text-foreground/70">im:chat:readonly</span> — 获取群组信息</div>
+            <div><span className="text-foreground/70">im:message.reactions:write_only</span> — 为消息添加状态表情（如⌨️/✅），让用户感知 Bot 正在处理 / 已完成</div>
+            <div><span className="text-foreground/70">im:chat</span> — 创建群 + 读取/更新群基础信息（群名、简介、邀请链接等）</div>
             <div><span className="text-foreground/70">im:chat.members:read</span> — 获取群成员列表（支持 @某人）</div>
+            <div><span className="text-foreground/70">im:chat.members:write_only</span> — 添加 / 移除群成员（Bot 主动拉人入群）</div>
+            <div><span className="text-foreground/70">im:chat.managers:write_only</span> — 指定 / 移除群管理员</div>
+            <div><span className="text-foreground/70">im:chat.announcement:write_only</span> — 更新群公告（把任务进度挂到公告里）</div>
+            <div><span className="text-foreground/70">im:chat.tabs:write_only</span> — 操作群会话标签页</div>
+            <div><span className="text-foreground/70">im:chat.top_notice:write_only</span> — 设置群置顶消息</div>
             <div><span className="text-foreground/70">im:resource</span> — 获取消息中的资源文件（图片、文档等）</div>
             <div><span className="text-foreground/70">contact:contact.base:readonly</span> — 获取用户基本信息（群聊发送者名称）</div>
+            <div><span className="text-foreground/70">drive:drive</span> — 云文档评论 @Bot 时读取与回复（支持文档协作场景）</div>
+            <div><span className="text-foreground/70">wiki:wiki</span> — 解析知识库链接的真实文档（@Bot 在 wiki 文档评论时使用）</div>
           </div>
         )}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleCopy}
-          className="gap-1.5"
-        >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          <span>{copied ? '已复制' : '复制批量权限配置'}</span>
-        </Button>
       </div>
     </div>
   )
@@ -169,10 +325,14 @@ npm install -g @larksuite/cli
 2. 将 SKILL 配置到本工作区（默认配置本工作区，但请提醒用户是否需要额外安装到全局，会使得预置上下文增加，造成不必要的Token消耗）
 npx skills add https://github.com/larksuite/cli -y -g
 
-3. 初始化 CLI 配置
+3. 初始化 CLI 配置（创建一个全新的飞书 CLI 应用，与 Proma 飞书 Bot 互不影响）
 lark-cli config init --new
 
-到最后一步配置环节需要特别提醒用户：已有Bot应用则选择已有应用，没有再选择新建飞书CLI应用。`
+4. 一键申请全部领域的所有权限（文档/表格/日历/任务/邮件/通讯录/会议/审批/OKR/Wiki/多维表格/幻灯片/考勤/项目板等都包含在内）
+lark-cli auth login --domain all
+
+执行第 3 步时浏览器会弹出授权页面，引导用户完成应用创建并扫码授权；
+执行第 4 步时浏览器会再次弹出，引导用户一次性确认所有领域的权限——这一步是体验关键，跳过会导致后续 Agent 调用飞书文档/日历/邮件等能力时报权限不足。`
 
 /** 飞书 CLI 配置引导 */
 function FeishuCliSection(): React.ReactElement {
@@ -210,10 +370,12 @@ function FeishuCliSection(): React.ReactElement {
             <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-200">
               <div><span className="text-foreground/70 font-semibold">步骤 1</span> — 安装飞书 CLI 到全局</div>
               <div className="pl-3 text-foreground/60">npm install -g @larksuite/cli</div>
-              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 2</span> — 将 SKILL 配置到本工作区（默认配置本工作区，但请提醒用户是否需要额外安装到全局，会使得预置上下文增加，造成不必要的Token消耗）</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 2</span> — 将 SKILL 配置到本工作区（默认本工作区；如需全局会增加 Token 消耗）</div>
               <div className="pl-3 text-foreground/60">npx skills add https://github.com/larksuite/cli -y -g</div>
-              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 3</span> — 初始化 CLI 配置</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 3</span> — 初始化 CLI（新建独立 CLI 应用，不影响 Proma 飞书 Bot）</div>
               <div className="pl-3 text-foreground/60">lark-cli config init --new</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 4</span> — 一键申请全部领域权限（文档/表格/日历/任务/邮件/通讯录/会议等）</div>
+              <div className="pl-3 text-foreground/60">lark-cli auth login --domain all</div>
             </div>
           )}
 
@@ -473,6 +635,205 @@ function FeishuBindingsTab(): React.ReactElement {
       </SettingsSection>
     </div>
   )
+}
+
+// ===== 扫码注册 Dialog =====
+
+/** 扫码成功页底部的"下一步推荐"：把 CLI 提示词一键复制，让用户去 Agent 会话里跑 */
+function CliRecommendationCard(): React.ReactElement {
+  const [copied, setCopied] = React.useState(false)
+
+  const handleCopy = React.useCallback(() => {
+    navigator.clipboard.writeText(FEISHU_CLI_PROMPT).then(() => {
+      setCopied(true)
+      toast.success('提示词已复制，前往 Agent 对话粘贴发送')
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      toast.error('复制失败')
+    })
+  }, [])
+
+  return (
+    <div className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-3 space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 text-xs text-foreground/80 leading-relaxed">
+          <div className="font-medium text-foreground mb-0.5">想要更完整的飞书生态体验？</div>
+          补全飞书 CLI 后 Proma Agent 还可以直接读写你的文档、查日历、发邮件等。
+          复制下方提示词到任意工作区的新对话发送即可，Agent 会全程引导完成。
+        </div>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleCopy}
+        className="gap-1.5 w-full"
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+        <span>{copied ? '已复制至剪贴板' : '复制配置提示词'}</span>
+      </Button>
+    </div>
+  )
+}
+
+interface RegisterFeishuDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** 注册成功后回调，返回主进程拿到的 App ID/Secret；上层应在此处保存配置并启动 Bot */
+  onSuccess: (result: { appId: string; appSecret: string }) => void
+}
+
+/** 扫码注册飞书 Bot：弹窗内全程引导，扫码成功后自动保存配置并启动 Bot */
+function RegisterFeishuDialog({ open, onOpenChange, onSuccess }: RegisterFeishuDialogProps): React.ReactElement {
+  const [qrcode, setQrcode] = React.useState<FeishuRegisterAppQRCode | null>(null)
+  const [status, setStatus] = React.useState<FeishuRegisterAppStatus | null>(null)
+  const [phase, setPhase] = React.useState<'idle' | 'qrcode' | 'success' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = React.useState<string>('')
+
+  // 用 ref 持有最新的 onSuccess，避免依赖 onSuccess 后回调引用变化触发整个 effect 重启
+  // 重启会调 cancelFeishuRegistration 中断当前正在等待扫码的流程
+  const onSuccessRef = React.useRef(onSuccess)
+  React.useLayoutEffect(() => {
+    onSuccessRef.current = onSuccess
+  })
+
+  // 弹窗打开 → 监听推送 + 启动注册；关闭 → 解监听 + 取消
+  React.useEffect(() => {
+    if (!open) return
+
+    let cancelled = false
+    setPhase('idle')
+    setErrorMsg('')
+    setQrcode(null)
+    setStatus(null)
+
+    const offQr = window.electronAPI.onFeishuRegisterQrcode((payload) => {
+      setQrcode(payload)
+      setPhase('qrcode')
+    })
+    const offStatus = window.electronAPI.onFeishuRegisterStatus((payload) => {
+      setStatus(payload)
+    })
+
+    window.electronAPI.registerFeishuApp()
+      .then((result) => {
+        if (cancelled) return
+        setPhase('success')
+        onSuccessRef.current({ appId: result.appId, appSecret: result.appSecret })
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        const msg = err instanceof Error ? err.message : String(err)
+        // SDK 在 abort 时抛出的错误，关闭弹窗时不显示
+        if (msg.includes('aborted') || msg.includes('Abort')) return
+        setPhase('error')
+        setErrorMsg(msg)
+      })
+
+    return () => {
+      cancelled = true
+      offQr()
+      offStatus()
+      window.electronAPI.cancelFeishuRegistration().catch(() => {})
+    }
+  }, [open])
+
+  const handleOpenInBrowser = React.useCallback(() => {
+    if (qrcode?.url) {
+      window.electronAPI.openExternal(qrcode.url)
+    }
+  }, [qrcode])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <QrCode size={18} className="text-primary" />
+            扫码创建飞书 Bot
+          </DialogTitle>
+          <DialogDescription>
+            飞书后端将自动创建一个 PersonalAgent 应用，扫码完成后 Proma 会自动保存凭证并启动 Bot，整个过程无需手动复制 App ID / Secret。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col items-center gap-3 py-2">
+          {phase === 'idle' && (
+            <div className="flex flex-col items-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 size={24} className="animate-spin" />
+              <span>正在向飞书申请二维码…</span>
+            </div>
+          )}
+
+          {phase === 'qrcode' && qrcode && (
+            <>
+              <div className="bg-white rounded-lg p-3 shadow-sm">
+                {qrcode.dataUrl ? (
+                  <img
+                    src={qrcode.dataUrl}
+                    alt="飞书扫码注册二维码"
+                    className="w-[240px] h-[240px] block"
+                  />
+                ) : (
+                  <div className="w-[240px] h-[240px] flex items-center justify-center text-xs text-muted-foreground">
+                    二维码生成失败，请用浏览器打开
+                  </div>
+                )}
+              </div>
+              <div className="text-sm text-foreground text-center">
+                用飞书 App 「扫一扫」，按提示完成应用创建
+              </div>
+              <div className="text-xs text-muted-foreground text-center">
+                {status?.status === 'polling' && '等待扫码确认中…'}
+                {status?.status === 'slow_down' && '轮询节奏已自动放慢'}
+                {status?.status === 'domain_switched' && '已切换到国际版域名'}
+                {!status && '二维码已就绪'}
+              </div>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={handleOpenInBrowser}
+                className="h-auto p-0 text-xs"
+              >
+                或在浏览器中打开链接
+              </Button>
+            </>
+          )}
+
+          {phase === 'success' && (
+            <div className="w-full flex flex-col items-center gap-4 py-2">
+              <div className="flex flex-col items-center gap-2 text-sm">
+                <CheckCircle2 size={32} className="text-green-600" />
+                <span className="text-foreground font-medium">应用创建成功</span>
+                <span className="text-xs text-muted-foreground">已自动保存配置，正在启动 Bot…</span>
+              </div>
+
+              {/* 推荐：补全飞书 CLI 获得完整生态体验 */}
+              <CliRecommendationCard />
+            </div>
+          )}
+
+          {phase === 'error' && (
+            <div className="flex flex-col items-center gap-2 py-8 text-sm">
+              <XCircle size={32} className="text-red-600" />
+              <span className="text-foreground font-medium">创建失败</span>
+              <span className="text-xs text-muted-foreground text-center max-w-[300px]">{errorMsg || '未知错误，请稍后重试'}</span>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {phase === 'success' ? '关闭' : '取消'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 用于将新名称生成的占位符（参考 handleAddBot 的命名规则保持一致）
+function defaultBotName(index: number): string {
+  return `飞书助手 ${index + 1}`
 }
 
 // ===== 单个 Bot 配置卡片 =====
@@ -760,7 +1121,7 @@ function FeishuConfigTab(): React.ReactElement {
   const handleAddBot = React.useCallback(async () => {
     try {
       const saved = await window.electronAPI.saveFeishuBotConfig({
-        name: `飞书助手 ${bots.length + 1}`,
+        name: defaultBotName(bots.length),
         enabled: false,
         appId: '',
         appSecret: '',
@@ -774,6 +1135,31 @@ function FeishuConfigTab(): React.ReactElement {
     }
   }, [bots.length])
 
+  const [registerOpen, setRegisterOpen] = React.useState(false)
+
+  /** 扫码成功后：保存配置 + 自动启动 Bot */
+  const handleRegisterSuccess = React.useCallback(async (result: { appId: string; appSecret: string }) => {
+    try {
+      const saved = await window.electronAPI.saveFeishuBotConfig({
+        name: defaultBotName(bots.length),
+        enabled: true,
+        appId: result.appId,
+        appSecret: result.appSecret,
+        defaultWorkspaceId: undefined,
+        defaultChannelId: undefined,
+        defaultModelId: undefined,
+      })
+      setBots((prev) => [...prev, saved])
+      toast.success(`Bot "${saved.name}" 已创建`)
+      // 自动启动 Bot（不阻塞 UI）
+      window.electronAPI.startFeishuBot(saved.id).catch((err: unknown) => {
+        toast.error(err instanceof Error ? err.message : '自动启动失败，请手动启动')
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存配置失败')
+    }
+  }, [bots.length])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -784,21 +1170,36 @@ function FeishuConfigTab(): React.ReactElement {
 
   return (
     <div className="space-y-8">
+      {/* 视频教程（顶部最显眼处，未配置 URL 时自动隐藏） */}
+      <FeishuTutorialVideo />
+
+      <RegisterFeishuDialog
+        open={registerOpen}
+        onOpenChange={setRegisterOpen}
+        onSuccess={handleRegisterSuccess}
+      />
+
       {/* Bot 列表 */}
       <SettingsSection
         title="飞书 Bot 列表"
         description="管理多个飞书机器人，每个 Bot 可绑定不同的工作区和模型"
         action={
-          <Button size="sm" variant="outline" onClick={handleAddBot}>
-            <Plus size={14} className="mr-1.5" />
-            添加 Bot
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setRegisterOpen(true)}>
+              <QrCode size={14} className="mr-1.5" />
+              扫码创建
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleAddBot}>
+              <Plus size={14} className="mr-1.5" />
+              手动添加
+            </Button>
+          </div>
         }
       >
         {bots.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              还没有配置飞书 Bot。点击「添加 Bot」开始。
+              还没有配置飞书 Bot。点击「扫码创建」一键接入，或「手动添加」用已有 App ID。
             </div>
           </SettingsCard>
         ) : (
@@ -873,22 +1274,39 @@ function FeishuConfigTab(): React.ReactElement {
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center">5</span>
                 <span className="font-medium text-foreground">配置事件订阅（关键步骤）</span>
               </div>
-              <div className="pl-7 space-y-1.5 text-muted-foreground">
+              <div className="pl-7 space-y-2 text-muted-foreground">
                 <p>
-                  进入「事件与回调」页面：
+                  进入「事件与回调」页面，分别完成下面两项配置：
                 </p>
-                <ol className="list-decimal pl-4 space-y-1">
-                  <li>
-                    事件订阅方式选择{' '}
-                    <span className="text-foreground font-medium">「使用长连接接收事件」</span>
-                    （而非 Webhook，无需公网 IP）
-                  </li>
-                  <li>
-                    添加事件{' '}
-                    <code className="bg-muted/50 px-1.5 py-0.5 rounded text-xs text-foreground/80">im.message.receive_v1</code>
-                    {' '}（接收消息）
-                  </li>
-                </ol>
+                <div className="space-y-1.5">
+                  <div className="text-foreground/80 font-medium text-xs">① 事件订阅</div>
+                  <ol className="list-decimal pl-4 space-y-1">
+                    <li>
+                      订阅方式选择{' '}
+                      <span className="text-foreground font-medium">「使用长连接接收事件」</span>
+                      （而非 Webhook，无需公网 IP）
+                    </li>
+                    <li>
+                      添加事件{' '}
+                      <code className="bg-muted/50 px-1.5 py-0.5 rounded text-xs text-foreground/80">im.message.receive_v1</code>
+                      {' '}（接收消息）
+                    </li>
+                  </ol>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="text-foreground/80 font-medium text-xs">② 回调配置</div>
+                  <ol className="list-decimal pl-4 space-y-1">
+                    <li>
+                      回调方式同样选择{' '}
+                      <span className="text-foreground font-medium">「使用长连接接收回调」</span>
+                    </li>
+                    <li>
+                      添加回调{' '}
+                      <code className="bg-muted/50 px-1.5 py-0.5 rounded text-xs text-foreground/80">card.action.trigger</code>
+                      {' '}（卡片按钮回调，Proma 的流式卡片交互依赖此项）
+                    </li>
+                  </ol>
+                </div>
               </div>
             </div>
 

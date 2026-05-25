@@ -990,6 +990,17 @@ export interface ElectronAPI {
   /** 获取多 Bot 状态 */
   getFeishuMultiStatus: () => Promise<import('@proma/shared').FeishuMultiBridgeState>
 
+  // --- 扫码注册 ---
+
+  /** 启动扫码注册流程，等待用户扫码 + 飞书确认后返回 App ID/Secret */
+  registerFeishuApp: () => Promise<import('@proma/shared').FeishuRegisterAppResult>
+  /** 取消正在进行的扫码注册流程 */
+  cancelFeishuRegistration: () => Promise<void>
+  /** 监听二维码 URL 生成 */
+  onFeishuRegisterQrcode: (callback: (payload: import('@proma/shared').FeishuRegisterAppQRCode) => void) => () => void
+  /** 监听注册流程状态变化 */
+  onFeishuRegisterStatus: (callback: (payload: import('@proma/shared').FeishuRegisterAppStatus) => void) => () => void
+
   // ===== 钉钉集成 =====
 
   /** 获取钉钉配置 */
@@ -2274,6 +2285,28 @@ const electronAPI: ElectronAPI = {
 
   getFeishuMultiStatus: () => {
     return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.GET_MULTI_STATUS)
+  },
+
+  // --- 扫码注册 ---
+
+  registerFeishuApp: () => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.REGISTER_APP_START)
+  },
+
+  cancelFeishuRegistration: () => {
+    return ipcRenderer.invoke(FEISHU_IPC_CHANNELS.REGISTER_APP_CANCEL)
+  },
+
+  onFeishuRegisterQrcode: (callback: (payload: import('@proma/shared').FeishuRegisterAppQRCode) => void) => {
+    const listener = (_: unknown, payload: import('@proma/shared').FeishuRegisterAppQRCode) => callback(payload)
+    ipcRenderer.on(FEISHU_IPC_CHANNELS.REGISTER_APP_QRCODE, listener)
+    return () => { ipcRenderer.removeListener(FEISHU_IPC_CHANNELS.REGISTER_APP_QRCODE, listener) }
+  },
+
+  onFeishuRegisterStatus: (callback: (payload: import('@proma/shared').FeishuRegisterAppStatus) => void) => {
+    const listener = (_: unknown, payload: import('@proma/shared').FeishuRegisterAppStatus) => callback(payload)
+    ipcRenderer.on(FEISHU_IPC_CHANNELS.REGISTER_APP_STATUS, listener)
+    return () => { ipcRenderer.removeListener(FEISHU_IPC_CHANNELS.REGISTER_APP_STATUS, listener) }
   },
 
   // ===== 微信集成 =====
