@@ -11,7 +11,7 @@
  */
 
 import * as React from 'react'
-import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { atom, useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -24,11 +24,14 @@ import {
   agentDiffRefreshVersionAtom,
   agentDiffUnseenChangesAtom,
   agentDiffUnseenFilesAtom,
+  agentDiffDataAtom,
   agentStreamingStatesAtom,
   liveMessagesMapAtom,
   agentSessionStreamingStateAtomFamily,
   agentSessionDraftAtomFamily,
   agentSessionDraftHtmlAtomFamily,
+  agentSessionPendingFilesAtom,
+  agentPendingFilesAtomFamily,
   backgroundTasksAtomFamily,
   sessionPersistedPermissionModeAtom,
   sessionExistsAtom,
@@ -74,9 +77,12 @@ export function useCloseTab(): UseCloseTabReturn {
   const setDiffRefreshVersion = useSetAtom(agentDiffRefreshVersionAtom)
   const setDiffUnseen = useSetAtom(agentDiffUnseenChangesAtom)
   const setDiffUnseenFiles = useSetAtom(agentDiffUnseenFilesAtom)
+  const setDiffData = useSetAtom(agentDiffDataAtom)
 
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
+  const setSessionPendingFiles = useSetAtom(agentSessionPendingFilesAtom)
+  const store = useStore()
 
   const cleanupMapAtoms = React.useCallback((tabId: string) => {
     const deleteKey = <T,>(prev: Map<string, T>): Map<string, T> => {
@@ -96,23 +102,35 @@ export function useCloseTab(): UseCloseTabReturn {
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
     setDiffUnseenFiles(deleteKey)
+    setDiffData(deleteKey)
     // tab.id === sessionId（见 tab-atoms.ts openTab）
     // 清理重型流式数据：streamingStates（含累积 content 与 toolActivities）和 liveMessages（SDK 消息数组）
     // 不清 agentSessionDraftsAtom / agentSessionDraftHtmlAtom / agentStreamErrorsAtom 这些
     // base map：草稿和错误信息体积小，保留可让用户重开 tab 时恢复输入与错误回显
     setStreamingStates(deleteKey)
     setLiveMessagesMap(deleteKey)
+    // 清理该 session 的待发送附件：释放 blob URL 和 window 缓存中的 base64，再删 base map entry
+    // 与文字草稿不同，附件涉及 ObjectURL 和大体积二进制数据，不保留语义
+    const sessionPending = store.get(agentSessionPendingFilesAtom).get(tabId)
+    if (sessionPending && sessionPending.length > 0) {
+      for (const f of sessionPending) {
+        if (f.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(f.previewUrl)
+        window.__pendingAgentFileData?.delete(f.id)
+      }
+      setSessionPendingFiles(deleteKey)
+    }
     // 清理 atomFamily 内部 atom 缓存（Jotai 对 string key 强引用 Map，不显式 remove 永不释放）。
     // 注意：remove 仅清 family 缓存，不动 base map；下次 family(sessionId) 调用会自动重建派生
     // atom 并读出 base map 中保留的草稿值——这正是上面"不清草稿 base map"能恢复 UX 的前提。
     agentSessionStreamingStateAtomFamily.remove(tabId)
     agentSessionDraftAtomFamily.remove(tabId)
     agentSessionDraftHtmlAtomFamily.remove(tabId)
+    agentPendingFilesAtomFamily.remove(tabId)
     backgroundTasksAtomFamily.remove(tabId)
     sessionPersistedPermissionModeAtom.remove(tabId)
     sessionExistsAtom.remove(tabId)
     clearPreviewCacheForSession(tabId)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setStreamingStates, setLiveMessagesMap])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
 
   const executeClose = React.useCallback((tabId: string) => {
     const tab = tabs.find((t) => t.id === tabId)

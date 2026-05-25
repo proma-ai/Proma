@@ -46,9 +46,15 @@ import { cn } from '@/lib/utils'
 import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import type { FileEntry } from '@proma/shared'
 import { FileTypeIcon } from './FileTypeIcon'
+import {
+  computeTreeRowLayout,
+  AncestorGuides,
+  STICKY_ROW_BASE_CLASS,
+  canBeSticky,
+} from './tree-row-layout'
 
 /** 计算目标路径相对 rootPath 的祖先目录集合（不含 rootPath 自身、含目标的所有上级） */
-function computeRevealAncestors(rootPath: string, targetPath: string): Set<string> {
+export function computeRevealAncestors(rootPath: string, targetPath: string): Set<string> {
   const ancestors = new Set<string>()
   if (!rootPath || !targetPath) return ancestors
   // 归一化：移除尾部分隔符
@@ -69,7 +75,7 @@ function computeRevealAncestors(rootPath: string, targetPath: string): Set<strin
 }
 
 /** 判断目标路径是否落在 rootPath 内 */
-function isPathUnderRoot(rootPath: string, targetPath: string): boolean {
+export function isPathUnderRoot(rootPath: string, targetPath: string): boolean {
   if (!rootPath || !targetPath) return false
   const root = rootPath.replace(/[/\\]+$/, '')
   if (targetPath === root) return true
@@ -89,11 +95,6 @@ interface FileBrowserProps {
   /** 单击文件时在内联预览面板中显示（替代外部窗口预览） */
   onFilePreview?: (filePath: string) => void
 }
-
-const TREE_ROW_HEIGHT = 32
-const TREE_ROW_HORIZONTAL_MARGIN = 8
-const TREE_INDENT_WIDTH = 16
-const MAX_STICKY_DEPTH = 4
 
 export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddToChat, onFilePreview }: FileBrowserProps): React.ReactElement {
   const [entries, setEntries] = React.useState<FileEntry[]>([])
@@ -115,6 +116,17 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
   )
   const revealTarget = revealForThisRoot?.path ?? null
   const revealTs = revealForThisRoot?.ts ?? 0
+  const revealSelect = revealForThisRoot?.select ?? false
+
+  // ===== autoReveal 带 select 标记时，将目标文件加入选中态 =====
+  const consumedSelectTsRef = React.useRef(0)
+  React.useEffect(() => {
+    if (!revealForThisRoot?.select || !revealTarget) return
+    // 避免同一个 ts 被重复消费
+    if (revealTs <= consumedSelectTsRef.current) return
+    consumedSelectTsRef.current = revealTs
+    setSelectedPaths(new Set([revealTarget]))
+  }, [revealTs, revealForThisRoot?.select, revealTarget])
 
   // ===== 最近修改的文件路径（60s 内显示左侧竖条） =====
   const recentlyModifiedMap = useAtomValue(recentlyModifiedPathsAtom)
@@ -308,6 +320,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
           revealAncestors={revealAncestors}
           revealTarget={revealTarget}
           revealTs={revealTs}
+          revealSelect={revealSelect}
           recentlyModifiedSet={recentlyModifiedSet}
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
@@ -409,6 +422,8 @@ interface FileTreeItemProps {
   revealTarget: string | null
   /** 自动定位脉冲时间戳，变化时重新触发 */
   revealTs: number
+  /** 本次 reveal 是否带 select 标记（来源于用户搜索点击）；为 true 时跳过 flash 高亮，避免覆盖选中色 */
+  revealSelect: boolean
   /** 最近修改的路径集合（命中则在行左侧显示竖条标记） */
   recentlyModifiedSet: Set<string>
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
@@ -435,6 +450,7 @@ function FileTreeItem({
   revealAncestors,
   revealTarget,
   revealTs,
+  revealSelect,
   recentlyModifiedSet,
   onSelect,
   onShowInFolder,
@@ -466,8 +482,20 @@ function FileTreeItem({
   // ===== Agent 自动定位：祖先目录自动展开 + 目标行滚动到中心 + 0.8s 高亮脉冲 =====
   React.useEffect(() => {
     if (revealTs === 0) return
-    // 祖先目录：自动展开（必要时加载子项）
-    if (entry.isDirectory && revealAncestors.has(entry.path) && !expanded) {
+
+    const cleanups: Array<() => void> = []
+    const isAncestor = revealAncestors.has(entry.path)
+    const isTarget = revealTarget !== null && entry.path === revealTarget
+
+    const scrollToTarget = (): void => {
+      requestAnimationFrame(() => {
+        rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+
+    // 自身需要展开：祖先目录 OR 目标本身就是目录（搜到文件夹时让其展开露出内容）
+    const willExpand = entry.isDirectory && (isAncestor || isTarget) && !expanded
+    if (willExpand) {
       let cancelled = false
       const run = async (): Promise<void> => {
         if (!childrenLoaded) {
@@ -482,21 +510,33 @@ function FileTreeItem({
             return
           }
         }
-        if (!cancelled) setExpanded(true)
+        if (cancelled) return
+        setExpanded(true)
+        // 目标自身就是这个目录时，等展开后再滚动，避免子项渲染改变行高使
+        // smooth scroll 的目标位置过时；加载失败路径不会到这里。
+        if (isTarget) scrollToTarget()
       }
-      run()
-      return () => { cancelled = true }
+      void run()
+      cleanups.push(() => { cancelled = true })
     }
+
     // 目标行：滚动到可视区中心 + 高亮脉冲
-    if (revealTarget && entry.path === revealTarget) {
-      // 等下一帧渲染稳定后再 scroll
-      requestAnimationFrame(() => {
-        rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      })
-      setFlash(true)
-      const t = setTimeout(() => setFlash(false), 1200)
-      return () => clearTimeout(t)
+    if (isTarget) {
+      // 仅在不会通过展开分支异步滚动时立即滚动（即：目标是文件，或已展开的目录）
+      if (!willExpand) scrollToTarget()
+      // 用户搜索点击场景（revealSelect=true）会同步把目标置为选中态，
+      // flash 动画末关键帧的 transparent 背景会盖掉 bg-accent，造成"先闪一下再变选中"的视觉断层，
+      // 因此该路径跳过 flash，仅保留滚动 + 选中态。Agent 自动定位（无 select）仍走 flash。
+      // 注意：不要改 globals.css 里 .file-browser-row-flash 末关键帧的 transparent，那是 Agent
+      // 路径下"动画结束行恢复无背景"的预期行为；选中态冲突应由本分支跳过 class 解决。
+      if (!revealSelect) {
+        setFlash(true)
+        const t = setTimeout(() => setFlash(false), 1200)
+        cleanups.push(() => clearTimeout(t))
+      }
     }
+
+    if (cleanups.length > 0) return () => { for (const c of cleanups) c() }
   }, [revealTs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 重命名编辑状态
@@ -629,12 +669,8 @@ function FileTreeItem({
     }
   }
 
-  const paddingLeft = 8 + depth * TREE_INDENT_WIDTH
-  const guideLeft = TREE_ROW_HORIZONTAL_MARGIN + paddingLeft + 7
-  const stickyDepth = Math.min(depth, MAX_STICKY_DEPTH)
-  const stickyTop = stickyDepth * TREE_ROW_HEIGHT
-  // 起点 10 已足够压住普通行内元素；保持外层目录在更上层以遮住下方滚过的内层。
-  const stickyZIndex = Math.max(1, 10 - stickyDepth)
+  const { paddingLeft, guideLeft, stickyTop, stickyZIndex } = computeTreeRowLayout(depth)
+  const isSticky = entry.isDirectory && expanded && canBeSticky(depth)
   const showMenu = !isRenaming
   const menuSelectedCount = isSelected ? selectedCount : 1
 
@@ -642,19 +678,27 @@ function FileTreeItem({
     <div className="relative" onClick={handleWrapperClick}>
       <div
         ref={rowRef}
+        data-sticky-row={isSticky ? 'true' : undefined}
         className={cn(
-          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group mx-2 rounded-lg transition-colors',
-          entry.isDirectory && expanded && 'sticky bg-background/95 backdrop-blur-sm shadow-[0_1px_0_hsl(var(--border)/0.45)]',
-          isSelected ? 'bg-accent' : 'hover:bg-accent/50',
+          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group transition-colors',
+          isSticky && STICKY_ROW_BASE_CLASS,
+          // sticky 行 hover 用不透明色，避免下方滚动内容透出；普通行保持半透明柔和感
+          isSelected
+            ? 'bg-accent'
+            : isSticky
+              ? 'hover:bg-accent'
+              : 'hover:bg-accent/50',
           flash && 'file-browser-row-flash',
         )}
         style={{
           paddingLeft,
-          top: entry.isDirectory && expanded ? stickyTop : undefined,
-          zIndex: entry.isDirectory && expanded ? stickyZIndex : undefined,
+          top: isSticky ? stickyTop : undefined,
+          zIndex: isSticky ? stickyZIndex : undefined,
         }}
         onClick={handleClick}
       >
+        {/* sticky 行祖先链竖线，逻辑见 tree-row-layout.tsx 的 AncestorGuides */}
+        {isSticky && <AncestorGuides depth={depth} isSelected={isSelected} />}
         {recentlyModifiedSet.has(entry.path) && (
           <span
             aria-label="最近被 Agent 修改"
@@ -807,6 +851,7 @@ function FileTreeItem({
               revealAncestors={revealAncestors}
               revealTarget={revealTarget}
               revealTs={revealTs}
+              revealSelect={revealSelect}
               recentlyModifiedSet={recentlyModifiedSet}
               onSelect={onSelect}
               onShowInFolder={onShowInFolder}

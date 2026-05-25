@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomFamily, atomWithStorage } from 'jotai/utils'
-import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage } from '@proma/shared'
+import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 
@@ -232,8 +232,35 @@ export const liveMessagesMapAtom = atom<Map<string, SDKMessage[]>>(new Map())
 
 export const agentPendingPromptAtom = atom<AgentPendingPrompt | null>(null)
 
-/** Agent 待发送文件列表 */
-export const agentPendingFilesAtom = atom<AgentPendingFile[]>([])
+/**
+ * Agent 待发送文件列表 Map — 以 sessionId 为 key
+ * 切换会话时保留各 session 自己的 pending files，与文字草稿语义一致
+ */
+export const agentSessionPendingFilesAtom = atom<Map<string, AgentPendingFile[]>>(new Map())
+
+/**
+ * 单个 session 的 pending files 派生 atom（读写）— 按 sessionId 切片
+ * read：返回当前 session 的数组（空数组兜底）
+ * write：接受新数组或 updater 函数，写回时空数组转为 delete，避免 Map 长期残留空 entry
+ */
+export const agentPendingFilesAtomFamily = atomFamily((sessionId: string) =>
+  atom(
+    (get) => get(agentSessionPendingFilesAtom).get(sessionId) ?? [],
+    (_get, set, update: AgentPendingFile[] | ((prev: AgentPendingFile[]) => AgentPendingFile[])) => {
+      set(agentSessionPendingFilesAtom, (prev) => {
+        const current = prev.get(sessionId) ?? []
+        const next = typeof update === 'function' ? update(current) : update
+        const map = new Map(prev)
+        if (next.length === 0) {
+          map.delete(sessionId)
+        } else {
+          map.set(sessionId, next)
+        }
+        return map
+      })
+    },
+  ),
+)
 
 /** 工作区能力版本号 — 每次修改 MCP/Skills 后自增，触发侧边栏重新获取 */
 export const workspaceCapabilitiesVersionAtom = atom(0)
@@ -267,6 +294,15 @@ export const agentDiffUnseenChangesAtom = atom(new Map<string, boolean>())
 /** Agent 本轮刚修改但用户尚未查看的文件路径 — 按 session 隔离，Map<sessionId, Set<filePath>> */
 export const agentDiffUnseenFilesAtom = atom(new Map<string, Set<string>>())
 
+/**
+ * Diff 数据缓存 — 按 session 隔离，存放上一次 IPC 拉取到的未暂存改动结果。
+ *
+ * 让 DiffChangesList 切走再切回时能立即拿到旧数据渲染（SWR 模式），
+ * 避免 mount 时空数组误命中"没有代码改动"分支造成 ~1s 闪烁。
+ * 数据新鲜度由 [[agentDiffRefreshVersionAtom]] 触发的后台 fetch 维护，无 TTL。
+ */
+export const agentDiffDataAtom = atom(new Map<string, UnstagedChangesResult>())
+
 /** 当前会话的侧面板是否打开（派生只读：全局共享，但仅在有当前会话且为 Agent 模式时显示） */
 export const currentSessionSidePanelOpenAtom = atom<boolean>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
@@ -286,6 +322,8 @@ export interface FileBrowserAutoReveal {
   sessionId: string
   path: string
   ts: number
+  /** 是否同时将文件设为选中态 */
+  select?: boolean
 }
 export const fileBrowserAutoRevealAtom = atom<FileBrowserAutoReveal | null>(null)
 

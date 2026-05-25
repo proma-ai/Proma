@@ -100,6 +100,10 @@ export function InputToolbarOverflow({
     })
   }, [])
 
+  // 仅在 items 列表（key 集合）变化时重新注册 observer；
+  // 宽度变化由 ResizeObserver 推送给 readWidths，不需要每次 render 都重订阅。
+  // 之前缺依赖数组导致每次 render 都重跑 → setItemWidths → re-render → 死循环（React #185）。
+  const itemKeysSignature = items.map((it) => it.key).join('|')
   React.useLayoutEffect(() => {
     readWidths()
     let raf = 0
@@ -114,7 +118,7 @@ export function InputToolbarOverflow({
       cancelAnimationFrame(raf)
       observer.disconnect()
     }
-  })
+  }, [itemKeysSignature, readWidths])
 
   /**
    * 计算可见数量：依次累加 item 宽度直到超出容器，

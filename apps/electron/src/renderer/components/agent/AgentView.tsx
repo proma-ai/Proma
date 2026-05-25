@@ -62,7 +62,7 @@ import {
   agentSessionModelMapAtom,
   currentAgentWorkspaceIdAtom,
   agentPendingPromptAtom,
-  agentPendingFilesAtom,
+  agentPendingFilesAtomFamily,
   agentWorkspacesAtom,
   agentStreamErrorsAtom,
   agentSessionDraftsAtom,
@@ -342,17 +342,19 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     return meta.workspaceId ?? null     // 数据已加载，以会话自身为准
   }, [sessions, sessionId, globalWorkspaceId])
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
-  const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtom)
+  const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtomFamily(sessionId))
   const workspaces = useAtomValue(agentWorkspacesAtom)
   // 保持 channelId 稳定：初始化前使用上次有效值，避免工具栏抖动
   const stableChannelIdRef = React.useRef(agentChannelId)
   if (agentChannelId) stableChannelIdRef.current = agentChannelId
   const stableChannelId = agentChannelId ?? stableChannelIdRef.current
 
-  // 已有会话首次打开时，从全局默认值初始化 per-session map
+  // 已有会话首次打开时，从全局默认值初始化 per-session map。
+  // setter 内的 `prev.has(sessionId)` 守卫保证幂等，外层不再订阅 Map atom，
+  // 避免 setter 写入 → atom 引用变化 → effect 重跑的自循环（React #185）。
   React.useEffect(() => {
     if (!sessionId) return
-    if (!sessionChannelMap.has(sessionId) && defaultChannelId) {
+    if (defaultChannelId) {
       setSessionChannelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
@@ -360,7 +362,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     }
-    if (!sessionModelMap.has(sessionId) && defaultModelId) {
+    if (defaultModelId) {
       setSessionModelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
@@ -368,7 +370,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     }
-  }, [sessionId, sessionChannelMap, sessionModelMap, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
+  }, [sessionId, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
 
   const contextStatus: AgentContextStatus = {
     isCompacting: streamState?.isCompacting ?? false,
@@ -486,18 +488,22 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const firstModel = preferredModel ?? modelList.find((m) => m.enabled)
       if (!firstModel) return
 
-    // 更新 per-session map
+    // 更新 per-session map（带幂等守卫，避免无意义写入导致 effect 自循环）
     setSessionModelMap((prev) => {
+      if (prev.get(sessionId) === firstModel.id) return prev
       const map = new Map(prev)
       map.set(sessionId, firstModel.id)
       return map
     })
-    // 同步全局默认值
-    setDefaultModelId(firstModel.id)
-    window.electronAPI.updateSettings({
-      agentChannelId,
-      agentModelId: firstModel.id,
-    }).catch(console.error)
+    // 全局默认值 + 持久化 IPC 也加幂等：firstModel 与当前 defaultModelId 相同时跳过，
+    // 避免每次 agentChannelId / globalChannels 变化都重复写盘和触发 agentModelIdAtom 更新。
+    if (defaultModelId !== firstModel.id) {
+      setDefaultModelId(firstModel.id)
+      window.electronAPI.updateSettings({
+        agentChannelId,
+        agentModelId: firstModel.id,
+      }).catch(console.error)
+    }
   }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap, setDefaultModelId])
 
   // 获取当前 session 的工作路径（文件浏览器需要）

@@ -461,9 +461,16 @@ export function AboutSettings(): React.ReactElement {
         </SettingsRow>
         <SettingsRow
           label="开源协议"
-          description="本项目遵循开源协议发布"
+          description="社区版基于 AGPL-3.0 开源，商业授权请联系 erlichliu@gmail.com"
         >
-          <span className="text-sm text-muted-foreground">MIT</span>
+          <a
+            href="https://www.gnu.org/licenses/agpl-3.0.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary hover:underline"
+          >
+            AGPL-3.0
+          </a>
         </SettingsRow>
         <SettingsRow label="项目地址">
           <a

@@ -47,6 +47,7 @@ import {
   agentDiffRefreshVersionAtom,
   agentDiffUnseenChangesAtom,
   agentDiffUnseenFilesAtom,
+  agentDiffDataAtom,
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
@@ -114,7 +115,7 @@ function SidebarItem({ icon, label, active, suffix, onClick }: SidebarItemProps)
     <button
       onClick={onClick}
       className={cn(
-        'w-full flex items-center justify-between px-3 py-2 rounded-[10px] text-[13px] transition-colors duration-100 titlebar-no-drag',
+        'w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
           ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
           : 'text-foreground/60 hover:bg-primary/5 hover:text-foreground'
@@ -364,6 +365,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const setDiffRefreshVersion = useSetAtom(agentDiffRefreshVersionAtom)
   const setDiffUnseen = useSetAtom(agentDiffUnseenChangesAtom)
   const setDiffUnseenFiles = useSetAtom(agentDiffUnseenFilesAtom)
+  const setDiffData = useSetAtom(agentDiffDataAtom)
   const setWorkingDone = useSetAtom(workingDoneSessionIdsAtom)
 
   /** 清理 per-conversation/session Map atoms 条目 */
@@ -385,10 +387,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setDiffRefreshVersion(deleteKey)
     setDiffUnseen(deleteKey)
     setDiffUnseenFiles(deleteKey)
+    setDiffData(deleteKey)
     setSessionChannelMap(deleteKey)
     setSessionModelMap(deleteKey)
     clearPreviewCacheForSession(id)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setSessionChannelMap, setSessionModelMap])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setSessionChannelMap, setSessionModelMap])
 
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null
@@ -1757,7 +1760,7 @@ const ConversationItem = React.memo(function ConversationItem({
             startEdit()
           }}
           className={cn(
-            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-md transition-colors duration-100 titlebar-no-drag text-left',
             active
               ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
               : 'hover:bg-primary/5'
@@ -1966,7 +1969,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             startEdit()
           }}
           className={cn(
-            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left',
+            'group relative w-full flex items-center gap-2 px-3 py-[7px] rounded-md transition-colors duration-100 titlebar-no-drag text-left',
             active
               ? 'session-item-selected bg-primary/10 shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
               : 'hover:bg-primary/5'

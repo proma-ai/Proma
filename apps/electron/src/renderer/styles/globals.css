@@ -892,7 +892,16 @@
   content: none;
 }
 
-/* ===== FileBrowser 自动定位的高亮脉冲 ===== */
+/* ===== FileBrowser 自动定位的高亮脉冲 =====
+ * 末关键帧用 transparent 是故意的：Agent 自动 reveal（select=false）一行不进入选中态，
+ * 动画结束后行需要恢复无背景色。如果改成 hsl(--accent) 等不透明色，那一行会一直停留
+ * 在高亮色直到下次重渲染。
+ *
+ * 副作用：当 reveal 同时把目标置为选中态（用户搜索点击，select=true）时，
+ * animation 在 1.2s 内会盖掉 .bg-accent，造成"先闪→变透明→才出现选中色"的视觉断层。
+ * 因此 FileTreeItem 在 select=true 路径下跳过 .file-browser-row-flash class，
+ * 直接呈现选中态，避开此冲突。详见 FileBrowser.tsx 中 reveal 分支的注释。
+ */
 @keyframes file-browser-flash {
   0%   { background-color: hsl(var(--primary) / 0.18); }
   50%  { background-color: hsl(var(--primary) / 0.22); }
@@ -900,6 +909,16 @@
 }
 .file-browser-row-flash {
   animation: file-browser-flash 1.2s ease-out;
+}
+
+/* ===== FileBrowser sticky 目录行：每条 sticky 链路最末一行加一道软扩散阴影 =====
+   :has() 选择器只能向后看 sticky 行同一父级内的兄弟，所以 "栈最末" 实际语义是
+   "本节点子树内不再有更深的 sticky 子行"。
+   - 单棵展开链路：只有最深一层 sticky 子行有阴影（父行的子项容器内含子 sticky，被规则排除）。
+   - 多个平行展开（多个根目录同时打开）：每条链路各自一道阴影——这里把每棵独立树视为独立视觉单元。
+   要做到全局唯一一道阴影需要 JS 监听滚动 + 展开状态动态打标记，目前不做。 */
+[data-sticky-row="true"]:not(:has(~ * [data-sticky-row="true"])) {
+  box-shadow: 0 2px 4px -1px hsl(var(--foreground) / 0.08);
 }
 
 /* ===== Office 内联预览 ===== */

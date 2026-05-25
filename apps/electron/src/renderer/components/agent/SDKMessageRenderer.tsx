@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
 import { TaskProgressCard } from './TaskProgressCard'
+import { TurnFileChangesSummary } from './TurnFileChangesSummary'
 import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
 import { DurationBadge } from './AgentMessages'
 import {
@@ -649,6 +650,10 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
           </div>
         )}
       </MessageContent>
+      {/* 文件改动汇总：流式结束后展示本轮所有 Edit/Write/MultiEdit/NotebookEdit 文件 */}
+      {!isStreaming && (
+        <TurnFileChangesSummary turnMessages={turn.turnMessages} basePath={basePath} />
+      )}
       {/* 操作栏：流式输出完成后显示操作按钮 */}
       {!isStreaming && (() => {
         const textContent = topLevelBlocks

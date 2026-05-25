@@ -21,6 +21,8 @@ export interface PreviewFile {
   readOnly?: boolean
   /** 候选基础目录（用于相对路径解析） */
   basePaths?: string[]
+  /** 文件是否落在当前会话的 diff scope 内（与 getUnstagedChanges 的 candidates 对齐） */
+  inDiffScope?: boolean
 }
 
 // ===== Atoms =====
@@ -34,8 +36,8 @@ export const previewFileMapAtom = atom<Map<string, PreviewFile | null>>(new Map(
 /** 分栏比例（对话占比），持久化 */
 export const previewSplitRatioAtom = atomWithStorage<number>('proma-preview-split-ratio', 0.5)
 
-/** 自动预览开关，持久化 */
-export const autoPreviewEnabledAtom = atomWithStorage<boolean>('proma-auto-preview-enabled', true)
+/** 自动预览开关，持久化（默认关闭以减轻设备性能负担，老用户保留已设置的偏好） */
+export const autoPreviewEnabledAtom = atomWithStorage<boolean>('proma-auto-preview-enabled', false)
 
 /** 当前会话的预览面板是否打开（derived） */
 export const currentSessionPreviewOpenAtom = atom<boolean>((get) => {

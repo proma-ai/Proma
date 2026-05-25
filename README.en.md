@@ -283,4 +283,12 @@ Proma currently has a PR bounty program. You can leave your email in the PR desc
 
 ## License
 
-Current workspace packages declare `Apache-2.0` in their `package.json` files. Until a root license file is added, please refer to the actual repository release contents and package declarations.
+The Proma Community Edition is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE). The full license text is available in the `LICENSE` file at the repository root.
+
+**Personal / non-commercial use**: free to use, modify, and distribute, subject to the terms of AGPL-3.0.
+
+**Commercial use**: permitted as long as you fully comply with AGPL-3.0, including (but not limited to) releasing the complete corresponding source code of any modified version you distribute or make available over a network, and licensing all derivative works under AGPL-3.0.
+
+**Commercial license (exemption from AGPL-3.0 obligations)**: if you want to integrate Proma into a closed-source product, offer it as a SaaS service without releasing your modifications, or use it in any way that cannot meet AGPL-3.0 requirements, please contact us by email to obtain a commercial license: [erlichliu@gmail.com](mailto:erlichliu@gmail.com).
+
+By submitting a Pull Request to this project, you agree to license your contribution under AGPL-3.0 and to grant the maintainer the right to relicense it under future commercial license terms.
