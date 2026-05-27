@@ -10,12 +10,16 @@ import { Table } from '@tiptap/extension-table'
 import { TableRow } from '@tiptap/extension-table-row'
 import { TableCell } from '@tiptap/extension-table-cell'
 import { TableHeader } from '@tiptap/extension-table-header'
+import { createRoot } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
 import DOMPurify from 'dompurify'
 import katex from 'katex'
 import { highlightCode, highlightToTokens, getDisplayName } from '@proma/core'
+import { MermaidBlock } from '@proma/ui'
 import type { HighlightTokensResult } from '@proma/core'
 import type { FileAccessOptions } from '@proma/shared'
 import { extractCodeText } from '../../lib/markdown-rich-text'
+import { shouldRenderMermaidCodeBlock } from '../../lib/mermaid-detection'
 
 type FileAccessRef = { current: FileAccessOptions | undefined }
 /** 传 null 表示当前编辑器无会话/文件上下文（如 ScratchPad），跳过路径解析。 */
@@ -34,8 +38,15 @@ interface ShikiDecorationState {
   decorations: DecorationSet
 }
 
+interface CodeBlockRenderModeState {
+  decorations: DecorationSet
+  editable: boolean | null
+}
+
 const shikiCodeBlockPluginKey = new PluginKey<ShikiDecorationState>('markdownShikiCodeBlock')
+const codeBlockRenderModePluginKey = new PluginKey<CodeBlockRenderModeState>('markdownCodeBlockRenderMode')
 const SHIKI_REFRESH_META = 'markdownShikiCodeBlockRefresh'
+const CODE_BLOCK_RENDER_MODE_META = 'markdownCodeBlockRenderModeRefresh'
 const SHIKI_TOKEN_CACHE_LIMIT = 160
 const shikiTokenCache = new Map<string, HighlightTokensResult>()
 
@@ -266,6 +277,71 @@ function createShikiDecorationsPlugin(themeRef: ThemeRef): Plugin<ShikiDecoratio
             clearTimeout(scheduleHandle)
             scheduleHandle = null
           }
+        },
+      }
+    },
+  })
+}
+
+function buildCodeBlockRenderModeDecorations(doc: ProseMirrorNode, editable: boolean): DecorationSet {
+  const decorations: Decoration[] = []
+  doc.descendants((node, pos) => {
+    if (node.type.name !== 'codeBlock') return true
+    decorations.push(Decoration.node(pos, pos + node.nodeSize, {
+      'data-proma-render-mode': editable ? 'editing' : 'preview',
+    }))
+    return false
+  })
+  return DecorationSet.create(doc, decorations)
+}
+
+function createCodeBlockRenderModePlugin(): Plugin<CodeBlockRenderModeState> {
+  return new Plugin<CodeBlockRenderModeState>({
+    key: codeBlockRenderModePluginKey,
+    state: {
+      init: () => ({ decorations: DecorationSet.empty, editable: null }),
+      apply: (tr, previous) => {
+        const nextEditable = tr.getMeta(CODE_BLOCK_RENDER_MODE_META)
+        if (typeof nextEditable === 'boolean') {
+          return {
+            decorations: buildCodeBlockRenderModeDecorations(tr.doc, nextEditable),
+            editable: nextEditable,
+          }
+        }
+
+        return {
+          decorations: previous.decorations.map(tr.mapping, tr.doc),
+          editable: previous.editable,
+        }
+      },
+    },
+    props: {
+      decorations: (state) => codeBlockRenderModePluginKey.getState(state)?.decorations ?? DecorationSet.empty,
+    },
+    view: (view) => {
+      let lastEditable = view.editable
+      let refreshHandle: ReturnType<typeof setTimeout> | null = null
+
+      const scheduleRefresh = (currentView: EditorView): void => {
+        if (refreshHandle !== null) clearTimeout(refreshHandle)
+        refreshHandle = setTimeout(() => {
+          refreshHandle = null
+          if (currentView.isDestroyed) return
+          currentView.dispatch(currentView.state.tr.setMeta(CODE_BLOCK_RENDER_MODE_META, currentView.editable))
+        }, 0)
+      }
+
+      // 初始化一组节点装饰；之后 editable 切换时装饰变化会促使 NodeView 重新 update。
+      scheduleRefresh(view)
+
+      return {
+        update: (nextView) => {
+          if (nextView.editable === lastEditable) return
+          lastEditable = nextView.editable
+          scheduleRefresh(nextView)
+        },
+        destroy: () => {
+          if (refreshHandle !== null) clearTimeout(refreshHandle)
         },
       }
     },
@@ -507,14 +583,15 @@ function createMathView(initialNode: ProseMirrorNode, displayMode: boolean) {
   })
 }
 
-function createShikiCodeBlockView(initialNode: ProseMirrorNode, _themeRef: ThemeRef) {
+function createShikiCodeBlockView(initialNode: ProseMirrorNode, view: EditorView) {
   const dom = document.createElement('div')
   setClass(dom, 'not-prose my-3 overflow-hidden rounded-md border border-border/40 bg-muted/30')
+  dom.dataset.promaCodeBlock = 'true'
 
   // 头部栏：语言标签 + 复制按钮
   const header = document.createElement('div')
   header.contentEditable = 'false'
-  setClass(header, 'flex h-8 items-center justify-between border-b border-border/30 px-3 text-xs text-muted-foreground')
+  setClass(header, 'proma-code-header flex h-8 items-center justify-between border-b border-border/30 px-3 text-xs text-muted-foreground')
   const label = document.createElement('span')
   label.className = 'font-medium select-none'
   header.appendChild(label)
@@ -537,7 +614,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, _themeRef: Theme
   header.appendChild(copyBtn)
 
   const body = document.createElement('div')
-  setClass(body, 'markdown-code-block-body overflow-x-auto')
+  setClass(body, 'proma-code-source-body markdown-code-block-body overflow-x-auto')
 
   const editPre = document.createElement('pre')
   setClass(editPre, 'markdown-code-edit-layer m-0 min-h-[3.2em] overflow-x-auto bg-transparent p-4 font-mono text-[13px] leading-[1.6]')
@@ -549,13 +626,34 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, _themeRef: Theme
   editPre.appendChild(contentDOM)
   body.appendChild(editPre)
 
+  const mermaidHost = document.createElement('div')
+  mermaidHost.contentEditable = 'false'
+  setClass(mermaidHost, 'proma-mermaid-preview hidden')
+  const mermaidRoot: Root = createRoot(mermaidHost)
+  let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null
+  let destroyed = false
+
   dom.appendChild(header)
+  dom.appendChild(mermaidHost)
   dom.appendChild(body)
+
+  const scheduleMermaidRender = (nextCode: string | null): void => {
+    if (mermaidRenderTimer) clearTimeout(mermaidRenderTimer)
+    mermaidRenderTimer = setTimeout(() => {
+      mermaidRenderTimer = null
+      if (destroyed) return
+      mermaidRoot.render(nextCode === null ? null : <MermaidBlock code={nextCode} />)
+    }, 0)
+  }
 
   const render = (node: ProseMirrorNode) => {
     const language = String(node.attrs.language ?? 'text') || 'text'
     currentCode = node.textContent
     label.textContent = language === 'text' ? 'Code' : getDisplayName(language)
+    const className = language === 'text' ? undefined : `language-${language}`
+    const shouldRenderMermaid = !view.editable && shouldRenderMermaidCodeBlock(className, currentCode)
+    dom.classList.toggle('proma-code-block--mermaid', shouldRenderMermaid)
+    scheduleMermaidRender(shouldRenderMermaid ? currentCode : null)
   }
 
   render(initialNode)
@@ -568,7 +666,10 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, _themeRef: Theme
       return true
     },
     destroy() {
+      destroyed = true
+      if (mermaidRenderTimer) clearTimeout(mermaidRenderTimer)
       if (copyTimeout) clearTimeout(copyTimeout)
+      setTimeout(() => mermaidRoot.unmount(), 0)
     },
     contentDOM,
     ignoreMutation(mutation: ViewMutationRecord) {
@@ -916,11 +1017,11 @@ export function createShikiCodeBlock(themeRef: ThemeRef): Node {
     },
 
     addNodeView() {
-      return ({ node }) => createShikiCodeBlockView(node, themeRef)
+      return ({ node, view }) => createShikiCodeBlockView(node, view)
     },
 
     addProseMirrorPlugins() {
-      return [createShikiDecorationsPlugin(themeRef)]
+      return [createShikiDecorationsPlugin(themeRef), createCodeBlockRenderModePlugin()]
     },
   })
 }

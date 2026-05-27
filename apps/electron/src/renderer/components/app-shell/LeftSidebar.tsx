@@ -73,6 +73,7 @@ import { WorkspaceSelector } from '@/components/agent/WorkspaceSelector'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
 import { MoveSessionDialog } from '@/components/agent/MoveSessionDialog'
 import { detectIsMac } from '@/lib/platform'
+import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1275,7 +1276,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               <Search size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">搜索 (⌘F)</TooltipContent>
+          <TooltipContent side="bottom">搜索 ({getAcceleratorDisplay(getActiveAccelerator('global-search'))})</TooltipContent>
         </Tooltip>
       </div>
 

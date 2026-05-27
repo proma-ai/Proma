@@ -7,6 +7,9 @@
 
 import { useEffect } from 'react'
 import { registerShortcut } from '@/lib/shortcut-registry'
+import type { ShortcutRegistrationOptions } from '@/lib/shortcut-registry'
+
+const DEFAULT_SHORTCUT_OPTIONS: ShortcutRegistrationOptions = {}
 
 /**
  * 注册一个快捷键 handler
@@ -19,9 +22,11 @@ export function useShortcut(
   id: string,
   callback: () => void,
   enabled = true,
+  options?: ShortcutRegistrationOptions,
 ): void {
+  const shortcutOptions = options ?? DEFAULT_SHORTCUT_OPTIONS
   useEffect(() => {
     if (!enabled) return
-    return registerShortcut(id, callback)
-  }, [id, callback, enabled])
+    return registerShortcut(id, callback, shortcutOptions)
+  }, [id, callback, enabled, shortcutOptions])
 }

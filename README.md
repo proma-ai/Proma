@@ -155,10 +155,10 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.9.12` | Electron 桌面应用 |
-| `@proma/shared` | `0.1.17` | 共享类型、IPC 常量、配置和工具 |
+| `@proma/electron` | `0.10.7` | Electron 桌面应用 |
+| `@proma/shared` | `0.1.20` | 共享类型、IPC 常量、配置和工具 |
 | `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
-| `@proma/ui` | `0.1.3` | 共享 React UI 组件 |
+| `@proma/ui` | `0.1.6` | 共享 React UI 组件 |
 
 常用命令：
 
@@ -281,7 +281,7 @@ Proma 目前设有 PR 赠金计划。提交 PR 时可以在描述中留下邮箱
 ## 致谢
 
 - [Shiki](https://shiki.style/)：代码高亮。
-- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid)：Mermaid 图表渲染。
+- [Beautiful Mermaid](https://github.com/lukilabs/beautiful-mermaid) 与 [Mermaid](https://mermaid.js.org/)：Mermaid 图表渲染与官方兜底渲染。
 - [Cherry Studio](https://github.com/CherryHQ/cherry-studio)：多供应商桌面 AI 产品启发。
 - [Lobe Icons](https://github.com/lobehub/lobe-icons)：AI / LLM 品牌图标。
 - [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss)：Agent SDK 集成模式参考。

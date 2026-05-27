@@ -184,7 +184,23 @@ export function MarkdownRichEditor({
   return (
     <div className="flex min-h-full flex-col">
       {editing && editor && <MarkdownEditorToolbar editor={editor} />}
-      <EditorContent editor={editor} className="min-h-full flex-1" />
+      <EditorContent
+        editor={editor}
+        className={cn(
+          'min-h-full flex-1',
+          isEditable
+            ? '[&_.proma-mermaid-preview]:hidden [&_.proma-code-source-body]:block'
+            : [
+                '[&_.proma-code-block--mermaid]:overflow-visible',
+                '[&_.proma-code-block--mermaid]:rounded-none',
+                '[&_.proma-code-block--mermaid]:border-0',
+                '[&_.proma-code-block--mermaid]:bg-transparent',
+                '[&_.proma-code-block--mermaid_.proma-code-header]:hidden',
+                '[&_.proma-code-block--mermaid_.proma-mermaid-preview]:block',
+                '[&_.proma-code-block--mermaid_.proma-code-source-body]:hidden',
+              ],
+        )}
+      />
       {editing && editor && <TableBubbleMenu editor={editor} />}
     </div>
   )

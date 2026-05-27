@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react'
-import { getDisplayName, highlightCode, highlightToTokens } from '@proma/core'
+import { getDisplayName, highlightToTokens, onHighlighterReady } from '@proma/core'
 import type { HighlightToken, HighlightTokensResult } from '@proma/core'
 
 /** react-markdown 传入的 <code> 元素 props */
@@ -53,9 +53,16 @@ function extractText(node: React.ReactNode): string {
 
 /** 从 children 中提取语言名和代码文本 */
 function extractCodeInfo(children: React.ReactNode): { language: string; code: string } {
+  // react-markdown v10 把 <code> 替换成自定义组件后，type 不再是字符串 'code'，
+  // 但 pre 的 code child 要么是原生 'code'（v9 及之前），要么是自定义函数/对象组件（v10+）。
+  // 通过 type 形态过滤掉意外混入的其他原生 HTML 元素，避免未来 react-markdown
+  // 行为变化时静默把第一个 element 误识别为 code
   const codeElement = React.Children.toArray(children).find(
-    (child): child is React.ReactElement =>
-      React.isValidElement(child) && (child as React.ReactElement).type === 'code'
+    (child): child is React.ReactElement => {
+      if (!React.isValidElement(child)) return false
+      const t = (child as React.ReactElement).type
+      return t === 'code' || typeof t === 'function' || typeof t === 'object'
+    }
   ) as React.ReactElement | undefined
 
   if (!codeElement) {
@@ -174,16 +181,9 @@ export function CodeBlock({ children }: CodeBlockProps): React.ReactElement {
       return
     }
 
-    // 异步兜底：高亮器尚未初始化
-    let cancelled = false
-    highlightCode({ code: trimmedCode, language: langOrText })
-      .then(() => {
-        // 初始化完成，用同步路径获取最新结果
-        if (!cancelled) doHighlight()
-      })
-      .catch((error) => console.error('[CodeBlock] 高亮失败:', error))
-
-    return () => { cancelled = true }
+    // 兜底：高亮器尚未初始化，订阅就绪事件，初始化完成后用同步路径上色
+    const unsubscribe = onHighlighterReady(() => doHighlight())
+    return () => unsubscribe()
   }, [trimmedCode, langOrText])
 
   // 清理节流定时器

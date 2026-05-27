@@ -15,8 +15,22 @@ const isMac =
 
 // ===== 注册表状态 =====
 
+export interface ShortcutRegistrationOptions {
+  /**
+   * 独占模式。若同一快捷键的任一注册项设置了 exclusive=true，
+   * 则仅执行**最后注册的** exclusive handler，其余 handler（无论是否 exclusive）均被跳过。
+   * 用于在嵌套场景中让"最内层"组件捕获快捷键，避免触发外层全局逻辑。
+   */
+  exclusive?: boolean
+}
+
+interface ShortcutHandlerEntry {
+  callback: () => void
+  options: ShortcutRegistrationOptions
+}
+
 /** shortcutId → handler 集合 */
-const handlers = new Map<string, Set<() => void>>()
+const handlers = new Map<string, Set<ShortcutHandlerEntry>>()
 
 /** 当前用户自定义配置 */
 let currentOverrides: ShortcutOverrides = {}
@@ -153,9 +167,21 @@ function dispatchShortcut(e: KeyboardEvent): void {
       if (handlerSet && handlerSet.size > 0) {
         e.preventDefault()
         e.stopPropagation()
-        // 执行所有注册的 handler
-        for (const handler of handlerSet) {
-          handler()
+        const handlerEntries = Array.from(handlerSet)
+        let exclusiveEntry: ShortcutHandlerEntry | undefined
+        for (let i = handlerEntries.length - 1; i >= 0; i--) {
+          if (handlerEntries[i]!.options.exclusive) {
+            exclusiveEntry = handlerEntries[i]
+            break
+          }
+        }
+        if (exclusiveEntry) {
+          exclusiveEntry.callback()
+        } else {
+          // 执行所有注册的 handler
+          for (const entry of handlerEntries) {
+            entry.callback()
+          }
         }
       }
       return // 匹配一个即停止
@@ -185,16 +211,18 @@ export function initShortcutRegistry(): void {
 export function registerShortcut(
   id: string,
   callback: () => void,
+  options: ShortcutRegistrationOptions = {},
 ): () => void {
   if (!handlers.has(id)) {
     handlers.set(id, new Set())
   }
-  handlers.get(id)!.add(callback)
+  const entry: ShortcutHandlerEntry = { callback, options }
+  handlers.get(id)!.add(entry)
 
   return () => {
     const set = handlers.get(id)
     if (set) {
-      set.delete(callback)
+      set.delete(entry)
       if (set.size === 0) handlers.delete(id)
     }
   }

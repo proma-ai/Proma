@@ -15,8 +15,11 @@ import { cn } from '@/lib/utils'
 import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
+import { useShortcut } from '@/hooks/useShortcut'
+import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
+import { PreviewFindBar } from './PreviewFindBar'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
@@ -25,6 +28,7 @@ const DOCX_EXTS = new Set(['.docx'])
 const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
 const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
+const FILE_FIND_SHORTCUT_OPTIONS = { exclusive: true }
 
 /**
  * 简易 LRU 缓存：保留最近访问的 N 个 entries。
@@ -212,6 +216,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const imageDragging = React.useRef(false)
   const imageDragStart = React.useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 })
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
+  const [findOpen, setFindOpen] = React.useState(false)
   const [loading, setLoading] = React.useState(true)
   const [copied, setCopied] = React.useState(false)
   const refreshVersionMap = useAtomValue(agentDiffRefreshVersionAtom)
@@ -227,6 +232,30 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
   const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
   const isImage = previewOnly && IMAGE_EXTS.has(ext)
+
+  React.useEffect(() => {
+    initShortcutRegistry()
+  }, [])
+
+  useShortcut(
+    'file-find',
+    React.useCallback(() => setFindOpen(true), []),
+    true,
+    FILE_FIND_SHORTCUT_OPTIONS,
+  )
+
+  const findContentKey = React.useMemo(() => JSON.stringify({
+    filePath,
+    previewOnly: Boolean(previewOnly),
+    viewMode,
+    loading,
+    newLength: newContent.length,
+    oldLength: oldContent.length,
+    docxLength: docxHtml.length,
+    officeLength: officeHtml.length,
+    markdownEditing,
+    markdownSourceMode,
+  }), [docxHtml.length, filePath, loading, markdownEditing, markdownSourceMode, newContent.length, officeHtml.length, oldContent.length, previewOnly, viewMode])
 
   // ===== 选中文本引用（Quoted Selection）=====
 
@@ -985,13 +1014,21 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         </button>
       </div>
 
-      <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-auto scrollbar-thin relative">
-        {loading ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
-        ) : previewOnly ? (
-          isPdf ? (
-            pdfSrc ? (
-              <div className="relative h-full">
+      <div className="relative flex-1 min-h-0">
+        <PreviewFindBar
+          open={findOpen}
+          rootRef={scrollContainerRef}
+          contentKey={findContentKey}
+          unsupportedReason={isPdf ? '暂不支持 PDF 搜索' : undefined}
+          onOpenChange={setFindOpen}
+        />
+        <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full overflow-auto scrollbar-thin relative">
+          {loading ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
+          ) : previewOnly ? (
+            isPdf ? (
+              pdfSrc ? (
+                <div className="relative h-full">
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg bg-background/80 backdrop-filter backdrop-blur-sm border border-border/30 shadow-sm">
                   <button
                     type="button"
@@ -1012,10 +1049,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   title={filePath.split('/').pop() || 'PDF'}
                 />
               </div>
-            ) : null
-          ) : isImage ? (
-            imageDataUrl ? (
-              <div className="relative h-full">
+              ) : null
+            ) : isImage ? (
+              imageDataUrl ? (
+                <div className="relative h-full">
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg bg-background/80 backdrop-blur-sm border border-border/30 shadow-sm">
                   <button
                     type="button"
@@ -1068,74 +1105,75 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   </div>
                 </div>
               </div>
-            ) : null
-          ) : isDocx ? (
-            docxHtml ? (
-              <div
-                className="prose prose-sm dark:prose-invert max-w-none px-4 py-3"
-                dangerouslySetInnerHTML={{ __html: docxHtml }}
-              />
-            ) : null
-          ) : isOfficePreview ? (
-            officeHtml ? (
-              <div
-                className="office-preview-host"
-                dangerouslySetInnerHTML={{ __html: officeHtml }}
-              />
-            ) : null
-          ) : isLegacyOffice ? null : isMarkdown ? (
-            markdownEditing && markdownSourceMode ? (
-              <textarea
-                value={markdownDraft}
-                onChange={(e) => setMarkdownDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    exitMarkdownEdit()
-                  }
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault()
-                    void saveMarkdownEdit()
-                  }
-                }}
-                autoFocus
-                spellCheck={false}
-                className="w-full min-h-full resize-none border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-none focus:outline-none"
-              />
+              ) : null
+            ) : isDocx ? (
+              docxHtml ? (
+                <div
+                  className="prose prose-sm dark:prose-invert max-w-none px-4 py-3"
+                  dangerouslySetInnerHTML={{ __html: docxHtml }}
+                />
+              ) : null
+            ) : isOfficePreview ? (
+              officeHtml ? (
+                <div
+                  className="office-preview-host"
+                  dangerouslySetInnerHTML={{ __html: officeHtml }}
+                />
+              ) : null
+            ) : isLegacyOffice ? null : isMarkdown ? (
+              markdownEditing && markdownSourceMode ? (
+                <textarea
+                  value={markdownDraft}
+                  onChange={(e) => setMarkdownDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      exitMarkdownEdit()
+                    }
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault()
+                      void saveMarkdownEdit()
+                    }
+                  }}
+                  autoFocus
+                  spellCheck={false}
+                  className="w-full min-h-full resize-none border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-none focus:outline-none"
+                />
+              ) : (
+                <MarkdownRichEditor
+                  value={markdownEditing ? markdownDraft : newContent}
+                  editing={markdownEditing}
+                  onChange={setMarkdownDraft}
+                  onSave={() => void saveMarkdownEdit()}
+                  onCancel={exitMarkdownEdit}
+                  onRequestEdit={startMarkdownEdit}
+                  disabled={markdownSaving}
+                  fileAccess={markdownFileAccess}
+                  shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}
+                />
+              )
+            ) : newContent ? (
+              newContent.length > MAX_PREVIEW_CHARS ? (
+                <pre className="p-3 text-[13px] leading-relaxed text-foreground/80 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {newContent.slice(0, MAX_PREVIEW_CHARS)}
+                  <span className="text-muted-foreground block mt-2">
+                    （文件过大，仅显示前 {MAX_PREVIEW_CHARS.toLocaleString()} 字符）
+                  </span>
+                </pre>
+              ) : (
+                <div className="h-full">
+                  <PierreFile file={pierreFile} options={pierreOptions} />
+                </div>
+              )
             ) : (
-              <MarkdownRichEditor
-                value={markdownEditing ? markdownDraft : newContent}
-                editing={markdownEditing}
-                onChange={setMarkdownDraft}
-                onSave={() => void saveMarkdownEdit()}
-                onCancel={exitMarkdownEdit}
-                onRequestEdit={startMarkdownEdit}
-                disabled={markdownSaving}
-                fileAccess={markdownFileAccess}
-                shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}
-              />
-            )
-          ) : newContent ? (
-            newContent.length > MAX_PREVIEW_CHARS ? (
               <pre className="p-3 text-[13px] leading-relaxed text-foreground/80 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">
-                {newContent.slice(0, MAX_PREVIEW_CHARS)}
-                <span className="text-muted-foreground block mt-2">
-                  （文件过大，仅显示前 {MAX_PREVIEW_CHARS.toLocaleString()} 字符）
-                </span>
+                <span className="text-muted-foreground">（文件为空）</span>
               </pre>
-            ) : (
-              <div className="h-full">
-                <PierreFile file={pierreFile} options={pierreOptions} />
-              </div>
             )
           ) : (
-            <pre className="p-3 text-[13px] leading-relaxed text-foreground/80 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">
-              <span className="text-muted-foreground">（文件为空）</span>
-            </pre>
-          )
-        ) : (
-          <DiffView oldContent={oldContent} newContent={newContent} filePath={filePath} viewMode={viewMode} />
-        )}
+            <DiffView oldContent={oldContent} newContent={newContent} filePath={filePath} viewMode={viewMode} />
+          )}
+        </div>
       </div>
     </div>
   )

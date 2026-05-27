@@ -119,9 +119,34 @@ let highlighterPromise: Promise<ShikiHighlighter> | null = null
 /** 已 resolve 的高亮器实例缓存（同步访问用） */
 let cachedHighlighter: ShikiHighlighter | null = null
 
+/** 高亮器就绪订阅者，初始化完成后一次性触发并清空 */
+const readyListeners = new Set<() => void>()
+
+/** 是否已完成首次初始化（同步查询用） */
+export function isHighlighterReady(): boolean {
+  return cachedHighlighter !== null
+}
+
+/**
+ * 订阅高亮器就绪事件
+ * - 已就绪时立即同步触发回调，返回 noop unsubscribe
+ * - 未就绪时入队，初始化完成后触发一次后自动清理
+ * 返回 unsubscribe 函数，组件卸载时应调用以避免泄漏
+ */
+export function onHighlighterReady(callback: () => void): () => void {
+  if (cachedHighlighter) {
+    callback()
+    return () => {}
+  }
+  readyListeners.add(callback)
+  // 触发初始化（如果还没启动）
+  void getHighlighter()
+  return () => readyListeners.delete(callback)
+}
+
 /**
  * 获取或创建 Shiki 高亮器单例
- * 首次调用时懒加载，resolve 后缓存实例供同步使用
+ * 首次调用时懒加载，resolve 后缓存实例供同步使用，并通知所有 ready 订阅者
  */
 function getHighlighter(): Promise<ShikiHighlighter> {
   if (!highlighterPromise) {
@@ -130,6 +155,16 @@ function getHighlighter(): Promise<ShikiHighlighter> {
       langs: DEFAULT_LANGS,
     }).then((hl) => {
       cachedHighlighter = hl
+      // 通知所有等待中的订阅者，触发后清空（一次性事件）
+      const listeners = Array.from(readyListeners)
+      readyListeners.clear()
+      for (const listener of listeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[shiki-service] ready listener 抛错:', error)
+        }
+      }
       return hl
     })
   }

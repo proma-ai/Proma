@@ -23,11 +23,11 @@ Bun workspace monorepo：
 ```
 proma-v2/
 ├── packages/
-│   ├── shared/     # 共享类型、IPC 通道常量、配置、工具函数 (v0.1.15)
-│   ├── core/       # AI Provider 适配器、代码高亮服务 (v0.2.2)
-│   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock) (v0.1.3)
+│   ├── shared/     # 共享类型、IPC 通道常量、配置、工具函数 (v0.1.20)
+│   ├── core/       # AI Provider 适配器、代码高亮服务 (v0.2.9)
+│   └── ui/         # 共享 UI 组件 (CodeBlock, MermaidBlock) (v0.1.6)
 └── apps/
-    └── electron/   # Electron 桌面应用 (v0.9.5)
+    └── electron/   # Electron 桌面应用 (v0.10.7)
         └── src/
             ├── main/       # 主进程 + 服务层 (main/lib/)
             ├── preload/    # IPC 上下文桥接
@@ -40,23 +40,23 @@ proma-v2/
 
 ### 包职责详解
 
-#### @proma/shared (v0.1.15)
+#### @proma/shared (v0.1.20)
 - **导出模块**：`./types`、`./config`、`./utils`、`./constants/permission-rules`
 - **关键类型**：`AgentMessage`、`ChatMessage`、`Channel`、`PermissionRequest`、`FeishuConfig`
 - **依赖**：无运行时依赖（仅 TypeScript）
 
-#### @proma/core (v0.2.2)
+#### @proma/core (v0.2.9)
 - **导出模块**：`./providers`、`./highlight`、`./types`、`./utils`
 - **关键功能**：Provider 适配器注册表、代码高亮（Shiki）
 - **依赖**：`@proma/shared`、`shiki`
 - **Peer 依赖**：`@anthropic-ai/Codex-agent-sdk`、`@anthropic-ai/sdk`、`@modelcontextprotocol/sdk`
 
-#### @proma/ui (v0.1.3)
+#### @proma/ui (v0.1.6)
 - **关键组件**：共享 React UI 组件库
-- **依赖**：`@proma/core`、`beautiful-mermaid`、`shiki`、Radix UI
+- **依赖**：`@proma/core`、`beautiful-mermaid`、`mermaid`、`shiki`
 - **Peer 依赖**：`react@^18.3.0`、`react-dom@^18.3.0`
 
-#### @proma/electron (v0.9.5)
+#### @proma/electron (v0.10.7)
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
   - `@anthropic-ai/Codex-agent-sdk@0.2.120` - Agent SDK

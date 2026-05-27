@@ -135,7 +135,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
       el.removeEventListener('scroll', update)
       observer.disconnect()
     }
-  }, [scrollRef, items])
+  }, [scrollRef])
 
   // ── 面板打开时自动聚焦搜索框 ──
 
