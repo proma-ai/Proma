@@ -27,7 +27,7 @@ export function DefaultAppOpenButton({
   variant = 'labeled',
   className,
 }: DefaultAppOpenButtonProps): React.ReactElement | null {
-  const info = useDefaultAppForFile(filePath, access)
+  const info = useDefaultAppForFile(filePath)
 
   const handleClick = React.useCallback(() => {
     window.electronAPI.systemOpenFile(filePath, undefined, access).catch((err) => {

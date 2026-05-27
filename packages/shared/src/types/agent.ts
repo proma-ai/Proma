@@ -518,7 +518,10 @@ export type PromaEvent =
   | { type: 'model_resolved'; model: string }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
+  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }
 
+/** 外部入口触发 Agent 运行的来源 */
+export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge'
 
 /** IPC 传输的统一 payload（替代 AgentEvent） */
 export type AgentStreamPayload =

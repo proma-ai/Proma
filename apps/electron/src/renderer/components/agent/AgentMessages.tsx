@@ -35,6 +35,7 @@ import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
+import { buildLiveGroupSet } from './live-group-set'
 import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -544,22 +545,12 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
-    if (!liveMessages || liveMessages.length === 0) return new Set<MessageGroup>()
-    const liveSet = new Set<SDKMessage>(liveMessages)
-    const result = new Set<MessageGroup>()
-    for (const group of allGroups) {
-      let isLive = false
-      if (group.type === 'user' || group.type === 'system') {
-        isLive = liveSet.has(group.message as SDKMessage)
-      } else {
-        // assistant-turn 可能被 mergeAdjacentSameModelTurns 合并，
-        // 需检查任意一条 assistantMessage 是否来自实时流
-        isLive = group.assistantMessages.some((m) => liveSet.has(m as SDKMessage))
-      }
-      if (isLive) result.add(group)
-    }
-    return result
-  }, [allGroups, liveMessages])
+    return buildLiveGroupSet({
+      allGroups,
+      liveMessages,
+      streaming,
+    })
+  }, [allGroups, liveMessages, streaming])
 
   // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
   const minimapItems: MinimapItem[] = React.useMemo(

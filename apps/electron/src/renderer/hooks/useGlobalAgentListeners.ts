@@ -56,7 +56,8 @@ import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTab
 import { autoPreviewEnabledAtom, previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
-import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
+import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -343,6 +344,62 @@ export function useGlobalAgentListeners(): void {
       return sessions.find((s) => s.id === sessionId)?.title ?? '未命名会话'
     }
 
+    const activateExternalAgentRun = (event: Extract<PromaEvent, { type: 'external_run_started' }>): void => {
+      const applyActivation = (sessions: AgentSessionMeta[]): void => {
+        const activation = buildExternalAgentRunActivation({
+          tabs: store.get(tabsAtom),
+          sessions,
+          sessionId: event.sessionId,
+          title: event.title,
+          workspaceId: event.workspaceId,
+          modelId: event.modelId,
+          startedAt: event.startedAt,
+          currentStreamState: store.get(agentStreamingStatesAtom).get(event.sessionId),
+        })
+
+        store.set(agentSessionsAtom, sessions)
+        store.set(tabsAtom, activation.tabs)
+        store.set(activeTabIdAtom, activation.activeTabId)
+        store.set(appModeAtom, 'agent')
+        store.set(currentAgentSessionIdAtom, event.sessionId)
+        if (activation.workspaceId) {
+          store.set(currentAgentWorkspaceIdAtom, activation.workspaceId)
+          window.electronAPI.updateSettings({ agentWorkspaceId: activation.workspaceId }).catch(console.error)
+        }
+        const activationModelId = activation.modelId
+        if (activationModelId) {
+          store.set(agentSessionModelMapAtom, (prev) => {
+            const map = new Map(prev)
+            map.set(event.sessionId, activationModelId)
+            return map
+          })
+        }
+        store.set(unviewedCompletedSessionIdsAtom, (prev) => {
+          if (!prev.has(event.sessionId)) return prev
+          const next = new Set(prev)
+          next.delete(event.sessionId)
+          return next
+        })
+        store.set(agentStreamingStatesAtom, (prev) => {
+          const map = new Map(prev)
+          map.set(event.sessionId, activation.streamState)
+          return map
+        })
+      }
+
+      const knownSessions = store.get(agentSessionsAtom)
+      if (knownSessions.some((session) => session.id === event.sessionId)) {
+        applyActivation(knownSessions)
+        return
+      }
+
+      window.electronAPI.listAgentSessions()
+        .then((sessions) => {
+          unstable_batchedUpdates(() => applyActivation(sessions))
+        })
+        .catch(console.error)
+    }
+
     /** 发送阻塞通知（带提示音 + 会话导航） */
     const sendBlockingNotification = (sessionId: string, title: string, body: string, soundType: NotificationSoundType) => {
       const enabled = store.get(notificationsEnabledAtom)
@@ -503,6 +560,10 @@ export function useGlobalAgentListeners(): void {
 
         unstable_batchedUpdates(() => {
         const { sessionId, payload } = streamEvent
+
+        if (payload.kind === 'proma_event' && payload.event.type === 'external_run_started') {
+          activateExternalAgentRun(payload.event)
+        }
 
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)

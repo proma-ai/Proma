@@ -26,12 +26,14 @@ import type {
   AgentStreamPayload,
   AgentQueueMessageInput,
   PromaPermissionMode,
+  AgentExternalRunSource,
 } from '@proma/shared'
 import { ClaudeAgentAdapter, scanAndKillOrphanedClaudeSubprocesses } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
 import { getChannelById } from './channel-manager'
+import { getAgentSessionMeta } from './agent-session-manager'
 
 // ===== 实例创建 =====
 
@@ -76,6 +78,21 @@ function registerWebContents(sessionId: string, wc: WebContents): void {
       if (mappedWc === wc) sessionWebContents.delete(sid)
     }
   })
+}
+
+function isMainRendererWindow(win: BrowserWindow): boolean {
+  if (win.isDestroyed()) return false
+  const url = win.webContents.getURL()
+  if (!url) return false
+  if (url.startsWith('data:')) return false
+  return !url.includes('window=quick-task')
+    && !url.includes('window=voice-dictation')
+    && !url.includes('window=detached-preview')
+}
+
+function getMainRendererWebContents(): WebContents | null {
+  const win = BrowserWindow.getAllWindows().find(isMainRendererWindow)
+  return win && !win.webContents.isDestroyed() ? win.webContents : null
 }
 
 // ===== EventBus IPC 转发中间件 =====
@@ -189,23 +206,25 @@ export async function runAgentHeadless(
     onError: (error: string) => void
     onComplete: () => void
     onTitleUpdated: (title: string) => void
+    source?: AgentExternalRunSource
   },
 ): Promise<void> {
   // 尝试注册主窗口 webContents，让流式事件同步推送到桌面端
-  const win = BrowserWindow.getAllWindows()[0]
-  const wc = win && !win.isDestroyed() ? win.webContents : null
+  const wc = getMainRendererWebContents()
+  const runInput: AgentSendInput = input.startedAt != null ? input : { ...input, startedAt: Date.now() }
+  const startedAt = runInput.startedAt!
   if (wc) {
-    registerWebContents(input.sessionId, wc)
+    registerWebContents(runInput.sessionId, wc)
   }
 
   try {
-    await orchestrator.sendMessage(input, {
+    await orchestrator.sendMessage(runInput, {
       onError: (error) => {
         callbacks.onError(error)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
-            sessionId: input.sessionId,
+            sessionId: runInput.sessionId,
             error,
           })
         }
@@ -215,7 +234,7 @@ export async function runAgentHeadless(
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
-            sessionId: input.sessionId,
+            sessionId: runInput.sessionId,
             messages,
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
@@ -225,17 +244,32 @@ export async function runAgentHeadless(
       },
       onTitleUpdated: (title) => {
         callbacks.onTitleUpdated(title)
-        eventBus.emit(input.sessionId, {
+        eventBus.emit(runInput.sessionId, {
           kind: 'proma_event',
           event: { type: 'title_updated', title },
         })
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
-            sessionId: input.sessionId,
+            sessionId: runInput.sessionId,
             title,
           })
         }
+      },
+      onRunStarted: ({ startedAt: persistedStartedAt }) => {
+        const session = getAgentSessionMeta(runInput.sessionId)
+        eventBus.emit(runInput.sessionId, {
+          kind: 'proma_event',
+          event: {
+            type: 'external_run_started',
+            source: callbacks.source ?? 'bridge',
+            sessionId: runInput.sessionId,
+            title: session?.title,
+            workspaceId: runInput.workspaceId ?? session?.workspaceId,
+            modelId: runInput.modelId,
+            startedAt: persistedStartedAt,
+          },
+        })
       },
     })
   } catch (err) {
@@ -244,12 +278,12 @@ export async function runAgentHeadless(
     callbacks.onError(errorMessage)
     callbacks.onComplete()
     if (wc && !wc.isDestroyed()) {
-      wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: input.sessionId, error: errorMessage })
-      wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId: input.sessionId, messages: [], stoppedByUser: false })
+      wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: runInput.sessionId, error: errorMessage })
+      wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId: runInput.sessionId, messages: [], stoppedByUser: false, startedAt })
     }
   } finally {
-    if (!orchestrator.isActive(input.sessionId)) {
-      sessionWebContents.delete(input.sessionId)
+    if (!orchestrator.isActive(runInput.sessionId)) {
+      sessionWebContents.delete(runInput.sessionId)
     }
   }
 }

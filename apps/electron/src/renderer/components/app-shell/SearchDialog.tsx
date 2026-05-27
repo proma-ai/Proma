@@ -21,13 +21,16 @@ import { Search, X, MessageSquare, Bot, Archive, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
-import { conversationsAtom } from '@/atoms/chat-atoms'
+import { conversationsAtom, channelsAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
   agentWorkspacesAtom,
+  agentChannelIdAtom,
+  agentPendingPromptAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { useOpenSession } from '@/hooks/useOpenSession'
+import { useCreateSession } from '@/hooks/useCreateSession'
 import type { MessageSearchResult, AgentMessageSearchResult } from '@proma/shared'
 
 /** 标题搜索结果项 */
@@ -106,8 +109,12 @@ export function SearchDialog(): React.ReactElement {
   const conversations = useAtomValue(conversationsAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
+  const channels = useAtomValue(channelsAtom)
+  const currentAgentChannelId = useAtomValue(agentChannelIdAtom)
+  const setAgentPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const openSession = useOpenSession()
+  const { createAgent } = useCreateSession()
 
   const workspaceNameMap = React.useMemo(() => {
     const map = new Map<string, string>()
@@ -235,6 +242,37 @@ export function SearchDialog(): React.ReactElement {
     }
   }, [query, conversations, agentSessions])
 
+  const handleAgentSearch = React.useCallback(async () => {
+    const q = query.trim()
+    if (!q) return
+
+    const deepseekChannel = channels.find(
+      (c) => c.enabled && c.models.some((m) => m.id === 'deepseek-v4-flash' && m.enabled)
+    )
+    const channelId = deepseekChannel?.id ?? currentAgentChannelId ?? undefined
+
+    const configDir = import.meta.env.DEV ? '.proma-dev' : '.proma'
+    const prompt = `请帮我在 Proma 的全部会话历史中搜索与以下描述相关的内容：
+
+"${q}"
+
+搜索范围：
+- Chat 会话消息文件：~/${configDir}/conversations/ 目录下所有 .jsonl 文件
+- Agent 会话消息文件：~/${configDir}/agent-sessions/ 目录下所有 .jsonl 文件
+
+要求：
+1. 理解用户描述的语义，不要求关键词完全匹配，根据内容相关性判断
+2. 找到相关会话后，给出会话标题、相关内容摘要，以及文件路径
+3. 按相关性排序，最相关的结果排在最前面`
+
+    const sessionId = await createAgent({ channelId })
+    if (!sessionId) return
+
+    setAgentPendingPrompt({ sessionId, message: prompt })
+    setOpen(false)
+    setActiveView('conversations')
+  }, [query, channels, currentAgentChannelId, createAgent, setAgentPendingPrompt, setOpen, setActiveView])
+
   // 全部结果列表（标题在前、内容在后）
   const allResults = React.useMemo(
     () => [...titleResults, ...contentResults.map((c) => ({ ...c, updatedAt: 0 }))],
@@ -355,6 +393,20 @@ export function SearchDialog(): React.ReactElement {
             {loading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
             <span>搜索</span>
           </button>
+          <button
+            onClick={() => void handleAgentSearch()}
+            disabled={trimmedQuery.length < 2}
+            title="适合在精准搜索找不到的情况下使用，Agent 会帮助你搜索整个 Proma 会话空间"
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 rounded text-[12px] font-medium transition-colors',
+              trimmedQuery.length >= 2
+                ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20'
+                : 'bg-foreground/[0.06] text-foreground/30 cursor-not-allowed'
+            )}
+          >
+            <Bot size={12} />
+            <span>Agent 搜索</span>
+          </button>
         </div>
 
         {/* 搜索结果 */}
@@ -377,8 +429,15 @@ export function SearchDialog(): React.ReactElement {
           )}
 
           {hasSearched && !loading && allResults.length === 0 && (
-            <div className="py-12 text-center text-[13px] text-foreground/40">
-              未找到匹配结果
+            <div className="py-8 flex flex-col items-center gap-3 text-[13px] text-foreground/40">
+              <span>未找到匹配结果</span>
+              <button
+                onClick={() => void handleAgentSearch()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+              >
+                <Bot size={12} />
+                <span>试试 Agent 搜索</span>
+              </button>
             </div>
           )}
 

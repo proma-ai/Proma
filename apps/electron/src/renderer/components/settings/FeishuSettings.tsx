@@ -906,7 +906,7 @@ function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.Reac
   return (
     <SettingsSection
       title="同步到飞书"
-      description="开启后，每个新的 Proma Agent Session 会创建一个仅包含你和指定 Bot 的飞书群，并把输出同步到群内卡片。借此可以实现几乎完整的 Proma 移动端体验，可以脱离电脑随时在飞书上继续完成工作。"
+      description="开启后，每个新的 Proma Agent Session 会创建一个仅包含你和指定 Bot 的飞书群，并把输出同步到群内卡片，同时默认阻止电脑自动休眠，方便你脱离电脑在飞书上继续完成工作。"
     >
       <SettingsCard divided={false}>
         <div className="px-4 py-4 space-y-4">

@@ -22,6 +22,8 @@ import { useOpenSession } from './useOpenSession'
 interface CreateSessionOptions {
   /** 标记为草稿会话（不在侧边栏显示，发送首条消息后自动取消） */
   draft?: boolean
+  /** 覆盖默认渠道 ID（仅 Agent 会话） */
+  channelId?: string
 }
 
 interface CreateSessionActions {
@@ -74,7 +76,7 @@ export function useCreateSession(): CreateSessionActions {
     try {
       const meta = await window.electronAPI.createAgentSession(
         undefined,
-        agentChannelId || undefined,
+        options?.channelId ?? agentChannelId ?? undefined,
         currentWorkspaceId || undefined,
       )
       setAgentSessions((prev) => [meta, ...prev])

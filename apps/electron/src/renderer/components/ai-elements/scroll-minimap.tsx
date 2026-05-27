@@ -72,6 +72,8 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const [hovered, setHovered] = React.useState(false)
   const [isLeaving, setIsLeaving] = React.useState(false)
   const [visibleIds, setVisibleIds] = React.useState<Set<string>>(new Set())
+  /** 主区视口几何中心当前对应的消息 id —— 面板打开时作为列表居中锚点 */
+  const [centerVisibleId, setCenterVisibleId] = React.useState<string | undefined>(undefined)
   const [canScroll, setCanScroll] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isDragging, setIsDragging] = React.useState(false)
@@ -81,6 +83,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const openTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const searchInputRef = React.useRef<HTMLInputElement>(null)
   const trackRef = React.useRef<HTMLDivElement>(null)
+  const listRef = React.useRef<HTMLDivElement>(null)
 
   // ── 组件卸载时清理计时器 ──
 
@@ -104,8 +107,10 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
       setScrollMetrics({ scrollTop, scrollHeight, clientHeight })
       if (scrollHeight <= 0) return
 
+      const viewportCenter = scrollTop + clientHeight / 2
       const nodes = el.querySelectorAll<HTMLElement>('[data-message-id]')
       const ids = new Set<string>()
+      let centerId: string | undefined
       for (const node of nodes) {
         const top = getOffsetTopRelativeTo(node, el)
         const bottom = top + node.offsetHeight
@@ -113,8 +118,12 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
           const id = node.getAttribute('data-message-id')
           if (id) ids.add(id)
         }
+        if (centerId === undefined && top <= viewportCenter && bottom > viewportCenter) {
+          centerId = node.getAttribute('data-message-id') ?? undefined
+        }
       }
       setVisibleIds(ids)
+      setCenterVisibleId(centerId)
     }
 
     update()
@@ -135,6 +144,26 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
       const timer = setTimeout(() => searchInputRef.current?.focus(), 80)
       return () => clearTimeout(timer)
     }
+  }, [hovered])
+
+  // ── 面板打开时把当前可见消息滚到列表中间，避免每次都从顶部开始 ──
+
+  React.useEffect(() => {
+    if (!hovered) return
+    const timer = setTimeout(() => {
+      const list = listRef.current
+      if (!list) return
+      const target = list.querySelector<HTMLElement>('[data-minimap-visible="true"]')
+      if (!target) return
+      // listRef 没有 position 设置，offsetTop / getOffsetTopRelativeTo 都不可靠，
+      // 直接用 getBoundingClientRect 计算 target 相对 list 视口的偏移
+      const listRect = list.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      const offsetInList = (targetRect.top - listRect.top) + list.scrollTop
+      const offset = offsetInList - (list.clientHeight - target.offsetHeight) / 2
+      list.scrollTo({ top: Math.max(0, offset), behavior: 'auto' })
+    }, 0)
+    return () => clearTimeout(timer)
   }, [hovered])
 
   // ── 面板关闭时清空搜索 ──
@@ -216,6 +245,14 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
     const q = searchQuery.toLowerCase()
     return items.filter((item) => item.preview.toLowerCase().includes(q))
   }, [items, searchQuery])
+
+  /** 列表居中锚点：优先用主区视口中心对应的消息；该消息被搜索过滤掉时退回第一条可见消息 */
+  const anchorId = React.useMemo(() => {
+    if (centerVisibleId && filteredItems.some((item) => item.id === centerVisibleId)) {
+      return centerVisibleId
+    }
+    return filteredItems.find((item) => visibleIds.has(item.id))?.id
+  }, [centerVisibleId, filteredItems, visibleIds])
 
   // ── 滚动条滑块拖拽 ──
 
@@ -344,7 +381,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
             </div>
 
             {/* 消息列表 */}
-            <div className="overflow-y-auto flex-1 p-1.5 space-y-0.5 scrollbar-thin">
+            <div ref={listRef} className="overflow-y-auto flex-1 p-1.5 space-y-0.5 scrollbar-thin">
               {filteredItems.length === 0 ? (
                 <div className="py-6 text-center text-xs text-muted-foreground">
                   未找到匹配消息
@@ -354,6 +391,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
                   <button
                     key={item.id}
                     type="button"
+                    data-minimap-visible={item.id === anchorId ? 'true' : undefined}
                     className={cn(
                       'flex items-start gap-2 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent',
                       visibleIds.has(item.id) && 'bg-accent/50'

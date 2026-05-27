@@ -226,7 +226,7 @@ export function TabSwitcher(): React.ReactElement | null {
         <div className="py-1.5">
           {displayTabs.map((tab, index) => {
             const status = indicatorMap.get(tab.id) ?? 'idle'
-            const indicatorColor = getIndicatorColor(status, tab.type)
+            const indicatorColor = getIndicatorColor(status)
             const indicatorPulse = status === 'running' || status === 'blocked'
             const wsName = tab.type === 'agent'
               ? (() => {
@@ -303,16 +303,12 @@ function Kbd({ children }: { children: React.ReactNode }): React.ReactElement {
  * 状态指示点颜色（与 TabBarItem 保持一致）
  * - completed → 绿色（已完成未查看）
  * - blocked → 橙色脉动（Agent 等待用户输入）
- * - running + chat → emerald 脉动
- * - running + agent → 蓝色脉动
+ * - running → 蓝色脉动
  * - idle → 无
  */
-function getIndicatorColor(
-  status: SessionIndicatorStatus,
-  type: TabItem['type'],
-): string | undefined {
+function getIndicatorColor(status: SessionIndicatorStatus): string | undefined {
   if (status === 'idle') return undefined
   if (status === 'completed') return 'bg-green-500'
   if (status === 'blocked') return 'bg-orange-500'
-  return type === 'chat' ? 'bg-emerald-500' : 'bg-blue-500'
+  return 'bg-blue-500'
 }

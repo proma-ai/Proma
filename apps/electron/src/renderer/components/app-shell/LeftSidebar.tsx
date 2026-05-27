@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react'
-import { useAtom, useSetAtom, useAtomValue } from 'jotai'
+import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
 import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Hammer, Bot, MessageSquare, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -261,6 +261,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const openSession = useOpenSession()
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
+  const store = useStore()
 
   // 归档 & 搜索状态
   const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
@@ -549,7 +550,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [])
 
   /** 重命名对话标题 */
-  const handleRename = async (id: string, newTitle: string): Promise<void> => {
+  const handleRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.updateConversationTitle(id, newTitle)
       setConversations((prev) =>
@@ -560,12 +561,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 重命名对话失败:', error)
     }
-  }
+  }, [setConversations, setTabs])
 
   /** 切换对话置顶状态 */
-  const handleTogglePin = async (id: string): Promise<void> => {
+  const handleTogglePin = React.useCallback(async (id: string): Promise<void> => {
     try {
-      const original = conversations.find((c) => c.id === id)
+      const original = store.get(conversationsAtom).find((c) => c.id === id)
       const updated = await window.electronAPI.togglePinConversation(id)
       setConversations((prev) =>
         prev.map((c) => (c.id === updated.id ? updated : c))
@@ -577,10 +578,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 切换置顶失败:', error)
     }
-  }
+  }, [store, setConversations])
 
   /** 切换对话归档状态 */
-  const handleToggleArchive = async (id: string): Promise<void> => {
+  const handleToggleArchive = React.useCallback(async (id: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.toggleArchiveConversation(id)
       setConversations((prev) =>
@@ -590,8 +591,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       // （appMode、currentXxxId 等），避免文件面板/工具栏等 per-tab
       // 状态被遗留为旧值或被错误地置 null。
       if (updated.archived) {
-        const wasActive = activeTabId === id
-        const tabResult = closeTab(tabs, activeTabId, id)
+        const currentTabs = store.get(tabsAtom)
+        const currentActiveTabId = store.get(activeTabIdAtom)
+        const wasActive = currentActiveTabId === id
+        const tabResult = closeTab(currentTabs, currentActiveTabId, id)
         setTabs(tabResult.tabs)
         setActiveTabId(tabResult.activeTabId)
         cleanupMapAtoms(id)
@@ -606,7 +609,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 切换归档失败:', error)
     }
-  }
+  }, [store, setConversations, setTabs, setActiveTabId, cleanupMapAtoms, syncActiveTabSideEffects])
 
   /** 确认删除对话 */
   const handleConfirmDelete = async (): Promise<void> => {
@@ -733,7 +736,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [openSession, setActiveView, setUnviewedCompleted])
 
   /** 重命名 Agent 会话标题 */
-  const handleAgentRename = async (id: string, newTitle: string): Promise<void> => {
+  const handleAgentRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.updateAgentSessionTitle(id, newTitle)
       setAgentSessions((prev) =>
@@ -744,12 +747,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 重命名 Agent 会话失败:', error)
     }
-  }
+  }, [setAgentSessions, setTabs])
 
   /** 切换 Agent 会话置顶状态 */
-  const handleTogglePinAgent = async (id: string): Promise<void> => {
+  const handleTogglePinAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
-      const original = agentSessions.find((s) => s.id === id)
+      const original = store.get(agentSessionsAtom).find((s) => s.id === id)
       const updated = await window.electronAPI.togglePinAgentSession(id)
       setAgentSessions((prev) =>
         prev.map((s) => (s.id === updated.id ? updated : s))
@@ -761,15 +764,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话置顶失败:', error)
     }
-  }
+  }, [store, setAgentSessions])
 
   /** 切换 Agent 会话手动工作中状态 */
-  const handleToggleManualWorkingAgent = async (id: string): Promise<void> => {
+  const handleToggleManualWorkingAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
-      const isCurrentlyInWorking = workingSessionIds.has(id)
+      const isCurrentlyInWorking = store.get(workingSessionIdsSetAtom).has(id)
       if (isCurrentlyInWorking) {
         // 从工作中移出：清除 manualWorking + 清除 workingDone
-        const session = agentSessions.find((s) => s.id === id)
+        const session = store.get(agentSessionsAtom).find((s) => s.id === id)
         if (session?.manualWorking) {
           const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
           setAgentSessions((prev) =>
@@ -784,7 +787,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         })
       } else {
         // 加入工作中
-        const original = agentSessions.find((s) => s.id === id)
+        const original = store.get(agentSessionsAtom).find((s) => s.id === id)
         const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
         setAgentSessions((prev) =>
           prev.map((s) => (s.id === updated.id ? updated : s))
@@ -797,10 +800,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       console.error('[Sidebar] Failed to toggle manual working:', error)
       toast.error('操作失败')
     }
-  }
+  }, [store, setAgentSessions, setWorkingDone])
 
   /** 切换 Agent 会话归档状态 */
-  const handleToggleArchiveAgent = async (id: string): Promise<void> => {
+  const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.toggleArchiveAgentSession(id)
       setAgentSessions((prev) =>
@@ -810,8 +813,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       // 否则 RightSidePanel（依赖 currentAgentSessionIdAtom）会因为
       // 指针被错误置 null 而消失。
       if (updated.archived) {
-        const wasActive = activeTabId === id
-        const tabResult = closeTab(tabs, activeTabId, id)
+        const currentTabs = store.get(tabsAtom)
+        const currentActiveTabId = store.get(activeTabIdAtom)
+        const wasActive = currentActiveTabId === id
+        const tabResult = closeTab(currentTabs, currentActiveTabId, id)
         setTabs(tabResult.tabs)
         setActiveTabId(tabResult.activeTabId)
         cleanupMapAtoms(id)
@@ -833,7 +838,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
     }
-  }
+  }, [store, setAgentSessions, setTabs, setActiveTabId, cleanupMapAtoms, setWorkingDone, syncActiveTabSideEffects])
 
   /** 请求迁移会话到其他工作区（弹出迁移对话框） */
   const handleRequestMove = React.useCallback((id: string): void => {
@@ -1769,7 +1774,7 @@ const ConversationItem = React.memo(function ConversationItem({
           {/* 流式状态左侧竖线条（与 Agent 保持一致） */}
           {streaming && (
             <span
-              className="absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full bg-emerald-500 animate-pulse pointer-events-none"
+              className="absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full bg-blue-500 animate-pulse pointer-events-none"
               aria-hidden="true"
             />
           )}

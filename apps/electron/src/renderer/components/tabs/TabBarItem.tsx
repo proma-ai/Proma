@@ -95,9 +95,7 @@ export function TabBarItem({
       ? 'bg-green-500'
       : isStreaming === 'blocked'
         ? 'bg-orange-500'
-        : type === 'chat'
-          ? 'bg-emerald-500'
-          : 'bg-blue-500'
+        : 'bg-blue-500'
     : undefined
   const indicatorPulse = isStreaming === 'running' || isStreaming === 'blocked'
   const previewItems = minimapCache.get(id) ?? []

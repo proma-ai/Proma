@@ -239,6 +239,7 @@ import {
   getDecryptedBotAppSecret,
 } from './lib/feishu-config'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
+import { syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
 import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
@@ -473,7 +474,7 @@ function parseWindowsExecutablePath(command: string): string {
 }
 
 function isSafeWindowsProgId(progId: string): boolean {
-  return /^[\w.+\\-]+$/.test(progId)
+  return /^[a-zA-Z0-9_.+-]+$/.test(progId)
 }
 
 async function getWindowsDefaultAppCommand(progId: string): Promise<string> {
@@ -491,10 +492,13 @@ async function getWindowsDefaultAppCommand(progId: string): Promise<string> {
   return (ftypeResult.stdout || '').split('=').slice(1).join('=').trim()
 }
 
-async function getWindowsDefaultAppInfo(filePath: string): Promise<{ appPath: string; appName: string } | null> {
+async function getWindowsDefaultAppInfo(filePath: string): Promise<{ appPath: string; appName: string; isUwp?: boolean } | null> {
   const ext = extOf(filePath)
   // ext 来自渲染进程的 filePath，必须严格校验：cmd /c "assoc ${ext}" 中 & | > < 等会触发命令链
-  if (!/^\.[a-zA-Z0-9]+$/.test(ext)) return null
+  if (!/^\.[a-zA-Z0-9]+$/.test(ext)) {
+    console.log('[DefaultApp] ext 校验失败:', ext)
+    return null
+  }
 
   const userChoiceResult = await runCmd('reg', [
     'query',
@@ -503,16 +507,116 @@ async function getWindowsDefaultAppInfo(filePath: string): Promise<{ appPath: st
     'ProgId',
   ])
   let progId = parseWindowsRegistryValue(userChoiceResult.stdout)
+  console.log('[DefaultApp] ext=%s UserChoice progId=%s', ext, progId)
 
   if (!progId) {
     const assoc = await runCmd('cmd', ['/c', `assoc ${ext}`])
-    progId = (assoc.stdout || '').split('=')[1]?.trim() ?? ''
+    progId = (assoc.stdout || '').split('=').slice(1).join('=').trim()
+    console.log('[DefaultApp] assoc fallback progId=%s', progId)
   }
-  if (!progId || !isSafeWindowsProgId(progId)) return null
+  // 第三 fallback：HKCU OpenWithList MRU（取最近使用的 exe，与 Windows 设置显示一致）
+  if (!progId) {
+    const mruResult = await runCmd('reg', [
+      'query',
+      `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\${ext}\\OpenWithList`,
+    ])
+    const mruLine = mruResult.stdout.split(/\r?\n/).find((l) => /\s+MRUList\s+REG_SZ\s+/.test(l))
+    const mruOrder = mruLine?.split(/\s+REG_SZ\s+/)[1]?.trim() ?? ''
+    if (mruOrder) {
+      const firstKey = mruOrder[0]
+      const exeLine = mruResult.stdout.split(/\r?\n/).find((l) => new RegExp(`\\s+${firstKey}\\s+REG_SZ\\s+`).test(l))
+      const exeName = exeLine?.split(/\s+REG_SZ\s+/)[1]?.trim() ?? ''
+      if (exeName && /^[a-zA-Z0-9 _.+()-]+\.exe$/i.test(exeName)) {
+        // 从 App Paths 把 exe 名转成 progId（取 exe 对应的 HKCR 下注册的 ProgId）
+        // 直接用 exe 名（去掉 .exe）当 appName，appPath 从 App Paths 查
+        const appName = exeName.replace(/\.exe$/i, '')
+        const apResult = await runCmd('reg', [
+          'query', `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeName}`, '/ve',
+        ])
+        let exePath = parseWindowsRegistryValue(apResult.stdout)
+        if (!exePath) {
+          const apResult2 = await runCmd('reg', [
+            'query', `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeName}`, '/ve',
+          ])
+          exePath = parseWindowsRegistryValue(apResult2.stdout)
+        }
+        console.log('[DefaultApp] OpenWithList MRU fallback: exe=%s path=%s', exeName, exePath)
+        if (exePath) return { appPath: exePath, appName }
+      }
+    }
+  }
+  // 第四 fallback：HKCU OpenWithProgids（无 UserChoice 但有文件类型关联时）
+  if (!progId) {
+    const owpResult = await runCmd('reg', [
+      'query',
+      `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\${ext}\\OpenWithProgids`,
+    ])
+    // 取第一个非空值名（跳过空行和路径行）
+    for (const line of owpResult.stdout.split(/\r?\n/)) {
+      const m = line.match(/^\s+(\S+)\s+REG_/)
+      if (m && m[1] && isSafeWindowsProgId(m[1])) {
+        progId = m[1]
+        console.log('[DefaultApp] OpenWithProgids fallback progId=%s', progId)
+        break
+      }
+    }
+  }
+  if (!progId || !isSafeWindowsProgId(progId)) {
+    console.log('[DefaultApp] progId 无效或不安全:', progId)
+    return null
+  }
+
+  // UWP 应用：shell\open\command 下只有 DelegateExecute，没有传统 exe 路径
+  // 从 Application 子键读 ApplicationName 作为 appName
+  if (progId.startsWith('AppX')) {
+    const nameResult = await runCmd('reg', [
+      'query', `HKCR\\${progId}\\Application`, '/v', 'ApplicationName',
+    ])
+    let appName = parseWindowsRegistryValue(nameResult.stdout)
+    // ApplicationName 通常是资源引用 "@{...?ms-resource://...}"，取最后一段
+    if (appName.startsWith('@{')) {
+      const appIdResult = await runCmd('reg', [
+        'query', `HKCR\\${progId}\\Application`, '/v', 'AppUserModelId',
+      ])
+      const appUserModelId = parseWindowsRegistryValue(appIdResult.stdout)
+      // AppUserModelId 形如 "Microsoft.ZuneVideo_8wekyb3d8bbwe!Microsoft.ZuneVideo"
+      // 取 ! 之后的部分作为名字，再去掉前缀
+      const parts = appUserModelId.split('!')
+      appName = (parts[1] ?? parts[0] ?? '').replace(/^Microsoft\./, '').replace(/^Windows\./, '') || 'UWP App'
+    }
+    console.log('[DefaultApp] UWP app, appName=%s', appName)
+    return { appPath: '', appName, isUwp: true }
+  }
 
   const command = await getWindowsDefaultAppCommand(progId)
+  console.log('[DefaultApp] open command:', command)
   const appPath = parseWindowsExecutablePath(command)
-  if (!appPath) return null
+  console.log('[DefaultApp] parsed appPath:', appPath)
+  if (!appPath) {
+    // Fallback：从 HKCR\<progId> 默认值取 app 名，从 App Paths 找 exe
+    const rootResult = await runCmd('reg', ['query', `HKCR\\${progId}`, '/ve'])
+    const rootName = parseWindowsRegistryValue(rootResult.stdout)
+    // AppUserModelId 字段（非 UWP 也可能有，如 Quark）
+    const appModelResult = await runCmd('reg', ['query', `HKCR\\${progId}`, '/v', 'AppUserModelId'])
+    const appModelId = parseWindowsRegistryValue(appModelResult.stdout)
+    const candidateAppName = (appModelId || rootName || '').replace(/\s+(HTML?\s+)?(Document|File)$/i, '').trim()
+    if (!candidateAppName || !/^[a-zA-Z0-9 _.+-]+$/.test(candidateAppName)) return null
+    // 从 App Paths 找 exe（应用注册了 App Paths 就能找到）
+    const appPathsResult = await runCmd('reg', [
+      'query', `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${candidateAppName}.exe`, '/ve',
+    ])
+    let exePath = parseWindowsRegistryValue(appPathsResult.stdout)
+    if (!exePath) {
+      const appPathsResult2 = await runCmd('reg', [
+        'query', `HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${candidateAppName}.exe`, '/ve',
+      ])
+      exePath = parseWindowsRegistryValue(appPathsResult2.stdout)
+    }
+    console.log('[DefaultApp] App Paths fallback: candidateAppName=%s exePath=%s', candidateAppName, exePath)
+    if (!exePath) return null
+    const base = exePath.split(/[\\/]/).pop() || ''
+    return { appPath: exePath, appName: base.replace(/\.exe$/i, '') }
+  }
 
   const base = appPath.split(/[\\/]/).pop() || ''
   return { appPath, appName: base.replace(/\.exe$/i, '') }
@@ -520,14 +624,10 @@ async function getWindowsDefaultAppInfo(filePath: string): Promise<{ appPath: st
 
 async function getDefaultAppInfoForFile(
   filePath: string,
-  options?: FileAccessOptions,
+  _options?: FileAccessOptions,
 ): Promise<import('@proma/shared').DefaultAppInfo | null> {
   const { resolve } = await import('node:path')
   const absPath = resolve(filePath)
-  if (!isPathAllowed(absPath, options)) {
-    console.warn('[IPC] shell:get-default-app-for-file 拒绝越界路径:', absPath)
-    return null
-  }
 
   const cacheKey = `${process.platform}:${extOf(filePath) || filePath}`
   if (defaultAppCache.has(cacheKey)) return defaultAppCache.get(cacheKey) ?? null
@@ -559,8 +659,9 @@ if let appUrl = NSWorkspace.shared.urlForApplication(toOpen: url) {
     }
   } else if (process.platform === 'win32') {
     const info = await getWindowsDefaultAppInfo(filePath)
+    console.log('[DefaultApp] win32 getWindowsDefaultAppInfo 结果:', info)
     if (!info) return cacheNull(cacheKey)
-    appPath = info.appPath
+    appPath = info.isUwp ? absPath : info.appPath
     appName = info.appName
   } else {
     const mimeRes = await runCmd('xdg-mime', ['query', 'filetype', absPath])
@@ -585,9 +686,13 @@ if let appUrl = NSWorkspace.shared.urlForApplication(toOpen: url) {
     appName = nameLine || (appPath.split('/').pop() ?? '')
   }
 
-  if (!appPath || !appName) return cacheNull(cacheKey)
+  if (!appPath || !appName) {
+    console.log('[DefaultApp] appPath 或 appName 为空，返回 null. appPath=%s appName=%s', appPath, appName)
+    return cacheNull(cacheKey)
+  }
 
-  const iconDataUrl = await getAppIconDataUrl(appPath).catch(() => '')
+  const iconDataUrl = await getAppIconDataUrl(appPath).catch((e) => { console.warn('[DefaultApp] getAppIconDataUrl 失败:', e); return '' })
+  console.log('[DefaultApp] iconDataUrl 长度:', iconDataUrl?.length)
   if (!iconDataUrl) return cacheNull(cacheKey)
 
   const info: import('@proma/shared').DefaultAppInfo = { name: appName, appPath, iconDataUrl }
@@ -827,10 +932,13 @@ export function registerIpcHandlers(): void {
   // 查询某个文件在本机的默认打开应用信息（带图标）
   ipcMain.handle(
     IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE,
-    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').DefaultAppInfo | null> => {
+    async (_, filePath: string): Promise<import('@proma/shared').DefaultAppInfo | null> => {
       if (!filePath || typeof filePath !== 'string') return null
       try {
-        return await getDefaultAppInfoForFile(filePath, normalizeFileAccessOptions(access))
+        console.log('[IPC] get-default-app-for-file 收到请求:', filePath)
+        const result = await getDefaultAppInfoForFile(filePath)
+        console.log('[IPC] get-default-app-for-file 返回:', result ? `name=${result.name} appPath=${result.appPath} iconLen=${result.iconDataUrl?.length}` : 'null')
+        return result
       } catch (err) {
         console.warn('[IPC] shell:get-default-app-for-file 失败:', err)
         return null
@@ -1226,6 +1334,10 @@ export function registerIpcHandlers(): void {
     async (event, updates: Partial<AppSettings>): Promise<AppSettings> => {
       const result = await updateSettings(updates)
 
+      if (updates.feishuSessionMirror !== undefined) {
+        syncFeishuSyncSleepBlocker(result)
+      }
+
       // 主题相关设置变化时，广播给所有窗口（跨窗口同步，如 Quick Task 面板）
       if (updates.themeMode !== undefined || updates.themeStyle !== undefined) {
         const payload = { themeMode: result.themeMode, themeStyle: result.themeStyle }
@@ -1246,7 +1358,10 @@ export function registerIpcHandlers(): void {
     SETTINGS_IPC_CHANNELS.UPDATE_SYNC,
     (event, updates: Partial<AppSettings>) => {
       try {
-        updateSettings(updates)
+        const result = updateSettings(updates)
+        if (updates.feishuSessionMirror !== undefined) {
+          syncFeishuSyncSleepBlocker(result)
+        }
         event.returnValue = true
       } catch {
         event.returnValue = false

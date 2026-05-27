@@ -1593,6 +1593,7 @@ class FeishuBridge {
       // 时，orchestrator 已经清理干净，下一个 batch 立刻调 sendMessage 不会撞守卫。
       try {
         await runAgentHeadless(input, {
+          source: 'feishu',
           onError: (error) => {
             const errPrefix = this.resolveContextPrefix(chatId)
             // 优先把错误显示到流式卡上；没有流式卡才发独立错误卡

@@ -39,8 +39,8 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
 
   const handleOpenDetachedPreview = React.useCallback(() => {
     if (!currentFile) return
-    const slash = currentFile.filePath.lastIndexOf('/')
-    const fallbackDirPath = slash > 0 ? currentFile.filePath.slice(0, slash) : sessionPath
+    const lastSep = Math.max(currentFile.filePath.lastIndexOf('/'), currentFile.filePath.lastIndexOf('\\'))
+    const fallbackDirPath = lastSep > 0 ? currentFile.filePath.slice(0, lastSep) : sessionPath
     window.electronAPI.openDetachedPreview({
       sessionId,
       filePath: currentFile.filePath,
@@ -49,7 +49,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
       previewOnly: currentFile.previewOnly,
       readOnly: currentFile.readOnly,
       basePaths: currentFile.basePaths,
-      title: currentFile.filePath.split('/').pop(),
+      title: currentFile.filePath.split(/[\\/]/).pop(),
     }).catch((err) => {
       console.error('[PreviewPanel] 打开独立预览窗口失败:', err)
     })
@@ -60,7 +60,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
       {/* 顶部栏：文件名 + 关闭 */}
       <div className="flex items-center h-[34px] px-3 flex-shrink-0 border-b border-border/30 titlebar-no-drag">
         <span className="text-xs text-muted-foreground truncate">
-          {currentFile ? currentFile.filePath.split('/').pop() : '文件预览'}
+          {currentFile ? currentFile.filePath.split(/[\\/]/).pop() : '文件预览'}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
           {currentFile && (
