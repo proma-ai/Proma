@@ -18,6 +18,7 @@ import {
 } from '@/atoms/agent-atoms'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { DiffTabContent } from './DiffTabContent'
+import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 
 interface PreviewPanelProps {
   sessionId: string
@@ -62,6 +63,12 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
           {currentFile ? currentFile.filePath.split('/').pop() : '文件预览'}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
+          {currentFile && (
+            <DefaultAppOpenButton
+              filePath={currentFile.filePath}
+              access={{ sessionId, candidateBasePaths: currentFile.basePaths }}
+            />
+          )}
           {currentFile && (
             <Tooltip>
               <TooltipTrigger asChild>

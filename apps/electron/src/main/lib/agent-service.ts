@@ -142,6 +142,10 @@ export async function runAgent(
         }
       },
       onTitleUpdated: (title) => {
+        eventBus.emit(input.sessionId, {
+          kind: 'proma_event',
+          event: { type: 'title_updated', title },
+        })
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
             sessionId: input.sessionId,
@@ -221,6 +225,10 @@ export async function runAgentHeadless(
       },
       onTitleUpdated: (title) => {
         callbacks.onTitleUpdated(title)
+        eventBus.emit(input.sessionId, {
+          kind: 'proma_event',
+          event: { type: 'title_updated', title },
+        })
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {

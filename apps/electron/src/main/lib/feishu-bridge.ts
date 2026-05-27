@@ -6,7 +6,7 @@
  * - 路由命令或转发用户消息到 Agent/Chat 服务
  * - 监听 AgentEventBus 事件，累积完整回复后发送到飞书
  * - 管理聊天绑定（chatId ↔ sessionId）
- * - 智能通知路由：桌面发起的会话根据在场状态决定是否发飞书通知
+ * - Session 镜像：桌面发起的会话可同步为飞书群内流式卡片
  */
 
 import { BrowserWindow } from 'electron'
@@ -16,8 +16,6 @@ import type {
   FeishuBridgeState,
   FeishuChatBinding,
   FeishuTestResult,
-  FeishuNotifyMode,
-  FeishuNotificationSentPayload,
   FeishuMention,
   FeishuGroupInfo,
   FeishuGroupMember,
@@ -25,6 +23,7 @@ import type {
   FeishuChatMessage,
   FeishuUpdateBindingInput,
   FeishuBotConfig,
+  AgentSessionMeta,
   SDKAssistantMessage,
   SDKUserMessage,
 } from '@proma/shared'
@@ -37,7 +36,7 @@ import {
   getAgentWorkspace,
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
-import { getFeishuBotBindingsPath } from './config-paths'
+import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
 import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
 import {
   inferImageMediaType as inferImageMediaTypeShared,
@@ -46,10 +45,8 @@ import {
   inferExtension,
 } from './bridge-attachment-utils'
 import { getSettings } from './settings-service'
-import { presenceService } from './feishu-presence'
 import {
   buildAgentReplyCard,
-  buildNotificationCard,
   buildErrorCard,
   buildSessionListCard,
   buildWorkspaceSwitchedCard,
@@ -69,6 +66,7 @@ import {
   type RunState,
 } from './feishu/card-run-state'
 import { renderCard as renderRunCard } from './feishu/card-renderer-v2'
+import { buildSessionMirrorGroupName } from './feishu/session-mirror'
 import { ScopedQueue } from './feishu/scoped-queue'
 import { RunCoordinator } from './feishu/run-coordinator'
 import {
@@ -149,6 +147,10 @@ class FeishuBridge {
   private streamingCards = new Map<string, CardStream>()
   /** 用过流式卡的 sessionId 集合（complete 时判定是否需要降级回复卡） */
   private streamingCardsUsedSessions = new Set<string>()
+  /** 已经由飞书流式卡处理过终态的 session → 标记时间戳。
+   *  收到 result 时 delete 即可；如果 Agent 异常退出 result 不到达，
+   *  下次写入会顺手回收 5 分钟前的过期条目，避免长尾泄漏。 */
+  private streamingTerminalHandledSessions = new Map<string, number>()
 
   /** 防抖队列：scope → 累积的待处理消息（合并 batch 触发一次 Agent） */
   private readonly messageQueue = new ScopedQueue<QueuedFeishuMessage>(
@@ -158,10 +160,8 @@ class FeishuBridge {
 
   /** Run 协调：per-scope 串行 + 全局并发上限 */
   private readonly runCoordinator = new RunCoordinator(DEFAULT_MAX_CONCURRENT_RUNS)
-  /** sessionId → 通知模式 */
-  private sessionNotifyModes = new Map<string, FeishuNotifyMode>()
-  /** 默认通知目标 chatId（最后一个与 Bot 交互的飞书聊天） */
-  private defaultNotifyChatId: string | null = null
+  /** 最近与该 Bot 交互的用户 open_id，用于桌面 Session 镜像建群。 */
+  private lastInteractedUserOpenId: string | null = null
 
   /** chatId → 待合并的图片（纯图片消息暂存，等待后续文本一起发送） */
   private pendingImages = new Map<string, FeishuImageAttachment[]>()
@@ -277,6 +277,8 @@ class FeishuBridge {
 
       // 恢复之前的聊天绑定
       this.loadBindings()
+      // 恢复运行时元数据（最近交互用户等）
+      this.loadMetadata()
 
       this.updateStatus({ status: 'connected', connectedAt: Date.now() })
       console.log('[飞书 Bridge] 已连接')
@@ -315,14 +317,15 @@ class FeishuBridge {
     this.streamingCards.clear()
     this.streamingRunStates.clear()
     this.streamingCardsUsedSessions.clear()
-    this.sessionNotifyModes.clear()
+    this.streamingTerminalHandledSessions.clear()
     this.recentMessageIds.clear()
     this.recentEventIds.clear()
     this.processingChats.clear()
     this.lastUserMessageId.clear()
     this.groupInfoCache.clear()
     this.userNameCache.clear()
-    this.defaultNotifyChatId = null
+    // 注意：lastInteractedUserOpenId 不在 stop 中清空——它代表"用户曾经与该 Bot 互动过"的事实，
+    // 重启后仍需用来给桌面 Session 镜像建群。完整重置请删除 ~/.proma/feishu-metadata-{botId}.json。
     this.botOpenId = null
 
     this.updateStatus({ status: 'disconnected', activeBindings: 0 })
@@ -381,6 +384,44 @@ class FeishuBridge {
     }
   }
 
+  /**
+   * 加载 Bot 级运行时元数据（如最近交互用户的 open_id）。
+   *
+   * 之所以用独立文件而非合入 bindings：bindings 是数组，元数据是对象，
+   * 形态不同；并且元数据需要在 disconnect/stop 时仍然保留，被显式
+   * 重置才会清空。
+   */
+  private loadMetadata(): void {
+    const metaPath = getFeishuBotMetadataPath(this.botConfig.id)
+    if (!existsSync(metaPath)) return
+
+    try {
+      const raw = readFileSync(metaPath, 'utf-8')
+      const data = JSON.parse(raw) as { lastInteractedUserOpenId?: string }
+      if (data.lastInteractedUserOpenId && data.lastInteractedUserOpenId !== 'unknown') {
+        this.lastInteractedUserOpenId = data.lastInteractedUserOpenId
+      }
+    } catch (error) {
+      console.error('[飞书 Bridge] 加载元数据失败:', error)
+    }
+  }
+
+  private saveMetadata(): void {
+    try {
+      const metaPath = getFeishuBotMetadataPath(this.botConfig.id)
+      const data = { lastInteractedUserOpenId: this.lastInteractedUserOpenId }
+      writeFileSync(metaPath, JSON.stringify(data, null, 2), 'utf-8')
+    } catch (error) {
+      console.error('[飞书 Bridge] 保存元数据失败:', error)
+    }
+  }
+
+  private setLastInteractedUserOpenId(openId: string | null): void {
+    if (this.lastInteractedUserOpenId === openId) return
+    this.lastInteractedUserOpenId = openId
+    this.saveMetadata()
+  }
+
   // ===== 状态查询 =====
 
   getStatus(): FeishuBridgeState {
@@ -416,14 +457,101 @@ class FeishuBridge {
     if (!binding) return false
 
     this.sessionToChat.delete(binding.sessionId)
+    this.streamingTerminalHandledSessions.delete(binding.sessionId)
     this.chatBindings.delete(chatId)
     this.updateStatus({ activeBindings: this.chatBindings.size })
     this.saveBindings()
     return true
   }
 
-  setSessionNotifyMode(sessionId: string, mode: FeishuNotifyMode): void {
-    this.sessionNotifyModes.set(sessionId, mode)
+  /**
+   * 为 Proma 桌面端会话准备飞书镜像群。
+   *
+   * 该群只包含用户与当前 Bot。用户在群里继续发送消息时，会通过
+   * source=session-mirror 的绑定回到同一个 Proma session。
+   */
+  async ensureSessionMirror(session: AgentSessionMeta): Promise<void> {
+    if (!this.client) return
+
+    const existing = this.findBindingBySessionId(session.id)
+    if (existing) return
+
+    const userOpenId = this.resolveMirrorUserOpenId()
+    if (!userOpenId) {
+      console.warn('[飞书 Session 镜像] 缺少用户 open_id，无法创建镜像群。请先让用户在飞书里和该 Bot 互动一次。')
+      return
+    }
+
+    const appSettings = getSettings()
+    const workspaceId = session.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
+    const channelId = session.channelId ?? this.botConfig.defaultChannelId ?? appSettings.agentChannelId
+    if (!workspaceId || !channelId) {
+      console.warn('[飞书 Session 镜像] 缺少 workspaceId 或 channelId，跳过镜像群创建', {
+        sessionId: session.id,
+        workspaceId,
+        channelId,
+      })
+      return
+    }
+
+    const groupName = buildSessionMirrorGroupName(session)
+    const chatId = await this.createSessionMirrorGroup(userOpenId, groupName)
+    if (!chatId) return
+
+    const binding: FeishuChatBinding = {
+      chatId,
+      botId: this.botConfig.id,
+      userId: userOpenId,
+      sessionId: session.id,
+      workspaceId,
+      channelId,
+      modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
+      mode: 'agent',
+      source: 'session-mirror',
+      chatType: 'group',
+      groupName,
+      createdAt: Date.now(),
+    }
+
+    this.chatBindings.set(chatId, binding)
+    this.sessionToChat.set(session.id, chatId)
+    this.updateStatus({ activeBindings: this.chatBindings.size })
+    this.saveBindings()
+    console.log(`[飞书 Session 镜像] 已创建群: session=${session.id.slice(0, 8)}, chat=${chatId}`)
+  }
+
+  /** Agent 运行前为桌面 Session 镜像打开流式卡片。 */
+  async startSessionMirrorRun(session: AgentSessionMeta): Promise<void> {
+    if (!this.client) return
+    await this.ensureSessionMirror(session)
+
+    const binding = this.findBindingBySessionId(session.id)
+    if (!binding || binding.source !== 'session-mirror') return
+    if (this.streamingCards.has(session.id)) return
+
+    const initialState = createInitialState()
+    this.streamingRunStates.set(session.id, initialState)
+
+    try {
+      const cardStream = await CardStream.open(
+        this.client,
+        binding.chatId,
+        renderRunCard(initialState, {
+          header: `${binding.groupName ?? buildSessionMirrorGroupName(session)} · Agent 处理中`,
+          stopHint: '在群里发送 `/stop` 可终止当前任务',
+        }),
+      )
+      this.streamingCards.set(session.id, cardStream)
+      this.streamingCardsUsedSessions.add(session.id)
+      this.lastUserMessageId.delete(binding.chatId)
+    } catch (error) {
+      this.streamingRunStates.delete(session.id)
+      console.error('[飞书 Session 镜像] 流式卡片创建失败:', error)
+    }
+  }
+
+  stopSessionMirrorRun(sessionId: string): void {
+    this.markStreamingInterrupted(sessionId)
   }
 
   // ===== 连接测试 =====
@@ -559,8 +687,11 @@ class FeishuBridge {
       return
     }
 
-    // 群聊中仅处理 @Bot 的消息
-    if (chatType === 'group') {
+    const existingBinding = this.chatBindings.get(chatId)
+    const isSessionMirrorGroup = existingBinding?.source === 'session-mirror'
+
+    // 普通群聊中仅处理 @Bot；Session 镜像群只包含用户与 Bot，可以直接回复。
+    if (chatType === 'group' && !isSessionMirrorGroup) {
       if (!(await this.isBotMentioned(mentions))) {
         return
       }
@@ -571,8 +702,10 @@ class FeishuBridge {
       this.lastUserMessageId.set(chatId, messageId)
     }
 
-    // 记录最近交互的 chatId 作为默认通知目标
-    this.defaultNotifyChatId = chatId
+    // 记录最近交互用户，用于桌面 Session 镜像建群（持久化以跨进程重启）。
+    if (userId && userId !== 'unknown') {
+      this.setLastInteractedUserOpenId(userId)
+    }
 
     // 仅处理文本、图片、富文本和文件消息
     const supportedTypes = new Set(['text', 'image', 'post', 'file'])
@@ -671,7 +804,7 @@ class FeishuBridge {
       const fileCount = this.pendingFiles.get(chatId)?.length ?? 0
       if (imgCount > 0) parts.push(`${imgCount} 张图片`)
       if (fileCount > 0) parts.push(`${fileCount} 个文件`)
-      await this.sendTextMessage(chatId, `📎 已收到${parts.join('和')}，请继续发送文字消息来触发处理。`)
+      await this.sendTextMessage(chatId, `已收到${parts.join('和')}，请继续发送文字消息来触发处理。`)
       return
     }
 
@@ -899,6 +1032,7 @@ class FeishuBridge {
       channelId,
       modelId: appSettings.agentModelId ?? undefined,
       mode,
+      source: 'feishu',
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
       createdAt: Date.now(),
@@ -918,7 +1052,92 @@ class FeishuBridge {
     }
 
     const modeLabel = mode === 'agent' ? 'Agent' : 'Chat'
-    await this.sendMessage(chatId, `✅ 已创建 ${modeLabel} 会话 (${session.id.slice(0, 8)})`)
+    await this.sendMessage(chatId, `已创建 ${modeLabel} 会话 (${session.id.slice(0, 8)})`)
+  }
+
+  private findBindingBySessionId(sessionId: string): FeishuChatBinding | undefined {
+    const chatId = this.sessionToChat.get(sessionId)
+    if (chatId) return this.chatBindings.get(chatId)
+    return Array.from(this.chatBindings.values()).find((binding) => binding.sessionId === sessionId)
+  }
+
+  private resolveMirrorUserOpenId(): string | null {
+    if (this.lastInteractedUserOpenId && this.lastInteractedUserOpenId !== 'unknown') {
+      return this.lastInteractedUserOpenId
+    }
+    for (const binding of this.chatBindings.values()) {
+      if (binding.userId && binding.userId !== 'unknown') return binding.userId
+    }
+    return null
+  }
+
+  private async createSessionMirrorGroup(userOpenId: string, name: string): Promise<string | null> {
+    if (!this.client) return null
+
+    try {
+      const resp = await this.client.im.chat.create({
+        data: {
+          name,
+          chat_mode: 'group',
+          chat_type: 'private',
+          user_id_list: [userOpenId],
+        },
+        params: { user_id_type: 'open_id' },
+      })
+
+      if (resp.code && resp.code !== 0) {
+        console.error('[飞书 Session 镜像] 创建群返回非 0 code:', resp.code, resp.msg)
+        return null
+      }
+
+      const chatId = resp.data?.chat_id
+      if (!chatId) {
+        console.error('[飞书 Session 镜像] 创建群未返回 chat_id:', JSON.stringify(resp).slice(0, 300))
+        return null
+      }
+      return chatId
+    } catch (error) {
+      console.error('[飞书 Session 镜像] 创建群失败:', error)
+      return null
+    }
+  }
+
+  private updateSessionMirrorGroupName(sessionId: string, title: string): void {
+    const binding = this.findBindingBySessionId(sessionId)
+    if (!binding || binding.source !== 'session-mirror') return
+
+    const nextName = buildSessionMirrorGroupName({ id: sessionId, title })
+    if (binding.groupName === nextName) return
+
+    void this.renameSessionMirrorGroup(binding.chatId, nextName)
+      .then((updated) => {
+        if (!updated) return
+        binding.groupName = nextName
+        this.saveBindings()
+      })
+      .catch((error) => {
+        console.error('[飞书 Session 镜像] 更新群名失败:', error)
+      })
+  }
+
+  private async renameSessionMirrorGroup(chatId: string, name: string): Promise<boolean> {
+    if (!this.client) return false
+
+    try {
+      const resp = await this.client.im.chat.update({
+        path: { chat_id: chatId },
+        data: { name },
+      })
+
+      if (resp.code && resp.code !== 0) {
+        console.warn('[飞书 Session 镜像] 更新群名返回非 0 code:', resp.code, resp.msg)
+        return false
+      }
+      return true
+    } catch (error) {
+      console.error('[飞书 Session 镜像] 调用更新群名接口失败:', error)
+      return false
+    }
   }
 
   private async updateBindingMode(msgCtx: FeishuMessageContext, mode: 'agent' | 'chat'): Promise<void> {
@@ -990,7 +1209,8 @@ class FeishuBridge {
     }
 
     stopAgent(binding.sessionId)
-    await this.sendMessage(chatId, '✅ 已停止 Agent')
+    this.markStreamingInterrupted(binding.sessionId)
+    await this.sendMessage(chatId, '已停止 Agent')
   }
 
   private async handleSwitchCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
@@ -1024,6 +1244,7 @@ class FeishuBridge {
       channelId: match.channelId ?? appSettings.agentChannelId ?? '',
       modelId: appSettings.agentModelId ?? undefined,
       mode: 'agent',
+      source: 'feishu',
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
       createdAt: Date.now(),
@@ -1033,7 +1254,7 @@ class FeishuBridge {
     this.updateStatus({ activeBindings: this.chatBindings.size })
     this.saveBindings()
 
-    await this.sendMessage(chatId, `✅ 已切换到会话: ${match.title} (${match.id.slice(0, 8)})`)
+    await this.sendMessage(chatId, `已切换到会话: ${match.title} (${match.id.slice(0, 8)})`)
   }
 
   private async handleWorkspaceCommand(msgCtx: FeishuMessageContext, arg?: string): Promise<void> {
@@ -1131,7 +1352,7 @@ class FeishuBridge {
         lines.push('')
         lines.push('**MCP Servers**:')
         for (const mcp of capabilities.mcpServers) {
-          const status = mcp.enabled !== false ? '✅' : '⏸️'
+          const status = mcp.enabled !== false ? '启用' : '停用'
           lines.push(`  ${status} ${mcp.name}`)
         }
       } else {
@@ -1143,7 +1364,7 @@ class FeishuBridge {
         lines.push('')
         lines.push('**Skills**:')
         for (const skill of capabilities.skills) {
-          const status = skill.enabled !== false ? '✅' : '⏸️'
+          const status = skill.enabled !== false ? '启用' : '停用'
           lines.push(`  ${status} ${skill.name}`)
         }
       } else {
@@ -1157,7 +1378,7 @@ class FeishuBridge {
         const entries = readdirSync(wsPath, { withFileTypes: true })
         const fileList = entries
           .filter((e) => !e.name.startsWith('.') && e.name !== 'mcp.json' && e.name !== 'config.json' && e.name !== 'skills' && e.name !== 'skills-inactive')
-          .map((e) => e.isDirectory() ? `📁 ${e.name}/` : `📄 ${e.name}`)
+          .map((e) => e.isDirectory() ? `${e.name}/` : e.name)
         if (fileList.length > 0) {
           lines.push('')
           lines.push('**工作区文件**:')
@@ -1274,7 +1495,7 @@ class FeishuBridge {
           header: headerTitle,
           // 飞书 cardAction 不通过长连接推送，按钮点击会报 200340；
           // 改为文本提示用户用 /stop 命令终止
-          stopHint: '💬 发送 `/stop` 可终止当前任务',
+          stopHint: '发送 `/stop` 可终止当前任务',
         }),
         {
           replyToMessageId: msgCtx.chatType === 'group' ? msgCtx.messageId : undefined,
@@ -1284,8 +1505,8 @@ class FeishuBridge {
       this.streamingCardsUsedSessions.add(binding.sessionId)
     } catch (error) {
       console.error('[飞书 Bridge] 流式卡片创建失败，降级为文本进度提示:', error)
-      // 降级：保留原"⏳ 处理中..."提示，最终走 sendAgentReply 兜底
-      await this.sendMessage(chatId, `${prefix}⏳ Agent 处理中...`)
+      // 降级：保留原"处理中..."提示，最终走 sendAgentReply 兜底
+      await this.sendMessage(chatId, `${prefix}Agent 处理中...`)
     }
 
     if (binding.mode === 'agent') {
@@ -1419,7 +1640,7 @@ class FeishuBridge {
           (nextState.terminal === 'running' ? 'Agent 处理中' : 'Agent 已完成')
         const card = renderRunCard(nextState, {
           header: headerTitle,
-          stopHint: nextState.terminal === 'running' ? '💬 发送 `/stop` 可终止当前任务' : undefined,
+          stopHint: nextState.terminal === 'running' ? '发送 `/stop` 可终止当前任务' : undefined,
         })
         if (nextState.terminal === 'running') {
           cardStream.update(card)
@@ -1462,13 +1683,16 @@ class FeishuBridge {
       }
     }
 
-    // result 路由要放在 buffer 守卫外：桌面发起的会话本来就没 buffer，
-    // 需要走 handleDesktopSessionComplete 检查是否发飞书通知
+    // result 路由要放在 buffer 守卫外：桌面发起且未启用 Session 镜像时
+    // 没有任何状态需要清理，直接 no-op；启用镜像时由流式卡分支兜住。
     if (payload.kind === 'sdk_message' && payload.message.type === 'result') {
       if (buffer) {
         this.handleFeishuSessionComplete(sessionId)
-      } else {
-        this.handleDesktopSessionComplete(sessionId)
+      } else if (this.streamingTerminalHandledSessions.has(sessionId)) {
+        this.streamingTerminalHandledSessions.delete(sessionId)
+      } else if (this.streamingCardsUsedSessions.has(sessionId)) {
+        // 桌面 Session 镜像已经在流式卡片里完成终态展示，避免重复处理。
+        this.streamingCardsUsedSessions.delete(sessionId)
       }
       return
     }
@@ -1487,6 +1711,10 @@ class FeishuBridge {
         // 流式卡片同步标记 error（若用过流式卡）
         this.markStreamingError(sessionId, aMsg.error.message)
       }
+    }
+
+    if (payload.kind === 'proma_event' && payload.event.type === 'title_updated') {
+      this.updateSessionMirrorGroupName(sessionId, payload.event.title)
     }
   }
 
@@ -1523,6 +1751,20 @@ class FeishuBridge {
     // stop 后 Agent 仍可能推 result，需清掉 buffer 与 used 标志避免后续触发 sendAgentReply
     this.sessionBuffers.delete(sessionId)
     this.streamingCardsUsedSessions.delete(sessionId)
+    this.markTerminalHandled(sessionId)
+  }
+
+  /** 懒回收的 5 分钟兜底（防御 Agent 异常退出导致 result 不到达）。 */
+  private static readonly TERMINAL_HANDLED_TTL_MS = 5 * 60 * 1000
+
+  private markTerminalHandled(sessionId: string): void {
+    const now = Date.now()
+    for (const [sid, ts] of this.streamingTerminalHandledSessions) {
+      if (now - ts > FeishuBridge.TERMINAL_HANDLED_TTL_MS) {
+        this.streamingTerminalHandledSessions.delete(sid)
+      }
+    }
+    this.streamingTerminalHandledSessions.set(sessionId, now)
   }
 
   /** 飞书发起的会话完成：发送完整回复到飞书 */
@@ -1550,56 +1792,11 @@ class FeishuBridge {
     this.sessionBuffers.delete(sessionId)
   }
 
-  /**
-   * 桌面发起的会话完成：根据通知模式和在场状态决定是否发飞书通知
-   *
-   * - off → 不发
-   * - always → 发
-   * - auto → 用户不在场时才发
-   */
-  private handleDesktopSessionComplete(sessionId: string): void {
-    if (!this.client || !this.defaultNotifyChatId) return
-
-    const mode = this.sessionNotifyModes.get(sessionId) ?? 'auto'
-
-    if (mode === 'off') return
-    if (mode === 'auto' && presenceService.isUserPresent(sessionId)) return
-
-    // 需要发通知 → 发送简短通知卡片
-    this.sendDesktopNotification(sessionId).catch(console.error)
-  }
-
-  /** 向飞书发送桌面会话完成通知，并通知渲染进程 */
-  private async sendDesktopNotification(sessionId: string): Promise<void> {
-    if (!this.defaultNotifyChatId) return
-
-    // 获取会话标题
-    const sessions = await listAgentSessions()
-    const session = sessions.find((s) => s.id === sessionId)
-    const title = session?.title ?? '未命名会话'
-    const preview = '任务已完成，请在 Proma 中查看详情。'
-
-    // 发送通知卡片到飞书
-    const card = buildNotificationCard(title, preview, [], 0)
-    await this.sendCard(this.defaultNotifyChatId, card)
-
-    // 通知渲染进程（用于 Sonner toast + 桌面通知）
-    const payload: FeishuNotificationSentPayload = {
-      sessionId,
-      sessionTitle: title,
-      preview,
-    }
-    const windows = BrowserWindow.getAllWindows()
-    if (windows.length > 0 && !windows[0]!.isDestroyed()) {
-      windows[0]!.webContents.send(FEISHU_IPC_CHANNELS.NOTIFICATION_SENT, payload)
-    }
-  }
-
   private async sendAgentReply(chatId: string, result: FormattedAgentResult): Promise<void> {
     const subtitle = this.resolveContextSubtitle(chatId)
 
     if (!result.text.trim()) {
-      await this.sendMessage(chatId, `${subtitle ? `${subtitle} | ` : ''}✅ Agent 已完成（无文本输出）`)
+      await this.sendMessage(chatId, `${subtitle ? `${subtitle} | ` : ''}Agent 已完成（无文本输出）`)
       return
     }
 

@@ -83,7 +83,7 @@ export function ChatToolBlock({
         />
 
         {isPreviewable && (
-          <PreviewOpenButton filePath={filePath} expanded={expanded} />
+          <PreviewOpenButton filePath={filePath} />
         )}
       </button>
 

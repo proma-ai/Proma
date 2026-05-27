@@ -14,12 +14,10 @@ import { cn } from '@/lib/utils'
 
 interface PreviewOpenButtonProps {
   filePath: string
-  /** 是否已在展开状态（展开时始终可见，否则仅 hover 可见） */
-  expanded?: boolean
   className?: string
 }
 
-export function PreviewOpenButton({ filePath, expanded = false, className }: PreviewOpenButtonProps): React.ReactElement | null {
+export function PreviewOpenButton({ filePath, className }: PreviewOpenButtonProps): React.ReactElement | null {
   const sessionId = useAtomValue(currentAgentSessionIdAtom)
   const setPreviewFile = useSetAtom(previewFileMapAtom)
   const setPreviewOpen = useSetAtom(previewPanelOpenMapAtom)
@@ -44,11 +42,10 @@ export function PreviewOpenButton({ filePath, expanded = false, className }: Pre
       role="button"
       tabIndex={0}
       className={cn(
-        'shrink-0 px-1.5 py-px rounded text-[11px] text-muted-foreground/50',
+        'inline-flex shrink-0 items-center px-1.5 py-px rounded text-[11px] text-muted-foreground/60',
         'hover:text-foreground/70 hover:bg-muted/50',
-        'transition-all duration-150 cursor-pointer',
-        'opacity-0 group-hover:opacity-100',
-        expanded && 'opacity-100',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'transition-colors duration-150 cursor-pointer',
         className,
       )}
       onClick={(e) => {
@@ -58,6 +55,7 @@ export function PreviewOpenButton({ filePath, expanded = false, className }: Pre
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
+          e.stopPropagation()
           handleOpen()
         }
       }}

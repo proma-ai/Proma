@@ -1,13 +1,12 @@
 /**
  * 飞书集成 Jotai 状态（多 Bot 版本）
  *
- * 管理多个飞书 Bot 的 Bridge 连接状态和 per-session 通知模式。
+ * 管理多个飞书 Bot 的 Bridge 连接状态和聊天绑定。
  */
 
 import { atom } from 'jotai'
 import type {
   FeishuBridgeState,
-  FeishuNotifyMode,
   FeishuChatBinding,
   FeishuBotBridgeState,
 } from '@proma/shared'
@@ -26,12 +25,6 @@ export const feishuBridgeStateAtom = atom<FeishuBridgeState>((get) => {
   const first = Object.values(states)[0]
   return first ?? { status: 'disconnected', activeBindings: 0 }
 })
-
-/** 全局默认通知模式 */
-export const feishuDefaultNotifyModeAtom = atom<FeishuNotifyMode>('auto')
-
-/** per-session 通知模式 Map<sessionId, FeishuNotifyMode> */
-export const sessionFeishuNotifyModeAtom = atom<Map<string, FeishuNotifyMode>>(new Map())
 
 /** 飞书是否已连接（向后兼容：任一 Bot 连接即为 true） */
 export const feishuConnectedAtom = feishuAnyConnectedAtom

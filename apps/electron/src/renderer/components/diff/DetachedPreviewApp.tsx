@@ -11,6 +11,7 @@ import type { DetachedPreviewWindowData } from '@proma/shared'
 import { agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
+import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 
 function getPreviewId(): string | null {
   return new URLSearchParams(window.location.search).get('previewId')
@@ -87,6 +88,10 @@ export function DetachedPreviewApp(): React.ReactElement {
             {data.filePath}
           </div>
         </div>
+        <DefaultAppOpenButton
+          filePath={data.filePath}
+          access={{ sessionId: data.sessionId, candidateBasePaths: data.basePaths }}
+        />
         <button
           type="button"
           onClick={handleRefresh}

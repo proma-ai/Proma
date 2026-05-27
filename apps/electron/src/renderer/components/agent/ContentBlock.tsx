@@ -494,7 +494,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
       <button
         type="button"
         className={cn(
-          'flex w-full max-w-full items-center gap-2 py-0.5 text-left transition-opacity group',
+          'inline-flex max-w-full items-center gap-2 py-0.5 text-left transition-opacity group',
           'hover:opacity-70',
         )}
         onClick={() => setExpanded(!expanded)}
@@ -508,32 +508,32 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
         <ToolIcon className={cn('size-3.5 shrink-0', dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground')} />
 
         <span className={cn(
-          'truncate text-[14px]',
-          taskGetSummary || taskListSummary ? 'shrink-0' : 'min-w-0 flex-1',
+          'min-w-0 truncate text-[14px]',
+          taskGetSummary || taskListSummary ? 'shrink-0' : '',
           dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
         )}>{renderLabelWithDiffColors(displayLabel, block.name)}</span>
 
         {taskGetSummary && (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5">
             <TaskGetCollapsedSummary task={taskGetSummary} />
           </span>
         )}
 
         {taskListSummary && (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5">
             <TaskListCollapsedSummary tasks={taskListSummary} />
           </span>
         )}
 
         <ChevronRight
           className={cn(
-            'ml-auto shrink-0 size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-all duration-150',
-            expanded && 'rotate-90 opacity-100',
+            'shrink-0 size-3 text-muted-foreground/45 transition-transform duration-150',
+            expanded && 'rotate-90',
           )}
         />
 
         {isPreviewable && (
-          <PreviewOpenButton filePath={filePath} expanded={expanded} />
+          <PreviewOpenButton filePath={filePath} />
         )}
       </button>
 

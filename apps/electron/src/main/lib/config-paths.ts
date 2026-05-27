@@ -561,6 +561,17 @@ export function getFeishuBotBindingsPath(botId: string): string {
 }
 
 /**
+ * 获取某个飞书 Bot 的运行时元数据持久化路径
+ *
+ * 用于保存最近交互用户 open_id 等需要跨进程重启恢复的状态。
+ *
+ * @returns ~/.proma/feishu-metadata-{botId}.json
+ */
+export function getFeishuBotMetadataPath(botId: string): string {
+  return join(getConfigDir(), `feishu-metadata-${botId}.json`)
+}
+
+/**
  * 获取指定 Agent 会话的工作路径
  *
  * 在工作区目录下创建以 sessionId 命名的子文件夹，

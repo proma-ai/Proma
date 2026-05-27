@@ -91,7 +91,6 @@ import type {
   FeishuTestResult,
   FeishuChatBinding,
   FeishuPresenceReport,
-  FeishuNotifyMode,
   FeishuUpdateBindingInput,
   FeishuRegisterAppQRCode,
   FeishuRegisterAppStatus,
@@ -361,6 +360,247 @@ function getBundledResourcesDir(): string {
 }
 
 /**
+ * 默认 App 探测结果按文件后缀缓存（含 null 负缓存），避免反复 spawn osascript / 注册表查询。
+ * 进程级别一次会话足够，无需失效策略——用户切换默认 App 是低频行为，下次重启生效即可。
+ */
+const defaultAppCache = new Map<string, import('@proma/shared').DefaultAppInfo | null>()
+
+function extOf(filePath: string): string {
+  const base = filePath.split(/[\\/]/).pop() ?? ''
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(dot).toLowerCase() : ''
+}
+
+async function getAppIconDataUrl(appPath: string): Promise<string> {
+  // macOS: 用 sips 把 App bundle 的 .icns 转成 64×64 PNG 再读。
+  // 不要用 nativeImage.createFromPath(.icns) + resize ——某些 Electron 版本对多分辨率 .icns
+  // resize 时会 SIGTRAP 直接崩主进程。
+  if (process.platform === 'darwin' && appPath.endsWith('.app')) {
+    const dataUrl = await getMacAppIconViaSips(appPath)
+    if (dataUrl) return dataUrl
+  }
+
+  const icon = await app.getFileIcon(appPath, { size: 'large' })
+  if (icon.isEmpty()) return ''
+  return icon.toDataURL()
+}
+
+async function getMacAppIconViaSips(appPath: string): Promise<string> {
+  const { existsSync, readFileSync, unlinkSync, mkdtempSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+
+  // 找 .icns 文件
+  const resourcesDir = join(appPath, 'Contents', 'Resources')
+  const plistPath = join(appPath, 'Contents', 'Info.plist')
+  let iconName: string | null = null
+  if (existsSync(plistPath)) {
+    const r = await runCmd('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIconFile', plistPath], { timeoutMs: 2000 })
+    if (r.status === 0) iconName = r.stdout.trim()
+  }
+  const candidates: string[] = []
+  if (iconName) candidates.push(join(resourcesDir, iconName.endsWith('.icns') ? iconName : `${iconName}.icns`))
+  candidates.push(join(resourcesDir, 'AppIcon.icns'), join(resourcesDir, 'app.icns'), join(resourcesDir, 'icon.icns'))
+  const icnsPath = candidates.find((p) => existsSync(p))
+  if (!icnsPath) return ''
+
+  const tmp = mkdtempSync(join(tmpdir(), 'proma-icon-'))
+  const outPath = join(tmp, 'icon.png')
+  try {
+    const r = await runCmd('sips', ['-s', 'format', 'png', '-Z', '64', icnsPath, '--out', outPath], { timeoutMs: 4000 })
+    if (r.status !== 0 || !existsSync(outPath)) return ''
+    const buf = readFileSync(outPath)
+    return `data:image/png;base64,${buf.toString('base64')}`
+  } finally {
+    try { if (existsSync(outPath)) unlinkSync(outPath) } catch { /* ignore */ }
+  }
+}
+
+/** 异步执行外部命令，超时即 kill；不经 shell，避免 shell 元字符注入。 */
+async function runCmd(
+  bin: string,
+  args: string[],
+  opts: { timeoutMs?: number; stdin?: string } = {},
+): Promise<{ status: number | null; stdout: string }> {
+  const { spawn } = await import('node:child_process')
+  const { timeoutMs = 4000, stdin } = opts
+  return new Promise((resolvePromise) => {
+    const child = spawn(bin, args, {
+      stdio: [stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'ignore'],
+    })
+    let stdout = ''
+    let settled = false
+    const finish = (status: number | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise({ status, stdout })
+    }
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* ignore */ }
+      finish(null)
+    }, timeoutMs)
+    child.on('error', () => finish(null))
+    child.on('close', (code) => finish(code))
+    if (child.stdout) {
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => { stdout += chunk })
+    }
+    if (stdin !== undefined && child.stdin) {
+      child.stdin.end(stdin)
+    }
+  })
+}
+
+function parseWindowsRegistryValue(stdout: string): string {
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/\s+REG_\w+\s+(.+)$/)
+    if (match?.[1]) return match[1].trim()
+  }
+  return ''
+}
+
+function expandWindowsEnvPath(filePath: string): string {
+  return filePath.replace(/%([^%]+)%/g, (token, name: string) => {
+    const foundKey = Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase())
+    return foundKey ? process.env[foundKey] ?? token : token
+  })
+}
+
+function parseWindowsExecutablePath(command: string): string {
+  const match = command.match(/"([^"]+\.exe)"|([^\s"]+\.exe)/i)
+  return expandWindowsEnvPath((match?.[1] || match?.[2] || '').trim())
+}
+
+function isSafeWindowsProgId(progId: string): boolean {
+  return /^[\w.+\\-]+$/.test(progId)
+}
+
+async function getWindowsDefaultAppCommand(progId: string): Promise<string> {
+  if (!isSafeWindowsProgId(progId)) return ''
+
+  const registryResult = await runCmd('reg', [
+    'query',
+    `HKCR\\${progId}\\shell\\open\\command`,
+    '/ve',
+  ])
+  const registryCommand = parseWindowsRegistryValue(registryResult.stdout)
+  if (registryCommand) return registryCommand
+
+  const ftypeResult = await runCmd('cmd', ['/c', `ftype ${progId}`])
+  return (ftypeResult.stdout || '').split('=').slice(1).join('=').trim()
+}
+
+async function getWindowsDefaultAppInfo(filePath: string): Promise<{ appPath: string; appName: string } | null> {
+  const ext = extOf(filePath)
+  // ext 来自渲染进程的 filePath，必须严格校验：cmd /c "assoc ${ext}" 中 & | > < 等会触发命令链
+  if (!/^\.[a-zA-Z0-9]+$/.test(ext)) return null
+
+  const userChoiceResult = await runCmd('reg', [
+    'query',
+    `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\${ext}\\UserChoice`,
+    '/v',
+    'ProgId',
+  ])
+  let progId = parseWindowsRegistryValue(userChoiceResult.stdout)
+
+  if (!progId) {
+    const assoc = await runCmd('cmd', ['/c', `assoc ${ext}`])
+    progId = (assoc.stdout || '').split('=')[1]?.trim() ?? ''
+  }
+  if (!progId || !isSafeWindowsProgId(progId)) return null
+
+  const command = await getWindowsDefaultAppCommand(progId)
+  const appPath = parseWindowsExecutablePath(command)
+  if (!appPath) return null
+
+  const base = appPath.split(/[\\/]/).pop() || ''
+  return { appPath, appName: base.replace(/\.exe$/i, '') }
+}
+
+async function getDefaultAppInfoForFile(
+  filePath: string,
+  options?: FileAccessOptions,
+): Promise<import('@proma/shared').DefaultAppInfo | null> {
+  const { resolve } = await import('node:path')
+  const absPath = resolve(filePath)
+  if (!isPathAllowed(absPath, options)) {
+    console.warn('[IPC] shell:get-default-app-for-file 拒绝越界路径:', absPath)
+    return null
+  }
+
+  const cacheKey = `${process.platform}:${extOf(filePath) || filePath}`
+  if (defaultAppCache.has(cacheKey)) return defaultAppCache.get(cacheKey) ?? null
+
+  let appPath = ''
+  let appName = ''
+
+  if (process.platform === 'darwin') {
+    // 通过 swift + AppKit/NSWorkspace.urlForApplication(toOpen:) 调 LaunchServices。
+    // 比 AppleScript 的 `default application of (file as alias)` 稳得多——后者在 macOS 14+
+    // 经常返回 -1700（无法转 alias），即便文件存在、默认 App 已正确设置。
+    // swift 通过 stdin 接收脚本，文件路径作为 argv[1]，杜绝任何字符串拼接注入。
+    const swiftSrc = `import Foundation
+import AppKit
+let path = CommandLine.arguments.dropFirst().first ?? ""
+let url = URL(fileURLWithPath: path)
+if let appUrl = NSWorkspace.shared.urlForApplication(toOpen: url) {
+  print(appUrl.path)
+} else {
+  exit(1)
+}`
+    const r = await runCmd('swift', ['-', absPath], { stdin: swiftSrc, timeoutMs: 6000 })
+    if (r.status === 0) {
+      appPath = r.stdout.trim().replace(/\/$/, '')
+    }
+    if (appPath.endsWith('.app')) {
+      const base = appPath.split('/').pop() || ''
+      appName = base.replace(/\.app$/, '')
+    }
+  } else if (process.platform === 'win32') {
+    const info = await getWindowsDefaultAppInfo(filePath)
+    if (!info) return cacheNull(cacheKey)
+    appPath = info.appPath
+    appName = info.appName
+  } else {
+    const mimeRes = await runCmd('xdg-mime', ['query', 'filetype', absPath])
+    const mime = mimeRes.stdout.trim()
+    if (!mime) return cacheNull(cacheKey)
+    const defRes = await runCmd('xdg-mime', ['query', 'default', mime])
+    const desktop = defRes.stdout.trim()
+    if (!desktop) return cacheNull(cacheKey)
+    const { homedir } = await import('node:os')
+    const candidates = [
+      `${homedir()}/.local/share/applications/${desktop}`,
+      `/usr/share/applications/${desktop}`,
+      `/usr/local/share/applications/${desktop}`,
+    ]
+    const { existsSync, readFileSync } = await import('node:fs')
+    const desktopPath = candidates.find((p) => existsSync(p))
+    if (!desktopPath) return cacheNull(cacheKey)
+    const text = readFileSync(desktopPath, 'utf8')
+    const execLine = text.split('\n').find((l) => l.startsWith('Exec='))?.slice(5) || ''
+    const nameLine = text.split('\n').find((l) => l.startsWith('Name='))?.slice(5) || ''
+    appPath = execLine.split(/\s+/)[0] || ''
+    appName = nameLine || (appPath.split('/').pop() ?? '')
+  }
+
+  if (!appPath || !appName) return cacheNull(cacheKey)
+
+  const iconDataUrl = await getAppIconDataUrl(appPath).catch(() => '')
+  if (!iconDataUrl) return cacheNull(cacheKey)
+
+  const info: import('@proma/shared').DefaultAppInfo = { name: appName, appPath, iconDataUrl }
+  defaultAppCache.set(cacheKey, info)
+  return info
+}
+
+function cacheNull(key: string): null {
+  defaultAppCache.set(key, null)
+  return null
+}
+
+/**
  * 解析应用图标变体的文件路径
  */
 export function resolveAppIconPath(variantId: string): string | null {
@@ -581,6 +821,20 @@ export function registerIpcHandlers(): void {
       return editors
         .filter((e) => e.paths.some((p) => existsSync(p)))
         .map((e) => ({ name: e.name, path: e.paths.find((p) => existsSync(p))! }))
+    }
+  )
+
+  // 查询某个文件在本机的默认打开应用信息（带图标）
+  ipcMain.handle(
+    IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE,
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').DefaultAppInfo | null> => {
+      if (!filePath || typeof filePath !== 'string') return null
+      try {
+        return await getDefaultAppInfoForFile(filePath, normalizeFileAccessOptions(access))
+      } catch (err) {
+        console.warn('[IPC] shell:get-default-app-for-file 失败:', err)
+        return null
+      }
     }
   )
 
@@ -1247,7 +1501,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string): Promise<AgentSessionMeta> => {
-      return createAgentSession(title, channelId, workspaceId)
+      const session = createAgentSession(title, channelId, workspaceId)
+      feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
+        console.error('[飞书 Session 镜像] 新会话建群失败:', error)
+      })
+      return session
     }
   )
 
@@ -1601,6 +1859,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {
+      const session = getAgentSessionMeta(input.sessionId)
+      if (session) {
+        await feishuBridgeManager.startSessionMirrorRun(session).catch((error) => {
+          console.error('[飞书 Session 镜像] 流式卡片初始化失败:', error)
+        })
+      }
       await runAgent(input, event.sender)
     }
   )
@@ -1609,6 +1873,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.STOP_AGENT,
     async (_, sessionId: string): Promise<void> => {
+      feishuBridgeManager.stopSessionMirrorRun(sessionId)
       stopAgent(sessionId)
     }
   )
@@ -3042,17 +3307,6 @@ export function registerIpcHandlers(): void {
     FEISHU_IPC_CHANNELS.REPORT_PRESENCE,
     async (_, report: FeishuPresenceReport): Promise<void> => {
       presenceService.updatePresence(report)
-    }
-  )
-
-  // 设置会话通知模式
-  ipcMain.handle(
-    FEISHU_IPC_CHANNELS.SET_SESSION_NOTIFY,
-    async (_, sessionId: string, mode: FeishuNotifyMode): Promise<void> => {
-      // 通知模式需要发到所有 Bridge（不确定哪个 Bridge 持有该 session）
-      for (const bridge of feishuBridgeManager.getAllBridges().values()) {
-        bridge.setSessionNotifyMode(sessionId, mode)
-      }
     }
   )
 

@@ -231,6 +231,16 @@ export interface EditorApp {
   path: string
 }
 
+/** 某个文件路径在本机系统中的默认打开应用信息 */
+export interface DefaultAppInfo {
+  /** 显示名称，如 "Visual Studio Code"、"Typora"、"Preview" */
+  name: string
+  /** 应用绝对路径（macOS 为 .app bundle，Windows 为 .exe），用于点击打开/调试 */
+  appPath: string
+  /** App 图标的 PNG dataURL；通过 Electron app.getFileIcon 抓取 */
+  iconDataUrl: string
+}
+
 /**
  * WSL 运行时状态（Windows 平台）
  */
@@ -330,6 +340,8 @@ export const IPC_CHANNELS = {
   SYSTEM_OPEN_FILE: 'shell:system-open-file',
   /** 扫描系统中可用的编辑器应用 */
   SCAN_EDITORS: 'shell:scan-editors',
+  /** 查询某个文件在本机系统中的默认打开应用信息（带图标） */
+  GET_DEFAULT_APP_FOR_FILE: 'shell:get-default-app-for-file',
   /** 打开独立预览窗口 */
   OPEN_DETACHED_PREVIEW: 'preview:open-detached',
   /** 获取独立预览窗口数据 */

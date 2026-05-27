@@ -46,6 +46,7 @@ import { cn } from '@/lib/utils'
 import { workspaceFilesVersionAtom, fileBrowserAutoRevealAtom, recentlyModifiedPathsAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import type { FileEntry } from '@proma/shared'
 import { FileTypeIcon } from './FileTypeIcon'
+import { DefaultAppMenuItem } from './DefaultAppMenuItem'
 import {
   computeTreeRowLayout,
   AncestorGuides,
@@ -790,6 +791,12 @@ function FileTreeItem({
                     <FolderSearch />
                     在文件夹中显示
                   </DropdownMenuItem>
+                )}
+                {menuSelectedCount === 1 && !entry.isDirectory && (
+                  <DefaultAppMenuItem
+                    filePath={entry.path}
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                  />
                 )}
                 <DropdownMenuItem
                   className="text-xs py-1 [&>svg]:size-3.5"

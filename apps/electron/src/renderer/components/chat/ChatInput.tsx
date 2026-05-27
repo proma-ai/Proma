@@ -38,7 +38,6 @@ import {
   useConversationModel,
   useConversationThinkingEnabled,
 } from '@/hooks/useConversationSettings'
-import { FeishuNotifyToggle } from './FeishuNotifyToggle'
 import { cn } from '@/lib/utils'
 import { fileToBase64, formatFileNames } from '@/lib/file-utils'
 import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
@@ -311,12 +310,11 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         </Tooltip>
       ),
     },
-    { key: 'feishu', node: <FeishuNotifyToggle sessionId={conversationId} /> },
     { key: 'speech', node: <SpeechButton className="size-[36px] shrink-0 rounded-full" /> },
     { key: 'tools', node: <ToolSelectorPopover /> },
     { key: 'context', node: <ContextSettingsPopover /> },
     { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
-  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, conversationId, onClearContext])
+  ], [handleOpenFileDialog, thinkingEnabled, setThinkingEnabled, onClearContext])
 
   const trailingNode = streaming ? (
     <Tooltip>

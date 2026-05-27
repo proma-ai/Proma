@@ -210,6 +210,12 @@ export const agentSessionModelMapAtom = atom<Map<string, string>>(new Map())
 export const currentAgentSessionIdAtom = atom<string | null>(null)
 export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>>(new Map())
 
+/** Agent 流式结束后是否保持过程组展开，默认收起以降低结果阅读干扰 */
+export const agentProcessGroupsKeepExpandedAtom = atomWithStorage<boolean>(
+  'proma-agent-process-groups-keep-expanded',
+  false,
+)
+
 /**
  * 单个 session 的 streaming state 派生 atomFamily — 按 sessionId 切片订阅。
  *

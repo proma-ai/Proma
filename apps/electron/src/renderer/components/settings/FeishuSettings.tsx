@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight, PlayCircle, QrCode } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight, PlayCircle, QrCode, MessageSquare, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -45,7 +45,7 @@ import { SettingsRow } from './primitives/SettingsRow'
 import { feishuBotStatesAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
 import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
-import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus } from '@proma/shared'
+import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus, FeishuSessionMirrorSettings, FeishuSessionSyncMode } from '@proma/shared'
 
 // ===== 常量 =====
 
@@ -836,6 +836,132 @@ function defaultBotName(index: number): string {
   return `飞书助手 ${index + 1}`
 }
 
+// ===== Session 镜像设置 =====
+
+const SESSION_SYNC_LABELS: Record<FeishuSessionSyncMode, string> = {
+  off: '关闭',
+  stream: '实时同步到飞书群',
+}
+
+function normalizeSessionMirrorSettings(settings: FeishuSessionMirrorSettings | undefined): FeishuSessionMirrorSettings {
+  return settings?.mode === 'stream'
+    ? { mode: 'stream', botId: settings.botId }
+    : { mode: 'off' }
+}
+
+function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.ReactElement {
+  const [settings, setSettings] = React.useState<FeishuSessionMirrorSettings>({ mode: 'off' })
+  const [bindings, setBindings] = React.useState<FeishuChatBinding[]>([])
+  const enabledBots = React.useMemo(
+    () => bots.filter((bot) => bot.enabled && bot.appId),
+    [bots],
+  )
+  const selectedBot = React.useMemo(
+    () => enabledBots.find((bot) => bot.id === settings.botId),
+    [enabledBots, settings.botId],
+  )
+  const selectedBotHasBinding = React.useMemo(
+    () => Boolean(settings.botId && bindings.some((binding) =>
+      binding.botId === settings.botId && binding.userId && binding.userId !== 'unknown'
+    )),
+    [bindings, settings.botId],
+  )
+  const showBotBindingWarning = settings.mode === 'stream' && Boolean(settings.botId) && !selectedBotHasBinding
+
+  React.useEffect(() => {
+    window.electronAPI.getSettings()
+      .then((appSettings) => {
+        setSettings(normalizeSessionMirrorSettings(appSettings.feishuSessionMirror))
+      })
+      .catch(() => {})
+
+    window.electronAPI.listFeishuBindings()
+      .then(setBindings)
+      .catch(() => {})
+  }, [])
+
+  const saveSettings = React.useCallback(async (next: FeishuSessionMirrorSettings) => {
+    setSettings(next)
+    try {
+      await window.electronAPI.updateSettings({ feishuSessionMirror: next })
+      toast.success('飞书 Session 镜像设置已更新')
+    } catch {
+      toast.error('保存飞书 Session 镜像设置失败')
+    }
+  }, [])
+
+  const handleModeChange = React.useCallback((value: string) => {
+    const mode = value as FeishuSessionSyncMode
+    const fallbackBotId = settings.botId ?? enabledBots[0]?.id
+    const next: FeishuSessionMirrorSettings = mode === 'stream'
+      ? { mode, botId: fallbackBotId }
+      : { mode, botId: settings.botId }
+    saveSettings(next).catch(() => {})
+  }, [enabledBots, saveSettings, settings.botId])
+
+  const handleBotChange = React.useCallback((botId: string) => {
+    saveSettings({ ...settings, botId }).catch(() => {})
+  }, [saveSettings, settings])
+
+  return (
+    <SettingsSection
+      title="同步到飞书"
+      description="开启后，每个新的 Proma Agent Session 会创建一个仅包含你和指定 Bot 的飞书群，并把输出同步到群内卡片。借此可以实现几乎完整的 Proma 移动端体验，可以脱离电脑随时在飞书上继续完成工作。"
+    >
+      <SettingsCard divided={false}>
+        <div className="px-4 py-4 space-y-4">
+          <div className="grid gap-3 md:grid-cols-[180px_1fr] md:items-center">
+            <div className="text-sm font-medium text-foreground">同步方式</div>
+            <Select value={settings.mode} onValueChange={handleModeChange}>
+              <SelectTrigger className="h-9">
+                <SelectValue>{SESSION_SYNC_LABELS[settings.mode]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">关闭</SelectItem>
+                <SelectItem value="stream">实时同步到飞书群</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[180px_1fr] md:items-center">
+            <div className="text-sm font-medium text-foreground">同步 Bot</div>
+            <Select
+              value={settings.botId ?? ''}
+              onValueChange={handleBotChange}
+              disabled={enabledBots.length === 0}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder={enabledBots.length === 0 ? '先启用一个 Bot' : '选择同步 Bot'} />
+              </SelectTrigger>
+              <SelectContent>
+                {enabledBots.map((bot) => (
+                  <SelectItem key={bot.id} value={bot.id}>{bot.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-lg bg-blue-500/10 px-3 py-3 text-xs text-blue-700 dark:text-blue-300">
+            <MessageSquare size={15} className="mt-0.5 flex-shrink-0" />
+            <div className="leading-relaxed">
+              实时同步模式下，一个 Proma Session 对应一个飞书群。即使配置了多个 Bot，也只会使用这里选中的 Bot，避免同一 Session 被多个 Bot 重复建群或拆散上下文。
+            </div>
+          </div>
+
+          {showBotBindingWarning && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-3 text-xs text-amber-800 dark:text-amber-300">
+              <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+              <div className="leading-relaxed">
+                当前同步 Bot 还没有绑定记录。请先在飞书里向「{selectedBot?.name ?? '该 Bot'}」发送一条消息，Proma 记录你的 open_id 后才能自动为新 Session 建群。
+              </div>
+            </div>
+          )}
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
+
 // ===== 单个 Bot 配置卡片 =====
 
 interface BotConfigCardProps {
@@ -1216,6 +1342,8 @@ function FeishuConfigTab(): React.ReactElement {
           </div>
         )}
       </SettingsSection>
+
+      <SessionMirrorSection bots={bots} />
 
       {/* 创建飞书 Bot 引导 */}
       <SettingsSection

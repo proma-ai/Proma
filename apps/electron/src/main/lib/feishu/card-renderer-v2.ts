@@ -5,9 +5,9 @@ import type { Block, FooterStatus, RunState, ToolEntry } from './card-run-state'
  *
  * 设计参考 zara/feishu-claude-code-bridge `src/card/run-renderer.ts`：
  * - streaming_mode 标志告诉飞书客户端这是动态卡（关闭时停止动效）
- * - 工具调用 >= COLLAPSE_TOOL_THRESHOLD 时折叠为单面板，避免每个 element
+ * - 工具调用 >= COLLAPSE_TOOL_THRESHOLD 时合并为单面板，避免每个 element
  *   超过飞书 30KB 的限制（长 tool_result 很容易撞）
- * - 进行中的最新工具单独展开，已结束工具折叠到摘要里
+ * - 工具调用面板默认收起，手机端只保留清晰的运行状态和摘要
  * - 底部 summary 是手机端通知预览的短文本
  *
  * 需要时通过 buildStopButton 等辅助函数把按钮 callback value 注入 cmd 字段，
@@ -62,12 +62,12 @@ export function renderCard(state: RunState, opts: RenderOptions = {}): object {
   }
 
   if (state.terminal === 'interrupted') {
-    elements.push(noteMd('_⏹ 已被中断_'))
+    elements.push(noteMd('_已被中断_'))
   } else if (state.terminal === 'idle_timeout') {
     const mins = state.idleTimeoutMinutes ?? 0
-    elements.push(noteMd(`_⏱ ${mins} 分钟无响应，已自动终止_`))
+    elements.push(noteMd(`_${mins} 分钟无响应，已自动终止_`))
   } else if (state.terminal === 'error' && state.errorMsg) {
-    elements.push(noteMd(`⚠️ Agent 失败：${state.errorMsg}`))
+    elements.push(noteMd(`Agent 失败：${state.errorMsg}`))
   } else if (state.terminal === 'done' && elements.length === 0) {
     elements.push(noteMd('_（Agent 未返回内容）_'))
   }
@@ -117,24 +117,22 @@ function* groupBlocks(blocks: Block[]): Generator<Group> {
 function renderToolGroup(tools: ToolEntry[], finalized: boolean): object[] {
   if (tools.length === 0) return []
   if (tools.length < MIN_TOOLS_TO_COLLAPSE) {
-    // 工具数少时默认展开，让用户直接看到 input/output（点不到 panel 体验更差）
-    // 已完成的工具如果 done 状态可以收起，运行中或出错的展开
-    return tools.map((t) => toolPanel(t, t.status !== 'done'))
+    return tools.map((t) => toolPanel(t))
   }
   if (finalized) {
-    return [collapsedToolSummary(tools, true)]
+    return [toolSummaryPanel(tools, true)]
   }
-  // running 期：把已完成的工具折叠成摘要，最新的单独展开
+  // running 期：把已完成的工具合并成摘要，最新工具单独成面板，二者都默认收起。
   const prior = tools.slice(0, -1)
   const latest = tools[tools.length - 1]
   const out: object[] = []
-  if (prior.length > 0) out.push(collapsedToolSummary(prior, false))
-  if (latest) out.push(toolPanel(latest, true))
+  if (prior.length > 0) out.push(toolSummaryPanel(prior, false))
+  if (latest) out.push(toolPanel(latest))
   return out
 }
 
 function reasoningPanel(content: string, active: boolean): object {
-  const title = active ? '🧠 **思考中**' : '🧠 **思考完成，点击查看**'
+  const title = active ? '**思考中**' : '**思考完成，点击查看**'
   return collapsiblePanel({
     title,
     expanded: active,
@@ -143,24 +141,23 @@ function reasoningPanel(content: string, active: boolean): object {
   })
 }
 
-function toolPanel(tool: ToolEntry, expanded: boolean): object {
+function toolPanel(tool: ToolEntry): object {
   return collapsiblePanel({
     title: toolHeaderText(tool),
-    expanded,
+    expanded: false,
     border: tool.status === 'error' ? 'red' : 'grey',
     body: toolBodyMd(tool) || '_无输出_',
   })
 }
 
-function collapsedToolSummary(tools: ToolEntry[], finalized: boolean): object {
+function toolSummaryPanel(tools: ToolEntry[], finalized: boolean): object {
   const suffix = finalized ? '（已结束）' : ''
-  const title = `🛠 **${tools.length} 个工具调用${suffix}**`
-  // 摘要默认展开，让用户直接看到调了哪些工具（不必点开二次交互）
-  // 每行 header 已含 icon + 工具名 + 参数预览，足够定位"调了什么"
+  const title = `**${tools.length} 个工具调用${suffix}**`
+  // 每行 header 已含 icon + 工具名 + 参数预览，折叠时标题也能表达整体状态。
   const headerList = tools.map((t) => `- ${toolHeaderText(t)}`).join('\n')
   return {
     tag: 'collapsible_panel',
-    expanded: true,
+    expanded: false,
     header: panelHeader(title),
     border: { color: 'blue', corner_radius: '5px' },
     vertical_spacing: '8px',
@@ -207,30 +204,30 @@ function noteMd(content: string): object {
 }
 
 function footerStatus(status: Exclude<FooterStatus, null>, blocks: Block[]): object {
-  if (status === 'thinking') return noteMd('🧠 正在思考')
-  if (status === 'streaming') return noteMd('✍️ 正在输出')
+  if (status === 'thinking') return noteMd('正在思考')
+  if (status === 'streaming') return noteMd('正在输出')
   // tool_running：找到最新运行中的工具，把名字带上让用户知道具体在调什么
   const runningTool = [...blocks].reverse().find(
     (b) => b.kind === 'tool' && b.tool.status === 'running',
   )
   if (runningTool && runningTool.kind === 'tool') {
-    return noteMd(`🛠 正在调用 \`${runningTool.tool.name}\``)
+    return noteMd(`正在调用 \`${runningTool.tool.name}\``)
   }
-  return noteMd('🛠 正在调用工具')
+  return noteMd('正在调用工具')
 }
 
 function metaFooter(state: RunState): object {
   const parts: string[] = []
   if (state.meta.durationMs !== undefined) {
-    parts.push(`⏱ ${(state.meta.durationMs / 1000).toFixed(1)}s`)
+    parts.push(`${(state.meta.durationMs / 1000).toFixed(1)}s`)
   }
   if (state.meta.inputTokens !== undefined || state.meta.outputTokens !== undefined) {
     const i = state.meta.inputTokens ?? 0
     const o = state.meta.outputTokens ?? 0
-    parts.push(`📊 ${i}↑ ${o}↓ tokens`)
+    parts.push(`${i}↑ ${o}↓ tokens`)
   }
   if (state.meta.model) {
-    parts.push(`🤖 ${state.meta.model}`)
+    parts.push(state.meta.model)
   }
   return noteMd(parts.length > 0 ? parts.join('  ·  ') : '_已完成_')
 }
@@ -250,10 +247,10 @@ function truncate(s: string, max: number): string {
 }
 
 function toolHeaderText(tool: ToolEntry): string {
-  const icon = tool.status === 'error' ? '❌' : tool.status === 'done' ? '✅' : '⏳'
+  const status = tool.status === 'error' ? '失败' : tool.status === 'done' ? '完成' : '运行中'
   const summary = toolInputSummary(tool)
   const summaryPart = summary ? ` · ${summary}` : ''
-  return `${icon} **${tool.name}**${summaryPart}`
+  return `**${tool.name}** · ${status}${summaryPart}`
 }
 
 function toolInputSummary(tool: ToolEntry): string {

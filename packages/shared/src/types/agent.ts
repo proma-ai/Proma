@@ -517,6 +517,7 @@ export type PromaEvent =
   | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
   | { type: 'model_resolved'; model: string }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
+  | { type: 'title_updated'; title: string }
 
 
 /** IPC 传输的统一 payload（替代 AgentEvent） */

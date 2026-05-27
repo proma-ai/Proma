@@ -19,6 +19,7 @@ import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
 import { TaskProgressCard } from './TaskProgressCard'
 import { TurnFileChangesSummary } from './TurnFileChangesSummary'
+import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
 import { DurationBadge } from './AgentMessages'
 import {
@@ -38,6 +39,7 @@ import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
+import { agentProcessGroupsKeepExpandedAtom } from '@/atoms/agent-atoms'
 import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import type {
@@ -517,6 +519,7 @@ export interface AssistantTurnRendererProps {
 
 export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
+  const processGroupsKeepExpanded = useAtomValue(agentProcessGroupsKeepExpandedAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
     block: SDKContentBlock
@@ -586,6 +589,15 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   const { taskActivities, firstTaskIndex } = React.useMemo(() => {
     return buildTaskProgressData(topLevelBlocks, turn.turnMessages)
   }, [topLevelBlocks, turn.turnMessages])
+  const completedToolResultIds = React.useMemo(() => {
+    return buildCompletedToolResultIds(turn.turnMessages)
+  }, [turn.turnMessages])
+  const renderItems = React.useMemo(() => {
+    return buildAssistantTurnRenderItems(topLevelBlocks, {
+      isStreaming,
+      completedToolResultIds,
+    })
+  }, [topLevelBlocks, isStreaming, completedToolResultIds])
 
   // 如果只有错误消息
   if (enrichedBlocks.length === 0 && hasError && errorContent) {
@@ -602,6 +614,58 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   // 如果没有任何内容
   if (enrichedBlocks.length === 0 && !hasError) return null
 
+  const renderTopLevelBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
+    // Task 工具块：聚合为卡片，此处用索引定位首个任务工具
+    if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
+      if (i === firstTaskIndex) {
+        return (
+          <TaskProgressCard
+            key="task-progress-card"
+            activities={taskActivities}
+            streamEnded={!isStreaming}
+            historicalTaskSubjects={historicalTaskSubjects}
+          />
+        )
+      }
+      return null
+    }
+
+    const isAgentTool = block.type === 'tool_use'
+      && ((block as { name: string }).name === 'Agent' || (block as { name: string }).name === 'Task')
+    const childBlocks = isAgentTool
+      ? childBlocksMap.get((block as { id: string }).id)
+      : undefined
+
+    return (
+      <ContentBlock
+        key={i}
+        block={block}
+        allMessages={allMessages}
+        basePath={basePath}
+        animate={!!isStreaming}
+        index={i}
+        dimmed={hasTextContent && block.type !== 'text'}
+        childBlocks={childBlocks}
+        isStreaming={isStreaming}
+      />
+    )
+  }
+
+  const renderProcessGroupBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
+    const content = renderTopLevelBlock(block, i)
+    if (!content) return content
+    if (!isStreaming || block.type !== 'text') return content
+
+    return (
+      <div
+        key={`process-text-${i}`}
+        className="animate-in fade-in slide-in-from-top-1 duration-300"
+      >
+        {content}
+      </div>
+    )
+  }
+
   return (
     <Message from="assistant">
       <MessageHeader
@@ -611,35 +675,24 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
       />
       <MessageContent>
         <div className={cn('space-y-2')}>
-          {topLevelBlocks.map((block, i) => {
-              // Task 工具块：聚合为卡片，此处用索引定位首个任务工具
-              if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
-                if (i === firstTaskIndex) {
-                  return <TaskProgressCard key="task-progress-card" activities={taskActivities} streamEnded={!isStreaming} historicalTaskSubjects={historicalTaskSubjects} />
-                }
-                return null
-              }
+          {renderItems.map((item) => {
+            if (item.type === 'block') {
+              return renderTopLevelBlock(item.item.block, item.item.index)
+            }
 
-              const isAgentTool = block.type === 'tool_use'
-                && ((block as { name: string }).name === 'Agent' || (block as { name: string }).name === 'Task')
-              const childBlocks = isAgentTool
-                ? childBlocksMap.get((block as { id: string }).id)
-                : undefined
-
-              return (
-                <ContentBlock
-                  key={i}
-                  block={block}
-                  allMessages={allMessages}
-                  basePath={basePath}
-                  animate={!!isStreaming}
-                  index={i}
-                  dimmed={hasTextContent && block.type !== 'text'}
-                  childBlocks={childBlocks}
-                  isStreaming={isStreaming}
-                />
-              )
-            })}
+            const groupBlocks = item.items.map((groupItem) => groupItem.block)
+            const firstIndex = item.items[0]?.index ?? 0
+            return (
+              <ProcessBlockGroup
+                key={`process-${firstIndex}`}
+                blocks={groupBlocks}
+                isStreaming={isStreaming}
+                keepExpandedAfterComplete={processGroupsKeepExpanded}
+              >
+                {item.items.map((groupItem) => renderProcessGroupBlock(groupItem.block, groupItem.index))}
+              </ProcessBlockGroup>
+            )
+          })}
         </div>
         {/* 如果有错误但也有内容块，在末尾显示错误 */}
         {hasError && errorContent && topLevelBlocks.length > 0 && (

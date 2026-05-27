@@ -48,39 +48,6 @@ export function buildAgentReplyCard(result: FormattedAgentResult, subtitle?: str
 }
 
 /**
- * 构建桌面端通知的飞书摘要卡片（非飞书发起的会话）
- */
-export function buildNotificationCard(
-  sessionTitle: string,
-  preview: string,
-  toolSummaries: ToolSummary[],
-  duration: number,
-): Record<string, unknown> {
-  const toolLine = formatToolSummaryLine(toolSummaries, duration)
-
-  return {
-    config: { wide_screen_mode: true },
-    header: {
-      title: { tag: 'plain_text', content: 'Proma 任务完成' },
-      template: 'green',
-    },
-    elements: [
-      {
-        tag: 'markdown',
-        content: `**会话**: ${sessionTitle}\n\n${preview.slice(0, 200)}${preview.length > 200 ? '...' : ''}`,
-      },
-      ...(toolLine ? [
-        { tag: 'hr' },
-        {
-          tag: 'note',
-          elements: [{ tag: 'plain_text', content: `${toolLine} | 在 Proma 中查看完整回复` }],
-        },
-      ] : []),
-    ],
-  }
-}
-
-/**
  * 构建错误卡片
  */
 export function buildErrorCard(errorMessage: string): Record<string, unknown> {
@@ -116,7 +83,7 @@ export function buildSessionListCard(
 
   for (const ws of workspaces) {
     const isCurrent = ws.id === currentWorkspaceId
-    const wsLabel = isCurrent ? `📂 **${ws.name}**（当前）` : `📁 ${ws.name}`
+    const wsLabel = isCurrent ? `**${ws.name}**（当前）` : ws.name
 
     if (ws.sessions.length === 0) {
       elements.push({
@@ -176,7 +143,7 @@ export function buildWorkspaceSwitchedCard(
 
   elements.push({
     tag: 'markdown',
-    content: `📂 已切换到工作区: **${workspaceName}**`,
+    content: `已切换到工作区: **${workspaceName}**`,
   })
 
   if (sessions.length > 0) {
@@ -286,11 +253,11 @@ function formatToolSummaryLine(summaries: ToolSummary[], durationSeconds: number
 
   if (summaries.length > 0) {
     const toolParts = summaries.map((s) => `${s.toolName} x${s.count}`)
-    parts.push(`🔧 ${toolParts.join(', ')}`)
+    parts.push(`工具 ${toolParts.join(', ')}`)
   }
 
   if (durationSeconds > 0) {
-    parts.push(`⏱ ${Math.round(durationSeconds)}s`)
+    parts.push(`${Math.round(durationSeconds)}s`)
   }
 
   return parts.join(' | ')

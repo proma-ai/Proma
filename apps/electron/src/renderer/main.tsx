@@ -72,7 +72,7 @@ import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
 import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { appModeAtom } from './atoms/app-mode'
-import type { FeishuBotBridgeState, FeishuBridgeState, FeishuNotificationSentPayload, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
+import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, calcTotalAvailable } from '@proma/shared'
@@ -694,20 +694,6 @@ function FeishuInitializer(): null {
       }))
     })
 
-    // 订阅通知已发送事件 → Sonner + 桌面通知
-    const cleanupNotif = window.electronAPI.onFeishuNotificationSent((payload: FeishuNotificationSentPayload) => {
-      toast('已发送到飞书', {
-        description: `${payload.sessionTitle}: ${payload.preview.slice(0, 60)}`,
-        duration: 3000,
-      })
-      // 桌面通知
-      if (Notification.permission === 'granted') {
-        new Notification('Proma → 飞书', {
-          body: `${payload.sessionTitle} 的回复已发送到飞书`,
-        })
-      }
-    })
-
     // 定期上报在场状态（5 秒间隔 + 焦点变化时即时上报）
     const reportPresence = (): void => {
       const activeSessionId = store.get(currentAgentSessionIdAtom) ?? store.get(currentConversationIdAtom)
@@ -722,7 +708,6 @@ function FeishuInitializer(): null {
 
     return () => {
       cleanupStatus()
-      cleanupNotif()
       clearInterval(interval)
       window.removeEventListener('focus', reportPresence)
       window.removeEventListener('blur', reportPresence)
