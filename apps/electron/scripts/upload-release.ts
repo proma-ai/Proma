@@ -16,15 +16,15 @@
  * releases/
  *   ├── mac-arm64/
  *   │   ├── latest-mac.yml
- *   │   ├── Proma-{version}-arm64-mac.zip
+ *   │   ├── Proma-{version}-arm64-mac.zip(.blockmap)
  *   │   └── Proma-{version}-arm64.dmg
  *   ├── mac-x64/
  *   │   ├── latest-mac.yml
- *   │   ├── Proma-{version}-mac.zip
+ *   │   ├── Proma-{version}-mac.zip(.blockmap)
  *   │   └── Proma-{version}-x64.dmg
  *   └── win-x64/
  *       ├── latest.yml
- *       └── Proma-{version}-setup.exe
+ *       └── Proma-{version}-setup.exe(.blockmap)
  */
 
 import OSS from "ali-oss"
@@ -75,12 +75,15 @@ interface UploadResult {
 const FILE_CONFIGS: FileConfig[] = [
   // macOS arm64
   { suffix: "-arm64-mac.zip", platformDir: "mac-arm64", ymlFile: "latest-mac.yml" },
+  { suffix: "-arm64-mac.zip.blockmap", platformDir: "mac-arm64", ymlFile: "latest-mac.yml" },
   { suffix: "-arm64.dmg", platformDir: "mac-arm64", ymlFile: "latest-mac.yml" },
   // macOS x64（electron-builder x64 zip 命名是 -mac.zip，无 -x64- 后缀）
   { suffix: "-mac.zip", platformDir: "mac-x64", ymlFile: "latest-mac.yml" },
+  { suffix: "-mac.zip.blockmap", platformDir: "mac-x64", ymlFile: "latest-mac.yml" },
   { suffix: "-x64.dmg", platformDir: "mac-x64", ymlFile: "latest-mac.yml" },
-  // Windows x64
+  // Windows x64（即使 differentialPackage: false，electron-updater 客户端仍会探测 .blockmap）
   { suffix: "-setup.exe", platformDir: "win-x64", ymlFile: "latest.yml" },
+  { suffix: "-setup.exe.blockmap", platformDir: "win-x64", ymlFile: "latest.yml" },
 ]
 
 // ============================================

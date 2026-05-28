@@ -107,6 +107,7 @@ jobs:
           path: |
             apps/electron/out/*.dmg
             apps/electron/out/*.zip
+            apps/electron/out/*.blockmap
             apps/electron/out/*.yml
           retention-days: 1
           if-no-files-found: warn
@@ -192,6 +193,7 @@ jobs:
           path: |
             apps/electron/out/*.dmg
             apps/electron/out/*.zip
+            apps/electron/out/*.blockmap
             apps/electron/out/*.yml
           retention-days: 1
           if-no-files-found: warn
@@ -248,6 +250,7 @@ jobs:
           name: release-windows-x64
           path: |
             apps/electron/out/*.exe
+            apps/electron/out/*.blockmap
             apps/electron/out/*.yml
           retention-days: 1
           if-no-files-found: warn
