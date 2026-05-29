@@ -247,6 +247,44 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
       return phrase('等待用户输入')
     }
 
+    case 'REPL': {
+      const description = input.description
+      const code = input.code
+      if (typeof description === 'string' && description.trim()) return phrase(`执行 REPL ${truncate(description, 50)}`)
+      if (typeof code === 'string') return phrase(`执行 REPL ${truncate(code, 50)}`)
+      return phrase('执行 REPL')
+    }
+
+    case 'Workflow': {
+      const name = input.name
+      const scriptPath = input.scriptPath
+      if (typeof name === 'string') return phrase(`运行工作流 ${name}`)
+      if (typeof scriptPath === 'string') return phrase(`运行工作流 ${filename(scriptPath)}`)
+      return phrase('运行工作流')
+    }
+
+    case 'ScheduleWakeup': {
+      const delaySeconds = input.delaySeconds
+      const reason = input.reason
+      if (typeof delaySeconds === 'number' && typeof reason === 'string') {
+        return phrase(`安排 ${delaySeconds}s 后唤醒 · ${truncate(reason, 40)}`)
+      }
+      if (typeof delaySeconds === 'number') return phrase(`安排 ${delaySeconds}s 后唤醒`)
+      return phrase('安排唤醒')
+    }
+
+    case 'Monitor': {
+      const description = input.description
+      if (typeof description === 'string') return phrase(`监控 ${truncate(description, 50)}`)
+      return phrase('监控任务')
+    }
+
+    case 'PushNotification': {
+      const message = input.message
+      if (typeof message === 'string') return phrase(`发送通知 ${truncate(message, 50)}`)
+      return phrase('发送通知')
+    }
+
     case 'CronCreate': {
       const cron = input.cron
       const prompt = input.prompt

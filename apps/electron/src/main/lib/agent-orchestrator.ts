@@ -234,6 +234,7 @@ function getRetryDelayMs(attempt: number, elapsedRetryDelayMs: number): number {
  */
 function resolveSDKCliPath(): string {
   const subpkg = `claude-agent-sdk-${process.platform}-${process.arch}`
+  const scopedSubpkg = `@anthropic-ai/${subpkg}`
   const binaryName = process.platform === 'win32' ? 'claude.exe' : 'claude'
   let binaryPath: string | null = null
 
@@ -246,18 +247,29 @@ function resolveSDKCliPath(): string {
     const anthropicDir = dirname(dirname(sdkEntryPath))
     binaryPath = join(anthropicDir, subpkg, binaryName)
     console.log(`[Agent 编排] SDK binary 路径 (createRequire): ${binaryPath}`)
+    if (!existsSync(binaryPath)) {
+      const subpkgPackagePath = cjsRequire.resolve(`${scopedSubpkg}/package.json`)
+      binaryPath = join(dirname(subpkgPackagePath), binaryName)
+      console.log(`[Agent 编排] SDK binary 路径 (platform package): ${binaryPath}`)
+    }
   } catch (e) {
     console.warn('[Agent 编排] createRequire 解析 SDK 路径失败:', e)
   }
 
   // 策略 2：全局 require（esbuild CJS bundle 可能保留）
-  if (!binaryPath) {
+  if (!binaryPath || !existsSync(binaryPath)) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const sdkEntryPath = require.resolve('@anthropic-ai/claude-agent-sdk')
       const anthropicDir = dirname(dirname(sdkEntryPath))
       binaryPath = join(anthropicDir, subpkg, binaryName)
       console.log(`[Agent 编排] SDK binary 路径 (require.resolve): ${binaryPath}`)
+      if (!existsSync(binaryPath)) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const subpkgPackagePath = require.resolve(`${scopedSubpkg}/package.json`)
+        binaryPath = join(dirname(subpkgPackagePath), binaryName)
+        console.log(`[Agent 编排] SDK binary 路径 (require platform package): ${binaryPath}`)
+      }
     } catch (e) {
       console.warn('[Agent 编排] require.resolve 解析 SDK 路径失败:', e)
     }
@@ -266,7 +278,7 @@ function resolveSDKCliPath(): string {
   // 策略 3：从当前模块目录手动查找（打包后 __dirname 指向 app/dist/，上一级即 app/）
   // 注意：不使用 process.cwd()，因为打包后的 Electron 应用 cwd 通常是 '/'
   // 或用户主目录，与 app 安装目录无关。
-  if (!binaryPath) {
+  if (!binaryPath || !existsSync(binaryPath)) {
     binaryPath = join(__dirname, '..', 'node_modules', '@anthropic-ai', subpkg, binaryName)
     console.log(`[Agent 编排] SDK binary 路径 (手动): ${binaryPath}`)
   }
@@ -1411,6 +1423,10 @@ export class AgentOrchestrator {
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',
       ])
+      const DEFERRED_OR_PROACTIVE_TOOLS = new Set([
+        'REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification',
+        'CronCreate', 'CronDelete', 'RemoteTrigger',
+      ])
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
       let planModeEntered = initialPermissionMode === 'plan'
@@ -1516,6 +1532,9 @@ export class AgentOrchestrator {
             // MCP 工具（以 mcp__ 开头）允许调用（调研用）
             if (toolName.startsWith('mcp__')) {
               return { behavior: 'allow' as const, updatedInput: input }
+            }
+            if (DEFERRED_OR_PROACTIVE_TOOLS.has(toolName)) {
+              return { behavior: 'deny' as const, message: '计划模式下不允许启动后台、定时、通知或脚本执行能力，请在计划审批通过后再执行' }
             }
             // 其余工具拒绝
             return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }

@@ -266,6 +266,9 @@ Proma 目前设有 PR 赠金计划。提交 PR 时可以在描述中留下邮箱
 
 ![Proma PR Bounty](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
 
+## 作者
+
+- 个人网站：[erlich.fun](https://erlich.fun)
 
 ## Star History
 

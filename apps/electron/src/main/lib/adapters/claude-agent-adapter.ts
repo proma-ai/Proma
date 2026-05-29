@@ -329,6 +329,24 @@ export function mapSDKErrorToTypedError(
       message: '余额不足，叠加订阅后继续（订阅不自动扣费，支持任意数量叠加）',
       canRetry: false,
     },
+    'model_not_found': {
+      code: 'invalid_model',
+      title: '模型不可用',
+      message: '当前渠道无法使用所选模型，请检查模型名称或切换模型',
+      canRetry: false,
+    },
+    'invalid_request': {
+      code: 'invalid_request',
+      title: '请求无效',
+      message: 'API 请求参数无效，请检查当前渠道与模型配置',
+      canRetry: false,
+    },
+    'rate_limit': {
+      code: 'rate_limited',
+      title: '请求频率限制',
+      message: '请求过于频繁，请稍后再试',
+      canRetry: true,
+    },
     'rate_limited': {
       code: 'rate_limited',
       title: '请求频率限制',
@@ -363,6 +381,12 @@ export function mapSDKErrorToTypedError(
       code: 'service_unavailable',
       title: '服务暂时不可用',
       message: 'API 服务暂时不可用，请稍后再试',
+      canRetry: true,
+    },
+    'server_error': {
+      code: 'service_error',
+      title: '服务错误',
+      message: 'API 服务暂时异常，请稍后再试',
       canRetry: true,
     },
     'prompt_too_long': {

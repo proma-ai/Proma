@@ -1,6 +1,6 @@
 {
   "name": "@proma/shared",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "license": "AGPL-3.0-only",
   "description": "Shared types, configs and utilities for proma",
   "type": "module",

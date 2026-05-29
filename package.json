@@ -31,5 +31,12 @@
   },
   "dependencies": {
     "jotai": "^2.17.1"
+  },
+  "overrides": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.153",
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.153",
+    "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.153",
+    "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.153",
+    "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.153"
   }
 }

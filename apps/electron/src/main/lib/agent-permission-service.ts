@@ -352,6 +352,26 @@ export class AgentPermissionService {
         return typeof input.description === 'string'
           ? `启动子任务: ${input.description}`
           : '启动子任务'
+      case 'REPL':
+        return typeof input.description === 'string'
+          ? `执行 REPL: ${input.description}`
+          : '执行 REPL 代码'
+      case 'Workflow':
+        return typeof input.name === 'string'
+          ? `运行工作流: ${input.name}`
+          : '运行工作流'
+      case 'ScheduleWakeup':
+        return typeof input.reason === 'string'
+          ? `安排会话唤醒: ${input.reason}`
+          : '安排会话唤醒'
+      case 'Monitor':
+        return typeof input.description === 'string'
+          ? `启动监控任务: ${input.description}`
+          : '启动监控任务'
+      case 'PushNotification':
+        return typeof input.message === 'string'
+          ? `发送通知: ${input.message}`
+          : '发送通知'
       default:
         return `使用工具: ${toolName}`
     }
@@ -373,6 +393,11 @@ export class AgentPermissionService {
 
     // Task 工具默认为 normal
     if (toolName === 'Task') return 'normal'
+
+    // 新 SDK 的后台/定时/通知/脚本能力都可能产生会话外影响，需要明确审批
+    if (['REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification', 'CronCreate', 'CronDelete', 'RemoteTrigger'].includes(toolName)) {
+      return 'normal'
+    }
 
     return 'normal'
   }

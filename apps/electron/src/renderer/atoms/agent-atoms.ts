@@ -74,6 +74,8 @@ export interface AgentStreamState {
   costUsd?: number
   /** 模型上下文窗口大小 */
   contextWindow?: number
+  /** 当前 thinking block 的 token 估算值（SDK 实时估算，非计费值） */
+  thinkingEstimatedTokens?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
   /**
@@ -652,6 +654,12 @@ export function applyAgentEvent(
 
     case 'task_notification':
       return prev
+
+    case 'thinking_tokens':
+      return {
+        ...prev,
+        thinkingEstimatedTokens: event.estimatedTokens,
+      }
 
     case 'tool_use_summary':
       // 工具使用摘要 — 目前不影响流式状态，仅用于 UI 展示

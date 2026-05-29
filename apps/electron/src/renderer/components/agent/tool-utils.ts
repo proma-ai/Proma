@@ -68,6 +68,11 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   TaskOutput: Layers,
   TaskStop: OctagonX,
   AskUserQuestion: MessageCircleQuestion,
+  REPL: Terminal,
+  Workflow: GitBranch,
+  ScheduleWakeup: CalendarClock,
+  Monitor: Radio,
+  PushNotification: Send,
   CronCreate: CalendarClock,
   CronDelete: CalendarX,
   CronList: CalendarDays,
@@ -117,6 +122,11 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   TaskOutput: '获取任务输出',
   TaskStop: '停止任务',
   AskUserQuestion: '等待用户输入',
+  REPL: '执行 REPL',
+  Workflow: '运行工作流',
+  ScheduleWakeup: '安排唤醒',
+  Monitor: '监控任务',
+  PushNotification: '发送通知',
   CronCreate: '创建定时任务',
   CronDelete: '删除定时任务',
   CronList: '列出定时任务',
@@ -319,6 +329,42 @@ export function getInputSummary(
           return first.question.length > 60 ? first.question.slice(0, 60) + '…' : first.question
         }
       }
+      return null
+    }
+
+    case 'REPL': {
+      const description = input.description
+      const code = input.code
+      if (typeof description === 'string' && description.trim()) return description
+      if (typeof code === 'string') return code.length > 60 ? code.slice(0, 60) + '…' : code
+      return null
+    }
+
+    case 'Workflow': {
+      const name = input.name
+      const scriptPath = input.scriptPath
+      if (typeof name === 'string') return name
+      if (typeof scriptPath === 'string') return scriptPath.split('/').pop() ?? scriptPath
+      return null
+    }
+
+    case 'ScheduleWakeup': {
+      const delaySeconds = input.delaySeconds
+      const reason = input.reason
+      if (typeof delaySeconds === 'number' && typeof reason === 'string') return `${delaySeconds}s · ${reason}`
+      if (typeof delaySeconds === 'number') return `${delaySeconds}s`
+      return null
+    }
+
+    case 'Monitor': {
+      const description = input.description
+      if (typeof description === 'string') return description.length > 60 ? description.slice(0, 60) + '…' : description
+      return null
+    }
+
+    case 'PushNotification': {
+      const message = input.message
+      if (typeof message === 'string') return message.length > 60 ? message.slice(0, 60) + '…' : message
       return null
     }
 
