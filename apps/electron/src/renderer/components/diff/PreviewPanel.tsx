@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom, useAtom } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Maximize2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -15,8 +15,11 @@ import {
 } from '@/atoms/preview-atoms'
 import {
   agentSessionPathMapAtom,
+  currentSessionSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
+import { detectIsWindows } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 
@@ -24,14 +27,19 @@ interface PreviewPanelProps {
   sessionId: string
 }
 
+const WINDOWS_WINDOW_CONTROLS_SAFE_AREA = 126
+
 export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactElement {
   const fileMap = useAtomValue(previewFileMapAtom)
   const setOpenMap = useSetAtom(previewPanelOpenMapAtom)
+  const isSidePanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
 
   const currentFile = fileMap.get(sessionId) ?? null
 
   const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
   const sessionPath = sessionPathMap.get(sessionId) ?? ''
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const useStackedWindowsHeader = isWindows && !isSidePanelOpen
 
   const handleClosePanel = React.useCallback(() => {
     setOpenMap((prev) => { const m = new Map(prev); m.set(sessionId, false); return m })
@@ -55,53 +63,77 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
     })
   }, [currentFile, sessionId, sessionPath])
 
+  const fileName = currentFile ? currentFile.filePath.split(/[\\/]/).pop() || currentFile.filePath : '文件预览'
+
+  const renderPreviewActions = (): React.ReactElement => (
+    <div className="ml-auto flex items-center gap-0.5 shrink-0">
+      {currentFile && (
+        <DefaultAppOpenButton
+          filePath={currentFile.filePath}
+          access={{ sessionId, candidateBasePaths: currentFile.basePaths }}
+        />
+      )}
+      {currentFile && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleOpenDetachedPreview}
+              className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+              aria-label="在单独窗口打开预览"
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>在单独窗口打开预览</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={handleClosePanel}
+            className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
+            aria-label="关闭预览面板"
+          >
+            <X className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>关闭预览面板 ({getAcceleratorDisplay(getActiveAccelerator('toggle-preview-panel'))})</p>
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  )
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-content-area titlebar-no-drag">
-      {/* 顶部栏：文件名 + 关闭 */}
-      <div className="flex items-center h-[34px] px-3 flex-shrink-0 border-b border-border/30 titlebar-no-drag">
-        <span className="text-xs text-muted-foreground truncate">
-          {currentFile ? currentFile.filePath.split(/[\\/]/).pop() : '文件预览'}
-        </span>
-        <div className="ml-auto flex items-center gap-0.5">
-          {currentFile && (
-            <DefaultAppOpenButton
-              filePath={currentFile.filePath}
-              access={{ sessionId, candidateBasePaths: currentFile.basePaths }}
-            />
-          )}
-          {currentFile && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleOpenDetachedPreview}
-                  className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-                  aria-label="在单独窗口打开预览"
-                >
-                  <Maximize2 className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>在单独窗口打开预览</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleClosePanel}
-                className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-                aria-label="关闭预览面板"
-              >
-                <X className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>关闭预览面板 ({getAcceleratorDisplay(getActiveAccelerator('toggle-preview-panel'))})</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
+      {/* 顶部栏：文件名 + 预览操作 */}
+      <div className={cn('flex-shrink-0 border-b border-border/30 titlebar-no-drag', useStackedWindowsHeader && 'bg-content-area')}>
+        {useStackedWindowsHeader ? (
+          <>
+            <div
+              className="flex items-center h-[34px] pl-3"
+              style={{ paddingRight: WINDOWS_WINDOW_CONTROLS_SAFE_AREA }}
+            >
+              <span className="text-xs text-muted-foreground truncate">
+                {fileName}
+              </span>
+            </div>
+            <div className="flex items-center h-[30px] px-3 border-t border-border/20 bg-muted/20">
+              {renderPreviewActions()}
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center h-[34px] px-3">
+            <span className="text-xs text-muted-foreground truncate">
+              {fileName}
+            </span>
+            {renderPreviewActions()}
+          </div>
+        )}
       </div>
 
       {/* 内容区 */}

@@ -222,12 +222,12 @@ export function MermaidBlock({ code }: MermaidBlockProps): React.ReactElement {
       <div className="overflow-hidden">
         {!renderedSvg ? (
           <pre
-            className="overflow-x-auto p-4 m-0 text-[13px] leading-[1.6] bg-muted/30 text-foreground/80"
+            className="mermaid-block-scroll overflow-x-auto p-4 m-0 text-[13px] leading-[1.6] bg-muted/30 text-foreground/80"
           >
             <code>{code}</code>
           </pre>
         ) : (
-          <div className="bg-background overflow-auto min-h-[180px]">
+          <div className="mermaid-block-scroll bg-background overflow-auto min-h-[180px]">
             <div
               className="flex justify-center items-center p-4 min-h-[180px] origin-center"
               style={{ transform: `scale(${scale})` }}

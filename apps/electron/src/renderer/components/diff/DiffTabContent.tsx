@@ -23,6 +23,7 @@ import { PreviewFindBar } from './PreviewFindBar'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
+const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
 const PDF_EXTS = new Set(['.pdf'])
 const DOCX_EXTS = new Set(['.docx'])
 const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
@@ -227,6 +228,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const ext = getExtension(filePath)
   const isMarkdown = previewOnly && MD_EXTS.has(ext)
+  const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
+  const isEditableText = isMarkdown || isPlainTextEditable
   const isPdf = previewOnly && PDF_EXTS.has(ext)
   const isDocx = previewOnly && DOCX_EXTS.has(ext)
   const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
@@ -763,13 +766,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   }, [isOfficePreview, markdownDraft, markdownEditing, newContent, officeText])
 
   const startMarkdownEdit = React.useCallback(() => {
-    if (!isMarkdown) return
+    if (!isEditableText) return
     setMarkdownDraft(newContent)
     lastSavedDraftRef.current = newContent
     setAutosaveStatus('idle')
     setMarkdownSourceMode(false)
     setMarkdownEditing(true)
-  }, [isMarkdown, newContent])
+  }, [isEditableText, newContent])
 
   // ref 形式的 persist：避免 callback / effect 因 refreshVersion 频繁变化而重建
   const persistRef = React.useRef<(draft: string, fp: string, fa: typeof fileAccess) => Promise<boolean>>(async () => false)
@@ -832,7 +835,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   }, [getContentCacheKey, refreshVersion, sessionId, setRefreshVersionMap])
 
   const saveMarkdownEdit = React.useCallback(async () => {
-    if (!isMarkdown || markdownSaving) return
+    if (!isEditableText || markdownSaving) return
     // autosaveTimerRef 由 autosave effect 创建；这里手动清是为了避免
     // "立即保存"返回后 effect cleanup 再次清掉一个已经 null 的句柄（无害但冗余），
     // 同时也确保不会在 await 期间触发延迟回调
@@ -849,7 +852,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
     setMarkdownSourceMode(false)
     setMarkdownEditing(false)
-  }, [fileAccess, filePath, isMarkdown, markdownDraft, markdownSaving, persistMarkdownDraft])
+  }, [fileAccess, filePath, isEditableText, markdownDraft, markdownSaving, persistMarkdownDraft])
 
   const handleManualRefresh = React.useCallback(() => {
     setRefreshVersionMap((prev) => {
@@ -869,7 +872,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   // timer 所有权：autosave effect 创建并在 cleanup 中清；saveMarkdownEdit / exitMarkdownEdit
   // 也会主动清以抢占 debounce。多处清理都是幂等的（设 null 后再清是 no-op）。
   React.useEffect(() => {
-    if (!markdownEditing || !isMarkdown) return
+    if (!markdownEditing || !isEditableText) return
     if (markdownDraft === lastSavedDraftRef.current) return
     if (autosaveTimerRef.current !== null) {
       window.clearTimeout(autosaveTimerRef.current)
@@ -887,7 +890,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         autosaveTimerRef.current = null
       }
     }
-  }, [markdownDraft, markdownEditing, isMarkdown, filePath, fileAccess])
+  }, [markdownDraft, markdownEditing, isEditableText, filePath, fileAccess])
 
   // saved → 1.5s 后回到 idle，避免指示器一直停在"已保存"
   React.useEffect(() => {
@@ -910,7 +913,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       const { draft, editing, filePath: fp, fileAccess: fa } = flushStateRef.current
       // 不过滤空 draft：startMarkdownEdit 已把 lastSavedDraftRef 设为 newContent，
       // 因此"原本就空、未编辑"的情况会被 dirty 比较自动跳过；而"非空清空"是合法操作必须落盘。
-      if (editing && isMarkdown && draft !== lastSavedDraftRef.current) {
+      if (editing && isEditableText && draft !== lastSavedDraftRef.current) {
         void persistRef.current(draft, fp, fa)
       }
     }
@@ -944,18 +947,20 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           </div>
         )}
 
-        {previewOnly && isMarkdown && !readOnly && (
+        {previewOnly && isEditableText && !readOnly && (
           markdownEditing ? (
             <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setMarkdownSourceMode((v) => !v)}
-                disabled={markdownSaving}
-                className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 disabled:opacity-50 shrink-0"
-                title={markdownSourceMode ? '切换到富文本编辑' : '切换到源码编辑'}
-              >
-                {markdownSourceMode ? <Eye className="size-3.5" /> : <Code2 className="size-3.5" />}
-              </button>
+              {isMarkdown && (
+                <button
+                  type="button"
+                  onClick={() => setMarkdownSourceMode((v) => !v)}
+                  disabled={markdownSaving}
+                  className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 disabled:opacity-50 shrink-0"
+                  title={markdownSourceMode ? '切换到富文本编辑' : '切换到源码编辑'}
+                >
+                  {markdownSourceMode ? <Eye className="size-3.5" /> : <Code2 className="size-3.5" />}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={exitMarkdownEdit}
@@ -991,7 +996,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
               type="button"
               onClick={startMarkdownEdit}
               className="ml-auto p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
-              title="编辑 Markdown"
+              title={isMarkdown ? '编辑 Markdown' : '编辑文本'}
             >
               <Pencil className="size-3.5" />
             </button>
@@ -999,7 +1004,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         )}
 
         <button type="button" onClick={handleCopy}
-          className={cn("p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0", previewOnly && !isMarkdown && "ml-auto")}
+          className={cn("p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0", previewOnly && !isEditableText && "ml-auto")}
           title="复制文件内容">
           {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
         </button>
@@ -1152,6 +1157,24 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
                   shikiTheme={theme === 'dark' ? 'github-dark' : 'github-light'}
                 />
               )
+            ) : isPlainTextEditable && markdownEditing ? (
+              <textarea
+                value={markdownDraft}
+                onChange={(e) => setMarkdownDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    exitMarkdownEdit()
+                  }
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    void saveMarkdownEdit()
+                  }
+                }}
+                autoFocus
+                spellCheck={false}
+                className="w-full min-h-full resize-none border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground outline-none focus:outline-none"
+              />
             ) : newContent ? (
               newContent.length > MAX_PREVIEW_CHARS ? (
                 <pre className="p-3 text-[13px] leading-relaxed text-foreground/80 font-mono whitespace-pre-wrap [overflow-wrap:anywhere]">

@@ -31,7 +31,17 @@ import {
 import { activeViewAtom } from '@/atoms/active-view'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useCreateSession } from '@/hooks/useCreateSession'
-import type { MessageSearchResult, AgentMessageSearchResult } from '@proma/shared'
+import type {
+  ChatMessage,
+  MessageSearchResult,
+  AgentMessageSearchResult,
+  SDKMessage,
+  SDKAssistantMessage,
+  SDKSystemMessage,
+  SDKUserMessage,
+  SDKContentBlock,
+  SDKUserContentBlock,
+} from '@proma/shared'
 
 /** 标题搜索结果项 */
 interface TitleResult {
@@ -47,10 +57,33 @@ interface ContentResult {
   id: string
   title: string
   type: 'chat' | 'agent'
+  messageId: string
   snippet: string
   matchStart: number
   matchLength: number
   archived?: boolean
+}
+
+type SearchResult = TitleResult | ContentResult
+
+interface SearchPreviewTarget {
+  result: SearchResult
+}
+
+interface SessionPreviewItem {
+  id: string
+  role: 'user' | 'assistant' | 'status'
+  preview: string
+  matched: boolean
+}
+
+interface SearchResultSessionPreviewProps {
+  target: SearchPreviewTarget | null
+  committedQuery: string
+}
+
+function isContentResult(result: SearchResult): result is ContentResult {
+  return 'snippet' in result
 }
 
 /** 高亮文本中的匹配部分 */
@@ -104,6 +137,236 @@ function HighlightSnippet({ snippet, matchStart, matchLength }: {
   )
 }
 
+function SearchResultIcon({ result }: { result: SearchResult }): React.ReactElement {
+  return result.type === 'chat' ? (
+    <MessageSquare size={14} className="flex-shrink-0 text-foreground/40" />
+  ) : (
+    <Bot size={14} className="flex-shrink-0 text-blue-500/70" />
+  )
+}
+
+function normalizePreviewText(text: string): string {
+  return text
+    .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/g, '')
+    .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function sdkBlockText(block: SDKContentBlock | SDKUserContentBlock): string {
+  if (block.type === 'text' && 'text' in block && typeof block.text === 'string') {
+    return block.text
+  }
+  if (block.type === 'thinking' && 'thinking' in block && typeof block.thinking === 'string') {
+    return block.thinking
+  }
+  if (block.type === 'tool_use' && 'name' in block && typeof block.name === 'string') {
+    const toolName = block.name || 'tool'
+    return `调用工具 ${toolName}`
+  }
+  if (block.type === 'tool_result') {
+    return block.is_error ? '工具结果出错' : '工具返回结果'
+  }
+  return ''
+}
+
+function buildChatPreviewItems(messages: ChatMessage[], matchMessageId?: string): SessionPreviewItem[] {
+  return messages
+    .map((message) => ({
+      id: message.id,
+      role: message.role === 'user' ? 'user' as const : message.role === 'assistant' ? 'assistant' as const : 'status' as const,
+      preview: normalizePreviewText(message.content).slice(0, 220),
+      matched: message.id === matchMessageId,
+    }))
+    .filter((item) => item.preview.length > 0)
+}
+
+function buildAgentPreviewItems(messages: SDKMessage[], matchMessageId?: string): SessionPreviewItem[] {
+  const items: SessionPreviewItem[] = []
+
+  for (const message of messages) {
+    if (message.type === 'assistant') {
+      const assistant = message as SDKAssistantMessage
+      const blocks = Array.isArray(assistant.message?.content) ? assistant.message.content : []
+      const preview = normalizePreviewText(blocks.map(sdkBlockText).filter(Boolean).join(' ')).slice(0, 220)
+      if (preview) {
+        items.push({
+          id: assistant.uuid ?? `assistant-${items.length}`,
+          role: 'assistant',
+          preview,
+          matched: assistant.uuid === matchMessageId,
+        })
+      }
+      continue
+    }
+
+    if (message.type === 'user') {
+      const user = message as SDKUserMessage
+      const blocks = Array.isArray(user.message?.content) ? user.message.content : []
+      const preview = normalizePreviewText(blocks.map(sdkBlockText).filter(Boolean).join(' ')).slice(0, 220)
+      if (preview) {
+        items.push({
+          id: user.uuid ?? `user-${items.length}`,
+          role: 'user',
+          preview,
+          matched: user.uuid === matchMessageId,
+        })
+      }
+      continue
+    }
+
+    if (message.type === 'system') {
+      const system = message as SDKSystemMessage
+      const preview = system.subtype === 'compact_boundary'
+        ? '上下文已压缩'
+        : system.subtype === 'compacting'
+          ? '正在压缩上下文...'
+          : system.subtype === 'permission_denied'
+            ? '自动审批已拒绝操作'
+            : ''
+      if (preview) {
+        items.push({
+          id: `${system.subtype ?? 'system'}-${items.length}`,
+          role: 'status',
+          preview,
+          matched: false,
+        })
+      }
+    }
+  }
+
+  return items
+}
+
+function SearchResultSessionPreview({ target, committedQuery }: SearchResultSessionPreviewProps): React.ReactElement | null {
+  const [items, setItems] = React.useState<SessionPreviewItem[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const cacheRef = React.useRef<Map<string, SessionPreviewItem[]>>(new Map())
+
+  React.useEffect(() => {
+    if (!target) {
+      setItems([])
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    const key = `${target.result.type}:${target.result.id}:${isContentResult(target.result) ? target.result.messageId : 'title'}`
+    const cached = cacheRef.current.get(key)
+    if (cached) {
+      setItems(cached)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    const load = async (): Promise<void> => {
+      try {
+        const matchMessageId = isContentResult(target.result) ? target.result.messageId : undefined
+        const nextItems = target.result.type === 'chat'
+          ? buildChatPreviewItems(await window.electronAPI.getConversationMessages(target.result.id), matchMessageId)
+          : buildAgentPreviewItems(await window.electronAPI.getAgentSessionSDKMessages(target.result.id), matchMessageId)
+        if (cancelled) return
+        cacheRef.current.set(key, nextItems)
+        setItems(nextItems)
+      } catch (loadError) {
+        console.error('[搜索] 会话迷你地图加载失败:', loadError)
+        if (!cancelled) setError('无法加载会话内容')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [target])
+
+  if (!target) return null
+
+  const matchedIndex = items.findIndex((item) => item.matched)
+
+  return (
+    <div className="absolute right-2 top-2 bottom-2 z-20 w-[286px] pointer-events-none">
+      <div className="h-full max-h-[380px] rounded-lg border bg-popover shadow-xl overflow-hidden pointer-events-auto animate-in fade-in-0 zoom-in-95 duration-150">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b">
+          <div className="min-w-0 flex items-center gap-2">
+            <SearchResultIcon result={target.result} />
+            <span className="truncate text-xs font-medium text-popover-foreground/75">
+              {target.result.title}
+            </span>
+          </div>
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {loading ? '加载中' : `${items.length} 条`}
+          </span>
+        </div>
+
+        <div className="max-h-[336px] overflow-y-auto scrollbar-thin p-2">
+          {loading && (
+            <div className="py-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 size={13} className="animate-spin" />
+              <span>正在读取会话...</span>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>
+          )}
+
+          {!loading && !error && items.length === 0 && (
+            <div className="py-8 text-center text-xs text-muted-foreground">暂无可预览内容</div>
+          )}
+
+          {!loading && !error && items.length > 0 && (
+            <div className="space-y-1">
+              {items.map((item, index) => (
+                <div
+                  key={`${item.id}-${index}`}
+                  className={cn(
+                    'flex items-start gap-2 rounded-md px-1.5 py-1.5',
+                    item.matched && 'bg-primary/10'
+                  )}
+                >
+                  <div className="relative mt-1 w-7 shrink-0">
+                    <div
+                      className={cn(
+                        'h-[3px] rounded-full',
+                        item.matched
+                          ? 'bg-primary'
+                          : item.role === 'user'
+                            ? 'bg-primary/35'
+                            : item.role === 'assistant'
+                              ? 'bg-blue-500/35'
+                              : 'bg-foreground/20'
+                      )}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-[11px] leading-4 text-popover-foreground/70">
+                      <HighlightText text={item.preview} query={committedQuery} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {matchedIndex >= 0 && (
+                <div className="pt-1 text-center text-[10px] text-muted-foreground">
+                  已定位到第 {matchedIndex + 1} 条匹配消息
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function SearchDialog(): React.ReactElement {
   const [open, setOpen] = useAtom(searchDialogOpenAtom)
   const conversations = useAtomValue(conversationsAtom)
@@ -137,6 +400,7 @@ export function SearchDialog(): React.ReactElement {
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const [loading, setLoading] = React.useState(false)
   const [hasSearched, setHasSearched] = React.useState(false)
+  const [previewTarget, setPreviewTarget] = React.useState<SearchPreviewTarget | null>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
   const isComposingRef = React.useRef(false)
@@ -162,6 +426,7 @@ export function SearchDialog(): React.ReactElement {
     setContentResults([])
     setHasSearched(false)
     setSelectedIndex(0)
+    setPreviewTarget(null)
     searchTokenRef.current += 1
     setLoading(false)
     inputRef.current?.focus()
@@ -179,6 +444,7 @@ export function SearchDialog(): React.ReactElement {
       setContentResults([])
       setHasSearched(false)
       setCommittedQuery('')
+      setPreviewTarget(null)
       return
     }
 
@@ -187,6 +453,7 @@ export function SearchDialog(): React.ReactElement {
     setHasSearched(true)
     setLoading(true)
     setSelectedIndex(0)
+    setPreviewTarget(null)
 
     const qLower = q.toLowerCase()
     const titles: TitleResult[] = [
@@ -216,6 +483,7 @@ export function SearchDialog(): React.ReactElement {
           id: r.conversationId,
           title: r.conversationTitle,
           type: 'chat' as const,
+          messageId: r.messageId,
           snippet: r.snippet,
           matchStart: r.matchStart,
           matchLength: r.matchLength,
@@ -227,6 +495,7 @@ export function SearchDialog(): React.ReactElement {
           id: r.sessionId,
           title: r.sessionTitle,
           type: 'agent' as const,
+          messageId: r.messageId,
           snippet: r.snippet,
           matchStart: r.matchStart,
           matchLength: r.matchLength,
@@ -274,8 +543,8 @@ export function SearchDialog(): React.ReactElement {
   }, [query, channels, currentAgentChannelId, createAgent, setAgentPendingPrompt, setOpen, setActiveView])
 
   // 全部结果列表（标题在前、内容在后）
-  const allResults = React.useMemo(
-    () => [...titleResults, ...contentResults.map((c) => ({ ...c, updatedAt: 0 }))],
+  const allResults = React.useMemo<SearchResult[]>(
+    () => [...titleResults, ...contentResults],
     [titleResults, contentResults]
   )
 
@@ -341,6 +610,7 @@ export function SearchDialog(): React.ReactElement {
       setContentResults([])
       setHasSearched(false)
       setSelectedIndex(0)
+      setPreviewTarget(null)
       setLoading(false)
       setTimeout(() => inputRef.current?.focus(), 50)
     }
@@ -410,7 +680,11 @@ export function SearchDialog(): React.ReactElement {
         </div>
 
         {/* 搜索结果 */}
-        <div ref={listRef} className="max-h-[400px] overflow-y-auto">
+        <div
+          className="relative"
+          onMouseLeave={() => setPreviewTarget(null)}
+        >
+          <div ref={listRef} className="max-h-[400px] overflow-y-auto scrollbar-thin">
           {!hasSearched && (
             <div className="py-12 text-center text-[13px] text-foreground/40">
               {trimmedQuery.length === 0
@@ -452,7 +726,10 @@ export function SearchDialog(): React.ReactElement {
                   key={`title-${result.id}`}
                   data-index={idx}
                   onClick={() => navigateToResult(result)}
-                  onMouseEnter={() => setSelectedIndex(idx)}
+                  onMouseEnter={() => {
+                    setSelectedIndex(idx)
+                    setPreviewTarget({ result })
+                  }}
                   className={cn(
                     'w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors',
                     selectedIndex === idx
@@ -461,11 +738,7 @@ export function SearchDialog(): React.ReactElement {
                     result.archived && 'opacity-60'
                   )}
                 >
-                  {result.type === 'chat' ? (
-                    <MessageSquare size={14} className="flex-shrink-0 text-foreground/40" />
-                  ) : (
-                    <Bot size={14} className="flex-shrink-0 text-blue-500/70" />
-                  )}
+                  <SearchResultIcon result={result} />
                   <span className="flex-1 min-w-0 truncate text-[13px] text-foreground/80">
                     <HighlightText text={result.title} query={committedQuery} />
                   </span>
@@ -496,10 +769,13 @@ export function SearchDialog(): React.ReactElement {
                 const globalIdx = titleResults.length + i
                 return (
                   <button
-                    key={`content-${result.id}`}
+                    key={`content-${result.id}-${result.messageId}`}
                     data-index={globalIdx}
                     onClick={() => navigateToResult(result)}
-                    onMouseEnter={() => setSelectedIndex(globalIdx)}
+                    onMouseEnter={() => {
+                      setSelectedIndex(globalIdx)
+                      setPreviewTarget({ result })
+                    }}
                     className={cn(
                       'w-full flex flex-col gap-0.5 px-4 py-2 text-left transition-colors',
                       selectedIndex === globalIdx
@@ -509,11 +785,7 @@ export function SearchDialog(): React.ReactElement {
                     )}
                   >
                     <div className="flex items-center gap-2.5">
-                      {result.type === 'chat' ? (
-                        <MessageSquare size={14} className="flex-shrink-0 text-foreground/40" />
-                      ) : (
-                        <Bot size={14} className="flex-shrink-0 text-blue-500/70" />
-                      )}
+                      <SearchResultIcon result={result} />
                       <span className="flex-1 min-w-0 truncate text-[13px] text-foreground/80">
                         {result.title}
                       </span>
@@ -541,6 +813,12 @@ export function SearchDialog(): React.ReactElement {
               })}
             </div>
           )}
+          </div>
+
+          <SearchResultSessionPreview
+            target={previewTarget}
+            committedQuery={committedQuery}
+          />
         </div>
 
         {/* 底部快捷键提示 */}

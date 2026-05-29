@@ -1018,6 +1018,12 @@ export interface AgentPendingFile {
   previewUrl?: string
   /** 文件原始路径（从侧面板添加时设置，发送时跳过复制直接引用） */
   sourcePath?: string
+  /**
+   * 标记 sourcePath 指向的是剪贴板临时预览文件（os.tmpdir）。
+   * 这类文件可能被系统清理，发送时需读取其最新内容拷贝进 session 目录，
+   * 而非像侧面板真实文件那样原地引用。
+   */
+  isClipboardDraft?: boolean
 }
 
 /** Agent 文件保存到 session 的输入 */
