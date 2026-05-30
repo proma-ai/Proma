@@ -932,11 +932,16 @@ export function registerIpcHandlers(): void {
   // 查询某个文件在本机的默认打开应用信息（带图标）
   ipcMain.handle(
     IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE,
-    async (_, filePath: string): Promise<import('@proma/shared').DefaultAppInfo | null> => {
+    async (_, filePath: string, access?: FileAccessOptions | string[]): Promise<import('@proma/shared').DefaultAppInfo | null> => {
       if (!filePath || typeof filePath !== 'string') return null
       try {
+        const options = normalizeFileAccessOptions(access)
+        if (options && !isPathAllowed(filePath, options)) {
+          console.warn('[IPC] shell:get-default-app-for-file 拒绝越界路径:', filePath)
+          return null
+        }
         console.log('[IPC] get-default-app-for-file 收到请求:', filePath)
-        const result = await getDefaultAppInfoForFile(filePath)
+        const result = await getDefaultAppInfoForFile(filePath, options)
         console.log('[IPC] get-default-app-for-file 返回:', result ? `name=${result.name} appPath=${result.appPath} iconLen=${result.iconDataUrl?.length}` : 'null')
         return result
       } catch (err) {

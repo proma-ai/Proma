@@ -52,6 +52,7 @@ import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
+import { applyAgentModelRoutingToEnv, resolveAgentModelRouting } from './agent-model-routing'
 import { getMemoryConfig } from './memory-service'
 import { searchMemory, addMemory, formatSearchResult } from './memos-client'
 import { validateToolInput } from './agent-tool-input-validator'
@@ -457,7 +458,7 @@ const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
 
 /**
  * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）
- * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7、DeepSeek V4 系列
+ * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
  */
 function supports1MContext(modelId: string): boolean {
@@ -466,7 +467,7 @@ function supports1MContext(modelId: string): boolean {
   // Claude: Sonnet 4+ 与 Opus 4.6+ 都支持
   if (m.includes('claude')) {
     if (m.includes('sonnet-4')) return true
-    if (m.includes('opus-4-6') || m.includes('opus-4-7')) return true
+    if (m.includes('opus-4-6') || m.includes('opus-4-7') || m.includes('opus-4-8')) return true
     return false
   }
   // DeepSeek V4 系列（deepseek-v4-pro、deepseek-v4-flash）
@@ -531,6 +532,18 @@ export class AgentOrchestrator {
   constructor(adapter: AgentProviderAdapter, eventBus: AgentEventBus) {
     this.adapter = adapter
     this.eventBus = eventBus
+  }
+
+  /**
+   * 消费一次用户手动停止标记。
+   *
+   * SDK 在 query.close() 后不一定走异常路径：某些版本会先正常 yield result 再结束迭代。
+   * 因此停止标记必须在所有终态路径统一消费，而不能只依赖 catch 块。
+   */
+  private consumeStoppedByUser(sessionId: string): boolean {
+    const stoppedByUser = this.stoppedBySessions.has(sessionId)
+    this.stoppedBySessions.delete(sessionId)
+    return stoppedByUser
   }
 
   /**
@@ -1148,6 +1161,10 @@ export class AgentOrchestrator {
 
     const sdkEnv = await this.buildSdkEnv(apiKey, sdkBaseUrl, channel.provider)
 
+    // 上游：DeepSeek subagent 路由到 flash 等模型路由规则
+    const modelRouting = resolveAgentModelRouting({ modelId: modelId || DEFAULT_MODEL_ID, provider: channel.provider })
+    applyAgentModelRoutingToEnv(sdkEnv, modelRouting)
+
     // 诊断日志：记录关键认证参数
     if (channel.provider === 'proma') {
       const keyPrefix = apiKey.slice(0, 8)
@@ -1583,6 +1600,7 @@ export class AgentOrchestrator {
             permissionMode: initialPermissionMode,
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
             claudeAvailable,
+            deepSeekSubagentModel: modelRouting.subagentModel,
           }),
         },
         resumeSessionId: existingSdkSessionId,
@@ -1607,13 +1625,14 @@ export class AgentOrchestrator {
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
-        // 1M context window: 支持的模型自动启用 beta（Claude: Sonnet 4+ / Opus 4.6+、DeepSeek V4 系列）
+        // 1M context window: 支持的模型自动启用 beta（Claude: Sonnet 4+ / Opus 4.6+ / 4.7 / 4.8、DeepSeek V4 系列）
         // 未启用时 SDK 默认 200K 并在约 150K 触发压缩；启用后上限提升至 1M
         ...(supports1MContext(modelId || DEFAULT_MODEL_ID) && {
           betas: ['context-1m-2025-08-07'] as SdkBeta[],
         }),
         // 内置 SubAgent 定义（code-reviewer / explorer / researcher）
-        // claudeAvailable=false 时 SubAgent 省略 model 字段，自动继承主 Agent 模型
+        // SubAgent 模型最终由 CLAUDE_CODE_SUBAGENT_MODEL 兜底控制：
+        // DeepSeek 系列固定 deepseek-v4-flash，其它模型删除该 env，保留 SDK 默认解析。
         agents: buildBuiltinAgents(claudeAvailable),
         onStderr: (data: string) => {
           stderrChunks.push(data)
@@ -1711,8 +1730,10 @@ export class AgentOrchestrator {
 
             // 等待期间如果会话被中止，退出
             if (!this.activeSessions.has(sessionId)) {
+              const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-              completeRun(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
+              try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
+              completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
               return
             }
           }
@@ -1979,8 +2000,10 @@ export class AgentOrchestrator {
             continue
           }
 
+          const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
+
           // 正常完成 — 如果之前有重试，发送 retry_cleared
-          if (retryAttemptsScheduled > 0) {
+          if (!wasStoppedByUser && retryAttemptsScheduled > 0) {
             this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', status: 'cleared' } })
             console.log(`[Agent 编排] 重试成功，已在第 ${attempt} 次尝试后恢复`)
           }
@@ -1989,7 +2012,7 @@ export class AgentOrchestrator {
           // 15. 持久化 assistant 消息
           this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
 
-          try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
+          try { updateAgentSessionMeta(sessionId, wasStoppedByUser ? { stoppedByUser: true } : {}) } catch { /* 忽略 */ }
 
           // Plan 模式：Agent 完成规划后注入"接受计划"建议
           if (initialPermissionMode === 'plan' && planModeEntered && this.activeSessions.has(sessionId)) {
@@ -2001,7 +2024,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          completeRun(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
 
           break  // 成功完成，退出重试循环
 
@@ -2017,7 +2040,7 @@ export class AgentOrchestrator {
 
           // 用户主动中止
           if (!this.activeSessions.has(sessionId)) {
-            const wasStoppedByUser = this.stoppedBySessions.delete(sessionId)
+            const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
             console.log(`[Agent 编排] 会话 ${sessionId} 已被用户中止`)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             // 持久化中断状态到会话 meta

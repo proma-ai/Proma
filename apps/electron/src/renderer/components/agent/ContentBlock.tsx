@@ -199,6 +199,8 @@ export interface ContentBlockProps {
   allMessages: SDKMessage[]
   /** 相对路径解析基准（文件链接用） */
   basePath?: string
+  /** 多个可解析相对路径的基准目录 */
+  basePaths?: string[]
   /** 是否启用入场动画 */
   animate?: boolean
   /** 在父级中的索引（用于动画延迟） */
@@ -648,13 +650,13 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
 
 // ===== ContentBlock 主组件 =====
 
-export function ContentBlock({ block, allMessages, basePath, animate = false, index = 0, dimmed = false, childBlocks, isStreaming }: ContentBlockProps): React.ReactElement | null {
+export function ContentBlock({ block, allMessages, basePath, basePaths, animate = false, index = 0, dimmed = false, childBlocks, isStreaming }: ContentBlockProps): React.ReactElement | null {
   // text 块 — 主要内容，不受 dimmed 影响
   if (block.type === 'text') {
     const textBlock = block as SDKTextBlock
     if (!textBlock.text) return null
     return (
-      <MessageResponse basePath={basePath}>{textBlock.text}</MessageResponse>
+      <MessageResponse basePath={basePath} basePaths={basePaths}>{textBlock.text}</MessageResponse>
     )
   }
 

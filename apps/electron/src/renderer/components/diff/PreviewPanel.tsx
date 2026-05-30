@@ -22,6 +22,7 @@ import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
 interface PreviewPanelProps {
   sessionId: string
@@ -64,13 +65,15 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
   }, [currentFile, sessionId, sessionPath])
 
   const fileName = currentFile ? currentFile.filePath.split(/[\\/]/).pop() || currentFile.filePath : '文件预览'
+  const defaultAppTargetPath = currentFile ? getDefaultAppTargetPath(currentFile, sessionPath) : ''
+  const defaultAppAccess = currentFile ? getPreviewFileAccess(sessionId, currentFile, sessionPath) : undefined
 
   const renderPreviewActions = (): React.ReactElement => (
     <div className="ml-auto flex items-center gap-0.5 shrink-0">
       {currentFile && (
         <DefaultAppOpenButton
-          filePath={currentFile.filePath}
-          access={{ sessionId, candidateBasePaths: currentFile.basePaths }}
+          filePath={defaultAppTargetPath}
+          access={defaultAppAccess}
         />
       )}
       {currentFile && (

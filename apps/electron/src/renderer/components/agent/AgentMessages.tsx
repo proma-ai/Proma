@@ -13,7 +13,6 @@ import {
   Message,
   MessageHeader,
   MessageContent,
-  MessageResponse,
   BasePathsProvider,
 } from '@/components/ai-elements/message'
 import {
@@ -36,6 +35,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
+import { ContentBlock } from './ContentBlock'
+import { parseThinkTagsFromText } from './thinking-tag-parser'
 import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -450,6 +451,11 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 会导致 fallback 气泡与持久化消息同时渲染一帧（重复内容闪烁）。
   // 用原始 streamingContent 作为守卫：内容已清空且不在流式中，立即归零。
   const smoothContent = (streaming || streamingContent) ? rawSmoothContent : ''
+  const smoothContentBlocks = React.useMemo(() => {
+    if (!smoothContent) return []
+    return parseThinkTagsFromText(smoothContent)
+  }, [smoothContent])
+  const hasSmoothTextContent = smoothContentBlocks.some((block) => block.type === 'text')
 
   /**
    * 流式完成过渡：streaming 结束到持久化消息加载完成之间，
@@ -656,7 +662,20 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                   {retrying && <RetryingNotice retrying={retrying} />}
                   {smoothContent ? (
                     <>
-                      <MessageResponse basePath={sessionPath || undefined} basePaths={attachedDirs}>{smoothContent}</MessageResponse>
+                      <div className={cn('space-y-2')}>
+                        {smoothContentBlocks.map((block, index) => (
+                          <ContentBlock
+                            key={index}
+                            block={block}
+                            allMessages={allSDKMessages}
+                            basePath={sessionPath || undefined}
+                            basePaths={attachedDirs}
+                            index={index}
+                            dimmed={hasSmoothTextContent && block.type !== 'text'}
+                            isStreaming={streaming}
+                          />
+                        ))}
+                      </div>
                       {streaming && <AgentRunningIndicator startedAt={startedAt} />}
                     </>
                   ) : (

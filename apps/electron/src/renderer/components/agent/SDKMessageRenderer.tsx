@@ -21,6 +21,7 @@ import { TaskProgressCard } from './TaskProgressCard'
 import { TurnFileChangesSummary } from './TurnFileChangesSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
+import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
 import { DurationBadge } from './AgentMessages'
 import {
   Message,
@@ -539,7 +540,9 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
     const blocks = aMsg.message?.content
     if (Array.isArray(blocks)) {
       for (const block of blocks) {
-        enrichedBlocks.push({ block, parentToolUseId: aMsg.parent_tool_use_id })
+        for (const normalizedBlock of normalizeThinkTagsInContentBlocks([block])) {
+          enrichedBlocks.push({ block: normalizedBlock, parentToolUseId: aMsg.parent_tool_use_id })
+        }
       }
     }
   }
@@ -547,14 +550,9 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   // 从 turnMessages 中提取 result 消息的耗时和用量
   const { durationMs, usage } = extractTurnUsage(turn.turnMessages)
 
-  // 该 turn 是否被软中断（aborted_streaming / aborted_tools）
-  // 用于在消息底部显示“已被用户中断”徽章，独立于会话级 stoppedByUser 标记
-  const isInterruptedTurn = turn.turnMessages.some((m) => {
-    if (m.type !== 'result') return false
-    const reason = (m as { terminal_reason?: string }).terminal_reason
-    return reason === 'aborted_streaming' || reason === 'aborted_tools'
-  })
-  const showStoppedBadge = stoppedByUser || isInterruptedTurn
+  // 只在用户点击停止时显示中断徽章。
+  // aborted_streaming / aborted_tools 是流式追加消息时的软中断，语义是继续补充信息。
+  const showStoppedBadge = !!stoppedByUser
 
   // 构建 Agent/Task tool_use → 子代理内容块映射
   const agentToolIds = new Set<string>()
@@ -773,8 +771,10 @@ export function SDKMessageRenderer({
       return <ErrorMessage message={aMsg} />
     }
 
-    const blocks = aMsg.message?.content
-    if (!Array.isArray(blocks) || blocks.length === 0) return null
+    const rawBlocks = aMsg.message?.content
+    if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return null
+    const blocks = normalizeThinkTagsInContentBlocks(rawBlocks)
+    if (blocks.length === 0) return null
 
     const model = aMsg._channelModelId || aMsg.message?.model || sessionModelId
     const meta = extractMeta(message)
@@ -1330,9 +1330,9 @@ export function getGroupPreview(group: MessageGroup): string {
   // assistant-turn：收集所有 text 块
   const texts: string[] = []
   for (const aMsg of group.assistantMessages) {
-    const blocks = aMsg.message?.content
-    if (!Array.isArray(blocks)) continue
-    for (const block of blocks) {
+    const rawBlocks = aMsg.message?.content
+    if (!Array.isArray(rawBlocks)) continue
+    for (const block of normalizeThinkTagsInContentBlocks(rawBlocks)) {
       if (block.type === 'text' && 'text' in block) {
         texts.push((block as { text: string }).text)
       }

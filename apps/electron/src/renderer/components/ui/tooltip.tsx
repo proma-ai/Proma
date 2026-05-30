@@ -26,7 +26,7 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         // 深色毛玻璃效果：主题色调深色背景 + 模糊 + 高对比度文字
-        "z-[100] overflow-hidden rounded-lg px-3 py-2 text-xs",
+        "z-[10050] overflow-hidden rounded-lg px-3 py-2 text-xs",
         "bg-tooltip/90 text-tooltip-foreground backdrop-blur-md",
         "shadow-lg shadow-black/25",
         "animate-in fade-in-0 zoom-in-95",

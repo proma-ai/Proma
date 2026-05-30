@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { X, FolderOpen, ExternalLink, RefreshCw, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart, MessageSquarePlus } from 'lucide-react'
+import { X, FolderOpen, ExternalLink, ChevronRight, MoreHorizontal, FolderSearch, Pencil, FolderInput, Info, FolderHeart, MessageSquarePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -56,6 +56,8 @@ interface SidePanelProps {
   onTabChange: (tab: 'files' | 'changes') => void
   width?: number
 }
+
+const filePanelActionButtonClass = 'h-6 w-6 flex-shrink-0 rounded-md text-muted-foreground/75 hover:bg-accent/70 hover:text-foreground [&_svg]:size-3.5'
 
 export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, width = 280 }: SidePanelProps): React.ReactElement {
   // per-session 侧面板状态（默认打开）
@@ -317,11 +319,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     setFilesVersion((prev) => prev + 1)
   }, [setFilesVersion])
 
-  // 手动刷新文件列表
-  const handleRefresh = React.useCallback(() => {
-    setFilesVersion((prev) => prev + 1)
-  }, [setFilesVersion])
-
   // 添加文件到聊天
   const pendingFiles = useAtomValue(agentPendingFilesAtomFamily(sessionId))
   const setPendingFiles = useSetAtom(agentPendingFilesAtomFamily(sessionId))
@@ -417,7 +414,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                             <p>当前会话的专属文件，仅本次对话的 Agent 可以访问</p>
                           </TooltipContent>
                         </Tooltip>
-                        <span className="text-[10px] text-muted-foreground/75 truncate flex-1" title={sessionPath}>
+                        <span className="text-[10px] text-muted-foreground/70 truncate flex-1 min-w-0" title={sessionPath}>
                           {breadcrumb}
                         </span>
                         <Tooltip>
@@ -426,30 +423,14 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-5 w-5 flex-shrink-0"
+                              className={filePanelActionButtonClass}
                               onClick={() => window.electronAPI.openFile(sessionPath).catch(console.error)}
                             >
-                              <ExternalLink className="size-2.5" />
+                              <FolderSearch />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent side="bottom">
                             <p>在 Finder 中打开</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5 flex-shrink-0"
-                              onClick={handleRefresh}
-                            >
-                              <RefreshCw className="size-2.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            <p>刷新文件列表</p>
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -532,10 +513,10 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-5 w-5 flex-shrink-0"
+                              className={filePanelActionButtonClass}
                               onClick={() => window.electronAPI.openFile(workspaceFilesPath).catch(console.error)}
                             >
-                              <ExternalLink className="size-2.5" />
+                              <FolderSearch />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent side="bottom">

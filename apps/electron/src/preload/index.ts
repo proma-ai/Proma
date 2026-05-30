@@ -705,7 +705,7 @@ export interface ElectronAPI {
   scanEditors: () => Promise<import('@proma/shared').EditorApp[]>
 
   /** 查询本机为该文件类型注册的默认打开应用（含图标 dataURL） */
-  getDefaultAppForFile: (filePath: string) => Promise<import('@proma/shared').DefaultAppInfo | null>
+  getDefaultAppForFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').DefaultAppInfo | null>
 
   /** 在系统文件管理器中显示文件 */
   showInFolder: (filePath: string) => Promise<void>
@@ -1903,8 +1903,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.SCAN_EDITORS)
   },
 
-  getDefaultAppForFile: (filePath: string) => {
-    return ipcRenderer.invoke(IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE, filePath) as Promise<import('@proma/shared').DefaultAppInfo | null>
+  getDefaultAppForFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE, filePath, access) as Promise<import('@proma/shared').DefaultAppInfo | null>
   },
 
   showInFolder: (filePath: string) => {

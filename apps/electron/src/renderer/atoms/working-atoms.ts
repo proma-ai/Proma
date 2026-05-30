@@ -2,7 +2,7 @@
  * Working Atoms — Working 区域的派生状态
  *
  * 独立文件以避免 agent-atoms ↔ tab-atoms 循环依赖。
- * 依赖关系：agent-atoms + tab-atoms + draft-session-atoms → working-atoms
+ * 依赖关系：agent-atoms + draft-session-atoms → working-atoms
  */
 
 import { atom } from 'jotai'
@@ -10,9 +10,9 @@ import type { AgentSessionMeta } from '@proma/shared'
 import {
   agentSessionsAtom,
   agentSessionIndicatorMapAtom,
+  unviewedCompletedSessionIdsAtom,
   workingDoneSessionIdsAtom,
 } from './agent-atoms'
-import { tabsAtom } from './tab-atoms'
 import { draftSessionIdsAtom } from './draft-session-atoms'
 
 /** Working 区域三组会话 */
@@ -26,7 +26,7 @@ export interface WorkingSessionGroups {
  * 派生 atom：计算 Working 区域的三组会话（跨工作区，不按当前工作区过滤）
  * - todo: blocked（orange，等待用户决策）
  * - running: running（blue，Agent 执行中）
- * - done: 完成且 Tab 仍打开（green / idle），包含手动标记为工作中的会话
+ * - done: 完成未查看、显式留在工作中，或手动标记为工作中的会话
  *
  * manualWorking 会话始终纳入工作中，按当前 indicator 分配到对应子组
  */
@@ -34,13 +34,10 @@ export const workingSessionGroupsAtom = atom<WorkingSessionGroups>((get) => {
   const sessions = get(agentSessionsAtom)
   const indicatorMap = get(agentSessionIndicatorMapAtom)
   const doneIds = get(workingDoneSessionIdsAtom)
-  const tabs = get(tabsAtom)
+  const unviewedCompletedIds = get(unviewedCompletedSessionIdsAtom)
   const draftIds = get(draftSessionIdsAtom)
 
   const sessionMap = new Map(sessions.map((s) => [s.id, s]))
-  const openAgentTabIds = new Set(
-    tabs.filter((t) => t.type === 'agent').map((t) => t.sessionId),
-  )
 
   const todo: AgentSessionMeta[] = []
   const running: AgentSessionMeta[] = []
@@ -53,12 +50,12 @@ export const workingSessionGroupsAtom = atom<WorkingSessionGroups>((get) => {
     if (!session || draftIds.has(id)) continue
     if (status === 'blocked') { todo.push(session); includedIds.add(id) }
     else if (status === 'running') { running.push(session); includedIds.add(id) }
+    else if (status === 'completed') { done.push(session); includedIds.add(id) }
   }
 
-  // 从 workingDoneSessionIdsAtom 提取 done
-  for (const id of doneIds) {
+  // 从完成未查看与显式保留集合提取 done
+  for (const id of new Set([...doneIds, ...unviewedCompletedIds])) {
     if (includedIds.has(id)) continue
-    if (!openAgentTabIds.has(id)) continue
     const session = sessionMap.get(id)
     if (!session || draftIds.has(id)) continue
     done.push(session)

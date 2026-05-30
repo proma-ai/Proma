@@ -1372,3 +1372,54 @@
 .ProseMirror .markdown-code-edit-layer ::selection {
   background: hsl(var(--primary) / 0.22);
 }
+
+/* ===== Session Mini Map ===== */
+.session-minimap-popover {
+  transform-origin: left center;
+  will-change: transform, opacity;
+}
+
+.session-minimap-popover-enter {
+  animation: session-minimap-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.session-minimap-popover-exit {
+  animation: session-minimap-popover-out 90ms ease-in both;
+}
+
+.session-minimap-content-enter {
+  animation: session-minimap-content-in 140ms ease-out both;
+}
+
+@keyframes session-minimap-popover-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-4px, 2px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes session-minimap-popover-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(-3px, 1px, 0) scale(0.99);
+  }
+}
+
+@keyframes session-minimap-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

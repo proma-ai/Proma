@@ -12,6 +12,7 @@ import { agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
 function getPreviewId(): string | null {
   return new URLSearchParams(window.location.search).get('previewId')
@@ -79,6 +80,9 @@ export function DetachedPreviewApp(): React.ReactElement {
     )
   }
 
+  const defaultAppTargetPath = getDefaultAppTargetPath(data, data.dirPath)
+  const defaultAppAccess = getPreviewFileAccess(data.sessionId, data, data.dirPath)
+
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-content-area text-foreground">
       <div className="h-11 flex items-center gap-2 px-3 border-b border-border/40 shrink-0">
@@ -89,8 +93,8 @@ export function DetachedPreviewApp(): React.ReactElement {
           </div>
         </div>
         <DefaultAppOpenButton
-          filePath={data.filePath}
-          access={{ sessionId: data.sessionId, candidateBasePaths: data.basePaths }}
+          filePath={defaultAppTargetPath}
+          access={defaultAppAccess}
         />
         <button
           type="button"

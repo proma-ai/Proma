@@ -37,12 +37,14 @@ import {
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
 import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
-import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync } from 'node:fs'
 import {
   inferImageMediaType as inferImageMediaTypeShared,
   saveImageToSession as saveImageToSessionShared,
   saveFileToSession as saveFileToSessionShared,
   inferExtension,
+  buildSessionFileTree,
+  buildFileTree,
 } from './bridge-attachment-utils'
 import { getSettings } from './settings-service'
 import {
@@ -1386,26 +1388,39 @@ class FeishuBridge {
         lines.push('**Skills**: 无')
       }
 
-      // 工作区文件列表
-      const { getAgentWorkspacePath: getWsPath } = await import('./config-paths')
-      const wsPath = getWsPath(workspace.slug)
+      // 工作区文件列表（递归，体现文件夹-文件层级）
+      const { resolveWorkspaceFilesDir: resolveWsFilesDir } = await import('./config-paths')
+      const wsPath = resolveWsFilesDir(workspace.slug)
       try {
-        const entries = readdirSync(wsPath, { withFileTypes: true })
-        const fileList = entries
-          .filter((e) => !e.name.startsWith('.') && e.name !== 'mcp.json' && e.name !== 'config.json' && e.name !== 'skills' && e.name !== 'skills-inactive')
-          .map((e) => e.isDirectory() ? `${e.name}/` : e.name)
-        if (fileList.length > 0) {
+        const treeLines = buildFileTree(wsPath, { dirIcon: '', fileIcon: '' })
+        if (treeLines.length > 0) {
           lines.push('')
           lines.push('**工作区文件**:')
-          for (const f of fileList.slice(0, 20)) {
-            lines.push(`  ${f}`)
-          }
-          if (fileList.length > 20) {
-            lines.push(`  ... 还有 ${fileList.length - 20} 项`)
+          for (const l of treeLines) {
+            lines.push(`  ${l}`)
           }
         }
       } catch {
         // 目录不存在或无法读取，忽略
+      }
+
+      // 会话文件（体现文件夹-文件层级）
+      if (binding) {
+        try {
+          const treeLines = buildSessionFileTree(workspace.slug, binding.sessionId, {
+            dirIcon: '',
+            fileIcon: '',
+          })
+          if (treeLines.length > 0) {
+            lines.push('')
+            lines.push('**会话文件**:')
+            for (const l of treeLines) {
+              lines.push(`  ${l}`)
+            }
+          }
+        } catch {
+          // 忽略
+        }
       }
     } else {
       lines.push('**工作区**: 未设置')

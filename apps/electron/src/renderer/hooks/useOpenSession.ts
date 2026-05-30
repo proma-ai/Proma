@@ -38,10 +38,10 @@ export function useOpenSession(): OpenSessionFn {
 
       if (type === 'chat') {
         setCurrentConversationId(sessionId)
-      } else {
+      } else if (type === 'agent') {
         setCurrentAgentSessionId(sessionId)
 
-        // 清除该会话的"已完成未查看"标记，与 TabBar.handleActivate 保持一致
+        // 用户打开查看后只清除未读角标；是否完成由用户通过对勾确认。
         setUnviewedCompleted((prev) => {
           if (!prev.has(sessionId)) return prev
           const next = new Set(prev)
@@ -57,6 +57,9 @@ export function useOpenSession(): OpenSessionFn {
             agentWorkspaceId: session.workspaceId,
           }).catch(console.error)
         }
+      } else {
+        setCurrentConversationId(null)
+        setCurrentAgentSessionId(null)
       }
     },
     [tabs, setTabs, setActiveTabId, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted],

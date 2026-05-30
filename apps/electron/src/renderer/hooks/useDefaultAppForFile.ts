@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import type { DefaultAppInfo } from '@proma/shared'
+import type { DefaultAppInfo, FileAccessOptions } from '@proma/shared'
 
 const rendererCache = new Map<string, DefaultAppInfo | null>()
 
@@ -18,6 +18,7 @@ function extKeyOf(filePath: string): string {
 
 export function useDefaultAppForFile(
   filePath: string | null | undefined,
+  access?: FileAccessOptions,
 ): DefaultAppInfo | null {
   const [info, setInfo] = React.useState<DefaultAppInfo | null>(() => {
     if (!filePath) return null
@@ -37,11 +38,12 @@ export function useDefaultAppForFile(
       return
     }
     window.electronAPI
-      .getDefaultAppForFile(filePath)
+      .getDefaultAppForFile(filePath, access)
       .then((result) => {
         if (cancelled) return
         console.log('[useDefaultAppForFile] IPC 返回:', filePath, result ? `name=${result.name}` : 'null')
-        rendererCache.set(key, result)
+        // 带访问上下文时，null 可能来自路径授权失败，不能污染按后缀共享的默认 App 缓存。
+        if (result || !access) rendererCache.set(key, result)
         setInfo(result)
       })
       .catch((err) => {
@@ -53,7 +55,7 @@ export function useDefaultAppForFile(
     return () => {
       cancelled = true
     }
-  }, [filePath])
+  }, [filePath, access])
 
   return info
 }

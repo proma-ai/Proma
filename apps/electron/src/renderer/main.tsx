@@ -844,11 +844,11 @@ function TabStatePersistenceInitializer(): null {
         }
       }
 
-      store.set(tabsAtom, ensureScratchPadTab(validTabs))
+      const activeTab = validTabs.find((t) => t.id === restoredActiveTabId) ?? validTabs[0] ?? null
+      store.set(tabsAtom, ensureScratchPadTab(activeTab ? [activeTab] : []))
       store.set(activeTabIdAtom, restoredActiveTabId)
 
       // 同步 appMode 和 currentSessionId
-      const activeTab = validTabs.find((t) => t.id === restoredActiveTabId)
       if (activeTab) {
         store.set(appModeAtom, activeTab.type)
         if (activeTab.type === 'chat') {
@@ -858,7 +858,7 @@ function TabStatePersistenceInitializer(): null {
         }
       }
 
-      console.log(`[TabRestore] 已恢复 ${validTabs.length} 个标签页`)
+      console.log(`[TabRestore] 已恢复当前会话入口，历史标签 ${validTabs.length} 个已收敛到左侧列表`)
     }).catch((err) => console.error('[TabRestore] 恢复标签页失败:', err))
       .finally(() => { restoredRef.current = true })
   }, [store])

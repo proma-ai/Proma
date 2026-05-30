@@ -14,21 +14,19 @@ import {
   tabsAtom,
   activeTabIdAtom,
   tabIndicatorMapAtom,
-  openTab,
-  reorderTabs,
 } from '@/atoms/tab-atoms'
 import type { TabItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
+  agentWorkspacesAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { TabBarItem } from './TabBarItem'
-import { TabCloseConfirmDialog } from './TabCloseConfirmDialog'
 import { useCloseTab } from '@/hooks/useCloseTab'
 import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -43,12 +41,23 @@ export function TabBar(): React.ReactElement {
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
 
-  // 统一关闭逻辑：含 Agent 子进程 stop + 流式中的确认对话框
-  // 详见 useCloseTab，修复 Issue #357 的 UI→IPC 断链
+  // 统一关闭逻辑：关闭当前会话入口并回到 Scratch Pad，不停止后台 Agent
   const { requestClose } = useCloseTab()
+
+  const workspaceNameBySessionId = React.useMemo(() => {
+    const workspaceNameMap = new Map(agentWorkspaces.map((workspace) => [workspace.id, workspace.name]))
+    const sessionWorkspaceNameMap = new Map<string, string>()
+    for (const session of agentSessions) {
+      if (!session.workspaceId) continue
+      const workspaceName = workspaceNameMap.get(session.workspaceId)
+      if (workspaceName) sessionWorkspaceNameMap.set(session.id, workspaceName)
+    }
+    return sessionWorkspaceNameMap
+  }, [agentSessions, agentWorkspaces])
 
   // 拖拽状态
   const dragState = React.useRef<{
@@ -71,7 +80,7 @@ export function TabBar(): React.ReactElement {
       setAppMode('agent')
       setCurrentAgentSessionId(tab.sessionId)
 
-      // 清除该会话的"已完成未查看"标记
+      // 用户打开查看后只清除未读角标；是否完成由用户通过对勾确认。
       setUnviewedCompleted((prev) => {
         if (!prev.has(tab.sessionId)) return prev
         const next = new Set(prev)
@@ -87,7 +96,9 @@ export function TabBar(): React.ReactElement {
         }).catch(console.error)
       }
     } else if (tab.type === 'scratch') {
-      // Scratch Pad 不改变侧边栏 chat/agent 状态
+      // Scratch Pad 不改变侧边栏模式，但主区与右侧面板应脱离具体会话。
+      setCurrentConversationId(null)
+      setCurrentAgentSessionId(null)
     }
   }, [setActiveTabId, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
@@ -127,11 +138,11 @@ export function TabBar(): React.ReactElement {
         tabs={tabs}
         activeTabId={activeTabId}
         streamingMap={indicatorMap}
+        workspaceNameBySessionId={workspaceNameBySessionId}
         onActivate={handleActivate}
         onClose={requestClose}
         onDragStart={handleDragStart}
       />
-      <TabCloseConfirmDialog />
     </>
   )
 }
@@ -141,6 +152,7 @@ function TabBarInner({
   tabs,
   activeTabId,
   streamingMap,
+  workspaceNameBySessionId,
   onActivate,
   onClose,
   onDragStart,
@@ -148,6 +160,7 @@ function TabBarInner({
   tabs: TabItem[]
   activeTabId: string | null
   streamingMap: Map<string, SessionIndicatorStatus>
+  workspaceNameBySessionId: Map<string, string>
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
@@ -244,6 +257,7 @@ function TabBarInner({
             id={tab.id}
             type={tab.type}
             title={tab.title}
+            workspaceName={tab.type === 'agent' ? workspaceNameBySessionId.get(tab.sessionId) : undefined}
             isActive={tab.id === activeTabId}
             isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}

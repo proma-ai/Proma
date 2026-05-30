@@ -1,7 +1,7 @@
 /**
- * Tab Atoms — 标签页状态管理
+ * Tab Atoms — 当前工作区入口状态管理
  *
- * 支持浏览器风格的多标签页。
+ * 顶部只保留 Scratch Pad 与当前会话两个入口；会话恢复与导航交给左侧列表。
  * 通过桥接 atom 与现有 currentConversationIdAtom / currentAgentSessionIdAtom 同步，
  * 确保所有现有派生 atoms 无需修改。
  */
@@ -49,7 +49,7 @@ export interface PersistedTabState {
 
 // ===== 核心 Atoms =====
 
-/** 所有打开的标签页列表（有序，控制 TabBar 显示顺序） */
+/** 顶部入口列表：Scratch Pad + 当前会话 */
 export const tabsAtom = atom<TabItem[]>([])
 
 /** 当前激活的标签 ID */
@@ -127,18 +127,38 @@ export const tabIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((ge
 
 // ===== 操作函数 =====
 
-/** 打开或聚焦标签页（如果已存在则聚焦，否则创建新标签） */
+function createScratchPadTab(): TabItem {
+  return {
+    id: SCRATCH_PAD_ID,
+    type: 'scratch',
+    sessionId: SCRATCH_PAD_ID,
+    title: SCRATCH_PAD_TITLE,
+  }
+}
+
+/** 打开或聚焦会话入口：始终用目标会话替换当前会话，避免顶部累积多个 Tab */
 export function openTab(
   tabs: TabItem[],
   item: { type: TabType; sessionId: string; title: string },
 ): { tabs: TabItem[]; activeTabId: string } {
+  const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID) ?? createScratchPadTab()
+
+  if (item.type === 'scratch') {
+    return {
+      tabs: [scratchTab],
+      activeTabId: SCRATCH_PAD_ID,
+    }
+  }
+
   const existingTab = tabs.find((t) => t.sessionId === item.sessionId && t.type === item.type)
 
   if (existingTab) {
-    return { tabs, activeTabId: existingTab.id }
+    return {
+      tabs: [scratchTab, existingTab],
+      activeTabId: existingTab.id,
+    }
   }
 
-  // 创建新标签
   const newTab: TabItem = {
     id: item.sessionId,
     type: item.type,
@@ -147,7 +167,7 @@ export function openTab(
   }
 
   return {
-    tabs: [...tabs, newTab],
+    tabs: [scratchTab, newTab],
     activeTabId: newTab.id,
   }
 }
@@ -180,7 +200,7 @@ export function closeTab(
   return { tabs: newTabs, activeTabId: newActiveTabId }
 }
 
-/** 重排标签顺序（scratch tab 固定在第 0 位，不可移动） */
+/** 重排标签顺序（当前只保留 Scratch + 当前会话，保留函数用于兼容旧调用） */
 export function reorderTabs(
   tabs: TabItem[],
   fromIndex: number,
@@ -206,22 +226,13 @@ export function updateTabTitle(
   )
 }
 
-/** 确保 Scratch Pad 标签存在并位于首位 */
+/** 确保 Scratch Pad 标签存在并位于首位，同时只保留一个会话入口 */
 export function ensureScratchPadTab(tabs: TabItem[]): TabItem[] {
   const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID)
+  const sessionTab = tabs.filter((t) => t.id !== SCRATCH_PAD_ID).at(-1)
   if (scratchTab) {
-    // 已存在，确保在第一位
-    const idx = tabs.indexOf(scratchTab)
-    if (idx === 0) return tabs
-    const rest = tabs.filter((t) => t.id !== SCRATCH_PAD_ID)
-    return [scratchTab, ...rest]
+    return sessionTab ? [scratchTab, sessionTab] : [scratchTab]
   }
-  // 不存在，创建并插入第一位
-  const newTab: TabItem = {
-    id: SCRATCH_PAD_ID,
-    type: 'scratch',
-    sessionId: SCRATCH_PAD_ID,
-    title: SCRATCH_PAD_TITLE,
-  }
-  return [newTab, ...tabs]
+  const newTab = createScratchPadTab()
+  return sessionTab ? [newTab, sessionTab] : [newTab]
 }

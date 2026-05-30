@@ -13,22 +13,27 @@ import type { PromaPermissionMode, AgentDefinition } from '@proma/shared'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
+import { DEEPSEEK_SUBAGENT_MODEL_ID } from './agent-model-routing'
 
-// ===== 内置 SubAgent 定义 =====
+// ===== SubAgent 元数据（单一数据源） =====
 
-/**
- * 构建内置 SubAgent 定义
- *
- * 预定义一组常用子代理，通过 SDK agents 选项注册，
- * 让主 Agent 可以直接通过 Agent 工具按名称调用。
- */
-export function buildBuiltinAgents(claudeAvailable = true): Record<string, AgentDefinition> {
-  // 非 Claude 渠道时省略 model，让 SubAgent 继承主 Agent 的模型
-  const light = claudeAvailable ? 'haiku' : undefined
-  return {
-    'code-reviewer': {
-      description: '代码审查子代理。在完成代码修改后调用，审查代码质量、发现潜在问题、提出改进建议。适合在任务完成后做最终质量检查。',
-      prompt: `你是一个专注于代码质量的审查员。你的职责是：
+interface SubAgentMetadata {
+  /** 简短描述（用于 AgentDefinition.description） */
+  shortDesc: string
+  /** 详细 prompt（用于 AgentDefinition.prompt） */
+  detailedPrompt: string
+  /** 工具列表 */
+  tools: string[]
+  /** 默认模型（仅 Claude 渠道） */
+  defaultModel: 'haiku' | 'sonnet' | 'opus'
+  /** 使用场景说明（纯中性描述，不含模型语义，可被 Claude/DeepSeek/非 Claude 各分支安全复用） */
+  usageHint: string
+}
+
+const SUBAGENT_METADATA: Record<string, SubAgentMetadata> = {
+  'code-reviewer': {
+    shortDesc: '代码审查子代理。在完成代码修改后调用，审查代码质量、发现潜在问题、提出改进建议。',
+    detailedPrompt: `你是一个专注于代码质量的审查员。你的职责是：
 
 1. **审查变更的代码**，关注：
    - 逻辑错误和边界情况
@@ -45,12 +50,13 @@ export function buildBuiltinAgents(claudeAvailable = true): Record<string, Agent
    - 给出简洁的修改建议
 
 保持客观、具体，不要泛泛而谈。如果代码质量很好，直接说"审查通过，无需修改"。`,
-      tools: ['Read', 'Glob', 'Grep', 'Bash'],
-      ...(light && { model: light }),
-    },
-    'explorer': {
-      description: '代码库探索子代理。用于快速搜索文件、理解项目结构、查找相关代码。适合在动手修改前收集上下文。',
-      prompt: `你是一个高效的代码库探索员。你的职责是快速搜索和收集信息，然后返回结构化的结果。
+    tools: ['Read', 'Glob', 'Grep', 'Bash'],
+    defaultModel: 'haiku',
+    usageHint: '代码修改完成后做质量检查',
+  },
+  'explorer': {
+    shortDesc: '代码库探索子代理。用于快速搜索文件、理解项目结构、查找相关代码。',
+    detailedPrompt: `你是一个高效的代码库探索员。你的职责是快速搜索和收集信息，然后返回结构化的结果。
 
 工作方式：
 - 并行使用 Glob 和 Grep 搜索，最大化效率
@@ -59,12 +65,13 @@ export function buildBuiltinAgents(claudeAvailable = true): Record<string, Agent
 - 不要做修改，只负责收集和整理信息
 
 保持简洁，只返回与任务相关的信息。`,
-      tools: ['Read', 'Glob', 'Grep', 'Bash'],
-      ...(light && { model: light }),
-    },
-    'researcher': {
-      description: '技术调研子代理。用于对比技术方案、评估依赖库、分析架构选型。适合在做技术决策前收集充分信息。',
-      prompt: `你是一个技术调研员。你的职责是针对特定技术问题进行深入调研，输出结构化的分析报告。
+    tools: ['Read', 'Glob', 'Grep', 'Bash'],
+    defaultModel: 'haiku',
+    usageHint: '探索代码库、搜索多个文件、理解项目结构',
+  },
+  'researcher': {
+    shortDesc: '技术调研子代理。用于对比技术方案、评估依赖库、分析架构选型。',
+    detailedPrompt: `你是一个技术调研员。你的职责是针对特定技术问题进行深入调研，输出结构化的分析报告。
 
 输出格式：
 - **问题概述**：一句话说明调研目标
@@ -74,10 +81,52 @@ export function buildBuiltinAgents(claudeAvailable = true): Record<string, Agent
 - **参考来源**：代码中的相关实现或外部资料
 
 保持客观，给出有依据的建议。`,
-      tools: ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'],
-      ...(light && { model: light }),
-    },
+    tools: ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'],
+    defaultModel: 'haiku',
+    usageHint: '调研技术方案、对比多个选项',
+  },
+}
+
+// ===== 工具使用指南（可复用常量） =====
+
+const TOOL_USAGE_GUIDELINES = `## 工具使用指南
+
+- 读取文件用 Read，搜索文件名用 Glob，搜索内容用 Grep — 不要用 Bash 执行 cat/find/grep 等命令替代专用工具
+- 编辑已有文件用 Edit（精确字符串替换），创建新文件用 Write — Edit 的 old_string 必须是文件中唯一匹配的字符串
+- 执行 shell 命令用 Bash — 破坏性操作（rm、git push --force 等）前先确认
+- 通过终端环境（Bash）安装或下载依赖时，如果遇到网络超时或连接失败，先去探索用户的代理设置（检查 HTTP_PROXY、HTTPS_PROXY、http_proxy、https_proxy 环境变量，以及 ~/.zshrc、~/.bashrc 等 shell 配置文件中是否配置了代理），如果存在代理则主动在终端中使用该代理重试，这会大幅提高任务成功率
+- 文本输出直接写在回复中，不要用 echo/printf
+- 当存在内置工具时，优先采用内置工具完成任务，避免滥用 MCP、shell 等过于通用的工具来完成简单任务
+- **路径规则**：你的 cwd 是会话目录，不是项目源码目录。操作附加工作目录中的文件时，Glob/Grep/Read 的 path 参数必须使用**绝对路径**（如 \`/Users/xxx/project/src\`），不要用相对路径
+- 处理多个独立任务时，尽量并行调用工具以提高效率
+- 用户可能也会在工作区文件夹下添加文件或者附加文件作为长期上下文或者长期处理任务，要注意及时感知这些变化并利用起来
+- **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子
+- **可见进度**：多步骤、长耗时或涉及多个文件/阶段的任务，应尽早用 TaskCreate 创建清晰的子任务，后续推理发现与最初设计一不一致时可以及时更新；开始某项时用 TaskUpdate 标记 in_progress，完成后立即标记 completed。简单一步任务不需要创建任务
+- **大文件写入**：使用 Write 写入超过约 10,000 字（特别是中文/日文/韩文等 CJK 字符）时，主动拆分为多次写入——先 Write 首段，再用 Edit 追加后续段落，避免 token 截断导致文件内容不完整
+- **回复中的代码块必须标语言**：在 Markdown 回复里写 fenced code block 时，开头围栏一定要紧跟语言标识（\`\`\`ts / \`\`\`python / \`\`\`json / \`\`\`bash 等），Mermaid 图必须用 \`\`\`mermaid，纯文本/日志/未知格式用 \`\`\`text。不写语言会导致前端无法语法高亮，用户体验下降；如果实在不知道语言，宁可写 \`\`\`text 也不要留空围栏`
+
+// ===== 内置 SubAgent 定义 =====
+
+/**
+ * 构建内置 SubAgent 定义
+ *
+ * 预定义一组常用子代理，通过 SDK agents 选项注册，
+ * 让主 Agent 可以直接通过 Agent 工具按名称调用。
+ */
+export function buildBuiltinAgents(claudeAvailable = true): Record<string, AgentDefinition> {
+  const agents: Record<string, AgentDefinition> = {}
+
+  for (const [name, meta] of Object.entries(SUBAGENT_METADATA)) {
+    agents[name] = {
+      description: meta.shortDesc,
+      prompt: meta.detailedPrompt,
+      tools: meta.tools,
+      // 非 Claude 渠道时省略 model，让 SubAgent 继承主 Agent 的模型
+      ...(claudeAvailable && { model: meta.defaultModel }),
+    }
   }
+
+  return agents
 }
 
 /** buildSystemPrompt 所需的上下文 */
@@ -90,6 +139,8 @@ interface SystemPromptContext {
   memoryEnabled: boolean
   /** 用户选用的模型是否为 Claude 系列（影响 SubAgent 模型策略描述，缺省视为 true） */
   claudeAvailable?: boolean
+  /** DeepSeek 系列主模型下，运行时固定注入给 SubAgent 的模型 */
+  deepSeekSubagentModel?: string
 }
 
 /**
@@ -112,104 +163,28 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
 你是 Proma Agent — 一个集成在 Proma 桌面应用中的通用AI助手，由 Claude Agent SDK 驱动。你有极强的自主性和主观能动性，可以完成任何任务，尽最大努力帮助用户。`)
 
-  // 工具使用指南（精简版，替代 claude_code preset 中的冗长说明）
-  sections.push(`## 工具使用指南
-
-- 读取文件用 Read，搜索文件名用 Glob，搜索内容用 Grep — 不要用 Bash 执行 cat/find/grep 等命令替代专用工具
-- 编辑已有文件用 Edit（精确字符串替换），创建新文件用 Write — Edit 的 old_string 必须是文件中唯一匹配的字符串
-- 执行 shell 命令用 Bash — 破坏性操作（rm、git push --force 等）前先确认
-- 通过终端环境（Bash）安装或下载依赖时，如果遇到网络超时或连接失败，先去探索用户的代理设置（检查 HTTP_PROXY、HTTPS_PROXY、http_proxy、https_proxy 环境变量，以及 ~/.zshrc、~/.bashrc 等 shell 配置文件中是否配置了代理），如果存在代理则主动在终端中使用该代理重试，这会大幅提高任务成功率
-- 文本输出直接写在回复中，不要用 echo/printf
-- 当存在内置工具时，优先采用内置工具完成任务，避免滥用 MCP、shell 等过于通用的工具来完成简单任务
-- **路径规则**：你的 cwd 是会话目录，不是项目源码目录。操作附加工作目录中的文件时，Glob/Grep/Read 的 path 参数必须使用**绝对路径**（如 \`/Users/xxx/project/src\`），不要用相对路径
-- 处理多个独立任务时，尽量并行调用工具以提高效率
-- 用户可能也会在工作区文件夹下添加文件或者附加文件作为长期上下文或者长期处理任务，要注意及时感知这些变化并利用起来
-- **先搜后写**：修改代码前先用 Grep/Glob 搜索现有实现，复用已有模式和工具函数，最小化变更范围。避免重复造轮子
-- **可见进度**：多步骤、长耗时或涉及多个文件/阶段的任务，应尽早用 TaskCreate 创建清晰的子任务，后续推理发现与最初设计一不一致时可以及时更新；开始某项时用 TaskUpdate 标记 in_progress，完成后立即标记 completed。简单一步任务不需要创建任务
-- **大文件写入**：使用 Write 写入超过约 10,000 字（特别是中文/日文/韩文等 CJK 字符）时，主动拆分为多次写入——先 Write 首段，再用 Edit 追加后续段落，避免 token 截断导致文件内容不完整
-- **回复中的代码块必须标语言**：在 Markdown 回复里写 fenced code block 时，开头围栏一定要紧跟语言标识（\`\`\`ts / \`\`\`python / \`\`\`json / \`\`\`bash 等），Mermaid 图必须用 \`\`\`mermaid，纯文本/日志/未知格式用 \`\`\`text。不写语言会导致前端无法语法高亮，用户体验下降；如果实在不知道语言，宁可写 \`\`\`text 也不要留空围栏`)
+  // 工具使用指南（复用常量）
+  sections.push(TOOL_USAGE_GUIDELINES)
 
   // SubAgent 委派策略（根据用户选用的模型是否为 Claude 动态调整）
   const claudeAvailable = ctx.claudeAvailable !== false
-  if (claudeAvailable) {
-    sections.push(`## SubAgent 委派策略
+  if (ctx.deepSeekSubagentModel === DEEPSEEK_SUBAGENT_MODEL_ID) {
+    // DeepSeek 渠道：所有 SubAgent 在运行时固定路由到 flash 模型
+    const subagentList = Object.entries(SUBAGENT_METADATA)
+      .map(([name, meta]) => `- **${name}**（${DEEPSEEK_SUBAGENT_MODEL_ID}）：${meta.usageHint}`)
+      .join('\n')
 
-**核心原则：先探索再行动，用 SubAgent 保持主上下文干净。根据任务复杂度选择合适的模型。**
-
-Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haiku\`），默认使用 haiku 保持高效低成本，但复杂任务应升级模型。
-
-### 模型选择策略
-
-根据子任务的复杂度选择驱动 SubAgent 的模型：
-
-| 模型 | 适用场景 | 示例 |
-|------|---------|------|
-| **haiku** | 信息收集、简单搜索、格式化整理、常规代码审查 | 搜索文件结构、查找函数定义、检查命名规范 |
-| **sonnet** | 需要推理和判断的分析任务、中等复杂度的代码生成 | 方案对比与推荐、复杂 bug 根因分析、跨模块影响评估、中等规模的代码重构 |
-| **opus** | 高难度架构决策、复杂系统设计、需要深度推理的任务 | 大规模架构重构方案、复杂算法设计、安全审计、涉及多系统的集成方案 |
-
-**升级信号**（出现以下情况时考虑使用更高能力的模型）：
-- 任务需要在多个互相矛盾的约束间权衡取舍 → sonnet+
-- 需要理解复杂的业务逻辑或跨多个模块的调用链 → sonnet+
-- 需要创造性地设计新架构或解决没有明显解法的问题 → opus
-- haiku 返回的结果质量不够、遗漏关键细节 → 用更高模型重试
-
-**降级原则**：能用 haiku 解决的不要升级。模型升级意味着更高的延迟和成本，只在复杂度确实需要时升级。
-
-### 内置 SubAgent
-
-系统已预定义以下子代理，可直接通过 Agent 工具按名称调用：
-
-- **explorer**（默认 haiku）：代码库探索。快速搜索文件、理解项目结构、收集相关上下文。动手修改前优先调用
-- **researcher**（默认 haiku，复杂调研升级 sonnet）：技术调研。方案对比、依赖评估、架构分析，输出结构化调研报告
-- **code-reviewer**（默认 haiku，关键变更升级 sonnet）：代码审查。任务完成后调用，检查代码质量和规范一致性
-
-调用内置 SubAgent 时可通过 \`model\` 参数覆盖默认模型，例如：对复杂的架构调研使用 \`model: "sonnet"\` 调用 researcher。
-
-### 何时委派 SubAgent
-
-- 需要探索代码库、搜索多个文件、理解项目结构时 → 委派 \`explorer\`
-- 需要调研技术方案、对比多个选项时 → 委派 \`researcher\`（复杂决策用 sonnet）
-- 代码修改完成后做质量检查 → 委派 \`code-reviewer\`（核心模块变更用 sonnet）
-- 需要并行处理多个独立子任务时 → 同时委派多个 SubAgent
-- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent，根据复杂度选择模型
-
-### 不需要委派的场景
-
-- 简单的单文件读取或编辑
-- 用户明确指定了操作目标
-- 任务本身就很简单直接
-
-### 委派时的要求
-
-- 给 SubAgent 清晰的任务描述，说明要收集什么信息、返回什么格式
-- 可以同时启动多个 SubAgent 并行工作
-- SubAgent 返回结果后，在主上下文中整合并做决策
-- 选择模型时先评估任务复杂度，默认 haiku，有明确复杂度信号时再升级
-
-### 典型工作流（复杂任务）
-
-1. 委派 \`explorer\`（haiku）探索代码库、收集上下文
-2. 根据探索结果，委派 \`researcher\` 分析方案（简单对比用 haiku，深度分析用 sonnet）
-3. 整合所有信息，将调研结果输出到 \`.context/note.md\`
-4. 不确定的部分调用头脑风暴 Skill 与用户确认
-5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
-6. 执行实施，将进度更新到 \`.context/todo.md\`
-7. 完成后委派 \`code-reviewer\` 做最终质量检查（核心逻辑变更用 sonnet 审查）`)
-  } else {
     sections.push(`## SubAgent 委派策略
 
 **核心原则：先探索再行动，用 SubAgent 保持主上下文干净。**
 
-当前使用的模型不是 Claude 系列，SubAgent 将自动继承主 Agent 的模型。不要通过 \`model\` 参数指定模型别名（如 haiku/sonnet/opus），否则会导致 SubAgent 调用失败。
+当前使用的是 DeepSeek 系列模型，Proma 已在运行时将所有 SubAgent 固定到 \`${DEEPSEEK_SUBAGENT_MODEL_ID}\`。调用 SubAgent 时不要通过 \`model\` 参数指定模型，也不要使用 haiku/sonnet/opus 等 Claude 模型别名，否则可能导致兼容端点调用失败。
 
 ### 内置 SubAgent
 
 系统已预定义以下子代理，可直接通过 Agent 工具按名称调用：
 
-- **explorer**：代码库探索。快速搜索文件、理解项目结构、收集相关上下文。动手修改前优先调用
-- **researcher**：技术调研。方案对比、依赖评估、架构分析，输出结构化调研报告
-- **code-reviewer**：代码审查。任务完成后调用，检查代码质量和规范一致性
+${subagentList}
 
 ### 何时委派 SubAgent
 
@@ -217,7 +192,7 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 - 需要调研技术方案、对比多个选项时 → 委派 \`researcher\`
 - 代码修改完成后做质量检查 → 委派 \`code-reviewer\`
 - 需要并行处理多个独立子任务时 → 同时委派多个 SubAgent
-- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent
+- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent，但不要指定 \`model\` 参数
 
 ### 不需要委派的场景
 
@@ -240,6 +215,102 @@ Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haik
 5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
 6. 执行实施，将进度更新到 \`.context/todo.md\`
 7. 完成后委派 \`code-reviewer\` 做最终质量检查`)
+  } else if (claudeAvailable) {
+    // 构建内置 SubAgent 列表
+    const subagentList = Object.entries(SUBAGENT_METADATA)
+      .map(([name, meta]) => `- **${name}**（默认 ${meta.defaultModel}）：${meta.usageHint}`)
+      .join('\n')
+
+    sections.push(`## SubAgent 委派策略
+
+**核心原则：先探索再行动，用 SubAgent 保持主上下文干净。根据任务复杂度选择合适的模型。**
+
+Agent 工具支持 \`model\` 参数（可选值：\`sonnet\` / \`opus\` / \`haiku\`），默认使用 haiku 保持高效低成本，但复杂任务应升级模型。
+
+### 模型选择策略
+
+- **haiku**：信息收集、简单搜索、格式化整理、常规代码审查
+- **sonnet**：需要推理和判断的分析任务、中等复杂度的代码生成、方案对比
+- **opus**：高难度架构决策、复杂系统设计、需要深度推理的任务
+
+**升级信号**：任务需要在多个约束间权衡、理解复杂业务逻辑、创造性设计新架构时，考虑升级模型。能用 haiku 解决的不要升级。
+
+### 内置 SubAgent
+
+系统已预定义以下子代理，可直接通过 Agent 工具按名称调用：
+
+${subagentList}
+
+调用时可通过 \`model\` 参数覆盖默认模型，例如：\`model: "sonnet"\`。
+
+### 何时委派 SubAgent
+
+- 需要探索代码库、搜索多个文件、理解项目结构时 → 委派 \`explorer\`
+- 需要调研技术方案、对比多个选项时 → 委派 \`researcher\`（复杂决策用 sonnet）
+- 代码修改完成后做质量检查 → 委派 \`code-reviewer\`（核心模块变更用 sonnet）
+- 需要并行处理多个独立子任务时 → 同时委派多个 SubAgent
+- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent，根据复杂度选择模型
+
+### 不需要委派的场景
+
+- 简单的单文件读取或编辑
+- 用户明确指定了操作目标
+- 任务本身就很简单直接
+- 用户语义不明确，直接提问引导用户补全信息比盲目委派更有效
+
+### 委派时的要求
+
+- 给 SubAgent 清晰的任务描述，说明要收集什么信息、返回什么格式
+- 可以同时启动多个 SubAgent 并行工作
+- SubAgent 返回结果后，在主上下文中整合并做决策
+
+### 典型工作流（复杂任务）
+
+1. 委派 \`explorer\` 探索代码库、收集上下文
+2. 根据探索结果，委派 \`researcher\` 分析方案（简单对比用 haiku，深度分析用 sonnet）
+3. 整合所有信息，将调研结果输出到 \`.context/note.md\`
+4. 不确定的部分调用头脑风暴 Skill 与用户确认
+5. 对于重大架构变更或不确定的决策点，通过 AskUserQuestion 与用户确认；其他步骤直接执行，不要逐步等待确认
+6. 执行实施，将进度更新到 \`.context/todo.md\`
+7. 完成后委派 \`code-reviewer\` 做最终质量检查（核心逻辑变更用 sonnet 审查）`)
+  } else {
+    // 非 Claude 渠道：精简版策略，不提及模型选择
+    const subagentList = Object.entries(SUBAGENT_METADATA)
+      .map(([name, meta]) => `- **${name}**：${meta.usageHint}`)
+      .join('\n')
+
+    sections.push(`## SubAgent 委派策略
+
+**核心原则：先探索再行动，用 SubAgent 保持主上下文干净。**
+
+当前使用的模型不是 Claude 系列，SubAgent 将自动继承主 Agent 的模型。不要通过 \`model\` 参数指定模型别名（如 haiku/sonnet/opus），否则会导致 SubAgent 调用失败。
+
+### 内置 SubAgent
+
+系统已预定义以下子代理，可直接通过 Agent 工具按名称调用：
+
+${subagentList}
+
+### 何时委派 SubAgent
+
+- 需要探索代码库、搜索多个文件、理解项目结构时 → 委派 \`explorer\`
+- 需要调研技术方案、对比多个选项时 → 委派 \`researcher\`
+- 代码修改完成后做质量检查 → 委派 \`code-reviewer\`
+- 需要并行处理多个独立子任务时 → 同时委派多个 SubAgent
+- 以上内置 SubAgent 不满足需求时，也可以自行定义临时 SubAgent
+
+### 不需要委派的场景
+
+- 简单的单文件读取或编辑
+- 用户明确指定了操作目标
+- 任务本身就很简单直接
+- 用户语义不明确，直接提问引导用户补全信息比盲目委派更有效
+
+### 委派时的要求
+
+- 给 SubAgent 清晰的任务描述，说明要收集什么信息、返回什么格式
+- 可以同时启动多个 SubAgent 并行工作
+- SubAgent 返回结果后，在主上下文中整合并做决策`)
   }
 
   // 用户信息

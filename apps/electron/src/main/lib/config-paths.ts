@@ -333,6 +333,33 @@ export function getWorkspaceFilesDir(slug: string): string {
 }
 
 /**
+ * 解析工作区文件目录路径（只读，不创建目录）
+ *
+ * 与 getWorkspaceFilesDir 的区别：不会触发 mkdir 副作用，
+ * 适用于 /now 等只读查询场景。
+ *
+ * @param slug 工作区 slug
+ * @returns ~/.proma/agent-workspaces/{slug}/workspace-files/
+ */
+export function resolveWorkspaceFilesDir(slug: string): string {
+  return join(getConfigDir(), 'agent-workspaces', slug, 'workspace-files')
+}
+
+/**
+ * 解析 Agent 会话工作目录路径（只读，不创建目录）
+ *
+ * 与 getAgentSessionWorkspacePath 的区别：不会触发 mkdir 副作用，
+ * 适用于 /now 等只读查询场景。
+ *
+ * @param slug 工作区 slug
+ * @param sessionId 会话 ID
+ * @returns ~/.proma/agent-workspaces/{slug}/{sessionId}/
+ */
+export function resolveAgentSessionWorkspacePath(slug: string, sessionId: string): string {
+  return join(getConfigDir(), 'agent-workspaces', slug, sessionId)
+}
+
+/**
  * 获取工作区不活跃 Skills 目录路径
  *
  * 禁用的 Skill 会被移动到此目录，Agent SDK 不会扫描该目录。

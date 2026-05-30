@@ -90,7 +90,7 @@ for (const key of Object.keys(process.env)) {
 
 import { createApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
-import { createTray, destroyTray } from './tray'
+import { createTray, destroyTray, getTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
@@ -370,6 +370,22 @@ function createWindow(): void {
         event.preventDefault()
         mainWindow?.hide()
         app.hide()
+      }
+    })
+  }
+
+  // Windows: 点击关闭按钮时隐藏窗口到托盘，而不是退出
+  if (process.platform === 'win32') {
+    mainWindow.on('close', (event) => {
+      if (!getIsQuitting() && getTray()) {
+        // 隐藏前先刷新挂起的窗口状态保存
+        if (windowStateSaveTimer) {
+          clearTimeout(windowStateSaveTimer)
+          windowStateSaveTimer = null
+        }
+        saveMainWindowState()
+        event.preventDefault()
+        mainWindow?.hide()
       }
     })
   }

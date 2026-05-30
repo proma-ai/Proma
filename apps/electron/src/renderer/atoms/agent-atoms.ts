@@ -501,8 +501,20 @@ export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed
 /** 已完成但用户尚未查看的会话 ID 集合 */
 export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
 
-/** Working 区域"已完成"组：本次 App 会话中完成且 Tab 仍打开的会话 ID（关闭 Tab 时移除） */
+/** Working 区域"已完成"组：后台完成后暂留，用户确认完成、重新运行或归档/删除时移除 */
 export const workingDoneSessionIdsAtom = atom<Set<string>>(new Set<string>())
+
+let lastIndicatorSignature = ''
+let lastIndicatorMap = new Map<string, SessionIndicatorStatus>()
+
+function getStableIndicatorMap(entries: Array<[string, SessionIndicatorStatus]>): Map<string, SessionIndicatorStatus> {
+  entries.sort(([a], [b]) => a.localeCompare(b))
+  const signature = entries.map(([id, status]) => `${id}:${status}`).join('|')
+  if (signature === lastIndicatorSignature) return lastIndicatorMap
+  lastIndicatorSignature = signature
+  lastIndicatorMap = new Map(entries)
+  return lastIndicatorMap
+}
 
 /** Dock/Launcher 角标数量：未查看完成会话 + 待处理阻塞请求 */
 export const dockBadgeCountAtom = atom<number>((get) => {
@@ -541,7 +553,7 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
     }
   }
 
-  return map
+  return getStableIndicatorMap(Array.from(map.entries()))
 })
 
 /**

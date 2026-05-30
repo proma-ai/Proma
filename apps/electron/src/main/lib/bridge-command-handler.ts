@@ -18,9 +18,8 @@ import {
 } from './agent-workspace-manager'
 import { runAgentHeadless, agentEventBus, stopAgent, isAgentSessionActive } from './agent-service'
 import { getSettings } from './settings-service'
-import { getAgentWorkspacePath } from './config-paths'
-import { buildAttachedFilesBlock } from './bridge-attachment-utils'
-import { readdirSync } from 'node:fs'
+import { resolveWorkspaceFilesDir } from './config-paths'
+import { buildAttachedFilesBlock, buildSessionFileTree, buildFileTree } from './bridge-attachment-utils'
 
 // ===== 接口定义 =====
 
@@ -516,25 +515,35 @@ export class BridgeCommandHandler {
         }
       }
 
-      // 工作区文件
+      // 工作区文件（递归，体现文件夹-文件层级）
       try {
-        const wsPath = getAgentWorkspacePath(workspace.slug)
-        const entries = readdirSync(wsPath, { withFileTypes: true })
-        const fileList = entries
-          .filter((e) => !e.name.startsWith('.') && e.name !== 'mcp.json' && e.name !== 'config.json' && e.name !== 'skills' && e.name !== 'skills-inactive')
-          .map((e) => e.isDirectory() ? `📁 ${e.name}/` : `📄 ${e.name}`)
-        if (fileList.length > 0) {
+        const wsPath = resolveWorkspaceFilesDir(workspace.slug)
+        const treeLines = buildFileTree(wsPath)
+        if (treeLines.length > 0) {
           lines.push('')
           lines.push('工作区文件:')
-          for (const f of fileList.slice(0, 20)) {
-            lines.push(`  ${f}`)
-          }
-          if (fileList.length > 20) {
-            lines.push(`  ... 还有 ${fileList.length - 20} 项`)
+          for (const l of treeLines) {
+            lines.push(`  ${l}`)
           }
         }
       } catch {
         // 忽略
+      }
+
+      // 会话文件（体现文件夹-文件层级）
+      if (binding) {
+        try {
+          const treeLines = buildSessionFileTree(workspace.slug, binding.sessionId)
+          if (treeLines.length > 0) {
+            lines.push('')
+            lines.push('会话文件:')
+            for (const l of treeLines) {
+              lines.push(`  ${l}`)
+            }
+          }
+        } catch {
+          // 忽略
+        }
       }
     } else {
       lines.push('工作区: 未设置')

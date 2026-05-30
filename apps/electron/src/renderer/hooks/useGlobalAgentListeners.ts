@@ -58,6 +58,7 @@ import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
+import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -109,8 +110,13 @@ function inferContextWindow(model?: string): number | undefined {
   const m = model.toLowerCase()
   // Claude Haiku 为 200k
   if (m.includes('claude-haiku')) return 200_000
-  // Claude Sonnet 4+、Opus 4.6+、DeepSeek V4 系列均为 1M 上下文
-  if (m.includes('claude-sonnet-4-6') || m.includes('claude-opus-4-6') || m.includes('claude-opus-4-7')) return 1_000_000
+  // Claude Sonnet 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列均为 1M 上下文
+  if (
+    m.includes('claude-sonnet-4-6') ||
+    m.includes('claude-opus-4-6') ||
+    m.includes('claude-opus-4-7') ||
+    m.includes('claude-opus-4-8')
+  ) return 1_000_000
   if (m.includes('deepseek-v4')) return 1_000_000
   return 200_000
 }
@@ -927,10 +933,16 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
-        // 如果用户当前不在查看该会话，标记为"未查看的已完成"
+        // 当前激活会话完成后仍保留在 Working Done，等待用户用对勾明确确认。
+        // 只有未激活会话才进入"未查看完成"，避免当前页面完成时出现额外未读提醒。
         const currentSessionId = store.get(currentAgentSessionIdAtom)
-        const isViewingCompletedSession = data.sessionId === currentSessionId && document.hasFocus()
-        if (!isViewingCompletedSession) {
+        const completionMarkers = getAgentCompletionMarkers({
+          tabs: store.get(tabsAtom),
+          activeTabId: store.get(activeTabIdAtom),
+          currentAgentSessionId: currentSessionId,
+          sessionId: data.sessionId,
+        })
+        if (completionMarkers.markUnviewedCompleted) {
           store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
             const next = new Set(prev)
             next.add(data.sessionId)
@@ -938,12 +950,13 @@ export function useGlobalAgentListeners(): void {
           })
         }
 
-        // 添加到 Working Done 集合（保持到 Tab 关闭）
-        store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
-          const next = new Set(prev)
-          next.add(data.sessionId)
-          return next
-        })
+        if (completionMarkers.keepInWorkingDone) {
+          store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
+            const next = new Set(prev)
+            next.add(data.sessionId)
+            return next
+          })
+        }
 
         // 标记用户主动打断状态
         if (data.stoppedByUser) {

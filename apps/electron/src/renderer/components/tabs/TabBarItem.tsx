@@ -1,7 +1,7 @@
 /**
  * TabBarItem — 单个标签页 UI
  *
- * 显示：类型图标 + 标题 + 流式指示器 + 关闭按钮
+ * 显示：标题 + 工作区标签 + 流式指示器 + 关闭按钮
  * 支持：点击聚焦、中键关闭、拖拽重排
  * hover 预览面板由父级 TabBar 统一管理状态
  */
@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { useAtomValue } from 'jotai'
-import { MessageSquare, Bot, StickyNote, X } from 'lucide-react'
+import { StickyNote, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -20,6 +20,7 @@ export interface TabBarItemProps {
   id: string
   type: TabType
   title: string
+  workspaceName?: string
   isActive: boolean
   isStreaming: SessionIndicatorStatus
   /** 是否显示 hover 预览面板（由父级管理） */
@@ -44,6 +45,7 @@ export function TabBarItem({
   id,
   type,
   title,
+  workspaceName,
   isActive,
   isStreaming,
   isHovered,
@@ -86,7 +88,6 @@ export function TabBarItem({
     onClose()
   }
 
-  const Icon = type === 'chat' ? MessageSquare : type === 'agent' ? Bot : StickyNote
   const isScratch = type === 'scratch'
   const indicatorColor = isScratch
     ? undefined
@@ -102,7 +103,7 @@ export function TabBarItem({
   // 当前 active Tab 不显示预览面板
   const showPreview = isHovered && !isActive
 
-  // Scratch Pad 是小图标标签
+  // Scratch Pad 是固定草稿入口
   if (isScratch) {
     return (
       <div
@@ -114,7 +115,7 @@ export function TabBarItem({
           ref={buttonRef}
           type="button"
           className={cn(
-            'group relative flex items-center justify-center w-[36px] h-[34px]',
+            'group relative flex items-center justify-center gap-1.5 min-w-[82px] px-3 h-[34px]',
             'rounded-t-lg text-xs transition-colors select-none cursor-pointer',
             'border-t border-l border-r border-transparent',
             isActive
@@ -125,7 +126,8 @@ export function TabBarItem({
           onMouseDown={handleMouseDown}
           onPointerDown={onDragStart}
         >
-          <Icon className="size-3.5" />
+          <StickyNote className="size-3.5" />
+          <span className="truncate">草稿</span>
         </button>
       </div>
     )
@@ -152,14 +154,17 @@ export function TabBarItem({
         onMouseDown={handleMouseDown}
         onPointerDown={onDragStart}
       >
-        {/* 类型图标 */}
-        <Icon className={cn('shrink-0', isNarrow ? 'size-3.5' : 'size-3')} />
-
         {/* 标题（窄状态下隐藏，用 spacer 撑开让关闭按钮靠右） */}
         {isNarrow ? (
           <span className="flex-1" />
         ) : (
           <span className="flex-1 min-w-0 truncate text-left">{title}</span>
+        )}
+
+        {workspaceName && !isNarrow && (
+          <span className="shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[86px]">
+            {workspaceName}
+          </span>
         )}
 
         {/* 关闭按钮（scratch 类型不显示） */}
