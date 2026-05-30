@@ -1077,6 +1077,18 @@ export interface WorkspaceAttachFileInput {
   filePath: string
 }
 
+/** Worktree 仓库配置 */
+export interface WorkspaceWorktreeRepo {
+  /** 显示名称 */
+  name: string
+  /** 主仓库绝对路径 */
+  repoPath: string
+  /** Worktree 存放目录绝对路径 */
+  worktreesPath: string
+  /** 优先级（数字越小越优先） */
+  priority?: number
+}
+
 // ===== AskUserQuestion 交互式问答类型 =====
 
 /** AskUserQuestion 工具的选项定义 */
@@ -1386,6 +1398,12 @@ export const AGENT_IPC_CHANNELS = {
   GET_WORKSPACE_DIRECTORIES: 'agent:get-workspace-directories',
   /** 获取工作区附加文件列表 */
   GET_WORKSPACE_ATTACHED_FILES: 'agent:get-workspace-attached-files',
+  /** 获取工作区 worktree 仓库配置列表 */
+  GET_WORKTREE_REPOS: 'agent:get-worktree-repos',
+  /** 添加 worktree 仓库到工作区配置 */
+  ADD_WORKTREE_REPO: 'agent:add-worktree-repo',
+  /** 从工作区配置移除 worktree 仓库 */
+  REMOVE_WORKTREE_REPO: 'agent:remove-worktree-repo',
 
   // 文件系统操作
   /** 获取 session 工作路径 */

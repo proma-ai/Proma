@@ -138,6 +138,20 @@ export interface UnstagedChangesResult {
   gitRootNames: string[]
 }
 
+/** Git Worktree 信息 */
+export interface WorktreeInfo {
+  /** worktree 绝对路径 */
+  path: string
+  /** 分支名 */
+  branch: string
+  /** HEAD commit hash (short) */
+  head: string
+  /** 是否为主 worktree */
+  isMain: boolean
+  /** 显示名（路径最后一段） */
+  name: string
+}
+
 /** 获取文件 Diff 的输入 */
 export interface GetFileDiffInput {
   dirPath: string
@@ -146,6 +160,8 @@ export interface GetFileDiffInput {
   gitRoot?: string
   /** 当前 Agent 会话 ID，用于主进程校验可访问路径 */
   sessionId?: string
+  /** 基准 ref（如 "origin/main"），用于 worktree vs main 模式 */
+  baseRef?: string
 }
 
 /** 独立预览窗口输入 */
@@ -334,6 +350,10 @@ export const IPC_CHANNELS = {
   /** 还原文件变更 */
   REVERT_FILE: 'git:revert-file',
   GET_DIFF_CONTENTS: 'git:get-diff-contents',
+  /** 列出 Git Worktree */
+  LIST_WORKTREES: 'git:list-worktrees',
+  /** 获取 Worktree 相对于基准分支的全量变更 */
+  GET_WORKTREE_CHANGES: 'git:get-worktree-changes',
   /** 在系统默认浏览器中打开外部链接 */
   OPEN_EXTERNAL: 'shell:open-external',
   /** 用系统默认应用打开任意文件 */

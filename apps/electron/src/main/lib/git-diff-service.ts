@@ -319,9 +319,9 @@ export async function getFileDiff(dirPath: string, filePath: string, gitRoot?: s
 }
 
 /**
- * 获取文件的旧版本（git HEAD）和新版本（磁盘）内容
+ * 获取文件的旧版本（git HEAD 或指定 baseRef）和新版本（磁盘）内容
  */
-export async function getDiffContents(dirPath: string, filePath: string, gitRoot?: string): Promise<{ oldContent: string; newContent: string } | null> {
+export async function getDiffContents(dirPath: string, filePath: string, gitRoot?: string, baseRef?: string): Promise<{ oldContent: string; newContent: string } | null> {
   const root = gitRoot || findGitRoot(dirPath)
 
   // 无 git root：纯文件预览（无 git HEAD 可比较），仅读磁盘文件，安全检查依赖 dirPath
@@ -354,10 +354,11 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
     return null
   }
 
-  // 旧版本从 git HEAD 读取
+  // 旧版本从 git HEAD（或指定 baseRef）读取
+  const ref = baseRef || 'HEAD'
   let oldContent = ''
   try {
-    const result = spawnSync('git', ['show', `HEAD:${safePath}`], {
+    const result = spawnSync('git', ['show', `${ref}:${safePath}`], {
       cwd: root,
       encoding: 'utf-8',
       timeout: 10000,
@@ -429,5 +430,172 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
   const result = runGitCommand(['checkout', '--', safePath], root)
   if (result === null) {
     throw new Error(`还原失败: git checkout -- ${safePath}`)
+  }
+}
+
+/**
+ * 列出指定仓库的所有 Git Worktree
+ */
+export function listWorktrees(repoPath: string): import('@proma/shared').WorktreeInfo[] {
+  const output = runGitCommand(['worktree', 'list', '--porcelain'], repoPath)
+  if (!output) return []
+
+  const worktrees: import('@proma/shared').WorktreeInfo[] = []
+  const blocks = output.split('\n\n').filter(Boolean)
+
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    let path = ''
+    let head = ''
+    let branch = ''
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        path = line.slice('worktree '.length)
+      } else if (line.startsWith('HEAD ')) {
+        head = line.slice('HEAD '.length).slice(0, 7)
+      } else if (line.startsWith('branch refs/heads/')) {
+        branch = line.slice('branch refs/heads/'.length)
+      } else if (line === 'detached') {
+        branch = '(detached)'
+      }
+    }
+
+    if (path) {
+      const isMain = path === repoPath
+      worktrees.push({
+        path,
+        branch: branch || 'unknown',
+        head,
+        isMain,
+        name: basename(path),
+      })
+    }
+  }
+
+  return worktrees
+}
+
+/**
+ * 获取 Worktree 相对于基准分支的全量变更（已 commit + 未提交 + 新文件）
+ */
+export async function getWorktreeChanges(
+  worktreePath: string,
+  baseBranch: string = 'origin/main',
+): Promise<import('@proma/shared').UnstagedChangesResult> {
+  if (!existsSync(worktreePath)) {
+    return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
+  }
+
+  // 尝试 fetch 远端 main 以确保 baseBranch 最新
+  runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
+
+  // 确认是 git 仓库
+  const toplevel = runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)
+  if (!toplevel) {
+    return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
+  }
+
+  const gitRoot = toplevel
+  const allFiles: import('@proma/shared').ChangedFileEntry[] = []
+  const fileMap = new Map<string, import('@proma/shared').ChangedFileEntry>()
+
+  // 1. 已 commit 但未合并的改动: git diff baseBranch...HEAD
+  const committedStatus = runGitCommand(['diff', `${baseBranch}...HEAD`, '--name-status'], gitRoot)
+  const committedNumstat = runGitCommand(['diff', `${baseBranch}...HEAD`, '--numstat'], gitRoot)
+  const committedStats = parseNumstat(committedNumstat)
+
+  if (committedStatus) {
+    for (const line of committedStatus.split('\n').filter(Boolean)) {
+      const simpleMatch = line.match(/^([MDAT])\t(.+)$/)
+      const renameMatch = line.match(/^([RC])\d*\t([^\t]+)\t(.+)$/)
+
+      let status: import('@proma/shared').ChangedFileStatus
+      let filePath: string
+
+      if (simpleMatch) {
+        const code = simpleMatch[1]!
+        status = code === 'D' ? 'deleted' : code === 'A' ? 'untracked' : 'modified'
+        filePath = simpleMatch[2]!
+      } else if (renameMatch) {
+        status = 'modified'
+        filePath = renameMatch[3]!
+      } else {
+        continue
+      }
+
+      const stats = committedStats.get(filePath) ?? { additions: 0, deletions: 0 }
+      const entry: import('@proma/shared').ChangedFileEntry = {
+        filePath,
+        status,
+        additions: stats.additions,
+        deletions: stats.deletions,
+        source: 'none',
+        gitRoot,
+      }
+      fileMap.set(filePath, entry)
+    }
+  }
+
+  // 2. 未提交的改动: git diff (working tree vs HEAD)
+  const uncommittedStatus = runGitCommand(['diff', '--name-status'], gitRoot)
+  const uncommittedNumstat = runGitCommand(['diff', '--numstat'], gitRoot)
+  const uncommittedStats = parseNumstat(uncommittedNumstat)
+
+  if (uncommittedStatus) {
+    for (const line of uncommittedStatus.split('\n').filter(Boolean)) {
+      const simpleMatch = line.match(/^([MDAT])\t(.+)$/)
+      const renameMatch = line.match(/^([RC])\d*\t([^\t]+)\t(.+)$/)
+
+      let status: import('@proma/shared').ChangedFileStatus
+      let filePath: string
+
+      if (simpleMatch) {
+        const code = simpleMatch[1]!
+        status = code === 'D' ? 'deleted' : 'modified'
+        filePath = simpleMatch[2]!
+      } else if (renameMatch) {
+        status = 'modified'
+        filePath = renameMatch[3]!
+      } else {
+        continue
+      }
+
+      const stats = uncommittedStats.get(filePath) ?? { additions: 0, deletions: 0 }
+      const existing = fileMap.get(filePath)
+      if (existing) {
+        existing.additions += stats.additions
+        existing.deletions += stats.deletions
+      } else {
+        fileMap.set(filePath, {
+          filePath,
+          status,
+          additions: stats.additions,
+          deletions: stats.deletions,
+          source: 'none',
+          gitRoot,
+        })
+      }
+    }
+  }
+
+  allFiles.push(...fileMap.values())
+
+  // 3. 新文件（未追踪）
+  const untrackedFiles: import('@proma/shared').UntrackedFileEntry[] = []
+  const untrackedOutput = runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
+  if (untrackedOutput) {
+    for (const rel of untrackedOutput.split('\n').filter(Boolean)) {
+      if (!fileMap.has(rel)) {
+        untrackedFiles.push({ filePath: rel, gitRoot })
+      }
+    }
+  }
+
+  return {
+    isGitRepo: true,
+    files: allFiles,
+    untrackedFiles,
+    gitRootNames: [basename(gitRoot)],
   }
 }

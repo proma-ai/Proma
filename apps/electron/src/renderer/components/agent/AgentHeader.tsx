@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentSessionsAtom, agentSidePanelOpenAtom, workspaceFilesVersionAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
+import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
 import { registerShortcut } from '@/lib/shortcut-registry'
 
 /** AgentHeader 属性接口 */
@@ -63,9 +64,7 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
       // 同步更新标签页标题
       setTabs((prev) => updateTabTitle(prev, updated.id, updated.title))
       // 同步更新侧边栏会话列表
-      setAgentSessions((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s))
-      )
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
     } catch (error) {
       console.error('[AgentHeader] 更新标题失败:', error)
     }

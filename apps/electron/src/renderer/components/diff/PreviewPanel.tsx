@@ -17,6 +17,12 @@ import {
   agentSessionPathMapAtom,
   currentSessionSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
+import {
+  activeTabIdAtom,
+  getPreviewTabTitle,
+  openTab,
+  tabsAtom,
+} from '@/atoms/tab-atoms'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -33,6 +39,9 @@ const WINDOWS_WINDOW_CONTROLS_SAFE_AREA = 126
 export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactElement {
   const fileMap = useAtomValue(previewFileMapAtom)
   const setOpenMap = useSetAtom(previewPanelOpenMapAtom)
+  const tabs = useAtomValue(tabsAtom)
+  const setTabs = useSetAtom(tabsAtom)
+  const setActiveTabId = useSetAtom(activeTabIdAtom)
   const isSidePanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
 
   const currentFile = fileMap.get(sessionId) ?? null
@@ -46,23 +55,21 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
     setOpenMap((prev) => { const m = new Map(prev); m.set(sessionId, false); return m })
   }, [sessionId, setOpenMap])
 
-  const handleOpenDetachedPreview = React.useCallback(() => {
+  const handleOpenPreviewTab = React.useCallback(() => {
     if (!currentFile) return
-    const lastSep = Math.max(currentFile.filePath.lastIndexOf('/'), currentFile.filePath.lastIndexOf('\\'))
-    const fallbackDirPath = lastSep > 0 ? currentFile.filePath.slice(0, lastSep) : sessionPath
-    window.electronAPI.openDetachedPreview({
+    const result = openTab(tabs, {
+      type: 'preview',
       sessionId,
-      filePath: currentFile.filePath,
-      dirPath: currentFile.dirPath || sessionPath || fallbackDirPath,
-      gitRoot: currentFile.gitRoot,
-      previewOnly: currentFile.previewOnly,
-      readOnly: currentFile.readOnly,
-      basePaths: currentFile.basePaths,
-      title: currentFile.filePath.split(/[\\/]/).pop(),
-    }).catch((err) => {
-      console.error('[PreviewPanel] 打开独立预览窗口失败:', err)
+      title: getPreviewTabTitle(currentFile.filePath),
     })
-  }, [currentFile, sessionId, sessionPath])
+    setTabs(result.tabs)
+    setActiveTabId(result.activeTabId)
+    setOpenMap((prev) => {
+      const m = new Map(prev)
+      m.set(sessionId, false)
+      return m
+    })
+  }, [currentFile, sessionId, setActiveTabId, setOpenMap, setTabs, tabs])
 
   const fileName = currentFile ? currentFile.filePath.split(/[\\/]/).pop() || currentFile.filePath : '文件预览'
   const defaultAppTargetPath = currentFile ? getDefaultAppTargetPath(currentFile, sessionPath) : ''
@@ -81,15 +88,15 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={handleOpenDetachedPreview}
+              onClick={handleOpenPreviewTab}
               className="flex items-center justify-center size-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors"
-              aria-label="在单独窗口打开预览"
+              aria-label="作为标签页打开预览"
             >
               <Maximize2 className="size-3.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p>在单独窗口打开预览</p>
+            <p>作为标签页打开预览</p>
           </TooltipContent>
         </Tooltip>
       )}
@@ -151,6 +158,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
             previewOnly={currentFile.previewOnly}
             readOnly={currentFile.readOnly}
             basePaths={currentFile.basePaths}
+            baseRef={currentFile.baseRef}
             onEmptyDiff={handleClosePanel}
           />
         ) : (

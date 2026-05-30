@@ -100,7 +100,7 @@ export function ScratchPadView(): React.ReactElement {
 
   const activeSessionId = React.useMemo(() => {
     const activeTab = tabs.find((t) => t.id === activeTabId)
-    if (activeTab?.type === 'agent') return activeTab.sessionId
+    if (activeTab?.type === 'agent' || activeTab?.type === 'preview') return activeTab.sessionId
     const agentTab = [...tabs].reverse().find((t) => t.type === 'agent')
     return agentTab?.sessionId ?? null
   }, [tabs, activeTabId])

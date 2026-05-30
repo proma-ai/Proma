@@ -54,7 +54,7 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
         return
       }
 
-      // Agent
+      // Agent / 会话预览
       setAppMode('agent')
       setCurrentAgentSessionId(newActiveTab.sessionId)
       setCurrentConversationId(null)

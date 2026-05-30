@@ -10,6 +10,7 @@ import { useAtomValue } from 'jotai'
 import { tabsAtom } from '@/atoms/tab-atoms'
 import { ChatView } from '@/components/chat'
 import { AgentView } from '@/components/agent'
+import { PreviewTabContent } from '@/components/diff/PreviewTabContent'
 import { ScratchPadView } from '@/components/scratch-pad/ScratchPadView'
 import { TabErrorBoundary } from './TabErrorBoundary'
 
@@ -44,6 +45,14 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
     return (
       <TabErrorBoundary key={tab.sessionId} sessionId={tab.sessionId}>
         <ChatView conversationId={tab.sessionId} />
+      </TabErrorBoundary>
+    )
+  }
+
+  if (tab.type === 'preview') {
+    return (
+      <TabErrorBoundary key={tab.id} sessionId={tab.sessionId}>
+        <PreviewTabContent sessionId={tab.sessionId} />
       </TabErrorBoundary>
     )
   }

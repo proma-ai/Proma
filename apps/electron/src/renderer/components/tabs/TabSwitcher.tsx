@@ -13,8 +13,10 @@ import { cn } from '@/lib/utils'
 import {
   activeTabIdAtom,
   openTab,
+  tabMruAtom,
   tabsAtom,
 } from '@/atoms/tab-atoms'
+import { getInitialTabSwitchIndex, promoteTabMru } from '@/lib/tab-switching'
 import { appModeAtom } from '@/atoms/app-mode'
 import {
   conversationsAtom,
@@ -63,6 +65,8 @@ export function TabSwitcher(): ReactElement | null {
   const setTabs = useSetAtom(tabsAtom)
   const activeTabId = useAtomValue(activeTabIdAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
+  const tabMru = useAtomValue(tabMruAtom)
+  const setTabMru = useSetAtom(tabMruAtom)
 
   const conversations = useAtomValue(conversationsAtom)
   const streamingConversationIds = useAtomValue(streamingConversationIdsAtom)
@@ -161,13 +165,23 @@ export function TabSwitcher(): ReactElement | null {
   const selectedIndexRef = useRef(0)
   const activeTabIdRef = useRef<string | null>(activeTabId)
   const candidatesRef = useRef<SwitchCandidate[]>(switcherModel.candidates)
+  const tabMruRef = useRef<string[]>(tabMru)
   const tabsRef = useRef(tabs)
 
   isOpenRef.current = isOpen
   selectedIndexRef.current = selectedIndex
   activeTabIdRef.current = activeTabId
   candidatesRef.current = switcherModel.candidates
+  tabMruRef.current = tabMru
   tabsRef.current = tabs
+
+  useEffect(() => {
+    setTabMru((prev) => {
+      const next = promoteTabMru(prev, activeTabId)
+      tabMruRef.current = next
+      return next
+    })
+  }, [activeTabId, setTabMru])
 
   const closeSwitcher = useCallback((): void => {
     setIsOpen(false)
@@ -183,6 +197,12 @@ export function TabSwitcher(): ReactElement | null {
       })
       setTabs(nextTab.tabs)
       setActiveTabId(nextTab.activeTabId)
+      activeTabIdRef.current = nextTab.activeTabId
+      setTabMru((prev) => {
+        const next = promoteTabMru(prev, nextTab.activeTabId)
+        tabMruRef.current = next
+        return next
+      })
 
       if (candidate.type === 'chat') {
         setAppMode('chat')
@@ -215,6 +235,7 @@ export function TabSwitcher(): ReactElement | null {
       setCurrentAgentSessionId,
       setCurrentAgentWorkspaceId,
       setCurrentConversationId,
+      setTabMru,
       setTabs,
       setUnviewedCompleted,
     ],
@@ -228,10 +249,12 @@ export function TabSwitcher(): ReactElement | null {
   useEffect(() => {
     const getNextIndex = (direction: 1 | -1): number => {
       const candidates = candidatesRef.current
-      if (candidates.length === 0) return -1
-      const currentIndex = candidates.findIndex((candidate) => candidate.id === activeTabIdRef.current)
-      if (currentIndex === -1) return direction === 1 ? 0 : candidates.length - 1
-      return (currentIndex + direction + candidates.length) % candidates.length
+      return getInitialTabSwitchIndex(
+        candidates,
+        activeTabIdRef.current,
+        tabMruRef.current,
+        direction,
+      )
     }
 
     const hasAlternateTarget = (): boolean => {

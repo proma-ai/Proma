@@ -21,10 +21,13 @@ import type { SessionIndicatorStatus } from './agent-atoms'
 // ===== 类型定义 =====
 
 /** 标签页类型（Settings 不作为 Tab，保留独立视图） */
-export type TabType = 'chat' | 'agent' | 'scratch'
+export type TabType = 'chat' | 'agent' | 'scratch' | 'preview'
 
 /** Scratch Pad 专用的固定 sessionId */
 export const SCRATCH_PAD_ID = '__scratch-pad__'
+
+/** 会话预览 Tab 的 ID 前缀：运行时临时入口，不参与持久化 */
+const PREVIEW_TAB_PREFIX = '__preview__:'
 
 /** Scratch Pad 标签默认标题 */
 export const SCRATCH_PAD_TITLE = 'Scratch Pad'
@@ -136,6 +139,48 @@ function createScratchPadTab(): TabItem {
   }
 }
 
+export function createPreviewTabId(sessionId: string): string {
+  return `${PREVIEW_TAB_PREFIX}${sessionId}`
+}
+
+export function getFileBaseName(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() || filePath
+}
+
+export function getPreviewTabTitle(filePath: string): string {
+  return `预览：${getFileBaseName(filePath)}`
+}
+
+export function isPreviewTab(tab: TabItem): boolean {
+  return tab.type === 'preview' || tab.id.startsWith(PREVIEW_TAB_PREFIX)
+}
+
+function isSessionTab(tab: TabItem): boolean {
+  return tab.type === 'chat' || tab.type === 'agent'
+}
+
+function getPersistentTabs(tabs: TabItem[]): TabItem[] {
+  return tabs.filter((tab) => tab.id !== SCRATCH_PAD_ID && !isPreviewTab(tab))
+}
+
+export function getPersistableTabState(
+  tabs: TabItem[],
+  activeTabId: string | null,
+): PersistedTabState {
+  const persistentTabs = getPersistentTabs(tabs)
+  const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : null
+  const persistentActiveTabId = activeTab && isPreviewTab(activeTab)
+    ? persistentTabs.find((tab) => tab.sessionId === activeTab.sessionId && tab.type === 'agent')?.id
+      ?? persistentTabs.at(-1)?.id
+      ?? null
+    : activeTabId
+
+  return {
+    tabs: persistentTabs,
+    activeTabId: persistentActiveTabId,
+  }
+}
+
 /** 打开或聚焦会话入口：始终用目标会话替换当前会话，避免顶部累积多个 Tab */
 export function openTab(
   tabs: TabItem[],
@@ -147,6 +192,26 @@ export function openTab(
     return {
       tabs: [scratchTab],
       activeTabId: SCRATCH_PAD_ID,
+    }
+  }
+
+  if (item.type === 'preview') {
+    const ownerAgentTab = tabs.find((t) => t.type === 'agent' && t.sessionId === item.sessionId) ?? {
+      id: item.sessionId,
+      type: 'agent' as const,
+      sessionId: item.sessionId,
+      title: 'Agent 会话',
+    }
+    const previewTab: TabItem = {
+      id: createPreviewTabId(item.sessionId),
+      type: 'preview',
+      sessionId: item.sessionId,
+      title: item.title,
+    }
+
+    return {
+      tabs: [scratchTab, ownerAgentTab, previewTab],
+      activeTabId: previewTab.id,
     }
   }
 
@@ -183,12 +248,14 @@ export function closeTab(
 
   const tabIndex = tabs.findIndex((t) => t.id === tabId)
   if (tabIndex === -1) return { tabs, activeTabId }
+  const closingTab = tabs[tabIndex]!
+  const boundPreviewId = isSessionTab(closingTab) ? createPreviewTabId(closingTab.sessionId) : null
 
-  const newTabs = tabs.filter((t) => t.id !== tabId)
+  const newTabs = tabs.filter((t) => t.id !== tabId && (!boundPreviewId || t.id !== boundPreviewId))
 
   // 如果关闭的是当前激活的标签，切换到相邻标签
   let newActiveTabId = activeTabId
-  if (activeTabId === tabId) {
+  if (activeTabId === tabId || (boundPreviewId !== null && activeTabId === boundPreviewId)) {
     if (newTabs.length > 0) {
       const nextIndex = Math.min(tabIndex, newTabs.length - 1)
       newActiveTabId = newTabs[nextIndex]!.id
@@ -222,14 +289,14 @@ export function updateTabTitle(
   title: string,
 ): TabItem[] {
   return tabs.map((t) =>
-    t.sessionId === sessionId ? { ...t, title } : t
+    t.sessionId === sessionId && !isPreviewTab(t) ? { ...t, title } : t
   )
 }
 
 /** 确保 Scratch Pad 标签存在并位于首位，同时只保留一个会话入口 */
 export function ensureScratchPadTab(tabs: TabItem[]): TabItem[] {
   const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID)
-  const sessionTab = tabs.filter((t) => t.id !== SCRATCH_PAD_ID).at(-1)
+  const sessionTab = tabs.filter((t) => t.id !== SCRATCH_PAD_ID && !isPreviewTab(t)).at(-1)
   if (scratchTab) {
     return sessionTab ? [scratchTab, sessionTab] : [scratchTab]
   }

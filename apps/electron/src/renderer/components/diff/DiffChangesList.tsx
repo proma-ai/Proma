@@ -42,6 +42,8 @@ interface DiffChangesListProps {
   selectedFilePath?: string
   /** 额外的候选目录（附加目录等） */
   extraPaths?: string[]
+  /** Worktree 模式：显示 worktree vs baseBranch 的全量 diff */
+  worktreeMode?: { path: string; baseBranch: string }
 }
 
 /** 文件来源 badge 的颜色和文案 */
@@ -61,6 +63,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   refreshVersion,
   selectedFilePath,
   extraPaths,
+  worktreeMode,
 }: DiffChangesListProps): React.ReactElement {
   // Diff 数据缓存：mount 时若已有上次结果，立即用作初值，避免空数组闪 1s "没有代码改动"
   const diffDataMap = useAtomValue(agentDiffDataAtom)
@@ -94,17 +97,17 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   }, [sessionId, setUnseenFilesMap])
 
   const fetchChanges = React.useCallback(async () => {
-    if (!dirPath) return // sessionPath 为空时跳过，避免空字符串被过滤导致找不到仓库
+    if (!dirPath && !worktreeMode) return
     const requestId = ++fetchSeqRef.current
     try {
-      const result = await window.electronAPI.getUnstagedChanges(dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId)
-      // 竞态保护：仅当本次请求是最新的才写入 state
+      const result = worktreeMode
+        ? await window.electronAPI.getWorktreeChanges(worktreeMode.path, worktreeMode.baseBranch, sessionId)
+        : await window.electronAPI.getUnstagedChanges(dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId)
       if (requestId !== fetchSeqRef.current) return
       setIsGitRepo(result.isGitRepo)
       setFiles(result.files || [])
       setUntrackedFiles(result.untrackedFiles || [])
       setHasFetched(true)
-      // 写回 atom 缓存：下一次 mount 可直接拿到旧值跳过空闪烁
       setDiffDataMap((prev) => {
         const next = new Map(prev)
         next.set(sessionId, result)
@@ -112,10 +115,10 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       })
     } catch {
       if (requestId !== fetchSeqRef.current) return
-      setIsGitRepo(true) // 避免网络等错误误判
+      setIsGitRepo(true)
       setHasFetched(true)
     }
-  }, [dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId, setDiffDataMap])
+  }, [dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId, setDiffDataMap, worktreeMode])
 
   React.useEffect(() => {
     fetchChanges()

@@ -296,6 +296,9 @@ export const agentDiffViewModeAtom = atom<'split' | 'unified'>('split')
 /** Diff 刷新版本号 — 按 session 隔离，Agent 写工具完成时递增 */
 export const agentDiffRefreshVersionAtom = atom(new Map<string, number>())
 
+/** 当前会话选中的 worktree 路径，null = 默认行为（显示 session 改动） */
+export const agentSelectedWorktreeAtom = atom(new Map<string, string | null>())
+
 /** 是否有未查看的代码改动 — 按 session 隔离 */
 export const agentDiffUnseenChangesAtom = atom(new Map<string, boolean>())
 

@@ -11,7 +11,7 @@
 
 import type { PromaPermissionMode, AgentDefinition } from '@proma/shared'
 import { getUserProfile } from './user-profile-service'
-import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-manager'
+import { getWorkspaceMcpConfig } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
 import { DEEPSEEK_SUBAGENT_MODEL_ID } from './agent-model-routing'
 
@@ -528,29 +528,7 @@ export function buildDynamicContext(ctx: DynamicContext): string {
     }
 
     // Skills 列表已通过 SDK plugin 机制自动发现并注册，无需手动注入
-    // 仅检查 skill-creator 是否启用，注入持续改进提示
-    const skills = getWorkspaceSkills(ctx.workspaceSlug)
-    const hasSkillCreator = skills.some((s) => s.slug === 'skill-creator')
-    if (hasSkillCreator) {
-      wsLines.push([
-        '<skill_improvement_hint>',
-        'skill-creator 已启用。在整个对话过程中，留意以下信号：',
-        '',
-        '**现有 Skill 改进信号：**',
-        '- 用户主动修正了某个 Skill 产出的内容（格式、流程、术语等）→ 该 Skill 可能需要更新',
-        '- 某个 Skill 的输出持续需要大量后续调整 → 可能需要重构',
-        '',
-        '**新 Skill 创建信号：**',
-        '- 用户反复描述一类任务但没有匹配的 Skill → 可能值得创建新 Skill',
-        '- 你在对话中经历了一个有价值的多步工作流（如：探索→分析→方案选择→实施，或多轮推理决策与用户交互），且该流程具有通用性——未来其他场景大概率会复用类似模式 → 主动建议将其固化为 Skill',
-        '',
-        '**行动原则：**',
-        '- 发现信号时，简要描述你观察到的模式和复用价值，征得用户同意后通过 skill-creator 执行',
-        '- 对于主动建议新 Skill，要说清楚：观察到了什么模式、为什么觉得复用度高、固化后的 Skill 大致做什么',
-        '- 不要在每次交互后都提建议——仅在确实观察到高复用价值的模式时才提出',
-        '</skill_improvement_hint>',
-      ].join('\n'))
-    }
+    // skill-creator 的持续改进提示已移至 buildSystemPrompt（静态注入，避免 per-message 重复）
 
     if (wsLines.length > 0) {
       sections.push(`<workspace_state>\n${wsLines.join('\n')}\n</workspace_state>`)

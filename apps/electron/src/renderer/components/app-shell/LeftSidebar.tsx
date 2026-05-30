@@ -90,6 +90,10 @@ import {
 import { detectIsMac } from '@/lib/platform'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
+  replaceAgentSessionInFreshnessOrder,
+  sortAgentSessionsByUpdatedAtDesc,
+} from '@/lib/agent-session-list'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -542,7 +546,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
   /** 置顶 Agent 会话列表（仅活跃模式显示，按当前工作区过滤，排除 draft 和 Working） */
   const pinnedAgentSessions = React.useMemo(
-    () => viewMode === 'active' ? agentSessions.filter((s) => s.pinned && !draftSessionIds.has(s.id) && !workingSessionIds.has(s.id) && (!currentWorkspaceId || s.workspaceId === currentWorkspaceId)) : [],
+    () => {
+      if (viewMode !== 'active') return []
+      const filtered = agentSessions.filter((s) =>
+        s.pinned
+        && !draftSessionIds.has(s.id)
+        && !workingSessionIds.has(s.id)
+        && (!currentWorkspaceId || s.workspaceId === currentWorkspaceId)
+      )
+      return sortAgentSessionsByUpdatedAtDesc(filtered)
+    },
     [agentSessions, viewMode, draftSessionIds, currentWorkspaceId, workingSessionIds]
   )
 
@@ -852,9 +865,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleAgentRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.updateAgentSessionTitle(id, newTitle)
-      setAgentSessions((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s))
-      )
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
       // 同步更新标签页标题
       setTabs((prev) => updateTabTitle(prev, id, newTitle))
     } catch (error) {
@@ -867,12 +878,20 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     try {
       const original = store.get(agentSessionsAtom).find((s) => s.id === id)
       const updated = await window.electronAPI.togglePinAgentSession(id)
-      setAgentSessions((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s))
-      )
-      // 归档会话被置顶时会自动取消归档
-      if (original?.archived && updated.pinned && !updated.archived) {
-        toast.success('已取消归档并置顶')
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      if (updated.pinned) {
+        const isRunning = store.get(agentSessionIndicatorMapAtom).get(id) === 'running'
+        if (isRunning) {
+          toast.success('已置顶', {
+            description: '当前 Agent 正在执行中，移出工作中后会显示到置顶区域',
+          })
+        } else if (original?.archived && !updated.archived) {
+          toast.success('已置顶', { description: '已自动取消归档' })
+        } else {
+          toast.success('已置顶')
+        }
+      } else {
+        toast.success('已取消置顶')
       }
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话置顶失败:', error)
@@ -888,9 +907,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         const session = store.get(agentSessionsAtom).find((s) => s.id === id)
         if (session?.manualWorking) {
           const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
-          setAgentSessions((prev) =>
-            prev.map((s) => (s.id === updated.id ? updated : s))
-          )
+          setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
         }
         setWorkingDone((prev) => {
           if (!prev.has(id)) return prev
@@ -902,9 +919,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         // 加入工作中
         const original = store.get(agentSessionsAtom).find((s) => s.id === id)
         const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
-        setAgentSessions((prev) =>
-          prev.map((s) => (s.id === updated.id ? updated : s))
-        )
+        setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
         if (original?.archived && updated.manualWorking && !updated.archived) {
           toast.success('已取消归档并标记为工作中')
         }
@@ -921,9 +936,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       const session = store.get(agentSessionsAtom).find((s) => s.id === id)
       if (session?.manualWorking) {
         const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
-        setAgentSessions((prev) =>
-          prev.map((s) => (s.id === updated.id ? updated : s))
-        )
+        setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
       }
 
       setWorkingDone((prev) => {
@@ -952,9 +965,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.toggleArchiveAgentSession(id)
-      setAgentSessions((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s))
-      )
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
       // 归档时自动关闭该会话的标签页，并同步新激活标签的副作用，
       // 否则 RightSidePanel（依赖 currentAgentSessionIdAtom）会因为
       // 指针被错误置 null 而消失。
@@ -993,9 +1004,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
   /** 迁移会话到另一个工作区后的回调 */
   const handleSessionMoved = (updatedSession: AgentSessionMeta, targetWorkspaceName: string): void => {
-    setAgentSessions((prev) =>
-      prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
-    )
+    setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updatedSession))
     // 如果迁移的是当前选中的会话，取消选中并关闭标签页
     if (currentAgentSessionId === updatedSession.id) {
       const tabResult = closeTab(tabs, activeTabId, updatedSession.id)
@@ -1020,9 +1029,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const filteredAgentSessions = React.useMemo(
     () => {
       const byWorkspace = agentSessions.filter((s) => s.workspaceId === currentWorkspaceId && !draftSessionIds.has(s.id))
-      return viewMode === 'archived'
+      const filtered = viewMode === 'archived'
         ? byWorkspace.filter((s) => s.archived)
         : byWorkspace.filter((s) => !s.archived && !s.pinned && !workingSessionIds.has(s.id))
+      return sortAgentSessionsByUpdatedAtDesc(filtered)
     },
     [agentSessions, currentWorkspaceId, viewMode, draftSessionIds, workingSessionIds]
   )

@@ -186,6 +186,10 @@ export interface ElectronAPI {
   revertFile: (input: import('@proma/shared').RevertFileInput) => Promise<void>
   /** 获取文件新旧版本内容 */
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => Promise<{ oldContent: string; newContent: string } | null>
+  /** 列出 Git Worktree */
+  listWorktrees: (repoPath: string, sessionId: string) => Promise<import('@proma/shared').WorktreeInfo[]>
+  /** 获取 Worktree 相对于基准分支的全量变更 */
+  getWorktreeChanges: (worktreePath: string, baseBranch: string, sessionId: string) => Promise<import('@proma/shared').UnstagedChangesResult>
   /** 在独立窗口打开当前文件预览 */
   openDetachedPreview: (input: DetachedPreviewWindowInput) => Promise<string | null>
   /** 获取独立预览窗口数据 */
@@ -680,6 +684,12 @@ export interface ElectronAPI {
 
   /** 获取工作区附加文件列表 */
   getWorkspaceAttachedFiles: (workspaceSlug: string) => Promise<string[]>
+  /** 获取工作区 worktree 仓库配置列表 */
+  getWorktreeRepos: (workspaceSlug: string) => Promise<import('@proma/shared').WorkspaceWorktreeRepo[]>
+  /** 添加 worktree 仓库到工作区配置 */
+  addWorktreeRepo: (workspaceSlug: string, repo: import('@proma/shared').WorkspaceWorktreeRepo) => Promise<import('@proma/shared').WorkspaceWorktreeRepo[]>
+  /** 从工作区配置移除 worktree 仓库 */
+  removeWorktreeRepo: (workspaceSlug: string, repoPath: string) => Promise<import('@proma/shared').WorkspaceWorktreeRepo[]>
 
   // ===== Agent 文件系统操作 =====
 
@@ -1188,6 +1198,14 @@ const electronAPI: ElectronAPI = {
 
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_DIFF_CONTENTS, input)
+  },
+
+  listWorktrees: (repoPath: string, sessionId: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LIST_WORKTREES, repoPath, sessionId)
+  },
+
+  getWorktreeChanges: (worktreePath: string, baseBranch: string, sessionId: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_WORKTREE_CHANGES, worktreePath, baseBranch, sessionId)
   },
 
   openDetachedPreview: (input: DetachedPreviewWindowInput) => {
@@ -1872,6 +1890,18 @@ const electronAPI: ElectronAPI = {
 
   getWorkspaceAttachedFiles: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_ATTACHED_FILES, workspaceSlug)
+  },
+
+  getWorktreeRepos: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKTREE_REPOS, workspaceSlug)
+  },
+
+  addWorktreeRepo: (workspaceSlug: string, repo: import('@proma/shared').WorkspaceWorktreeRepo) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ADD_WORKTREE_REPO, workspaceSlug, repo)
+  },
+
+  removeWorktreeRepo: (workspaceSlug: string, repoPath: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REMOVE_WORKTREE_REPO, workspaceSlug, repoPath)
   },
 
   // Agent 文件系统操作

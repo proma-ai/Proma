@@ -34,11 +34,12 @@ export function useOpenSession(): OpenSessionFn {
       const result = openTab(tabs, { type, sessionId, title })
       setTabs(result.tabs)
       setActiveTabId(result.activeTabId)
-      setAppMode(type)
 
       if (type === 'chat') {
+        setAppMode('chat')
         setCurrentConversationId(sessionId)
-      } else if (type === 'agent') {
+      } else if (type === 'agent' || type === 'preview') {
+        setAppMode('agent')
         setCurrentAgentSessionId(sessionId)
 
         // 用户打开查看后只清除未读角标；是否完成由用户通过对勾确认。
@@ -58,6 +59,7 @@ export function useOpenSession(): OpenSessionFn {
           }).catch(console.error)
         }
       } else {
+        setAppMode('scratch')
         setCurrentConversationId(null)
         setCurrentAgentSessionId(null)
       }

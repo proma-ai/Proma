@@ -3,7 +3,7 @@
  *
  * 在 Agent 消息中检测到文件路径时，渲染为可点击的芯片。
  * 支持绝对路径和相对路径（相对于 basePath 解析）。
- * 点击后在右侧内联面板中预览文件。
+ * 点击后在当前会话的临时预览标签页中打开文件。
  */
 
 import * as React from 'react'
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { previewFileMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { activeTabIdAtom, getPreviewTabTitle, openTab, tabsAtom } from '@/atoms/tab-atoms'
 
 /** 文件存在性缓存（模块级共享，避免重复 IPC）。key = filePath + basePaths */
 const fileExistsCache = new Map<string, boolean>()
@@ -171,9 +172,16 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     })
     store.set(previewPanelOpenMapAtom, (prev) => {
       const m = new Map(prev)
-      m.set(sessionId, true)
+      m.set(sessionId, false)
       return m
     })
+    const result = openTab(store.get(tabsAtom), {
+      type: 'preview',
+      sessionId,
+      title: getPreviewTabTitle(cleanPath),
+    })
+    store.set(tabsAtom, result.tabs)
+    store.set(activeTabIdAtom, result.activeTabId)
   }, [store, cleanPath, candidateBases])
 
   return (
