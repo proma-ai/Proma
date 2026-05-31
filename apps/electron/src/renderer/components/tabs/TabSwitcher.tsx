@@ -1,8 +1,7 @@
 /**
  * TabSwitcher — Ctrl+Tab 会话快速切换器
  *
- * 顶部只保留“草稿 + 当前会话”后，快捷键不再依赖顶部 Tab 数量。
- * 列表按“工作中优先、最近更新兜底”分区展示，键盘和鼠标共享同一套选择模型。
+ * 列表按 MRU（最近访问）顺序排列，键盘和鼠标共享同一套选择模型。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -33,9 +32,8 @@ import {
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
-import { workingSessionGroupsAtom } from '@/atoms/working-atoms'
 
-type SwitchSectionId = 'working' | 'recent'
+type SwitchSectionId = 'recent'
 type SwitchCandidateType = 'chat' | 'agent'
 
 interface SwitchCandidate {
@@ -74,7 +72,6 @@ export function TabSwitcher(): ReactElement | null {
   const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const agentIndicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
   const unviewedCompletedIds = useAtomValue(unviewedCompletedSessionIdsAtom)
-  const workingGroups = useAtomValue(workingSessionGroupsAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
 
   const setAppMode = useSetAtom(appModeAtom)
@@ -85,6 +82,9 @@ export function TabSwitcher(): ReactElement | null {
 
   const [isOpen, setIsOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [mouseActivated, setMouseActivated] = useState(false)
+  const mouseActivatedRef = useRef(false)
+  const initialMousePosRef = useRef({ x: 0, y: 0 })
 
   const switcherModel = useMemo<SwitcherModel>(() => {
     const workspaceNameById = new Map(agentWorkspaces.map((workspace) => [workspace.id, workspace.name]))
@@ -103,13 +103,6 @@ export function TabSwitcher(): ReactElement | null {
       }
     }
 
-    const workingCandidates = [
-      ...workingGroups.todo,
-      ...workingGroups.running,
-      ...workingGroups.done,
-    ].map(buildAgentCandidate)
-    const workingIds = new Set(workingCandidates.map((candidate) => candidate.id))
-
     const chatCandidates = conversations
       .filter((conversation) => !conversation.archived && !draftSessionIds.has(conversation.id))
       .map((conversation: ConversationMeta): SwitchCandidate => ({
@@ -121,33 +114,35 @@ export function TabSwitcher(): ReactElement | null {
       }))
 
     const agentCandidates = agentSessions
-      .filter((session) => !session.archived && !draftSessionIds.has(session.id) && !workingIds.has(session.id))
+      .filter((session) => !session.archived && !draftSessionIds.has(session.id))
       .map(buildAgentCandidate)
 
-    const recentCandidates = [...chatCandidates, ...agentCandidates]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+    const allCandidates = [...chatCandidates, ...agentCandidates]
+
+    // 按 MRU 排序：在 MRU 列表中的按 MRU 顺序，不在的按 updatedAt 追加到末尾
+    const mruIndex = new Map(tabMru.map((id, i) => [id, i]))
+    allCandidates.sort((a, b) => {
+      const ai = mruIndex.get(a.id)
+      const bi = mruIndex.get(b.id)
+      if (ai !== undefined && bi !== undefined) return ai - bi
+      if (ai !== undefined) return -1
+      if (bi !== undefined) return 1
+      return b.updatedAt - a.updatedAt
+    })
 
     const sections: SwitchSection[] = []
-    if (workingCandidates.length > 0) {
-      sections.push({
-        id: 'working',
-        title: '工作中',
-        description: '等待处理、运行中、完成待查看',
-        candidates: workingCandidates,
-      })
-    }
-    if (recentCandidates.length > 0) {
+    if (allCandidates.length > 0) {
       sections.push({
         id: 'recent',
-        title: '最近更新',
-        description: '所有工作区的 Chat 和 Agent',
-        candidates: recentCandidates,
+        title: '最近访问',
+        description: '按访问顺序排列',
+        candidates: allCandidates,
       })
     }
 
     return {
       sections,
-      candidates: sections.flatMap((section) => section.candidates),
+      candidates: allCandidates,
     }
   }, [
     agentIndicatorMap,
@@ -156,8 +151,8 @@ export function TabSwitcher(): ReactElement | null {
     conversations,
     draftSessionIds,
     streamingConversationIds,
+    tabMru,
     unviewedCompletedIds,
-    workingGroups,
   ])
 
   // Refs 用于事件回调中读取最新值，避免全局键盘监听闭包过期。
@@ -167,6 +162,7 @@ export function TabSwitcher(): ReactElement | null {
   const candidatesRef = useRef<SwitchCandidate[]>(switcherModel.candidates)
   const tabMruRef = useRef<string[]>(tabMru)
   const tabsRef = useRef(tabs)
+  const lastMousePosRef = useRef({ x: 0, y: 0 })
 
   isOpenRef.current = isOpen
   selectedIndexRef.current = selectedIndex
@@ -186,6 +182,8 @@ export function TabSwitcher(): ReactElement | null {
   const closeSwitcher = useCallback((): void => {
     setIsOpen(false)
     isOpenRef.current = false
+    mouseActivatedRef.current = false
+    setMouseActivated(false)
   }, [])
 
   const activateCandidate = useCallback(
@@ -284,6 +282,8 @@ export function TabSwitcher(): ReactElement | null {
         if (nextIndex < 0) return
         setIsOpen(true)
         isOpenRef.current = true
+        mouseActivatedRef.current = false
+        initialMousePosRef.current = { x: lastMousePosRef.current.x, y: lastMousePosRef.current.y }
         setSelectedIndex(nextIndex)
         selectedIndexRef.current = nextIndex
         return
@@ -305,14 +305,28 @@ export function TabSwitcher(): ReactElement | null {
       if (event.key === 'Control') confirmSelection()
     }
 
+    const handleMouseMove = (event: MouseEvent): void => {
+      lastMousePosRef.current = { x: event.clientX, y: event.clientY }
+      if (isOpenRef.current && !mouseActivatedRef.current) {
+        const dx = event.clientX - initialMousePosRef.current.x
+        const dy = event.clientY - initialMousePosRef.current.y
+        if (dx * dx + dy * dy > 25) {
+          mouseActivatedRef.current = true
+          setMouseActivated(true)
+        }
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('keyup', handleKeyUp, true)
     window.addEventListener('blur', confirmSelection)
+    window.addEventListener('mousemove', handleMouseMove, true)
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('keyup', handleKeyUp, true)
       window.removeEventListener('blur', confirmSelection)
+      window.removeEventListener('mousemove', handleMouseMove, true)
     }
   }, [activateCandidate, closeSwitcher])
 
@@ -329,9 +343,6 @@ export function TabSwitcher(): ReactElement | null {
         <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-border/40 bg-muted/30">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-[13px] font-medium text-foreground">切换会话</span>
-            <span className="shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 text-primary font-medium">
-              工作中优先
-            </span>
           </div>
           <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Kbd>Ctrl</Kbd>
@@ -359,7 +370,9 @@ export function TabSwitcher(): ReactElement | null {
                     key={`${candidate.type}-${candidate.id}`}
                     candidate={candidate}
                     active={index === safeIndex}
+                    hoverEnabled={mouseActivated}
                     onMouseEnter={() => {
+                      if (!mouseActivatedRef.current) return
                       setSelectedIndex(index)
                       selectedIndexRef.current = index
                     }}
@@ -386,11 +399,13 @@ export function TabSwitcher(): ReactElement | null {
 function SwitcherCandidateRow({
   candidate,
   active,
+  hoverEnabled,
   onMouseEnter,
   onClick,
 }: {
   candidate: SwitchCandidate
   active: boolean
+  hoverEnabled: boolean
   onMouseEnter: () => void
   onClick: () => void
 }): ReactElement {
@@ -402,7 +417,7 @@ function SwitcherCandidateRow({
       type="button"
       className={cn(
         'relative flex items-center gap-3 w-full pl-5 pr-5 py-2.5 text-[15px] text-left cursor-default transition-colors',
-        active ? 'bg-primary/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-muted/40',
+        active ? 'bg-primary/15 text-foreground font-medium' : hoverEnabled ? 'text-muted-foreground hover:bg-muted/40' : 'text-muted-foreground',
       )}
       onMouseEnter={onMouseEnter}
       onMouseDown={(event) => {

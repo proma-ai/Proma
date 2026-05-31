@@ -599,7 +599,12 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   }, [allGroups])
 
   // 实时消息中是否已有可渲染的助手内容
-  const hasLiveAssistantContent = allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
+  // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
+  // 流式结束后：直接检查 liveMessages 中是否有助手消息，
+  // 防止 streaming→false 到 liveMessages 被清除之间的过渡帧中 fallback 气泡重复渲染
+  const hasLiveAssistantContent = streaming
+    ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
+    : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
 
   return (
     <BasePathsProvider basePaths={attachedDirs}>

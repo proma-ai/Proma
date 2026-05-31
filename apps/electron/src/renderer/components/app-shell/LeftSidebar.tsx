@@ -933,11 +933,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   /** 确认已完成：从 Working 中移出，但会话仍可通过搜索或最近工作找到 */
   const handleConfirmWorkingDoneAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
-      const session = store.get(agentSessionsAtom).find((s) => s.id === id)
-      if (session?.manualWorking) {
-        const updated = await window.electronAPI.toggleManualWorkingAgentSession(id)
-        setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
-      }
+      // 通过 IPC 清除持久化的 completedButUnconfirmed 和 manualWorking 状态
+      const updated = await window.electronAPI.confirmWorkingDoneAgentSession(id)
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
 
       setWorkingDone((prev) => {
         if (!prev.has(id)) return prev
@@ -959,7 +957,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       console.error('[侧边栏] 标记完成失败:', error)
       toast.error('标记完成失败')
     }
-  }, [store, setAgentSessions, setWorkingDone, setUnviewedCompleted])
+  }, [setAgentSessions, setWorkingDone, setUnviewedCompleted])
 
   /** 切换 Agent 会话归档状态 */
   const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {

@@ -287,8 +287,8 @@ export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-side
 /** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 
-/** 侧面板当前 Tab：'files' | 'changes'（per-session Map） */
-export const agentDiffPanelTabAtom = atom<Map<string, 'files' | 'changes'>>(new Map())
+/** 侧面板当前 Tab：'session' | 'workspace' | 'changes'（per-session Map） */
+export const agentDiffPanelTabAtom = atom<Map<string, 'session' | 'workspace' | 'changes'>>(new Map())
 
 /** Diff 视图模式：'split' | 'unified' */
 export const agentDiffViewModeAtom = atom<'split' | 'unified'>('split')

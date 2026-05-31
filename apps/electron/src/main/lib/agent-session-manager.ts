@@ -376,7 +376,7 @@ function convertLegacyMessage(legacy: AgentMessage): SDKMessage {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -1256,7 +1256,7 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
   let count = 0
 
   for (const session of index.sessions) {
-    if (!session.pinned && !session.archived && session.updatedAt < threshold) {
+    if (!session.pinned && !session.manualWorking && !session.completedButUnconfirmed && !session.archived && session.updatedAt < threshold) {
       session.archived = true
       count++
     }
@@ -1271,7 +1271,48 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
 }
 
 /**
- * 搜索 Agent 会话消息内容
+ * 清理所有会话中不存在的附加目录和附加文件
+ * @returns 清理的条目总数
+ */
+export function cleanupStaleAttachedPaths(): number {
+  const index = readIndex()
+  let count = 0
+
+  for (const session of index.sessions) {
+    let changed = false
+
+    if (session.attachedDirectories?.length) {
+      const valid = session.attachedDirectories.filter((d) => existsSync(d))
+      if (valid.length < session.attachedDirectories.length) {
+        count += session.attachedDirectories.length - valid.length
+        session.attachedDirectories = valid.length > 0 ? valid : undefined
+        changed = true
+      }
+    }
+
+    if (session.attachedFiles?.length) {
+      const valid = session.attachedFiles.filter((f) => existsSync(f))
+      if (valid.length < session.attachedFiles.length) {
+        count += session.attachedFiles.length - valid.length
+        session.attachedFiles = valid.length > 0 ? valid : undefined
+        changed = true
+      }
+    }
+
+    if (changed) {
+      session.updatedAt = Date.now()
+    }
+  }
+
+  if (count > 0) {
+    writeIndex(index)
+    console.log(`[Agent 会话] 清理了 ${count} 个不存在的附加路径`)
+  }
+
+  return count
+}
+
+/**
  *
  * 按行流式读取每个会话的 JSONL 文件，命中即早退。兼容旧 AgentMessage 和新 SDKMessage 格式。
  * 每个会话最多返回 1 条匹配，总计达到 maxResults 即停止扫描后续会话。

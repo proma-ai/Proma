@@ -20,7 +20,7 @@ import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
-const MIN_RIGHT_PANEL_WIDTH = 220
+const MIN_RIGHT_PANEL_WIDTH = 300
 const MAX_RIGHT_PANEL_WIDTH = 420
 
 function clampRightPanelWidth(width: number): number {

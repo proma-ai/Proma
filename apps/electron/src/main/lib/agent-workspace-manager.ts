@@ -1163,3 +1163,45 @@ export function removeWorktreeRepo(workspaceSlug: string, repoPath: string): imp
   console.log(`[Agent 工作区] 已移除 worktree 仓库: ${repoPath} ← ${workspaceSlug}`)
   return updated
 }
+
+/**
+ * 清理所有工作区中不存在的附加目录和附加文件
+ * @returns 清理的条目总数
+ */
+export function cleanupStaleWorkspaceAttachedPaths(): number {
+  const workspaces = listAgentWorkspaces()
+  let count = 0
+
+  for (const ws of workspaces) {
+    const config = readWorkspaceConfig(ws.slug)
+    let changed = false
+
+    if (config.attachedDirectories?.length) {
+      const valid = config.attachedDirectories.filter((d) => existsSync(d))
+      if (valid.length < config.attachedDirectories.length) {
+        count += config.attachedDirectories.length - valid.length
+        config.attachedDirectories = valid.length > 0 ? valid : undefined
+        changed = true
+      }
+    }
+
+    if (config.attachedFiles?.length) {
+      const valid = config.attachedFiles.filter((f) => existsSync(f))
+      if (valid.length < config.attachedFiles.length) {
+        count += config.attachedFiles.length - valid.length
+        config.attachedFiles = valid.length > 0 ? valid : undefined
+        changed = true
+      }
+    }
+
+    if (changed) {
+      writeWorkspaceConfig(ws.slug, config)
+    }
+  }
+
+  if (count > 0) {
+    console.log(`[Agent 工作区] 清理了 ${count} 个不存在的附加路径`)
+  }
+
+  return count
+}

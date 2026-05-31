@@ -62,6 +62,15 @@ export const workingSessionGroupsAtom = atom<WorkingSessionGroups>((get) => {
     includedIds.add(id)
   }
 
+  // completedButUnconfirmed 会话：跨重启恢复到工作中列表
+  for (const session of sessions) {
+    if (!session.completedButUnconfirmed || draftIds.has(session.id) || includedIds.has(session.id)) continue
+    const status = indicatorMap.get(session.id)
+    if (status === 'blocked') { todo.push(session); includedIds.add(session.id) }
+    else if (status === 'running') { running.push(session); includedIds.add(session.id) }
+    else { done.push(session); includedIds.add(session.id) }
+  }
+
   // manualWorking 会话：按当前 indicator 分配到对应子组
   for (const session of sessions) {
     if (!session.manualWorking || draftIds.has(session.id) || includedIds.has(session.id)) continue

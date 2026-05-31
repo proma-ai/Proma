@@ -599,6 +599,8 @@ export interface AgentSessionMeta {
   resumeAtMessageUuid?: string
   /** 手动标记为工作中 */
   manualWorking?: boolean
+  /** Agent 执行完成但用户尚未确认（跨重启保留在工作中列表） */
+  completedButUnconfirmed?: boolean
   /** 最后一次流式执行是否被用户主动中断 */
   stoppedByUser?: boolean
   /** 该会话当前的权限模式（持久化到磁盘，重启后恢复）。未设置时新会话默认 auto */
@@ -1280,6 +1282,8 @@ export const AGENT_IPC_CHANNELS = {
   TOGGLE_PIN: 'agent:toggle-pin',
   /** 切换会话手动工作中状态 */
   TOGGLE_MANUAL_WORKING: 'agent:toggle-manual-working',
+  /** 确认会话已完成（清除 completedButUnconfirmed 和 manualWorking） */
+  CONFIRM_WORKING_DONE: 'agent:confirm-working-done',
   /** 切换会话归档状态 */
   TOGGLE_ARCHIVE: 'agent:toggle-archive',
   /** 搜索会话消息内容 */
