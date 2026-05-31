@@ -220,6 +220,7 @@ function ensureWindowOnScreen(win: BrowserWindow): void {
 /** 显示并聚焦主窗口，确保窗口在可见区域；若窗口已销毁则重新创建 */
 function showAndFocusMainWindow(): void {
   if (process.platform === 'darwin') {
+    if (app.dock) app.dock.show()
     app.show()
   }
 
@@ -323,8 +324,8 @@ function createWindow(): void {
     if (savedState?.isMaximized ?? true) {
       mainWindow?.maximize()
     }
-    if (process.platform === 'darwin') {
-      app.show()
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.show()
     }
     mainWindow?.show()
   })
@@ -499,8 +500,10 @@ async function bootstrap(): Promise<void> {
   }
 
   // Set dock icon on macOS
+  // 确保 Dock 图标可见（dev 模式下通过 spawn 启动时可能不会自动显示）
   // 如果用户有保存的图标偏好则使用，否则用默认图标
   if (process.platform === 'darwin' && app.dock) {
+    await app.dock.show()
     const { resolveAppIconPath } = require('./ipc')
     const settings = getSettings()
     const variantId = settings.appIconVariant
