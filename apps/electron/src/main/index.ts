@@ -323,6 +323,9 @@ function createWindow(): void {
     if (savedState?.isMaximized ?? true) {
       mainWindow?.maximize()
     }
+    if (process.platform === 'darwin') {
+      app.show()
+    }
     mainWindow?.show()
   })
 
@@ -495,15 +498,13 @@ async function bootstrap(): Promise<void> {
     registerSyncIpcHandlers()
   }
 
-  // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
+  // Set dock icon on macOS
   // 如果用户有保存的图标偏好则使用，否则用默认图标
   if (process.platform === 'darwin' && app.dock) {
     const { resolveAppIconPath } = require('./ipc')
     const settings = getSettings()
     const variantId = settings.appIconVariant
-    const dockIconPath = variantId
-      ? resolveAppIconPath(variantId)
-      : join(__dirname, '../resources/icon.png')
+    const dockIconPath = resolveAppIconPath(variantId ?? 'default')
     if (dockIconPath && existsSync(dockIconPath)) {
       app.dock.setIcon(dockIconPath)
     }
