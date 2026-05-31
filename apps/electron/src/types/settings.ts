@@ -35,6 +35,10 @@ export type VoiceDictationOutputMode = 'auto' | 'clipboard' | 'proma-input'
 export interface VoiceDictationWindowPosition {
   x: number
   y: number
+  /** 窗口相对于所在屏幕 workArea 的归一化水平偏移 (0~1) */
+  relativeX?: number
+  /** 窗口相对于所在屏幕 workArea 的归一化垂直偏移 (0~1) */
+  relativeY?: number
 }
 
 /** 语音输入设置（渲染进程读取到的是解密后的值） */

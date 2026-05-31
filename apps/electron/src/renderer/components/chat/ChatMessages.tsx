@@ -232,6 +232,22 @@ export function ChatMessages({
 
   const transitioning = needsInstant || transitioningCooldown
 
+  // 缓存 streaming MessageHeader 的 props，避免每帧 re-render 导致闪烁
+  const streamingTime = React.useMemo(
+    () => formatMessageTime(startedAt ?? Date.now()),
+    [startedAt]
+  )
+  const streamingLogo = React.useMemo(
+    () => (
+      <img
+        src={getModelLogo(streamingModel ?? '')}
+        alt="AI"
+        className="size-[35px] rounded-[25%] object-cover"
+      />
+    ),
+    [streamingModel]
+  )
+
   /**
    * 淡入控制：切换对话时先隐藏，等 StickToBottom 定位完成后再显示。
    * 避免 "先看到顶部消息再跳到底部" 的闪烁。
@@ -386,14 +402,8 @@ export function ChatMessages({
               <Message from="assistant">
                 <MessageHeader
                   model={streamingModel ?? undefined}
-                  time={formatMessageTime(Date.now())}
-                  logo={
-                    <img
-                      src={getModelLogo(streamingModel ?? '')}
-                      alt="AI"
-                      className="size-[35px] rounded-[25%] object-cover"
-                    />
-                  }
+                  time={streamingTime}
+                  logo={streamingLogo}
                 />
                 <MessageContent>
                   {/* 工具活动指示器 */}

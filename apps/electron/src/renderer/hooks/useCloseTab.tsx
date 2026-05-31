@@ -48,18 +48,14 @@ export function useCloseTab(): UseCloseTabReturn {
     // running 或 blocked 的会话不移除
     if (status === 'running' || status === 'blocked') return
 
-    // 清除 manualWorking
-    const sessions = store.get(agentSessionsAtom)
-    const session = sessions.find((s) => s.id === sessionId)
-    if (session?.manualWorking) {
-      window.electronAPI.toggleManualWorkingAgentSession(sessionId)
-        .then((updated) => {
-          setAgentSessions((prev) =>
-            prev.map((s) => (s.id === updated.id ? updated : s))
-          )
-        })
-        .catch(console.error)
-    }
+    // 通过 IPC 清除持久化的 completedButUnconfirmed 和 manualWorking 状态
+    window.electronAPI.confirmWorkingDoneAgentSession(sessionId)
+      .then((updated) => {
+        setAgentSessions((prev) =>
+          prev.map((s) => (s.id === updated.id ? updated : s))
+        )
+      })
+      .catch(console.error)
 
     setWorkingDone((prev) => {
       if (!prev.has(sessionId)) return prev

@@ -2200,7 +2200,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   type="button"
                   aria-label="标记为完成"
                   className={cn(
-                    'flex-shrink-0 p-1 rounded-md bg-green-500/10 text-green-600 hover:bg-green-500/20 hover:text-green-700 transition-colors',
+                    'flex-shrink-0 p-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary transition-colors',
                     'opacity-0 pointer-events-none',
                     'group-hover:opacity-100 group-hover:pointer-events-auto',
                     'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',

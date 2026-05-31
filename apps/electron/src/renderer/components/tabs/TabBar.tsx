@@ -37,6 +37,7 @@ export function TabBar(): React.ReactElement {
   const indicatorMap = useAtomValue(tabIndicatorMapAtom)
 
   // Tab 切换时同步 sidebar 状态
+  const appMode = useAtomValue(appModeAtom)
   const setAppMode = useSetAtom(appModeAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
@@ -96,11 +97,13 @@ export function TabBar(): React.ReactElement {
         }).catch(console.error)
       }
     } else if (tab.type === 'scratch') {
-      // Scratch Pad 不改变侧边栏模式，但主区与右侧面板应脱离具体会话。
+      // Agent 模式下切到 Scratch Pad 时保持右侧文件面板不收起
       setCurrentConversationId(null)
-      setCurrentAgentSessionId(null)
+      if (appMode !== 'agent') {
+        setCurrentAgentSessionId(null)
+      }
     }
-  }, [setActiveTabId, tabs, agentSessions, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
+  }, [setActiveTabId, tabs, agentSessions, appMode, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
   const handleDragStart = React.useCallback((tabId: string, e: React.PointerEvent) => {
     if (e.button !== 0) return // 只处理左键
