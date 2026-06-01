@@ -293,6 +293,64 @@ export function getProviderLogo(provider: ProviderType): string {
 }
 
 /**
+ * Base URL 域名 → Logo 映射
+ *
+ * 仅用于「泛化」provider 类型（anthropic / anthropic-compatible / custom），
+ * 这些类型无法从类型本身判断真实品牌，需要按 Base URL 域名识别。
+ *
+ * 注意：故意不包含 anthropic 域名规则——真 Anthropic 渠道会通过
+ * getProviderLogo('anthropic') 回退到 Claude；而第三方 anthropic-compatible
+ * 服务（常以 /anthropic 结尾）不应被误判为 Claude（见 #659）。
+ */
+const URL_LOGO_MAP: Array<[RegExp, string]> = [
+  [/proma\.cool/i, PromaLogo],
+  [/moonshot\.cn|kimi/i, KimiLogo],
+  [/bigmodel\.cn|zhipuai/i, ZhipuLogo],
+  [/minimax/i, MiniMaxLogo],
+  [/volces\.com|volcengine/i, DoubaoLogo],
+  [/dashscope|aliyuncs/i, QwenLogo],
+  [/deepseek/i, DeepSeekLogo],
+  [/openai\.com/i, OpenAILogo],
+  [/googleapis|generativelanguage/i, GeminiLogo],
+  [/grok|x\.ai/i, GrokLogo],
+  [/stepfun/i, StepLogo],
+  [/cohere/i, CohereLogo],
+  [/spark-api|xfyun/i, SparkDeskLogo],
+  [/hunyuan/i, HunyuanLogo],
+  [/ernie|baidu/i, WenxinLogo],
+  [/yi\.com|lingyiwanwu/i, YiLogo],
+]
+
+/** provider 类型本身无法判断真实品牌、需按 URL 识别的「泛化」类型 */
+const GENERIC_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  'anthropic',
+  'anthropic-compatible',
+  'custom',
+])
+
+/**
+ * 获取渠道（Channel）的 Logo
+ *
+ * 识别策略：
+ * 1. 明确品牌的 provider 类型（deepseek/openai/google/...）→ 直接信任 provider Logo
+ * 2. 泛化类型（anthropic/anthropic-compatible/custom）→ 先按 Base URL 域名识别真实品牌，
+ *    识别不到再回退到 provider 默认 Logo
+ *
+ * 这样既能识别「用 Anthropic 协议接入第三方品牌」的渠道，又不会把第三方
+ * anthropic-compatible 服务误判为 Claude。
+ */
+export function getChannelLogo(channel: { provider: ProviderType; baseUrl: string }): string {
+  if (GENERIC_PROVIDERS.has(channel.provider) && channel.baseUrl) {
+    for (const [regex, logo] of URL_LOGO_MAP) {
+      if (regex.test(channel.baseUrl)) {
+        return logo
+      }
+    }
+  }
+  return getProviderLogo(channel.provider)
+}
+
+/**
  * 根据模型 ID 在渠道列表中查找显示名称
  *
  * 优先返回别名（name !== id），未找到则返回原始 modelId。

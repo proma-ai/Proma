@@ -25,7 +25,7 @@ import {
 } from '@/atoms/chat-atoms'
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
-import { getModelLogo, getProviderLogo } from '@/lib/model-logo'
+import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
@@ -292,7 +292,10 @@ export function ModelSelector({
                     {/* 供应商标题行 - 灰色背景 */}
                     <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
                       <img
-                        src={getProviderLogo(channels.find((c) => c.id === channelId)?.provider ?? 'anthropic')}
+                        src={(() => {
+                          const ch = channels.find((c) => c.id === channelId)
+                          return ch ? getChannelLogo(ch) : DefaultLogo
+                        })()}
                         alt={first.channelName}
                         className="size-5 rounded object-cover"
                       />

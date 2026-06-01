@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID, isAgentCompatibleProvider } from '@proma/shared'
 import type { Channel } from '@proma/shared'
-import { getProviderLogo, PromaLogo } from '@/lib/model-logo'
+import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
@@ -365,7 +365,7 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
   return (
     <SettingsRow
       label={channel.name}
-      icon={<img src={getProviderLogo(channel.provider)} alt="" className="w-8 h-8 rounded" />}
+      icon={<img src={getChannelLogo(channel)} alt="" className="w-8 h-8 rounded" />}
       description={description}
       className="group"
     >
@@ -416,7 +416,7 @@ function AgentProviderRow({ channel, enabled, onToggle }: AgentProviderRowProps)
   return (
     <SettingsRow
       label={channel.name}
-      icon={<img src={getProviderLogo(channel.provider)} alt="" className="w-8 h-8 rounded" />}
+      icon={<img src={getChannelLogo(channel)} alt="" className="w-8 h-8 rounded" />}
       description={description}
     >
       <Switch
