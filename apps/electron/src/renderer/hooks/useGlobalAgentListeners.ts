@@ -118,6 +118,8 @@ function inferContextWindow(model?: string): number | undefined {
     m.includes('claude-opus-4-8')
   ) return 1_000_000
   if (m.includes('deepseek-v4')) return 1_000_000
+  // MiniMax M3 为 1M 上下文
+  if (m.includes('minimax-m3')) return 1_000_000
   return 200_000
 }
 

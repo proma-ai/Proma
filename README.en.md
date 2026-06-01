@@ -105,6 +105,8 @@ Proma supports Doubao-powered streaming voice input, both inside Proma and acros
 | Qwen | Supported | Supported | Anthropic-compatible protocol |
 | Custom endpoint | Supported | Not yet | OpenAI-compatible protocol |
 
+> **Kimi Coding Plan users**: Proma is officially whitelisted by Kimi. Using Proma with your Kimi Coding Plan subscription will not trigger any third-party client ban policy.
+
 Agent mode is powered by Claude Agent SDK, so it currently requires an Anthropic or Anthropic-compatible channel. Chat mode uses Provider Adapters from `@proma/core` to support different protocols.
 
 ## Local Data

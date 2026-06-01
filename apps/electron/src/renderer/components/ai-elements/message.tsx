@@ -464,7 +464,8 @@ const MarkdownPre = React.memo(function MarkdownPre({
 
     // 先用共享 mermaid 识别（覆盖 language-mermaid/mmd 以及未标语言但内容像 Mermaid 的情况）
     if (shouldInspectMermaidCodeBlock(className)) {
-      const mermaidCode = extractText(codeProps.children).replace(/\n$/, '')
+      // normalize Windows/legacy-Mac line endings before feeding to Mermaid parser
+      const mermaidCode = extractText(codeProps.children).replace(/\r\n?/g, '\n').replace(/\n$/, '')
       if (shouldRenderMermaidCodeBlock(className, mermaidCode)) {
         return <MermaidBlock code={mermaidCode} />
       }

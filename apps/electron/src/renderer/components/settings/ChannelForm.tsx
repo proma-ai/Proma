@@ -44,6 +44,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
+import { normalizeAnthropicProviderUrl } from '@proma/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
@@ -72,7 +73,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -84,6 +85,7 @@ const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
 const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   proma: '/chat',
   anthropic: '/v1/messages',
+  'anthropic-compatible': '/v1/messages',
   openai: '/chat/completions',
   deepseek: '/messages',
   google: '/v1beta/models/{model}:generateContent',
@@ -96,41 +98,27 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   custom: '/chat/completions',
 }
 
+/** 走 Anthropic 协议的供应商集合（共用 /v1/messages 端点） */
+const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  'anthropic',
+  'anthropic-compatible',
+  'deepseek',
+  'kimi-api',
+  'kimi-coding',
+  'minimax',
+])
+
 /**
  * 生成 API 端点预览 URL
  *
- * Anthropic 特殊处理：如果 baseUrl 已包含 /v1，则不重复添加。
+ * Anthropic 协议供应商：复用 normalizeAnthropicProviderUrl 计算 base，再拼 /messages，
+ * 与运行时 channel-manager / AnthropicAdapter 的规范化逻辑保持一致。
  */
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
-  let trimmed = baseUrl.trim().replace(/\/+$/, '')
-
-  if (provider === 'anthropic' || provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding' || provider === 'minimax') {
-    // 去除用户误填的 /messages 后缀，与 normalizeAnthropicBaseUrl 保持一致
-    trimmed = trimmed.replace(/\/messages$/, '')
-    // MiniMax 的 Anthropic 协议根路径为 /anthropic，实际 API 位于 /v1/messages
-    if (provider === 'minimax') {
-      if (trimmed.match(/\/v\d+$/)) {
-        return `${trimmed}/messages`
-      }
-      return `${trimmed}/v1/messages`
-    }
-    // DeepSeek / Kimi 的 baseUrl 已带非版本路径（/anthropic、/coding/v1），直接拼 /messages
-    if (provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {
-      return `${trimmed}/messages`
-    }
-    if (trimmed.match(/\/v\d+$/)) {
-      return `${trimmed}/messages`
-    }
-    // 已有非根路径时不追加 /v1
-    try {
-      const pathname = new URL(trimmed).pathname
-      if (pathname !== '/' && pathname !== '') {
-        return `${trimmed}/messages`
-      }
-    } catch {}
-    return `${trimmed}/v1/messages`
+  if (ANTHROPIC_PROTOCOL_PROVIDERS.has(provider)) {
+    return `${normalizeAnthropicProviderUrl(baseUrl, provider)}/messages`
   }
-
+  const trimmed = baseUrl.trim().replace(/\/+$/, '')
   return `${trimmed}${PROVIDER_CHAT_PATHS[provider]}`
 }
 
@@ -283,6 +271,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         ])
       } else if (p === 'minimax') {
         setModels([
+          { id: 'MiniMax-M3', name: 'MiniMax-M3', enabled: true },
           { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', enabled: true },
         ])
       }

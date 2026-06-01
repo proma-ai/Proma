@@ -295,9 +295,9 @@ function PermissionsStep(): React.ReactElement {
             <div><span className="text-foreground/70">im:message:send_as_bot</span> — 以机器人身份发送消息</div>
             <div><span className="text-foreground/70">im:message.p2p_msg:readonly</span> — 接收用户发给机器人的单聊消息</div>
             <div><span className="text-foreground/70">im:message.group_at_msg:readonly</span> — 接收群聊中 @机器人 的消息</div>
-            <div><span className="text-foreground/70">im:message.group_msg</span> — 接收群聊所有用户消息（仅你和 Bot 的群免 @ 续聊、群聊上下文）</div>
+            <div><span className="text-foreground/70">im:message.group_msg</span> — 接收群聊所有用户消息（配合 im:chat 实现仅你和 Bot 的群免 @ 续聊、群聊上下文）</div>
             <div><span className="text-foreground/70">im:message.reactions:write_only</span> — 为消息添加状态表情（如⌨️/✅），让用户感知 Bot 正在处理 / 已完成</div>
-            <div><span className="text-foreground/70">im:chat</span> — 创建群 + 读取/更新群基础信息（群名、简介、邀请链接等）</div>
+            <div><span className="text-foreground/70">im:chat</span> — 创建群 + 读取/更新群基础信息（群名、简介、真人数量等；免 @ 续聊靠它判断群里只有你和 Bot）</div>
             <div><span className="text-foreground/70">im:chat.members:read</span> — 获取群成员列表（支持 @某人）</div>
             <div><span className="text-foreground/70">im:chat.members:write_only</span> — 添加 / 移除群成员（Bot 主动拉人入群）</div>
             <div><span className="text-foreground/70">im:chat.managers:write_only</span> — 指定 / 移除群管理员</div>
@@ -951,13 +951,22 @@ function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.Reac
           <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-3 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
             <div className="space-y-1 leading-relaxed">
-              <div className="font-medium text-amber-900 dark:text-amber-200">想在仅你和 Bot 的群里不 @Bot 也能继续发送消息，需要额外申请敏感权限。</div>
+              <div className="font-medium text-amber-900 dark:text-amber-200">想在仅你和 Bot 的群里不 @Bot 也能继续发送消息，需要额外申请两个权限。</div>
               <div>
-                请在飞书开放平台为同步 Bot 申请并发布
-                {' '}
-                <code className="rounded bg-amber-500/15 px-1 py-0.5 text-[11px] text-amber-900 dark:text-amber-100">im:message.group_msg</code>
-                {' '}
-                获取群组中所有消息。管理员审核通过前，飞书不会把非 @ 的群消息推送给 Proma；此时仍需要在群里 @Bot 才能触发 Agent。
+                请在飞书开放平台为同步 Bot 申请并发布以下权限：
+              </div>
+              <div className="flex flex-col gap-1 pl-1">
+                <div>
+                  <code className="rounded bg-amber-500/15 px-1 py-0.5 text-[11px] text-amber-900 dark:text-amber-100">im:message.group_msg</code>
+                  {' '}— 接收群聊中所有用户消息（否则飞书不会把非 @ 的群消息推送给 Proma）
+                </div>
+                <div>
+                  <code className="rounded bg-amber-500/15 px-1 py-0.5 text-[11px] text-amber-900 dark:text-amber-100">im:chat</code>
+                  {' '}— 读取群基础信息以判断群里只有你和 Bot（缺少时无法识别 2 人群，仍需 @Bot）
+                </div>
+              </div>
+              <div>
+                两者都审核通过并发布后才会生效；任一缺失或审核未过时，仍需要在群里 @Bot 才能触发 Agent。一键复制的权限配置里已包含这两项，单独手动添加时请勿遗漏。
               </div>
             </div>
           </div>

@@ -40,6 +40,7 @@ function createMentionSuggestion<T>(
   return {
     char: config.char,
     allowSpaces: false,
+    allowedPrefixes: null,
 
     items: async ({ query }): Promise<T[]> => {
       const slug = workspaceSlugRef.current
@@ -54,11 +55,32 @@ function createMentionSuggestion<T>(
     render: () => {
       let renderer: ReactRenderer<MentionListRef> | null = null
       let popup: HTMLDivElement | null = null
+      let blurHandler: (() => void) | null = null
+      let editorDom: HTMLElement | null = null
+
+      function cleanup() {
+        if (blurHandler && editorDom) {
+          editorDom.removeEventListener('blur', blurHandler, true)
+          blurHandler = null
+        }
+        editorDom = null
+        mentionActiveRef.current = false
+        mentionItemCountRef.current = 0
+        popup?.remove()
+        popup = null
+        renderer?.destroy()
+        renderer = null
+      }
 
       return {
         onStart(props) {
+          if (popup || renderer) {
+            cleanup()
+          }
+
           mentionActiveRef.current = true
           mentionItemCountRef.current = props.items.length
+          editorDom = props.editor.view.dom
           renderer = new ReactRenderer(MentionList, {
             props: {
               items: props.items,
@@ -75,6 +97,15 @@ function createMentionSuggestion<T>(
           })
           popup = createMentionPopup(renderer.element)
           positionPopup(popup, props.clientRect?.())
+
+          blurHandler = () => {
+            setTimeout(() => {
+              if (!props.editor.view.hasFocus() && popup) {
+                cleanup()
+              }
+            }, 100)
+          }
+          editorDom.addEventListener('blur', blurHandler, true)
         },
 
         onUpdate(props) {
@@ -94,12 +125,7 @@ function createMentionSuggestion<T>(
         },
 
         onExit() {
-          mentionActiveRef.current = false
-          mentionItemCountRef.current = 0
-          popup?.remove()
-          popup = null
-          renderer?.destroy()
-          renderer = null
+          cleanup()
         },
       }
     },

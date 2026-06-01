@@ -203,6 +203,8 @@ export interface FeishuGroupInfo {
   description?: string
   /** 群成员列表 */
   members?: FeishuGroupMember[]
+  /** 群内真人数量（来自 chat.get 的 user_count，不含机器人）。免 @ 续聊判定的权威依据。 */
+  userCount?: number
   /** 缓存时间戳 */
   cachedAt: number
 }

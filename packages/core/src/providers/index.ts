@@ -17,6 +17,7 @@ export * from './types.ts'
 export * from './sse-reader.ts'
 export * from './url-utils.ts'
 export * from './thinking-capability.ts'
+export * from './user-agent.ts'
 
 // 导出适配器类
 export { AnthropicAdapter } from './anthropic-adapter.ts'
@@ -28,6 +29,7 @@ export { PromaAdapter } from './proma-adapter.ts'
 const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['proma', new PromaAdapter()],         // Proma 官方
   ['anthropic', new AnthropicAdapter()],
+  ['anthropic-compatible', new AnthropicAdapter('anthropic-compatible')],
   ['openai', new OpenAIAdapter()],
   ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['kimi-api', new AnthropicAdapter('kimi-api')],       // Kimi API 的 Anthropic 协议端点

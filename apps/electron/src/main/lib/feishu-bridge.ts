@@ -706,6 +706,11 @@ class FeishuBridge {
       })
 
       if (!access.accepted) {
+        console.log(
+          `[飞书 Bridge] 群消息未触发 Agent（需 @Bot）——chatId=${chatId}, ` +
+          `userCount=${groupInfo?.userCount ?? 'N/A'}, isMentioned=${isMentioned}, ` +
+          `reason=${access.reason}。若这是仅你和 Bot 的群却仍要求 @，请确认已申请并发布 im:chat 权限。`,
+        )
         return
       }
 
@@ -1979,7 +1984,21 @@ class FeishuBridge {
       const name = chatResp?.data?.name ?? '未知群组'
       const description = chatResp?.data?.description
 
-      const info: FeishuGroupInfo = { chatId, name, description, members, cachedAt: Date.now() }
+      // user_count 是飞书侧权威的真人数量（不含机器人），免 @ 续聊判定优先用它。
+      // chat.get 需要 im:chat 权限；拿不到时记日志提示，判定会回退到成员列表。
+      const rawUserCount = chatResp?.data?.user_count
+      const userCount = rawUserCount != null ? Number(rawUserCount) : undefined
+      const normalizedUserCount = Number.isFinite(userCount) ? userCount : undefined
+      if (normalizedUserCount === undefined) {
+        console.warn(
+          `[飞书 Bridge] chat.get 未返回 user_count（chatId=${chatId}）——` +
+          `请确认已申请并发布 im:chat 权限（读取群基础信息），否则「仅你和 Bot 的群」无法免 @ 续聊。`,
+        )
+      }
+
+      const info: FeishuGroupInfo = {
+        chatId, name, description, members, userCount: normalizedUserCount, cachedAt: Date.now(),
+      }
       this.groupInfoCache.set(chatId, info)
 
       // 同时填充 userNameCache

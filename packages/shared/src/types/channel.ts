@@ -11,6 +11,7 @@
 export type ProviderType =
   | 'proma'
   | 'anthropic'
+  | 'anthropic-compatible'
   | 'openai'
   | 'deepseek'
   | 'google'
@@ -34,6 +35,7 @@ export const PROMA_OFFICIAL_DEFAULT_AGENT_MODEL = 'claude-opus-4-6'
 export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   proma: '',
   anthropic: 'https://api.anthropic.com',
+  'anthropic-compatible': '',
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com/anthropic',
   google: 'https://generativelanguage.googleapis.com',
@@ -52,6 +54,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
 export const PROVIDER_LABELS: Record<ProviderType, string> = {
   proma: 'Proma 官方',
   anthropic: 'Anthropic',
+  'anthropic-compatible': 'Anthropic 兼容格式',
   openai: 'OpenAI',
   deepseek: 'DeepSeek',
   google: 'Google',
@@ -72,6 +75,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
  */
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'anthropic',
+  'anthropic-compatible',
   'deepseek',
   'kimi-api',
   'kimi-coding',

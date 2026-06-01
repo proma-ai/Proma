@@ -15,6 +15,18 @@ import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 /**
+ * 归一化换行符为 LF。
+ *
+ * diff 两侧内容来源不同：旧版本来自 `git show`（读对象库 blob，换行符为 LF），
+ * 新版本来自磁盘工作区文件（Windows 在 core.autocrlf=true 下检出为 CRLF）。
+ * 若不归一化，逐行 diff 会把每一行都判定为变更，导致整文件「全删全增」。
+ * 此处只影响 diff 显示比较，不改写磁盘文件。
+ */
+function normalizeLineEndings(content: string): string {
+  return content.replace(/\r\n/g, '\n')
+}
+
+/**
  * 校验并规范化 filePath，确保其位于 root 目录内。
  * 支持相对路径和绝对路径。绝对路径会被自动转为相对路径。
  * 拒绝 `..` 穿越和 root 外的路径。
@@ -244,6 +256,17 @@ export async function getUnstagedChanges(
   }
 }
 
+/**
+ * 归一化仓库根路径，用于去重。
+ *
+ * 两个数据源的分隔符风格不一致：`git rev-parse --show-toplevel` 在 Windows 返回正斜杠
+ * （`C:/.../repo`），而 Node `path.join` 返回反斜杠（`C:\...\repo`）。统一用 resolve
+ * 规范化并转为正斜杠，确保同一仓库的两种写法被识别为同一个根，避免重复跑 git diff。
+ */
+function normalizeGitRoot(p: string): string {
+  return resolve(p).replace(/\\/g, '/')
+}
+
 /** 向下递归搜索所有 .git 目录，返回所有找到的仓库根（不提前停止） */
 function findAllGitRootsDown(dirPath: string, maxDepth: number): string[] {
   if (maxDepth <= 0) return []
@@ -286,13 +309,15 @@ function findAllGitRoots(baseDir: string): string[] {
   // 1. 向上搜索：git rev-parse --show-toplevel
   const toplevel = runGitCommand(['rev-parse', '--show-toplevel'], baseDir)
   const roots: string[] = []
-  if (toplevel && existsSync(toplevel) && !roots.includes(toplevel)) {
-    roots.push(toplevel)
+  if (toplevel && existsSync(toplevel)) {
+    const normalized = normalizeGitRoot(toplevel)
+    if (!roots.includes(normalized)) roots.push(normalized)
   }
 
   // 2. 向下搜索所有子 .git
   for (const r of findAllGitRootsDown(baseDir, 3)) {
-    if (!roots.includes(r)) roots.push(r)
+    const normalized = normalizeGitRoot(r)
+    if (!roots.includes(normalized)) roots.push(normalized)
   }
 
   return roots
@@ -345,7 +370,7 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
         // 读取失败保持空字符串
       }
     }
-    return { oldContent: '', newContent }
+    return { oldContent: '', newContent: normalizeLineEndings(newContent) }
   }
 
   const safePath = normalizeSafePath(root, filePath)
@@ -387,7 +412,7 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
     }
   }
 
-  return { oldContent, newContent }
+  return { oldContent: normalizeLineEndings(oldContent), newContent: normalizeLineEndings(newContent) }
 }
 
 /**
@@ -411,7 +436,7 @@ export async function getUntrackedContent(dirPath: string, filePath: string, git
       console.warn('[git-diff-service] 未追踪文件超过大小上限:', fullPath, st.size)
       return ''
     }
-    return readFileSync(fullPath, 'utf-8')
+    return normalizeLineEndings(readFileSync(fullPath, 'utf-8'))
   } catch {
     return ''
   }
@@ -496,7 +521,7 @@ export async function getWorktreeChanges(
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
-  const gitRoot = toplevel
+  const gitRoot = normalizeGitRoot(toplevel)
   const allFiles: import('@proma/shared').ChangedFileEntry[] = []
   const fileMap = new Map<string, import('@proma/shared').ChangedFileEntry>()
 
