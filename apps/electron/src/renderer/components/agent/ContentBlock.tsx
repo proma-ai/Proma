@@ -261,22 +261,6 @@ function PromptRow({ prompt, dimmed = false }: { prompt: string; dimmed?: boolea
 
 // ===== 工具短语 diff 着色 =====
 
-/** 将 displayLabel 中的 +N 染绿、-N 染红（仅对 Edit/Write 工具生效，避免 `head -5` 等命令参数被误染） */
-function renderLabelWithDiffColors(label: string, toolName: string): React.ReactNode {
-  if (toolName !== 'Edit' && toolName !== 'Write') return label
-  const parts = label.split(/((?:^|(?<=\s))[+-]\d+)/g)
-  if (parts.length === 1) return label
-  return parts.map((part, i) => {
-    if (/^\+\d+$/.test(part)) {
-      return <span key={i} className="text-green-500">{part}</span>
-    }
-    if (/^-\d+$/.test(part)) {
-      return <span key={i} className="text-red-500">{part}</span>
-    }
-    return part
-  })
-}
-
 function TaskGetCollapsedSummary({ task }: { task: ParsedTaskGetResult }): React.ReactElement {
   const blockPreview = task.blocks.length > 0
     ? `${task.blocks[0]}${task.blocks.length > 1 ? ` +${task.blocks.length - 1}` : ''}`
@@ -513,7 +497,19 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
           'min-w-0 truncate text-[14px]',
           taskGetSummary || taskListSummary ? 'shrink-0' : '',
           dimmed ? 'text-muted-foreground/70' : 'text-muted-foreground',
-        )}>{renderLabelWithDiffColors(displayLabel, block.name)}</span>
+        )}>{displayLabel}</span>
+
+        {phrase.diffStats && (isCompleted || !isStreaming) && (
+          <span className="shrink-0 text-[14px] tabular-nums">
+            {phrase.diffStats.additions > 0 && (
+              <span className="text-green-500">+{phrase.diffStats.additions}</span>
+            )}
+            {phrase.diffStats.additions > 0 && phrase.diffStats.deletions > 0 && ' '}
+            {phrase.diffStats.deletions > 0 && (
+              <span className="text-red-500">-{phrase.diffStats.deletions}</span>
+            )}
+          </span>
+        )}
 
         {taskGetSummary && (
           <span className="flex min-w-0 items-center gap-1.5">

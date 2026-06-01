@@ -1310,7 +1310,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         <div className="my-3 h-px w-8 bg-border/70" />
 
         {/* 最近/关键会话入口 */}
-        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-none">
+        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
           <div className="flex flex-col items-center gap-1.5 pb-2">
             {railRecentItems.map((item) => (
               <RailRecentButton
@@ -1514,7 +1514,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 </div>
 
                 {/* Tab 内容（自己滚动） */}
-                <div className="flex-1 overflow-y-auto scrollbar-none px-3 pb-1 min-h-0">
+                <div className="flex-1 overflow-y-auto scrollbar-thin px-3 pb-1 min-h-0">
                   {agentSubTab === 'working' && (
                     <div className="pt-0.5 pb-0.5">
                       {hasWorkingSessions ? (() => {
@@ -1611,7 +1611,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </div>
 
           {/* 下区：历史会话列表 */}
-          <div className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-none min-h-0">
+          <div className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-thin min-h-0">
             {agentSessionGroups.map((group) => (
               <div key={group.label} className="mb-1">
                 <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
@@ -1653,7 +1653,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           )}
 
           {/* Chat 模式 / 归档视图：单列表布局 */}
-          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-none">
+          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-thin">
             {mode === 'chat' ? (
               /* Chat 模式：对话按日期分组 */
               conversationGroups.map((group) => (

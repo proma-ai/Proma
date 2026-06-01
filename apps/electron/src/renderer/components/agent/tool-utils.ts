@@ -271,8 +271,8 @@ export function getInputSummary(
     case 'Write': {
       const filePath = input.file_path
       if (typeof filePath === 'string') {
-        // 仅展示文件名，不展示完整路径
-        return filePath.split('/').pop() ?? filePath
+        // 仅展示文件名，不展示完整路径（兼容 Windows 反斜杠）
+        return filePath.split(/[/\\]/).pop() || filePath
       }
       return null
     }
@@ -280,7 +280,7 @@ export function getInputSummary(
     case 'NotebookEdit': {
       const notebookPath = input.notebook_path
       if (typeof notebookPath === 'string') {
-        return notebookPath.split('/').pop() ?? notebookPath
+        return notebookPath.split(/[/\\]/).pop() || notebookPath
       }
       return null
     }
@@ -344,7 +344,7 @@ export function getInputSummary(
       const name = input.name
       const scriptPath = input.scriptPath
       if (typeof name === 'string') return name
-      if (typeof scriptPath === 'string') return scriptPath.split('/').pop() ?? scriptPath
+      if (typeof scriptPath === 'string') return scriptPath.split(/[/\\]/).pop() || scriptPath
       return null
     }
 

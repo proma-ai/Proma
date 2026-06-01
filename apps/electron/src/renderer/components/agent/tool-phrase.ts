@@ -13,11 +13,13 @@ export interface ToolPhrase {
   label: string
   /** Loading 态短语，如 "正在读取 foo.ts..." */
   loadingLabel: string
+  /** 编辑/写入的增删行数统计，独立于 label，便于 UI 单独渲染且不被路径截断 */
+  diffStats?: { additions: number; deletions: number }
 }
 
-/** 从路径中提取文件名 */
+/** 从路径中提取文件名（同时兼容 POSIX `/` 与 Windows `\` 分隔符） */
 function filename(path: string): string {
-  return path.split('/').pop() ?? path
+  return path.split(/[/\\]/).pop() || path
 }
 
 /** 截断文本 */
@@ -53,11 +55,8 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
       const fp = input.file_path ?? input.filePath
       const name = typeof fp === 'string' ? filename(fp) : '文件'
       const diff = computeDiffStats('Edit', input)
-      if (diff) {
-        const parts = [name]
-        if (diff.additions > 0) parts.push(`+${diff.additions}`)
-        if (diff.deletions > 0) parts.push(`-${diff.deletions}`)
-        return phrase(`编辑 ${parts.join(' ')}`)
+      if (diff && (diff.additions > 0 || diff.deletions > 0)) {
+        return { ...phrase(`编辑 ${name}`), diffStats: diff }
       }
       return phrase(`编辑 ${name}`)
     }
@@ -68,7 +67,7 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown>):
       const content = input.content
       if (typeof content === 'string' && content.length > 0) {
         const lines = content.split('\n').length
-        return phrase(`写入 ${name} +${lines}`)
+        return { ...phrase(`写入 ${name}`), diffStats: { additions: lines, deletions: 0 } }
       }
       return phrase(`写入 ${name}`)
     }
