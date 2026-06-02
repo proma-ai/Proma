@@ -70,6 +70,8 @@ import {
   agentSessionDraftHtmlAtomFamily,
   agentPromptSuggestionsAtom,
   agentMessageRefreshAtom,
+  agentSDKMessagesCacheAtom,
+  setSessionMessagesCache,
   agentDiffRefreshVersionAtom,
   agentSessionsAtom,
   agentAttachedDirectoriesMapAtom,
@@ -619,6 +621,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const refreshMap = useAtomValue(agentMessageRefreshAtom)
   const refreshVersion = refreshMap.get(sessionId) ?? 0
 
+  // 持久化消息缓存 setter — 仅写入，读取时用 store.get 同步取值避免订阅触发重渲染
+  const setMessagesCache = useSetAtom(agentSDKMessagesCacheAtom)
+
   // 消息是否已完成首次加载（用于 auto-send 等待）
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const loadingSessionIdRef = React.useRef<string | null>(null)
@@ -627,15 +632,28 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   React.useEffect(() => {
     // 只有切换会话时才进入 loading 态；同一会话在流式完成后的刷新要保留当前
     // persisted/live 消息，避免“助手气泡先消失、持久化消息再恢复”的空窗跳动。
-    if (loadingSessionIdRef.current !== sessionId) {
+    const isSessionSwitch = loadingSessionIdRef.current !== sessionId
+    if (isSessionSwitch) {
       loadingSessionIdRef.current = sessionId
-      setPersistedSDKMessages([])
-      setMessagesLoaded(false)
+      // 命中缓存则立即填充，消除「先清空 → 等 IPC 全量读盘」的可见空窗；
+      // IPC 返回后仍会以最新数据覆盖。未命中才回退到清空 + loading 态。
+      // 注意：refreshVersion bump（流结束/出错/rewind）不是会话切换，
+      // 走 else 分支保留当前消息，并在下方 IPC 覆盖时获得最新数据。
+      const cached = store.get(agentSDKMessagesCacheAtom).get(sessionId)
+      if (cached) {
+        setPersistedSDKMessages(cached)
+        setMessagesLoaded(true)
+      } else {
+        setPersistedSDKMessages([])
+        setMessagesLoaded(false)
+      }
     }
     let cancelled = false
     window.electronAPI.getAgentSessionSDKMessages(sessionId)
       .then((sdkMsgs) => {
         if (cancelled) return
+        // 写入缓存（含 LRU 淘汰，防止会话数增长导致内存无限膨胀）
+        setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, sdkMsgs))
         unstable_batchedUpdates(() => {
           setPersistedSDKMessages(sdkMsgs)
           setMessagesLoaded(true)
@@ -679,7 +697,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
       .catch(console.error)
     return () => { cancelled = true }
-  }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, store])
+  }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, setMessagesCache, store])
 
   // 从会话元数据初始化附加目录（仅冷启动水合，后续由 handleAttachFolder/handleDetachDirectory 实时写入）
   React.useEffect(() => {

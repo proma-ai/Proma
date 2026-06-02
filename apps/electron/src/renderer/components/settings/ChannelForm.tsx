@@ -73,7 +73,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -95,6 +95,8 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   minimax: '/v1/messages',
   doubao: '/chat/completions',
   qwen: '/chat/completions',
+  xiaomi: '/v1/messages',
+  'xiaomi-token-plan': '/v1/messages',
   custom: '/chat/completions',
 }
 
@@ -106,6 +108,8 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'kimi-api',
   'kimi-coding',
   'minimax',
+  'xiaomi',
+  'xiaomi-token-plan',
 ])
 
 /**
@@ -273,6 +277,14 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         setModels([
           { id: 'MiniMax-M3', name: 'MiniMax-M3', enabled: true },
           { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', enabled: true },
+        ])
+      } else if (p === 'xiaomi' || p === 'xiaomi-token-plan') {
+        setModels([
+          { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
+          { id: 'mimo-v2-pro', name: 'MiMo V2 Pro', enabled: true },
+          { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
+          { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
+          { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
         ])
       }
     }

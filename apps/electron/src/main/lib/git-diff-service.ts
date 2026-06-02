@@ -2,10 +2,10 @@
  * Git Diff 服务
  *
  * 提供工作区文件变更检测、diff 获取、文件还原等 Git 操作。
- * 复用 git-detector.ts 中 runGitCommand 的 spawnSync 模式。
+ * 使用异步 spawn 模式，避免阻塞主进程。
  */
 
-import { spawnSync } from 'child_process'
+import { spawn } from 'child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { basename, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
@@ -61,37 +61,68 @@ function normalizeSafePath(root: string, filePath: string): string | null {
 }
 
 /**
- * 执行 Git 命令
+ * 异步执行 Git 命令
  *
  * @param args - Git 命令参数
  * @param cwd - 工作目录
  * @returns 命令输出，如果失败返回 null
  */
-function runGitCommand(args: string[], cwd: string): string | null {
-  try {
-    const result = spawnSync('git', args, {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 10000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-      },
-    })
+function runGitCommand(args: string[], cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      // -c core.quotePath=false：禁用 git 对非 ASCII 路径的八进制转义（如中文文件名
+      // 默认会输出为 "\347\250\213.md" 并加引号），保证 diff/ls-files 等输出原始 UTF-8 路径
+      const child = spawn('git', ['-c', 'core.quotePath=false', ...args], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+        },
+      })
 
-    if (result.error) {
-      console.error('[git-diff-service] git 命令错误:', result.error)
-      return null
-    }
-    if (result.status === 0) {
-      return result.stdout.trim()
-    }
-  } catch {
-    // 命令执行失败
-  }
+      // 显式指定 UTF-8 编码：由 StringDecoder 正确处理跨 chunk 的多字节字符边界，
+      // 避免中文文件名/内容在 chunk 切分处出现乱码（逐块 data.toString() 会损坏）
+      child.stdout?.setEncoding('utf-8')
+      child.stderr?.setEncoding('utf-8')
 
-  return null
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout?.on('data', (data) => {
+        stdout += data
+      })
+
+      child.stderr?.on('data', (data) => {
+        stderr += data
+      })
+
+      // 10 秒超时
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM')
+        console.warn('[git-diff-service] git 命令超时:', args.join(' '))
+        resolve(null)
+      }, 10000)
+
+      child.on('close', (code) => {
+        clearTimeout(timeout)
+        if (code === 0) {
+          resolve(stdout.trim())
+        } else {
+          console.error('[git-diff-service] git 命令失败:', args.join(' '), stderr.trim())
+          resolve(null)
+        }
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(timeout)
+        console.error('[git-diff-service] git 命令错误:', err)
+        resolve(null)
+      })
+    } catch {
+      resolve(null)
+    }
+  })
 }
 
 /**
@@ -171,7 +202,8 @@ export async function getUnstagedChanges(
   )
   const gitRoots: string[] = []
   for (const cand of candidates) {
-    for (const root of findAllGitRoots(cand)) {
+    const roots = await findAllGitRoots(cand)
+    for (const root of roots) {
       if (!gitRoots.includes(root)) gitRoots.push(root)
     }
   }
@@ -194,8 +226,8 @@ export async function getUnstagedChanges(
 
   for (const gitRoot of gitRoots) {
     // 获取变更文件列表 (M=modified, D=deleted, A=added, R=renamed, C=copied, T=type)
-    const nameStatus = runGitCommand(['diff', '--name-status'], gitRoot)
-    const numStat = runGitCommand(['diff', '--numstat'], gitRoot)
+    const nameStatus = await runGitCommand(['diff', '--name-status'], gitRoot)
+    const numStat = await runGitCommand(['diff', '--numstat'], gitRoot)
     const numStatMap = parseNumstat(numStat)
 
     if (nameStatus) {
@@ -237,7 +269,7 @@ export async function getUnstagedChanges(
     }
 
     // 获取未追踪文件
-    const untrackedOutput = runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
+    const untrackedOutput = await runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
     if (untrackedOutput) {
       for (const rel of untrackedOutput.split('\n').filter(Boolean)) {
         const absPath = join(gitRoot, rel)
@@ -303,11 +335,11 @@ function findAllGitRootsDown(dirPath: string, maxDepth: number): string[] {
 }
 
 /** 查找 Git 仓库根目录（支持向上搜索子目录内的 repos），返回所有找到的根 */
-function findAllGitRoots(baseDir: string): string[] {
+async function findAllGitRoots(baseDir: string): Promise<string[]> {
   if (!existsSync(baseDir)) return []
 
   // 1. 向上搜索：git rev-parse --show-toplevel
-  const toplevel = runGitCommand(['rev-parse', '--show-toplevel'], baseDir)
+  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], baseDir)
   const roots: string[] = []
   if (toplevel && existsSync(toplevel)) {
     const normalized = normalizeGitRoot(toplevel)
@@ -324,22 +356,23 @@ function findAllGitRoots(baseDir: string): string[] {
 }
 
 /** 查找 Git 仓库根目录，先向上后向下搜索，失败返回 null */
-function findGitRoot(baseDir: string): string | null {
-  return findAllGitRoots(baseDir)[0] ?? null
+async function findGitRoot(baseDir: string): Promise<string | null> {
+  const roots = await findAllGitRoots(baseDir)
+  return roots[0] ?? null
 }
 
 /**
  * 获取单个文件的 unified diff
  */
 export async function getFileDiff(dirPath: string, filePath: string, gitRoot?: string): Promise<string> {
-  const root = gitRoot || findGitRoot(dirPath)
+  const root = gitRoot || await findGitRoot(dirPath)
   if (!root) return ''
   const safePath = normalizeSafePath(root, filePath)
   if (!safePath) {
     console.warn('[git-diff-service] getFileDiff 拒绝不安全路径:', filePath)
     return ''
   }
-  const diff = runGitCommand(['diff', '--', safePath], root)
+  const diff = await runGitCommand(['diff', '--', safePath], root)
   return diff || ''
 }
 
@@ -347,7 +380,7 @@ export async function getFileDiff(dirPath: string, filePath: string, gitRoot?: s
  * 获取文件的旧版本（git HEAD 或指定 baseRef）和新版本（磁盘）内容
  */
 export async function getDiffContents(dirPath: string, filePath: string, gitRoot?: string, baseRef?: string): Promise<{ oldContent: string; newContent: string } | null> {
-  const root = gitRoot || findGitRoot(dirPath)
+  const root = gitRoot || await findGitRoot(dirPath)
 
   // 无 git root：纯文件预览（无 git HEAD 可比较），仅读磁盘文件，安全检查依赖 dirPath
   if (!root) {
@@ -383,14 +416,9 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
   const ref = baseRef || 'HEAD'
   let oldContent = ''
   try {
-    const result = spawnSync('git', ['show', `${ref}:${safePath}`], {
-      cwd: root,
-      encoding: 'utf-8',
-      timeout: 10000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    })
-    if (result.status === 0) {
-      oldContent = result.stdout
+    const oldGitContent = await runGitCommand(['show', `${ref}:${safePath}`], root)
+    if (oldGitContent !== null) {
+      oldContent = oldGitContent
     }
   } catch {
     // 文件在 HEAD 中不存在（新文件）
@@ -423,7 +451,7 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
  */
 export async function getUntrackedContent(dirPath: string, filePath: string, gitRoot?: string): Promise<string> {
   if (!filePath || typeof filePath !== 'string') return ''
-  const root = gitRoot || findGitRoot(dirPath) || dirPath
+  const root = gitRoot || await findGitRoot(dirPath) || dirPath
   const safePath = normalizeSafePath(root, filePath)
   if (!safePath) {
     console.warn('[git-diff-service] getUntrackedContent 拒绝不安全路径:', filePath)
@@ -446,13 +474,13 @@ export async function getUntrackedContent(dirPath: string, filePath: string, git
  * 还原文件的未暂存变更
  */
 export async function revertFile(dirPath: string, filePath: string, gitRoot?: string): Promise<void> {
-  const root = gitRoot || findGitRoot(dirPath)
+  const root = gitRoot || await findGitRoot(dirPath)
   if (!root) throw new Error('未找到 Git 仓库')
   const safePath = normalizeSafePath(root, filePath)
   if (!safePath) {
     throw new Error(`不安全的路径: ${filePath}`)
   }
-  const result = runGitCommand(['checkout', '--', safePath], root)
+  const result = await runGitCommand(['checkout', '--', safePath], root)
   if (result === null) {
     throw new Error(`还原失败: git checkout -- ${safePath}`)
   }
@@ -461,8 +489,8 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
 /**
  * 列出指定仓库的所有 Git Worktree
  */
-export function listWorktrees(repoPath: string): import('@proma/shared').WorktreeInfo[] {
-  const output = runGitCommand(['worktree', 'list', '--porcelain'], repoPath)
+export async function listWorktrees(repoPath: string): Promise<import('@proma/shared').WorktreeInfo[]> {
+  const output = await runGitCommand(['worktree', 'list', '--porcelain'], repoPath)
   if (!output) return []
 
   const worktrees: import('@proma/shared').WorktreeInfo[] = []
@@ -513,10 +541,10 @@ export async function getWorktreeChanges(
   }
 
   // 尝试 fetch 远端 main 以确保 baseBranch 最新
-  runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
+  await runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
 
   // 确认是 git 仓库
-  const toplevel = runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)
+  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)
   if (!toplevel) {
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
@@ -526,8 +554,8 @@ export async function getWorktreeChanges(
   const fileMap = new Map<string, import('@proma/shared').ChangedFileEntry>()
 
   // 1. 已 commit 但未合并的改动: git diff baseBranch...HEAD
-  const committedStatus = runGitCommand(['diff', `${baseBranch}...HEAD`, '--name-status'], gitRoot)
-  const committedNumstat = runGitCommand(['diff', `${baseBranch}...HEAD`, '--numstat'], gitRoot)
+  const committedStatus = await runGitCommand(['diff', `${baseBranch}...HEAD`, '--name-status'], gitRoot)
+  const committedNumstat = await runGitCommand(['diff', `${baseBranch}...HEAD`, '--numstat'], gitRoot)
   const committedStats = parseNumstat(committedNumstat)
 
   if (committedStatus) {
@@ -563,8 +591,8 @@ export async function getWorktreeChanges(
   }
 
   // 2. 未提交的改动: git diff (working tree vs HEAD)
-  const uncommittedStatus = runGitCommand(['diff', '--name-status'], gitRoot)
-  const uncommittedNumstat = runGitCommand(['diff', '--numstat'], gitRoot)
+  const uncommittedStatus = await runGitCommand(['diff', '--name-status'], gitRoot)
+  const uncommittedNumstat = await runGitCommand(['diff', '--numstat'], gitRoot)
   const uncommittedStats = parseNumstat(uncommittedNumstat)
 
   if (uncommittedStatus) {
@@ -608,7 +636,7 @@ export async function getWorktreeChanges(
 
   // 3. 新文件（未追踪）
   const untrackedFiles: import('@proma/shared').UntrackedFileEntry[] = []
-  const untrackedOutput = runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
+  const untrackedOutput = await runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
   if (untrackedOutput) {
     for (const rel of untrackedOutput.split('\n').filter(Boolean)) {
       if (!fileMap.has(rel)) {

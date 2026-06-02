@@ -839,7 +839,7 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.LIST_WORKTREES,
     async (_, repoPath: string, _sessionId: string) => {
       if (!repoPath || typeof repoPath !== 'string') return []
-      return listWorktrees(repoPath)
+      return await listWorktrees(repoPath)
     }
   )
 

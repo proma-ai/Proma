@@ -54,9 +54,19 @@ import {
   buildWorkspaceSwitchedCard,
   buildWorkspaceListCard,
   buildHelpCard,
+  buildChannelListCard,
+  buildModelListCard,
+  buildModelSwitchedCard,
   accumulateToolStart,
   splitLongContent,
 } from './feishu-message'
+import {
+  listSwitchableChannels,
+  getEnabledModels,
+  resolveChannelByIndex,
+  resolveModelByIndex,
+  describeBindingModel,
+} from './bridge-model-utils'
 import type { ToolSummary, FormattedAgentResult, WorkspaceListItem } from './feishu-message'
 import { CardStream } from './feishu/card-stream'
 import {
@@ -509,7 +519,6 @@ class FeishuBridge {
       workspaceId,
       channelId,
       modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
-      mode: 'agent',
       source: 'session-mirror',
       chatType: 'group',
       groupName,
@@ -960,30 +969,27 @@ class FeishuBridge {
 
     switch (command?.toLowerCase()) {
       case '/help':
+      case '/h':
         await this.sendCardMessage(chatId, buildHelpCard())
         break
 
       case '/new':
-        await this.createNewSession(msgCtx, 'agent', arg || undefined)
-        break
-
-      case '/chat':
-        await this.updateBindingMode(msgCtx, 'chat')
-        break
-
-      case '/agent':
-        await this.updateBindingMode(msgCtx, 'agent')
+      case '/n':
+        await this.createNewSession(msgCtx, arg || undefined)
         break
 
       case '/list':
+      case '/ls':
         await this.handleListCommand(msgCtx)
         break
 
       case '/stop':
+      case '/s':
         await this.handleStopCommand(msgCtx)
         break
 
-      case '/switch': {
+      case '/switch':
+      case '/sw': {
         if (!arg) {
           await this.sendMessage(chatId, '用法: /switch <序号>（先用 /list 查看）')
           return
@@ -992,13 +998,19 @@ class FeishuBridge {
         break
       }
 
-      case '/workspace': {
+      case '/workspace':
+      case '/ws': {
         await this.handleWorkspaceCommand(msgCtx, arg || undefined)
         break
       }
 
       case '/now':
         await this.handleNowCommand(msgCtx)
+        break
+
+      case '/model':
+      case '/m':
+        await this.handleModelCommand(msgCtx, arg)
         break
 
       default:
@@ -1010,7 +1022,6 @@ class FeishuBridge {
 
   private async createNewSession(
     msgCtx: FeishuMessageContext,
-    mode: 'agent' | 'chat',
     title?: string,
     overrideWorkspaceId?: string,
   ): Promise<void> {
@@ -1052,8 +1063,7 @@ class FeishuBridge {
       sessionId: session.id,
       workspaceId,
       channelId,
-      modelId: appSettings.agentModelId ?? undefined,
-      mode,
+      modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
       source: 'feishu',
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
@@ -1073,8 +1083,7 @@ class FeishuBridge {
       })
     }
 
-    const modeLabel = mode === 'agent' ? 'Agent' : 'Chat'
-    await this.sendMessage(chatId, `已创建 ${modeLabel} 会话 (${session.id.slice(0, 8)})`)
+    await this.sendMessage(chatId, `已创建会话 (${session.id.slice(0, 8)})`)
   }
 
   private findBindingBySessionId(sessionId: string): FeishuChatBinding | undefined {
@@ -1159,19 +1168,6 @@ class FeishuBridge {
     } catch (error) {
       console.error('[飞书 Session 镜像] 调用更新群名接口失败:', error)
       return false
-    }
-  }
-
-  private async updateBindingMode(msgCtx: FeishuMessageContext, mode: 'agent' | 'chat'): Promise<void> {
-    const { chatId } = msgCtx
-    const binding = this.chatBindings.get(chatId)
-    if (binding) {
-      binding.mode = mode
-      const modeLabel = mode === 'agent' ? 'Agent' : 'Chat'
-      await this.sendMessage(chatId, `已切换到 ${modeLabel} 模式`)
-    } else {
-      const modeLabel = mode === 'agent' ? 'Agent' : 'Chat'
-      await this.sendMessage(chatId, `当前没有会话。直接发送消息将自动创建 ${modeLabel} 会话，或使用 /new 创建。`)
     }
   }
 
@@ -1264,8 +1260,7 @@ class FeishuBridge {
       sessionId: match.id,
       workspaceId: match.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId ?? '',
       channelId: match.channelId ?? appSettings.agentChannelId ?? '',
-      modelId: appSettings.agentModelId ?? undefined,
-      mode: 'agent',
+      modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
       source: 'feishu',
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
@@ -1357,7 +1352,13 @@ class FeishuBridge {
     if (binding) {
       const session = getAgentSessionMeta(binding.sessionId)
       lines.push(`**会话**: ${session?.title ?? '未知'} (\`${binding.sessionId.slice(0, 8)}\`)`)
-      lines.push(`**模式**: ${binding.mode === 'agent' ? 'Agent' : 'Chat'}`)
+
+      // 模型信息（与发送路径同序解析：binding > Bot 配置 > 应用设置）
+      const nowSettings = getSettings()
+      const effChannelId = binding.channelId || this.botConfig.defaultChannelId || nowSettings.agentChannelId
+      const effModelId = binding.modelId || this.botConfig.defaultModelId || nowSettings.agentModelId
+      const modelInfo = describeBindingModel(effChannelId, effModelId)
+      lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}${modelInfo.valid ? '' : '（已失效）'}`)
     } else {
       lines.push('**会话**: 未绑定（发送消息将自动创建）')
     }
@@ -1444,6 +1445,88 @@ class FeishuBridge {
     await this.sendCardMessage(chatId, card)
   }
 
+  /**
+   * /model 命令：罗列渠道 / 罗列模型 / 切换模型（per-chat）
+   * - /model            列出可用渠道
+   * - /model <渠道序号>  列出该渠道下的模型
+   * - /model <渠道> <模型> 切换到该渠道的该模型
+   */
+  private async handleModelCommand(msgCtx: FeishuMessageContext, arg: string): Promise<void> {
+    const { chatId } = msgCtx
+    const channels = listSwitchableChannels()
+    if (channels.length === 0) {
+      await this.sendMessage(
+        chatId,
+        '暂无可用渠道。请先在 Proma 设置中配置并启用渠道（需填入 API Key 且至少启用一个模型）。',
+      )
+      return
+    }
+
+    const parts = arg.split(/\s+/).filter(Boolean)
+    const binding = this.chatBindings.get(chatId)
+
+    // /model — 列出渠道
+    if (parts.length === 0) {
+      const items = channels.map((c, i) => ({
+        index: i + 1,
+        name: c.name,
+        modelCount: getEnabledModels(c).length,
+        isCurrent: binding?.channelId === c.id,
+      }))
+      await this.sendCardMessage(chatId, buildChannelListCard(items))
+      return
+    }
+
+    // 解析渠道
+    const channelIdx = Number(parts[0])
+    const channel = resolveChannelByIndex(channelIdx)
+    if (!channel) {
+      await this.sendMessage(chatId, `未找到渠道 "${parts[0]}"。使用 /model 查看可用渠道。`)
+      return
+    }
+
+    const models = getEnabledModels(channel)
+
+    // /model <渠道> — 列出该渠道模型
+    if (parts.length === 1) {
+      const items = models.map((m, i) => ({
+        index: i + 1,
+        name: m.name,
+        isCurrent: binding?.channelId === channel.id && binding?.modelId === m.id,
+      }))
+      await this.sendCardMessage(chatId, buildModelListCard(channel.name, channelIdx, items))
+      return
+    }
+
+    // /model <渠道> <模型> — 切换
+    const modelIdx = Number(parts[1])
+    const model = resolveModelByIndex(channel, modelIdx)
+    if (!model) {
+      await this.sendMessage(
+        chatId,
+        `未找到模型 "${parts[1]}"。使用 /model ${channelIdx} 查看该渠道的模型。`,
+      )
+      return
+    }
+
+    // 切换需要一个 binding 承载；没有则自动创建
+    let targetBinding = binding
+    if (!targetBinding) {
+      await this.createNewSession(msgCtx)
+      targetBinding = this.chatBindings.get(chatId)
+      if (!targetBinding) {
+        await this.sendMessage(chatId, '请先发送一条消息创建会话，或在 Proma 设置中选择 Agent 渠道。')
+        return
+      }
+    }
+
+    targetBinding.channelId = channel.id
+    targetBinding.modelId = model.id
+    this.saveBindings()
+
+    await this.sendCardMessage(chatId, buildModelSwitchedCard(channel.name, model.name))
+  }
+
   // ===== 用户消息处理 =====
 
   private async handleUserMessage(
@@ -1458,7 +1541,7 @@ class FeishuBridge {
 
     // 自动创建会话
     if (!binding) {
-      await this.createNewSession(msgCtx, 'agent')
+      await this.createNewSession(msgCtx)
       binding = this.chatBindings.get(chatId)
       if (!binding) return
     }
@@ -1544,116 +1627,109 @@ class FeishuBridge {
       await this.sendMessage(chatId, `${prefix}Agent 处理中...`)
     }
 
-    if (binding.mode === 'agent') {
-      // 构建消息：附件引用 + 文本
-      const hasAnyAttachment = imageAttachments.length > 0 || fileAttachments.length > 0
-      const userText = text || (hasAnyAttachment ? '请查看上面附加的文件。' : '')
+    // 构建消息：附件引用 + 文本
+    const userText = text || (hasAnyAttachment ? '请查看上面附加的文件。' : '')
 
-      // 拉取被引用消息（用户长按"回复"触发；parent_id 由 handleFeishuMessage 透传）
-      let quoted: QuotedMessage | undefined
-      if (parentMessageId && this.client) {
-        quoted = await fetchQuotedMessage(this.client, parentMessageId)
-        if (quoted) {
-          console.log(`[飞书 Bridge] 引用消息已注入: type=${quoted.contentType}, chars=${quoted.content.length}`)
-        }
+    // 拉取被引用消息（用户长按"回复"触发；parent_id 由 handleFeishuMessage 透传）
+    let quoted: QuotedMessage | undefined
+    if (parentMessageId && this.client) {
+      quoted = await fetchQuotedMessage(this.client, parentMessageId)
+      if (quoted) {
+        console.log(`[飞书 Bridge] 引用消息已注入: type=${quoted.contentType}, chars=${quoted.content.length}`)
+      }
+    }
+
+    // 群聊上下文 + 历史摘要（保留原 Phase 1 逻辑，作为 group_extra 块）
+    let groupExtraBlock: string | undefined
+    if (msgCtx.chatType === 'group') {
+      const contextParts: string[] = []
+      if (msgCtx.groupName) contextParts.push(`[群聊: ${msgCtx.groupName}]`)
+      if (msgCtx.senderName) contextParts.push(`[发送者: ${msgCtx.senderName}]`)
+
+      const groupInfo = this.groupInfoCache.get(chatId)
+      if (groupInfo?.members && groupInfo.members.length > 0) {
+        const membersExceptBot = groupInfo.members.filter((m) => m.openId !== this.botOpenId)
+        const memberList = membersExceptBot.map((m) => `${m.name}(${m.openId})`).join(', ')
+        contextParts.push(`[群成员: ${memberList}]`)
+        contextParts.push('[提示: 如需 @某人，请直接使用 @姓名 格式，如 @Alice，系统会自动转换为飞书 @mention]')
       }
 
-      // 群聊上下文 + 历史摘要（保留原 Phase 1 逻辑，作为 group_extra 块）
-      let groupExtraBlock: string | undefined
-      if (msgCtx.chatType === 'group') {
-        const contextParts: string[] = []
-        if (msgCtx.groupName) contextParts.push(`[群聊: ${msgCtx.groupName}]`)
-        if (msgCtx.senderName) contextParts.push(`[发送者: ${msgCtx.senderName}]`)
+      const chatHistory = await this.fetchChatHistory(chatId)
+      const historyContext = this.formatChatHistoryContext(chatHistory)
 
-        const groupInfo = this.groupInfoCache.get(chatId)
-        if (groupInfo?.members && groupInfo.members.length > 0) {
-          const membersExceptBot = groupInfo.members.filter((m) => m.openId !== this.botOpenId)
-          const memberList = membersExceptBot.map((m) => `${m.name}(${m.openId})`).join(', ')
-          contextParts.push(`[群成员: ${memberList}]`)
-          contextParts.push('[提示: 如需 @某人，请直接使用 @姓名 格式，如 @Alice，系统会自动转换为飞书 @mention]')
-        }
+      const parts: string[] = []
+      if (contextParts.length > 0) parts.push(contextParts.join(' '))
+      if (historyContext) parts.push(historyContext)
+      groupExtraBlock = parts.length > 0 ? parts.join('\n') : undefined
+    }
 
-        const chatHistory = await this.fetchChatHistory(chatId)
-        const historyContext = this.formatChatHistoryContext(chatHistory)
+    const bridgeContext: BridgeContext = {
+      chatId: msgCtx.chatId,
+      chatType: msgCtx.chatType,
+      senderOpenId: msgCtx.senderOpenId,
+      senderName: msgCtx.senderName,
+    }
 
-        const parts: string[] = []
-        if (contextParts.length > 0) parts.push(contextParts.join(' '))
-        if (historyContext) parts.push(historyContext)
-        groupExtraBlock = parts.length > 0 ? parts.join('\n') : undefined
+    const agentMessage = buildAgentUserMessage({
+      userText,
+      context: bridgeContext,
+      quoted,
+      attachedFilesBlock: fileReferences.trim() || undefined,
+      groupExtraBlock,
+    })
+
+    // fire-and-forget，不阻塞事件回调
+    // 群聊时注入动态 MCP 工具（允许 Agent 主动拉取更多群聊历史）
+    let customMcpServers: Record<string, Record<string, unknown>> | undefined
+    if (msgCtx.chatType === 'group') {
+      const mcpServer = await this.createFeishuChatMcpServer(chatId)
+      if (mcpServer) {
+        customMcpServers = { feishu_chat: mcpServer as unknown as Record<string, unknown> }
       }
+    }
 
-      const bridgeContext: BridgeContext = {
-        chatId: msgCtx.chatId,
-        chatType: msgCtx.chatType,
-        senderOpenId: msgCtx.senderOpenId,
-        senderName: msgCtx.senderName,
-      }
+    // 渠道/模型解析：binding（per-chat 用户在 IM 里切过的）优先，其次 Bot 配置、应用设置
+    const latestSettings = getSettings()
+    const channelId = binding.channelId || this.botConfig.defaultChannelId || latestSettings.agentChannelId || ''
+    const modelId = binding.modelId || this.botConfig.defaultModelId || latestSettings.agentModelId
 
-      const agentMessage = buildAgentUserMessage({
-        userText,
-        context: bridgeContext,
-        quoted,
-        attachedFilesBlock: fileReferences.trim() || undefined,
-        groupExtraBlock,
+    const input: AgentSendInput = {
+      sessionId: binding.sessionId,
+      userMessage: agentMessage,
+      channelId,
+      modelId,
+      workspaceId: binding.workspaceId,
+      permissionModeOverride: 'bypassPermissions',
+      ...(customMcpServers && { customMcpServers }),
+    }
+
+    // 直接 await runAgentHeadless 的 Promise——它会在 orchestrator.sendMessage
+    // 完整 await 结束（包含 finally { activeSessions.delete }）后才 resolve。
+    // 这是消除并发守卫竞态的核心：上层 runMergedBatch 看到本 Promise resolve
+    // 时，orchestrator 已经清理干净，下一个 batch 立刻调 sendMessage 不会撞守卫。
+    try {
+      await runAgentHeadless(input, {
+        source: 'feishu',
+        onError: (error) => {
+          const errPrefix = this.resolveContextPrefix(chatId)
+          // 优先把错误显示到流式卡上；没有流式卡才发独立错误卡
+          if (this.streamingCards.has(binding!.sessionId)) {
+            this.markStreamingError(binding!.sessionId, error)
+          } else {
+            this.sendCardMessage(chatId, buildErrorCard(`${errPrefix}${error}`)).catch(console.error)
+          }
+          this.sessionBuffers.delete(binding!.sessionId)
+          this.streamingCardsUsedSessions.delete(binding!.sessionId)
+        },
+        onComplete: () => {
+          // complete 事件由 EventBus listener 处理
+        },
+        onTitleUpdated: (_title) => {
+          // 标题更新可选通知
+        },
       })
-
-      // Agent 模式 — fire-and-forget，不阻塞事件回调
-      // 群聊时注入动态 MCP 工具（允许 Agent 主动拉取更多群聊历史）
-      let customMcpServers: Record<string, Record<string, unknown>> | undefined
-      if (msgCtx.chatType === 'group') {
-        const mcpServer = await this.createFeishuChatMcpServer(chatId)
-        if (mcpServer) {
-          customMcpServers = { feishu_chat: mcpServer as unknown as Record<string, unknown> }
-        }
-      }
-
-      // 使用最新的渠道和模型设置（Bot 配置 > 应用设置 > 绑定默认值）
-      const latestSettings = getSettings()
-      const channelId = this.botConfig.defaultChannelId || latestSettings.agentChannelId || binding.channelId
-      const modelId = this.botConfig.defaultModelId || latestSettings.agentModelId || binding.modelId
-
-      const input: AgentSendInput = {
-        sessionId: binding.sessionId,
-        userMessage: agentMessage,
-        channelId,
-        modelId,
-        workspaceId: binding.workspaceId,
-        permissionModeOverride: 'bypassPermissions',
-        ...(customMcpServers && { customMcpServers }),
-      }
-
-      // 直接 await runAgentHeadless 的 Promise——它会在 orchestrator.sendMessage
-      // 完整 await 结束（包含 finally { activeSessions.delete }）后才 resolve。
-      // 这是消除并发守卫竞态的核心：上层 runMergedBatch 看到本 Promise resolve
-      // 时，orchestrator 已经清理干净，下一个 batch 立刻调 sendMessage 不会撞守卫。
-      try {
-        await runAgentHeadless(input, {
-          source: 'feishu',
-          onError: (error) => {
-            const errPrefix = this.resolveContextPrefix(chatId)
-            // 优先把错误显示到流式卡上；没有流式卡才发独立错误卡
-            if (this.streamingCards.has(binding!.sessionId)) {
-              this.markStreamingError(binding!.sessionId, error)
-            } else {
-              this.sendCardMessage(chatId, buildErrorCard(`${errPrefix}${error}`)).catch(console.error)
-            }
-            this.sessionBuffers.delete(binding!.sessionId)
-            this.streamingCardsUsedSessions.delete(binding!.sessionId)
-          },
-          onComplete: () => {
-            // complete 事件由 EventBus listener 处理
-          },
-          onTitleUpdated: (_title) => {
-            // 标题更新可选通知
-          },
-        })
-      } catch (error) {
-        console.error('[飞书 Bridge] Agent 运行异常:', error)
-      }
-    } else {
-      // Chat 模式 — TODO: Phase 4 实现
-      await this.sendMessage(chatId, 'Chat 模式暂未实现，请使用 /agent 切换到 Agent 模式。')
-      this.sessionBuffers.delete(binding.sessionId)
+    } catch (error) {
+      console.error('[飞书 Bridge] Agent 运行异常:', error)
     }
   }
 

@@ -224,18 +224,108 @@ export function buildHelpCard(): Record<string, unknown> {
       {
         tag: 'markdown',
         content: [
-          '`/help` — 显示帮助',
-          '`/new [标题]` — 创建新 Agent 会话',
-          '`/now` — 查看当前状态（工作区、会话、MCP、Skills 等）',
-          '`/chat` — 切换到 Chat 模式',
-          '`/agent` — 切换到 Agent 模式',
-          '`/list` — 列出所有会话',
-          '`/stop` — 停止当前 Agent',
-          '`/switch <序号>` — 切换到已有会话',
-          '`/workspace <名称>` — 设置工作区',
+          '括号内为简写命令',
+          '`/help` (`/h`) — 显示帮助',
+          '`/new` (`/n`) `[标题]` — 创建新 Agent 会话',
+          '`/now` — 查看当前状态（工作区、会话、模型、MCP、Skills 等）',
+          '`/list` (`/ls`) — 列出所有会话',
+          '`/stop` (`/s`) — 停止当前 Agent',
+          '`/switch` (`/sw`) `<序号>` — 切换到已有会话',
+          '`/workspace` (`/ws`) `<名称>` — 设置工作区',
+          '`/model` (`/m`) `[渠道 [模型]]` — 查看或切换渠道/模型',
           '',
           '直接发送文本会自动创建或发送到当前会话。',
         ].join('\n'),
+      },
+    ],
+  }
+}
+
+/**
+ * 构建渠道列表卡片（/model 无参数时）
+ */
+export function buildChannelListCard(
+  channels: Array<{ index: number; name: string; modelCount: number; isCurrent: boolean }>,
+): Record<string, unknown> {
+  const lines = channels.map((c) =>
+    c.isCurrent
+      ? `▶ **${c.index}.** ${c.name}（${c.modelCount} 个模型 · 当前）`
+      : `  **${c.index}.** ${c.name}（${c.modelCount} 个模型）`,
+  )
+
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: 'plain_text', content: '选择渠道' },
+      template: 'blue',
+    },
+    elements: [
+      {
+        tag: 'markdown',
+        content: lines.length > 0 ? lines.join('\n') : '暂无可用渠道',
+      },
+      { tag: 'hr' },
+      {
+        tag: 'note',
+        elements: [{ tag: 'plain_text', content: '使用 /model <渠道序号> 查看模型' }],
+      },
+    ],
+  }
+}
+
+/**
+ * 构建模型列表卡片（/model <渠道序号> 时）
+ */
+export function buildModelListCard(
+  channelName: string,
+  channelIndex: number,
+  models: Array<{ index: number; name: string; isCurrent: boolean }>,
+): Record<string, unknown> {
+  const lines = models.map((m) =>
+    m.isCurrent
+      ? `▶ **${m.index}.** ${m.name}（当前）`
+      : `  **${m.index}.** ${m.name}`,
+  )
+
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: 'plain_text', content: `${channelName} 的模型` },
+      template: 'blue',
+    },
+    elements: [
+      {
+        tag: 'markdown',
+        content: lines.length > 0 ? lines.join('\n') : '该渠道暂无可用模型',
+      },
+      { tag: 'hr' },
+      {
+        tag: 'note',
+        elements: [
+          { tag: 'plain_text', content: `使用 /model ${channelIndex} <模型序号> 切换` },
+        ],
+      },
+    ],
+  }
+}
+
+/**
+ * 构建模型切换成功卡片（/model <渠道> <模型> 时）
+ */
+export function buildModelSwitchedCard(
+  channelName: string,
+  modelName: string,
+): Record<string, unknown> {
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: 'plain_text', content: '已切换模型' },
+      template: 'green',
+    },
+    elements: [
+      {
+        tag: 'markdown',
+        content: `**渠道**: ${channelName}\n**模型**: ${modelName}`,
       },
     ],
   }

@@ -89,10 +89,15 @@ export function normalizeBaseUrl(baseUrl: string): string {
  * 根据 Anthropic 协议供应商类型选择对应的 URL 规范化策略。
  *
  * 统一收口 channel-manager 和 AnthropicAdapter 中重复的条件分支逻辑。
- * 仅适用于走 Anthropic 协议的供应商（anthropic / anthropic-compatible / deepseek / kimi-* / minimax）。
+ * 仅适用于走 Anthropic 协议的供应商（anthropic / anthropic-compatible / deepseek / kimi-* / minimax / xiaomi-*）。
  */
 export function normalizeAnthropicProviderUrl(baseUrl: string, provider: ProviderType): string {
-  if (provider === 'minimax' || provider === 'anthropic-compatible') {
+  if (
+    provider === 'minimax'
+    || provider === 'anthropic-compatible'
+    || provider === 'xiaomi'
+    || provider === 'xiaomi-token-plan'
+  ) {
     return normalizeVersionedAnthropicBaseUrl(baseUrl)
   }
   if (provider === 'deepseek' || provider === 'kimi-api' || provider === 'kimi-coding') {

@@ -1,6 +1,6 @@
 import type { AppSettings } from '../../../types'
 
-export type SleepBlockerType = 'prevent-display-sleep'
+export type SleepBlockerType = 'prevent-app-suspension'
 
 export interface SleepBlockerAdapter {
   start(type: SleepBlockerType): number
@@ -46,7 +46,7 @@ export class FeishuSyncSleepBlocker {
       this.activeBlockerId = null
     }
 
-    this.activeBlockerId = this.adapter.start('prevent-display-sleep')
-    console.log('[飞书防休眠] 已启用，飞书实时同步期间阻止系统自动休眠')
+    this.activeBlockerId = this.adapter.start('prevent-app-suspension')
+    console.log('[飞书防休眠] 已启用，飞书实时同步期间阻止系统休眠（允许息屏锁屏）')
   }
 }

@@ -833,6 +833,39 @@ export const agentStreamErrorsAtom = atom<Map<string, string>>(new Map())
  */
 export const agentMessageRefreshAtom = atom<Map<string, number>>(new Map())
 
+/**
+ * 持久化 SDKMessage 的内存缓存 Map — 以 sessionId 为 key
+ * 用于消除「切换会话时先清空 → 等待 IPC 全量读盘」的可见空窗：
+ * 命中缓存可立即填充消息区，IPC 返回后再覆盖为最新数据。
+ *
+ * 内存安全：缓存条目随会话数增长会无限膨胀（长会话的消息数组很大），
+ * 因此通过 setSessionMessagesCache 做 LRU 淘汰，仅保留最近访问的
+ * AGENT_MSG_CACHE_MAX 个会话；会话删除时也需主动剔除对应条目。
+ */
+export const AGENT_MSG_CACHE_MAX = 20
+export const agentSDKMessagesCacheAtom = atom<Map<string, SDKMessage[]>>(new Map())
+
+/**
+ * 写入会话消息缓存并执行 LRU 淘汰。
+ * 利用 JS Map 的插入顺序：删除已存在的 key 再重新 set，使其移到「最新」位置；
+ * 超出上限时从头部（最旧）删除，直到回到上限内。返回新的 Map（不可变更新）。
+ */
+export function setSessionMessagesCache(
+  prev: Map<string, SDKMessage[]>,
+  sessionId: string,
+  messages: SDKMessage[],
+): Map<string, SDKMessage[]> {
+  const next = new Map(prev)
+  next.delete(sessionId)
+  next.set(sessionId, messages)
+  while (next.size > AGENT_MSG_CACHE_MAX) {
+    const oldest = next.keys().next().value
+    if (oldest === undefined) break
+    next.delete(oldest)
+  }
+  return next
+}
+
 /** 当前 Agent 会话的错误消息（派生只读原子） */
 export const currentAgentErrorAtom = atom<string | null>((get) => {
   const currentId = get(currentAgentSessionIdAtom)

@@ -47,8 +47,81 @@ export interface StreamSSEResult {
   stopReason?: string
 }
 
+// ===== 首字节前自动重试 =====
+//
+// 仅在「尚未向 UI 发出任何事件」时重试，一旦开始流式输出就不再重试——
+// 否则已渲染的内容会与重试产生的内容重复。覆盖场景：fetch 网络错误、
+// 瞬时 HTTP 状态（408/429/5xx）、以及 200 之后首事件前的连接中断。
+
+/** 首字节前最大自动重试次数 */
+const MAX_SSE_RETRIES = 5
+
+/** 累计重试等待预算（毫秒）——交互式 Chat，用户在等待，预算比 Agent 编排短 */
+const MAX_SSE_RETRY_WAIT_MS = 30_000
+
+/** 单次重试延迟上限（毫秒） */
+const SSE_RETRY_MAX_DELAY_MS = 8_000
+
+/** HTTP 错误携带状态码，便于重试决策 */
+class HTTPError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'HTTPError'
+  }
+}
+
 /**
- * 执行流式 SSE 请求
+ * 计算重试延迟（指数退避 + ±20% jitter）
+ *
+ * 基础序列：1s, 2s, 4s, 8s, 8s...（cap = 8s），叠加 ±20% 抖动避免惊群。
+ * 累计等待限制在 {@link MAX_SSE_RETRY_WAIT_MS} 内，预算耗尽返回 0（表示放弃）。
+ */
+function getSSERetryDelayMs(attempt: number, elapsedRetryDelayMs: number): number {
+  const remainingMs = MAX_SSE_RETRY_WAIT_MS - elapsedRetryDelayMs
+  if (remainingMs <= 0) return 0
+
+  const base = Math.min(1000 * Math.pow(2, attempt - 1), SSE_RETRY_MAX_DELAY_MS)
+  const jitter = base * (Math.random() * 0.4 - 0.2)
+  return Math.min(remainingMs, Math.max(0, Math.round(base + jitter)))
+}
+
+/**
+ * 判断错误是否可重试
+ *
+ * - 带 HTTP 状态码：仅 408/429/5xx（瞬时）可重试，其余 4xx 为永久错误
+ * - 无状态码（网络错误 / 流读取中断 / 空响应体）：视为瞬时问题，可重试
+ */
+function isRetriableError(error: unknown): boolean {
+  if (error instanceof HTTPError) {
+    return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
+  }
+  return true
+}
+
+/** 可被 AbortSignal 立即打断的 sleep；abort 时 reject AbortError */
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * 执行流式 SSE 请求（含首字节前自动重试）
  *
  * 通用流程：
  * 1. 发起 fetch POST 请求
@@ -58,8 +131,51 @@ export interface StreamSSEResult {
  * 5. 调用 adapter.parseSSELine() 解析供应商特定 JSON
  * 6. 累积 content/reasoning/toolCalls，通过 onEvent 回调分发
  * 7. 返回完整内容
+ *
+ * 重试语义：仅当本次尝试尚未通过 onEvent 发出任何事件时才重试，
+ * 确保不会向 UI 重复推送内容。
  */
 export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSEResult> {
+  const { signal } = options
+
+  let elapsedRetryDelayMs = 0
+
+  for (let attempt = 1; ; attempt++) {
+    // 跟踪本次尝试是否已发出事件——一旦发出就不能再重试
+    let hasEmitted = false
+    const trackedOptions: StreamSSEOptions = {
+      ...options,
+      onEvent: (event) => {
+        hasEmitted = true
+        options.onEvent(event)
+      },
+    }
+
+    try {
+      return await runStreamAttempt(trackedOptions)
+    } catch (error) {
+      // 用户主动取消：不重试
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        throw error
+      }
+      // 已向 UI 发出过事件：重试会导致内容重复
+      if (hasEmitted) throw error
+      // 永久性错误（4xx 等）或已达重试上限：直接抛出
+      if (!isRetriableError(error) || attempt >= MAX_SSE_RETRIES) throw error
+
+      const delay = getSSERetryDelayMs(attempt, elapsedRetryDelayMs)
+      if (delay <= 0) throw error // 等待预算耗尽
+      elapsedRetryDelayMs += delay
+
+      const msg = error instanceof Error ? error.message : String(error)
+      console.warn(`[streamSSE] 首字节前出错，${delay}ms 后第 ${attempt} 次重试: ${msg}`)
+      await sleepWithAbort(delay, signal)
+    }
+  }
+}
+
+/** 单次 SSE 流式尝试（不含重试逻辑） */
+async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
   const { request, adapter, onEvent, signal, fetchFn = fetch } = options
 
   // 1. 发起请求（支持通过 fetchFn 注入代理）
@@ -73,7 +189,7 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   // 2. 错误检查
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(`${adapter.providerType} API 错误 (${response.status}): ${text.slice(0, 300)}`)
+    throw new HTTPError(`${adapter.providerType} API 错误 (${response.status}): ${text.slice(0, 300)}`, response.status)
   }
 
   if (!response.body) {

@@ -448,7 +448,11 @@ function TreeNodeList({
               : 'hover:bg-accent/50',
           )}
           style={{ paddingLeft }}
-          onClick={() => {
+          // 用 mousedown 而非 click：异步搜索结果重渲染会替换 button 节点，
+          // 导致 mousedown/mouseup 不在同一节点、click 不派发而漏选；
+          // preventDefault 阻止按钮抢焦点，避免编辑器 blur 触发弹窗关闭竞态。
+          onMouseDown={(e) => {
+            e.preventDefault()
             setSelectedIndex(idx)
             if (node.type === 'dir') {
               handleDirClick(node)

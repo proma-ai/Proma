@@ -6,8 +6,16 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { tabsAtom, activeTabIdAtom, openTab, type TabType } from '@/atoms/tab-atoms'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
+import {
+  tabsAtom,
+  activeTabIdAtom,
+  openTab,
+  buildOpenTabRestore,
+  sessionViewStateMapAtom,
+  type TabType,
+} from '@/atoms/tab-atoms'
+import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
@@ -20,6 +28,7 @@ import {
 type OpenSessionFn = (type: TabType, sessionId: string, title: string) => void
 
 export function useOpenSession(): OpenSessionFn {
+  const store = useStore()
   const [tabs, setTabs] = useAtom(tabsAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
   const setAppMode = useSetAtom(appModeAtom)
@@ -31,7 +40,15 @@ export function useOpenSession(): OpenSessionFn {
 
   return React.useCallback(
     (type: TabType, sessionId: string, title: string): void => {
-      const result = openTab(tabs, { type, sessionId, title })
+      // 切回 agent 会话时，若该会话上次开着预览 Tab 则一并重建并回到上次视图
+      const restore = type === 'agent'
+        ? buildOpenTabRestore(
+            sessionId,
+            store.get(sessionViewStateMapAtom),
+            store.get(previewFileMapAtom),
+          )
+        : undefined
+      const result = openTab(tabs, { type, sessionId, title }, restore)
       setTabs(result.tabs)
       setActiveTabId(result.activeTabId)
 

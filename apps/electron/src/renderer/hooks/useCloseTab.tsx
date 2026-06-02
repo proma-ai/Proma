@@ -17,6 +17,8 @@ import {
   tabsAtom,
   activeTabIdAtom,
   closeTab,
+  isPreviewTab,
+  sessionViewStateMapAtom,
 } from '@/atoms/tab-atoms'
 import {
   agentSessionsAtom,
@@ -41,6 +43,7 @@ export function useCloseTab(): UseCloseTabReturn {
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const setWorkingDone = useSetAtom(workingDoneSessionIdsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
+  const setViewStateMap = useSetAtom(sessionViewStateMapAtom)
 
   const removeIdleSessionFromWorking = React.useCallback((sessionId: string) => {
     const indicatorMap = store.get(agentSessionIndicatorMapAtom)
@@ -78,6 +81,28 @@ export function useCloseTab(): UseCloseTabReturn {
     setTabs(result.tabs)
     setActiveTabId(result.activeTabId)
 
+    // 同步该会话的视图状态：
+    // - 关闭预览 Tab → 预览不再打开（保留 lastView，切回不再重建预览）
+    // - 关闭会话 Tab（连带其预览）→ 删除整条记录
+    if (closingTab) {
+      if (isPreviewTab(closingTab)) {
+        setViewStateMap((prev) => {
+          const current = prev.get(closingTab.sessionId)
+          if (!current) return prev
+          const next = new Map(prev)
+          next.set(closingTab.sessionId, { previewTabOpen: false, lastView: current.lastView })
+          return next
+        })
+      } else if (closingTab.type === 'agent') {
+        setViewStateMap((prev) => {
+          if (!prev.has(closingTab.sessionId)) return prev
+          const next = new Map(prev)
+          next.delete(closingTab.sessionId)
+          return next
+        })
+      }
+    }
+
     if (wasActive) {
       const newActiveTab = result.activeTabId
         ? result.tabs.find((t) => t.id === result.activeTabId) ?? null
@@ -89,7 +114,7 @@ export function useCloseTab(): UseCloseTabReturn {
     if (closingTab && closingTab.type === 'agent') {
       removeIdleSessionFromWorking(closingTab.sessionId)
     }
-  }, [tabs, activeTabId, setTabs, setActiveTabId, syncActiveTabSideEffects, removeIdleSessionFromWorking])
+  }, [tabs, activeTabId, setTabs, setActiveTabId, setViewStateMap, syncActiveTabSideEffects, removeIdleSessionFromWorking])
 
   const requestClose = React.useCallback((tabId: string) => {
     executeClose(tabId)

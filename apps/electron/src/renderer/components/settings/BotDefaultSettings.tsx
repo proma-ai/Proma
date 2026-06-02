@@ -79,27 +79,27 @@ export function BotDefaultSettings(): React.ReactElement {
 
       <SettingsSection
         title="机器人命令"
-        description="在任意机器人平台中发送以下命令"
+        description="在任意机器人平台中发送以下命令（括号内为简写）"
       >
         <SettingsCard divided={false}>
           <div className="px-4 py-3 space-y-2 text-sm text-muted-foreground">
-            <div className="grid grid-cols-[100px_1fr] gap-y-1.5 gap-x-4">
-              <code className="text-foreground/80 font-mono">/help</code>
+            <div className="grid grid-cols-[140px_1fr] gap-y-1.5 gap-x-4">
+              <code className="text-foreground/80 font-mono">/help (/h)</code>
               <span>显示帮助</span>
-              <code className="text-foreground/80 font-mono">/new</code>
+              <code className="text-foreground/80 font-mono">/new (/n)</code>
               <span>创建新 Agent 会话</span>
-              <code className="text-foreground/80 font-mono">/agent</code>
-              <span>切换到 Agent 模式</span>
-              <code className="text-foreground/80 font-mono">/list</code>
+              <code className="text-foreground/80 font-mono">/list (/ls)</code>
               <span>列出所有会话</span>
-              <code className="text-foreground/80 font-mono">/stop</code>
+              <code className="text-foreground/80 font-mono">/stop (/s)</code>
               <span>停止当前 Agent</span>
-              <code className="text-foreground/80 font-mono">/switch</code>
+              <code className="text-foreground/80 font-mono">/switch (/sw)</code>
               <span>切换到已有会话（序号）</span>
-              <code className="text-foreground/80 font-mono">/workspace</code>
+              <code className="text-foreground/80 font-mono">/workspace (/ws)</code>
               <span>设置默认工作区</span>
+              <code className="text-foreground/80 font-mono">/model (/m)</code>
+              <span>查看或切换渠道 / 模型</span>
               <code className="text-foreground/80 font-mono">/now</code>
-              <span>查看当前状态（工作区、会话、MCP、Skills）</span>
+              <span>查看当前状态（工作区、会话、模型、MCP、Skills）</span>
             </div>
             <p className="pt-2 text-xs">
               直接发送文本会自动创建新会话或发送到当前绑定的会话。

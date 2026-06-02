@@ -147,8 +147,6 @@ export interface FeishuChatBinding {
   channelId: string
   /** 模型 ID */
   modelId?: string
-  /** 会话模式 */
-  mode: 'agent' | 'chat'
   /** 绑定来源：飞书主动绑定或 Proma 桌面 Session 镜像 */
   source?: 'feishu' | 'session-mirror'
   /** 聊天类型（单聊或群聊） */

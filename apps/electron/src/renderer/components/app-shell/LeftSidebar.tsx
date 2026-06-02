@@ -32,6 +32,7 @@ import {
 } from '@/atoms/chat-atoms'
 import {
   agentSessionsAtom,
+  agentSDKMessagesCacheAtom,
   currentAgentSessionIdAtom,
   agentSessionIndicatorMapAtom,
   unviewedCompletedSessionIdsAtom,
@@ -65,9 +66,11 @@ import { clearPreviewCacheForSession } from '@/components/diff/DiffTabContent'
 import {
   tabsAtom,
   activeTabIdAtom,
+  activeSessionIdAtom,
   sidebarCollapsedAtom,
   closeTab,
   updateTabTitle,
+  sessionViewStateMapAtom,
 } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { sidebarViewModeAtom, agentSidebarTopHeightAtom } from '@/atoms/sidebar-atoms'
@@ -306,6 +309,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
+  const setAgentMessagesCache = useSetAtom(agentSDKMessagesCacheAtom)
 
   /** 待删除对话 ID，非空时显示确认弹窗 */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
@@ -346,6 +350,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // Tab 状态
   const [tabs, setTabs] = useAtom(tabsAtom)
   const [activeTabId, setActiveTabId] = useAtom(activeTabIdAtom)
+  // 会话高亮按"激活 Tab 所属会话"判定：预览 Tab 激活时其 owner 会话仍保持高亮
+  const activeSessionId = useAtomValue(activeSessionIdAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const openSession = useOpenSession()
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
@@ -459,6 +465,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
   const setSessionPendingFiles = useSetAtom(agentSessionPendingFilesAtom)
+  const setSessionViewStateMap = useSetAtom(sessionViewStateMapAtom)
 
   /** 清理 per-conversation/session Map atoms 条目 */
   const cleanupMapAtoms = React.useCallback((id: string) => {
@@ -482,6 +489,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setDiffData(deleteKey)
     setSessionChannelMap(deleteKey)
     setSessionModelMap(deleteKey)
+    // 视图状态（预览开关 + 上次视图）：删除/归档是终态，统一清理避免孤立条目
+    setSessionViewStateMap(deleteKey)
 
     // 重型流式数据：streamingStates（累积 content + toolActivities）与 liveMessages（SDK 消息数组）
     setStreamingStates(deleteKey)
@@ -509,7 +518,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     sessionExistsAtom.remove(id)
 
     clearPreviewCacheForSession(id)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setSessionChannelMap, setSessionModelMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setSessionChannelMap, setSessionModelMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
 
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null
@@ -559,18 +568,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [agentSessions, viewMode, draftSessionIds, currentWorkspaceId, workingSessionIds]
   )
 
-  /** 顶部 TabBar 切换 tab 时，自动同步上区子 Tab 到对应分类 */
-  const prevActiveTabIdForSubTab = React.useRef<string | null>(activeTabId)
+  /** 顶部 TabBar 切换 tab 时，自动同步上区子 Tab 到对应分类（预览 Tab 归一化为其会话） */
+  const prevActiveTabIdForSubTab = React.useRef<string | null>(activeSessionId)
   React.useEffect(() => {
-    if (activeTabId === prevActiveTabIdForSubTab.current) return
-    prevActiveTabIdForSubTab.current = activeTabId
-    if (mode !== 'agent' || viewMode !== 'active' || !activeTabId) return
-    if (pinnedAgentSessions.some((s) => s.id === activeTabId)) {
+    if (activeSessionId === prevActiveTabIdForSubTab.current) return
+    prevActiveTabIdForSubTab.current = activeSessionId
+    if (mode !== 'agent' || viewMode !== 'active' || !activeSessionId) return
+    if (pinnedAgentSessions.some((s) => s.id === activeSessionId)) {
       setAgentSubTab('pinned')
-    } else if (workingSessionIds.has(activeTabId)) {
+    } else if (workingSessionIds.has(activeSessionId)) {
       setAgentSubTab('working')
     }
-  }, [activeTabId, mode, viewMode, pinnedAgentSessions, workingSessionIds])
+  }, [activeSessionId, mode, viewMode, pinnedAgentSessions, workingSessionIds])
 
   /** 对话按日期分组（根据 viewMode 过滤归档状态，排除 draft） */
   const conversationGroups = React.useMemo(
@@ -795,6 +804,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         // 即使后端报错，也从本地列表移除（可能是会话已不存在）
         setAgentSessions((prev) => prev.filter((s) => s.id !== pendingDeleteId))
       } finally {
+        // 清理该会话的消息缓存，避免已删除会话的消息数组滞留内存
+        setAgentMessagesCache((prev) => {
+          if (!prev.has(pendingDeleteId)) return prev
+          const next = new Map(prev)
+          next.delete(pendingDeleteId)
+          return next
+        })
         setPendingDeleteId(null)
       }
       return
@@ -1088,7 +1104,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       return conversations
         .filter((c) => !c.archived && !draftSessionIds.has(c.id))
         .sort((a, b) => {
-          const activeDelta = Number(b.id === activeTabId) - Number(a.id === activeTabId)
+          const activeDelta = Number(b.id === activeSessionId) - Number(a.id === activeSessionId)
           if (activeDelta !== 0) return activeDelta
           const streamingDelta = Number(streamingIds.has(b.id)) - Number(streamingIds.has(a.id))
           if (streamingDelta !== 0) return streamingDelta
@@ -1102,7 +1118,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           title: conversation.title,
           type: 'chat' as const,
           initial: getRailInitial(conversation.title),
-          active: conversation.id === activeTabId,
+          active: conversation.id === activeSessionId,
           status: streamingIds.has(conversation.id) ? 'running' as const : 'idle' as const,
           pinned: !!conversation.pinned,
           workspaceName: undefined,
@@ -1119,7 +1135,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         const statusA = agentIndicatorMap.get(a.id) ?? (unviewedCompletedSessionIds.has(a.id) ? 'completed' : 'idle')
         const statusB = agentIndicatorMap.get(b.id) ?? (unviewedCompletedSessionIds.has(b.id) ? 'completed' : 'idle')
         const priority = (session: AgentSessionMeta, status: SessionIndicatorStatus): number => {
-          if (session.id === activeTabId) return 0
+          if (session.id === activeSessionId) return 0
           if (status === 'blocked') return 1
           if (status === 'running') return 2
           if (workingSessionIds.has(session.id)) return 3
@@ -1137,7 +1153,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         title: session.title,
         type: 'agent' as const,
         initial: getRailInitial(session.title),
-        active: session.id === activeTabId,
+        active: session.id === activeSessionId,
         status: agentIndicatorMap.get(session.id) ?? (unviewedCompletedSessionIds.has(session.id) ? 'completed' as const : 'idle' as const),
         pinned: !!session.pinned,
         workspaceName: session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined,
@@ -1148,7 +1164,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     agentSessions,
     draftSessionIds,
     currentWorkspaceId,
-    activeTabId,
+    activeSessionId,
     streamingIds,
     agentIndicatorMap,
     unviewedCompletedSessionIds,
@@ -1441,7 +1457,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               <ConversationItem
                 key={`pinned-${conv.id}`}
                 conversation={conv}
-                active={conv.id === activeTabId}
+                active={conv.id === activeSessionId}
                 streaming={streamingIds.has(conv.id)}
                 showPinIcon={false}
                 onSelect={handleSelectConversation}
@@ -1514,7 +1530,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 </div>
 
                 {/* Tab 内容（自己滚动） */}
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-3 pb-1 min-h-0">
+                <div className="flex-1 overflow-y-auto scrollbar-thin px-3 pb-1 min-h-0 titlebar-no-drag">
                   {agentSubTab === 'working' && (
                     <div className="pt-0.5 pb-0.5">
                       {hasWorkingSessions ? (() => {
@@ -1534,13 +1550,13 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                               <AgentSessionItem
                                 key={`${keyPrefix}-${session.id}`}
                                 session={session}
-                                active={session.id === activeTabId}
+                                active={session.id === activeSessionId}
                                 indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                                 isInWorkingSection={workingSessionIds.has(session.id)}
                                 showPinIcon={false}
                                 leftAccent={accent}
                                 showConfirmDone={showConfirmDone}
-                                disableMiniMap={session.id === activeTabId}
+                                disableMiniMap={session.id === activeSessionId}
                                 workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
                                 onSelect={handleSelectAgentSession}
                                 onConfirmDone={handleConfirmWorkingDoneAgent}
@@ -1570,7 +1586,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                             <AgentSessionItem
                               key={`pinned-${session.id}`}
                               session={session}
-                              active={session.id === activeTabId}
+                              active={session.id === activeSessionId}
                               indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                               isInWorkingSection={workingSessionIds.has(session.id)}
                               showPinIcon={false}
@@ -1611,7 +1627,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </div>
 
           {/* 下区：历史会话列表 */}
-          <div className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-thin min-h-0">
+          <div className="flex-1 overflow-y-auto px-3 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
             {agentSessionGroups.map((group) => (
               <div key={group.label} className="mb-1">
                 <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
@@ -1622,7 +1638,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     <AgentSessionItem
                       key={session.id}
                       session={session}
-                      active={session.id === activeTabId}
+                      active={session.id === activeSessionId}
                       indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                       isInWorkingSection={workingSessionIds.has(session.id)}
                       showPinIcon={!!session.pinned}
@@ -1653,7 +1669,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           )}
 
           {/* Chat 模式 / 归档视图：单列表布局 */}
-          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-thin titlebar-no-drag">
             {mode === 'chat' ? (
               /* Chat 模式：对话按日期分组 */
               conversationGroups.map((group) => (
@@ -1666,7 +1682,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                       <ConversationItem
                         key={conv.id}
                         conversation={conv}
-                        active={conv.id === activeTabId}
+                        active={conv.id === activeSessionId}
                         streaming={streamingIds.has(conv.id)}
                         showPinIcon={!!conv.pinned}
                         onSelect={handleSelectConversation}
@@ -1691,7 +1707,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                       <AgentSessionItem
                         key={session.id}
                         session={session}
-                        active={session.id === activeTabId}
+                        active={session.id === activeSessionId}
                         indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
                         isInWorkingSection={workingSessionIds.has(session.id)}
                         showPinIcon={!!session.pinned}
@@ -1834,9 +1850,11 @@ const ConversationItem = React.memo(function ConversationItem({
 }: ConversationItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
+  const [menuOpen, setMenuOpen] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
-  const preview = useSessionMiniMapHover()
+  // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
+  const preview = useSessionMiniMapHover(300, menuOpen)
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
@@ -1961,7 +1979,7 @@ const ConversationItem = React.memo(function ConversationItem({
               className="flex-shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
-              <DropdownMenu>
+              <DropdownMenu onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button
                     className={cn(
@@ -2057,9 +2075,11 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 }: AgentSessionItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
+  const [menuOpen, setMenuOpen] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
-  const preview = useSessionMiniMapHover(300, disableMiniMap)
+  // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
+  const preview = useSessionMiniMapHover(300, disableMiniMap || menuOpen)
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -2226,7 +2246,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
               className="flex-shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
-              <DropdownMenu>
+              <DropdownMenu onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button
                     className={cn(

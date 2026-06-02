@@ -21,6 +21,8 @@ export type ProviderType =
   | 'minimax'
   | 'doubao'
   | 'qwen'
+  | 'xiaomi'
+  | 'xiaomi-token-plan'
   | 'custom'
 
 /** Proma 官方渠道固定 ID */
@@ -45,6 +47,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   minimax: 'https://api.minimaxi.com/anthropic',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  xiaomi: 'https://api.xiaomimimo.com/anthropic',
+  'xiaomi-token-plan': 'https://token-plan-cn.xiaomimimo.com/anthropic',
   custom: '',
 }
 
@@ -64,6 +68,8 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   minimax: 'MiniMax (API&编程包)',
   doubao: '豆包',
   qwen: '通义千问',
+  xiaomi: '小米 MiMo (API)',
+  'xiaomi-token-plan': '小米 MiMo Token Plan',
   custom: 'OpenAI 兼容格式',
 }
 
@@ -80,6 +86,8 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'kimi-api',
   'kimi-coding',
   'minimax',
+  'xiaomi',
+  'xiaomi-token-plan',
 ])
 
 /**

@@ -35,13 +35,13 @@ class FakeSleepBlocker implements SleepBlockerAdapter {
 }
 
 describe('飞书同步防休眠', () => {
-  test('Given 飞书实时同步已开启 When 同步防休眠状态 Then 启用显示器级防休眠', () => {
+  test('Given 飞书实时同步已开启 When 同步防休眠状态 Then 启用系统级防休眠（允许息屏锁屏）', () => {
     const adapter = new FakeSleepBlocker()
     const blocker = new FeishuSyncSleepBlocker(adapter)
 
     blocker.sync({ feishuSessionMirror: { mode: 'stream', botId: 'bot-1' } })
 
-    expect(adapter.startedTypes).toEqual(['prevent-display-sleep'])
+    expect(adapter.startedTypes).toEqual(['prevent-app-suspension'])
     expect(adapter.isStarted(1)).toBe(true)
   })
 
@@ -75,7 +75,7 @@ describe('飞书同步防休眠', () => {
     adapter.markStopped(1)
     blocker.sync({ feishuSessionMirror: { mode: 'stream', botId: 'bot-1' } })
 
-    expect(adapter.startedTypes).toEqual(['prevent-display-sleep', 'prevent-display-sleep'])
+    expect(adapter.startedTypes).toEqual(['prevent-app-suspension', 'prevent-app-suspension'])
     expect(adapter.isStarted(2)).toBe(true)
   })
 

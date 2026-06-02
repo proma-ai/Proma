@@ -6,15 +6,19 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import type { AgentSessionMeta, ConversationMeta } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import {
   activeTabIdAtom,
+  activeSessionIdAtom,
   openTab,
+  buildOpenTabRestore,
+  sessionViewStateMapAtom,
   tabMruAtom,
   tabsAtom,
 } from '@/atoms/tab-atoms'
+import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { getInitialTabSwitchIndex, promoteTabMru } from '@/lib/tab-switching'
 import { appModeAtom } from '@/atoms/app-mode'
 import {
@@ -60,10 +64,14 @@ interface SwitcherModel {
 }
 
 export function TabSwitcher(): ReactElement | null {
+  const store = useStore()
   const tabs = useAtomValue(tabsAtom)
   const setTabs = useSetAtom(tabsAtom)
   const activeTabId = useAtomValue(activeTabIdAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
+  // MRU 与 Ctrl+Tab 起始定位均按会话 ID 归一化：预览 Tab 复用其 owner 会话 ID，
+  // 与候选列表（会话 ID）对齐，避免处于预览 Tab 时需按两下才能切换。
+  const activeSessionId = useAtomValue(activeSessionIdAtom)
   const tabMru = useAtomValue(tabMruAtom)
   const setTabMru = useSetAtom(tabMruAtom)
 
@@ -160,7 +168,7 @@ export function TabSwitcher(): ReactElement | null {
   // Refs 用于事件回调中读取最新值，避免全局键盘监听闭包过期。
   const isOpenRef = useRef(false)
   const selectedIndexRef = useRef(0)
-  const activeTabIdRef = useRef<string | null>(activeTabId)
+  const activeSessionIdRef = useRef<string | null>(activeSessionId)
   const candidatesRef = useRef<SwitchCandidate[]>(switcherModel.candidates)
   const tabMruRef = useRef<string[]>(tabMru)
   const tabsRef = useRef(tabs)
@@ -168,18 +176,18 @@ export function TabSwitcher(): ReactElement | null {
 
   isOpenRef.current = isOpen
   selectedIndexRef.current = selectedIndex
-  activeTabIdRef.current = activeTabId
+  activeSessionIdRef.current = activeSessionId
   candidatesRef.current = switcherModel.candidates
   tabMruRef.current = tabMru
   tabsRef.current = tabs
 
   useEffect(() => {
     setTabMru((prev) => {
-      const next = promoteTabMru(prev, activeTabId)
+      const next = promoteTabMru(prev, activeSessionId)
       tabMruRef.current = next
       return next
     })
-  }, [activeTabId, setTabMru])
+  }, [activeSessionId, setTabMru])
 
   const closeSwitcher = useCallback((): void => {
     setIsOpen(false)
@@ -190,16 +198,26 @@ export function TabSwitcher(): ReactElement | null {
 
   const activateCandidate = useCallback(
     (candidate: SwitchCandidate): void => {
+      // 切回 agent 会话时，若该会话上次开着预览 Tab 则一并重建并回到上次视图
+      const restore = candidate.type === 'agent'
+        ? buildOpenTabRestore(
+            candidate.id,
+            store.get(sessionViewStateMapAtom),
+            store.get(previewFileMapAtom),
+          )
+        : undefined
       const nextTab = openTab(tabsRef.current, {
         type: candidate.type,
         sessionId: candidate.id,
         title: candidate.title,
-      })
+      }, restore)
       setTabs(nextTab.tabs)
       setActiveTabId(nextTab.activeTabId)
-      activeTabIdRef.current = nextTab.activeTabId
+      // MRU/起始定位按会话 ID 归一化：即使 restore 后激活的是预览 Tab，
+      // 也以 candidate.id（会话 ID）记账，保证与候选列表对齐。
+      activeSessionIdRef.current = candidate.id
       setTabMru((prev) => {
-        const next = promoteTabMru(prev, nextTab.activeTabId)
+        const next = promoteTabMru(prev, candidate.id)
         tabMruRef.current = next
         return next
       })
@@ -251,7 +269,7 @@ export function TabSwitcher(): ReactElement | null {
       const candidates = candidatesRef.current
       return getInitialTabSwitchIndex(
         candidates,
-        activeTabIdRef.current,
+        activeSessionIdRef.current,
         tabMruRef.current,
         direction,
       )
@@ -259,7 +277,7 @@ export function TabSwitcher(): ReactElement | null {
 
     const hasAlternateTarget = (): boolean => {
       const candidates = candidatesRef.current
-      return candidates.some((candidate) => candidate.id !== activeTabIdRef.current)
+      return candidates.some((candidate) => candidate.id !== activeSessionIdRef.current)
     }
 
     const handleKeyDown = (event: KeyboardEvent): void => {

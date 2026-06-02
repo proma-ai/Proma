@@ -14,6 +14,47 @@ import { execSync } from 'node:child_process'
 import iconv from 'iconv-lite'
 import type { WslStatus } from '@proma/shared'
 
+/** WSL 不可用时返回的统一错误提示 */
+const WSL_NOT_READY_ERROR = 'WSL 未就绪，如已安装 Git Bash 可不安装'
+
+/**
+ * 智能解码 Buffer：尝试 UTF-16 LE → UTF-8 → GBK
+ * Windows 控制台命令输出可能是 UTF-16 LE 编码
+ */
+function smartDecode(buffer: Buffer): string {
+  // 检测 UTF-16 LE BOM (FF FE) 或特征（大量 00 字节间隔）
+  const isUtf16Le = buffer.length > 2 &&
+    ((buffer[0] === 0xFF && buffer[1] === 0xFE) ||
+     (buffer.length > 4 && buffer[1] === 0x00 && buffer[3] === 0x00))
+
+  if (isUtf16Le) {
+    try {
+      const decoded = iconv.decode(buffer, 'utf-16le')
+      if (decoded.length > 0 && !decoded.includes('')) {
+        return decoded
+      }
+    } catch {
+      // 解码失败，继续尝试其他编码
+    }
+  }
+
+  // 尝试 UTF-8
+  let output = iconv.decode(buffer, 'utf-8')
+  // 如果包含替换字符（U+FFFD），说明不是 UTF-8
+  if (!output.includes('')) {
+    return output
+  }
+
+  // 回退 GBK
+  output = iconv.decode(buffer, 'gbk')
+  if (!output.includes('')) {
+    return output
+  }
+
+  // 最后尝试 UTF-16 LE（无 BOM 的情况）
+  return iconv.decode(buffer, 'utf-16le')
+}
+
 /**
  * 解析 WSL 发行版列表输出
  *
@@ -79,6 +120,17 @@ function parseWslListOutput(output: string): {
   }
 }
 
+/** 构建 WSL 不可用的返回结果 */
+function createWslNotReadyResult(): WslStatus {
+  return {
+    available: false,
+    version: null,
+    defaultDistro: null,
+    distros: [],
+    error: WSL_NOT_READY_ERROR,
+  }
+}
+
 /**
  * 检测 WSL 环境
  *
@@ -101,30 +153,19 @@ export async function detectWsl(): Promise<WslStatus> {
 
   try {
     // 执行 wsl.exe --list --verbose
-    // 不指定 encoding，接收原始 Buffer，然后用 iconv-lite 做编码转换
+    // 不指定 encoding，接收原始 Buffer，然后用 smartDecode 做编码转换
     const buffer = execSync('wsl.exe --list --verbose', {
       timeout: 10000,
       stdio: ['pipe', 'pipe', 'pipe'],
     }) as Buffer
 
-    // 先尝试 UTF-8 解码；若结果含替换字符（U+FFFD），说明原始数据非 UTF-8，回退 GBK
-    let output = iconv.decode(buffer, 'utf-8')
-    if (output.includes('�')) {
-      output = iconv.decode(buffer, 'gbk')
-    }
-
+    const output = smartDecode(buffer)
     const parsed = parseWslListOutput(output)
 
     // 检查是否有可用的发行版
     if (parsed.distros.length === 0) {
       console.warn('[WSL 检测] WSL 已安装但未安装任何发行版')
-      return {
-        available: false,
-        version: null,
-        defaultDistro: null,
-        distros: [],
-        error: 'WSL 已安装但未安装任何 Linux 发行版',
-      }
+      return createWslNotReadyResult()
     }
 
     console.log(
@@ -139,45 +180,8 @@ export async function detectWsl(): Promise<WslStatus> {
       error: null,
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-
-    // 检测乱码（替换字符或不可见控制字符）— 无法确定具体原因，报告编码异常
-    const hasGarbledText = errorMessage.includes('�') || /[\x00-\x08\x0b-\x0c\x0e-\x1f]/.test(errorMessage)
-    if (hasGarbledText) {
-      console.warn('[WSL 检测] 检测到编码乱码，无法解析命令输出')
-      return {
-        available: false,
-        version: null,
-        defaultDistro: null,
-        distros: [],
-        error: 'WSL 检测失败: 命令输出编码异常',
-      }
-    }
-
-    // 判断是否为 WSL 未安装的错误
-    if (
-      errorMessage.includes('wsl.exe') &&
-      (errorMessage.includes('not found') ||
-        errorMessage.includes('not recognized'))
-    ) {
-      console.warn('[WSL 检测] WSL 未安装')
-      return {
-        available: false,
-        version: null,
-        defaultDistro: null,
-        distros: [],
-        error: 'WSL 未安装',
-      }
-    }
-
-    // 其他错误
-    console.warn('[WSL 检测] 检测失败:', errorMessage)
-    return {
-      available: false,
-      version: null,
-      defaultDistro: null,
-      distros: [],
-      error: `WSL 检测失败: ${errorMessage}`,
-    }
+    // 所有异常场景统一返回 WSL 未就绪
+    console.warn('[WSL 检测] WSL 未就绪')
+    return createWslNotReadyResult()
   }
 }

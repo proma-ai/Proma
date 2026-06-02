@@ -120,6 +120,8 @@ function inferContextWindow(model?: string): number | undefined {
   if (m.includes('deepseek-v4')) return 1_000_000
   // MiniMax M3 为 1M 上下文
   if (m.includes('minimax-m3')) return 1_000_000
+  // 小米 MiMo：v2.5 / v2.5-pro / v2-pro 为 1M（omni / flash 仍走默认 200k）
+  if (m.includes('mimo-v2.5') || m.includes('mimo-v2-pro')) return 1_000_000
   return 200_000
 }
 
@@ -372,15 +374,12 @@ export function useGlobalAgentListeners(): void {
           currentStreamState: store.get(agentStreamingStatesAtom).get(event.sessionId),
         })
 
+        // 外部来源（飞书/钉钉/微信/bridge）唤起的 run 不抢占前台：
+        // 不打开新 Tab、不切换激活 Tab、不切换 appMode/当前会话/当前工作区。
+        // 只更新驱动左侧边栏列表与状态指示条所需的状态，让用户自行决定是否切过去。
+        // 若该会话恰好是用户当前正在查看的会话，这里不动 Tab/激活，流式内容会通过
+        // agentStreamingStatesAtom 自然刷新，用户视角无任何跳动。
         store.set(agentSessionsAtom, sessions)
-        store.set(tabsAtom, activation.tabs)
-        store.set(activeTabIdAtom, activation.activeTabId)
-        store.set(appModeAtom, 'agent')
-        store.set(currentAgentSessionIdAtom, event.sessionId)
-        if (activation.workspaceId) {
-          store.set(currentAgentWorkspaceIdAtom, activation.workspaceId)
-          window.electronAPI.updateSettings({ agentWorkspaceId: activation.workspaceId }).catch(console.error)
-        }
         const activationModelId = activation.modelId
         if (activationModelId) {
           store.set(agentSessionModelMapAtom, (prev) => {
@@ -943,6 +942,7 @@ export function useGlobalAgentListeners(): void {
           activeTabId: store.get(activeTabIdAtom),
           currentAgentSessionId: currentSessionId,
           sessionId: data.sessionId,
+          documentHasFocus: document.hasFocus(),
         })
         if (completionMarkers.markUnviewedCompleted) {
           store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {

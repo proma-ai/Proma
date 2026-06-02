@@ -14,10 +14,14 @@ import { SettingsDialog } from '@/components/settings'
 import { WelcomeView } from '@/components/welcome/WelcomeView'
 import { previewPanelOpenMapAtom, previewSplitRatioAtom } from '@/atoms/preview-atoms'
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
+import { useTrackSessionView } from '@/hooks/useTrackSessionView'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 
 export function MainArea(): React.ReactElement {
+  // 记录每个会话上次停留的视图（对话 / 预览），供切回时重建预览 Tab
+  useTrackSessionView()
+
   const tabs = useAtomValue(tabsAtom)
   const activeTabId = useAtomValue(activeTabIdAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)

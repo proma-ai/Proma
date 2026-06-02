@@ -459,7 +459,8 @@ const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
 
 /**
  * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）
- * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列
+ * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列、
+ * 小米 MiMo V2.5 / V2.5 Pro / V2 Pro
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
  */
 function supports1MContext(modelId: string): boolean {
@@ -473,6 +474,8 @@ function supports1MContext(modelId: string): boolean {
   }
   // DeepSeek V4 系列（deepseek-v4-pro、deepseek-v4-flash）
   if (m.includes('deepseek-v4')) return true
+  // 小米 MiMo：v2.5 / v2.5-pro / v2-pro 为 1M（omni / flash 不支持）
+  if (m.includes('mimo-v2.5') || m.includes('mimo-v2-pro')) return true
   return false
 }
 
@@ -593,6 +596,9 @@ export class AgentOrchestrator {
     if (provider === 'proma') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
     } else if (provider === 'kimi-coding') {
+      sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
+      sdkEnv.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
+    } else if (provider === 'xiaomi-token-plan') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
       sdkEnv.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
     } else if (provider === 'minimax') {
@@ -1143,6 +1149,10 @@ export class AgentOrchestrator {
       process.env.ANTHROPIC_AUTH_TOKEN = apiKey
     } else if (channel.provider === 'kimi-coding') {
       // Kimi Coding Plan：只用 Bearer + 必须带 User-Agent
+      process.env.ANTHROPIC_AUTH_TOKEN = apiKey
+      process.env.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
+    } else if (channel.provider === 'xiaomi-token-plan') {
+      // 小米 Token Plan：Bearer + 必须带 User-Agent
       process.env.ANTHROPIC_AUTH_TOKEN = apiKey
       process.env.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
     } else if (channel.provider === 'minimax') {

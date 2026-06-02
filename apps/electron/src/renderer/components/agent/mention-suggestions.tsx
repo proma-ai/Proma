@@ -84,7 +84,6 @@ function createMentionSuggestion<T>(
           renderer = new ReactRenderer(MentionList, {
             props: {
               items: props.items,
-              selectedIndex: 0,
               emptyText: config.emptyText,
               keyExtractor: config.keyExtractor,
               renderItem: config.renderItem,

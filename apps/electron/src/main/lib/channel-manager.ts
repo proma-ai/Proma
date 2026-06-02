@@ -377,6 +377,8 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'kimi-api':
       case 'kimi-coding':
       case 'minimax':
+      case 'xiaomi':
+      case 'xiaomi-token-plan':
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
       case 'openai':
       case 'zhipu':
@@ -424,6 +426,10 @@ async function testAnthropicCompatible(
     case 'minimax':
       testModel = 'MiniMax-M3'
       break
+    case 'xiaomi':
+    case 'xiaomi-token-plan':
+      testModel = 'mimo-v2.5-pro'
+      break
     default:
       testModel = 'claude-sonnet-4-6'
   }
@@ -433,6 +439,9 @@ async function testAnthropicCompatible(
     'content-type': 'application/json',
   }
   if (provider === 'kimi-coding') {
+    headers.Authorization = `Bearer ${apiKey}`
+    headers['User-Agent'] = getPromaUserAgent(pkg.version)
+  } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
   } else if (provider === 'minimax') {
@@ -535,6 +544,8 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
       case 'kimi-api':
       case 'kimi-coding':
       case 'minimax':
+      case 'xiaomi':
+      case 'xiaomi-token-plan':
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'zhipu':
@@ -574,6 +585,8 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'kimi-api':
       case 'kimi-coding':
       case 'minimax':
+      case 'xiaomi':
+      case 'xiaomi-token-plan':
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'zhipu':
@@ -622,6 +635,9 @@ async function fetchAnthropicCompatibleModels(
     'anthropic-version': '2023-06-01',
   }
   if (provider === 'kimi-coding') {
+    headers.Authorization = `Bearer ${apiKey}`
+    headers['User-Agent'] = getPromaUserAgent(pkg.version)
+  } else if (provider === 'xiaomi-token-plan') {
     headers.Authorization = `Bearer ${apiKey}`
     headers['User-Agent'] = getPromaUserAgent(pkg.version)
   } else if (provider === 'minimax') {

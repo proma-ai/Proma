@@ -57,6 +57,9 @@ async function renderWithOfficialMermaid(code: string): Promise<string> {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    // 解析/绘制失败时清理临时节点并抛错，而非把错误图注入 document.body
+    // （后者会在页面底部残留一条孤立的 "Syntax error in text" bar）
+    suppressErrorRendering: true,
     theme: dark ? 'dark' : 'default',
     themeVariables: {
       background: dark ? '#0f172a' : '#ffffff',

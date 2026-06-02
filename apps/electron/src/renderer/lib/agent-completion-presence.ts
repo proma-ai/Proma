@@ -5,6 +5,8 @@ export interface AgentCompletionPresenceInput {
   activeTabId: string | null
   currentAgentSessionId: string | null
   sessionId: string
+  /** 完成发生时应用窗口是否处于前台。窗口失焦时即使是当前 Tab 也不算"正在查看"。 */
+  documentHasFocus: boolean
 }
 
 export interface AgentCompletionMarkers {
@@ -18,7 +20,12 @@ export function isAgentSessionActiveForCompletion({
   activeTabId,
   currentAgentSessionId,
   sessionId,
+  documentHasFocus,
 }: AgentCompletionPresenceInput): boolean {
+  // 窗口不在前台时用户不可能正在查看，一律按"未查看"处理，
+  // 与角标清除端（依赖 document.hasFocus()）的语义保持对齐。
+  if (!documentHasFocus) return false
+
   const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : null
   if (activeTab) {
     return (activeTab.type === 'agent' || activeTab.type === 'preview') && activeTab.sessionId === sessionId

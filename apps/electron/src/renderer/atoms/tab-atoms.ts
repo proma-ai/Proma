@@ -17,6 +17,7 @@ import {
   unviewedCompletedSessionIdsAtom,
 } from './agent-atoms'
 import type { SessionIndicatorStatus } from './agent-atoms'
+import type { PreviewFile } from './preview-atoms'
 
 // ===== 类型定义 =====
 
@@ -50,6 +51,30 @@ export interface PersistedTabState {
   activeTabId: string | null
 }
 
+/** 会话上次停留的视图：会话对话 vs 文件预览 */
+export type SessionView = 'session' | 'preview'
+
+/**
+ * 每会话的视图状态（仅运行期内存态，不持久化到磁盘）。
+ * 用于在切走再切回同一会话时，重建预览 Tab 并回到上次停留的视图。
+ */
+export interface SessionViewState {
+  /** 该会话的预览 Tab 是否处于"打开"状态（用户主动关闭后置 false） */
+  previewTabOpen: boolean
+  /** 上次激活的是会话对话还是文件预览 */
+  lastView: SessionView
+}
+
+/** 切回会话时重建预览 Tab 的提示（由调用方读取 atom 后传入纯函数 openTab） */
+export interface OpenTabRestore {
+  /** 该会话是否应重建预览 Tab（previewTabOpen && 存在预览文件时为 true） */
+  previewTabOpen: boolean
+  /** 预览 Tab 标题（重建时使用） */
+  previewTitle: string
+  /** 上次停留的视图，决定重建后激活预览 Tab 还是会话 Tab */
+  lastView: SessionView
+}
+
 // ===== 核心 Atoms =====
 
 /** 顶部入口列表：Scratch Pad + 当前会话 */
@@ -60,6 +85,13 @@ export const activeTabIdAtom = atom<string | null>(null)
 
 /** 标签页 MRU（最近使用）顺序，最近使用的 ID 排在前面 */
 export const tabMruAtom = atom<string[]>([])
+
+/**
+ * 每会话视图状态 Map（仅运行期内存态，不持久化）。
+ * key = sessionId，value = { previewTabOpen, lastView }。
+ * 切走会话时预览 Tab 被 openTab 丢弃，切回时据此重建并回到上次视图。
+ */
+export const sessionViewStateMapAtom = atom<Map<string, SessionViewState>>(new Map())
 
 /** 侧边栏是否收起（持久化） */
 export const sidebarCollapsedAtom = atomWithStorage<boolean>(
@@ -89,6 +121,16 @@ export const activeTabAtom = atom<TabItem | null>((get) => {
   const activeId = get(activeTabIdAtom)
   if (!activeId) return null
   return get(tabsAtom).find((t) => t.id === activeId) ?? null
+})
+
+/**
+ * 当前活跃标签所属的会话 ID。
+ * 预览 Tab 归一化为其 owner 会话的 sessionId，使"会话高亮"与"Ctrl+Tab 定位"
+ * 都把预览 Tab 视为所属会话的一部分（preview tab 的 id 自身不参与这些判定）。
+ */
+export const activeSessionIdAtom = atom<string | null>((get) => {
+  const activeTab = get(activeTabAtom)
+  return activeTab?.sessionId ?? null
 })
 
 /** 标签是否在流式输出中（派生，从现有流式 atoms 计算） */
@@ -181,10 +223,12 @@ export function getPersistableTabState(
   }
 }
 
-/** 打开或聚焦会话入口：始终用目标会话替换当前会话，避免顶部累积多个 Tab */
+/** 打开或聚焦会话入口：始终用目标会话替换当前会话，避免顶部累积多个 Tab。
+ *  restore 提示存在时，切回带预览的会话会一并重建其预览 Tab 并回到上次视图。 */
 export function openTab(
   tabs: TabItem[],
   item: { type: TabType; sessionId: string; title: string },
+  restore?: OpenTabRestore,
 ): { tabs: TabItem[]; activeTabId: string } {
   const scratchTab = tabs.find((t) => t.id === SCRATCH_PAD_ID) ?? createScratchPadTab()
 
@@ -216,24 +260,50 @@ export function openTab(
   }
 
   const existingTab = tabs.find((t) => t.sessionId === item.sessionId && t.type === item.type)
-
-  if (existingTab) {
-    return {
-      tabs: [scratchTab, existingTab],
-      activeTabId: existingTab.id,
-    }
-  }
-
-  const newTab: TabItem = {
+  const sessionTab: TabItem = existingTab ?? {
     id: item.sessionId,
     type: item.type,
     sessionId: item.sessionId,
     title: item.title,
   }
 
+  // 切回带预览的会话：重建该会话的预览 Tab，并按 lastView 决定激活哪个。
+  if (restore?.previewTabOpen) {
+    const previewTab: TabItem = {
+      id: createPreviewTabId(item.sessionId),
+      type: 'preview',
+      sessionId: item.sessionId,
+      title: restore.previewTitle,
+    }
+    return {
+      tabs: [scratchTab, sessionTab, previewTab],
+      activeTabId: restore.lastView === 'preview' ? previewTab.id : sessionTab.id,
+    }
+  }
+
   return {
-    tabs: [scratchTab, newTab],
-    activeTabId: newTab.id,
+    tabs: [scratchTab, sessionTab],
+    activeTabId: sessionTab.id,
+  }
+}
+
+/**
+ * 从视图状态与预览文件 Map 构造 openTab 的 restore 提示。
+ * 仅当该会话预览 Tab 处于打开状态且确实有预览文件时才返回提示，否则返回 undefined。
+ * 供 useOpenSession / TabSwitcher 等切换入口在调用 openTab 前读取 atom 后传入。
+ */
+export function buildOpenTabRestore(
+  sessionId: string,
+  viewStateMap: Map<string, SessionViewState>,
+  previewFileMap: Map<string, PreviewFile | null>,
+): OpenTabRestore | undefined {
+  const viewState = viewStateMap.get(sessionId)
+  const previewFile = previewFileMap.get(sessionId)
+  if (!viewState?.previewTabOpen || !previewFile) return undefined
+  return {
+    previewTabOpen: true,
+    previewTitle: getPreviewTabTitle(previewFile.filePath),
+    lastView: viewState.lastView,
   }
 }
 

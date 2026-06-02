@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Code2, Copy, Check, Eye, Pencil, RefreshCw, Save, X } from 'lucide-react'
+import { Code2, Copy, Check, Eye, List, Pencil, RefreshCw, Save, X } from 'lucide-react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
@@ -15,11 +15,13 @@ import { cn } from '@/lib/utils'
 import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
+import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
 import { useShortcut } from '@/hooks/useShortcut'
 import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { PreviewFindBar } from './PreviewFindBar'
+import { MarkdownToc } from './MarkdownToc'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
@@ -229,6 +231,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const refreshVersion = refreshVersionMap.get(sessionId) ?? 0
   const previewContentVersion = previewOnly ? refreshVersion : 0
   const theme = useAtomValue(resolvedThemeAtom)
+  const [tocOpen, setTocOpen] = useAtom(markdownTocOpenAtom)
 
   const ext = getExtension(filePath)
   const isMarkdown = previewOnly && MD_EXTS.has(ext)
@@ -263,6 +266,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     markdownEditing,
     markdownSourceMode,
   }), [docxHtml.length, filePath, loading, markdownEditing, markdownSourceMode, newContent.length, officeHtml.length, oldContent.length, previewOnly, viewMode])
+
+  // 目录提取只需在「文件本身或其内容」变化时重建，避免 loading/编辑态切换造成的抖动
+  const tocContentKey = React.useMemo(
+    () => JSON.stringify({ filePath, previewContentVersion, newLength: newContent.length }),
+    [filePath, previewContentVersion, newContent.length],
+  )
 
   // ===== 选中文本引用（Quoted Selection）=====
 
@@ -508,6 +517,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const lastNewContentRef = React.useRef('')
   const lastOldContentRef = React.useRef('')
 
+  // 滚动位置持久化 key（sessionId:filePath）。主加载 effect 在缓存未命中时
+  // 也会读它判断是否需要恢复滚动，故声明须早于该 effect。
+  const scrollKey = scrollCacheKey(sessionId, filePath)
+
   // 主加载 effect：上下文变化（filePath/dirPath/gitRoot/previewOnly）时触发；
   // 纯预览模式也跟随 refreshVersion 失效，保证同一文件二次写入后重新读盘。
   // 命中缓存时跳过 loading 闪烁直接渲染；未命中走 IPC 拉取
@@ -553,6 +566,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setImageNaturalSize({ w: 0, h: 0 })
       lastNewContentRef.current = ''
       lastOldContentRef.current = ''
+      // 内容缓存被 LRU 淘汰但滚动位置仍在时（如切走会话后预览 Tab 重建），
+      // 也标记需要恢复，待 load() 重新拉取渲染后回到上次滚动位置。
+      if (scrollPositionCache.has(scrollKey)) {
+        restoreScrollRef.current = true
+      }
     }
 
     async function load() {
@@ -712,7 +730,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;
   // cached mount → restore; scroll → save.
-  const scrollKey = scrollCacheKey(sessionId, filePath)
   const prevRefreshVersionRef = React.useRef(refreshVersion)
 
   // WHEN content version changes (refreshVersion bump): delete stored scroll position
@@ -1022,10 +1039,24 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           <RefreshCw className="size-3.5" />
         </button>
 
+        {isMarkdown && !markdownEditing && (
+          <button
+            type="button"
+            onClick={() => setTocOpen((v) => !v)}
+            className={cn(
+              'p-1 rounded hover:bg-foreground/[0.06] shrink-0',
+              tocOpen ? 'text-foreground/70' : 'text-foreground/40 hover:text-foreground/60',
+            )}
+            title={tocOpen ? '隐藏目录' : '显示目录'}
+          >
+            <List className="size-3.5" />
+          </button>
+        )}
+
         {toolbarActions}
       </div>
 
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0 flex">
         <PreviewFindBar
           open={findOpen}
           rootRef={scrollContainerRef}
@@ -1033,7 +1064,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           unsupportedReason={isPdf ? '暂不支持 PDF 搜索' : undefined}
           onOpenChange={setFindOpen}
         />
-        <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full overflow-auto scrollbar-thin relative">
+        <MarkdownToc
+          containerRef={scrollContainerRef}
+          contentKey={tocContentKey}
+          enabled={Boolean(isMarkdown && !markdownEditing && tocOpen)}
+        />
+        <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full flex-1 min-w-0 overflow-auto scrollbar-thin relative">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
           ) : previewOnly ? (

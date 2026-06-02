@@ -11,7 +11,6 @@ import { cn } from '@/lib/utils'
 
 export interface MentionListProps<T> {
   items: T[]
-  selectedIndex: number
   onSelect: (item: T) => void
   /** 空列表占位文字 */
   emptyText: string
@@ -87,7 +86,13 @@ function MentionListInner<T>(
             'w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-accent transition-colors',
             index === localIndex && 'bg-accent text-accent-foreground',
           )}
-          onClick={() => onSelect(item)}
+          // 用 mousedown 而非 click：异步 items 重渲染会替换 button 节点，
+          // 导致 mousedown/mouseup 不在同一节点、click 不派发而漏选；
+          // preventDefault 阻止按钮抢焦点，避免编辑器 blur 触发弹窗关闭竞态。
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onSelect(item)
+          }}
         >
           {renderItem(item)}
         </button>

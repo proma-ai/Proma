@@ -20,6 +20,13 @@ import { runAgentHeadless, agentEventBus, stopAgent, isAgentSessionActive } from
 import { getSettings } from './settings-service'
 import { resolveWorkspaceFilesDir } from './config-paths'
 import { buildAttachedFilesBlock, buildSessionFileTree, buildFileTree } from './bridge-attachment-utils'
+import {
+  listSwitchableChannels,
+  getEnabledModels,
+  resolveChannelByIndex,
+  resolveModelByIndex,
+  describeBindingModel,
+} from './bridge-model-utils'
 
 // ===== 接口定义 =====
 
@@ -58,7 +65,6 @@ export interface BridgeChatBinding {
   workspaceId: string
   channelId: string
   modelId?: string
-  mode: 'agent' | 'chat'
 }
 
 /** Agent 回复缓冲 */
@@ -146,7 +152,6 @@ export class BridgeCommandHandler {
       workspaceId,
       channelId,
       modelId: settings.agentModelId ?? undefined,
-      mode: 'agent',
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
@@ -197,30 +202,27 @@ export class BridgeCommandHandler {
 
     switch (command?.toLowerCase()) {
       case '/help':
+      case '/h':
         await this.sendHelp(chatId, contextData)
         break
 
       case '/new':
+      case '/n':
         await this.createNewSession(chatId, arg || undefined, contextData)
         break
 
-      case '/chat':
-        await this.updateBindingMode(chatId, 'chat', contextData)
-        break
-
-      case '/agent':
-        await this.updateBindingMode(chatId, 'agent', contextData)
-        break
-
       case '/list':
+      case '/ls':
         await this.handleListCommand(chatId, contextData)
         break
 
       case '/stop':
+      case '/s':
         await this.handleStopCommand(chatId, contextData)
         break
 
       case '/switch':
+      case '/sw':
         if (!arg) {
           await this.send(chatId, '用法: /switch <序号>（先用 /list 查看）', contextData)
           return
@@ -229,11 +231,17 @@ export class BridgeCommandHandler {
         break
 
       case '/workspace':
+      case '/ws':
         await this.handleWorkspaceCommand(chatId, arg || undefined, contextData)
         break
 
       case '/now':
         await this.handleNowCommand(chatId, contextData)
+        break
+
+      case '/model':
+      case '/m':
+        await this.handleModelCommand(chatId, arg, contextData)
         break
 
       default:
@@ -245,16 +253,15 @@ export class BridgeCommandHandler {
 
   private async sendHelp(chatId: string, contextData?: unknown): Promise<void> {
     const lines = [
-      '📋 可用命令:',
+      '📋 可用命令（斜杠后为简写）:',
       '',
-      '/help — 显示此帮助',
-      '/new [标题] — 创建新 Agent 会话',
-      '/list — 列出所有会话',
-      '/switch <序号> — 切换到指定会话',
-      '/stop — 停止当前 Agent',
-      '/workspace [名称] — 查看或切换工作区',
-      '/agent — 切换到 Agent 模式',
-      '/chat — 切换到 Chat 模式',
+      '/help (/h) — 显示此帮助',
+      '/new (/n) [标题] — 创建新 Agent 会话',
+      '/list (/ls) — 列出所有会话',
+      '/switch (/sw) <序号> — 切换到指定会话',
+      '/stop (/s) — 停止当前 Agent',
+      '/workspace (/ws) [名称] — 查看或切换工作区',
+      '/model (/m) [渠道 [模型]] — 查看或切换渠道/模型',
       '/now — 查看当前状态',
     ]
     await this.send(chatId, lines.join('\n'), contextData)
@@ -289,7 +296,6 @@ export class BridgeCommandHandler {
       workspaceId,
       channelId,
       modelId: settings.agentModelId ?? undefined,
-      mode: 'agent',
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
@@ -298,17 +304,6 @@ export class BridgeCommandHandler {
     this.notifySessionCreated(session.id, session.title)
 
     await this.send(chatId, `✅ 已创建 Agent 会话: ${session.title} (${session.id.slice(0, 8)})`, contextData)
-  }
-
-  private async updateBindingMode(chatId: string, mode: 'agent' | 'chat', contextData?: unknown): Promise<void> {
-    const binding = this.chatBindings.get(chatId)
-    if (!binding) {
-      await this.send(chatId, '当前没有绑定的会话，发送消息将自动创建。', contextData)
-      return
-    }
-    binding.mode = mode
-    const label = mode === 'agent' ? 'Agent' : 'Chat'
-    await this.send(chatId, `✅ 已切换到 ${label} 模式`, contextData)
   }
 
   private async handleListCommand(chatId: string, contextData?: unknown): Promise<void> {
@@ -399,7 +394,6 @@ export class BridgeCommandHandler {
       workspaceId: match.workspaceId ?? this.config.getDefaultWorkspaceId?.() ?? settings.agentWorkspaceId ?? '',
       channelId: match.channelId ?? settings.agentChannelId ?? '',
       modelId: settings.agentModelId ?? undefined,
-      mode: 'agent',
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(match.id, chatId)
@@ -483,7 +477,12 @@ export class BridgeCommandHandler {
     if (binding) {
       const session = getAgentSessionMeta(binding.sessionId)
       lines.push(`会话: ${session?.title ?? '未知'} (${binding.sessionId.slice(0, 8)})`)
-      lines.push(`模式: ${binding.mode === 'agent' ? 'Agent' : 'Chat'}`)
+      // 与发送路径同序解析：binding > 应用设置
+      const nowSettings = getSettings()
+      const effChannelId = binding.channelId || nowSettings.agentChannelId
+      const effModelId = binding.modelId ?? nowSettings.agentModelId
+      const modelInfo = describeBindingModel(effChannelId, effModelId)
+      lines.push(`模型: ${modelInfo.channelName} / ${modelInfo.modelName}${modelInfo.valid ? '' : '（已失效）'}`)
     } else {
       lines.push('会话: 未绑定（发送消息将自动创建）')
     }
@@ -552,6 +551,95 @@ export class BridgeCommandHandler {
     await this.send(chatId, lines.join('\n'), contextData)
   }
 
+  /**
+   * /model 命令：罗列渠道 / 罗列模型 / 切换模型（per-chat）
+   * - /model            列出可用渠道
+   * - /model <渠道序号>  列出该渠道下的模型
+   * - /model <渠道> <模型> 切换到该渠道的该模型
+   */
+  private async handleModelCommand(chatId: string, arg: string, contextData?: unknown): Promise<void> {
+    const channels = listSwitchableChannels()
+    if (channels.length === 0) {
+      await this.send(
+        chatId,
+        '暂无可用渠道。请先在 Proma 设置中配置并启用渠道（需填入 API Key 且至少启用一个模型）。',
+        contextData,
+      )
+      return
+    }
+
+    const parts = arg.split(/\s+/).filter(Boolean)
+
+    // /model — 列出渠道
+    if (parts.length === 0) {
+      const binding = this.chatBindings.get(chatId)
+      const lines = ['📡 可用渠道:']
+      channels.forEach((c, i) => {
+        const marker = binding?.channelId === c.id ? ' ← 当前' : ''
+        lines.push(`  ${i + 1}. ${c.name}（${getEnabledModels(c).length} 个模型）${marker}`)
+      })
+      lines.push('')
+      lines.push('使用 /model <渠道序号> 查看模型')
+      await this.send(chatId, lines.join('\n'), contextData)
+      return
+    }
+
+    // 解析渠道
+    const channelIdx = Number(parts[0])
+    const channel = resolveChannelByIndex(channelIdx)
+    if (!channel) {
+      await this.send(chatId, `未找到渠道 "${parts[0]}"。使用 /model 查看可用渠道。`, contextData)
+      return
+    }
+
+    const models = getEnabledModels(channel)
+
+    // /model <渠道> — 列出该渠道模型
+    if (parts.length === 1) {
+      const binding = this.chatBindings.get(chatId)
+      const lines = [`🤖 ${channel.name} 的可用模型:`]
+      models.forEach((m, i) => {
+        const isCurrent = binding?.channelId === channel.id && binding?.modelId === m.id
+        lines.push(`  ${i + 1}. ${m.name}${isCurrent ? ' ← 当前' : ''}`)
+      })
+      lines.push('')
+      lines.push(`使用 /model ${channelIdx} <模型序号> 切换`)
+      await this.send(chatId, lines.join('\n'), contextData)
+      return
+    }
+
+    // /model <渠道> <模型> — 切换
+    const modelIdx = Number(parts[1])
+    const model = resolveModelByIndex(channel, modelIdx)
+    if (!model) {
+      await this.send(
+        chatId,
+        `未找到模型 "${parts[1]}"。使用 /model ${channelIdx} 查看该渠道的模型。`,
+        contextData,
+      )
+      return
+    }
+
+    // 切换需要一个 binding 承载；没有则自动创建
+    let binding = this.chatBindings.get(chatId)
+    if (!binding) {
+      binding = this.ensureBinding(chatId) ?? undefined
+      if (!binding) {
+        await this.send(chatId, '请先发送一条消息创建会话，或在 Proma 设置中选择 Agent 渠道。', contextData)
+        return
+      }
+    }
+
+    binding.channelId = channel.id
+    binding.modelId = model.id
+
+    await this.send(
+      chatId,
+      `✅ 已切换模型: ${channel.name} / ${model.name}\n（注：重启应用后会恢复默认渠道设置）`,
+      contextData,
+    )
+  }
+
   // ===== Agent 消息路由 =====
 
   private async handleUserMessage(
@@ -579,11 +667,6 @@ export class BridgeCommandHandler {
       binding = result
     }
 
-    if (binding.mode !== 'agent') {
-      await this.send(chatId, 'Chat 模式暂未实现，请使用 /agent 切换到 Agent 模式。', contextData)
-      return
-    }
-
     // 并发保护：如果该会话的 Agent 仍在运行，直接拒绝，不要触碰 buffer
     if (isAgentSessionActive(binding.sessionId)) {
       await this.send(chatId, '❌ 上一条消息仍在处理中，请稍候再试', contextData)
@@ -605,10 +688,10 @@ export class BridgeCommandHandler {
       startedAt: Date.now(),
     })
 
-    // 使用最新设置
+    // 渠道/模型解析：binding（per-chat 用户在 IM 里切过的）优先，其次全局设置
     const latestSettings = getSettings()
-    const latestChannelId = latestSettings.agentChannelId || binding.channelId
-    const modelId = latestSettings.agentModelId || binding.modelId
+    const latestChannelId = binding.channelId || latestSettings.agentChannelId || ''
+    const modelId = binding.modelId ?? latestSettings.agentModelId
 
     // 如果有附件，拼接 <attached_files> 块到用户消息前
     const fileReferences = attachments?.length
