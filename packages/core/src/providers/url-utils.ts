@@ -97,6 +97,7 @@ export function normalizeAnthropicProviderUrl(baseUrl: string, provider: Provide
     || provider === 'anthropic-compatible'
     || provider === 'xiaomi'
     || provider === 'xiaomi-token-plan'
+    || provider === 'zhipu-coding'
   ) {
     return normalizeVersionedAnthropicBaseUrl(baseUrl)
   }

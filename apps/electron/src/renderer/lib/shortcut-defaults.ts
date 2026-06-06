@@ -92,8 +92,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   },
   {
     id: 'file-find',
-    name: '文件内查找',
-    description: '在文件预览或 Diff 面板中查找当前文件内容',
+    name: '查找',
+    description: '在对话中搜索消息，或在文件预览/Diff 面板中查找文件内容',
     defaultMac: 'Cmd+F',
     defaultWin: 'Ctrl+F',
     category: 'navigation',

@@ -59,6 +59,7 @@ import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
+import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -143,6 +144,8 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         return [{ type: 'exit_plan_mode_resolved', requestId: evt.requestId }]
       case 'enter_plan_mode':
         return [{ type: 'enter_plan_mode', sessionId: evt.sessionId }]
+      case 'plan_mode_changed':
+        return [{ type: 'plan_mode_changed', active: evt.active, source: evt.source }]
       case 'model_resolved':
         return [{ type: 'model_resolved', model: evt.model }]
       case 'permission_mode_changed':
@@ -187,6 +190,14 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
           const tb = block as SDKContentBlock & { id: string; name: string; input: Record<string, unknown> }
           const intent = (tb.input._intent as string | undefined)
             ?? (tb.name === 'Bash' ? (tb.input.description as string | undefined) : undefined)
+          const planModeChange = getPlanModeChangeFromToolName(tb.name)
+          if (planModeChange) {
+            events.push({
+              type: 'plan_mode_changed',
+              active: planModeChange.active,
+              source: planModeChange.source,
+            })
+          }
           events.push({
             type: 'tool_start',
             toolName: tb.name,
@@ -865,18 +876,14 @@ export function useGlobalAgentListeners(): void {
             )
           } else if (event.type === 'enter_plan_mode') {
             // 进入 Plan 模式
-            store.set(agentPlanModeSessionsAtom, (prev: Set<string>) => {
-              if (prev.has(sessionId)) return prev
-              const next = new Set(prev)
-              next.add(sessionId)
-              return next
-            })
-            // 同步更新权限模式选择器（per-session）
-            store.set(agentPermissionModeMapAtom, (prev: Map<string, import('@proma/shared').PromaPermissionMode>) => {
-              const next = new Map(prev)
-              next.set(sessionId, 'plan')
-              return next
-            })
+            store.set(agentPlanModeSessionsAtom, (prev: Set<string>) =>
+              updatePlanModeSessionSet(prev, sessionId, true)
+            )
+          } else if (event.type === 'plan_mode_changed') {
+            // 计划阶段变化只影响输入框/横幅状态，不改用户选择的权限模式
+            store.set(agentPlanModeSessionsAtom, (prev: Set<string>) =>
+              updatePlanModeSessionSet(prev, sessionId, event.active)
+            )
           } else if (event.type === 'permission_mode_changed') {
             // 权限模式变更（如 Plan 模式退出后切换到自动审批或完全自动）
             console.log(`[GlobalAgentListeners] 权限模式变更: ${event.mode}`)
@@ -885,6 +892,9 @@ export function useGlobalAgentListeners(): void {
               next.set(sessionId, event.mode)
               return next
             })
+            store.set(agentPlanModeSessionsAtom, (prev: Set<string>) =>
+              updatePlanModeSessionSet(prev, sessionId, event.mode === 'plan')
+            )
           }
         }
         }) // unstable_batchedUpdates

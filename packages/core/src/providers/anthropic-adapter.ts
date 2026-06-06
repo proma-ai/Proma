@@ -278,7 +278,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     }
-    if (this.providerType === 'kimi-coding') {
+    if (this.providerType === 'kimi-coding' || this.providerType === 'zhipu-coding') {
       base['Authorization'] = `Bearer ${apiKey}`
       base['User-Agent'] = getPromaUserAgent()
       return base

@@ -15,6 +15,7 @@ import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { getModelLogo } from '@/lib/model-logo'
+import { useShortcut } from '@/hooks/useShortcut'
 import { cn } from '@/lib/utils'
 
 export interface MinimapItem {
@@ -171,6 +172,18 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   React.useEffect(() => {
     if (!hovered) setSearchQuery('')
   }, [hovered])
+
+  // ── Cmd+F / Ctrl+F 快捷键：打开面板并聚焦搜索 ──
+
+  const handleShortcutOpen = React.useCallback(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = undefined }
+    setIsLeaving(false)
+    setHovered(true)
+  }, [])
+
+  useShortcut('file-find', handleShortcutOpen, items.length >= MIN_ITEMS && canScroll)
 
   // ── 鼠标进出控制（仅迷你地图区域） ──
 

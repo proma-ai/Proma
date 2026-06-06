@@ -44,7 +44,7 @@ let rateLimitUntil = 0
 async function fetchFromGitHub<T>(endpoint: string): Promise<T> {
   // Rate limit 冷却期内直接跳过
   if (Date.now() < rateLimitUntil) {
-    throw new Error('GitHub API rate limit cooldown')
+    throw new Error('GitHub API 请求过于频繁，请稍后再试')
   }
 
   const url = `${GITHUB_API_BASE}/repos/${GITHUB_REPO.owner}/${GITHUB_REPO.repo}${endpoint}`
@@ -61,13 +61,12 @@ async function fetchFromGitHub<T>(endpoint: string): Promise<T> {
   if (response.status === 403 || response.status === 429) {
     // Rate limited — 冷却 15 分钟
     rateLimitUntil = Date.now() + 15 * 60 * 1000
-    throw new Error('GitHub API rate limit exceeded, cooling down for 15 minutes')
+    throw new Error('GitHub API 请求过于频繁，请 15 分钟后重试')
   }
 
   if (!response.ok) {
-    const errorText = await response.text()
     throw new Error(
-      `GitHub API 请求失败: ${response.status} ${response.statusText}\n${errorText}`
+      `GitHub API 请求失败 (${response.status})，请检查网络连接后重试`
     )
   }
 
@@ -155,7 +154,8 @@ export async function listReleases(
         : releaseCache.data.filter(r => !r.prerelease && !r.draft)
       return filtered.slice(0, perPage)
     }
-    return []
+    // 没有缓存时抛出异常，让前端知道加载失败
+    throw error instanceof Error ? error : new Error(String(error))
   }
 }
 

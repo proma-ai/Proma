@@ -10,7 +10,6 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'
 import { tabsAtom, activeTabIdAtom, activeTabAtom } from '@/atoms/tab-atoms'
 import { Panel } from '@/components/app-shell/Panel'
-import { SettingsDialog } from '@/components/settings'
 import { WelcomeView } from '@/components/welcome/WelcomeView'
 import { previewPanelOpenMapAtom, previewSplitRatioAtom } from '@/atoms/preview-atoms'
 import { PreviewPanel } from '@/components/diff/PreviewPanel'
@@ -179,7 +178,6 @@ export function MainArea(): React.ReactElement {
           )}
         </div>
       </Panel>
-      <SettingsDialog />
     </>
   )
 }

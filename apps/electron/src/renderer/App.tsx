@@ -8,6 +8,7 @@ import { MigrationImportDialog } from './components/migration/MigrationImportDia
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
+import { SettingsDialog } from './components/settings/SettingsDialog'
 import { conversationsAtom } from './atoms/chat-atoms'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { tabsAtom, activeTabIdAtom, openTab } from './atoms/tab-atoms'
@@ -103,6 +104,7 @@ export default function App(): React.ReactElement {
         <AppShell contextValue={contextValue} />
         <QuotaExceededDialog />
       </CloudAuthGate>
+      <SettingsDialog />
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
       <MigrationImportDialog />

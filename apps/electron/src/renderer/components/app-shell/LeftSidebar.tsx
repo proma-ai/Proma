@@ -199,9 +199,9 @@ function groupByDate<T extends { updatedAt: number }>(items: T[]): Array<{ label
 
 const RAIL_STATUS_CLASS: Record<SessionIndicatorStatus, string> = {
   idle: 'hidden',
-  running: 'bg-blue-500 animate-pulse',
-  blocked: 'bg-orange-500',
-  completed: 'bg-emerald-500',
+  running: 'border-blue-500 animate-pulse',
+  blocked: 'border-orange-500',
+  completed: 'border-emerald-500',
 }
 
 const SIDEBAR_DRAG_STRIP_HEIGHT = {
@@ -262,7 +262,7 @@ function RailRecentButton({
           >
             <span
               className={cn(
-                'absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full pointer-events-none',
+                'absolute inset-y-0 left-0 w-0 border-l-[3px] rounded-l-[12px] pointer-events-none',
                 RAIL_STATUS_CLASS[item.status]
               )}
             />
@@ -1483,7 +1483,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               >
                 {/* Tab 切换按钮 */}
                 <div className="pt-2 px-3 flex-shrink-0">
-                  <div className="flex items-center gap-1 mb-0.5">
+                  <div className="flex items-center gap-1 mb-1.5">
                     <button
                       onClick={() => setAgentSubTab('working')}
                       className={cn(
@@ -2024,9 +2024,9 @@ const ConversationItem = React.memo(function ConversationItem({
 /** 会话行左侧状态色块的颜色 — 与 SessionIndicatorStatus 呼应 */
 type SessionLeftAccent = 'orange' | 'blue' | 'green'
 const SESSION_LEFT_ACCENT_CLASS: Record<SessionLeftAccent, string> = {
-  orange: 'bg-orange-500',
-  blue: 'bg-blue-500',
-  green: 'bg-green-500',
+  orange: 'border-orange-500',
+  blue: 'border-blue-500',
+  green: 'border-green-500',
 }
 
 interface AgentSessionItemProps {
@@ -2076,10 +2076,18 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const [confirmingDone, setConfirmingDone] = React.useState(false)
+  const confirmingDoneTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(300, disableMiniMap || menuOpen)
+
+  React.useEffect(() => {
+    return () => {
+      if (confirmingDoneTimer.current) clearTimeout(confirmingDoneTimer.current)
+    }
+  }, [])
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -2178,7 +2186,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           {leftAccent && (
             <span
               className={cn(
-                'absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full pointer-events-none',
+                'absolute inset-y-0 left-0 w-0 border-l-[3px] rounded-l-md pointer-events-none',
                 SESSION_LEFT_ACCENT_CLASS[leftAccent]
               )}
             />
@@ -2218,24 +2226,43 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label="标记为完成"
+                  aria-label={confirmingDone ? '确认完成' : '标记为完成'}
                   className={cn(
-                    'flex-shrink-0 p-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary transition-colors',
-                    'opacity-0 pointer-events-none',
-                    'group-hover:opacity-100 group-hover:pointer-events-auto',
-                    'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                    'flex-shrink-0 p-1 rounded-md transition-colors',
+                    confirmingDone
+                      ? 'bg-destructive/15 text-destructive hover:bg-destructive/25 opacity-100 pointer-events-auto'
+                      : cn(
+                          'bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary',
+                          'opacity-0 pointer-events-none',
+                          'group-hover:opacity-100 group-hover:pointer-events-auto',
+                          'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                        ),
                   )}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={(e) => {
                     e.stopPropagation()
-                    void onConfirmDone(session.id)
+                    if (!confirmingDone) {
+                      setConfirmingDone(true)
+                      if (confirmingDoneTimer.current) clearTimeout(confirmingDoneTimer.current)
+                      confirmingDoneTimer.current = setTimeout(() => setConfirmingDone(false), 3000)
+                    } else {
+                      setConfirmingDone(false)
+                      if (confirmingDoneTimer.current) clearTimeout(confirmingDoneTimer.current)
+                      void onConfirmDone(session.id)
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (confirmingDone) {
+                      if (confirmingDoneTimer.current) clearTimeout(confirmingDoneTimer.current)
+                      confirmingDoneTimer.current = setTimeout(() => setConfirmingDone(false), 1500)
+                    }
                   }}
                 >
-                  <Check size={14} />
+                  {confirmingDone ? <Check size={14} strokeWidth={3} /> : <Check size={14} />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-[220px]">
-                标记为完成。之后可以随时通过搜索或最近工作找到这个会话。
+                {confirmingDone ? '再次点击确认完成' : '标记为完成。之后可以随时通过搜索或最近工作找到这个会话。'}
               </TooltipContent>
             </Tooltip>
           )}

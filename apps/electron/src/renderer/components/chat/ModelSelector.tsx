@@ -275,7 +275,7 @@ export function ModelSelector({
           </div>
 
           {/* 模型列表 */}
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="max-h-[420px] overflow-y-auto scrollbar-thin">
             {filteredGrouped.size === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
                 未找到模型

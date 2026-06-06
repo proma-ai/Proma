@@ -45,6 +45,7 @@ import type {
   ProviderType,
 } from '@proma/shared'
 import { normalizeAnthropicProviderUrl } from '@proma/core'
+import { getProviderLogo } from '@/lib/model-logo'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   AlertDialog,
@@ -73,12 +74,13 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
   value: p,
   label: PROVIDER_LABELS[p],
+  icon: getProviderLogo(p),
 }))
 
 /** 各供应商的 Chat 端点路径，用于 Base URL 预览 */
@@ -92,6 +94,7 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   'kimi-api': '/messages',
   'kimi-coding': '/messages',
   zhipu: '/chat/completions',
+  'zhipu-coding': '/messages',
   minimax: '/v1/messages',
   doubao: '/chat/completions',
   qwen: '/chat/completions',
@@ -107,6 +110,7 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'deepseek',
   'kimi-api',
   'kimi-coding',
+  'zhipu-coding',
   'minimax',
   'xiaomi',
   'xiaomi-token-plan',
@@ -272,6 +276,10 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       } else if (p === 'kimi-coding') {
         setModels([
           { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
+        ])
+      } else if (p === 'zhipu' || p === 'zhipu-coding') {
+        setModels([
+          { id: 'glm-5.1', name: 'GLM-5.1', enabled: true },
         ])
       } else if (p === 'minimax') {
         setModels([
@@ -510,19 +518,19 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       {!isPromaOfficial && (
         <SettingsSection title="基本信息">
           <SettingsCard>
-            <SettingsInput
-              label="渠道名称"
-              value={name}
-              onChange={setName}
-              placeholder="例如: My Anthropic"
-              required
-            />
             <SettingsSelect
               label="供应商类型"
               value={provider}
               onValueChange={handleProviderChange}
               options={PROVIDER_SELECT_OPTIONS}
               placeholder="选择供应商"
+            />
+            <SettingsInput
+              label="供应商名称"
+              value={name}
+              onChange={setName}
+              placeholder="例如: My Anthropic"
+              required
             />
             <SettingsInput
               label="Base URL"

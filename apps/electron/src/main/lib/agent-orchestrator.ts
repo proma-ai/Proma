@@ -80,6 +80,12 @@ export interface SessionCallbacks {
 
 // ===== 工具函数 =====
 
+function sdkPermissionModeForPromaMode(mode: PromaPermissionMode): PromaPermissionMode {
+  // Proma 自己在 canUseTool 里实现完全自动。SDK 原生 bypassPermissions
+  // 可能在 canUseTool 前直接放行 ExitPlanMode，绕过计划审批。
+  return mode === 'bypassPermissions' ? 'auto' : PROMA_PERMISSION_MODE_CONFIG[mode].sdkMode
+}
+
 /**
  * 从 stderr 中提取 API 错误信息
  *
@@ -595,10 +601,7 @@ export class AgentOrchestrator {
     // - 其它：ANTHROPIC_API_KEY（SDK 内部会同时带上 x-api-key 和 Bearer）
     if (provider === 'proma') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
-    } else if (provider === 'kimi-coding') {
-      sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
-      sdkEnv.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
-    } else if (provider === 'xiaomi-token-plan') {
+    } else if (provider === 'kimi-coding' || provider === 'zhipu-coding' || provider === 'xiaomi-token-plan') {
       sdkEnv.ANTHROPIC_AUTH_TOKEN = apiKey
       sdkEnv.ANTHROPIC_CUSTOM_HEADERS = `User-Agent: ${getPromaUserAgent(pkg.version)}`
     } else if (provider === 'minimax') {
@@ -1384,9 +1387,17 @@ export class AgentOrchestrator {
       this.sessionPermissionModes.set(sessionId, initialPermissionMode)
       console.log(`[Agent 编排] 权限模式: ${initialPermissionMode}${permissionModeOverride ? '（外部覆盖）' : ''}`)
 
+      const emitPlanModeChanged = (active: boolean, source: 'initial' | 'tool' | 'permission'): void => {
+        this.eventBus.emit(sessionId, {
+          kind: 'proma_event',
+          event: { type: 'plan_mode_changed', sessionId, active, source },
+        })
+      }
+
       // 当初始模式为 plan 时，通知渲染进程展示计划模式 UI（如「Agent 正在规划」横幅）
       if (initialPermissionMode === 'plan') {
         this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'enter_plan_mode', sessionId } })
+        emitPlanModeChanged(true, 'initial')
       }
 
       /** 读取当前会话的实时权限模式（支持运行中切换） */
@@ -1458,6 +1469,16 @@ export class AgentOrchestrator {
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
       let planModeEntered = initialPermissionMode === 'plan'
 
+      const syncPlanModeFromToolUse = (toolName: string): void => {
+        if (toolName === 'EnterPlanMode') {
+          planModeEntered = true
+          emitPlanModeChanged(true, 'tool')
+          return
+        }
+        // ExitPlanMode 的 tool_use 只代表 Agent 准备退出计划模式。
+        // 真正退出必须等待用户审批结果，不能在这里提前清掉计划态。
+      }
+
       // 动态 canUseTool：每次调用读取当前权限模式，支持运行中切换
       const canUseTool = async (toolName: string, input: Record<string, unknown>, options: CanUseToolOptions): Promise<PermissionResult> => {
         const currentMode = getPermissionMode()
@@ -1487,25 +1508,25 @@ export class AgentOrchestrator {
 
         // ── EnterPlanMode / ExitPlanMode 处理 ──
 
-        // 完全自动模式：透明化（用户选择了完全信任 Agent）
-        if (currentMode === 'bypassPermissions' && (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode')) {
+        // 完全自动模式：进入计划阶段透明化；退出计划仍必须审批。
+        if (currentMode === 'bypassPermissions' && toolName === 'EnterPlanMode') {
+          planModeEntered = true
+          emitPlanModeChanged(true, 'tool')
           return { behavior: 'allow' as const, updatedInput: input }
         }
 
-        // ExitPlanMode：只有 Agent 确实进入过 Plan 模式才走审批，否则静默放行
+        // ExitPlanMode：无论当前权限模式是什么，都必须让用户确认计划。
         if (toolName === 'ExitPlanMode') {
           console.log(`[canUseTool] ExitPlanMode: signal.aborted=${options.signal.aborted}, planModeEntered=${planModeEntered}, mode=${currentMode}`)
-          if (!planModeEntered) {
-            return { behavior: 'allow' as const, updatedInput: input }
-          }
           const result = await handleExitPlanMode(input, options.signal)
           if (result.behavior === 'allow' && 'targetMode' in result && result.targetMode) {
             // 更新 Map，后续 canUseTool 调用使用新模式
             this.sessionPermissionModes.set(sessionId, result.targetMode)
             planModeEntered = false
+            emitPlanModeChanged(false, 'permission')
             // 同步通知 SDK 侧切换权限模式
             if (this.adapter.setPermissionMode) {
-              this.adapter.setPermissionMode(sessionId, result.targetMode).catch((err: unknown) => {
+              this.adapter.setPermissionMode(sessionId, sdkPermissionModeForPromaMode(result.targetMode)).catch((err: unknown) => {
                 console.warn(`[Agent 编排] SDK 权限模式切换失败:`, err)
               })
             }
@@ -1516,6 +1537,7 @@ export class AgentOrchestrator {
         // EnterPlanMode：标记进入状态，通知渲染进程
         if (toolName === 'EnterPlanMode') {
           planModeEntered = true
+          emitPlanModeChanged(true, 'tool')
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'enter_plan_mode', sessionId } })
           return { behavior: 'allow' as const, updatedInput: input }
         }
@@ -1589,7 +1611,7 @@ export class AgentOrchestrator {
         sdkCliPath: cliPath,
         env: sdkEnv,
         ...(maxTurns != null && { maxTurns }),
-        sdkPermissionMode: PROMA_PERMISSION_MODE_CONFIG[initialPermissionMode].sdkMode,
+        sdkPermissionMode: sdkPermissionModeForPromaMode(initialPermissionMode),
         // 当提供 canUseTool 回调时必须为 false，否则 CLI 同时收到
         // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
         // 两个矛盾的指令，导致 ExitPlanMode/AskUserQuestion 等交互式工具失败。
@@ -1597,7 +1619,7 @@ export class AgentOrchestrator {
         // Worker 子代理在 bypassPermissions 模式下也会被自动放行。
         allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
-        ...(initialPermissionMode === 'auto' && { allowedTools: [...SAFE_TOOLS] }),
+        ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: [...SAFE_TOOLS] }),
         // claude_code preset 提供基础环境信息（platform/shell/OS/git/model/知识截止日期等）
         // buildSystemPrompt 追加 Proma 特有指令（角色定义、SubAgent 策略、工作区信息等）
         systemPrompt: {
@@ -1793,6 +1815,19 @@ export class AgentOrchestrator {
 
             pendingNext = null
             const msg = iterResult.value
+
+            // SDK 权限模式可能在 canUseTool 前直接批准工具（如 bypassPermissions）。
+            // 因此计划阶段状态要从实际 tool_use 流里同步，不能只依赖权限回调。
+            if (msg.type === 'assistant') {
+              const assistantMsg = msg as SDKAssistantMessage
+              if (!assistantMsg.isReplay) {
+                for (const block of assistantMsg.message.content) {
+                  if (block.type === 'tool_use' && 'name' in block && typeof block.name === 'string') {
+                    syncPlanModeFromToolUse(block.name)
+                  }
+                }
+              }
+            }
 
             // 检测 assistant 消息中的 SDK 错误
             if (msg.type === 'assistant') {
@@ -2322,9 +2357,13 @@ export class AgentOrchestrator {
   async updateSessionPermissionMode(sessionId: string, mode: PromaPermissionMode): Promise<void> {
     if (!this.activeSessions.has(sessionId)) return
     this.sessionPermissionModes.set(sessionId, mode)
+    this.eventBus.emit(sessionId, {
+      kind: 'proma_event',
+      event: { type: 'plan_mode_changed', sessionId, active: mode === 'plan', source: 'permission' },
+    })
     // 同步通知 SDK 侧
     if (this.adapter.setPermissionMode) {
-      await this.adapter.setPermissionMode(sessionId, mode)
+      await this.adapter.setPermissionMode(sessionId, sdkPermissionModeForPromaMode(mode))
     }
     console.log(`[Agent 编排] 运行中权限模式已切换: sessionId=${sessionId}, mode=${mode}`)
   }

@@ -7,13 +7,14 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Zap, Compass, Map as MapIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
-import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, sessionPersistedPermissionModeAtom, sessionExistsAtom } from '@/atoms/agent-atoms'
+import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, sessionPersistedPermissionModeAtom, sessionExistsAtom, agentPlanModeSessionsAtom } from '@/atoms/agent-atoms'
 import type { PromaPermissionMode } from '@proma/shared'
 import { PROMA_PERMISSION_MODE_CONFIG, PROMA_PERMISSION_MODE_ORDER } from '@proma/shared'
+import { updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
 const MODE_ICONS: Record<PromaPermissionMode, React.ComponentType<{ className?: string }>> = {
   auto: Compass,
@@ -27,6 +28,7 @@ interface PermissionModeSelectorProps {
 
 export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProps): React.ReactElement | null {
   const [modeMap, setModeMap] = useAtom(agentPermissionModeMapAtom)
+  const setPlanModeSessions = useSetAtom(agentPlanModeSessionsAtom)
   const defaultMode = useAtomValue(agentDefaultPermissionModeAtom)
   const persistedSessionMode = useAtomValue(sessionPersistedPermissionModeAtom(sessionId))
   const mode = modeMap.get(sessionId) ?? persistedSessionMode ?? defaultMode
@@ -60,6 +62,9 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
       next.set(sessionId, nextMode)
       return next
     })
+    setPlanModeSessions((prev: Set<string>) =>
+      updatePlanModeSessionSet(prev, sessionId, nextMode === 'plan')
+    )
 
     // 热切换运行中的当前 session；失败时回滚 modeMap 保持 UI/后端一致
     try {
@@ -71,8 +76,11 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
         next.set(sessionId, prevMode)
         return next
       })
+      setPlanModeSessions((prev: Set<string>) =>
+        updatePlanModeSessionSet(prev, sessionId, prevMode === 'plan')
+      )
     }
-  }, [mode, sessionId, setModeMap])
+  }, [mode, sessionId, setModeMap, setPlanModeSessions])
 
   const config = PROMA_PERMISSION_MODE_CONFIG[mode]
   const Icon = MODE_ICONS[mode]

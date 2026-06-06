@@ -93,12 +93,11 @@ export function TabBarItem({
     ? undefined
     : isStreaming !== 'idle'
     ? isStreaming === 'completed'
-      ? 'bg-green-500'
+      ? 'border-green-500'
       : isStreaming === 'blocked'
-        ? 'bg-orange-500'
-        : 'bg-blue-500'
+        ? 'border-orange-500'
+        : 'border-blue-500'
     : undefined
-  const indicatorPulse = isStreaming === 'running' || isStreaming === 'blocked'
   const previewItems = minimapCache.get(id) ?? []
   // 当前 active Tab 不显示预览面板
   const showPreview = isHovered && !isActive
@@ -190,13 +189,12 @@ export function TabBarItem({
         </span>
         )}
 
-        {/* 底部状态横线条 */}
+        {/* 状态包边 */}
         {indicatorColor && (
           <span
             className={cn(
-              'absolute left-2 right-2 bottom-0 h-[2px] rounded-full pointer-events-none',
+              'absolute inset-0 rounded-t-lg border-t-2 border-l-2 border-r-2 border-b-0 pointer-events-none',
               indicatorColor,
-              indicatorPulse && 'animate-pulse',
             )}
             aria-hidden="true"
           />

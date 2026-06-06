@@ -27,7 +27,7 @@ export const TIPS: Tip[] = [
   // macOS 快捷键
   { id: 'mac-shortcut-new', text: '按 ⌘N 快速创建新对话', platform: 'mac' },
   { id: 'mac-shortcut-search', text: '按 ⌘⇧F 搜索历史对话', platform: 'mac' },
-  { id: 'mac-shortcut-file-find', text: '在文件预览中按 ⌘F 可在当前文件内查找内容', platform: 'mac' },
+  { id: 'mac-shortcut-file-find', text: '按 ⌘F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'mac' },
   { id: 'mac-shortcut-settings', text: '按 ⌘, 打开设置', platform: 'mac' },
   { id: 'mac-shortcut-sidebar', text: '按 ⌘B 切换侧边栏显示', platform: 'mac' },
   { id: 'mac-shortcut-mode', text: '按 ⌘⇧M 快速切换 Chat / Agent 模式', platform: 'mac' },
@@ -41,7 +41,7 @@ export const TIPS: Tip[] = [
   // Windows 快捷键
   { id: 'win-shortcut-new', text: '按 Ctrl+N 快速创建新对话', platform: 'windows' },
   { id: 'win-shortcut-search', text: '按 Ctrl+Shift+F 搜索历史对话', platform: 'windows' },
-  { id: 'win-shortcut-file-find', text: '在文件预览中按 Ctrl+F 可在当前文件内查找内容', platform: 'windows' },
+  { id: 'win-shortcut-file-find', text: '按 Ctrl+F 可在对话中搜索消息，预览面板中则查找文件内容', platform: 'windows' },
   { id: 'win-shortcut-settings', text: '按 Ctrl+, 打开设置', platform: 'windows' },
   { id: 'win-shortcut-sidebar', text: '按 Ctrl+B 切换侧边栏显示', platform: 'windows' },
   { id: 'win-shortcut-mode', text: '按 Ctrl+Shift+M 快速切换 Chat / Agent 模式', platform: 'windows' },

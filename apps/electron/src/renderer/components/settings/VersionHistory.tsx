@@ -32,7 +32,14 @@ export function VersionHistory(): React.ReactElement {
       setReleases(data)
     } catch (err) {
       console.error('[版本历史] 加载失败:', err)
-      setError(err instanceof Error ? err.message : '加载失败')
+      let errorMessage = err instanceof Error ? err.message : '加载失败'
+      // 过滤掉 Electron IPC 的英文前缀，只保留中文错误信息
+      // IPC 错误格式: "Error invoking remote method 'xxx': Error: 中文错误信息"
+      const ipcPrefixMatch = errorMessage.match(/Error invoking remote method[^:]*:\s*Error:\s*(.+)/s)
+      if (ipcPrefixMatch && ipcPrefixMatch[1]) {
+        errorMessage = ipcPrefixMatch[1].trim()
+      }
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -75,11 +82,6 @@ export function VersionHistory(): React.ReactElement {
             刷新
           </button>
         </div>
-        {error && (
-          <p className="text-xs text-destructive mt-2">
-            {error}
-          </p>
-        )}
       </div>
 
       {/* 版本列表 */}
@@ -88,6 +90,11 @@ export function VersionHistory(): React.ReactElement {
           <div className="p-8 text-center">
             <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
             <p className="text-sm text-muted-foreground mt-2">加载中...</p>
+          </div>
+        ) : error ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-muted-foreground">加载失败</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
           </div>
         ) : releases.length === 0 ? (
           <div className="p-8 text-center">
