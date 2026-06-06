@@ -174,6 +174,8 @@ interface AgentProjectGroup {
 
 const PROJECT_SESSION_PREVIEW_LIMIT = 5
 const PROJECT_SESSION_RECENT_WINDOW_MS = 3 * 86_400_000
+/** 点击"显示更多"时每次额外展开的会话数量 */
+const PROJECT_SESSION_EXPAND_STEP = 10
 
 const ACTIVE_SESSION_STATUSES: ReadonlySet<SessionIndicatorStatus> = new Set([
   'blocked',
@@ -344,8 +346,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [moveTargetId, setMoveTargetId] = React.useState<string | null>(null)
   /** 置顶区域展开/收起 */
   const [pinnedExpanded, setPinnedExpanded] = React.useState(true)
-  /** 已展开显示全部历史的项目 ID 集合 */
-  const [expandedProjectIds, setExpandedProjectIds] = React.useState<Set<string>>(new Set())
+  /** 每个项目额外展开显示的会话数量（每次点击"显示更多" +10），未点击则为 0 或无值 */
+  const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
@@ -814,12 +816,21 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
   }, [currentWorkspaceId, setCurrentWorkspaceId])
 
-  /** 展开/收起某个项目的完整历史 */
-  const handleToggleProjectExpanded = React.useCallback((workspaceId: string): void => {
-    setExpandedProjectIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(workspaceId)) next.delete(workspaceId)
-      else next.add(workspaceId)
+  /** 展开某个项目时每次额外显示的会话数量 */
+  const handleShowMoreSessions = React.useCallback((workspaceId: string): void => {
+    setExpandedExtraCountMap((prev) => {
+      const next = new Map(prev)
+      next.set(workspaceId, (prev.get(workspaceId) ?? 0) + PROJECT_SESSION_EXPAND_STEP)
+      return next
+    })
+  }, [])
+
+  /** 收起某个项目额外展开的会话 */
+  const handleCollapseExtraSessions = React.useCallback((workspaceId: string): void => {
+    setExpandedExtraCountMap((prev) => {
+      if (!prev.has(workspaceId)) return prev
+      const next = new Map(prev)
+      next.delete(workspaceId)
       return next
     })
   }, [])
@@ -924,7 +935,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       setWorkspaces((prev) => [workspace, ...prev])
       setCurrentWorkspaceId(workspace.id)
       window.electronAPI.updateSettings({ agentWorkspaceId: workspace.id }).catch(console.error)
-      setExpandedProjectIds((prev) => new Set(prev).add(workspace.id))
       setCreatingProject(false)
       setNewProjectName('')
     } catch (error) {
@@ -1564,13 +1574,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   key={group.workspace.id}
                   group={group}
                   currentWorkspaceId={currentWorkspaceId}
-                  expanded={expandedProjectIds.has(group.workspace.id)}
+                  expanded={(expandedExtraCountMap.get(group.workspace.id) ?? 0) > 0}
+                  extraCount={expandedExtraCountMap.get(group.workspace.id) ?? 0}
                   activeSessionId={activeSessionId}
                   agentIndicatorMap={agentIndicatorMap}
                   relativeTimeNow={relativeTimeNow}
                   dragging={dragProjectId === group.workspace.id}
                   dropPosition={projectDropIndicator?.id === group.workspace.id ? projectDropIndicator.position : null}
-                  onToggleExpanded={handleToggleProjectExpanded}
+                  onShowMore={handleShowMoreSessions}
+                  onCollapseExtra={handleCollapseExtraSessions}
                   onSelectProject={handleSelectProject}
                   onNewSession={createAgentSessionInWorkspace}
                   onDragStart={handleProjectDragStart}
@@ -1791,6 +1803,10 @@ function SessionItemActions({
   onMenuOpenChange,
 }: SessionItemActionsProps): React.ReactElement {
   const [archiveConfirming, setArchiveConfirming] = React.useState(false)
+  // 菜单打开时强制保持按钮组挂载且可见：否则鼠标移开后父级 group:hover 失效，
+  // 外层包装变 display:none，Radix Popper 拿不到 trigger 的位置矩形（getBoundingClientRect 全是 0），
+  // 浮层就漂到视口左上角 (0,0)。
+  const [menuOpen, setMenuOpen] = React.useState(false)
 
   React.useEffect(() => {
     if (!archiveConfirming) return
@@ -1811,6 +1827,13 @@ function SessionItemActions({
     setArchiveConfirming(true)
   }
 
+  const handleMenuOpenChange = (open: boolean): void => {
+    setMenuOpen(open)
+    onMenuOpenChange?.(open)
+  }
+
+  const forceVisible = archiveConfirming || menuOpen
+
   return (
     <div
       className="flex-shrink-0 flex items-center h-[18px]"
@@ -1820,7 +1843,7 @@ function SessionItemActions({
         title={`最后更新：${new Date(updatedAt).toLocaleString('zh-CN')}`}
         className={cn(
           'min-w-[42px] text-right text-[11px] leading-[18px] tabular-nums text-foreground/35',
-          archiveConfirming ? 'hidden' : 'group-hover:hidden',
+          forceVisible ? 'hidden' : 'group-hover:hidden',
         )}
       >
         {formatRelativeUpdatedAt(updatedAt, relativeTimeNow)}
@@ -1828,7 +1851,7 @@ function SessionItemActions({
       <div
         className={cn(
           'items-center gap-0.5',
-          archiveConfirming ? 'flex' : 'hidden group-hover:flex',
+          forceVisible ? 'flex' : 'hidden group-hover:flex',
         )}
       >
         <Tooltip>
@@ -1867,7 +1890,7 @@ function SessionItemActions({
             {archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
           </TooltipContent>
         </Tooltip>
-        <DropdownMenu onOpenChange={onMenuOpenChange}>
+        <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <button
               className={cn(
@@ -2080,8 +2103,8 @@ const ConversationItem = React.memo(function ConversationItem({
 type SessionLeftAccent = 'orange' | 'blue' | 'green'
 const SESSION_ACCENT_ROW_CLASS: Record<SessionLeftAccent, string> = {
   orange: 'bg-orange-500/[0.08] text-foreground font-medium',
-  blue: 'bg-foreground/[0.04] text-foreground font-medium',
-  green: 'bg-green-500/[0.08] text-foreground font-medium',
+  blue: 'text-foreground font-medium hover:bg-foreground/[0.03]',
+  green: 'text-foreground font-medium hover:bg-foreground/[0.03]',
 }
 
 const SESSION_ACCENT_INDICATOR_CLASS: Record<SessionLeftAccent, string> = {
@@ -2225,9 +2248,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
-              : active
-                ? 'bg-foreground/[0.04]'
-                : 'hover:bg-foreground/[0.03]'
+              : 'hover:bg-foreground/[0.03]'
           )}
         >
           {(leftAccent || active) && (
@@ -2310,12 +2331,15 @@ interface AgentProjectGroupItemProps {
   group: AgentProjectGroup
   currentWorkspaceId: string | null
   expanded: boolean
+  /** 用户已点击"显示更多"额外展开的会话数量（基于 collapsedSessions 之上累加） */
+  extraCount: number
   activeSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
   relativeTimeNow: number
   dragging: boolean
   dropPosition: 'before' | 'after' | null
-  onToggleExpanded: (workspaceId: string) => void
+  onShowMore: (workspaceId: string) => void
+  onCollapseExtra: (workspaceId: string) => void
   onSelectProject: (workspaceId: string) => void
   onNewSession: (workspaceId: string) => Promise<void>
   onDragStart: (e: React.DragEvent, workspaceId: string) => void
@@ -2336,12 +2360,14 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   group,
   currentWorkspaceId,
   expanded,
+  extraCount,
   activeSessionId,
   agentIndicatorMap,
   relativeTimeNow,
   dragging,
   dropPosition,
-  onToggleExpanded,
+  onShowMore,
+  onCollapseExtra,
   onSelectProject,
   onNewSession,
   onDragStart,
@@ -2364,6 +2390,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   // blocked > running > completed 优先级排序（与 railRecentItems 对齐），
   // 同优先级保留 group.sessions 的 updatedAt 倒序。
   // 非活跃部分仍保留原"最近 3 天 + 至多 5 条"预览策略，作为额外补充展示。
+  // 用户点击"显示更多"会在折叠基线之上每次再额外展开 PROJECT_SESSION_EXPAND_STEP 条。
   const getStatus = (sessionId: string): SessionIndicatorStatus =>
     agentIndicatorMap.get(sessionId) ?? 'idle'
   const activeSessions = group.sessions
@@ -2380,9 +2407,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
     .filter((session) => !activeIds.has(session.id) && session.updatedAt >= recentCutoff)
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
   const collapsedSessions = [...activeSessions, ...fillSessions]
-  const sessions = expanded
-    ? group.sessions
-    : collapsedSessions
+  const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
+  const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
+  const extraSessions = remainingSessions.slice(0, extraCount)
+  const sessions = [...collapsedSessions, ...extraSessions]
   const hiddenCount = Math.max(0, group.sessions.length - sessions.length)
 
   return (
@@ -2412,10 +2440,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           type="button"
           onClick={() => onSelectProject(group.workspace.id)}
           className={cn(
-            'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11',
+            'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11 hover:bg-foreground/[0.025]',
             isCurrent
-              ? 'agent-project-item-current bg-foreground/[0.035] text-foreground'
-              : 'text-foreground/65 hover:bg-foreground/[0.025] hover:text-foreground/88',
+              ? 'agent-project-item-current text-foreground'
+              : 'text-foreground/65 hover:text-foreground/88',
           )}
         >
           <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
@@ -2472,7 +2500,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
 
       <div className="ml-4 mt-px">
         {group.sessions.length > 0 ? (
-          <div className="flex flex-col gap-px">
+          <div className="flex flex-col gap-0.5">
             {sessions.map((session) => (
               <AgentSessionItem
                 key={session.id}
@@ -2494,18 +2522,18 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             {hiddenCount > 0 && (
               <button
                 type="button"
-                onClick={() => onToggleExpanded(group.workspace.id)}
-                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] font-medium text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                onClick={() => onShowMore(group.workspace.id)}
+                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
               >
-                展开显示 {hiddenCount} 个更多会话
+                显示更多
               </button>
             )}
 
-            {expanded && group.sessions.length > PROJECT_SESSION_PREVIEW_LIMIT && (
+            {expanded && (
               <button
                 type="button"
-                onClick={() => onToggleExpanded(group.workspace.id)}
-                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] font-medium text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                onClick={() => onCollapseExtra(group.workspace.id)}
+                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
               >
                 收起
               </button>
