@@ -504,9 +504,6 @@ export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed
 /** 已完成但用户尚未查看的会话 ID 集合 */
 export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
 
-/** Working 区域"已完成"组：后台完成后暂留，用户确认完成、重新运行或归档/删除时移除 */
-export const workingDoneSessionIdsAtom = atom<Set<string>>(new Set<string>())
-
 let lastIndicatorSignature = ''
 let lastIndicatorMap = new Map<string, SessionIndicatorStatus>()
 

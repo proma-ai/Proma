@@ -1,8 +1,8 @@
 /**
- * WorkspaceSelector — Agent 工作区切换器
+ * WorkspaceSelector — Agent 项目切换器
  *
- * 垂直列表展示所有工作区，支持新建、重命名、删除、切换和拖拽排序。
- * 切换工作区后持久化到 settings。
+ * 垂直列表展示所有项目，支持新建、重命名、删除、切换和拖拽排序。
+ * 切换项目后持久化到底层 workspace 设置。
  */
 
 import * as React from 'react'
@@ -20,15 +20,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { workspaceListHeightAtom } from '@/atoms/sidebar-atoms'
-import { useWorkspaceActions } from '@/hooks/useWorkspaceActions'
-import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
+import { projectListHeightAtom } from '@/atoms/sidebar-atoms'
+import { useProjectActions } from '@/hooks/useProjectActions'
+import { agentSessionsAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import type { AgentWorkspace } from '@proma/shared'
 
 export function WorkspaceSelector(): React.ReactElement {
-  const { workspaces, currentWorkspaceId, selectWorkspace, createWorkspace } = useWorkspaceActions()
+  const { workspaces, currentWorkspaceId, selectProject, createProject } = useProjectActions()
   const [, setWorkspaces] = useAtom(agentWorkspacesAtom)
-  const [listHeight, setListHeight] = useAtom(workspaceListHeightAtom)
+  const [, setAgentSessions] = useAtom(agentSessionsAtom)
+  const [listHeight, setListHeight] = useAtom(projectListHeightAtom)
 
   // 高度拖拽调整
   const listRef = React.useRef<HTMLDivElement>(null)
@@ -89,10 +90,10 @@ export function WorkspaceSelector(): React.ReactElement {
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
 
-  /** 切换工作区 */
+  /** 切换项目 */
   const handleSelect = (workspace: AgentWorkspace): void => {
     if (editingId) return
-    selectWorkspace(workspace.id)
+    selectProject(workspace.id)
   }
 
   // ===== 新建 =====
@@ -106,7 +107,7 @@ export function WorkspaceSelector(): React.ReactElement {
   }
 
   const handleCreate = async (): Promise<void> => {
-    await createWorkspace(newName)
+    await createProject(newName)
     setCreating(false)
   }
 
@@ -174,14 +175,19 @@ export function WorkspaceSelector(): React.ReactElement {
 
     try {
       await window.electronAPI.deleteAgentWorkspace(deleteTargetId)
-      const remaining = workspaces.filter((w) => w.id !== deleteTargetId)
+      const [remaining, sessions] = await Promise.all([
+        window.electronAPI.listAgentWorkspaces(),
+        window.electronAPI.listAgentSessions(),
+      ])
       setWorkspaces(remaining)
+      setAgentSessions(sessions)
 
       if (deleteTargetId === currentWorkspaceId && remaining.length > 0) {
-        selectWorkspace(remaining[0]!.id)
+        const defaultWorkspace = remaining.find((workspace) => workspace.slug === 'default')
+        selectProject((defaultWorkspace ?? remaining[0]!).id)
       }
     } catch (error) {
-      console.error('[WorkspaceSelector] 删除工作区失败:', error)
+      console.error('[WorkspaceSelector] 删除项目失败:', error)
     } finally {
       setDeleteTargetId(null)
     }
@@ -267,17 +273,17 @@ export function WorkspaceSelector(): React.ReactElement {
       <div className="rounded-lg border border-border/60 overflow-hidden">
         {/* 头部 */}
         <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border/40">
-          <span className="text-[11px] font-medium text-foreground/50 uppercase tracking-wide">工作区</span>
+          <span className="text-[11px] font-medium text-foreground/50 uppercase tracking-wide">项目</span>
           <button
             onClick={handleStartCreate}
             className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/35 hover:text-foreground/60 transition-colors titlebar-no-drag"
-            title="新建工作区"
+            title="新建项目"
           >
             <Plus size={13} />
           </button>
         </div>
 
-        {/* 工作区列表 */}
+        {/* 项目列表 */}
         <div
           ref={listRef}
           className="overflow-y-auto scrollbar-thin flex flex-col p-1"
@@ -355,7 +361,7 @@ export function WorkspaceSelector(): React.ReactElement {
             </div>
           ))}
 
-          {/* 新建工作区输入框 */}
+          {/* 新建项目输入框 */}
           {creating && (
             <div className="flex items-center gap-2 px-2 py-[5px]">
               <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
@@ -365,7 +371,7 @@ export function WorkspaceSelector(): React.ReactElement {
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={handleCreateKeyDown}
                 onBlur={() => setCreating(false)}
-                placeholder="工作区名称..."
+                placeholder="项目名称..."
                 className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
                 maxLength={50}
               />
@@ -389,9 +395,9 @@ export function WorkspaceSelector(): React.ReactElement {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确认删除工作区</AlertDialogTitle>
+            <AlertDialogTitle>确认删除项目</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后工作区配置将被移除，但目录文件会保留。确定要删除吗？
+              删除后项目配置将被移除，但目录文件会保留。确定要删除吗？
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -11,7 +11,6 @@ export interface AgentCompletionPresenceInput {
 
 export interface AgentCompletionMarkers {
   markUnviewedCompleted: boolean
-  keepInWorkingDone: boolean
 }
 
 /** 判断 Agent 完成时用户是否仍停留在该会话入口 */
@@ -34,11 +33,10 @@ export function isAgentSessionActiveForCompletion({
   return currentAgentSessionId === sessionId
 }
 
-/** 计算 Agent 完成后应写入哪些侧边栏标记 */
+/** 计算 Agent 完成后是否需要写入侧边栏完成提醒 */
 export function getAgentCompletionMarkers(input: AgentCompletionPresenceInput): AgentCompletionMarkers {
   const isActiveSession = isAgentSessionActiveForCompletion(input)
   return {
     markUnviewedCompleted: !isActiveSession,
-    keepInWorkingDone: true,
   }
 }

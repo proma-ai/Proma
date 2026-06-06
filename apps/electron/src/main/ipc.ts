@@ -1722,25 +1722,9 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 切换 Agent 会话手动工作中状态
+  // 清除 Agent 会话完成状态（兼容清除旧版 manualWorking）
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.TOGGLE_MANUAL_WORKING,
-    async (_, id: string): Promise<AgentSessionMeta> => {
-      const sessions = listAgentSessions()
-      const current = sessions.find((s) => s.id === id)
-      if (!current) throw new Error(`Agent session not found: ${id}`)
-      const newManualWorking = !current.manualWorking
-      const updates: Partial<AgentSessionMeta> = { manualWorking: newManualWorking }
-      if (newManualWorking && current.archived) {
-        updates.archived = false
-      }
-      return updateAgentSessionMeta(id, updates)
-    }
-  )
-
-  // 确认 Agent 会话已完成（清除 completedButUnconfirmed 和 manualWorking）
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.CONFIRM_WORKING_DONE,
+    AGENT_IPC_CHANNELS.CLEAR_COMPLETION_STATE,
     async (_, id: string): Promise<AgentSessionMeta> => {
       const sessions = listAgentSessions()
       const current = sessions.find((s) => s.id === id)
@@ -1854,7 +1838,20 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_WORKSPACE,
     async (_, id: string): Promise<void> => {
-      return deleteAgentWorkspace(id)
+      const deletingWorkspace = getAgentWorkspace(id)
+      if (!deletingWorkspace) {
+        return deleteAgentWorkspace(id)
+      }
+
+      const affectedSessionIds = listAgentSessions()
+        .filter((session) => session.workspaceId === id)
+        .map((session) => session.id)
+
+      const defaultWorkspace = ensureDefaultWorkspace()
+      for (const sessionId of affectedSessionIds) {
+        moveSessionToWorkspace(sessionId, defaultWorkspace.id)
+      }
+      deleteAgentWorkspace(id)
     }
   )
 

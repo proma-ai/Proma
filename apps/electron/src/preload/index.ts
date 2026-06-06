@@ -454,11 +454,8 @@ export interface ElectronAPI {
   /** 切换 Agent 会话置顶状态 */
   togglePinAgentSession: (id: string) => Promise<AgentSessionMeta>
 
-  /** 切换 Agent 会话手动工作中状态 */
-  toggleManualWorkingAgentSession: (id: string) => Promise<AgentSessionMeta>
-
-  /** 确认 Agent 会话已完成（清除 completedButUnconfirmed 和 manualWorking） */
-  confirmWorkingDoneAgentSession: (id: string) => Promise<AgentSessionMeta>
+  /** 清除 Agent 会话完成状态（兼容清除旧版 manualWorking） */
+  clearAgentCompletionState: (id: string) => Promise<AgentSessionMeta>
 
   /** 切换 Agent 会话归档状态 */
   toggleArchiveAgentSession: (id: string) => Promise<AgentSessionMeta>
@@ -1559,12 +1556,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_PIN, id)
   },
 
-  toggleManualWorkingAgentSession: (id: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_MANUAL_WORKING, id)
-  },
-
-  confirmWorkingDoneAgentSession: (id: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_WORKING_DONE, id)
+  clearAgentCompletionState: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CLEAR_COMPLETION_STATE, id)
   },
 
   toggleArchiveAgentSession: (id: string) => {

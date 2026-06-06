@@ -81,9 +81,7 @@ export interface SessionCallbacks {
 // ===== 工具函数 =====
 
 function sdkPermissionModeForPromaMode(mode: PromaPermissionMode): PromaPermissionMode {
-  // Proma 自己在 canUseTool 里实现完全自动。SDK 原生 bypassPermissions
-  // 可能在 canUseTool 前直接放行 ExitPlanMode，绕过计划审批。
-  return mode === 'bypassPermissions' ? 'auto' : PROMA_PERMISSION_MODE_CONFIG[mode].sdkMode
+  return PROMA_PERMISSION_MODE_CONFIG[mode].sdkMode
 }
 
 /**
@@ -1475,8 +1473,13 @@ export class AgentOrchestrator {
           emitPlanModeChanged(true, 'tool')
           return
         }
-        // ExitPlanMode 的 tool_use 只代表 Agent 准备退出计划模式。
-        // 真正退出必须等待用户审批结果，不能在这里提前清掉计划态。
+        if (toolName === 'ExitPlanMode' && getPermissionMode() === 'bypassPermissions') {
+          planModeEntered = false
+          emitPlanModeChanged(false, 'tool')
+          return
+        }
+        // auto/plan 下 ExitPlanMode 只是发起退出计划的审批请求。
+        // 真正退出由用户审批结果触发，不能在工具开始时提前清掉计划态。
       }
 
       // 动态 canUseTool：每次调用读取当前权限模式，支持运行中切换
@@ -1508,14 +1511,15 @@ export class AgentOrchestrator {
 
         // ── EnterPlanMode / ExitPlanMode 处理 ──
 
-        // 完全自动模式：进入计划阶段透明化；退出计划仍必须审批。
-        if (currentMode === 'bypassPermissions' && toolName === 'EnterPlanMode') {
-          planModeEntered = true
-          emitPlanModeChanged(true, 'tool')
+        // 完全自动模式：计划进入和退出都透明化，保持 bypassPermissions 的无人值守语义。
+        if (currentMode === 'bypassPermissions' && (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode')) {
+          const active = toolName === 'EnterPlanMode'
+          planModeEntered = active
+          emitPlanModeChanged(active, 'tool')
           return { behavior: 'allow' as const, updatedInput: input }
         }
 
-        // ExitPlanMode：无论当前权限模式是什么，都必须让用户确认计划。
+        // ExitPlanMode：auto/plan 模式下必须让用户确认计划。
         if (toolName === 'ExitPlanMode') {
           console.log(`[canUseTool] ExitPlanMode: signal.aborted=${options.signal.aborted}, planModeEntered=${planModeEntered}, mode=${currentMode}`)
           const result = await handleExitPlanMode(input, options.signal)
@@ -1612,11 +1616,12 @@ export class AgentOrchestrator {
         env: sdkEnv,
         ...(maxTurns != null && { maxTurns }),
         sdkPermissionMode: sdkPermissionModeForPromaMode(initialPermissionMode),
-        // 当提供 canUseTool 回调时必须为 false，否则 CLI 同时收到
+        // permissionMode 负责表达 auto/plan/bypassPermissions。
+        // 当提供 canUseTool 回调时这里必须为 false，否则 CLI 同时收到
         // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
         // 两个矛盾的指令，导致 ExitPlanMode/AskUserQuestion 等交互式工具失败。
-        // canUseTool 已完整处理所有权限模式（plan/auto/bypassPermissions），
-        // Worker 子代理在 bypassPermissions 模式下也会被自动放行。
+        // bypassPermissions 下 SDK 可能在 canUseTool 前直接放行工具，因此计划态还会
+        // 从实际 tool_use 流里同步，避免 UI 停留在计划阶段。
         allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
         ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: [...SAFE_TOOLS] }),

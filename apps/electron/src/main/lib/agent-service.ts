@@ -148,10 +148,6 @@ export async function runAgent(
         }
       },
       onComplete: (messages, opts) => {
-        // 持久化"完成但未确认"状态，确保重启后仍显示在工作中列表
-        try {
-          updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: true })
-        } catch { /* 会话可能已被删除 */ }
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
             sessionId: input.sessionId,

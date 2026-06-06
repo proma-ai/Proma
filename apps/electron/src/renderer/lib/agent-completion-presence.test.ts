@@ -19,7 +19,6 @@ describe('Agent 完成归属判断', () => {
     expect(isAgentSessionActiveForCompletion(input)).toBe(true)
     expect(getAgentCompletionMarkers(input)).toEqual({
       markUnviewedCompleted: false,
-      keepInWorkingDone: true,
     })
   })
 
@@ -39,7 +38,6 @@ describe('Agent 完成归属判断', () => {
     expect(isAgentSessionActiveForCompletion(input)).toBe(false)
     expect(getAgentCompletionMarkers(input)).toEqual({
       markUnviewedCompleted: true,
-      keepInWorkingDone: true,
     })
   })
 
@@ -69,7 +67,6 @@ describe('Agent 完成归属判断', () => {
     expect(isAgentSessionActiveForCompletion(input)).toBe(false)
     expect(getAgentCompletionMarkers(input)).toEqual({
       markUnviewedCompleted: true,
-      keepInWorkingDone: true,
     })
   })
 })

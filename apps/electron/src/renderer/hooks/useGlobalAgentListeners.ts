@@ -39,7 +39,6 @@ import {
   workspaceAttachedDirectoriesMapAtom,
   workspaceAttachedFilesMapAtom,
   unviewedCompletedSessionIdsAtom,
-  workingDoneSessionIdsAtom,
   agentSessionPathMapAtom,
   agentDiffRefreshVersionAtom,
 } from '@/atoms/agent-atoms'
@@ -641,11 +640,11 @@ export function useGlobalAgentListeners(): void {
         const legacyEvents = payloadToLegacyEvents(payload)
 
         for (const event of legacyEvents) {
-          // 会话首次进入 running 时，从 Working Done 集合移除（它会出现在 Running 组）
+          // 会话首次进入 running 时，清除旧的完成提醒状态
           if (event.type !== 'prompt_suggestion') {
             const prevState = store.get(agentStreamingStatesAtom).get(sessionId)
             if (!prevState || !prevState.running) {
-              store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
+              store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
                 if (!prev.has(sessionId)) return prev
                 const next = new Set(prev)
                 next.delete(sessionId)
@@ -944,7 +943,6 @@ export function useGlobalAgentListeners(): void {
           return map
         })
 
-        // 当前激活会话完成后仍保留在 Working Done，等待用户用对勾明确确认。
         // 只有未激活会话才进入"未查看完成"，避免当前页面完成时出现额外未读提醒。
         const currentSessionId = store.get(currentAgentSessionIdAtom)
         const completionMarkers = getAgentCompletionMarkers({
@@ -956,14 +954,6 @@ export function useGlobalAgentListeners(): void {
         })
         if (completionMarkers.markUnviewedCompleted) {
           store.set(unviewedCompletedSessionIdsAtom, (prev: Set<string>) => {
-            const next = new Set(prev)
-            next.add(data.sessionId)
-            return next
-          })
-        }
-
-        if (completionMarkers.keepInWorkingDone) {
-          store.set(workingDoneSessionIdsAtom, (prev: Set<string>) => {
             const next = new Set(prev)
             next.add(data.sessionId)
             return next

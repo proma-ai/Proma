@@ -1,8 +1,8 @@
 /**
- * useWorkspaceActions — 工作区切换与创建的共享逻辑
+ * useProjectActions — 项目切换与创建的共享逻辑
  *
- * 抽离 WorkspaceSelector 与 CollapsedWorkspacePopover 共用的切换/创建逻辑，
- * 避免两处实现漂移。重命名 / 删除 / 拖拽排序仅展开态需要，留在 WorkspaceSelector 内。
+ * UI 层把 AgentWorkspace 展示为“项目”。底层类型和 IPC 仍沿用 workspace
+ * 命名，这里只把对展示组件暴露的动作语义收敛到 project。
  */
 
 import * as React from 'react'
@@ -14,21 +14,21 @@ import {
 } from '@/atoms/agent-atoms'
 import type { AgentWorkspace } from '@proma/shared'
 
-interface UseWorkspaceActionsResult {
+interface UseProjectActionsResult {
   workspaces: AgentWorkspace[]
   currentWorkspaceId: string | null
-  /** 切换到指定工作区；已是当前工作区时无副作用 */
-  selectWorkspace: (workspaceId: string) => void
-  /** 创建并切到新工作区；成功返回新工作区，失败已 toast 并返回 null */
-  createWorkspace: (name: string) => Promise<AgentWorkspace | null>
+  /** 切换到指定项目；已是当前项目时无副作用 */
+  selectProject: (workspaceId: string) => void
+  /** 创建并切到新项目；成功返回新项目，失败已 toast 并返回 null */
+  createProject: (name: string) => Promise<AgentWorkspace | null>
 }
 
-export function useWorkspaceActions(): UseWorkspaceActionsResult {
+export function useProjectActions(): UseProjectActionsResult {
   const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
   const createInFlightRef = React.useRef(false)
 
-  const selectWorkspace = React.useCallback(
+  const selectProject = React.useCallback(
     (workspaceId: string): void => {
       if (workspaceId === currentWorkspaceId) return
       setCurrentWorkspaceId(workspaceId)
@@ -37,7 +37,7 @@ export function useWorkspaceActions(): UseWorkspaceActionsResult {
     [currentWorkspaceId, setCurrentWorkspaceId],
   )
 
-  const createWorkspace = React.useCallback(
+  const createProject = React.useCallback(
     async (name: string): Promise<AgentWorkspace | null> => {
       const trimmed = name.trim()
       if (!trimmed) return null
@@ -61,5 +61,5 @@ export function useWorkspaceActions(): UseWorkspaceActionsResult {
     [setWorkspaces, setCurrentWorkspaceId],
   )
 
-  return { workspaces, currentWorkspaceId, selectWorkspace, createWorkspace }
+  return { workspaces, currentWorkspaceId, selectProject, createProject }
 }

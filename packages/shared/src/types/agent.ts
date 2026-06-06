@@ -603,9 +603,9 @@ export interface AgentSessionMeta {
   forkSourceSdkSessionId?: string
   /** 回退后的 resume 截断点：下次发消息时传给 SDK resumeSessionAt（消费后清除） */
   resumeAtMessageUuid?: string
-  /** 手动标记为工作中 */
+  /** 历史兼容字段：旧版手动保留状态 */
   manualWorking?: boolean
-  /** Agent 执行完成但用户尚未确认（跨重启保留在工作中列表） */
+  /** Agent 执行完成但用户尚未清除完成状态 */
   completedButUnconfirmed?: boolean
   /** 最后一次流式执行是否被用户主动中断 */
   stoppedByUser?: boolean
@@ -1286,10 +1286,8 @@ export const AGENT_IPC_CHANNELS = {
   MIGRATE_CHAT_TO_AGENT: 'agent:migrate-chat-to-agent',
   /** 切换会话置顶状态 */
   TOGGLE_PIN: 'agent:toggle-pin',
-  /** 切换会话手动工作中状态 */
-  TOGGLE_MANUAL_WORKING: 'agent:toggle-manual-working',
-  /** 确认会话已完成（清除 completedButUnconfirmed 和 manualWorking） */
-  CONFIRM_WORKING_DONE: 'agent:confirm-working-done',
+  /** 清除会话完成状态（兼容清除旧版 manualWorking）。channel 值保留旧名以兼容已缓存的 preload */
+  CLEAR_COMPLETION_STATE: 'agent:confirm-working-done',
   /** 切换会话归档状态 */
   TOGGLE_ARCHIVE: 'agent:toggle-archive',
   /** 搜索会话消息内容 */

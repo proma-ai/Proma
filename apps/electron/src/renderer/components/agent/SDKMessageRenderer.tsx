@@ -650,18 +650,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   }
 
   const renderProcessGroupBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
-    const content = renderTopLevelBlock(block, i)
-    if (!content) return content
-    if (!isStreaming || block.type !== 'text') return content
-
-    return (
-      <div
-        key={`process-text-${i}`}
-        className="animate-in fade-in slide-in-from-top-1 duration-300"
-      >
-        {content}
-      </div>
-    )
+    return renderTopLevelBlock(block, i)
   }
 
   return (
@@ -673,7 +662,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
       />
       <MessageContent>
         <div className={cn('space-y-2')}>
-          {renderItems.map((item) => {
+          {renderItems.map((item, itemIndex) => {
             if (item.type === 'block') {
               return renderTopLevelBlock(item.item.block, item.item.index)
             }
@@ -686,6 +675,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
                 blocks={groupBlocks}
                 isStreaming={isStreaming}
                 keepExpandedAfterComplete={processGroupsKeepExpanded}
+                isMessageTail={itemIndex === renderItems.length - 1}
               >
                 {item.items.map((groupItem) => renderProcessGroupBlock(groupItem.block, groupItem.index))}
               </ProcessBlockGroup>

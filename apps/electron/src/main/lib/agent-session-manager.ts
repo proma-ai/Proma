@@ -1256,7 +1256,7 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
   let count = 0
 
   for (const session of index.sessions) {
-    if (!session.pinned && !session.manualWorking && !session.completedButUnconfirmed && !session.archived && session.updatedAt < threshold) {
+    if (!session.pinned && !session.archived && session.updatedAt < threshold) {
       session.archived = true
       count++
     }

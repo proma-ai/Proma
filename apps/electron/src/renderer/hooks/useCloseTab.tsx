@@ -5,8 +5,8 @@
  *
  * 关键行为：
  * - 关闭当前会话入口只回到 Scratch Pad，不停止后台 Agent
- * - 运行中或阻塞中的会话继续通过左侧 Working 区恢复
- * - idle 状态的 Agent 会话在用户主动关闭 Tab 时自动从 Working 移除
+ * - 运行中或阻塞中的会话继续通过左侧状态 indicator 恢复
+ * - idle 状态的 Agent 会话在用户主动关闭 Tab 时清除完成提醒状态
  * - 真正删除/归档时由侧边栏路径负责清理 per-session 状态
  */
 
@@ -24,7 +24,6 @@ import {
   agentSessionsAtom,
   agentSessionIndicatorMapAtom,
   unviewedCompletedSessionIdsAtom,
-  workingDoneSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 
@@ -41,18 +40,17 @@ export function useCloseTab(): UseCloseTabReturn {
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
   const store = useStore()
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
-  const setWorkingDone = useSetAtom(workingDoneSessionIdsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setViewStateMap = useSetAtom(sessionViewStateMapAtom)
 
-  const removeIdleSessionFromWorking = React.useCallback((sessionId: string) => {
+  const clearIdleAgentCompletionNotice = React.useCallback((sessionId: string) => {
     const indicatorMap = store.get(agentSessionIndicatorMapAtom)
     const status = indicatorMap.get(sessionId)
-    // running 或 blocked 的会话不移除
+    // running 或 blocked 的会话仍需要侧边栏状态提示
     if (status === 'running' || status === 'blocked') return
 
-    // 通过 IPC 清除持久化的 completedButUnconfirmed 和 manualWorking 状态
-    window.electronAPI.confirmWorkingDoneAgentSession(sessionId)
+    // 通过 IPC 清除持久化的 completedButUnconfirmed 和旧版 manualWorking 状态
+    window.electronAPI.clearAgentCompletionState(sessionId)
       .then((updated) => {
         setAgentSessions((prev) =>
           prev.map((s) => (s.id === updated.id ? updated : s))
@@ -60,19 +58,13 @@ export function useCloseTab(): UseCloseTabReturn {
       })
       .catch(console.error)
 
-    setWorkingDone((prev) => {
-      if (!prev.has(sessionId)) return prev
-      const next = new Set(prev)
-      next.delete(sessionId)
-      return next
-    })
     setUnviewedCompleted((prev) => {
       if (!prev.has(sessionId)) return prev
       const next = new Set(prev)
       next.delete(sessionId)
       return next
     })
-  }, [store, setAgentSessions, setWorkingDone, setUnviewedCompleted])
+  }, [store, setAgentSessions, setUnviewedCompleted])
 
   const executeClose = React.useCallback((tabId: string) => {
     const closingTab = tabs.find((t) => t.id === tabId)
@@ -110,11 +102,11 @@ export function useCloseTab(): UseCloseTabReturn {
       syncActiveTabSideEffects(newActiveTab)
     }
 
-    // 用户主动关闭 idle 的 Agent Tab 时，从 Working 状态移除
+    // 用户主动关闭 idle 的 Agent Tab 时，清除完成提醒状态
     if (closingTab && closingTab.type === 'agent') {
-      removeIdleSessionFromWorking(closingTab.sessionId)
+      clearIdleAgentCompletionNotice(closingTab.sessionId)
     }
-  }, [tabs, activeTabId, setTabs, setActiveTabId, setViewStateMap, syncActiveTabSideEffects, removeIdleSessionFromWorking])
+  }, [tabs, activeTabId, setTabs, setActiveTabId, setViewStateMap, syncActiveTabSideEffects, clearIdleAgentCompletionNotice])
 
   const requestClose = React.useCallback((tabId: string) => {
     executeClose(tabId)

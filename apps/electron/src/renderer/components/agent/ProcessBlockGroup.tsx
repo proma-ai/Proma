@@ -14,11 +14,14 @@ interface ProcessBlockGroupProps {
   blocks: SDKContentBlock[]
   isStreaming?: boolean
   keepExpandedAfterComplete: boolean
+  // 该过程组是否为整条消息的末尾项：是则流式中保留最后一段为正常显示，
+  // 否则（最终答案已作为后续兄弟块外置）整组统一弱化。
+  isMessageTail?: boolean
   children: React.ReactNode
 }
 
 const MAX_PROCESS_GROUP_ICONS = 4
-const PROCESS_GROUP_COLLAPSE_DURATION_MS = 700
+const PROCESS_GROUP_COLLAPSE_DURATION_MS = 500
 const PROCESS_GROUP_AUTO_COLLAPSE_SOUND_DELAY_MS = 900
 const PROCESS_GROUP_AUTO_COLLAPSE_COUNTDOWN_SECONDS = 3
 
@@ -165,7 +168,7 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
   return toolNames
 }
 
-export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComplete, children }: ProcessBlockGroupProps): React.ReactElement {
+export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComplete, isMessageTail = false, children }: ProcessBlockGroupProps): React.ReactElement {
   const shouldExpandByDefault = !!isStreaming || keepExpandedAfterComplete
   const [expanded, setExpanded] = React.useState(shouldExpandByDefault)
   const [shouldRenderContent, setShouldRenderContent] = React.useState(shouldExpandByDefault)
@@ -173,6 +176,8 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
   const userToggledRef = React.useRef(false)
   const wasStreamingRef = React.useRef(!!isStreaming)
   const autoCollapseTimersRef = React.useRef<number[]>([])
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  const [measuredHeight, setMeasuredHeight] = React.useState<number | undefined>(undefined)
 
   const clearAutoCollapseTimers = React.useCallback(() => {
     for (const timer of autoCollapseTimersRef.current) window.clearTimeout(timer)
@@ -184,7 +189,6 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
 
     if (isStreaming || keepExpandedAfterComplete) {
       setCollapseCountdown(null)
-      // 新一轮流式开始时复位用户手动 toggle 状态，使本轮完成后仍能走自动收起。
       if (isStreaming && !wasStreamingRef.current) {
         userToggledRef.current = false
       }
@@ -223,10 +227,21 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
     return clearAutoCollapseTimers
   }, [clearAutoCollapseTimers, isStreaming, keepExpandedAfterComplete])
 
+  // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {
     if (expanded) {
       setShouldRenderContent(true)
+      setMeasuredHeight(undefined)
       return
+    }
+
+    // 折叠时：先测量当前高度，触发 height 过渡动画，动画结束后卸载 DOM
+    const el = contentRef.current
+    if (el) {
+      const h = el.scrollHeight
+      setMeasuredHeight(h)
+      // 强制浏览器在下一帧开始从 h → 0 的过渡
+      requestAnimationFrame(() => setMeasuredHeight(0))
     }
 
     const timer = window.setTimeout(() => setShouldRenderContent(false), PROCESS_GROUP_COLLAPSE_DURATION_MS)
@@ -240,6 +255,28 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
   const toolNames = React.useMemo(() => buildProcessGroupToolNames(blocks), [blocks])
   const visibleToolNames = toolNames.slice(0, MAX_PROCESS_GROUP_ICONS)
   const hiddenToolCount = Math.max(0, toolNames.length - visibleToolNames.length)
+
+  // 内容区子项渲染策略：
+  // - 流式中：每个新块有入场动画，最新一段（消息末尾过程组的最后一个 child）保持正常显示，
+  //   其余步骤轻微弱化以引导视觉重心到最下方。
+  // - 流式结束后用户展开：所有内容以正常颜色显示，无动画。
+  const childArray = React.Children.toArray(children)
+  const renderContentChildren = (): React.ReactNode =>
+    childArray.map((child, i) => {
+      const isLast = i === childArray.length - 1
+      const dimmed = isStreaming && !(isMessageTail && isLast)
+      return (
+        <div
+          key={i}
+          className={cn(
+            dimmed && 'opacity-80',
+            isStreaming && 'animate-in fade-in slide-in-from-top-1 duration-200',
+          )}
+        >
+          {child}
+        </div>
+      )
+    })
 
   return (
     <div className="space-y-1.5">
@@ -291,16 +328,19 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
 
       {shouldRenderContent && (
         <div
-          className="grid transition-[grid-template-rows,opacity] duration-700 ease-in-out"
+          ref={contentRef}
+          className="overflow-hidden"
           style={{
-            gridTemplateRows: expanded ? '1fr' : '0fr',
+            height: measuredHeight !== undefined ? `${measuredHeight}px` : 'auto',
             opacity: expanded ? 1 : 0,
+            transition: measuredHeight !== undefined
+              ? `height ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out, opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`
+              : `opacity ${PROCESS_GROUP_COLLAPSE_DURATION_MS}ms ease-in-out`,
           }}
         >
-          <div className="min-h-0 overflow-hidden">
-            <div className="ml-[5px] space-y-2 border-l-2 border-border/30 pl-4">
-              {children}
-              <button
+          <div className="space-y-2">
+            {renderContentChildren()}
+            <button
                 type="button"
                 className="flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors"
                 onClick={() => {
@@ -315,8 +355,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
   )
 }
