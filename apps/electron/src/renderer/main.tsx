@@ -34,6 +34,7 @@ import {
   unviewedCompletedSessionIdsAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
+import { automationsAtom } from './atoms/automation-atoms'
 import {
   // Cloud 模式专属
   cloudUserAtom,
@@ -512,6 +513,26 @@ function OfficialChannelInitializer(): null {
       unsubOfficialChannel()
     }
   }, [user, setChannels])
+
+  return null
+}
+
+/**
+ * 定时任务初始化组件
+ *
+ * 加载全部定时任务，并订阅主进程的变更事件（运行完成/状态变化）刷新列表。
+ */
+function AutomationInitializer(): null {
+  const setAutomations = useSetAtom(automationsAtom)
+
+  useEffect(() => {
+    const load = (): void => {
+      window.electronAPI.listAutomations().then(setAutomations).catch(console.error)
+    }
+    load()
+    const unsub = window.electronAPI.onAutomationChanged(load)
+    return unsub
+  }, [setAutomations])
 
   return null
 }
@@ -1070,6 +1091,7 @@ if (isQuickTaskWindow) {
       <AgentListenersInitializer />
       <ChatToolInitializer />
       <UpdaterInitializer />
+      <AutomationInitializer />
       <FeishuInitializer />
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />

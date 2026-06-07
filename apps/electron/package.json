@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.11.1",
+  "version": "0.11.10",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -10,7 +10,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n vite,electron -c blue,green \"bun run dev:vite\" \"bun run dev:electron\"",
+    "dev": "bun run scripts/dev-kill.ts --vite && concurrently -k -n vite,electron -c blue,green \"bun run dev:vite\" \"bun run dev:electron\"",
     "dev:split": "bash scripts/dev-split.sh",
     "dev:vite": "vite dev",
     "dev:kill": "bun run scripts/dev-kill.ts",

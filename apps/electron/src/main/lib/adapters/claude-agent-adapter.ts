@@ -543,6 +543,13 @@ const forceKillTimers = new Map<string, NodeJS.Timeout>()
 const FORCE_KILL_GRACE_MS = 10_000
 
 /**
+ * 后台任务挂起时，无任何活动则释放子进程的空闲上限（1 小时）。
+ * 与 SDK 自动唤醒机制的时限上界对齐：ScheduleWakeup 最长 3600s、非持久 Monitor 最长 3600000ms。
+ * 超过此窗口无任何 task_notification/活动，说明 persistent Monitor 已无事件，安全释放子进程。
+ */
+const BACKGROUND_IDLE_TIMEOUT_MS = 60 * 60 * 1000
+
+/**
  * 平台差异化强制终止：macOS/Linux 用 SIGKILL，Windows 用 taskkill /F /T 级联杀子孙
  *
  * Windows 备注：Node 的 process.kill 对原生 binary 只发 TerminateProcess，且不级联子进程，
@@ -682,9 +689,29 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     })
     queryReadyPromises.set(options.sessionId, readyPromise)
 
+    // 后台任务等待态：本轮结束时若仍有 background_tasks/session_crons 在飞行，
+    // 保持消息通道开启（不 close），让 SDK 子进程存活、在任务完成时自动 yield
+    // task_notification 驱动新一轮 turn。idleTimer 是兜底：超过空闲上限无任何活动则释放子进程。
+    // 声明在 try 外，使 finally 也能 clearIdleTimer。
+    let backgroundTasksPending = false
+    let idleTimer: NodeJS.Timeout | null = null
+    const clearIdleTimer = (): void => {
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+    }
+
     try {
       // 动态导入 SDK
       const sdk = await import('@anthropic-ai/claude-agent-sdk')
+
+      // armIdleTimer 闭包引用下方创建的 channel，故定义在 try 内（channel 在作用域内）。
+      const armIdleTimer = (): void => {
+        clearIdleTimer()
+        idleTimer = setTimeout(() => {
+          console.warn(`[Claude 适配器] 后台任务空闲超时 (${BACKGROUND_IDLE_TIMEOUT_MS}ms)，释放子进程: ${options.sessionId}`)
+          channel.close()
+        }, BACKGROUND_IDLE_TIMEOUT_MS)
+        idleTimer.unref?.()
+      }
 
       // SDK options 构建
       const sdkOptions = {
@@ -735,6 +762,24 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         // 强制顺序执行工具，防止并发 tool_use 导致 400 错误
         // 根因：多个 tool_use 并发时若结果未完整批量提交会触发 invalid_request_error
         toolUseConcurrency: 1,
+
+        // Stop hook 观察者：读取本轮结束时仍在飞行的后台任务/定时任务集合。
+        // background_tasks（run_in_background bash / Monitor / subagent）与 session_crons
+        // （ScheduleWakeup / CronCreate）是 SDK 权威信息，且 Stop hook 走控制协议、
+        // 在 result 消息发到 host 之前完成，故 result 处理时 backgroundTasksPending 已是最新。
+        // 仅观察、绝不返回 decision:'block'（那会强制模型继续输出）。
+        hooks: {
+          Stop: [{
+            hooks: [async (input: unknown) => {
+              const bt = (input as { background_tasks?: unknown[] }).background_tasks
+              const crons = (input as { session_crons?: unknown[] }).session_crons
+              backgroundTasksPending =
+                (Array.isArray(bt) && bt.length > 0) ||
+                (Array.isArray(crons) && crons.length > 0)
+              return { continue: true }
+            }],
+          }],
+        },
 
         // 自定义 spawn：记录 PID 以供 abort/dispose 做 force-kill 兜底（Issue #357）
         // 注意：一旦提供 spawnClaudeCodeProcess，SDK 会完全绕过 spawnLocalProcess，
@@ -818,6 +863,14 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
           }
         }
 
+        // 后台任务等待期间收到任意 task 活动消息：重置空闲计时器，避免误释放子进程。
+        if (msg.type === 'system' && idleTimer != null) {
+          const sub = msg.subtype
+          if (sub === 'task_started' || sub === 'task_progress' || sub === 'task_notification') {
+            armIdleTimer()
+          }
+        }
+
         // 捕获 result 中的 contextWindow
         if (msg.type === 'result') {
           const resultMsg = msg as {
@@ -837,10 +890,29 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
           // 注意：keep-open 场景本身就是"等待用户决策"（权限审批、Exit Plan、AskUser 等），
           // 不在此处加闲置超时——用户离开再回来继续交互是合法的，强行超时会破坏体验。
           // 若用户关闭 Tab，TabBar/GlobalShortcuts 会主动调 stopAgent → abort() 终止子进程。
-          if (!shouldKeepChannelOpen(resultMsg.terminal_reason)) {
+          const keepForReason = shouldKeepChannelOpen(resultMsg.terminal_reason)
+          // terminal_reason 无法区分"真完成"与"完成但有后台任务挂起"，
+          // 后者由 Stop hook 观察者刷新的 backgroundTasksPending 标识。
+          const keepForTasks = backgroundTasksPending
+
+          if (keepForTasks && !keepForReason) {
+            // 本轮主体结束、但仍有后台任务/定时任务在飞行：保持通道开启，
+            // 子进程存活并在任务完成时自动 yield task_notification 驱动新一轮。
+            // 给消息打注解，让 orchestrator 走"轻量完成"（UI 空闲但保留会话）而非彻底释放。
+            ;(msg as Record<string, unknown>)._keepChannelOpenForTasks = true
+            armIdleTimer()
+          } else if (keepForReason) {
+            // 既有"可继续"路径（abort/defer/hook，对应权限/ExitPlan/AskUser 等待）：
+            // 保持通道开启。本轮并非真正空闲——SDK 会继续驱动新一轮，故不打
+            // _keepChannelOpenForTasks 注解（不让 UI 进软空闲态，否则会与"继续中"的真实状态冲突）。
+            // 但若此时同时有后台任务在飞行（keepForTasks），仍 arm idle timer 作为安全网：
+            // 任务活动会持续重置计时器，仅在长时间彻底静默时兜底释放子进程，避免叠加场景下子进程泄漏。
+            if (keepForTasks) armIdleTimer()
+          } else {
             // result 表示本轮真正结束，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
             // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
             // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
+            clearIdleTimer()
             channel.close()
           }
         }
@@ -850,6 +922,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     } finally {
       // 注意：pidMap 的清理由 child.on('exit') 触发，不在这里清除
       // 原因：finally 可能先于子进程真正退出执行，此时仍需保留 PID 以便 abort/dispose 兜底
+      clearIdleTimer()
       activeControllers.delete(options.sessionId)
       activeQueries.delete(options.sessionId)
       activeChannels.delete(options.sessionId)

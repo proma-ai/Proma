@@ -107,6 +107,7 @@ import { registerSyncIpcHandlers } from './sync-ipc'
 import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
 import { registerBridge, startAllBridges, stopAllBridges } from './lib/bridge-registry'
+import { startScheduler, stopScheduler } from './lib/automation-scheduler'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
@@ -579,6 +580,9 @@ async function bootstrap(): Promise<void> {
   // 启动所有已注册的 Bridge（飞书/钉钉/微信等）
   await safeAwait('startAllBridges', () => startAllBridges())
 
+  // 启动定时任务调度器（恢复持久化的 active 任务）
+  safeRun('startScheduler', startScheduler)
+
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
       return
@@ -670,6 +674,8 @@ app.on('before-quit', () => {
   stopChatToolsWatcher()
   // 停止所有 Bridge
   stopAllBridges()
+  // 停止定时任务调度器
+  stopScheduler()
   // 释放飞书同步防休眠
   stopFeishuSyncSleepBlocker()
   // 注销全局快捷键

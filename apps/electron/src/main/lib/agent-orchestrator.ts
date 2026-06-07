@@ -38,6 +38,7 @@ import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
+import { injectAutomationMcpServer } from './automation-agent-tools'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAgent } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
@@ -71,7 +72,7 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; backgroundTasksPending?: boolean }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
   /** 用户消息已持久化，外部入口可据此通知前端切到实时会话 */
@@ -986,7 +987,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds } = input
+    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext } = input
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -1074,6 +1075,7 @@ export class AgentOrchestrator {
     // 否则用本地 runGeneration 作为回退（headless 模式等无渲染进程场景）
     const streamStartedAt = input.startedAt ?? runGeneration
     this.activeSessions.set(sessionId, runGeneration)
+
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
       // 主进程仍在 finally 前短暂拒绝下一条消息。
@@ -1088,6 +1090,16 @@ export class AgentOrchestrator {
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
+    }
+    // 轻量完成：turn 主体结束但仍有后台任务在飞行。
+    // 关键区别——不调用 releaseActiveRun，保留 activeSessions/activeChannels/sessionPermissionModes，
+    // 以便 ① adapter 保持的通道在任务完成时自动续轮 ② 用户在等待期手动注入消息能复用通道。
+    // UI 侧通过 backgroundTasksPending 进入"空闲可输入"态（spinner 停、输入框启用）。
+    const idleComplete = (
+      messages?: AgentMessage[],
+      opts?: { startedAt?: number; resultSubtype?: string },
+    ): void => {
+      callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
     }
     const failRun = (
       error: string,
@@ -1325,6 +1337,13 @@ export class AgentOrchestrator {
       const mcpServers = this.buildMcpServers(workspaceSlug)
       await this.injectMemoryTools(sdk, mcpServers)
       await this.injectPromaCloudMcp(sdk, mcpServers)
+      await injectAutomationMcpServer(sdk, mcpServers, {
+        sessionId,
+        channelId,
+        modelId,
+        workspaceId,
+        triggeredBy: input.triggeredBy,
+      })
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
@@ -1638,7 +1657,7 @@ export class AgentOrchestrator {
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
             claudeAvailable,
             deepSeekSubagentModel: modelRouting.subagentModel,
-          }),
+          }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : ''),
         },
         resumeSessionId: existingSdkSessionId,
         // 回退后 resume：从指定消息处继续（SDK 在同一 JSONL 内创建分支）
@@ -1791,6 +1810,9 @@ export class AgentOrchestrator {
           // 此 timeout 仅作安全网，防止极端情况下 iterator 仍未关闭
           let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
           const RESULT_DRAIN_TIMEOUT_MS = 2_000
+          // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
+          // 置回 false 并发 run_resumed，让 UI 从空闲态恢复运行态。
+          let awaitingBackgroundWake = false
 
           while (true) {
             if (!pendingNext) {
@@ -1820,6 +1842,17 @@ export class AgentOrchestrator {
 
             pendingNext = null
             const msg = iterResult.value
+
+            // 后台任务唤醒：轻量完成后处于等待态，收到新一轮的首条实质消息时
+            // 发 run_resumed，让 UI 从"空闲可输入"恢复到"运行中"。
+            // applyAgentEvent 的流式分支不会重置 running，故必须显式通知。
+            if (awaitingBackgroundWake) {
+              const sub = msg.type === 'system' ? (msg as { subtype?: string }).subtype : undefined
+              if (msg.type === 'assistant' || msg.type === 'user' || sub === 'task_started' || sub === 'task_progress') {
+                awaitingBackgroundWake = false
+                this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'run_resumed', sessionId } })
+              }
+            }
 
             // SDK 权限模式可能在 canUseTool 前直接批准工具（如 bypassPermissions）。
             // 因此计划阶段状态要从实际 tool_use 流里同步，不能只依赖权限回调。
@@ -2009,15 +2042,24 @@ export class AgentOrchestrator {
               // 等待队列或后续消息继续 drive Query，此处跳过 drain 超时以免误关闭事件循环。
               // 完整白名单见 adapters/claude-agent-adapter.ts 的 CONTINUABLE_TERMINAL_REASONS。
               const resultTerminalReason = (msg as { terminal_reason?: string }).terminal_reason
-              const keepChannelOpen = shouldKeepChannelOpen(resultTerminalReason)
+              // adapter 在"本轮结束但仍有后台任务/定时任务在飞行"时打的注解：
+              // 走轻量完成（UI 空闲可输入、host 保留会话），等待 task_notification 自动续轮。
+              const keptOpenForTasks = (msg as Record<string, unknown>)._keepChannelOpenForTasks === true
+              const keepChannelOpen = shouldKeepChannelOpen(resultTerminalReason) || keptOpenForTasks
               // 分类打点：跟踪线上哪种 terminal_reason 最常见，配合 deferred_tool_use 回填决策
               const hasDeferredTool = (msg as { deferred_tool_use?: unknown }).deferred_tool_use != null
               console.log(
                 `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}, ` +
                 `terminal_reason=${resultTerminalReason ?? 'undefined'}, keepChannelOpen=${keepChannelOpen}` +
+                (keptOpenForTasks ? ', keptOpenForTasks=true' : '') +
                 (hasDeferredTool ? ', hasDeferredTool=true' : ''),
               )
-              if (!keepChannelOpen && !drainTimeoutPromise) {
+              if (keptOpenForTasks) {
+                // 轻量完成：UI 置空闲可输入，但 host 保持运行态（不 releaseActiveRun、不 break、不启动 drain 超时），
+                // while 循环继续 park 在 queryIterator.next()，等待后台任务完成时 SDK 自动 yield 的新一轮消息。
+                awaitingBackgroundWake = true
+                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+              } else if (!keepChannelOpen && !drainTimeoutPromise) {
                 // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
                 // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
                 drainTimeoutPromise = new Promise((resolve) =>

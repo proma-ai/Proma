@@ -17,6 +17,8 @@ import {
 } from '@/atoms/tab-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
+import { activeViewAtom } from '@/atoms/active-view'
+import { automationFormAtom } from '@/atoms/automation-atoms'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   currentAgentSessionIdAtom,
@@ -32,6 +34,8 @@ export function useOpenSession(): OpenSessionFn {
   const [tabs, setTabs] = useAtom(tabsAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
   const setAppMode = useSetAtom(appModeAtom)
+  const setActiveView = useSetAtom(activeViewAtom)
+  const setAutomationForm = useSetAtom(automationFormAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
@@ -51,6 +55,8 @@ export function useOpenSession(): OpenSessionFn {
       const result = openTab(tabs, { type, sessionId, title }, restore)
       setTabs(result.tabs)
       setActiveTabId(result.activeTabId)
+      setAutomationForm({ open: false, draft: null })
+      setActiveView('conversations')
 
       if (type === 'chat') {
         setAppMode('chat')
@@ -81,6 +87,6 @@ export function useOpenSession(): OpenSessionFn {
         setCurrentAgentSessionId(null)
       }
     },
-    [tabs, setTabs, setActiveTabId, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted],
+    [tabs, setTabs, setActiveTabId, setAutomationForm, setActiveView, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted],
   )
 }

@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote, Clock } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -41,6 +41,10 @@ import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { agentProcessGroupsKeepExpandedAtom } from '@/atoms/agent-atoms'
+import { agentSessionsAtom } from '@/atoms/agent-atoms'
+import { activeSessionIdAtom } from '@/atoms/tab-atoms'
+import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/automation-atoms'
+import { activeViewAtom } from '@/atoms/active-view'
 import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import type {
@@ -263,6 +267,11 @@ export interface AssistantTurn {
   model?: string
   /** 创建时间（取首条 assistant 消息的时间） */
   createdAt?: number
+  /**
+   * 该 turn 由后台任务完成通知（task_notification）唤醒后开始。
+   * 用于阻断与前一 turn 的合并，让自动唤醒的新输出独立成块，而不是被追加进上一轮的消息块。
+   */
+  startsAfterWake?: boolean
 }
 
 export type MessageGroup =
@@ -283,6 +292,10 @@ export type MessageGroup =
 export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
+  // 收到后台任务完成通知（task_notification）后，若没有用户输入就直接出现新的 assistant 输出，
+  // 说明这是自动唤醒的新一轮，应另起独立消息块，而不是续接上一轮。
+  // 注意：不能用 result 做信号——正常对话每轮也以 result 结束，会误伤普通回复。
+  let pendingWakeBoundary = false
 
   const flushTurn = (): void => {
     if (currentTurn && currentTurn.assistantMessages.length > 0) {
@@ -298,6 +311,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
         // 真正的用户输入 → 结束当前 turn，开始新段落
         flushTurn()
         groups.push({ type: 'user', message: userMsg })
+        pendingWakeBoundary = false
       } else {
         // tool_result 消息 → 归入当前 turn
         if (currentTurn) {
@@ -318,7 +332,10 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           turnMessages: [msg],
           model: aMsg._channelModelId || aMsg.message?.model || sessionModelId,
           createdAt: meta.createdAt,
+          // 紧跟在后台任务唤醒之后的新 turn：阻断与上一轮的合并
+          startsAfterWake: pendingWakeBoundary || undefined,
         }
+        pendingWakeBoundary = false
       } else {
         // 继续当前 turn
         currentTurn.assistantMessages.push(aMsg)
@@ -333,6 +350,12 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
         groups.push({ type: 'system', message: sysMsg })
       } else if (currentTurn) {
         currentTurn.turnMessages.push(msg)
+        // 后台任务完成通知：标志一次自动唤醒。当前 turn 收尾后，
+        // 后续新出现的 assistant 输出应独立成块。
+        if (sysMsg.subtype === 'task_notification') {
+          flushTurn()
+          pendingWakeBoundary = true
+        }
       }
     } else {
       // result, tool_progress 等 → 归入当前 turn
@@ -364,6 +387,12 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
 
   for (const group of groups) {
     if (group.type !== 'assistant-turn') {
+      result.push(group)
+      continue
+    }
+
+    // 后台任务唤醒后开始的 turn：独立成块，不向前合并。
+    if (group.startsAfterWake) {
       result.push(group)
       continue
     }
@@ -970,10 +999,52 @@ function QuoteChip({ quote }: { quote: QuotedFileRef }): React.ReactElement {
 
 // ===== 用户输入消息渲染 =====
 
+
+const SCHEDULED_RUN_MARKER = '<!--PROMA_SCHEDULED_RUN-->'
+
+function stripScheduledRunMarker(text: string): string {
+  return text.replaceAll(SCHEDULED_RUN_MARKER, '').trim()
+}
+
+function ScheduledRunBadge(): React.ReactElement {
+  const activeSessionId = useAtomValue(activeSessionIdAtom)
+  const sessions = useAtomValue(agentSessionsAtom)
+  const automations = useAtomValue(automationsAtom)
+  const setForm = useSetAtom(automationFormAtom)
+  const setActiveView = useSetAtom(activeViewAtom)
+
+  const session = sessions.find((s) => s.id === activeSessionId)
+  const automation = session?.sourceAutomationId
+    ? automations.find((a) => a.id === session.sourceAutomationId)
+    : undefined
+
+  const handleClick = (): void => {
+    if (!automation) return
+    setActiveView('automations')
+    setForm({
+      open: true,
+      draft: automationToDraft(automation),
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="inline-flex items-center gap-1 text-[10px] text-primary/70 hover:text-primary transition-colors"
+      title="来自 Proma 定时任务，点击查看设置"
+    >
+      <Clock className="size-3" />
+      <span>来自 Proma 定时任务</span>
+    </button>
+  )
+}
+
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const rawText = extractUserText(message) ?? ''
-  const { files: attachedFiles, quotes, text } = parseAttachedFiles(rawText)
+  const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
+  const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
   const imageFiles = attachedFiles.filter((f) => isImageFile(f.filename))
   const nonImageFiles = attachedFiles.filter((f) => !isImageFile(f.filename))
   const meta = extractMeta(message as unknown as SDKMessage)
@@ -984,8 +1055,15 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         <UserAvatar avatar={userProfile.avatar} size={35} />
         <div className="flex flex-col justify-between h-[35px]">
           <span className="text-sm font-semibold text-foreground/60 leading-none">{userProfile.userName}</span>
-          {meta.createdAt && (
-            <span className="text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(meta.createdAt)}</span>
+          {(meta.createdAt || isScheduledRun) && (
+            <span className="flex items-center gap-2 leading-none">
+              {meta.createdAt && (
+                <span className="text-[10px] text-foreground/[0.38]">{formatMessageTime(meta.createdAt)}</span>
+              )}
+              {isScheduledRun && (
+                <ScheduledRunBadge />
+              )}
+            </span>
           )}
         </div>
       </div>
@@ -1306,7 +1384,7 @@ export function getGroupId(group: MessageGroup): string {
  */
 export function getGroupPreview(group: MessageGroup): string {
   if (group.type === 'user') {
-    return (extractUserText(group.message) ?? '')
+    return stripScheduledRunMarker(extractUserText(group.message) ?? '')
       .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '')
       .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
       .slice(0, 200)

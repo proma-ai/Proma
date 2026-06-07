@@ -84,6 +84,8 @@ interface ModelSelectorProps {
   onModelSelect?: (option: ModelOption) => void
   /** 使用 Agent 专用模型列表（仅 Proma 官方渠道） */
   useAgentModels?: boolean
+  /** 触发按钮是否显示「渠道 · 模型」（默认只显示模型名） */
+  showChannelInTrigger?: boolean
 }
 
 export function ModelSelector({
@@ -92,6 +94,7 @@ export function ModelSelector({
   externalSelectedModel,
   onModelSelect,
   useAgentModels,
+  showChannelInTrigger = false,
 }: ModelSelectorProps = {}): React.ReactElement {
   const [conversationModel, setConversationModel] = useConversationModelOptional()
   const conversationId = useConversationIdOptional()
@@ -248,7 +251,9 @@ export function ModelSelector({
           <Cpu className="size-3.5" />
         )}
         <span className="max-w-[200px] truncate">
-          {displayModelInfo ? displayModelInfo.modelName : '选择模型'}
+          {displayModelInfo
+            ? (showChannelInTrigger ? `${displayModelInfo.channelName} · ${displayModelInfo.modelName}` : displayModelInfo.modelName)
+            : '选择模型'}
         </span>
         <ChevronDown className="size-3" />
       </button>

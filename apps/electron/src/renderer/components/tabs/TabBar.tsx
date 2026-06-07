@@ -26,6 +26,7 @@ import {
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
+import { automationFormAtom } from '@/atoms/automation-atoms'
 import { TabBarItem } from './TabBarItem'
 import { useCloseTab } from '@/hooks/useCloseTab'
 import { detectIsWindows } from '@/lib/platform'
@@ -45,6 +46,7 @@ export function TabBar(): React.ReactElement {
   const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
+  const setAutomationForm = useSetAtom(automationFormAtom)
 
   // 统一关闭逻辑：关闭当前会话入口并回到 Scratch Pad，不停止后台 Agent
   const { requestClose } = useCloseTab()
@@ -60,6 +62,14 @@ export function TabBar(): React.ReactElement {
     return sessionWorkspaceNameMap
   }, [agentSessions, agentWorkspaces])
 
+  const automationSessionIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of agentSessions) {
+      if (s.sourceAutomationId) ids.add(s.id)
+    }
+    return ids
+  }, [agentSessions])
+
   // 拖拽状态
   const dragState = React.useRef<{
     dragging: boolean
@@ -70,6 +80,8 @@ export function TabBar(): React.ReactElement {
 
   const handleActivate = React.useCallback((tabId: string) => {
     setActiveTabId(tabId)
+    // 点击任意 tab 都关闭定时任务编辑表单（overlay 否则会盖在内容区上）
+    setAutomationForm({ open: false, draft: null })
 
     const tab = tabs.find((t) => t.id === tabId)
     if (!tab) return
@@ -103,7 +115,7 @@ export function TabBar(): React.ReactElement {
         setCurrentAgentSessionId(null)
       }
     }
-  }, [setActiveTabId, tabs, agentSessions, appMode, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
+  }, [setActiveTabId, setAutomationForm, tabs, agentSessions, appMode, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, setCurrentAgentWorkspaceId, setUnviewedCompleted])
 
   const handleDragStart = React.useCallback((tabId: string, e: React.PointerEvent) => {
     if (e.button !== 0) return // 只处理左键
@@ -142,6 +154,7 @@ export function TabBar(): React.ReactElement {
         activeTabId={activeTabId}
         streamingMap={indicatorMap}
         workspaceNameBySessionId={workspaceNameBySessionId}
+        automationSessionIds={automationSessionIds}
         onActivate={handleActivate}
         onClose={requestClose}
         onDragStart={handleDragStart}
@@ -156,6 +169,7 @@ function TabBarInner({
   activeTabId,
   streamingMap,
   workspaceNameBySessionId,
+  automationSessionIds,
   onActivate,
   onClose,
   onDragStart,
@@ -164,6 +178,7 @@ function TabBarInner({
   activeTabId: string | null
   streamingMap: Map<string, SessionIndicatorStatus>
   workspaceNameBySessionId: Map<string, string>
+  automationSessionIds: Set<string>
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
@@ -261,6 +276,7 @@ function TabBarInner({
             type={tab.type}
             title={tab.title}
             workspaceName={tab.type === 'agent' ? workspaceNameBySessionId.get(tab.sessionId) : undefined}
+            isAutomation={tab.type === 'agent' && automationSessionIds.has(tab.sessionId)}
             isActive={tab.id === activeTabId}
             isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}

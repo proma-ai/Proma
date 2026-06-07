@@ -565,7 +565,7 @@ export const MessageResponse = React.memo(
           urlTransform={mentionUrlTransform}
           components={components}
         >
-          {children}
+          {children.replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim()}
         </Markdown>
       </div>
     )

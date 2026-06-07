@@ -59,3 +59,6 @@ export * from './wechat'
 
 // 模型健康检查相关类型
 export * from './model-health'
+
+// 定时任务（Automation）相关类型
+export * from './automation'

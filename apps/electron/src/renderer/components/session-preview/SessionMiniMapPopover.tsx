@@ -74,7 +74,7 @@ const PREVIEW_MD_COMPONENTS: Components = {
   a: ({ children }) => <span>{children}</span>,
 }
 
-export function useSessionMiniMapHover(delayMs = 300, disabled = false): UseSessionMiniMapHoverReturn {
+export function useSessionMiniMapHover(delayMs = 600, disabled = false): UseSessionMiniMapHoverReturn {
   const anchorRef = React.useRef<HTMLElement | null>(null)
   const [isOpen, setIsOpen] = React.useState(false)
   const [isLeaving, setIsLeaving] = React.useState(false)

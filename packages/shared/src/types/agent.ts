@@ -512,6 +512,7 @@ export type AgentEvent =
   | { type: 'tool_use_summary'; summary: string; precedingToolUseIds: string[] }
   // 控制流
   | { type: 'complete'; stopReason?: string; usage?: AgentEventUsage }
+  | { type: 'run_resumed' }
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
   // 重试机制
@@ -561,6 +562,7 @@ export type PromaEvent =
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }
+  | { type: 'run_resumed'; sessionId: string }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge'
@@ -611,6 +613,8 @@ export interface AgentSessionMeta {
   stoppedByUser?: boolean
   /** 该会话当前的权限模式（持久化到磁盘，重启后恢复）。未设置时新会话默认 auto */
   permissionMode?: PromaPermissionMode
+  /** 来源定时任务 ID（该会话由定时任务自动创建/复用时标记，用于侧栏显示钟表图标 + 跳转设置） */
+  sourceAutomationId?: string
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -771,6 +775,8 @@ export interface SkillMeta {
   slug: string
   name: string
   description?: string
+  /** UI 分组名，用于把 Proma 内嵌 Skills 收拢到同一组 */
+  group?: string
   icon?: string
   version?: string
   enabled: boolean
@@ -850,6 +856,10 @@ export interface AgentSendInput {
   mentionedSessionIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
+  /** 触发来源：用户手动 vs 定时任务自动触发（用于 UI 区分标记） */
+  triggeredBy?: 'user' | 'automation'
+  /** 定时任务执行上下文（注入到系统提示词，用户不可见） */
+  automationContext?: string
 }
 
 // ===== Agent 队列消息 =====
@@ -974,6 +984,8 @@ export interface AgentStreamCompletePayload {
   startedAt?: number
   /** SDK result 消息的 subtype（success / error_max_turns / error_max_budget_usd / error_during_execution 等） */
   resultSubtype?: string
+  /** 本轮主体结束但仍有后台任务/定时任务在飞行：UI 进入"空闲可输入"态，等待任务完成自动唤醒 */
+  backgroundTasksPending?: boolean
 }
 
 // ===== 文件浏览器 =====

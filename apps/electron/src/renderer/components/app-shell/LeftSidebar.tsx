@@ -11,13 +11,14 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom } from '@/atoms/active-view'
+import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import {
@@ -150,6 +151,49 @@ function SidebarItem({ icon, label, active, suffix, onClick }: SidebarItemProps)
   )
 }
 
+function formatAutomationCount(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
+
+interface AutomationSidebarEntryProps {
+  count: number
+  active: boolean
+  onClick: () => void
+}
+
+function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEntryProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label={`自动任务，${count} 个任务已创建`}
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-primary/5 hover:text-foreground',
+      )}
+    >
+      <span className="flex items-center gap-3 min-w-0">
+        <span className="flex-shrink-0 w-[18px] h-[18px]">
+          <AlarmClock size={16} className={cn('block', active ? 'text-primary' : 'text-foreground/45')} />
+        </span>
+        <span className="truncate">自动任务</span>
+      </span>
+      <span
+        className={cn(
+          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
+          active
+            ? 'bg-primary/[0.14] text-primary'
+            : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+        )}
+      >
+        {formatAutomationCount(count)}
+      </span>
+    </button>
+  )
+}
+
 export interface LeftSidebarProps {
   /** 可选固定宽度，默认使用 CSS 响应式宽度 */
   width?: number
@@ -260,6 +304,7 @@ interface RailRecentItem {
   status: SessionIndicatorStatus
   pinned: boolean
   workspaceName?: string
+  isAutomation?: boolean
 }
 
 function RailRecentButton({
@@ -295,7 +340,10 @@ function RailRecentButton({
                 RAIL_STATUS_CLASS[item.status]
               )}
             />
-            <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
+            {item.isAutomation
+              ? <Clock size={14} className="text-foreground/40" />
+              : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
+            }
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">
@@ -331,6 +379,9 @@ function SidebarWindowDragStrip({ height }: { height: number }): React.ReactElem
 
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
+  const setAutomationForm = useSetAtom(automationFormAtom)
+  const automations = useAtomValue(automationsAtom)
+  const automationCount = automations.length
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const [activeItem, setActiveItem] = React.useState<SidebarItemId>('all-chats')
@@ -587,6 +638,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setActiveView(ITEM_TO_VIEW[item])
   }
 
+  /** 打开自动任务列表 */
+  const handleOpenAutomations = React.useCallback((): void => {
+    setAutomationForm({ open: false, draft: null })
+    setActiveView('automations')
+  }, [setAutomationForm, setActiveView])
+
   // 切换模式时重置归档视图
   React.useEffect(() => {
     setViewMode('active')
@@ -594,6 +651,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
   /** 创建新对话（继承当前选中的模型/渠道） */
   const handleNewConversation = async (): Promise<void> => {
+    setActiveView('conversations')
     try {
       const meta = await window.electronAPI.createConversation(
         undefined,
@@ -806,8 +864,9 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
   /** 创建新 Agent 会话 */
   const handleNewAgentSession = React.useCallback(async (): Promise<void> => {
+    setActiveView('conversations')
     await createAgentSessionInWorkspace()
-  }, [createAgentSessionInWorkspace])
+  }, [createAgentSessionInWorkspace, setActiveView])
 
   /** 切换当前项目 */
   const handleSelectProject = React.useCallback((workspaceId: string): void => {
@@ -968,6 +1027,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       return next
     })
   }, [openSession, setActiveView, setUnviewedCompleted])
+
+  /** 重命名工作区（项目）名称 */
+  const handleWorkspaceRename = React.useCallback(async (workspaceId: string, newName: string): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspace(workspaceId, { name: newName })
+      setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
+    } catch (error) {
+      console.error('[侧边栏] 重命名工作区失败:', error)
+      const msg = error instanceof Error ? error.message : '重命名失败'
+      toast.error(msg)
+    }
+  }, [setWorkspaces])
 
   /** 重命名 Agent 会话标题 */
   const handleAgentRename = React.useCallback(async (id: string, newTitle: string): Promise<void> => {
@@ -1191,6 +1262,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         status: agentIndicatorMap.get(session.id) ?? (unviewedCompletedSessionIds.has(session.id) ? 'completed' as const : 'idle' as const),
         pinned: !!session.pinned,
         workspaceName: session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined,
+        isAutomation: !!session.sourceAutomationId,
       }))
   }, [
     mode,
@@ -1354,6 +1426,39 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </TooltipTrigger>
             <TooltipContent side="right">搜索</TooltipContent>
           </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`自动任务，${automationCount} 个任务已创建`}
+                onClick={handleOpenAutomations}
+                className={cn(
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                  activeView === 'automations'
+                    ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                    : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                )}
+              >
+                <AlarmClock size={16} />
+                {automationCount > 0 && (
+                  <span
+                    className={cn(
+                      'absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums',
+                      activeView === 'automations'
+                        ? 'bg-primary-foreground text-primary'
+                        : 'bg-primary text-primary-foreground',
+                    )}
+                  >
+                    {formatAutomationCount(automationCount)}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              自动任务（{automationCount} 个任务已创建）
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -1457,9 +1562,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </Tooltip>
       </div>
 
+      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
+      <div className="px-3 pt-2 pb-0.5">
+        <AutomationSidebarEntry
+          count={automationCount}
+          active={activeView === 'automations'}
+          onClick={handleOpenAutomations}
+        />
+      </div>
+
       {/* Chat 模式：导航菜单（置顶区域） */}
       {mode === 'chat' && (
-        <div className="flex flex-col gap-1 pt-3 px-3">
+        <div className="flex flex-col gap-1 pt-1 px-3">
           <SidebarItem
             icon={<Pin size={16} />}
             label="置顶对话"
@@ -1595,6 +1709,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     setSettingsTab('agent')
                     setSettingsOpen(true)
                   }}
+                  onRenameWorkspace={handleWorkspaceRename}
                   onSelectSession={handleSelectAgentSession}
                   onRequestDelete={handleRequestDelete}
                   onRequestMove={handleRequestMove}
@@ -1827,10 +1942,30 @@ function SessionItemActions({
     setArchiveConfirming(true)
   }
 
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const handleMenuOpenChange = (open: boolean): void => {
-    setMenuOpen(open)
+    if (open) {
+      if (closeTimerRef.current !== null) {
+        clearTimeout(closeTimerRef.current)
+        closeTimerRef.current = null
+      }
+      setMenuOpen(true)
+    } else {
+      // Delay hiding the trigger so Radix Popper can still read its rect during the close animation (~150ms).
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null
+        setMenuOpen(false)
+      }, 200)
+    }
     onMenuOpenChange?.(open)
   }
+
+  React.useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
 
   const forceVisible = archiveConfirming || menuOpen
 
@@ -1944,7 +2079,7 @@ const ConversationItem = React.memo(function ConversationItem({
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
-  const preview = useSessionMiniMapHover(300, menuOpen)
+  const preview = useSessionMiniMapHover(600, menuOpen)
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
@@ -2163,7 +2298,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
-  const preview = useSessionMiniMapHover(300, disableMiniMap || menuOpen)
+  const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -2279,6 +2414,9 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 {showPinIcon && (
                   <Pin size={11} className="flex-shrink-0 text-primary/60" />
                 )}
+                {session.sourceAutomationId && (
+                  <Clock size={11} className="flex-shrink-0 text-foreground/40" />
+                )}
                 <span className="truncate">{session.title}</span>
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
@@ -2348,6 +2486,7 @@ interface AgentProjectGroupItemProps {
   onDrop: (e: React.DragEvent, workspaceId: string) => void
   onDragEnd: () => void
   onConfigureProject: (workspaceId: string) => void
+  onRenameWorkspace: (workspaceId: string, newName: string) => Promise<void>
   onSelectSession: (id: string, title: string) => void
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
@@ -2376,6 +2515,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onDrop,
   onDragEnd,
   onConfigureProject,
+  onRenameWorkspace,
   onSelectSession,
   onRequestDelete,
   onRequestMove,
@@ -2384,6 +2524,43 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onToggleArchive,
 }: AgentProjectGroupItemProps): React.ReactElement {
   const isCurrent = group.workspace.id === currentWorkspaceId
+
+  const [renamingWorkspace, setRenamingWorkspace] = React.useState(false)
+  const [workspaceEditName, setWorkspaceEditName] = React.useState('')
+  const workspaceEditRef = React.useRef<HTMLInputElement>(null)
+  const justStartedRenamingRef = React.useRef(false)
+
+  const handleStartWorkspaceRename = (): void => {
+    setWorkspaceEditName(group.workspace.name)
+    setRenamingWorkspace(true)
+    justStartedRenamingRef.current = true
+    setTimeout(() => {
+      justStartedRenamingRef.current = false
+      workspaceEditRef.current?.focus()
+      workspaceEditRef.current?.select()
+    }, 300)
+  }
+
+  const handleWorkspaceRenameCommit = async (): Promise<void> => {
+    if (justStartedRenamingRef.current) return
+    const trimmed = workspaceEditName.trim()
+    if (!trimmed || trimmed === group.workspace.name) {
+      setRenamingWorkspace(false)
+      return
+    }
+    await onRenameWorkspace(group.workspace.id, trimmed)
+    setRenamingWorkspace(false)
+  }
+
+  const handleWorkspaceRenameKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter') {
+      if (e.nativeEvent.isComposing) return
+      e.preventDefault()
+      void handleWorkspaceRenameCommit()
+    } else if (e.key === 'Escape') {
+      setRenamingWorkspace(false)
+    }
+  }
   const recentCutoff = relativeTimeNow - PROJECT_SESSION_RECENT_WINDOW_MS
   // 折叠时：所有"活跃"会话（运行中 / 阻塞 / 未查看的已完成）必须展示，
   // 不受 PROJECT_SESSION_PREVIEW_LIMIT 与 3 天窗口限制；活跃部分内部按
@@ -2436,21 +2613,43 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           <GripVertical size={12} />
         </span>
 
-        <button
-          type="button"
-          onClick={() => onSelectProject(group.workspace.id)}
-          className={cn(
-            'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11 hover:bg-foreground/[0.025]',
-            isCurrent
-              ? 'agent-project-item-current text-foreground'
-              : 'text-foreground/65 hover:text-foreground/88',
-          )}
-        >
-          <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
-          <span className="flex-1 min-w-0 truncate text-[13px] font-medium leading-[18px]">
-            {group.workspace.name}
-          </span>
-        </button>
+        {renamingWorkspace ? (
+          <div
+            className={cn(
+              'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11',
+              isCurrent
+                ? 'agent-project-item-current text-foreground'
+                : 'text-foreground/65',
+            )}
+          >
+            <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
+            <input
+              ref={workspaceEditRef}
+              value={workspaceEditName}
+              onChange={(e) => setWorkspaceEditName(e.target.value)}
+              onKeyDown={handleWorkspaceRenameKeyDown}
+              onBlur={() => void handleWorkspaceRenameCommit()}
+              className="flex-1 min-w-0 bg-transparent text-[13px] font-medium text-foreground border-b border-primary/50 outline-none px-0.5 leading-[18px]"
+              maxLength={50}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSelectProject(group.workspace.id)}
+            className={cn(
+              'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11 hover:bg-foreground/[0.025]',
+              isCurrent
+                ? 'agent-project-item-current text-foreground'
+                : 'text-foreground/65 hover:text-foreground/88',
+            )}
+          >
+            <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
+            <span className="flex-1 min-w-0 truncate text-[13px] font-medium leading-[18px]">
+              {group.workspace.name}
+            </span>
+          </button>
+        )}
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -2479,13 +2678,20 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               <MoreHorizontal size={13} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44 z-[9999] min-w-0 p-0.5">
+          <DropdownMenuContent align="start" className="w-44 z-[9999] min-w-0 p-0.5">
             <DropdownMenuItem
               className="text-xs py-1 [&>svg]:size-3.5"
               onSelect={() => onSelectProject(group.workspace.id)}
             >
               <FolderOpen size={14} />
               设为当前项目
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-xs py-1 [&>svg]:size-3.5"
+              onSelect={handleStartWorkspaceRename}
+            >
+              <Pencil size={14} />
+              重命名
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-xs py-1 [&>svg]:size-3.5"

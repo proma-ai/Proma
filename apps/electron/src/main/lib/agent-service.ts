@@ -155,6 +155,7 @@ export async function runAgent(
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
             resultSubtype: opts?.resultSubtype,
+            backgroundTasksPending: opts?.backgroundTasksPending,
           })
         }
         // Proma 官方渠道：对话完成后通知渲染进程刷新余额
@@ -243,6 +244,7 @@ export async function runAgentHeadless(
             stoppedByUser: opts?.stoppedByUser ?? false,
             startedAt: opts?.startedAt,
             resultSubtype: opts?.resultSubtype,
+            backgroundTasksPending: opts?.backgroundTasksPending,
           })
         }
       },

@@ -648,3 +648,12 @@ export function getSdkConfigDir(): string {
 export function getScratchPadPath(): string {
   return join(getConfigDir(), 'scratch-pad.md')
 }
+
+/**
+ * 获取定时任务（Automation）配置文件路径
+ *
+ * @returns ~/.proma/automations.json
+ */
+export function getAutomationsPath(): string {
+  return join(getConfigDir(), 'automations.json')
+}

@@ -59,6 +59,11 @@ export function finalizeStreamingActivities(
 /** Agent 会话的流式状态 */
 export interface AgentStreamState {
   running: boolean
+  /**
+   * 后台任务等待态（软空闲）：本轮主体已结束、UI 可输入，但 SDK 通道仍开着等后台任务唤醒。
+   * 此状态下 running 为 false，但服务端 activeSessions 仍保留，新消息必须走注入通道而非新建 run。
+   */
+  backgroundWaiting?: boolean
   content: string
   toolActivities: ToolActivity[]
   model?: string
@@ -687,6 +692,10 @@ export function applyAgentEvent(
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
       }
+
+    case 'run_resumed':
+      // 后台任务完成自动唤醒：从"空闲可输入"恢复到运行态（防御性，监听器已显式处理）。
+      return { ...prev, running: true, backgroundWaiting: false }
 
     case 'typed_error':
       // 处理类型化错误（TypedError）

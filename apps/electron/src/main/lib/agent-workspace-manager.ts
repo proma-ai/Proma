@@ -488,7 +488,7 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
   const yaml = fmMatch[1]
   if (!yaml) return meta
 
-  const validKeys = new Set(['name', 'description', 'icon', 'version'])
+  const validKeys = new Set(['name', 'description', 'group', 'icon', 'version'])
   const entries: Record<string, string> = {}
   let currentKey = ''
   let isFolded = false
@@ -525,6 +525,7 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
 
   if (entries.name) meta.name = entries.name.trim()
   if (entries.description) meta.description = entries.description.trim()
+  if (entries.group) meta.group = entries.group.trim()
   if (entries.icon) meta.icon = entries.icon.trim()
   if (entries.version) meta.version = entries.version.trim()
 
