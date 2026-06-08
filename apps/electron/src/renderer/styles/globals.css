@@ -473,6 +473,18 @@
   color: inherit !important;
 }
 
+/* 苍穹暮色：自动化入口选中状态 */
+.theme-ocean-dark .automation-entry-selected.automation-entry-selected {
+  background-color: hsl(210 40% 18%) !important;
+}
+.theme-ocean-dark .automation-entry-selected .automation-entry-icon {
+  color: hsl(205 70% 75%) !important;
+}
+.theme-ocean-dark .automation-entry-selected .automation-entry-badge {
+  background-color: hsl(205 70% 75% / 0.20) !important;
+  color: hsl(205 70% 75%) !important;
+}
+
 /* ===== 森系主题：会话/工作区选中状态 ===== */
 /* 森息晨光：浅绿背景 + 深绿文字 */
 .theme-forest-light .session-item-selected,
@@ -500,6 +512,18 @@
   color: inherit !important;
 }
 
+/* 森息夜语：自动化入口选中状态 */
+.theme-forest-dark .automation-entry-selected.automation-entry-selected {
+  background-color: hsl(150 25% 18%) !important;
+}
+.theme-forest-dark .automation-entry-selected .automation-entry-icon {
+  color: hsl(150 40% 70%) !important;
+}
+.theme-forest-dark .automation-entry-selected .automation-entry-badge {
+  background-color: hsl(150 40% 70% / 0.20) !important;
+  color: hsl(150 40% 70%) !important;
+}
+
 /* ===== 莫兰迪主题：模式切换器选中状态 ===== */
 /* 莫兰迪夜：淡杏粉滑块 + 深色文字 */
 .theme-slate-dark .mode-slider {
@@ -522,6 +546,18 @@
 .theme-slate-dark .workspace-item-selected *,
 .theme-slate-dark .tab-item-selected * {
   color: inherit !important;
+}
+
+/* 莫兰迪夜：自动化入口选中状态 */
+.theme-slate-dark .automation-entry-selected.automation-entry-selected {
+  background-color: hsl(260 10% 22%) !important;
+}
+.theme-slate-dark .automation-entry-selected .automation-entry-icon {
+  color: hsl(15 30% 75%) !important;
+}
+.theme-slate-dark .automation-entry-selected .automation-entry-badge {
+  background-color: hsl(15 30% 75% / 0.20) !important;
+  color: hsl(15 30% 75%) !important;
 }
 
 /* ===== 云朵舞者主题：会话/工作区选中状态 ===== */

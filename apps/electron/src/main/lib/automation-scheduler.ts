@@ -15,6 +15,7 @@ import {
   AUTOMATION_MAX_CONSECUTIVE_FAILURES,
   AUTOMATION_IPC_CHANNELS,
   type Automation,
+  type AutomationRun,
 } from '@proma/shared'
 import {
   listAutomations,
@@ -27,6 +28,7 @@ import {
 } from './automation-manager'
 import { createAgentSession, updateAgentSessionMeta } from './agent-session-manager'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
+import { notifyAutomationRunFinished } from './automation-notification-service'
 
 /** tick 周期：每 30s 检查一次到期任务（短轮询，抗休眠漂移） */
 const TICK_INTERVAL_MS = 30_000
@@ -95,14 +97,18 @@ export async function runAutomation(automation: Automation, manual = false): Pro
         if (settled) return
         settled = true
         if (timeoutTimer) clearTimeout(timeoutTimer)
-        appendRun(automation.id, {
+        const run: AutomationRun = {
           runAt,
           sessionId: targetSessionId,
           status,
           durationMs: Date.now() - runAt,
           error,
-        })
+        }
+        appendRun(automation.id, run)
         broadcastChanged()
+        void notifyAutomationRunFinished({ automation, run }).catch((err) => {
+          console.error(`[定时任务] 发送完成通知失败: ${automation.name}`, err)
+        })
         // 失败退避：连续失败达上限自动暂停
         const latest = getAutomation(automation.id)
         if (
@@ -147,14 +153,18 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     })
   } catch (err) {
     console.error(`[定时任务] ${automation.name} 执行异常:`, err)
-    appendRun(automation.id, {
+    const run: AutomationRun = {
       runAt,
       sessionId: '',
       status: 'error',
       durationMs: Date.now() - runAt,
       error: err instanceof Error ? err.message : '未知错误',
-    })
+    }
+    appendRun(automation.id, run)
     broadcastChanged()
+    void notifyAutomationRunFinished({ automation, run }).catch((notifyError) => {
+      console.error(`[定时任务] 发送异常通知失败: ${automation.name}`, notifyError)
+    })
   } finally {
     runningAutomations.delete(automation.id)
   }

@@ -181,13 +181,24 @@ export function MarkdownRichEditor({
     return () => clearTimeout(timer)
   }, [editor, isEditable])
 
+  const focusEditorFromBlankArea = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!editor || !isEditable || event.button !== 0) return
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    if (target.closest('.ProseMirror')) return
+
+    event.preventDefault()
+    editor.chain().focus('end').run()
+  }, [editor, isEditable])
+
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex h-full min-h-full flex-col">
       {editing && editor && <MarkdownEditorToolbar editor={editor} />}
       <EditorContent
         editor={editor}
+        onMouseDown={focusEditorFromBlankArea}
         className={cn(
-          'min-h-full flex-1',
+          'h-full min-h-full flex-1',
           isEditable
             ? '[&_.proma-mermaid-preview]:hidden [&_.proma-code-source-body]:block'
             : [

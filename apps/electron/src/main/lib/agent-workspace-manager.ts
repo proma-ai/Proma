@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
 import {
   getAgentWorkspacesIndexPath,
+  getAgentWorkspacesDir,
   getAgentWorkspacePath,
   getWorkspaceMcpPath,
   getWorkspaceSkillsDir,
@@ -235,7 +236,7 @@ export function updateAgentWorkspace(
   return updated
 }
 
-/** 删除工作区索引条目，保留目录避免误删用户文件 */
+/** 删除工作区索引条目及其本地目录 */
 export function deleteAgentWorkspace(id: string): void {
   const index = readIndex()
   const idx = index.workspaces.findIndex((w) => w.id === id)
@@ -244,10 +245,37 @@ export function deleteAgentWorkspace(id: string): void {
     throw new Error(`Agent 工作区不存在: ${id}`)
   }
 
+  const target = index.workspaces[idx]!
+  if (target.slug === 'default') {
+    throw new Error('默认项目不能删除')
+  }
+  if (index.workspaces.length <= 1) {
+    throw new Error('至少需要保留一个项目')
+  }
+
+  const workspacesRoot = resolve(getAgentWorkspacesDir())
+  const workspaceDir = resolve(join(workspacesRoot, target.slug))
+  const relativePath = relative(workspacesRoot, workspaceDir)
+  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+    throw new Error(`工作区目录路径异常，已跳过删除: ${workspaceDir}`)
+  }
+
+  // 先移除索引条目并落盘，再删目录：
+  // 即使随后 rmSync 失败，也只会残留一个无引用目录（无害，可被同 slug 重建覆盖），
+  // 而不会留下指向已删目录的孤儿索引条目导致 UI 状态不一致
   const removed = index.workspaces.splice(idx, 1)[0]!
   writeIndex(index)
 
-  console.log(`[Agent 工作区] 已删除工作区索引: ${removed.name} (slug: ${removed.slug}，目录已保留)`)
+  if (existsSync(workspaceDir)) {
+    try {
+      rmSync(workspaceDir, { recursive: true, force: true })
+      console.log(`[Agent 工作区] 已删除工作区目录: ${workspaceDir}`)
+    } catch (error) {
+      console.warn(`[Agent 工作区] 删除工作区目录失败，已残留无引用目录 (${target.slug}):`, error)
+    }
+  }
+
+  console.log(`[Agent 工作区] 已删除工作区: ${removed.name} (slug: ${removed.slug})`)
 }
 
 /** 确保默认工作区存在，首次启动时自动创建（slug: default） */
@@ -598,6 +626,20 @@ function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
   }
 
   return skills
+}
+
+/** 获取默认 Skills 的 slug 列表（来自 ~/.proma/default-skills/） */
+export function getDefaultSkillSlugs(): string[] {
+  const dir = getDefaultSkillsDir()
+  if (!existsSync(dir)) return []
+
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  } catch {
+    return []
+  }
 }
 
 /** 获取工作区所有 Skills（含活跃和不活跃），用于设置页 UI */

@@ -151,6 +151,7 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     modelId: input.modelId,
     workspaceId: input.workspaceId,
     permissionMode: input.permissionMode ?? AUTOMATION_DEFAULT_PERMISSION_MODE,
+    notificationTargets: input.notificationTargets,
     sourceSessionId: input.sourceSessionId,
     createdAt: now,
     updatedAt: now,
@@ -180,6 +181,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
     target.workspaceId = input.workspaceId || undefined
   }
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
+  if (input.notificationTargets !== undefined) target.notificationTargets = input.notificationTargets
 
   // 调度参数变化：重算下次运行时间（从现在起算，避免旧时间戳立即触发）
   const scheduleChanged =

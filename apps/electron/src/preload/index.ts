@@ -546,6 +546,9 @@ export interface ElectronAPI {
   /** 获取其他工作区的 Skill 列表 */
   getOtherWorkspaceSkills: (currentSlug: string) => Promise<OtherWorkspaceSkillsGroup[]>
 
+  /** 获取默认 Skills 的 slug 列表（来自 ~/.proma/default-skills/） */
+  getDefaultSkillSlugs: () => Promise<string[]>
+
   /** 从其他工作区导入 Skill */
   importSkillFromWorkspace: (targetSlug: string, sourceSlug: string, skillSlug: string) => Promise<SkillMeta>
 
@@ -1685,6 +1688,10 @@ const electronAPI: ElectronAPI = {
 
   getOtherWorkspaceSkills: (currentSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_SKILLS, currentSlug)
+  },
+
+  getDefaultSkillSlugs: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_DEFAULT_SKILL_SLUGS)
   },
 
   importSkillFromWorkspace: (targetSlug: string, sourceSlug: string, skillSlug: string) => {

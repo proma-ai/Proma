@@ -49,6 +49,7 @@ interface EditingServer {
 interface SkillGroup {
   prefix: string
   skills: SkillMeta[]
+  isBuiltin?: boolean
 }
 
 interface SkillGroupBucket {
@@ -58,10 +59,21 @@ interface SkillGroupBucket {
 
 // ===== Helpers =====
 
-function groupSkillsByPrefix(skills: SkillMeta[]): SkillGroup[] {
-  const prefixMap = new Map<string, SkillGroupBucket>()
+function groupSkillsByPrefix(skills: SkillMeta[], defaultSlugs: Set<string>): SkillGroup[] {
+  const builtinSkills: SkillMeta[] = []
+  const otherSkills: SkillMeta[] = []
 
   for (const skill of skills) {
+    if (defaultSlugs.has(skill.slug)) {
+      builtinSkills.push(skill)
+    } else {
+      otherSkills.push(skill)
+    }
+  }
+
+  const prefixMap = new Map<string, SkillGroupBucket>()
+
+  for (const skill of otherSkills) {
     const explicitGroup = skill.group?.trim()
     const dashIdx = skill.slug.indexOf('-')
     const prefix = explicitGroup || (dashIdx > 0 ? skill.slug.slice(0, dashIdx) : '')
@@ -87,11 +99,16 @@ function groupSkillsByPrefix(skills: SkillMeta[]): SkillGroup[] {
     groups.push({ prefix: '', skills: standalone })
   }
 
+  // built-in 分组放在最前面（用 proma-built-in 作为内部哨兵，避免与用户 skill 的 slug 前缀碰撞）
+  if (builtinSkills.length > 0) {
+    groups.unshift({ prefix: 'proma-built-in', skills: builtinSkills, isBuiltin: true })
+  }
+
   return groups
 }
 
 function shortName(slug: string, prefix: string): string {
-  if (!prefix) return slug
+  if (!prefix || prefix === 'proma-built-in') return slug
   return slug.startsWith(prefix + '-') ? slug.slice(prefix.length + 1) : slug
 }
 
@@ -150,6 +167,7 @@ export function AgentSettings(): React.ReactElement {
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
   const [skillsDir, setSkillsDir] = React.useState('')
+  const [defaultSkillSlugs, setDefaultSkillSlugs] = React.useState<Set<string>>(new Set())
   const [otherWorkspaces, setOtherWorkspaces] = React.useState<OtherWorkspaceSkillsGroup[]>([])
   const [showImportDialog, setShowImportDialog] = React.useState(false)
   const [importingSkill, setImportingSkill] = React.useState<string | null>(null)
@@ -165,14 +183,16 @@ export function AgentSettings(): React.ReactElement {
       return
     }
     try {
-      const [config, skillList, dir] = await Promise.all([
+      const [config, skillList, dir, defaultSlugs] = await Promise.all([
         window.electronAPI.getWorkspaceMcpConfig(workspaceSlug),
         window.electronAPI.getWorkspaceSkills(workspaceSlug),
         window.electronAPI.getWorkspaceSkillsDir(workspaceSlug),
+        window.electronAPI.getDefaultSkillSlugs(),
       ])
       setMcpConfig(config)
       setSkills(skillList)
       setSkillsDir(dir)
+      setDefaultSkillSlugs(new Set(defaultSlugs))
     } catch (error) {
       console.error('[Agent 设置] 加载工作区配置失败:', error)
     } finally {
@@ -496,6 +516,7 @@ ${skillList}
               <div className="flex border border-border rounded-lg overflow-hidden" style={{ minHeight: 420 }}>
                 <SkillListPanel
                   skills={skills}
+                  defaultSkillSlugs={defaultSkillSlugs}
                   selectedSlug={selectedSkillSlug}
                   onSelect={setSelectedSkillSlug}
                   onDelete={handleDeleteSkill}
@@ -638,6 +659,7 @@ function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowP
 
 interface SkillListPanelProps {
   skills: SkillMeta[]
+  defaultSkillSlugs: Set<string>
   selectedSlug: string | null
   onSelect: (slug: string) => void
   onDelete: (slug: string, name: string) => void
@@ -646,8 +668,8 @@ interface SkillListPanelProps {
   skillsDir: string
 }
 
-function SkillListPanel({ skills, selectedSlug, onSelect, onDelete, onToggle, onUpdate, skillsDir }: SkillListPanelProps): React.ReactElement {
-  const groups = React.useMemo(() => groupSkillsByPrefix(skills), [skills])
+function SkillListPanel({ skills, defaultSkillSlugs, selectedSlug, onSelect, onDelete, onToggle, onUpdate, skillsDir }: SkillListPanelProps): React.ReactElement {
+  const groups = React.useMemo(() => groupSkillsByPrefix(skills, defaultSkillSlugs), [skills, defaultSkillSlugs])
   const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(() =>
     new Set(groups.filter((g) => g.prefix).map((g) => g.prefix)),
   )
@@ -677,7 +699,14 @@ function SkillListPanel({ skills, selectedSlug, onSelect, onDelete, onToggle, on
               {expandedGroups.has(group.prefix)
                 ? <ChevronDown size={12} className="text-muted-foreground flex-shrink-0" />
                 : <ChevronRight size={12} className="text-muted-foreground flex-shrink-0" />}
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate flex-1">{group.prefix}</span>
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate flex-1">
+                {group.isBuiltin ? 'built-in' : group.prefix}
+              </span>
+              {group.isBuiltin && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium flex-shrink-0">
+                  PROMA
+                </span>
+              )}
               <span className="text-[10px] tabular-nums text-muted-foreground flex-shrink-0">{group.skills.length}</span>
             </button>
             {expandedGroups.has(group.prefix) && (
@@ -694,6 +723,7 @@ function SkillListPanel({ skills, selectedSlug, onSelect, onDelete, onToggle, on
                     onToggle={(enabled) => onToggle(skill.slug, enabled)}
                     onOpenFolder={() => openSkillFolder(skill.slug)}
                     onUpdate={skill.hasUpdate ? () => onUpdate(skill.slug) : undefined}
+                    isBuiltin={group.isBuiltin}
                     indented
                   />
                 ))}
@@ -732,9 +762,10 @@ interface SkillCompactItemProps {
   onOpenFolder: () => void
   onUpdate?: () => void
   indented?: boolean
+  isBuiltin?: boolean
 }
 
-function SkillCompactItem({ skill, displayName, selected, onSelect, onDelete, onToggle, onOpenFolder, onUpdate, indented }: SkillCompactItemProps): React.ReactElement {
+function SkillCompactItem({ skill, displayName, selected, onSelect, onDelete, onToggle, onOpenFolder, onUpdate, indented, isBuiltin }: SkillCompactItemProps): React.ReactElement {
   return (
     <div
       role="button"
@@ -772,13 +803,15 @@ function SkillCompactItem({ skill, displayName, selected, onSelect, onDelete, on
         >
           <FolderOpen size={12} />
         </span>
-        <span
-          role="button"
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
-        >
-          <Trash2 size={12} />
-        </span>
+        {!isBuiltin && (
+          <span
+            role="button"
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+          >
+            <Trash2 size={12} />
+          </span>
+        )}
       </div>
       <Switch
         checked={skill.enabled}

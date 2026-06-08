@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, ChevronDown, ChevronRight, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -118,38 +118,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { ActiveView } from '@/atoms/active-view'
 import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
 import { CloudSidebarDownloadButton, CloudSidebarCreditIndicator } from './CloudSidebarExtension'
-
-interface SidebarItemProps {
-  icon: React.ReactNode
-  label: string
-  active?: boolean
-  /** 右侧额外元素（如展开/收起箭头） */
-  suffix?: React.ReactNode
-  onClick?: () => void
-}
-
-function SidebarItem({ icon, label, active, suffix, onClick }: SidebarItemProps): React.ReactElement {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
-        active
-          ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/60 hover:bg-primary/5 hover:text-foreground'
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <span className="flex-shrink-0 w-[18px] h-[18px]">{icon}</span>
-        <span>{label}</span>
-      </div>
-      {suffix}
-    </button>
-  )
-}
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -168,23 +138,23 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
       aria-label={`自动任务，${count} 个任务已创建`}
       onClick={onClick}
       className={cn(
-        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag automation-entry',
         active
-          ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/60 hover:bg-primary/5 hover:text-foreground',
+          ? 'automation-entry-selected bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
       )}
     >
       <span className="flex items-center gap-3 min-w-0">
-        <span className="flex-shrink-0 w-[18px] h-[18px]">
-          <AlarmClock size={16} className={cn('block', active ? 'text-primary' : 'text-foreground/45')} />
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px] automation-entry-icon', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+          <AlarmClock size={16} className="block" />
         </span>
         <span className="truncate">自动任务</span>
       </span>
       <span
         className={cn(
-          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
+          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
           active
-            ? 'bg-primary/[0.14] text-primary'
+            ? 'bg-accent-foreground/[0.26] text-primary-foreground'
             : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
         )}
       >
@@ -199,15 +169,6 @@ export interface LeftSidebarProps {
   width?: number
 }
 
-/** 侧边栏导航项标识 */
-type SidebarItemId = 'pinned' | 'all-chats'
-
-/** 导航项到视图的映射 */
-const ITEM_TO_VIEW: Record<SidebarItemId, ActiveView> = {
-  pinned: 'conversations',
-  'all-chats': 'conversations',
-}
-
 /** 日期分组标签 */
 type DateGroup = '今天' | '昨天' | '更早'
 
@@ -220,6 +181,10 @@ const PROJECT_SESSION_PREVIEW_LIMIT = 5
 const PROJECT_SESSION_RECENT_WINDOW_MS = 3 * 86_400_000
 /** 点击"显示更多"时每次额外展开的会话数量 */
 const PROJECT_SESSION_EXPAND_STEP = 10
+/** 置顶区最多占用约 6 条会话的高度，超过后在置顶区内部滚动 */
+const PINNED_SESSION_VISIBLE_LIMIT = 6
+const PINNED_SESSION_ROW_HEIGHT_PX = 32
+const PINNED_SESSION_MAX_HEIGHT = PINNED_SESSION_VISIBLE_LIMIT * PINNED_SESSION_ROW_HEIGHT_PX
 
 const ACTIVE_SESSION_STATUSES: ReadonlySet<SessionIndicatorStatus> = new Set([
   'blocked',
@@ -381,10 +346,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const automations = useAtomValue(automationsAtom)
+  const setAutomations = useSetAtom(automationsAtom)
   const automationCount = automations.length
   const setSettingsTab = useSetAtom(settingsTabAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const [activeItem, setActiveItem] = React.useState<SidebarItemId>('all-chats')
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
@@ -393,10 +358,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
   /** 待删除对话 ID，非空时显示确认弹窗 */
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
+  /** 待删除项目 ID，非空时显示项目删除确认弹窗 */
+  const [pendingDeleteWorkspaceId, setPendingDeleteWorkspaceId] = React.useState<string | null>(null)
+  const [deletingWorkspaceId, setDeletingWorkspaceId] = React.useState<string | null>(null)
   /** 待迁移会话 ID，非空时显示迁移对话框 */
   const [moveTargetId, setMoveTargetId] = React.useState<string | null>(null)
-  /** 置顶区域展开/收起 */
-  const [pinnedExpanded, setPinnedExpanded] = React.useState(true)
   /** 每个项目额外展开显示的会话数量（每次点击"显示更多" +10），未点击则为 0 或无值 */
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
   /** 项目拖拽排序状态 */
@@ -545,6 +511,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return map
   }, [workspaces])
 
+  const pendingDeleteWorkspace = React.useMemo(
+    () => workspaces.find((workspace) => workspace.id === pendingDeleteWorkspaceId) ?? null,
+    [pendingDeleteWorkspaceId, workspaces],
+  )
+
   React.useEffect(() => {
     if (!currentWorkspaceSlug || mode !== 'agent') {
       setCapabilities(null)
@@ -627,17 +598,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 处理导航项点击 */
-  const handleItemClick = (item: SidebarItemId): void => {
-    if (item === 'pinned') {
-      // 置顶按钮仅切换展开/收起，不改变 activeView
-      setPinnedExpanded((prev) => !prev)
-      return
-    }
-    setActiveItem(item)
-    setActiveView(ITEM_TO_VIEW[item])
-  }
-
   /** 打开自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
     setAutomationForm({ open: false, draft: null })
@@ -663,7 +623,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       openSession('chat', meta.id, meta.title)
       // 确保在对话视图
       setActiveView('conversations')
-      setActiveItem('all-chats')
       // 根据默认提示词重置选中
       if (promptConfig.defaultPromptId) {
         setSelectedPromptId(promptConfig.defaultPromptId)
@@ -677,7 +636,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleSelectConversation = React.useCallback((id: string, title: string): void => {
     openSession('chat', id, title)
     setActiveView('conversations')
-    setActiveItem('all-chats')
   }, [openSession, setActiveView])
 
   /** 请求删除对话（弹出确认框） */
@@ -856,7 +814,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       // 打开新标签页
       openSession('agent', meta.id, meta.title)
       setActiveView('conversations')
-      setActiveItem('all-chats')
     } catch (error) {
       console.error('[侧边栏] 创建 Agent 会话失败:', error)
     }
@@ -874,6 +831,128 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setCurrentWorkspaceId(workspaceId)
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
   }, [currentWorkspaceId, setCurrentWorkspaceId])
+
+  const canDeleteWorkspace = React.useCallback(
+    (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
+    [workspaces.length],
+  )
+
+  /** 请求删除项目（弹出二次确认框） */
+  const handleRequestDeleteWorkspace = React.useCallback((workspaceId: string): void => {
+    setPendingDeleteWorkspaceId(workspaceId)
+  }, [])
+
+  /** 确认删除项目及其绑定资源 */
+  const handleConfirmDeleteWorkspace = React.useCallback(async (): Promise<void> => {
+    const workspaceId = pendingDeleteWorkspaceId
+    const workspace = workspaces.find((item) => item.id === workspaceId)
+    if (!workspaceId || !workspace) return
+
+    if (!canDeleteWorkspace(workspace)) {
+      toast.error(workspace.slug === 'default' ? '默认项目不能删除' : '至少需要保留一个项目')
+      setPendingDeleteWorkspaceId(null)
+      return
+    }
+
+    const deletedSessionIds = new Set(
+      agentSessions
+        .filter((session) => session.workspaceId === workspaceId)
+        .map((session) => session.id),
+    )
+
+    try {
+      setDeletingWorkspaceId(workspaceId)
+
+      await window.electronAPI.deleteAgentWorkspace(workspaceId)
+
+      for (const sessionId of deletedSessionIds) {
+        cleanupMapAtoms(sessionId)
+      }
+
+      setDraftSessionIds((prev: Set<string>) => {
+        let changed = false
+        const next = new Set(prev)
+        for (const sessionId of deletedSessionIds) {
+          if (next.delete(sessionId)) changed = true
+        }
+        return changed ? next : prev
+      })
+
+      setAgentMessagesCache((prev) => {
+        let changed = false
+        const next = new Map(prev)
+        for (const sessionId of deletedSessionIds) {
+          if (next.delete(sessionId)) changed = true
+        }
+        return changed ? next : prev
+      })
+      setAutomations((prev) => prev.filter((automation) => automation.workspaceId !== workspaceId))
+
+      const currentTabs = store.get(tabsAtom)
+      const currentActiveTabId = store.get(activeTabIdAtom)
+      const nextTabs = currentTabs.filter((tab) => (
+        (tab.type !== 'agent' && tab.type !== 'preview') || !deletedSessionIds.has(tab.sessionId)
+      ))
+      const nextActiveTabId = currentActiveTabId && nextTabs.some((tab) => tab.id === currentActiveTabId)
+        ? currentActiveTabId
+        : nextTabs[0]?.id ?? null
+
+      setTabs(nextTabs)
+      setActiveTabId(nextActiveTabId)
+      syncActiveTabSideEffects(nextActiveTabId ? nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null : null)
+
+      const [remainingWorkspaces, sessions] = await Promise.all([
+        window.electronAPI.listAgentWorkspaces(),
+        window.electronAPI.listAgentSessions(),
+      ])
+
+      setWorkspaces(remainingWorkspaces)
+      setAgentSessions(sessions)
+
+      setExpandedExtraCountMap((prev) => {
+        if (!prev.has(workspaceId)) return prev
+        const next = new Map(prev)
+        next.delete(workspaceId)
+        return next
+      })
+
+      if (workspaceId === currentWorkspaceId) {
+        const fallback = remainingWorkspaces.find((item) => item.slug === 'default') ?? remainingWorkspaces[0] ?? null
+        setCurrentWorkspaceId(fallback?.id ?? null)
+        if (fallback) {
+          window.electronAPI.updateSettings({ agentWorkspaceId: fallback.id }).catch(console.error)
+        }
+      }
+
+      toast.success('项目已删除', {
+        description: `已删除「${workspace.name}」及其绑定资源`,
+      })
+    } catch (error) {
+      console.error('[侧边栏] 删除项目失败:', error)
+      const msg = error instanceof Error ? error.message : '删除项目失败'
+      toast.error(msg)
+    } finally {
+      setDeletingWorkspaceId(null)
+      setPendingDeleteWorkspaceId(null)
+    }
+  }, [
+    pendingDeleteWorkspaceId,
+    workspaces,
+    canDeleteWorkspace,
+    agentSessions,
+    cleanupMapAtoms,
+    setDraftSessionIds,
+    setAgentMessagesCache,
+    setAutomations,
+    store,
+    setTabs,
+    setActiveTabId,
+    syncActiveTabSideEffects,
+    setWorkspaces,
+    setAgentSessions,
+    currentWorkspaceId,
+    setCurrentWorkspaceId,
+  ])
 
   /** 展开某个项目时每次额外显示的会话数量 */
   const handleShowMoreSessions = React.useCallback((workspaceId: string): void => {
@@ -1018,7 +1097,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleSelectAgentSession = React.useCallback((id: string, title: string): void => {
     openSession('agent', id, title)
     setActiveView('conversations')
-    setActiveItem('all-chats')
     // 清除该会话的"已完成未查看"标记
     setUnviewedCompleted((prev: Set<string>) => {
       if (!prev.has(id)) return prev
@@ -1310,6 +1388,43 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     </AlertDialog>
   )
 
+  // 项目删除确认弹窗（会同时删除项目下的会话与工作区资源）
+  const projectDeleteDialog = (
+    <AlertDialog
+      open={pendingDeleteWorkspaceId !== null}
+      onOpenChange={(open) => {
+        if (!open && !deletingWorkspaceId) setPendingDeleteWorkspaceId(null)
+      }}
+    >
+      <AlertDialogContent
+        onCloseAutoFocus={(event) => event.preventDefault()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !deletingWorkspaceId) {
+            e.preventDefault()
+            void handleConfirmDeleteWorkspace()
+          }
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认删除项目</AlertDialogTitle>
+          <AlertDialogDescription>
+            将删除「{pendingDeleteWorkspace?.name ?? '该项目'}」及其绑定的所有会话、自动任务、MCP、Skills、工作区文件和本地项目目录。附加目录和附加文件只会移除引用，不会删除原始文件。删除后无法恢复。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={!!deletingWorkspaceId}>取消</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={!!deletingWorkspaceId}
+            onClick={handleConfirmDeleteWorkspace}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {deletingWorkspaceId ? '删除中...' : '删除项目'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+
   // 迁移会话对话框（collapsed/expanded 共享）
   const moveDialog = (
     <MoveSessionDialog
@@ -1503,6 +1618,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </div>
 
         {deleteDialog}
+        {projectDeleteDialog}
         {moveDialog}
         <SearchDialog />
       </div>
@@ -1571,74 +1687,105 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         />
       </div>
 
-      {/* Chat 模式：导航菜单（置顶区域） */}
-      {mode === 'chat' && (
-        <div className="flex flex-col gap-1 pt-1 px-3">
-          <SidebarItem
-            icon={<Pin size={16} />}
-            label="置顶对话"
-            suffix={
-              pinnedConversations.length > 0 ? (
-                pinnedExpanded
-                  ? <ChevronDown size={14} className="text-foreground/40" />
-                  : <ChevronRight size={14} className="text-foreground/40" />
-              ) : undefined
-            }
-            onClick={() => handleItemClick('pinned')}
-          />
-        </div>
-      )}
+      {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
+      {mode === 'chat' && viewMode === 'active' ? (
+        <div className="flex-1 flex flex-col min-h-0">
+          {pinnedConversations.length > 0 && (
+            <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
+              <div className="px-3.5 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                置顶
+              </div>
+              <div
+                className="overflow-y-auto scrollbar-thin"
+                style={{ maxHeight: PINNED_SESSION_MAX_HEIGHT }}
+              >
+                <div className="px-2">
+                  <div className="ml-4 flex flex-col gap-0.5">
+                    {pinnedConversations.map((conv) => (
+                      <ConversationItem
+                        key={`pinned-${conv.id}`}
+                        conversation={conv}
+                        active={conv.id === activeSessionId}
+                        streaming={streamingIds.has(conv.id)}
+                        showPinIcon={false}
+                        relativeTimeNow={relativeTimeNow}
+                        onSelect={handleSelectConversation}
+                        onRequestDelete={handleRequestDelete}
+                        onRename={handleRename}
+                        onTogglePin={handleTogglePin}
+                        onToggleArchive={handleToggleArchive}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
-      {/* Chat 模式：置顶对话区域 */}
-      {mode === 'chat' && pinnedExpanded && pinnedConversations.length > 0 && (
-        <div className="px-3 pt-1 pb-1">
-          <div className="flex flex-col gap-0.5 pl-1 border-l-2 border-primary/20 ml-2">
-            {pinnedConversations.map((conv) => (
-              <ConversationItem
-                key={`pinned-${conv.id}`}
-                conversation={conv}
-                active={conv.id === activeSessionId}
-                streaming={streamingIds.has(conv.id)}
-                showPinIcon={false}
-                relativeTimeNow={relativeTimeNow}
-                onSelect={handleSelectConversation}
-                onRequestDelete={handleRequestDelete}
-                onRename={handleRename}
-                onTogglePin={handleTogglePin}
-                onToggleArchive={handleToggleArchive}
-              />
+          <div className="px-2 pt-2 pb-1 flex-shrink-0">
+            <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">对话</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
+            {conversationGroups.map((group) => (
+              <div key={group.label} className="mb-1">
+                <div className="px-1.5 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                  {group.label}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {group.items.map((conv) => (
+                    <ConversationItem
+                      key={conv.id}
+                      conversation={conv}
+                      active={conv.id === activeSessionId}
+                      streaming={streamingIds.has(conv.id)}
+                      showPinIcon={!!conv.pinned}
+                      relativeTimeNow={relativeTimeNow}
+                      onSelect={handleSelectConversation}
+                      onRequestDelete={handleRequestDelete}
+                      onRename={handleRename}
+                      onTogglePin={handleTogglePin}
+                      onToggleArchive={handleToggleArchive}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
-      )}
-
-      {/* Agent 模式 active 视图：置顶 + 项目历史 */}
-      {mode === 'agent' && viewMode === 'active' ? (
+      ) : mode === 'agent' && viewMode === 'active' ? (
         <div className="flex-1 flex flex-col min-h-0">
           {pinnedAgentSessions.length > 0 && (
-            <div className="px-2 pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
-              <div className="px-1.5 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+            <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
+              <div className="px-3.5 pb-1 text-[11px] font-medium text-foreground/40 select-none">
                 置顶
               </div>
-              <div className="flex flex-col gap-0.5">
-                {pinnedAgentSessions.map((session) => (
-                  <AgentSessionItem
-                    key={`pinned-${session.id}`}
-                    session={session}
-                    active={session.id === activeSessionId}
-                    indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                    showPinIcon={false}
-                    leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                    workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
-                    relativeTimeNow={relativeTimeNow}
-                    onSelect={handleSelectAgentSession}
-                    onRequestDelete={handleRequestDelete}
-                    onRequestMove={handleRequestMove}
-                    onRename={handleAgentRename}
-                    onTogglePin={handleTogglePinAgent}
-                    onToggleArchive={handleToggleArchiveAgent}
-                  />
-                ))}
+              <div
+                className="overflow-y-auto scrollbar-thin"
+                style={{ maxHeight: PINNED_SESSION_MAX_HEIGHT }}
+              >
+                <div className="px-2">
+                  <div className="ml-4 flex flex-col gap-0.5">
+                    {pinnedAgentSessions.map((session) => (
+                      <AgentSessionItem
+                        key={`pinned-${session.id}`}
+                        session={session}
+                        active={session.id === activeSessionId}
+                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                        showPinIcon={false}
+                        leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
+                        workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
+                        relativeTimeNow={relativeTimeNow}
+                        onSelect={handleSelectAgentSession}
+                        onRequestDelete={handleRequestDelete}
+                        onRequestMove={handleRequestMove}
+                        onRename={handleAgentRename}
+                        onTogglePin={handleTogglePinAgent}
+                        onToggleArchive={handleToggleArchiveAgent}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1710,6 +1857,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     setSettingsOpen(true)
                   }}
                   onRenameWorkspace={handleWorkspaceRename}
+                  onRequestDeleteWorkspace={handleRequestDeleteWorkspace}
+                  canDeleteWorkspace={canDeleteWorkspace(group.workspace)}
                   onSelectSession={handleSelectAgentSession}
                   onRequestDelete={handleRequestDelete}
                   onRequestMove={handleRequestMove}
@@ -1732,10 +1881,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </div>
           )}
 
-          {/* Chat 模式 / 归档视图：单列表布局 */}
+          {/* 归档视图：单列表布局 */}
           <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3 scrollbar-thin titlebar-no-drag">
             {mode === 'chat' ? (
-              /* Chat 模式：对话按日期分组 */
+              /* Chat 归档：对话按日期分组 */
               conversationGroups.map((group) => (
                 <div key={group.label} className="mb-1">
                   <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
@@ -1881,6 +2030,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       </div>
 
       {deleteDialog}
+      {projectDeleteDialog}
       {moveDialog}
       <SearchDialog />
     </div>
@@ -2159,16 +2309,20 @@ const ConversationItem = React.memo(function ConversationItem({
             startEdit()
           }}
           className={cn(
-            'group relative w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors duration-100 titlebar-no-drag text-left',
-            active
-              ? 'session-item-selected bg-foreground/[0.055]'
-              : 'hover:bg-foreground/[0.035]'
+            'group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            active && 'session-item-selected',
+            streaming
+              ? 'text-foreground font-medium hover:bg-foreground/[0.03]'
+              : 'hover:bg-foreground/[0.03]',
+            active && 'bg-foreground/[0.08]',
           )}
         >
-          {/* 流式状态左侧竖线条（与 Agent 保持一致） */}
-          {streaming && (
+          {(streaming || active) && (
             <span
-              className="absolute left-1 top-1.5 bottom-1.5 w-[2px] rounded-full bg-blue-500 animate-pulse pointer-events-none"
+              className={cn(
+                'absolute inset-y-0 left-0 w-[3px] rounded-l-md pointer-events-none',
+                streaming ? 'bg-blue-500 animate-pulse' : 'bg-primary',
+              )}
               aria-hidden="true"
             />
           )}
@@ -2383,7 +2537,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
-              : 'hover:bg-foreground/[0.03]'
+              : 'hover:bg-foreground/[0.03]',
+            // 选中态背景：浅色叠加深色变深、深色叠加浅色变浅，自动适配主题。
+            // orange accent 自带橙色底色，不再叠加，避免视觉过重。
+            active && leftAccent !== 'orange' && 'bg-foreground/[0.08]',
           )}
         >
           {(leftAccent || active) && (
@@ -2487,6 +2644,8 @@ interface AgentProjectGroupItemProps {
   onDragEnd: () => void
   onConfigureProject: (workspaceId: string) => void
   onRenameWorkspace: (workspaceId: string, newName: string) => Promise<void>
+  onRequestDeleteWorkspace: (workspaceId: string) => void
+  canDeleteWorkspace: boolean
   onSelectSession: (id: string, title: string) => void
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
@@ -2516,6 +2675,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onDragEnd,
   onConfigureProject,
   onRenameWorkspace,
+  onRequestDeleteWorkspace,
+  canDeleteWorkspace,
   onSelectSession,
   onRequestDelete,
   onRequestMove,
@@ -2699,6 +2860,18 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             >
               <Settings size={14} />
               配置 MCP 与 Skills
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="my-0.5" />
+            <DropdownMenuItem
+              disabled={!canDeleteWorkspace}
+              className={cn(
+                'text-xs py-1 [&>svg]:size-3.5',
+                canDeleteWorkspace && 'text-destructive focus:text-destructive',
+              )}
+              onSelect={() => onRequestDeleteWorkspace(group.workspace.id)}
+            >
+              <Trash2 size={14} />
+              删除项目
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

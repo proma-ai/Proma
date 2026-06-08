@@ -25,6 +25,7 @@ import rehypeKatex from 'rehype-katex'
 import { ChevronDown, ChevronUp, Paperclip, FileText, Sparkles, Server, Download, MessageSquareText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
+import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import {
@@ -565,7 +566,7 @@ export const MessageResponse = React.memo(
           urlTransform={mentionUrlTransform}
           components={components}
         >
-          {children.replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim()}
+          {normalizeLatexDelimiters(children.replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim())}
         </Markdown>
       </div>
     )

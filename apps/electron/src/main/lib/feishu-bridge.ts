@@ -2451,6 +2451,11 @@ class FeishuBridge {
     }
   }
 
+  /** 主动向指定飞书聊天发送卡片，不绑定上一条用户消息线程。 */
+  async sendCardToChat(chatId: string, card: Record<string, unknown>): Promise<void> {
+    await this.sendCard(chatId, card)
+  }
+
   // ===== 群聊 Thread Reply =====
 
   /** 回复指定消息（文本，群聊线程回复） */

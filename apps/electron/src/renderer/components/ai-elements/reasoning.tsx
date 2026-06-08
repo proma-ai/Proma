@@ -23,6 +23,7 @@ import {
   CollapsibleContent,
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
+import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
 import type { ComponentProps, ReactNode } from 'react'
 
 // ===== 上下文 =====
@@ -236,7 +237,7 @@ export const ReasoningContent = React.memo(
               ),
             }}
           >
-            {children}
+            {normalizeLatexDelimiters(children)}
           </Markdown>
         </div>
       </CollapsibleContent>

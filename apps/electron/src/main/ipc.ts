@@ -202,6 +202,7 @@ import {
   saveWorkspaceMcpConfig,
   getAllWorkspaceSkills,
   getOtherWorkspaceSkills,
+  getDefaultSkillSlugs,
   getWorkspaceCapabilities,
   getAgentWorkspace,
   deleteWorkspaceSkill,
@@ -1853,13 +1854,33 @@ export function registerIpcHandlers(): void {
         return deleteAgentWorkspace(id)
       }
 
+      // 守卫前置：在删除任何会话/自动任务前就拦截不可删除的工作区，
+      // 否则会先把绑定数据删光、再由 deleteAgentWorkspace 抛错，造成数据丢失与状态不一致
+      if (deletingWorkspace.slug === 'default') {
+        throw new Error('默认项目不能删除')
+      }
+      if (listAgentWorkspaces().length <= 1) {
+        throw new Error('至少需要保留一个项目')
+      }
+
       const affectedSessionIds = listAgentSessions()
         .filter((session) => session.workspaceId === id)
         .map((session) => session.id)
+      const affectedAutomationIds = listAutomations()
+        .filter((automation) => automation.workspaceId === id)
+        .map((automation) => automation.id)
 
-      const defaultWorkspace = ensureDefaultWorkspace()
       for (const sessionId of affectedSessionIds) {
-        moveSessionToWorkspace(sessionId, defaultWorkspace.id)
+        if (isAgentSessionActive(sessionId)) {
+          stopAgent(sessionId)
+        }
+        deleteAgentSession(sessionId)
+      }
+      for (const automationId of affectedAutomationIds) {
+        deleteAutomation(automationId)
+      }
+      if (affectedAutomationIds.length > 0) {
+        broadcastAutomationsChanged()
       }
       deleteAgentWorkspace(id)
     }
@@ -1949,6 +1970,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_SKILLS,
     async (_, currentSlug: string) => {
       return getOtherWorkspaceSkills(currentSlug)
+    }
+  )
+
+  // 获取默认 Skills 的 slug 列表（来自 ~/.proma/default-skills/）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_DEFAULT_SKILL_SLUGS,
+    async () => {
+      return getDefaultSkillSlugs()
     }
   )
 
@@ -4099,7 +4128,27 @@ export function registerIpcHandlers(): void {
     v === 'interval' || v === 'daily' || v === 'weekly'
   const validPermissionMode = (v: unknown): v is 'auto' | 'bypassPermissions' =>
     v === 'auto' || v === 'bypassPermissions'
+  const validAutomationNotificationTrigger = (v: unknown): v is 'always' | 'success' | 'error' =>
+    v === 'always' || v === 'success' || v === 'error'
   const validTimeOfDay = (v: unknown): boolean => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
+
+  const validateAutomationNotificationTargets = (targets: unknown): void => {
+    if (targets === undefined) return
+    if (!Array.isArray(targets)) throw new Error('notificationTargets 必须是数组')
+    if (targets.length > 5) throw new Error('notificationTargets 最多 5 个')
+
+    for (const target of targets) {
+      if (!target || typeof target !== 'object') throw new Error('notificationTargets 包含非法目标')
+      const t = target as Record<string, unknown>
+      if (t.type !== 'feishu') throw new Error(`不支持的通知目标: ${String(t.type)}`)
+      if (typeof t.enabled !== 'boolean') throw new Error('notificationTargets.enabled 必须是 boolean')
+      if (!validAutomationNotificationTrigger(t.trigger)) {
+        throw new Error(`非法的 notificationTargets.trigger: ${String(t.trigger)}`)
+      }
+      if (!isNonEmptyString(t.botId)) throw new Error('notificationTargets.botId 必填')
+      if (!isNonEmptyString(t.chatId)) throw new Error('notificationTargets.chatId 必填')
+    }
+  }
 
   const validateAutomationFields = (i: Partial<CreateAutomationInput | UpdateAutomationInput>): void => {
     if (i.scheduleType !== undefined && !validScheduleType(i.scheduleType)) {
@@ -4117,6 +4166,7 @@ export function registerIpcHandlers(): void {
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {
       throw new Error(`非法的 permissionMode: ${String(i.permissionMode)}`)
     }
+    validateAutomationNotificationTargets(i.notificationTargets)
   }
 
   ipcMain.handle(

@@ -11,9 +11,8 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Check, Clock, Loader2, Pencil, Play, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, X } from 'lucide-react'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -22,6 +21,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import {
   automationFormAtom,
@@ -35,9 +35,18 @@ import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { useOpenSession } from '@/hooks/useOpenSession'
-import type { AutomationRun, CreateAutomationInput, UpdateAutomationInput } from '@proma/shared'
+import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
+import type {
+  AutomationFeishuNotificationTarget,
+  AutomationNotificationTarget,
+  AutomationRun,
+  CreateAutomationInput,
+  FeishuChatBinding,
+  UpdateAutomationInput,
+} from '@proma/shared'
 
 const NO_WORKSPACE = '__none__'
+const NO_FEISHU_BINDING = '__none__'
 
 function formatTime(ts?: number): string {
   if (!ts) return '—'
@@ -67,6 +76,7 @@ function getDraftSignature(draft: AutomationDraft): string {
     modelId: draft.modelId ?? '',
     workspaceId: draft.workspaceId ?? '',
     permissionMode: draft.permissionMode,
+    notificationTargets: draft.notificationTargets ?? [],
     active: draft.active,
   })
 }
@@ -83,6 +93,7 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     modelId: draft.modelId,
     workspaceId: draft.workspaceId,
     permissionMode: draft.permissionMode,
+    notificationTargets: draft.notificationTargets,
     sourceSessionId: draft.sourceSessionId,
     active: draft.active,
   }
@@ -101,8 +112,56 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     modelId: draft.modelId,
     workspaceId: draft.workspaceId ?? '',
     permissionMode: draft.permissionMode,
+    notificationTargets: draft.notificationTargets ?? [],
     active: draft.active,
   }
+}
+
+function getFeishuTarget(targets?: AutomationNotificationTarget[]): AutomationFeishuNotificationTarget | undefined {
+  return targets?.find((target): target is AutomationFeishuNotificationTarget => target.type === 'feishu')
+}
+
+function getFeishuBindingValue(binding: FeishuChatBinding): string {
+  return `${binding.botId}::${binding.chatId}`
+}
+
+function formatFeishuBinding(binding: FeishuChatBinding): string {
+  const name = binding.chatType === 'group'
+    ? binding.groupName || '未命名群聊'
+    : '飞书单聊'
+  return `${name} · ${binding.botId.slice(0, 8)}`
+}
+
+function createFeishuTarget(binding: FeishuChatBinding): AutomationFeishuNotificationTarget {
+  return {
+    type: 'feishu',
+    enabled: true,
+    trigger: 'always',
+    botId: binding.botId,
+    chatId: binding.chatId,
+  }
+}
+
+function AutomationPromptEmptyGuide(): React.ReactElement {
+  return (
+    <div className="rounded-xl bg-foreground/[0.035] p-4 shadow-inner">
+      <div className="flex flex-col gap-3">
+        <div>
+          <div className="text-[13px] font-semibold text-foreground">推荐：让 Proma Agent 创建</div>
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            在左侧会话里说清目标，并明确表示要求创建定时任务，Proma Agent 会生成任务描述，并补全周期、工作区和模型等配置，手动编辑更适合微调任务描述。
+          </div>
+        </div>
+        <div className="h-px bg-border/50" />
+        <div>
+          <div className="text-[13px] font-medium text-foreground/85">手动编写时，只写任务本身</div>
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            例：检查 Proma 仓库新增 issue，主动回复问答类问题，不清楚的部分整理到工作区目录下的 .context/issue-faq.md 文档；真正的 Bug 或请求罗列后发给我，不要记录任何重复的信息。
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function AutomationFormView(): React.ReactElement | null {
@@ -118,6 +177,7 @@ export function AutomationFormView(): React.ReactElement | null {
   const [form, setForm] = React.useState<AutomationDraft | null>(null)
   const [editingName, setEditingName] = React.useState(false)
   const [runningNow, setRunningNow] = React.useState(false)
+  const [feishuBindings, setFeishuBindings] = React.useState<FeishuChatBinding[]>([])
   const nameInputRef = React.useRef<HTMLInputElement>(null)
   const saveTimerRef = React.useRef<number | undefined>(undefined)
   const lastSavedSignatureRef = React.useRef('')
@@ -140,6 +200,15 @@ export function AutomationFormView(): React.ReactElement | null {
         : ''
     }
   }, [formState.open, formState.draft])
+
+  React.useEffect(() => {
+    if (!formState.open) return
+    window.electronAPI.listFeishuBindings()
+      .then(setFeishuBindings)
+      .catch((err: unknown) => {
+        console.error('[定时任务] 获取飞书绑定失败:', err)
+      })
+  }, [formState.open])
 
   React.useEffect(() => {
     latestFormRef.current = form
@@ -260,6 +329,10 @@ export function AutomationFormView(): React.ReactElement | null {
     setForm((prev) => (prev ? { ...prev, ...patch } : prev))
   }
 
+  const updateFeishuNotification = (target: AutomationFeishuNotificationTarget | null): void => {
+    update({ notificationTargets: target ? [target] : [] })
+  }
+
   const handleRunNow = async (): Promise<void> => {
     const latest = latestFormRef.current
     if (!latest || !canPersistDraft(latest)) {
@@ -342,6 +415,13 @@ export function AutomationFormView(): React.ReactElement | null {
   const selectedModel = form.channelId && form.modelId
     ? { channelId: form.channelId, modelId: form.modelId }
     : null
+  const feishuTarget = getFeishuTarget(form.notificationTargets)
+  const selectedFeishuBinding = feishuTarget
+    ? feishuBindings.find((binding) => binding.botId === feishuTarget.botId && binding.chatId === feishuTarget.chatId)
+    : undefined
+  const selectedFeishuBindingValue = selectedFeishuBinding
+    ? getFeishuBindingValue(selectedFeishuBinding)
+    : NO_FEISHU_BINDING
 
   return (
     <div className="titlebar-no-drag absolute inset-0 z-10 bg-content-area flex animate-in fade-in duration-200">
@@ -396,14 +476,29 @@ export function AutomationFormView(): React.ReactElement | null {
             </div>
           )}
         </div>
-        <div className="flex-1 min-h-0 px-6 pb-6">
-          <Textarea
-            value={form.prompt}
-            onChange={(e) => update({ prompt: e.target.value })}
-            placeholder="用自然语言描述要重复执行的任务，例如：&#10;&#10;查看 Proma 仓库最近 10 分钟的新 issue，总结其中状态有变化的，输出一句话摘要。"
-            className="w-full h-full resize-none text-[15px] leading-relaxed border-none shadow-none focus-visible:ring-0 bg-transparent px-0"
-            autoFocus
-          />
+        <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col gap-3">
+          <div className="flex items-center">
+            <Label htmlFor="automation-prompt" className="text-xs font-medium text-muted-foreground">
+              任务编写
+            </Label>
+          </div>
+          <div className="min-h-0 flex-1">
+            <div className="flex h-full min-h-0 flex-col gap-3">
+              <AutomationPromptEmptyGuide />
+              <div
+                id="automation-prompt"
+                className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-foreground/[0.03] shadow-inner scrollbar-thin"
+              >
+                <MarkdownRichEditor
+                  value={form.prompt}
+                  editing
+                  onChange={(value) => update({ prompt: value })}
+                  onSave={() => undefined}
+                  onCancel={() => undefined}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -561,6 +656,83 @@ export function AutomationFormView(): React.ReactElement | null {
             </Select>
           </div>
 
+          {/* 飞书通知 */}
+          <div className="flex flex-col gap-2 rounded-lg bg-foreground/[0.03] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <Bell className="size-4 shrink-0 mt-0.5 text-primary" />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="auto-feishu-notify">飞书通知</Label>
+                  <span className="text-xs text-muted-foreground leading-relaxed">
+                    任务结束后把结果推送到已有飞书绑定
+                  </span>
+                </div>
+              </div>
+              <Switch
+                id="auto-feishu-notify"
+                checked={feishuTarget?.enabled === true}
+                onCheckedChange={(checked) => {
+                  if (!checked) {
+                    updateFeishuNotification(null)
+                    return
+                  }
+                  const target = selectedFeishuBinding ?? feishuBindings[0]
+                  if (!target) {
+                    toast.error('暂无飞书绑定，请先在飞书里向 Bot 发送一条消息')
+                    return
+                  }
+                  updateFeishuNotification(feishuTarget
+                    ? { ...feishuTarget, enabled: true }
+                    : createFeishuTarget(target))
+                }}
+              />
+            </div>
+
+            {feishuTarget?.enabled === true && (
+              <div className="flex flex-col gap-2 pt-1">
+                <Select
+                  value={selectedFeishuBindingValue}
+                  onValueChange={(value) => {
+                    const binding = feishuBindings.find((item) => getFeishuBindingValue(item) === value)
+                    if (!binding) return
+                    updateFeishuNotification({
+                      ...createFeishuTarget(binding),
+                      trigger: feishuTarget.trigger,
+                    })
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="选择飞书聊天" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_FEISHU_BINDING} disabled>
+                      {feishuBindings.length === 0 ? '暂无飞书绑定' : '选择飞书聊天'}
+                    </SelectItem>
+                    {feishuBindings.map((binding) => (
+                      <SelectItem key={getFeishuBindingValue(binding)} value={getFeishuBindingValue(binding)}>
+                        {formatFeishuBinding(binding)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={feishuTarget.trigger}
+                  onValueChange={(value) => {
+                    updateFeishuNotification({
+                      ...feishuTarget,
+                      trigger: value as AutomationFeishuNotificationTarget['trigger'],
+                    })
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">成功或失败都通知</SelectItem>
+                    <SelectItem value="success">仅成功时通知</SelectItem>
+                    <SelectItem value="error">仅失败时通知</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
           {/* 权限模式 */}
           <div className="flex flex-col gap-2">
             <Label>运行权限</Label>
@@ -599,22 +771,28 @@ export function AutomationFormView(): React.ReactElement | null {
                   {live.runHistory.slice(0, 10).map((run, i) => {
                     const hasSessionId = !!run.sessionId
                     return (
-                      <button
-                        key={`${run.runAt}-${i}`}
-                        type="button"
-                        onClick={() => { void handleOpenRunSession(run) }}
-                        disabled={!hasSessionId}
-                        title={hasSessionId ? '查看本次执行的会话' : '这条记录没有可打开的会话'}
-                        className="flex items-center gap-2 px-1.5 py-1 -mx-1.5 rounded-md text-[11px] text-foreground/60 text-left transition-colors enabled:hover:bg-foreground/[0.04] enabled:hover:text-foreground/80 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <span className="tabular-nums">{formatTime(run.runAt)}</span>
-                        <span className="shrink-0 text-foreground/45">{formatRunStatus(run.status)}</span>
-                        <span className="text-foreground/35 truncate">
-                          {run.status === 'success' && run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : ''}
-                          {run.status === 'error' ? (run.error ?? '失败') : ''}
-                          {run.status === 'skipped' ? (run.skipReason ?? '跳过') : ''}
-                        </span>
-                      </button>
+                      <Tooltip key={`${run.runAt}-${i}`}>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => { void handleOpenRunSession(run) }}
+                            disabled={!hasSessionId}
+                            title={hasSessionId ? undefined : '这条记录没有可打开的会话'}
+                            className="flex items-center gap-2 px-1.5 py-1 -mx-1.5 rounded-md text-[11px] text-foreground/60 text-left transition-colors enabled:hover:bg-foreground/[0.04] enabled:hover:text-foreground/80 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className="tabular-nums">{formatTime(run.runAt)}</span>
+                            <span className="shrink-0 text-foreground/45">{formatRunStatus(run.status)}</span>
+                            <span className="text-foreground/35 truncate">
+                              {run.status === 'success' && run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : ''}
+                              {run.status === 'error' ? (run.error ?? '失败') : ''}
+                              {run.status === 'skipped' ? (run.skipReason ?? '跳过') : ''}
+                            </span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left">
+                          {hasSessionId ? '点击以跳转到该次会话' : '这条记录没有可打开的会话'}
+                        </TooltipContent>
+                      </Tooltip>
                     )
                   })}
                 </div>

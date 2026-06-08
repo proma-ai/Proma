@@ -35,6 +35,24 @@ export type AutomationPermissionMode = 'auto' | 'bypassPermissions'
 /** 定时任务默认权限模式（向后兼容：旧任务无此字段时按此值运行） */
 export const AUTOMATION_DEFAULT_PERMISSION_MODE: AutomationPermissionMode = 'bypassPermissions'
 
+/** 定时任务通知触发条件 */
+export type AutomationNotificationTrigger = 'always' | 'success' | 'error'
+
+/** 飞书通知目标 */
+export interface AutomationFeishuNotificationTarget {
+  type: 'feishu'
+  enabled: boolean
+  /** 通知触发条件：默认 always */
+  trigger: AutomationNotificationTrigger
+  /** 负责发送通知的飞书 Bot ID */
+  botId: string
+  /** 飞书 chat_id（来自已有绑定） */
+  chatId: string
+}
+
+/** 定时任务通知目标（钉钉/微信后续扩展） */
+export type AutomationNotificationTarget = AutomationFeishuNotificationTarget
+
 /** 定时任务定义 */
 export interface Automation {
   id: string
@@ -60,6 +78,8 @@ export interface Automation {
   workspaceId?: string
   /** 权限模式（无人值守运行时的工具审批策略，默认 bypassPermissions） */
   permissionMode?: AutomationPermissionMode
+  /** 运行完成后的外部通知目标 */
+  notificationTargets?: AutomationNotificationTarget[]
   /** 创建来源会话 ID（作为模板，运行时不复用而是新建子会话） */
   sourceSessionId?: string
   /** 创建时间 */
@@ -96,6 +116,7 @@ export interface CreateAutomationInput {
   modelId?: string
   workspaceId?: string
   permissionMode?: AutomationPermissionMode
+  notificationTargets?: AutomationNotificationTarget[]
   sourceSessionId?: string
   /** 创建后是否立即启用（默认 true） */
   active?: boolean
@@ -115,6 +136,7 @@ export interface UpdateAutomationInput {
   /** 工作区（用户可在创建后调整子会话归属的工作区） */
   workspaceId?: string
   permissionMode?: AutomationPermissionMode
+  notificationTargets?: AutomationNotificationTarget[]
   active?: boolean
 }
 

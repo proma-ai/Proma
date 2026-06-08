@@ -6,7 +6,12 @@
  */
 
 import { atom } from 'jotai'
-import type { Automation, AutomationScheduleType, AutomationPermissionMode } from '@proma/shared'
+import type {
+  Automation,
+  AutomationNotificationTarget,
+  AutomationScheduleType,
+  AutomationPermissionMode,
+} from '@proma/shared'
 import { AUTOMATION_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 
 /** 全部定时任务列表 */
@@ -30,6 +35,7 @@ export interface AutomationDraft {
   modelId?: string
   workspaceId?: string
   permissionMode: AutomationPermissionMode
+  notificationTargets?: AutomationNotificationTarget[]
   sourceSessionId?: string
   active: boolean
 }
@@ -77,6 +83,7 @@ export function automationToDraft(a: Automation): AutomationDraft {
     modelId: a.modelId,
     workspaceId: a.workspaceId,
     permissionMode: a.permissionMode ?? AUTOMATION_DEFAULT_PERMISSION_MODE,
+    notificationTargets: a.notificationTargets,
     sourceSessionId: a.sourceSessionId,
     active: a.active,
   }
@@ -103,5 +110,4 @@ export const AUTOMATION_WEEKDAY_OPTIONS = [
   { label: '周六', value: 6 },
   { label: '周日', value: 0 },
 ] as const
-
 
