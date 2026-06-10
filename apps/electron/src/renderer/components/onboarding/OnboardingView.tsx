@@ -12,36 +12,24 @@ import { useMemo, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { GraduationCap, ChevronRight, ChevronLeft, HardDriveDownload, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { TutorialViewer } from '@/components/tutorial/TutorialViewer'
 import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
 import { isShellEnvironmentOkAtom } from '@/atoms/environment'
 import { detectIsWindows } from '@/lib/platform'
 import { migrationImportDialogOpenAtom } from '@/atoms/migration-atoms'
 
 interface OnboardingViewProps {
-  /** 完成回调（进入主界面） */
-  onComplete: () => void
+  onComplete: (openTutorial?: boolean) => void
 }
 
 export function OnboardingView({ onComplete }: OnboardingViewProps) {
-  const [showTutorial, setShowTutorial] = useState(false)
   const [step, setStep] = useState<'welcome' | 'environment'>('welcome')
   const isWindows = useMemo(() => detectIsWindows(), [])
   const shellOk = useAtomValue(isShellEnvironmentOkAtom)
   const setMigrationImportDialogOpen = useSetAtom(migrationImportDialogOpenAtom)
 
-  const handleFinish = async () => {
-    await window.electronAPI.updateSettings({
-      onboardingCompleted: true,
-    })
-    onComplete()
+  const handleFinish = async (openTutorial?: boolean) => {
+    await window.electronAPI.updateSettings({ onboardingCompleted: true })
+    onComplete(openTutorial)
   }
 
   const handleNextFromWelcome = () => {
@@ -70,7 +58,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           <div className="w-full max-w-2xl">
             <div className="space-y-3">
               <button
-                onClick={() => setShowTutorial(true)}
+                onClick={() => handleFinish(true)}
                 className="w-full rounded-xl bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 border border-primary/15 p-4 flex items-center gap-4 hover:from-primary/10 hover:via-primary/15 hover:to-primary/10 transition-colors text-left"
               >
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -170,7 +158,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             </Button>
             <div className="flex gap-3">
               <Button
-                onClick={handleFinish}
+                onClick={() => handleFinish()}
                 variant={shellOk ? 'default' : 'outline'}
               >
                 {shellOk ? '开始使用' : '稍后处理（进入主界面）'}
@@ -179,22 +167,6 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
           </div>
         </div>
       )}
-
-      <Sheet open={showTutorial} onOpenChange={setShowTutorial}>
-        <SheetContent side="right" className="w-[560px] sm:max-w-[560px] p-0">
-          <SheetHeader className="px-6 pt-6 pb-4 border-b">
-            <SheetTitle className="flex items-center gap-2">
-              <GraduationCap size={18} className="text-primary" />
-              Proma 使用教程
-            </SheetTitle>
-          </SheetHeader>
-          <ScrollArea className="h-[calc(100vh-80px)]">
-            <div className="px-6 py-4">
-              <TutorialViewer />
-            </div>
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }

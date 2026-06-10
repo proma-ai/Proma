@@ -464,17 +464,18 @@ const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
 
 /**
  * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）
- * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列、
+ * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、Fable 5、DeepSeek V4 系列、
  * 小米 MiMo V2.5 / V2.5 Pro / V2 Pro
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
  */
 function supports1MContext(modelId: string): boolean {
   const m = modelId.toLowerCase()
   if (m.includes('haiku')) return false
-  // Claude: Sonnet 4+ 与 Opus 4.6+ 都支持
+  // Claude: Sonnet 4+ 与 Opus 4.6+、Fable 5 都支持
   if (m.includes('claude')) {
     if (m.includes('sonnet-4')) return true
     if (m.includes('opus-4-6') || m.includes('opus-4-7') || m.includes('opus-4-8')) return true
+    if (m.includes('fable-5')) return true
     return false
   }
   // DeepSeek V4 系列（deepseek-v4-pro、deepseek-v4-flash）

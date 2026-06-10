@@ -22,8 +22,8 @@ function getTutorialFilePath(): string {
   if (app.isPackaged) {
     return join(process.resourcesPath, 'tutorial.md')
   }
-  // 开发模式：app.getAppPath() → apps/electron/
-  return join(app.getAppPath(), '../../tutorial/tutorial.md')
+  // 开发模式：resources/ 经 build:resources 复制到 dist/resources/
+  return join(__dirname, 'resources/tutorial.md')
 }
 
 /**

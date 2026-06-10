@@ -110,12 +110,13 @@ function inferContextWindow(model?: string): number | undefined {
   const m = model.toLowerCase()
   // Claude Haiku 为 200k
   if (m.includes('claude-haiku')) return 200_000
-  // Claude Sonnet 4.6、Opus 4.6 / 4.7 / 4.8、DeepSeek V4 系列均为 1M 上下文
+  // Claude Sonnet 4.6、Opus 4.6 / 4.7 / 4.8、Fable 5、DeepSeek V4 系列均为 1M 上下文
   if (
     m.includes('claude-sonnet-4-6') ||
     m.includes('claude-opus-4-6') ||
     m.includes('claude-opus-4-7') ||
-    m.includes('claude-opus-4-8')
+    m.includes('claude-opus-4-8') ||
+    m.includes('claude-fable-5')
   ) return 1_000_000
   if (m.includes('deepseek-v4')) return 1_000_000
   // MiniMax M3 为 1M 上下文

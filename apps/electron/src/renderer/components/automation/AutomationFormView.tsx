@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -31,9 +31,10 @@ import {
   automationToDraft,
   type AutomationDraft,
 } from '@/atoms/automation-atoms'
-import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
+import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
 import type {
@@ -169,9 +170,12 @@ export function AutomationFormView(): React.ReactElement | null {
   const setAutomations = useSetAtom(automationsAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const automations = useAtomValue(automationsAtom)
+  const agentChannelIds = useAtomValue(agentChannelIdsAtom)
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const setActiveView = useSetAtom(activeViewAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const openSession = useOpenSession()
 
   const [form, setForm] = React.useState<AutomationDraft | null>(null)
@@ -629,14 +633,32 @@ export function AutomationFormView(): React.ReactElement | null {
             </div>
           )}
 
-          {/* 选择模型 */}
+          {/* 选择模型（定时任务只能跑 Agent，因此只显示已勾选为 Agent 兼容的渠道模型） */}
           <div className="flex flex-col gap-2">
             <Label>选择模型</Label>
-            <ModelSelector
-              externalSelectedModel={selectedModel}
-              showChannelInTrigger
-              onModelSelect={(opt) => update({ channelId: opt.channelId, modelId: opt.modelId })}
-            />
+            {agentChannelIds.length === 0 ? (
+              <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                <Settings size={14} className="shrink-0" />
+                <span>尚未启用任何 Agent 兼容渠道</span>
+                <button
+                  type="button"
+                  className="ml-auto text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+                  onClick={() => {
+                    setSettingsTab('channels')
+                    setSettingsOpen(true)
+                  }}
+                >
+                  前往渠道设置
+                </button>
+              </div>
+            ) : (
+              <ModelSelector
+                filterChannelIds={agentChannelIds}
+                externalSelectedModel={selectedModel}
+                showChannelInTrigger
+                onModelSelect={(opt) => update({ channelId: opt.channelId, modelId: opt.modelId })}
+              />
+            )}
           </div>
 
           {/* 工作区 */}

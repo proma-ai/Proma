@@ -8,41 +8,38 @@
  */
 
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
+import { useAtom, useSetAtom } from 'jotai'
 import { GraduationCap, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
+import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from '@/atoms/tab-atoms'
 
 export function TutorialBanner(): React.ReactElement | null {
   const [visible, setVisible] = React.useState(false)
   const [dismissed, setDismissed] = React.useState(true)
-  const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSettingsTab = useSetAtom(settingsTabAtom)
+  const [tabs, setTabs] = useAtom(tabsAtom)
+  const setActiveTabId = useSetAtom(activeTabIdAtom)
 
-  // 初始化：从主进程读取 settings 判断是否需要显示
   React.useEffect(() => {
     window.electronAPI
       .getSettings()
       .then((settings) => {
         if (!settings.tutorialBannerDismissed) {
           setDismissed(false)
-          // 延迟 1.5 秒显示，避免页面加载时的干扰
           setTimeout(() => setVisible(true), 1500)
         }
       })
       .catch(console.error)
   }, [])
 
-  // 关闭横幅并持久化
   const handleDismiss = async () => {
     setVisible(false)
     await window.electronAPI.updateSettings({ tutorialBannerDismissed: true })
   }
 
-  // 立即学习：跳转到设置教程页并关闭横幅
   const handleLearnNow = async () => {
-    setSettingsTab('tutorial')
-    setSettingsOpen(true)
+    const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
+    setTabs(result.tabs)
+    setActiveTabId(result.activeTabId)
     await handleDismiss()
   }
 
@@ -102,7 +99,7 @@ export function TutorialBanner(): React.ReactElement | null {
 
         {/* 提示文字 */}
         <p className="text-[11px] text-muted-foreground/60 mt-3 text-center">
-          你可以随时在 设置 &gt; 教程 中查看完整教程
+          你可以随时点击顶栏「教程」标签重新打开
         </p>
       </div>
     </div>

@@ -11,7 +11,7 @@ import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { conversationsAtom } from './atoms/chat-atoms'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
-import { tabsAtom, activeTabIdAtom, openTab } from './atoms/tab-atoms'
+import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
@@ -46,18 +46,24 @@ export default function App(): React.ReactElement {
     initialize()
   }, [])
 
-  // 完成 onboarding 回调：创建欢迎对话
-  const handleOnboardingComplete = async () => {
+  // 完成 onboarding 回调：创建欢迎对话，可选打开教程 Tab
+  const handleOnboardingComplete = async (openTutorial?: boolean) => {
     setShowOnboarding(false)
+
+    if (openTutorial) {
+      const tabs = store.get(tabsAtom)
+      const result = openTab(tabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
+      store.set(tabsAtom, result.tabs)
+      store.set(activeTabIdAtom, result.activeTabId)
+      return
+    }
 
     try {
       const meta = await window.electronAPI.createWelcomeConversation()
       if (meta) {
-        // 添加到对话列表
         const conversations = store.get(conversationsAtom)
         store.set(conversationsAtom, [meta, ...conversations])
 
-        // 打开对话标签页
         const tabs = store.get(tabsAtom)
         const result = openTab(tabs, {
           type: 'chat',

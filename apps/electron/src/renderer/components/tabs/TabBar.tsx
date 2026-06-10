@@ -108,8 +108,7 @@ export function TabBar(): React.ReactElement {
           agentWorkspaceId: session.workspaceId,
         }).catch(console.error)
       }
-    } else if (tab.type === 'scratch') {
-      // Agent 模式下切到 Scratch Pad 时保持右侧文件面板不收起
+    } else if (tab.type === 'scratch' || tab.type === 'tutorial') {
       setCurrentConversationId(null)
       if (appMode !== 'agent') {
         setCurrentAgentSessionId(null)
