@@ -78,6 +78,7 @@ import {
   workspaceAttachedDirectoriesMapAtom,
   workspaceAttachedFilesMapAtom,
   liveMessagesMapAtom,
+  liveGenerativeWidgetsMapAtom,
   agentThinkingAtom,
   stoppedByUserSessionsAtom,
   agentPlanModeSessionsAtom,
@@ -102,9 +103,11 @@ import type { AgentSendInput, AgentPendingFile, FileDialogLargeFile, ModelOption
 import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
+import type { LiveGenerativeWidgetPreview } from '@/lib/generative-ui-live-preview'
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
+const EMPTY_LIVE_GENERATIVE_WIDGETS: LiveGenerativeWidgetPreview[] = []
 const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
 
 interface SDKMessageRecord {
@@ -220,18 +223,22 @@ function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverP
 interface DisplayOptionsPopoverProps {
   autoPreviewEnabled: boolean
   processGroupsKeepExpanded: boolean
+  generativeUIEnabled: boolean
   onAutoPreviewChange: (enabled: boolean) => void
   onProcessGroupsKeepExpandedChange: (expanded: boolean) => void
+  onGenerativeUIChange: (enabled: boolean) => void
 }
 
 function DisplayOptionsPopover({
   autoPreviewEnabled,
   processGroupsKeepExpanded,
+  generativeUIEnabled,
   onAutoPreviewChange,
   onProcessGroupsKeepExpandedChange,
+  onGenerativeUIChange,
 }: DisplayOptionsPopoverProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
-  const hasEnabledOption = autoPreviewEnabled || processGroupsKeepExpanded
+  const hasEnabledOption = autoPreviewEnabled || processGroupsKeepExpanded || generativeUIEnabled
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMouseEnter = React.useCallback(() => {
@@ -294,6 +301,14 @@ function DisplayOptionsPopover({
               className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
             />
           </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs text-foreground/70">生成式 UI</span>
+            <Switch
+              checked={generativeUIEnabled}
+              onCheckedChange={onGenerativeUIChange}
+              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+            />
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -318,8 +333,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const stoppedByUser = stoppedByUserSessions.has(sessionId)
   const liveMessagesMap = useAtomValue(liveMessagesMapAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
+  const liveGenerativeWidgetsMap = useAtomValue(liveGenerativeWidgetsMapAtom)
+  const setLiveGenerativeWidgetsMap = useSetAtom(liveGenerativeWidgetsMapAtom)
   // 稳定化空数组引用，避免 ?? [] 每次创建新引用导致下游 useMemo 链不必要重算
   const liveMessages = liveMessagesMap.get(sessionId) ?? EMPTY_SDK_MESSAGES
+  const liveGenerativeWidgets = liveGenerativeWidgetsMap.get(sessionId) ?? EMPTY_LIVE_GENERATIVE_WIDGETS
   // Per-session 渠道/模型配置（优先读 session map，回退到全局默认值）
   const sessionChannelMap = useAtomValue(agentSessionChannelMapAtom)
   const sessionModelMap = useAtomValue(agentSessionModelMapAtom)
@@ -445,6 +463,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [sessionId, setDraftsMap])
   const inputHtmlContent = useAtomValue(agentSessionDraftHtmlAtomFamily(sessionId))
+  const [generativeUIEnabled, setGenerativeUIEnabled] = React.useState(false)
   const setDraftHtmlMap = useSetAtom(agentSessionDraftHtmlAtom)
   const setInputHtmlContent = React.useCallback((html: string) => {
     setDraftHtmlMap((prev) => {
@@ -721,6 +740,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             map.delete(sessionId)
             return map
           })
+          setLiveGenerativeWidgetsMap((prev) => {
+            if (!prev.has(sessionId)) return prev
+            const streamingState = store.get(agentStreamingStatesAtom).get(sessionId)
+            if (streamingState?.running) return prev
+            const map = new Map(prev)
+            map.delete(sessionId)
+            return map
+          })
         })
       })
       .catch((error) => {
@@ -729,7 +756,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         setMessagesLoaded(true)
       })
     return () => { cancelled = true }
-  }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, setMessagesCache, store])
+  }, [sessionId, refreshVersion, setStreamingStates, setLiveMessagesMap, setLiveGenerativeWidgetsMap, setMessagesCache, store])
 
   // 从会话元数据初始化附加目录（仅冷启动水合，后续由 handleAttachFolder/handleDetachDirectory 实时写入）
   React.useEffect(() => {
@@ -1501,6 +1528,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     // 初始化流式状态（startedAt 由渲染进程生成，传递给主进程原样回传，确保竞态保护使用同一个值）
     const streamStartedAt = Date.now()
+    setLiveGenerativeWidgetsMap((prev) => {
+      if (!prev.has(sessionId)) return prev
+      const map = new Map(prev)
+      map.delete(sessionId)
+      return map
+    })
     setStreamingStates((prev) => {
       const map = new Map(prev)
       const existing = prev.get(sessionId)
@@ -1536,6 +1569,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       startedAt: streamStartedAt,
       permissionModeOverride: permissionMode,
       ...(additionalDirectoriesForRun.size > 0 && { additionalDirectories: Array.from(additionalDirectoriesForRun) }),
+      ...(generativeUIEnabled && {
+        generativeUI: {
+          enabled: true,
+          mode: 'interactive',
+          source: 'composer-toggle',
+        },
+      }),
       // 解析用户消息中的 Skill/MCP/会话引用，传递结构化元数据给后端
       ...(() => {
         const skills = [...effectiveText.matchAll(/\/skill:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
@@ -1562,7 +1602,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [inputContent, attachedDirs, attachedFileDirectories, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded])
+  }, [inputContent, attachedDirs, attachedFileDirectories, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, setLiveGenerativeWidgetsMap, permissionMode, messagesLoaded, generativeUIEnabled])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
@@ -1972,8 +2012,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <DisplayOptionsPopover
           autoPreviewEnabled={autoPreviewEnabled}
           processGroupsKeepExpanded={processGroupsKeepExpanded}
+          generativeUIEnabled={generativeUIEnabled}
           onAutoPreviewChange={setAutoPreviewEnabled}
           onProcessGroupsKeepExpandedChange={setProcessGroupsKeepExpanded}
+          onGenerativeUIChange={setGenerativeUIEnabled}
         />
       ),
     },
@@ -1997,8 +2039,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     handleCompact,
     autoPreviewEnabled,
     processGroupsKeepExpanded,
+    generativeUIEnabled,
     setAutoPreviewEnabled,
     setProcessGroupsKeepExpanded,
+    setGenerativeUIEnabled,
   ])
 
   const inputTrailingNode = streaming && !hasTextInput ? (
@@ -2052,6 +2096,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           streaming={streaming}
           streamState={streamState}
           liveMessages={liveMessages}
+          liveGenerativeWidgets={liveGenerativeWidgets}
           sessionPath={sessionPath}
           attachedDirs={allAttachedDirs}
           stoppedByUser={stoppedByUser}

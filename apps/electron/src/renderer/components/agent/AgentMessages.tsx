@@ -36,7 +36,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
+import { GenerativeWidgetRenderer } from './GenerativeWidgetRenderer'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
+import { parseGenerativeWidgetInput } from '@/lib/generative-ui-contract'
+import { liveGenerativeWidgetPreviewToInput, type LiveGenerativeWidgetPreview } from '@/lib/generative-ui-live-preview'
 import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
@@ -99,6 +102,8 @@ interface AgentMessagesProps {
   streamState?: AgentStreamState
   /** Phase 2: 实时 SDKMessage 列表（流式期间累积） */
   liveMessages?: SDKMessage[]
+  /** 生成式 UI partial tool args 的实时预览（不进入持久化 transcript） */
+  liveGenerativeWidgets?: LiveGenerativeWidgetPreview[]
   /** 当前会话工作目录，用于解析相对文件路径 */
   sessionPath?: string | null
   /** 附加目录列表（与 sessionPath 一并用作相对路径解析候选） */
@@ -393,7 +398,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, liveGenerativeWidgets, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -402,6 +407,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 空会话无需淡入过渡（无消息则无滚动位置问题）
   const [skipFadeIn, setSkipFadeIn] = React.useState(false)
   const prevSessionIdRef = React.useRef<string | null>(null)
+  const hasLiveGenerativeWidgets = (liveGenerativeWidgets?.length ?? 0) > 0
 
   React.useEffect(() => {
     if (sessionId !== prevSessionIdRef.current) {
@@ -418,7 +424,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
     if (messagesLoaded === false) return
 
     // 流式进行中且有实时内容 → 跳过 fade 直接显示
-    if (streaming && liveMessages && liveMessages.length > 0) {
+    if (streaming && ((liveMessages && liveMessages.length > 0) || hasLiveGenerativeWidgets)) {
       setReady(true)
       return
     }
@@ -433,7 +439,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
       if (!cancelled) setReady(true)
     })
     return () => { cancelled = true }
-  }, [streaming, liveMessages, persistedSDKMessages, messagesLoaded])
+  }, [streaming, liveMessages, persistedSDKMessages, messagesLoaded, hasLiveGenerativeWidgets])
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
@@ -470,7 +476,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // render-phase 判断：是否处于需要 instant resize 的过渡期
   // liveMessages 非空说明持久化消息还没加载完（加载完后会清空 liveMessages）
-  const needsInstant = !streaming && (!!streamingContent || !!smoothContent || (liveMessages != null && liveMessages.length > 0))
+  const needsInstant = !streaming && (!!streamingContent || !!smoothContent || (liveMessages != null && liveMessages.length > 0) || hasLiveGenerativeWidgets)
 
   React.useEffect(() => {
     // 刚从 streaming → not-streaming：启动 cooldown
@@ -529,7 +535,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
       ...liveWithKeys,
     ]
   }, [persistedSDKMessages, liveMessages, streaming])
-  const hasContent = allSDKMessages.length > 0
+  const hasContent = allSDKMessages.length > 0 || hasLiveGenerativeWidgets
 
   // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
   // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
@@ -603,8 +609,8 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 流式结束后：直接检查 liveMessages 中是否有助手消息，
   // 防止 streaming→false 到 liveMessages 被清除之间的过渡帧中 fallback 气泡重复渲染
   const hasLiveAssistantContent = streaming
-    ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
-    : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
+    ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g)) || hasLiveGenerativeWidgets
+    : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant')) || hasLiveGenerativeWidgets
 
   return (
     <BasePathsProvider basePaths={attachedDirs}>
@@ -643,6 +649,30 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 />
               )
             })}
+
+            {hasLiveGenerativeWidgets && (
+              <Message from="assistant">
+                <MessageHeader
+                  model={agentStreamingModel}
+                  time={formatMessageTime(Date.now())}
+                  logo={<AssistantLogo model={agentStreamingModel} />}
+                />
+                <MessageContent>
+                  <div className="space-y-2">
+                    {(liveGenerativeWidgets ?? []).map((preview) => (
+                      <GenerativeWidgetRenderer
+                        key={preview.toolUseId}
+                        parseResult={parseGenerativeWidgetInput(
+                          liveGenerativeWidgetPreviewToInput(preview),
+                          { sessionId, toolUseId: preview.toolUseId },
+                        )}
+                        isStreaming={preview.isStreaming}
+                      />
+                    ))}
+                  </div>
+                </MessageContent>
+              </Message>
+            )}
 
             {/* 有实时助手内容时：显示运行指示器或占位（防止 streaming 结束到 Actions Bar 出现之间的高度跳动） */}
             {/* 不使用 mt：ConversationContent 的 gap-1(4px) 已提供间距，

@@ -24,10 +24,12 @@ import { MessageResponse } from '@/components/ai-elements/message'
 import { getToolIcon, extractFilePath } from './tool-utils'
 import { getToolPhrase } from './tool-phrase'
 import { ToolResultRenderer } from './tool-result-renderers'
+import { GenerativeWidgetRenderer } from './GenerativeWidgetRenderer'
 import { PreviewOpenButton } from './tool-result-renderers/preview-open-button'
 import { getTaskGetStatusLabel, parseTaskGetResult, type ParsedTaskGetResult } from './tool-result-renderers/task-get-result'
 import { parseTaskListResult, type ParsedTaskListItem } from './tool-result-renderers/task-list-result'
 import { formatDuration } from './AgentMessages'
+import { isGenerativeUiToolName, parseGenerativeWidgetOwnerFromToolResult, parseGenerativeWidgetToolBlock } from '@/lib/generative-ui-contract'
 import type {
   SDKContentBlock,
   SDKMessage,
@@ -378,6 +380,16 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
 
   // 子代理工具调用统计
   const childToolCount = childBlocks?.filter((b) => b.type === 'tool_use').length ?? 0
+
+  if (isGenerativeUiToolName(block.name)) {
+    const owner = parseGenerativeWidgetOwnerFromToolResult(resultText)
+    return (
+      <GenerativeWidgetRenderer
+        parseResult={parseGenerativeWidgetToolBlock(block, owner)}
+        isStreaming={isStreaming && !isCompleted}
+      />
+    )
+  }
 
   // ===== Agent/Task 工具：特殊渲染 =====
   if (isAgentTool) {

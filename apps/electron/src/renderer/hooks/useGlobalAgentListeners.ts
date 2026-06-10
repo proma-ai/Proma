@@ -25,6 +25,7 @@ import {
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
   liveMessagesMapAtom,
+  liveGenerativeWidgetsMapAtom,
   agentSessionModelMapAtom,
   agentModelIdAtom,
   agentPermissionModeMapAtom,
@@ -55,17 +56,35 @@ import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTab
 import { autoPreviewEnabledAtom, previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
-import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, SDKMessage, PromaEvent, AgentSessionMeta } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
+import {
+  buildLiveGenerativeWidgetPreviewFromFinalEvent,
+  buildLiveGenerativeWidgetPreviewFromStreamEvent,
+  getGenerativeUiToolUseIds,
+  stripPreviewedGenerativeWidgetBlocks,
+  type LiveGenerativeWidgetPreview,
+} from '@/lib/generative-ui-live-preview'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
 
 /** 会改变 git 工作树状态的子命令（用于识别 Bash 中触发 diff 刷新的 git 操作） */
 const GIT_MUTATING_SUBCOMMANDS = /\bgit\s+(commit|checkout|reset|restore|stash|clean|add|rm|mv|pull|merge|rebase|cherry-pick|revert|switch|am|apply)\b/
+
+function upsertLiveGenerativeWidgetPreview(
+  current: LiveGenerativeWidgetPreview[],
+  preview: LiveGenerativeWidgetPreview,
+): LiveGenerativeWidgetPreview[] {
+  const existingIndex = current.findIndex((item) => item.toolUseId === preview.toolUseId)
+  if (existingIndex === -1) return [...current, preview]
+  const next = current.slice()
+  next[existingIndex] = { ...current[existingIndex], ...preview }
+  return next
+}
 
 function isAbsolutePath(path: string): boolean {
   return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
@@ -573,6 +592,28 @@ export function useGlobalAgentListeners(): void {
           activateExternalAgentRun(payload.event)
         }
 
+        if (payload.kind === 'proma_event' && payload.event.type === 'generative_ui_widget_stream') {
+          const preview = buildLiveGenerativeWidgetPreviewFromStreamEvent(payload.event)
+          if (preview) {
+            store.set(liveGenerativeWidgetsMapAtom, (prev) => {
+              const map = new Map(prev)
+              const current = map.get(sessionId) ?? []
+              map.set(sessionId, upsertLiveGenerativeWidgetPreview(current, preview))
+              return map
+            })
+          }
+        } else if (payload.kind === 'proma_event' && payload.event.type === 'generative_ui_widget_stream_end') {
+          const preview = buildLiveGenerativeWidgetPreviewFromFinalEvent(payload.event)
+          if (preview) {
+            store.set(liveGenerativeWidgetsMapAtom, (prev) => {
+              const map = new Map(prev)
+              const current = map.get(sessionId) ?? []
+              map.set(sessionId, upsertLiveGenerativeWidgetPreview(current, preview))
+              return map
+            })
+          }
+        }
+
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
@@ -583,11 +624,28 @@ export function useGlobalAgentListeners(): void {
 
         // Phase 2: 直接累积 SDKMessage 到 liveMessagesMapAtom（跳过 replay 消息，避免与持久化消息重复）
         if (payload.kind === 'sdk_message') {
-          const msgRecord = payload.message as Record<string, unknown>
+          let messageForLive: SDKMessage | null = payload.message
+          let msgRecord = messageForLive as Record<string, unknown>
+          const previewedWidgetIds = new Set((store.get(liveGenerativeWidgetsMapAtom).get(sessionId) ?? []).map((preview) => preview.toolUseId))
+          if (msgRecord.type === 'assistant' && previewedWidgetIds.size > 0) {
+            const messageWidgetIds = getGenerativeUiToolUseIds(messageForLive)
+            const matchingPreviewIds = new Set(messageWidgetIds.filter((id) => previewedWidgetIds.has(id)))
+            const stripped = stripPreviewedGenerativeWidgetBlocks(messageForLive, matchingPreviewIds)
+            if (stripped === null) {
+              messageForLive = null
+            } else {
+              messageForLive = stripped
+              msgRecord = messageForLive as Record<string, unknown>
+            }
+          }
           // prompt_suggestion 不是对话转录消息，不能进入 liveMessages（会被错误渲染到最后一条助手消息中）
           // 它通过下方 legacyEvents 分支写入 agentPromptSuggestionsAtom，显示在输入框上方
-          if (msgRecord.type === 'prompt_suggestion') {
+          if (messageForLive == null) {
+            // 该 assistant 消息只包含已被 live preview 接管的 show_widget block，跳过 live transcript 避免重复渲染。
+          } else if (msgRecord.type === 'prompt_suggestion') {
             // 跳过写入 liveMessages
+          } else if (msgRecord.type === 'stream_event') {
+            // partial stream_event 只通过 generative_ui_widget_stream 旁路消费，不进入普通消息渲染。
           } else if (msgRecord.type === 'system' && msgRecord.subtype === 'thinking_tokens') {
             // thinking_tokens 是高频进度估算，只更新流式状态，不进入消息转录。
           } else if (!msgRecord.isReplay) {
@@ -614,7 +672,7 @@ export function useGlobalAgentListeners(): void {
                 return prev
               }
 
-              map.set(sessionId, [...current, payload.message])
+              map.set(sessionId, [...current, messageForLive])
               return map
             })
           }

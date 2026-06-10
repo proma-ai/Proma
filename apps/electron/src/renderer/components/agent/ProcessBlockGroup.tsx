@@ -37,6 +37,7 @@ export type AssistantTurnRenderItem =
 interface BuildAssistantTurnRenderItemsOptions {
   isStreaming?: boolean
   completedToolResultIds?: Set<string>
+  shouldPromoteBlock?: (block: SDKContentBlock) => boolean
 }
 
 export function buildCompletedToolResultIds(turnMessages: SDKMessage[]): Set<string> {
@@ -87,6 +88,43 @@ function areToolsBeforeIndexCompleted(
   return hasToolUse
 }
 
+function isProcessBlock(block: SDKContentBlock, shouldPromoteBlock?: (block: SDKContentBlock) => boolean): boolean {
+  if (shouldPromoteBlock?.(block)) return false
+  return block.type === 'tool_use' || block.type === 'thinking'
+}
+
+function buildProcessRegionItems(
+  blocks: SDKContentBlock[],
+  startIndex: number,
+  endIndex: number,
+  shouldPromoteBlock?: (block: SDKContentBlock) => boolean,
+): AssistantTurnRenderItem[] {
+  const items: AssistantTurnRenderItem[] = []
+  let processItems: IndexedContentBlock[] = []
+
+  const flushProcessItems = () => {
+    if (processItems.length === 0) return
+    items.push({ type: 'process-group', items: processItems })
+    processItems = []
+  }
+
+  for (let index = startIndex; index < endIndex; index++) {
+    const block = blocks[index]
+    if (!block) continue
+
+    if (shouldPromoteBlock?.(block)) {
+      flushProcessItems()
+      items.push({ type: 'block', item: { block, index } })
+      continue
+    }
+
+    processItems.push({ block, index })
+  }
+
+  flushProcessItems()
+  return items
+}
+
 export function buildAssistantTurnRenderItems(
   blocks: SDKContentBlock[],
   options: BuildAssistantTurnRenderItemsOptions = {},
@@ -95,7 +133,7 @@ export function buildAssistantTurnRenderItems(
 
   // 流式阶段最后的 text 还不稳定，后续工具调用可能会把它变成中间过程。
   // 只有当前面所有工具都有结果时，才把尾部 text 视作交付输出提前外置，降低完成瞬间的跳动。
-  const hasProcessBlock = blocks.some((block) => block.type === 'tool_use' || block.type === 'thinking')
+  const hasProcessBlock = blocks.some((block) => isProcessBlock(block, options.shouldPromoteBlock))
   const trailingTextStartIndex = getTrailingTextStartIndex(blocks)
   const canSplitStreamingFinalOutput = options.isStreaming
     && hasProcessBlock
@@ -104,25 +142,16 @@ export function buildAssistantTurnRenderItems(
     && areToolsBeforeIndexCompleted(blocks, trailingTextStartIndex, options.completedToolResultIds)
 
   if (options.isStreaming && hasProcessBlock && !canSplitStreamingFinalOutput) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessRegionItems(blocks, 0, blocks.length, options.shouldPromoteBlock)
   }
 
   if (trailingTextStartIndex === null) {
-    return [{
-      type: 'process-group',
-      items: blocks.map((block, index) => ({ block, index })),
-    }]
+    return buildProcessRegionItems(blocks, 0, blocks.length, options.shouldPromoteBlock)
   }
 
   const items: AssistantTurnRenderItem[] = []
   if (trailingTextStartIndex > 0) {
-    items.push({
-      type: 'process-group',
-      items: blocks.slice(0, trailingTextStartIndex).map((block, index) => ({ block, index })),
-    })
+    items.push(...buildProcessRegionItems(blocks, 0, trailingTextStartIndex, options.shouldPromoteBlock))
   }
 
   for (let index = trailingTextStartIndex; index < blocks.length; index++) {

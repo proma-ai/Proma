@@ -10,6 +10,7 @@ import { atomFamily, atomWithStorage } from 'jotai/utils'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
+import type { LiveGenerativeWidgetPreview } from '@/lib/generative-ui-live-preview'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -244,6 +245,13 @@ export const agentSessionStreamingStateAtomFamily = atomFamily((sessionId: strin
  * 流式完成后清空（持久化消息从 JSONL 加载）。
  */
 export const liveMessagesMapAtom = atom<Map<string, SDKMessage[]>>(new Map())
+
+/**
+ * 实时生成式 UI 预览 Map。
+ *
+ * 只保存 show_widget partial side-channel 的 transient 预览；完整 SDKMessage 仍是持久化来源。
+ */
+export const liveGenerativeWidgetsMapAtom = atom<Map<string, LiveGenerativeWidgetPreview[]>>(new Map())
 
 export const agentPendingPromptAtom = atom<AgentPendingPrompt | null>(null)
 

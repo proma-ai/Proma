@@ -2,7 +2,7 @@
  * Claude Agent SDK 适配器
  *
  * 实现 AgentProviderAdapter 接口，直接透传 SDK 的 SDKMessage 流。
- * 使用 includePartialMessages: false 获取完整 JSON 对象，无需逐 chunk 翻译。
+ * 默认使用 includePartialMessages: false 获取完整 JSON 对象；特定能力可显式开启 partial side-channel。
  */
 
 import type {
@@ -138,6 +138,8 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   systemPrompt: string | { type: 'preset'; preset: 'claude_code'; append?: string }
   /** SDK session ID（用于 resume） */
   resumeSessionId?: string
+  /** 是否接收 SDK partial stream_event（默认 false，仅用于 run-scoped UI 预览等旁路能力） */
+  includePartialMessages?: boolean
   /** resume 时从指定消息 uuid 处截断（配合 forkSession 实现分叉） */
   resumeSessionAt?: string
   /** MCP 服务器配置 */
@@ -715,8 +717,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         ...(options.maxTurns != null && { maxTurns: options.maxTurns }),
         permissionMode: options.sdkPermissionMode,
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,
-        // 关键：false 获取完整消息，与 v2 stream() 返回格式一致
-        includePartialMessages: false,
+        // 默认 false 获取完整消息；仅在 run-scoped 能力显式要求时接收 transient partial event。
+        includePartialMessages: options.includePartialMessages === true,
         promptSuggestions: true,
         cwd: options.cwd,
         abortController: controller,

@@ -336,7 +336,7 @@ export interface SDKToolUseSummaryMessage {
   session_id?: string
 }
 
-/** SDK 消息联合类型（v1 query + includePartialMessages: false 返回的完整 JSON 对象） */
+/** SDK 消息联合类型（默认完整消息；生成式 UI 开启时会额外收到 transient stream_event） */
 export type SDKMessage =
   | SDKAssistantMessage
   | SDKUserMessage
@@ -564,6 +564,8 @@ export type PromaEvent =
   | { type: 'title_updated'; title: string }
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }
   | { type: 'run_resumed'; sessionId: string }
+  | { type: 'generative_ui_widget_stream'; toolUseId: string; toolName: string; partialJson: string; parentToolUseId?: string | null; updatedAt: number }
+  | { type: 'generative_ui_widget_stream_end'; toolUseId: string; toolName?: string; input?: Record<string, unknown>; parentToolUseId?: string | null; updatedAt: number }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge'
@@ -831,6 +833,15 @@ export interface WorkspaceCapabilities {
 
 // ===== Agent 发送输入 =====
 
+export interface AgentGenerativeUIRunConfig {
+  /** Whether the user explicitly authorized Generative UI for this run. */
+  enabled: boolean
+  /** Runtime mode for generated widget artifacts. */
+  mode?: 'render-only' | 'interactive'
+  /** Source of the authorization, useful for audits and future persistence. */
+  source?: 'composer-toggle'
+}
+
 /**
  * Agent 发送消息的输入参数
  */
@@ -849,6 +860,8 @@ export interface AgentSendInput {
   additionalDirectories?: string[]
   /** 动态注入的 MCP 服务器（仅在本次会话中生效，如飞书群聊工具） */
   customMcpServers?: Record<string, Record<string, unknown>>
+  /** 本轮是否授权生成式 UI 能力；未授权时后端不得注入相关 prompt/tool */
+  generativeUI?: AgentGenerativeUIRunConfig
   /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'bypassPermissions'） */
   permissionModeOverride?: PromaPermissionMode
   /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */

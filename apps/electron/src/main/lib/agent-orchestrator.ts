@@ -37,6 +37,8 @@ import { isTransientNetworkError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { injectAutomationMcpServer } from './automation-agent-tools'
+import { buildGenerativeUiRunPrompt, getGenerativeUiAllowedToolNames, injectGenerativeUiMcpServer, isGenerativeUiGuidelineToolName, isGenerativeUiRunEnabled, isGenerativeUiToolName } from './generative-ui-agent-tools'
+import { GenerativeUiPartialWidgetTracker } from './generative-ui-partial-stream'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAgent } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
@@ -907,7 +909,8 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext } = input
+    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, generativeUI, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext } = input
+    const generativeUIEnabled = isGenerativeUiRunEnabled(generativeUI)
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -1224,6 +1227,13 @@ export class AgentOrchestrator {
         workspaceId,
         triggeredBy: input.triggeredBy,
       })
+      if (generativeUIEnabled) {
+        await injectGenerativeUiMcpServer(sdk, mcpServers, {
+          sessionId,
+          workspaceId,
+          runId: input.startedAt != null ? String(input.startedAt) : undefined,
+        })
+      }
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
@@ -1392,6 +1402,10 @@ export class AgentOrchestrator {
           return validationFailure
         }
 
+        if (generativeUIEnabled && (isGenerativeUiToolName(toolName) || isGenerativeUiGuidelineToolName(toolName))) {
+          return { behavior: 'allow' as const, updatedInput: input }
+        }
+
         // ── Write 大文件 token 截断防护 ──
         if (toolName === 'Write' && typeof input.content === 'string') {
           const estimatedTokens = estimateTokenCount(input.content)
@@ -1506,6 +1520,11 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
+      const generativeUiPrompt = generativeUIEnabled ? `\n\n${buildGenerativeUiRunPrompt()}` : ''
+      const autoAllowedTools = [
+        ...SAFE_TOOLS,
+        ...getGenerativeUiAllowedToolNames(generativeUIEnabled),
+      ]
       const queryOptions: ClaudeAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
@@ -1515,6 +1534,7 @@ export class AgentOrchestrator {
         env: sdkEnv,
         ...(maxTurns != null && { maxTurns }),
         sdkPermissionMode: sdkPermissionModeForPromaMode(initialPermissionMode),
+        includePartialMessages: generativeUIEnabled,
         // permissionMode 负责表达 auto/plan/bypassPermissions。
         // 当提供 canUseTool 回调时这里必须为 false，否则 CLI 同时收到
         // --allow-dangerously-skip-permissions 和 --permission-prompt-tool stdio
@@ -1523,7 +1543,7 @@ export class AgentOrchestrator {
         // 从实际 tool_use 流里同步，避免 UI 停留在计划阶段。
         allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
-        ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: [...SAFE_TOOLS] }),
+        ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: autoAllowedTools }),
         // claude_code preset 提供基础环境信息（platform/shell/OS/git/model/知识截止日期等）
         // buildSystemPrompt 追加 Proma 特有指令（角色定义、SubAgent 策略、工作区信息等）
         systemPrompt: {
@@ -1537,7 +1557,7 @@ export class AgentOrchestrator {
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
             claudeAvailable,
             deepSeekSubagentModel: modelRouting.subagentModel,
-          }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : ''),
+          }) + generativeUiPrompt + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : ''),
         },
         resumeSessionId: existingSdkSessionId,
         // 回退后 resume：从指定消息处继续（SDK 在同一 JSONL 内创建分支）
@@ -1699,6 +1719,9 @@ export class AgentOrchestrator {
           // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
           // 置回 false 并发 run_resumed，让 UI 从空闲态恢复运行态。
           let awaitingBackgroundWake = false
+          const generativeUiPartialTracker = generativeUIEnabled
+            ? new GenerativeUiPartialWidgetTracker()
+            : null
 
           while (true) {
             if (!pendingNext) {
@@ -1728,6 +1751,16 @@ export class AgentOrchestrator {
 
             pendingNext = null
             const msg = iterResult.value
+
+            if (generativeUiPartialTracker) {
+              const partialEvents = generativeUiPartialTracker.handleMessage(msg)
+              for (const event of partialEvents) {
+                this.eventBus.emit(sessionId, { kind: 'proma_event', event })
+              }
+              if ((msg as Record<string, unknown>).type === 'stream_event') {
+                continue
+              }
+            }
 
             // 后台任务唤醒：轻量完成后处于等待态，收到新一轮的首条实质消息时
             // 发 run_resumed，让 UI 从"空闲可输入"恢复到"运行中"。
@@ -1914,6 +1947,12 @@ export class AgentOrchestrator {
                 drainTimeoutPromise = new Promise((resolve) =>
                   setTimeout(() => resolve('drain_timeout'), RESULT_DRAIN_TIMEOUT_MS),
                 )
+              }
+            }
+
+            if (generativeUiPartialTracker && msg.type === 'assistant' && !(msg as Record<string, unknown>).isReplay) {
+              for (const event of generativeUiPartialTracker.buildFinalEvents(msg)) {
+                this.eventBus.emit(sessionId, { kind: 'proma_event', event })
               }
             }
 

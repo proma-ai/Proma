@@ -47,6 +47,7 @@ import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/
 import { activeViewAtom } from '@/atoms/active-view'
 import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
+import { isGenerativeUiToolName } from '@/lib/generative-ui-contract'
 import type {
   SDKMessage,
   SDKAssistantMessage,
@@ -625,6 +626,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
     return buildAssistantTurnRenderItems(topLevelBlocks, {
       isStreaming,
       completedToolResultIds,
+      shouldPromoteBlock: (block) => block.type === 'tool_use' && isGenerativeUiToolName((block as SDKToolUseBlock).name),
     })
   }, [topLevelBlocks, isStreaming, completedToolResultIds])
 

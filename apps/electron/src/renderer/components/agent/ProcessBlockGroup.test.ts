@@ -116,6 +116,29 @@ describe('Agent 过程块折叠分组', () => {
     }
   })
 
+  test('given promoted widget tool between process blocks when grouping then keeps widget outside process group', () => {
+    const items = buildAssistantTurnRenderItems([
+      thinking('准备生成 UI'),
+      tool('tool-1', 'mcp__generative-ui__load_widget_guidelines'),
+      tool('tool-2', 'mcp__generative-ui__show_widget'),
+      thinking('总结结果'),
+      text('最终输出'),
+    ], {
+      shouldPromoteBlock: (block) => block.type === 'tool_use' && (block as { name: string }).name.endsWith('__show_widget'),
+    })
+
+    expect(items.map((item) => item.type)).toEqual(['process-group', 'block', 'process-group', 'block'])
+    if (items[0]?.type === 'process-group') {
+      expect(items[0].items.map((item) => item.index)).toEqual([0, 1])
+    }
+    if (items[1]?.type === 'block') {
+      expect(items[1].item.index).toBe(2)
+    }
+    if (items[2]?.type === 'process-group') {
+      expect(items[2].items.map((item) => item.index)).toEqual([3])
+    }
+  })
+
   test('given streaming turn with only thinking before trailing text when grouping then keeps the whole turn inside process group', () => {
     // 仅有 thinking + 尾部 text 时，工具调用可能稍后才出现，
     // 不应把这段尾部 text 提前外置——避免后续完成瞬间从外部又跳回过程组。
