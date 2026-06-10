@@ -19,6 +19,7 @@ import {
   getInactiveSkillsDir,
   getDefaultSkillsDir,
   parseSkillVersion,
+  removeLegacyBuiltinWorkflowSkillDir,
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
@@ -349,6 +350,12 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
   for (const workspace of index.workspaces) {
     const activeDir = getWorkspaceSkillsDir(workspace.slug)
     const inactiveDir = getInactiveSkillsDir(workspace.slug)
+
+    for (const legacyPath of [join(activeDir, 'workflow'), join(inactiveDir, 'workflow')]) {
+      if (removeLegacyBuiltinWorkflowSkillDir(legacyPath)) {
+        console.log(`[Agent 工作区] 已移除旧默认 Skill: ${workspace.slug}/workflow`)
+      }
+    }
 
     for (const [slug, info] of defaultSkills) {
       const activePath = join(activeDir, slug)

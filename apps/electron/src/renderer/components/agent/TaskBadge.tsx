@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Loader2, Terminal, GitBranch } from 'lucide-react'
+import { Loader2, Terminal, GitBranch, Workflow as WorkflowIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { BackgroundTask } from '@/atoms/agent-atoms'
 
@@ -49,13 +49,27 @@ function shortenId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}...` : id
 }
 
+function formatNumber(value: number): string {
+  return Math.round(value).toLocaleString('en-US')
+}
+
+function buildTaskTitle(task: BackgroundTask): string {
+  const parts = [
+    task.description || task.intent || `${task.type} 任务`,
+    task.lastToolName,
+    task.usage?.totalTokens != null ? `${formatNumber(task.usage.totalTokens)} tokens` : undefined,
+    task.usage?.toolUses != null ? `${formatNumber(task.usage.toolUses)} tools` : undefined,
+  ].filter((part): part is string => Boolean(part))
+  return parts.join(' · ')
+}
+
 /**
  * TaskBadge 组件
  *
  * 显示运行中的后台任务，点击后滚动到对应的实时工具调用。
  */
 export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement {
-  // 本地计时器（Shell 任务），Agent 任务使用事件驱动的 elapsedSeconds
+  // 本地计时器（Shell 任务），Agent/Workflow 任务使用事件驱动的 elapsedSeconds
   const [localElapsed, setLocalElapsed] = React.useState(() =>
     Math.floor((Date.now() - task.startTime) / 1000)
   )
@@ -72,7 +86,8 @@ export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement
   }, [task.type, task.startTime])
 
   const displayElapsed = task.type === 'shell' ? localElapsed : task.elapsedSeconds
-  const Icon = task.type === 'shell' ? Terminal : GitBranch
+  const Icon = task.type === 'shell' ? Terminal : task.type === 'workflow' ? WorkflowIcon : GitBranch
+  const taskLabel = task.type === 'shell' ? 'Shell' : task.type === 'workflow' ? 'Workflow' : 'Task'
 
   return (
     <button
@@ -88,7 +103,7 @@ export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement
         'text-xs font-medium',
         'cursor-pointer select-none'
       )}
-      title={task.intent || `${task.type} 任务`}
+      title={buildTaskTitle(task)}
     >
       {/* Spinner */}
       <Loader2 className="size-3 animate-spin text-primary" />
@@ -98,7 +113,7 @@ export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement
 
       {/* 类型标签 */}
       <span className="text-muted-foreground">
-        {task.type === 'shell' ? 'Shell' : 'Task'}
+        {taskLabel}
       </span>
 
       {/* 任务 ID（缩短） */}

@@ -12,7 +12,12 @@ import { MessageSquareText, Sparkles, Server } from 'lucide-react'
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
 import { createMentionPopup, positionPopup } from './mention-popup-utils'
-import type { AgentSessionReferenceSearchResult } from '@proma/shared'
+import {
+  getBuiltinWorkflowSlashCommandBySlug,
+  isBuiltinWorkflowSlashCommandSlug,
+  isLegacyBuiltinWorkflowSkillSlug,
+  type AgentSessionReferenceSearchResult,
+} from '@proma/shared'
 
 // ===== 泛型工厂 =====
 
@@ -137,6 +142,7 @@ export interface SkillMentionItem {
   id: string
   name: string
   description?: string
+  group?: string
 }
 
 export function createSkillMentionSuggestion(
@@ -152,8 +158,23 @@ export function createSkillMentionSuggestion(
         const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
         return caps.skills
           .filter((s) => s.enabled)
+          .filter((s) => !(s.group === 'proma' && isLegacyBuiltinWorkflowSkillSlug(s.slug)))
           .filter((s) => !q || s.name.toLowerCase().includes(q) || (s.slug ?? '').toLowerCase().includes(q))
-          .map((s) => ({ id: s.slug, name: s.name, description: s.description }))
+          .map((s) => {
+            const workflowCommand = getBuiltinWorkflowSlashCommandBySlug(s.slug)
+            return {
+              id: s.slug,
+              name: workflowCommand?.name ?? s.name,
+              description: s.description,
+              group: s.group,
+            }
+          })
+          .sort((a, b) => {
+            const aWorkflow = isBuiltinWorkflowSlashCommandSlug(a.id)
+            const bWorkflow = isBuiltinWorkflowSlashCommandSlug(b.id)
+            if (aWorkflow !== bWorkflow) return aWorkflow ? -1 : 1
+            return a.name.localeCompare(b.name)
+          })
       },
       keyExtractor: (item) => item.id,
       renderItem: (item) => (

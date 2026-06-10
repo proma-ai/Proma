@@ -423,6 +423,46 @@ export function parseSkillVersion(skillDir: string): string {
   return '0.0.0'
 }
 
+function parseSkillFrontmatterField(content: string, field: string): string | undefined {
+  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
+  if (!fmMatch?.[1]) return undefined
+
+  for (const line of fmMatch[1].split('\n')) {
+    const colonIdx = line.indexOf(':')
+    if (colonIdx === -1) continue
+    const key = line.slice(0, colonIdx).trim()
+    if (key !== field) continue
+    return line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '')
+  }
+
+  return undefined
+}
+
+/**
+ * Detects the retired Proma built-in `/workflow` skill.
+ *
+ * User-authored skills may also be named "workflow", so cleanup is intentionally
+ * limited to the old Proma frontmatter shape.
+ */
+export function isLegacyBuiltinWorkflowSkillDir(skillDir: string): boolean {
+  const skillMdPath = join(skillDir, 'SKILL.md')
+  if (!existsSync(skillMdPath)) return false
+
+  try {
+    const content = readFileSync(skillMdPath, 'utf-8')
+    return parseSkillFrontmatterField(content, 'group') === 'proma'
+      && parseSkillFrontmatterField(content, 'name') === '/workflow'
+  } catch {
+    return false
+  }
+}
+
+export function removeLegacyBuiltinWorkflowSkillDir(skillDir: string): boolean {
+  if (!existsSync(skillDir) || !isLegacyBuiltinWorkflowSkillDir(skillDir)) return false
+  rmSync(skillDir, { recursive: true, force: true })
+  return true
+}
+
 /** 比较两个 semver 版本字符串
  *
  * @returns 正数表示 a > b，0 表示相等，负数表示 a < b
@@ -476,6 +516,9 @@ export function seedDefaultSkills(): void {
   }
 
   const userDir = getDefaultSkillsDir()
+  if (removeLegacyBuiltinWorkflowSkillDir(join(userDir, 'workflow'))) {
+    console.log('[配置] 已移除旧默认 Skill: workflow')
+  }
 
   try {
     const entries = readdirSync(bundledDir, { withFileTypes: true })

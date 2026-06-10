@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomFamily, atomWithStorage } from 'jotai/utils'
-import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
+import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult, TaskUsage } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 
@@ -1002,7 +1002,7 @@ export interface BackgroundTask {
   /** 任务或 Shell ID */
   id: string
   /** 任务类型 */
-  type: 'agent' | 'shell'
+  type: 'agent' | 'shell' | 'workflow'
   /** 关联的工具调用 ID（用于滚动定位到实时工具调用） */
   toolUseId: string
   /** 任务开始时间戳 */
@@ -1011,6 +1011,12 @@ export interface BackgroundTask {
   elapsedSeconds: number
   /** 任务意图/描述 */
   intent?: string
+  /** Workflow/task 当前阶段描述 */
+  description?: string
+  /** 最近一次工具调用名称 */
+  lastToolName?: string
+  /** SDK task_progress/task_notification 用量统计 */
+  usage?: TaskUsage
 }
 
 /**

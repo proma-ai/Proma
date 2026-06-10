@@ -264,6 +264,7 @@ export interface SDKSystemMessage {
   task_id?: string
   description?: string
   task_type?: string
+  workflow_name?: string
   tool_use_id?: string
   status?: string
   summary?: string
@@ -502,7 +503,7 @@ export type AgentEvent =
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string; imageAttachments?: AgentToolResultImage[] }
   // 后台任务
   | { type: 'task_backgrounded'; toolUseId: string; taskId: string; intent?: string; turnId?: string }
-  | { type: 'task_started'; taskId: string; toolUseId?: string; description: string; taskType?: string; turnId?: string }
+  | { type: 'task_started'; taskId: string; toolUseId?: string; description: string; taskType?: string; workflowName?: string; turnId?: string }
   | { type: 'task_progress'; toolUseId: string; elapsedSeconds?: number; turnId?: string; taskId?: string; description?: string; lastToolName?: string; usage?: TaskUsage }
   | { type: 'task_notification'; taskId: string; toolUseId?: string; status: 'completed' | 'failed' | 'stopped'; summary: string; outputFile?: string; usage?: TaskUsage; turnId?: string }
   | { type: 'thinking_tokens'; estimatedTokens: number; estimatedTokensDelta: number }

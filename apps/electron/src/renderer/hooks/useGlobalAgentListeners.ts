@@ -55,7 +55,7 @@ import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, agentDiffPanelTab
 import { autoPreviewEnabledAtom, previewPanelOpenMapAtom, previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
-import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, SDKMessage, PromaEvent, AgentSessionMeta } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
@@ -155,6 +155,12 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
   const msg = payload.message
 
   switch (msg.type) {
+    case 'stream_event': {
+      const inner = (msg as { event?: unknown }).event
+      if (!inner || typeof inner !== 'object' || !('type' in inner)) return []
+      return payloadToLegacyEvents({ kind: 'sdk_message', message: inner as SDKMessage })
+    }
+
     case 'assistant': {
       const aMsg = msg as SDKAssistantMessage
       if (aMsg.isReplay) return []
@@ -257,7 +263,14 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       if (sMsg.subtype === 'compact_boundary') return [{ type: 'compact_complete' }]
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
       if (sMsg.subtype === 'task_started' && sMsg.task_id) {
-        return [{ type: 'task_started', taskId: sMsg.task_id, description: sMsg.description ?? '', taskType: sMsg.task_type, toolUseId: sMsg.tool_use_id }]
+        return [{
+          type: 'task_started',
+          taskId: sMsg.task_id,
+          description: sMsg.description ?? '',
+          taskType: sMsg.task_type,
+          workflowName: typeof sMsg.workflow_name === 'string' ? sMsg.workflow_name : undefined,
+          toolUseId: sMsg.tool_use_id,
+        }]
       }
       if (sMsg.subtype === 'task_notification' && sMsg.task_id) {
         return [{
@@ -706,11 +719,32 @@ export function useGlobalAgentListeners(): void {
                 intent: event.intent,
               }]
             })
+          } else if (event.type === 'task_started' && (event.taskType === 'local_workflow' || event.workflowName)) {
+            const workflowToolUseId = event.toolUseId ?? event.taskId
+            store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
+              if (prev.some((t) => t.id === event.taskId || t.toolUseId === workflowToolUseId)) return prev
+              return [...prev, {
+                id: event.taskId,
+                type: 'workflow' as const,
+                toolUseId: workflowToolUseId,
+                startTime: Date.now(),
+                elapsedSeconds: 0,
+                intent: event.workflowName || event.description,
+                description: event.description,
+              }]
+            })
           } else if (event.type === 'task_progress') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
               prev.map((t) =>
-                t.toolUseId === event.toolUseId
-                  ? { ...t, elapsedSeconds: event.elapsedSeconds ?? t.elapsedSeconds }
+                t.toolUseId === event.toolUseId || (event.taskId != null && t.id === event.taskId)
+                  ? {
+                      ...t,
+                      elapsedSeconds: event.elapsedSeconds ?? (event.usage ? event.usage.durationMs / 1000 : t.elapsedSeconds),
+                      intent: event.description ?? t.intent,
+                      description: event.description ?? t.description,
+                      lastToolName: event.lastToolName ?? t.lastToolName,
+                      usage: event.usage ?? t.usage,
+                    }
                   : t
               )
             )
@@ -726,6 +760,10 @@ export function useGlobalAgentListeners(): void {
                 intent: event.command || event.intent,
               }]
             })
+          } else if (event.type === 'task_notification') {
+            store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
+              prev.filter((t) => t.id !== event.taskId && t.toolUseId !== (event.toolUseId ?? event.taskId))
+            )
           } else if (event.type === 'tool_result') {
             // 工具完成时，移除对应的后台任务
             store.set(backgroundTasksAtomFamily(sessionId), (prev) =>

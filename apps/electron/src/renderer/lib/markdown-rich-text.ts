@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import { getBuiltinWorkflowSlashCommandBySlug } from '@proma/shared'
 
 const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(?:[?#].*)?$/i
 const PREVIEW_BLOCK_RE = /^<div\s+[^>]*data-type=(["'])(?:raw-html-block|math-block)\1/i
@@ -447,7 +448,10 @@ export function htmlToMarkdown(html: string): string {
         const dataId = el.getAttribute('data-id') || ''
         const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
         if (dataType === 'mention') {
-          if (suggestionChar === '/') return `/skill:${dataId}`
+          if (suggestionChar === '/') {
+            const workflowCommand = getBuiltinWorkflowSlashCommandBySlug(dataId)
+            return workflowCommand?.command ?? `/skill:${dataId}`
+          }
           if (suggestionChar === '#') return `#mcp:${dataId}`
           if (suggestionChar === '&') return `&session:${dataId}`
           return `@file:${dataId}`

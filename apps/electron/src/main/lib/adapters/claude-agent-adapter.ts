@@ -144,6 +144,8 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   mcpServers?: Record<string, unknown>
   /** 插件配置 */
   plugins?: Array<{ type: 'local'; path: string }>
+  /** 是否接收 SDK partial stream_event（默认 false，仅用于明确需要实时旁路进度的 run） */
+  includePartialMessages?: boolean
   /** stderr 回调 */
   onStderr?: (data: string) => void
   /** SDK session ID 捕获回调 */
@@ -668,7 +670,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
   /**
    * 发起查询，返回 SDKMessage 异步迭代流
    *
-   * 使用 includePartialMessages: false 获取完整 JSON 对象，直接透传。
+   * 默认使用 includePartialMessages: false 获取完整 JSON 对象，直接透传。
+   * 特定能力可显式开启 partial side-channel。
    */
   async *query(input: AgentQueryInput): AsyncIterable<SDKMessage> {
     const options = input as ClaudeAgentQueryOptions
@@ -715,8 +718,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         ...(options.maxTurns != null && { maxTurns: options.maxTurns }),
         permissionMode: options.sdkPermissionMode,
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,
-        // 关键：false 获取完整消息，与 v2 stream() 返回格式一致
-        includePartialMessages: false,
+        // 默认 false 获取完整消息；仅在 run-scoped 能力显式要求时接收 transient partial event。
+        includePartialMessages: options.includePartialMessages === true,
         promptSuggestions: true,
         cwd: options.cwd,
         abortController: controller,

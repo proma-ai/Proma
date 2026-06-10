@@ -6,13 +6,39 @@
  */
 
 import * as React from 'react'
-import { Loader2, Terminal, GitBranch } from 'lucide-react'
+import { Loader2, Terminal, GitBranch, Workflow as WorkflowIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { BackgroundTask } from '@/atoms/agent-atoms'
 
 export interface BackgroundTasksPanelProps {
   tasks: BackgroundTask[]
   className?: string
+}
+
+function formatNumber(value: number): string {
+  return Math.round(value).toLocaleString('en-US')
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${Math.max(0, seconds).toFixed(seconds < 10 ? 1 : 0)}s`
+
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.round(seconds % 60)
+  if (minutes < 60) return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`
+
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`
+}
+
+function buildTaskMeta(task: BackgroundTask): string {
+  const parts: string[] = []
+  if (task.lastToolName) parts.push(task.lastToolName)
+  if (task.usage?.totalTokens != null) parts.push(`${formatNumber(task.usage.totalTokens)} tokens`)
+  if (task.usage?.toolUses != null) parts.push(`${formatNumber(task.usage.toolUses)} tools`)
+  const elapsedSeconds = task.usage ? task.usage.durationMs / 1000 : task.elapsedSeconds
+  if (elapsedSeconds > 0) parts.push(formatElapsed(elapsedSeconds))
+  return parts.join(' · ')
 }
 
 /**
@@ -46,8 +72,10 @@ export function BackgroundTasksPanel({
           </thead>
           <tbody>
             {tasks.map((task, index) => {
-              const Icon = task.type === 'shell' ? Terminal : GitBranch
-              const description = task.intent || `${task.type === 'shell' ? 'Shell' : 'Task'} 任务`
+              const Icon = task.type === 'shell' ? Terminal : task.type === 'workflow' ? WorkflowIcon : GitBranch
+              const taskLabel = task.type === 'shell' ? 'Shell' : task.type === 'workflow' ? 'Workflow' : 'Task'
+              const description = task.description || task.intent || `${taskLabel} 任务`
+              const meta = buildTaskMeta(task)
 
               return (
                 <tr
@@ -61,9 +89,12 @@ export function BackgroundTasksPanel({
 
                   {/* 任务描述 */}
                   <td className="py-1.5 px-2">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-start gap-1.5">
                       <Icon className="size-3 text-muted-foreground shrink-0" />
-                      <span className="text-foreground/70 text-[11px]">{description}</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-foreground/70 text-[11px]">{description}</div>
+                        {meta && <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70">{meta}</div>}
+                      </div>
                     </div>
                   </td>
 
