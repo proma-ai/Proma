@@ -89,6 +89,7 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
+  agentGenerativeUIEnabledAtom,
   agentProcessGroupsKeepExpandedAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
@@ -463,7 +464,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [sessionId, setDraftsMap])
   const inputHtmlContent = useAtomValue(agentSessionDraftHtmlAtomFamily(sessionId))
-  const [generativeUIEnabled, setGenerativeUIEnabled] = React.useState(false)
+  const [generativeUIEnabled, setGenerativeUIEnabled] = useAtom(agentGenerativeUIEnabledAtom)
   const setDraftHtmlMap = useSetAtom(agentSessionDraftHtmlAtom)
   const setInputHtmlContent = React.useCallback((html: string) => {
     setDraftHtmlMap((prev) => {

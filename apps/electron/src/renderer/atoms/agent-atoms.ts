@@ -226,6 +226,12 @@ export const agentProcessGroupsKeepExpandedAtom = atomWithStorage<boolean>(
   false,
 )
 
+/** 生成式 UI（widget 按钮）是否开启，默认关闭 */
+export const agentGenerativeUIEnabledAtom = atomWithStorage<boolean>(
+  'proma-agent-generative-ui-enabled',
+  false,
+)
+
 /**
  * 单个 session 的 streaming state 派生 atomFamily — 按 sessionId 切片订阅。
  *
