@@ -354,6 +354,14 @@ export async function logout(): Promise<CloudAuthIpcResponse> {
   } catch {
     // 清理失败不影响登出
   }
+  // 清理 inner key 进程内缓存（1h TTL），避免登出后仍持有上一个账号的 pk_xxx，
+  // 触发后端 auth_cache 命中过期 credits 快照而误报 402。
+  try {
+    const { invalidatePromaAgentInnerKeyCache } = await import('./proma-agent-key-service')
+    invalidatePromaAgentInnerKeyCache()
+  } catch {
+    // 清理失败不影响登出
+  }
   // 清理健康数据缓存并停止轮询
   try {
     const { clearHealthCache, stopHealthPolling } = await import('./cloud-health-service')
