@@ -378,6 +378,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     isCompacting: streamState?.isCompacting ?? false,
     inputTokens: streamState?.inputTokens,
     contextWindow: streamState?.contextWindow,
+    usageUpdatedAt: streamState?.usageUpdatedAt,
   }
   const setAgentStreamErrors = useSetAtom(agentStreamErrorsAtom)
   const streamErrors = useAtomValue(agentStreamErrorsAtom)
@@ -1212,6 +1213,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
 
+    // 模型切换时：清除旧的 contextWindow，让 result 重新提供真实值
+    setStreamingStates((prev) => {
+      const state = prev.get(sessionId)
+      if (!state) return prev
+      const map = new Map(prev)
+      map.set(sessionId, { ...state, contextWindow: undefined })
+      return map
+    })
+
     // 自动将选中的渠道加入 Agent 可用渠道白名单
     const updatedChannelIds = agentChannelIds.includes(option.channelId)
       ? agentChannelIds
@@ -1944,6 +1954,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           cacheReadTokens={contextStatus.cacheReadTokens}
           cacheCreationTokens={contextStatus.cacheCreationTokens}
           contextWindow={contextStatus.contextWindow}
+          usageUpdatedAt={contextStatus.usageUpdatedAt}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
           onCompact={handleCompact}

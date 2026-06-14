@@ -81,6 +81,8 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 当前 thinking block 的 token 估算值（SDK 实时估算，非计费值） */
   thinkingEstimatedTokens?: number
+  /** usage 数据最后更新时间戳（毫秒），用于 UI 提示数据时效 */
+  usageUpdatedAt?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
   /**
@@ -703,6 +705,15 @@ export function applyAgentEvent(
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
+        ...(event.usage && {
+          inputTokens: event.usage.inputTokens,
+          ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
+          ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
+          ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
+          ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
+          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
+          usageUpdatedAt: Date.now(),
+        }),
       }
 
     case 'run_resumed':
@@ -727,7 +738,10 @@ export function applyAgentEvent(
         ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
         ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
         ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-        ...(event.usage.contextWindow && { contextWindow: event.usage.contextWindow }),
+        // 流式中 assistant 消息的 usage_update 可能携带推断的 contextWindow，
+        // 若已有 result 消息提供的真实值，则不再覆盖
+        ...(event.usage.contextWindow && !prev.contextWindow && { contextWindow: event.usage.contextWindow }),
+        usageUpdatedAt: Date.now(),
       }
 
     case 'compacting':
@@ -820,6 +834,8 @@ export interface AgentContextStatus {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+  /** usage 数据最后更新时间戳（毫秒） */
+  usageUpdatedAt?: number
 }
 
 /** 当前会话的上下文使用量派生 atom */
@@ -835,6 +851,7 @@ export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
     cacheCreationTokens: state?.cacheCreationTokens,
     costUsd: state?.costUsd,
     contextWindow: state?.contextWindow,
+    usageUpdatedAt: state?.usageUpdatedAt,
   }
 })
 

@@ -29,6 +29,8 @@ interface ContextUsageBadgeProps {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+  /** usage 数据最后更新时间戳（毫秒），用于显示数据时效 */
+  usageUpdatedAt?: number
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
@@ -116,6 +118,7 @@ export function ContextUsageBadge({
   cacheReadTokens,
   cacheCreationTokens,
   contextWindow,
+  usageUpdatedAt,
   isCompacting,
   isProcessing,
   onCompact,
@@ -193,6 +196,17 @@ export function ContextUsageBadge({
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
 
+  /** 计算数据时效提示（普通变量，非 useMemo — 避免在 isCompacting early return 后 hook 数不一致） */
+  let ageText: string | undefined
+  if (usageUpdatedAt) {
+    const ageMs = Date.now() - usageUpdatedAt
+    if (ageMs >= 5_000 && ageMs < 60_000) {
+      ageText = `${Math.round(ageMs / 1000)}秒前更新`
+    } else if (ageMs >= 60_000) {
+      ageText = `${Math.round(ageMs / 60_000)}分钟前更新`
+    }
+  }
+
   const handleCompactClick = (): void => {
     if (isProcessing) return
     onCompact()
@@ -250,6 +264,12 @@ export function ContextUsageBadge({
                 />
               )}
             </>
+          ) : null}
+
+          {ageText ? (
+            <div className="text-[11px] text-center text-foreground/50 pt-0.5">
+              数据{ageText}
+            </div>
           ) : null}
 
           <div className="h-px bg-border my-0.5" />
