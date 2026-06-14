@@ -109,14 +109,14 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const selectedWorktreePath = selectedWorktreeMap.get(sessionId) ?? null
 
   const handleWorktreeSelect = React.useCallback((worktree: import('@proma/shared').WorktreeInfo | null) => {
+    // 仅切换 diff 视图，不再自动把 worktree 挂进会话目录。
+    // worktree 的 diff 读取已由主进程的 ensurePathAllowedWithWorktree 凭 git 背书放行，
+    // 无需借「附加目录」绕过安全检查；是否让 Agent 访问该 worktree 交由用户手动决定。
     setSelectedWorktreeMap((prev) => {
       const m = new Map(prev)
       m.set(sessionId, worktree?.path ?? null)
       return m
     })
-    if (worktree) {
-      window.electronAPI.attachDirectory({ sessionId, directoryPath: worktree.path })
-    }
   }, [sessionId, setSelectedWorktreeMap])
 
   const handleDiffFileClick = React.useCallback((filePath: string, _isUntracked: boolean, gitRoot?: string) => {

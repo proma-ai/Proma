@@ -407,7 +407,7 @@ function SessionMiniMapPopoverContent({
 
   return createPortal(
     <div
-      className="fixed z-[9999] titlebar-no-drag transition-[top,height] duration-150 ease-out"
+      className="fixed z-[9999] titlebar-no-drag transition-[top,height] duration-150 ease-out pointer-events-auto"
       style={{ top: position.top, left: position.left, width: PANEL_WIDTH, height: position.height }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}

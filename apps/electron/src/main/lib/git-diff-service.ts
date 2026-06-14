@@ -7,7 +7,7 @@
 
 import { spawn } from 'child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
-import { basename, isAbsolute, join, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
 import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 
@@ -295,7 +295,7 @@ export async function getUnstagedChanges(
  * （`C:/.../repo`），而 Node `path.join` 返回反斜杠（`C:\...\repo`）。统一用 resolve
  * 规范化并转为正斜杠，确保同一仓库的两种写法被识别为同一个根，避免重复跑 git diff。
  */
-function normalizeGitRoot(p: string): string {
+export function normalizeGitRoot(p: string): string {
   return resolve(p).replace(/\\/g, '/')
 }
 
@@ -335,7 +335,7 @@ function findAllGitRootsDown(dirPath: string, maxDepth: number): string[] {
 }
 
 /** 查找 Git 仓库根目录（支持向上搜索子目录内的 repos），返回所有找到的根 */
-async function findAllGitRoots(baseDir: string): Promise<string[]> {
+export async function findAllGitRoots(baseDir: string): Promise<string[]> {
   if (!existsSync(baseDir)) return []
 
   // 1. 向上搜索：git rev-parse --show-toplevel
@@ -484,6 +484,26 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
   if (result === null) {
     throw new Error(`还原失败: git checkout -- ${safePath}`)
   }
+}
+
+/**
+ * 解析给定路径所属 git 仓库的「主仓库根目录」。
+ *
+ * 对于 worktree，git 的公共目录（--git-common-dir）始终指向主仓库的 .git，
+ * 因此其父目录即主仓库根。普通仓库返回自身根目录。非 git 路径返回 null。
+ *
+ * 用于安全校验：worktree 常被放在主仓库之外（如 ~/proma-dev/worktrees/xxx），
+ * 直接判定其路径会越界；改为校验它回溯到的主仓库是否已授权。
+ */
+export async function getMainRepoRoot(somePath: string): Promise<string | null> {
+  if (!existsSync(somePath)) return null
+  const commonDir = await runGitCommand(
+    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+    somePath,
+  )
+  if (!commonDir) return null
+  // commonDir 形如 /path/to/main-repo/.git，取其父目录
+  return normalizeGitRoot(dirname(commonDir))
 }
 
 /**

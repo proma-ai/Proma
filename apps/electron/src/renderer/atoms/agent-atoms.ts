@@ -687,8 +687,20 @@ export function applyAgentEvent(
       // 等待 STREAM_COMPLETE IPC 回调通过删除流式状态来控制 UI 就绪状态
       // 这避免了用户在后端尚未完成清理时就能发送新消息的竞态条件
       // 同时将未完成的工具活动标记为 done（兜底）
+      //
+      // 同步把 result 里真实的 usage（inputTokens / outputTokens / contextWindow 等）
+      // 写入 streamState。SDK 流式过程中 message.usage 一直是 0，只有 result 里才有真实值，
+      // 不在这里写入的话上下文指示器分母和分子会永远停留在 0 或上次会话的残留。
       return {
         ...prev,
+        ...(event.usage ? {
+          ...(event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
+          ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
+          ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
+          ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
+          ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
+          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
+        } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
       }
@@ -710,7 +722,7 @@ export function applyAgentEvent(
     case 'usage_update':
       return {
         ...prev,
-        inputTokens: event.usage.inputTokens,
+        ...(event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
         ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
         ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
         ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),

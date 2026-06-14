@@ -20,6 +20,7 @@ import {
   getDefaultSkillsDir,
   parseSkillVersion,
 } from './config-paths'
+import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
@@ -1178,10 +1179,50 @@ export function detachWorkspaceFile(workspaceSlug: string, filePath: string): st
 
 // ===== 工作区级 Worktree 仓库管理 =====
 
-export function getWorktreeRepos(workspaceSlug: string): import('@proma/shared').WorkspaceWorktreeRepo[] {
+/**
+ * 获取工作区的 Worktree 仓库列表。
+ *
+ * 优先从工作区的「附加目录」中自动探测 git 仓库根，避免依赖手动维护的
+ * worktreeRepos 配置（其 repoPath 容易因仓库移动而失效，导致 WorktreeSelector
+ * 静默找不到 worktree）。同时保留 config 中仍然存在的手动配置项（如不在附加
+ * 目录内的额外仓库），并自动过滤掉路径已不存在的陈旧条目。
+ */
+export async function getWorktreeRepos(workspaceSlug: string): Promise<import('@proma/shared').WorkspaceWorktreeRepo[]> {
   const config = readWorkspaceConfig(workspaceSlug)
-  const repos = config.worktreeRepos ?? []
-  return repos.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+
+  // repoPath 归一化后去重
+  const byPath = new Map<string, import('@proma/shared').WorkspaceWorktreeRepo>()
+
+  // 1. 从附加目录自动探测 git 仓库根
+  const attachedDirs = config.attachedDirectories ?? []
+  for (const dir of attachedDirs) {
+    let roots: string[]
+    try {
+      roots = await findAllGitRoots(dir)
+    } catch {
+      continue
+    }
+    for (const root of roots) {
+      if (!byPath.has(root)) {
+        byPath.set(root, {
+          name: basename(root),
+          repoPath: root,
+          worktreesPath: '',
+          priority: 1,
+        })
+      }
+    }
+  }
+
+  // 2. 合并手动配置中仍然存在的仓库（自动过滤失效路径）
+  for (const repo of config.worktreeRepos ?? []) {
+    const normalized = normalizeGitRoot(repo.repoPath)
+    if (!byPath.has(normalized) && existsSync(repo.repoPath)) {
+      byPath.set(normalized, repo)
+    }
+  }
+
+  return Array.from(byPath.values()).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
 }
 
 export function addWorktreeRepo(workspaceSlug: string, repo: import('@proma/shared').WorkspaceWorktreeRepo): import('@proma/shared').WorkspaceWorktreeRepo[] {

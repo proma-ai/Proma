@@ -422,7 +422,7 @@ export interface TypedError {
 
 /** Agent 事件 Usage 信息 */
 export interface AgentEventUsage {
-  inputTokens: number
+  inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
@@ -559,6 +559,7 @@ export type PromaEvent =
   | { type: 'plan_mode_changed'; sessionId: string; active: boolean; source: AgentPlanModeChangeSource }
   | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
   | { type: 'model_resolved'; model: string }
+  | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }

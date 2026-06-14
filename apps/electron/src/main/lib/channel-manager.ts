@@ -425,7 +425,7 @@ async function testAnthropicCompatible(
       testModel = 'kimi-for-coding'
       break
     case 'zhipu-coding':
-      testModel = 'glm-5.1'
+      testModel = 'glm-5.2'
       break
     case 'minimax':
       testModel = 'MiniMax-M3'

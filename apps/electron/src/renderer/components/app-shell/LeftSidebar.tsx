@@ -41,6 +41,7 @@ import {
   agentModelIdAtom,
   agentSessionChannelMapAtom,
   agentSessionModelMapAtom,
+  agentSessionPathMapAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   workspaceCapabilitiesVersionAtom,
@@ -393,6 +394,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const agentModelId = useAtomValue(agentModelIdAtom)
   const setSessionChannelMap = useSetAtom(agentSessionChannelMapAtom)
   const setSessionModelMap = useSetAtom(agentSessionModelMapAtom)
+  const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
   const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const setMode = useSetAtom(appModeAtom)
@@ -469,6 +471,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setDiffData(deleteKey)
     setSessionChannelMap(deleteKey)
     setSessionModelMap(deleteKey)
+    // 会话工作目录路径：不清理会导致右侧文件面板继续用已删除目录请求 list-directory
+    setSessionPathMap(deleteKey)
     // 视图状态（预览开关 + 上次视图）：删除/归档是终态，统一清理避免孤立条目
     setSessionViewStateMap(deleteKey)
 
@@ -498,7 +502,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     sessionExistsAtom.remove(id)
 
     clearPreviewCacheForSession(id)
-  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setSessionChannelMap, setSessionModelMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
+  }, [setConvModels, setConvContextLength, setConvThinking, setConvParallel, setConvPromptId, setPreviewPanelOpen, setPreviewFile, setDiffPanelTab, setDiffRefreshVersion, setDiffUnseen, setDiffUnseenFiles, setDiffData, setSessionChannelMap, setSessionModelMap, setSessionPathMap, setSessionViewStateMap, setStreamingStates, setLiveMessagesMap, setSessionPendingFiles, store])
 
   const currentWorkspaceSlug = React.useMemo(() => {
     if (!currentWorkspaceId) return null

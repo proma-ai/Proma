@@ -340,7 +340,7 @@ export function buildUsageTooltip(durationMs: number, usage?: AgentEventUsage): 
   lines.push(`耗时: ${formatDuration(durationMs)}`)
 
   if (usage) {
-    const pureInput = usage.inputTokens - (usage.cacheReadTokens ?? 0) - (usage.cacheCreationTokens ?? 0)
+    const pureInput = (usage.inputTokens ?? 0) - (usage.cacheReadTokens ?? 0) - (usage.cacheCreationTokens ?? 0)
     if (pureInput > 0) lines.push(`输入: ${pureInput.toLocaleString()}`)
     if (usage.outputTokens) lines.push(`输出: ${usage.outputTokens.toLocaleString()}`)
     if (usage.cacheCreationTokens) lines.push(`缓存写入: ${usage.cacheCreationTokens.toLocaleString()}`)

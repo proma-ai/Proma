@@ -279,7 +279,9 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         ])
       } else if (p === 'zhipu' || p === 'zhipu-coding') {
         setModels([
-          { id: 'glm-5.1', name: 'GLM-5.1', enabled: true },
+          { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
+          { id: 'glm-x-preview[1m]', name: 'GLM-X-Preview[1m]', enabled: false },
+          { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
       } else if (p === 'minimax') {
         setModels([

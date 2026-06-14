@@ -28,6 +28,7 @@ import {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
+  supports1MContext,
 } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -461,29 +462,6 @@ const PROMA_TITLE_MODEL = 'openai/gpt-oss-120b'
 
 /** 默认模型 ID */
 const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
-
-/**
- * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）
- * 当前支持：Claude Sonnet 4 / 4.5 / 4.6、Opus 4.6 / 4.7 / 4.8、Fable 5、DeepSeek V4 系列、
- * 小米 MiMo V2.5 / V2.5 Pro / V2 Pro
- * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
- */
-function supports1MContext(modelId: string): boolean {
-  const m = modelId.toLowerCase()
-  if (m.includes('haiku')) return false
-  // Claude: Sonnet 4+ 与 Opus 4.6+、Fable 5 都支持
-  if (m.includes('claude')) {
-    if (m.includes('sonnet-4')) return true
-    if (m.includes('opus-4-6') || m.includes('opus-4-7') || m.includes('opus-4-8')) return true
-    if (m.includes('fable-5')) return true
-    return false
-  }
-  // DeepSeek V4 系列（deepseek-v4-pro、deepseek-v4-flash）
-  if (m.includes('deepseek-v4')) return true
-  // 小米 MiMo：v2.5 / v2.5-pro / v2-pro 为 1M（omni / flash 不支持）
-  if (m.includes('mimo-v2.5') || m.includes('mimo-v2-pro')) return true
-  return false
-}
 
 /**
  * 聚合一次 SDK 调用涉及的所有附加目录（去重，保持插入顺序）。
@@ -1724,6 +1702,12 @@ export class AgentOrchestrator {
         },
         onContextWindow: (cw: number) => {
           console.log(`[Agent 编排] 缓存 contextWindow: ${cw}`)
+          // result 消息里的真实 contextWindow 透传到 renderer，
+          // 覆盖流式过程中按模型名推断的 fallback 值（智谱等端点会把 [1m] 等后缀剥掉，导致 fallback 不准）
+          this.eventBus.emit(sessionId, {
+            kind: 'proma_event',
+            event: { type: 'context_window', contextWindow: cw },
+          })
         },
       }
 

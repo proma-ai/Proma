@@ -348,14 +348,16 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       if (sysMsg.subtype === 'compact_boundary' || sysMsg.subtype === 'compacting' || sysMsg.subtype === 'permission_denied') {
         flushTurn()
         groups.push({ type: 'system', message: sysMsg })
-      } else if (currentTurn) {
-        currentTurn.turnMessages.push(msg)
-        // 后台任务完成通知：标志一次自动唤醒。当前 turn 收尾后，
-        // 后续新出现的 assistant 输出应独立成块。
-        if (sysMsg.subtype === 'task_notification') {
-          flushTurn()
+      } else if (sysMsg.subtype === 'task_notification') {
+        // 后台任务完成通知：仅在没有进行中的 turn 时标记唤醒边界（真正的唤醒场景）。
+        // 若当前有 turn 正在进行，归入当前 turn 不截断。
+        if (currentTurn) {
+          currentTurn.turnMessages.push(msg)
+        } else {
           pendingWakeBoundary = true
         }
+      } else if (currentTurn) {
+        currentTurn.turnMessages.push(msg)
       }
     } else {
       // result, tool_progress 等 → 归入当前 turn
