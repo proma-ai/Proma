@@ -184,5 +184,4 @@ export async function injectGenerativeUiMcpServer(
   })
 
   mcpServers[GENERATIVE_UI_SERVER_NAME] = server as unknown as Record<string, unknown>
-  console.log('[Agent 编排] 已注入本轮生成式 UI 工具 (generative-ui)')
 }
