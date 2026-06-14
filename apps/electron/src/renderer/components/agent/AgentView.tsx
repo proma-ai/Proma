@@ -221,25 +221,86 @@ function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverP
   )
 }
 
+interface GenerativeUIButtonProps {
+  enabled: boolean
+  onToggle: () => void
+}
+
+function GenerativeUIButton({ enabled, onToggle }: GenerativeUIButtonProps): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleMouseEnter = React.useCallback(() => {
+    if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
+    setOpen(true)
+  }, [])
+
+  const handleMouseLeave = React.useCallback(() => {
+    hoverTimeout.current = setTimeout(() => setOpen(false), 150)
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
+    }
+  }, [])
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'size-[36px] rounded-full',
+            enabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+          )}
+          onClick={onToggle}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          aria-label="生成式 UI"
+        >
+          <Sparkles className="size-5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="center"
+        sideOffset={8}
+        className="w-auto min-w-[160px] p-2 px-2.5"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-xs text-foreground/70">生成式 UI</span>
+          <Switch
+            checked={enabled}
+            onCheckedChange={onToggle}
+            className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 interface DisplayOptionsPopoverProps {
   autoPreviewEnabled: boolean
   processGroupsKeepExpanded: boolean
-  generativeUIEnabled: boolean
   onAutoPreviewChange: (enabled: boolean) => void
   onProcessGroupsKeepExpandedChange: (expanded: boolean) => void
-  onGenerativeUIChange: (enabled: boolean) => void
 }
 
 function DisplayOptionsPopover({
   autoPreviewEnabled,
   processGroupsKeepExpanded,
-  generativeUIEnabled,
   onAutoPreviewChange,
   onProcessGroupsKeepExpandedChange,
-  onGenerativeUIChange,
 }: DisplayOptionsPopoverProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
-  const hasEnabledOption = autoPreviewEnabled || processGroupsKeepExpanded || generativeUIEnabled
+  const hasEnabledOption = autoPreviewEnabled || processGroupsKeepExpanded
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMouseEnter = React.useCallback(() => {
@@ -299,14 +360,6 @@ function DisplayOptionsPopover({
             <Switch
               checked={processGroupsKeepExpanded}
               onCheckedChange={onProcessGroupsKeepExpandedChange}
-              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-foreground/70">生成式 UI</span>
-            <Switch
-              checked={generativeUIEnabled}
-              onCheckedChange={onGenerativeUIChange}
               className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
             />
           </div>
@@ -1947,7 +2000,16 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    { key: 'speech', node: <SpeechButton className="size-[36px] shrink-0 rounded-full" /> },
+    { key: 'generative-ui', node: (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <GenerativeUIButton enabled={generativeUIEnabled} onToggle={() => setGenerativeUIEnabled((v) => !v)} />
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          <p>生成式 UI</p>
+        </TooltipContent>
+      </Tooltip>
+    ) },
     {
       key: 'attach-file',
       node: (
@@ -2013,10 +2075,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <DisplayOptionsPopover
           autoPreviewEnabled={autoPreviewEnabled}
           processGroupsKeepExpanded={processGroupsKeepExpanded}
-          generativeUIEnabled={generativeUIEnabled}
           onAutoPreviewChange={setAutoPreviewEnabled}
           onProcessGroupsKeepExpandedChange={setProcessGroupsKeepExpanded}
-          onGenerativeUIChange={setGenerativeUIEnabled}
         />
       ),
     },
