@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { AlertTriangle, Code2, Loader2, Maximize2, X } from 'lucide-react'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { cn } from '@/lib/utils'
 import type { GenerativeWidgetArtifact, GenerativeWidgetParseResult } from '@/lib/generative-ui-contract'
 import {
@@ -118,19 +119,6 @@ function WidgetFrame({
     return buildGenerativeWidgetSrcdoc(styleBlock, isDark)
   }, [styleBlock])
 
-  React.useEffect(() => {
-    if (!showExpanded || typeof document === 'undefined') return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setShowExpanded(false)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [showExpanded])
 
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent): void => {
@@ -299,34 +287,66 @@ function WidgetFrame({
       </div>
 
       {showExpanded && presentation === 'inline' && (
-        <div
-          className="fixed inset-0 z-[9999] flex flex-col bg-background/95 text-foreground backdrop-blur-sm titlebar-no-drag"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${artifact.title} 全屏查看`}
-        >
-          <div className="flex min-h-12 items-center justify-between gap-3 border-b border-border bg-card/95 px-4 py-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-card-foreground">{artifact.title}</div>
-              {artifact.description && (
-                <div className="truncate text-xs text-muted-foreground">{artifact.description}</div>
+        <DialogPrimitive.Root open={showExpanded} onOpenChange={setShowExpanded}>
+          <DialogPrimitive.Portal>
+            {/* 遮罩层 — 点击关闭 */}
+            <DialogPrimitive.Overlay
+              className={cn(
+                'fixed inset-0 z-[200] bg-black/20 titlebar-no-drag',
+                'data-[state=open]:animate-in data-[state=closed]:animate-out',
+                'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
               )}
-            </div>
-            <button
-              type="button"
-              className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={() => setShowExpanded(false)}
-              aria-label="关闭全屏查看"
+            />
+            {/* 内容层 */}
+            <DialogPrimitive.Content
+              className={cn(
+                'fixed inset-0 z-[200] flex flex-col titlebar-no-drag',
+                'data-[state=open]:animate-in data-[state=closed]:animate-out',
+                'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+                'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+                'duration-200'
+              )}
+              /* 点击背景区域关闭 */
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setShowExpanded(false)
+              }}
             >
-              <X className="size-4" />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
-            <div className="mx-auto w-full max-w-[min(1400px,calc(100vw-32px))]">
-              <WidgetFrame artifact={artifact} isStreaming={isStreaming} presentation="expanded" />
-            </div>
-          </div>
-        </div>
+              <DialogPrimitive.Title className="sr-only">
+                {artifact.title} 全屏查看
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description className="sr-only">
+                放大查看生成式 UI 组件
+              </DialogPrimitive.Description>
+
+              {/* 标题栏 */}
+              <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-card/95 px-4 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-card-foreground">{artifact.title}</div>
+                  {artifact.description && (
+                    <div className="truncate text-xs text-muted-foreground">{artifact.description}</div>
+                  )}
+                </div>
+                <DialogPrimitive.Close
+                  className={cn(
+                    'inline-flex size-8 shrink-0 items-center justify-center rounded-md',
+                    'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    'focus:outline-none'
+                  )}
+                  aria-label="关闭全屏查看"
+                >
+                  <X className="size-4" />
+                </DialogPrimitive.Close>
+              </div>
+
+              {/* 内容区 */}
+              <div className="min-h-0 flex-1 overflow-auto bg-background/95 backdrop-blur-sm p-4 md:p-6">
+                <div className="mx-auto w-full max-w-[min(1400px,calc(100vw-32px))]">
+                  <WidgetFrame artifact={artifact} isStreaming={isStreaming} presentation="expanded" />
+                </div>
+              </div>
+            </DialogPrimitive.Content>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
       )}
     </>
   )
