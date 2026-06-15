@@ -27,6 +27,8 @@ export interface TabBarItemProps {
   isHovered: boolean
   /** 预览面板是否正在退出动画 */
   isLeaving: boolean
+  /** 该 Tab 正在被拖出 TabBar 转分屏（tear-off 触发瞬间） */
+  isTearingOff?: boolean
   onActivate: () => void
   onClose: () => void
   onMiddleClick: () => void
@@ -52,6 +54,7 @@ export function TabBarItem({
   isStreaming,
   isHovered,
   isLeaving,
+  isTearingOff,
   onActivate,
   onClose,
   onMiddleClick,
@@ -151,6 +154,7 @@ export function TabBarItem({
           isActive
             ? 'bg-content-area text-foreground border-border/50'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+          isTearingOff && 'ring-2 ring-primary/70 ring-offset-0 bg-primary/10',
         )}
         onClick={onActivate}
         onMouseDown={handleMouseDown}

@@ -10,8 +10,9 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
-import { agentDiffUnseenFilesAtom, agentDiffDataAtom } from '@/atoms/agent-atoms'
-import type { ChangedFileEntry, ChangeSource, UntrackedFileEntry } from '@proma/shared'
+import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom } from '@/atoms/agent-atoms'
+import type { ChangedFileEntry, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
+import { WorktreeSelector } from './WorktreeSelector'
 
 /** 按目录分组后的数据结构 */
 interface FileGroup {
@@ -42,8 +43,8 @@ interface DiffChangesListProps {
   selectedFilePath?: string
   /** 额外的候选目录（附加目录等） */
   extraPaths?: string[]
-  /** Worktree 模式：显示 worktree vs baseBranch 的全量 diff */
-  worktreeMode?: { path: string; baseBranch: string }
+  /** 工作区 slug，用于 WorktreeSelector 拉取 worktree 列表 */
+  workspaceSlug?: string
 }
 
 /** 文件来源 badge 的颜色和文案 */
@@ -63,7 +64,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   refreshVersion,
   selectedFilePath,
   extraPaths,
-  worktreeMode,
+  workspaceSlug,
 }: DiffChangesListProps): React.ReactElement {
   // Diff 数据缓存：mount 时若已有上次结果，立即用作初值，避免空数组闪 1s "没有代码改动"
   const diffDataMap = useAtomValue(agentDiffDataAtom)
@@ -78,6 +79,22 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   const [searchQuery, setSearchQuery] = React.useState('')
   /** 单调递增的 fetch 序号，用于丢弃乱序到达的旧响应 */
   const fetchSeqRef = React.useRef(0)
+
+  // Worktree 选择状态（内联 WorktreeSelector）
+  const selectedWorktreeMap = useAtomValue(agentSelectedWorktreeAtom)
+  const setSelectedWorktreeMap = useSetAtom(agentSelectedWorktreeAtom)
+  const selectedWorktreePath = selectedWorktreeMap.get(sessionId) ?? null
+  const worktreeMode = React.useMemo(
+    () => selectedWorktreePath ? { path: selectedWorktreePath, baseBranch: 'origin/main' } : undefined,
+    [selectedWorktreePath],
+  )
+  const handleWorktreeSelect = React.useCallback((worktree: WorktreeInfo | null) => {
+    setSelectedWorktreeMap((prev) => {
+      const m = new Map(prev)
+      m.set(sessionId, worktree?.path ?? null)
+      return m
+    })
+  }, [sessionId, setSelectedWorktreeMap])
 
   // Agent 本轮刚修改但尚未查看的文件
   const unseenFilesMap = useAtomValue(agentDiffUnseenFilesAtom)
@@ -231,6 +248,16 @@ export const DiffChangesList = React.memo(function DiffChangesList({
           )}
         </div>
       </div>
+
+      {/* Worktree 分支选择器 — 仅当有 worktree 时显示（组件内部自动隐藏） */}
+      {workspaceSlug && (
+        <WorktreeSelector
+          sessionId={sessionId}
+          workspaceSlug={workspaceSlug}
+          selectedPath={selectedWorktreePath}
+          onSelect={handleWorktreeSelect}
+        />
+      )}
 
       {isEmpty && (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">

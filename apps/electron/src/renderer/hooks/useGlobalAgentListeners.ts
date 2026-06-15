@@ -235,17 +235,15 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
     }
 
     case 'result': {
-      const rMsg = msg as { subtype: string; usage?: { input_tokens: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }; total_cost_usd?: number; modelUsage?: Record<string, { contextWindow?: number }> }
-      const usage = rMsg.usage
+      const rMsg = msg as { subtype: string; total_cost_usd?: number; modelUsage?: Record<string, { contextWindow?: number }> }
       const contextWindow = rMsg.modelUsage ? Object.values(rMsg.modelUsage)[0]?.contextWindow : undefined
+      // 注意：result.usage 是整个 query 内所有模型调用的累计求和，不能当成当前上下文占用，
+      // 否则进度环会虚高（见 agent-atoms complete 分支）。token 计数只信任流式 usage_update，
+      // 这里仅透传两个货真价实的值：成本（本就累计）与窗口大小（进度环分母）。
       return [{
         type: 'complete',
         stopReason: rMsg.subtype === 'success' ? 'end_turn' : 'error',
-        usage: usage ? {
-          inputTokens: usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
-          outputTokens: usage.output_tokens,
-          cacheReadTokens: usage.cache_read_input_tokens,
-          cacheCreationTokens: usage.cache_creation_input_tokens,
+        usage: (rMsg.total_cost_usd != null || contextWindow != null) ? {
           costUsd: rMsg.total_cost_usd,
           contextWindow,
         } : undefined,

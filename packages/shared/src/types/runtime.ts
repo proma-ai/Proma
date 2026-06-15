@@ -358,6 +358,8 @@ export const IPC_CHANNELS = {
   OPEN_EXTERNAL: 'shell:open-external',
   /** 用系统默认应用打开任意文件 */
   SYSTEM_OPEN_FILE: 'shell:system-open-file',
+  /** 在系统文件管理器（访达/资源管理器）中显示文件 */
+  SHOW_ITEM_IN_FOLDER: 'shell:show-item-in-folder',
   /** 扫描系统中可用的编辑器应用 */
   SCAN_EDITORS: 'shell:scan-editors',
   /** 查询某个文件在本机系统中的默认打开应用信息（带图标） */

@@ -41,6 +41,19 @@ export const previewSplitRatioAtom = atomWithStorage<number>('proma-preview-spli
 /** 自动预览开关，持久化（默认关闭以减轻设备性能负担，老用户保留已设置的偏好） */
 export const autoPreviewEnabledAtom = atomWithStorage<boolean>('proma-auto-preview-enabled', false)
 
+/**
+ * 预览默认展开方式，持久化。
+ * - 'tab'   = 以预览标签页形式打开（旧版默认）
+ * - 'split' = 在主区域右侧分屏展开（可同时看到 Agent 输出与文件内容）
+ *
+ * 用户仍可通过拖拽 Tab 出区域、PreviewPanel 顶栏按钮等即时切换。
+ */
+export type PreviewModePreference = 'tab' | 'split'
+export const previewModePreferenceAtom = atomWithStorage<PreviewModePreference>(
+  'proma-preview-mode-pref',
+  'tab',
+)
+
 /** 当前会话的预览面板是否打开（derived） */
 export const currentSessionPreviewOpenAtom = atom<boolean>((get) => {
   const sessionId = get(currentAgentSessionIdAtom)

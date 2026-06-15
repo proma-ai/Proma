@@ -690,22 +690,20 @@ export function applyAgentEvent(
       // 这避免了用户在后端尚未完成清理时就能发送新消息的竞态条件
       // 同时将未完成的工具活动标记为 done（兜底）
       //
-      // 同步把 result 里真实的 usage（inputTokens / outputTokens / contextWindow 等）
-      // 写入 streamState。SDK 流式过程中 message.usage 一直是 0，只有 result 里才有真实值，
-      // 不在这里写入的话上下文指示器分母和分子会永远停留在 0 或上次会话的残留。
+      // token 计数（inputTokens / 缓存 / outputTokens）只信任流式中每条 assistant
+      // 消息的 usage_update：单条模型调用的 input+缓存 ≈ 当轮完整 prompt = 当前真实上下文。
+      // 这里【不再】从 result.usage 写入这些字段——SDK 的 result.usage 是整个 query 内所有
+      // 模型调用的累计求和（cache_read 会被累加 N 次），当成当前上下文会让进度环虚高、冲破 100%。
       //
-      // 全字段条件 spread：event.usage 中的 undefined 字段不覆盖 prev 已有值，
-      // 避免流式 usage_update 已写入的真实值被 result 的空字段清零。
+      // 仅从 result 取两个货真价实的值：
+      // - contextWindow：进度环分母（窗口大小，非用量）
+      // - costUsd：本就该是整轮累计成本
       return {
         ...prev,
         ...(event.usage ? {
-          ...(event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
-          ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
-          ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
-          ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
           ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
-          usageUpdatedAt: Date.now(),
+          ...(event.usage.contextWindow != null && { usageUpdatedAt: Date.now() }),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),

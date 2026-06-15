@@ -12,6 +12,8 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
+import { detectIsWindows } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -23,7 +25,6 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { cn } from '@/lib/utils'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import {
   automationFormAtom,
@@ -189,7 +190,57 @@ function AutomationPromptEmptyGuide(): React.ReactElement {
   )
 }
 
+type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+
+function SaveStatusBadge({
+  status,
+  lastSavedAt,
+}: {
+  status: SaveStatus
+  lastSavedAt: number | null
+}): React.ReactElement | null {
+  if (status === 'idle' && !lastSavedAt) return null
+
+  let icon: React.ReactNode
+  let text: string
+  let tone = 'text-muted-foreground'
+
+  if (status === 'dirty') {
+    icon = <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+    text = '未保存'
+  } else if (status === 'saving') {
+    icon = <Loader2 className="size-3 animate-spin" />
+    text = '保存中…'
+  } else if (status === 'saved') {
+    icon = <Check className="size-3 text-emerald-500" />
+    text = '已保存 · 刚刚'
+    tone = 'text-foreground/70'
+  } else if (status === 'error') {
+    icon = <AlertTriangle className="size-3" />
+    text = '保存失败'
+    tone = 'text-red-500'
+  } else {
+    icon = <Check className="size-3 text-muted-foreground/50" />
+    text = '已保存'
+  }
+
+  return (
+    <div
+      className={cn(
+        'titlebar-no-drag flex items-center gap-1.5 text-[11px] flex-shrink-0 tabular-nums select-none',
+        tone,
+      )}
+      aria-live="polite"
+      role="status"
+    >
+      {icon}
+      <span>{text}</span>
+    </div>
+  )
+}
+
 export function AutomationFormView(): React.ReactElement | null {
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const [formState, setFormState] = useAtom(automationFormAtom)
   const setAutomations = useSetAtom(automationsAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
@@ -207,6 +258,8 @@ export function AutomationFormView(): React.ReactElement | null {
   const [editingName, setEditingName] = React.useState(false)
   const [runningNow, setRunningNow] = React.useState(false)
   const [feishuBindings, setFeishuBindings] = React.useState<FeishuChatBinding[]>([])
+  const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle')
+  const [lastSavedAt, setLastSavedAt] = React.useState<number | null>(null)
   const nameInputRef = React.useRef<HTMLInputElement>(null)
   const saveTimerRef = React.useRef<number | undefined>(undefined)
   const lastSavedSignatureRef = React.useRef('')
@@ -227,6 +280,8 @@ export function AutomationFormView(): React.ReactElement | null {
       lastSavedSignatureRef.current = formState.draft.id && canPersistDraft(formState.draft)
         ? getDraftSignature(formState.draft)
         : ''
+      setSaveStatus('idle')
+      setLastSavedAt(null)
     }
   }, [formState.open, formState.draft])
 
@@ -291,12 +346,17 @@ export function AutomationFormView(): React.ReactElement | null {
       if (signature === lastSavedSignatureRef.current) return draftToSave.id ?? null
 
       try {
+        if (isMountedRef.current) setSaveStatus('saving')
         if (draftToSave.id) {
           const updated = await window.electronAPI.updateAutomation(draftToUpdateInput(draftToSave))
           if (!updated) throw new Error('定时任务不存在')
           lastSavedSignatureRef.current = signature
           setAutomations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
           setForm((prev) => (prev ? { ...prev, id: updated.id, name: updated.name } : prev))
+          if (isMountedRef.current) {
+            setSaveStatus('saved')
+            setLastSavedAt(Date.now())
+          }
           return updated.id
         } else {
           const created = await window.electronAPI.createAutomation(draftToCreateInput(draftToSave))
@@ -304,11 +364,18 @@ export function AutomationFormView(): React.ReactElement | null {
           lastSavedSignatureRef.current = getDraftSignature(createdDraft)
           setAutomations((prev) => [created, ...prev.filter((a) => a.id !== created.id)])
           setForm((prev) => (prev ? { ...prev, id: created.id, name: created.name } : prev))
+          if (isMountedRef.current) {
+            setSaveStatus('saved')
+            setLastSavedAt(Date.now())
+          }
           return created.id
         }
       } catch (err) {
         console.error('[定时任务] 自动保存失败:', err)
-        if (isMountedRef.current) toast.error('自动保存失败')
+        if (isMountedRef.current) {
+          setSaveStatus('error')
+          toast.error('自动保存失败')
+        }
         return null
       }
     })()
@@ -326,7 +393,13 @@ export function AutomationFormView(): React.ReactElement | null {
     if (!formState.open || !form || !canPersistDraft(form)) return
 
     const signature = getDraftSignature(form)
-    if (signature === lastSavedSignatureRef.current) return
+    if (signature === lastSavedSignatureRef.current) {
+      // 用户撤回到上次保存的状态，清掉残留的 dirty
+      setSaveStatus((prev) => (prev === 'dirty' ? 'idle' : prev))
+      return
+    }
+
+    setSaveStatus('dirty')
 
     if (saveTimerRef.current !== undefined) {
       window.clearTimeout(saveTimerRef.current)
@@ -342,6 +415,13 @@ export function AutomationFormView(): React.ReactElement | null {
       }
     }
   }, [form, formState.open, persistDraft])
+
+  // "已保存 · 刚刚" 高亮 3 秒后退化为静态"已保存"，避免一直占用视觉焦点
+  React.useEffect(() => {
+    if (saveStatus !== 'saved') return
+    const timer = window.setTimeout(() => setSaveStatus('idle'), 3000)
+    return () => window.clearTimeout(timer)
+  }, [saveStatus])
 
   // 切换会话/Tab 时自动关闭表单
   const initialSessionRef = React.useRef<string | null | undefined>(undefined)
@@ -524,6 +604,7 @@ export function AutomationFormView(): React.ReactElement | null {
               </button>
             </div>
           )}
+          <SaveStatusBadge status={saveStatus} lastSavedAt={lastSavedAt} />
         </div>
         <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col gap-3">
           <div className="flex items-center">
@@ -576,12 +657,14 @@ export function AutomationFormView(): React.ReactElement | null {
                 </TooltipContent>
               )}
             </Tooltip>
+            {!isWindows && (
             <button
               onClick={close}
               className="titlebar-no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors"
             >
               <X className="size-4" />
             </button>
+          )}
           </div>
         </div>
 
@@ -976,6 +1059,18 @@ export function AutomationFormView(): React.ReactElement | null {
               )}
             </div>
           )}
+        </div>
+        {/* 底部运行测试按钮 */}
+        <div className="flex-shrink-0 px-4 py-3 border-t border-border/50 bg-content-area">
+          <button
+            type="button"
+            onClick={() => { void handleRunNow() }}
+            disabled={runningNow || !canPersistDraft(form)}
+            className="titlebar-no-drag w-full h-8 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+            <span>{runningNow ? '运行中' : '运行测试'}</span>
+          </button>
         </div>
       </div>
     </div>

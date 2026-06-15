@@ -6,12 +6,13 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
-import { Maximize2, X } from 'lucide-react'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { Maximize2, PanelRight, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   previewPanelOpenMapAtom,
   previewFileMapAtom,
+  previewModePreferenceAtom,
 } from '@/atoms/preview-atoms'
 import {
   agentSessionPathMapAtom,
@@ -43,6 +44,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
   const setTabs = useSetAtom(tabsAtom)
   const setActiveTabId = useSetAtom(activeTabIdAtom)
   const isSidePanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
+  const [previewModePref, setPreviewModePref] = useAtom(previewModePreferenceAtom)
 
   const currentFile = fileMap.get(sessionId) ?? null
 
@@ -82,6 +84,32 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
           filePath={defaultAppTargetPath}
           access={defaultAppAccess}
         />
+      )}
+      {currentFile && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setPreviewModePref((p) => (p === 'split' ? 'tab' : 'split'))}
+              className={cn(
+                'flex items-center justify-center size-6 shrink-0 rounded transition-colors',
+                previewModePref === 'split'
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+              )}
+              aria-label={previewModePref === 'split' ? '默认展开方式：侧边分屏，点击改为标签页' : '默认展开方式：标签页，点击改为侧边分屏'}
+            >
+              <PanelRight className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>
+              {previewModePref === 'split'
+                ? '默认展开方式：侧边分屏 · 点击改为「标签页」（仅影响下次打开，不改变当前预览）'
+                : '默认展开方式：标签页 · 点击改为「侧边分屏」（仅影响下次打开，不改变当前预览）'}
+            </p>
+          </TooltipContent>
+        </Tooltip>
       )}
       {currentFile && (
         <Tooltip>

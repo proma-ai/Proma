@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -27,6 +27,7 @@ import {
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { automationFormAtom } from '@/atoms/automation-atoms'
+import { tearOffPreviewToSplit } from '@/components/diff/preview-opener'
 import { TabBarItem } from './TabBarItem'
 import { useCloseTab } from '@/hooks/useCloseTab'
 import { detectIsWindows } from '@/lib/platform'
@@ -50,6 +51,15 @@ export function TabBar(): React.ReactElement {
 
   // 统一关闭逻辑：关闭当前会话入口并回到 Scratch Pad，不停止后台 Agent
   const { requestClose } = useCloseTab()
+  const store = useStore()
+
+  /**
+   * Tear-off：把 preview Tab 拖出 TabBar 时，转成右侧分屏预览。
+   * 公共实现在 preview-opener.ts，PreviewTabContent 顶栏切换按钮共用同一份逻辑。
+   */
+  const handleTearOff = React.useCallback((tabId: string) => {
+    tearOffPreviewToSplit(store, tabId)
+  }, [store])
 
   const workspaceNameBySessionId = React.useMemo(() => {
     const workspaceNameMap = new Map(agentWorkspaces.map((workspace) => [workspace.id, workspace.name]))
@@ -157,6 +167,7 @@ export function TabBar(): React.ReactElement {
         onActivate={handleActivate}
         onClose={requestClose}
         onDragStart={handleDragStart}
+        onTearOff={handleTearOff}
       />
     </>
   )
@@ -172,6 +183,7 @@ function TabBarInner({
   onActivate,
   onClose,
   onDragStart,
+  onTearOff,
 }: {
   tabs: TabItem[]
   activeTabId: string | null
@@ -181,6 +193,7 @@ function TabBarInner({
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
+  onTearOff: (tabId: string) => void
 }): React.ReactElement {
   const [hoveredTabId, setHoveredTabId] = React.useState<string | null>(null)
   const [isLeaving, setIsLeaving] = React.useState(false)
@@ -191,6 +204,64 @@ function TabBarInner({
 
   // 滚动容器 ref
   const scrollRef = React.useRef<HTMLDivElement>(null)
+
+  // 整条 TabBar 容器 ref，用于拖拽 tear-off 时检测鼠标是否离开 TabBar 区域
+  const barRef = React.useRef<HTMLDivElement>(null)
+
+  // 拖出 TabBar 区域时给出视觉提示（仅 preview Tab 可 tear-off）
+  const [tearingOff, setTearingOff] = React.useState<string | null>(null)
+
+  // 拦截外层 handleDragStart：若拖出 TabBar 区域且是 preview Tab，触发 tear-off
+  const handleDragStartWithTearOff = React.useCallback((tabId: string, e: React.PointerEvent) => {
+    const tab = tabs.find((t) => t.id === tabId)
+    // 仅 preview Tab 支持拖出转分屏
+    if (!tab || tab.type !== 'preview') {
+      onDragStart(tabId, e)
+      return
+    }
+
+    if (e.button !== 0) return
+    const startX = e.clientX
+    let torn = false
+    let sorting = false
+
+    // 拖出 TabBar 上下边界后还需再越过这段缓冲距离才触发 tear-off，
+    // 避免在水平排序过程中轻微的垂直抖动误触发转分屏。
+    const TEAR_OFF_MARGIN = 24
+
+    const handleMove = (me: PointerEvent): void => {
+      if (torn) return
+      const rect = barRef.current?.getBoundingClientRect()
+      // 拖出 TabBar 上/下边界并越过缓冲距离才视为 tear-off
+      const outOfBar = !!rect && (me.clientY < rect.top - TEAR_OFF_MARGIN || me.clientY > rect.bottom + TEAR_OFF_MARGIN)
+      if (outOfBar) {
+        torn = true
+        setTearingOff(tabId)
+        // 仅停止 move 监听，保留 pointerup 让浏览器自然结束按住状态
+        document.removeEventListener('pointermove', handleMove)
+        // 等下一帧再触发，避免在事件回调中同步重渲染导致 React 警告
+        requestAnimationFrame(() => {
+          onTearOff(tabId)
+          setTearingOff(null)
+        })
+        return
+      }
+      // 在 TabBar 内水平移动 → 交给原有排序逻辑
+      const dx = Math.abs(me.clientX - startX)
+      if (!sorting && dx > 5) {
+        sorting = true
+        onDragStart(tabId, e)
+      }
+    }
+
+    const handleUp = (): void => {
+      document.removeEventListener('pointermove', handleMove)
+      document.removeEventListener('pointerup', handleUp)
+    }
+
+    document.addEventListener('pointermove', handleMove)
+    document.addEventListener('pointerup', handleUp)
+  }, [tabs, onDragStart, onTearOff])
 
   // 鼠标滚轮横向滚动（使用原生事件监听器以支持 preventDefault）
   React.useEffect(() => {
@@ -257,12 +328,17 @@ function TabBarInner({
   }, [])
 
   return (
-    <div className="flex items-end h-[34px] tabbar-bg relative">
+    <div ref={barRef} className="flex items-end h-[34px] tabbar-bg relative">
       {/* 顶部 TabBar 的空白区域必须保持可拖拽，尤其是 macOS/Windows 自定义标题栏。
           注意：不要把 titlebar-no-drag 加到下面的整条 flex 容器上，否则标签右侧空白会再次失去拖拽能力。
           Windows 上背景拖拽层避开右上角 WindowControls 区域（126px），防止 hitmask 重叠。
           需要交互的单个 Tab 会在 TabBarItem 内部自己声明 titlebar-no-drag。 */}
       <div className={cn("absolute inset-0 titlebar-drag-region", isWindows && "right-[126px]")} />
+
+      {/* Tear-off 提示遮罩：拖出 TabBar 区域时，让 TabBar 下方出现一条高亮分割线 */}
+      {tearingOff && (
+        <div className="pointer-events-none absolute -bottom-px left-0 right-0 h-px bg-primary/60 shadow-[0_0_8px_rgba(0,0,0,0.2)]" />
+      )}
 
       <div
         ref={scrollRef}
@@ -280,10 +356,11 @@ function TabBarInner({
             isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}
             isLeaving={hoveredTabId === tab.id && isLeaving}
+            isTearingOff={tearingOff === tab.id}
             onActivate={() => onActivate(tab.id)}
             onClose={() => onClose(tab.id)}
             onMiddleClick={() => onClose(tab.id)}
-            onDragStart={(e) => onDragStart(tab.id, e)}
+            onDragStart={(e) => handleDragStartWithTearOff(tab.id, e)}
             onHoverEnter={() => handleTabHoverEnter(tab.id)}
             onHoverLeave={handleTabHoverLeave}
             onPanelHoverEnter={handlePanelHoverEnter}

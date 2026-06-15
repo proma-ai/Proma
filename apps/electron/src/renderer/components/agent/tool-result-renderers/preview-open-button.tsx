@@ -3,14 +3,13 @@
  *
  * 显示在工具结果预览区域（Read/Edit/Write）的 chevron 旁边，
  * 使用 span 避免嵌套 button 的 HTML 问题，
- * 点击后将文件内容在当前会话的临时预览标签页中打开。
+ * 点击后按用户偏好（标签页 / 右侧分屏）打开文件预览。
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom, useStore } from 'jotai'
-import { previewFileMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import { useAtomValue } from 'jotai'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
-import { activeTabIdAtom, getPreviewTabTitle, openTab, tabsAtom } from '@/atoms/tab-atoms'
+import { useOpenPreview } from '@/components/diff/preview-opener'
 import { cn } from '@/lib/utils'
 
 interface PreviewOpenButtonProps {
@@ -20,30 +19,12 @@ interface PreviewOpenButtonProps {
 
 export function PreviewOpenButton({ filePath, className }: PreviewOpenButtonProps): React.ReactElement | null {
   const sessionId = useAtomValue(currentAgentSessionIdAtom)
-  const store = useStore()
-  const setPreviewFile = useSetAtom(previewFileMapAtom)
-  const setPreviewOpen = useSetAtom(previewPanelOpenMapAtom)
+  const openPreview = useOpenPreview()
 
   if (!sessionId || !filePath) return null
 
   const handleOpen = () => {
-    setPreviewFile((prev) => {
-      const next = new Map(prev)
-      next.set(sessionId, { filePath, previewOnly: true, readOnly: true })
-      return next
-    })
-    setPreviewOpen((prev) => {
-      const next = new Map(prev)
-      next.set(sessionId, false)
-      return next
-    })
-    const result = openTab(store.get(tabsAtom), {
-      type: 'preview',
-      sessionId,
-      title: getPreviewTabTitle(filePath),
-    })
-    store.set(tabsAtom, result.tabs)
-    store.set(activeTabIdAtom, result.activeTabId)
+    openPreview(sessionId, { filePath, previewOnly: true, readOnly: true })
   }
 
   return (
@@ -68,7 +49,7 @@ export function PreviewOpenButton({ filePath, className }: PreviewOpenButtonProp
           handleOpen()
         }
       }}
-      title="在预览标签页中打开"
+      title="预览文件"
     >
       预览
     </span>
