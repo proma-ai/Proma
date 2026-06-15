@@ -58,7 +58,7 @@ interface SessionMiniMapPopoverProps {
 const PANEL_WIDTH = 318
 const PANEL_MIN_HEIGHT = 132
 const PANEL_MAX_HEIGHT = 420
-const PANEL_GAP = 8
+const PANEL_GAP = 16
 const VIEWPORT_MARGIN = 8
 const MAX_RENDERED_ITEMS = 80
 const PREVIEW_REMARK_PLUGINS = [remarkGfm]

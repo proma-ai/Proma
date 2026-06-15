@@ -3,7 +3,11 @@
  *
  * 核心设计（见 .context/plan/automation-feature.md）：
  * - 用「下次触发时间戳 + 短 tick 轮询」而非长 setInterval，避免系统休眠导致的定时器漂移
- * - 每轮触发都新建独立子会话执行，不复用来源会话（规避 orchestrator 同会话并发守卫 + 防上下文膨胀）
+ * - 子会话归属按 sessionMode 决定：
+ *     · daily（默认）：同一自然日内的触发复用同一个子会话，跨日自动新建（兼顾上下文连续性与成本控制）。
+ *       叠加安全阀：同日若上次会话上下文占用率已达 DAILY_CONTEXT_ROLLOVER_THRESHOLD，本次也主动新建，
+ *       避免运行刚开始就触发 SDK 自动压缩。
+ *     · reuse：始终复用同一个子会话（用户主动选择，长期 token 成本由用户承担）
  * - 强制 bypassPermissions，否则无人值守时写操作会因权限弹窗永久阻塞
  * - 来源会话/目标会话忙时跳过本轮，不排队堆积
  * - 连续失败达上限自动暂停
@@ -28,6 +32,7 @@ import {
   computeNextRunAt,
 } from './automation-manager'
 import { createAgentSession, updateAgentSessionMeta, getAgentSessionMeta } from './agent-session-manager'
+import { getSessionContextUsageRatio } from './agent-session-usage'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
 import { notifyAutomationRunFinished } from './automation-notification-service'
 
@@ -36,6 +41,27 @@ const TICK_INTERVAL_MS = 30_000
 
 /** 单次任务执行的超时上限：2 小时。超时后强制标记为 error 并释放 runningAutomations 槽位 */
 const RUN_TIMEOUT_MS = 2 * 60 * 60 * 1000
+
+/**
+ * daily 模式下的上下文占用率切换阈值。
+ * 当同日复用的会话上下文占用 ≥ 此值时，本次自动新建会话。
+ * 留出与 SDK 自动压缩阈值（约 77.5%）的安全余量，避免本次运行刚开始就被压缩。
+ */
+const DAILY_CONTEXT_ROLLOVER_THRESHOLD = 0.7
+
+/**
+ * 判断两个时间戳是否落在同一个本地自然日。
+ * 用 new Date().getFullYear/Month/Date 直接取本地时区年月日，避免引入时区库或字符串解析。
+ */
+function isSameLocalDay(a: number, b: number): boolean {
+  const da = new Date(a)
+  const db = new Date(b)
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  )
+}
 
 function formatScheduleLabel(a: Automation): string {
   if (a.scheduleType === 'daily') return `每天 ${a.timeOfDay ?? '09:00'}`
@@ -87,10 +113,30 @@ export async function runAutomation(automation: Automation, manual = false): Pro
 
   try {
     // 根据 sessionMode 决定新建或复用子会话
+    //  - reuse：lastSessionId 存在且会话还活着就复用，否则新建
+    //  - daily：再叠加一层「同一自然日」+「上下文占用率 < 阈值」双重判断
+    //    （基于 automation.lastRunAt 排除 skipped 运行；占用率读不到时按"未知"保守复用）
     const sessionMode = automation.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE
-    const reuseSessionId = sessionMode === 'reuse' && automation.lastSessionId
-      ? (getAgentSessionMeta(automation.lastSessionId) ? automation.lastSessionId : undefined)
-      : undefined
+
+    let reuseSessionId: string | undefined
+    if (automation.lastSessionId && getAgentSessionMeta(automation.lastSessionId)) {
+      if (sessionMode === 'reuse') {
+        reuseSessionId = automation.lastSessionId
+      } else if (
+        sessionMode === 'daily' &&
+        automation.lastRunAt &&
+        isSameLocalDay(automation.lastRunAt, runAt)
+      ) {
+        const usageRatio = getSessionContextUsageRatio(automation.lastSessionId)
+        if (usageRatio === undefined || usageRatio < DAILY_CONTEXT_ROLLOVER_THRESHOLD) {
+          reuseSessionId = automation.lastSessionId
+        } else {
+          console.log(
+            `[定时任务] ${automation.name} 上下文占用 ${(usageRatio * 100).toFixed(1)}% 已达阈值 ${DAILY_CONTEXT_ROLLOVER_THRESHOLD * 100}%，本次自动开新会话`,
+          )
+        }
+      }
+    }
 
     let targetSessionId: string
     if (reuseSessionId) {

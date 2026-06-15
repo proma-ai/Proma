@@ -18,7 +18,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { Search, X, MessageSquare, Bot, Archive, Loader2 } from 'lucide-react'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import { conversationsAtom, channelsAtom } from '@/atoms/chat-atoms'
@@ -460,6 +460,20 @@ export function SearchDialog(): React.ReactElement {
 
   return (
     <Dialog open={open} onOpenChange={setOpen} modal={false}>
+      {/* 非交互式背景遮罩：modal=false 时 Radix 不渲染原生 overlay（避免拦截 hover 预览的事件），
+       * 这里手动通过 DialogPortal 在 document.body 渲染一个 pointer-events-none 的 blur 层——
+       * Portal 是关键：直接渲染会被父级 stacking context（如 MainContentPanel）困住，导致只覆盖到
+       * 左侧栏；用 Portal 后 fixed inset-0 真正覆盖整个视口。
+       * z-[99] 在 DialogContent (z-[100]) 之下，在所有 app 内容之上。
+       */}
+      {open && (
+        <DialogPortal>
+          <div
+            aria-hidden
+            className="fixed inset-0 z-[99] bg-black/40 backdrop-blur-sm pointer-events-none animate-in fade-in-0 duration-150"
+          />
+        </DialogPortal>
+      )}
       <DialogContent
         hideClose
         className="sm:max-w-[520px] p-0 gap-0 overflow-hidden"

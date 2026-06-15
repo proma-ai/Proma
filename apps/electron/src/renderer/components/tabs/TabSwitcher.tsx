@@ -369,7 +369,7 @@ export function TabSwitcher(): ReactElement | null {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/20" />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
       <div className="relative bg-popover/95 backdrop-blur-md border border-border/50 rounded-xl shadow-2xl min-w-[420px] max-w-[540px] overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-border/40 bg-muted/30">

@@ -37,10 +37,12 @@ export function ImageLightbox({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        {/* 遮罩层 — 点击关闭 */}
+        {/* 遮罩层 — 点击关闭。图片预览语义不同于普通弹窗：背景需要"消失"让图片成为焦点，
+         * 所以 80% 深 + md blur，对比 Dialog 的 40% sm blur 更强烈。
+         */}
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-[200] bg-black/20 titlebar-no-drag',
+            'fixed inset-0 z-[200] bg-black/80 backdrop-blur-md titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}

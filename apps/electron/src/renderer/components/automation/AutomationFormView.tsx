@@ -44,7 +44,6 @@ import type {
   AutomationFeishuNotificationTarget,
   AutomationNotificationTarget,
   AutomationRun,
-  AutomationSessionMode,
   CreateAutomationInput,
   FeishuChatBinding,
   UpdateAutomationInput,
@@ -973,25 +972,8 @@ export function AutomationFormView(): React.ReactElement | null {
             )}
           </div>
 
-          {/* 会话模式 */}
-          <div className="flex flex-col gap-2">
-            <Label>会话模式</Label>
-            <Select
-              value={form.sessionMode}
-              onValueChange={(v) => update({ sessionMode: v as AutomationSessionMode })}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="new">每次新建会话</SelectItem>
-                <SelectItem value="reuse">复用上次会话</SelectItem>
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground leading-relaxed">
-              {form.sessionMode === 'reuse'
-                ? '每次触发时继续上次的子会话，保留对话上下文（首次运行会自动新建）。'
-                : '每次触发都新建独立子会话，互不干扰。'}
-            </span>
-          </div>
+          {/* 会话模式选择已隐藏：默认采用 daily（同日复用、跨日新建）。
+              schema/scheduler/Agent 工具层仍保留 reuse 模式，方便老配置和高级用户继续使用。 */}
 
           {/* 权限模式 */}
           <div className="flex flex-col gap-2">

@@ -51,6 +51,42 @@ export default {
         },
         'content-area': 'hsl(var(--content-area) / <alpha-value>)',
       },
+      // ===== 字体栈：Inter Variable 优先，回退 SF Pro Text / 系统中文字体 =====
+      fontFamily: {
+        sans: [
+          'Inter Variable',
+          'Inter',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          'SF Pro Text',
+          'PingFang SC',
+          'Segoe UI',
+          'Microsoft YaHei',
+          'system-ui',
+          'sans-serif',
+        ],
+      },
+      // ===== 圆角：覆写 shadcn 标准三档，全部由 --radius 派生 =====
+      // 改一处 --radius 即可整站统一调圆角节奏，无需 grep 替换 300+ 处 rounded-*
+      borderRadius: {
+        sm: 'calc(var(--radius) - 4px)',
+        DEFAULT: 'calc(var(--radius) - 2px)',
+        md: 'calc(var(--radius) - 2px)',
+        lg: 'var(--radius)',
+        xl: 'calc(var(--radius) + 4px)',
+        '2xl': 'calc(var(--radius) + 8px)',
+      },
+      // ===== 阴影：覆写 Tailwind 内置的 sm/md/lg/xl/DEFAULT =====
+      // 现有 78 处 shadow-md / shadow-lg 等代码无需改动，自动吃多层柔阴影 + 主题自适应
+      boxShadow: {
+        xs: 'var(--shadow-xs)',
+        sm: 'var(--shadow-sm)',
+        DEFAULT: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+        xl: 'var(--shadow-xl)',
+        '2xl': 'var(--shadow-xl)',
+      },
       keyframes: {
         'slide-in-from-top': {
           from: { transform: 'translateY(-100%)' },

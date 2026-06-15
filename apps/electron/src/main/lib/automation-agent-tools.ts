@@ -79,7 +79,7 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   if (input.permissionMode !== undefined && !validPermissionMode(input.permissionMode)) {
     throw new Error(`非法的 permissionMode: ${String(input.permissionMode)}`)
   }
-  if (input.sessionMode !== undefined && input.sessionMode !== 'new' && input.sessionMode !== 'reuse') {
+  if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)
   }
 }
@@ -127,7 +127,7 @@ function getCurrentAutomationId(ctx: AutomationAgentToolContext): string | undef
 function buildAutomationSchemas(z: ZodModule['z']) {
   const scheduleType = z.enum(['interval', 'daily', 'weekly', 'monthly'])
   const permissionMode = z.enum(['auto', 'bypassPermissions'])
-  const sessionMode = z.enum(['new', 'reuse'])
+  const sessionMode = z.enum(['daily', 'reuse'])
   return {
     list: {
       active: z.boolean().optional().describe('只列出启用或暂停任务；不传则列出全部'),
@@ -146,7 +146,7 @@ function buildAutomationSchemas(z: ZodModule['z']) {
       dayOfMonth: z.number().int().min(1).max(31).optional().describe('每月触发日，1-31；scheduleType=monthly 时必填'),
       active: z.boolean().optional().describe('创建后是否启用，默认 true'),
       permissionMode: permissionMode.optional().describe('无人值守权限模式，默认 bypassPermissions；高风险任务可用 auto'),
-      sessionMode: sessionMode.optional().describe('会话模式：new=每次新建子会话（默认，避免上下文膨胀）；reuse=复用上次子会话（保留上下文，首次会自动新建）'),
+      sessionMode: sessionMode.optional().describe('会话模式：daily=同一自然日内的触发复用同一个子会话，跨日新建（默认）；reuse=始终复用同一个子会话（保留长期上下文，token 成本更高）'),
     },
     update: {
       id: z.string().optional().describe('定时任务 ID；定时任务自动执行中可省略以更新当前任务'),
@@ -159,7 +159,7 @@ function buildAutomationSchemas(z: ZodModule['z']) {
       dayOfMonth: z.number().int().min(1).max(31).optional().describe('新的每月触发日，1-31'),
       active: z.boolean().optional().describe('启用或暂停任务'),
       permissionMode: permissionMode.optional().describe('新的无人值守权限模式'),
-      sessionMode: sessionMode.optional().describe('新的会话模式：new=每次新建子会话；reuse=复用上次子会话'),
+      sessionMode: sessionMode.optional().describe('新的会话模式：daily=同一自然日内复用，跨日新建；reuse=始终复用同一个子会话'),
     },
     delete: {
       id: z.string().describe('要删除的定时任务 ID'),

@@ -115,7 +115,7 @@ const SPECIAL_STYLES: readonly SpecialStyle[] = [
   },
   {
     id: 'ocean-dark',
-    name: '苍穹暮色',
+    name: '远山暮霭',
     variant: 'dark',
     image: themeOceanDark,
   },
@@ -134,16 +134,6 @@ const SPECIAL_STYLES: readonly SpecialStyle[] = [
     objectPosition: '44% 58%',
   },
 ]
-
-/** 各主题遮罩颜色（实心背景 + 浅色文字，与 CSS --primary 对应） */
-const STYLE_MASK_COLORS: Record<SpecialStyleId, { bg: string; text: string }> = {
-  'slate-light':  { bg: 'hsl(18, 20%, 67%)',  text: 'hsl(18, 20%, 88%)' },
-  'ocean-light':  { bg: 'hsl(205, 50%, 50%)', text: 'hsl(205, 50%, 82%)' },
-  'forest-light': { bg: 'hsl(150, 35%, 38%)', text: 'hsl(150, 35%, 75%)' },
-  'ocean-dark':   { bg: 'rgba(0,0,0,0.8)', text: 'hsl(205, 50%, 82%)' },
-  'forest-dark':  { bg: 'rgba(0,0,0,0.8)', text: 'hsl(150, 35%, 75%)' },
-  'slate-dark':   { bg: 'rgba(0,0,0,0.8)', text: 'hsl(18, 20%, 88%)' },
-}
 
 /** 图标变体定义 */
 interface IconVariant {
@@ -394,7 +384,7 @@ function IconCard({
   )
 }
 
-/** 特殊风格卡片 - 竖长条图片预览 */
+/** 特殊风格卡片 - 竖长条图片预览 + 名字放在卡片下方 */
 function StyleCard({
   style,
   isSelected,
@@ -408,45 +398,46 @@ function StyleCard({
     <button
       type="button"
       onClick={onSelect}
-      className={cn(
-        'relative rounded-lg overflow-hidden',
-        'w-[99px] h-[183px]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
-        isSelected
-          ? 'ring-2 ring-primary shadow-lg shadow-primary/20'
-          : 'ring-1 ring-border/50 hover:ring-border'
-      )}
+      className="group flex flex-col items-center gap-2 focus-visible:outline-none"
     >
+      {/* 图片卡片本体 */}
       <div
-        className="w-full h-full"
-        style={style.imageScale ? { transform: `scale(${style.imageScale})` } : undefined}
+        className={cn(
+          'relative rounded-lg overflow-hidden w-[99px] h-[183px] transition-all duration-150',
+          isSelected
+            ? 'ring-2 ring-primary shadow-lg shadow-primary/20'
+            : 'ring-1 ring-border/50 group-hover:ring-border group-focus-visible:ring-2 group-focus-visible:ring-primary group-focus-visible:ring-offset-1'
+        )}
       >
-        <img
-          src={style.image}
-          alt={style.name}
-          loading="lazy"
-          decoding="async"
-          className="w-full h-full object-cover"
-          style={style.objectPosition ? { objectPosition: style.objectPosition } : undefined}
-          draggable={false}
-        />
-      </div>
-      <div
-        className="absolute bottom-0 left-0 right-0 h-5 flex items-end justify-center pb-0.5"
-        style={{ background: STYLE_MASK_COLORS[style.id].bg }}
-      >
-        <span
-          className="text-xs font-medium"
-          style={{ color: STYLE_MASK_COLORS[style.id].text }}
+        <div
+          className="w-full h-full"
+          style={style.imageScale ? { transform: `scale(${style.imageScale})` } : undefined}
         >
-          {style.name}
-        </span>
-      </div>
-      {isSelected && (
-        <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center z-10">
-          <Check className="size-2.5 text-primary-foreground" />
+          <img
+            src={style.image}
+            alt={style.name}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover"
+            style={style.objectPosition ? { objectPosition: style.objectPosition } : undefined}
+            draggable={false}
+          />
         </div>
-      )}
+        {isSelected && (
+          <div className="absolute top-1 right-1 size-4 rounded-full bg-primary flex items-center justify-center z-10">
+            <Check className="size-2.5 text-primary-foreground" />
+          </div>
+        )}
+      </div>
+      {/* 名字放在卡片下方，吃 token，自动跟主题切色 */}
+      <span
+        className={cn(
+          'text-xs font-medium transition-colors',
+          isSelected ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
+        )}
+      >
+        {style.name}
+      </span>
     </button>
   )
 }

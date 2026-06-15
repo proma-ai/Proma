@@ -4206,7 +4206,7 @@ export function registerIpcHandlers(): void {
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {
       throw new Error(`非法的 permissionMode: ${String(i.permissionMode)}`)
     }
-    if (i.sessionMode !== undefined && i.sessionMode !== 'new' && i.sessionMode !== 'reuse') {
+    if (i.sessionMode !== undefined && i.sessionMode !== 'daily' && i.sessionMode !== 'reuse') {
       throw new Error(`非法的 sessionMode: ${String(i.sessionMode)}`)
     }
     validateAutomationNotificationTargets(i.notificationTargets)

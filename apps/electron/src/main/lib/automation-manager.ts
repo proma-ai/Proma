@@ -26,7 +26,29 @@ interface AutomationsIndex {
   automations: Automation[]
 }
 
-const INDEX_VERSION = 1
+const INDEX_VERSION = 2
+
+/**
+ * 兼容历史 sessionMode 字面量：v1 用过的 'new' 值统一改为 'daily'。
+ * - v1 默认值 'new' 的语义是「每次新建会话」；v2 的 'daily' 默认行为是「同日复用、跨日新建」，
+ *   高频任务可少占左侧栏 tab，低频任务（间隔 ≥ 24h）的实际行为等价于「每次新建」，对用户无负面影响。
+ * - 同时把 index.version bump 到当前值，避免下次启动反复迁移。
+ * 返回是否发生改动，由调用方决定是否写回磁盘。
+ */
+function migrateLegacySessionMode(data: AutomationsIndex): boolean {
+  let changed = false
+  for (const a of data.automations) {
+    if ((a.sessionMode as string | undefined) === 'new') {
+      a.sessionMode = 'daily'
+      changed = true
+    }
+  }
+  if (data.version < INDEX_VERSION) {
+    data.version = INDEX_VERSION
+    changed = true
+  }
+  return changed
+}
 
 /**
  * 内存缓存：避免每次操作都从磁盘读取完整索引。
@@ -44,16 +66,35 @@ function readIndex(): AutomationsIndex {
     cachedIndex = { version: INDEX_VERSION, automations: [] }
     return cachedIndex
   }
-  if (typeof data.version !== 'number' || data.version > INDEX_VERSION) {
-    console.warn(`[定时任务] 索引文件版本 ${data.version} 不被当前构建识别，将忽略其内容`)
+  if (typeof data.version !== 'number') {
+    console.warn(`[定时任务] 索引文件缺少有效 version 字段，将忽略其内容`)
     cachedIndex = { version: INDEX_VERSION, automations: [] }
+    return cachedIndex
+  }
+  if (data.version > INDEX_VERSION) {
+    // 数据由更高版本的 Proma 写入（用户回滚到旧版的场景）。保留原始 automations 数组只读返回，
+    // 避免下次 writeIndex 用空数据覆盖磁盘导致永久丢失任务配置和运行历史。
+    console.warn(
+      `[定时任务] 索引文件版本 ${data.version} 高于当前构建（${INDEX_VERSION}），将以原数据加载，` +
+        `可能存在不识别的字段；请尽量升级到最新版本。`,
+    )
+    if (!Array.isArray(data.automations)) {
+      cachedIndex = { version: INDEX_VERSION, automations: [] }
+      return cachedIndex
+    }
+    cachedIndex = data
     return cachedIndex
   }
   if (!Array.isArray(data.automations)) {
     cachedIndex = { version: INDEX_VERSION, automations: [] }
     return cachedIndex
   }
+  const migrated = migrateLegacySessionMode(data)
   cachedIndex = data
+  if (migrated) {
+    writeIndex(data)
+    console.log('[定时任务] 索引已迁移至最新版本（sessionMode: new → daily）')
+  }
   return cachedIndex
 }
 

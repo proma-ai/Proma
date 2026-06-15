@@ -37,13 +37,13 @@ export const AUTOMATION_DEFAULT_PERMISSION_MODE: AutomationPermissionMode = 'byp
 
 /**
  * 定时任务的会话模式
- * - new：每次触发都新建独立子会话（默认，防上下文膨胀）
- * - reuse：复用上次创建的子会话（保留上下文，若上次会话不存在则新建）
+ * - daily：同一自然日内的触发写入同一个子会话，跨日时自动新建（默认，兼顾上下文连续性与成本控制）
+ * - reuse：始终复用同一个子会话（保留长期上下文，会话越长 token 成本越高，由用户自行承担）
  */
-export type AutomationSessionMode = 'new' | 'reuse'
+export type AutomationSessionMode = 'daily' | 'reuse'
 
 /** 定时任务默认会话模式 */
-export const AUTOMATION_DEFAULT_SESSION_MODE: AutomationSessionMode = 'new'
+export const AUTOMATION_DEFAULT_SESSION_MODE: AutomationSessionMode = 'daily'
 
 /** 定时任务通知触发条件 */
 export type AutomationNotificationTrigger = 'always' | 'success' | 'error'
@@ -90,7 +90,7 @@ export interface Automation {
   workspaceId?: string
   /** 权限模式（无人值守运行时的工具审批策略，默认 bypassPermissions） */
   permissionMode?: AutomationPermissionMode
-  /** 会话模式：new=每次新建子会话（默认）；reuse=复用上次会话 */
+  /** 会话模式：daily=同一自然日内复用子会话，跨日新建（默认）；reuse=始终复用同一个子会话 */
   sessionMode?: AutomationSessionMode
   /** 运行完成后的外部通知目标 */
   notificationTargets?: AutomationNotificationTarget[]

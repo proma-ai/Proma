@@ -16,6 +16,7 @@ export {
   supports1MContext,
   inferContextWindow,
 } from './context-window'
+export { calculateContextUsageRatio } from './context-usage'
 export {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_TITLE,
