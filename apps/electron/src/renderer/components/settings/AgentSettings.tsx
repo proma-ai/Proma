@@ -645,7 +645,7 @@ function McpServerRow({ name, entry, onEdit, onDelete, onToggle }: McpServerRowP
           </span>
         )}
         <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
-          {TRANSPORT_LABELS[entry.type] ?? entry.type}
+          {TRANSPORT_LABELS[entry.type] ?? entry.type ?? '未知'}
         </span>
         <button onClick={onEdit} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100" title="编辑">
           <Pencil size={14} />

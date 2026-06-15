@@ -99,6 +99,7 @@ export function createAgentSession(
   title?: string,
   channelId?: string,
   workspaceId?: string,
+  modelId?: string,
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
@@ -107,6 +108,7 @@ export function createAgentSession(
     id: randomUUID(),
     title: title || '新 Agent 会话',
     channelId,
+    modelId,
     workspaceId,
     createdAt: now,
     updatedAt: now,
@@ -376,7 +378,7 @@ function convertLegacyMessage(legacy: AgentMessage): SDKMessage {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'sdkSessionId' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
