@@ -35,7 +35,15 @@ import type { Channel, ModelOption } from '@proma/shared'
 function buildModelOptions(channels: Channel[], filterChannelId?: string, filterChannelIds?: string[], useAgentModels?: boolean): ModelOption[] {
   const options: ModelOption[] = []
 
-  for (const channel of channels) {
+  // Proma 官方渠道置顶（若已启用且未被过滤掉），其余保持原有相对顺序
+  const ordered = channels.some((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID && c.enabled)
+    ? [
+        ...channels.filter((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID),
+        ...channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID),
+      ]
+    : channels
+
+  for (const channel of ordered) {
     if (!channel.enabled) continue
     if (filterChannelId && channel.id !== filterChannelId) continue
     if (filterChannelIds && filterChannelIds.length > 0 && !filterChannelIds.includes(channel.id)) continue

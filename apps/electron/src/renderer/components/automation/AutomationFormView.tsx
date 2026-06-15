@@ -726,6 +726,7 @@ export function AutomationFormView(): React.ReactElement | null {
                 filterChannelIds={agentChannelIds}
                 externalSelectedModel={selectedModel}
                 showChannelInTrigger
+                useAgentModels
                 onModelSelect={(opt) => update({ channelId: opt.channelId, modelId: opt.modelId })}
               />
             )}
