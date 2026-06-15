@@ -185,6 +185,10 @@ export async function runAutomation(automation: Automation, manual = false): Pro
 export async function runAutomationNow(id: string): Promise<void> {
   const automation = getAutomation(id)
   if (!automation) throw new Error(`定时任务不存在: ${id}`)
+  // 草稿态（缺 channelId / workspaceId）拒绝运行，兜底前端 disabled 防止 IPC 绕过
+  if (!automation.channelId || !automation.workspaceId) {
+    throw new Error('请先为该任务配置模型与工作区')
+  }
   await runAutomation(automation, true)
 }
 
@@ -193,6 +197,8 @@ function tick(): void {
   const now = Date.now()
   for (const automation of listAutomations()) {
     if (!automation.active) continue
+    // 完整度兜底：老用户可能存在「active=true 但缺工作区 / 渠道」的历史数据，跳过避免运行时崩溃
+    if (!automation.channelId || !automation.workspaceId) continue
     if (now < automation.nextRunAt) continue
     if (runningAutomations.has(automation.id)) continue
     // 来源会话忙时跳过（极端情况下的额外保险，主要靠新建子会话规避）

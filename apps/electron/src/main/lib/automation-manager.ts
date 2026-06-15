@@ -148,11 +148,18 @@ export function getAutomation(id: string): Automation | undefined {
   return readIndex().automations.find((a) => a.id === id)
 }
 
+/** 任务是否具备运行所需的最小完整度（channelId + workspaceId） */
+function isAutomationRunnable(a: Pick<Automation, 'channelId' | 'workspaceId'>): boolean {
+  return !!a.channelId && !!a.workspaceId
+}
+
 /** 创建定时任务 */
 export function createAutomation(input: CreateAutomationInput): Automation {
   const index = readIndex()
   const now = Date.now()
-  const active = input.active ?? true
+  // 草稿态（缺 channelId / workspaceId）强制不启用，避免空配置任务进入调度
+  const requestedActive = input.active ?? true
+  const active = requestedActive && isAutomationRunnable(input)
 
   const automation: Automation = {
     id: randomUUID(),
@@ -220,12 +227,21 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
 
   // 启用状态变化
   if (input.active !== undefined && input.active !== target.active) {
+    // 启用要求 channelId + workspaceId 齐全，否则拒绝（兜底前端校验，避免空配置任务进入调度）
+    if (input.active && !isAutomationRunnable(target)) {
+      throw new Error('启用定时任务前必须配置模型与工作区')
+    }
     target.active = input.active
     if (input.active) {
       // 重新启用：从现在起算下一次触发，清空连续失败计数
       target.nextRunAt = computeNextRunAt(target, now)
       target.consecutiveFailures = 0
     }
+  }
+
+  // 调度配置被改成不完整时自动暂停：防止用户清空工作区 / 渠道后任务仍处于 active 进入 tick
+  if (target.active && !isAutomationRunnable(target)) {
+    target.active = false
   }
 
   target.updatedAt = now

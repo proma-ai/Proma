@@ -82,6 +82,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
   // ===== 全局 atoms（Map 结构，按 conversationId 读取） =====
   const conversations = useAtomValue(conversationsAtom)
+  const setConversations = useSetAtom(conversationsAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const streamingStates = useAtomValue(streamingStatesAtom)
   const setStreamingStates = useSetAtom(streamingStatesAtom)
@@ -295,6 +296,19 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       return map
     })
 
+    // 乐观更新：发送瞬间若会话已归档，立即取消归档，
+    // 让侧边栏立即把它移到未归档列表，无需等待 STREAM_COMPLETE。
+    // 后端 appendMessage 已会做同样的取消归档，STREAM_COMPLETE 时会再用 listConversations 对齐
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.id === conversationId)
+      if (idx === -1) return prev
+      const conv = prev[idx]!
+      if (!conv.archived) return prev
+      const next = [...prev]
+      next[idx] = { ...conv, archived: false, updatedAt: Date.now() }
+      return next
+    })
+
     const input: ChatSendInput = {
       conversationId,
       userMessage: content,
@@ -344,6 +358,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     activeToolIds,
     setChatStreamErrors,
     setStreamingStates,
+    setConversations,
   ])
 
   // ===== 自动发送快速任务消息 =====

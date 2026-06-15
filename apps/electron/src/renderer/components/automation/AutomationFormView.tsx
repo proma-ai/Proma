@@ -33,7 +33,7 @@ import {
   automationToDraft,
   type AutomationDraft,
 } from '@/atoms/automation-atoms'
-import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom } from '@/atoms/agent-atoms'
+import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
@@ -49,7 +49,6 @@ import type {
   UpdateAutomationInput,
 } from '@proma/shared'
 
-const NO_WORKSPACE = '__none__'
 const NO_FEISHU_BINDING = '__none__'
 
 function formatTime(ts?: number): string {
@@ -64,7 +63,23 @@ function formatRunStatus(status: AutomationRun['status']): string {
 }
 
 function canPersistDraft(draft: AutomationDraft): boolean {
-  return !!(draft.name.trim() && draft.prompt.trim() && draft.channelId)
+  // 草稿保存门槛：只要有任务名和任务描述就保存为草稿（缺 channelId / workspaceId 会被强制不启用）
+  return !!(draft.name.trim() && draft.prompt.trim())
+}
+
+/** 任务是否具备运行 / 启用所需的最小完整度（模型 + 工作区） */
+function isReadyToRun(draft: AutomationDraft): boolean {
+  return canPersistDraft(draft) && !!draft.channelId && !!draft.workspaceId
+}
+
+/** 列出当前还缺哪些必填项（用于"运行一次" Tooltip 与关闭时的 toast 提示） */
+function listMissingFields(draft: AutomationDraft): string[] {
+  const missing: string[] = []
+  if (!draft.name.trim()) missing.push('任务名称')
+  if (!draft.prompt.trim()) missing.push('任务描述')
+  if (!draft.channelId) missing.push('模型')
+  if (!draft.workspaceId) missing.push('工作区')
+  return missing
 }
 
 function getDraftSignature(draft: AutomationDraft): string {
@@ -182,6 +197,7 @@ export function AutomationFormView(): React.ReactElement | null {
   const agentChannelIds = useAtomValue(agentChannelIdsAtom)
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const activeSessionId = useAtomValue(activeSessionIdAtom)
+  const currentAgentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const setSettingsTab = useSetAtom(settingsTabAtom)
@@ -213,6 +229,18 @@ export function AutomationFormView(): React.ReactElement | null {
         : ''
     }
   }, [formState.open, formState.draft])
+
+  // 新建模式下若 workspaceId 为空，按优先级填入默认值：
+  // 1. 当前 Agent 模式选中的工作区（≈ 当前会话所在工作区）
+  // 2. 第一个工作区（fallback）
+  // 编辑模式不动；用户已显式选过的也不覆盖。
+  React.useEffect(() => {
+    if (!formState.open || !form || form.id || form.workspaceId) return
+    const fallback = currentAgentWorkspaceId ?? workspaces[0]?.id
+    if (fallback) {
+      setForm((prev) => (prev && !prev.id && !prev.workspaceId ? { ...prev, workspaceId: fallback } : prev))
+    }
+  }, [formState.open, form?.id, form?.workspaceId, currentAgentWorkspaceId, workspaces])
 
   React.useEffect(() => {
     if (!formState.open) return
@@ -248,9 +276,14 @@ export function AutomationFormView(): React.ReactElement | null {
     const persistTask = (async (): Promise<string | null> => {
       const previousId = previousPersist ? await previousPersist.catch(() => null) : null
       const latestDraft = latestFormRef.current
-      const draftToSave = latestDraft
+      const baseDraft = latestDraft
         ? { ...latestDraft, id: latestDraft.id ?? previousId ?? draft.id }
         : { ...draft, id: draft.id ?? previousId ?? undefined }
+
+      // 不完整任务（缺模型 / 工作区）强制不启用：避免无配置任务出现在「启用中」分组
+      const draftToSave: AutomationDraft = isReadyToRun(baseDraft)
+        ? baseDraft
+        : { ...baseDraft, active: false }
 
       if (!canPersistDraft(draftToSave)) return draftToSave.id ?? null
 
@@ -350,8 +383,9 @@ export function AutomationFormView(): React.ReactElement | null {
 
   const handleRunNow = async (): Promise<void> => {
     const latest = latestFormRef.current
-    if (!latest || !canPersistDraft(latest)) {
-      toast.error('请先填写任务名称、任务描述并选择模型')
+    if (!latest || !isReadyToRun(latest)) {
+      const missing = latest ? listMissingFields(latest) : ['任务名称', '任务描述', '模型', '工作区']
+      toast.error(`请先补全：${missing.join('、')}`)
       return
     }
 
@@ -522,15 +556,26 @@ export function AutomationFormView(): React.ReactElement | null {
         <div className="flex items-center justify-between gap-2 px-4 py-4 flex-shrink-0">
           <span className="text-sm font-semibold text-foreground">配置</span>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => { void handleRunNow() }}
-              disabled={runningNow || !canPersistDraft(form)}
-              className="titlebar-no-drag h-7 px-2.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-sm"
-            >
-              {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-              <span>{runningNow ? '运行中' : '运行一次'}</span>
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <button
+                    type="button"
+                    onClick={() => { void handleRunNow() }}
+                    disabled={runningNow || !isReadyToRun(form)}
+                    className="titlebar-no-drag h-7 px-2.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-sm"
+                  >
+                    {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                    <span>{runningNow ? '运行中' : '运行一次'}</span>
+                  </button>
+                </span>
+              </TooltipTrigger>
+              {!isReadyToRun(form) && !runningNow && (
+                <TooltipContent side="bottom">
+                  请先补全：{listMissingFields(form).join('、')}
+                </TooltipContent>
+              )}
+            </Tooltip>
             <button
               onClick={close}
               className="titlebar-no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors"
@@ -541,15 +586,18 @@ export function AutomationFormView(): React.ReactElement | null {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-5">
-          {/* 启用开关（最上） */}
+          {/* 启用开关（最上）：模型 / 工作区缺失时禁用，避免 UI 状态与持久化结果不一致 */}
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-0.5">
               <Label htmlFor="auto-active">启用</Label>
-              <span className="text-xs text-muted-foreground">关闭后任务暂停调度</span>
+              <span className="text-xs text-muted-foreground">
+                {isReadyToRun(form) ? '关闭后任务暂停调度' : `补全${listMissingFields(form).join('、')}后方可启用`}
+              </span>
             </div>
             <Switch
               id="auto-active"
-              checked={form.active}
+              checked={form.active && isReadyToRun(form)}
+              disabled={!isReadyToRun(form)}
               onCheckedChange={(checked) => update({ active: checked })}
             />
           </div>
@@ -732,21 +780,37 @@ export function AutomationFormView(): React.ReactElement | null {
             )}
           </div>
 
-          {/* 工作区 */}
+          {/* 工作区（必选，默认填入当前会话所在工作区） */}
           <div className="flex flex-col gap-2">
             <Label>工作区</Label>
-            <Select
-              value={form.workspaceId ?? NO_WORKSPACE}
-              onValueChange={(v) => update({ workspaceId: v === NO_WORKSPACE ? undefined : v })}
-            >
-              <SelectTrigger><SelectValue placeholder="选择工作区" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_WORKSPACE}>无工作区</SelectItem>
-                {workspaces.map((ws) => (
-                  <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {workspaces.length === 0 ? (
+              <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                <Settings size={14} className="shrink-0" />
+                <span>尚未创建任何工作区</span>
+                <button
+                  type="button"
+                  className="ml-auto text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+                  onClick={() => {
+                    setSettingsTab('agent')
+                    setSettingsOpen(true)
+                  }}
+                >
+                  前往 Agent 设置
+                </button>
+              </div>
+            ) : (
+              <Select
+                value={form.workspaceId ?? ''}
+                onValueChange={(v) => update({ workspaceId: v })}
+              >
+                <SelectTrigger><SelectValue placeholder="选择工作区" /></SelectTrigger>
+                <SelectContent>
+                  {workspaces.map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* 飞书通知 */}

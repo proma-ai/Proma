@@ -4206,7 +4206,7 @@ export function registerIpcHandlers(): void {
       if (!input || typeof input !== 'object') throw new Error('input 必须是对象')
       if (!isNonEmptyString(input.name)) throw new Error('name 必填')
       if (!isNonEmptyString(input.prompt)) throw new Error('prompt 必填')
-      if (!isNonEmptyString(input.channelId)) throw new Error('channelId 必填')
+      // channelId / workspaceId 允许为空（草稿态），但此时任务不能被启用
       validateAutomationFields(input)
       if (input.scheduleType === 'interval' && !isFiniteInt(input.intervalMinutes)) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
       if ((input.scheduleType === 'daily' || input.scheduleType === 'weekly' || input.scheduleType === 'monthly') && !validTimeOfDay(input.timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
