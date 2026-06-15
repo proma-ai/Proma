@@ -140,6 +140,21 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     if (window.__pendingAttachmentData) {
       window.__pendingAttachmentData.clear()
     }
+
+    // 组件卸载时清理（关闭标签页、切换 Chat→Agent 等）
+    return () => {
+      setPendingAttachments((prev) => {
+        prev.forEach((att) => {
+          if (att.previewUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(att.previewUrl)
+          }
+        })
+        return []
+      })
+      if (window.__pendingAttachmentData) {
+        window.__pendingAttachmentData.clear()
+      }
+    }
   }, [conversationId, setPendingRecommendation])
 
   // ===== 加载消息 + 上下文分隔线 =====
