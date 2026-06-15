@@ -29,6 +29,8 @@ import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
   supports1MContext,
+  buildFlowPrompt,
+  isFlowMentionMessage,
 } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -43,7 +45,7 @@ import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName } from './config-paths'
+import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName, getWorkspaceFlowsDir } from './config-paths'
 import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
@@ -907,7 +909,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext } = input
+    const { sessionId, userMessage, channelId, modelId, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedFlows, automationContext } = input
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -1260,6 +1262,25 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
 
+      // 11.6 Flow mention 处理：将 !flow:slug 转换为 SDK 可识别的命令/脚本路径
+      let flowScriptPath: string | undefined
+      let hasFlowMention = false
+      if (mentionedFlows && mentionedFlows.length > 0 && workspaceSlug) {
+        hasFlowMention = true
+        const flowsDir = getWorkspaceFlowsDir(workspaceSlug)
+        // 取第一个 Flow（消息只可能触发一个 Flow）
+        const flowSlug = mentionedFlows[0]!
+        // 先找到 Flow 的 flow.js 路径（可能在 active 或 inactive 目录）
+        const activeFlowJs = join(flowsDir, flowSlug, 'flow.js')
+        if (existsSync(activeFlowJs)) {
+          flowScriptPath = activeFlowJs
+        }
+        if (flowScriptPath) {
+          enrichedMessage = buildFlowPrompt(enrichedMessage, { scriptPath: flowScriptPath })
+        }
+        console.log(`[Agent 编排] Flow mention 注入: ${flowSlug}, scriptPath=${flowScriptPath ?? '未找到'}${flowScriptPath ? '' : ', 透传原始消息'}`)
+      }
+
       const contextualMessage = `${dynamicCtx}\n\n${enrichedMessage}`
 
       const isCompactCommand = userMessage.trim() === '/compact'
@@ -1555,6 +1576,20 @@ export class AgentOrchestrator {
         })(),
         // 启用文件检查点，支持 rewindFiles 回退
         enableFileCheckpointing: true,
+        // Flow mention 触发时，启用 partial messages 和 agent 进度摘要，支持 workflow 实时进度展示
+        ...(hasFlowMention && {
+          includePartialMessages: true,
+          agentProgressSummaries: true,
+        }),
+        // Flow 相关 SDK settings 覆盖
+        ...(() => {
+          const sdkSettings: Record<string, unknown> = {}
+          if (appSettings.disableWorkflows) sdkSettings.disableWorkflows = true
+          if (appSettings.workflowKeywordTriggerEnabled !== undefined) {
+            sdkSettings.workflowKeywordTriggerEnabled = appSettings.workflowKeywordTriggerEnabled
+          }
+          return Object.keys(sdkSettings).length > 0 ? { sdkSettings } : {}
+        })(),
         // SDK 0.2.52+ 新增选项（从 settings 读取）
         ...(appSettings.agentThinking && { thinking: appSettings.agentThinking }),
         effort: appSettings.agentEffort ?? 'high',

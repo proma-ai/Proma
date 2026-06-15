@@ -356,25 +356,34 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 已有会话首次打开时，从全局默认值初始化 per-session map。
   // setter 内的 `prev.has(sessionId)` 守卫保证幂等，外层不再订阅 Map atom，
   // 避免 setter 写入 → atom 引用变化 → effect 重跑的自循环（React #185）。
+  // 优先使用会话元数据上的 channelId/modelId（如自动任务子会话），回退到全局默认。
+  const sessionMeta = React.useMemo(
+    () => sessions.find((s) => s.id === sessionId),
+    [sessions, sessionId],
+  )
+  const sessionMetaChannelId = sessionMeta?.channelId
+  const sessionMetaModelId = sessionMeta?.modelId
   React.useEffect(() => {
     if (!sessionId) return
-    if (defaultChannelId) {
+    const initialChannelId = sessionMetaChannelId ?? defaultChannelId
+    const initialModelId = sessionMetaModelId ?? defaultModelId
+    if (initialChannelId) {
       setSessionChannelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
-        map.set(sessionId, defaultChannelId)
+        map.set(sessionId, initialChannelId)
         return map
       })
     }
-    if (defaultModelId) {
+    if (initialModelId) {
       setSessionModelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
-        map.set(sessionId, defaultModelId)
+        map.set(sessionId, initialModelId)
         return map
       })
     }
-  }, [sessionId, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
+  }, [sessionId, sessionMetaChannelId, sessionMetaModelId, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
 
   const contextStatus: AgentContextStatus = {
     isCompacting: streamState?.isCompacting ?? false,
@@ -1239,10 +1248,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds])
 
   /** 构建 externalSelectedModel 给 ModelSelector */
-  const externalSelectedModel = React.useMemo(() => {
+  const computedSelectedModel = React.useMemo(() => {
     if (!agentChannelId || !agentModelId) return null
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
+
+  // 防止瞬态 null 传递给 ModelSelector（防御 overflow remount 时 stableModelInfoRef 丢失）
+  const stableSelectedModelRef = React.useRef(computedSelectedModel)
+  if (computedSelectedModel) stableSelectedModelRef.current = computedSelectedModel
+  const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
 
   /** 发送消息 */
   const handleSend = React.useCallback(async (overrideTextOrEvent?: string | React.MouseEvent): Promise<void> => {
@@ -1956,6 +1970,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           usageUpdatedAt={contextStatus.usageUpdatedAt}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
+          sessionId={sessionId}
           onCompact={handleCompact}
         />
       ),
@@ -2060,7 +2075,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           tasks={backgroundTasks}
           workspaceSlug={workspaceSlug ?? undefined}
           onRetryFlow={(flowSlug) => {
-            void handleSend(`!${flowSlug}`)
+            void handleSend(`!flow:${flowSlug}`)
           }}
         />
 

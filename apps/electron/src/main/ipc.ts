@@ -187,7 +187,7 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir, getScratchPadPath, getWorkspaceFlowsDir } from './lib/config-paths'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
 import {
@@ -216,6 +216,17 @@ import {
   createSkillEntry,
   deleteSkillEntry,
   renameSkillEntry,
+  getWorkspaceFlows,
+  getOtherWorkspaceFlows,
+  getDefaultFlowSlugs,
+  deleteWorkspaceFlow,
+  toggleWorkspaceFlow,
+  importFlowFromWorkspace,
+  updateFlowFromSource,
+  readFlowContent,
+  writeFlowContent,
+  saveWorkflowAsFlow,
+  upgradeDefaultFlowInWorkspace,
   getWorkspaceAttachedDirectories,
   getWorkspaceAttachedFiles,
   attachWorkspaceDirectory,
@@ -2063,6 +2074,92 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.RENAME_SKILL_ENTRY,
     async (_, workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string): Promise<void> => {
       renameSkillEntry(workspaceSlug, skillSlug, fromRelative, toRelative)
+    }
+  )
+
+  // ===== 工作区能力 — Flow =====
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_FLOWS,
+    async (_, workspaceSlug: string) => {
+      return getWorkspaceFlows(workspaceSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_FLOWS_DIR,
+    async (_, workspaceSlug: string) => {
+      return getWorkspaceFlowsDir(workspaceSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DELETE_FLOW,
+    async (_, workspaceSlug: string, flowSlug: string): Promise<void> => {
+      deleteWorkspaceFlow(workspaceSlug, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TOGGLE_FLOW,
+    async (_, workspaceSlug: string, flowSlug: string): Promise<boolean> => {
+      return toggleWorkspaceFlow(workspaceSlug, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_FLOWS,
+    async (_, currentSlug: string) => {
+      return getOtherWorkspaceFlows(currentSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_DEFAULT_FLOW_SLUGS,
+    async () => {
+      return getDefaultFlowSlugs()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.IMPORT_FLOW_FROM_WORKSPACE,
+    async (_, targetSlug: string, sourceSlug: string, flowSlug: string): Promise<void> => {
+      importFlowFromWorkspace(targetSlug, sourceSlug, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_FLOW_FROM_SOURCE,
+    async (_, targetSlug: string, sourceSlug: string, flowSlug: string): Promise<void> => {
+      updateFlowFromSource(targetSlug, sourceSlug, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_FLOW_CONTENT,
+    async (_, workspaceSlug: string, flowSlug: string): Promise<string> => {
+      return readFlowContent(workspaceSlug, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WRITE_FLOW_CONTENT,
+    async (_, workspaceSlug: string, flowSlug: string, content: string): Promise<void> => {
+      writeFlowContent(workspaceSlug, flowSlug, content)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SAVE_WORKFLOW_AS_FLOW,
+    async (_, workspaceSlug: string, scriptPath: string, flowSlug?: string): Promise<string> => {
+      return saveWorkflowAsFlow(workspaceSlug, scriptPath, flowSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPGRADE_DEFAULT_FLOW,
+    async (_, workspaceSlug: string, flowSlug: string): Promise<boolean> => {
+      return upgradeDefaultFlowInWorkspace(workspaceSlug, flowSlug)
     }
   )
 

@@ -639,7 +639,14 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
   try {
     const raw = readFileSync(mcpPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<WorkspaceMcpConfig>
-    return { servers: parsed.servers ?? {} }
+    const servers = parsed.servers ?? {}
+    for (const [name, entry] of Object.entries(servers)) {
+      if (!entry.type) {
+        entry.type = entry.command ? 'stdio' : entry.url ? 'http' : 'stdio'
+        console.log(`[Agent 工作区] MCP 服务器 "${name}" 缺少 type 字段，已自动推断为 "${entry.type}"`)
+      }
+    }
+    return { servers }
   } catch (error) {
     console.error('[Agent 工作区] 读取 MCP 配置失败:', error)
     return { servers: {} }
@@ -668,6 +675,9 @@ export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
 /** 解析 SKILL.md 的 YAML frontmatter，支持单行值、block scalar（`|` / `>`）和多行缩进 */
 function parseSkillFrontmatter(content: string, slug: string, enabled: boolean): SkillMeta {
   const meta: SkillMeta = { slug, name: slug, enabled }
+
+  // 移除 UTF-8 BOM（﻿），确保 YAML frontmatter 匹配不受 BOM 干扰
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
 
   const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
   if (!fmMatch) return meta
