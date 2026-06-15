@@ -177,7 +177,7 @@ function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; us
     return {
       durationMs,
       usage: {
-        inputTokens: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+        inputTokens: u.input_tokens,
         outputTokens: u.output_tokens,
         cacheReadTokens: u.cache_read_input_tokens,
         cacheCreationTokens: u.cache_creation_input_tokens,

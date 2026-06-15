@@ -192,7 +192,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       // Usage（保留完整字段用于详细展示）
       if (!aMsg.parent_tool_use_id && aMsg.message.usage) {
         const u = aMsg.message.usage
-        const inputTokens = u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+        const inputTokens = u.input_tokens
         // 流式过程中 SDK 不返回 contextWindow，按模型名推断一个默认值作为 fallback。
         // 注意：必须优先用 _channelModelId（用户在 UI 上选择的原始模型 ID），
         // 因为部分端点（如智谱）会在 message.model 里剥掉 [1m] 等规格后缀，
@@ -242,7 +242,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         type: 'complete',
         stopReason: rMsg.subtype === 'success' ? 'end_turn' : 'error',
         usage: usage ? {
-          inputTokens: usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
+          inputTokens: usage.input_tokens,
           outputTokens: usage.output_tokens,
           cacheReadTokens: usage.cache_read_input_tokens,
           cacheCreationTokens: usage.cache_creation_input_tokens,
