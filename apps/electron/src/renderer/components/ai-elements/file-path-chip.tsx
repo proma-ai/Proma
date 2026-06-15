@@ -7,18 +7,12 @@
  */
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from 'jotai'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from '@/components/ui/context-menu'
 
 /** 文件存在性缓存（模块级共享，避免重复 IPC）。key = filePath + basePaths */
 const fileExistsCache = new Map<string, boolean>()
@@ -97,9 +91,9 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const filename = getFileName(cleanPath)
 
-  const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:\\/.test(cleanPath)
+  const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:[\\/]/.test(cleanPath)
 
-  const chipRef = React.useRef<HTMLButtonElement>(null)
+  const chipRef = React.useRef<HTMLDivElement>(null)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
   const store = useStore()
   const openPreview = useOpenPreview()
@@ -180,38 +174,117 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     window.electronAPI.showItemInFolder(cleanPath, bases).catch(console.error)
   }, [cleanPath, candidateBases])
 
+  // 自定义右键菜单状态（取代 Radix ContextMenu — 在 react-markdown 环境下定位不可靠）
+  const [menuPos, setMenuPos] = React.useState<{ x: number; y: number } | null>(null)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+
+  const openMenu = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setMenuPos({ x: e.clientX, y: e.clientY })
+  }, [])
+
+  const closeMenu = React.useCallback(() => {
+    setMenuPos(null)
+  }, [])
+
+  // 点击菜单外部 / 按 Escape 关闭
+  React.useEffect(() => {
+    if (!menuPos) return
+    const handleMousedown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuPos(null)
+      }
+    }
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuPos(null)
+    }
+    document.addEventListener('mousedown', handleMousedown)
+    document.addEventListener('keydown', handleKeydown)
+    return () => {
+      document.removeEventListener('mousedown', handleMousedown)
+      document.removeEventListener('keydown', handleKeydown)
+    }
+  }, [menuPos])
+
+  const handleKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleClick()
+    }
+    // 右键菜单键打开菜单
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault()
+      const rect = (e.target as HTMLElement).getBoundingClientRect()
+      setMenuPos({ x: rect.left, y: rect.bottom })
+    }
+  }, [handleClick])
+
+  if (fileStatus === 'broken') {
+    return (
+      <code className="rounded bg-foreground/10 px-[0.35em] py-[0.15em] text-[0.875em] font-mono font-medium">
+        {trimmedPath}
+      </code>
+    )
+  }
+
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <button
-          ref={chipRef}
-          type="button"
-          onClick={handleClick}
-          title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
-          className={cn(
-            'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
-            'cursor-pointer transition-colors duration-150',
-            'align-baseline not-prose',
-            fileStatus === 'broken'
-              ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
-              : 'bg-primary/10 text-primary hover:bg-primary/20',
-            className
-          )}
+    <>
+      <div
+        ref={chipRef}
+        role="button"
+        tabIndex={0}
+        onClick={handleClick}
+        onContextMenu={openMenu}
+        onKeyDown={handleKeyDown}
+        title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
+        className={cn(
+          'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
+          'cursor-pointer transition-colors duration-150 select-none',
+          'align-baseline not-prose',
+          fileStatus === 'broken'
+            ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
+            : 'bg-primary/10 text-primary hover:bg-primary/20',
+          className
+        )}
+      >
+        <FileTypeIcon name={filename} isDirectory={false} size={14} />
+        <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
+      </div>
+
+      {menuPos && createPortal(
+        <div
+          className="fixed inset-0 z-[9999]"
+          onClick={closeMenu}
+          onContextMenu={(e) => { e.preventDefault(); closeMenu() }}
         >
-          <FileTypeIcon name={filename} isDirectory={false} size={14} />
-          <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
-        </button>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={handleClick}>
-          打开预览
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={handleShowInFolder}>
-          在文件管理器中显示
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+          <div
+            ref={menuRef}
+            className="absolute min-w-[8rem] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: menuPos.x, top: menuPos.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              role="menuitem"
+              tabIndex={-1}
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent"
+              onClick={() => { handleClick(); closeMenu() }}
+            >
+              打开预览
+            </div>
+            <div className="-mx-1 my-1 h-px bg-border" />
+            <div
+              role="menuitem"
+              tabIndex={-1}
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent"
+              onClick={() => { handleShowInFolder(); closeMenu() }}
+            >
+              在文件管理器中显示
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
@@ -236,8 +309,8 @@ export function isAbsoluteFilePath(text: string): boolean {
     return true
   }
 
-  // Windows 绝对路径
-  if (/^[A-Z]:\\/.test(clean)) return true
+  // Windows 绝对路径（兼容正斜杠 C:/ 和反斜杠 C:\ ）
+  if (/^[A-Z]:[\\/]/.test(clean)) return true
 
   return false
 }
