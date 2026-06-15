@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -342,6 +342,25 @@ function SidebarWindowDragStrip({ height }: { height: number }): React.ReactElem
   )
 }
 
+/** 不可变地切换 Set 中某个成员的存在状态（存在则删除，不存在则添加），返回新 Set */
+function toggleSetEntry<T>(prev: Set<T>, value: T): Set<T> {
+  const next = new Set(prev)
+  if (next.has(value)) {
+    next.delete(value)
+  } else {
+    next.add(value)
+  }
+  return next
+}
+
+/** 不可变地从 Set 中移除某个成员，若不存在则原样返回 */
+function deleteSetEntry<T>(prev: Set<T>, value: T): Set<T> {
+  if (!prev.has(value)) return prev
+  const next = new Set(prev)
+  next.delete(value)
+  return next
+}
+
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
@@ -365,7 +384,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [moveTargetId, setMoveTargetId] = React.useState<string | null>(null)
   /** 每个项目额外展开显示的会话数量（每次点击"显示更多" +10），未点击则为 0 或无值 */
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
-  /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开） */
+  /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开）。刻意不持久化：折叠被视为临时查看行为，刷新/重启后恢复默认展开 */
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = React.useState<Set<string>>(new Set())
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
@@ -830,34 +849,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     await createAgentSessionInWorkspace()
   }, [createAgentSessionInWorkspace, setActiveView])
 
-  /** 切换当前项目 - 使用 ref 确保获取最新的 currentWorkspaceId */
-  const currentWorkspaceIdRef = React.useRef(currentWorkspaceId)
-  currentWorkspaceIdRef.current = currentWorkspaceId
-
+  /** 切换当前项目；点击当前已选中工作区标题时则折叠/展开其会话列表 */
   const handleSelectProject = React.useCallback((workspaceId: string): void => {
-    const currentId = currentWorkspaceIdRef.current
-    if (workspaceId === currentId) {
+    if (workspaceId === currentWorkspaceId) {
       // 点击当前工作区 → 折叠/展开会话列表
-      setCollapsedWorkspaceIds((prev) => {
-        const next = new Set(prev)
-        if (next.has(workspaceId)) {
-          next.delete(workspaceId)
-        } else {
-          next.add(workspaceId)
-        }
-        return next
-      })
+      setCollapsedWorkspaceIds((prev) => toggleSetEntry(prev, workspaceId))
       return
     }
     setCurrentWorkspaceId(workspaceId)
     // 切换到新工作区时，自动展开该工作区
-    setCollapsedWorkspaceIds((prev) => {
-      const next = new Set(prev)
-      next.delete(workspaceId)
-      return next
-    })
+    setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
-  }, [setCurrentWorkspaceId])
+  }, [currentWorkspaceId, setCurrentWorkspaceId])
 
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
@@ -942,6 +945,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         next.delete(workspaceId)
         return next
       })
+
+      setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
 
       if (workspaceId === currentWorkspaceId) {
         const fallback = remainingWorkspaces.find((item) => item.slug === 'default') ?? remainingWorkspaces[0] ?? null
@@ -2821,6 +2826,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         ) : (
           <button
             type="button"
+            aria-expanded={!collapsed}
+            aria-controls={`project-sessions-${group.workspace.id}`}
             onClick={(e) => {
               e.stopPropagation()
               onSelectProject(group.workspace.id)
@@ -2836,6 +2843,13 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             <span className="flex-1 min-w-0 truncate text-[13px] font-medium leading-[18px]">
               {group.workspace.name}
             </span>
+            <ChevronRight
+              size={12}
+              className={cn(
+                'flex-shrink-0 text-foreground/30 transition-transform duration-150',
+                collapsed ? '-rotate-90' : 'rotate-90',
+              )}
+            />
           </button>
         )}
 
@@ -2904,7 +2918,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         </DropdownMenu>
       </div>
 
-      <div className="ml-4 mt-px">
+      <div id={`project-sessions-${group.workspace.id}`} className="ml-4 mt-px">
         {!collapsed ? (
           group.sessions.length > 0 ? (
             <div className="flex flex-col gap-0.5">
