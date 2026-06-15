@@ -77,7 +77,9 @@ function writeIndex(index: AutomationsIndex): void {
  * 返回值保证为有限正整数。输入非法时回退到 from + 10min 并打印警告。
  */
 export function computeNextRunAt(
-  a: Pick<Automation, 'scheduleType' | 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth'>,
+  a: { scheduleType: Automation['scheduleType'] } & Partial<
+    Pick<Automation, 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth'>
+  >,
   from: number = Date.now(),
 ): number {
   const FALLBACK_INTERVAL_MS = 10 * 60_000
