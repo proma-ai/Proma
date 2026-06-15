@@ -365,6 +365,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [moveTargetId, setMoveTargetId] = React.useState<string | null>(null)
   /** 每个项目额外展开显示的会话数量（每次点击"显示更多" +10），未点击则为 0 或无值 */
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
+  /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开） */
+  const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = React.useState<Set<string>>(new Set())
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
@@ -828,12 +830,34 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     await createAgentSessionInWorkspace()
   }, [createAgentSessionInWorkspace, setActiveView])
 
-  /** 切换当前项目 */
+  /** 切换当前项目 - 使用 ref 确保获取最新的 currentWorkspaceId */
+  const currentWorkspaceIdRef = React.useRef(currentWorkspaceId)
+  currentWorkspaceIdRef.current = currentWorkspaceId
+
   const handleSelectProject = React.useCallback((workspaceId: string): void => {
-    if (workspaceId === currentWorkspaceId) return
+    const currentId = currentWorkspaceIdRef.current
+    if (workspaceId === currentId) {
+      // 点击当前工作区 → 折叠/展开会话列表
+      setCollapsedWorkspaceIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(workspaceId)) {
+          next.delete(workspaceId)
+        } else {
+          next.add(workspaceId)
+        }
+        return next
+      })
+      return
+    }
     setCurrentWorkspaceId(workspaceId)
+    // 切换到新工作区时，自动展开该工作区
+    setCollapsedWorkspaceIds((prev) => {
+      const next = new Set(prev)
+      next.delete(workspaceId)
+      return next
+    })
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
-  }, [currentWorkspaceId, setCurrentWorkspaceId])
+  }, [setCurrentWorkspaceId])
 
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
@@ -1840,6 +1864,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   currentWorkspaceId={currentWorkspaceId}
                   expanded={(expandedExtraCountMap.get(group.workspace.id) ?? 0) > 0}
                   extraCount={expandedExtraCountMap.get(group.workspace.id) ?? 0}
+                  collapsed={collapsedWorkspaceIds.has(group.workspace.id)}
                   activeSessionId={activeSessionId}
                   agentIndicatorMap={agentIndicatorMap}
                   relativeTimeNow={relativeTimeNow}
@@ -2623,6 +2648,7 @@ interface AgentProjectGroupItemProps {
   group: AgentProjectGroup
   currentWorkspaceId: string | null
   expanded: boolean
+  collapsed: boolean
   /** 用户已点击"显示更多"额外展开的会话数量（基于 collapsedSessions 之上累加） */
   extraCount: number
   activeSessionId: string | null
@@ -2655,6 +2681,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   group,
   currentWorkspaceId,
   expanded,
+  collapsed,
   extraCount,
   activeSessionId,
   agentIndicatorMap,
@@ -2794,7 +2821,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         ) : (
           <button
             type="button"
-            onClick={() => onSelectProject(group.workspace.id)}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectProject(group.workspace.id)
+            }}
             className={cn(
               'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11 hover:bg-foreground/[0.025]',
               isCurrent
@@ -2875,51 +2905,53 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       </div>
 
       <div className="ml-4 mt-px">
-        {group.sessions.length > 0 ? (
-          <div className="flex flex-col gap-0.5">
-            {sessions.map((session) => (
-              <AgentSessionItem
-                key={session.id}
-                session={session}
-                active={session.id === activeSessionId}
-                indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                showPinIcon={!!session.pinned}
-                leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                relativeTimeNow={relativeTimeNow}
-                onSelect={onSelectSession}
-                onRequestDelete={onRequestDelete}
-                onRequestMove={onRequestMove}
-                onRename={onRename}
-                onTogglePin={onTogglePin}
-                onToggleArchive={onToggleArchive}
-              />
-            ))}
+        {!collapsed ? (
+          group.sessions.length > 0 ? (
+            <div className="flex flex-col gap-0.5">
+              {sessions.map((session) => (
+                <AgentSessionItem
+                  key={session.id}
+                  session={session}
+                  active={session.id === activeSessionId}
+                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                  showPinIcon={!!session.pinned}
+                  leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
+                  relativeTimeNow={relativeTimeNow}
+                  onSelect={onSelectSession}
+                  onRequestDelete={onRequestDelete}
+                  onRequestMove={onRequestMove}
+                  onRename={onRename}
+                  onTogglePin={onTogglePin}
+                  onToggleArchive={onToggleArchive}
+                />
+              ))}
 
-            {hiddenCount > 0 && (
-              <button
-                type="button"
-                onClick={() => onShowMore(group.workspace.id)}
-                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
-              >
-                显示更多
-              </button>
-            )}
+              {hiddenCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onShowMore(group.workspace.id)}
+                  className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                >
+                  显示更多
+                </button>
+              )}
 
-            {expanded && (
-              <button
-                type="button"
-                onClick={() => onCollapseExtra(group.workspace.id)}
-                className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
-              >
-                收起
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="px-1.5 py-0.5 text-[12px] text-foreground/22 select-none">
-            暂无会话
-          </div>
-        )}
+              {expanded && (
+                <button
+                  type="button"
+                  onClick={() => onCollapseExtra(group.workspace.id)}
+                  className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                >
+                  收起
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="px-1.5 py-0.5 text-[12px] text-foreground/22 select-none">
+              暂无会话
+            </div>
+          )
+        ) : null}
       </div>
       {dropPosition === 'after' && (
         <div className="absolute -bottom-0.5 left-3 right-3 h-0.5 rounded-full bg-primary z-10" />
