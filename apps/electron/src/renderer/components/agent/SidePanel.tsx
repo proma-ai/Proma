@@ -389,6 +389,30 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     window.electronAPI.getWorkspaceFilesPath(workspaceSlug).then(setWorkspaceFilesPath).catch(() => setWorkspaceFilesPath(null))
   }, [workspaceSlug])
 
+  // Agent 写文件触发自动定位时，把 Tab 切到该文件所在的面板（session / workspace），
+  // 让"最近修改"高亮落在用户当前可见的 Tab 上。仅响应 Agent 写入（select 未置位）的 reveal，
+  // 用户搜索点击（select=true）不抢占 Tab；ts 去重确保用户手动切回后不会被重新抢占。
+  const autoRevealSignal = useAtomValue(fileBrowserAutoRevealAtom)
+  const consumedTabRevealTsRef = React.useRef(0)
+  React.useEffect(() => {
+    if (!autoRevealSignal || autoRevealSignal.select) return
+    if (autoRevealSignal.sessionId !== sessionId) return
+    if (autoRevealSignal.ts <= consumedTabRevealTsRef.current) return
+    const path = autoRevealSignal.path
+    const inSession =
+      (!!sessionPath && (path === sessionPath || isPathUnderRoot(sessionPath, path)))
+      || attachedDirs.some((d) => isPathUnderRoot(d, path))
+      || attachedFiles.includes(path)
+    const inWorkspace =
+      (!!workspaceFilesPath && (path === workspaceFilesPath || isPathUnderRoot(workspaceFilesPath, path)))
+      || wsAttachedDirs.some((d) => isPathUnderRoot(d, path))
+      || wsAttachedFiles.includes(path)
+    const targetTab = inSession ? 'session' : inWorkspace ? 'workspace' : null
+    if (!targetTab) return
+    consumedTabRevealTsRef.current = autoRevealSignal.ts
+    if (activeTab !== targetTab) onTabChange(targetTab)
+  }, [autoRevealSignal, sessionId, sessionPath, workspaceFilesPath, attachedDirs, attachedFiles, wsAttachedDirs, wsAttachedFiles, activeTab, onTabChange])
+
   // RightSidePanel 完全由用户控制，不因 Agent 文件变更自动打开
 
   // 同步 basePaths ref（供 handleFilePreview 使用，避免 hooks 声明顺序问题）
