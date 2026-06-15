@@ -20,7 +20,6 @@ import { cn } from '@/lib/utils'
 import { FileBrowser, FileDropZone, FileTypeIcon, FileSearchBar, computeRevealAncestors, isPathUnderRoot, computeTreeRowLayout, AncestorGuides, STICKY_ROW_BASE_CLASS, canBeSticky } from '@/components/file-browser'
 import { DiffPanelTabBar } from '@/components/diff/DiffPanelTabBar'
 import { DiffChangesList } from '@/components/diff/DiffChangesList'
-import { WorktreeSelector } from '@/components/diff/WorktreeSelector'
 import {
   agentSidePanelOpenAtom,
   workspaceFilesVersionAtom,
@@ -104,20 +103,9 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     })
   }, [openPreviewTabForFile])
 
-  // Worktree 选择状态
-  const [selectedWorktreeMap, setSelectedWorktreeMap] = useAtom(agentSelectedWorktreeAtom)
+  // Worktree 选择状态（仅用于 diff 文件点击时传递 baseRef，选取逻辑已下沉至 DiffChangesList）
+  const selectedWorktreeMap = useAtomValue(agentSelectedWorktreeAtom)
   const selectedWorktreePath = selectedWorktreeMap.get(sessionId) ?? null
-
-  const handleWorktreeSelect = React.useCallback((worktree: import('@proma/shared').WorktreeInfo | null) => {
-    // 仅切换 diff 视图，不再自动把 worktree 挂进会话目录。
-    // worktree 的 diff 读取已由主进程的 ensurePathAllowedWithWorktree 凭 git 背书放行，
-    // 无需借「附加目录」绕过安全检查；是否让 Agent 访问该 worktree 交由用户手动决定。
-    setSelectedWorktreeMap((prev) => {
-      const m = new Map(prev)
-      m.set(sessionId, worktree?.path ?? null)
-      return m
-    })
-  }, [sessionId, setSelectedWorktreeMap])
 
   const handleDiffFileClick = React.useCallback((filePath: string, _isUntracked: boolean, gitRoot?: string) => {
     openPreviewTabForFile({
@@ -442,13 +430,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
 
           {activeTab === 'changes' ? (
             sessionPath ? (
-            <>
-              <WorktreeSelector
-                sessionId={sessionId}
-                workspaceSlug={workspaceSlug || ''}
-                selectedPath={selectedWorktreePath}
-                onSelect={handleWorktreeSelect}
-              />
               <DiffChangesList
                 key={sessionId}
                 dirPath={sessionPath}
@@ -459,9 +440,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                 refreshVersion={diffRefreshVersion}
                 selectedFilePath={selectedFilePath}
                 onFileClick={handleDiffFileClick}
-                worktreeMode={selectedWorktreePath ? { path: selectedWorktreePath, baseBranch: 'origin/main' } : undefined}
+                workspaceSlug={workspaceSlug || undefined}
               />
-            </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
             )

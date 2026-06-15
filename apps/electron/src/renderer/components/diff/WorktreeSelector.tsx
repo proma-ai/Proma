@@ -76,7 +76,7 @@ export function WorktreeSelector({
   const displayLabel = selectedWorktree ? selectedWorktree.branch : '会话改动'
   const hasMultipleRepos = repoWorktrees.length > 1
 
-  if (allWorktrees.length === 0 && !isLoading) return <></>
+  if (allWorktrees.length === 0) return <></>
 
   return (
     <div ref={dropdownRef} className="relative px-3 py-1.5 border-b border-border/50">
