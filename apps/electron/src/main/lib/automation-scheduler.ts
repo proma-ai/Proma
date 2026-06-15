@@ -96,7 +96,7 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     if (reuseSessionId) {
       targetSessionId = reuseSessionId
     } else {
-      const created = createAgentSession(automation.name, automation.channelId, automation.workspaceId)
+      const created = createAgentSession(automation.name, automation.channelId, automation.workspaceId, automation.modelId)
       updateAgentSessionMeta(created.id, { sourceAutomationId: automation.id })
       targetSessionId = created.id
       setLastSessionId(automation.id, created.id)
