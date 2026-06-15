@@ -91,6 +91,8 @@ function readPartialJsonStringValue(source: string, key: string): string | undef
         value += '\b'
       } else if (char === 'f') {
         value += '\f'
+      } else if (char === '/') {
+        value += '/'
       } else if (char === 'u' && i + 4 < source.length) {
         const hex = source.slice(i + 1, i + 5)
         if (/^[0-9a-f]{4}$/i.test(hex)) {

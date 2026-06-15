@@ -19,6 +19,8 @@ export function isGenerativeUiRunEnabled(config: { enabled?: boolean } | undefin
   return config?.enabled === true
 }
 
+const GENERATIVE_UI_MCP_TOOL_PREFIX = GENERATIVE_UI_SERVER_NAME
+
 export function getGenerativeUiAllowedToolNames(enabled: boolean): string[] {
   if (!enabled) return []
   return [
@@ -28,8 +30,6 @@ export function getGenerativeUiAllowedToolNames(enabled: boolean): string[] {
     GENERATIVE_UI_SHOW_WIDGET_TOOL,
   ]
 }
-
-const GENERATIVE_UI_MCP_TOOL_PREFIX = GENERATIVE_UI_SERVER_NAME
 
 export function isGenerativeUiToolName(toolName: string): boolean {
   return toolName === GENERATIVE_UI_SHOW_WIDGET_TOOL || toolName.endsWith(`__${GENERATIVE_UI_SHOW_WIDGET_TOOL}`)

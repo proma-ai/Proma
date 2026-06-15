@@ -336,7 +336,7 @@ export interface SDKToolUseSummaryMessage {
   session_id?: string
 }
 
-/** SDK 消息联合类型（默认完整消息；生成式 UI 开启时会额外收到 transient stream_event） */
+/** SDK 消息联合类型（v1 query + includePartialMessages: false 返回的完整 JSON 对象） */
 export type SDKMessage =
   | SDKAssistantMessage
   | SDKUserMessage
