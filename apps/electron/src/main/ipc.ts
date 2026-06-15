@@ -2769,6 +2769,23 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 在系统文件管理器中显示任意路径（无工作区限制，用户主动点击触发）
+  ipcMain.handle(
+    IPC_CHANNELS.SHOW_ITEM_IN_FOLDER,
+    async (_, filePath: string, candidateBasePaths?: string[]): Promise<void> => {
+      const { resolve } = await import('node:path')
+      const { existsSync } = await import('node:fs')
+      const { resolveTargetPath } = await import('./lib/file-preview-service')
+
+      const resolvedPath = resolveTargetPath(filePath, candidateBasePaths?.length ? candidateBasePaths : undefined)
+      if (!existsSync(resolvedPath)) {
+        console.warn('[IPC] shell:show-item-in-folder 路径不存在:', resolvedPath)
+        return
+      }
+      shell.showItemInFolder(resolve(resolvedPath))
+    }
+  )
+
   // 解析文件路径并读取内容（供内联预览使用）
   ipcMain.handle(
     'file:resolve-and-read',

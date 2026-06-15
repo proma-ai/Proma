@@ -13,6 +13,13 @@ import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { previewFileMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
 import { activeTabIdAtom, getPreviewTabTitle, openTab, tabsAtom } from '@/atoms/tab-atoms'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu'
 
 /** 文件存在性缓存（模块级共享，避免重复 IPC）。key = filePath + basePaths */
 const fileExistsCache = new Map<string, boolean>()
@@ -184,25 +191,43 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     store.set(activeTabIdAtom, result.activeTabId)
   }, [store, cleanPath, candidateBases])
 
+  const handleShowInFolder = React.useCallback(() => {
+    const bases = candidateBases.length > 0 ? candidateBases : undefined
+    window.electronAPI.showItemInFolder(cleanPath, bases).catch(console.error)
+  }, [cleanPath, candidateBases])
+
   return (
-    <button
-      ref={chipRef}
-      type="button"
-      onClick={handleClick}
-      title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
-      className={cn(
-        'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
-        'cursor-pointer transition-colors duration-150',
-        'align-baseline not-prose',
-        fileStatus === 'broken'
-          ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
-          : 'bg-primary/10 text-primary hover:bg-primary/20',
-        className
-      )}
-    >
-      <FileTypeIcon name={filename} isDirectory={false} size={14} />
-      <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
-    </button>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          ref={chipRef}
+          type="button"
+          onClick={handleClick}
+          title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
+          className={cn(
+            'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
+            'cursor-pointer transition-colors duration-150',
+            'align-baseline not-prose',
+            fileStatus === 'broken'
+              ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
+              : 'bg-primary/10 text-primary hover:bg-primary/20',
+            className
+          )}
+        >
+          <FileTypeIcon name={filename} isDirectory={false} size={14} />
+          <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={handleClick}>
+          在标签页中打开
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={handleShowInFolder}>
+          在文件管理器中显示
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
