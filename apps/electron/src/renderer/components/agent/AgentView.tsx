@@ -1245,10 +1245,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds])
 
   /** 构建 externalSelectedModel 给 ModelSelector */
-  const externalSelectedModel = React.useMemo(() => {
+  const computedSelectedModel = React.useMemo(() => {
     if (!agentChannelId || !agentModelId) return null
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
+
+  // 防止瞬态 null 传递给 ModelSelector（防御 overflow remount 时 stableModelInfoRef 丢失）
+  const stableSelectedModelRef = React.useRef(computedSelectedModel)
+  if (computedSelectedModel) stableSelectedModelRef.current = computedSelectedModel
+  const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
 
   /** 发送消息 */
   const handleSend = React.useCallback(async (): Promise<void> => {
@@ -1974,7 +1979,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     },
   ], [
     agentChannelIds,
-    externalSelectedModel,
+    agentChannelId,
+    agentModelId,
     handleModelSelect,
     sessionId,
     agentThinking,
