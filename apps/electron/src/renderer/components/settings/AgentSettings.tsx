@@ -113,6 +113,9 @@ function shortName(slug: string, prefix: string): string {
 }
 
 function extractSkillBody(content: string): string {
+  // 移除 UTF-8 BOM（﻿），确保 frontmatter 匹配不受 BOM 干扰
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
+
   const match = content.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/)
   return match?.[1] ?? content
 }
@@ -121,6 +124,9 @@ function rebuildSkillMd(
   originalContent: string,
   updates: { name?: string; description?: string; body?: string },
 ): string {
+  // 移除 UTF-8 BOM（﻿），确保 frontmatter 匹配不受 BOM 干扰
+  if (originalContent.charCodeAt(0) === 0xFEFF) originalContent = originalContent.slice(1)
+
   const fmMatch = originalContent.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/)
   if (!fmMatch) return originalContent
 

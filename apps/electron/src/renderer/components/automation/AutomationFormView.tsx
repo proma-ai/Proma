@@ -22,6 +22,8 @@ import {
   SelectItem,
 } from '@/components/ui/select'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { cn } from '@/lib/utils'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import {
   automationFormAtom,
@@ -41,6 +43,7 @@ import type {
   AutomationFeishuNotificationTarget,
   AutomationNotificationTarget,
   AutomationRun,
+  AutomationSessionMode,
   CreateAutomationInput,
   FeishuChatBinding,
   UpdateAutomationInput,
@@ -73,10 +76,12 @@ function getDraftSignature(draft: AutomationDraft): string {
     intervalMinutes: draft.intervalMinutes,
     timeOfDay: draft.timeOfDay ?? '',
     dayOfWeek: draft.dayOfWeek ?? '',
+    dayOfMonth: draft.dayOfMonth ?? '',
     channelId: draft.channelId,
     modelId: draft.modelId ?? '',
     workspaceId: draft.workspaceId ?? '',
     permissionMode: draft.permissionMode,
+    sessionMode: draft.sessionMode,
     notificationTargets: draft.notificationTargets ?? [],
     active: draft.active,
   })
@@ -90,10 +95,12 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     intervalMinutes: draft.intervalMinutes,
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
+    dayOfMonth: draft.dayOfMonth,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId,
     permissionMode: draft.permissionMode,
+    sessionMode: draft.sessionMode,
     notificationTargets: draft.notificationTargets,
     sourceSessionId: draft.sourceSessionId,
     active: draft.active,
@@ -109,10 +116,12 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     intervalMinutes: draft.intervalMinutes,
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
+    dayOfMonth: draft.dayOfMonth,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId ?? '',
     permissionMode: draft.permissionMode,
+    sessionMode: draft.sessionMode,
     notificationTargets: draft.notificationTargets ?? [],
     active: draft.active,
   }
@@ -318,6 +327,8 @@ export function AutomationFormView(): React.ReactElement | null {
       setFormState({ open: false, draft: null })
     }
   }, [activeSessionId, formState.open, persistDraft, setFormState])
+
+  const [dayPopoverOpen, setDayPopoverOpen] = React.useState(false)
 
   if (!formState.open || !form) return null
 
@@ -561,7 +572,7 @@ export function AutomationFormView(): React.ReactElement | null {
 
           {/* 调度模式 */}
           <div className="flex flex-col gap-2">
-            <Label>运行方式</Label>
+            <Label>运行频率</Label>
             <Select
               value={form.scheduleType}
               onValueChange={(v) => update({ scheduleType: v as AutomationDraft['scheduleType'] })}
@@ -571,6 +582,7 @@ export function AutomationFormView(): React.ReactElement | null {
                 <SelectItem value="interval">每隔一段时间</SelectItem>
                 <SelectItem value="daily">每天定点</SelectItem>
                 <SelectItem value="weekly">每周定点</SelectItem>
+                <SelectItem value="monthly">每月定点</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -630,6 +642,64 @@ export function AutomationFormView(): React.ReactElement | null {
                   className="flex h-9 w-[120px] shrink-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
+            </div>
+          )}
+
+          {/* monthly 模式：日期网格 + 时刻 */}
+          {form.scheduleType === 'monthly' && (
+            <div className="flex flex-col gap-2">
+              <Label>每月</Label>
+              <div className="flex items-center gap-2">
+                <Popover open={dayPopoverOpen} onOpenChange={setDayPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-9 flex-1 items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm hover:bg-foreground/[0.02] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <span>{form.dayOfMonth ?? 1} 号</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" align="start">
+                    <div className="grid grid-cols-7 gap-0.5">
+                      {['一', '二', '三', '四', '五', '六', '日'].map((d) => (
+                        <div key={d} className="flex h-7 items-center justify-center text-[11px] font-medium text-muted-foreground">
+                          {d}
+                        </div>
+                      ))}
+                      {Array.from({ length: 31 }, (_, i) => {
+                        const day = i + 1
+                        const selected = (form.dayOfMonth ?? 1) === day
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => { update({ dayOfMonth: day }); setDayPopoverOpen(false) }}
+                            className={cn(
+                              'flex h-7 items-center justify-center rounded-md text-[13px] transition-colors',
+                              selected
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-foreground hover:bg-foreground/[0.06]',
+                            )}
+                          >
+                            {day}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <input
+                  type="time"
+                  value={form.timeOfDay ?? '09:00'}
+                  onChange={(e) => update({ timeOfDay: e.target.value })}
+                  className="flex h-9 w-[120px] shrink-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              {form.dayOfMonth !== undefined && form.dayOfMonth >= 29 && (
+                <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
+                  如当月无 {form.dayOfMonth} 日，将在当月最后一天执行
+                </span>
+              )}
             </div>
           )}
 
@@ -753,6 +823,26 @@ export function AutomationFormView(): React.ReactElement | null {
                 </Select>
               </div>
             )}
+          </div>
+
+          {/* 会话模式 */}
+          <div className="flex flex-col gap-2">
+            <Label>会话模式</Label>
+            <Select
+              value={form.sessionMode}
+              onValueChange={(v) => update({ sessionMode: v as AutomationSessionMode })}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">每次新建会话</SelectItem>
+                <SelectItem value="reuse">复用上次会话</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground leading-relaxed">
+              {form.sessionMode === 'reuse'
+                ? '每次触发时继续上次的子会话，保留对话上下文（首次运行会自动新建）。'
+                : '每次触发都新建独立子会话，互不干扰。'}
+            </span>
           </div>
 
           {/* 权限模式 */}

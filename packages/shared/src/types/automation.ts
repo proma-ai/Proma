@@ -22,7 +22,7 @@ export interface AutomationRun {
 }
 
 /** 调度模式 */
-export type AutomationScheduleType = 'interval' | 'daily' | 'weekly'
+export type AutomationScheduleType = 'interval' | 'daily' | 'weekly' | 'monthly'
 
 /**
  * 定时任务的权限模式（无人值守运行场景）
@@ -34,6 +34,16 @@ export type AutomationPermissionMode = 'auto' | 'bypassPermissions'
 
 /** 定时任务默认权限模式（向后兼容：旧任务无此字段时按此值运行） */
 export const AUTOMATION_DEFAULT_PERMISSION_MODE: AutomationPermissionMode = 'bypassPermissions'
+
+/**
+ * 定时任务的会话模式
+ * - new：每次触发都新建独立子会话（默认，防上下文膨胀）
+ * - reuse：复用上次创建的子会话（保留上下文，若上次会话不存在则新建）
+ */
+export type AutomationSessionMode = 'new' | 'reuse'
+
+/** 定时任务默认会话模式 */
+export const AUTOMATION_DEFAULT_SESSION_MODE: AutomationSessionMode = 'new'
 
 /** 定时任务通知触发条件 */
 export type AutomationNotificationTrigger = 'always' | 'success' | 'error'
@@ -62,14 +72,16 @@ export interface Automation {
   prompt: string
   /** 是否启用调度 */
   active: boolean
-  /** 调度模式：interval=固定间隔；daily=每天定点；weekly=每周某天定点 */
+  /** 调度模式：interval=固定间隔；daily=每天定点；weekly=每周某天定点；monthly=每月某天定点 */
   scheduleType: AutomationScheduleType
   /** 运行间隔（分钟），scheduleType==='interval' 时使用 */
   intervalMinutes: number
-  /** 触发时刻 "HH:MM"，scheduleType==='daily'|'weekly' 时使用 */
+  /** 触发时刻 "HH:MM"，scheduleType==='daily'|'weekly'|'monthly' 时使用 */
   timeOfDay?: string
   /** 星期几（0=周日 … 6=周六），scheduleType==='weekly' 时使用 */
   dayOfWeek?: number
+  /** 每月几号（1-31），scheduleType==='monthly' 时使用 */
+  dayOfMonth?: number
   /** AI 渠道 ID */
   channelId: string
   /** 模型 ID（可选，继承来源会话或渠道默认） */
@@ -78,6 +90,8 @@ export interface Automation {
   workspaceId?: string
   /** 权限模式（无人值守运行时的工具审批策略，默认 bypassPermissions） */
   permissionMode?: AutomationPermissionMode
+  /** 会话模式：new=每次新建子会话（默认）；reuse=复用上次会话 */
+  sessionMode?: AutomationSessionMode
   /** 运行完成后的外部通知目标 */
   notificationTargets?: AutomationNotificationTarget[]
   /** 创建来源会话 ID（作为模板，运行时不复用而是新建子会话） */
@@ -112,10 +126,12 @@ export interface CreateAutomationInput {
   intervalMinutes: number
   timeOfDay?: string
   dayOfWeek?: number
+  dayOfMonth?: number
   channelId: string
   modelId?: string
   workspaceId?: string
   permissionMode?: AutomationPermissionMode
+  sessionMode?: AutomationSessionMode
   notificationTargets?: AutomationNotificationTarget[]
   sourceSessionId?: string
   /** 创建后是否立即启用（默认 true） */
@@ -131,11 +147,13 @@ export interface UpdateAutomationInput {
   intervalMinutes?: number
   timeOfDay?: string
   dayOfWeek?: number
+  dayOfMonth?: number
   channelId?: string
   modelId?: string
   /** 工作区（用户可在创建后调整子会话归属的工作区） */
   workspaceId?: string
   permissionMode?: AutomationPermissionMode
+  sessionMode?: AutomationSessionMode
   notificationTargets?: AutomationNotificationTarget[]
   active?: boolean
 }

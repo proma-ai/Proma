@@ -511,6 +511,9 @@ export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
 function parseSkillFrontmatter(content: string, slug: string, enabled: boolean): SkillMeta {
   const meta: SkillMeta = { slug, name: slug, enabled }
 
+  // 移除 UTF-8 BOM（﻿），确保 YAML frontmatter 匹配不受 BOM 干扰
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
+
   const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
   if (!fmMatch) return meta
 

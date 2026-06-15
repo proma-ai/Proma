@@ -11,8 +11,9 @@ import type {
   AutomationNotificationTarget,
   AutomationScheduleType,
   AutomationPermissionMode,
+  AutomationSessionMode,
 } from '@proma/shared'
-import { AUTOMATION_DEFAULT_PERMISSION_MODE } from '@proma/shared'
+import { AUTOMATION_DEFAULT_PERMISSION_MODE, AUTOMATION_DEFAULT_SESSION_MODE } from '@proma/shared'
 
 /** 全部定时任务列表 */
 export const automationsAtom = atom<Automation[]>([])
@@ -31,10 +32,12 @@ export interface AutomationDraft {
   intervalMinutes: number
   timeOfDay?: string
   dayOfWeek?: number
+  dayOfMonth?: number
   channelId: string
   modelId?: string
   workspaceId?: string
   permissionMode: AutomationPermissionMode
+  sessionMode: AutomationSessionMode
   notificationTargets?: AutomationNotificationTarget[]
   sourceSessionId?: string
   active: boolean
@@ -60,8 +63,10 @@ export function createEmptyDraft(): AutomationDraft {
     intervalMinutes: 10,
     timeOfDay: '09:00',
     dayOfWeek: 1,
+    dayOfMonth: 1,
     channelId: '',
     permissionMode: AUTOMATION_DEFAULT_PERMISSION_MODE,
+    sessionMode: AUTOMATION_DEFAULT_SESSION_MODE,
     active: true,
   }
 }
@@ -79,10 +84,12 @@ export function automationToDraft(a: Automation): AutomationDraft {
     intervalMinutes: a.intervalMinutes,
     timeOfDay: a.timeOfDay,
     dayOfWeek: a.dayOfWeek,
+    dayOfMonth: a.dayOfMonth,
     channelId: a.channelId,
     modelId: a.modelId,
     workspaceId: a.workspaceId,
     permissionMode: a.permissionMode ?? AUTOMATION_DEFAULT_PERMISSION_MODE,
+    sessionMode: a.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE,
     notificationTargets: a.notificationTargets,
     sourceSessionId: a.sourceSessionId,
     active: a.active,

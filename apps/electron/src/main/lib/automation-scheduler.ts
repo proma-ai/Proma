@@ -14,6 +14,7 @@ import { BrowserWindow } from 'electron'
 import {
   AUTOMATION_MAX_CONSECUTIVE_FAILURES,
   AUTOMATION_IPC_CHANNELS,
+  AUTOMATION_DEFAULT_SESSION_MODE,
   type Automation,
   type AutomationRun,
 } from '@proma/shared'
@@ -26,7 +27,7 @@ import {
   setLastSessionId,
   computeNextRunAt,
 } from './automation-manager'
-import { createAgentSession, updateAgentSessionMeta } from './agent-session-manager'
+import { createAgentSession, updateAgentSessionMeta, getAgentSessionMeta } from './agent-session-manager'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
 import { notifyAutomationRunFinished } from './automation-notification-service'
 
@@ -42,6 +43,7 @@ function formatScheduleLabel(a: Automation): string {
     const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
     return `每${names[a.dayOfWeek ?? 1]} ${a.timeOfDay ?? '09:00'}`
   }
+  if (a.scheduleType === 'monthly') return `每月 ${a.dayOfMonth ?? 1} 号 ${a.timeOfDay ?? '09:00'}`
   const min = a.intervalMinutes
   if (min < 60) return `每 ${min} 分钟`
   if (min < 1440) return `每 ${min / 60} 小时`
@@ -84,12 +86,21 @@ export async function runAutomation(automation: Automation, manual = false): Pro
   const runAt = Date.now()
 
   try {
-    // 每次触发都创建新的会话，避免自动运行在旧上下文上继续导致结果被历史对话污染。
-    // 标题直接用任务名（不加时间戳），并标记 sourceAutomationId 供侧栏显示钟表图标 + 跳转。
-    const created = createAgentSession(automation.name, automation.channelId, automation.workspaceId)
-    updateAgentSessionMeta(created.id, { sourceAutomationId: automation.id })
-    const targetSessionId = created.id
-    setLastSessionId(automation.id, created.id)
+    // 根据 sessionMode 决定新建或复用子会话
+    const sessionMode = automation.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE
+    const reuseSessionId = sessionMode === 'reuse' && automation.lastSessionId
+      ? (getAgentSessionMeta(automation.lastSessionId) ? automation.lastSessionId : undefined)
+      : undefined
+
+    let targetSessionId: string
+    if (reuseSessionId) {
+      targetSessionId = reuseSessionId
+    } else {
+      const created = createAgentSession(automation.name, automation.channelId, automation.workspaceId)
+      updateAgentSessionMeta(created.id, { sourceAutomationId: automation.id })
+      targetSessionId = created.id
+      setLastSessionId(automation.id, created.id)
+    }
 
     await new Promise<void>((resolveRun) => {
       let settled = false

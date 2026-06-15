@@ -77,7 +77,7 @@ function writeIndex(index: AutomationsIndex): void {
  * 返回值保证为有限正整数。输入非法时回退到 from + 10min 并打印警告。
  */
 export function computeNextRunAt(
-  a: Pick<Automation, 'scheduleType' | 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek'>,
+  a: Pick<Automation, 'scheduleType' | 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth'>,
   from: number = Date.now(),
 ): number {
   const FALLBACK_INTERVAL_MS = 10 * 60_000
@@ -103,6 +103,22 @@ export function computeNextRunAt(
 
     if (a.scheduleType === 'daily') {
       if (next.getTime() <= from) next.setDate(next.getDate() + 1)
+      result = next.getTime()
+    } else if (a.scheduleType === 'monthly') {
+      const daysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate()
+      const targetDom = Number.isFinite(a.dayOfMonth) && a.dayOfMonth! >= 1 && a.dayOfMonth! <= 31
+        ? a.dayOfMonth!
+        : 1
+      // 先重置到当月 1 号再设日，避免当前日期为 31 时进入短月自动溢出（如 3/31 setMonth(3) 会变 5/1）
+      next.setDate(1)
+      next.setDate(Math.min(targetDom, daysInMonth(next.getFullYear(), next.getMonth())))
+      if (next.getTime() <= from) {
+        // 关键：先回到当月 1 号再 +1 月，否则若当前 getDate() 已落在该月最后一天（targetDom 被钳到 30/28），
+        // setMonth 仍会越过短月（如 1/31 → 3/3）。setDate(1) 后再前进月份才是稳定的。
+        next.setDate(1)
+        next.setMonth(next.getMonth() + 1)
+        next.setDate(Math.min(targetDom, daysInMonth(next.getFullYear(), next.getMonth())))
+      }
       result = next.getTime()
     } else {
       // weekly
@@ -147,10 +163,12 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     intervalMinutes: input.intervalMinutes,
     timeOfDay: input.timeOfDay,
     dayOfWeek: input.dayOfWeek,
+    dayOfMonth: input.dayOfMonth,
     channelId: input.channelId,
     modelId: input.modelId,
     workspaceId: input.workspaceId,
     permissionMode: input.permissionMode ?? AUTOMATION_DEFAULT_PERMISSION_MODE,
+    sessionMode: input.sessionMode,
     notificationTargets: input.notificationTargets,
     sourceSessionId: input.sourceSessionId,
     createdAt: now,
@@ -181,6 +199,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
     target.workspaceId = input.workspaceId || undefined
   }
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
+  if (input.sessionMode !== undefined) target.sessionMode = input.sessionMode
   if (input.notificationTargets !== undefined) target.notificationTargets = input.notificationTargets
 
   // 调度参数变化：重算下次运行时间（从现在起算，避免旧时间戳立即触发）
@@ -188,11 +207,13 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
     (input.scheduleType !== undefined && input.scheduleType !== target.scheduleType) ||
     (input.intervalMinutes !== undefined && input.intervalMinutes !== target.intervalMinutes) ||
     (input.timeOfDay !== undefined && input.timeOfDay !== target.timeOfDay) ||
-    (input.dayOfWeek !== undefined && input.dayOfWeek !== target.dayOfWeek)
+    (input.dayOfWeek !== undefined && input.dayOfWeek !== target.dayOfWeek) ||
+    (input.dayOfMonth !== undefined && input.dayOfMonth !== target.dayOfMonth)
   if (input.scheduleType !== undefined) target.scheduleType = input.scheduleType
   if (input.intervalMinutes !== undefined) target.intervalMinutes = input.intervalMinutes
   if (input.timeOfDay !== undefined) target.timeOfDay = input.timeOfDay
   if (input.dayOfWeek !== undefined) target.dayOfWeek = input.dayOfWeek
+  if (input.dayOfMonth !== undefined) target.dayOfMonth = input.dayOfMonth
   if (scheduleChanged) {
     target.nextRunAt = computeNextRunAt(target, now)
   }

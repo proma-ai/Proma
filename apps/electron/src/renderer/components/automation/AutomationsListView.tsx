@@ -33,6 +33,12 @@ function formatSchedule(a: Automation): string {
     const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
     return `每${names[a.dayOfWeek ?? 1]} ${a.timeOfDay ?? '09:00'}`
   }
+  if (a.scheduleType === 'monthly') {
+    const dom = a.dayOfMonth ?? 1
+    // 29-31 号在短月会自动落在当月最后一天，列表里追加提示避免用户误以为漏跑
+    const suffix = dom >= 29 ? '（短月落在最后一天）' : ''
+    return `每月 ${dom} 号 ${a.timeOfDay ?? '09:00'}${suffix}`
+  }
   const min = a.intervalMinutes
   if (min < 60) return `每 ${min} 分钟`
   if (min < 1440) return `每 ${min / 60} 小时`

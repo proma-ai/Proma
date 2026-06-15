@@ -405,7 +405,8 @@ export function parseSkillVersion(skillDir: string): string {
   if (!existsSync(skillMdPath)) return '0.0.0'
 
   try {
-    const content = readFileSync(skillMdPath, 'utf-8')
+    let content = readFileSync(skillMdPath, 'utf-8')
+    if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
     const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
     if (!fmMatch?.[1]) return '0.0.0'
 

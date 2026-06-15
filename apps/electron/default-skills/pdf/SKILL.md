@@ -1,30 +1,78 @@
 ---
 name: pdf
-description: Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.
+description: Use this skill whenever the user mentions a PDF file or asks to produce/edit one. For read-only tasks such as reading, summarizing, extracting plain text, or answering questions from a PDF, follow this skill's read-only routing rules: use the built-in Read tool first, do not write code or scripts, and prefer markitdown for PDFs over 100 pages. Use PDF processing libraries/scripts only for modification tasks such as merging, splitting, rotating, watermarking, filling forms, encrypting/decrypting, extracting images, OCR, or creating PDFs.
 license: Proprietary. LICENSE.txt has complete terms
-version: "1.0.1"
+version: "1.0.4"
 ---
 
 # PDF Processing Guide
 
 ## Overview
 
-This guide covers essential PDF processing operations using Python libraries and command-line tools. For advanced features, JavaScript libraries, and detailed examples, see REFERENCE.md. If you need to fill out a PDF form, read FORMS.md and follow its instructions.
+This guide defines how to handle PDF files. Read-only tasks must be handled with built-in tools first. Python libraries and scripts are fallback tools for PDF modification, OCR, form filling, or other operations that cannot be completed by direct reading.
 
-## Quick Start
+## Read-Only Routing Rules
 
-```python
-from pypdf import PdfReader, PdfWriter
+Use this section for requests like "read this PDF", "summarize this PDF", "answer questions from this PDF", or "extract the main points".
 
-# Read a PDF
-reader = PdfReader("document.pdf")
-print(f"Pages: {len(reader.pages)}")
+1. Prefer the built-in Read tool on the PDF path.
+   - Do not write Python, JavaScript, shell scripts, or temporary extraction files for simple reading.
+   - Do not use the Python examples below for read-only tasks unless the built-in Read tool fails or the user explicitly asks for a generated file.
 
-# Extract text
-text = ""
-for page in reader.pages:
-    text += page.extract_text()
+2. If the PDF has more than 100 pages, prefer markitdown before Python libraries.
+   - First check whether a global `markitdown` command is available.
+   - If global `markitdown` exists, use it directly.
+   - If global `markitdown` is missing, install it globally for the user, then use it.
+   - Do not create wrapper scripts around markitdown.
+   - If installation fails because of network, permissions, or missing Python tooling, say so briefly and fall back to the built-in Read tool or ask which page range to inspect.
+
+3. Only move to PDF processing libraries or scripts when the task needs document transformation, complex table extraction, OCR, form filling, image extraction, or PDF generation.
+
+### Page Count Check
+
+Use the cheapest available command. Try `pdfinfo` first:
+
+```bash
+pdfinfo input.pdf | grep '^Pages:'
 ```
+
+If `pdfinfo` is unavailable, use the built-in Read tool and infer whether the document is long from the tool result. Avoid writing a custom page-count script just to decide the reading path.
+
+### markitdown for Long PDFs
+
+For PDFs over 100 pages, first check for a globally available markitdown command:
+
+```bash
+command -v markitdown
+```
+
+If it exists, convert to Markdown directly:
+
+```bash
+markitdown input.pdf
+```
+
+If `markitdown` is not installed, install it globally before converting. Prefer direct `pip` installation because it is usually faster and has fewer network/toolchain dependencies than Homebrew-based flows.
+
+Before installing, quickly verify the package source/version if tooling is available:
+
+```bash
+python3 -m pip index versions markitdown
+```
+
+Then install:
+
+```bash
+python3 -m pip install --user "markitdown[all]"
+```
+
+After installation, run `markitdown input.pdf`. If the command is not on PATH, try `python3 -m markitdown input.pdf` or use the user's Python user-base bin path.
+
+If the output is too long for the response, inspect or summarize relevant sections instead of dumping the full text. When saving a converted Markdown file is useful, ask only if the user did not already request a file output.
+
+## Modification and Advanced Processing
+
+Use the sections below when the user asks to modify PDFs, create PDFs, fill forms, extract images, OCR scanned pages, or perform precise table extraction that the built-in Read tool cannot handle.
 
 ## Python Libraries
 
@@ -300,8 +348,10 @@ with open("encrypted.pdf", "wb") as output:
 |------|-----------|--------------|
 | Merge PDFs | pypdf | `writer.add_page(page)` |
 | Split PDFs | pypdf | One page per file |
-| Extract text | pdfplumber | `page.extract_text()` |
-| Extract tables | pdfplumber | `page.extract_tables()` |
+| Read or summarize PDFs | Built-in Read tool | Use Read first; no scripts |
+| Long PDF text extraction (>100 pages) | markitdown | `markitdown input.pdf` |
+| Extract text after Read fails | pdfplumber | `page.extract_text()` |
+| Extract tables after Read fails | pdfplumber | `page.extract_tables()` |
 | Create PDFs | reportlab | Canvas or Platypus |
 | Command line merge | qpdf | `qpdf --empty --pages ...` |
 | OCR scanned PDFs | pytesseract | Convert to image first |
