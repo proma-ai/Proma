@@ -12,6 +12,10 @@ export interface CapabilityChange {
     | 'skill_removed'
     | 'skill_enabled'
     | 'skill_disabled'
+    | 'flow_added'
+    | 'flow_removed'
+    | 'flow_enabled'
+    | 'flow_disabled'
   /** 变化对象名称 */
   name: string
 }
@@ -62,6 +66,25 @@ export function diffCapabilities(
     if (!nextSkillMap.has(slug)) {
       const skill = prevSkillMap.get(slug)!
       changes.push({ type: 'skill_removed', name: skill.name })
+    }
+  }
+
+  // --- Flows ---
+  const prevFlowMap = new Map(prev.flows.map((f) => [f.slug, f]))
+  const nextFlowMap = new Map(next.flows.map((f) => [f.slug, f]))
+
+  for (const [slug, flow] of nextFlowMap) {
+    const prevFlow = prevFlowMap.get(slug)
+    if (!prevFlow) {
+      changes.push({ type: 'flow_added', name: flow.name })
+    } else if (prevFlow.enabled !== flow.enabled) {
+      changes.push({ type: flow.enabled ? 'flow_enabled' : 'flow_disabled', name: flow.name })
+    }
+  }
+  for (const [slug] of prevFlowMap) {
+    if (!nextFlowMap.has(slug)) {
+      const flow = prevFlowMap.get(slug)!
+      changes.push({ type: 'flow_removed', name: flow.name })
     }
   }
 

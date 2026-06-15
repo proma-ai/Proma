@@ -693,9 +693,6 @@ export function applyAgentEvent(
       // 同步把 result 里真实的 usage（inputTokens / outputTokens / contextWindow 等）
       // 写入 streamState。SDK 流式过程中 message.usage 一直是 0，只有 result 里才有真实值，
       // 不在这里写入的话上下文指示器分母和分子会永远停留在 0 或上次会话的残留。
-      //
-      // 全字段条件 spread：event.usage 中的 undefined 字段不覆盖 prev 已有值，
-      // 避免流式 usage_update 已写入的真实值被 result 的空字段清零。
       return {
         ...prev,
         ...(event.usage ? {
@@ -705,10 +702,18 @@ export function applyAgentEvent(
           ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
           ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
-          usageUpdatedAt: Date.now(),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
+        ...(event.usage && {
+          inputTokens: event.usage.inputTokens,
+          ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
+          ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
+          ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
+          ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
+          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
+          usageUpdatedAt: Date.now(),
+        }),
       }
 
     case 'run_resumed':
@@ -997,7 +1002,7 @@ export interface BackgroundTask {
   /** 任务或 Shell ID */
   id: string
   /** 任务类型 */
-  type: 'agent' | 'shell'
+  type: 'agent' | 'shell' | 'workflow'
   /** 关联的工具调用 ID（用于滚动定位到实时工具调用） */
   toolUseId: string
   /** 任务开始时间戳 */
@@ -1006,6 +1011,34 @@ export interface BackgroundTask {
   elapsedSeconds: number
   /** 任务意图/描述 */
   intent?: string
+  /** Flow slug（type=workflow 时标识所属 Flow） */
+  flowSlug?: string
+  /** 任务状态：running 运行中 / completed 完成 / failed 失败 / stopped 停止 */
+  status?: 'running' | 'completed' | 'failed' | 'stopped'
+  /** 完成摘要（task_notification 的 summary） */
+  summary?: string
+  /** SDK 持久化脚本路径（workflow 完成后可保存为 Flow） */
+  outputFile?: string
+  /** SDK Workflow 运行 ID（用于 resumeFromRunId，从 tool_result 中提取） */
+  runId?: string
+  /** 子任务进度列表（workflow 的 phase → agent 层级） */
+  children?: FlowProgressItem[]
+}
+
+/** Flow 进度树节点 */
+export interface FlowProgressItem {
+  /** 任务 ID */
+  id: string
+  /** 显示名称 */
+  name: string
+  /** 状态 */
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  /** AI 生成的进度摘要 */
+  summary?: string
+  /** 最后调用的工具名 */
+  lastToolName?: string
+  /** 子节点（agent 节点可以有嵌套） */
+  children?: FlowProgressItem[]
 }
 
 /**

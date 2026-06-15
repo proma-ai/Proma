@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
 import {
   getAgentWorkspacesIndexPath,
@@ -19,9 +20,16 @@ import {
   getInactiveSkillsDir,
   getDefaultSkillsDir,
   parseSkillVersion,
+  getWorkspaceFlowsDir,
+  getInactiveFlowsDir,
+  getDefaultFlowsDir,
+  parseFlowVersion,
+  extractMetaBodyFromFlowJs,
+  compareSemver,
+  getConfigDirName,
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, FlowMeta, FlowImportSource, OtherWorkspaceFlowsGroup } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
@@ -174,6 +182,32 @@ function copyDefaultSkills(workspaceSlug: string): void {
   }
 }
 
+/** 将 ~/.proma/default-flows/ 的内容逐个复制到工作区 flows/ 目录 */
+function copyDefaultFlows(workspaceSlug: string): void {
+  const defaultDir = getDefaultFlowsDir()
+  const targetDir = getWorkspaceFlowsDir(workspaceSlug)
+
+  try {
+    const entries = readdirSync(defaultDir, { withFileTypes: true })
+    if (entries.length === 0) {
+      console.warn(`[Agent 工作区] 默认 Flows 模板为空，工作区 Flows 未初始化: ${workspaceSlug}`)
+      return
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const source = join(defaultDir, entry.name)
+      const target = join(targetDir, entry.name)
+      if (!existsSync(target)) {
+        cpSync(source, target, { recursive: true, filter: skillCopyFilter })
+      }
+    }
+    console.log(`[Agent 工作区] 已复制默认 Flows 到: ${workspaceSlug}`)
+  } catch (err) {
+    console.error(`[Agent 工作区] 复制默认 Flows 失败 (${workspaceSlug}):`, err)
+  }
+}
+
 export function createAgentWorkspace(name: string): AgentWorkspace {
   const index = readIndex()
 
@@ -197,6 +231,7 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
   getAgentWorkspacePath(slug)
   ensurePluginManifest(slug, name)
   copyDefaultSkills(slug)
+  copyDefaultFlows(slug)
 
   index.workspaces.unshift(workspace)
   writeIndex(index)
@@ -297,6 +332,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     getAgentWorkspacePath('default')
     ensurePluginManifest('default', '默认工作区')
     copyDefaultSkills('default')
+    copyDefaultFlows('default')
 
     index.workspaces.push(defaultWs)
     writeIndex(index)
@@ -308,6 +344,24 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
   }
 
   return defaultWs
+}
+
+// ===== 通用 slug 校验 =====
+
+const MAX_SLUG_LENGTH = 64
+const SLUG_VALID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+
+/** 校验 workspace/skill/flow slug 合法性，阻止路径遍历 */
+export function validateSlug(slug: string, label: string = 'slug'): void {
+  if (!slug || typeof slug !== 'string') {
+    throw new Error(`${label} 不能为空`)
+  }
+  if (slug.length > MAX_SLUG_LENGTH) {
+    throw new Error(`${label} 过长（最大 ${MAX_SLUG_LENGTH} 字符）`)
+  }
+  if (!SLUG_VALID_PATTERN.test(slug)) {
+    throw new Error(`${label} 包含非法字符，只允许字母、数字、下划线、连字符，且不能以连字符开头`)
+  }
 }
 
 // ===== 默认 Skills 自动升级 =====
@@ -397,6 +451,121 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
   }
 }
 
+// ===== 默认 Flows 自动升级 =====
+
+/**
+ * 同步默认 Flows 到所有工作区。规则：
+ * - 缺失：注入到 flows/（active），让升级后新增的内置 Flow 对老用户立即可用
+ * - 已存在（active 或 inactive）：比较 flow.js 的 version，bundled 更新时才覆盖
+ */
+export function upgradeDefaultFlowsInWorkspaces(): void {
+  const defaultDir = getDefaultFlowsDir()
+
+  interface DefaultFlowInfo {
+    version: string
+    sourcePath: string
+  }
+  const defaultFlows = new Map<string, DefaultFlowInfo>()
+
+  try {
+    const entries = readdirSync(defaultDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const sourcePath = join(defaultDir, entry.name)
+      defaultFlows.set(entry.name, {
+        version: parseFlowVersion(sourcePath),
+        sourcePath,
+      })
+    }
+  } catch {
+    return
+  }
+
+  if (defaultFlows.size === 0) return
+
+  const index = readIndex()
+
+  for (const workspace of index.workspaces) {
+    const activeDir = getWorkspaceFlowsDir(workspace.slug)
+    const inactiveDir = getInactiveFlowsDir(workspace.slug)
+
+    for (const [slug, info] of defaultFlows) {
+      const activePath = join(activeDir, slug)
+      const inactivePath = join(inactiveDir, slug)
+
+      if (existsSync(activePath)) {
+        const currentVer = parseFlowVersion(activePath)
+        if (compareSemver(info.version, currentVer) > 0) {
+          if (safeReplaceFlowDir(info.sourcePath, activePath)) {
+            console.log(
+              `[Agent 工作区] 已升级默认 Flow: ${workspace.slug}/${slug} (active, ${currentVer} → ${info.version})`,
+            )
+          } else {
+            console.warn(
+              `[Agent 工作区] 升级默认 Flow 失败 (${workspace.slug}/${slug}, active)，跳过`,
+            )
+          }
+        }
+        continue
+      }
+
+      if (existsSync(inactivePath)) {
+        const currentVer = parseFlowVersion(inactivePath)
+        if (compareSemver(info.version, currentVer) > 0) {
+          if (safeReplaceFlowDir(info.sourcePath, inactivePath)) {
+            console.log(
+              `[Agent 工作区] 已升级默认 Flow: ${workspace.slug}/${slug} (inactive, ${currentVer} → ${info.version})`,
+            )
+          } else {
+            console.warn(
+              `[Agent 工作区] 升级默认 Flow 失败 (${workspace.slug}/${slug}, inactive)，跳过`,
+            )
+          }
+        }
+        continue
+      }
+
+      try {
+        if (!existsSync(activeDir)) mkdirSync(activeDir, { recursive: true })
+        cpSync(info.sourcePath, activePath, { recursive: true, filter: skillCopyFilter })
+        console.log(`[Agent 工作区] 已注入新默认 Flow: ${workspace.slug}/${slug} → active`)
+      } catch (err) {
+        console.warn(`[Agent 工作区] 注入默认 Flow 失败 (${workspace.slug}/${slug}):`, err)
+      }
+    }
+  }
+}
+
+/** 安全替换一个 flow 目录：原子替换 + 失败恢复 */
+function safeReplaceFlowDir(sourcePath: string, targetPath: string): boolean {
+  try {
+    // 原子替换：先复制到临时目录，成功后用 rename 替换目标
+    const parentDir = dirname(targetPath)
+    const base = basename(targetPath)
+    const uniqueId = randomUUID().slice(0, 8)
+    const tempDir = join(parentDir, `.tmp-${base}-${uniqueId}`)
+    const backupDir = join(parentDir, `.backup-${base}-${uniqueId}`)
+
+    cpSync(sourcePath, tempDir, { recursive: true })
+    renameSync(targetPath, backupDir)
+
+    try {
+      renameSync(tempDir, targetPath)
+    } catch (renameErr) {
+      // 步骤3失败：尝试恢复 backup 到原位置
+      try { renameSync(backupDir, targetPath) } catch { /* 忽略恢复失败 */ }
+      throw renameErr
+    }
+
+    // 成功后清理 backup
+    try { rmSync(backupDir, { recursive: true, force: true }) } catch { /* 忽略 */ }
+    return true
+  } catch (err) {
+    console.warn(`[Agent 工作区] safeReplaceFlowDir 失败 (${targetPath}):`, err)
+    return false
+  }
+}
+
 /**
  * 安全替换一个 skill 目录：先 rmSync 再 cpSync，每步独立 try/catch。
  *
@@ -435,17 +604,6 @@ export function skillCopyFilter(src: string): boolean {
   return !SKILL_COPY_BLOCKLIST.has(basename(src))
 }
 
-/** 比较两个 semver 版本字符串，返回值 >0 表示 a 更新 */
-function compareSemver(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
-
 // ===== Plugin Manifest（SDK 插件发现） =====
 
 /** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills */
@@ -481,14 +639,7 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
   try {
     const raw = readFileSync(mcpPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<WorkspaceMcpConfig>
-    const servers = parsed.servers ?? {}
-    for (const [name, entry] of Object.entries(servers)) {
-      if (!entry.type) {
-        entry.type = entry.command ? 'stdio' : entry.url ? 'http' : 'stdio'
-        console.log(`[Agent 工作区] MCP 服务器 "${name}" 缺少 type 字段，已自动推断为 "${entry.type}"`)
-      }
-    }
-    return { servers }
+    return { servers: parsed.servers ?? {} }
   } catch (error) {
     console.error('[Agent 工作区] 读取 MCP 配置失败:', error)
     return { servers: {} }
@@ -517,9 +668,6 @@ export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
 /** 解析 SKILL.md 的 YAML frontmatter，支持单行值、block scalar（`|` / `>`）和多行缩进 */
 function parseSkillFrontmatter(content: string, slug: string, enabled: boolean): SkillMeta {
   const meta: SkillMeta = { slug, name: slug, enabled }
-
-  // 移除 UTF-8 BOM（﻿），确保 YAML frontmatter 匹配不受 BOM 干扰
-  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
 
   const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/)
   if (!fmMatch) return meta
@@ -571,11 +719,547 @@ function parseSkillFrontmatter(content: string, slug: string, enabled: boolean):
   return meta
 }
 
+// ===== Flow 管理 =====
+
+/**
+ * 获取工作区 Flow 列表
+ *
+ * 扫描活跃（flows/）和禁用（flows-inactive/）目录，解析 flow.js 的 meta 信息。
+ */
+export function getWorkspaceFlows(workspaceSlug: string): FlowMeta[] {
+  const activeDir = getWorkspaceFlowsDir(workspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(workspaceSlug)
+  const flows: FlowMeta[] = []
+
+  // 扫描活跃目录
+  try {
+    const entries = readdirSync(activeDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      // 跳过临时/备份目录和隐藏目录，避免 safeReplaceFlowDir 残留变成幻影 Flow
+      if (entry.name.startsWith('.') || entry.name.endsWith('.tmp')) continue
+      const flowJsPath = join(activeDir, entry.name, 'flow.js')
+      if (!existsSync(flowJsPath)) continue
+
+      const meta = parseFlowJsMeta(flowJsPath, entry.name, true)
+      if (meta) flows.push(meta)
+    }
+  } catch {
+    // 目录不存在或读取失败
+  }
+
+  // 扫描禁用目录
+  try {
+    const entries = readdirSync(inactiveDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      // 跳过临时/备份目录和隐藏目录
+      if (entry.name.startsWith('.') || entry.name.endsWith('.tmp')) continue
+      const flowJsPath = join(inactiveDir, entry.name, 'flow.js')
+      if (!existsSync(flowJsPath)) continue
+
+      const meta = parseFlowJsMeta(flowJsPath, entry.name, false)
+      if (meta) flows.push(meta)
+    }
+  } catch {
+    // 目录不存在或读取失败
+  }
+
+  return flows
+}
+
+/**
+ * 从 flow.js 解析 FlowMeta
+ *
+ * 使用正则+括号匹配解析 export const meta = { ... }，
+ * 与 parseSkillFrontmatter 风格一致。
+ * meta 必须是纯字面量（SDK 要求），不含函数调用或变量引用。
+ */
+function parseFlowJsMeta(
+  flowJsPath: string,
+  slug: string,
+  enabled: boolean,
+): FlowMeta | null {
+  try {
+    const content = readFileSync(flowJsPath, 'utf-8')
+
+    // 使用共享函数提取 meta 对象体（自动跳过字符串和注释中的花括号）
+    const metaBody = extractMetaBodyFromFlowJs(content)
+    if (!metaBody) return null
+
+    // 简单行级解析
+    let name = `!${slug}`
+    let description: string | undefined
+    let group: string | undefined
+    let icon: string | undefined
+    let version: string | undefined
+    let type: 'builtin' | 'custom' = 'custom'
+    let argsHint: string | undefined
+
+    for (const line of metaBody.split('\n')) {
+      const colonIdx = line.indexOf(':')
+      if (colonIdx === -1) continue
+      const key = line.slice(0, colonIdx).trim()
+      const value = line.slice(colonIdx + 1).trim().replace(/[,，]$/, '').replace(/^["']|["']$/g, '')
+
+      switch (key) {
+        case 'name': name = value || name; break
+        case 'description': description = value || undefined; break
+        case 'group': group = value || undefined; break
+        case 'icon': icon = value || undefined; break
+        case 'version': version = value || undefined; break
+        case 'type': if (value === 'builtin' || value === 'custom') type = value; break
+        case 'argsHint': argsHint = value || undefined; break
+      }
+    }
+
+    // 读取导入来源元数据
+    const flowDir = dirname(flowJsPath)
+    let importSource: FlowImportSource | undefined
+    try {
+      const sourcePath = join(flowDir, SOURCE_META_FILE)
+      if (existsSync(sourcePath)) {
+        const parsed = JSON.parse(readFileSync(sourcePath, 'utf-8')) as Partial<FlowImportSource>
+        // 基本字段校验：缺少 sourceWorkspaceSlug 视为无效
+        if (parsed?.sourceWorkspaceSlug) {
+          importSource = parsed as FlowImportSource
+        }
+      }
+    } catch {
+      // 解析失败，忽略
+    }
+
+    // 检查是否有更新版本
+    let hasUpdate: boolean | undefined
+    if (type === 'builtin') {
+      // 内置 Flow：与默认源版本对比
+      try {
+        const defaultDir = getDefaultFlowsDir()
+        const defaultFlowPath = join(defaultDir, slug)
+        if (existsSync(defaultFlowPath)) {
+          const defaultVer = parseFlowVersion(defaultFlowPath)
+          if (defaultVer && version && compareSemver(defaultVer, version) > 0) {
+            hasUpdate = true
+          }
+        }
+      } catch {
+        // 版本对比失败，忽略
+      }
+    } else if (importSource) {
+      // 跨工作区导入的 Flow：与源工作区版本对比
+      try {
+        const sourceActiveDir = getWorkspaceFlowsDir(importSource.sourceWorkspaceSlug)
+        const sourceInactiveDir = getInactiveFlowsDir(importSource.sourceWorkspaceSlug)
+        const sourceActiveFlow = join(sourceActiveDir, slug)
+        const sourceInactiveFlow = join(sourceInactiveDir, slug)
+        const sourceFlowDir = existsSync(sourceActiveFlow) ? sourceActiveFlow
+          : existsSync(sourceInactiveFlow) ? sourceInactiveFlow : null
+        if (sourceFlowDir) {
+          const sourceVer = parseFlowVersion(sourceFlowDir)
+          if (sourceVer && compareSemver(sourceVer, importSource.sourceVersion) > 0) {
+            hasUpdate = true
+          }
+        }
+      } catch {
+        // 版本对比失败，忽略
+      }
+    }
+
+    return {
+      slug,
+      name,
+      description,
+      group,
+      icon,
+      version,
+      enabled,
+      type,
+      importSource,
+      hasUpdate,
+      argsHint,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 删除工作区 Flow */
+export function deleteWorkspaceFlow(workspaceSlug: string, flowSlug: string): void {
+  validateSlug(flowSlug, 'Flow slug')
+  const activeDir = getWorkspaceFlowsDir(workspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(workspaceSlug)
+  const activePath = join(activeDir, flowSlug)
+  const inactivePath = join(inactiveDir, flowSlug)
+
+  if (existsSync(activePath)) {
+    rmSync(activePath, { recursive: true, force: true })
+    console.log(`[Agent 工作区] 已删除 Flow: ${workspaceSlug}/${flowSlug} (active)`)
+  } else if (existsSync(inactivePath)) {
+    rmSync(inactivePath, { recursive: true, force: true })
+    console.log(`[Agent 工作区] 已删除 Flow: ${workspaceSlug}/${flowSlug} (inactive)`)
+  } else {
+    throw new Error(`Flow 不存在: ${flowSlug}`)
+  }
+}
+
+/** 切换工作区 Flow 启用/禁用 */
+export function toggleWorkspaceFlow(workspaceSlug: string, flowSlug: string): boolean {
+  validateSlug(flowSlug, 'Flow slug')
+  const activeDir = getWorkspaceFlowsDir(workspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(workspaceSlug)
+  const activePath = join(activeDir, flowSlug)
+  const inactivePath = join(inactiveDir, flowSlug)
+
+  // 检查目标位置是否已存在同名目录
+  if (existsSync(activePath)) {
+    // 活跃 → 禁用：检查禁用目录是否已有同名
+    if (existsSync(inactivePath)) {
+      throw new Error(`目标目录已存在同名 Flow: ${flowSlug}`)
+    }
+    renameSync(activePath, inactivePath)
+    console.log(`[Agent 工作区] 已禁用 Flow: ${workspaceSlug}/${flowSlug}`)
+    return false
+  } else if (existsSync(inactivePath)) {
+    // 禁用 → 活跃：检查活跃目录是否已有同名
+    if (existsSync(activePath)) {
+      throw new Error(`目标目录已存在同名 Flow: ${flowSlug}`)
+    }
+    renameSync(inactivePath, activePath)
+    console.log(`[Agent 工作区] 已启用 Flow: ${workspaceSlug}/${flowSlug}`)
+    return true
+  } else {
+    throw new Error(`Flow 不存在: ${flowSlug}`)
+  }
+}
+
+/** 获取其他工作区的 Flow 列表（导入对话框用） */
+export function getOtherWorkspaceFlows(
+  currentWorkspaceSlug: string,
+): OtherWorkspaceFlowsGroup[] {
+  const index = readIndex()
+  const groups: OtherWorkspaceFlowsGroup[] = []
+
+  for (const workspace of index.workspaces) {
+    if (workspace.slug === currentWorkspaceSlug) continue
+
+    const flows = getWorkspaceFlows(workspace.slug)
+    if (flows.length === 0) continue
+
+    groups.push({
+      workspaceName: workspace.name,
+      workspaceSlug: workspace.slug,
+      flows,
+    })
+  }
+
+  return groups
+}
+
+/** 获取默认 Flow slug 列表 */
+export function getDefaultFlowSlugs(): string[] {
+  const defaultDir = getDefaultFlowsDir()
+  try {
+    return readdirSync(defaultDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+}
+
+/** 从其他工作区导入 Flow */
+export function importFlowFromWorkspace(
+  targetWorkspaceSlug: string,
+  sourceWorkspaceSlug: string,
+  flowSlug: string,
+): void {
+  // slug 路径遍历防护
+  validateSlug(targetWorkspaceSlug, '目标工作区 slug')
+  validateSlug(sourceWorkspaceSlug, '源工作区 slug')
+  validateSlug(flowSlug, 'Flow slug')
+
+  const sourceActiveDir = getWorkspaceFlowsDir(sourceWorkspaceSlug)
+  const sourceInactiveDir = getInactiveFlowsDir(sourceWorkspaceSlug)
+  const targetActiveDir = getWorkspaceFlowsDir(targetWorkspaceSlug)
+
+  const sourcePath = join(sourceActiveDir, flowSlug)
+  const sourceInactivePath = join(sourceInactiveDir, flowSlug)
+  const targetPath = join(targetActiveDir, flowSlug)
+
+  // 优先从活跃目录复制
+  const src = existsSync(sourcePath) ? sourcePath : existsSync(sourceInactivePath) ? sourceInactivePath : null
+  if (!src) {
+    throw new Error(`源 Flow 不存在: ${sourceWorkspaceSlug}/${flowSlug}`)
+  }
+
+  // 检查目标是否已存在（重名检测）
+  if (existsSync(targetPath)) {
+    throw new Error(`目标工作区已存在同名 Flow: ${flowSlug}`)
+  }
+
+  cpSync(src, targetPath, { recursive: true })
+
+  // 记录导入来源，支持跨工作区 hasUpdate 检测
+  const sourceWorkspace = readIndex().workspaces.find(w => w.slug === sourceWorkspaceSlug)
+  const sourceVersion = parseFlowVersion(src) || '0.0.0'
+  const importSource: FlowImportSource = {
+    sourceWorkspaceSlug,
+    sourceWorkspaceName: sourceWorkspace?.name || sourceWorkspaceSlug,
+    importedAt: new Date().toISOString(),
+    sourceVersion,
+  }
+  writeFileSync(join(targetPath, SOURCE_META_FILE), JSON.stringify(importSource, null, 2), 'utf-8')
+
+  console.log(`[Agent 工作区] 已导入 Flow: ${sourceWorkspaceSlug}/${flowSlug} → ${targetWorkspaceSlug}`)
+}
+
+/** 从源工作区同步更新已导入的 Flow */
+export function updateFlowFromSource(
+  targetWorkspaceSlug: string,
+  sourceWorkspaceSlug: string,
+  flowSlug: string,
+): void {
+  // slug 路径遍历防护
+  validateSlug(targetWorkspaceSlug, '目标工作区 slug')
+  validateSlug(sourceWorkspaceSlug, '源工作区 slug')
+  validateSlug(flowSlug, 'Flow slug')
+
+  const targetActiveDir = getWorkspaceFlowsDir(targetWorkspaceSlug)
+  const targetInactiveDir = getInactiveFlowsDir(targetWorkspaceSlug)
+  const targetActivePath = join(targetActiveDir, flowSlug)
+  const targetInactivePath = join(targetInactiveDir, flowSlug)
+  const existingTarget = existsSync(targetActivePath) ? targetActivePath
+    : existsSync(targetInactivePath) ? targetInactivePath : null
+
+  if (!existingTarget) {
+    throw new Error(`Flow 不存在: ${flowSlug}`)
+  }
+
+  // 验证目标 Flow 是否为跨工作区导入的
+  let originalImportSource: FlowImportSource | undefined
+  try {
+    const sourceMetaPath = join(existingTarget, SOURCE_META_FILE)
+    if (existsSync(sourceMetaPath)) {
+      originalImportSource = JSON.parse(readFileSync(sourceMetaPath, 'utf-8')) as FlowImportSource
+    }
+  } catch {
+    // 解析失败，忽略
+  }
+  if (!originalImportSource) {
+    throw new Error(`Flow ${flowSlug} 不是从其他工作区导入的，无法从源更新`)
+  }
+
+  // 记录原始位置（active 或 inactive）
+  const wasActive = existingTarget === targetActivePath
+
+  // 从源工作区复制到临时目录
+  const sourceActiveDir = getWorkspaceFlowsDir(sourceWorkspaceSlug)
+  const sourceInactiveDir = getInactiveFlowsDir(sourceWorkspaceSlug)
+  const sourceActivePath = join(sourceActiveDir, flowSlug)
+  const sourceInactivePath = join(sourceInactiveDir, flowSlug)
+  const src = existsSync(sourceActivePath) ? sourceActivePath
+    : existsSync(sourceInactivePath) ? sourceInactivePath : null
+  if (!src) {
+    throw new Error(`源 Flow 不存在: ${sourceWorkspaceSlug}/${flowSlug}`)
+  }
+
+  // 原子替换：先复制到临时目录，成功后替换
+  const tempDir = join(wasActive ? targetActiveDir : targetInactiveDir, `${flowSlug}.tmp`)
+  let cleanupNeeded = false
+  try {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true })
+    cpSync(src, tempDir, { recursive: true })
+    cleanupNeeded = true
+
+    // 写入更新后的来源信息
+    const sourceWorkspace = readIndex().workspaces.find(w => w.slug === sourceWorkspaceSlug)
+    const sourceVersion = parseFlowVersion(src) || '0.0.0'
+    const updatedImportSource: FlowImportSource = {
+      sourceWorkspaceSlug,
+      sourceWorkspaceName: sourceWorkspace?.name || sourceWorkspaceSlug,
+      importedAt: originalImportSource.importedAt, // 保留原始导入时间
+      sourceVersion,
+    }
+    writeFileSync(join(tempDir, SOURCE_META_FILE), JSON.stringify(updatedImportSource, null, 2), 'utf-8')
+
+    // 替换旧目录
+    rmSync(existingTarget, { recursive: true, force: true })
+    renameSync(tempDir, existingTarget)
+    cleanupNeeded = false
+
+    console.log(`[Agent 工作区] 已从源更新 Flow: ${sourceWorkspaceSlug}/${flowSlug} → ${targetWorkspaceSlug}`)
+  } finally {
+    // 确保临时目录被清理（即使部分步骤失败）
+    if (cleanupNeeded && existsSync(tempDir)) {
+      try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* 忽略 */ }
+    }
+  }
+}
+
+/** 从默认源升级内置 Flow 到最新版本 */
+export function upgradeDefaultFlowInWorkspace(
+  targetWorkspaceSlug: string,
+  flowSlug: string,
+): boolean {
+  validateSlug(flowSlug, 'Flow slug')
+  const defaultDir = getDefaultFlowsDir()
+  const sourcePath = join(defaultDir, flowSlug)
+  if (!existsSync(join(sourcePath, 'flow.js'))) {
+    throw new Error(`默认 Flow 不存在: ${flowSlug}`)
+  }
+
+  const activeDir = getWorkspaceFlowsDir(targetWorkspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(targetWorkspaceSlug)
+  const activeTarget = join(activeDir, flowSlug)
+  const inactiveTarget = join(inactiveDir, flowSlug)
+
+  // 判断目标位置（活跃或禁用）
+  let targetPath: string
+  if (existsSync(activeTarget)) {
+    targetPath = activeTarget
+  } else if (existsSync(inactiveTarget)) {
+    targetPath = inactiveTarget
+  } else {
+    throw new Error(`工作区中不存在 Flow: ${flowSlug}`)
+  }
+
+  // 保留导入来源元数据（如果目标已有 .source.json）
+  const sourceMetaPath = join(targetPath, SOURCE_META_FILE)
+  let preservedSourceMeta: FlowImportSource | undefined
+  if (existsSync(sourceMetaPath)) {
+    try {
+      preservedSourceMeta = JSON.parse(readFileSync(sourceMetaPath, 'utf-8')) as FlowImportSource
+    } catch {
+      // 解析失败，忽略
+    }
+  }
+
+  const result = safeReplaceFlowDir(sourcePath, targetPath)
+
+  // 恢复跨工作区导入来源元数据（仅当 Flow 是从其他工作区导入时才恢复，
+  // 内置 Flow 升级不应有 .source.json）
+  if (preservedSourceMeta && result && preservedSourceMeta.sourceWorkspaceSlug) {
+    try {
+      writeFileSync(sourceMetaPath, JSON.stringify(preservedSourceMeta, null, 2), 'utf-8')
+    } catch (err) {
+      console.warn(`[Agent 工作区] 恢复 .source.json 失败 (${targetPath}):`, err)
+    }
+  }
+
+  return result
+}
+
+/** 读取 flow.js 全文内容 */
+export function readFlowContent(workspaceSlug: string, flowSlug: string): string {
+  validateSlug(flowSlug, 'Flow slug')
+  const activeDir = getWorkspaceFlowsDir(workspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(workspaceSlug)
+  const activePath = join(activeDir, flowSlug, 'flow.js')
+  const inactivePath = join(inactiveDir, flowSlug, 'flow.js')
+
+  const path = existsSync(activePath) ? activePath : existsSync(inactivePath) ? inactivePath : null
+  if (!path) {
+    throw new Error(`Flow 不存在: ${flowSlug}`)
+  }
+
+  return readFileSync(path, 'utf-8')
+}
+
+/** 写入 flow.js 全文内容（支持新建） */
+export function writeFlowContent(workspaceSlug: string, flowSlug: string, content: string): void {
+  validateSlug(flowSlug, 'Flow slug')
+  // 内容长度限制：防止恶意大文件写入
+  const MAX_FLOW_CONTENT_LENGTH = 1024 * 1024 // 1MB
+  if (content.length > MAX_FLOW_CONTENT_LENGTH) {
+    throw new Error(`Flow 内容过长（最大 1MB）`)
+  }
+  const activeDir = getWorkspaceFlowsDir(workspaceSlug)
+  const inactiveDir = getInactiveFlowsDir(workspaceSlug)
+  const activePath = join(activeDir, flowSlug, 'flow.js')
+  const inactivePath = join(inactiveDir, flowSlug, 'flow.js')
+
+  // 已存在的 Flow：写入原位置（活跃或禁用目录）
+  if (existsSync(activePath)) {
+    writeFileSync(activePath, content, 'utf-8')
+    console.log(`[Agent 工作区] 已更新 Flow: ${workspaceSlug}/${flowSlug}`)
+    return
+  }
+  if (existsSync(inactivePath)) {
+    writeFileSync(inactivePath, content, 'utf-8')
+    console.log(`[Agent 工作区] 已更新 Flow: ${workspaceSlug}/${flowSlug} (inactive)`)
+    return
+  }
+
+  // 新建 Flow：在活跃目录下创建
+  const targetDir = join(activeDir, flowSlug)
+  mkdirSync(targetDir, { recursive: true })
+  const targetPath = join(targetDir, 'flow.js')
+  writeFileSync(targetPath, content, 'utf-8')
+  console.log(`[Agent 工作区] 已创建 Flow: ${workspaceSlug}/${flowSlug}`)
+}
+
+/**
+ * 将 SDK workflow 输出脚本保存为 Flow
+ *
+ * 读取 SDK 持久化的脚本文件，写入到 flows/ 目录下。
+ * 如果指定 flowSlug 对应的 Flow 已存在，覆盖其 flow.js；
+ * 如果不存在，创建新 Flow 目录。
+ */
+export function saveWorkflowAsFlow(workspaceSlug: string, scriptPath: string, flowSlug?: string): string {
+  // 校验 scriptPath 必须在合法的临时目录下（防止路径遍历读取任意文件）
+  const allowedPrefixes = [
+    join(homedir(), getConfigDirName(), 'agent-sessions'),
+    join(homedir(), getConfigDirName(), 'agent-workspaces'),
+  ]
+  // Windows 路径不区分大小写，使用 normalize + toLowerCase 比较
+  const normalizedScriptPath = resolve(scriptPath).toLowerCase()
+  const sep = process.platform === 'win32' ? '\\' : '/'
+  if (!allowedPrefixes.some((prefix) => {
+    const normalizedPrefix = resolve(prefix).toLowerCase() + sep
+    return normalizedScriptPath.startsWith(normalizedPrefix)
+  })) {
+    throw new Error(`非法脚本路径: ${scriptPath}`)
+  }
+
+  // 读取 SDK 持久化的脚本文件
+  if (!existsSync(scriptPath)) {
+    throw new Error(`脚本文件不存在: ${scriptPath}`)
+  }
+  const content = readFileSync(scriptPath, 'utf-8')
+
+  // 从脚本 meta 中提取 slug（如果没有传入），并校验合法性
+  const slug = flowSlug || extractSlugFromScript(content) || `custom-flow-${Date.now().toString(36)}`
+  validateSlug(slug, 'Flow slug')
+
+  // 写入到 flows/ 目录
+  const flowsDir = getWorkspaceFlowsDir(workspaceSlug)
+  const targetDir = join(flowsDir, slug)
+  if (!existsSync(targetDir)) {
+    mkdirSync(targetDir, { recursive: true })
+  }
+  const targetPath = join(targetDir, 'flow.js')
+  writeFileSync(targetPath, content, 'utf-8')
+
+  console.log(`[Agent 工作区] 已保存 Workflow 为 Flow: ${workspaceSlug}/${slug}`)
+  return slug
+}
+
+/**
+ * 从 flow.js 脚本内容中提取 slug
+ *
+ * 尝试从 meta.name 字段提取（如 "!deep-research" → "deep-research"）。
+ */
+function extractSlugFromScript(content: string): string | null {
+  const match = content.match(/name:\s*['"]!(.+?)['"]/)
+  return match?.[1] ?? null
+}
+
 // ===== 工作区能力摘要 =====
 
 export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabilities {
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
   const skills = getWorkspaceSkills(workspaceSlug)
+  const flows = getWorkspaceFlows(workspaceSlug)
 
   const mcpServers = Object.entries(mcpConfig.servers ?? {}).map(([name, entry]) => ({
     name,
@@ -583,7 +1267,7 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
     type: entry.type,
   }))
 
-  return { mcpServers, skills }
+  return { mcpServers, skills, flows }
 }
 
 export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): void {

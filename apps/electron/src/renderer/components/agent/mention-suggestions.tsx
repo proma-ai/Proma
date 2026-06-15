@@ -8,7 +8,7 @@
 import type React from 'react'
 import { ReactRenderer } from '@tiptap/react'
 import type { SuggestionOptions } from '@tiptap/suggestion'
-import { MessageSquareText, Sparkles, Server } from 'lucide-react'
+import { MessageSquareText, Sparkles, Server, Workflow } from 'lucide-react'
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
 import { createMentionPopup, positionPopup } from './mention-popup-utils'
@@ -89,7 +89,7 @@ function createMentionSuggestion<T>(
               renderItem: config.renderItem,
               onSelect: (item: T) => {
                 const cmd = config.toCommand(item)
-                props.command({ id: cmd.id, label: cmd.label })
+                props.command({ id: cmd.id, label: cmd.label, mentionSuggestionChar: config.char })
               },
             },
             editor: props.editor,
@@ -113,7 +113,7 @@ function createMentionSuggestion<T>(
             items: props.items,
             onSelect: (item: T) => {
               const cmd = config.toCommand(item)
-              props.command({ id: cmd.id, label: cmd.label })
+              props.command({ id: cmd.id, label: cmd.label, mentionSuggestionChar: config.char })
             },
           })
           positionPopup(popup, props.clientRect?.())
@@ -254,4 +254,63 @@ export function createSessionMentionSuggestion(
     mentionActiveRef,
     mentionItemCountRef,
   )
+}
+
+// ===== Flow 配置 =====
+
+export interface FlowMentionItem {
+  id: string
+  name: string
+  description?: string
+  argsHint?: string
+}
+
+export function createFlowMentionSuggestion(
+  workspaceSlugRef: React.RefObject<string | null>,
+  mentionActiveRef: React.MutableRefObject<boolean>,
+  mentionItemCountRef: React.MutableRefObject<number>,
+) {
+  const config = {
+    emptyText: '无匹配 Flow' as const,
+    fetchItems: async (slug: string, q: string) => {
+      const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
+      return caps.flows
+        .filter((f) => f.enabled)
+        .filter((f) => !q || f.name.toLowerCase().includes(q) || (f.slug ?? '').toLowerCase().includes(q))
+        .map((f) => ({ id: f.slug, name: f.name.replace(/^!/, ''), description: f.description, argsHint: f.argsHint }))
+    },
+    keyExtractor: (item: FlowMentionItem) => item.id,
+    renderItem: (item: FlowMentionItem) => (
+      <>
+        <Workflow className="size-3.5 text-amber-500 flex-shrink-0" />
+        <span className="truncate font-medium flex-1 min-w-0">{item.name}</span>
+        {item.argsHint && (
+          <span className="truncate text-[10px] text-amber-500/60 max-w-[80px] italic">{item.argsHint}</span>
+        )}
+        {item.description && (
+          <span className="truncate text-[10px] text-muted-foreground/50 max-w-[120px]">{item.description}</span>
+        )}
+      </>
+    ),
+    toCommand: (item: FlowMentionItem) => ({ id: item.id, label: item.name }),
+  }
+
+  const createWithChar = (char: string) => {
+    const suggestion = createMentionSuggestion<FlowMentionItem>(
+      {
+        char,
+        ...config,
+      },
+      workspaceSlugRef,
+      mentionActiveRef,
+      mentionItemCountRef,
+    )
+    // 过滤 Markdown 图片语法 ![alt](url) 和 ！[alt](url)，不触发 Flow mention 弹窗
+    return {
+      ...suggestion,
+      shouldShow: ({ text }: { text: string }) => !text.startsWith(`${char}[`),
+    }
+  }
+
+  return [createWithChar('!'), createWithChar('！')]
 }

@@ -502,7 +502,7 @@ export type AgentEvent =
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string; imageAttachments?: AgentToolResultImage[] }
   // 后台任务
   | { type: 'task_backgrounded'; toolUseId: string; taskId: string; intent?: string; turnId?: string }
-  | { type: 'task_started'; taskId: string; toolUseId?: string; description: string; taskType?: string; turnId?: string }
+  | { type: 'task_started'; taskId: string; toolUseId?: string; description: string; taskType?: string; turnId?: string; flowSlug?: string }
   | { type: 'task_progress'; toolUseId: string; elapsedSeconds?: number; turnId?: string; taskId?: string; description?: string; lastToolName?: string; usage?: TaskUsage }
   | { type: 'task_notification'; taskId: string; toolUseId?: string; status: 'completed' | 'failed' | 'stopped'; summary: string; outputFile?: string; usage?: TaskUsage; turnId?: string }
   | { type: 'thinking_tokens'; estimatedTokens: number; estimatedTokensDelta: number }
@@ -823,10 +823,46 @@ export interface SkillFileContent {
   size: number
 }
 
-/** 工作区能力摘要（MCP + Skill 计数） */
+/** 工作区能力摘要（MCP + Skill + Flow 计数） */
 export interface WorkspaceCapabilities {
   mcpServers: Array<{ name: string; enabled: boolean; type: McpTransportType }>
   skills: SkillMeta[]
+  flows: FlowMeta[]
+}
+
+// ===== Flow 元数据 =====
+
+/** Flow 类型 */
+export type FlowType = 'builtin' | 'custom'
+
+/** 从其他工作区导入的 Flow 来源元数据 */
+export interface FlowImportSource {
+  sourceWorkspaceSlug: string
+  sourceWorkspaceName: string
+  importedAt: string
+  sourceVersion: string
+}
+
+/** 工作区 Flow 元数据 */
+export interface FlowMeta {
+  slug: string
+  name: string
+  description?: string
+  group?: string
+  icon?: string
+  version?: string
+  enabled: boolean
+  type: FlowType
+  importSource?: FlowImportSource
+  hasUpdate?: boolean
+  argsHint?: string
+}
+
+/** 其他工作区 Flow 分组（导入对话框用） */
+export interface OtherWorkspaceFlowsGroup {
+  workspaceName: string
+  workspaceSlug: string
+  flows: FlowMeta[]
 }
 
 // ===== Agent 发送输入 =====
@@ -853,6 +889,8 @@ export interface AgentSendInput {
   permissionModeOverride?: PromaPermissionMode
   /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */
   mentionedSkills?: string[]
+  /** 用户通过 !flow:xxx 引用的 Flow slug 列表 */
+  mentionedFlows?: string[]
   /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
   mentionedMcpServers?: string[]
   /** 用户通过会话引用 mention 指定的 Agent 会话 ID 列表 */
@@ -1385,6 +1423,20 @@ export const AGENT_IPC_CHANNELS = {
   DELETE_SKILL_ENTRY: 'agent:delete-skill-entry',
   /** 重命名/移动 Skill 目录下的文件或目录 */
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
+
+  // 工作区能力 — Flow
+  GET_FLOWS: 'agent:get-flows',
+  GET_FLOWS_DIR: 'agent:get-flows-dir',
+  DELETE_FLOW: 'agent:delete-flow',
+  TOGGLE_FLOW: 'agent:toggle-flow',
+  GET_OTHER_WORKSPACE_FLOWS: 'agent:get-other-workspace-flows',
+  GET_DEFAULT_FLOW_SLUGS: 'agent:get-default-flow-slugs',
+  IMPORT_FLOW_FROM_WORKSPACE: 'agent:import-flow-from-workspace',
+  UPDATE_FLOW_FROM_SOURCE: 'agent:update-flow-from-source',
+  UPGRADE_DEFAULT_FLOW: 'agent:upgrade-default-flow',
+  READ_FLOW_CONTENT: 'agent:read-flow-content',
+  WRITE_FLOW_CONTENT: 'agent:write-flow-content',
+  SAVE_WORKFLOW_AS_FLOW: 'agent:save-workflow-as-flow',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

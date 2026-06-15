@@ -22,7 +22,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.12.5",
+      "version": "0.12.4",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.153",
         "@anthropic-ai/sdk": "^0.93.0",
@@ -137,7 +137,7 @@
     },
     "packages/core": {
       "name": "@proma/core",
-      "version": "0.2.11",
+      "version": "0.2.10",
       "dependencies": {
         "@proma/shared": "workspace:*",
         "highlight.js": "^11.11.1",
@@ -155,7 +155,7 @@
     },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.30",
+      "version": "0.1.23",
       "devDependencies": {
         "typescript": "^5.0.0",
       },

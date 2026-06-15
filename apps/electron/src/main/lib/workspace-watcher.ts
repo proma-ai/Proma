@@ -79,7 +79,8 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
 
       const isCapabilitiesChange =
         normalizedFilename.endsWith('/mcp.json') ||
-        normalizedFilename.includes('/skills/')
+        normalizedFilename.includes('/skills/') ||
+        (normalizedFilename.includes('/flows/') && !normalizedFilename.includes('/flows-inactive/'))
 
       if (isCapabilitiesChange) {
         // MCP/Skills 变化 → 通知侧边栏刷新

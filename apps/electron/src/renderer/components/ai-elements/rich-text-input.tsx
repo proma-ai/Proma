@@ -5,7 +5,7 @@
  *
  * 功能：
  * - StarterKit + Placeholder + Underline + Link + CodeBlockLowlight
- * - 可选 Mention 扩展（@ 引用文件、/ 触发 Skill、# 触发 MCP、& 引用会话）
+ * - 可选 Mention 扩展（@ 引用文件、! 触发 Flow、/ 触发 Skill、# 触发 MCP、& 引用会话）
  * - htmlToMarkdown 转换
  * - IME composition 处理
  * - Enter 提交 / Shift+Enter 换行
@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
-import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion } from '@/components/agent/mention-suggestions'
+import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion, createFlowMentionSuggestion } from '@/components/agent/mention-suggestions'
 import {
   VOICE_DICTATION_INSERT_EVENT,
   getLastFocusedVoiceInputId,
@@ -224,6 +224,12 @@ export function RichTextInput({
     [],
   )
 
+  // Flow Suggestion 配置（! 和 ！触发）
+  const flowSuggestions = useMemo(
+    () => createFlowMentionSuggestion(workspaceSlugRef, mentionActiveRef, mentionItemCountRef),
+    [],
+  )
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -271,12 +277,21 @@ export function RichTextInput({
         }).configure({
           HTMLAttributes: {},
           renderHTML({ node, suggestion }) {
-            const char = suggestion?.char ?? node.attrs.mentionSuggestionChar ?? '@'
             const label = node.attrs.label ?? node.attrs.id
+            // 优先从 suggestion/attrs 取，回退到 label 前缀检测
+            let char = suggestion?.char ?? node.attrs.mentionSuggestionChar
+            if (!char || char === '@') {
+              if (label?.startsWith('!')) char = '!'
+              else if (label?.startsWith('/skill:')) char = '/'
+              else if (label?.startsWith('#mcp:')) char = '#'
+              else if (label?.startsWith('&')) char = '&'
+              else char = '@'
+            }
             let chipClass = 'mention-chip'
             if (char === '/') chipClass = 'skill-mention-chip'
             else if (char === '#') chipClass = 'mcp-mention-chip'
             else if (char === '&') chipClass = 'session-mention-chip'
+            else if (char === '!' || char === '！') chipClass = 'flow-mention-chip'
             return [
               'span',
               {
@@ -294,6 +309,7 @@ export function RichTextInput({
             skillSuggestion,
             mcpSuggestion,
             sessionSuggestion,
+            ...flowSuggestions,
           ],
         }),
       ] : []),
@@ -751,6 +767,30 @@ export function RichTextInput({
           height: 12px;
           background-color: currentColor;
           mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3Cpath d='M8 9h8'/%3E%3Cpath d='M8 13h6'/%3E%3C/svg%3E");
+          mask-size: contain;
+          mask-repeat: no-repeat;
+          flex-shrink: 0;
+        }
+        .flow-mention-chip {
+          background-color: hsl(38 92% 50% / 0.16);
+          color: hsl(38 92% 38%);
+          border-radius: 4px;
+          padding: 1px 4px 1px 2px;
+          font-size: 13px;
+          font-weight: 500;
+          white-space: nowrap;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          vertical-align: baseline;
+        }
+        .flow-mention-chip::before {
+          content: '';
+          display: inline-block;
+          width: 12px;
+          height: 12px;
+          background-color: currentColor;
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='8' height='8' x='3' y='3' rx='2'/%3E%3Cpath d='M7 11v4a2 2 0 0 0 2 2h4'/%3E%3Crect width='8' height='8' x='13' y='13' rx='2'/%3E%3C/svg%3E");
           mask-size: contain;
           mask-repeat: no-repeat;
           flex-shrink: 0;

@@ -396,6 +396,124 @@ export function getDefaultSkillsDir(): string {
 }
 
 /**
+ * 获取指定工作区的 Flows 目录路径，不存在则自动创建。
+ */
+export function getWorkspaceFlowsDir(slug: string): string {
+  const dir = join(getAgentWorkspacePath(slug), 'flows')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * 获取工作区不活跃 Flows 目录路径，不存在则自动创建。
+ */
+export function getInactiveFlowsDir(slug: string): string {
+  const dir = join(getAgentWorkspacePath(slug), 'flows-inactive')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * 获取默认 Flows 模板目录路径，不存在则自动创建。
+ */
+export function getDefaultFlowsDir(): string {
+  const dir = join(getConfigDir(), 'default-flows')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * 从 flow.js 内容中提取 export const meta = { ... } 的对象体文本。
+ * 跳过字符串字面量、模板字符串（含嵌套 ${}）、行注释中的花括号。
+ */
+export function extractMetaBodyFromFlowJs(content: string): string | null {
+  const metaMatch = content.match(/export\s+const\s+meta\s*=\s*\{/)
+  if (!metaMatch) return null
+
+  const startIdx = metaMatch.index! + metaMatch[0].length
+  let depth = 1
+  let idx = startIdx
+
+  while (idx < content.length && depth > 0) {
+    const ch = content[idx]
+
+    if (ch === "'") {
+      idx++
+      while (idx < content.length && content[idx] !== "'") {
+        if (content[idx] === '\\') { idx += 2; continue }
+        idx++
+      }
+      idx++
+      continue
+    }
+
+    if (ch === '"') {
+      idx++
+      while (idx < content.length && content[idx] !== '"') {
+        if (content[idx] === '\\') { idx += 2; continue }
+        idx++
+      }
+      idx++
+      continue
+    }
+
+    if (ch === '`') {
+      idx++
+      while (idx < content.length && content[idx] !== '`') {
+        if (content[idx] === '\\') { idx += 2; continue }
+        if (content[idx] === '$' && idx + 1 < content.length && content[idx + 1] === '{') {
+          depth++
+          idx += 2
+          continue
+        }
+        idx++
+      }
+      idx++
+      continue
+    }
+
+    if (ch === '/' && idx + 1 < content.length && content[idx + 1] === '/') {
+      while (idx < content.length && content[idx] !== '\n') idx++
+      continue
+    }
+
+    if (ch === '{') depth++
+    else if (ch === '}') depth--
+    idx++
+  }
+
+  return content.slice(startIdx, idx - 1)
+}
+
+/**
+ * 从 flow.js 的 meta 对象中解析 version 字段。
+ * 无 version 字段时返回 '0.0.0'。
+ */
+export function parseFlowVersion(flowDir: string): string {
+  const flowJsPath = join(flowDir, 'flow.js')
+  if (!existsSync(flowJsPath)) return '0.0.0'
+
+  try {
+    const content = readFileSync(flowJsPath, 'utf-8')
+    const metaBody = extractMetaBodyFromFlowJs(content)
+    if (!metaBody) return '0.0.0'
+
+    for (const line of metaBody.split('\n')) {
+      const cleanLine = line.replace(/(\/\/.*)$/, '')
+      const colonIdx = cleanLine.indexOf(':')
+      if (colonIdx === -1) continue
+      const key = cleanLine.slice(0, colonIdx).trim()
+      const value = cleanLine.slice(colonIdx + 1).trim().replace(/[,，]$/, '').replace(/^["']|["']$/g, '')
+      if (key === 'version' && value) return value
+    }
+  } catch {
+    // 解析失败视为最低版本
+  }
+
+  return '0.0.0'
+}
+
+/**
  * 从 SKILL.md 的 YAML frontmatter 中解析 version 字段
  *
  * 无 version 字段时返回 '0.0.0'（确保旧 Skill 会被更新）。
@@ -428,7 +546,7 @@ export function parseSkillVersion(skillDir: string): string {
  *
  * @returns 正数表示 a > b，0 表示相等，负数表示 a < b
  */
-function compareSemver(a: string, b: string): number {
+export function compareSemver(a: string, b: string): number {
   const pa = a.split('.').map(Number)
   const pb = b.split('.').map(Number)
   for (let i = 0; i < 3; i++) {
@@ -438,9 +556,9 @@ function compareSemver(a: string, b: string): number {
   return 0
 }
 
-/** 防御性目录基名集合：复制 default skills 时永远跳过这些目录，避免
+/** 防御性目录基名集合：复制默认模板（Skills/Flows）时永远跳过这些目录，避免
  *  .git 0444 文件、node_modules 文件爆炸等场景把启动期同步链路炸掉。 */
-const DEFAULT_SKILL_COPY_BLOCKLIST = new Set([
+const DEFAULT_COPY_BLOCKLIST = new Set([
   '.git',
   '.DS_Store',
   'node_modules',
@@ -451,8 +569,8 @@ const DEFAULT_SKILL_COPY_BLOCKLIST = new Set([
   '__pycache__',
 ])
 
-function defaultSkillCopyFilter(src: string): boolean {
-  return !DEFAULT_SKILL_COPY_BLOCKLIST.has(basename(src))
+function defaultCopyFilter(src: string): boolean {
+  return !DEFAULT_COPY_BLOCKLIST.has(basename(src))
 }
 
 /**
@@ -489,7 +607,7 @@ export function seedDefaultSkills(): void {
 
       try {
         if (!existsSync(target)) {
-          cpSync(source, target, { recursive: true, filter: defaultSkillCopyFilter })
+          cpSync(source, target, { recursive: true, filter: defaultCopyFilter })
           console.log(`[配置] 已同步默认 Skill: ${entry.name}`)
           continue
         }
@@ -502,7 +620,7 @@ export function seedDefaultSkills(): void {
           // 0444 文件用 cpSync({ force: true }) 无法覆盖会 EACCES，但
           // rmSync({ force: true }) 只需父目录可写就能 unlink）。
           rmSync(target, { recursive: true, force: true })
-          cpSync(source, target, { recursive: true, filter: defaultSkillCopyFilter })
+          cpSync(source, target, { recursive: true, filter: defaultCopyFilter })
           console.log(`[配置] 已升级默认 Skill: ${entry.name} (${existingVer} → ${bundledVer})`)
         }
       } catch (err) {
@@ -513,6 +631,56 @@ export function seedDefaultSkills(): void {
     }
   } catch (err) {
     console.warn('[配置] 同步默认 Skills 失败:', err)
+  }
+}
+
+/**
+ * 从 app bundle 同步默认 Flows 到 ~/.proma/default-flows/
+ *
+ * 与 seedDefaultSkills 规则一致：
+ * - 缺失的 Flow：直接复制
+ * - 已存在的 Flow：比较 flow.js version，bundled 更新时才覆盖
+ */
+export function seedDefaultFlows(): void {
+  const { app } = require('electron')
+  const bundledDir = app.isPackaged
+    ? join(process.resourcesPath, 'default-flows')
+    : join(__dirname, '../default-flows')
+
+  if (!existsSync(bundledDir)) {
+    console.log('[配置] 未找到内置 default-flows 目录，跳过')
+    return
+  }
+
+  const userDir = getDefaultFlowsDir()
+
+  try {
+    const entries = readdirSync(bundledDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const source = join(bundledDir, entry.name)
+      const target = join(userDir, entry.name)
+
+      try {
+        if (!existsSync(target)) {
+          cpSync(source, target, { recursive: true, filter: defaultCopyFilter })
+          console.log(`[配置] 已同步默认 Flow: ${entry.name}`)
+          continue
+        }
+
+        const bundledVer = parseFlowVersion(source)
+        const existingVer = parseFlowVersion(target)
+        if (compareSemver(bundledVer, existingVer) > 0) {
+          rmSync(target, { recursive: true, force: true })
+          cpSync(source, target, { recursive: true, filter: defaultCopyFilter })
+          console.log(`[配置] 已升级默认 Flow: ${entry.name} (${existingVer} → ${bundledVer})`)
+        }
+      } catch (err) {
+        console.warn(`[配置] 同步默认 Flow 失败 (${entry.name})，跳过:`, err)
+      }
+    }
+  } catch (err) {
+    console.warn('[配置] 同步默认 Flows 失败:', err)
   }
 }
 

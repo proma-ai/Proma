@@ -6,10 +6,12 @@ import type { WorkspaceCapabilities } from '../types/agent'
 function makeCaps(
   mcpServers: Array<{ name: string; enabled: boolean }> = [],
   skills: Array<{ slug: string; name: string; enabled: boolean }> = [],
+  flows: Array<{ slug: string; name: string; enabled: boolean; type: 'builtin' | 'custom' }> = [],
 ): WorkspaceCapabilities {
   return {
     mcpServers: mcpServers.map((s) => ({ ...s, type: 'stdio' as const })),
     skills: skills.map((s) => ({ ...s })),
+    flows: flows.map((f) => ({ ...f })),
   }
 }
 
@@ -106,5 +108,52 @@ describe('diffCapabilities', () => {
     expect(changes).toContainEqual({ type: 'skill_disabled', name: 'Code Review' })
     expect(changes).toContainEqual({ type: 'skill_added', name: 'Test Runner' })
     expect(changes).toHaveLength(5)
+  })
+
+  // --- Flows ---
+
+  test('检测 Flow 新增', () => {
+    const prev = makeCaps()
+    const next = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: true, type: 'builtin' }])
+    const changes = diffCapabilities(prev, next)
+    expect(changes).toEqual([{ type: 'flow_added', name: 'Deep Research' }])
+  })
+
+  test('检测 Flow 移除', () => {
+    const prev = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: true, type: 'builtin' }])
+    const next = makeCaps()
+    const changes = diffCapabilities(prev, next)
+    expect(changes).toEqual([{ type: 'flow_removed', name: 'Deep Research' }])
+  })
+
+  test('检测 Flow 启用', () => {
+    const prev = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: false, type: 'builtin' }])
+    const next = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: true, type: 'builtin' }])
+    const changes = diffCapabilities(prev, next)
+    expect(changes).toEqual([{ type: 'flow_enabled', name: 'Deep Research' }])
+  })
+
+  test('检测 Flow 禁用', () => {
+    const prev = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: true, type: 'builtin' }])
+    const next = makeCaps([], [], [{ slug: 'deep-research', name: 'Deep Research', enabled: false, type: 'builtin' }])
+    const changes = diffCapabilities(prev, next)
+    expect(changes).toEqual([{ type: 'flow_disabled', name: 'Deep Research' }])
+  })
+
+  test('检测 Flow 与 Skill/MCP 混合场景', () => {
+    const prev = makeCaps(
+      [{ name: 'github', enabled: true }],
+      [{ slug: 'review', name: 'Code Review', enabled: true }],
+      [{ slug: 'deep-research', name: 'Deep Research', enabled: true, type: 'builtin' }],
+    )
+    const next = makeCaps(
+      [{ name: 'github', enabled: true }],
+      [{ slug: 'review', name: 'Code Review', enabled: true }],
+      [{ slug: 'deep-research', name: 'Deep Research', enabled: false, type: 'builtin' }, { slug: 'ultracode', name: 'Ultracode', enabled: true, type: 'builtin' }],
+    )
+    const changes = diffCapabilities(prev, next)
+    expect(changes).toContainEqual({ type: 'flow_disabled', name: 'Deep Research' })
+    expect(changes).toContainEqual({ type: 'flow_added', name: 'Ultracode' })
+    expect(changes).toHaveLength(2)
   })
 })

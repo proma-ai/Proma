@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Loader2, Terminal, GitBranch } from 'lucide-react'
+import { Loader2, Terminal, GitBranch, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { BackgroundTask } from '@/atoms/agent-atoms'
 
@@ -72,7 +72,7 @@ export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement
   }, [task.type, task.startTime])
 
   const displayElapsed = task.type === 'shell' ? localElapsed : task.elapsedSeconds
-  const Icon = task.type === 'shell' ? Terminal : GitBranch
+  const Icon = task.type === 'shell' ? Terminal : task.type === 'workflow' ? Workflow : GitBranch
 
   return (
     <button
@@ -98,7 +98,7 @@ export function TaskBadge({ task, onClick }: TaskBadgeProps): React.ReactElement
 
       {/* 类型标签 */}
       <span className="text-muted-foreground">
-        {task.type === 'shell' ? 'Shell' : 'Task'}
+        {task.type === 'shell' ? 'Shell' : task.type === 'workflow' ? 'Workflow' : 'Task'}
       </span>
 
       {/* 任务 ID（缩短） */}

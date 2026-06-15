@@ -85,6 +85,34 @@ const SUBAGENT_METADATA: Record<string, SubAgentMetadata> = {
     defaultModel: 'haiku',
     usageHint: '调研技术方案、对比多个选项',
   },
+  'deep-researcher': {
+    shortDesc: '深度调研子代理。拆分研究主题为并行搜索方向，派发子 Agent 交叉验证，输出引用报告。',
+    detailedPrompt: `你是一个深度调研执行者。收到研究主题后，严格按以下流程执行：
+
+1. **拆分方向**：将主题拆为 2-4 个独立搜索方向
+2. **并行派发**：使用 Task 工具同时为每个方向派发搜索子 Agent，每个子 Agent 返回该方向的关键发现
+3. **交叉验证**：对比各子 Agent 的发现，标注一致和矛盾之处，必要时追加验证
+4. **综合报告**：输出结构化报告：核心发现摘要、分方向分析、来源引用、局限性说明
+
+每个子 Agent 必须独立可并行执行，不依赖其他子 Agent 的结果。`,
+    tools: ['Read', 'Write', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch', 'Task'],
+    defaultModel: 'sonnet',
+    usageHint: '深度调研、多源搜索、交叉验证并生成引用报告',
+  },
+  'workflow-runner': {
+    shortDesc: '工作流执行子代理。将任务转化为多 Agent 编排脚本，使用 Workflow 工具执行，汇总结果。',
+    detailedPrompt: `你是一个动态工作流执行者。收到任务后，严格按以下流程执行：
+
+1. **拆解任务**：将任务分解为可并行的独立子任务
+2. **编写脚本**：使用 Write 工具创建 Workflow 编排脚本，定义 meta/phases，用 agent()/parallel()/pipeline() 编排子 Agent
+3. **执行**：使用 Workflow 工具加载脚本运行
+4. **汇总结果**：报告成功和失败的步骤
+
+子任务之间不要有顺序依赖。脚本 meta 必须用纯字面量。`,
+    tools: ['Write', 'Read', 'Workflow'],
+    defaultModel: 'sonnet',
+    usageHint: '多 Agent 编排、动态工作流编写和执行',
+  },
 }
 
 // ===== 工具使用指南（可复用常量） =====

@@ -552,6 +552,44 @@ export interface ElectronAPI {
   /** 重命名/移动 Skill 目录下的文件或目录 */
   renameSkillEntry: (workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string) => Promise<void>
 
+  // ===== Flow 管理 =====
+
+  /** 获取工作区 Flow 列表 */
+  getFlows: (workspaceSlug: string) => Promise<import('@proma/shared').FlowMeta[]>
+
+  /** 获取工作区 Flows 目录绝对路径 */
+  getWorkspaceFlowsDir: (workspaceSlug: string) => Promise<string>
+
+  /** 删除工作区 Flow */
+  deleteFlow: (workspaceSlug: string, flowSlug: string) => Promise<void>
+
+  /** 切换工作区 Flow 启用/禁用 */
+  toggleFlow: (workspaceSlug: string, flowSlug: string) => Promise<boolean>
+
+  /** 获取其他工作区的 Flow 列表 */
+  getOtherWorkspaceFlows: (currentSlug: string) => Promise<import('@proma/shared').OtherWorkspaceFlowsGroup[]>
+
+  /** 获取默认 Flows 的 slug 列表 */
+  getDefaultFlowSlugs: () => Promise<string[]>
+
+  /** 从其他工作区导入 Flow */
+  importFlowFromWorkspace: (targetSlug: string, sourceSlug: string, flowSlug: string) => Promise<void>
+
+  /** 从源工作区同步更新已导入的 Flow */
+  updateFlowFromSource: (targetSlug: string, sourceSlug: string, flowSlug: string) => Promise<void>
+
+  /** 读取 flow.js 全文内容 */
+  readFlowContent: (workspaceSlug: string, flowSlug: string) => Promise<string>
+
+  /** 写入 flow.js 全文内容 */
+  writeFlowContent: (workspaceSlug: string, flowSlug: string, content: string) => Promise<void>
+
+  /** 将 SDK workflow 输出脚本保存为 Flow */
+  saveWorkflowAsFlow: (workspaceSlug: string, scriptPath: string, flowSlug?: string) => Promise<string>
+
+  /** 从默认源升级内置 Flow */
+  upgradeDefaultFlow: (workspaceSlug: string, flowSlug: string) => Promise<boolean>
+
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
 
@@ -1595,6 +1633,56 @@ const electronAPI: ElectronAPI = {
 
   renameSkillEntry: (workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RENAME_SKILL_ENTRY, workspaceSlug, skillSlug, fromRelative, toRelative)
+  },
+
+  // ===== Flow 管理 =====
+
+  getFlows: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_FLOWS, workspaceSlug)
+  },
+
+  getWorkspaceFlowsDir: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_FLOWS_DIR, workspaceSlug)
+  },
+
+  deleteFlow: (workspaceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_FLOW, workspaceSlug, flowSlug)
+  },
+
+  toggleFlow: (workspaceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_FLOW, workspaceSlug, flowSlug)
+  },
+
+  getOtherWorkspaceFlows: (currentSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_OTHER_WORKSPACE_FLOWS, currentSlug)
+  },
+
+  getDefaultFlowSlugs: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_DEFAULT_FLOW_SLUGS)
+  },
+
+  importFlowFromWorkspace: (targetSlug: string, sourceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.IMPORT_FLOW_FROM_WORKSPACE, targetSlug, sourceSlug, flowSlug)
+  },
+
+  updateFlowFromSource: (targetSlug: string, sourceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_FLOW_FROM_SOURCE, targetSlug, sourceSlug, flowSlug)
+  },
+
+  readFlowContent: (workspaceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_FLOW_CONTENT, workspaceSlug, flowSlug)
+  },
+
+  writeFlowContent: (workspaceSlug: string, flowSlug: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_FLOW_CONTENT, workspaceSlug, flowSlug, content)
+  },
+
+  saveWorkflowAsFlow: (workspaceSlug: string, scriptPath: string, flowSlug?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SAVE_WORKFLOW_AS_FLOW, workspaceSlug, scriptPath, flowSlug)
+  },
+
+  upgradeDefaultFlow: (workspaceSlug: string, flowSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPGRADE_DEFAULT_FLOW, workspaceSlug, flowSlug)
   },
 
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {

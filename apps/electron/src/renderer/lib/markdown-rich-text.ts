@@ -445,11 +445,13 @@ export function htmlToMarkdown(html: string): string {
         }
         const dataType = el.getAttribute('data-type')
         const dataId = el.getAttribute('data-id') || ''
-        const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
+        const suggestionChar = el.getAttribute('data-mention-suggestion-char')
+        const chipClass = el.getAttribute('class') || ''
         if (dataType === 'mention') {
-          if (suggestionChar === '/') return `/skill:${dataId}`
-          if (suggestionChar === '#') return `#mcp:${dataId}`
-          if (suggestionChar === '&') return `&session:${dataId}`
+          if (suggestionChar === '/' || chipClass.includes('skill-mention-chip')) return `/skill:${dataId}`
+          if (suggestionChar === '#' || chipClass.includes('mcp-mention-chip')) return `#mcp:${dataId}`
+          if (suggestionChar === '&' || chipClass.includes('session-mention-chip')) return `&session:${dataId}`
+          if (suggestionChar === '!' || suggestionChar === '！' || chipClass.includes('flow-mention-chip')) return `!flow:${dataId}`
           return `@file:${dataId}`
         }
         return children

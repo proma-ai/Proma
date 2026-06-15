@@ -20,6 +20,7 @@ import {
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
+  type BackgroundTask,
   fileBrowserAutoRevealAtom,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
@@ -66,6 +67,9 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Upda
 
 /** 会改变 git 工作树状态的子命令（用于识别 Bash 中触发 diff 刷新的 git 操作） */
 const GIT_MUTATING_SUBCOMMANDS = /\bgit\s+(commit|checkout|reset|restore|stash|clean|add|rm|mv|pull|merge|rebase|cherry-pick|revert|switch|am|apply)\b/
+
+/** 各 session 的 workflow 延迟清理定时器，新任务启动时取消避免误清 */
+const workflowCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function isAbsolutePath(path: string): boolean {
   return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
@@ -257,7 +261,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       if (sMsg.subtype === 'compact_boundary') return [{ type: 'compact_complete' }]
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
       if (sMsg.subtype === 'task_started' && sMsg.task_id) {
-        return [{ type: 'task_started', taskId: sMsg.task_id, description: sMsg.description ?? '', taskType: sMsg.task_type, toolUseId: sMsg.tool_use_id }]
+        return [{ type: 'task_started', taskId: sMsg.task_id, description: sMsg.description ?? '', taskType: sMsg.task_type, toolUseId: sMsg.tool_use_id, flowSlug: typeof sMsg.flow_slug === 'string' ? sMsg.flow_slug : undefined }]
       }
       if (sMsg.subtype === 'task_notification' && sMsg.task_id) {
         return [{
@@ -706,13 +710,86 @@ export function useGlobalAgentListeners(): void {
                 intent: event.intent,
               }]
             })
+          } else if (event.type === 'task_started') {
+            // workflow 类型的任务启动时，添加到后台任务列表
+            const isWorkflow = event.taskType === 'local_workflow'
+              || event.taskType === 'workflow'
+              || (typeof event.taskType === 'string' && event.taskType.includes('workflow'))
+            if (isWorkflow) {
+              // 新 workflow 启动：取消该 session 的延迟清理定时器
+              const existingTimer = workflowCleanupTimers.get(sessionId)
+              if (existingTimer) {
+                clearTimeout(existingTimer)
+                workflowCleanupTimers.delete(sessionId)
+              }
+              store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
+                if (prev.some((t) => t.id === event.taskId)) return prev
+                // 优先使用后端直传的 flowSlug，回退到从 description 解析
+                const flowSlug = event.flowSlug
+                  || (event.description
+                    ? event.description.replace(/^!/, '').split(/\s/)[0] || undefined
+                    : undefined)
+                return [...prev, {
+                  id: event.taskId,
+                  type: 'workflow' as const,
+                  toolUseId: event.toolUseId ?? event.taskId,
+                  startTime: Date.now(),
+                  elapsedSeconds: 0,
+                  intent: event.description,
+                  status: 'running' as const,
+                  flowSlug,
+                  children: [],
+                }]
+              })
+            } else {
+              // 非 workflow 的 task_started：作为子节点添加到最近启动的 running workflow
+              store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
+                const runningWorkflow = prev.findLast((t) => t.type === 'workflow' && t.status === 'running')
+                if (!runningWorkflow) return prev
+                const childId = event.taskId
+                if (runningWorkflow.children?.some((c) => c.id === childId)) return prev
+                return prev.map((t) =>
+                  t.id === runningWorkflow.id
+                    ? {
+                        ...t,
+                        children: [...(t.children ?? []), {
+                          id: childId,
+                          name: event.description || `Agent ${childId.slice(0, 8)}`,
+                          status: 'running' as const,
+                          toolUseId: event.toolUseId,
+                          lastToolName: undefined,
+                          summary: undefined,
+                        }],
+                      }
+                    : t
+                )
+              })
+            }
           } else if (event.type === 'task_progress') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
-              prev.map((t) =>
-                t.toolUseId === event.toolUseId
-                  ? { ...t, elapsedSeconds: event.elapsedSeconds ?? t.elapsedSeconds }
-                  : t
-              )
+              prev.map((t) => {
+                // 更新 workflow 自身的 elapsedSeconds
+                if (t.toolUseId === event.toolUseId) {
+                  return { ...t, elapsedSeconds: event.elapsedSeconds ?? t.elapsedSeconds }
+                }
+                // 更新子节点的进度
+                if (t.children?.some((c) => c.id === event.taskId)) {
+                  return {
+                    ...t,
+                    children: t.children.map((c) =>
+                      c.id === event.taskId
+                        ? {
+                            ...c,
+                            status: 'running' as const,
+                            lastToolName: event.lastToolName,
+                            summary: event.description || c.summary,
+                          }
+                        : c
+                    ),
+                  }
+                }
+                return t
+              })
             )
           } else if (event.type === 'shell_backgrounded') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
@@ -794,6 +871,49 @@ export function useGlobalAgentListeners(): void {
               const task = prev.find((t) => t.id === event.shellId)
               if (!task) return prev
               return prev.filter((t) => t.toolUseId !== task.toolUseId)
+            })
+          } else if (event.type === 'task_notification') {
+            // workflow 任务完成/失败/停止时，标记完成状态（保留以显示"保存为 Flow"按钮）
+            // 子 Agent 完成时更新其状态
+            store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
+              const task = prev.find((t) => t.id === event.taskId)
+              if (task?.type === 'workflow') {
+                // workflow 保留在列表中，标记完成状态
+                return prev.map((t) =>
+                  t.id === event.taskId
+                    ? {
+                        ...t,
+                        status: event.status ?? 'completed',
+                        summary: event.summary,
+                        outputFile: event.outputFile,
+                      }
+                    : t
+                )
+              }
+              // 子 Agent 完成：更新其所在 workflow 的 children 状态
+              const parentWorkflow = prev.find((t) =>
+                t.type === 'workflow' && t.children?.some((c) => c.id === event.taskId)
+              )
+              if (parentWorkflow) {
+                return prev.map((t) =>
+                  t.id === parentWorkflow.id
+                    ? {
+                        ...t,
+                        children: t.children!.map((c) =>
+                          c.id === event.taskId
+                            ? {
+                                ...c,
+                                status: event.status ?? 'completed',
+                                summary: event.summary || c.summary,
+                              }
+                            : c
+                        ),
+                      }
+                    : t
+                )
+              }
+              // 非 workflow 且非子 Agent 任务直接移除
+              return prev.filter((t) => t.id !== event.taskId)
             })
           } else if (event.type === 'prompt_suggestion') {
             // 存储提示建议到 atom
@@ -1016,8 +1136,30 @@ export function useGlobalAgentListeners(): void {
           // 等任务完成 Agent 自动唤醒续轮后再走真正的完成路径。
           if (backgroundTasksPending) return
 
-          // 清理后台任务
-          store.set(backgroundTasksAtomFamily(data.sessionId), [])
+          // 清理后台任务：保留已完成的 workflow 任务 30 秒供用户操作（保存为 Flow），
+          // 立即清除 running 和非 workflow 类型的已完成任务
+          const currentTasks = store.get(backgroundTasksAtomFamily(data.sessionId))
+          const completedWorkflows = currentTasks.filter(
+            (t: BackgroundTask) => t.type === 'workflow' && t.status === 'completed',
+          )
+          if (completedWorkflows.length > 0) {
+            // 保留已完成的 workflow，30 秒后延迟清理
+            store.set(backgroundTasksAtomFamily(data.sessionId), completedWorkflows)
+            // 先取消旧定时器，再注册新的
+            const oldTimer = workflowCleanupTimers.get(data.sessionId)
+            if (oldTimer) clearTimeout(oldTimer)
+            const timer = setTimeout(() => {
+              workflowCleanupTimers.delete(data.sessionId)
+              const latestTasks = store.get(backgroundTasksAtomFamily(data.sessionId))
+              const hasRunning = latestTasks.some((t: BackgroundTask) => t.status === 'running' || !t.status)
+              if (!hasRunning) {
+                store.set(backgroundTasksAtomFamily(data.sessionId), [])
+              }
+            }, 30_000)
+            workflowCleanupTimers.set(data.sessionId, timer)
+          } else {
+            store.set(backgroundTasksAtomFamily(data.sessionId), [])
+          }
 
           // 清理该 session 关联的未完成写工具记录，防止内存泄漏
           for (const [toolId, entry] of pendingWriteTools) {

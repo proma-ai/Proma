@@ -54,6 +54,11 @@ extraResources:
     to: default-skills
     filter:
       - "**/*"
+  # 默认 Flows 模板（首次启动时同步到 ~/.proma/default-flows/）
+  - from: default-flows
+    to: default-flows
+    filter:
+      - "**/*"
   # 教程文件（教程查看器 + 欢迎对话使用）
   - from: ../../tutorial/tutorial-v2.md
     to: tutorial.md

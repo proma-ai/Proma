@@ -11,6 +11,10 @@ const CHANGE_LABELS: Record<CapabilityChange['type'], string> = {
   skill_removed: 'Skill 已移除',
   skill_enabled: 'Skill 已启用',
   skill_disabled: 'Skill 已禁用',
+  flow_added: 'Flow 已添加',
+  flow_removed: 'Flow 已移除',
+  flow_enabled: 'Flow 已启用',
+  flow_disabled: 'Flow 已禁用',
 }
 
 /**
@@ -36,9 +40,11 @@ export function showCapabilityChangeToasts(changes: CapabilityChange[]): void {
     // 批量变化：合并为一条摘要
     const mcpCount = changes.filter((c) => c.type.startsWith('mcp_')).length
     const skillCount = changes.filter((c) => c.type.startsWith('skill_')).length
+    const flowCount = changes.filter((c) => c.type.startsWith('flow_')).length
     const parts: string[] = []
     if (mcpCount > 0) parts.push(`${mcpCount} 个 MCP 服务器`)
     if (skillCount > 0) parts.push(`${skillCount} 个 Skill`)
+    if (flowCount > 0) parts.push(`${flowCount} 个 Flow`)
     toast.info(`工作区配置已更新：${parts.join('、')}`)
   }
 }

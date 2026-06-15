@@ -3,13 +3,14 @@
  *
  * Tab 布局：
  * 1. Skills — Master-Detail 视图（左列列表 + 右列详情 + 内联编辑）
- * 2. MCP 服务器 — 管理当前工作区的 MCP 服务器配置
- * 3. 内置工具 — 只读展示内置工具状态
+ * 2. Flows — 管理当前工作区的 Flow 工作流
+ * 3. MCP 服务器 — 管理当前工作区的 MCP 服务器配置
+ * 4. 内置工具 — 只读展示内置工具状态
  */
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Search, RefreshCw, Save, X } from 'lucide-react'
+import { Plus, Plug, Pencil, Trash2, Sparkles, Workflow, FolderOpen, MessageSquare, ShieldCheck, ChevronDown, ChevronRight, Brain, ImagePlus, Search, RefreshCw, Save, X } from 'lucide-react'
 import { toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -32,10 +33,13 @@ import {
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
 import { appModeAtom } from '@/atoms/app-mode'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
-import type { McpServerEntry, SkillMeta, OtherWorkspaceSkillsGroup, WorkspaceMcpConfig } from '@proma/shared'
+import type { McpServerEntry, SkillMeta, OtherWorkspaceSkillsGroup, WorkspaceMcpConfig, FlowMeta } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
+import { SettingsToggle } from './primitives/SettingsToggle'
 import { McpServerForm } from './McpServerForm'
 import { SkillFilesPanel } from './SkillFilesPanel'
+import { FlowDetailPanel } from './FlowDetailPanel'
+import { useFlowsManager } from '@/hooks/useFlowsManager'
 
 // ===== Types =====
 
@@ -182,6 +186,26 @@ export function AgentSettings(): React.ReactElement {
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
 
   const selectedSkill = skills.find((s) => s.slug === selectedSkillSlug) ?? null
+
+  // Flows 管理委托给独立 hook
+  const {
+    flows,
+    flowsDir,
+    flowsLoading,
+    otherWorkspaceFlows,
+    showImportFlowDialog,
+    selectedFlowSlug,
+    selectedFlow,
+    setShowImportFlowDialog,
+    setSelectedFlowSlug,
+    reloadFlows,
+    handleFlowToggle,
+    handleDeleteFlow,
+    handleFlowContentSaved,
+    handleUpdateFlowFromDefault,
+    handleUpdateFlowFromSource,
+    handleImportFlow,
+  } = useFlowsManager(workspaceSlug)
 
   const loadData = React.useCallback(async () => {
     if (!workspaceSlug) {
@@ -447,15 +471,14 @@ ${skillList}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="relative flex rounded-xl bg-muted p-1">
           <div
-            className={cn(
-              'mode-slider absolute top-1 bottom-1 w-[calc(33.333%-3px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
-              activeTab === 'skills' && 'translate-x-0',
-              activeTab === 'mcp' && 'translate-x-[100%]',
-              activeTab === 'tools' && 'translate-x-[200%]',
-            )}
+            className="mode-slider pointer-events-none absolute top-1 bottom-1 w-[calc(25%-4px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out"
+            style={{
+              transform: `translateX(${{ skills: 0, flows: 100, mcp: 200, tools: 300 }[activeTab] ?? 0}%)`,
+            }}
           />
           {[
             { value: 'skills', label: 'Skills' },
+            { value: 'flows', label: 'Flows' },
             { value: 'mcp', label: 'MCP' },
             { value: 'tools', label: '内置工具' },
           ].map(({ value, label }) => (
@@ -548,6 +571,98 @@ ${skillList}
           </SettingsSection>
         </TabsContent>
 
+        {/* ===== Flows Tab ===== */}
+        <TabsContent value="flows" className="mt-4 space-y-4">
+          <SettingsSection
+            title="Flows"
+            description={`当前工作区: ${currentWorkspace.name}`}
+            action={
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setShowImportFlowDialog(true)}>
+                  <Plus size={16} />
+                  <span>从其他工作区导入</span>
+                </Button>
+                {flowsDir && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => window.electronAPI.openFile(flowsDir)}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <FolderOpen size={16} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>打开 Flows 目录</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            }
+          >
+            {flowsLoading ? (
+              <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
+            ) : flows.length === 0 ? (
+              <SettingsCard divided={false}>
+                <div className="text-sm text-muted-foreground py-8 text-center">暂无 Flow</div>
+              </SettingsCard>
+            ) : (
+              <div className="flex border border-border rounded-lg overflow-hidden" style={{ minHeight: 420 }}>
+                <div className="w-56 border-r border-border overflow-y-auto">
+                  {flows.map((flow) => (
+                    <div
+                      key={flow.slug}
+                      onClick={() => setSelectedFlowSlug(flow.slug)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors',
+                        selectedFlowSlug === flow.slug && 'bg-muted/70',
+                      )}
+                    >
+                      <Workflow size={14} className="text-amber-500 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <span className="text-sm truncate block">{flow.name.replace(/^!/, '')}</span>
+                        <div className="flex items-center gap-1">
+                          {flow.type === 'builtin' && (
+                            <span className="text-[10px] text-muted-foreground/60">内置</span>
+                          )}
+                          {flow.hasUpdate && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400">有更新</span>
+                          )}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={flow.enabled}
+                        onCheckedChange={(checked) => handleFlowToggle(flow.slug, checked)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="scale-75"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {selectedFlow ? (
+                    <FlowDetailPanel
+                      flow={selectedFlow}
+                      workspaceSlug={workspaceSlug}
+                      onDelete={() => handleDeleteFlow(selectedFlow.slug)}
+                      onSaved={handleFlowContentSaved}
+                      onUpdate={selectedFlow.hasUpdate ? () => {
+                        if (selectedFlow.type === 'builtin') {
+                          void handleUpdateFlowFromDefault(selectedFlow.slug)
+                        } else if (selectedFlow.importSource) {
+                          void handleUpdateFlowFromSource(selectedFlow.slug, selectedFlow.importSource.sourceWorkspaceSlug)
+                        }
+                      } : undefined}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                      选择一个 Flow 查看详情
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </SettingsSection>
+        </TabsContent>
+
         {/* ===== MCP Tab ===== */}
         <TabsContent value="mcp" className="mt-4 space-y-4">
           <SettingsSection
@@ -612,6 +727,46 @@ ${skillList}
         importingSkill={importingSkill}
         onImport={handleImportSkill}
       />
+      {/* Flow 导入对话框 */}
+      <Dialog open={showImportFlowDialog} onOpenChange={setShowImportFlowDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>从其他工作区导入 Flow</DialogTitle>
+            <DialogDescription>选择其他工作区的 Flow 导入到当前工作区</DialogDescription>
+          </DialogHeader>
+          {(() => {
+            const installedSlugs = new Set(flows.map((f) => f.slug))
+            const available = otherWorkspaceFlows
+              .map((group) => ({
+                ...group,
+                flows: group.flows.filter((f) => !installedSlugs.has(f.slug)),
+              }))
+              .filter((group) => group.flows.length > 0)
+            if (available.length === 0) {
+              return <div className="py-4 text-sm text-muted-foreground text-center">没有其他工作区或没有可导入的 Flow</div>
+            }
+            return (
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {available.map((group) => (
+                  <div key={group.workspaceSlug}>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">{group.workspaceName}</div>
+                    {group.flows.map((flow) => (
+                      <div key={flow.slug} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Workflow size={14} className="text-amber-500 shrink-0" />
+                          <span className="text-sm truncate">{flow.name.replace(/^!/, '')}</span>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => { handleImportFlow(group.workspaceSlug, flow.slug) }}>导入</Button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }
@@ -1304,5 +1459,6 @@ function ImportSkillFromWorkspaceDialog({
         </div>
       </DialogContent>
     </Dialog>
+
   )
 }

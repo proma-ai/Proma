@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, Workflow, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -2031,10 +2031,16 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     <span className="tabular-nums">{capabilities.skills.length}</span>
                     <span className="text-foreground/30">Skills</span>
                   </span>
+                  <span className="text-foreground/20">·</span>
+                  <span className="flex items-center gap-1">
+                    <Workflow size={13} className="text-foreground/40" />
+                    <span className="tabular-nums">{capabilities.flows.length}</span>
+                    <span className="text-foreground/30">Flows</span>
+                  </span>
                 </div>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
+            <TooltipContent side="top">点击配置 MCP、Skills 与 Flows</TooltipContent>
           </Tooltip>
         </div>
       )}

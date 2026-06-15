@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
+import { BackgroundTasksPanel } from './BackgroundTasksPanel'
 import { ContextUsageBadge } from './ContextUsageBadge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
@@ -89,6 +90,7 @@ import {
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
   agentProcessGroupsKeepExpandedAtom,
+  backgroundTasksAtomFamily,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
@@ -345,6 +347,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const [pendingPrompt, setPendingPrompt] = useAtom(agentPendingPromptAtom)
   const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtomFamily(sessionId))
   const workspaces = useAtomValue(agentWorkspacesAtom)
+  const backgroundTasks = useAtomValue(backgroundTasksAtomFamily(sessionId))
   // 保持 channelId 稳定：初始化前使用上次有效值，避免工具栏抖动
   const stableChannelIdRef = React.useRef(agentChannelId)
   if (agentChannelId) stableChannelIdRef.current = agentChannelId
@@ -353,34 +356,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 已有会话首次打开时，从全局默认值初始化 per-session map。
   // setter 内的 `prev.has(sessionId)` 守卫保证幂等，外层不再订阅 Map atom，
   // 避免 setter 写入 → atom 引用变化 → effect 重跑的自循环（React #185）。
-  // 优先使用会话元数据上的 channelId/modelId（如自动任务子会话），回退到全局默认。
-  const sessionMeta = React.useMemo(
-    () => sessions.find((s) => s.id === sessionId),
-    [sessions, sessionId],
-  )
-  const sessionMetaChannelId = sessionMeta?.channelId
-  const sessionMetaModelId = sessionMeta?.modelId
   React.useEffect(() => {
     if (!sessionId) return
-    const initialChannelId = sessionMetaChannelId ?? defaultChannelId
-    const initialModelId = sessionMetaModelId ?? defaultModelId
-    if (initialChannelId) {
+    if (defaultChannelId) {
       setSessionChannelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
-        map.set(sessionId, initialChannelId)
+        map.set(sessionId, defaultChannelId)
         return map
       })
     }
-    if (initialModelId) {
+    if (defaultModelId) {
       setSessionModelMap((prev) => {
         if (prev.has(sessionId)) return prev
         const map = new Map(prev)
-        map.set(sessionId, initialModelId)
+        map.set(sessionId, defaultModelId)
         return map
       })
     }
-  }, [sessionId, sessionMetaChannelId, sessionMetaModelId, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
+  }, [sessionId, defaultChannelId, defaultModelId, setSessionChannelMap, setSessionModelMap])
 
   const contextStatus: AgentContextStatus = {
     isCompacting: streamState?.isCompacting ?? false,
@@ -1245,19 +1239,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds])
 
   /** 构建 externalSelectedModel 给 ModelSelector */
-  const computedSelectedModel = React.useMemo(() => {
+  const externalSelectedModel = React.useMemo(() => {
     if (!agentChannelId || !agentModelId) return null
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
 
-  // 防止瞬态 null 传递给 ModelSelector（防御 overflow remount 时 stableModelInfoRef 丢失）
-  const stableSelectedModelRef = React.useRef(computedSelectedModel)
-  if (computedSelectedModel) stableSelectedModelRef.current = computedSelectedModel
-  const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
-
   /** 发送消息 */
-  const handleSend = React.useCallback(async (): Promise<void> => {
-    const text = inputContent.trim()
+  const handleSend = React.useCallback(async (overrideTextOrEvent?: string | React.MouseEvent): Promise<void> => {
+    const overrideText = typeof overrideTextOrEvent === 'string' ? overrideTextOrEvent : undefined
+    const text = (overrideText ?? inputContent).trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
     const pendingFilesSnapshot = pendingFilesRef.current
@@ -1536,15 +1526,20 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       startedAt: streamStartedAt,
       permissionModeOverride: permissionMode,
       ...(additionalDirectoriesForRun.size > 0 && { additionalDirectories: Array.from(additionalDirectoriesForRun) }),
-      // 解析用户消息中的 Skill/MCP/会话引用，传递结构化元数据给后端
+      // 解析用户消息中的 Skill/MCP/Flow/会话引用，传递结构化元数据给后端
       ...(() => {
         const skills = [...effectiveText.matchAll(/\/skill:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
         const mcps = [...effectiveText.matchAll(/#mcp:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
         const sessionIds = [...effectiveText.matchAll(/&session:(\S+)/g)].map(m => m[1]).filter(Boolean) as string[]
+        // 解析 Flow mention（仅匹配 !flow:slug 格式，由 mention chip 发送）
+        const flows = [...effectiveText.matchAll(/(?:^|\s)[!！]flow:([A-Za-z0-9][A-Za-z0-9_-]*)/g)]
+          .map(m => m[1])
+          .filter((s): s is string => Boolean(s))
         return {
           ...(skills.length > 0 && { mentionedSkills: skills }),
           ...(mcps.length > 0 && { mentionedMcpServers: mcps }),
           ...(sessionIds.length > 0 && { mentionedSessionIds: sessionIds }),
+          ...(flows.length > 0 && { mentionedFlows: flows }),
         }
       })(),
     }
@@ -1961,7 +1956,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           usageUpdatedAt={contextStatus.usageUpdatedAt}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
-          sessionId={sessionId}
           onCompact={handleCompact}
         />
       ),
@@ -1979,8 +1973,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     },
   ], [
     agentChannelIds,
-    agentChannelId,
-    agentModelId,
+    externalSelectedModel,
     handleModelSelect,
     sessionId,
     agentThinking,
@@ -2060,6 +2053,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onFork={handleFork}
           onRewind={handleRewindRequest}
           onCompact={handleCompact}
+        />
+
+        {/* 后台任务面板（运行中 + 已完成的 workflow） */}
+        <BackgroundTasksPanel
+          tasks={backgroundTasks}
+          workspaceSlug={workspaceSlug ?? undefined}
+          onRetryFlow={(flowSlug) => {
+            void handleSend(`!${flowSlug}`)
+          }}
         />
 
         {/* 权限请求横幅 */}
@@ -2160,8 +2162,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               placeholder={
                 agentChannelId && hasAvailableModel
                   ? sendWithCmdEnter
-                    ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
-                    : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
+                    ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，! 调用 Flow，/ 调用 Skill，# 调用 MCP，& 引用会话)'
+                    : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，! 调用 Flow，/ 调用 Skill，# 调用 MCP，& 引用会话)'
                   : !agentChannelId
                     ? '请先在设置中选择 Agent 供应商'
                     : '暂无可用模型，请先在设置中启用渠道'

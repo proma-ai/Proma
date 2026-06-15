@@ -10,7 +10,7 @@ describe('computeNextRunAt 月度调度', () => {
   test('Given 当月目标日还未到达 When 计算下次运行 Then 返回本月该日', () => {
     const from = base(2026, 6, 14, 9, 36)
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 20 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 20 },
       from,
     )
     expect(new Date(next).getDate()).toBe(20)
@@ -20,7 +20,7 @@ describe('computeNextRunAt 月度调度', () => {
   test('Given 当月目标日已过 When 计算下次运行 Then 跳到下月同日', () => {
     const from = base(2026, 6, 14, 9, 36)
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 10 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 10 },
       from,
     )
     expect(new Date(next).getMonth() + 1).toBe(7)
@@ -30,7 +30,7 @@ describe('computeNextRunAt 月度调度', () => {
   test('Given 3/31 目标 31 号已过 When 计算下次运行 Then 落在 4/30 而非跳到 5/1', () => {
     const from = base(2026, 3, 31, 9, 30)
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 31 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 31 },
       from,
     )
     expect(new Date(next).getMonth() + 1).toBe(4)
@@ -41,7 +41,7 @@ describe('computeNextRunAt 月度调度', () => {
     const from = base(2026, 1, 31, 9, 30)
     // 2026 年非闰年，2 月 28 天
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 31 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 31 },
       from,
     )
     expect(new Date(next).getMonth() + 1).toBe(2)
@@ -51,7 +51,7 @@ describe('computeNextRunAt 月度调度', () => {
   test('Given 闰年 1/31 目标 31 号 When 计算下次运行 Then 落在 2/29', () => {
     const from = base(2024, 1, 31, 9, 30)
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 31 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 31 },
       from,
     )
     expect(new Date(next).getMonth() + 1).toBe(2)
@@ -61,7 +61,7 @@ describe('computeNextRunAt 月度调度', () => {
   test('Given dayOfMonth=29 在 2 月 When 计算下次运行 Then 落在 2/28（平年）', () => {
     const from = base(2026, 1, 31, 9, 30)
     const next = computeNextRunAt(
-      { scheduleType: 'monthly', timeOfDay: '09:00', dayOfMonth: 29 },
+      { scheduleType: 'monthly' as const, intervalMinutes: 10, timeOfDay: '09:00', dayOfMonth: 29 },
       from,
     )
     expect(new Date(next).getMonth() + 1).toBe(2)

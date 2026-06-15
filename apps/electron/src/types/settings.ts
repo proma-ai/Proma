@@ -228,6 +228,10 @@ export interface AppSettings {
   autoCleanupTempOnStart?: boolean
   /** 自动清理 N 天前已归档会话的 SDK 数据（0 = 禁用，默认 0） */
   autoCleanupArchivedDays?: number
+  /** 是否禁用 Flow（workflow）功能（默认 false） */
+  disableWorkflows?: boolean
+  /** 是否启用 ultracode 关键词触发（默认 true） */
+  workflowKeywordTriggerEnabled?: boolean
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
 }

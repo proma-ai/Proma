@@ -183,6 +183,12 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   sdkSessionId?: string
   /** 附加的外部目录（SDK additionalDirectories） */
   additionalDirectories?: string[]
+  /** 是否启用 partial messages（Flow mention 触发时启用，支持 workflow 实时进度展示） */
+  includePartialMessages?: boolean
+  /** 是否启用 AI 进度摘要（子 Agent 每 ~30s 生成简要描述，Flow mention 触发时启用） */
+  agentProgressSummaries?: boolean
+  /** SDK settings 覆盖（如 disableWorkflows、workflowKeywordTriggerEnabled） */
+  sdkSettings?: Record<string, unknown>
 }
 
 // ============================================================================
@@ -716,7 +722,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         permissionMode: options.sdkPermissionMode,
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,
         // 关键：false 获取完整消息，与 v2 stream() 返回格式一致
-        includePartialMessages: false,
+        // Flow mention 触发时启用 partial messages，支持 workflow 实时进度展示
+        includePartialMessages: options.includePartialMessages ?? false,
+        // Flow mention 触发时启用 AI 进度摘要
+        agentProgressSummaries: options.agentProgressSummaries ?? false,
         promptSuggestions: true,
         cwd: options.cwd,
         abortController: controller,
@@ -724,6 +733,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         systemPrompt: options.systemPrompt,
         // 不加载 user 级别的 ~/.claude/settings.json
         settingSources: ['user', 'project'],
+        // SDK settings 覆盖（Flow 相关设置）
+        ...(options.sdkSettings && Object.keys(options.sdkSettings).length > 0 && {
+          settings: options.sdkSettings as import('@anthropic-ai/claude-agent-sdk').Settings,
+        }),
 
         // 条件字段
         ...(options.canUseTool && { canUseTool: options.canUseTool }),
