@@ -206,6 +206,33 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     })
   }, [setPendingAttachments])
 
+  /** 编辑完成 — 用编辑后的图片替换原 pending 附件 */
+  const handleEditComplete = React.useCallback((attachmentId: string, editedDataUrl: string): void => {
+    const base64 = editedDataUrl.split(',')[1]
+    if (!base64) return
+
+    if (!window.__pendingAttachmentData) {
+      window.__pendingAttachmentData = new Map()
+    }
+    window.__pendingAttachmentData.set(attachmentId, base64)
+
+    setPendingAttachments((prev) =>
+      prev.map((att) => {
+        if (att.id !== attachmentId) return att
+        if (att.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(att.previewUrl)
+        }
+        return {
+          ...att,
+          previewUrl: editedDataUrl,
+          filename: att.filename.replace(/(\.[^.]+)?$/, '') + '_edited.png',
+          mediaType: 'image/png',
+          size: Math.round(base64.length * 0.75),
+        }
+      })
+    )
+  }, [setPendingAttachments])
+
   /** 发送消息 */
   const handleSend = React.useCallback((): void => {
     if (!canSend) return
@@ -374,6 +401,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   mediaType={att.mediaType}
                   previewUrl={att.previewUrl}
                   onRemove={() => handleRemoveAttachment(att.id)}
+                  onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
                 />
               ))}
             </div>

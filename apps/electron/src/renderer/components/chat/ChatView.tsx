@@ -569,6 +569,28 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     setHasMoreMessages(false)
   }, [conversationId])
 
+  /** 消息历史中的图片编辑完成 → 作为新附件加入输入框 */
+  const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {
+    const base64 = editedDataUrl.split(',')[1]
+    if (!base64) return
+
+    const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const pending: PendingAttachment = {
+      id,
+      filename: `edited_image_${Date.now()}.png`,
+      mediaType: 'image/png',
+      localPath: '',
+      size: Math.round(base64.length * 0.75),
+      previewUrl: editedDataUrl,
+    }
+
+    if (!window.__pendingAttachmentData) {
+      window.__pendingAttachmentData = new Map()
+    }
+    window.__pendingAttachmentData.set(id, base64)
+    setPendingAttachments((prev) => [...prev, pending])
+  }, [setPendingAttachments])
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* 主内容区域 */}
@@ -597,6 +619,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
             inlineEditingMessageId={inlineEditingMessageId}
             onDeleteDivider={handleDeleteDivider}
             onLoadMore={handleLoadMore}
+            onImageEditComplete={handleImageEditComplete}
           />
 
           {/* 错误提示 */}

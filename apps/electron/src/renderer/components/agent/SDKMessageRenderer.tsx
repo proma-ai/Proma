@@ -40,7 +40,7 @@ import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
-import { agentProcessGroupsKeepExpandedAtom } from '@/atoms/agent-atoms'
+import { agentProcessGroupsKeepExpandedAtom, agentSessionPendingFilesAtom } from '@/atoms/agent-atoms'
 import { agentSessionsAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/automation-atoms'
@@ -59,6 +59,7 @@ import type {
   SDKToolResultBlock,
   RecoveryAction,
 } from '@proma/shared'
+import type { AgentPendingFile } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_TITLE,
@@ -923,7 +924,7 @@ export function isImageFile(filename: string): boolean {
 }
 
 /** 图片附件缩略图，点击可预览大图 */
-function AttachedImageThumb({ file }: { file: AttachedFileRef }): React.ReactElement {
+function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; onEditComplete?: (editedDataUrl: string) => void }): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
   const [lightboxOpen, setLightboxOpen] = React.useState(false)
 
@@ -971,6 +972,7 @@ function AttachedImageThumb({ file }: { file: AttachedFileRef }): React.ReactEle
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
         onSave={handleSave}
+        onEditComplete={onEditComplete}
       />
     </div>
   )
@@ -1048,8 +1050,36 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
   const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
   const imageFiles = attachedFiles.filter((f) => isImageFile(f.filename))
+  const activeSessionId = useAtomValue(activeSessionIdAtom)
+  const setSessionPendingFiles = useSetAtom(agentSessionPendingFilesAtom)
   const nonImageFiles = attachedFiles.filter((f) => !isImageFile(f.filename))
   const meta = extractMeta(message as unknown as SDKMessage)
+
+  const handleImageEditComplete = React.useCallback((editedDataUrl: string): void => {
+    const base64 = editedDataUrl.split(',')[1]
+    if (!base64 || !activeSessionId) return
+
+    const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const pending: AgentPendingFile = {
+      id,
+      filename: `edited_image_${Date.now()}.png`,
+      mediaType: 'image/png',
+      size: Math.round(base64.length * 0.75),
+      previewUrl: editedDataUrl,
+    }
+
+    if (!window.__pendingAgentFileData) {
+      window.__pendingAgentFileData = new Map()
+    }
+    window.__pendingAgentFileData.set(id, base64)
+
+    setSessionPendingFiles((prev) => {
+      const sessionFiles = prev.get(activeSessionId) ?? []
+      const map = new Map(prev)
+      map.set(activeSessionId, [...sessionFiles, pending])
+      return map
+    })
+  }, [activeSessionId, setSessionPendingFiles])
 
   return (
     <Message from="user">
@@ -1082,7 +1112,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         {imageFiles.length > 0 && (
           <div className="flex flex-wrap gap-2.5 mb-2">
             {imageFiles.map((file) => (
-              <AttachedImageThumb key={file.path} file={file} />
+              <AttachedImageThumb key={file.path} file={file} onEditComplete={handleImageEditComplete} />
             ))}
           </div>
         )}
