@@ -16,6 +16,11 @@ export {
   inferContextWindow,
 } from './context-window'
 export {
+  normalizeUsage,
+  isOpenAICompatibleProvider,
+  type AnthropicLikeUsage,
+} from './usage-normalizer'
+export {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_TITLE,
   THINKING_SIGNATURE_ERROR_MESSAGE,

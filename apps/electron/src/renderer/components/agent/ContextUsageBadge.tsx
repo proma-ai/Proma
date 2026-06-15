@@ -34,6 +34,11 @@ interface ContextUsageBadgeProps {
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
+  /**
+   * 当前会话 ID，用于在切换会话时清空 stableRef，
+   * 避免新会话尚未发消息时仍显示上一个会话的 token 数。
+   */
+  sessionId?: string
 }
 
 /** 格式化 token 数为可读字符串（如 1234 → "1.2k"） */
@@ -122,6 +127,7 @@ export function ContextUsageBadge({
   isCompacting,
   isProcessing,
   onCompact,
+  sessionId,
 }: ContextUsageBadgeProps): React.ReactElement | null {
   // 保留最近一次有效的 token 值，避免切换会话时闪烁消失
   const stableRef = React.useRef<{
@@ -131,6 +137,14 @@ export function ContextUsageBadge({
     cacheCreationTokens?: number
     contextWindow?: number
   } | null>(null)
+  // 会话切换时清空陈旧值，避免新会话尚未上报 usage 时显示上个会话的数字
+  const lastSessionRef = React.useRef<string | undefined>(sessionId)
+  React.useEffect(() => {
+    if (lastSessionRef.current !== sessionId) {
+      stableRef.current = null
+      lastSessionRef.current = sessionId
+    }
+  }, [sessionId])
   if (inputTokens && inputTokens > 0) {
     stableRef.current = { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextWindow }
   }

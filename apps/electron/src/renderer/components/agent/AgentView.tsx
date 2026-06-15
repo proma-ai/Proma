@@ -1947,6 +1947,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           usageUpdatedAt={contextStatus.usageUpdatedAt}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
+          sessionId={sessionId}
           onCompact={handleCompact}
         />
       ),

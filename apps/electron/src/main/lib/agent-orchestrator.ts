@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, SDKResultMessage, AgentStreamPayload, RewindSessionResult, SdkBeta, ProviderType } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -38,6 +38,7 @@ import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { injectAutomationMcpServer } from './automation-agent-tools'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAgent } from '@proma/core'
+import { normalizeUsage } from '@proma/shared'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -477,6 +478,32 @@ function collectAttachedDirectories(params: {
   }
 
   return result
+}
+
+/**
+ * 把 SDKMessage 内嵌的 usage 归一化为 Anthropic 语义（原地修改）。
+ *
+ * 仅对 assistant / result 消息生效；其他类型直接返回。
+ * 归一化逻辑见 packages/shared 的 normalizeUsage；此处仅做字段定位。
+ */
+function normalizeSDKMessageUsage(msg: SDKMessage, provider: string | undefined | null): void {
+  if (msg.type === 'assistant') {
+    const inner = (msg as SDKAssistantMessage).message
+    if (inner?.usage) {
+      const normalized = normalizeUsage(inner.usage, provider)
+      if (normalized && normalized !== inner.usage) {
+        inner.usage = normalized
+      }
+    }
+  } else if (msg.type === 'result') {
+    const rMsg = msg as SDKResultMessage
+    if (rMsg.usage) {
+      const normalized = normalizeUsage(rMsg.usage, provider)
+      if (normalized && normalized !== rMsg.usage) {
+        rMsg.usage = normalized
+      }
+    }
+  }
 }
 
 // ===== AgentOrchestrator =====
@@ -1869,6 +1896,12 @@ export class AgentOrchestrator {
                   // 为 assistant 消息注入渠道 modelId，确保持久化后能正确匹配模型显示名
                   if (msg.type === 'assistant' && modelId) {
                     (msg as Record<string, unknown>)._channelModelId = modelId
+                  }
+                  // OpenAI 兼容渠道（zhipu / openai / doubao / qwen / custom）的 usage
+                  // 需要归一化为 Anthropic 语义，避免下游公式 input + cache_read 重复计数。
+                  // 单点处理：持久化和 emit 共用同一引用，故两路都受益。
+                  if (msg.type === 'assistant' || msg.type === 'result') {
+                    normalizeSDKMessageUsage(msg, channel.provider)
                   }
                   accumulatedMessages.push(msg)
                 }

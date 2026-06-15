@@ -693,6 +693,9 @@ export function applyAgentEvent(
       // 同步把 result 里真实的 usage（inputTokens / outputTokens / contextWindow 等）
       // 写入 streamState。SDK 流式过程中 message.usage 一直是 0，只有 result 里才有真实值，
       // 不在这里写入的话上下文指示器分母和分子会永远停留在 0 或上次会话的残留。
+      //
+      // 全字段条件 spread：event.usage 中的 undefined 字段不覆盖 prev 已有值，
+      // 避免流式 usage_update 已写入的真实值被 result 的空字段清零。
       return {
         ...prev,
         ...(event.usage ? {
@@ -702,18 +705,10 @@ export function applyAgentEvent(
           ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
           ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
+          usageUpdatedAt: Date.now(),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
-        ...(event.usage && {
-          inputTokens: event.usage.inputTokens,
-          ...(event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
-          ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
-          ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
-          ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
-          usageUpdatedAt: Date.now(),
-        }),
       }
 
     case 'run_resumed':
