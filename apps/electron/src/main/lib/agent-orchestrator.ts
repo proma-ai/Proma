@@ -669,6 +669,8 @@ export class AgentOrchestrator {
           ...(entry.headers && Object.keys(entry.headers).length > 0 && { headers: entry.headers }),
           required: false,
         }
+      } else {
+        console.warn(`[Agent 编排] MCP 服务器 "${name}" 配置不完整，已跳过（type=${entry.type}, command=${entry.command ?? '无'}, url=${entry.url ?? '无'}）`)
       }
     }
 

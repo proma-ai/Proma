@@ -481,7 +481,14 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
   try {
     const raw = readFileSync(mcpPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<WorkspaceMcpConfig>
-    return { servers: parsed.servers ?? {} }
+    const servers = parsed.servers ?? {}
+    for (const [name, entry] of Object.entries(servers)) {
+      if (!entry.type) {
+        entry.type = entry.command ? 'stdio' : entry.url ? 'http' : 'stdio'
+        console.log(`[Agent 工作区] MCP 服务器 "${name}" 缺少 type 字段，已自动推断为 "${entry.type}"`)
+      }
+    }
+    return { servers }
   } catch (error) {
     console.error('[Agent 工作区] 读取 MCP 配置失败:', error)
     return { servers: {} }
