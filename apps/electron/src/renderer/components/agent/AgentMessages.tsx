@@ -437,7 +437,8 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
-  const agentStreamingModel = streamState?.model ? resolveModelDisplayName(streamState.model, channels) : undefined
+  const streamingModelId = streamState?.model || sessionModelId
+  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels) : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 
