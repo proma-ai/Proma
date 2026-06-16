@@ -7,7 +7,8 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Bot, RotateCw, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Bot, RotateCw, AlertTriangle, ChevronDown, ChevronRight, Camera, Circle } from 'lucide-react'
+import { toast } from 'sonner'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
   Message,
@@ -34,6 +35,8 @@ import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
+import { useMessageSelectionContext } from '@/components/shared/MessageSelectionContext'
+import { captureSelectedMessages } from '@/lib/chat-screenshot'
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
@@ -397,6 +400,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
+  const sel = useMessageSelectionContext()
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
   // 空会话无需淡入过渡（无消息则无滚动位置问题）
@@ -625,10 +629,15 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
               const isLastAssistantTurn = !streaming && stoppedByUser
                 && group.type === 'assistant-turn'
                 && idx === allGroups.findLastIndex((g) => g.type === 'assistant-turn')
+              const groupId = getGroupId(group)
               return (
-                <MessageGroupRenderer
-                  key={getGroupId(group)}
-                  group={group}
+                <div
+                  key={groupId}
+                  data-message-id={groupId}
+                >
+                  <div className="flex-1 min-w-0">
+                    <MessageGroupRenderer
+                      group={group}
                   allMessages={allSDKMessages}
                   historicalTaskSubjects={historicalTaskSubjects}
                   basePath={sessionPath || undefined}
@@ -641,6 +650,8 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                   stoppedByUser={isLastAssistantTurn || undefined}
                   sessionModelId={sessionModelId}
                 />
+                  </div>
+                </div>
               )
             })}
 

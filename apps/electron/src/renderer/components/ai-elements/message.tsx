@@ -148,6 +148,7 @@ export function MessageActions({
 }: MessageActionsProps): React.ReactElement {
   return (
     <div
+      data-no-screenshot
       className={cn(
         'flex items-center gap-2.5 text-muted-foreground/60 hover:text-muted-foreground/90 transition-colors duration-200',
         className

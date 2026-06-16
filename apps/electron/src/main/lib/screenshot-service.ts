@@ -175,37 +175,29 @@ function sanitizeScreenshotFragment(html: string): string {
 function buildScreenshotHtml(htmlContent: string, isDark: boolean, css: string, themeClass: string): string {
   const bg = isDark ? '#111827' : '#ffffff'
   const safeHtml = sanitizeScreenshotFragment(htmlContent)
-  // 防止 css 字符串中出现 `</style >` 等变体提前终止 style 块。
   const safeCss = css.replace(/<\/style\s*>/gi, '<\\/style>')
   const safeThemeClass = themeClass.replace(/["<>]/g, '')
 
+  // wrapper 不再添加排版样式（padding/max-width/margin 等），
+  // 由渲染端注入的精简 CSS 全权控制排版。此处只做 reset + 安全加固。
   return `<!DOCTYPE html>
 <html class="${safeThemeClass}"><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob: proma-file: https: http:; media-src 'self' data: blob: proma-file: https: http:; font-src 'self' data: https: http:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="${isDark ? 'dark' : 'light'}">
 <style>${safeCss}</style>
 <style>
-*{box-sizing:border-box}
 html,body{margin:0;background:${bg};scrollbar-width:none;-ms-overflow-style:none}
 html::-webkit-scrollbar,body::-webkit-scrollbar{display:none}
 body{-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
-img,video,canvas,svg{max-width:100%}
-.proma-screenshot-wrapper{padding:${SCREENSHOT_PADDING_TOP}px ${SCREENSHOT_PADDING_X}px;background:${bg};width:max-content;max-width:100%;margin:0 auto}
-.proma-screenshot-sheet{width:max-content;max-width:100%;margin:0 auto;background:${bg}}
-.proma-screenshot-sheet [contenteditable],
-.proma-screenshot-sheet [contenteditable="false"]{outline:none}
-.proma-screenshot-sheet .ProseMirror-selectednode,
-.proma-screenshot-sheet .selectedCell::after{display:none!important}
 </style></head><body class="${safeThemeClass}">
-<div class="proma-screenshot-wrapper">
-<main class="proma-screenshot-sheet">${safeHtml}</main>
-</div>
+${safeHtml}
 </body></html>`
 }
 
 /* ── 核心截图函数 ── */
 
-async function loadScreenshotDocument(win: BrowserWindow, htmlPath: string, width: number): Promise<number> {
+async function loadScreenshotDocument(win: BrowserWindow, htmlPath: string, width: number): Promise<{ width: number; height: number }> {
   win.setSize(width, 100)
   await win.loadURL(pathToFileURL(htmlPath).href)
   await win.webContents.executeJavaScript(`
@@ -227,14 +219,28 @@ async function loadScreenshotDocument(win: BrowserWindow, htmlPath: string, widt
     })()
   `)
   await new Promise((r) => setTimeout(r, 100))
-  const totalHeight: number = await win.webContents.executeJavaScript(`
-      Math.max(document.body.scrollHeight, document.body.offsetHeight,
-               document.documentElement.scrollHeight, document.documentElement.offsetHeight)
+
+  const dims: { width: number; height: number } = await win.webContents.executeJavaScript(`
+    (() => {
+      const article = document.querySelector('.msg');
+      const contentW = article ? article.scrollWidth : document.body.scrollWidth;
+      const finalW = Math.max(contentW, ${SCREENSHOT_LIMITS.MIN_WIDTH}) + ${SCREENSHOT_PADDING_X} * 2;
+      const h = Math.max(document.body.scrollHeight, document.body.offsetHeight,
+               document.documentElement.scrollHeight, document.documentElement.offsetHeight);
+      return { width: Math.ceil(finalW), height: Math.ceil(h) };
+    })()
   `)
-  if (!Number.isFinite(totalHeight) || totalHeight <= 0) {
+
+  if (!Number.isFinite(dims.height) || dims.height <= 0) {
     throw new Error('截图内容高度无效')
   }
-  return Math.ceil(totalHeight)
+  if (!Number.isFinite(dims.width) || dims.width <= 0) {
+    throw new Error('截图内容宽度无效')
+  }
+
+  // 窗口尺寸 = 内容实际宽度 + 左右留白（executeJavaScript 中已计入）
+  win.setSize(dims.width, dims.height)
+  return { width: dims.width, height: dims.height }
 }
 
 async function captureLoadedDocument(win: BrowserWindow, width: number, totalHeight: number, scale: number): Promise<Buffer> {
@@ -275,18 +281,20 @@ async function screenshotCapture(htmlContent: string, width: number): Promise<Bu
 
   try {
     let win = getScreenshotWindow(1)
-    let totalHeight = await loadScreenshotDocument(win, tmpPath, width)
-    const scale = resolveScreenshotScale(width, totalHeight)
+    let { width: actualWidth, height: totalHeight } = await loadScreenshotDocument(win, tmpPath, width)
+    const scale = resolveScreenshotScale(actualWidth, totalHeight)
     if (!scale) {
       throw new Error('文档过长，当前截图会占用过多内存，请缩短内容后重试')
     }
 
     if (scale !== 1) {
       win = getScreenshotWindow(scale)
-      totalHeight = await loadScreenshotDocument(win, tmpPath, width)
+      const dims = await loadScreenshotDocument(win, tmpPath, width)
+      actualWidth = dims.width
+      totalHeight = dims.height
     }
 
-    return captureLoadedDocument(win, width, totalHeight, scale)
+    return captureLoadedDocument(win, actualWidth, totalHeight, scale)
   } finally {
     try { unlinkSync(tmpPath) } catch { /* 清理 */ }
   }

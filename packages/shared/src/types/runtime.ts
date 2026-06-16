@@ -396,7 +396,7 @@ export const SCREENSHOT_LIMITS = {
   /** 渲染端预检：编辑器 DOM 元素数上限。超过会导致 inlineComputedStyles 卡顿明显 */
   MAX_ELEMENTS: 3000,
   /** 渲染端预检：原始 outerHTML 字节数上限（不含 inline 样式）。膨胀系数 5-10× 对应主进程 12MB */
-  MAX_RAW_HTML_BYTES: 2 * 1024 * 1024,
+  MAX_RAW_HTML_BYTES: 8 * 1024 * 1024,
   /** 主进程兜底：含 inline 样式的 HTML 字节数上限 */
   MAX_HTML_BYTES: 12 * 1024 * 1024,
   /** 主进程兜底：渲染像素预算（width × height × scale²）。4 字节/像素 ≈ 400MB */

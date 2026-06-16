@@ -26,6 +26,7 @@ import { PermissionModeSelector } from './PermissionModeSelector'
 import { AskUserBanner } from './AskUserBanner'
 import { ExitPlanModeBanner } from './ExitPlanModeBanner'
 import { PlanModeDashedBorder } from './PlanModeDashedBorder'
+import { MessageSelectionProvider } from '@/components/shared/MessageSelectionContext'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
@@ -2028,6 +2029,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <AgentHeader sessionId={sessionId} />
 
         {/* 消息区域 */}
+        <MessageSelectionProvider>
         <AgentMessages
           sessionId={sessionId}
           sessionModelId={agentModelId || undefined}
@@ -2045,6 +2047,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRewind={handleRewindRequest}
           onCompact={handleCompact}
         />
+        </MessageSelectionProvider>
 
         {/* 权限请求横幅 */}
         <PermissionBanner sessionId={sessionId} />

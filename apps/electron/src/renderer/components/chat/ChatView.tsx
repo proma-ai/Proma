@@ -21,6 +21,7 @@ import { ChatMessages } from './ChatMessages'
 import { ChatInput } from './ChatInput'
 import { AgentRecommendBanner } from './AgentRecommendBanner'
 import { PromptEditorSidebar } from './PromptEditorSidebar'
+import { MessageSelectionProvider } from '@/components/shared/MessageSelectionContext'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import {
   conversationsAtom,
@@ -574,9 +575,12 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0">
         {/* Header 在 max-w 外，按钮可到达最右侧 */}
-        <ChatHeader conversation={conversation} />
+        <ChatHeader
+          conversation={conversation}
+        />
         <div className="flex flex-col flex-1 w-full max-w-[min(72rem,100%)] mx-auto overflow-hidden min-h-0">
           {/* 中间：消息区域 */}
+          <MessageSelectionProvider>
           <ChatMessages
             conversationId={conversationId}
             messages={messages}
@@ -598,6 +602,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
             onDeleteDivider={handleDeleteDivider}
             onLoadMore={handleLoadMore}
           />
+          </MessageSelectionProvider>
 
           {/* 错误提示 */}
           {chatError && (

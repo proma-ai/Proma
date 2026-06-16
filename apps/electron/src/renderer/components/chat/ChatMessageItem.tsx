@@ -11,7 +11,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { AlertCircle, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertCircle, Pencil, RotateCcw, Trash2, Camera, Circle, Copy } from 'lucide-react'
 import {
   Message,
   MessageHeader,
@@ -35,6 +35,9 @@ import { DeleteMessageDialog } from './DeleteMessageDialog'
 import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
 import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { captureSelectedMessages } from '@/lib/chat-screenshot'
+import { useMessageSelectionContext } from '@/components/shared/MessageSelectionContext'
+import { toast } from 'sonner'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import type { ChatMessage } from '@proma/shared'
@@ -112,6 +115,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   const [isDeleting, setIsDeleting] = React.useState(false)
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
+  const sel = useMessageSelectionContext()
 
   /** 确认删除消息 */
   const handleDeleteConfirm = async (): Promise<void> => {
@@ -232,6 +236,45 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
         {/* 操作按钮（非 streaming 时显示，hover 时可见） */}
         {(message.content || message.error || (message.attachments && message.attachments.length > 0)) && !isStreaming && !isInlineEditing && (
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px]">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={() => sel.toggle(message.id)}
+            >
+              {sel.isSelected(message.id)
+                ? <Circle className="size-3.5 fill-current" />
+                : <Circle className="size-3.5" />
+              }
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={() => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.id])
+                void captureSelectedMessages(ids, 'file').then((r) => {
+                  if (r.success) toast.success('截图已保存')
+                  else if (r.error) toast.error(r.error)
+                })
+              }}
+            >
+              <Camera className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={async () => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.id])
+                try {
+                  const result = await captureSelectedMessages(ids, 'clipboard')
+                  if (result.success) toast.success('已复制到剪贴板')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
+              }}
+            >
+              <Copy className="size-3.5" />
+            </button>
             <CopyButton content={message.content} />
             {message.role === 'assistant' && conversationId && (
               <MigrateToAgentButton conversationId={conversationId} />

@@ -372,20 +372,22 @@ export function ChatMessages({
             {/* 已有消息 + 分隔线 */}
             {messages.map((msg: ChatMessage) => (
               <React.Fragment key={msg.id}>
-                <div data-message-id={msg.id}>
-                  <ChatMessageItem
-                    message={msg}
-                    conversationId={conversationId}
-                    isStreaming={false}
-                    isLastAssistant={false}
-                    allMessages={messages}
-                    onDeleteMessage={onDeleteMessage}
-                    onResendMessage={onResendMessage}
-                    onStartInlineEdit={onStartInlineEdit}
-                    onSubmitInlineEdit={onSubmitInlineEdit}
-                    onCancelInlineEdit={onCancelInlineEdit}
-                    isInlineEditing={msg.id === inlineEditingMessageId}
-                  />
+                <div>
+                  <div className="flex-1 min-w-0" data-message-id={msg.id}>
+                    <ChatMessageItem
+                      message={msg}
+                      conversationId={conversationId}
+                      isStreaming={false}
+                      isLastAssistant={false}
+                      allMessages={messages}
+                      onDeleteMessage={onDeleteMessage}
+                      onResendMessage={onResendMessage}
+                      onStartInlineEdit={onStartInlineEdit}
+                      onSubmitInlineEdit={onSubmitInlineEdit}
+                      onCancelInlineEdit={onCancelInlineEdit}
+                      isInlineEditing={msg.id === inlineEditingMessageId}
+                    />
+                  </div>
                 </div>
                 {/* 分隔线 */}
                 {dividerSet.has(msg.id) && (

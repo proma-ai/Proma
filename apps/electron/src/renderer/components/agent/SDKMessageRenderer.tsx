@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote, Clock } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote, Clock, Camera, Circle, Copy } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -34,6 +34,9 @@ import {
 } from '@/components/ai-elements/message'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
+import { captureSelectedMessages } from '@/lib/chat-screenshot'
+import { useMessageSelectionContext } from '@/components/shared/MessageSelectionContext'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
@@ -552,6 +555,8 @@ export interface AssistantTurnRendererProps {
 export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   const processGroupsKeepExpanded = useAtomValue(agentProcessGroupsKeepExpandedAtom)
+  const sel = useMessageSelectionContext()
+  const turnId = getGroupId(turn)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
     block: SDKContentBlock
@@ -739,12 +744,51 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
         const lastUuid = mainlineAssistants.length > 0
           ? mainlineAssistants[mainlineAssistants.length - 1]?.uuid
           : undefined
-        const hasActions = !!(textContent || (onFork && lastUuid) || (onRewind && lastUuid))
         const hasDuration = durationMs != null
-        if (!hasDuration && !hasActions && !showStoppedBadge) return null
         return (
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
-            {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={() => sel.toggle(turnId)}
+            >
+              {sel.isSelected(turnId)
+                ? <Circle className="size-3.5 fill-current" />
+                : <Circle className="size-3.5" />
+              }
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={async () => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([turnId])
+                try {
+                  const result = await captureSelectedMessages(ids, 'file')
+                  if (result.success) toast.success('截图已保存')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
+              }}
+            >
+              <Camera className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={async () => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([turnId])
+                try {
+                  const result = await captureSelectedMessages(ids, 'clipboard')
+                  if (result.success) toast.success('已复制到剪贴板')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
+              }}
+            >
+              <Copy className="size-3.5" />
+            </button>
             {textContent && <CopyButton content={textContent} />}
             {onFork && lastUuid && (
               <MessageAction tooltip="从此处分叉" onClick={() => onFork(lastUuid)}>
@@ -1044,6 +1088,7 @@ function ScheduledRunBadge(): React.ReactElement {
 
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+  const sel = useMessageSelectionContext()
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
   const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
@@ -1096,11 +1141,32 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         )}
         {text && <UserMessageContent>{text}</UserMessageContent>}
       </MessageContent>
-      {text && (
-        <MessageActions className="pl-[46px] mt-0.5">
-          <CopyButton content={text} />
-        </MessageActions>
-      )}
+      <MessageActions className="pl-[46px] mt-0.5">
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={() => sel.toggle(message.uuid || '')}>
+          {sel.isSelected(message.uuid || '') ? <Circle className="size-3.5 fill-current" /> : <Circle className="size-3.5" />}
+        </button>
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async () => {
+          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.uuid || ''])
+          try {
+            const result = await captureSelectedMessages(ids, 'file')
+            if (result.success) toast.success('截图已保存')
+            else if (result.error) toast.error(result.error)
+          } catch { toast.error('截图失败') }
+        }}>
+          <Camera className="size-3.5" />
+        </button>
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async () => {
+          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.uuid || ''])
+          try {
+            const result = await captureSelectedMessages(ids, 'clipboard')
+            if (result.success) toast.success('已复制到剪贴板')
+            else if (result.error) toast.error(result.error)
+          } catch { toast.error('截图失败') }
+        }}>
+          <Copy className="size-3.5" />
+        </button>
+        {text && <CopyButton content={text} />}
+      </MessageActions>
     </Message>
   )
 }
@@ -1118,6 +1184,7 @@ interface ErrorMessageProps {
 }
 
 function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: ErrorMessageProps): React.ReactElement {
+  const sel = useMessageSelectionContext()
   const meta = extractMeta(message as unknown as SDKMessage)
   const errorText = message.error?.message ?? '未知错误'
 
@@ -1294,6 +1361,52 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         )}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
+        {message.uuid && (() => { const uid = message.uuid!; return (
+          <>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={() => sel.toggle(uid)}
+            >
+              {sel.isSelected(uid)
+                ? <Circle className="size-3.5 fill-current" />
+                : <Circle className="size-3.5" />
+              }
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={async () => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([uid])
+                try {
+                  const result = await captureSelectedMessages(ids, 'file')
+                  if (result.success) toast.success('截图已保存')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
+              }}
+            >
+              <Camera className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
+              onClick={async () => {
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([uid])
+                try {
+                  const result = await captureSelectedMessages(ids, 'clipboard')
+                  if (result.success) toast.success('已复制到剪贴板')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
+              }}
+            >
+              <Copy className="size-3.5" />
+            </button>
+          </>
+        )})()}
         <CopyButton content={displayContentText} />
       </MessageActions>
     </Message>
