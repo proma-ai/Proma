@@ -1811,8 +1811,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </div>
           )}
 
-          <div className="px-2 pt-2 pb-1 flex flex-shrink-0">
+          <div className="px-2 pt-2 pb-1 flex items-center flex-shrink-0">
             <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">对话</span>
+            {/* 占位元素：与项目行的 size-6 按钮等高，保证跨模式切换时标签文字垂直位置不变 */}
+            <div className="w-0 h-6" aria-hidden="true" />
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
