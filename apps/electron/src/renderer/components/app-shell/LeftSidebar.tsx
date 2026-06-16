@@ -135,30 +135,19 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
   return (
     <button
       type="button"
-      aria-label={`自动任务，${count} 个任务已创建`}
+      aria-label={`定时任务，${count} 个任务已创建`}
       onClick={onClick}
       className={cn(
-        'group w-full flex items-center justify-between px-3 py-2 rounded-[10px] text-[13px] transition-colors duration-100 titlebar-no-drag automation-entry',
+        'w-full flex items-center justify-center px-3 py-2 rounded-[10px] text-[12px] transition-colors titlebar-no-drag whitespace-nowrap',
         active
-          ? 'automation-entry-selected bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+          ? 'bg-primary/10 text-foreground'
+          : 'text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70',
       )}
     >
-      <span className="flex items-center gap-3 min-w-0">
-        <span className={cn('flex-shrink-0 w-[18px] h-[18px] automation-entry-icon', active ? 'text-accent-foreground' : 'text-foreground/45')}>
-          <AlarmClock size={16} className="block" />
-        </span>
-        <span className="truncate">自动任务</span>
-      </span>
-      <span
-        className={cn(
-          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
-          active
-            ? 'bg-accent-foreground/[0.26] text-primary-foreground'
-            : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
-        )}
-      >
-        {formatAutomationCount(count)}
+      <span className="flex items-center gap-1">
+        <AlarmClock size={13} className={active ? 'text-primary' : 'text-foreground/40'} />
+        <span className="tabular-nums">{formatAutomationCount(count)}</span>
+        <span className={active ? 'text-foreground/50' : 'text-foreground/30'}>定时任务</span>
       </span>
     </button>
   )
@@ -665,11 +654,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 打开自动任务列表 */
+  /** 打开/关闭定时任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
+    if (activeView === 'automations') {
+      setActiveView('conversations')
+      return
+    }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView])
 
   /** 打开 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
@@ -1489,7 +1482,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         <AlertDialogHeader>
           <AlertDialogTitle>确认删除项目</AlertDialogTitle>
           <AlertDialogDescription>
-            将删除「{pendingDeleteWorkspace?.name ?? '该项目'}」及其绑定的所有会话、自动任务、MCP、Skills、工作区文件和本地项目目录。附加目录和附加文件只会移除引用，不会删除原始文件。删除后无法恢复。
+            将删除「{pendingDeleteWorkspace?.name ?? '该项目'}」及其绑定的所有会话、定时任务、MCP、Skills、工作区文件和本地项目目录。附加目录和附加文件只会移除引用，不会删除原始文件。删除后无法恢复。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1627,7 +1620,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={`自动任务，${automationCount} 个任务已创建`}
+                aria-label={`定时任务，${automationCount} 个任务已创建`}
                 onClick={handleOpenAutomations}
                 className={cn(
                   'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
@@ -1652,7 +1645,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              自动任务（{automationCount} 个任务已创建）
+              定时任务（{automationCount} 个任务已创建）
             </TooltipContent>
           </Tooltip>
 
@@ -1818,7 +1811,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </div>
           )}
 
-          <div className="px-2 pt-2 pb-1 flex-shrink-0">
+          <div className="px-2 pt-2 pb-1 flex flex-shrink-0">
             <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">对话</span>
           </div>
 
@@ -2074,10 +2067,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         )}
       </div>
 
-      {/* Agent 模式：自动任务 + 项目能力指示器 */}
+      {/* Agent 模式：定时任务 + 项目能力指示器 */}
       {mode === 'agent' && (
         <div className="px-3 pb-1 flex items-center gap-1.5">
-          <div className="flex-1 min-w-0">
+          <div className="flex-1">
             <AutomationSidebarEntry
               count={automationCount}
               active={activeView === 'automations'}
@@ -2089,7 +2082,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
-                  className="flex-1 flex items-center justify-center gap-2.5 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
+                  className="flex-1 flex items-center justify-center gap-2.5 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag whitespace-nowrap"
                 >
                   <span className="flex items-center gap-1">
                     <Plug size={13} className="text-foreground/40" />

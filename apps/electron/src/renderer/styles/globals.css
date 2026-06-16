@@ -621,18 +621,6 @@
   color: inherit !important;
 }
 
-/* 远山暮霭：自动化入口选中状态 */
-.theme-ocean-dark .automation-entry-selected.automation-entry-selected {
-  background-color: hsl(210 14% 22%) !important;
-}
-.theme-ocean-dark .automation-entry-selected .automation-entry-icon {
-  color: hsl(210 35% 70%) !important;
-}
-.theme-ocean-dark .automation-entry-selected .automation-entry-badge {
-  background-color: hsl(210 35% 70% / 0.20) !important;
-  color: hsl(210 35% 70%) !important;
-}
-
 /* ===== 森系主题：会话/工作区选中状态 ===== */
 /* 森息晨光：浅绿背景 + 深绿文字 */
 .theme-forest-light .session-item-selected,
@@ -658,18 +646,6 @@
 .theme-forest-dark .workspace-item-selected *,
 .theme-forest-dark .tab-item-selected * {
   color: inherit !important;
-}
-
-/* 森息夜语：自动化入口选中状态 */
-.theme-forest-dark .automation-entry-selected.automation-entry-selected {
-  background-color: hsl(150 12% 22%) !important;
-}
-.theme-forest-dark .automation-entry-selected .automation-entry-icon {
-  color: hsl(145 35% 65%) !important;
-}
-.theme-forest-dark .automation-entry-selected .automation-entry-badge {
-  background-color: hsl(145 35% 65% / 0.20) !important;
-  color: hsl(145 35% 65%) !important;
 }
 
 /* ===== 莫兰迪主题：模式切换器选中状态 ===== */
@@ -754,18 +730,6 @@
   color: inherit !important;
 }
 
-/* 莫兰迪夜：自动化入口选中状态 */
-.theme-slate-dark .automation-entry-selected.automation-entry-selected {
-  background-color: hsl(260 10% 22%) !important;
-}
-.theme-slate-dark .automation-entry-selected .automation-entry-icon {
-  color: hsl(15 30% 75%) !important;
-}
-.theme-slate-dark .automation-entry-selected .automation-entry-badge {
-  background-color: hsl(15 30% 75% / 0.20) !important;
-  color: hsl(15 30% 75%) !important;
-}
-
 /* ===== CRT 终端：会话/工作区选中态 ===== */
 .theme-terminal-dark .session-item-selected.session-item-selected,
 .theme-terminal-dark .workspace-item-selected.workspace-item-selected,
@@ -777,18 +741,6 @@
 .theme-terminal-dark .workspace-item-selected *,
 .theme-terminal-dark .tab-item-selected * {
   color: inherit !important;
-}
-
-/* CRT 终端：自动化入口选中态 */
-.theme-terminal-dark .automation-entry-selected.automation-entry-selected {
-  background-color: hsl(100 10% 16%) !important;
-}
-.theme-terminal-dark .automation-entry-selected .automation-entry-icon {
-  color: hsl(var(--primary)) !important;
-}
-.theme-terminal-dark .automation-entry-selected .automation-entry-badge {
-  background-color: hsl(var(--primary) / 0.20) !important;
-  color: hsl(var(--primary)) !important;
 }
 
 /* ===== 云朵舞者主题：会话/工作区选中状态 ===== */
