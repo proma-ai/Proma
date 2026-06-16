@@ -9,11 +9,12 @@ import * as React from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
-import { Sparkles, Pencil, Save, X, FolderOpen, RefreshCw, Trash2 } from 'lucide-react'
-import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { Sparkles, Pencil, Save, X, FolderOpen, RefreshCw, Trash2, ArrowLeft } from 'lucide-react'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SettingsCard } from '@/components/settings/primitives'
 import { SkillFilesPanel } from '@/components/settings/SkillFilesPanel'
 import { cn } from '@/lib/utils'
@@ -28,7 +29,7 @@ interface SkillDetailSheetProps {
   onOpenChange: (open: boolean) => void
   onToggle: (enabled: boolean) => void
   onUpdate: () => void
-  onDelete: () => void
+  onRequestDelete: () => void
   onOpenFolder: () => void
   onChanged: () => void
 }
@@ -37,7 +38,7 @@ export function SkillDetailSheet(props: SkillDetailSheetProps): React.ReactEleme
   const { skill, onOpenChange } = props
   return (
     <Sheet open={!!skill} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[62vw] min-w-[680px] max-w-[1100px] sm:max-w-[1100px] p-0 flex flex-col gap-0" aria-describedby={undefined}>
+      <SheetContent hideClose side="right" className="w-[62vw] min-w-[680px] max-w-[1100px] sm:max-w-[1100px] p-0 flex flex-col gap-0" aria-describedby={undefined}>
         <SheetTitle className="sr-only">Skill 详情</SheetTitle>
         {skill && <SkillDetailBody key={skill.slug} {...props} skill={skill} />}
       </SheetContent>
@@ -50,9 +51,10 @@ function SkillDetailBody({
   workspaceSlug,
   isBuiltin,
   updating,
+  onOpenChange,
   onToggle,
   onUpdate,
-  onDelete,
+  onRequestDelete,
   onOpenFolder,
   onChanged,
 }: SkillDetailSheetProps & { skill: SkillMeta }): React.ReactElement {
@@ -133,8 +135,15 @@ function SkillDetailBody({
   return (
     <div className="flex h-full flex-col min-h-0">
       {/* 头部 */}
-      <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5 pr-12">
-        <div className="flex items-start gap-3">
+      <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => onOpenChange(false)}>
+            <ArrowLeft size={18} />
+          </Button>
+          <h3 className="text-lg font-medium text-foreground">Skill 详情</h3>
+        </div>
+
+        <div className="mt-4 flex items-start gap-3">
           <div className="rounded-xl bg-amber-500/12 p-2 text-amber-500 shadow-sm shrink-0">
             <Sparkles size={18} />
           </div>
@@ -163,13 +172,28 @@ function SkillDetailBody({
               {updating ? '更新中' : '更新'}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={onOpenFolder} title="打开目录">
-            <FolderOpen size={14} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" variant="ghost" onClick={onOpenFolder}>
+                <FolderOpen size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">打开目录</TooltipContent>
+          </Tooltip>
           {!isBuiltin && (
-            <Button size="sm" variant="ghost" onClick={onDelete} className="text-muted-foreground hover:text-destructive" title="卸载">
-              <Trash2 size={14} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onRequestDelete}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">卸载</TooltipContent>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -184,9 +208,18 @@ function SkillDetailBody({
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">元数据</h4>
               {!isEditingMeta ? (
-                <button onClick={startEditMeta} className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                  <Pencil size={12} /> 编辑
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={startEditMeta}
+                      className="flex items-center rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">编辑</TooltipContent>
+                </Tooltip>
               ) : (
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="ghost" onClick={() => setIsEditingMeta(false)} disabled={saving}>
@@ -234,14 +267,18 @@ function SkillDetailBody({
                 <div className="flex min-h-[28px] shrink-0 items-center justify-between px-1 pb-2">
                   <div className="font-mono text-xs text-muted-foreground">SKILL.md</div>
                   {!isEditingBody ? (
-                    <button
-                      type="button"
-                      title="编辑"
-                      onClick={() => { setEditBody(body); setIsEditingBody(true) }}
-                      className="flex items-center gap-1 rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <Pencil size={14} />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => { setEditBody(body); setIsEditingBody(true) }}
+                          className="flex items-center gap-1 rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">编辑</TooltipContent>
+                    </Tooltip>
                   ) : (
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="ghost" onClick={() => setIsEditingBody(false)} disabled={saving}>

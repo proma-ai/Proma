@@ -93,7 +93,6 @@ export function useAgentSkillsData(): AgentSkillsData {
   }, [workspaceSlug, bumpCapabilitiesVersion])
 
   const deleteSkill = React.useCallback(async (slug: string, name: string): Promise<boolean> => {
-    if (!confirm(`确定删除 Skill「${name}」？此操作不可恢复。`)) return false
     try {
       await window.electronAPI.deleteWorkspaceSkill(workspaceSlug, slug)
       setSkills((prev) => prev.filter((s) => s.slug !== slug))
@@ -143,7 +142,6 @@ export function useAgentSkillsData(): AgentSkillsData {
   const deleteMcp = React.useCallback(async (name: string) => {
     const entry = mcpConfig.servers[name]
     if (entry?.isBuiltin) return
-    if (!confirm(`确定删除 MCP 服务器「${name}」？此操作不可恢复。`)) return
     try {
       const newServers = { ...mcpConfig.servers }
       delete newServers[name]

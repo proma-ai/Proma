@@ -7,6 +7,7 @@
 import * as React from 'react'
 import { Plug, ShieldCheck, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { McpServerEntry } from '@proma/shared'
 
@@ -17,10 +18,10 @@ interface McpCardProps {
   entry: McpServerEntry
   onOpen: () => void
   onToggle: (enabled: boolean) => void
-  onDelete: () => void
+  onRequestDelete: () => void
 }
 
-export function McpCard({ name, entry, onOpen, onToggle, onDelete }: McpCardProps): React.ReactElement {
+export function McpCard({ name, entry, onOpen, onToggle, onRequestDelete }: McpCardProps): React.ReactElement {
   const isBuiltin = entry.isBuiltin === true
   const target = entry.type === 'stdio' ? entry.command : entry.url
   const test = entry.lastTestResult
@@ -83,14 +84,18 @@ export function McpCard({ name, entry, onOpen, onToggle, onDelete }: McpCardProp
           </span>
         )}
         {!isBuiltin && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onDelete() }}
-            title="删除"
-            className="ml-auto rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-          >
-            <Trash2 size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRequestDelete() }}
+                className="ml-auto rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+              >
+                <Trash2 size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">删除</TooltipContent>
+          </Tooltip>
         )}
       </div>
     </div>
