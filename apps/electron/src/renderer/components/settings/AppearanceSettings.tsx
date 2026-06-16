@@ -54,6 +54,7 @@ import themeForestMorning from '@/assets/theme-previews/theme-forest-morning.web
 import themeOceanDark from '@/assets/theme-previews/theme-ocean-dark.webp'
 import themeForestNight from '@/assets/theme-previews/theme-forest-night.webp'
 import themeMorandiNight from '@/assets/theme-previews/theme-morandi-night.webp'
+import themeTerminalDark from '@/assets/theme-previews/theme-terminal-dark.png'
 
 /** 主题选项 */
 const THEME_OPTIONS = [
@@ -90,6 +91,8 @@ interface SpecialStyle {
   objectPosition?: string
   /** 图片缩放比例（默认 1） */
   imageScale?: number
+  /** Tooltip 提示 */
+  tooltip?: string
 }
 
 const SPECIAL_STYLES: readonly SpecialStyle[] = [
@@ -132,6 +135,13 @@ const SPECIAL_STYLES: readonly SpecialStyle[] = [
     image: themeMorandiNight,
     imageScale: 1.15,
     objectPosition: '44% 58%',
+  },
+  {
+    id: 'terminal-dark',
+    name: '旧屏微光',
+    variant: 'dark',
+    image: themeTerminalDark,
+    tooltip: '该主题包含轻微闪烁动画',
   },
 ]
 
@@ -222,7 +232,7 @@ export function AppearanceSettings(): React.ReactElement {
           {/* 特殊风格 - 标签在上，卡片在下 */}
           <div className="px-4 py-3 space-y-2">
             <div className="text-sm font-medium text-foreground">特殊风格</div>
-            <div className="grid grid-cols-6 gap-3">
+            <div className="grid grid-cols-7 gap-3">
               {SPECIAL_STYLES.map((style) => (
                 <StyleCard
                   key={style.id}
@@ -398,6 +408,7 @@ function StyleCard({
     <button
       type="button"
       onClick={onSelect}
+      title={style.tooltip}
       className="group flex flex-col items-center gap-2 focus-visible:outline-none"
     >
       {/* 图片卡片本体 */}

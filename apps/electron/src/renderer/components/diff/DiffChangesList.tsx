@@ -1,7 +1,7 @@
 /**
  * DiffChangesList — 代码改动文件列表
  *
- * 显示所有未暂存文件，按目录分组，支持 hover 操作按钮。
+ * 显示当前工作树相对 HEAD 的代码改动，按目录分组，支持 hover 操作按钮。
  */
 
 import * as React from 'react'
@@ -45,6 +45,8 @@ interface DiffChangesListProps {
   extraPaths?: string[]
   /** 工作区 slug，用于 WorktreeSelector 拉取 worktree 列表 */
   workspaceSlug?: string
+  /** 用于自动发现 worktree 的仓库候选路径 */
+  worktreeRepoPaths?: string[]
 }
 
 /** 文件来源 badge 的颜色和文案 */
@@ -65,25 +67,13 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   selectedFilePath,
   extraPaths,
   workspaceSlug,
+  worktreeRepoPaths,
 }: DiffChangesListProps): React.ReactElement {
-  // Diff 数据缓存：mount 时若已有上次结果，立即用作初值，避免空数组闪 1s "没有代码改动"
-  const diffDataMap = useAtomValue(agentDiffDataAtom)
-  const setDiffDataMap = useSetAtom(agentDiffDataAtom)
-  const cached = diffDataMap.get(sessionId)
-  const [files, setFiles] = React.useState<ChangedFileEntry[]>(() => cached?.files ?? [])
-  const [untrackedFiles, setUntrackedFiles] = React.useState<UntrackedFileEntry[]>(() => cached?.untrackedFiles ?? [])
-  const [isGitRepo, setIsGitRepo] = React.useState(() => cached?.isGitRepo ?? true)
-  /** 首次 fetch 是否已返回——区分 loading 与真·空，避免 "没有代码改动" 误闪 */
-  const [hasFetched, setHasFetched] = React.useState<boolean>(() => cached !== undefined)
-  const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(new Set())
-  const [searchQuery, setSearchQuery] = React.useState('')
-  /** 单调递增的 fetch 序号，用于丢弃乱序到达的旧响应 */
-  const fetchSeqRef = React.useRef(0)
-
   // Worktree 选择状态（内联 WorktreeSelector）
   const selectedWorktreeMap = useAtomValue(agentSelectedWorktreeAtom)
   const setSelectedWorktreeMap = useSetAtom(agentSelectedWorktreeAtom)
   const selectedWorktreePath = selectedWorktreeMap.get(sessionId) ?? null
+  const diffCacheKey = selectedWorktreePath ? `${sessionId}:worktree:${selectedWorktreePath}` : `${sessionId}:session`
   const worktreeMode = React.useMemo(
     () => selectedWorktreePath ? { path: selectedWorktreePath, baseBranch: 'origin/main' } : undefined,
     [selectedWorktreePath],
@@ -95,6 +85,30 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       return m
     })
   }, [sessionId, setSelectedWorktreeMap])
+
+  // Diff 数据缓存：mount 时若已有上次结果，立即用作初值，避免空数组闪 1s "没有代码改动"
+  const diffDataMap = useAtomValue(agentDiffDataAtom)
+  const setDiffDataMap = useSetAtom(agentDiffDataAtom)
+  const cached = diffDataMap.get(diffCacheKey)
+  const [files, setFiles] = React.useState<ChangedFileEntry[]>(() => cached?.files ?? [])
+  const [untrackedFiles, setUntrackedFiles] = React.useState<UntrackedFileEntry[]>(() => cached?.untrackedFiles ?? [])
+  const [isGitRepo, setIsGitRepo] = React.useState(() => cached?.isGitRepo ?? true)
+  /** 首次 fetch 是否已返回——区分 loading 与真·空，避免 "没有代码改动" 误闪 */
+  const [hasFetched, setHasFetched] = React.useState<boolean>(() => cached !== undefined)
+  const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = React.useState('')
+  /** 单调递增的 fetch 序号，用于丢弃乱序到达的旧响应 */
+  const fetchSeqRef = React.useRef(0)
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset state on cache key switch, not on every diffDataMap update
+  React.useEffect(() => {
+    fetchSeqRef.current += 1
+    const nextCached = diffDataMap.get(diffCacheKey)
+    setFiles(nextCached?.files ?? [])
+    setUntrackedFiles(nextCached?.untrackedFiles ?? [])
+    setIsGitRepo(nextCached?.isGitRepo ?? true)
+    setHasFetched(nextCached !== undefined)
+  }, [diffCacheKey])
 
   // Agent 本轮刚修改但尚未查看的文件
   const unseenFilesMap = useAtomValue(agentDiffUnseenFilesAtom)
@@ -127,7 +141,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       setHasFetched(true)
       setDiffDataMap((prev) => {
         const next = new Map(prev)
-        next.set(sessionId, result)
+        next.set(diffCacheKey, result)
         return next
       })
     } catch {
@@ -135,7 +149,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       setIsGitRepo(true)
       setHasFetched(true)
     }
-  }, [dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId, setDiffDataMap, worktreeMode])
+  }, [dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId, setDiffDataMap, worktreeMode, diffCacheKey])
 
   React.useEffect(() => {
     fetchChanges()
@@ -198,73 +212,71 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   }, [untrackedFiles, searchQuery])
 
   const isEmpty = fileGroups.length === 0 && filteredUntrackedFiles.length === 0
-
-  // 非 Git 仓库
-  if (!isGitRepo) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
-        <p className="text-[12px] text-center">当前目录不是 Git 仓库或暂无改动</p>
-      </div>
-    )
-  }
-
-  // 空状态：首次 fetch 未完成时显示加载占位，避免误显示 "没有代码改动"
-  if (files.length === 0 && untrackedFiles.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
-        <p className="text-[12px] text-center">{hasFetched ? '没有代码改动' : '加载中…'}</p>
-      </div>
-    )
-  }
+  const hasAnyChanges = files.length > 0 || untrackedFiles.length > 0
+  const shouldShowSearch = isGitRepo && (hasAnyChanges || searchQuery.length > 0)
+  const shouldShowWorktreeSelector = Boolean(workspaceSlug || (worktreeRepoPaths?.length ?? 0) > 0)
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
-      {/* 搜索框 — 有改动文件时才显示 */}
-      <div className="flex-shrink-0 sticky top-0 z-10 bg-content-area px-2 pt-1.5 pb-1">
-        <div className="flex items-center gap-1.5 px-2 h-7 rounded-md bg-muted/50 border border-transparent focus-within:border-primary/40 focus-within:bg-muted/70 transition-colors">
-          <Search className="size-3 text-muted-foreground flex-shrink-0" />
-          <input
-            type="text"
-            aria-label="搜索改动文件"
-            className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/40"
-            placeholder="搜索改动文件..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <>
-              <span className="text-[10px] text-muted-foreground/50 flex-shrink-0 tabular-nums">
-                {matchedFilesCount + filteredUntrackedFiles.length}
-              </span>
-              <button
-                type="button"
-                aria-label="清除搜索"
-                className="flex-shrink-0 p-0.5 rounded-sm hover:bg-foreground/[0.08] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                onClick={() => setSearchQuery('')}
-              >
-                <X className="size-3" />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Worktree 分支选择器 — 仅当有 worktree 时显示（组件内部自动隐藏） */}
-      {workspaceSlug && (
+      {/* Worktree 分支选择器 — 空 diff / 非 Git 空态也保留，避免无法切到会话 worktree */}
+      {shouldShowWorktreeSelector && (
         <WorktreeSelector
           sessionId={sessionId}
           workspaceSlug={workspaceSlug}
+          repoPaths={worktreeRepoPaths}
           selectedPath={selectedWorktreePath}
           onSelect={handleWorktreeSelect}
         />
       )}
 
-      {isEmpty && (
+      {/* 搜索框 — 有改动文件时才显示 */}
+      {shouldShowSearch && (
+        <div className="flex-shrink-0 sticky top-0 z-10 bg-content-area px-2 pt-1.5 pb-1">
+          <div className="flex items-center gap-1.5 px-2 h-7 rounded-md bg-muted/50 border border-transparent focus-within:border-primary/40 focus-within:bg-muted/70 transition-colors">
+            <Search className="size-3 text-muted-foreground flex-shrink-0" />
+            <input
+              type="text"
+              aria-label="搜索改动文件"
+              className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/40"
+              placeholder="搜索改动文件..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <>
+                <span className="text-[10px] text-muted-foreground/50 flex-shrink-0 tabular-nums">
+                  {matchedFilesCount + filteredUntrackedFiles.length}
+                </span>
+                <button
+                  type="button"
+                  aria-label="清除搜索"
+                  className="flex-shrink-0 p-0.5 rounded-sm hover:bg-foreground/[0.08] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                  onClick={() => setSearchQuery('')}
+                >
+                  <X className="size-3" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!isGitRepo && (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
+          <p className="text-[12px] text-center">当前目录不是 Git 仓库</p>
+        </div>
+      )}
+      {isGitRepo && !hasAnyChanges && (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
+          <p className="text-[12px] text-center">{hasFetched ? '没有代码改动' : '加载中…'}</p>
+        </div>
+      )}
+      {isGitRepo && hasAnyChanges && isEmpty && (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
           <p className="text-[12px] text-center">没有匹配的文件</p>
         </div>
       )}
-      {!isEmpty && (
+      {isGitRepo && hasAnyChanges && !isEmpty && (
         <>
           {fileGroups.map((group) => {
             const isCollapsed = collapsedDirs.has(group.gitRoot)

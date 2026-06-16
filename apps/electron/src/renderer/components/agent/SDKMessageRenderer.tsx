@@ -1060,7 +1060,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
           {(meta.createdAt || isScheduledRun) && (
             <span className="flex items-center gap-2 leading-none">
               {meta.createdAt && (
-                <span className="text-[10px] text-foreground/[0.38]">{formatMessageTime(meta.createdAt)}</span>
+                <span className="message-time text-[10px] text-foreground/[0.38]">{formatMessageTime(meta.createdAt)}</span>
               )}
               {isScheduledRun && (
                 <ScheduledRunBadge />

@@ -55,7 +55,7 @@ export function Message({ className, from, ...props }: MessageProps): React.Reac
   return (
     <div
       className={cn(
-        'group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
+        'message-item group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
         from === 'user' ? 'is-user' : 'is-assistant',
         className
       )}
@@ -100,7 +100,7 @@ export function MessageHeader({
       )}
       <div className="flex flex-col justify-between h-[35px]">
         {model && <span className="text-sm font-semibold text-foreground/60 leading-none">{model}</span>}
-        {time && <span className="text-[10px] text-foreground/[0.38] leading-none">{time}</span>}
+        {time && <span className="message-time text-[10px] text-foreground/[0.38] leading-none">{time}</span>}
       </div>
       {children}
     </div>

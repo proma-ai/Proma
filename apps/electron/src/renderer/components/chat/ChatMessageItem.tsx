@@ -158,7 +158,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <UserAvatar avatar={userProfile.avatar} size={35} />
             <div className="flex flex-col justify-between h-[35px]">
               <span className="text-sm font-semibold text-foreground/60 leading-none">{userProfile.userName}</span>
-              <span className="text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
+              <span className="message-time text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
             </div>
           </div>
         )}

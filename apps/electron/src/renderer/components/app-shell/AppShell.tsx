@@ -145,7 +145,8 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
         {/* 左侧边栏：可折叠，带圆角和内边距 */}
         {/* titlebar-drag-region：wrapper 的 p-2 间隙也须可拖拽，否则 z-[60] 会把全局 z-50 drag 层挡住 */}
-        <div className="p-2 pr-0 relative z-[60] titlebar-drag-region">
+        <div className="p-2 pr-0 relative z-[60] titlebar-drag-region crt-sidebar">
+
           <LeftSidebar />
         </div>
 
@@ -157,7 +158,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
 
         {/* 右侧边栏：Agent 文件面板，拖拽手柄在间距中间 */}
         {showRightPanel && (
-          <div className={cn('relative z-[60] flex items-stretch transition-[padding] duration-300 ease-in-out', isPanelOpen ? 'p-2 pl-0' : 'p-0')}>
+          <div className={cn('relative z-[60] flex items-stretch transition-[padding] duration-300 ease-in-out crt-sidebar', isPanelOpen ? 'p-2 pl-0' : 'p-0')}>
             {/* 拖拽手柄 — 绝对定位，居中于主区域和右侧面板的缝隙 */}
             {isPanelOpen && (
               <div

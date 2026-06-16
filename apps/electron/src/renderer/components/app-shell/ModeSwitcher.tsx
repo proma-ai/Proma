@@ -69,7 +69,7 @@ export function ModeSwitcher(): React.ReactElement {
 
   return (
     <div className="pt-2 titlebar-drag-region select-none">
-      <div className="relative flex rounded-xl bg-muted p-1 titlebar-drag-region">
+      <div className="relative flex rounded-xl bg-muted p-1 titlebar-drag-region mode-switcher-track">
         {/* 滑动背景指示器 */}
         <div
           className={cn(
