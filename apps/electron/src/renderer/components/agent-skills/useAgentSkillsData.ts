@@ -27,13 +27,11 @@ export interface AgentSkillsData {
   skillsDir: string
   mcpConfig: WorkspaceMcpConfig
   updatingSkill: string | null
-  reload: () => void
   toggleSkill: (slug: string, enabled: boolean) => Promise<void>
   deleteSkill: (slug: string, name: string) => Promise<boolean>
   updateSkill: (slug: string) => Promise<void>
   toggleMcp: (name: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
-  openSkillsDir: () => void
 }
 
 export function useAgentSkillsData(): AgentSkillsData {
@@ -160,10 +158,6 @@ export function useAgentSkillsData(): AgentSkillsData {
     }
   }, [workspaceSlug, mcpConfig, bumpCapabilitiesVersion])
 
-  const openSkillsDir = React.useCallback(() => {
-    if (skillsDir) window.electronAPI.openFile(skillsDir)
-  }, [skillsDir])
-
   return {
     workspaceSlug,
     workspaceName: currentWorkspace?.name ?? '',
@@ -174,12 +168,10 @@ export function useAgentSkillsData(): AgentSkillsData {
     skillsDir,
     mcpConfig,
     updatingSkill,
-    reload: loadData,
     toggleSkill,
     deleteSkill,
     updateSkill,
     toggleMcp,
     deleteMcp,
-    openSkillsDir,
   }
 }

@@ -66,6 +66,12 @@ export function AgentSkillsView(): React.ReactElement {
       .filter(([name]) => !q || name.toLowerCase().includes(q))
   }, [data.mcpConfig, q])
 
+  // 不含搜索过滤的 MCP 总数（标签计数与空态判断用）
+  const mcpCount = React.useMemo(
+    () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length,
+    [data.mcpConfig],
+  )
+
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
 
@@ -149,7 +155,7 @@ export function AgentSkillsView(): React.ReactElement {
           />
           {([
             { value: 'skills' as const, label: 'Skills', count: data.skills.length },
-            { value: 'mcp' as const, label: 'MCP', count: Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length },
+            { value: 'mcp' as const, label: 'MCP', count: mcpCount },
           ]).map(({ value, label, count }) => (
             <button
               key={value}
@@ -236,7 +242,7 @@ export function AgentSkillsView(): React.ReactElement {
           ) : (
             <McpTab
               entries={serverEntries}
-              total={Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length}
+              total={mcpCount}
               onOpen={(name, entry) => { setEditingMcp({ name, entry }); setMcpSheetOpen(true) }}
               onToggle={data.toggleMcp}
               onDelete={data.deleteMcp}

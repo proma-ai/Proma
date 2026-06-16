@@ -14,6 +14,11 @@ export function extractSkillBody(content: string): string {
   return match?.[1] ?? content
 }
 
+/** frontmatter 是单行 `key: value`，值里的换行会破坏 YAML 结构，折叠为空格 */
+function toInlineValue(value: string): string {
+  return value.replace(/\s*\n\s*/g, ' ').trim()
+}
+
 /** 在保留 frontmatter 结构的前提下重写指定字段 */
 export function rebuildSkillMd(
   originalContent: string,
@@ -29,14 +34,16 @@ export function rebuildSkillMd(
   const currentBody = fmMatch[2] ?? ''
 
   if (updates.name !== undefined) {
+    const name = toInlineValue(updates.name)
     fmBlock = /^name:/m.test(fmBlock)
-      ? fmBlock.replace(/^name:.*$/m, `name: ${updates.name}`)
-      : `name: ${updates.name}\n${fmBlock}`
+      ? fmBlock.replace(/^name:.*$/m, `name: ${name}`)
+      : `name: ${name}\n${fmBlock}`
   }
   if (updates.description !== undefined) {
+    const description = toInlineValue(updates.description)
     fmBlock = /^description:/m.test(fmBlock)
-      ? fmBlock.replace(/^description:.*$/m, `description: ${updates.description}`)
-      : `${fmBlock}\ndescription: ${updates.description}`
+      ? fmBlock.replace(/^description:.*$/m, `description: ${description}`)
+      : `${fmBlock}\ndescription: ${description}`
   }
 
   const newBody = updates.body !== undefined ? updates.body : currentBody
