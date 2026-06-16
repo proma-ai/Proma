@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -156,6 +156,49 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
           active
             ? 'bg-accent-foreground/[0.26] text-primary-foreground'
             : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+        )}
+      >
+        {formatAutomationCount(count)}
+      </span>
+    </button>
+  )
+}
+
+interface SkillsSidebarEntryProps {
+  count: number
+  updateCount: number
+  active: boolean
+  onClick: () => void
+}
+
+function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSidebarEntryProps): React.ReactElement {
+  const hasUpdate = updateCount > 0
+  return (
+    <button
+      type="button"
+      aria-label={`Agent 技能，${count} 个能力${hasUpdate ? `，${updateCount} 个可更新` : ''}`}
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+      )}
+    >
+      <span className="flex items-center gap-3 min-w-0">
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+          <Blocks size={16} className="block" />
+        </span>
+        <span className="truncate">Agent 技能</span>
+      </span>
+      <span
+        className={cn(
+          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
+          hasUpdate
+            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+            : active
+              ? 'bg-accent-foreground/[0.26] text-primary-foreground'
+              : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
         )}
       >
         {formatAutomationCount(count)}
@@ -628,6 +671,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setActiveView('automations')
   }, [setAutomationForm, setActiveView])
 
+  /** 打开 Agent 技能视图 */
+  const handleOpenSkills = React.useCallback((): void => {
+    setActiveView('agent-skills')
+  }, [setActiveView])
+
   // 切换模式时重置归档视图
   React.useEffect(() => {
     setViewMode('active')
@@ -857,10 +905,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       return
     }
     setCurrentWorkspaceId(workspaceId)
+    setActiveView('conversations')
     // 切换到新工作区时，自动展开该工作区
     setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
-  }, [currentWorkspaceId, setCurrentWorkspaceId])
+  }, [currentWorkspaceId, setCurrentWorkspaceId, setActiveView])
 
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
@@ -1606,6 +1655,30 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               自动任务（{automationCount} 个任务已创建）
             </TooltipContent>
           </Tooltip>
+
+          {mode === 'agent' && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Agent 技能"
+                  onClick={handleOpenSkills}
+                  className={cn(
+                    'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                    activeView === 'agent-skills'
+                      ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                      : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                  )}
+                >
+                  <Blocks size={16} />
+                  {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
+                    <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Agent 技能</TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -1718,6 +1791,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           onClick={handleOpenAutomations}
         />
       </div>
+
+      {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
+      {mode === 'agent' && (
+        <div className="px-3 pb-0.5">
+          <SkillsSidebarEntry
+            count={capabilities?.skills.length ?? 0}
+            updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
+            active={activeView === 'agent-skills'}
+            onClick={handleOpenSkills}
+          />
+        </div>
+      )}
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
@@ -2009,35 +2094,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </button>
         )}
       </div>
-
-      {/* Agent 模式：项目能力指示器 */}
-      {mode === 'agent' && capabilities && (
-        <div className="px-3 pb-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
-              >
-                <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                  <span className="flex items-center gap-1">
-                    <Plug size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.mcpServers.filter((s) => s.enabled).length}</span>
-                    <span className="text-foreground/30">MCP</span>
-                  </span>
-                  <span className="text-foreground/20">·</span>
-                  <span className="flex items-center gap-1">
-                    <Zap size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.skills.length}</span>
-                    <span className="text-foreground/30">Skills</span>
-                  </span>
-                </div>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
-          </Tooltip>
-        </div>
-      )}
 
       {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
