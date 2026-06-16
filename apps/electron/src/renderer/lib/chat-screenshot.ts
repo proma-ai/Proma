@@ -121,18 +121,32 @@ export async function captureSelectedMessages(
   // 构建内容文章
   const articles: string[] = []
   const seen = new Set<string>()
+  let matchedCount = 0
+  let emptyCount = 0
+
+  console.log(
+    '[chat-screenshot] DOM 中 %d 个 [data-message-id]，选中 %d 个 ID:',
+    allMessageEls.length, selectedIds.size,
+    [...selectedIds].slice(0, 5),
+    selectedIds.size > 5 ? '…' : '',
+  )
 
   for (const el of allMessageEls) {
     const id = el.getAttribute('data-message-id')
     if (!id || !selectedIds.has(id) || seen.has(id)) continue
     seen.add(id)
+    matchedCount++
 
     const clone = el.cloneNode(true) as HTMLElement
     const role = detectRole(clone)
     const time = extractTime(clone)
     const bodyHtml = extractContentBody(clone)
 
-    if (!bodyHtml.trim()) continue
+    if (!bodyHtml.trim()) {
+      emptyCount++
+      console.log('[chat-screenshot] 消息 %s (%s) bodyHtml 为空，跳过', id, role)
+      continue
+    }
 
     articles.push(`<article class="msg">
   <div class="msg-head"><span class="msg-role">${roleLabel(role)}</span>${time ? ` <span class="msg-time">${time}</span>` : ''}</div>
@@ -140,8 +154,20 @@ export async function captureSelectedMessages(
 </article>`)
   }
 
+  console.log(
+    '[chat-screenshot] 匹配 %d 条，空内容 %d 条，生成 %d 个 article',
+    matchedCount, emptyCount, articles.length,
+  )
+
   if (articles.length === 0) {
-    return { success: false, error: '未找到选中消息的 DOM 元素' }
+    if (matchedCount === 0) {
+      const domIds = allMessageEls.map((el) => el.getAttribute('data-message-id')).filter(Boolean).slice(0, 10)
+      return {
+        success: false,
+        error: `选中 ID 与 DOM 不匹配。选中: [${[...selectedIds].slice(0, 5).join(', ')}]，DOM 前 10: [${domIds.join(', ')}]`,
+      }
+    }
+    return { success: false, error: `选中 ${matchedCount} 条消息内容均为空，无法生成截图` }
   }
 
   const isDark = document.documentElement.classList.contains('dark')
