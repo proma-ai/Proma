@@ -1635,7 +1635,33 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </TooltipTrigger>
             <TooltipContent side="right">搜索</TooltipContent>
           </Tooltip>
+        </div>
 
+        <div className="my-3 h-px w-8 bg-border/70" />
+
+        {/* 最近/关键会话入口 */}
+        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
+          <div className="flex flex-col items-center gap-1.5 pb-2">
+            {railRecentItems.map((item) => (
+              <RailRecentButton
+                key={`${item.type}-${item.id}`}
+                item={item}
+                onSelect={(selected) => {
+                  if (selected.type === 'agent') {
+                    handleSelectAgentSession(selected.id, selected.title)
+                  } else {
+                    handleSelectConversation(selected.id, selected.title)
+                  }
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="my-3 h-px w-8 bg-border/70" />
+
+        {/* 定时任务 + Agent 技能 */}
+        <div className="flex flex-col items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1643,10 +1669,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 aria-label={`定时任务，${automationCount} 个任务已创建`}
                 onClick={handleOpenAutomations}
                 className={cn(
-                  'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                  'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
                   activeView === 'automations'
                     ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
-                    : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                    : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
                 )}
               >
                 <AlarmClock size={16} />
@@ -1677,10 +1703,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   aria-label="Agent 技能"
                   onClick={handleOpenSkills}
                   className={cn(
-                    'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                    'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
                     activeView === 'agent-skills'
                       ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
-                      : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                      : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
                   )}
                 >
                   <Blocks size={16} />
@@ -1692,27 +1718,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               <TooltipContent side="right">Agent 技能</TooltipContent>
             </Tooltip>
           )}
-        </div>
-
-        <div className="my-3 h-px w-8 bg-border/70" />
-
-        {/* 最近/关键会话入口 */}
-        <div className="flex-1 min-h-0 w-full overflow-y-auto scrollbar-thin">
-          <div className="flex flex-col items-center gap-1.5 pb-2">
-            {railRecentItems.map((item) => (
-              <RailRecentButton
-                key={`${item.type}-${item.id}`}
-                item={item}
-                onSelect={(selected) => {
-                  if (selected.type === 'agent') {
-                    handleSelectAgentSession(selected.id, selected.title)
-                  } else {
-                    handleSelectConversation(selected.id, selected.title)
-                  }
-                }}
-              />
-            ))}
-          </div>
         </div>
 
         {/* 用户头像（点击打开设置） */}
