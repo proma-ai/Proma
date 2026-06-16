@@ -1091,7 +1091,9 @@ function ScheduledRunBadge(): React.ReactElement {
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const sel = useMessageSelectionContext()
-  const msgKey = stableUserMsgId(message)
+  // 用 getGroupId 保证与 DOM data-message-id 完全一致
+  const syntheticGroup = React.useMemo<MessageGroup>(() => ({ type: 'user', message }), [message])
+  const msgKey = getGroupId(syntheticGroup)
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
   const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
@@ -1149,7 +1151,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
           {sel.isSelected(msgKey) ? <Circle className="size-3.5 fill-current" /> : <Circle className="size-3.5" />}
         </button>
         <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async (e) => {
-          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? ''
+          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? msgKey
           const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
           try {
             const result = await captureSelectedMessages(ids, 'file')
@@ -1160,7 +1162,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
           <Camera className="size-3.5" />
         </button>
         <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async (e) => {
-          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? ''
+          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? msgKey
           const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
           try {
             const result = await captureSelectedMessages(ids, 'clipboard')
