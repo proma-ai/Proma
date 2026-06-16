@@ -760,8 +760,9 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={async () => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([turnId])
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? turnId
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'file')
                   if (result.success) toast.success('截图已保存')
@@ -776,8 +777,9 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={async () => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([turnId])
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? turnId
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'clipboard')
                   if (result.success) toast.success('已复制到剪贴板')
@@ -1145,8 +1147,9 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={() => sel.toggle(message.uuid || '')}>
           {sel.isSelected(message.uuid || '') ? <Circle className="size-3.5 fill-current" /> : <Circle className="size-3.5" />}
         </button>
-        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async () => {
-          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.uuid || ''])
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async (e) => {
+          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? ''
+          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
           try {
             const result = await captureSelectedMessages(ids, 'file')
             if (result.success) toast.success('截图已保存')
@@ -1155,8 +1158,9 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         }}>
           <Camera className="size-3.5" />
         </button>
-        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async () => {
-          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.uuid || ''])
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async (e) => {
+          const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? ''
+          const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
           try {
             const result = await captureSelectedMessages(ids, 'clipboard')
             if (result.success) toast.success('已复制到剪贴板')
@@ -1376,8 +1380,9 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={async () => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([uid])
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? uid
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'file')
                   if (result.success) toast.success('截图已保存')
@@ -1392,8 +1397,9 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={async () => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([uid])
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? uid
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'clipboard')
                   if (result.success) toast.success('已复制到剪贴板')

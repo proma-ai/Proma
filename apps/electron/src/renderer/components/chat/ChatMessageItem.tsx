@@ -249,12 +249,16 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={() => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.id])
-                void captureSelectedMessages(ids, 'file').then((r) => {
-                  if (r.success) toast.success('截图已保存')
-                  else if (r.error) toast.error(r.error)
-                })
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? message.id
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
+                try {
+                  const result = await captureSelectedMessages(ids, 'file')
+                  if (result.success) toast.success('截图已保存')
+                  else if (result.error) toast.error(result.error)
+                } catch {
+                  toast.error('截图失败')
+                }
               }}
             >
               <Camera className="size-3.5" />
@@ -262,8 +266,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={async () => {
-                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([message.id])
+              onClick={async (e) => {
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? message.id
+                const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'clipboard')
                   if (result.success) toast.success('已复制到剪贴板')
