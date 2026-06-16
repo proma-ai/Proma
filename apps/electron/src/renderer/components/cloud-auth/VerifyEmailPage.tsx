@@ -23,10 +23,22 @@ export function VerifyEmailPage(): React.ReactElement {
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setLocalError(null)
+    setSuccessMsg(null)
+
+    const trimmedCode = code.trim()
+    if (!trimmedCode) {
+      setLocalError('请输入验证码')
+      return
+    }
+    if (!/^\d{6}$/.test(trimmedCode)) {
+      setLocalError('验证码为 6 位数字')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const result = await window.electronAPI.cloudAuth.verifyEmail({ email, code })
+      const result = await window.electronAPI.cloudAuth.verifyEmail({ email, code: trimmedCode })
       if (result.success) {
         setSuccessMsg('邮箱验证成功')
         setTimeout(() => setView('login'), 1500)

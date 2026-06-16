@@ -71,8 +71,14 @@ export function LoginPage(): React.ReactElement {
       const result = await window.electronAPI.cloudAuth.login({ email, password })
 
       if (!result.success) {
-        // 用户状态为 PENDING，跳转到邮箱验证
+        // 用户状态为 PENDING，账号尚未通过邮箱验证 → 跳转到邮箱验证页面
         if (result.user?.status === 'PENDING') {
+          setAuthEmail(email)
+          setView('verify-email')
+          return
+        }
+        // 兜底：若后端未返回 user 但错误信息提示需要验证，也跳转
+        if (result.error && /验证|verify|pending/i.test(result.error)) {
           setAuthEmail(email)
           setView('verify-email')
           return
