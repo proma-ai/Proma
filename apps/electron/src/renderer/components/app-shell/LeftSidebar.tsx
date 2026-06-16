@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, Plug, Zap } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -138,16 +138,27 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
       aria-label={`定时任务，${count} 个任务已创建`}
       onClick={onClick}
       className={cn(
-        'w-full flex items-center justify-center px-3 py-2 rounded-[10px] text-[12px] transition-colors titlebar-no-drag whitespace-nowrap',
+        'group w-full flex items-center justify-between px-3 py-2 rounded-[10px] text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
-          ? 'bg-primary/10 text-foreground'
-          : 'text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70',
+          ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
       )}
     >
-      <span className="flex items-center gap-1">
-        <AlarmClock size={13} className={active ? 'text-primary' : 'text-foreground/40'} />
-        <span className="tabular-nums">{formatAutomationCount(count)}</span>
-        <span className={active ? 'text-foreground/50' : 'text-foreground/30'}>定时任务</span>
+      <span className="flex items-center gap-3 min-w-0">
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+          <AlarmClock size={16} className="block" />
+        </span>
+        <span className="truncate">定时任务</span>
+      </span>
+      <span
+        className={cn(
+          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
+          active
+            ? 'bg-accent-foreground/[0.26] text-primary-foreground'
+            : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+        )}
+      >
+        {formatAutomationCount(count)}
       </span>
     </button>
   )
@@ -168,7 +179,7 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
       aria-label={`Agent 技能，${count} 个能力${hasUpdate ? `，${updateCount} 个可更新` : ''}`}
       onClick={onClick}
       className={cn(
-        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        'group w-full flex items-center justify-between px-3 py-2 rounded-[10px] text-[13px] transition-colors duration-100 titlebar-no-drag',
         active
           ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
           : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
@@ -657,12 +668,17 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   /** 打开/关闭定时任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
     if (activeView === 'automations') {
+      // 编辑页 → 关表单回列表；列表页 → 退出到对话
+      if (store.get(automationFormAtom).open) {
+        setAutomationForm({ open: false, draft: null })
+        return
+      }
       setActiveView('conversations')
       return
     }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [activeView, setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView, store])
 
   /** 打开 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
@@ -2069,39 +2085,20 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         )}
       </div>
 
-      {/* Agent 模式：定时任务 + 项目能力指示器 */}
+      {/* Agent 模式：定时任务 + Agent 技能 */}
       {mode === 'agent' && (
-        <div className="px-3 pb-1 flex items-center gap-1.5">
-          <div className="flex-1">
-            <AutomationSidebarEntry
-              count={automationCount}
-              active={activeView === 'automations'}
-              onClick={handleOpenAutomations}
-            />
-          </div>
-          {capabilities && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
-                  className="flex-1 flex items-center justify-center gap-2.5 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag whitespace-nowrap"
-                >
-                  <span className="flex items-center gap-1">
-                    <Plug size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.mcpServers.filter((s) => s.enabled).length}</span>
-                    <span className="text-foreground/30">MCP</span>
-                  </span>
-                  <span className="text-foreground/20">·</span>
-                  <span className="flex items-center gap-1">
-                    <Zap size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.skills.length}</span>
-                    <span className="text-foreground/30">Skills</span>
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
-            </Tooltip>
-          )}
+        <div className="px-3 pb-1 flex flex-col gap-0.5">
+          <AutomationSidebarEntry
+            count={automationCount}
+            active={activeView === 'automations'}
+            onClick={handleOpenAutomations}
+          />
+          <SkillsSidebarEntry
+            count={capabilities?.skills.length ?? 0}
+            updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
+            active={activeView === 'agent-skills'}
+            onClick={handleOpenSkills}
+          />
         </div>
       )}
 
