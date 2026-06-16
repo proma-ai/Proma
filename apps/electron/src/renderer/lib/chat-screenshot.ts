@@ -114,18 +114,15 @@ export async function captureSelectedMessages(
 
   const allMessageEls = Array.from(document.querySelectorAll('[data-message-id]'))
 
-  // 区分 Agent / Chat 模式
-  const isAgentMode = allMessageEls.some((el) => el.hasAttribute('data-message-role'))
-
-  const captureEls = isAgentMode
-    ? allMessageEls.filter((el) => el.hasAttribute('data-message-role'))
-    : allMessageEls
+  if (allMessageEls.length === 0) {
+    return { success: false, error: '页面尚未加载消息，请稍后重试' }
+  }
 
   // 构建内容文章
   const articles: string[] = []
   const seen = new Set<string>()
 
-  for (const el of captureEls) {
+  for (const el of allMessageEls) {
     const id = el.getAttribute('data-message-id')
     if (!id || !selectedIds.has(id) || seen.has(id)) continue
     seen.add(id)
