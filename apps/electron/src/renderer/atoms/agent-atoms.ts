@@ -684,30 +684,42 @@ export function applyAgentEvent(
       // 工具使用摘要 — 目前不影响流式状态，仅用于 UI 展示
       return prev
 
-    case 'complete':
+    case 'complete': {
       // 成功完成 — 清除 retrying，但保持 running: true
       // 等待 STREAM_COMPLETE IPC 回调通过删除流式状态来控制 UI 就绪状态
       // 这避免了用户在后端尚未完成清理时就能发送新消息的竞态条件
       // 同时将未完成的工具活动标记为 done（兜底）
       //
-      // token 计数（inputTokens / 缓存 / outputTokens）只信任流式中每条 assistant
+      // token 计数（inputTokens / 缓存 / outputTokens）默认只信任流式中每条 assistant
       // 消息的 usage_update：单条模型调用的 input+缓存 ≈ 当轮完整 prompt = 当前真实上下文。
-      // 这里【不再】从 result.usage 写入这些字段——SDK 的 result.usage 是整个 query 内所有
-      // 模型调用的累计求和（cache_read 会被累加 N 次），当成当前上下文会让进度环虚高、冲破 100%。
+      // SDK 的 result.usage 是整个 query 内所有模型调用的累计求和（cache_read 会被累加 N 次），
+      // 直接覆盖会让进度环虚高、冲破 100%（PR #821 修的正是这个问题）。
       //
-      // 仅从 result 取两个货真价实的值：
-      // - contextWindow：进度环分母（窗口大小，非用量）
-      // - costUsd：本就该是整轮累计成本
+      // 但 GLM-5.2 等走 Anthropic 兼容端点的渠道，流式 assistant 消息不携带 usage 字段，
+      // 真实值只在 result 中返回。若完全不用 result.usage，这些渠道的 ContextUsageBadge
+      // 永远停留在 inputTokens=0 不显示。
+      //
+      // 折中：仅当「整个 query 期间从未收到流式 usage_update」（prev.inputTokens 为空/0）
+      // 才从 result.usage 兜底写入 token 字段；已有流式真实值时不动。
+      // - contextWindow：始终覆盖（result 才是权威分母）
+      // - costUsd：始终覆盖（本就该是整轮累计成本）
+      const needResultFallback = !prev.inputTokens || prev.inputTokens <= 0
       return {
         ...prev,
         ...(event.usage ? {
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
           ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
           ...(event.usage.contextWindow != null && { usageUpdatedAt: Date.now() }),
+          ...(needResultFallback && event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
+          ...(needResultFallback && event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
+          ...(needResultFallback && event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
+          ...(needResultFallback && event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
+          ...(needResultFallback && { usageUpdatedAt: Date.now() }),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
       }
+    }
 
     case 'run_resumed':
       // 后台任务完成自动唤醒：从"空闲可输入"恢复到运行态（防御性，监听器已显式处理）。
