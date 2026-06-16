@@ -680,10 +680,14 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setActiveView('automations')
   }, [activeView, setAutomationForm, setActiveView, store])
 
-  /** 打开 Agent 技能视图 */
+  /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
+    if (activeView === 'agent-skills') {
+      setActiveView('conversations')
+      return
+    }
     setActiveView('agent-skills')
-  }, [setActiveView])
+  }, [activeView, setActiveView])
 
   // 切换模式时重置归档视图
   React.useEffect(() => {
