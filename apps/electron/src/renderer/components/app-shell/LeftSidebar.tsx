@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, Plug, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -1783,27 +1783,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </Tooltip>
       </div>
 
-      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
-      <div className="px-3 pt-2 pb-0.5">
-        <AutomationSidebarEntry
-          count={automationCount}
-          active={activeView === 'automations'}
-          onClick={handleOpenAutomations}
-        />
-      </div>
-
-      {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
-      {mode === 'agent' && (
-        <div className="px-3 pb-0.5">
-          <SkillsSidebarEntry
-            count={capabilities?.skills.length ?? 0}
-            updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
-            active={activeView === 'agent-skills'}
-            onClick={handleOpenSkills}
-          />
-        </div>
-      )}
-
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
         <div className="flex-1 flex flex-col min-h-0">
@@ -2094,6 +2073,42 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </button>
         )}
       </div>
+
+      {/* Agent 模式：自动任务 + 项目能力指示器 */}
+      {mode === 'agent' && (
+        <div className="px-3 pb-1 flex items-center gap-1.5">
+          <div className="flex-1 min-w-0">
+            <AutomationSidebarEntry
+              count={automationCount}
+              active={activeView === 'automations'}
+              onClick={handleOpenAutomations}
+            />
+          </div>
+          {capabilities && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
+                  className="flex-1 flex items-center justify-center gap-2.5 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
+                >
+                  <span className="flex items-center gap-1">
+                    <Plug size={13} className="text-foreground/40" />
+                    <span className="tabular-nums">{capabilities.mcpServers.filter((s) => s.enabled).length}</span>
+                    <span className="text-foreground/30">MCP</span>
+                  </span>
+                  <span className="text-foreground/20">·</span>
+                  <span className="flex items-center gap-1">
+                    <Zap size={13} className="text-foreground/40" />
+                    <span className="tabular-nums">{capabilities.skills.length}</span>
+                    <span className="text-foreground/30">Skills</span>
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      )}
 
       {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
