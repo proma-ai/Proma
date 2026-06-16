@@ -5,7 +5,8 @@ import type { WorktreeInfo, WorkspaceWorktreeRepo } from '@proma/shared'
 
 interface WorktreeSelectorProps {
   sessionId: string
-  workspaceSlug: string
+  workspaceSlug?: string
+  repoPaths?: string[]
   selectedPath: string | null
   onSelect: (worktree: WorktreeInfo | null) => void
 }
@@ -15,9 +16,18 @@ interface RepoWorktrees {
   worktrees: WorktreeInfo[]
 }
 
+function normalizePathKey(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function getPathBasename(filePath: string): string {
+  return normalizePathKey(filePath).split('/').filter(Boolean).pop() || filePath
+}
+
 export function WorktreeSelector({
   sessionId,
   workspaceSlug,
+  repoPaths,
   selectedPath,
   onSelect,
 }: WorktreeSelectorProps): React.ReactElement {
@@ -29,7 +39,28 @@ export function WorktreeSelector({
   const fetchWorktrees = React.useCallback(async () => {
     setIsLoading(true)
     try {
-      const repos = await window.electronAPI.getWorktreeRepos(workspaceSlug)
+      const repoMap = new Map<string, WorkspaceWorktreeRepo>()
+
+      if (workspaceSlug) {
+        const repos = await window.electronAPI.getWorktreeRepos(workspaceSlug)
+        for (const repo of repos) {
+          repoMap.set(normalizePathKey(repo.repoPath), repo)
+        }
+      }
+
+      for (const repoPath of repoPaths ?? []) {
+        if (!repoPath) continue
+        const key = normalizePathKey(repoPath)
+        if (repoMap.has(key)) continue
+        repoMap.set(key, {
+          name: getPathBasename(repoPath),
+          repoPath,
+          worktreesPath: '',
+          priority: 0,
+        })
+      }
+
+      const repos = Array.from(repoMap.values())
       if (repos.length === 0) {
         setRepoWorktrees([])
         return
@@ -53,7 +84,7 @@ export function WorktreeSelector({
     } finally {
       setIsLoading(false)
     }
-  }, [workspaceSlug, sessionId])
+  }, [workspaceSlug, repoPaths, sessionId])
 
   React.useEffect(() => {
     fetchWorktrees()

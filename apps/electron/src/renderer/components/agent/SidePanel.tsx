@@ -358,6 +358,11 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
     window.electronAPI.getWorkspaceFilesPath(workspaceSlug).then(setWorkspaceFilesPath).catch(() => setWorkspaceFilesPath(null))
   }, [workspaceSlug])
 
+  const worktreeRepoPathsMemo = React.useMemo(
+    () => [sessionPath, workspaceFilesPath, ...extraPathsMemo].filter(Boolean) as string[],
+    [sessionPath, workspaceFilesPath, extraPathsMemo]
+  )
+
   // Agent 写文件触发自动定位时，把 Tab 切到该文件所在的面板（session / workspace），
   // 让"最近修改"高亮落在用户当前可见的 Tab 上。仅响应 Agent 写入（select 未置位）的 reveal，
   // 用户搜索点击（select=true）不抢占 Tab；ts 去重确保用户手动切回后不会被重新抢占。
@@ -417,11 +422,12 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                 sessionId={sessionId}
                 sessionPath={sessionPath}
                 workspaceFilesPath={workspaceFilesPath || undefined}
-                extraPaths={extraPathsMemo}
+                extraPaths={fileAccessPathsMemo}
                 refreshVersion={diffRefreshVersion}
                 selectedFilePath={selectedFilePath}
                 onFileClick={handleDiffFileClick}
                 workspaceSlug={workspaceSlug || undefined}
+                worktreeRepoPaths={worktreeRepoPathsMemo}
               />
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">等待会话初始化...</div>
