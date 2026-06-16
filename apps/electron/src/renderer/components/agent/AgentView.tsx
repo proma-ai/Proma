@@ -1240,8 +1240,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
 
   /** 发送消息 */
-  const handleSend = React.useCallback(async (): Promise<void> => {
-    const text = inputContent.trim()
+  const handleSend = React.useCallback(async (overrideText?: string): Promise<void> => {
+    const text = (overrideText ?? inputContent).trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
     const pendingFilesSnapshot = pendingFilesRef.current
@@ -2114,7 +2114,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                 <button
                   type="button"
                   className="group flex items-start gap-2 w-full rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/[0.06]"
-                  onClick={handleSend}
+                  onClick={() => handleSend(suggestion)}
                 >
                   <Sparkles className="size-4 shrink-0 mt-0.5 text-primary/60 group-hover:text-primary/80" />
                   <span className="flex-1 min-w-0 text-foreground/80 group-hover:text-foreground line-clamp-3">{suggestion}</span>
