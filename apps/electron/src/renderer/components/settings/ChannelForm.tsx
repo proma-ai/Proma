@@ -252,9 +252,14 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [models, name, provider, baseUrl, apiKey, enabled, scheduleAutoSave])
 
-  // 切换供应商时自动更新 Base URL，Anthropic 兼容渠道自动添加预设模型
+  // 切换供应商时自动更新 Base URL 与名称，Anthropic 兼容渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
+    // 若 name 为空或仍是上一个 provider 的默认名称，则用新 provider 的名称覆盖；用户手动改过的 name 不动
+    const trimmedName = name.trim()
+    if (!trimmedName || trimmedName === PROVIDER_LABELS[provider]) {
+      setName(PROVIDER_LABELS[p])
+    }
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
     setTestResult(null)
@@ -276,7 +281,6 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       } else if (p === 'zhipu' || p === 'zhipu-coding') {
         setModels([
           { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
-          { id: 'glm-x-preview[1m]', name: 'GLM-X-Preview[1m]', enabled: false },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
         ])
       } else if (p === 'minimax') {
@@ -304,6 +308,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       id: newModelId.trim(),
       name: newModelName.trim() || newModelId.trim(),
       enabled: true,
+      source: 'manual',
     }
 
     setModels((prev) => [...prev, model])
@@ -339,18 +344,26 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
       setFetchResult(result)
 
-      if (result.success && result.models.length > 0) {
-        // 合并拉取的模型：保留已有模型的启用状态，新模型默认不勾选
-        const existingIds = new Set(models.map((m) => m.id))
-        const newModels = result.models
-          .filter((m) => !existingIds.has(m.id))
-          .map((m) => ({ ...m, enabled: false }))
-        if (newModels.length > 0) {
-          setModels((prev) => [...prev, ...newModels])
-        }
-      }
+      // 用拉取结果作为权威清单替换：
+      // - source==='manual' 的模型一律保留（即便不在新结果里）
+      // - 在新结果里也存在的旧模型保留 enabled 状态
+      // - 新出现的模型默认未启用
+      // - 既不在新结果里、也不是手动添加的旧模型一律丢弃（清除残留）
+      // 失败（result.success===false）时 result.models 为空，等价于清掉所有非手动模型
+      const fetchedModels = result.success ? result.models : []
+      const fetchedById = new Map(fetchedModels.map((m) => [m.id, m]))
+      setModels((prev) => {
+        const manualKept = prev.filter((m) => m.source === 'manual' && !fetchedById.has(m.id))
+        const merged = fetchedModels.map((m) => {
+          const old = prev.find((p) => p.id === m.id)
+          return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
+        })
+        return [...manualKept, ...merged]
+      })
     } catch (error) {
       setFetchResult({ success: false, message: '拉取模型请求失败', models: [] })
+      // IPC 异常等同样按"拉取结果为空"处理：清掉所有非手动模型，保留手动添加的
+      setModels((prev) => prev.filter((m) => m.source === 'manual'))
     } finally {
       setFetchingModels(false)
     }

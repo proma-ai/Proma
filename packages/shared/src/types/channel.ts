@@ -102,6 +102,8 @@ export interface ChannelModel {
   name: string
   /** 是否启用 */
   enabled: boolean
+  /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
+  source?: 'manual' | 'fetched'
 }
 
 /**
