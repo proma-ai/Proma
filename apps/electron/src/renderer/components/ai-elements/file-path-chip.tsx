@@ -3,16 +3,15 @@
  *
  * 在 Agent 消息中检测到文件路径时，渲染为可点击的芯片。
  * 支持绝对路径和相对路径（相对于 basePath 解析）。
- * 点击后在当前会话的临时预览标签页中打开文件。
+ * 点击后按用户偏好（标签页 / 侧边分屏）打开文件预览。
  */
 
 import * as React from 'react'
 import { useStore } from 'jotai'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
-import { previewFileMapAtom, previewPanelOpenMapAtom } from '@/atoms/preview-atoms'
+import { useOpenPreview } from '@/components/diff/preview-opener'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
-import { activeTabIdAtom, getPreviewTabTitle, openTab, tabsAtom } from '@/atoms/tab-atoms'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -103,6 +102,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   const chipRef = React.useRef<HTMLButtonElement>(null)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
   const store = useStore()
+  const openPreview = useOpenPreview()
 
   // 候选基础目录列表：优先使用 basePaths；否则退化到 basePath 单值
   const candidateBases = React.useMemo<string[]>(() => {
@@ -168,28 +168,12 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     const sessionId = store.get(currentAgentSessionIdAtom)
     if (!sessionId) return
 
-    store.set(previewFileMapAtom, (prev) => {
-      const m = new Map(prev)
-      m.set(sessionId, {
-        filePath: cleanPath,
-        previewOnly: true,
-        basePaths: candidateBases.length > 0 ? candidateBases : undefined,
-      })
-      return m
+    openPreview(sessionId, {
+      filePath: cleanPath,
+      previewOnly: true,
+      basePaths: candidateBases.length > 0 ? candidateBases : undefined,
     })
-    store.set(previewPanelOpenMapAtom, (prev) => {
-      const m = new Map(prev)
-      m.set(sessionId, false)
-      return m
-    })
-    const result = openTab(store.get(tabsAtom), {
-      type: 'preview',
-      sessionId,
-      title: getPreviewTabTitle(cleanPath),
-    })
-    store.set(tabsAtom, result.tabs)
-    store.set(activeTabIdAtom, result.activeTabId)
-  }, [store, cleanPath, candidateBases])
+  }, [store, openPreview, cleanPath, candidateBases])
 
   const handleShowInFolder = React.useCallback(() => {
     const bases = candidateBases.length > 0 ? candidateBases : undefined
@@ -220,7 +204,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <ContextMenuItem onClick={handleClick}>
-          在标签页中打开
+          打开预览
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={handleShowInFolder}>
