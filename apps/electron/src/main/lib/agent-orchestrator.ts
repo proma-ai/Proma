@@ -33,7 +33,7 @@ import {
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { isPromptTooLongError, isThinkingSignatureError, friendlyErrorMessage, mapSDKErrorToTypedError, extractErrorDetails, shouldKeepChannelOpen } from './adapters/claude-agent-adapter'
-import { isTransientNetworkError } from './error-patterns'
+import { isTransientNetworkError, isMalformedResponseError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
@@ -187,6 +187,8 @@ function isAutoRetryableCatchError(
   if (/\b502\b|\b529\b|overloaded/i.test(text)) return true
   // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）
   if (isTransientNetworkError(rawErrorMessage, stderr)) return true
+  // 上游响应体解析失败（JSON Parse error 等）：网关瞬时异常返回非 JSON 体，重试通常即可恢复
+  if (isMalformedResponseError(rawErrorMessage, stderr)) return true
   return false
 }
 

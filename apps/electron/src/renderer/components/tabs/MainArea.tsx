@@ -18,6 +18,7 @@ import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { AutomationsListView } from '@/components/automation/AutomationsListView'
+import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 
@@ -160,6 +161,9 @@ export function MainArea(): React.ReactElement {
                 // Automations 列表视图：全屏取代 TabBar + TabContent
                 <AutomationsListView />
               )
+            ) : activeView === 'agent-skills' ? (
+              // Agent 技能视图：全屏取代 TabBar + TabContent
+              <AgentSkillsView />
             ) : (
               <>
                 <TabBar />
