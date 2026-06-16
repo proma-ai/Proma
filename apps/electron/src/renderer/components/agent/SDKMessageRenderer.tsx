@@ -1091,6 +1091,7 @@ function ScheduledRunBadge(): React.ReactElement {
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const sel = useMessageSelectionContext()
+  const msgKey = stableUserMsgId(message)
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
   const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
@@ -1144,8 +1145,8 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         {text && <UserMessageContent>{text}</UserMessageContent>}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
-        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={() => sel.toggle(message.uuid || '')}>
-          {sel.isSelected(message.uuid || '') ? <Circle className="size-3.5 fill-current" /> : <Circle className="size-3.5" />}
+        <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={() => sel.toggle(msgKey)}>
+          {sel.isSelected(msgKey) ? <Circle className="size-3.5 fill-current" /> : <Circle className="size-3.5" />}
         </button>
         <button type="button" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60" onClick={async (e) => {
           const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? ''
@@ -1191,6 +1192,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
   const sel = useMessageSelectionContext()
   const meta = extractMeta(message as unknown as SDKMessage)
   const errorText = message.error?.message ?? '未知错误'
+  const msgKey = stableUserMsgId(message)
 
   const msgAny = message as unknown as Record<string, unknown>
   const errorTitle = typeof msgAny._errorTitle === 'string' ? msgAny._errorTitle : undefined
@@ -1365,14 +1367,14 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         )}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
-        {message.uuid && (() => { const uid = message.uuid!; return (
+        {message.uuid && (() => { const msgKeyLocal = msgKey; return (
           <>
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
-              onClick={() => sel.toggle(uid)}
+              onClick={() => sel.toggle(msgKeyLocal)}
             >
-              {sel.isSelected(uid)
+              {sel.isSelected(msgKeyLocal)
                 ? <Circle className="size-3.5 fill-current" />
                 : <Circle className="size-3.5" />
               }
@@ -1381,7 +1383,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
               onClick={async (e) => {
-                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? uid
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? msgKeyLocal
                 const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'file')
@@ -1398,7 +1400,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
               type="button"
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground h-7 w-7 focus-visible:ring-0 text-muted-foreground/60"
               onClick={async (e) => {
-                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? uid
+                const domId = (e.currentTarget as HTMLElement).closest('[data-message-id]')?.getAttribute('data-message-id') ?? msgKeyLocal
                 const ids = sel.selectedIds.size > 0 ? sel.selectedIds : new Set([domId])
                 try {
                   const result = await captureSelectedMessages(ids, 'clipboard')
@@ -1450,6 +1452,18 @@ export interface MessageGroupRendererProps {
  */
 const messageIdCache = new WeakMap<object, string>()
 let fallbackIdCounter = 0
+
+/** 为缺少 uuid 的 UserInput / Error 消息生成稳定 ID，防止空串冲突 */
+const userMsgIdCache = new WeakMap<object, string>()
+let userMsgIdCounter = 0
+
+function stableUserMsgId(msg: { uuid?: string }): string {
+  if (msg.uuid) return msg.uuid
+  if (!userMsgIdCache.has(msg)) {
+    userMsgIdCache.set(msg, `user-msg-${++userMsgIdCounter}`)
+  }
+  return userMsgIdCache.get(msg)!
+}
 
 /**
  * 从 MessageGroup 中提取稳定的 ID，用于 data-message-id 和迷你地图
