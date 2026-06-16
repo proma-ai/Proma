@@ -100,6 +100,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   /** 单调递增的 fetch 序号，用于丢弃乱序到达的旧响应 */
   const fetchSeqRef = React.useRef(0)
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset state on cache key switch, not on every diffDataMap update
   React.useEffect(() => {
     fetchSeqRef.current += 1
     const nextCached = diffDataMap.get(diffCacheKey)

@@ -9,7 +9,7 @@ import { join, resolve, sep, dirname } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -396,11 +396,11 @@ async function ensurePathAllowedWithWorktree(filePath: string, options?: FileAcc
   const mainRepo = await getMainRepoRoot(filePath)
   if (mainRepo && isPathAllowed(mainRepo, options)) return true
   if (mainRepo) {
-    const targetMainRepo = realpathOrResolve(mainRepo).replace(/\\/g, '/').replace(/\/+$/, '')
+    const targetMainRepo = normalizePathForCompare(realpathOrResolve(mainRepo))
     for (const root of getAuthorizedRoots(options)) {
       const authorizedMainRepo = await getAccessRootMainRepo(root)
       if (!authorizedMainRepo) continue
-      const authorizedRoot = realpathOrResolve(authorizedMainRepo).replace(/\\/g, '/').replace(/\/+$/, '')
+      const authorizedRoot = normalizePathForCompare(realpathOrResolve(authorizedMainRepo))
       if (authorizedRoot === targetMainRepo) return true
     }
     for (const workspaceSlug of getWorkspaceSlugsForAccess(options)) {
@@ -412,7 +412,7 @@ async function ensurePathAllowedWithWorktree(filePath: string, options?: FileAcc
       }
       for (const repo of repos) {
         const repoMain = await getMainRepoRoot(repo.repoPath)
-        const repoRoot = realpathOrResolve(repoMain ?? repo.repoPath).replace(/\\/g, '/').replace(/\/+$/, '')
+        const repoRoot = normalizePathForCompare(realpathOrResolve(repoMain ?? repo.repoPath))
         if (repoRoot === targetMainRepo) return true
       }
     }

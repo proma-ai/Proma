@@ -9,6 +9,7 @@ import { spawn } from 'child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
+import { normalizePathForCompare } from '@proma/shared'
 import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 
 /** 大文件读取上限：超过则跳过，避免 IPC 序列化撑爆内存 */
@@ -27,7 +28,7 @@ function normalizeLineEndings(content: string): string {
 }
 
 function normalizeComparablePath(filePath: string): string {
-  return resolve(filePath).replace(/\\/g, '/').replace(/\/+$/, '')
+  return normalizePathForCompare(resolve(filePath))
 }
 
 interface ChangeCandidate {

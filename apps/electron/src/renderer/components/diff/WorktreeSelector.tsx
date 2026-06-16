@@ -2,6 +2,7 @@ import * as React from 'react'
 import { GitBranch, ChevronDown, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { WorktreeInfo, WorkspaceWorktreeRepo } from '@proma/shared'
+import { normalizePathForCompare } from '@proma/shared'
 
 interface WorktreeSelectorProps {
   sessionId: string
@@ -17,7 +18,7 @@ interface RepoWorktrees {
 }
 
 function normalizePathKey(filePath: string): string {
-  return filePath.replace(/\\/g, '/').replace(/\/+$/, '')
+  return normalizePathForCompare(filePath)
 }
 
 function getPathBasename(filePath: string): string {
