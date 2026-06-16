@@ -2137,6 +2137,70 @@ interface SessionItemActionsProps {
 }
 
 /**
+ * 安全 Tooltip：延迟渲染 Content，避开 Popper 初始定位 (0,0) 的闪现。
+ *
+ * 左侧列表项的操作按钮默认 hidden，hover 时才显示。Radix Popper 在 Content 首次挂载
+ * 时若 trigger 尚未完成布局，会先把浮层放到视口左上角 (0,0)，再跳到正确位置。这里
+ * 在 Radix 进入打开状态后，先让 Popper 有一小段时间完成定位，再真正渲染 Content；
+ * 同时 trigger rect 为 0 时直接不打开。
+ */
+interface SafeTooltipProps {
+  children: React.ReactElement
+  content: React.ReactNode
+  side?: React.ComponentPropsWithoutRef<typeof TooltipContent>['side']
+}
+
+function SafeTooltip({ children, content, side = 'top' }: SafeTooltipProps): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const [showContent, setShowContent] = React.useState(false)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+      }
+    }
+  }, [])
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean): void => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (!nextOpen) {
+      setOpen(false)
+      setShowContent(false)
+      return
+    }
+
+    // trigger 还没完成布局时不打开
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      return
+    }
+
+    setOpen(true)
+    // 先让 Radix 完成 Popper 定位，再渲染 Content，避免看到 (0,0) 初始位置。
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      setShowContent(true)
+    }, 60)
+  }, [])
+
+  return (
+    <Tooltip open={open} onOpenChange={handleOpenChange}>
+      <TooltipTrigger asChild ref={triggerRef}>
+        {children}
+      </TooltipTrigger>
+      {showContent && <TooltipContent side={side}>{content}</TooltipContent>}
+    </Tooltip>
+  )
+}
+
+/**
  * 列表项右侧操作区：默认显示相对更新时间，hover 时切换为「置顶 / 归档 / 三点菜单」按钮组。
  * 归档需要二次确认；进入确认态后强制保持按钮可见，避免鼠标移开后用户失去反馈。
  */
@@ -2222,42 +2286,37 @@ function SessionItemActions({
           forceVisible ? 'flex' : 'hidden group-hover:flex',
         )}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={cn(
-                'p-0.5 rounded transition-colors',
-                pinned
-                  ? 'text-primary/60 hover:bg-foreground/[0.08] hover:text-primary'
+        <SafeTooltip content={pinned ? '取消置顶' : '置顶'} side="top">
+          <button
+            className={cn(
+              'p-0.5 rounded transition-colors',
+              pinned
+                ? 'text-primary/60 hover:bg-foreground/[0.08] hover:text-primary'
+                : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
+            )}
+            onClick={onTogglePin}
+          >
+            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
+          </button>
+        </SafeTooltip>
+        <SafeTooltip
+          content={archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
+          side="top"
+        >
+          <button
+            className={cn(
+              'p-0.5 rounded transition-colors',
+              archiveConfirming
+                ? 'text-destructive bg-destructive/10'
+                : archived
+                  ? 'text-foreground/60 hover:bg-foreground/[0.08]'
                   : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
-              )}
-              onClick={onTogglePin}
-            >
-              {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{pinned ? '取消置顶' : '置顶'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={cn(
-                'p-0.5 rounded transition-colors',
-                archiveConfirming
-                  ? 'text-destructive bg-destructive/10'
-                  : archived
-                    ? 'text-foreground/60 hover:bg-foreground/[0.08]'
-                    : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
-              )}
-              onClick={handleArchiveClick}
-            >
-              {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
-          </TooltipContent>
-        </Tooltip>
+            )}
+            onClick={handleArchiveClick}
+          >
+            {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          </button>
+        </SafeTooltip>
         <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <button
