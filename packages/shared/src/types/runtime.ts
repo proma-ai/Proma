@@ -354,6 +354,8 @@ export const IPC_CHANNELS = {
   LIST_WORKTREES: 'git:list-worktrees',
   /** 获取 Worktree 相对于基准分支的全量变更 */
   GET_WORKTREE_CHANGES: 'git:get-worktree-changes',
+  /** 缓存文件在 Agent 写入前的当前内容，供非 git 文件 diff 预览使用 */
+  CACHE_PRE_WRITE_CONTENT: 'git:cache-pre-write-content',
   /** 在系统默认浏览器中打开外部链接 */
   OPEN_EXTERNAL: 'shell:open-external',
   /** 用系统默认应用打开任意文件 */

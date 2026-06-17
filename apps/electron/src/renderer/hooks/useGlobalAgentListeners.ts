@@ -712,6 +712,8 @@ export function useGlobalAgentListeners(): void {
               if (store.get(autoPreviewEnabledAtom)) {
                 setAutoPreviewFile(sessionId, targetPath, false)
               }
+              // 缓存文件当前内容，供非 git 文件的 diff 预览使用
+              window.electronAPI.cachePreWriteContent(targetPath).catch(() => {})
             }
           }
 

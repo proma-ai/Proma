@@ -16,6 +16,35 @@ import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 /**
+ * Agent 写入前的文件内容缓存 — keyed by 绝对路径。
+ * 非 git 仓库的文件通过此缓存获得"旧版本"，在预览面板中显示 diff 而非纯语法高亮。
+ */
+const preWriteContentCache = new Map<string, string>()
+
+/**
+ * 在 Agent 写入文件前缓存其当前内容，供后续 getDiffContents 使用。
+ * 文件不存在（新文件）时不缓存。
+ */
+export function cacheFileBeforeWrite(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      const st = statSync(filePath)
+      if (st.size <= MAX_FILE_SIZE_BYTES) {
+        const content = readFileSync(filePath, 'utf-8')
+        preWriteContentCache.set(filePath, normalizeLineEndings(content))
+      }
+    }
+  } catch {
+    // 忽略读取失败
+  }
+}
+
+/** 清除指定文件的内容缓存 */
+export function clearCachedFileContent(filePath: string): void {
+  preWriteContentCache.delete(filePath)
+}
+
+/**
  * 归一化换行符为 LF。
  *
  * diff 两侧内容来源不同：旧版本来自 `git show`（读对象库 blob，换行符为 LF），
@@ -462,7 +491,9 @@ export async function getDiffContents(dirPath: string, filePath: string, gitRoot
         // 读取失败保持空字符串
       }
     }
-    return { oldContent: '', newContent: normalizeLineEndings(newContent) }
+    // 无 git root 时从缓存取旧版本，让非 git 文件也能显示 diff 前后对比
+    const cachedOld = fullPath ? preWriteContentCache.get(fullPath) : undefined
+    return { oldContent: cachedOld ?? '', newContent: normalizeLineEndings(newContent) }
   }
 
   const safePath = normalizeSafePath(root, filePath)

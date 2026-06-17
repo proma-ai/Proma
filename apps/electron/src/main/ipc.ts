@@ -113,7 +113,7 @@ import type {
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
-import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
+import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, cacheFileBeforeWrite, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
@@ -826,6 +826,15 @@ export function registerIpcHandlers(): void {
       }
 
       return getGitRepoStatus(dirPath)
+    }
+  )
+
+  // Agent 写入前缓存文件当前内容，供非 git 文件 diff 预览使用
+  ipcMain.handle(
+    IPC_CHANNELS.CACHE_PRE_WRITE_CONTENT,
+    async (_, filePath: string) => {
+      if (!filePath || typeof filePath !== 'string') return
+      cacheFileBeforeWrite(filePath)
     }
   )
 

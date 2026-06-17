@@ -162,6 +162,8 @@ export interface ElectronAPI {
   revertFile: (input: import('@proma/shared').RevertFileInput) => Promise<void>
   /** 获取文件新旧版本内容 */
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => Promise<{ oldContent: string; newContent: string } | null>
+  /** Agent 写入前缓存文件的当前内容（非 git 文件 diff 预览用） */
+  cachePreWriteContent: (filePath: string) => Promise<void>
   /** 列出 Git Worktree */
   listWorktrees: (repoPath: string, sessionId: string) => Promise<import('@proma/shared').WorktreeInfo[]>
   /** 获取 Worktree 相对于基准分支的全量变更 */
@@ -1068,6 +1070,10 @@ const electronAPI: ElectronAPI = {
 
   getDiffContents: (input: import('@proma/shared').GetFileDiffInput) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_DIFF_CONTENTS, input)
+  },
+
+  cachePreWriteContent: (filePath: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CACHE_PRE_WRITE_CONTENT, filePath)
   },
 
   listWorktrees: (repoPath: string, sessionId: string) => {
