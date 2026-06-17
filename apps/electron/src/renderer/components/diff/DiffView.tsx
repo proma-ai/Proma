@@ -58,7 +58,8 @@ export const DiffView = React.memo(function DiffView({ oldContent, newContent, f
     diffIndicators: 'bars' as const,
     hunkSeparators: 'line-info' as const,
     lineDiffType: 'none' as const,
-    overflow: 'scroll' as const,
+    overflow: 'wrap' as const,
+    preferredHighlighter: 'shiki-wasm' as const,
     themeType: theme as 'light' | 'dark' | 'system',
     unsafeCSS: `
       :root, :host {

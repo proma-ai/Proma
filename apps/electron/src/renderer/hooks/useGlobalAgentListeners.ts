@@ -504,6 +504,23 @@ export function useGlobalAgentListeners(): void {
         }
       }
 
+      // 回退检测：dirPath 未检测到 git 时，尝试 basePaths 中的路径
+      // 解决 agent session 目录非 git 但托管项目在 git 中时预览不显示 diff 的问题
+      if (previewOnly) {
+        for (const bp of basePaths) {
+          if (!bp) continue
+          try {
+            const status = await window.electronAPI.getGitRepoStatus(bp)
+            if (status?.isRepo === true) {
+              previewOnly = false
+              break
+            }
+          } catch {
+            continue
+          }
+        }
+      }
+
       // 检查文件是否落在当前会话的 diff scope 内（与 getUnstagedChanges 的 candidates 对齐）
       // 注：未纳入 dirPath，因为 DiffChangesList 调用时 dirPath 始终等于 sessionPath
       // 路径分隔符统一为正斜杠，避免 Windows 下 client 与服务端（path.sep='\\'）方向不一致导致反向错配

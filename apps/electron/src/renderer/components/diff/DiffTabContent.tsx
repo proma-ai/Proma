@@ -454,7 +454,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const pierreOptions = React.useMemo(() => ({
     theme: { dark: 'one-dark-pro' as const, light: 'one-light' as const },
     disableFileHeader: true,
-    overflow: 'scroll' as const,
+    overflow: 'wrap' as const,
+    preferredHighlighter: 'shiki-wasm' as const,
     themeType: theme as 'light' | 'dark' | 'system',
     unsafeCSS: PIERRE_FILE_CSS,
   }), [theme])
@@ -755,6 +756,28 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
   }, [loading, scrollKey])
 
+  // SCROLL to first diff change after content loads in diff mode
+  const scrolledToChangeRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (previewOnly || loading || !oldContent || !newContent) return
+    if (oldContent === newContent) return
+    // Track by file path + content hash to re-scroll when switching files
+    const contentKey = `${filePath}:${oldContent.length}:${newContent.length}`
+    if (scrolledToChangeRef.current === contentKey) return
+    scrolledToChangeRef.current = contentKey
+    const raf = requestAnimationFrame(() => {
+      const container = scrollContainerRef.current
+      if (!container) return
+      const firstChange = container.querySelector<HTMLElement>(
+        '[data-line-type="change-addition"], [data-line-type="change-deletion"]'
+      )
+      if (firstChange) {
+        firstChange.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [previewOnly, loading, oldContent, newContent, filePath])
+
   // SAVE scroll position on scroll (throttled via rAF)
   const scrollRafRef = React.useRef(0)
   const handleScroll = React.useCallback(() => {
@@ -958,13 +981,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             <div
               className={cn(
                 'absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-background shadow-sm transition-transform duration-200 ease-in-out',
-                viewMode === 'unified' ? 'translate-x-full' : 'translate-x-0',
+                viewMode === 'split' ? 'translate-x-full' : 'translate-x-0',
               )}
             />
             <span className={cn('relative z-[1] rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
-              viewMode === 'split' ? 'text-foreground' : 'text-muted-foreground')}>分栏</span>
-            <span className={cn('relative z-[1] rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
               viewMode === 'unified' ? 'text-foreground' : 'text-muted-foreground')}>统一</span>
+            <span className={cn('relative z-[1] rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
+              viewMode === 'split' ? 'text-foreground' : 'text-muted-foreground')}>分栏</span>
           </div>
         )}
 
