@@ -70,6 +70,18 @@
   color: hsl(var(--background));
 }
 
+/* ===== 代码块选区修复 =====
+ * Shiki 高亮 token 使用 inline style={{ color: ... }} 逐 token 上色。
+ * Chromium（Electron）中 ::selection 的 color 无法覆盖 inline style，
+ * 导致选中代码时 token 原色（可能为深色/黑色）在深色背景上不可读。
+ * 这里用 !important 强制代码块选中文字色使用 --foreground。
+ */
+.code-block-wrapper ::selection,
+.code-block-wrapper ::-moz-selection {
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--primary) / 0.3);
+}
+
 @layer base {
   /* ===== 全主题统一的几何与阴影 token =====
    * --radius 基准 10px，按钮 sm/md/lg/xl 圆角全部由它派生（tailwind.config.js）；
