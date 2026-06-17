@@ -663,7 +663,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 <MessageHeader
                   model={agentStreamingModel}
                   time={formatMessageTime(Date.now())}
-                  logo={<AssistantLogo model={agentStreamingModel} />}
+                  logo={<AssistantLogo model={streamingModelId} />}
                 />
                 <MessageContent>
                   {retrying && <RetryingNotice retrying={retrying} />}
