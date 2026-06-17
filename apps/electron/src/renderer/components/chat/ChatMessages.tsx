@@ -45,8 +45,9 @@ import {
 import { useSmoothStream } from '@proma/ui'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { useConversationParallelMode } from '@/hooks/useConversationSettings'
-import { getModelLogo } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import type { ChatMessage, ChatToolActivity } from '@proma/shared'
 
@@ -130,8 +131,6 @@ interface ChatMessagesProps {
   streamingReasoning: string
   /** 流式消息绑定的模型 */
   streamingModel: string | null
-  /** 流式消息绑定的供应商 */
-  streamingProvider?: import('@proma/shared').ProviderType
   /** 流式开始时间戳 */
   startedAt?: number
   /** 工具活动列表 */
@@ -171,7 +170,6 @@ export function ChatMessages({
   streamingContent,
   streamingReasoning,
   streamingModel,
-  streamingProvider,
   startedAt,
   toolActivities,
   contextDividers,
@@ -186,6 +184,7 @@ export function ChatMessages({
   onLoadMore,
 }: ChatMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+  const channels = useAtomValue(channelsAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
 
   // 平滑流式输出：将高频更新转为逐字渲染
@@ -243,12 +242,12 @@ export function ChatMessages({
   const streamingLogo = React.useMemo(
     () => (
       <img
-        src={getModelLogo(streamingModel ?? '', streamingProvider)}
+        src={getModelLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
         alt="AI"
         className="size-[35px] rounded-[25%] object-cover"
       />
     ),
-    [streamingModel, streamingProvider]
+    [streamingModel, channels]
   )
 
   /**
