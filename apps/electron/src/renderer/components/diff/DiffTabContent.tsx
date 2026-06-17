@@ -12,7 +12,7 @@ import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
+import { agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
@@ -195,10 +195,12 @@ interface DiffTabContentProps {
   toolbarActions?: React.ReactNode
   /** 基准 ref（如 "origin/main"），用于 worktree vs main 模式 */
   baseRef?: string
+  /** 视图模式：Tab 预览传 'split'（分栏），侧边预览传 'unified'（统一） */
+  preferredViewMode?: 'split' | 'unified'
 }
 
-export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, onEmptyDiff, toolbarActions, baseRef }: DiffTabContentProps): React.ReactElement {
-  const [viewMode, setViewMode] = useAtom(agentDiffViewModeAtom)
+export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, onEmptyDiff, toolbarActions, baseRef, preferredViewMode = 'unified' }: DiffTabContentProps): React.ReactElement {
+  const viewMode = preferredViewMode
   const [oldContent, setOldContent] = React.useState('')
   const [newContent, setNewContent] = React.useState('')
   const [markdownEditing, setMarkdownEditing] = React.useState(false)
@@ -974,21 +976,9 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         </span>
 
         {!previewOnly && (
-          <div
-            className="relative flex rounded-lg bg-muted p-0.5 shrink-0 ml-auto cursor-pointer select-none"
-            onClick={() => setViewMode((v) => v === 'split' ? 'unified' : 'split')}
-          >
-            <div
-              className={cn(
-                'absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-background shadow-sm transition-transform duration-200 ease-in-out',
-                viewMode === 'split' ? 'translate-x-full' : 'translate-x-0',
-              )}
-            />
-            <span className={cn('relative z-[1] rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
-              viewMode === 'unified' ? 'text-foreground' : 'text-muted-foreground')}>统一</span>
-            <span className={cn('relative z-[1] rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors',
-              viewMode === 'split' ? 'text-foreground' : 'text-muted-foreground')}>分栏</span>
-          </div>
+          <span className="text-[10px] text-muted-foreground/40 ml-auto shrink-0">
+            {viewMode === 'unified' ? '统一视图' : '分栏视图'}
+          </span>
         )}
 
         {previewOnly && isEditableText && !readOnly && (

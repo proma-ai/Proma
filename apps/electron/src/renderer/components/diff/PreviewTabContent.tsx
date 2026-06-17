@@ -121,6 +121,7 @@ export function PreviewTabContent({ sessionId }: PreviewTabContentProps): React.
           readOnly={currentFile.readOnly}
           basePaths={currentFile.basePaths}
           baseRef={currentFile.baseRef}
+          preferredViewMode="split"
           toolbarActions={toolbarActions}
         />
       </div>
