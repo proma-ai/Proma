@@ -24,6 +24,7 @@ import { PromptEditorSidebar } from './PromptEditorSidebar'
 import type { InlineEditSubmitPayload } from './ChatMessageItem'
 import {
   conversationsAtom,
+  channelsAtom,
   streamingStatesAtom,
   chatStreamErrorsAtom,
   chatMessageRefreshAtom,
@@ -82,6 +83,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
   // ===== 全局 atoms（Map 结构，按 conversationId 读取） =====
   const conversations = useAtomValue(conversationsAtom)
+  const channels = useAtomValue(channelsAtom)
   const setConversations = useSetAtom(conversationsAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const streamingStates = useAtomValue(streamingStatesAtom)
@@ -116,6 +118,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const streamingContent = streamState?.content ?? ''
   const streamingReasoning = streamState?.reasoning ?? ''
   const streamingModel = streamState?.model ?? null
+  const streamingProvider = streamState?.provider
   const toolActivities = streamState?.toolActivities ?? []
   const chatError = chatStreamErrors.get(conversationId) ?? null
   const refreshVersion = refreshMap.get(conversationId) ?? 0
@@ -283,6 +286,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     }
 
     // 初始化当前对话的流式状态
+    const channelProvider = channels.find((c) => c.id === selectedModel.channelId)?.provider
     setStreamingStates((prev) => {
       const map = new Map(prev)
       map.set(conversationId, {
@@ -290,6 +294,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
         content: '',
         reasoning: '',
         model: selectedModel.modelId,
+        provider: channelProvider,
         toolActivities: [],
         startedAt: Date.now(),
       })
@@ -347,6 +352,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   }, [
     conversationId,
     selectedModel,
+    channels,
     messages.length,
     pendingAttachments,
     contextLength,
@@ -585,6 +591,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
             streamingContent={streamingContent}
             streamingReasoning={streamingReasoning}
             streamingModel={streamingModel}
+            streamingProvider={streamingProvider}
             startedAt={streamState?.startedAt}
             toolActivities={toolActivities}
             contextDividers={contextDividers}

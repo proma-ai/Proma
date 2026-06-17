@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
-import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
+import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel, ProviderType } from '@proma/shared'
 
 /** 全局渠道列表缓存（启动时加载一次，设置变更时刷新） */
 export const channelsAtom = atom<Channel[]>([])
@@ -42,6 +42,7 @@ export interface ConversationStreamState {
   content: string
   reasoning: string
   model?: string
+  provider?: ProviderType
   /** 记忆工具活动列表（流式期间累积） */
   toolActivities: ChatToolActivity[]
   /** 流式开始时间戳（用于思考计时持久化） */
@@ -111,6 +112,15 @@ export const streamingModelAtom = atom<string | null>(
     const currentId = get(currentConversationIdAtom)
     if (!currentId) return null
     return get(streamingStatesAtom).get(currentId)?.model ?? null
+  },
+)
+
+/** 当前对话流式消息绑定的供应商（发送时快照） */
+export const streamingProviderAtom = atom<ProviderType | undefined>(
+  (get) => {
+    const currentId = get(currentConversationIdAtom)
+    if (!currentId) return undefined
+    return get(streamingStatesAtom).get(currentId)?.provider
   },
 )
 

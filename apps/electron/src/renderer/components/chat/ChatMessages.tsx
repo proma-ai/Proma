@@ -130,6 +130,8 @@ interface ChatMessagesProps {
   streamingReasoning: string
   /** 流式消息绑定的模型 */
   streamingModel: string | null
+  /** 流式消息绑定的供应商 */
+  streamingProvider?: import('@proma/shared').ProviderType
   /** 流式开始时间戳 */
   startedAt?: number
   /** 工具活动列表 */
@@ -169,6 +171,7 @@ export function ChatMessages({
   streamingContent,
   streamingReasoning,
   streamingModel,
+  streamingProvider,
   startedAt,
   toolActivities,
   contextDividers,
@@ -240,12 +243,12 @@ export function ChatMessages({
   const streamingLogo = React.useMemo(
     () => (
       <img
-        src={getModelLogo(streamingModel ?? '')}
+        src={getModelLogo(streamingModel ?? '', streamingProvider)}
         alt="AI"
         className="size-[35px] rounded-[25%] object-cover"
       />
     ),
-    [streamingModel]
+    [streamingModel, streamingProvider]
   )
 
   /**
