@@ -1,9 +1,7 @@
 ---
 name: find-skills
-description: Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.
-version: "1.0.0"
----
-version: "1.0.0"
+description: "IMMEDIATELY invoke this skill when the user asks about finding, discovering, or installing agent skills from the open ecosystem. Helps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill. Use npx skills find <query> to search, present results with install commands and skills.sh links, offer to install with npx skills add <owner/repo@skill> -g -y. If no results found, offer to help directly with general capabilities or suggest creating a custom skill with npx skills init."
+version: "1.0.1"
 ---
 # Find Skills
 

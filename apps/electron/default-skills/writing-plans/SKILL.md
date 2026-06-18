@@ -1,9 +1,7 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
-version: "1.0.0"
----
-version: "1.0.0"
+description: "IMMEDIATELY invoke this skill. Use when you have a spec or requirements for a multi-step task, before touching code Write comprehensive implementation plans assuming the engineer has zero context: exact file paths, complete code snippets, exact commands with expected output, bite-sized tasks (2-5 min each). DRY. YAGNI. TDD. Frequent commits. Save to docs/plans/YYYY-MM-DD-<feature>.md. After saving, offer two execution options: subagent-driven or parallel session with executing-plans."
+version: "1.0.1"
 ---
 # Writing Plans
 

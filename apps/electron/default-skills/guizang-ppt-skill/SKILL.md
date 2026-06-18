@@ -1,7 +1,7 @@
 ---
 name: guizang-ppt-skill
-description: 生成横向翻页网页 PPT（单 HTML 文件），含 WebGL 背景、章节幕封、数据大字报、图片网格等模板。提供两种风格：① "电子杂志 × 电子墨水"（衬线 + 流体背景 + 暖色） ② "瑞士国际主义"（无衬线 + 网格点阵 + IKB/柠檬黄/柠檬绿/安全橙高亮）。当用户需要制作分享 / 演讲 / 发布会风格的网页 PPT，或提到"杂志风 PPT"、"瑞士风 PPT"、"Swiss Style"、"horizontal swipe deck"时使用。
-version: "1.0.0"
+description: "IMMEDIATELY invoke this skill when the user needs to create a horizontal swipe web-based presentation (single HTML file). 生成横向翻页网页 PPT（单 HTML 文件），含 WebGL 背景、章节幕封、数据大字报、图片网格等模板。提供两种风格：① \"电子杂志 × 电子墨水\"（衬线 + 流体背景 + 暖色） ② \"瑞士国际主义\"（无衬线 + 网格点阵 + IKB/柠檬黄/柠檬绿/安全橙高亮）。当用户需要制作分享 / 演讲 / 发布会风格的网页 PPT，或提到\"杂志风 PPT\"、\"瑞士风 PPT\"、\"Swiss Style\"、\"horizontal swipe deck\"时使用。 先确定风格（7问澄清清单），再拷贝对应模板，按 layouts 骨架填充内容，最后用 checklist 自检。只使用预设主题色，不允许自定义 hex。风格B必须遵守 Swiss locked mode（22个登记版式S01-S22，每页data-layout）。生成后必须打开网页做视觉核对。"
+version: "1.0.1"
 ---
 
 # Magazine Web Ppt

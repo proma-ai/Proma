@@ -1,9 +1,7 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
-version: "1.0.0"
----
-version: "1.0.0"
+description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation. Ask questions one at a time (prefer multiple choice), propose 2-3 approaches with trade-offs, present design in 200-300 word sections for incremental validation. Write validated design to docs/plans/YYYY-MM-DD-<topic>-design.md. Do NOT start implementing before design is approved."
+version: "1.0.1"
 ---
 # Brainstorming Ideas Into Designs
 

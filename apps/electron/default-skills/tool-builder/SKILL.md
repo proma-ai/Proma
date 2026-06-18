@@ -1,9 +1,7 @@
 ---
 name: tool-builder
-description: 交互式创建和管理 Chat 模式的自定义 HTTP 工具。当用户想要创建新的 API 工具、配置 Chat 工具、添加自定义工具、管理自定义工具、或说"帮我创建一个 XX 工具"时使用此 Skill。也适用于调试、修复或删除已有的自定义工具。
-version: "1.0.0"
----
-version: "1.0.0"
+description: "IMMEDIATELY invoke this skill when the user wants to create or manage custom HTTP API tools for Chat mode. 交互式创建和管理 Chat 模式的自定义 HTTP 工具。当用户想要创建新的 API 工具、配置 Chat 工具、添加自定义工具、管理自定义工具、或说“帮我创建一个 XX 工具”时使用此 Skill。也适用于调试、修复或删除已有的自定义工具。 交互式收集需求（用途/端点URL/认证方式/参数/HTTP方法/响应提取路径），构建 tool config JSON 写入 ~/.proma/chat-tools.json。工具 id 必须以 custom- 为前缀，executorType 固定为 http，URL 用 {{paramName}} 占位符。创建后告知用户切换到 Chat 模式测试。"
+version: "1.0.1"
 ---
 # Tool Builder
 

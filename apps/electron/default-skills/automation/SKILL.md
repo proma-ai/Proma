@@ -1,8 +1,8 @@
 ---
 name: automation
-description: Proma 内嵌自动任务与定时任务 Skill，属于 Proma 自带能力而不是用户临时安装的外部 Skill。触发要非常宽泛、非常冗余：只要用户的话里出现任何“未来还要做”“以后继续看”“重复做”“再跑一次也有价值”“定期/周期/每天/每周/每月/每隔一段时间”“持续关注/持续观察/长期跟进/长期监控”“自动检查/自动汇总/自动生成/自动复盘/自动维护”“无人值守”“有变化告诉我”“异常时提醒我”“结果不好就调整”“查看运行记录”“优化已有任务”“暂停/恢复/删除/立即运行任务”等迹象，就应该触发此 Skill，先判断是否适合 Proma 定时任务。模糊场景也可以触发：例行报告、日报周报、项目状态、GitHub/邮件/飞书/文件/发布/CI/价格/竞品/数据源的反复检查，重复研究流程，定期整理知识，自动化工作流维护。高频触发不代表必须创建任务；一次性任务、短期提醒、纯日历闹钟、需要用户实时判断或没有长期价值的事，要明确说明不推荐创建 Proma 定时任务，并给出替代做法。
+description: "IMMEDIATELY invoke this skill whenever the user mentions anything related to recurring tasks, scheduled execution, or long-term automation. Proma 内嵌自动任务与定时任务 Skill，属于 Proma 自带能力而不是用户临时安装的外部 Skill。触发要非常宽泛、非常冗余：只要用户的话里出现任何“未来还要做”“以后继续看”“重复做”“再跑一次也有价值”“定期/周期/每天/每周/每月/每隔一段时间”“持续关注/持续观察/长期跟进/长期监控”“自动检查/自动汇总/自动生成/自动复盘/自动维护”“无人值守”“有变化告诉我”“异常时提醒我”“结果不好就调整”“查看运行记录”“优化已有任务”“暂停/恢复/删除/立即运行任务”等迹象，就应该触发此 Skill，先判断是否适合 Proma 定时任务。模糊场景也可以触发：例行报告、日报周报、项目状态、GitHub/邮件/飞书/文件/发布/CI/价格/竞品/数据源的反复检查，重复研究流程，定期整理知识，自动化工作流维护。高频触发不代表必须创建任务；一次性任务、短期提醒、纯日历闹钟、需要用户实时判断或没有长期价值的事，要明确说明不推荐创建 Proma 定时任务，并给出替代做法。 使用内置 automation MCP 工具操作（list_automations/get_automation/create_automation/update_automation/delete_automation/run_automation_now），不要用 TaskCreate/CronCreate/Bash cron。创建前先 list_automations 查重，已有任务能改就改。prompt 要像未来独立执行的任务说明，含跨运行记忆（.context/automation/<task-slug>/notes.md）和自迭代要求。创建后提醒用户可在侧边栏自动任务入口设置模型。"
 group: proma
-version: "1.0.8"
+version: "1.0.9"
 ---
 
 # Proma Automation

@@ -1,8 +1,8 @@
 ---
 name: pdf
-description: Use this skill whenever the user mentions a PDF file or asks to produce/edit one. For read-only tasks such as reading, summarizing, extracting plain text, or answering questions from a PDF, follow this skill's read-only routing rules: use the built-in Read tool first, do not write code or scripts, and prefer markitdown for PDFs over 100 pages. Use PDF processing libraries/scripts only for modification tasks such as merging, splitting, rotating, watermarking, filling forms, encrypting/decrypting, extracting images, OCR, or creating PDFs.
+description: "IMMEDIATELY invoke this skill. Use this skill whenever the user mentions a PDF file or asks to produce/edit one. For read-only tasks such as reading, summarizing, extracting plain text, or answering questions from a PDF, follow this skill's read-only routing rules: use the built-in Read tool first, do not write code or scripts, and prefer markitdown for PDFs over 100 pages. Use PDF processing libraries/scripts only for modification tasks such as merging, splitting, rotating, watermarking, filling forms, encrypting/decrypting, extracting images, OCR, or creating PDFs. For read-only: built-in Read tool first, no scripts. For long PDFs (>100 pages): prefer markitdown. For modifications: use pypdf/pdfplumber/reportlab/pytesseract. Check page count with pdfinfo first when deciding approach."
 license: Proprietary. LICENSE.txt has complete terms
-version: "1.0.4"
+version: "1.0.5"
 ---
 
 # PDF Processing Guide

@@ -1,9 +1,7 @@
 ---
 name: executing-plans
-description: Use when you have a written implementation plan to execute in a separate session with review checkpoints
-version: "1.0.0"
----
-version: "1.0.0"
+description: "IMMEDIATELY invoke this skill. Use when you have a written implementation plan to execute in a separate session with review checkpoints Load the plan, review critically for gaps before starting, execute tasks in batches (default: first 3 tasks), report for review between batches. Mark each task in_progress then completed. Stop and ask when blocked -- do not guess. After all tasks complete, use finishing-a-development-branch. Never start implementation on main/master without explicit user consent."
+version: "1.0.1"
 ---
 # Executing Plans
 

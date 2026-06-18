@@ -1,7 +1,7 @@
 ---
 name: skill-creator
-description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
-version: "1.1.1"
+description: "IMMEDIATELY invoke this skill when the user wants to create, modify, improve, or evaluate a skill. Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy. Follow the loop: capture intent (what/when/output/test?) → interview on edge cases → write SKILL.md (keep under 500 lines, use imperative form, explain WHY) → create 2-3 test prompts → spawn parallel runs (with-skill + baseline) → draft assertions → grade → launch eval viewer → read feedback → iterate until satisfied. After skill is done, offer description optimization via run_loop.py for better triggering accuracy."
+version: "1.1.2"
 ---
 
 # Skill Creator
