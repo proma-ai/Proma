@@ -23,6 +23,11 @@ import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
+import {
+  clearPreviewScrollPositionsForSession,
+  getPreviewScrollPosition,
+  savePreviewScrollFromElement,
+} from '@/lib/preview-scroll-memory'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
@@ -61,26 +66,12 @@ const MAX_PREVIEW_CHARS = 500_000
 /** 选中文本最大字符数（与 Bozeman DOM 模式一致） */
 const MAX_QUOTED_CHARS = 2000
 
-/** 滚动位置持久化：key = `${sessionId}:${filePath}` */
-const scrollPositionCache = new Map<string, { top: number; left: number }>()
-
-function scrollCacheKey(sessionId: string, filePath: string): string {
-  return `${sessionId}:${filePath}`
-}
-
-/** 获取缓存的滚动位置 */
-export function getPreviewScrollPosition(sessionId: string, filePath: string): { top: number; left: number } | undefined {
-  return scrollPositionCache.get(scrollCacheKey(sessionId, filePath))
-}
-
 /**
  * 清除指定 session 的预览缓存，供 useCloseTab 调用。
  */
 export function clearPreviewCacheForSession(sessionId: string): void {
+  clearPreviewScrollPositionsForSession(sessionId)
   const prefix = `${sessionId}:`
-  for (const key of scrollPositionCache.keys()) {
-    if (key.startsWith(prefix)) scrollPositionCache.delete(key)
-  }
   for (const key of contentCache.keys()) {
     if (key.startsWith(prefix)) contentCache.delete(key)
   }
@@ -519,8 +510,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   // 滚动位置持久化 key（sessionId:filePath）。主加载 effect 在缓存未命中时
   // 也会读它判断是否需要恢复滚动，故声明须早于该 effect。
-  const scrollKey = scrollCacheKey(sessionId, filePath)
-
   // 主加载 effect：上下文变化（filePath/dirPath/gitRoot/previewOnly）时触发；
   // 纯预览模式也跟随 refreshVersion 失效，保证同一文件二次写入后重新读盘。
   // 命中缓存时跳过 loading 闪烁直接渲染；未命中走 IPC 拉取
@@ -568,7 +557,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       lastOldContentRef.current = ''
       // 内容缓存被 LRU 淘汰但滚动位置仍在时（如切走会话后预览 Tab 重建），
       // 也标记需要恢复，待 load() 重新拉取渲染后回到上次滚动位置。
-      if (scrollPositionCache.has(scrollKey)) {
+      if (getPreviewScrollPosition(sessionId, filePath)) {
         restoreScrollRef.current = true
       }
     }
@@ -727,33 +716,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
   }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
 
-  // scrollPosition persistent: module-level Map keyed by sessionId:filePath
-  // content changes (refreshVersion bump) → delete stored position;
-  // cached mount → restore; scroll → save.
-  const prevRefreshVersionRef = React.useRef(refreshVersion)
-
-  // WHEN content version changes (refreshVersion bump): delete stored scroll position
-  // 只在内容变化时清除，切换文件时保留位置以支持返回导航
-  React.useEffect(() => {
-    if (loading) return // still loading, don't clear yet
-    if (prevRefreshVersionRef.current !== refreshVersion) {
-      // refreshVersion changed for current file → content updated, clear position
-      scrollPositionCache.delete(scrollKey)
-      prevRefreshVersionRef.current = refreshVersion
-    }
-  }, [scrollKey, refreshVersion, loading])
-
-  // RESTORE scroll position after cached content renders
+  // 预览滚动位置持久化：同一 session/file 的刷新、自动保存、外部写入都应尽量保留上下文，
+  // 否则“编辑中切走再回来跳回顶部”的体验会很割裂。
   const restoreScrollRef = React.useRef(false)
   React.useEffect(() => {
     if (loading || !restoreScrollRef.current) return
     restoreScrollRef.current = false
-    const pos = scrollPositionCache.get(scrollKey)
+    const pos = getPreviewScrollPosition(sessionId, filePath)
     if (pos && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = pos.top
       scrollContainerRef.current.scrollLeft = pos.left
     }
-  }, [loading, scrollKey])
+  }, [filePath, loading, sessionId])
 
   // SAVE scroll position on scroll (throttled via rAF)
   const scrollRafRef = React.useRef(0)
@@ -762,18 +736,18 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = 0
       const el = scrollContainerRef.current
-      if (el) {
-        scrollPositionCache.set(scrollKey, { top: el.scrollTop, left: el.scrollLeft })
-      }
+      if (el) savePreviewScrollFromElement(sessionId, filePath, el)
     })
-  }, [scrollKey])
+  }, [filePath, sessionId])
 
-  // Cleanup rAF on unmount to prevent stale writes
+  // Cleanup rAF on unmount to prevent stale writes，同时同步落一次当前位置，避免刚滚完就切页时丢最后一帧。
   React.useEffect(() => {
     return () => {
+      const el = scrollContainerRef.current
+      if (el) savePreviewScrollFromElement(sessionId, filePath, el)
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
     }
-  }, [])
+  }, [filePath, sessionId])
 
   const handleCopy = React.useCallback(async () => {
     try {
