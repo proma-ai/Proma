@@ -50,7 +50,7 @@ import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, g
 import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
-import { buildSystemPrompt, buildDynamicContext, buildBuiltinAgents } from './agent-prompt-builder'
+import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
 import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
@@ -1669,10 +1669,6 @@ export class AgentOrchestrator {
         ...(supports1MContext(modelId || DEFAULT_MODEL_ID) && {
           betas: ['context-1m-2025-08-07'] as SdkBeta[],
         }),
-        // 内置 SubAgent 定义（code-reviewer / explorer / researcher）
-        // SubAgent 模型最终由 CLAUDE_CODE_SUBAGENT_MODEL 兜底控制：
-        // DeepSeek 系列固定 deepseek-v4-flash，其它模型删除该 env，保留 SDK 默认解析。
-        agents: buildBuiltinAgents(claudeAvailable),
         onStderr: (data: string) => {
           stderrChunks.push(data)
           console.error(`[Agent SDK stderr] ${data}`)
