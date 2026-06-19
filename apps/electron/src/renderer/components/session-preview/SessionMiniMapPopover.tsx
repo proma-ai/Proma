@@ -14,7 +14,8 @@ import { AlertTriangle, Bot, Loader2, MessageSquare } from 'lucide-react'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { tabMinimapCacheAtom, type TabMinimapItem } from '@/atoms/tab-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
-import { getModelLogo } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
 import type {
   ChatMessage,
@@ -314,13 +315,14 @@ function PreviewText({ text }: { text: string }): React.ReactElement {
 }
 
 function ItemIcon({ item, type }: { item: TabMinimapItem; type: SessionMiniMapType }): React.ReactElement {
+  const channels = useAtomValue(channelsAtom)
   if (item.role === 'user' && item.avatar) {
     return <UserAvatar avatar={item.avatar} size={16} className="mt-0.5" />
   }
   if (item.role === 'assistant' && item.model) {
     return (
       <img
-        src={getModelLogo(item.model)}
+        src={getModelLogo(item.model, resolveModelProvider(item.model, channels))}
         alt=""
         className="size-4 shrink-0 mt-0.5 rounded-[20%] object-cover"
       />

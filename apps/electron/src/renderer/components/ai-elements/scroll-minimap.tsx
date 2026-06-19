@@ -8,13 +8,15 @@
  */
 
 import * as React from 'react'
+import { useAtomValue } from 'jotai'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AlertTriangle, Search } from 'lucide-react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { Input } from '@/components/ui/input'
 import { UserAvatar } from '@/components/chat/UserAvatar'
-import { getModelLogo } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { useShortcut } from '@/hooks/useShortcut'
 import { cn } from '@/lib/utils'
 
@@ -483,13 +485,14 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
 // ── 子组件 ──
 
 function ItemIcon({ item }: { item: MinimapItem }): React.ReactElement {
+  const channels = useAtomValue(channelsAtom)
   if (item.role === 'user' && item.avatar) {
     return <UserAvatar avatar={item.avatar} size={16} className="mt-0.5" />
   }
   if ((item.role === 'assistant') && item.model) {
     return (
       <img
-        src={getModelLogo(item.model)}
+        src={getModelLogo(item.model, resolveModelProvider(item.model, channels))}
         alt=""
         className="size-4 shrink-0 mt-0.5 rounded-[20%] object-cover"
       />

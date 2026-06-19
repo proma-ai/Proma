@@ -34,7 +34,7 @@ import { MigrateToAgentButton } from './MigrateToAgentButton'
 import { DeleteMessageDialog } from './DeleteMessageDialog'
 import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
-import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import type { ChatMessage } from '@proma/shared'
@@ -144,7 +144,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             time={formatMessageTime(message.createdAt)}
             logo={
               <img
-                src={getModelLogo(message.model ?? '')}
+                src={getModelLogo(message.model ?? '', resolveModelProvider(message.model ?? '', channels))}
                 alt={message.model ?? 'AI'}
                 className="size-[35px] rounded-[25%] object-cover"
               />
