@@ -408,8 +408,13 @@ export function RichTextInput({
             return false
           }
 
-          // Mention 列表打开且有可选项时，让 TipTap Mention 处理 Enter
-          if (mentionActiveRef.current && mentionItemCountRef.current > 0) {
+          // Suggestion（@ 文件 / / Skill / # MCP / & 会话）弹窗激活时，让 TipTap Suggestion
+          // 插件处理 Enter（选中高亮项 / 关闭）。这里用实时 decoration 判定，而非 onStart 里
+          // 异步设置的 mentionActiveRef/mentionItemCountRef——后者要等 items() 异步加载
+          // （IPC 拉取工作区能力）resolve 后才置位，存在竞态窗口：插件已 active、补全列表
+          // 正在加载时按 Enter，旧逻辑会误判为无 mention 激活而把消息直接发送出去。
+          // data-decoration-id 由 @tiptap/suggestion 在 active 时同步渲染，与插件状态严格一致。
+          if (view.dom.querySelector('[data-decoration-id]')) {
             return false
           }
 
