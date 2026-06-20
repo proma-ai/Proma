@@ -42,7 +42,7 @@ export function ImageLightbox({
          */}
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-[200] bg-black/80 backdrop-blur-md titlebar-no-drag',
+            'fixed inset-0 z-[200] bg-black/90 titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}

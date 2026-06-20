@@ -2889,6 +2889,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   // 不受 PROJECT_SESSION_PREVIEW_LIMIT 与 3 天窗口限制；活跃部分内部按
   // blocked > running > completed 优先级排序（与 railRecentItems 对齐），
   // 同优先级保留 group.sessions 的 updatedAt 倒序。
+  // 当前选中的会话（activeSessionId）也必须出现在折叠列表中，无论 updatedAt 多旧、
+  // 状态如何，确保从搜索结果打开旧会话时左侧栏立即可见，不必等待 agent 完成。
   // 非活跃部分仍保留原"最近 3 天 + 至多 5 条"预览策略，作为额外补充展示。
   // 用户点击"显示更多"会在折叠基线之上每次再额外展开 PROJECT_SESSION_EXPAND_STEP 条。
   const getStatus = (sessionId: string): SessionIndicatorStatus =>
@@ -2903,10 +2905,21 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       return b.updatedAt - a.updatedAt
     })
   const activeIds = new Set(activeSessions.map((s) => s.id))
+  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
+  const currentSession = activeSessionId
+    && !activeIds.has(activeSessionId)
+    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
+  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
   const fillSessions = group.sessions
-    .filter((session) => !activeIds.has(session.id) && session.updatedAt >= recentCutoff)
+    .filter((session) =>
+      !activeIds.has(session.id)
+      && !pinnedCurrentIds.has(session.id)
+      && session.updatedAt >= recentCutoff
+    )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
-  const collapsedSessions = [...activeSessions, ...fillSessions]
+  const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
   const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
   const extraSessions = remainingSessions.slice(0, extraCount)

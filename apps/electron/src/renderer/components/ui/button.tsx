@@ -17,7 +17,7 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12),0_1px_2px_0_rgb(0_0_0/0.18)] hover:bg-destructive/92 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.16),0_2px_4px_-1px_rgb(0_0_0/0.22)]",
         // outline：背景半透明 + hairline 边框 + 极浅阴影，hover 时边框与背景同时加深
         outline:
-          "border border-border/60 bg-background/60 backdrop-blur-[2px] text-foreground shadow-[0_1px_1px_0_rgb(0_0_0/0.04)] hover:bg-accent/60 hover:border-border hover:text-accent-foreground hover:shadow-[0_1px_2px_0_rgb(0_0_0/0.06)]",
+          "border border-border/60 bg-background/80 text-foreground shadow-[0_1px_1px_0_rgb(0_0_0/0.04)] hover:bg-accent/80 hover:border-border hover:text-accent-foreground hover:shadow-[0_1px_2px_0_rgb(0_0_0/0.06)]",
         secondary:
           "bg-secondary text-secondary-foreground shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.04),0_1px_1px_0_rgb(0_0_0/0.04)] hover:bg-secondary/80 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.06),0_1px_2px_0_rgb(0_0_0/0.06)]",
         // ghost：无阴影，hover 仅替换背景，避免和实体按钮抢戏

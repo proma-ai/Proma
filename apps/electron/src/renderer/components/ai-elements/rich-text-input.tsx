@@ -422,7 +422,7 @@ export function RichTextInput({
             return true
           }
 
-          // 换行：列表内延续列表项，其他场景插入硬换行（紧凑行距）
+          // 换行：Shift+Enter 插入硬换行 <br>，普通 Enter 拆分段落或列表项
           event.preventDefault()
           // 检查是否在列表项内（遍历祖先节点）
           let isInList = false
@@ -438,11 +438,20 @@ export function RichTextInput({
             // 空列表项再次按 Enter：退出列表，回到普通输入
             if (listItemNode && listItemNode.textContent === '') {
               editor.chain().focus().liftListItem('listItem').run()
+            } else if (hasShift) {
+              // Shift+Enter：在列表项内硬换行
+              editor.chain().focus().setHardBreak().run()
             } else {
               editor.chain().focus().splitListItem('listItem').run()
             }
           } else if (editor) {
-            editor.chain().focus().splitBlock().run()
+            if (hasShift) {
+              // Shift+Enter：同段落内硬换行
+              editor.chain().focus().setHardBreak().run()
+            } else {
+              // 普通 Enter：拆分为新段落
+              editor.chain().focus().splitBlock().run()
+            }
           }
           return true
         }
