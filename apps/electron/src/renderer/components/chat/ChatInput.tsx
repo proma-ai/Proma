@@ -291,27 +291,6 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [])
 
   const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
-    {
-      key: 'attach',
-      node: (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
-              onClick={handleOpenFileDialog}
-            >
-              <Paperclip className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>添加附件</p>
-          </TooltipContent>
-        </Tooltip>
-      ),
-    },
     { key: 'model', node: <ModelSelector /> },
     {
       key: 'thinking',
@@ -333,6 +312,27 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           </TooltipTrigger>
           <TooltipContent side="top">
             <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
+    {
+      key: 'attach',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              onClick={handleOpenFileDialog}
+            >
+              <Paperclip className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>添加附件</p>
           </TooltipContent>
         </Tooltip>
       ),
