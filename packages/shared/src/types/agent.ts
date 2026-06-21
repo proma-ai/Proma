@@ -564,6 +564,8 @@ export type PromaEvent =
   | { type: 'title_updated'; title: string }
   | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }
   | { type: 'run_resumed'; sessionId: string }
+  | { type: 'artifact_stream'; toolUseId: string; toolName: string; partialJson: string; parentToolUseId?: string | null; updatedAt: number }
+  | { type: 'artifact_stream_end'; toolUseId: string; toolName: string; input?: Record<string, unknown>; parentToolUseId?: string | null; updatedAt: number }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge'
@@ -829,6 +831,42 @@ export interface WorkspaceCapabilities {
   skills: SkillMeta[]
 }
 
+// ===== Artifacts =====
+
+/** Artifact 内容类型 */
+export type ArtifactType = 'code' | 'html' | 'svg' | 'mermaid' | 'markdown'
+
+/** Artifact 持久化实体 */
+export interface Artifact {
+  id: string
+  title: string
+  type: ArtifactType
+  language?: string
+  content: string
+  version: number
+  sessionId: string
+  workspaceId?: string
+  parentId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** create_artifact 工具入参 */
+export interface ArtifactCreateInput {
+  title: string
+  type: ArtifactType
+  content: string
+  language?: string
+}
+
+/** edit_artifact 工具入参 */
+export interface ArtifactEditInput {
+  artifactId: string
+  title?: string
+  content?: string
+  language?: string
+}
+
 // ===== Agent 发送输入 =====
 
 /**
@@ -863,6 +901,8 @@ export interface AgentSendInput {
   triggeredBy?: 'user' | 'automation'
   /** 定时任务执行上下文（注入到系统提示词，用户不可见） */
   automationContext?: string
+  /** 是否启用 Artifacts 功能（Agent 可用 create_artifact/edit_artifact 工具） */
+  artifactsEnabled?: boolean
 }
 
 // ===== Agent 队列消息 =====

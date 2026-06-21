@@ -37,6 +37,8 @@ import { isTransientNetworkError, isMalformedResponseError } from './error-patte
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
 import { injectAutomationMcpServer } from './automation-agent-tools'
+import { injectArtifactMcpServer, getArtifactAllowedToolNames, buildArtifactRunPrompt } from './artifact-agent-tools'
+import { ArtifactPartialStreamTracker } from './artifact-partial-stream'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAgent } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
@@ -731,6 +733,23 @@ export class AgentOrchestrator {
   }
 
   /**
+   * 注入 Artifact 工具（create_artifact / edit_artifact）
+   */
+  private async injectArtifactTools(
+    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
+    mcpServers: Record<string, Record<string, unknown>>,
+    sessionId: string,
+    workspaceId?: string,
+  ): Promise<void> {
+    try {
+      await injectArtifactMcpServer(sdk, mcpServers, { sessionId, workspaceId })
+      console.log(`[Agent 编排] 已注入 Artifact 工具 (artifact)`)
+    } catch (err) {
+      console.error(`[Agent 编排] 注入 Artifact 工具失败:`, err)
+    }
+  }
+
+  /**
    * 生成 Agent 会话标题
    *
    * 使用 Provider 适配器系统，支持所有渠道。任何错误返回 null。
@@ -1227,6 +1246,11 @@ export class AgentOrchestrator {
         triggeredBy: input.triggeredBy,
       })
 
+      // 注入 Artifact 工具（需用户显式启用）
+      if (input.artifactsEnabled) {
+        await this.injectArtifactTools(sdk, mcpServers, sessionId, workspaceId)
+      }
+
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
         Object.assign(mcpServers, customMcpServers)
@@ -1525,7 +1549,7 @@ export class AgentOrchestrator {
         // 从实际 tool_use 流里同步，避免 UI 停留在计划阶段。
         allowDangerouslySkipPermissions: !canUseTool,
         canUseTool,
-        ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: [...SAFE_TOOLS] }),
+        ...(sdkPermissionModeForPromaMode(initialPermissionMode) === 'auto' && { allowedTools: [...SAFE_TOOLS, ...(input.artifactsEnabled ? getArtifactAllowedToolNames(true) : [])] }),
         // claude_code preset 提供基础环境信息（platform/shell/OS/git/model/知识截止日期等）
         // buildSystemPrompt 追加 Proma 特有指令（角色定义、SubAgent 策略、工作区信息等）
         systemPrompt: {
@@ -1539,7 +1563,7 @@ export class AgentOrchestrator {
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
             claudeAvailable,
             deepSeekSubagentModel: modelRouting.subagentModel,
-          }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : ''),
+          }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '') + (input.artifactsEnabled ? `\n\n${buildArtifactRunPrompt()}` : ''),
         },
         resumeSessionId: existingSdkSessionId,
         // 回退后 resume：从指定消息处继续（SDK 在同一 JSONL 内创建分支）
@@ -1697,6 +1721,9 @@ export class AgentOrchestrator {
           // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
           // 置回 false 并发 run_resumed，让 UI 从空闲态恢复运行态。
           let awaitingBackgroundWake = false
+
+          // Artifact 部分流跟踪器（渐进式 artifact 内容预览）
+          const artifactTracker = input.artifactsEnabled ? new ArtifactPartialStreamTracker() : null
 
           while (true) {
             if (!pendingNext) {
@@ -1931,6 +1958,19 @@ export class AgentOrchestrator {
               // 跳过 SDK 内部 user 消息的前端推送
             } else {
               this.eventBus.emit(sessionId, { kind: 'sdk_message', message: msg })
+
+              // Artifact 部分流事件分发
+              if (artifactTracker) {
+                for (const event of artifactTracker.handleMessage(msg)) {
+                  this.eventBus.emit(sessionId, { kind: 'proma_event', event })
+                }
+                // assistant 消息完成时发送 artifact_stream_end
+                if (msg.type === 'assistant') {
+                  for (const event of artifactTracker.buildFinalEvents(msg)) {
+                    this.eventBus.emit(sessionId, { kind: 'proma_event', event })
+                  }
+                }
+              }
             }
           }
 
