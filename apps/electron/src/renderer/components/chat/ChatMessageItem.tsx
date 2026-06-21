@@ -11,7 +11,9 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { AlertCircle, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertCircle, Check, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { useMessageSelection } from '@/contexts/MessageSelectionContext'
 import {
   Message,
   MessageHeader,
@@ -112,6 +114,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   const [isDeleting, setIsDeleting] = React.useState(false)
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
+  const { toggleSelect, isSelected, selectedCount } = useMessageSelection()
+  const selected = isSelected(message.id)
 
   /** 确认删除消息 */
   const handleDeleteConfirm = async (): Promise<void> => {
@@ -134,9 +138,20 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   // 并排模式下，user 消息不使用 from="user" 以避免右对齐
   const messageFrom = isParallelMode ? 'assistant' : message.role
 
+  const handleMessageClick = React.useCallback((e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      toggleSelect(message.id)
+    }
+  }, [message.id, toggleSelect])
+
   return (
     <>
-      <Message from={messageFrom}>
+      <Message
+        from={messageFrom}
+        onClick={handleMessageClick}
+        className={cn(selected && 'ring-2 ring-primary/40 bg-primary/[0.03]')}
+      >
         {/* assistant 头像 + 模型名 + 时间 */}
         {message.role === 'assistant' && (
           <MessageHeader
