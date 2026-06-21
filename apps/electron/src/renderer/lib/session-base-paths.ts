@@ -41,7 +41,7 @@ export function buildOrderedBasePaths(input: BasePathsInput): string[] {
   const result: string[] = []
 
   function add(path: string | null | undefined): void {
-    if (!path) return
+    if (path == null || path === '') return
     // 标准化：去除尾部分隔符
     const normalized = path.replace(/[/\\]+$/, '')
     if (normalized && !result.includes(normalized)) {

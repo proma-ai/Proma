@@ -171,6 +171,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     if (!sessionId) return
 
     // 统一构建 basePaths，包含 dirPath（目标文件父目录）提升解析优先级
+    // candidateBases 由 MarkdownInlineCode 按 sessionPath 置首的顺序构建，首元素即为 sessionPath
     const dirPath = isAbsolute ? getFileParentPath(cleanPath) : null
     const previewBasePaths = buildOrderedBasePaths({
       dirPath,

@@ -40,6 +40,7 @@ import {
   workspaceAttachedFilesMapAtom,
   unviewedCompletedSessionIdsAtom,
   agentSessionPathMapAtom,
+  agentWorkspaceFilesPathMapAtom,
   agentDiffRefreshVersionAtom,
 } from '@/atoms/agent-atoms'
 import {
@@ -462,6 +463,9 @@ export function useGlobalAgentListeners(): void {
       if (!slug) return null
       const cached = workspaceFilesPathCache.get(slug)
       if (cached) return cached
+      // 优先从 atom 缓存读取，避免冗余 IPC
+      const atomCached = store.get(agentWorkspaceFilesPathMapAtom).get(slug)
+      if (atomCached) return atomCached
       try {
         const path = await window.electronAPI.getWorkspaceFilesPath(slug)
         workspaceFilesPathCache.set(slug, path)

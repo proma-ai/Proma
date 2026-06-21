@@ -555,7 +555,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   React.useEffect(() => {
     if (!workspaceSlug) {
       setWorkspaceFilesPath(null)
-      setWorkspaceFilesPathMap(new Map())
       return
     }
     window.electronAPI
