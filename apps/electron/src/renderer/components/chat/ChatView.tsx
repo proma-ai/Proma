@@ -581,29 +581,27 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
           <div className="flex flex-col flex-1 w-full max-w-[min(72rem,100%)] mx-auto overflow-hidden min-h-0">
             {/* 中间：消息区域 + 浮动操作栏 */}
             <div className="relative flex flex-col flex-1 overflow-hidden min-h-0">
-              <div className="flex-1 overflow-y-auto min-h-0">
-                <ChatMessages
-                  conversationId={conversationId}
-                  messages={messages}
-                  messagesLoaded={messagesLoaded}
-                  streaming={isStreaming}
-                  streamingContent={streamingContent}
-                  streamingReasoning={streamingReasoning}
-                  streamingModel={streamingModel}
-                  startedAt={streamState?.startedAt}
-                  toolActivities={toolActivities}
-                  contextDividers={contextDividers}
-                  hasMore={hasMoreMessages}
-                  onDeleteMessage={handleDeleteMessage}
-                  onResendMessage={handleResendMessage}
-                  onStartInlineEdit={handleStartInlineEdit}
-                  onSubmitInlineEdit={handleSubmitInlineEdit}
-                  onCancelInlineEdit={handleCancelInlineEdit}
-                  inlineEditingMessageId={inlineEditingMessageId}
-                  onDeleteDivider={handleDeleteDivider}
-                  onLoadMore={handleLoadMore}
-                />
-              </div>
+              <ChatMessages
+                conversationId={conversationId}
+                messages={messages}
+                messagesLoaded={messagesLoaded}
+                streaming={isStreaming}
+                streamingContent={streamingContent}
+                streamingReasoning={streamingReasoning}
+                streamingModel={streamingModel}
+                startedAt={streamState?.startedAt}
+                toolActivities={toolActivities}
+                contextDividers={contextDividers}
+                hasMore={hasMoreMessages}
+                onDeleteMessage={handleDeleteMessage}
+                onResendMessage={handleResendMessage}
+                onStartInlineEdit={handleStartInlineEdit}
+                onSubmitInlineEdit={handleSubmitInlineEdit}
+                onCancelInlineEdit={handleCancelInlineEdit}
+                inlineEditingMessageId={inlineEditingMessageId}
+                onDeleteDivider={handleDeleteDivider}
+                onLoadMore={handleLoadMore}
+              />
               <MessageSelectionBar />
             </div>
 

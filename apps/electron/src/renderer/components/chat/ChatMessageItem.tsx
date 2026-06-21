@@ -11,7 +11,7 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { AlertCircle, Check, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertCircle, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMessageSelection } from '@/contexts/MessageSelectionContext'
 import {
@@ -114,7 +114,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   const [isDeleting, setIsDeleting] = React.useState(false)
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
-  const { toggleSelect, isSelected, selectedCount } = useMessageSelection()
+  const { toggleSelect, isSelected } = useMessageSelection()
   const selected = isSelected(message.id)
 
   /** 确认删除消息 */
