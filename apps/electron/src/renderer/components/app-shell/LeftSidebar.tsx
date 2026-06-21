@@ -1658,67 +1658,69 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </div>
         </div>
 
-        <div className="my-3 h-px w-8 bg-border/70" />
+        {mode === 'agent' && (
+          <>
+            <div className="my-3 h-px w-8 bg-border/70" />
 
-        {/* 定时任务 + Agent 技能 */}
-        <div className="flex flex-col items-center gap-1.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={`定时任务，${automationCount} 个任务已创建`}
-                onClick={handleOpenAutomations}
-                className={cn(
-                  'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
-                  activeView === 'automations'
-                    ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
-                    : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
-                )}
-              >
-                <AlarmClock size={16} />
-                {automationCount > 0 && (
-                  <span
+            {/* 定时任务 + Agent 技能 */}
+            <div className="flex flex-col items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={`定时任务，${automationCount} 个任务已创建`}
+                    onClick={handleOpenAutomations}
                     className={cn(
-                      'absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums',
+                      'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
                       activeView === 'automations'
-                        ? 'bg-primary-foreground text-primary'
-                        : 'bg-primary text-primary-foreground',
+                        ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
                     )}
                   >
-                    {formatAutomationCount(automationCount)}
-                  </span>
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              定时任务（{automationCount} 个任务已创建）
-            </TooltipContent>
-          </Tooltip>
+                    <AlarmClock size={16} />
+                    {automationCount > 0 && (
+                      <span
+                        className={cn(
+                          'absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums',
+                          activeView === 'automations'
+                            ? 'bg-primary-foreground text-primary'
+                            : 'bg-primary text-primary-foreground',
+                        )}
+                      >
+                        {formatAutomationCount(automationCount)}
+                      </span>
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  定时任务（{automationCount} 个任务已创建）
+                </TooltipContent>
+              </Tooltip>
 
-          {mode === 'agent' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Agent 技能"
-                  onClick={handleOpenSkills}
-                  className={cn(
-                    'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
-                    activeView === 'agent-skills'
-                      ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
-                      : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
-                  )}
-                >
-                  <Blocks size={16} />
-                  {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
-                    <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Agent 技能</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Agent 技能"
+                    onClick={handleOpenSkills}
+                    className={cn(
+                      'relative size-10 flex items-center justify-center rounded-[12px] transition-[background-color,border-color,color] duration-150 titlebar-no-drag border',
+                      activeView === 'agent-skills'
+                        ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border/60 bg-primary/5 text-foreground/45 hover:border-border hover:bg-primary/10 hover:text-primary',
+                    )}
+                  >
+                    <Blocks size={16} />
+                    {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
+                      <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Agent 技能</TooltipContent>
+              </Tooltip>
+            </div>
+          </>
+        )}
 
         {/* 用户头像（点击打开设置） */}
         <div className="pt-3 pb-3">
