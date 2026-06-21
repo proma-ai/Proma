@@ -9,6 +9,7 @@ function makeCaps(
 ): WorkspaceCapabilities {
   return {
     mcpServers: mcpServers.map((s) => ({ ...s, type: 'stdio' as const })),
+    builtinMcpServers: [],
     skills: skills.map((s) => ({ ...s })),
   }
 }

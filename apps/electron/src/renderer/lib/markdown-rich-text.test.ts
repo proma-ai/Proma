@@ -2,6 +2,35 @@ import { describe, expect, test } from 'bun:test'
 import { markdownToHtml } from './markdown-rich-text'
 
 describe('markdownToHtml rich preview blocks', () => {
+  test('renders leading yaml frontmatter as a collapsible metadata block', () => {
+    const html = markdownToHtml([
+      '---',
+      'title: ChatGPT Pro 20x 官方订阅省 30%',
+      'type: X Article / 长推 草稿',
+      'status: draft v1',
+      '---',
+      '',
+      '# 标题（备选）',
+    ].join('\n'))
+
+    expect(html).toContain('前置元数据')
+    expect(html).toContain('title: ChatGPT Pro 20x 官方订阅省 30%')
+    expect(html).toContain('type: X Article / 长推 草稿')
+    expect(html).toContain('<h1>标题（备选）</h1>')
+  })
+
+  test('does not treat an opening thematic break as frontmatter without a closing fence', () => {
+    const html = markdownToHtml([
+      '---',
+      '',
+      '# 标题（备选）',
+    ].join('\n'))
+
+    expect(html).toContain('<hr>')
+    expect(html).not.toContain('前置元数据')
+    expect(html).toContain('<h1>标题（备选）</h1>')
+  })
+
   test('renders markdown tables as standard HTML tables', () => {
     const html = markdownToHtml([
       '| Header 1 | Header 2 |',

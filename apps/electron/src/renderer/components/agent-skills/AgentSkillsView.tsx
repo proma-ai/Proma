@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
+import { useAtom, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { Blocks, ChevronDown, Search, Plus, Store, FolderOpen, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -22,27 +22,32 @@ import {
 } from '@/components/ui/popover'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
+import { agentSkillsTabAtom } from '@/atoms/active-view'
+import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
-import type { McpServerEntry, SkillMeta } from '@proma/shared'
+import type { BuiltinMcpServerSummary, McpServerEntry, SkillMeta } from '@proma/shared'
 import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
 import { McpCard } from './McpCard'
 import { SkillDetailSheet } from './SkillDetailSheet'
 import { McpDetailSheet } from './McpDetailSheet'
+import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
-
-type CapabilityTab = 'skills' | 'mcp'
 
 export function AgentSkillsView(): React.ReactElement {
   const data = useAgentSkillsData()
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
+  const setToolSettingsFocus = useSetAtom(toolSettingsFocusAtom)
   const { workspaces, currentWorkspaceId, selectProject } = useProjectActions()
 
-  const [tab, setTab] = React.useState<CapabilityTab>('skills')
+  const [tab, setTab] = useAtom(agentSkillsTabAtom)
   const [search, setSearch] = React.useState('')
   const [selectedSkillSlug, setSelectedSkillSlug] = React.useState<string | null>(null)
   const [mcpSheetOpen, setMcpSheetOpen] = React.useState(false)
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
+  const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
   const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
@@ -65,16 +70,26 @@ export function AgentSkillsView(): React.ReactElement {
   const builtinSkills = filteredSkills.filter((s) => data.defaultSkillSlugs.has(s.slug))
   const updateCount = data.skills.filter((s) => s.hasUpdate).length
 
-  const serverEntries = React.useMemo(() => {
+  const userMcpEntries = React.useMemo(() => {
     return Object.entries(data.mcpConfig.servers ?? {})
       .filter(([name]) => name !== 'memos-cloud')
       .filter(([name]) => !q || name.toLowerCase().includes(q))
   }, [data.mcpConfig, q])
 
+  const builtinMcpServers = React.useMemo(() => {
+    if (!q) return data.builtinMcpServers
+    return data.builtinMcpServers.filter((server) =>
+      server.name.toLowerCase().includes(q) ||
+      server.displayName.toLowerCase().includes(q) ||
+      server.description.toLowerCase().includes(q) ||
+      server.tools.some((tool) => tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q)),
+    )
+  }, [data.builtinMcpServers, q])
+
   // 不含搜索过滤的 MCP 总数（标签计数与空态判断用）
   const mcpCount = React.useMemo(
-    () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length,
-    [data.mcpConfig],
+    () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length + data.builtinMcpServers.length,
+    [data.mcpConfig, data.builtinMcpServers],
   )
 
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
@@ -83,6 +98,19 @@ export function AgentSkillsView(): React.ReactElement {
   const openSkillFolder = (slug: string): void => {
     if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
   }
+
+  const configureBuiltinMcp = React.useCallback((serverId: string): void => {
+    const focusMap: Partial<Record<string, ToolSettingsFocus>> = {
+      mem: 'memory',
+      'nano-banana': 'nano-banana',
+    }
+    const focus = focusMap[serverId]
+    if (!focus) return
+    setToolSettingsFocus(focus)
+    setSettingsTab('tools')
+    setSettingsOpen(true)
+    setSelectedBuiltinMcp(null)
+  }, [setSettingsOpen, setSettingsTab, setToolSettingsFocus])
 
   if (!data.hasWorkspace) {
     return (
@@ -246,10 +274,13 @@ export function AgentSkillsView(): React.ReactElement {
             />
           ) : (
             <McpTab
-              entries={serverEntries}
+              userEntries={userMcpEntries}
+              builtinServers={builtinMcpServers}
               total={mcpCount}
               onOpen={(name, entry) => { setEditingMcp({ name, entry }); setMcpSheetOpen(true) }}
+              onOpenBuiltin={setSelectedBuiltinMcp}
               onToggle={data.toggleMcp}
+              onToggleBuiltin={data.toggleBuiltinMcp}
               onRequestDelete={setPendingDeleteMcpName}
               onAdd={() => { setEditingMcp(null); setMcpSheetOpen(true) }}
             />
@@ -315,6 +346,13 @@ export function AgentSkillsView(): React.ReactElement {
         onOpenChange={(open) => { setMcpSheetOpen(open); if (!open) bumpCapabilities((v) => v + 1) }}
         onSaved={() => setMcpSheetOpen(false)}
         onChanged={() => bumpCapabilities((v) => v + 1)}
+      />
+
+      <BuiltinMcpDetailSheet
+        open={!!selectedBuiltinMcp}
+        server={selectedBuiltinMcp}
+        onOpenChange={(open) => { if (!open) setSelectedBuiltinMcp(null) }}
+        onConfigure={configureBuiltinMcp}
       />
 
       <ImportSkillDialog
@@ -404,15 +442,18 @@ function SkillSection({ title, skills, isBuiltin, updatingSkill, onOpen, onToggl
 // ===== MCP Tab =====
 
 interface McpTabProps {
-  entries: Array<[string, McpServerEntry]>
+  userEntries: Array<[string, McpServerEntry]>
+  builtinServers: BuiltinMcpServerSummary[]
   total: number
   onOpen: (name: string, entry: McpServerEntry) => void
+  onOpenBuiltin: (server: BuiltinMcpServerSummary) => void
   onToggle: (name: string, enabled: boolean) => void
+  onToggleBuiltin: (id: string, enabled: boolean) => void
   onRequestDelete: (name: string) => void
   onAdd: () => void
 }
 
-function McpTab({ entries, total, onOpen, onToggle, onRequestDelete, onAdd }: McpTabProps): React.ReactElement {
+function McpTab({ userEntries, builtinServers, total, onOpen, onOpenBuiltin, onToggle, onToggleBuiltin, onRequestDelete, onAdd }: McpTabProps): React.ReactElement {
   if (total === 0) {
     return (
       <EmptyState
@@ -432,22 +473,70 @@ function McpTab({ entries, total, onOpen, onToggle, onRequestDelete, onAdd }: Mc
       />
     )
   }
-  if (entries.length === 0) {
+  if (userEntries.length === 0 && builtinServers.length === 0) {
     return <EmptyState icon={<Search className="size-8 text-foreground/30" />} title="没有匹配的 MCP 服务器" hint="试试更换搜索关键词。" />
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {entries.map(([name, entry]) => (
-        <McpCard
-          key={name}
-          name={name}
-          entry={entry}
-          onOpen={() => onOpen(name, entry)}
-          onToggle={(enabled) => onToggle(name, enabled)}
-          onRequestDelete={() => onRequestDelete(name)}
-        />
-      ))}
+    <div className="flex flex-col gap-8">
+      {userEntries.length > 0 && (
+        <McpSection title="我的 MCP" count={userEntries.length}>
+          {userEntries.map(([name, entry]) => (
+            <McpCard
+              key={name}
+              name={name}
+              entry={entry}
+              onOpen={() => onOpen(name, entry)}
+              onToggle={(enabled) => onToggle(name, enabled)}
+              onRequestDelete={() => onRequestDelete(name)}
+            />
+          ))}
+        </McpSection>
+      )}
+
+      {builtinServers.length > 0 && (
+        <McpSection title="Proma 内置" count={builtinServers.length}>
+          {builtinServers.map((server) => (
+            <McpCard
+              key={server.id}
+              name={server.displayName}
+              entry={{
+                type: 'stdio',
+                command: 'Proma 运行时注入',
+                enabled: server.enabled,
+                isBuiltin: true,
+              }}
+              description={server.description}
+              targetLabel={server.availabilityReason ?? 'Proma 运行时注入'}
+              statusLabel={getBuiltinMcpStatus(server).label}
+              statusTone={getBuiltinMcpStatus(server).tone}
+              readOnly
+              onOpen={() => onOpenBuiltin(server)}
+              onToggle={(enabled) => onToggleBuiltin(server.id, enabled)}
+            />
+          ))}
+        </McpSection>
+      )}
+    </div>
+  )
+}
+
+function getBuiltinMcpStatus(server: BuiltinMcpServerSummary): { label: string; tone: 'success' | 'warning' | 'muted' } {
+  if (!server.enabled) return { label: '已关闭', tone: 'muted' }
+  if (server.available) return { label: '可用', tone: 'success' }
+  return { label: '需配置', tone: 'warning' }
+}
+
+function McpSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-[13px] font-medium text-foreground/55">{title}</span>
+        <span className="text-[12px] tabular-nums text-foreground/35">{count}</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {children}
+      </div>
     </div>
   )
 }

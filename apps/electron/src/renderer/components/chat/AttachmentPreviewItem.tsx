@@ -23,6 +23,8 @@ interface AttachmentPreviewItemProps {
   onRemove: () => void
   /** 点击回调（用于打开文件预览等） */
   onClick?: () => void
+  /** 编辑完成回调 — 提供则启用图片编辑功能 */
+  onEditComplete?: (editedDataUrl: string) => void
   className?: string
 }
 
@@ -42,6 +44,7 @@ export function AttachmentPreviewItem({
   previewUrl,
   onRemove,
   onClick,
+  onEditComplete,
   className,
 }: AttachmentPreviewItemProps): React.ReactElement {
   const [lightboxOpen, setLightboxOpen] = React.useState(false)
@@ -67,6 +70,7 @@ export function AttachmentPreviewItem({
           alt={filename}
           className="size-full object-cover cursor-pointer"
           onClick={() => setLightboxOpen(true)}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
         />
         {/* hover 关闭按钮 */}
         <button
@@ -88,6 +92,7 @@ export function AttachmentPreviewItem({
           alt={filename}
           open={lightboxOpen}
           onOpenChange={setLightboxOpen}
+          onEditComplete={onEditComplete}
         />
       </div>
     )

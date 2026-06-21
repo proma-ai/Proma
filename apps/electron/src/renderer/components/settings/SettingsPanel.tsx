@@ -13,7 +13,6 @@ import {
   Radio,
   Palette,
   Info,
-  Plug,
   Globe,
   BookOpen,
   Wrench,
@@ -49,7 +48,6 @@ import { GeneralSettings } from "./GeneralSettings";
 import { ProxySettings } from "./ProxySettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { AboutSettings } from "./AboutSettings";
-import { AgentSettings } from "./AgentSettings";
 import { PromptSettings } from "./PromptSettings";
 import { ToolSettings } from "./ToolSettings";
 // Cloud 模式专属组件
@@ -99,12 +97,6 @@ const USAGE_TAB: TabItem = {
   icon: <ScrollText size={16} />,
 };
 
-/** Agent 模式专属 Tab */
-const AGENT_TAB: TabItem = {
-  id: "agent",
-  label: "Agent 配置",
-  icon: <Plug size={16} />,
-};
 const TOOLS_TAB: TabItem = {
   id: "tools",
   label: "Chat 工具",
@@ -157,8 +149,6 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <PromptSettings />;
     case "proxy":
       return <ProxySettings />;
-    case "agent":
-      return <AgentSettings />;
     case "tools":
       return <ToolSettings />;
     case "appearance":
@@ -253,7 +243,7 @@ export function SettingsPanel({
     }
   }, [closeRequested, activeTab, setCloseRequested])
 
-  // Cloud 模式专属 Tab 置顶，随后是 BASE_TABS；Agent 模式在渠道后插入 Agent Tab，记忆/工具 tab 两种模式都显示
+  // Cloud 模式专属 Tab 置顶；工具 tab 两种模式都显示，Agent Skills / MCP 独立在侧边栏能力中心管理。
   const tabs = React.useMemo(() => {
     const result: TabItem[] = [];
     if (isCloudMode()) {
@@ -262,9 +252,6 @@ export function SettingsPanel({
       result.push(USAGE_TAB);
     }
     result.push(...BASE_TABS);
-    if (appMode === "agent") {
-      result.push(AGENT_TAB);
-    }
     result.push(TOOLS_TAB);
     result.push(VOICE_INPUT_TAB);
     result.push(BOTS_TAB);

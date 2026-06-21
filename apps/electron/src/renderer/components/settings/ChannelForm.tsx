@@ -74,7 +74,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'minimax', 'doubao', 'qwen', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
@@ -98,6 +98,7 @@ const PROVIDER_CHAT_PATHS: Record<ProviderType, string> = {
   minimax: '/v1/messages',
   doubao: '/chat/completions',
   qwen: '/chat/completions',
+  'qwen-anthropic': '/v1/messages',
   xiaomi: '/v1/messages',
   'xiaomi-token-plan': '/v1/messages',
   custom: '/chat/completions',
@@ -114,6 +115,7 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'minimax',
   'xiaomi',
   'xiaomi-token-plan',
+  'qwen-anthropic',
 ])
 
 /**
@@ -299,6 +301,11 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
           { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
           { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
+        ])
+      } else if (p === 'qwen-anthropic') {
+        setModels([
+          { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
+          { id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', enabled: true },
         ])
       }
     }

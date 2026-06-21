@@ -93,6 +93,8 @@ interface ChatMessageItemProps {
   isInlineEditing?: boolean
   /** 是否并排模式（用户消息不右对齐） */
   isParallelMode?: boolean
+  /** 图片编辑完成回调 */
+  onImageEditComplete?: (editedDataUrl: string) => void
 }
 
 export const ChatMessageItem = React.memo(function ChatMessageItem({
@@ -107,6 +109,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   onCancelInlineEdit,
   isInlineEditing = false,
   isParallelMode = false,
+  onImageEditComplete,
 }: ChatMessageItemProps): React.ReactElement {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
   const [isDeleting, setIsDeleting] = React.useState(false)
@@ -207,14 +210,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
 
               {/* 生成的图片附件（如 Nano Banana 生图结果） */}
               {message.attachments && message.attachments.length > 0 && (
-                <MessageAttachments attachments={message.attachments} />
+                <MessageAttachments attachments={message.attachments} onImageEditComplete={onImageEditComplete} />
               )}
             </>
           ) : (
             /* 用户消息 - 附件 + 可折叠文本 / 原地编辑 */
             <>
               {!isInlineEditing && message.attachments && message.attachments.length > 0 && (
-                <MessageAttachments attachments={message.attachments} />
+                <MessageAttachments attachments={message.attachments} onImageEditComplete={onImageEditComplete} />
               )}
               {isInlineEditing ? (
                 <InlineEditForm

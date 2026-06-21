@@ -17,13 +17,29 @@ interface McpCardProps {
   name: string
   entry: McpServerEntry
   onOpen: () => void
-  onToggle: (enabled: boolean) => void
-  onRequestDelete: () => void
+  onToggle?: (enabled: boolean) => void
+  onRequestDelete?: () => void
+  description?: string
+  targetLabel?: string
+  statusLabel?: string
+  statusTone?: 'success' | 'warning' | 'muted'
+  readOnly?: boolean
 }
 
-export function McpCard({ name, entry, onOpen, onToggle, onRequestDelete }: McpCardProps): React.ReactElement {
+export function McpCard({
+  name,
+  entry,
+  onOpen,
+  onToggle,
+  onRequestDelete,
+  description,
+  targetLabel,
+  statusLabel,
+  statusTone = 'muted',
+  readOnly = false,
+}: McpCardProps): React.ReactElement {
   const isBuiltin = entry.isBuiltin === true
-  const target = entry.type === 'stdio' ? entry.command : entry.url
+  const target = targetLabel ?? (entry.type === 'stdio' ? entry.command : entry.url)
   const test = entry.lastTestResult
 
   return (
@@ -54,20 +70,36 @@ export function McpCard({ name, entry, onOpen, onToggle, onRequestDelete }: McpC
               {TRANSPORT_LABELS[entry.type] ?? entry.type ?? '未知'}
             </span>
           </div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{target || '未配置地址'}</div>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">{description || target || '未配置地址'}</div>
         </div>
-        <Switch
-          checked={entry.enabled}
-          onCheckedChange={onToggle}
-          onClick={(e) => e.stopPropagation()}
-          className="shrink-0"
-        />
+        {onToggle && (
+          <Switch
+            checked={entry.enabled}
+            onCheckedChange={onToggle}
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0"
+          />
+        )}
       </div>
 
       <div className="mt-auto flex items-center gap-2">
         {isBuiltin && (
           <span className="flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
             <ShieldCheck size={12} /> 内置
+          </span>
+        )}
+        {statusLabel && (
+          <span
+            className={cn(
+              'flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+              statusTone === 'success' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+              statusTone === 'warning' && 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+              statusTone === 'muted' && 'bg-muted text-muted-foreground',
+            )}
+          >
+            {statusTone === 'success' && <CheckCircle2 size={12} />}
+            {statusTone !== 'success' && <XCircle size={12} />}
+            {statusLabel}
           </span>
         )}
         {test && (
@@ -83,7 +115,12 @@ export function McpCard({ name, entry, onOpen, onToggle, onRequestDelete }: McpC
             {test.success ? '连接正常' : '连接失败'}
           </span>
         )}
-        {!isBuiltin && (
+        {readOnly && (
+          <span className="ml-auto rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+            内置托管
+          </span>
+        )}
+        {!isBuiltin && !readOnly && onRequestDelete && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button

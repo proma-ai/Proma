@@ -126,8 +126,12 @@ export function createPierreFileCSS(lineNumberStart: number, maxLineNumber: numb
     [data-gutter] {
       counter-reset: proma-read-line ${safeStart - 1};
     }
+    /* color: transparent 隐藏 Pierre 自带的相对行号；
+     * text-shadow: none 阻断 Terminal 主题的 CRT 辉光继承——否则
+     * transparent 文字会被 text-shadow 画出模糊轮廓，与 ::before 真实行号叠加。 */
     [data-line-number-content] {
       color: transparent !important;
+      text-shadow: none !important;
     }
     [data-line-number-content]::before {
       counter-increment: proma-read-line;

@@ -1,16 +1,16 @@
 /**
  * ImageLightbox - 图片预览弹窗
  *
- * 类似 macOS Quick Look 的全屏图片预览效果：
- * - 点击图片打开，点击遮罩层或按 Esc 关闭
- * - 深色半透明背景 + 居中大图
- * - 支持下载按钮
+ * 全屏图片预览：点击图片打开，点击遮罩层或按 Esc 关闭。
+ * 遮罩层与 Dialog 完全统一，操作按钮收拢到图片正下方的悬浮岛。
+ * 支持编辑模式（裁剪/旋转/绘制），编辑后可发送到对话。
  */
 
 import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Download, X } from 'lucide-react'
+import { Download, Pencil, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ImageEditor } from '@/components/ui/image-editor'
 
 interface ImageLightboxProps {
   /** 图片 src（data URL 或普通 URL） */
@@ -23,6 +23,8 @@ interface ImageLightboxProps {
   onOpenChange: (open: boolean) => void
   /** 下载回调（可选） */
   onSave?: () => void
+  /** 编辑完成回调 — 提供则显示编辑按钮 */
+  onEditComplete?: (editedDataUrl: string) => void
 }
 
 export function ImageLightbox({
@@ -31,15 +33,33 @@ export function ImageLightbox({
   open,
   onOpenChange,
   onSave,
+  onEditComplete,
 }: ImageLightboxProps): React.ReactElement | null {
+  const [mode, setMode] = React.useState<'preview' | 'editing'>('preview')
+
+  // 关闭时重置模式
+  React.useEffect(() => {
+    if (!open) setMode('preview')
+  }, [open])
+
   if (!src) return null
+
+  const handleEditSave = (editedDataUrl: string) => {
+    onEditComplete?.(editedDataUrl)
+    onOpenChange(false)
+    setMode('preview')
+  }
+
+  const handleEditCancel = () => {
+    setMode('preview')
+  }
+
+  const showEdit = !!onEditComplete
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        {/* 遮罩层 — 点击关闭。图片预览语义不同于普通弹窗：背景需要"消失"让图片成为焦点，
-         * 所以 80% 深 + md blur，对比 Dialog 的 40% sm blur 更强烈。
-         */}
+        {/* 遮罩层 — 与 DialogOverlay 完全一致 */}
         <DialogPrimitive.Overlay
           className={cn(
             'fixed inset-0 z-[200] bg-black/90 titlebar-no-drag',
@@ -47,21 +67,18 @@ export function ImageLightbox({
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}
         />
-        {/* 内容层 */}
         <DialogPrimitive.Content
           className={cn(
-            'fixed inset-0 z-[200] flex items-center justify-center titlebar-no-drag',
+            'fixed inset-0 z-[200] flex flex-col items-center justify-center titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
             'duration-200'
           )}
-          /* 点击背景区域（非图片）关闭 */
           onClick={(e) => {
             if (e.target === e.currentTarget) onOpenChange(false)
           }}
         >
-          {/* 隐藏的标题（无障碍） */}
           <DialogPrimitive.Title className="sr-only">
             {alt || '图片预览'}
           </DialogPrimitive.Title>
@@ -69,41 +86,36 @@ export function ImageLightbox({
             预览图片：{alt || '图片'}
           </DialogPrimitive.Description>
 
-          {/* 大图 */}
-          <img
-            src={src}
-            alt={alt}
-            className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain shadow-2xl select-none"
-            draggable={false}
-          />
+          {/* 双层都占位 — visibility 切换，无 unmount，Grid 单格叠加 */}
+          <div className="grid" style={{ gridTemplate: '"layer" 1fr / 1fr' }}>
+            {/* 预览层 */}
+            <div style={{ gridArea: 'layer', visibility: mode === 'editing' ? 'hidden' : 'visible' }}>
+              <div className="flex flex-col items-center">
+              <img
+                src={src}
+                alt={alt}
+                className="max-w-[90vw] max-h-[85vh] rounded-lg object-contain shadow-2xl select-none"
+                draggable={false}
+              />
+              <div className={cn(
+                'mt-3 flex items-center gap-0.5 rounded-full',
+                'bg-black/50 backdrop-blur-md shadow-lg',
+                'px-3 py-2.5'
+              )}>
+                <DialogPrimitive.Close className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')}>
+                  <X className="size-5" /><span className="sr-only">关闭</span>
+                </DialogPrimitive.Close>
+                {showEdit && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={() => setMode('editing')} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')} title="编辑图片"><Pencil className="size-5" /></button></>)}
+                {onSave && (<><div className="mx-1.5 h-5 w-px bg-white/20" aria-hidden /><button type="button" onClick={onSave} className={cn('rounded-full p-1.5 text-white/80 transition-colors duration-150', 'hover:bg-white/15 hover:text-white', 'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black')} title="保存图片"><Download className="size-5" /></button></>)}
+              </div>
+              </div>
+            </div>
 
-          {/* 右上角关闭按钮 */}
-          <DialogPrimitive.Close
-            className={cn(
-              'absolute top-4 right-4 p-2 rounded-full',
-              'bg-black/50 text-white/80 backdrop-blur-sm',
-              'hover:bg-black/70 hover:text-white transition-colors',
-              'focus:outline-none'
-            )}
-          >
-            <X className="size-5" />
-          </DialogPrimitive.Close>
-
-          {/* 底部下载按钮（可选） */}
-          {onSave && (
-            <button
-              type="button"
-              onClick={onSave}
-              className={cn(
-                'absolute bottom-6 right-6 p-2.5 rounded-full',
-                'bg-black/50 text-white/80 backdrop-blur-sm',
-                'hover:bg-black/70 hover:text-white transition-colors'
-              )}
-              title="保存图片"
-            >
-              <Download className="size-5" />
-            </button>
-          )}
+            {/* 编辑层 */}
+            <div style={{ gridArea: 'layer', visibility: mode === 'preview' ? 'hidden' : 'visible' }}>
+              <ImageEditor src={src} onSave={handleEditSave} onCancel={handleEditCancel} />
+            </div>
+          </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

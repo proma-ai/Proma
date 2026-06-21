@@ -155,6 +155,8 @@ interface ChatMessagesProps {
   onDeleteDivider?: (messageId: string) => void
   /** 加载更多历史消息回调 */
   onLoadMore?: () => Promise<void>
+  /** 图片编辑完成回调 */
+  onImageEditComplete?: (editedDataUrl: string) => void
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -182,6 +184,7 @@ export function ChatMessages({
   inlineEditingMessageId,
   onDeleteDivider,
   onLoadMore,
+  onImageEditComplete,
 }: ChatMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
@@ -387,6 +390,7 @@ export function ChatMessages({
                     onSubmitInlineEdit={onSubmitInlineEdit}
                     onCancelInlineEdit={onCancelInlineEdit}
                     isInlineEditing={msg.id === inlineEditingMessageId}
+                    onImageEditComplete={onImageEditComplete}
                   />
                 </div>
                 {/* 分隔线 */}

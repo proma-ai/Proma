@@ -4,8 +4,9 @@ const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(?:[?#].*)?$/i
 const PREVIEW_BLOCK_RE = /^<div\s+[^>]*data-type=(["'])(?:raw-html-block|math-block)\1/i
 const DETAILS_BLOCK_RE = /<details(\s[^>]*)?>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi
 const STANDALONE_HTML_MEDIA_RE = /^\s*<(?:img|video)\b[^>]*(?:\/?>|>.*?<\/video>)\s*$/i
+const LEADING_FRONTMATTER_RE = /^(?:\ufeff)?---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?=\r?\n|$)/
 
-export const MARKDOWN_RENDERER_VERSION = 3
+export const MARKDOWN_RENDERER_VERSION = 4
 
 const EMOJI_SHORTCODES: Record<string, string> = {
   '+1': '👍',
@@ -213,6 +214,52 @@ function wrapMarkdownDetailsBlocks(markdown: string): string {
   })
 }
 
+function looksLikeYamlFrontmatter(body: string): boolean {
+  return /^[A-Za-z0-9_-]+\s*:/m.test(body)
+}
+
+function renderFrontmatterPreviewHtml(body: string): string {
+  const escapedBody = markdownIt.utils.escapeHtml(body.trim())
+  return [
+    '<details open class="rounded-xl border border-border/30 bg-muted/20 shadow-sm">',
+    '<summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium text-foreground/70">前置元数据</summary>',
+    '<div class="px-4 pb-4">',
+    '<pre class="m-0 max-h-56 overflow-auto rounded-lg border border-border/30 bg-background/80 p-4 font-mono text-[13px] leading-7 whitespace-pre-wrap text-foreground/85">',
+    escapedBody,
+    '</pre>',
+    '</div>',
+    '</details>',
+  ].join('')
+}
+
+function extractLeadingFrontmatter(markdown: string): { frontmatter: string | null; body: string } {
+  const match = markdown.match(LEADING_FRONTMATTER_RE)
+  if (!match) return { frontmatter: null, body: markdown }
+
+  const rawFrontmatter = match[0] ?? ''
+  const body = match[1] ?? ''
+  if (!looksLikeYamlFrontmatter(body)) {
+    return { frontmatter: null, body: markdown }
+  }
+
+  return {
+    frontmatter: rawFrontmatter.trimEnd(),
+    body: markdown.slice(rawFrontmatter.length),
+  }
+}
+
+function wrapLeadingFrontmatterBlock(markdown: string): string {
+  const { frontmatter, body } = extractLeadingFrontmatter(markdown)
+  if (!frontmatter) return markdown
+
+  const content = frontmatter
+    .replace(/^(?:\ufeff)?---[ \t]*\r?\n/, '')
+    .replace(/\r?\n(?:---|\.\.\.)[ \t]*$/, '')
+  const previewHtml = renderFrontmatterPreviewHtml(content)
+  const previewBlock = `<div data-type="raw-html-block" data-markdown="${escapeAttr(frontmatter)}" data-html="${escapeAttr(previewHtml)}"></div>`
+  return body ? `${previewBlock}\n\n${body.replace(/^\r?\n/, '')}` : previewBlock
+}
+
 function splitMarkdownCodeRegions(markdown: string): Array<{ text: string; code: boolean }> {
   const chunks: Array<{ text: string; code: boolean }> = []
   const lines = markdown.split('\n')
@@ -271,7 +318,7 @@ function normalizeMarkdownLinePrefixes(markdown: string): string {
 }
 
 function preprocessMarkdown(markdown: string): string {
-  return splitMarkdownCodeRegions(markdown)
+  return splitMarkdownCodeRegions(wrapLeadingFrontmatterBlock(markdown))
     .map((chunk) => chunk.code
       ? chunk.text
       : wrapMarkdownDetailsBlocks(separateStandaloneHtmlMediaBlocks(normalizeMarkdownLinePrefixes(chunk.text))))
