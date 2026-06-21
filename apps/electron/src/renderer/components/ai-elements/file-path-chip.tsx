@@ -160,7 +160,10 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const handleClick = React.useCallback(() => {
     const sessionId = store.get(currentAgentSessionIdAtom)
-    if (!sessionId) return
+    if (!sessionId) {
+      console.warn('FilePathChip: 无法获取当前会话 ID，跳过打开预览')
+      return
+    }
 
     openPreview(sessionId, {
       filePath: cleanPath,
@@ -177,6 +180,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   // 自定义右键菜单状态（取代 Radix ContextMenu — 在 react-markdown 环境下定位不可靠）
   const [menuPos, setMenuPos] = React.useState<{ x: number; y: number } | null>(null)
   const menuRef = React.useRef<HTMLDivElement>(null)
+  const menuItemRefs = React.useRef<(HTMLDivElement | null)[]>([])
 
   const openMenu = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -186,6 +190,20 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   const closeMenu = React.useCallback(() => {
     setMenuPos(null)
   }, [])
+
+  // 菜单键盘导航：ArrowDown / ArrowUp 在菜单项间切换焦点
+  const handleMenuKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const items = menuItemRefs.current.filter(Boolean)
+      if (items.length === 0) return
+      const currentIndex = items.indexOf(document.activeElement as HTMLDivElement)
+      const delta = e.key === 'ArrowDown' ? 1 : -1
+      const nextIndex = ((currentIndex === -1 ? (delta === 1 ? -1 : items.length) : currentIndex) + delta + items.length) % items.length
+      items[nextIndex]?.focus()
+    }
+    if (e.key === 'Escape') closeMenu()
+  }, [closeMenu])
 
   // 点击菜单外部 / 按 Escape 关闭
   React.useEffect(() => {
@@ -236,14 +254,12 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
         onClick={handleClick}
         onContextMenu={openMenu}
         onKeyDown={handleKeyDown}
-        title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
+        title={displayPath}
         className={cn(
           'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
           'cursor-pointer transition-colors duration-150 select-none',
           'align-baseline not-prose',
-          fileStatus === 'broken'
-            ? 'opacity-50 border border-dashed border-muted-foreground/30 text-muted-foreground hover:opacity-70 hover:bg-muted/20'
-            : 'bg-primary/10 text-primary hover:bg-primary/20',
+          'bg-primary/10 text-primary hover:bg-primary/20',
           className
         )}
       >
@@ -259,11 +275,14 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
         >
           <div
             ref={menuRef}
+            role="menu"
             className="absolute min-w-[8rem] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
             style={{ left: menuPos.x, top: menuPos.y }}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleMenuKeyDown}
           >
             <div
+              ref={(el) => { menuItemRefs.current[0] = el }}
               role="menuitem"
               tabIndex={-1}
               className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent"
@@ -273,6 +292,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
             </div>
             <div className="-mx-1 my-1 h-px bg-border" />
             <div
+              ref={(el) => { menuItemRefs.current[1] = el }}
               role="menuitem"
               tabIndex={-1}
               className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent"
