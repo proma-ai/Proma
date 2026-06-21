@@ -34,7 +34,7 @@ import { MigrateToAgentButton } from './MigrateToAgentButton'
 import { DeleteMessageDialog } from './DeleteMessageDialog'
 import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
-import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import type { ChatMessage } from '@proma/shared'
@@ -93,6 +93,8 @@ interface ChatMessageItemProps {
   isInlineEditing?: boolean
   /** 是否并排模式（用户消息不右对齐） */
   isParallelMode?: boolean
+  /** 图片编辑完成回调 */
+  onImageEditComplete?: (editedDataUrl: string) => void
 }
 
 export const ChatMessageItem = React.memo(function ChatMessageItem({
@@ -107,6 +109,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   onCancelInlineEdit,
   isInlineEditing = false,
   isParallelMode = false,
+  onImageEditComplete,
 }: ChatMessageItemProps): React.ReactElement {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
   const [isDeleting, setIsDeleting] = React.useState(false)
@@ -144,7 +147,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             time={formatMessageTime(message.createdAt)}
             logo={
               <img
-                src={getModelLogo(message.model ?? '')}
+                src={getModelLogo(message.model ?? '', resolveModelProvider(message.model ?? '', channels))}
                 alt={message.model ?? 'AI'}
                 className="size-[35px] rounded-[25%] object-cover"
               />
@@ -158,7 +161,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <UserAvatar avatar={userProfile.avatar} size={35} />
             <div className="flex flex-col justify-between h-[35px]">
               <span className="text-sm font-semibold text-foreground/60 leading-none">{userProfile.userName}</span>
-              <span className="text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
+              <span className="message-time text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
             </div>
           </div>
         )}
@@ -207,14 +210,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
 
               {/* 生成的图片附件（如 Nano Banana 生图结果） */}
               {message.attachments && message.attachments.length > 0 && (
-                <MessageAttachments attachments={message.attachments} />
+                <MessageAttachments attachments={message.attachments} onImageEditComplete={onImageEditComplete} />
               )}
             </>
           ) : (
             /* 用户消息 - 附件 + 可折叠文本 / 原地编辑 */
             <>
               {!isInlineEditing && message.attachments && message.attachments.length > 0 && (
-                <MessageAttachments attachments={message.attachments} />
+                <MessageAttachments attachments={message.attachments} onImageEditComplete={onImageEditComplete} />
               )}
               {isInlineEditing ? (
                 <InlineEditForm

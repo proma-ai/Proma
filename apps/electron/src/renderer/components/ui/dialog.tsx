@@ -21,9 +21,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      // overlay：更轻的黑（避免暗主题压得太重）+ backdrop-blur 制造"焦点感"，
-      // 这是飞书/扣子/Linear 等现代 App 弹窗最显著的质感特征
-      "fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm titlebar-no-drag",
+      "fixed inset-0 z-[100] bg-black/40 titlebar-no-drag",
       "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}

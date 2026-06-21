@@ -45,8 +45,9 @@ import {
 import { useSmoothStream } from '@proma/ui'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { useConversationParallelMode } from '@/hooks/useConversationSettings'
-import { getModelLogo } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import type { ChatMessage, ChatToolActivity } from '@proma/shared'
 
@@ -154,6 +155,8 @@ interface ChatMessagesProps {
   onDeleteDivider?: (messageId: string) => void
   /** 加载更多历史消息回调 */
   onLoadMore?: () => Promise<void>
+  /** 图片编辑完成回调 */
+  onImageEditComplete?: (editedDataUrl: string) => void
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -181,8 +184,10 @@ export function ChatMessages({
   inlineEditingMessageId,
   onDeleteDivider,
   onLoadMore,
+  onImageEditComplete,
 }: ChatMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+  const channels = useAtomValue(channelsAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
 
   // 平滑流式输出：将高频更新转为逐字渲染
@@ -240,12 +245,12 @@ export function ChatMessages({
   const streamingLogo = React.useMemo(
     () => (
       <img
-        src={getModelLogo(streamingModel ?? '')}
+        src={getModelLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
         alt="AI"
         className="size-[35px] rounded-[25%] object-cover"
       />
     ),
-    [streamingModel]
+    [streamingModel, channels]
   )
 
   /**
@@ -385,6 +390,7 @@ export function ChatMessages({
                     onSubmitInlineEdit={onSubmitInlineEdit}
                     onCancelInlineEdit={onCancelInlineEdit}
                     isInlineEditing={msg.id === inlineEditingMessageId}
+                    onImageEditComplete={onImageEditComplete}
                   />
                 </div>
                 {/* 分隔线 */}

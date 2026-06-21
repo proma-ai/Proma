@@ -20,8 +20,7 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={cn(
-      // 与 Dialog 同款：blur + 适度深色。z-[100] 需高于 AppShell 内容区的 z-[60]，否则抽屉被主区盖住
-      "fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-[100] bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className
     )}
     {...props}
@@ -52,16 +51,19 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  hideClose?: boolean
+}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => {
+>(({ side = "right", className, children, hideClose, ...props }, ref) => {
   // Windows 下右侧抽屉的关闭按钮（right-4 top-4）会与窗口控制按钮重叠，隐藏它；
   // 用户可点击遮罩空白处或按 Esc 关闭。其他方向的抽屉不在窗口边缘，不受影响。
+  // 业务组件也可通过 hideClose 显式移除关闭按钮。
   const isWindows = React.useMemo(() => detectIsWindows(), [])
-  const hideClose = side === "right" && isWindows
+  const shouldHideClose = hideClose || (side === "right" && isWindows)
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -70,7 +72,7 @@ const SheetContent = React.forwardRef<
         className={cn(sheetVariants({ side }), className)}
         {...props}
       >
-        {!hideClose && (
+        {!shouldHideClose && (
           <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>

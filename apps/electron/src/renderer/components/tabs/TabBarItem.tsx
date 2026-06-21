@@ -207,7 +207,7 @@ export function TabBarItem({
         {indicatorColor && (
           <span
             className={cn(
-              'absolute inset-0 rounded-t-lg border-t-2 border-l-2 border-r-2 border-b-0 pointer-events-none',
+              'absolute inset-0 rounded-t-lg border-t-2 border-l-2 border-r-2 border-b-0 pointer-events-none tab-stream-indicator',
               indicatorColor,
             )}
             aria-hidden="true"

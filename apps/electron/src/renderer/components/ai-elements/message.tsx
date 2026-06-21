@@ -55,7 +55,7 @@ export function Message({ className, from, ...props }: MessageProps): React.Reac
   return (
     <div
       className={cn(
-        'group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
+        'message-item group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
         from === 'user' ? 'is-user' : 'is-assistant',
         className
       )}
@@ -100,7 +100,7 @@ export function MessageHeader({
       )}
       <div className="flex flex-col justify-between h-[35px]">
         {model && <span className="text-sm font-semibold text-foreground/60 leading-none">{model}</span>}
-        {time && <span className="text-[10px] text-foreground/[0.38] leading-none">{time}</span>}
+        {time && <span className="message-time text-[10px] text-foreground/[0.38] leading-none">{time}</span>}
       </div>
       {children}
     </div>
@@ -698,11 +698,14 @@ export function MessageStopped({ className, ...props }: MessageStoppedProps): Re
 interface MessageAttachmentsProps extends HTMLAttributes<HTMLDivElement> {
   /** 附件列表 */
   attachments: FileAttachment[]
+  /** 图片编辑完成回调 */
+  onImageEditComplete?: (editedDataUrl: string) => void
 }
 
 /** 消息附件容器 */
 export function MessageAttachments({
   attachments,
+  onImageEditComplete,
   className,
   ...props
 }: MessageAttachmentsProps): React.ReactElement {
@@ -716,7 +719,7 @@ export function MessageAttachments({
       {imageAttachments.length > 0 && (
         <div className="flex flex-wrap gap-2.5">
           {imageAttachments.map((att) => (
-            <MessageAttachmentImage key={att.id} attachment={att} isSingle={isSingleImage} />
+            <MessageAttachmentImage key={att.id} attachment={att} isSingle={isSingleImage} onEditComplete={onImageEditComplete} />
           ))}
         </div>
       )}
@@ -738,10 +741,12 @@ interface MessageAttachmentImageProps {
   attachment: FileAttachment
   /** 是否为唯一附件（单图模式） */
   isSingle?: boolean
+  /** 编辑完成回调 */
+  onEditComplete?: (editedDataUrl: string) => void
 }
 
 /** 图片附件展示（单图: max 500px，多图: 280px 方块），点击可预览大图 */
-function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachmentImageProps): React.ReactElement {
+function MessageAttachmentImage({ attachment, isSingle = false, onEditComplete }: MessageAttachmentImageProps): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
   const [lightboxOpen, setLightboxOpen] = React.useState(false)
 
@@ -803,6 +808,7 @@ function MessageAttachmentImage({ attachment, isSingle = false }: MessageAttachm
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
         onSave={handleSave}
+        onEditComplete={onEditComplete}
       />
     </div>
   )

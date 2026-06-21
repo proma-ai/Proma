@@ -36,10 +36,10 @@ export const previewPanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 export const previewFileMapAtom = atom<Map<string, PreviewFile | null>>(new Map())
 
 /** 分栏比例（对话占比），持久化 */
-export const previewSplitRatioAtom = atomWithStorage<number>('proma-preview-split-ratio', 0.5)
+export const previewSplitRatioAtom = atomWithStorage<number>('proma-preview-split-ratio', 0.5, undefined, { getOnInit: true })
 
 /** 自动预览开关，持久化（默认关闭以减轻设备性能负担，老用户保留已设置的偏好） */
-export const autoPreviewEnabledAtom = atomWithStorage<boolean>('proma-auto-preview-enabled', false)
+export const autoPreviewEnabledAtom = atomWithStorage<boolean>('proma-auto-preview-enabled', false, undefined, { getOnInit: true })
 
 /**
  * 预览默认展开方式，持久化。
@@ -52,6 +52,8 @@ export type PreviewModePreference = 'tab' | 'split'
 export const previewModePreferenceAtom = atomWithStorage<PreviewModePreference>(
   'proma-preview-mode-pref',
   'tab',
+  undefined,
+  { getOnInit: true },
 )
 
 /** 当前会话的预览面板是否打开（derived） */

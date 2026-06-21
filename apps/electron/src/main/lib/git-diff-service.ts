@@ -9,6 +9,7 @@ import { spawn } from 'child_process'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
+import { normalizePathForCompare } from '@proma/shared'
 import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 
 /** 大文件读取上限：超过则跳过，避免 IPC 序列化撑爆内存 */
@@ -26,6 +27,49 @@ function normalizeLineEndings(content: string): string {
   return content.replace(/\r\n/g, '\n')
 }
 
+function normalizeComparablePath(filePath: string): string {
+  return normalizePathForCompare(resolve(filePath))
+}
+
+interface ChangeCandidate {
+  /** 原始候选路径，保留给 git root 搜索 */
+  searchPath: string
+  /** 用于过滤变更文件的规范化路径 */
+  matchPath: string
+  /** true 表示只匹配这个文件，false 表示匹配目录下所有文件 */
+  fileOnly: boolean
+}
+
+function toChangeCandidate(input: string): ChangeCandidate | null {
+  if (!input || typeof input !== 'string') return null
+  const resolved = resolve(input)
+  try {
+    const stats = statSync(resolved)
+    if (stats.isFile()) {
+      return {
+        searchPath: dirname(resolved),
+        matchPath: normalizeComparablePath(resolved),
+        fileOnly: true,
+      }
+    }
+    if (stats.isDirectory()) {
+      return {
+        searchPath: resolved,
+        matchPath: normalizeComparablePath(resolved),
+        fileOnly: false,
+      }
+    }
+  } catch {
+    // 附加文件被删除后仍可能需要展示 git 删除记录；此时用父目录找仓库、按文件精确匹配。
+    return {
+      searchPath: dirname(resolved),
+      matchPath: normalizeComparablePath(resolved),
+      fileOnly: true,
+    }
+  }
+  return null
+}
+
 /**
  * 校验并规范化 filePath，确保其位于 root 目录内。
  * 支持相对路径和绝对路径。绝对路径会被自动转为相对路径。
@@ -34,7 +78,12 @@ function normalizeLineEndings(content: string): string {
  */
 function normalizeSafePath(root: string, filePath: string): string | null {
   if (!filePath || typeof filePath !== 'string') return null
-  const resolvedRoot = resolve(root)
+  let resolvedRoot: string
+  try {
+    resolvedRoot = realpathSync(resolve(root))
+  } catch {
+    resolvedRoot = resolve(root)
+  }
   const rootWithSep = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep
 
   if (isAbsolute(filePath)) {
@@ -67,7 +116,7 @@ function normalizeSafePath(root: string, filePath: string): string | null {
  * @param cwd - 工作目录
  * @returns 命令输出，如果失败返回 null
  */
-function runGitCommand(args: string[], cwd: string): Promise<string | null> {
+function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean }): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       // -c core.quotePath=false：禁用 git 对非 ASCII 路径的八进制转义（如中文文件名
@@ -109,14 +158,18 @@ function runGitCommand(args: string[], cwd: string): Promise<string | null> {
         if (code === 0) {
           resolve(stdout.trim())
         } else {
-          console.error('[git-diff-service] git 命令失败:', args.join(' '), stderr.trim())
+          if (!options?.quiet) {
+            console.error('[git-diff-service] git 命令失败:', args.join(' '), stderr.trim())
+          }
           resolve(null)
         }
       })
 
       child.on('error', (err) => {
         clearTimeout(timeout)
-        console.error('[git-diff-service] git 命令错误:', err)
+        if (!options?.quiet) {
+          console.error('[git-diff-service] git 命令错误:', err)
+        }
         resolve(null)
       })
     } catch {
@@ -188,7 +241,9 @@ function parseNumstat(numStat: string | null): Map<string, { additions: number; 
 }
 
 /**
- * 获取未暂存的文件变更列表（支持多 Git 仓库）
+ * 获取当前工作树相对 HEAD 的文件变更列表（支持多 Git 仓库）
+ *
+ * 包含 staged + unstaged 改动；函数名保留为 getUnstagedChanges 以兼容现有 IPC。
  */
 export async function getUnstagedChanges(
   dirPath: string,
@@ -197,12 +252,16 @@ export async function getUnstagedChanges(
   extraPaths?: string[],
 ): Promise<UnstagedChangesResult> {
   // 收集所有候选目录中的不重复 Git 仓库根
-  const candidates = [dirPath, sessionPath, workspaceFilesPath, ...(extraPaths || [])].filter(
+  const rawCandidates = [dirPath, sessionPath, workspaceFilesPath, ...(extraPaths || [])].filter(
     (p): p is string => typeof p === 'string' && p.length > 0
   )
+  const candidates = rawCandidates
+    .map(toChangeCandidate)
+    .filter((candidate): candidate is ChangeCandidate => candidate !== null)
+
   const gitRoots: string[] = []
   for (const cand of candidates) {
-    const roots = await findAllGitRoots(cand)
+    const roots = await findAllGitRoots(cand.searchPath)
     for (const root of roots) {
       if (!gitRoots.includes(root)) gitRoots.push(root)
     }
@@ -215,19 +274,19 @@ export async function getUnstagedChanges(
   const allFiles: ChangedFileEntry[] = []
   const allUntracked: UntrackedFileEntry[] = []
 
-  // 候选目录绝对路径（用于过滤：只显示落在某个候选目录内的文件）
-  const candidateRoots = candidates.map((c) => {
-    const r = c.replace(/[/\\]+$/, '')
-    return r + sep
-  })
+  // 候选路径用于过滤：目录匹配子树，附加文件只匹配自身，避免显示同级无关改动。
   const isUnderAnyCandidate = (absPath: string): boolean => {
-    return candidateRoots.some((root) => absPath === root.slice(0, -1) || absPath.startsWith(root))
+    const normalized = normalizeComparablePath(absPath)
+    return candidates.some((candidate) => {
+      if (candidate.fileOnly) return normalized === candidate.matchPath
+      return normalized === candidate.matchPath || normalized.startsWith(candidate.matchPath + '/')
+    })
   }
 
   for (const gitRoot of gitRoots) {
-    // 获取变更文件列表 (M=modified, D=deleted, A=added, R=renamed, C=copied, T=type)
-    const nameStatus = await runGitCommand(['diff', '--name-status'], gitRoot)
-    const numStat = await runGitCommand(['diff', '--numstat'], gitRoot)
+    // 获取当前工作树相对 HEAD 的变更文件列表，覆盖 staged + unstaged。
+    const nameStatus = await runGitCommand(['diff', 'HEAD', '--name-status'], gitRoot)
+    const numStat = await runGitCommand(['diff', 'HEAD', '--numstat'], gitRoot)
     const numStatMap = parseNumstat(numStat)
 
     if (nameStatus) {
@@ -339,7 +398,7 @@ export async function findAllGitRoots(baseDir: string): Promise<string[]> {
   if (!existsSync(baseDir)) return []
 
   // 1. 向上搜索：git rev-parse --show-toplevel
-  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], baseDir)
+  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], baseDir, { quiet: true })
   const roots: string[] = []
   if (toplevel && existsSync(toplevel)) {
     const normalized = normalizeGitRoot(toplevel)
@@ -471,7 +530,7 @@ export async function getUntrackedContent(dirPath: string, filePath: string, git
 }
 
 /**
- * 还原文件的未暂存变更
+ * 还原文件相对 HEAD 的所有改动（index + working tree）。
  */
 export async function revertFile(dirPath: string, filePath: string, gitRoot?: string): Promise<void> {
   const root = gitRoot || await findGitRoot(dirPath)
@@ -480,9 +539,9 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
   if (!safePath) {
     throw new Error(`不安全的路径: ${filePath}`)
   }
-  const result = await runGitCommand(['checkout', '--', safePath], root)
+  const result = await runGitCommand(['restore', '--staged', '--worktree', '--', safePath], root)
   if (result === null) {
-    throw new Error(`还原失败: git checkout -- ${safePath}`)
+    throw new Error(`还原失败: git restore --staged --worktree -- ${safePath}`)
   }
 }
 
@@ -500,6 +559,7 @@ export async function getMainRepoRoot(somePath: string): Promise<string | null> 
   const commonDir = await runGitCommand(
     ['rev-parse', '--path-format=absolute', '--git-common-dir'],
     somePath,
+    { quiet: true },
   )
   if (!commonDir) return null
   // commonDir 形如 /path/to/main-repo/.git，取其父目录
@@ -510,8 +570,12 @@ export async function getMainRepoRoot(somePath: string): Promise<string | null> 
  * 列出指定仓库的所有 Git Worktree
  */
 export async function listWorktrees(repoPath: string): Promise<import('@proma/shared').WorktreeInfo[]> {
-  const output = await runGitCommand(['worktree', 'list', '--porcelain'], repoPath)
+  const root = await findGitRoot(repoPath)
+  if (!root) return []
+  const output = await runGitCommand(['worktree', 'list', '--porcelain'], root, { quiet: true })
   if (!output) return []
+  const mainRepoRoot = await getMainRepoRoot(root)
+  const normalizedMainRoot = mainRepoRoot ? normalizeGitRoot(mainRepoRoot) : normalizeGitRoot(root)
 
   const worktrees: import('@proma/shared').WorktreeInfo[] = []
   const blocks = output.split('\n\n').filter(Boolean)
@@ -521,6 +585,7 @@ export async function listWorktrees(repoPath: string): Promise<import('@proma/sh
     let path = ''
     let head = ''
     let branch = ''
+    let prunable = false
 
     for (const line of lines) {
       if (line.startsWith('worktree ')) {
@@ -531,11 +596,13 @@ export async function listWorktrees(repoPath: string): Promise<import('@proma/sh
         branch = line.slice('branch refs/heads/'.length)
       } else if (line === 'detached') {
         branch = '(detached)'
+      } else if (line.startsWith('prunable')) {
+        prunable = true
       }
     }
 
-    if (path) {
-      const isMain = path === repoPath
+    if (path && !prunable && existsSync(path)) {
+      const isMain = normalizeGitRoot(path) === normalizedMainRoot
       worktrees.push({
         path,
         branch: branch || 'unknown',
@@ -610,9 +677,9 @@ export async function getWorktreeChanges(
     }
   }
 
-  // 2. 未提交的改动: git diff (working tree vs HEAD)
-  const uncommittedStatus = await runGitCommand(['diff', '--name-status'], gitRoot)
-  const uncommittedNumstat = await runGitCommand(['diff', '--numstat'], gitRoot)
+  // 2. 未提交的改动：当前工作树相对 HEAD，覆盖 staged + unstaged。
+  const uncommittedStatus = await runGitCommand(['diff', 'HEAD', '--name-status'], gitRoot)
+  const uncommittedNumstat = await runGitCommand(['diff', 'HEAD', '--numstat'], gitRoot)
   const uncommittedStats = parseNumstat(uncommittedNumstat)
 
   if (uncommittedStatus) {

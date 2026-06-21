@@ -20,6 +20,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { workspaceCapabilitiesVersionAtom } from '@/atoms/agent-atoms'
 import { agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
@@ -49,6 +50,10 @@ export function AgentSkillsView(): React.ReactElement {
   const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
+  const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
+  const [pendingDeleteMcpName, setPendingDeleteMcpName] = React.useState<string | null>(null)
+  const [isDeletingSkill, setIsDeletingSkill] = React.useState(false)
+  const [isDeletingMcp, setIsDeletingMcp] = React.useState(false)
 
   const q = search.trim().toLowerCase()
 
@@ -276,7 +281,7 @@ export function AgentSkillsView(): React.ReactElement {
               onOpenBuiltin={setSelectedBuiltinMcp}
               onToggle={data.toggleMcp}
               onToggleBuiltin={data.toggleBuiltinMcp}
-              onDelete={data.deleteMcp}
+              onRequestDelete={setPendingDeleteMcpName}
               onAdd={() => { setEditingMcp(null); setMcpSheetOpen(true) }}
             />
           )}
@@ -292,21 +297,55 @@ export function AgentSkillsView(): React.ReactElement {
         onOpenChange={(open) => { if (!open) setSelectedSkillSlug(null) }}
         onToggle={(enabled) => selectedSkill && data.toggleSkill(selectedSkill.slug, enabled)}
         onUpdate={() => selectedSkill && data.updateSkill(selectedSkill.slug)}
-        onDelete={async () => {
-          if (!selectedSkill) return
-          const ok = await data.deleteSkill(selectedSkill.slug, selectedSkill.name)
-          if (ok) setSelectedSkillSlug(null)
-        }}
+        onRequestDelete={() => selectedSkill && setPendingDeleteSkill(selectedSkill)}
         onOpenFolder={() => selectedSkill && openSkillFolder(selectedSkill.slug)}
         onChanged={() => bumpCapabilities((v) => v + 1)}
+      />
+
+      {/* Skill 删除确认 */}
+      <ConfirmDialog
+        open={pendingDeleteSkill !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteSkill(null) }}
+        title={`确认删除 Skill「${pendingDeleteSkill?.name}」？`}
+        description="删除后将无法恢复，确定要卸载这个 Skill 吗？"
+        confirmLabel="删除"
+        loadingLabel="删除中..."
+        loading={isDeletingSkill}
+        onConfirm={async () => {
+          if (!pendingDeleteSkill || isDeletingSkill) return
+          setIsDeletingSkill(true)
+          const ok = await data.deleteSkill(pendingDeleteSkill.slug, pendingDeleteSkill.name)
+          setIsDeletingSkill(false)
+          setPendingDeleteSkill(null)
+          if (ok) setSelectedSkillSlug(null)
+        }}
+      />
+
+      {/* MCP 删除确认 */}
+      <ConfirmDialog
+        open={pendingDeleteMcpName !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteMcpName(null) }}
+        title={`确认删除 MCP 服务器「${pendingDeleteMcpName}」？`}
+        description="删除后将无法恢复，确定要删除这个 MCP 服务器吗？"
+        confirmLabel="删除"
+        loadingLabel="删除中..."
+        loading={isDeletingMcp}
+        onConfirm={async () => {
+          if (!pendingDeleteMcpName || isDeletingMcp) return
+          setIsDeletingMcp(true)
+          await data.deleteMcp(pendingDeleteMcpName)
+          setIsDeletingMcp(false)
+          setPendingDeleteMcpName(null)
+        }}
       />
 
       <McpDetailSheet
         open={mcpSheetOpen}
         server={editingMcp}
         workspaceSlug={data.workspaceSlug}
-        onOpenChange={setMcpSheetOpen}
-        onSaved={() => { setMcpSheetOpen(false); bumpCapabilities((v) => v + 1) }}
+        onOpenChange={(open) => { setMcpSheetOpen(open); if (!open) bumpCapabilities((v) => v + 1) }}
+        onSaved={() => setMcpSheetOpen(false)}
+        onChanged={() => bumpCapabilities((v) => v + 1)}
       />
 
       <BuiltinMcpDetailSheet
@@ -410,11 +449,11 @@ interface McpTabProps {
   onOpenBuiltin: (server: BuiltinMcpServerSummary) => void
   onToggle: (name: string, enabled: boolean) => void
   onToggleBuiltin: (id: string, enabled: boolean) => void
-  onDelete: (name: string) => void
+  onRequestDelete: (name: string) => void
   onAdd: () => void
 }
 
-function McpTab({ userEntries, builtinServers, total, onOpen, onOpenBuiltin, onToggle, onToggleBuiltin, onDelete, onAdd }: McpTabProps): React.ReactElement {
+function McpTab({ userEntries, builtinServers, total, onOpen, onOpenBuiltin, onToggle, onToggleBuiltin, onRequestDelete, onAdd }: McpTabProps): React.ReactElement {
   if (total === 0) {
     return (
       <EmptyState
@@ -449,7 +488,7 @@ function McpTab({ userEntries, builtinServers, total, onOpen, onOpenBuiltin, onT
               entry={entry}
               onOpen={() => onOpen(name, entry)}
               onToggle={(enabled) => onToggle(name, enabled)}
-              onDelete={() => onDelete(name)}
+              onRequestDelete={() => onRequestDelete(name)}
             />
           ))}
         </McpSection>

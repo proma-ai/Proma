@@ -206,6 +206,33 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
     })
   }, [setPendingAttachments])
 
+  /** 编辑完成 — 用编辑后的图片替换原 pending 附件 */
+  const handleEditComplete = React.useCallback((attachmentId: string, editedDataUrl: string): void => {
+    const base64 = editedDataUrl.split(',')[1]
+    if (!base64) return
+
+    if (!window.__pendingAttachmentData) {
+      window.__pendingAttachmentData = new Map()
+    }
+    window.__pendingAttachmentData.set(attachmentId, base64)
+
+    setPendingAttachments((prev) =>
+      prev.map((att) => {
+        if (att.id !== attachmentId) return att
+        if (att.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(att.previewUrl)
+        }
+        return {
+          ...att,
+          previewUrl: editedDataUrl,
+          filename: att.filename.replace(/(\.[^.]+)?$/, '') + '_edited.png',
+          mediaType: 'image/png',
+          size: Math.round(base64.length * 0.75),
+        }
+      })
+    )
+  }, [setPendingAttachments])
+
   /** 发送消息 */
   const handleSend = React.useCallback((): void => {
     if (!canSend) return
@@ -264,27 +291,6 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [])
 
   const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
-    {
-      key: 'attach',
-      node: (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
-              onClick={handleOpenFileDialog}
-            >
-              <Paperclip className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>添加附件</p>
-          </TooltipContent>
-        </Tooltip>
-      ),
-    },
     { key: 'model', node: <ModelSelector /> },
     {
       key: 'thinking',
@@ -306,6 +312,27 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           </TooltipTrigger>
           <TooltipContent side="top">
             <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    },
+    {
+      key: 'attach',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              onClick={handleOpenFileDialog}
+            >
+              <Paperclip className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>添加附件</p>
           </TooltipContent>
         </Tooltip>
       ),
@@ -374,6 +401,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   mediaType={att.mediaType}
                   previewUrl={att.previewUrl}
                   onRemove={() => handleRemoveAttachment(att.id)}
+                  onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
                 />
               ))}
             </div>
