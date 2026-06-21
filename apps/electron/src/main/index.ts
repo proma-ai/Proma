@@ -87,6 +87,7 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
+import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
@@ -498,6 +499,9 @@ async function bootstrap(): Promise<void> {
 
   // Register IPC handlers
   registerIpcHandlers()
+
+  // 收敛上次退出时遗留的运行中委派子会话（内存态丢失，无法续跑）
+  safeRun('markRunningDelegationsAsInterrupted', markRunningDelegationsAsInterrupted)
 
   // Set dock icon on macOS
   // 确保 Dock 图标可见（dev 模式下通过 spawn 启动时可能不会自动显示）

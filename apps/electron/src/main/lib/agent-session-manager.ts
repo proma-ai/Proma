@@ -1277,6 +1277,35 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
 }
 
 /**
+ * 启动时收敛遗留的委派子会话状态
+ *
+ * 委派子会话的运行态只在主进程内存中维护，应用退出后无法续跑。
+ * 若上次退出时仍有 delegationStatus 为 'running' 的子会话，本次启动需要
+ * 把它们标记为 'interrupted'，避免状态永久卡在 running、父会话也无法收敛。
+ *
+ * @returns 被标记为中断的子会话数量
+ */
+export function markRunningDelegationsAsInterrupted(): number {
+  const index = readIndex()
+  let count = 0
+
+  for (const session of index.sessions) {
+    if (session.sourceDelegationId && session.delegationStatus === 'running') {
+      session.delegationStatus = 'interrupted'
+      session.updatedAt = Date.now()
+      count++
+    }
+  }
+
+  if (count > 0) {
+    writeIndex(index)
+    console.log(`[Agent 会话] 启动收敛 ${count} 个遗留的运行中委派子会话为 interrupted`)
+  }
+
+  return count
+}
+
+/**
  * 清理所有会话中不存在的附加目录和附加文件
  * @returns 清理的条目总数
  */

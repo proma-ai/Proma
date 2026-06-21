@@ -68,8 +68,24 @@ const MAX_WAIT_SECONDS = 2 * 60 * 60
 const DEFAULT_WAIT_SECONDS = 30 * 60
 const RESULT_SUMMARY_CHAR_LIMIT = 12_000
 const DELEGATION_GOAL_CHAR_LIMIT = 1_000
+/** live Map 中保留的已结束委派上限，超出时按完成时间清理最老的（持久化仍可回查） */
+const MAX_RETAINED_FINISHED_DELEGATIONS = 200
 
 const delegations = new Map<string, DelegationRecord>()
+
+/**
+ * 清理内存中过多的已结束委派，避免 live Map 无界增长。
+ * 仅清理 status !== 'running' 的记录；被清理项仍可通过持久化会话回查。
+ */
+function pruneFinishedDelegations(): void {
+  const finished = Array.from(delegations.values()).filter((item) => item.status !== 'running')
+  const excess = finished.length - MAX_RETAINED_FINISHED_DELEGATIONS
+  if (excess <= 0) return
+  finished
+    .sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0))
+    .slice(0, excess)
+    .forEach((item) => delegations.delete(item.delegationId))
+}
 
 function jsonResult(payload: unknown): CollaborationToolResult {
   return {
@@ -274,34 +290,46 @@ function getDelegationResult(parentSessionId: string, delegationId: string): Rec
   }
 }
 
-function getDelegationRecordsForWait(ids: string[], parentSessionId: string): DelegationRecord[] {
-  return ids.map((id) => {
+interface WaitResolution {
+  /** 仍在内存中、需要实际等待的委派 */
+  liveRecords: DelegationRecord[]
+  /** 不在内存、但持久化记录已是终态的委派（如应用重启后的遗留委派） */
+  settled: Array<Record<string, unknown>>
+}
+
+/**
+ * 解析等待目标：内存中的进行中委派照常等待；
+ * 不在内存的委派回退到持久化记录（重启后遗留），已终态则直接计入完成。
+ * 两处都查不到才抛错。
+ */
+function resolveWaitTargets(ids: string[], parentSessionId: string): WaitResolution {
+  const liveRecords: DelegationRecord[] = []
+  const settled: Array<Record<string, unknown>> = []
+  for (const id of ids) {
     const record = delegations.get(id)
-    if (!record) {
-      throw new Error(`委派不存在或不在当前运行中: ${id}`)
+    if (record) {
+      if (record.parentSessionId !== parentSessionId) {
+        throw new Error(`委派不属于当前父会话: ${id}`)
+      }
+      liveRecords.push(record)
+      continue
     }
-    if (record.parentSessionId !== parentSessionId) {
-      throw new Error(`委派不属于当前父会话: ${id}`)
-    }
-    return record
-  })
+    // 不在内存：回退到持久化记录；getDelegationResult 在完全找不到时抛错
+    settled.push(getDelegationResult(parentSessionId, id))
+  }
+  return { liveRecords, settled }
 }
 
 function getFinishedDelegationCount(records: DelegationRecord[]): number {
   return records.filter((record) => record.status !== 'running').length
 }
 
-async function waitForDelegationRecords(
+async function waitForLiveRecords(
   records: DelegationRecord[],
   timeoutSeconds: number,
-  mode: 'all' | 'any',
-  minCompleted: number,
+  liveTarget: number,
 ): Promise<'completed' | 'timeout'> {
-  const targetCompleted = mode === 'all'
-    ? records.length
-    : Math.max(1, Math.min(minCompleted, records.length))
-
-  if (getFinishedDelegationCount(records) >= targetCompleted) {
+  if (getFinishedDelegationCount(records) >= liveTarget) {
     return 'completed'
   }
 
@@ -310,7 +338,7 @@ async function waitForDelegationRecords(
     return await Promise.race([
       new Promise<'completed'>((resolve) => {
         const check = () => {
-          if (getFinishedDelegationCount(records) >= targetCompleted) {
+          if (getFinishedDelegationCount(records) >= liveTarget) {
             resolve('completed')
           }
         }
@@ -339,7 +367,15 @@ function getCurrentParentPermissionMode(
 
 function stopDelegation(parentSessionId: string, delegationId: string): Record<string, unknown> {
   const record = delegations.get(delegationId)
-  if (!record || record.parentSessionId !== parentSessionId) {
+  if (!record) {
+    // 不在内存：可能是应用重启后的遗留委派。回退到持久化记录（完全找不到才抛错），无法主动停止
+    return {
+      delegation: getDelegationResult(parentSessionId, delegationId),
+      stopped: false,
+      note: '该委派不在当前运行内存中（可能因应用重启已中断），无法主动停止。',
+    }
+  }
+  if (record.parentSessionId !== parentSessionId) {
     throw new Error(`未找到当前会话下的委派: ${delegationId}`)
   }
   if (record.status !== 'running') {
@@ -402,6 +438,7 @@ function startDelegation(
     resolveCompletion,
   }
   delegations.set(delegationId, record)
+  pruneFinishedDelegations()
 
   const prompt = buildDelegationPrompt({
     parentSessionId: ctx.sessionId,
@@ -522,22 +559,40 @@ export async function injectAgentCollaborationMcpServer(
         schemas.delegateBatch,
         async (args) => {
           const parent = assertCanCreateDelegation(ctx, args.items.length)
-          const results = args.items.map((item) => startDelegation(ctx, parent, {
-            ...item,
-            task: buildDelegationTaskWithSharedContext({
-              sharedContext: args.sharedContext,
-              task: item.task,
-            }),
-          }))
+          // 逐个创建并容错：单个失败不影响其余，避免整体抛错导致已创建的子会话成孤儿
+          const created: StartDelegationResult[] = []
+          const failures: Array<{ index: number; title?: string; error: string }> = []
+          args.items.forEach((item, index) => {
+            try {
+              created.push(startDelegation(ctx, parent, {
+                ...item,
+                task: buildDelegationTaskWithSharedContext({
+                  sharedContext: args.sharedContext,
+                  task: item.task,
+                }),
+              }))
+            } catch (error) {
+              failures.push({
+                index,
+                title: item.title,
+                error: error instanceof Error ? error.message : '未知错误',
+              })
+            }
+          })
 
           return jsonResult({
-            delegations: results.map((item) => getDelegationSummary(item.record)),
-            effectivePermissionModes: results.map((item) => ({
+            delegations: created.map((item) => getDelegationSummary(item.record)),
+            effectivePermissionModes: created.map((item) => ({
               delegationId: item.record.delegationId,
               permissionMode: item.effectivePermissionMode,
             })),
+            failures,
+            createdCount: created.length,
+            failedCount: failures.length,
             maxRunningDelegations: MAX_RUNNING_DELEGATIONS_PER_PARENT,
-            note: '批量子会话已启动。需要结果时调用 wait_for_delegations，可用 mode=any 先收敛部分结果。',
+            note: failures.length > 0
+              ? `批量子会话部分创建成功（成功 ${created.length}，失败 ${failures.length}）。失败项可修正后重试；需要结果时调用 wait_for_delegations。`
+              : '批量子会话已启动。需要结果时调用 wait_for_delegations，可用 mode=any 先收敛部分结果。',
           })
         },
       ),
@@ -551,22 +606,31 @@ export async function injectAgentCollaborationMcpServer(
             : Array.from(delegations.values())
               .filter((item) => item.parentSessionId === ctx.sessionId && item.status === 'running')
               .map((item) => item.delegationId)
-          const records = getDelegationRecordsForWait(ids, ctx.sessionId)
-          if (records.length === 0) {
+          const { liveRecords, settled } = resolveWaitTargets(ids, ctx.sessionId)
+          const totalTargets = liveRecords.length + settled.length
+          if (totalTargets === 0) {
             return jsonResult({ delegations: [], note: '没有找到可等待的协作委派' })
           }
 
           const mode = args.mode ?? 'all'
           const minCompleted = args.minCompleted ?? 1
           const timeoutSeconds = Math.min(args.timeoutSeconds ?? DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS)
-          const waitResult = await waitForDelegationRecords(records, timeoutSeconds, mode, minCompleted)
+          // settled 已是终态，先计入完成数；只需让足够多的 liveRecords 完成即可
+          const targetCompleted = mode === 'all'
+            ? totalTargets
+            : Math.max(1, Math.min(minCompleted, totalTargets))
+          const liveTarget = Math.max(0, targetCompleted - settled.length)
+          const waitResult = liveRecords.length > 0
+            ? await waitForLiveRecords(liveRecords, timeoutSeconds, liveTarget)
+            : 'completed'
 
+          const allDelegations = [...liveRecords.map(getDelegationSummary), ...settled]
           return jsonResult({
             status: waitResult,
             mode,
-            completedCount: getFinishedDelegationCount(records),
-            runningCount: records.filter((record) => record.status === 'running').length,
-            delegations: records.map(getDelegationSummary),
+            completedCount: allDelegations.filter((item) => item.status !== 'running').length,
+            runningCount: allDelegations.filter((item) => item.status === 'running').length,
+            delegations: allDelegations,
           })
         },
         { annotations: { readOnlyHint: true } },

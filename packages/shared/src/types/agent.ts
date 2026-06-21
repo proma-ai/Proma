@@ -641,8 +641,8 @@ export interface AgentSessionMeta {
 /** Agent 委派子会话的任务角色 */
 export type AgentDelegationRole = 'explore' | 'research' | 'implement' | 'review' | 'custom'
 
-/** Agent 委派子会话的运行状态 */
-export type AgentDelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+/** Agent 委派子会话的运行状态（interrupted：应用退出时仍在运行，重启后无法续跑） */
+export type AgentDelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
 /**
  * Agent 持久化消息
