@@ -60,6 +60,7 @@ import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
+import { buildOrderedBasePaths } from '@/lib/session-base-paths'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -484,15 +485,15 @@ export function useGlobalAgentListeners(): void {
       const workspaceAttachedFiles = workspaceId
         ? (store.get(workspaceAttachedFilesMapAtom).get(workspaceId) ?? [])
         : []
-      const basePaths = uniqueTruthyPaths([
+      const basePaths = buildOrderedBasePaths({
         sessionPath,
         workspaceFilesPath,
         dirPath,
-        ...sessionAttachedDirs,
-        ...sessionAttachedFiles,
-        ...workspaceAttachedDirs,
-        ...workspaceAttachedFiles,
-      ])
+        sessionAttachedDirs,
+        sessionAttachedFiles,
+        workspaceAttachedDirs,
+        workspaceAttachedFiles,
+      })
 
       let previewOnly = true
       if (dirPath) {

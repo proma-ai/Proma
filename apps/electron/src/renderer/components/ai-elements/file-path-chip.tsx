@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { buildOrderedBasePaths } from '@/lib/session-base-paths'
+import { getFileParentPath } from '@/lib/file-utils'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -97,7 +99,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const filename = getFileName(cleanPath)
 
-  const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:\\/.test(cleanPath)
+  const isAbsolute = cleanPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(cleanPath)
 
   const chipRef = React.useRef<HTMLButtonElement>(null)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
@@ -168,12 +170,20 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
     const sessionId = store.get(currentAgentSessionIdAtom)
     if (!sessionId) return
 
+    // 统一构建 basePaths，包含 dirPath（目标文件父目录）提升解析优先级
+    const dirPath = isAbsolute ? getFileParentPath(cleanPath) : null
+    const previewBasePaths = buildOrderedBasePaths({
+      dirPath,
+      sessionPath: candidateBases[0] ?? undefined,
+      sessionAttachedDirs: candidateBases,
+    })
+
     openPreview(sessionId, {
       filePath: cleanPath,
       previewOnly: true,
-      basePaths: candidateBases.length > 0 ? candidateBases : undefined,
+      basePaths: previewBasePaths.length > 0 ? previewBasePaths : undefined,
     })
-  }, [store, openPreview, cleanPath, candidateBases])
+  }, [store, openPreview, cleanPath, candidateBases, isAbsolute])
 
   const handleShowInFolder = React.useCallback(() => {
     const bases = candidateBases.length > 0 ? candidateBases : undefined
@@ -236,8 +246,8 @@ export function isAbsoluteFilePath(text: string): boolean {
     return true
   }
 
-  // Windows 绝对路径
-  if (/^[A-Z]:\\/.test(clean)) return true
+  // Windows 绝对路径（兼容 C:\foo 和 C:/foo）
+  if (/^[A-Za-z]:[\\/]/.test(clean)) return true
 
   return false
 }

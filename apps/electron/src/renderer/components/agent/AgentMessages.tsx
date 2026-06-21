@@ -29,6 +29,7 @@ import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/l
 import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
+import { agentSessionsAtom, agentWorkspacesAtom, agentWorkspaceFilesPathMapAtom } from '@/atoms/agent-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
@@ -398,6 +399,25 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
+  const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
+  const workspaceFilesPathMap = useAtomValue(agentWorkspaceFilesPathMapAtom)
+
+  // 补全 basePaths：将 workspaceFilesPath 从 atom 缓存补入，消除 IPC 异步时序缺口
+  const enrichedAttachedDirs = React.useMemo(() => {
+    const dirs = [...(attachedDirs ?? [])]
+    const session = agentSessions.find((s) => s.id === sessionId)
+    if (session?.workspaceId) {
+      const ws = agentWorkspaces.find((w) => w.id === session.workspaceId)
+      if (ws?.slug) {
+        const wfp = workspaceFilesPathMap.get(ws.slug)
+        if (wfp && !dirs.includes(wfp)) {
+          dirs.push(wfp)
+        }
+      }
+    }
+    return dirs
+  }, [attachedDirs, sessionId, agentSessions, agentWorkspaces, workspaceFilesPathMap])
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
   // 空会话无需淡入过渡（无消息则无滚动位置问题）
@@ -609,7 +629,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
     : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
 
   return (
-    <BasePathsProvider basePaths={attachedDirs}>
+    <BasePathsProvider basePaths={enrichedAttachedDirs}>
     <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
       <ScrollPositionManager id={sessionId} ready={ready} />
       <ConversationContent>
@@ -676,7 +696,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                             block={block}
                             allMessages={allSDKMessages}
                             basePath={sessionPath || undefined}
-                            basePaths={attachedDirs}
+                            basePaths={enrichedAttachedDirs}
                             index={index}
                             dimmed={hasSmoothTextContent && block.type !== 'text'}
                             isStreaming={streaming}

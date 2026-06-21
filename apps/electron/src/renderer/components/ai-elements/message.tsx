@@ -38,6 +38,7 @@ import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
 import { FilePathChip, isAbsoluteFilePath, isRelativeFilePath } from './file-path-chip'
+import { buildOrderedBasePaths } from '@/lib/session-base-paths'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
 
@@ -505,15 +506,12 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
   const text = typeof codeChildren === 'string' ? codeChildren : ''
 
   if (text) {
-    // 合并 basePath（主 cwd）+ basePaths（props 或 context 提供的附加目录）作为候选
-    const merged: string[] = []
-    if (basePath) merged.push(basePath)
+    // 使用统一函数构建 basePaths，保证与 buildAutoPreviewFile 等消费者顺序一致
     const allExtra = basePaths || ctxBasePaths
-    if (allExtra) {
-      for (const p of allExtra) {
-        if (p && !merged.includes(p)) merged.push(p)
-      }
-    }
+    const merged = buildOrderedBasePaths({
+      sessionPath: basePath,
+      sessionAttachedDirs: allExtra,
+    })
     if (isAbsoluteFilePath(text)) {
       return <FilePathChip filePath={text.trim()} basePaths={merged.length > 0 ? merged : undefined} />
     }

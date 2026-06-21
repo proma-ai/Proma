@@ -77,6 +77,7 @@ import {
   agentAttachedFilesMapAtom,
   workspaceAttachedDirectoriesMapAtom,
   workspaceAttachedFilesMapAtom,
+  agentWorkspaceFilesPathMapAtom,
   liveMessagesMapAtom,
   agentThinkingAtom,
   stoppedByUserSessionsAtom,
@@ -461,6 +462,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const sessionPath = sessionPathMap.get(sessionId) ?? null
   const [workspaceFilesPath, setWorkspaceFilesPath] = React.useState<string | null>(null)
+  const setWorkspaceFilesPathMap = useSetAtom(agentWorkspaceFilesPathMapAtom)
   const [isDragOver, setIsDragOver] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
 
@@ -548,18 +550,34 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [sessionId, currentWorkspaceId, setSessionPathMap])
 
-  // 获取工作区共享文件目录路径（@ 引用时需要搜索）
+  // 获取工作区共享文件目录路径（@ 引用时需要搜索），同步写入 atom 供其他组件读取
   const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
   React.useEffect(() => {
     if (!workspaceSlug) {
       setWorkspaceFilesPath(null)
+      setWorkspaceFilesPathMap(new Map())
       return
     }
     window.electronAPI
       .getWorkspaceFilesPath(workspaceSlug)
-      .then(setWorkspaceFilesPath)
-      .catch(() => setWorkspaceFilesPath(null))
-  }, [workspaceSlug])
+      .then((path) => {
+        setWorkspaceFilesPath(path)
+        setWorkspaceFilesPathMap((prev) => {
+          const next = new Map(prev)
+          if (path) next.set(workspaceSlug, path)
+          else next.delete(workspaceSlug)
+          return next
+        })
+      })
+      .catch(() => {
+        setWorkspaceFilesPath(null)
+        setWorkspaceFilesPathMap((prev) => {
+          const next = new Map(prev)
+          next.delete(workspaceSlug)
+          return next
+        })
+      })
+  }, [workspaceSlug, setWorkspaceFilesPathMap])
 
   // 获取工作区级附加文件（@ 引用和路径解析都需要）
   React.useEffect(() => {

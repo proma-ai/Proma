@@ -962,6 +962,14 @@ export const workspaceAttachedDirectoriesMapAtom = atom<Map<string, string[]>>(n
  */
 export const workspaceAttachedFilesMapAtom = atom<Map<string, string[]>>(new Map())
 
+/**
+ * 工作区共享文件目录路径缓存（按 workspace slug 存储）
+ *
+ * 由 AgentView 在挂载时通过 IPC 获取，供 MarkdownInlineCode / buildAutoPreviewFile
+ * 同步读取，避免 FilePathChip 初次渲染因异步时序缺失 workspaceFilesPath。
+ */
+export const agentWorkspaceFilesPathMapAtom = atom<Map<string, string>>(new Map())
+
 /** 当前 Agent 会话的草稿内容（派生读写原子） */
 export const currentAgentSessionDraftAtom = atom(
   (get) => {
