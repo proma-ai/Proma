@@ -116,24 +116,28 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     const srcW = rotated ? sh : sw
     const srcH = rotated ? sw : sh
 
+    const dpr = window.devicePixelRatio || 1
     const scale = Math.min(maxW / srcW, maxH / srcH, 1)
     scaleRef.current = scale
     const dw = Math.floor(srcW * scale)
     const dh = Math.floor(srcH * scale)
     displayDimRef.current = { w: dw, h: dh }
-    display.width = dw
-    display.height = dh
+    // 缓冲区按物理像素分配（× dpr），CSS 尺寸保持逻辑像素，避免高分屏下被浏览器放大而模糊
+    display.width = Math.floor(dw * dpr)
+    display.height = Math.floor(dh * dpr)
     display.style.width = `${dw}px`
     display.style.height = `${dh}px`
 
     const dCtx = display.getContext('2d')
     if (!dCtx) return
-    dCtx.clearRect(0, 0, display.width, display.height)
+    // 绘制坐标系统一到 CSS 逻辑像素：dpr 由 transform 吸收，后续绘制与坐标换算无需感知 dpr
+    dCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    dCtx.clearRect(0, 0, dw, dh)
 
     // 填充棋盘格背景（透明区域可见）
     const tileSize = 8
-    for (let y = 0; y < display.height; y += tileSize) {
-      for (let x = 0; x < display.width; x += tileSize) {
+    for (let y = 0; y < dh; y += tileSize) {
+      for (let x = 0; x < dw; x += tileSize) {
         dCtx.fillStyle = (Math.floor(x / tileSize) + Math.floor(y / tileSize)) % 2 === 0 ? '#e0e0e0' : '#ffffff'
         dCtx.fillRect(x, y, tileSize, tileSize)
       }
@@ -660,7 +664,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
           <X className="size-5" />
         </button>
 
-        {/* 发送到对话 */}
+        {/* 保存 */}
         <button
           type="button"
           onClick={handleExport}
@@ -671,7 +675,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
             'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
           )}
         >
-          发送到对话
+          保存
         </button>
       </div>
     </div>

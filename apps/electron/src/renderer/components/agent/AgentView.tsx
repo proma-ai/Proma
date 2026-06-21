@@ -1037,6 +1037,32 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [setPendingFiles])
 
+  /** 图片附件编辑完成：用编辑后的图替换该附件（统一转为内存图片走 __pendingAgentFileData） */
+  const handleAttachmentEditComplete = React.useCallback((fileId: string, editedDataUrl: string): void => {
+    const base64 = editedDataUrl.split(',')[1]
+    if (!base64) return
+    if (!window.__pendingAgentFileData) {
+      window.__pendingAgentFileData = new Map<string, string>()
+    }
+    window.__pendingAgentFileData.set(fileId, base64)
+    setPendingFiles((prev) => prev.map((f) => {
+      if (f.id !== fileId) return f
+      if (f.previewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(f.previewUrl)
+      }
+      return {
+        ...f,
+        previewUrl: editedDataUrl,
+        filename: f.filename.replace(/(\.[^.]+)?$/, '') + '_edited.png',
+        mediaType: 'image/png',
+        size: Math.round(base64.length * 0.75),
+        // 编辑后统一当作内存图片：清除文件引用，发送时从 __pendingAgentFileData 读取最新数据
+        sourcePath: undefined,
+        isClipboardDraft: undefined,
+      }
+    }))
+  }, [setPendingFiles])
+
   const openClipboardPreviewFile = React.useCallback((filePath: string): void => {
     const parentPath = getFileParentPath(filePath)
     openPreview(sessionId, {
@@ -2096,6 +2122,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                     previewUrl={file.previewUrl}
                     onRemove={() => handleRemoveFile(file.id)}
                     onClick={file.filename.startsWith('clipboard-') ? () => handleClipboardPreview(file) : undefined}
+                    onEditComplete={(editedDataUrl) => handleAttachmentEditComplete(file.id, editedDataUrl)}
                   />
                 ))}
                 {currentQuotedSelection && (
