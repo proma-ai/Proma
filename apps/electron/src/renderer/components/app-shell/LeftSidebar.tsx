@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -206,6 +206,46 @@ function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSideb
         {formatAutomationCount(count)}
       </span>
     </button>
+  )
+}
+
+/**
+ * ProactiveSection - Proactive 能力区容器
+ *
+ * 将自动任务和 Agent 技能入口统一放在带语义的 Proactive 区域中，
+ * 未来可在此区域内嵌入推荐卡（Phase 2+）。
+ * 区域可折叠收起以节省垂直空间。
+ */
+interface ProactiveSectionProps {
+  children: React.ReactNode
+}
+
+function ProactiveSection({ children }: ProactiveSectionProps): React.ReactElement {
+  const [collapsed, setCollapsed] = React.useState(false)
+
+  return (
+    <div className="px-3 pt-2 pb-0.5">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center gap-1.5 px-1 py-1 mb-1 rounded-md text-[11px] font-medium text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.03] transition-colors titlebar-no-drag"
+      >
+        <Sparkles size={12} className="text-foreground/40" />
+        <span>Proactive</span>
+        <ChevronRight
+          size={12}
+          className={cn(
+            'ml-auto transition-transform duration-200',
+            collapsed ? '' : 'rotate-90',
+          )}
+        />
+      </button>
+      {!collapsed && (
+        <div className="rounded-[10px] bg-accent-foreground/[0.03] px-2 py-1.5 flex flex-col gap-0.5">
+          {children}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -810,16 +850,25 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 打开自动任务列表 */
+  /** 打开/关闭自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
+    if (activeView === 'automations') {
+      setAutomationForm({ open: false, draft: null })
+      setActiveView('conversations')
+      return
+    }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView])
 
-  /** 打开 Agent 技能视图 */
+  /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
+    if (activeView === 'agent-skills') {
+      setActiveView('conversations')
+      return
+    }
     setActiveView('agent-skills')
-  }, [setActiveView])
+  }, [activeView, setActiveView])
 
   /** 打开当前工作区的 MCP 管理页 */
   const handleOpenMcpManagement = React.useCallback((): void => {
@@ -2126,26 +2175,22 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         </Tooltip>
       </div>
 
-      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
-      <div className="px-3 pt-2 pb-0.5">
+      {/* Proactive 能力区：自动任务 + Agent 技能入口，未来承载推荐卡 */}
+      <ProactiveSection>
         <AutomationSidebarEntry
           count={automationCount}
           active={activeView === 'automations'}
           onClick={handleOpenAutomations}
         />
-      </div>
-
-      {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
-      {mode === 'agent' && (
-        <div className="px-3 pb-0.5">
+        {mode === 'agent' && (
           <SkillsSidebarEntry
             count={capabilities?.skills.length ?? 0}
             updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
             active={activeView === 'agent-skills'}
             onClick={handleOpenSkills}
           />
-        </div>
-      )}
+        )}
+      </ProactiveSection>
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
