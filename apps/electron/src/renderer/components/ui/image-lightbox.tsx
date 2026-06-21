@@ -62,14 +62,14 @@ export function ImageLightbox({
         {/* 遮罩层 — 与 DialogOverlay 完全一致 */}
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm titlebar-no-drag',
+            'fixed inset-0 z-[200] bg-black/90 titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}
         />
         <DialogPrimitive.Content
           className={cn(
-            'fixed inset-0 z-[100] flex flex-col items-center justify-center titlebar-no-drag',
+            'fixed inset-0 z-[200] flex flex-col items-center justify-center titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',

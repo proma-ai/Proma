@@ -731,27 +731,61 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   // content changes (refreshVersion bump) → delete stored position;
   // cached mount → restore; scroll → save.
   const prevRefreshVersionRef = React.useRef(refreshVersion)
+  const restoreScrollRef = React.useRef(false)
+  const restoreRafRef = React.useRef(0)
 
   // WHEN content version changes (refreshVersion bump): delete stored scroll position
   // 只在内容变化时清除，切换文件时保留位置以支持返回导航
   React.useEffect(() => {
     if (loading) return // still loading, don't clear yet
     if (prevRefreshVersionRef.current !== refreshVersion) {
-      // refreshVersion changed for current file → content updated, clear position
       scrollPositionCache.delete(scrollKey)
+      restoreScrollRef.current = false
       prevRefreshVersionRef.current = refreshVersion
     }
   }, [scrollKey, refreshVersion, loading])
 
-  // RESTORE scroll position after cached content renders
-  const restoreScrollRef = React.useRef(false)
+  // RESTORE scroll position after cached content renders.
+  // 等待滚动容器内容高度连续 3 帧稳定后再恢复，避免异步渲染
+  // （Shiki tokenize、ProseMirror mount）导致高度变化引起滚动偏移。
   React.useEffect(() => {
     if (loading || !restoreScrollRef.current) return
-    restoreScrollRef.current = false
+
     const pos = scrollPositionCache.get(scrollKey)
-    if (pos && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = pos.top
-      scrollContainerRef.current.scrollLeft = pos.left
+    if (!pos || !scrollContainerRef.current) {
+      restoreScrollRef.current = false
+      return
+    }
+
+    const el = scrollContainerRef.current
+    let prevHeight = el.scrollHeight
+    let stableFrames = 0
+
+    const check = () => {
+      const curHeight = el.scrollHeight
+      if (curHeight === prevHeight) {
+        stableFrames++
+      } else {
+        stableFrames = 0
+        prevHeight = curHeight
+      }
+      if (stableFrames >= 3) {
+        restoreScrollRef.current = false
+        el.scrollTop = pos.top
+        el.scrollLeft = pos.left
+        restoreRafRef.current = 0
+        return
+      }
+      restoreRafRef.current = requestAnimationFrame(check)
+    }
+
+    restoreRafRef.current = requestAnimationFrame(check)
+
+    return () => {
+      if (restoreRafRef.current) {
+        cancelAnimationFrame(restoreRafRef.current)
+        restoreRafRef.current = 0
+      }
     }
   }, [loading, scrollKey])
 
@@ -772,6 +806,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   React.useEffect(() => {
     return () => {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+      if (restoreRafRef.current) cancelAnimationFrame(restoreRafRef.current)
     }
   }, [])
 

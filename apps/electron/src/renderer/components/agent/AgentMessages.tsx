@@ -25,7 +25,7 @@ import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
 import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
 import { useSmoothStream } from '@proma/ui'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
-import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -118,10 +118,11 @@ function EmptyState(): React.ReactElement {
 }
 
 function AssistantLogo({ model }: { model?: string }): React.ReactElement {
+  const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
       <img
-        src={getModelLogo(model)}
+        src={getModelLogo(model, resolveModelProvider(model, channels))}
         alt={model}
         className="size-[35px] rounded-[25%] object-cover"
       />
@@ -437,7 +438,8 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
-  const agentStreamingModel = streamState?.model ? resolveModelDisplayName(streamState.model, channels) : undefined
+  const streamingModelId = streamState?.model || sessionModelId
+  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels) : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 
@@ -661,7 +663,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 <MessageHeader
                   model={agentStreamingModel}
                   time={formatMessageTime(Date.now())}
-                  logo={<AssistantLogo model={agentStreamingModel} />}
+                  logo={<AssistantLogo model={streamingModelId} />}
                 />
                 <MessageContent>
                   {retrying && <RetryingNotice retrying={retrying} />}

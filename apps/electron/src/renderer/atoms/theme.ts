@@ -11,7 +11,7 @@
  */
 
 import { atom } from 'jotai'
-import type { ThemeMode, ThemeStyle } from '../../types'
+import { THEME_STYLES, type ThemeMode, type ThemeStyle } from '../../types'
 
 /** localStorage 缓存键 */
 const THEME_CACHE_KEY = 'proma-theme-mode'
@@ -38,8 +38,8 @@ function getCachedThemeMode(): ThemeMode {
 function getCachedThemeStyle(): ThemeStyle {
   try {
     const cached = localStorage.getItem(THEME_STYLE_CACHE_KEY)
-    if (cached === 'default' || cached === 'ocean-light' || cached === 'ocean-dark' || cached === 'forest-light' || cached === 'forest-dark' || cached === 'slate-light' || cached === 'slate-dark') {
-      return cached
+    if ((THEME_STYLES as readonly string[]).includes(cached ?? '')) {
+      return cached as ThemeStyle
     }
   } catch {
     // localStorage 不可用时忽略
@@ -92,15 +92,10 @@ export const resolvedThemeAtom = atom<'light' | 'dark'>((get) => {
   return mode
 })
 
-/** 所有特殊风格 class（用于清理旧值） */
-const ALL_THEME_STYLE_CLASSES = [
-  'theme-ocean-light',
-  'theme-ocean-dark',
-  'theme-forest-light',
-  'theme-forest-dark',
-  'theme-slate-light',
-  'theme-slate-dark',
-] as const
+/** 所有特殊风格 class（用于清理旧值）— 从 THEME_STYLES 单一源派生，排除 'default' */
+const ALL_THEME_STYLE_CLASSES = THEME_STYLES
+  .filter((style) => style !== 'default')
+  .map((style) => `theme-${style}` as const)
 
 /**
  * 应用主题到 DOM
@@ -108,7 +103,7 @@ const ALL_THEME_STYLE_CLASSES = [
  * 在 <html> 元素上切换 dark 类名和特殊风格类名。
  *
  * 幂等实现：先计算目标 class 状态，与当前 DOM 对比，一致时直接 return，
- * 不触发任何 classList mutation。避免与 vibrancy + backdrop-blur 合成层叠加
+ * 不触发任何 classList mutation。避免与 vibrancy 合成层叠加
  * 导致 Chromium 重建合成层造成的全屏闪烁。
  */
 export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = 'default', systemIsDark: boolean = true): void {

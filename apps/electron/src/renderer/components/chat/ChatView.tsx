@@ -57,6 +57,15 @@ interface ChatViewProps {
   conversationId: string
 }
 
+function cleanupPendingAttachments(attachments: PendingAttachment[]): void {
+  for (const att of attachments) {
+    if (att.previewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(att.previewUrl)
+    }
+    window.__pendingAttachmentData?.delete(att.id)
+  }
+}
+
 export function ChatView({ conversationId }: ChatViewProps): React.ReactElement {
   return (
     <ConversationProvider conversationId={conversationId}>
@@ -70,6 +79,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [contextDividers, setContextDividers] = React.useState<string[]>([])
   const [pendingAttachments, setPendingAttachments] = React.useState<PendingAttachment[]>([])
+  const pendingAttachmentsRef = React.useRef<PendingAttachment[]>([])
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
@@ -101,6 +111,17 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const globalChatPending = useAtomValue(chatPendingMessageAtom)
   const setGlobalChatPending = useSetAtom(chatPendingMessageAtom)
 
+  React.useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments
+  }, [pendingAttachments])
+
+  React.useEffect(() => {
+    return () => {
+      cleanupPendingAttachments(pendingAttachmentsRef.current)
+      pendingAttachmentsRef.current = []
+    }
+  }, [])
+
   // 检测到当前对话的待发送消息时，捕获到本地状态
   React.useEffect(() => {
     if (!globalChatPending) return
@@ -127,19 +148,10 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
     // 清空附件列表和缓存
     setPendingAttachments((prev) => {
-      // 释放 blob URLs
-      prev.forEach((att) => {
-        if (att.previewUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(att.previewUrl)
-        }
-      })
+      cleanupPendingAttachments(prev)
+      pendingAttachmentsRef.current = []
       return []
     })
-
-    // 清空附件数据缓存（如果存在）
-    if (window.__pendingAttachmentData) {
-      window.__pendingAttachmentData.clear()
-    }
   }, [conversationId, setPendingRecommendation])
 
   // ===== 加载消息 + 上下文分隔线 =====
@@ -273,12 +285,8 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       }
 
       // 清理 pending 附件和临时缓存
-      for (const att of currentAttachments) {
-        if (att.previewUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(att.previewUrl)
-        }
-        window.__pendingAttachmentData?.delete(att.id)
-      }
+      cleanupPendingAttachments(currentAttachments)
+      pendingAttachmentsRef.current = []
       setPendingAttachments([])
     }
 

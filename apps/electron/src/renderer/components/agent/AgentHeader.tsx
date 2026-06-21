@@ -6,14 +6,11 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Pencil, Check, X, PanelRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { agentSessionsAtom, agentSidePanelOpenAtom, workspaceFilesVersionAtom } from '@/atoms/agent-atoms'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { Pencil, Check, X } from 'lucide-react'
+import { agentSessionsAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
-import { registerShortcut } from '@/lib/shortcut-registry'
 
 /** AgentHeader 属性接口 */
 interface AgentHeaderProps {
@@ -28,19 +25,6 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
-
-  // 文件面板切换状态（全局共享）
-  const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
-  const filesVersion = useAtomValue(workspaceFilesVersionAtom)
-  const hasFileChanges = filesVersion > 0
-
-  const togglePanel = React.useCallback(() => {
-    setSidePanelOpen((v) => !v)
-  }, [setSidePanelOpen])
-
-  React.useEffect(() => {
-    return registerShortcut('toggle-right-panel', togglePanel)
-  }, [togglePanel])
 
   if (!session) return null
 
@@ -83,9 +67,8 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
 
   return (
     <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px]">
-      {/* 拖拽层仅覆盖左侧区域，避开右上角 WindowControls（Windows 上 ~126px）。
-          否则 header 的 drag-region 会与按钮重叠，导致 OS hitmask 把单击当成标题栏点击。 */}
-      <div className="absolute inset-0 right-[126px] titlebar-drag-region pointer-events-none" />
+      {/* 拖拽层覆盖整行，编辑/标题按钮内部已自带 titlebar-no-drag。 */}
+      <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
       {editing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input
@@ -115,44 +98,20 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
           </button>
         </div>
       ) : (
-        <>
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="truncate text-sm font-medium text-foreground">
-              {session.title}
-            </span>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={startEdit}
-              className="titlebar-no-drag p-1 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="编辑标题"
-            >
-              <Pencil className="size-3.5" />
-            </button>
-          </div>
-          {/* 文件面板打开按钮（面板关闭时显示） */}
-          {!isPanelOpen && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="relative titlebar-no-drag h-7 w-7 flex-shrink-0"
-                  onClick={togglePanel}
-                >
-                  <PanelRight className="size-3.5" />
-                  {hasFileChanges && (
-                    <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>打开文件面板 ({navigator.platform.includes('Mac') ? '⌘⇧B' : 'Ctrl+Shift+B'})</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </>
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <span className="truncate text-sm font-medium text-foreground">
+            {session.title}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={startEdit}
+            className="titlebar-no-drag p-1 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="编辑标题"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        </div>
       )}
     </div>
   )

@@ -153,8 +153,20 @@ export interface ShortcutOverrides {
 /** 主题模式 */
 export type ThemeMode = 'light' | 'dark' | 'system' | 'special'
 
+/** 所有合法的特殊风格值（白名单，新增主题时只需追加这里） */
+export const THEME_STYLES = [
+  'default',
+  'ocean-light',
+  'ocean-dark',
+  'forest-light',
+  'forest-dark',
+  'slate-light',
+  'slate-dark',
+  'terminal-dark',
+] as const
+
 /** 特殊风格主题 */
-export type ThemeStyle = 'default' | 'ocean-light' | 'ocean-dark' | 'forest-light' | 'forest-dark' | 'slate-light' | 'slate-dark'
+export type ThemeStyle = (typeof THEME_STYLES)[number]
 
 /** 默认主题模式 */
 export const DEFAULT_THEME_MODE: ThemeMode = 'dark'

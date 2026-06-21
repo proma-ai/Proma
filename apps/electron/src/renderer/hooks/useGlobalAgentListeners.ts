@@ -235,17 +235,33 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
     }
 
     case 'result': {
-      const rMsg = msg as { subtype: string; total_cost_usd?: number; modelUsage?: Record<string, { contextWindow?: number }> }
+      const rMsg = msg as {
+        subtype: string
+        total_cost_usd?: number
+        modelUsage?: Record<string, { contextWindow?: number }>
+        usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+      }
       const contextWindow = rMsg.modelUsage ? Object.values(rMsg.modelUsage)[0]?.contextWindow : undefined
-      // 注意：result.usage 是整个 query 内所有模型调用的累计求和，不能当成当前上下文占用，
-      // 否则进度环会虚高（见 agent-atoms complete 分支）。token 计数只信任流式 usage_update，
-      // 这里仅透传两个货真价实的值：成本（本就累计）与窗口大小（进度环分母）。
+      // result.usage 是整个 query 内所有模型调用的累计求和，不能当成当前上下文占用，
+      // 否则进度环会虚高、冲破 100%（PR #821 修的正是这个问题）。
+      //
+      // 但 GLM-5.2 等走 Anthropic 兼容端点的渠道，流式 assistant 消息不携带 usage 字段，
+      // 真实值只在 result 中返回。若完全不透传，这些渠道的 ContextUsageBadge 永远不显示。
+      //
+      // 折中：完整透传 result.usage 字段，由 agent-atoms 的 complete 分支按
+      // 「流式 usage_update 从未写入过」条件兜底（needFallback），避免覆盖流式真实值。
+      const u = rMsg.usage
+      const inputTokens = u ? u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) : undefined
       return [{
         type: 'complete',
         stopReason: rMsg.subtype === 'success' ? 'end_turn' : 'error',
-        usage: (rMsg.total_cost_usd != null || contextWindow != null) ? {
+        usage: (rMsg.total_cost_usd != null || contextWindow != null || u != null) ? {
           costUsd: rMsg.total_cost_usd,
           contextWindow,
+          ...(inputTokens != null && { inputTokens }),
+          ...(u && { outputTokens: u.output_tokens }),
+          ...(u && { cacheReadTokens: u.cache_read_input_tokens }),
+          ...(u && { cacheCreationTokens: u.cache_creation_input_tokens }),
         } : undefined,
       }]
     }

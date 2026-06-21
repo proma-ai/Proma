@@ -16,3 +16,24 @@ export function isTransientNetworkError(message?: string, stderr?: string): bool
     (!!stderr && TRANSIENT_NETWORK_PATTERN.test(stderr))
   )
 }
+
+/**
+ * 上游响应体解析失败模式
+ *
+ * SDK native CLI（Bun/JavaScriptCore）将上游响应解析为 JSON 失败时抛出，
+ * 典型形如 "API Error: JSON Parse error: Unable to parse JSON string"。
+ * 成因多为网关返回 HTML 错误页、SSE 流被截断、代理注入脏数据等瞬时异常，
+ * 与瞬时网络错误同属上游抖动，重试通常即可恢复。
+ * 同时覆盖 V8 引擎措辞（Unexpected end of JSON input / is not valid JSON）。
+ */
+export const MALFORMED_RESPONSE_PATTERN =
+  /JSON Parse error|Unable to parse JSON|Unexpected end of JSON input|Unexpected token.*JSON|is not valid JSON/i
+
+/** 判断错误消息/stderr 是否为上游响应体解析失败 */
+export function isMalformedResponseError(message?: string, stderr?: string): boolean {
+  if (!message && !stderr) return false
+  return (
+    (!!message && MALFORMED_RESPONSE_PATTERN.test(message)) ||
+    (!!stderr && MALFORMED_RESPONSE_PATTERN.test(stderr))
+  )
+}

@@ -37,7 +37,7 @@ import { CopyButton } from '@/components/chat/CopyButton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
-import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { agentProcessGroupsKeepExpandedAtom, agentSessionPendingFilesAtom } from '@/atoms/agent-atoms'
@@ -240,10 +240,11 @@ function isUserInputMessage(message: SDKUserMessage): boolean {
 // ===== 助手头像 =====
 
 function AssistantLogo({ model }: { model?: string }): React.ReactElement {
+  const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
       <img
-        src={getModelLogo(model)}
+        src={getModelLogo(model, resolveModelProvider(model, channels))}
         alt={model}
         className="size-[35px] rounded-[25%] object-cover"
       />
@@ -1090,7 +1091,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
           {(meta.createdAt || isScheduledRun) && (
             <span className="flex items-center gap-2 leading-none">
               {meta.createdAt && (
-                <span className="text-[10px] text-foreground/[0.38]">{formatMessageTime(meta.createdAt)}</span>
+                <span className="message-time text-[10px] text-foreground/[0.38]">{formatMessageTime(meta.createdAt)}</span>
               )}
               {isScheduledRun && (
                 <ScheduledRunBadge />

@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, Plug, Zap, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -156,6 +156,49 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
           active
             ? 'bg-accent-foreground/[0.26] text-primary-foreground'
             : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+        )}
+      >
+        {formatAutomationCount(count)}
+      </span>
+    </button>
+  )
+}
+
+interface SkillsSidebarEntryProps {
+  count: number
+  updateCount: number
+  active: boolean
+  onClick: () => void
+}
+
+function SkillsSidebarEntry({ count, updateCount, active, onClick }: SkillsSidebarEntryProps): React.ReactElement {
+  const hasUpdate = updateCount > 0
+  return (
+    <button
+      type="button"
+      aria-label={`Agent 技能，${count} 个能力${hasUpdate ? `，${updateCount} 个可更新` : ''}`}
+      onClick={onClick}
+      className={cn(
+        'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag',
+        active
+          ? 'bg-accent-foreground/[0.10] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'text-foreground/60 hover:bg-accent-foreground/[0.08] hover:text-foreground',
+      )}
+    >
+      <span className="flex items-center gap-3 min-w-0">
+        <span className={cn('flex-shrink-0 w-[18px] h-[18px]', active ? 'text-accent-foreground' : 'text-foreground/45')}>
+          <Blocks size={16} className="block" />
+        </span>
+        <span className="truncate">Agent 技能</span>
+      </span>
+      <span
+        className={cn(
+          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums',
+          hasUpdate
+            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+            : active
+              ? 'bg-accent-foreground/[0.26] text-primary-foreground'
+              : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
         )}
       >
         {formatAutomationCount(count)}
@@ -628,6 +671,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setActiveView('automations')
   }, [setAutomationForm, setActiveView])
 
+  /** 打开 Agent 技能视图 */
+  const handleOpenSkills = React.useCallback((): void => {
+    setActiveView('agent-skills')
+  }, [setActiveView])
+
   // 切换模式时重置归档视图
   React.useEffect(() => {
     setViewMode('active')
@@ -857,10 +905,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       return
     }
     setCurrentWorkspaceId(workspaceId)
+    setActiveView('conversations')
     // 切换到新工作区时，自动展开该工作区
     setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
     window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
-  }, [currentWorkspaceId, setCurrentWorkspaceId])
+  }, [currentWorkspaceId, setCurrentWorkspaceId, setActiveView])
 
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
@@ -1473,7 +1522,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="relative h-full flex flex-col items-center bg-background rounded-2xl shadow-xl transition-[width] duration-300 px-2"
+        className="relative h-full flex flex-col items-center bg-background rounded-2xl shadow-xl dark:shadow-md transition-[width] duration-300 px-2"
         style={{ width: 60, flexShrink: 0 }}
       >
         <SidebarWindowDragStrip
@@ -1606,6 +1655,30 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               自动任务（{automationCount} 个任务已创建）
             </TooltipContent>
           </Tooltip>
+
+          {mode === 'agent' && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Agent 技能"
+                  onClick={handleOpenSkills}
+                  className={cn(
+                    'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
+                    activeView === 'agent-skills'
+                      ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
+                      : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
+                  )}
+                >
+                  <Blocks size={16} />
+                  {(capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0) > 0 && (
+                    <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-blue-500" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Agent 技能</TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div className="my-3 h-px w-8 bg-border/70" />
@@ -1660,7 +1733,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="relative h-full flex flex-col bg-background rounded-2xl shadow-xl transition-[width] duration-300"
+      className="relative h-full flex flex-col bg-background rounded-2xl shadow-xl dark:shadow-md transition-[width] duration-300"
       style={{ width: width ?? 300, minWidth: 200, flexShrink: 1 }}
     >
       <SidebarWindowDragStrip
@@ -1718,6 +1791,18 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           onClick={handleOpenAutomations}
         />
       </div>
+
+      {/* Agent 技能入口：Skills / MCP 能力中心，仅 Agent 模式可见 */}
+      {mode === 'agent' && (
+        <div className="px-3 pb-0.5">
+          <SkillsSidebarEntry
+            count={capabilities?.skills.length ?? 0}
+            updateCount={capabilities?.skills.filter((s) => s.hasUpdate).length ?? 0}
+            active={activeView === 'agent-skills'}
+            onClick={handleOpenSkills}
+          />
+        </div>
+      )}
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
@@ -2010,35 +2095,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         )}
       </div>
 
-      {/* Agent 模式：项目能力指示器 */}
-      {mode === 'agent' && capabilities && (
-        <div className="px-3 pb-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => { setSettingsTab('agent'); setSettingsOpen(true) }}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-[12px] text-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/70 transition-colors titlebar-no-drag"
-              >
-                <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                  <span className="flex items-center gap-1">
-                    <Plug size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.mcpServers.filter((s) => s.enabled).length}</span>
-                    <span className="text-foreground/30">MCP</span>
-                  </span>
-                  <span className="text-foreground/20">·</span>
-                  <span className="flex items-center gap-1">
-                    <Zap size={13} className="text-foreground/40" />
-                    <span className="tabular-nums">{capabilities.skills.length}</span>
-                    <span className="text-foreground/30">Skills</span>
-                  </span>
-                </div>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">点击配置 MCP 与 Skills</TooltipContent>
-          </Tooltip>
-        </div>
-      )}
-
       {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
         <button
@@ -2081,6 +2137,80 @@ interface SessionItemActionsProps {
 }
 
 /**
+ * 安全 Tooltip：延迟渲染 Content，避开 Popper 初始定位 (0,0) 的闪现。
+ *
+ * 左侧列表项的操作按钮默认 hidden，hover 时才显示。Radix Popper 在 Content 首次挂载
+ * 时若 trigger 尚未完成布局，会先把浮层放到视口左上角 (0,0)，再跳到正确位置。这里
+ * 在 Radix 进入打开状态后，先让 Popper 有一小段时间完成定位，再真正渲染 Content；
+ * 同时 trigger rect 为 0 时直接不打开。
+ */
+interface SafeTooltipProps {
+  children: React.ReactElement
+  content: React.ReactNode
+  side?: React.ComponentPropsWithoutRef<typeof TooltipContent>['side']
+}
+
+function SafeTooltip({ children, content, side = 'top' }: SafeTooltipProps): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const [showContent, setShowContent] = React.useState(false)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const getUsableTriggerRect = React.useCallback((): DOMRect | null => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0 || rect.height === 0) return null
+    if (rect.right <= 0 || rect.bottom <= 0) return null
+    if (rect.left >= window.innerWidth || rect.top >= window.innerHeight) return null
+    return rect
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+      }
+    }
+  }, [])
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean): void => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (!nextOpen) {
+      setOpen(false)
+      setShowContent(false)
+      return
+    }
+
+    // trigger 还没完成布局或已经离开视口时不打开。
+    if (!getUsableTriggerRect()) return
+
+    setOpen(true)
+    // 先让 Radix 完成 Popper 定位，再渲染 Content，避免看到 (0,0) 初始位置。
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      if (!getUsableTriggerRect()) {
+        setOpen(false)
+        setShowContent(false)
+        return
+      }
+      setShowContent(true)
+    }, 60)
+  }, [getUsableTriggerRect])
+
+  return (
+    <Tooltip open={open} onOpenChange={handleOpenChange}>
+      <TooltipTrigger asChild ref={triggerRef}>
+        {children}
+      </TooltipTrigger>
+      {showContent && <TooltipContent side={side} hideWhenDetached>{content}</TooltipContent>}
+    </Tooltip>
+  )
+}
+
+/**
  * 列表项右侧操作区：默认显示相对更新时间，hover 时切换为「置顶 / 归档 / 三点菜单」按钮组。
  * 归档需要二次确认；进入确认态后强制保持按钮可见，避免鼠标移开后用户失去反馈。
  */
@@ -2095,9 +2225,8 @@ function SessionItemActions({
   onMenuOpenChange,
 }: SessionItemActionsProps): React.ReactElement {
   const [archiveConfirming, setArchiveConfirming] = React.useState(false)
-  // 菜单打开时强制保持按钮组挂载且可见：否则鼠标移开后父级 group:hover 失效，
-  // 外层包装变 display:none，Radix Popper 拿不到 trigger 的位置矩形（getBoundingClientRect 全是 0），
-  // 浮层就漂到视口左上角 (0,0)。
+  // 菜单打开时强制保持按钮组可见：按钮始终保留布局，只切换透明度和 pointer-events。
+  // 这样 Radix Popper 不会在 hover 切换瞬间读到 display:none 的 0 尺寸 trigger。
   const [menuOpen, setMenuOpen] = React.useState(false)
 
   React.useEffect(() => {
@@ -2148,60 +2277,57 @@ function SessionItemActions({
 
   return (
     <div
-      className="flex-shrink-0 flex items-center h-[18px]"
+      className="relative flex-shrink-0 h-[18px] w-[58px]"
       onClick={(e) => e.stopPropagation()}
     >
       <span
         title={`最后更新：${new Date(updatedAt).toLocaleString('zh-CN')}`}
         className={cn(
-          'min-w-[42px] text-right text-[11px] leading-[18px] tabular-nums text-foreground/35',
-          forceVisible ? 'hidden' : 'group-hover:hidden',
+          'absolute inset-y-0 right-0 block w-full text-right text-[11px] leading-[18px] tabular-nums text-foreground/35 transition-opacity duration-100',
+          forceVisible ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
         )}
       >
         {formatRelativeUpdatedAt(updatedAt, relativeTimeNow)}
       </span>
       <div
         className={cn(
-          'items-center gap-0.5',
-          forceVisible ? 'flex' : 'hidden group-hover:flex',
+          'absolute right-0 top-0 flex items-center gap-0.5 transition-opacity duration-100',
+          forceVisible
+            ? 'opacity-100 pointer-events-auto'
+            : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
         )}
       >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={cn(
-                'p-0.5 rounded transition-colors',
-                pinned
-                  ? 'text-primary/60 hover:bg-foreground/[0.08] hover:text-primary'
+        <SafeTooltip content={pinned ? '取消置顶' : '置顶'} side="top">
+          <button
+            className={cn(
+              'p-0.5 rounded transition-colors',
+              pinned
+                ? 'text-primary/60 hover:bg-foreground/[0.08] hover:text-primary'
+                : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
+            )}
+            onClick={onTogglePin}
+          >
+            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
+          </button>
+        </SafeTooltip>
+        <SafeTooltip
+          content={archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
+          side="top"
+        >
+          <button
+            className={cn(
+              'p-0.5 rounded transition-colors',
+              archiveConfirming
+                ? 'text-destructive bg-destructive/10'
+                : archived
+                  ? 'text-foreground/60 hover:bg-foreground/[0.08]'
                   : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
-              )}
-              onClick={onTogglePin}
-            >
-              {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{pinned ? '取消置顶' : '置顶'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={cn(
-                'p-0.5 rounded transition-colors',
-                archiveConfirming
-                  ? 'text-destructive bg-destructive/10'
-                  : archived
-                    ? 'text-foreground/60 hover:bg-foreground/[0.08]'
-                    : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
-              )}
-              onClick={handleArchiveClick}
-            >
-              {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
-          </TooltipContent>
-        </Tooltip>
+            )}
+            onClick={handleArchiveClick}
+          >
+            {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          </button>
+        </SafeTooltip>
         <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <button
@@ -2756,6 +2882,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   // 不受 PROJECT_SESSION_PREVIEW_LIMIT 与 3 天窗口限制；活跃部分内部按
   // blocked > running > completed 优先级排序（与 railRecentItems 对齐），
   // 同优先级保留 group.sessions 的 updatedAt 倒序。
+  // 当前选中的会话（activeSessionId）也必须出现在折叠列表中，无论 updatedAt 多旧、
+  // 状态如何，确保从搜索结果打开旧会话时左侧栏立即可见，不必等待 agent 完成。
   // 非活跃部分仍保留原"最近 3 天 + 至多 5 条"预览策略，作为额外补充展示。
   // 用户点击"显示更多"会在折叠基线之上每次再额外展开 PROJECT_SESSION_EXPAND_STEP 条。
   const getStatus = (sessionId: string): SessionIndicatorStatus =>
@@ -2770,10 +2898,21 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       return b.updatedAt - a.updatedAt
     })
   const activeIds = new Set(activeSessions.map((s) => s.id))
+  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
+  const currentSession = activeSessionId
+    && !activeIds.has(activeSessionId)
+    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
+  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
   const fillSessions = group.sessions
-    .filter((session) => !activeIds.has(session.id) && session.updatedAt >= recentCutoff)
+    .filter((session) =>
+      !activeIds.has(session.id)
+      && !pinnedCurrentIds.has(session.id)
+      && session.updatedAt >= recentCutoff
+    )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
-  const collapsedSessions = [...activeSessions, ...fillSessions]
+  const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
   const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
   const extraSessions = remainingSessions.slice(0, extraCount)

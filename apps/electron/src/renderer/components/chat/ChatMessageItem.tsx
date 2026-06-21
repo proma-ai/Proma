@@ -34,7 +34,7 @@ import { MigrateToAgentButton } from './MigrateToAgentButton'
 import { DeleteMessageDialog } from './DeleteMessageDialog'
 import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
-import { getModelLogo, resolveModelDisplayName } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import type { ChatMessage } from '@proma/shared'
@@ -147,7 +147,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             time={formatMessageTime(message.createdAt)}
             logo={
               <img
-                src={getModelLogo(message.model ?? '')}
+                src={getModelLogo(message.model ?? '', resolveModelProvider(message.model ?? '', channels))}
                 alt={message.model ?? 'AI'}
                 className="size-[35px] rounded-[25%] object-cover"
               />
@@ -161,7 +161,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <UserAvatar avatar={userProfile.avatar} size={35} />
             <div className="flex flex-col justify-between h-[35px]">
               <span className="text-sm font-semibold text-foreground/60 leading-none">{userProfile.userName}</span>
-              <span className="text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
+              <span className="message-time text-[10px] text-foreground/[0.38] leading-none">{formatMessageTime(message.createdAt)}</span>
             </div>
           </div>
         )}

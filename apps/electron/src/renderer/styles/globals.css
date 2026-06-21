@@ -17,6 +17,15 @@
   text-rendering: optimizeLegibility;
 }
 
+/* CRT Terminal 主题：全局等宽字体覆盖 */
+.theme-terminal-dark {
+  font-family:
+    'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Code',
+    ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, 'Courier New', monospace;
+  font-feature-settings: 'cv11', 'ss01', 'ss03', 'tnum', 'calt';
+}
+
 /* ===== 文字选区颜色 =====
  * 吃 --primary token，多数主题下品牌色自动反映到选区高亮。
  * 但部分主题的 --primary 在暗背景上太暗（如 ocean-dark/forest-dark）或在亮背景上太浅（如云朵舞者），
@@ -52,6 +61,13 @@
 .theme-slate-light ::selection,
 .theme-slate-light ::-moz-selection {
   background-color: hsl(var(--primary) / 0.6);
+}
+
+/* CRT 终端：亮绿选区 + 黑字 */
+.theme-terminal-dark ::selection,
+.theme-terminal-dark ::-moz-selection {
+  background-color: hsl(var(--primary) / 0.30);
+  color: hsl(var(--background));
 }
 
 @layer base {
@@ -380,6 +396,53 @@
     --dashed-border: 15 25% 68% / 0.30;
     --dashed-border-hover: 15 25% 68% / 0.45;
   }
+
+  /* ===== CRT 终端 (terminal-dark) — 暖磷光 =====
+   * 真实 P1 磷光体偏暖偏黄（~90° hue），不是电光绿。
+   * 前景低饱和暖绿白，长时间阅读不刺眼；
+   * CRT 氛围交给扫描线和辉光，颜色本身收敛。
+   */
+  .theme-terminal-dark {
+    /* 基础色 — 近纯黑的极暗暖灰底 */
+    --background: 100 6% 5%;              /* #0d0e0c 侧边栏 */
+    --foreground: 90 20% 65%;             /* #acb09f 暖黄绿白 */
+    --content-area: 100 6% 3%;            /* #080907 内容区：最深 */
+    /* 次要色 */
+    --muted: 100 5% 10%;                  /* #1a1b19 次要背景 */
+    --muted-foreground: 90 12% 38%;       /* #636b5e 次要文字 */
+    --border: 90 10% 18%;                 /* #2d3029 暗暖边框 */
+    /* 交互色 — 低饱和暖绿，不荧光 */
+    --primary: 100 30% 48%;               /* #6b9e52 收敛暖绿 */
+    --primary-foreground: 100 6% 5%;      /* 黑字 */
+    --secondary: 100 5% 10%;              /* 与 muted 一致 */
+    --secondary-foreground: 90 20% 65%;   /* 与 foreground 一致 */
+    --accent: 70 20% 18%;                 /* #2d2e24 暖琥珀暗强调 */
+    --accent-foreground: 70 35% 58%;      /* #a8a45e 暖琥珀高亮 */
+    --ring: 100 35% 42%;                  /* #5b8a3f 聚焦环 */
+    /* 组件色 */
+    --card: 100 6% 7%;                    /* #111210 卡片略高于背景 */
+    --card-foreground: 90 20% 65%;
+    --input: 100 5% 10%;
+    --popover: 100 6% 8%;                 /* #141412 弹出层 */
+    --popover-foreground: 90 20% 65%;
+    --dialog: 100 6% 10%;                 /* #1a1b18 弹窗 */
+    --dialog-foreground: 90 20% 65%;
+    /* 功能色 — 暖红调 */
+    --destructive: 10 35% 42%;            /* #9e5546 暖红 */
+    --destructive-foreground: 90 20% 65%;
+    --stop-hover-bg: hsl(10, 25%, 15%);
+    /* 毛玻璃 Tooltip */
+    --tooltip: 100 8% 14%;
+    --tooltip-foreground: 0 0% 98%;
+    --tooltip-muted: 90 15% 48%;
+    /* 代码块背景 */
+    --code-bg: 100 8% 4%;
+    /* 全局直角 — rounded-md = calc(2px - 2px) = 0，避免负值 */
+    --radius: 2px;
+    /* 虚线边框色 */
+    --dashed-border: 100 30% 48% / 0.25;
+    --dashed-border-hover: 100 30% 48% / 0.40;
+  }
 }
 
 @layer base {
@@ -468,6 +531,14 @@
     0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
+/* CRT 终端：暖磷光微光弹窗 */
+.theme-terminal-dark [data-radix-dialog-content] {
+  box-shadow:
+    0 0 40px 8px hsl(var(--primary) / 0.06),
+    0 0 80px 4px hsl(var(--primary) / 0.03),
+    0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
 /* 特殊主题外层缝隙背景色覆盖 */
 .theme-ocean-light .shell-bg { background: linear-gradient(135deg, hsl(205 35% 88%) 0%, hsl(205 30% 91%) 100%); }
 .theme-ocean-dark .shell-bg  { background: linear-gradient(135deg, hsl(210 14% 5%) 0%, hsl(210 12% 7%) 100%); }
@@ -475,6 +546,7 @@
 .theme-forest-dark .shell-bg { background: linear-gradient(135deg, hsl(150 10% 5%) 0%, hsl(150 10% 7%) 100%); }
 .theme-slate-light .shell-bg { background: linear-gradient(135deg, hsl(40 6% 84%) 0%, hsl(40 6% 86%) 100%); }
 .theme-slate-dark .shell-bg  { background: linear-gradient(135deg, hsl(270 10% 7%) 0%, hsl(260 8% 9%) 100%); }
+.theme-terminal-dark .shell-bg { background: linear-gradient(135deg, hsl(100 6% 3%) 0%, hsl(100 8% 5%) 100%); }
 
 /* ===== 特殊主题：模式切换器选中状态 ===== */
 /* 晴空碧海：蓝色背景滑块 + 白色文字 */
@@ -610,6 +682,64 @@
   color: hsl(270 8% 12%) !important;        /* 深色文字 */
 }
 
+/* ===== CRT 终端：模式切换器 — 古早指示灯面板 =====
+ * 轨道是暗底 + 微弱未点亮灯珠网格，
+ * 滑块是点亮的灯珠面板，由密集发光小圆点拼成大光块，
+ * 带电磁闪烁动画模拟指示灯供电不稳的微颤。
+ */
+
+/* 轨道：暗底 + 稀疏未点亮灯珠 */
+.theme-terminal-dark .mode-switcher-track {
+  background-color: hsl(var(--background)) !important;
+  background-image:
+    radial-gradient(circle, hsl(var(--muted-foreground) / 0.20) 0.5px, transparent 0.5px) !important;
+  background-size: 4px 4px !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+/* 滑块：点亮灯珠面板 — 密集双层灯珠 + 磷光外溢 + 电磁闪烁
+ * 使用 .mode-switcher-track .mode-slider 提升特异性到 (0,3,0)，
+ * 防止文件末尾 [class*="rounded"] catch-all 同特异性后置覆盖 border-radius。
+ */
+.theme-terminal-dark .mode-switcher-track .mode-slider {
+  background-color: hsl(100 40% 52%) !important;
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,0.06) 1px, transparent 1px),
+    radial-gradient(circle at 1px 1px, hsl(var(--primary) / 0.40) 0.5px, transparent 0.5px) !important;
+  background-size: 3px 3px, 3px 3px !important;
+  background-position: 0 0, 1px 1px !important;
+  border: 1px solid hsl(var(--primary) / 0.30) !important;
+  border-radius: 2px !important;
+  box-shadow:
+    0 0 10px hsl(var(--primary) / 0.30),
+    0 0 20px hsl(var(--ring) / 0.20),
+    inset 0 0 6px hsl(var(--primary) / 0.10) !important;
+  /* 电磁闪烁：不规则微亮度波动 */
+  animation: indicator-flicker 2.5s infinite steps(15);
+}
+
+@keyframes indicator-flicker {
+  0%   { opacity: 0.94; }
+  12%  { opacity: 0.99; }
+  25%  { opacity: 0.96; }
+  37%  { opacity: 1.0; }
+  50%  { opacity: 0.93; }
+  62%  { opacity: 0.98; }
+  75%  { opacity: 0.95; }
+  87%  { opacity: 0.99; }
+  100% { opacity: 0.94; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-terminal-dark .mode-switcher-track .mode-slider {
+    animation: none;
+  }
+}
+
+.theme-terminal-dark .mode-btn-selected {
+  color: #000000 !important;
+}
+
 /* ===== 莫兰迪主题：会话/工作区选中状态 ===== */
 /* 莫兰迪夜：淡紫灰背景 + 温暖杏粉文字 */
 .theme-slate-dark .session-item-selected.session-item-selected,
@@ -634,6 +764,31 @@
 .theme-slate-dark .automation-entry-selected .automation-entry-badge {
   background-color: hsl(15 30% 75% / 0.20) !important;
   color: hsl(15 30% 75%) !important;
+}
+
+/* ===== CRT 终端：会话/工作区选中态 ===== */
+.theme-terminal-dark .session-item-selected.session-item-selected,
+.theme-terminal-dark .workspace-item-selected.workspace-item-selected,
+.theme-terminal-dark .tab-item-selected.tab-item-selected {
+  background-color: hsl(100 10% 16%) !important;
+  color: hsl(var(--primary)) !important;
+}
+.theme-terminal-dark .session-item-selected *,
+.theme-terminal-dark .workspace-item-selected *,
+.theme-terminal-dark .tab-item-selected * {
+  color: inherit !important;
+}
+
+/* CRT 终端：自动化入口选中态 */
+.theme-terminal-dark .automation-entry-selected.automation-entry-selected {
+  background-color: hsl(100 10% 16%) !important;
+}
+.theme-terminal-dark .automation-entry-selected .automation-entry-icon {
+  color: hsl(var(--primary)) !important;
+}
+.theme-terminal-dark .automation-entry-selected .automation-entry-badge {
+  background-color: hsl(var(--primary) / 0.20) !important;
+  color: hsl(var(--primary)) !important;
 }
 
 /* ===== 云朵舞者主题：会话/工作区选中状态 ===== */
@@ -679,6 +834,11 @@
   color: hsl(15 30% 75%);
 }
 
+/* CRT 终端：工作区 Badge 文字色 */
+.theme-terminal-dark .workspace-badge {
+  color: hsl(var(--primary));
+}
+
 /* ===== TabBar 背景 ===== */
 /* 默认背景 */
 .tabbar-bg {
@@ -698,6 +858,11 @@
 /* 莫兰迪夜：底部浅色阴影勾勒轮廓 */
 .theme-slate-dark .tabbar-bg {
   box-shadow: inset 0 -1px 0 0 hsl(260 10% 18% / 0.6);
+}
+
+/* CRT 终端：TabBar 底部 hairline */
+.theme-terminal-dark .tabbar-bg {
+  box-shadow: inset 0 -1px 0 0 hsl(var(--border) / 0.6);
 }
 
 /* ===== 输入框段落紧凑行距（仅作用于输入框内的 tiptap 编辑器） ===== */
@@ -727,6 +892,14 @@
   color: hsl(var(--foreground));
 }
 
+/* CRT 终端：输入框内代码块 */
+.theme-terminal-dark .tiptap pre,
+.theme-terminal-dark .ProseMirror pre.markdown-code-block {
+  background-color: hsl(var(--code-bg)) !important;
+  color: hsl(var(--foreground)) !important;
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
 /* ===== 深色主题：代码块标题栏 ===== */
 /* 远山暮霭: RGB 26 34 43 */
 .theme-ocean-dark .code-block-wrapper > div:first-child {
@@ -741,6 +914,12 @@
 /* 莫兰迪夜: RGB 36 35 39 */
 .theme-slate-dark .code-block-wrapper > div:first-child {
   background: rgb(36, 35, 39) !important;
+}
+
+/* CRT 终端：代码块标题栏 */
+.theme-terminal-dark .code-block-wrapper > div:first-child {
+  background: rgb(11, 14, 10) !important;
+  border-bottom: 1px solid hsl(var(--border) / 0.3);
 }
 
 /* 快速任务窗口：透明背景 + 无拖拽 */
@@ -929,6 +1108,12 @@
   background-color: hsl(145 25% 45%) !important;   /* 雾绿灰，对齐主色 */
 }
 
+/* CRT 终端：minimap 指示器 — 工业指示灯短条 */
+.theme-terminal-dark .minimap-visible-indicator {
+  background-color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 3px hsl(var(--primary) / 0.5), 0 0 6px hsl(var(--primary) / 0.2);
+}
+
 /* ===== 滚动进度条 — 适配所有主题（无轨道背景，仅滑块） ===== */
 
 /* 默认亮色主题 */
@@ -1019,6 +1204,58 @@
   background-color: hsl(15 25% 68% / 0.40) !important;
 }
 
+/* ===== CRT 终端：机械风滚动条 ===== */
+
+/* 轨道 — 透明无背景，仅滑块可见 */
+.theme-terminal-dark .scroll-progress-track {
+  background: transparent !important;
+  border-left: none;
+}
+
+/* 滑块 — 分段金属块 + 铆钉刻线 */
+.theme-terminal-dark .scroll-progress-thumb {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 0.25),
+    hsl(var(--primary) / 0.45),
+    hsl(var(--primary) / 0.25)
+  ) !important;
+  border: 1px solid hsl(var(--primary) / 0.35) !important;
+  box-shadow:
+    inset 0 3px 0 hsl(var(--primary) / 0.12),
+    inset 0 -3px 0 hsl(var(--primary) / 0.12),
+    inset 0 6px 0 hsl(var(--primary) / 0.06),
+    inset 0 -6px 0 hsl(var(--primary) / 0.06) !important;
+  border-radius: 0 !important;
+}
+
+.theme-terminal-dark .scroll-progress-thumb:hover {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 0.35),
+    hsl(var(--primary) / 0.55),
+    hsl(var(--primary) / 0.35)
+  ) !important;
+  border-color: hsl(var(--primary) / 0.50) !important;
+}
+
+/* 拖拽中 — 加亮 + 外发光 */
+.theme-terminal-dark .scroll-progress-thumb-active {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary) / 0.45),
+    hsl(var(--primary) / 0.65),
+    hsl(var(--primary) / 0.45)
+  ) !important;
+  border-color: hsl(var(--primary) / 0.60) !important;
+  box-shadow:
+    inset 0 3px 0 hsl(var(--primary) / 0.20),
+    inset 0 -3px 0 hsl(var(--primary) / 0.20),
+    inset 0 6px 0 hsl(var(--primary) / 0.10),
+    inset 0 -6px 0 hsl(var(--primary) / 0.10),
+    0 0 8px hsl(var(--primary) / 0.25) !important;
+}
+
 /* ===== 计划模式：输入框定位上下文 ===== */
 .plan-mode-border {
   position: relative;
@@ -1029,6 +1266,11 @@
 }
 .theme-forest-dark .plan-mode-border .plan-mode-stroke {
   stroke: hsl(145 25% 45% / 0.7);
+}
+
+/* CRT 终端：Plan Mode 虚线 */
+.theme-terminal-dark .plan-mode-border .plan-mode-stroke {
+  stroke: hsl(var(--ring) / 0.7);
 }
 
 /* ===== prose inline code：移除 Tailwind Typography 默认的前后反引号伪元素 ===== */
@@ -1534,4 +1776,254 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ===== CRT 终端视觉特效 ===== */
+
+/* 扫描线 — body::before 全屏 overlay
+ * 1px 周期紧密排布 + 磷光暖色调暗线（非纯黑），纹理感远强于 2px 稀疏版；
+ * 不透明度提到 0.18，颜色收敛后扫描线做纹理主力。
+ * z-index: 100 高于主 UI 区（侧边栏 z-[60]），低于 portal 弹窗（z-[9999]），
+ * 让 DropdownMenu/ContextMenu/Dialog 内部文字保持清晰可读。
+ */
+.theme-terminal-dark body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(30, 35, 20, 0.18) 1px,
+    rgba(30, 35, 20, 0.18) 2px
+  );
+  animation: crt-flicker 8s infinite steps(10);
+  will-change: opacity;
+  transform: translateZ(0);
+}
+
+/* 屏幕暗角 — body::after
+ * radial-gradient 从中心透明到边缘变暗，增加 CRT 纵深。
+ * 同样置于主 UI 之上、portal 之下，弹窗不被暗角拉低对比。
+ */
+.theme-terminal-dark body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 60%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+  will-change: opacity;
+  transform: translateZ(0);
+}
+
+/* CRT 屏闪动画 — 微弱间歇亮度变化，模拟荧光屏刷新
+ * 8s 周期 + steps(10) 离散化，肉眼不易察觉但增加氛围。
+ */
+@keyframes crt-flicker {
+  0%   { opacity: 0.97; }
+  5%   { opacity: 1.0; }
+  10%  { opacity: 0.98; }
+  15%  { opacity: 1.0; }
+  20%  { opacity: 0.96; }
+  30%  { opacity: 1.0; }
+  50%  { opacity: 0.98; }
+  70%  { opacity: 1.0; }
+  80%  { opacity: 0.97; }
+  90%  { opacity: 1.0; }
+  100% { opacity: 0.98; }
+}
+
+/* 禁用动画时关闭屏闪、辉光、暗角
+ * prefers-reduced-motion 不只对应"动画"，也对应"视觉敏感"用户的整体诉求：
+ * 持续的辉光阴影、暗角 vignette 会让畏光/光敏感用户不适，一并移除。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .theme-terminal-dark body::before {
+    animation: none;
+  }
+  .theme-terminal-dark body::after {
+    background: none;
+  }
+  .theme-terminal-dark .text-foreground,
+  .theme-terminal-dark [class*="text-foreground"],
+  .theme-terminal-dark .crt-sidebar .text-foreground,
+  .theme-terminal-dark .crt-sidebar [class*="text-foreground"],
+  .theme-terminal-dark .model-selector-trigger,
+  .theme-terminal-dark .text-primary,
+  .theme-terminal-dark [class*="text-primary"] {
+    text-shadow: none;
+  }
+}
+
+/* 荧光辉光 — 全屏正文 + 主色文字 */
+.theme-terminal-dark .text-foreground,
+.theme-terminal-dark [class*="text-foreground"] {
+  text-shadow: 0 0 2.5px hsl(90 25% 55% / 0.14), 0 0 1px hsl(90 25% 55% / 0.20);
+}
+
+/* 侧边栏文字提亮 + 独立辉光 */
+.theme-terminal-dark .crt-sidebar .text-foreground,
+.theme-terminal-dark .crt-sidebar [class*="text-foreground"] {
+  color: hsl(90 25% 75%);
+  text-shadow: 0 0 3.3px hsl(90 25% 55% / 0.18), 0 0 1.5px hsl(90 25% 55% / 0.28);
+}
+
+/* 输入框模型名 — 磷光辉光 */
+.theme-terminal-dark .model-selector-trigger {
+  text-shadow: 0 0 6px hsl(100 40% 45% / 0.25), 0 0 2px hsl(100 40% 45% / 0.40);
+}
+
+.theme-terminal-dark .text-primary,
+.theme-terminal-dark [class*="text-primary"] {
+  text-shadow: 0 0 8px hsl(100 40% 45% / 0.28), 0 0 3px hsl(100 40% 45% / 0.40);
+}
+
+/* ===== CRT 终端：UI 组件终端化 ===== */
+
+/* 输入框容器：去掉圆角、毛玻璃和半透明背景，改用直角实色背景 + 实线边框 */
+.theme-terminal-dark [data-input-mode] > div:first-child {
+  border-radius: 0 !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-top-width: 1px !important;
+  border-bottom-width: 1px !important;
+  border-left-width: 1px !important;
+  border-right-width: 1px !important;
+  background: hsl(var(--background)) !important;
+  backdrop-filter: none !important;
+}
+
+/* 全局：所有圆角统一直角化由文件末尾 [class*="rounded"] catch-all 兜底，
+ * 此处无需单独为 rounded-full 重复一条规则。
+ */
+
+/* 设置卡片：去掉背景和阴影，用纯边框 */
+.theme-terminal-dark .settings-card {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+/* 按钮：去掉阴影 */
+.theme-terminal-dark button {
+  box-shadow: none !important;
+}
+
+/* default variant 按钮（编译后 className 含 bg-primary）：变边框风格 */
+.theme-terminal-dark button.bg-primary {
+  background: transparent !important;
+  border: 1px solid hsl(var(--primary)) !important;
+  color: hsl(var(--primary)) !important;
+  text-shadow: 0 0 6px hsl(var(--primary) / 0.25);
+}
+.theme-terminal-dark button.bg-primary:hover {
+  background: hsl(var(--primary) / 0.12) !important;
+  color: hsl(var(--primary)) !important;
+}
+
+/* secondary variant 按钮：边框 + 微弱填充 */
+.theme-terminal-dark button.bg-secondary {
+  background: transparent !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+.theme-terminal-dark button.bg-secondary:hover {
+  background: hsl(var(--muted)) !important;
+}
+
+/* 终端提示符 $ — 已移除，输入框保持默认 padding */
+
+/* 闪烁光标 — 暖磷光色块状光标，1s step-end 硬闪 */
+@keyframes terminal-cursor-blink {
+  0%, 50% { caret-color: hsl(100 40% 50%); }
+  51%, 100% { caret-color: transparent; }
+}
+
+.theme-terminal-dark .ProseMirror:focus {
+  caret-color: hsl(100 40% 50%);
+  animation: terminal-cursor-blink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-terminal-dark .ProseMirror:focus {
+    animation: none;
+  }
+}
+
+/* InputToolbar 按钮强制直角 — 由文件末尾 [class*="rounded"] catch-all 处理，
+ * 旧的 [class*="InputToolbar"] 选择器在 DOM 上无任何匹配（InputToolbarOverflow
+ * 组件不会把 "InputToolbar" 作为 className 输出），已移除。
+ */
+
+/* ===== CRT 终端：消息去气泡化 =====
+ * 消息无圆角、无背景、紧凑间距，像终端 stdout 滚动记录。
+ */
+
+/* 消息外层容器：去掉圆角和多余 padding */
+.theme-terminal-dark .message-item {
+  border-radius: 0 !important;
+  padding: 2px 4px !important;
+}
+
+/* 用户消息内容：去掉气泡背景和圆角，纯文字 */
+.theme-terminal-dark .is-user [class*="bg-primary/10"] {
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.theme-terminal-dark .is-user [class*="bg-gradient-to-t"] {
+  background: transparent !important;
+}
+
+/* AI 消息前缀 — 已移除 */
+
+/* 终端格式时间戳 — [MM/DD HH:MM] 方括号包裹 */
+.theme-terminal-dark .message-time::before {
+  content: '[';
+}
+.theme-terminal-dark .message-time::after {
+  content: ']';
+}
+
+/* 置顶用户消息 banner — 去掉毛玻璃，实色背景匹配终端 */
+.theme-terminal-dark .sticky-user-banner {
+  backdrop-filter: none !important;
+  background: hsl(var(--background)) !important;
+  box-shadow: none !important;
+  border-color: hsl(var(--border)) !important;
+}
+.theme-terminal-dark .sticky-user-banner:hover {
+  background: hsl(var(--muted)) !important;
+  border-color: hsl(var(--primary) / 0.35) !important;
+}
+
+/* 设置分隔线 — 终端主题保持单线，不动 */
+
+/* ===== CRT 终端：空态欢迎屏 =====
+ * 不隐藏现有子元素（保留中文问候、Tip、Chat/Agent 切换 Tab 等核心功能），
+ * 仅通过 ::before 前缀和直角化让它显得像终端 prompt。
+ * 之前的「display: none 全部子元素 + 硬编码英文」会破坏 i18n 和功能可达性。
+ */
+.theme-terminal-dark .welcome-empty-state h1::before {
+  content: '> ';
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+/* ===== CRT 终端：全局直角化 =====
+ * 匹配所有 Tailwind rounded- 类（rounded-xl、rounded-[Npx]、rounded-full 等），
+ * 强制 border-radius: 0。Tailwind utility 的字面拼写决定了只能用 [class*="rounded"]
+ * 才能覆盖任意值变体，这是有意为之的脆弱性，可接受。
+ * 模式切换器指示灯需要保留 2px 圆角 —— 由 .mode-switcher-track .mode-slider
+ * (特异性 0,3,0) 显式覆盖本规则 (特异性 0,2,0)，避免同特异性后置覆盖。
+ */
+.theme-terminal-dark [class*="rounded"] {
+  border-radius: 0 !important;
 }

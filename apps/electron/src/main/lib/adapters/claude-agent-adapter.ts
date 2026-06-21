@@ -25,7 +25,7 @@ import {
   isThinkingSignatureError as matchesThinkingSignatureError,
 } from '@proma/shared'
 import type { CanUseToolOptions, PermissionResult } from '../agent-permission-service'
-import { TRANSIENT_NETWORK_PATTERN } from '../error-patterns'
+import { TRANSIENT_NETWORK_PATTERN, isMalformedResponseError } from '../error-patterns'
 import { spawn as spawnChild, execFileSync } from 'node:child_process'
 
 /** SDK Query 对象类型（从动态导入中推断） */
@@ -402,6 +402,27 @@ export function mapSDKErrorToTypedError(
       code: 'network_error',
       title: '网络异常',
       message: detailedMessage || '上游 API 连接中断',
+      actions: [
+        { key: 's', label: '设置', action: 'settings' },
+        { key: 'r', label: '重试', action: 'retry' },
+      ],
+      canRetry: true,
+      retryDelayMs: 1000,
+      originalError,
+    }
+  }
+
+  // 上游响应体解析失败（JSON Parse error: Unable to parse JSON string 等）：
+  // 网关返回 HTML 错误页 / SSE 流截断 / 代理注入脏数据导致 SDK 解析非 JSON 体失败，
+  // SDK 常标记为 errorType='unknown'。归类为可重试的 service_error（已在重试白名单内）。
+  const looksLikeMalformedResponse =
+    (!errorMap[errorCode]) &&
+    isMalformedResponseError(detailedMessage, originalError)
+  if (looksLikeMalformedResponse) {
+    return {
+      code: 'service_error',
+      title: '响应解析失败',
+      message: '上游返回了无法解析的响应，通常为网关瞬时异常，正在重试',
       actions: [
         { key: 's', label: '设置', action: 'settings' },
         { key: 'r', label: '重试', action: 'retry' },

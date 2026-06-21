@@ -24,3 +24,4 @@ export {
   formatThinkingSignatureError,
   normalizeThinkingSignatureError,
 } from './thinking-signature-error'
+export { normalizePathForCompare } from './normalize-path'

@@ -18,6 +18,7 @@ import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { AutomationsListView } from '@/components/automation/AutomationsListView'
+import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 
@@ -141,7 +142,7 @@ export function MainArea(): React.ReactElement {
     <>
       <Panel
         variant="grow"
-        className="bg-content-area rounded-2xl shadow-xl"
+        className="bg-content-area rounded-2xl shadow-xl dark:shadow-sm"
       >
         <div className="flex flex-1 min-h-0 relative overflow-hidden" data-split-container>
           {/* 左侧：TabBar + TabContent（始终保持在同一 DOM 位置，避免 Tab 切换时 unmount）
@@ -160,6 +161,9 @@ export function MainArea(): React.ReactElement {
                 // Automations 列表视图：全屏取代 TabBar + TabContent
                 <AutomationsListView />
               )
+            ) : activeView === 'agent-skills' ? (
+              // Agent 技能视图：全屏取代 TabBar + TabContent
+              <AgentSkillsView />
             ) : (
               <>
                 <TabBar />

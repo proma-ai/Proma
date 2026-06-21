@@ -636,26 +636,6 @@ export function AutomationFormView(): React.ReactElement | null {
         <div className="flex items-center justify-between gap-2 px-4 py-4 flex-shrink-0">
           <span className="text-sm font-semibold text-foreground">配置</span>
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <button
-                    type="button"
-                    onClick={() => { void handleRunNow() }}
-                    disabled={runningNow || !isReadyToRun(form)}
-                    className="titlebar-no-drag h-7 px-2.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-sm"
-                  >
-                    {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-                    <span>{runningNow ? '运行中' : '运行一次'}</span>
-                  </button>
-                </span>
-              </TooltipTrigger>
-              {!isReadyToRun(form) && !runningNow && (
-                <TooltipContent side="bottom">
-                  请先补全：{listMissingFields(form).join('、')}
-                </TooltipContent>
-              )}
-            </Tooltip>
             {!isWindows && (
             <button
               onClick={close}
@@ -1041,17 +1021,28 @@ export function AutomationFormView(): React.ReactElement | null {
             </div>
           )}
         </div>
-        {/* 底部运行测试按钮 */}
-        <div className="flex-shrink-0 px-4 py-3 border-t border-border/50 bg-content-area">
-          <button
-            type="button"
-            onClick={() => { void handleRunNow() }}
-            disabled={runningNow || !canPersistDraft(form)}
-            className="titlebar-no-drag w-full h-8 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-          >
-            {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            <span>{runningNow ? '运行中' : '运行测试'}</span>
-          </button>
+        {/* 底部运行一次按钮 */}
+        <div className="flex-shrink-0 px-4 py-6 border-t border-border/50 bg-content-area">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="w-full">
+                <button
+                  type="button"
+                  onClick={() => { void handleRunNow() }}
+                  disabled={runningNow || !isReadyToRun(form)}
+                  className="titlebar-no-drag w-full h-9 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  {runningNow ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                  <span>{runningNow ? '运行中' : '运行一次'}</span>
+                </button>
+              </span>
+            </TooltipTrigger>
+            {!isReadyToRun(form) && !runningNow && (
+              <TooltipContent side="top">
+                请先补全：{listMissingFields(form).join('、')}
+              </TooltipContent>
+            )}
+          </Tooltip>
         </div>
       </div>
     </div>
