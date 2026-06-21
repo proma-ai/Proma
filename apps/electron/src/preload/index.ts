@@ -504,6 +504,9 @@ export interface ElectronAPI {
   /** 测试 MCP 服务器连接 */
   testMcpServer: (name: string, entry: import('@proma/shared').McpServerEntry) => Promise<{ success: boolean; message: string }>
 
+  /** 启用或关闭 Proma 内置 MCP */
+  setBuiltinMcpEnabled: (workspaceSlug: string, id: string, enabled: boolean) => Promise<WorkspaceCapabilities>
+
   /** 获取工作区 Skill 列表（含活跃和不活跃） */
   getWorkspaceSkills: (workspaceSlug: string) => Promise<SkillMeta[]>
 
@@ -1516,6 +1519,10 @@ const electronAPI: ElectronAPI = {
 
   testMcpServer: (name: string, entry: import('@proma/shared').McpServerEntry) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TEST_MCP_SERVER, name, entry) as Promise<{ success: boolean; message: string }>
+  },
+
+  setBuiltinMcpEnabled: (workspaceSlug: string, id: string, enabled: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_BUILTIN_MCP_ENABLED, workspaceSlug, id, enabled)
   },
 
   getWorkspaceSkills: (workspaceSlug: string) => {

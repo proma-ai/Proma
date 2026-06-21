@@ -150,6 +150,7 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 
 import { checkEnvironment } from './lib/environment-checker'
@@ -1990,6 +1991,15 @@ export function registerIpcHandlers(): void {
         success: result.valid,
         message: result.valid ? '连接成功' : (result.reason || '连接失败'),
       }
+    }
+  )
+
+  // 启用或关闭 Proma 内置 MCP
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_BUILTIN_MCP_ENABLED,
+    async (_, workspaceSlug: string, id: string, enabled: boolean): Promise<WorkspaceCapabilities> => {
+      setBuiltinMcpUserEnabled(id, enabled)
+      return getWorkspaceCapabilities(workspaceSlug)
     }
   )
 

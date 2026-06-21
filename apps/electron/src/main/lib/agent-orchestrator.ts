@@ -36,7 +36,6 @@ import { isPromptTooLongError, isThinkingSignatureError, friendlyErrorMessage, m
 import { isTransientNetworkError, isMalformedResponseError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
-import { injectAutomationMcpServer } from './automation-agent-tools'
 import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAgent } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
@@ -47,16 +46,16 @@ import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, g
 import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
-import { buildSystemPrompt, buildDynamicContext, buildBuiltinAgents } from './agent-prompt-builder'
+import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
 import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { applyAgentModelRoutingToEnv, resolveAgentModelRouting } from './agent-model-routing'
 import { getMemoryConfig } from './memory-service'
-import { searchMemory, addMemory, formatSearchResult } from './memos-client'
 import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
+import { injectBuiltinMcpServers } from './builtin-mcp/registry'
 
 // ===== 类型定义 =====
 
@@ -547,6 +546,11 @@ export class AgentOrchestrator {
       CLAUDE_CODE_ENABLE_TASKS: 'true',
       // 禁用实验性 beta 功能，使用稳定模式
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      // 禁用 attribution block：SDK 默认会在 system prompt 最前面注入一段
+      // 文本（含客户端版本号与基于会话内容计算的指纹），且每次请求都变化。
+      // 经第三方 Anthropic 兼容代理/网关中转时，会导致缓存前缀变化、命中率骤降。
+      // 官方文档确认直连 Anthropic API 不受此设置影响，故对所有 provider 无条件禁用。
+      CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
       // 配置隔离：让 SDK 使用独立的配置目录，不读取用户的 ~/.claude.json
       CLAUDE_CONFIG_DIR: getSdkConfigDir(),
     }
@@ -654,80 +658,6 @@ export class AgentOrchestrator {
     }
 
     return mcpServers
-  }
-
-  /**
-   * 注入 SDK 内置记忆工具（全局，不依赖工作区）
-   */
-  private async injectMemoryTools(
-    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
-    mcpServers: Record<string, Record<string, unknown>>,
-  ): Promise<void> {
-    const memoryConfig = getMemoryConfig()
-    const memUserId = memoryConfig.userId?.trim() || 'proma-user'
-    if (!memoryConfig.enabled || !memoryConfig.apiKey) return
-
-    try {
-      const { z } = await import('zod')
-      const memosServer = sdk.createSdkMcpServer({
-        name: 'mem',
-        version: '1.0.0',
-        tools: [
-          sdk.tool(
-            'recall_memory',
-            'Search user memories (facts and preferences) from MemOS Cloud. Use this to recall relevant context about the user.',
-            { query: z.string().describe('Search query for memory retrieval'), limit: z.number().optional().describe('Max results (default 6)') },
-            async (args) => {
-              const result = await searchMemory(
-                { apiKey: memoryConfig.apiKey, userId: memUserId, baseUrl: memoryConfig.baseUrl },
-                args.query,
-                args.limit,
-              )
-              return { content: [{ type: 'text' as const, text: formatSearchResult(result) }] }
-            },
-            { annotations: { readOnlyHint: true } },
-          ),
-          sdk.tool(
-            'add_memory',
-            'Store a conversation message pair into MemOS Cloud for long-term memory. Call this after meaningful exchanges worth remembering.',
-            {
-              userMessage: z.string().describe('The user message to store'),
-              assistantMessage: z.string().optional().describe('The assistant response to store'),
-              conversationId: z.string().optional().describe('Conversation ID for grouping'),
-              tags: z.array(z.string()).optional().describe('Tags for categorization'),
-            },
-            async (args) => {
-              await addMemory(
-                { apiKey: memoryConfig.apiKey, userId: memUserId, baseUrl: memoryConfig.baseUrl },
-                args,
-              )
-              return { content: [{ type: 'text' as const, text: 'Memory stored successfully.' }] }
-            },
-          ),
-        ],
-      })
-      mcpServers['mem'] = memosServer as unknown as Record<string, unknown>
-      console.log(`[Agent 编排] 已注入内置记忆工具 (mem)`)
-    } catch (err) {
-      console.error(`[Agent 编排] 注入记忆工具失败:`, err)
-    }
-  }
-
-  /**
-   * 注入 SDK 内置生图工具（Nano Banana）
-   */
-  private async injectNanoBananaTools(
-    sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
-    mcpServers: Record<string, Record<string, unknown>>,
-    sessionId: string,
-    agentCwd?: string,
-  ): Promise<void> {
-    try {
-      const { injectNanoBananaMcpServer } = await import('./chat-tools/nano-banana-mcp')
-      await injectNanoBananaMcpServer(sdk, mcpServers, sessionId, agentCwd)
-    } catch (err) {
-      console.error(`[Agent 编排] 注入 Nano Banana MCP 失败:`, err)
-    }
   }
 
   /**
@@ -1217,15 +1147,20 @@ export class AgentOrchestrator {
 
       // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
-      await this.injectMemoryTools(sdk, mcpServers)
-      await this.injectNanoBananaTools(sdk, mcpServers, sessionId, agentCwd)
-      await injectAutomationMcpServer(sdk, mcpServers, {
+      const builtinMcpResult = await injectBuiltinMcpServers({
+        sdk,
+        mcpServers,
         sessionId,
         channelId,
         modelId,
         workspaceId,
+        workspaceSlug,
+        agentCwd,
+        permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
+        sessionMeta,
       })
+      const collaborationAvailable = builtinMcpResult.collaborationAvailable
 
       // 合并外部注入的自定义 MCP 服务器（如飞书群聊工具）
       if (customMcpServers) {
@@ -1539,6 +1474,7 @@ export class AgentOrchestrator {
             memoryEnabled: (() => { const mc = getMemoryConfig(); return mc.enabled && !!mc.apiKey })(),
             claudeAvailable,
             deepSeekSubagentModel: modelRouting.subagentModel,
+            collaborationAvailable,
           }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : ''),
         },
         resumeSessionId: existingSdkSessionId,
@@ -1568,10 +1504,6 @@ export class AgentOrchestrator {
         ...(supports1MContext(modelId || DEFAULT_MODEL_ID) && {
           betas: ['context-1m-2025-08-07'] as SdkBeta[],
         }),
-        // 内置 SubAgent 定义（code-reviewer / explorer / researcher）
-        // SubAgent 模型最终由 CLAUDE_CODE_SUBAGENT_MODEL 兜底控制：
-        // DeepSeek 系列固定 deepseek-v4-flash，其它模型删除该 env，保留 SDK 默认解析。
-        agents: buildBuiltinAgents(claudeAvailable),
         onStderr: (data: string) => {
           stderrChunks.push(data)
           console.error(`[Agent SDK stderr] ${data}`)

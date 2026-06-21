@@ -322,7 +322,7 @@ async function callGeminiAndBuildResult(
 /**
  * 注入 Nano Banana MCP Server 到 Agent 会话
  *
- * 参照 injectMemoryTools 模式，检查配置后创建 SDK MCP Server。
+ * 检查配置后创建 SDK MCP Server，由内置 MCP registry 统一注入。
  */
 export async function injectNanoBananaMcpServer(
   sdk: typeof import('@anthropic-ai/claude-agent-sdk'),

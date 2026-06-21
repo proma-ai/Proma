@@ -23,6 +23,7 @@ export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
  * - 小米 MiMo V2.5 / V2.5 Pro / V2 Pro
  * - 智谱 GLM-5.2、GLM-X-Preview[1m]
  * - MiniMax M3（智谱式兼容端点支持）
+ * - Qwen3.7 Max / Plus（DashScope Anthropic 兼容端点，默认 1M，无需 beta header）
  *
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
  */
@@ -41,6 +42,8 @@ export function supports1MContext(modelId: string): boolean {
   if (m.includes('glm-5.2')) return true
   if (m.includes('glm-x-preview[1m]')) return true
   if (m.includes('minimax-m3')) return true
+  // Qwen3.7 系列（DashScope Anthropic 兼容端点默认 1M，无需 context-1m beta header）
+  if (m.includes('qwen3.7')) return true
   return false
 }
 

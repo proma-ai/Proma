@@ -14,7 +14,7 @@ import {
   currentAgentWorkspaceIdAtom,
   workspaceCapabilitiesVersionAtom,
 } from '@/atoms/agent-atoms'
-import type { SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
+import type { BuiltinMcpServerSummary, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
 
 export interface AgentSkillsData {
   /** 当前工作区（未选中时为 null） */
@@ -26,11 +26,13 @@ export interface AgentSkillsData {
   defaultSkillSlugs: Set<string>
   skillsDir: string
   mcpConfig: WorkspaceMcpConfig
+  builtinMcpServers: BuiltinMcpServerSummary[]
   updatingSkill: string | null
   toggleSkill: (slug: string, enabled: boolean) => Promise<void>
   deleteSkill: (slug: string, name: string) => Promise<boolean>
   updateSkill: (slug: string) => Promise<void>
   toggleMcp: (name: string, enabled: boolean) => Promise<void>
+  toggleBuiltinMcp: (id: string, enabled: boolean) => Promise<void>
   deleteMcp: (name: string) => Promise<void>
 }
 
@@ -48,26 +50,30 @@ export function useAgentSkillsData(): AgentSkillsData {
   const [defaultSkillSlugs, setDefaultSkillSlugs] = React.useState<Set<string>>(new Set())
   const [skillsDir, setSkillsDir] = React.useState('')
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
+  const [builtinMcpServers, setBuiltinMcpServers] = React.useState<BuiltinMcpServerSummary[]>([])
   const [updatingSkill, setUpdatingSkill] = React.useState<string | null>(null)
 
   const loadData = React.useCallback(async () => {
     if (!workspaceSlug) {
       setSkills([])
       setMcpConfig({ servers: {} })
+      setBuiltinMcpServers([])
       setLoading(false)
       return
     }
     try {
-      const [config, skillList, dir, defaultSlugs] = await Promise.all([
+      const [config, skillList, dir, defaultSlugs, capabilities] = await Promise.all([
         window.electronAPI.getWorkspaceMcpConfig(workspaceSlug),
         window.electronAPI.getWorkspaceSkills(workspaceSlug),
         window.electronAPI.getWorkspaceSkillsDir(workspaceSlug),
         window.electronAPI.getDefaultSkillSlugs(),
+        window.electronAPI.getWorkspaceCapabilities(workspaceSlug),
       ])
       setMcpConfig(config)
       setSkills(skillList)
       setSkillsDir(dir)
       setDefaultSkillSlugs(new Set(defaultSlugs))
+      setBuiltinMcpServers(capabilities.builtinMcpServers)
     } catch (error) {
       console.error('[Agent 技能] 加载工作区配置失败:', error)
     } finally {
@@ -139,6 +145,18 @@ export function useAgentSkillsData(): AgentSkillsData {
     }
   }, [workspaceSlug, mcpConfig, bumpCapabilitiesVersion])
 
+  const toggleBuiltinMcp = React.useCallback(async (id: string, enabled: boolean) => {
+    try {
+      const capabilities = await window.electronAPI.setBuiltinMcpEnabled(workspaceSlug, id, enabled)
+      setBuiltinMcpServers(capabilities.builtinMcpServers)
+      bumpCapabilitiesVersion((v) => v + 1)
+      toast.success(enabled ? '已启用内置 MCP' : '已关闭内置 MCP')
+    } catch (error) {
+      console.error('[Agent 技能] 切换内置 MCP 状态失败:', error)
+      toast.error('切换内置 MCP 状态失败')
+    }
+  }, [workspaceSlug, bumpCapabilitiesVersion])
+
   const deleteMcp = React.useCallback(async (name: string) => {
     const entry = mcpConfig.servers[name]
     if (entry?.isBuiltin) return
@@ -165,11 +183,13 @@ export function useAgentSkillsData(): AgentSkillsData {
     defaultSkillSlugs,
     skillsDir,
     mcpConfig,
+    builtinMcpServers,
     updatingSkill,
     toggleSkill,
     deleteSkill,
     updateSkill,
     toggleMcp,
+    toggleBuiltinMcp,
     deleteMcp,
   }
 }

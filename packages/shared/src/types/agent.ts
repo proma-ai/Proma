@@ -566,7 +566,7 @@ export type PromaEvent =
   | { type: 'run_resumed'; sessionId: string }
 
 /** 外部入口触发 Agent 运行的来源 */
-export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge'
+export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
 
 /** IPC 传输的统一 payload（替代 AgentEvent） */
 export type AgentStreamPayload =
@@ -618,11 +618,31 @@ export interface AgentSessionMeta {
   permissionMode?: PromaPermissionMode
   /** 来源定时任务 ID（该会话由定时任务自动创建/复用时标记，用于侧栏显示钟表图标 + 跳转设置） */
   sourceAutomationId?: string
+  /** 父 Agent 会话 ID（该会话由父 Agent 委派创建时标记） */
+  parentSessionId?: string
+  /** 根 Agent 会话 ID（多层委派时用于追溯；当前仅允许一层，预留字段） */
+  rootSessionId?: string
+  /** 来源委派任务 ID（由 collaboration 工具生成，用于父子会话关联） */
+  sourceDelegationId?: string
+  /** 委派角色，用于 UI 和后续统计 */
+  delegationRole?: AgentDelegationRole
+  /** 委派任务当前状态 */
+  delegationStatus?: AgentDelegationStatus
+  /** 委派深度；手动会话为 undefined，首层子会话为 1 */
+  delegationDepth?: number
+  /** 委派目标摘要，便于 UI 展示和追溯 */
+  delegationGoal?: string
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
   updatedAt: number
 }
+
+/** Agent 委派子会话的任务角色 */
+export type AgentDelegationRole = 'explore' | 'research' | 'implement' | 'review' | 'custom'
+
+/** Agent 委派子会话的运行状态（interrupted：应用退出时仍在运行，重启后无法续跑） */
+export type AgentDelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
 /**
  * Agent 持久化消息
@@ -758,6 +778,29 @@ export interface McpServerEntry {
   }
 }
 
+/** MCP 工具摘要，用于前端只读展示 */
+export interface McpToolSummary {
+  name: string
+  description: string
+  readOnly?: boolean
+}
+
+/** Proma 内置 MCP 分类 */
+export type BuiltinMcpCategory = 'system' | 'automation' | 'collaboration' | 'memory' | 'media'
+
+/** Proma 内置 MCP 摘要，不写入工作区 mcp.json */
+export interface BuiltinMcpServerSummary {
+  id: string
+  name: string
+  displayName: string
+  description: string
+  category: BuiltinMcpCategory
+  enabled: boolean
+  available: boolean
+  availabilityReason?: string
+  tools: McpToolSummary[]
+}
+
 /** 工作区 MCP 配置文件 */
 export interface WorkspaceMcpConfig {
   servers: Record<string, McpServerEntry>
@@ -826,6 +869,7 @@ export interface SkillFileContent {
 /** 工作区能力摘要（MCP + Skill 计数） */
 export interface WorkspaceCapabilities {
   mcpServers: Array<{ name: string; enabled: boolean; type: McpTransportType }>
+  builtinMcpServers: BuiltinMcpServerSummary[]
   skills: SkillMeta[]
 }
 
@@ -859,8 +903,8 @@ export interface AgentSendInput {
   mentionedSessionIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
-  /** 触发来源：用户手动 vs 定时任务自动触发（用于 UI 区分标记） */
-  triggeredBy?: 'user' | 'automation'
+  /** 触发来源：用户手动、定时任务、父 Agent 委派（用于 UI 区分标记） */
+  triggeredBy?: 'user' | 'automation' | 'delegation'
   /** 定时任务执行上下文（注入到系统提示词，用户不可见） */
   automationContext?: string
 }
@@ -1353,6 +1397,8 @@ export const AGENT_IPC_CHANNELS = {
   SAVE_MCP_CONFIG: 'agent:save-mcp-config',
   /** 测试 MCP 服务器连接 */
   TEST_MCP_SERVER: 'agent:test-mcp-server',
+  /** 启用或关闭 Proma 内置 MCP */
+  SET_BUILTIN_MCP_ENABLED: 'agent:set-builtin-mcp-enabled',
   /** 获取工作区 Skill 列表 */
   GET_SKILLS: 'agent:get-skills',
   /** 获取工作区 Skills 目录绝对路径 */

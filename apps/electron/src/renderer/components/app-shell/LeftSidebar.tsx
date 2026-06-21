@@ -17,10 +17,10 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
-import { activeViewAtom } from '@/atoms/active-view'
+import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
-import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
@@ -313,6 +313,7 @@ interface RailRecentItem {
   pinned: boolean
   workspaceName?: string
   isAutomation?: boolean
+  isDelegation?: boolean
 }
 
 function RailRecentButton({
@@ -350,7 +351,9 @@ function RailRecentButton({
             />
             {item.isAutomation
               ? <Clock size={14} className="text-foreground/40" />
-              : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
+              : item.isDelegation
+                ? <Blocks size={14} className="text-foreground/40" />
+                : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
             }
           </button>
         </TooltipTrigger>
@@ -406,11 +409,11 @@ function deleteSetEntry<T>(prev: Set<T>, value: T): Set<T> {
 
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
+  const setAgentSkillsTab = useSetAtom(agentSkillsTabAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const automations = useAtomValue(automationsAtom)
   const setAutomations = useSetAtom(automationsAtom)
   const automationCount = automations.length
-  const setSettingsTab = useSetAtom(settingsTabAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
@@ -675,6 +678,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleOpenSkills = React.useCallback((): void => {
     setActiveView('agent-skills')
   }, [setActiveView])
+
+  /** 打开当前工作区的 MCP 管理页 */
+  const handleOpenMcpManagement = React.useCallback((): void => {
+    setAgentSkillsTab('mcp')
+    setActiveView('agent-skills')
+  }, [setAgentSkillsTab, setActiveView])
 
   // 切换模式时重置归档视图
   React.useEffect(() => {
@@ -1422,6 +1431,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         pinned: !!session.pinned,
         workspaceName: session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined,
         isAutomation: !!session.sourceAutomationId,
+        isDelegation: !!session.sourceDelegationId,
       }))
   }, [
     mode,
@@ -1971,8 +1981,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   onDragEnd={handleProjectDragEnd}
                   onConfigureProject={(workspaceId) => {
                     handleSelectProject(workspaceId)
-                    setSettingsTab('agent')
-                    setSettingsOpen(true)
+                    handleOpenMcpManagement()
                   }}
                   onRenameWorkspace={handleWorkspaceRename}
                   onRequestDeleteWorkspace={handleRequestDeleteWorkspace}
@@ -2727,6 +2736,9 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 {session.sourceAutomationId && (
                   <Clock size={11} className="flex-shrink-0 text-foreground/40" />
                 )}
+                {session.sourceDelegationId && !session.sourceAutomationId && (
+                  <Blocks size={11} className="flex-shrink-0 text-foreground/40" />
+                )}
                 <span className="truncate">{session.title}</span>
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
@@ -2882,6 +2894,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   // 不受 PROJECT_SESSION_PREVIEW_LIMIT 与 3 天窗口限制；活跃部分内部按
   // blocked > running > completed 优先级排序（与 railRecentItems 对齐），
   // 同优先级保留 group.sessions 的 updatedAt 倒序。
+  // 当前选中的会话（activeSessionId）也必须出现在折叠列表中，无论 updatedAt 多旧、
+  // 状态如何，确保从搜索结果打开旧会话时左侧栏立即可见，不必等待 agent 完成。
   // 非活跃部分仍保留原"最近 3 天 + 至多 5 条"预览策略，作为额外补充展示。
   // 用户点击"显示更多"会在折叠基线之上每次再额外展开 PROJECT_SESSION_EXPAND_STEP 条。
   const getStatus = (sessionId: string): SessionIndicatorStatus =>
@@ -2896,10 +2910,21 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       return b.updatedAt - a.updatedAt
     })
   const activeIds = new Set(activeSessions.map((s) => s.id))
+  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
+  const currentSession = activeSessionId
+    && !activeIds.has(activeSessionId)
+    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
+  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
   const fillSessions = group.sessions
-    .filter((session) => !activeIds.has(session.id) && session.updatedAt >= recentCutoff)
+    .filter((session) =>
+      !activeIds.has(session.id)
+      && !pinnedCurrentIds.has(session.id)
+      && session.updatedAt >= recentCutoff
+    )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
-  const collapsedSessions = [...activeSessions, ...fillSessions]
+  const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
   const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
   const extraSessions = remainingSessions.slice(0, extraCount)

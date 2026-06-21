@@ -26,12 +26,14 @@ import type {
   AgentQueueMessageInput,
   PromaPermissionMode,
   AgentExternalRunSource,
+  AgentMessage,
 } from '@proma/shared'
 import { ClaudeAgentAdapter, scanAndKillOrphanedClaudeSubprocesses } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
 import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
+import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 
 // ===== 实例创建 =====
 
@@ -192,7 +194,7 @@ export async function runAgentHeadless(
   input: AgentSendInput,
   callbacks: {
     onError: (error: string) => void
-    onComplete: () => void
+    onComplete: (messages?: AgentMessage[]) => void
     onTitleUpdated: (title: string) => void
     source?: AgentExternalRunSource
   },
@@ -218,7 +220,7 @@ export async function runAgentHeadless(
         }
       },
       onComplete: (messages, opts) => {
-        callbacks.onComplete()
+        callbacks.onComplete(messages)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
           wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
@@ -290,6 +292,9 @@ export async function generateAgentTitle(input: AgentGenerateTitleInput): Promis
 export function stopAgent(sessionId: string): void {
   orchestrator.stop(sessionId)
 }
+
+setHeadlessAgentRunner(runAgentHeadless)
+setAgentStopper(stopAgent)
 
 /**
  * 快照回退：回退到指定消息点，恢复文件 + 截断对话

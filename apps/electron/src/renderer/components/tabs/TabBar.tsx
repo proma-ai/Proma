@@ -26,7 +26,6 @@ import {
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
-  workspaceFilesVersionAtom,
 } from '@/atoms/agent-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { automationFormAtom } from '@/atoms/automation-atoms'
@@ -82,6 +81,14 @@ export function TabBar(): React.ReactElement {
     const ids = new Set<string>()
     for (const s of agentSessions) {
       if (s.sourceAutomationId) ids.add(s.id)
+    }
+    return ids
+  }, [agentSessions])
+
+  const delegationSessionIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of agentSessions) {
+      if (s.sourceDelegationId) ids.add(s.id)
     }
     return ids
   }, [agentSessions])
@@ -170,6 +177,7 @@ export function TabBar(): React.ReactElement {
         streamingMap={indicatorMap}
         workspaceNameBySessionId={workspaceNameBySessionId}
         automationSessionIds={automationSessionIds}
+        delegationSessionIds={delegationSessionIds}
         onActivate={handleActivate}
         onClose={requestClose}
         onDragStart={handleDragStart}
@@ -186,6 +194,7 @@ function TabBarInner({
   streamingMap,
   workspaceNameBySessionId,
   automationSessionIds,
+  delegationSessionIds,
   onActivate,
   onClose,
   onDragStart,
@@ -196,6 +205,7 @@ function TabBarInner({
   streamingMap: Map<string, SessionIndicatorStatus>
   workspaceNameBySessionId: Map<string, string>
   automationSessionIds: Set<string>
+  delegationSessionIds: Set<string>
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
@@ -381,6 +391,7 @@ function TabBarInner({
             title={tab.title}
             workspaceName={tab.type === 'agent' ? workspaceNameBySessionId.get(tab.sessionId) : undefined}
             isAutomation={tab.type === 'agent' && automationSessionIds.has(tab.sessionId)}
+            isDelegation={tab.type === 'agent' && delegationSessionIds.has(tab.sessionId)}
             isActive={tab.id === activeTabId}
             isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}
@@ -407,7 +418,7 @@ function TabBarInner({
   )
 }
 
-/** 打开 Agent 文件面板按钮：独立订阅 workspaceFilesVersionAtom，避免文件变更时重渲染整个 TabBar。 */
+/** 打开 Agent 文件面板按钮。 */
 function AgentPanelOpenButton({
   isWindows,
   onToggle,
@@ -415,9 +426,6 @@ function AgentPanelOpenButton({
   isWindows: boolean
   onToggle: () => void
 }): React.ReactElement {
-  const filesVersion = useAtomValue(workspaceFilesVersionAtom)
-  const hasFileChanges = filesVersion > 0
-
   return (
     <div
       className={cn(
@@ -435,9 +443,6 @@ function AgentPanelOpenButton({
             onClick={onToggle}
           >
             <PanelRight className="size-3.5" />
-            {hasFileChanges && (
-              <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse" />
-            )}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">

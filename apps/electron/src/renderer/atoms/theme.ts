@@ -103,7 +103,7 @@ const ALL_THEME_STYLE_CLASSES = THEME_STYLES
  * 在 <html> 元素上切换 dark 类名和特殊风格类名。
  *
  * 幂等实现：先计算目标 class 状态，与当前 DOM 对比，一致时直接 return，
- * 不触发任何 classList mutation。避免与 vibrancy + backdrop-blur 合成层叠加
+ * 不触发任何 classList mutation。避免与 vibrancy 合成层叠加
  * 导致 Chromium 重建合成层造成的全屏闪烁。
  */
 export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = 'default', systemIsDark: boolean = true): void {

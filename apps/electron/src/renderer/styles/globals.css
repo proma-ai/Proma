@@ -865,6 +865,29 @@
   box-shadow: inset 0 -1px 0 0 hsl(var(--border) / 0.6);
 }
 
+/* CRT 终端：Tab 流式指示器 — 保留原色，叠加 CRT 磷光质感 */
+.theme-terminal-dark .tab-stream-indicator.border-blue-500 {
+  border-color: hsl(217 91% 60%) !important;
+  box-shadow:
+    0 0 6px hsl(217 85% 55% / 0.38),
+    0 0 14px hsl(217 80% 52% / 0.20),
+    inset 0 0 5px hsl(217 85% 58% / 0.12) !important;
+}
+.theme-terminal-dark .tab-stream-indicator.border-green-500 {
+  border-color: hsl(145 80% 45%) !important;
+  box-shadow:
+    0 0 6px hsl(145 75% 42% / 0.38),
+    0 0 14px hsl(145 70% 40% / 0.20),
+    inset 0 0 5px hsl(145 78% 44% / 0.12) !important;
+}
+.theme-terminal-dark .tab-stream-indicator.border-orange-500 {
+  border-color: hsl(25 95% 53%) !important;
+  box-shadow:
+    0 0 6px hsl(25 90% 50% / 0.38),
+    0 0 14px hsl(25 85% 48% / 0.20),
+    inset 0 0 5px hsl(25 92% 52% / 0.12) !important;
+}
+
 /* ===== 输入框段落紧凑行距（仅作用于输入框内的 tiptap 编辑器） ===== */
 .rich-text-input .tiptap p {
   margin: 0;
@@ -1108,10 +1131,10 @@
   background-color: hsl(145 25% 45%) !important;   /* 雾绿灰，对齐主色 */
 }
 
-/* CRT 终端：minimap 指示器 — 工业指示灯短条 */
+/* CRT 终端：minimap 指示器 — 工业指示灯短条（对齐 mode slider 点亮灯珠色并略微提亮） */
 .theme-terminal-dark .minimap-visible-indicator {
-  background-color: hsl(var(--primary)) !important;
-  box-shadow: 0 0 3px hsl(var(--primary) / 0.5), 0 0 6px hsl(var(--primary) / 0.2);
+  background-color: hsl(100 42% 62%) !important;
+  box-shadow: 0 0 3px hsl(100 42% 62% / 0.5), 0 0 6px hsl(100 42% 62% / 0.25);
 }
 
 /* ===== 滚动进度条 — 适配所有主题（无轨道背景，仅滑块） ===== */
@@ -1212,48 +1235,48 @@
   border-left: none;
 }
 
-/* 滑块 — 分段金属块 + 铆钉刻线 */
+/* 滑块 — 分段金属块 + 铆钉刻线（对齐 mode slider 点亮灯珠色并略微提亮） */
 .theme-terminal-dark .scroll-progress-thumb {
   background: linear-gradient(
     90deg,
-    hsl(var(--primary) / 0.25),
-    hsl(var(--primary) / 0.45),
-    hsl(var(--primary) / 0.25)
+    hsl(100 42% 58% / 0.25),
+    hsl(100 42% 58% / 0.45),
+    hsl(100 42% 58% / 0.25)
   ) !important;
-  border: 1px solid hsl(var(--primary) / 0.35) !important;
+  border: 1px solid hsl(100 42% 58% / 0.35) !important;
   box-shadow:
-    inset 0 3px 0 hsl(var(--primary) / 0.12),
-    inset 0 -3px 0 hsl(var(--primary) / 0.12),
-    inset 0 6px 0 hsl(var(--primary) / 0.06),
-    inset 0 -6px 0 hsl(var(--primary) / 0.06) !important;
+    inset 0 3px 0 hsl(100 42% 58% / 0.12),
+    inset 0 -3px 0 hsl(100 42% 58% / 0.12),
+    inset 0 6px 0 hsl(100 42% 58% / 0.06),
+    inset 0 -6px 0 hsl(100 42% 58% / 0.06) !important;
   border-radius: 0 !important;
 }
 
 .theme-terminal-dark .scroll-progress-thumb:hover {
   background: linear-gradient(
     90deg,
-    hsl(var(--primary) / 0.35),
-    hsl(var(--primary) / 0.55),
-    hsl(var(--primary) / 0.35)
+    hsl(100 42% 58% / 0.35),
+    hsl(100 42% 58% / 0.55),
+    hsl(100 42% 58% / 0.35)
   ) !important;
-  border-color: hsl(var(--primary) / 0.50) !important;
+  border-color: hsl(100 42% 58% / 0.50) !important;
 }
 
 /* 拖拽中 — 加亮 + 外发光 */
 .theme-terminal-dark .scroll-progress-thumb-active {
   background: linear-gradient(
     90deg,
-    hsl(var(--primary) / 0.45),
-    hsl(var(--primary) / 0.65),
-    hsl(var(--primary) / 0.45)
+    hsl(100 42% 58% / 0.45),
+    hsl(100 42% 58% / 0.65),
+    hsl(100 42% 58% / 0.45)
   ) !important;
-  border-color: hsl(var(--primary) / 0.60) !important;
+  border-color: hsl(100 42% 58% / 0.60) !important;
   box-shadow:
-    inset 0 3px 0 hsl(var(--primary) / 0.20),
-    inset 0 -3px 0 hsl(var(--primary) / 0.20),
-    inset 0 6px 0 hsl(var(--primary) / 0.10),
-    inset 0 -6px 0 hsl(var(--primary) / 0.10),
-    0 0 8px hsl(var(--primary) / 0.25) !important;
+    inset 0 3px 0 hsl(100 42% 58% / 0.20),
+    inset 0 -3px 0 hsl(100 42% 58% / 0.20),
+    inset 0 6px 0 hsl(100 42% 58% / 0.10),
+    inset 0 -6px 0 hsl(100 42% 58% / 0.10),
+    0 0 8px hsl(100 42% 58% / 0.25) !important;
 }
 
 /* ===== 计划模式：输入框定位上下文 ===== */
@@ -1961,8 +1984,9 @@
  * 组件不会把 "InputToolbar" 作为 className 输出），已移除。
  */
 
-/* ===== CRT 终端：消息去气泡化 =====
- * 消息无圆角、无背景、紧凑间距，像终端 stdout 滚动记录。
+/* ===== CRT 终端：消息终端化 =====
+ * 消息无圆角、紧凑间距，用户消息带暗色直角气泡 + 左侧竖线，
+ * AI 消息纯文字 stdout 风格。
  */
 
 /* 消息外层容器：去掉圆角和多余 padding */
@@ -1971,15 +1995,24 @@
   padding: 2px 4px !important;
 }
 
-/* 用户消息内容：去掉气泡背景和圆角，纯文字 */
+/* 用户消息内容：纯文字，无气泡 */
 .theme-terminal-dark .is-user [class*="bg-primary/10"] {
   background: transparent !important;
   border-radius: 0 !important;
-  padding: 0 !important;
+  padding: 2px 4px !important;
 }
 
 .theme-terminal-dark .is-user [class*="bg-gradient-to-t"] {
-  background: transparent !important;
+  background: linear-gradient(to top, hsl(100 5% 9%), transparent) !important;
+}
+
+/* 折叠态长消息的"展开全部"按钮：默认 absolute + 渐变遮罩在 Terminal 主题下失效
+ * （父容器 padding:0 撤掉了为按钮预留的 pb-6，渐变也被透明化），
+ * 会让按钮文字直接压在正文最后一行上。改为流式布局，让按钮自然落到正文下方。 */
+.theme-terminal-dark .is-user button[class*="bg-gradient-to-t"] {
+  position: static !important;
+  padding: 0 !important;
+  margin-top: 0.25rem !important;
 }
 
 /* AI 消息前缀 — 已移除 */
@@ -2002,6 +2035,38 @@
 .theme-terminal-dark .sticky-user-banner:hover {
   background: hsl(var(--muted)) !important;
   border-color: hsl(var(--primary) / 0.35) !important;
+}
+
+/* ===== CRT 终端：AskUserQuestion banner =====
+ * 预览区背景提亮、选项描述文字增强可读性
+ */
+.theme-terminal-dark .ask-user-banner {
+  box-shadow: none !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+/* 选项选中态：描述文字从极暗 → 亮白 */
+.theme-terminal-dark .ask-user-banner button[class*="bg-primary"] span[class*="text-primary-foreground/70"] {
+  color: hsl(90 20% 80% / 0.85) !important;
+}
+/* 选项未选中态：文字提亮 */
+.theme-terminal-dark .ask-user-banner button[class*="bg-muted/50"] span[class*="text-foreground/80"] {
+  color: hsl(90 20% 80%) !important;
+}
+.theme-terminal-dark .ask-user-banner button[class*="bg-muted/50"] span[class*="text-muted-foreground"] {
+  color: hsl(90 15% 55%) !important;
+}
+/* 预览区：实色背景 + 边框，替代半透明 muted/40 */
+.theme-terminal-dark .ask-user-banner [class*="bg-muted/40"] {
+  background: hsl(100 6% 10%) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+.theme-terminal-dark .ask-user-banner [class*="bg-muted/50"] {
+  background: hsl(100 6% 10%) !important;
+  border: 1px solid hsl(100 5% 14%) !important;
+}
+/* Tab 栏未选中项 */
+.theme-terminal-dark .ask-user-banner [class*="bg-muted/60"] {
+  background: hsl(100 5% 12%) !important;
 }
 
 /* 设置分隔线 — 终端主题保持单线，不动 */
