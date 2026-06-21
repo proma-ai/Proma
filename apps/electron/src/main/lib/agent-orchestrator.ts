@@ -546,6 +546,11 @@ export class AgentOrchestrator {
       CLAUDE_CODE_ENABLE_TASKS: 'true',
       // 禁用实验性 beta 功能，使用稳定模式
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      // 禁用 attribution block：SDK 默认会在 system prompt 最前面注入一段
+      // 文本（含客户端版本号与基于会话内容计算的指纹），且每次请求都变化。
+      // 经第三方 Anthropic 兼容代理/网关中转时，会导致缓存前缀变化、命中率骤降。
+      // 官方文档确认直连 Anthropic API 不受此设置影响，故对所有 provider 无条件禁用。
+      CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
       // 配置隔离：让 SDK 使用独立的配置目录，不读取用户的 ~/.claude.json
       CLAUDE_CONFIG_DIR: getSdkConfigDir(),
     }
