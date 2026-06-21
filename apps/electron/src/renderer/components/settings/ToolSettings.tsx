@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { useSetAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { ExternalLink, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { MemorySettings } from './MemorySettings'
 import { SettingsSection, SettingsCard } from './primitives'
 import { chatToolsAtom } from '@/atoms/chat-tool-atoms'
+import { toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 
 /** 刷新全局工具列表 atom */
 async function refreshChatTools(setter: (tools: Awaited<ReturnType<typeof window.electronAPI.getChatTools>>) => void): Promise<void> {
@@ -465,19 +466,47 @@ function CustomToolsSection(): React.ReactElement | null {
 }
 
 export function ToolSettings(): React.ReactElement {
+  const [focusedTool, setFocusedTool] = useAtom(toolSettingsFocusAtom)
+  const memoryRef = React.useRef<HTMLDivElement>(null)
+  const webSearchRef = React.useRef<HTMLDivElement>(null)
+  const nanoBananaRef = React.useRef<HTMLDivElement>(null)
+  const customToolsRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!focusedTool) return
+    const refs: Record<ToolSettingsFocus, React.RefObject<HTMLDivElement>> = {
+      memory: memoryRef,
+      'web-search': webSearchRef,
+      'nano-banana': nanoBananaRef,
+      'custom-tools': customToolsRef,
+    }
+    window.requestAnimationFrame(() => {
+      refs[focusedTool].current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      setFocusedTool(null)
+    })
+  }, [focusedTool, setFocusedTool])
+
   return (
     <div className="space-y-8">
       {/* 记忆工具（复用现有 MemorySettings 组件） */}
-      <MemorySettings />
+      <div ref={memoryRef}>
+        <MemorySettings />
+      </div>
 
       {/* 联网搜索工具 */}
-      <WebSearchSettings />
+      <div ref={webSearchRef}>
+        <WebSearchSettings />
+      </div>
 
       {/* Nano Banana 生图工具 */}
-      <NanoBananaSettings />
+      <div ref={nanoBananaRef}>
+        <NanoBananaSettings />
+      </div>
 
       {/* 自定义工具 */}
-      <CustomToolsSection />
+      <div ref={customToolsRef}>
+        <CustomToolsSection />
+      </div>
     </div>
   )
 }

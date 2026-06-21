@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { useAtomValue } from 'jotai'
-import { FileText, StickyNote, X, Clock } from 'lucide-react'
+import { FileText, StickyNote, X, Clock, Blocks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -35,6 +35,8 @@ export interface TabBarItemProps {
   onDragStart: (e: React.PointerEvent) => void
   /** 该 Tab 对应的会话是否由定时任务创建 */
   isAutomation?: boolean
+  /** 该 Tab 对应的会话是否由父 Agent 协作委派创建 */
+  isDelegation?: boolean
   /** hover 进入 Tab */
   onHoverEnter: () => void
   /** hover 离开 Tab */
@@ -60,6 +62,7 @@ export function TabBarItem({
   onMiddleClick,
   onDragStart,
   isAutomation,
+  isDelegation,
   onHoverEnter,
   onHoverLeave,
   onPanelHoverEnter,
@@ -170,6 +173,7 @@ export function TabBarItem({
         ) : (
           <span className="flex-1 min-w-0 truncate text-left flex items-center gap-1">
             {isAutomation && <Clock className="size-3 shrink-0 text-foreground/40" />}
+            {isDelegation && !isAutomation && <Blocks className="size-3 shrink-0 text-foreground/40" />}
             {title}
           </span>
         )}

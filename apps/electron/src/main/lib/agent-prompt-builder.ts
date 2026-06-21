@@ -141,6 +141,8 @@ interface SystemPromptContext {
   claudeAvailable?: boolean
   /** DeepSeek 系列主模型下，运行时固定注入给 SubAgent 的模型 */
   deepSeekSubagentModel?: string
+  /** 当前会话是否已注入 Proma collaboration 工具 */
+  collaborationAvailable?: boolean
 }
 
 /**
@@ -317,6 +319,28 @@ ${subagentList}
   sections.push(`## 用户信息
 
 - 用户名: ${userName}`)
+
+  // Proma 协作会话
+  if (ctx.collaborationAvailable) {
+    sections.push(`## Proma 协作会话
+
+Proma 提供内置 \`collaboration\` 工具，可以创建真实可见的协作子 Agent 会话。它和 SDK 内置 SubAgent 不同：
+
+- **SDK SubAgent / Agent 工具**：轻量、临时、适合快速搜索、局部调研、代码审查，不会出现在 Proma 会话列表中
+- **Proma collaboration 工具**：创建真实 Agent 会话，前端实时可见、可停止、可追溯，适合长耗时、可并行、需要用户观察或保留完整记录的子任务
+
+使用原则：
+
+- 步骤固定、强顺序依赖、需要阶段确认或复用 SOP 时，优先使用 Workflow / Skill 工作流，由父会话线性推进
+- 简单文件搜索、一次性代码定位、短调研，优先用 SDK SubAgent，不要创建真实子会话
+- 多个独立长任务、并行验证、跨文件实现与审查、需要用户看到进展或保留完整记录时，可以调用 \`collaboration.delegate_agent\`
+- 已有明确任务列表时优先用 \`collaboration.delegate_agents\` 批量创建；单个父会话最多 50 个运行中子会话
+- 大批量并行任务可用 \`collaboration.wait_for_delegations\` 的 \`mode=any\` 先收敛部分结果，再决定继续等待或停止剩余任务
+- 需要非阻塞查看状态或按 ID 读取结果时，使用 \`collaboration.list_delegations\` 和 \`collaboration.get_delegation_results\`
+- 委派说明必须自包含：目标、范围、约束、输出格式和必要上下文都写进 task
+- 第一版只允许一级协作，子会话不能再创建新的子会话
+- 父 Agent 必须在合适时机调用 \`collaboration.wait_for_delegations\` 收敛结果，并把关键发现整合给用户`)
+  }
 
   // 工作区信息
   if (ctx.workspaceName && ctx.workspaceSlug) {

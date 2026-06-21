@@ -80,6 +80,14 @@ export function TabBar(): React.ReactElement {
     return ids
   }, [agentSessions])
 
+  const delegationSessionIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of agentSessions) {
+      if (s.sourceDelegationId) ids.add(s.id)
+    }
+    return ids
+  }, [agentSessions])
+
   // 拖拽状态
   const dragState = React.useRef<{
     dragging: boolean
@@ -164,6 +172,7 @@ export function TabBar(): React.ReactElement {
         streamingMap={indicatorMap}
         workspaceNameBySessionId={workspaceNameBySessionId}
         automationSessionIds={automationSessionIds}
+        delegationSessionIds={delegationSessionIds}
         onActivate={handleActivate}
         onClose={requestClose}
         onDragStart={handleDragStart}
@@ -180,6 +189,7 @@ function TabBarInner({
   streamingMap,
   workspaceNameBySessionId,
   automationSessionIds,
+  delegationSessionIds,
   onActivate,
   onClose,
   onDragStart,
@@ -190,6 +200,7 @@ function TabBarInner({
   streamingMap: Map<string, SessionIndicatorStatus>
   workspaceNameBySessionId: Map<string, string>
   automationSessionIds: Set<string>
+  delegationSessionIds: Set<string>
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
   onDragStart: (tabId: string, e: React.PointerEvent) => void
@@ -352,6 +363,7 @@ function TabBarInner({
             title={tab.title}
             workspaceName={tab.type === 'agent' ? workspaceNameBySessionId.get(tab.sessionId) : undefined}
             isAutomation={tab.type === 'agent' && automationSessionIds.has(tab.sessionId)}
+            isDelegation={tab.type === 'agent' && delegationSessionIds.has(tab.sessionId)}
             isActive={tab.id === activeTabId}
             isStreaming={streamingMap.get(tab.id) ?? 'idle'}
             isHovered={hoveredTabId === tab.id}

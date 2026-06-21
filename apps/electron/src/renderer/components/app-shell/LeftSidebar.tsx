@@ -17,10 +17,10 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { ModeSwitcher } from './ModeSwitcher'
 import { SearchDialog } from './SearchDialog'
 import { UserAvatar } from '@/components/chat/UserAvatar'
-import { activeViewAtom } from '@/atoms/active-view'
+import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
-import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
@@ -313,6 +313,7 @@ interface RailRecentItem {
   pinned: boolean
   workspaceName?: string
   isAutomation?: boolean
+  isDelegation?: boolean
 }
 
 function RailRecentButton({
@@ -350,7 +351,9 @@ function RailRecentButton({
             />
             {item.isAutomation
               ? <Clock size={14} className="text-foreground/40" />
-              : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
+              : item.isDelegation
+                ? <Blocks size={14} className="text-foreground/40" />
+                : <span className="text-[13px] font-semibold leading-none">{item.initial}</span>
             }
           </button>
         </TooltipTrigger>
@@ -406,11 +409,11 @@ function deleteSetEntry<T>(prev: Set<T>, value: T): Set<T> {
 
 export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [activeView, setActiveView] = useAtom(activeViewAtom)
+  const setAgentSkillsTab = useSetAtom(agentSkillsTabAtom)
   const setAutomationForm = useSetAtom(automationFormAtom)
   const automations = useAtomValue(automationsAtom)
   const setAutomations = useSetAtom(automationsAtom)
   const automationCount = automations.length
-  const setSettingsTab = useSetAtom(settingsTabAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
@@ -675,6 +678,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleOpenSkills = React.useCallback((): void => {
     setActiveView('agent-skills')
   }, [setActiveView])
+
+  /** 打开当前工作区的 MCP 管理页 */
+  const handleOpenMcpManagement = React.useCallback((): void => {
+    setAgentSkillsTab('mcp')
+    setActiveView('agent-skills')
+  }, [setAgentSkillsTab, setActiveView])
 
   // 切换模式时重置归档视图
   React.useEffect(() => {
@@ -1422,6 +1431,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         pinned: !!session.pinned,
         workspaceName: session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined,
         isAutomation: !!session.sourceAutomationId,
+        isDelegation: !!session.sourceDelegationId,
       }))
   }, [
     mode,
@@ -1971,8 +1981,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                   onDragEnd={handleProjectDragEnd}
                   onConfigureProject={(workspaceId) => {
                     handleSelectProject(workspaceId)
-                    setSettingsTab('agent')
-                    setSettingsOpen(true)
+                    handleOpenMcpManagement()
                   }}
                   onRenameWorkspace={handleWorkspaceRename}
                   onRequestDeleteWorkspace={handleRequestDeleteWorkspace}
@@ -2656,6 +2665,9 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 )}
                 {session.sourceAutomationId && (
                   <Clock size={11} className="flex-shrink-0 text-foreground/40" />
+                )}
+                {session.sourceDelegationId && !session.sourceAutomationId && (
+                  <Blocks size={11} className="flex-shrink-0 text-foreground/40" />
                 )}
                 <span className="truncate">{session.title}</span>
                 {workspaceName && (
