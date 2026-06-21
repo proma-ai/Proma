@@ -42,6 +42,8 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
   const isDrawingRef = React.useRef(false)
   const isMouseDownRef = React.useRef(false)
   const drawCtxRef = React.useRef<CanvasRenderingContext2D | null>(null)
+  const checkerPatternRef = React.useRef<CanvasPattern | null>(null)
+  const rafRef = React.useRef<number | null>(null)
   const scaleRef = React.useRef(1)
   const displayDimRef = React.useRef({ w: 1, h: 1 })
   const rotationRef = React.useRef(0)
@@ -71,7 +73,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
       offscreen.width = w
       offscreen.height = h
       const ctx = offscreen.getContext('2d')
-      if (!ctx) return
+      if (!ctx) { console.error('ImageEditor: failed to get offscreen 2D context'); return }
       ctx.drawImage(img, 0, 0, w, h)
       offscreenCanvasRef.current = offscreen
 
@@ -80,7 +82,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
       drawLayer.height = h
       drawCanvasRef.current = drawLayer
       const drawCtx = drawLayer.getContext('2d')
-      if (!drawCtx) return
+      if (!drawCtx) { console.error('ImageEditor: failed to get draw layer 2D context'); return }
       drawCtxRef.current = drawCtx
 
       setImageLoaded(true)
@@ -116,31 +118,42 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     const srcW = rotated ? sh : sw
     const srcH = rotated ? sw : sh
 
-    const dpr = window.devicePixelRatio || 1
     const scale = Math.min(maxW / srcW, maxH / srcH, 1)
     scaleRef.current = scale
     const dw = Math.floor(srcW * scale)
     const dh = Math.floor(srcH * scale)
     displayDimRef.current = { w: dw, h: dh }
-    // 缓冲区按物理像素分配（× dpr），CSS 尺寸保持逻辑像素，避免高分屏下被浏览器放大而模糊
+    const dpr = window.devicePixelRatio || 1
     display.width = Math.floor(dw * dpr)
     display.height = Math.floor(dh * dpr)
     display.style.width = `${dw}px`
     display.style.height = `${dh}px`
 
     const dCtx = display.getContext('2d')
-    if (!dCtx) return
+    if (!dCtx) { console.error('ImageEditor: failed to get display 2D context'); return }
     // 绘制坐标系统一到 CSS 逻辑像素：dpr 由 transform 吸收，后续绘制与坐标换算无需感知 dpr
     dCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
     dCtx.clearRect(0, 0, dw, dh)
 
-    // 填充棋盘格背景（透明区域可见）
-    const tileSize = 8
-    for (let y = 0; y < dh; y += tileSize) {
-      for (let x = 0; x < dw; x += tileSize) {
-        dCtx.fillStyle = (Math.floor(x / tileSize) + Math.floor(y / tileSize)) % 2 === 0 ? '#e0e0e0' : '#ffffff'
-        dCtx.fillRect(x, y, tileSize, tileSize)
+    // 棋盘格背景（缓存 pattern canvas，避免每帧双循环）
+    if (!checkerPatternRef.current) {
+      const pCanvas = document.createElement('canvas')
+      pCanvas.width = 16
+      pCanvas.height = 16
+      const pCtx = pCanvas.getContext('2d')
+      if (pCtx) {
+        pCtx.fillStyle = '#e0e0e0'
+        pCtx.fillRect(0, 0, 8, 8)
+        pCtx.fillRect(8, 8, 8, 8)
+        pCtx.fillStyle = '#ffffff'
+        pCtx.fillRect(8, 0, 8, 8)
+        pCtx.fillRect(0, 8, 8, 8)
+        checkerPatternRef.current = dCtx.createPattern(pCanvas, 'repeat')
       }
+    }
+    if (checkerPatternRef.current) {
+      dCtx.fillStyle = checkerPatternRef.current
+      dCtx.fillRect(0, 0, dw, dh)
     }
 
     dCtx.save()
@@ -200,7 +213,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     newOffscreen.width = w
     newOffscreen.height = h
     const ctx = newOffscreen.getContext('2d')
-    if (!ctx) return
+    if (!ctx) { console.error('ImageEditor: applyCrop failed to get 2D context'); return }
     ctx.drawImage(offscreen, x, y, w, h, 0, 0, w, h)
     ctx.drawImage(drawLayer, x, y, w, h, 0, 0, w, h)
     offscreenCanvasRef.current = newOffscreen
@@ -210,7 +223,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     newDraw.height = h
     drawCanvasRef.current = newDraw
     const newDrawCtx = newDraw.getContext('2d')
-    if (!newDrawCtx) return
+    if (!newDrawCtx) { console.error('ImageEditor: applyCrop failed to get new draw layer 2D context'); return }
     drawCtxRef.current = newDrawCtx
 
     setCropRect(null)
@@ -256,7 +269,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     final.width = fw
     final.height = fh
     const ctx = final.getContext('2d')
-    if (!ctx) return
+    if (!ctx) { console.error('ImageEditor: handleExport failed to get 2D context'); return }
 
     if (r !== 0) {
       ctx.translate(fw / 2, fh / 2)
@@ -283,7 +296,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     offscreen.width = w
     offscreen.height = h
     const ctx = offscreen.getContext('2d')
-    if (!ctx) return
+    if (!ctx) { console.error('ImageEditor: handleReset failed to get 2D context'); return }
     ctx.drawImage(img, 0, 0, w, h)
     offscreenCanvasRef.current = offscreen
 
@@ -292,7 +305,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
     drawLayer.height = h
     drawCanvasRef.current = drawLayer
     const drawCtx = drawLayer.getContext('2d')
-    if (!drawCtx) return
+    if (!drawCtx) { console.error('ImageEditor: handleReset failed to get draw layer 2D context'); return }
     drawCtxRef.current = drawCtx
 
     setRotation(0)
@@ -384,12 +397,21 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
       if (ctx) {
         ctx.lineTo(pos.x, pos.y)
         ctx.stroke()
-        setDrawVersion((v) => v + 1)
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = null
+            setDrawVersion((v) => v + 1)
+          })
+        }
       }
     }
   }, [tool, getCanvasPos])
 
   const handleMouseUp = React.useCallback(() => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
     isMouseDownRef.current = false
     if (tool === 'rect' && cropRect && cropRect.w > 2 && cropRect.h > 2) {
       const ctx = drawCtxRef.current
@@ -397,9 +419,9 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
         ctx.strokeStyle = drawColor
         ctx.lineWidth = brushSize
         ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h)
-        setDrawVersion((v) => v + 1)
       }
     }
+    setDrawVersion((v) => v + 1)
     isDrawingRef.current = false
     if (tool !== 'crop') {
       cropStartRef.current = null
@@ -449,12 +471,21 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
       if (ctx) {
         ctx.lineTo(pos.x, pos.y)
         ctx.stroke()
-        setDrawVersion((v) => v + 1)
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = null
+            setDrawVersion((v) => v + 1)
+          })
+        }
       }
     }
   }, [tool, getCanvasPos])
 
   const handleTouchEnd = React.useCallback(() => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
     isMouseDownRef.current = false
     if (tool === 'rect' && cropRect && cropRect.w > 2 && cropRect.h > 2) {
       const ctx = drawCtxRef.current
@@ -462,9 +493,9 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
         ctx.strokeStyle = drawColor
         ctx.lineWidth = brushSize
         ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h)
-        setDrawVersion((v) => v + 1)
       }
     }
+    setDrawVersion((v) => v + 1)
     isDrawingRef.current = false
     if (tool !== 'crop') {
       cropStartRef.current = null
@@ -608,7 +639,7 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
               >
                 <span
                   className="rounded-full bg-current"
-                  style={{ width: Math.min(s + 1, 6), height: Math.min(s + 1, 6) }}
+                  style={{ width: Math.max(4, s * 1.2), height: Math.max(4, s * 1.2) }}
                 />
               </button>
             ))}
@@ -668,11 +699,13 @@ export function ImageEditor({ src, onSave, onCancel }: ImageEditorProps): React.
         <button
           type="button"
           onClick={handleExport}
+          disabled={!imageLoaded}
           className={cn(
             'rounded-full px-3 py-2 text-sm font-medium',
             'bg-white/15 text-white hover:bg-white/25',
             'transition-colors duration-150',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+            !imageLoaded && 'opacity-40 cursor-not-allowed hover:bg-white/15'
           )}
         >
           保存

@@ -42,6 +42,7 @@ export function ImageLightbox({
     if (!open) setMode('preview')
   }, [open])
 
+  // hooks 必须在条件 return 前声明，以遵守 React 规则（src 为 prop，值在渲染间不变）
   if (!src) return null
 
   const handleEditSave = (editedDataUrl: string) => {
@@ -62,7 +63,7 @@ export function ImageLightbox({
         {/* 遮罩层 — 与 DialogOverlay 完全一致 */}
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-[200] bg-black/90 titlebar-no-drag',
+            'fixed inset-0 z-[200] bg-black/40 titlebar-no-drag',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
           )}
