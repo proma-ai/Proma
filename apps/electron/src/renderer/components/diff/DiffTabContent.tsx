@@ -753,8 +753,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     restoreScrollRef.current = false
     const pos = scrollPositionCache.get(scrollKey)
     if (pos && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = pos.top
-      scrollContainerRef.current.scrollLeft = pos.left
+      // 等待一帧确保 @pierre/diffs Shiki 异步 tokenize 完成，容器高度稳定后再恢复
+      const raf = requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = pos.top
+          scrollContainerRef.current.scrollLeft = pos.left
+        }
+      })
+      return () => cancelAnimationFrame(raf)
     }
   }, [loading, scrollKey])
 

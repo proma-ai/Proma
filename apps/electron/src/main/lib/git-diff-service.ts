@@ -15,6 +15,9 @@ import type { ChangeSource, ChangedFileStatus } from '@proma/shared'
 /** 大文件读取上限：超过则跳过，避免 IPC 序列化撑爆内存 */
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
+/** preWriteContentCache 最大条目数，超出后淘汰最早条目 */
+const MAX_CACHE_SIZE = 200
+
 /**
  * Agent 写入前的文件内容缓存 — keyed by 绝对路径。
  * 非 git 仓库的文件通过此缓存获得"旧版本"，在预览面板中显示 diff 而非纯语法高亮。
@@ -23,7 +26,7 @@ const preWriteContentCache = new Map<string, string>()
 
 /**
  * 在 Agent 写入文件前缓存其当前内容，供后续 getDiffContents 使用。
- * 文件不存在（新文件）时不缓存。
+ * 文件不存在（新文件）时不缓存。缓存超过上限时淘汰最早条目。
  */
 export function cacheFileBeforeWrite(filePath: string): void {
   try {
@@ -31,7 +34,14 @@ export function cacheFileBeforeWrite(filePath: string): void {
       const st = statSync(filePath)
       if (st.size <= MAX_FILE_SIZE_BYTES) {
         const content = readFileSync(filePath, 'utf-8')
+        // 先删再设，把当前路径推到 Map 末尾（最近使用），避免被 LRU 误淘汰
+        preWriteContentCache.delete(filePath)
         preWriteContentCache.set(filePath, normalizeLineEndings(content))
+        // LRU 淘汰：超过上限时删除最早插入的条目
+        if (preWriteContentCache.size > MAX_CACHE_SIZE) {
+          const oldest = preWriteContentCache.keys().next().value
+          if (oldest) preWriteContentCache.delete(oldest)
+        }
       }
     }
   } catch {
