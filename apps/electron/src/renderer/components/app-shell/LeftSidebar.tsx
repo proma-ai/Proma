@@ -665,16 +665,29 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 打开自动任务列表 */
+  /** 打开/关闭自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
+    if (activeView === 'automations') {
+      // 编辑页 → 关表单回列表；列表页 → 退出到对话
+      if (store.get(automationFormAtom).open) {
+        setAutomationForm({ open: false, draft: null })
+        return
+      }
+      setActiveView('conversations')
+      return
+    }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView, store])
 
-  /** 打开 Agent 技能视图 */
+  /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
+    if (activeView === 'agent-skills') {
+      setActiveView('conversations')
+      return
+    }
     setActiveView('agent-skills')
-  }, [setActiveView])
+  }, [activeView, setActiveView])
 
   // 切换模式时重置归档视图
   React.useEffect(() => {
@@ -1752,7 +1765,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           <TooltipTrigger asChild>
             <button
               onClick={() => setSidebarCollapsed(true)}
-              className="mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] bg-muted text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors titlebar-no-drag"
+              className="mt-2 size-[36px] flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
             >
               <PanelLeftClose size={14} />
             </button>
@@ -1839,8 +1852,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             </div>
           )}
 
-          <div className="px-2 pt-2 pb-1 flex-shrink-0">
+          <div className="px-2 pt-2 pb-1 flex items-center flex-shrink-0">
             <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">对话</span>
+            {/* 占位元素：与项目行的 size-6 按钮等高，保证跨模式切换时标签文字垂直位置不变 */}
+            <div className="w-0 h-6" aria-hidden="true" />
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
