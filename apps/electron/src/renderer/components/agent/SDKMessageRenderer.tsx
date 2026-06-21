@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote, Clock } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, Camera, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, ExternalLink, Quote, Clock } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
@@ -37,6 +37,7 @@ import { CopyButton } from '@/components/chat/CopyButton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
+import { captureMessageScreenshot } from '@/lib/message-screenshot'
 import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -553,6 +554,13 @@ export interface AssistantTurnRendererProps {
 export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   const processGroupsKeepExpanded = useAtomValue(agentProcessGroupsKeepExpandedAtom)
+  const assistantRef = React.useRef<HTMLDivElement>(null)
+
+  const handleAssistantScreenshot = React.useCallback((): void => {
+    if (assistantRef.current) {
+      void captureMessageScreenshot(assistantRef.current)
+    }
+  }, [])
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
     block: SDKContentBlock
@@ -686,7 +694,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   }
 
   return (
-    <Message from="assistant">
+    <Message ref={assistantRef} from="assistant">
       <MessageHeader
         model={turn.model ? resolveModelDisplayName(turn.model, channels) : undefined}
         time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
@@ -745,6 +753,9 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
         if (!hasDuration && !hasActions && !showStoppedBadge) return null
         return (
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
+            <MessageAction tooltip="截图" onClick={handleAssistantScreenshot}>
+              <Camera className="size-3.5" />
+            </MessageAction>
             {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
             {textContent && <CopyButton content={textContent} />}
             {onFork && lastUuid && (
@@ -1045,6 +1056,13 @@ function ScheduledRunBadge(): React.ReactElement {
 
 function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
+  const userMsgRef = React.useRef<HTMLDivElement>(null)
+
+  const handleUserScreenshot = React.useCallback((): void => {
+    if (userMsgRef.current) {
+      void captureMessageScreenshot(userMsgRef.current)
+    }
+  }, [])
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
   const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
@@ -1053,7 +1071,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
   const meta = extractMeta(message as unknown as SDKMessage)
 
   return (
-    <Message from="user">
+    <Message ref={userMsgRef} from="user">
       <div className="flex items-start gap-2.5 mb-2.5">
         <UserAvatar avatar={userProfile.avatar} size={35} />
         <div className="flex flex-col justify-between h-[35px]">
@@ -1099,6 +1117,9 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
       </MessageContent>
       {text && (
         <MessageActions className="pl-[46px] mt-0.5">
+          <MessageAction tooltip="截图" onClick={handleUserScreenshot}>
+            <Camera className="size-3.5" />
+          </MessageAction>
           <CopyButton content={text} />
         </MessageActions>
       )}
@@ -1119,6 +1140,13 @@ interface ErrorMessageProps {
 }
 
 function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: ErrorMessageProps): React.ReactElement {
+  const errorMsgRef = React.useRef<HTMLDivElement>(null)
+
+  const handleErrorScreenshot = React.useCallback((): void => {
+    if (errorMsgRef.current) {
+      void captureMessageScreenshot(errorMsgRef.current)
+    }
+  }, [])
   const meta = extractMeta(message as unknown as SDKMessage)
   const errorText = message.error?.message ?? '未知错误'
 
@@ -1209,7 +1237,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
   const hasActions = hasStructuredActions || hasLegacyActions
 
   return (
-    <Message from="assistant">
+    <Message ref={errorMsgRef} from="assistant">
       <MessageHeader
         model={undefined}
         time={meta.createdAt ? formatMessageTime(meta.createdAt) : undefined}
@@ -1295,6 +1323,9 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         )}
       </MessageContent>
       <MessageActions className="pl-[46px] mt-0.5">
+        <MessageAction tooltip="截图" onClick={handleErrorScreenshot}>
+          <Camera className="size-3.5" />
+        </MessageAction>
         <CopyButton content={displayContentText} />
       </MessageActions>
     </Message>
