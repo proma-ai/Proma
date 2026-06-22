@@ -198,6 +198,8 @@ export interface AppSettings {
   agentChannelIds?: string[]
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string
+  /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；可拖拽调整） */
+  agentAutomationGroupOrder?: number
   /** 是否已完成 Onboarding 流程 */
   onboardingCompleted?: boolean
   /** 是否跳过了环境检测 */

@@ -119,7 +119,12 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     const sessionMode = automation.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE
 
     let reuseSessionId: string | undefined
-    if (automation.lastSessionId && getAgentSessionMeta(automation.lastSessionId)) {
+    const lastSessionMeta = automation.lastSessionId ? getAgentSessionMeta(automation.lastSessionId) : undefined
+    // 已被用户手动接管（毕业）的会话不再复用，强制新建，避免把定时任务消息注入用户的私人会话
+    if (lastSessionMeta?.automationGraduated) {
+      console.log(`[定时任务] ${automation.name} 上次会话已被用户接管，本次自动开新会话`)
+    }
+    if (automation.lastSessionId && lastSessionMeta && !lastSessionMeta.automationGraduated) {
       if (sessionMode === 'reuse') {
         reuseSessionId = automation.lastSessionId
       } else if (

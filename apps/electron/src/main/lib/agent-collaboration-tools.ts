@@ -11,6 +11,9 @@ import type {
   AgentDelegationStatus,
   AgentMessage,
   AgentSessionMeta,
+  AgentStreamPayload,
+  AskUserRequest,
+  PermissionRequest,
   PromaPermissionMode,
   SDKMessage,
 } from '@proma/shared'
@@ -72,6 +75,114 @@ const DELEGATION_GOAL_CHAR_LIMIT = 1_000
 const MAX_RETAINED_FINISHED_DELEGATIONS = 200
 
 const delegations = new Map<string, DelegationRecord>()
+
+// ===== 阻塞事件追踪（Level 1: Blocked Event Bubbling） =====
+
+interface BlockedEvent {
+  id: string
+  delegationId: string
+  childSessionId: string
+  type: 'ask_user' | 'permission'
+  askUserRequestId?: string
+  askUserQuestions?: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }> }>
+  permissionRequestId?: string
+  permissionToolName?: string
+  resolved: boolean
+  createdAt: number
+}
+
+const blockedEvents = new Map<string, BlockedEvent>()
+
+let _eventBusRegistered = false
+let _eventBusRef: import('./agent-event-bus').AgentEventBus | null = null
+
+export function registerCollaborationEventBus(eventBus: import('./agent-event-bus').AgentEventBus): void {
+  if (_eventBusRegistered) return
+  _eventBusRegistered = true
+  _eventBusRef = eventBus
+
+  eventBus.on((sessionId: string, payload: AgentStreamPayload) => {
+    const record = Array.from(delegations.values()).find((d) => d.childSessionId === sessionId)
+    if (!record || record.status !== 'running') return
+    if (payload.kind !== 'proma_event') return
+
+    const event = payload.event
+    if (event.type === 'ask_user_request') {
+      const req = event.request as AskUserRequest
+      const blocked: BlockedEvent = {
+        id: randomUUID(),
+        delegationId: record.delegationId,
+        childSessionId: sessionId,
+        type: 'ask_user',
+        askUserRequestId: req.requestId,
+        askUserQuestions: req.questions.map((q) => ({
+          question: q.question,
+          header: q.header,
+          options: q.options.map((o) => ({ label: o.label, description: o.description })),
+        })),
+        resolved: false,
+        createdAt: Date.now(),
+      }
+      blockedEvents.set(blocked.id, blocked)
+
+      eventBus.emit(record.parentSessionId, {
+        kind: 'proma_event',
+        event: {
+          type: 'delegation_blocked' as const,
+          delegationId: record.delegationId,
+          blockedEvent: blocked,
+        } as import('@proma/shared').PromaEvent,
+      })
+    }
+
+    if (event.type === 'permission_request') {
+      const req = event.request as PermissionRequest
+      const blocked: BlockedEvent = {
+        id: randomUUID(),
+        delegationId: record.delegationId,
+        childSessionId: sessionId,
+        type: 'permission',
+        permissionRequestId: req.requestId,
+        permissionToolName: req.toolName,
+        resolved: false,
+        createdAt: Date.now(),
+      }
+      blockedEvents.set(blocked.id, blocked)
+
+      eventBus.emit(record.parentSessionId, {
+        kind: 'proma_event',
+        event: {
+          type: 'delegation_blocked' as const,
+          delegationId: record.delegationId,
+          blockedEvent: blocked,
+        } as import('@proma/shared').PromaEvent,
+      })
+    }
+
+    if (event.type === 'ask_user_resolved' || event.type === 'permission_resolved') {
+      const requestId = 'requestId' in event ? (event as { requestId: string }).requestId : undefined
+      if (requestId) {
+        for (const be of blockedEvents.values()) {
+          if (be.resolved) continue
+          if (be.askUserRequestId === requestId || be.permissionRequestId === requestId) {
+            be.resolved = true
+            break
+          }
+        }
+      }
+    }
+  })
+
+  console.log('[协作工具] EventBus 阻塞事件监听已注册')
+}
+
+function getPendingBlockedEvents(delegationId: string): BlockedEvent[] {
+  return Array.from(blockedEvents.values()).filter((be) => be.delegationId === delegationId && !be.resolved)
+}
+
+function getBlockedEventById(blockedEventId: string): BlockedEvent | undefined {
+  return blockedEvents.get(blockedEventId)
+}
 
 /**
  * 清理内存中过多的已结束委派，避免 live Map 无界增长。
@@ -229,6 +340,7 @@ function getDelegationSummary(record: DelegationRecord): Record<string, unknown>
     completedAt: record.completedAt,
     error: record.error,
     resultSummary: record.resultSummary,
+    pendingBlockedEvents: getPendingBlockedEvents(record.delegationId),
   }
 }
 
@@ -523,6 +635,16 @@ function buildCollaborationSchemas(z: ZodModule['z']) {
     stopBatch: {
       delegationIds: z.array(z.string()).min(1).max(MAX_RUNNING_DELEGATIONS_PER_PARENT).describe('要停止的委派 ID 列表'),
     },
+    answer: {
+      delegationId: nonBlankString.describe('子会话所属的委派 ID'),
+      blockedEventId: nonBlankString.describe('要回答的阻塞事件 ID（从 delegation 的 pendingBlockedEvents 中获取）'),
+      answers: z.record(z.string(), z.string()).optional().describe('AskUserQuestion 的回答（问题文本 → 答案文本）'),
+      permissionBehavior: z.enum(['allow', 'deny']).optional().describe('Permission 请求的回复行为，默认 allow'),
+    },
+    continueD: {
+      delegationId: nonBlankString.describe('要继续操作的委派 ID（必须是已完成/已失败/已取消状态）'),
+      message: nonBlankString.describe('追加给子 Agent 的后续指令'),
+    },
   }
 }
 
@@ -678,6 +800,114 @@ export async function injectAgentCollaborationMcpServer(
         async (args) => {
           return jsonResult({
             results: args.delegationIds.map((delegationId) => stopDelegation(ctx.sessionId, delegationId)),
+          })
+        },
+      ),
+      sdk.tool(
+        'answer_delegation_question',
+        '代答协作子会话的阻塞问题（AskUserQuestion）或审批权限请求（Permission）。当子会话被阻塞时，父 Agent 可通过此工具代替用户回答，让子会话继续执行。从 delegation 的 pendingBlockedEvents 获取 blockedEventId。',
+        schemas.answer,
+        async (args) => {
+          const blocked = getBlockedEventById(args.blockedEventId)
+          if (!blocked) throw new Error(`阻塞事件不存在: ${args.blockedEventId}`)
+          if (blocked.resolved) return jsonResult({ answered: false, note: '该阻塞事件已被解决' })
+
+          const record = delegations.get(blocked.delegationId)
+          if (record && record.parentSessionId !== ctx.sessionId) {
+            throw new Error(`委派不属于当前父会话: ${blocked.delegationId}`)
+          }
+
+          if (blocked.type === 'ask_user' && blocked.askUserRequestId) {
+            const { askUserService } = await import('./agent-ask-user-service')
+            const answers = args.answers ?? {}
+            const sessionId = askUserService.respondToAskUser(blocked.askUserRequestId, answers)
+            blocked.resolved = !!sessionId
+            if (blocked.resolved && _eventBusRef) {
+              _eventBusRef.emit(blocked.childSessionId, {
+                kind: 'proma_event',
+                event: { type: 'ask_user_resolved', requestId: blocked.askUserRequestId },
+              })
+            }
+            return jsonResult({ answered: blocked.resolved, type: 'ask_user' })
+          }
+
+          if (blocked.type === 'permission' && blocked.permissionRequestId) {
+            const { permissionService } = await import('./agent-permission-service')
+            const behavior = args.permissionBehavior ?? 'allow'
+            const sessionId = permissionService.respondToPermission(blocked.permissionRequestId, behavior, false)
+            blocked.resolved = !!sessionId
+            if (blocked.resolved && _eventBusRef) {
+              _eventBusRef.emit(blocked.childSessionId, {
+                kind: 'proma_event',
+                event: { type: 'permission_resolved', requestId: blocked.permissionRequestId, behavior },
+              })
+            }
+            return jsonResult({ answered: blocked.resolved, type: 'permission', behavior })
+          }
+
+          return jsonResult({ answered: false, note: '无法匹配阻塞事件类型' })
+        },
+      ),
+      sdk.tool(
+        'continue_delegation',
+        '向已完成、已失败或已取消的协作子会话追加后续指令。子会话保留完整上下文继续执行。适合多轮协作场景：先让子 Agent 完成第一步，审查结果后继续下一步。',
+        schemas.continueD,
+        async (args) => {
+          const record = delegations.get(args.delegationId)
+          if (!record) throw new Error(`未找到当前会话下的委派: ${args.delegationId}`)
+          if (record.parentSessionId !== ctx.sessionId) {
+            throw new Error(`委派不属于当前父会话: ${args.delegationId}`)
+          }
+          if (record.status === 'running') {
+            throw new Error(`委派正在运行中，无法追加指令。请先等待完成或停止后再继续: ${args.delegationId}`)
+          }
+
+          record.status = 'running'
+          record.error = undefined
+          record.resultSummary = undefined
+          record.completedAt = undefined
+          let resolveCompletion: () => void = () => {}
+          const completion = new Promise<void>((resolve) => { resolveCompletion = resolve })
+          record.completion = completion
+          record.resolveCompletion = resolveCompletion
+
+          updateAgentSessionMeta(record.childSessionId, { delegationStatus: 'running' })
+
+          runRegisteredHeadlessAgent(
+            {
+              sessionId: record.childSessionId,
+              userMessage: args.message,
+              channelId: ctx.channelId,
+              modelId: ctx.modelId,
+              workspaceId: ctx.workspaceId,
+              permissionModeOverride: record.permissionMode,
+              triggeredBy: 'delegation',
+              startedAt: Date.now(),
+            },
+            {
+              source: 'delegation',
+              onError: (error) => {
+                markDelegationFinished(record, 'failed', { error })
+              },
+              onComplete: (messages) => {
+                if (record.status !== 'running') return
+                const resultSummary = summarizeChildResult(record.childSessionId, messages)
+                markDelegationFinished(record, 'completed', { resultSummary })
+              },
+              onTitleUpdated: () => {},
+            },
+          ).catch((error: unknown) => {
+            markDelegationFinished(record, 'failed', {
+              error: error instanceof Error ? error.message : '未知错误',
+            })
+          })
+
+          const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), DEFAULT_WAIT_SECONDS * 1000))
+          await Promise.race([completion, timeout])
+
+          return jsonResult({
+            delegation: getDelegationSummary(record),
+            note: record.status === 'running' ? '子会话仍在运行中（等待超时），可稍后用 wait_for_delegations 等待结果。' : undefined,
           })
         },
       ),
