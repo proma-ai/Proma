@@ -510,7 +510,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     if (!activeTabId) return
     requestAnimationFrame(() => {
       const el = document.querySelector('.agent-session-item-active, .session-item-selected')
-      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     })
   }, [activeTabId])
 
@@ -2957,6 +2957,12 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   const [renamingWorkspace, setRenamingWorkspace] = React.useState(false)
   const [workspaceEditName, setWorkspaceEditName] = React.useState('')
   const workspaceEditRef = React.useRef<HTMLInputElement>(null)
+  // 追踪 activeSessionId 变化：仅会话刚激活时强制展开所在 workspace，避免阻碍用户手动折叠
+  const prevActiveRef = React.useRef(activeSessionId)
+  const sessionJustActivated = prevActiveRef.current !== activeSessionId && activeSessionId != null
+  React.useEffect(() => {
+    prevActiveRef.current = activeSessionId
+  }, [activeSessionId])
   const justStartedRenamingRef = React.useRef(false)
 
   const handleStartWorkspaceRename = (): void => {
@@ -3011,26 +3017,25 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       return b.updatedAt - a.updatedAt
     })
   const activeIds = new Set(activeSessions.map((s) => s.id))
-  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
-  const currentSession = activeSessionId
-    && !activeIds.has(activeSessionId)
-    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
-    : null
-  const pinnedCurrent = currentSession ? [currentSession] : []
-  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
   const fillSessions = group.sessions
-    .filter((session) =>
-      !activeIds.has(session.id)
-      && !pinnedCurrentIds.has(session.id)
-      && session.updatedAt >= recentCutoff
-    )
+    .filter((session) => !activeIds.has(session.id) && session.updatedAt >= recentCutoff)
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
-  const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
+  const collapsedSessions = [...activeSessions, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
   const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
   const extraSessions = remainingSessions.slice(0, extraCount)
-  const sessions = [...collapsedSessions, ...extraSessions]
+  let sessions = [...collapsedSessions, ...extraSessions]
+  // 确保当前选中会话在可见列表中：若不在则自动扩列至包含它（保持 updatedAt 自然排序）
+  const sessionIds = new Set(sessions.map((s) => s.id))
+  if (activeSessionId && !sessionIds.has(activeSessionId)) {
+    const rest = group.sessions.filter((s) => !sessionIds.has(s.id))
+    const idx = rest.findIndex((s) => s.id === activeSessionId)
+    if (idx >= 0) sessions.push(...rest.slice(0, idx + 1))
+  }
   const hiddenCount = Math.max(0, group.sessions.length - sessions.length)
+  // 仅会话刚激活时强制展开所在 workspace，后续尊重用户手动折叠
+  const hasActiveSession = activeSessionId != null && group.sessions.some((s) => s.id === activeSessionId)
+  const effectiveCollapsed = collapsed && !(hasActiveSession && sessionJustActivated)
 
   return (
     <section
@@ -3078,7 +3083,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         ) : (
           <button
             type="button"
-            aria-expanded={!collapsed}
+            aria-expanded={!effectiveCollapsed}
             aria-controls={`project-sessions-${group.workspace.id}`}
             onClick={(e) => {
               e.stopPropagation()
@@ -3102,7 +3107,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               size={12}
               className={cn(
                 'flex-shrink-0 text-foreground/30 transition-transform duration-150',
-                collapsed ? '-rotate-90' : 'rotate-90',
+                effectiveCollapsed ? '-rotate-90' : 'rotate-90',
               )}
             />
           </button>
@@ -3178,7 +3183,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       </div>
 
       <div id={`project-sessions-${group.workspace.id}`} className="ml-4 mt-px">
-        {!collapsed ? (
+        {!effectiveCollapsed ? (
           group.sessions.length > 0 ? (
             <div className="flex flex-col gap-0.5">
               {sessions.map((session) => (
