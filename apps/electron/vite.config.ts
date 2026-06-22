@@ -20,6 +20,19 @@ export default defineConfig({
       '@/types': resolve(__dirname, 'src/types'),
       '@': resolve(__dirname, 'src/renderer'),
     },
+    // 强制 ProseMirror / TipTap 底层包只解析到单一实例。
+    // bun 的隔离式 node_modules 可能残留多版本 @tiptap/pm 与 prosemirror-*，
+    // 一旦同时加载就会触发 "multiple versions of prosemirror-model were loaded"，
+    // 导致 mention 节点 schema 不匹配、回车选中 Skill/MCP 报 Fragment 转换错误。
+    dedupe: [
+      '@tiptap/pm',
+      'prosemirror-model',
+      'prosemirror-state',
+      'prosemirror-view',
+      'prosemirror-transform',
+      'prosemirror-keymap',
+      'prosemirror-commands',
+    ],
   },
   server: {
     port: 5173,
