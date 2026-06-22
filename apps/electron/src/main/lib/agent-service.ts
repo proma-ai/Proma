@@ -44,6 +44,11 @@ const orchestrator = new AgentOrchestrator(adapter, eventBus)
 /** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
 export { eventBus as agentEventBus }
 
+// 注册协作子会话 EventBus 阻塞事件监听
+import('./agent-collaboration-tools').then(({ registerCollaborationEventBus }) => {
+  registerCollaborationEventBus(eventBus)
+}).catch(() => { /* collaboration 模块可能未加载 */ })
+
 /**
  * 会话 → webContents 映射
  *

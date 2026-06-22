@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { useAtomValue } from 'jotai'
-import { FileText, StickyNote, X, Clock, Blocks } from 'lucide-react'
+import { FileText, StickyNote, X, Clock, GitBranch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -173,7 +173,7 @@ export function TabBarItem({
         ) : (
           <span className="flex-1 min-w-0 truncate text-left flex items-center gap-1">
             {isAutomation && <Clock className="size-3 shrink-0 text-foreground/40" />}
-            {isDelegation && !isAutomation && <Blocks className="size-3 shrink-0 text-foreground/40" />}
+            {isDelegation && !isAutomation && <GitBranch className="size-3 shrink-0 text-foreground/40" />}
             {title}
           </span>
         )}
