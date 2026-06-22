@@ -19,6 +19,8 @@ import type { AgentSessionReferenceSearchResult } from '@proma/shared'
 interface MentionSuggestionConfig<T> {
   /** 触发字符 */
   char: string
+  /** 标题栏左侧标签（面板类型） */
+  headerLabel: string
   /** 空列表占位文字 */
   emptyText: string
   /** 异步获取列表项 */
@@ -85,6 +87,7 @@ function createMentionSuggestion<T>(
             props: {
               items: props.items,
               emptyText: config.emptyText,
+              headerLabel: config.headerLabel,
               keyExtractor: config.keyExtractor,
               renderItem: config.renderItem,
               onSelect: (item: T) => {
@@ -147,6 +150,7 @@ export function createSkillMentionSuggestion(
   return createMentionSuggestion<SkillMentionItem>(
     {
       char: '/',
+      headerLabel: '调用 skill',
       emptyText: '无匹配 Skill',
       fetchItems: async (slug, q) => {
         const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
@@ -189,6 +193,7 @@ export function createMcpMentionSuggestion(
   return createMentionSuggestion<McpMentionItem>(
     {
       char: '#',
+      headerLabel: 'MCP 服务',
       emptyText: '无匹配 MCP 服务',
       fetchItems: async (slug, q) => {
         const caps = await window.electronAPI.getWorkspaceCapabilities(slug)
@@ -226,6 +231,7 @@ export function createSessionMentionSuggestion(
   return createMentionSuggestion<SessionMentionItem>(
     {
       char: '&',
+      headerLabel: '引用会话',
       emptyText: '无匹配会话',
       fetchItems: async (_slug, q) => {
         const workspaceId = workspaceIdRef.current

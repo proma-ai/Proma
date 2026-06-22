@@ -300,8 +300,12 @@ export const FileMentionList = React.forwardRef<FileMentionRef, FileMentionListP
     // 无匹配结果
     if (!hasResults) {
       return (
-        <div className="rounded-lg border bg-popover p-2 shadow-lg text-[11px] text-muted-foreground">
-          无匹配文件
+        <div className="rounded-lg border bg-popover shadow-lg overflow-hidden min-w-[260px]">
+          <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px] font-medium bg-primary/10 text-primary border-b border-border/50">
+            <span>文件</span>
+            <span className="font-normal text-muted-foreground">Esc 关闭 · Enter 选中</span>
+          </div>
+          <div className="p-2 text-[11px] text-muted-foreground">无匹配文件</div>
         </div>
       )
     }
@@ -323,6 +327,7 @@ export const FileMentionList = React.forwardRef<FileMentionRef, FileMentionListP
             onSelect={handleSelect}
             onToggle={toggleExpand}
             setSelectedIndex={handleSetIndex}
+            showHint
           />
         )}
 
@@ -336,6 +341,7 @@ export const FileMentionList = React.forwardRef<FileMentionRef, FileMentionListP
             onSelect={handleSelect}
             onToggle={toggleExpand}
             setSelectedIndex={handleSetIndex}
+            showHint={!hasSession}
           />
         )}
       </div>
@@ -356,6 +362,7 @@ function FileSection({
   onSelect,
   onToggle,
   setSelectedIndex,
+  showHint,
 }: {
   label: string
   tree: FileTreeNode[]
@@ -364,12 +371,17 @@ function FileSection({
   onSelect: (node: FileTreeNode) => void
   onToggle: (path: string) => void
   setSelectedIndex: (index: number) => void
+  /** 在标题栏右侧显示快捷键提示 */
+  showHint?: boolean
 }) {
   return (
     <div>
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium bg-primary/10 text-primary border-b border-border/50">
         <Folder className="size-3" />
         <span>{label}</span>
+        {showHint && (
+          <span className="ml-auto font-normal text-muted-foreground">Esc 关闭 · Enter 选中</span>
+        )}
       </div>
       <TreeNodeList
         nodes={tree}
