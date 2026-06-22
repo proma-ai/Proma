@@ -30,6 +30,7 @@ import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
+import { useMessageSelection } from '@/contexts/MessageSelectionContext'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -398,6 +399,13 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
+  const { toggleSelect, isSelected } = useMessageSelection()
+  const handleGroupClick = React.useCallback((e: React.MouseEvent, groupId: string) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      toggleSelect(groupId)
+    }
+  }, [toggleSelect])
   /** 淡入控制：切换会话时先隐藏，等布局完成后再显示。 */
   const [ready, setReady] = React.useState(false)
   // 空会话无需淡入过渡（无消息则无滚动位置问题）
@@ -628,8 +636,11 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 && group.type === 'assistant-turn'
                 && idx === allGroups.findLastIndex((g) => g.type === 'assistant-turn')
               return (
+                <div key={getGroupId(group)} data-message-id={getGroupId(group)}
+                  onClick={(e) => handleGroupClick(e, getGroupId(group))}
+                  className={cn(isSelected(getGroupId(group)) && 'ring-2 ring-primary/40 bg-primary/[0.03] rounded-[10px]')}
+                >
                 <MessageGroupRenderer
-                  key={getGroupId(group)}
                   group={group}
                   allMessages={allSDKMessages}
                   historicalTaskSubjects={historicalTaskSubjects}
@@ -643,6 +654,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                   stoppedByUser={isLastAssistantTurn || undefined}
                   sessionModelId={sessionModelId}
                 />
+                </div>
               )
             })}
 

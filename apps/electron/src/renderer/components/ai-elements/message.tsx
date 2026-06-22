@@ -51,18 +51,21 @@ interface MessageProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 /** 消息根容器，user 自动右对齐 */
-export function Message({ className, from, ...props }: MessageProps): React.ReactElement {
-  return (
-    <div
-      className={cn(
-        'message-item group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
-        from === 'user' ? 'is-user' : 'is-assistant',
-        className
-      )}
-      {...props}
-    />
-  )
-}
+export const Message = React.forwardRef<HTMLDivElement, MessageProps>(
+  function Message({ className, from, ...props }, ref): React.ReactElement {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          'message-item group flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2.5',
+          from === 'user' ? 'is-user' : 'is-assistant',
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
 
 // ===== MessageHeader 头像 + 模型名 =====
 

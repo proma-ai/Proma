@@ -28,6 +28,8 @@ import { ExitPlanModeBanner } from './ExitPlanModeBanner'
 import { PlanModeDashedBorder } from './PlanModeDashedBorder'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
+import { MessageSelectionBar } from '@/components/chat/MessageSelectionBar'
+import { MessageSelectionProvider } from '@/contexts/MessageSelectionContext'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
@@ -2047,30 +2049,34 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   )
 
   return (
+    <MessageSelectionProvider>
     <>
     <AgentSessionProvider sessionId={sessionId}>
       <div className="flex flex-col h-full flex-1 min-w-0 max-w-[min(72rem,100%)] mx-auto">
         {/* Agent Header */}
         <AgentHeader sessionId={sessionId} />
 
-        {/* 消息区域 */}
-        <AgentMessages
-          sessionId={sessionId}
-          sessionModelId={agentModelId || undefined}
-          messagesLoaded={messagesLoaded}
-          persistedSDKMessages={persistedSDKMessages}
-          streaming={streaming}
-          streamState={streamState}
-          liveMessages={liveMessages}
-          sessionPath={sessionPath}
-          attachedDirs={allAttachedDirs}
-          stoppedByUser={stoppedByUser}
-          onRetry={handleRetry}
-          onRetryInNewSession={handleRetryInNewSession}
-          onFork={handleFork}
-          onRewind={handleRewindRequest}
-          onCompact={handleCompact}
-        />
+        {/* 消息区域 + 浮动操作栏 */}
+        <div className="relative flex-1 overflow-hidden">
+          <AgentMessages
+            sessionId={sessionId}
+            sessionModelId={agentModelId || undefined}
+            messagesLoaded={messagesLoaded}
+            persistedSDKMessages={persistedSDKMessages}
+            streaming={streaming}
+            streamState={streamState}
+            liveMessages={liveMessages}
+            sessionPath={sessionPath}
+            attachedDirs={allAttachedDirs}
+            stoppedByUser={stoppedByUser}
+            onRetry={handleRetry}
+            onRetryInNewSession={handleRetryInNewSession}
+            onFork={handleFork}
+            onRewind={handleRewindRequest}
+            onCompact={handleCompact}
+          />
+          <MessageSelectionBar />
+        </div>
 
         {/* 权限请求横幅 */}
         <PermissionBanner sessionId={sessionId} />
@@ -2224,5 +2230,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       </AlertDialogContent>
     </AlertDialog>
     </>
+    </MessageSelectionProvider>
   )
 }
