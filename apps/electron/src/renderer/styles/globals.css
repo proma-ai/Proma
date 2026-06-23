@@ -1081,6 +1081,32 @@
   padding: 0;
 }
 
+/* 浅色主题代码块是深底，用偏浅的蓝灰选区承托白字，避免 Shiki token 内联色在选中后变黑。 */
+:root:not(.dark) :is(
+  .code-block-wrapper pre.shiki,
+  .tiptap pre
+)::selection,
+:root:not(.dark) :is(
+  .code-block-wrapper pre.shiki,
+  .tiptap pre
+) ::selection {
+  background-color: hsl(210 80% 62% / 0.32);
+  color: hsl(0 0% 98%) !important;
+  -webkit-text-fill-color: hsl(0 0% 98%);
+}
+
+:root:not(.dark) :is(
+  .code-block-wrapper pre.shiki,
+  .tiptap pre
+)::-moz-selection,
+:root:not(.dark) :is(
+  .code-block-wrapper pre.shiki,
+  .tiptap pre
+) ::-moz-selection {
+  background-color: hsl(210 80% 62% / 0.32);
+  color: hsl(0 0% 98%) !important;
+}
+
 /* 代码行：限制重排范围，GPU 合成优化 */
 .code-block-wrapper .line {
   display: inline;
