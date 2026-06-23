@@ -313,11 +313,11 @@ function getRailInitial(title: string): string {
 
 /**
  * 是否为「应从项目会话列表隐藏」的自动任务会话：
- * 来自定时任务（sourceAutomationId）、尚未被用户接管毕业（automationGraduated）、且未被置顶。
- * 这类会话的"家"是 Automation 视图；置顶或毕业后回到普通项目列表。
+ * 来自定时任务（sourceAutomationId）且未被置顶。
+ * 这类会话的"家"是「自动任务」视图，始终不出现在普通项目列表。
  */
 function isHiddenAutomationSession(session: AgentSessionMeta): boolean {
-  return !!session.sourceAutomationId && !session.automationGraduated && !session.pinned
+  return !!session.sourceAutomationId && !session.pinned
 }
 
 interface RailRecentItem {
@@ -1121,7 +1121,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [])
 
   /**
-   * 合成「自动任务」项目组：聚合所有未毕业的自动任务会话（跨工作区），
+   * 合成「自动任务」项目组：聚合所有自动任务会话（跨工作区），
    * 作为这些会话在侧栏的统一归属地。会话为空时返回 null（不渲染空组）。
    */
   const automationGroup = React.useMemo<AgentProjectGroup | null>(
@@ -1132,7 +1132,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           && !session.pinned
           && !draftSessionIds.has(session.id)
           && !!session.sourceAutomationId
-          && !session.automationGraduated
         )
       )
       if (sessions.length === 0) return null
@@ -1377,7 +1376,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           !session.archived
           && !session.pinned
           && !draftSessionIds.has(session.id)
-          // 未毕业的自动任务会话不进入项目列表，统一归到 Automation 视图
+          // 自动任务会话不进入项目列表，统一归到「自动任务」视图
           && !isHiddenAutomationSession(session)
         )
       )
@@ -1495,7 +1494,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         !session.archived
         && !draftSessionIds.has(session.id)
         && (!currentWorkspaceId || session.workspaceId === currentWorkspaceId)
-        // 未毕业的自动任务会话不出现在收起态 Rail，与项目列表保持一致
+        // 自动任务会话不出现在收起态 Rail，与展开态列表保持一致
         && !isHiddenAutomationSession(session)
       )
       .sort((a, b) => {
