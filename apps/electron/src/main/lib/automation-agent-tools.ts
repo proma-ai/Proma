@@ -42,7 +42,7 @@ type ZodModule = typeof import('zod')
 const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
 
 function validScheduleType(v: unknown): v is AutomationScheduleType {
-  return v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly'
+  return v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly' || v === 'once'
 }
 
 function validPermissionMode(v: unknown): v is AutomationPermissionMode {
@@ -76,6 +76,12 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   if (input.dayOfMonth !== undefined && (!isFiniteInt(input.dayOfMonth) || input.dayOfMonth < 1 || input.dayOfMonth > 31)) {
     throw new Error(`非法的 dayOfMonth: ${String(input.dayOfMonth)}`)
   }
+  if (input.scheduledAt !== undefined && (typeof input.scheduledAt !== 'number' || !Number.isFinite(input.scheduledAt) || input.scheduledAt <= 0)) {
+    throw new Error(`非法的 scheduledAt: ${String(input.scheduledAt)}（应为毫秒时间戳）`)
+  }
+  if (input.maxRuns !== undefined && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
+    throw new Error(`非法的 maxRuns: ${String(input.maxRuns)}（应为 ≥1 的整数）`)
+  }
   if (input.permissionMode !== undefined && !validPermissionMode(input.permissionMode)) {
     throw new Error(`非法的 permissionMode: ${String(input.permissionMode)}`)
   }
@@ -94,6 +100,10 @@ function summarizeAutomation(a: Automation, includeHistory: boolean): Record<str
     timeOfDay: a.timeOfDay,
     dayOfWeek: a.dayOfWeek,
     dayOfMonth: a.dayOfMonth,
+    scheduledAt: a.scheduledAt,
+    maxRuns: a.maxRuns,
+    runCount: a.runCount ?? 0,
+    completedAt: a.completedAt,
     permissionMode: a.permissionMode,
     sessionMode: a.sessionMode,
     workspaceId: a.workspaceId,
@@ -125,7 +135,7 @@ function getCurrentAutomationId(ctx: AutomationAgentToolContext): string | undef
 }
 
 function buildAutomationSchemas(z: ZodModule['z']) {
-  const scheduleType = z.enum(['interval', 'daily', 'weekly', 'monthly'])
+  const scheduleType = z.enum(['interval', 'daily', 'weekly', 'monthly', 'once'])
   const permissionMode = z.enum(['auto', 'bypassPermissions'])
   const sessionMode = z.enum(['daily', 'reuse'])
   return {
@@ -139,11 +149,13 @@ function buildAutomationSchemas(z: ZodModule['z']) {
     create: {
       name: z.string().describe('任务名，简短说明长期反复执行的目标'),
       prompt: z.string().describe('每次触发时发送给 Agent 的完整自然语言指令'),
-      scheduleType: scheduleType.describe('调度类型：interval 固定间隔，daily 每天定点，weekly 每周定点，monthly 每月定点'),
-      intervalMinutes: z.number().int().min(1).optional().describe('固定间隔分钟数；scheduleType=interval 时必填'),
+      scheduleType: scheduleType.describe('调度类型：interval 固定间隔，daily 每天定点，weekly 每周定点，monthly 每月定点，once 指定时刻只运行一次'),
+      intervalMinutes: z.number().int().min(1).optional().describe('固定间隔分钟数；scheduleType=interval 时必填。间隔可以远大于 10-30 分钟，如 1440=每天、10080=每周'),
       timeOfDay: z.string().optional().describe('每天/每周/每月触发时间，24 小时制 HH:MM'),
       dayOfWeek: z.number().int().min(0).max(6).optional().describe('每周触发日，0=周日，1=周一，...，6=周六'),
       dayOfMonth: z.number().int().min(1).max(31).optional().describe('每月触发日，1-31；scheduleType=monthly 时必填'),
+      scheduledAt: z.number().int().positive().optional().describe('一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填。用于"在某个具体时间点跑一次"，如 N 小时/天后或某个日期时刻'),
+      maxRuns: z.number().int().min(1).optional().describe('最大运行次数上限（按实际执行次数计，成功+失败都算）；达到后任务自动停用。不传=不限次。可与任意 scheduleType 叠加，如 interval+maxRuns=3 表示"每隔一段时间跑，共跑 3 次就停"'),
       active: z.boolean().optional().describe('创建后是否启用，默认 true'),
       permissionMode: permissionMode.optional().describe('无人值守权限模式，默认 bypassPermissions；高风险任务可用 auto'),
       sessionMode: sessionMode.optional().describe('会话模式：daily=同一自然日内的触发复用同一个子会话，跨日新建（默认）；reuse=始终复用同一个子会话（保留长期上下文，token 成本更高）'),
@@ -157,6 +169,8 @@ function buildAutomationSchemas(z: ZodModule['z']) {
       timeOfDay: z.string().optional().describe('新的每天/每周/每月触发时间，24 小时制 HH:MM'),
       dayOfWeek: z.number().int().min(0).max(6).optional().describe('新的每周触发日，0=周日，...，6=周六'),
       dayOfMonth: z.number().int().min(1).max(31).optional().describe('新的每月触发日，1-31'),
+      scheduledAt: z.number().int().positive().optional().describe('新的一次性触发时间（毫秒时间戳），scheduleType=once 时使用'),
+      maxRuns: z.number().int().min(1).optional().describe('新的最大运行次数上限（按实际执行次数计）；改动会重置已执行次数计数'),
       active: z.boolean().optional().describe('启用或暂停任务'),
       permissionMode: permissionMode.optional().describe('新的无人值守权限模式'),
       sessionMode: sessionMode.optional().describe('新的会话模式：daily=同一自然日内复用，跨日新建；reuse=始终复用同一个子会话'),
@@ -209,7 +223,7 @@ export async function injectAutomationMcpServer(
       ),
       sdk.tool(
         'create_automation',
-        '创建 Proma 持久化定时任务。只用于长期、反复、无人值守有价值的场景；一次性任务、短期提醒、需要用户实时判断的任务不要创建。',
+        '创建 Proma 持久化定时任务。适合无人值守、有稳定价值的场景：长期反复的周期任务（interval/daily/weekly/monthly），以及未来某个时间点跑一次的延时任务（once + scheduledAt）或跑有限几次就停的任务（maxRuns）。纯提醒/闹钟、需要用户实时参与判断、或现在就该做完即终结的事不要创建。',
         schemas.create,
         async (args) => {
           if (ctx.triggeredBy === 'automation' || getCurrentAutomationId(ctx)) {
@@ -223,6 +237,8 @@ export async function injectAutomationMcpServer(
             timeOfDay: args.timeOfDay,
             dayOfWeek: args.dayOfWeek,
             dayOfMonth: args.dayOfMonth,
+            scheduledAt: args.scheduledAt,
+            maxRuns: args.maxRuns,
             channelId: ctx.channelId,
             modelId: ctx.modelId,
             workspaceId: ctx.workspaceId,
@@ -243,6 +259,9 @@ export async function injectAutomationMcpServer(
           }
           if (input.scheduleType === 'monthly' && input.dayOfMonth === undefined) {
             throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+          }
+          if (input.scheduleType === 'once' && input.scheduledAt === undefined) {
+            throw new Error('scheduleType=once 时 scheduledAt（绝对触发时间戳）必填')
           }
           const automation = createAutomation(input)
           broadcastAutomationsChanged()
@@ -265,6 +284,8 @@ export async function injectAutomationMcpServer(
             timeOfDay: args.timeOfDay,
             dayOfWeek: args.dayOfWeek,
             dayOfMonth: args.dayOfMonth,
+            scheduledAt: args.scheduledAt,
+            maxRuns: args.maxRuns,
             active: args.active,
             permissionMode: args.permissionMode,
             sessionMode: args.sessionMode,
@@ -272,6 +293,13 @@ export async function injectAutomationMcpServer(
           if (input.name !== undefined) assertNonBlank(input.name, 'name')
           if (input.prompt !== undefined) assertNonBlank(input.prompt, 'prompt')
           validateScheduleFields(input)
+          // 改成 once 时必须有可用的 scheduledAt（本次传入或任务已存在）
+          if (input.scheduleType === 'once' && input.scheduledAt === undefined) {
+            const existing = getAutomation(id)
+            if (!existing?.scheduledAt) {
+              throw new Error('scheduleType 改为 once 时必须提供 scheduledAt（绝对触发时间戳）')
+            }
+          }
           const automation = updateAutomation(input)
           if (!automation) throw new Error(`定时任务不存在: ${id}`)
           broadcastAutomationsChanged()

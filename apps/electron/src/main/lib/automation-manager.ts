@@ -114,12 +114,13 @@ function writeIndex(index: AutomationsIndex): void {
  * - interval：from + 间隔分钟
  * - daily：今天/明天的 timeOfDay
  * - weekly：本周/下周 dayOfWeek 的 timeOfDay
+ * - once：直接返回固定的 scheduledAt（不做任何前进推算），跑完后由 appendRun 自动停用
  *
  * 返回值保证为有限正整数。输入非法时回退到 from + 10min 并打印警告。
  */
 export function computeNextRunAt(
   a: { scheduleType: Automation['scheduleType'] } & Partial<
-    Pick<Automation, 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth'>
+    Pick<Automation, 'intervalMinutes' | 'timeOfDay' | 'dayOfWeek' | 'dayOfMonth' | 'scheduledAt'>
   >,
   from: number = Date.now(),
 ): number {
@@ -127,7 +128,17 @@ export function computeNextRunAt(
 
   let result: number
 
-  if (a.scheduleType === 'interval') {
+  if (a.scheduleType === 'once') {
+    // 一次性任务：永远返回固定的绝对时间戳，不随 from 前进。
+    // 即使该时刻已过去（如应用重启后恢复），也保持过去值——让调度器在下个 tick 补跑一次，
+    // 这正是「该跑没跑就补上」的期望行为；跑完后 appendRun 会把任务自动停用，不会重复触发。
+    result = Number.isFinite(a.scheduledAt) && a.scheduledAt! > 0
+      ? a.scheduledAt!
+      : from + FALLBACK_INTERVAL_MS
+    if (!Number.isFinite(a.scheduledAt) || a.scheduledAt! <= 0) {
+      console.warn(`[定时任务] computeNextRunAt: once 缺少有效 scheduledAt (${a.scheduledAt})，回退到 10 分钟后`)
+    }
+  } else if (a.scheduleType === 'interval') {
     const minutes = Number(a.intervalMinutes)
     if (!Number.isFinite(minutes) || minutes < 1) {
       console.warn(`[定时任务] computeNextRunAt: intervalMinutes 非法 (${a.intervalMinutes})，回退到 10 分钟`)
@@ -196,6 +207,29 @@ function isAutomationRunnable(a: Pick<Automation, 'channelId' | 'workspaceId'>):
   return !!a.channelId && !!a.workspaceId
 }
 
+/**
+ * 规范化 maxRuns：只接受 ≥1 的有限整数，其余（0、负数、非法值、undefined）一律按「不限次」处理返回 undefined。
+ * 让 0/负数等价于"取消上限"，避免出现"上限为 0 永远跑不了"的死配置。
+ */
+function normalizeMaxRuns(v: number | undefined): number | undefined {
+  if (v === undefined) return undefined
+  if (!Number.isFinite(v) || !Number.isInteger(v) || v < 1) return undefined
+  return v
+}
+
+/**
+ * 判断任务是否已达成「自动完成」条件（跑完后应停用，区别于手动暂停 / 失败暂停）：
+ * - once：只要实际执行过一次（runCount ≥ 1）即完成
+ * - 任意模式叠加 maxRuns：实际执行次数达到上限即完成
+ * 仅依据 runCount（成功 + 失败，不含 skipped），调用方需保证传入的是已自增后的最新值。
+ */
+function shouldAutoComplete(a: Pick<Automation, 'scheduleType' | 'maxRuns' | 'runCount'>): boolean {
+  const count = a.runCount ?? 0
+  if (a.scheduleType === 'once') return count >= 1
+  const max = normalizeMaxRuns(a.maxRuns)
+  return max !== undefined && count >= max
+}
+
 /** 创建定时任务 */
 export function createAutomation(input: CreateAutomationInput): Automation {
   const index = readIndex()
@@ -214,6 +248,8 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     timeOfDay: input.timeOfDay,
     dayOfWeek: input.dayOfWeek,
     dayOfMonth: input.dayOfMonth,
+    scheduledAt: input.scheduledAt,
+    maxRuns: normalizeMaxRuns(input.maxRuns),
     channelId: input.channelId,
     modelId: input.modelId,
     workspaceId: input.workspaceId,
@@ -224,6 +260,7 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     createdAt: now,
     updatedAt: now,
     nextRunAt: computeNextRunAt(input, now),
+    runCount: 0,
     runHistory: [],
   }
 
@@ -251,6 +288,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
   if (input.sessionMode !== undefined) target.sessionMode = input.sessionMode
   if (input.notificationTargets !== undefined) target.notificationTargets = input.notificationTargets
+  if (input.maxRuns !== undefined) target.maxRuns = normalizeMaxRuns(input.maxRuns)
 
   // 调度参数变化：重算下次运行时间（从现在起算，避免旧时间戳立即触发）
   const scheduleChanged =
@@ -258,12 +296,14 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
     (input.intervalMinutes !== undefined && input.intervalMinutes !== target.intervalMinutes) ||
     (input.timeOfDay !== undefined && input.timeOfDay !== target.timeOfDay) ||
     (input.dayOfWeek !== undefined && input.dayOfWeek !== target.dayOfWeek) ||
-    (input.dayOfMonth !== undefined && input.dayOfMonth !== target.dayOfMonth)
+    (input.dayOfMonth !== undefined && input.dayOfMonth !== target.dayOfMonth) ||
+    (input.scheduledAt !== undefined && input.scheduledAt !== target.scheduledAt)
   if (input.scheduleType !== undefined) target.scheduleType = input.scheduleType
   if (input.intervalMinutes !== undefined) target.intervalMinutes = input.intervalMinutes
   if (input.timeOfDay !== undefined) target.timeOfDay = input.timeOfDay
   if (input.dayOfWeek !== undefined) target.dayOfWeek = input.dayOfWeek
   if (input.dayOfMonth !== undefined) target.dayOfMonth = input.dayOfMonth
+  if (input.scheduledAt !== undefined) target.scheduledAt = input.scheduledAt
   if (scheduleChanged) {
     target.nextRunAt = computeNextRunAt(target, now)
   }
@@ -276,9 +316,13 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
     }
     target.active = input.active
     if (input.active) {
-      // 重新启用：从现在起算下一次触发，清空连续失败计数
+      // 重新启用：从现在起算下一次触发，清空连续失败计数，并重置运行配额
+      //（runCount 清零 + 清空 completedAt），语义是「重新跑一轮配额」。
+      // 这样跑满 maxRuns / once 完成后被自动停用的任务，用户手动启用即可再跑一轮。
       target.nextRunAt = computeNextRunAt(target, now)
       target.consecutiveFailures = 0
+      target.runCount = 0
+      target.completedAt = undefined
     }
   }
 
@@ -307,10 +351,11 @@ export function deleteAutomation(id: string): boolean {
  * 记录一次运行结果并推进下次触发时间
  *
  * 由调度器在运行完成/失败/跳过后调用。
- * - 成功/失败：从「现在」起算下次触发时间
- * - 跳过：不动 nextRunAt——否则任务因重入持续跳过时，每次跳过都会把下次触发再推一个完整间隔，
+ * - 成功/失败：从「现在」起算下次触发时间，并累加 runCount
+ * - 跳过：不动 nextRunAt、不计入 runCount——否则任务因重入持续跳过时，每次跳过都会把下次触发再推一个完整间隔，
  *   实际周期会被拉成 N×interval。保留原 nextRunAt 让下一个 tick 立刻有机会再次尝试。
  * - 成功/跳过：清零连续失败计数；失败：累加（调度器据此判断是否自动暂停）
+ * - once 跑完一次 / 达到 maxRuns 上限：自动停用并标记 completedAt，区别于手动暂停
  */
 export function appendRun(id: string, run: AutomationRun): Automation | undefined {
   const index = readIndex()
@@ -325,6 +370,7 @@ export function appendRun(id: string, run: AutomationRun): Automation | undefine
 
   if (run.status !== 'skipped') {
     target.lastRunAt = run.runAt
+    target.runCount = (target.runCount ?? 0) + 1
     target.nextRunAt = computeNextRunAt(target, now)
   }
 
@@ -332,6 +378,14 @@ export function appendRun(id: string, run: AutomationRun): Automation | undefine
     target.consecutiveFailures = (target.consecutiveFailures ?? 0) + 1
   } else {
     target.consecutiveFailures = 0
+  }
+
+  // 自动完成：once 跑完一次，或循环任务达到 maxRuns 上限 → 停用并标记完成时间。
+  // 只在非 skipped（runCount 已自增）时判断，避免重入跳过被误判为完成。
+  if (run.status !== 'skipped' && shouldAutoComplete(target)) {
+    target.active = false
+    target.completedAt = now
+    console.log(`[定时任务] ${target.name} 已达成运行上限（${target.runCount} 次），自动完成停用`)
   }
 
   target.updatedAt = now
