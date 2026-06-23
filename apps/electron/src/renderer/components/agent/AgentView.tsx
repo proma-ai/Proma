@@ -1311,7 +1311,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
 
       // 2. 清空输入框（仅当发送的是用户自己输入的内容，而非推荐建议时）
-      if (!overrideText) {
+      // 用 === undefined 与上方 `overrideText ?? inputContent` 的取值语义保持一致，
+      // 避免未来出现 handleSend('') 时两条路径行为割裂
+      if (overrideText === undefined) {
         setInputContent('')
         setInputHtmlContent('')
       }
@@ -1562,7 +1564,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
 
     // 清空输入框（仅当发送的是用户自己输入的内容，而非推荐建议时）
-    if (!overrideText) {
+    // 用 === undefined 与上方 `overrideText ?? inputContent` 的取值语义保持一致，
+    // 避免未来出现 handleSend('') 时两条路径行为割裂
+    if (overrideText === undefined) {
       setInputContent('')
       setInputHtmlContent('')
     }
