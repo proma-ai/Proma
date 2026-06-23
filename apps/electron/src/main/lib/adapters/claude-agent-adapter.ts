@@ -738,7 +738,11 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,
         // 关键：false 获取完整消息，与 v2 stream() 返回格式一致
         includePartialMessages: false,
-        promptSuggestions: true,
+        // 关闭 SDK 自动 prompt_suggestion：它在每轮 result 之后才到达，是旧版「收到 result 后
+        // 仍需等 2s 尾部消息」约束的根源。关闭后 result 即本轮最后一条消息，adapter 可在 result
+        // 后立即主动终止 iterator（见下方终止分支）。Plan 模式的「请执行该计划」建议由
+        // orchestrator 自行注入，不依赖此选项，故功能不受影响。
+        promptSuggestions: false,
         cwd: options.cwd,
         abortController: controller,
         env: options.env,
@@ -861,6 +865,15 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         queryReadyResolvers.delete(options.sessionId)
       }
 
+      // 终止标记：收到非 keep-open 的 terminal result 后置 true，yield 该 result 后主动 break。
+      // SDK 0.3.185 把会话终止逻辑挪进了 cleanup()，而 cleanup() 只在 iterator.return() 被调用时
+      // 触发（旧版「关 stdin → 子进程 EOF 退出 → 输出流自然 done」的链路已废弃，见 Transport.close
+      // 注释 "eliminating need for endInput"）。for-await 的 break 会自动对 SDK iterator 调
+      // .return()，进而触发 cleanup（内部 Promise.race([waitForExit(), 2s]) 有界），让子进程退出、
+      // 输出流结束。这样 orchestrator 的 next() 立即拿到 done:true 走自然退出路径，无需再依赖其
+      // 2s drain timeout 兜底。promptSuggestions 已关闭，result 即本轮最后一条消息，break 不会丢消息。
+      let terminateAfterTerminalResult = false
+
       for await (const sdkMessage of queryIterator) {
         if (controller.signal.aborted) break
 
@@ -924,15 +937,23 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
             // 任务活动会持续重置计时器，仅在长时间彻底静默时兜底释放子进程，避免叠加场景下子进程泄漏。
             if (keepForTasks) armIdleTimer()
           } else {
-            // result 表示本轮真正结束，关闭消息通道让 SDK 自然调用 endInput() 关闭 stdin。
-            // 子进程检测到 stdin EOF 后会退出，readMessages() 结束，iterator 返回 done:true。
-            // 注意：prompt_suggestion 等尾部消息仍会通过 stdout 正常传递，不受影响。
+            // result 表示本轮真正结束。先关闭消息通道（让 SDK 不再读取新输入），
+            // 再标记 terminateAfterTerminalResult，在 yield 本条 result 后主动 break 出循环。
+            // break 会对 SDK iterator 调 .return() → 触发 SDK cleanup（关闭 in-process MCP 传输 +
+            // 有界等待子进程退出），输出流随即结束。SDK 0.3.185 已不再走「stdin EOF → 自然 done」
+            // 链路（见 Transport.close 注释），必须由 .return() 驱动终止，否则会挂在 next() 上、
+            // 只能靠 orchestrator 的 2s drain timeout 兜底。promptSuggestions 已关闭，result 即
+            // 本轮最后一条消息，break 不会丢失尾部消息。
             clearIdleTimer()
             channel.close()
+            terminateAfterTerminalResult = true
           }
         }
 
         yield sdkMessage as SDKMessage
+
+        // terminal result 已 yield，主动结束循环触发 SDK iterator 的优雅清理
+        if (terminateAfterTerminalResult) break
       }
     } finally {
       // 注意：pidMap 的清理由 child.on('exit') 触发，不在这里清除

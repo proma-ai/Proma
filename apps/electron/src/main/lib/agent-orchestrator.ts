@@ -1647,8 +1647,11 @@ export class AgentOrchestrator {
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
-          // result 收到后的安全超时：adapter 层 channel.close() 应让 iterator 自然关闭，
-          // 此 timeout 仅作安全网，防止极端情况下 iterator 仍未关闭
+          // result 收到后的安全超时：正常情况下 adapter 收到 terminal result 后会主动 break 自己的
+          // for-await 循环（触发 SDK iterator.return → cleanup），让此处的 next() 立即拿到 done。
+          // 此 timeout 仅作真正的兜底安全网，防止极端情况（SDK 行为再次变化等）下 iterator 不关闭、
+          // 事件循环无限挂起。正常运行下不应触发——若日志频繁出现 drain timeout，说明 adapter 主动
+          // 终止路径失效，需排查。
           let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
           const RESULT_DRAIN_TIMEOUT_MS = 2_000
           // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
@@ -1865,8 +1868,9 @@ export class AgentOrchestrator {
                 awaitingBackgroundWake = true
                 idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
               } else if (!keepChannelOpen && !drainTimeoutPromise) {
-                // 启动 drain 超时安全网：adapter 层 channel.close() 应让 iterator 自然关闭，
-                // 此处仅在极端情况下（如 SDK 版本不兼容）保护事件循环不无限挂起
+                // 启动 drain 超时安全网：正常情况下 adapter 收到 terminal result 会主动 break
+                // 触发 iterator.return → 下一次 next() 立即返回 done，此 timeout 不会触发。
+                // 仅在极端情况下（adapter 主动终止失效、SDK 行为再次变化）保护事件循环不无限挂起。
                 drainTimeoutPromise = new Promise((resolve) =>
                   setTimeout(() => resolve('drain_timeout'), RESULT_DRAIN_TIMEOUT_MS),
                 )
