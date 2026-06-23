@@ -449,6 +449,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
   /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开）。刻意不持久化：折叠被视为临时查看行为，刷新/重启后恢复默认展开 */
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = React.useState<Set<string>>(new Set())
+  /** 记录被用户折叠的委派父会话 ID（点击主任务标题时折叠/展开其子任务）。首次加载时自动折叠所有已有父级 */
+  const [collapsedDelegationParentIds, setCollapsedDelegationParentIds] = React.useState<Set<string>>(new Set())
+  /** 标记是否已完成首次自动折叠，避免后续新创建的委派也被折叠 */
+  const didInitCollapseRef = React.useRef(false)
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
@@ -945,6 +949,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setCollapsedWorkspaceIds((prev) => toggleSetEntry(prev, groupId))
   }, [])
 
+  /** 切换委派子任务的折叠/展开状态 */
+  const handleToggleDelegationCollapse = React.useCallback((parentSessionId: string): void => {
+    setCollapsedDelegationParentIds((prev) => toggleSetEntry(prev, parentSessionId))
+  }, [])
+
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
     [workspaces.length],
@@ -1318,18 +1327,35 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.toggleArchiveAgentSession(id)
-      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      // 归档/取消归档父会话时，后端已联动处理子会话。拉取最新列表增量更新
+      const fresh = await window.electronAPI.listAgentSessions()
+      const childSessions = fresh.filter(s => s.parentSessionId === id)
+      const changedSessions = [updated, ...childSessions]
+      setAgentSessions((prev) => {
+        let next = prev
+        for (const s of changedSessions) {
+          next = replaceAgentSessionInFreshnessOrder(next, s)
+        }
+        return next
+      })
+      const childIds = childSessions.map(s => s.id)
       // 归档时自动关闭该会话的标签页，并同步新激活标签的副作用，
       // 否则 RightSidePanel（依赖 currentAgentSessionIdAtom）会因为
       // 指针被错误置 null 而消失。
       if (updated.archived) {
         const currentTabs = store.get(tabsAtom)
         const currentActiveTabId = store.get(activeTabIdAtom)
-        const wasActive = currentActiveTabId === id
-        const tabResult = closeTab(currentTabs, currentActiveTabId, id)
+        // 关闭父会话标签页
+        let tabResult = closeTab(currentTabs, currentActiveTabId, id)
+        // 同时关闭所有委派子会话的标签页（childIds 已在上面从 fresh 列表计算）
+        for (const childId of childIds) {
+          tabResult = closeTab(tabResult.tabs, tabResult.activeTabId, childId)
+          cleanupMapAtoms(childId)
+        }
         setTabs(tabResult.tabs)
         setActiveTabId(tabResult.activeTabId)
         cleanupMapAtoms(id)
+        const wasActive = currentActiveTabId === id || childIds.includes(currentActiveTabId ?? '')
         if (wasActive) {
           const newActiveTab = tabResult.activeTabId
             ? tabResult.tabs.find((t) => t.id === tabResult.activeTabId) ?? null
@@ -1398,6 +1424,59 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     },
     [agentSessions, draftSessionIds, workspaces],
   )
+
+  /** 委派子会话映射：parentSessionId → 委派子会话列表（按 updatedAt 倒序），包含置顶子任务 */
+  const delegationChildrenMap = React.useMemo(() => {
+    const map = new Map<string, AgentSessionMeta[]>()
+    for (const session of agentSessions) {
+      if (session.parentSessionId && session.sourceDelegationId && !session.archived) {
+        const children = map.get(session.parentSessionId) ?? []
+        children.push(session)
+        map.set(session.parentSessionId, children)
+      }
+    }
+    // 每个父会话的子节点按更新时间倒序
+    for (const [parentId, children] of map) {
+      map.set(parentId, sortAgentSessionsByUpdatedAtDesc(children))
+    }
+    return map
+  }, [agentSessions])
+
+  /** 已被置顶的委派父会话 ID 集合（用于从项目列表排除其子任务，避免重复出现在置顶区和项目区） */
+  const pinnedDelegationParentIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of pinnedAgentSessions) {
+      if (delegationChildrenMap.has(s.id)) {
+        ids.add(s.id)
+      }
+    }
+    return ids
+  }, [pinnedAgentSessions, delegationChildrenMap])
+
+  // 首次加载 + 运行时：委派子会话的折叠/展开
+  // - 首次加载时自动折叠所有已有委派父级（排除当前激活子会话的父级）
+  // - 运行时激活委派子会话时自动展开其父级
+  React.useEffect(() => {
+    if (!didInitCollapseRef.current && delegationChildrenMap.size > 0) {
+      const collapsed = new Set(delegationChildrenMap.keys())
+      if (activeSessionId && mode === 'agent') {
+        const sessions = store.get(agentSessionsAtom)
+        const activeSession = sessions.find(s => s.id === activeSessionId)
+        if (activeSession?.parentSessionId && activeSession.sourceDelegationId) {
+          collapsed.delete(activeSession.parentSessionId)
+        }
+      }
+      setCollapsedDelegationParentIds(collapsed)
+      didInitCollapseRef.current = true
+      return
+    }
+    if (!activeSessionId || mode !== 'agent') return
+    const sessions = store.get(agentSessionsAtom)
+    const activeSession = sessions.find(s => s.id === activeSessionId)
+    if (activeSession?.parentSessionId && activeSession.sourceDelegationId) {
+      setCollapsedDelegationParentIds((prev) => deleteSetEntry(prev, activeSession.parentSessionId!))
+    }
+  }, [delegationChildrenMap, activeSessionId, mode, store])
 
   /**
    * 项目组的最终显示顺序：把合成「自动任务」组按持久化的索引插入真实项目组中
@@ -2001,24 +2080,56 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               >
                 <div className="px-2">
                   <div className="ml-4 flex flex-col gap-0.5">
-                    {pinnedAgentSessions.map((session) => (
-                      <AgentSessionItem
-                        key={`pinned-${session.id}`}
-                        session={session}
-                        active={session.id === activeSessionId}
-                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                        showPinIcon={false}
-                        leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                        workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
-                        relativeTimeNow={relativeTimeNow}
-                        onSelect={handleSelectAgentSession}
-                        onRequestDelete={handleRequestDelete}
-                        onRequestMove={handleRequestMove}
-                        onRename={handleAgentRename}
-                        onTogglePin={handleTogglePinAgent}
-                        onToggleArchive={handleToggleArchiveAgent}
-                      />
-                    ))}
+                    {(() => {
+                      const pinnedIds = new Set(pinnedAgentSessions.map(s => s.id))
+                      const topLevelPinned = pinnedAgentSessions.filter(s => {
+                        if (s.parentSessionId && delegationChildrenMap.has(s.parentSessionId) && pinnedIds.has(s.parentSessionId)) {
+                          return false
+                        }
+                        return true
+                      })
+                      return topLevelPinned.map((session) => {
+                        const children = delegationChildrenMap.get(session.id) ?? []
+                        const delegationCollapsed = collapsedDelegationParentIds.has(session.id)
+
+                        return (
+                          <React.Fragment key={`pinned-${session.id}`}>
+                            <AgentSessionItem
+                              session={session}
+                              active={session.id === activeSessionId}
+                              indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                              showPinIcon={false}
+                              leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
+                              workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
+                              relativeTimeNow={relativeTimeNow}
+                              onSelect={handleSelectAgentSession}
+                              onRequestDelete={handleRequestDelete}
+                              onRequestMove={handleRequestMove}
+                              onRename={handleAgentRename}
+                              onTogglePin={handleTogglePinAgent}
+                              onToggleArchive={handleToggleArchiveAgent}
+                            />
+                            <DelegationChildren
+                              parentSessionId={session.id}
+                              children={children}
+                              collapsed={delegationCollapsed}
+                              onToggleCollapse={handleToggleDelegationCollapse}
+                              activeSessionId={activeSessionId}
+                              agentIndicatorMap={agentIndicatorMap}
+                              relativeTimeNow={relativeTimeNow}
+                              workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
+                              showPinIcon={(s) => !!s.pinned}
+                              onSelect={handleSelectAgentSession}
+                              onRequestDelete={handleRequestDelete}
+                              onRequestMove={handleRequestMove}
+                              onRename={handleAgentRename}
+                              onTogglePin={handleTogglePinAgent}
+                              onToggleArchive={handleToggleArchiveAgent}
+                            />
+                          </React.Fragment>
+                        )
+                      })
+                    })()}
                   </div>
                 </div>
               </div>
@@ -2104,6 +2215,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     onRename={handleAgentRename}
                     onTogglePin={handleTogglePinAgent}
                     onToggleArchive={handleToggleArchiveAgent}
+                    delegationChildrenMap={delegationChildrenMap}
+                    collapsedDelegationParentIds={collapsedDelegationParentIds}
+                    onToggleDelegationCollapse={handleToggleDelegationCollapse}
+                    pinnedDelegationParentIds={pinnedDelegationParentIds}
                   />
                 )
               })}
@@ -2902,6 +3017,101 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   )
 })
 
+// ===== 委派子任务折叠块（置顶区和项目组复用） =====
+
+interface DelegationChildrenProps {
+  parentSessionId: string
+  children: AgentSessionMeta[]
+  collapsed: boolean
+  onToggleCollapse: (sessionId: string) => void
+  /** 可选过滤器，排除不需要在此处渲染的子任务（如项目组中排除已置顶子任务） */
+  childFilter?: (child: AgentSessionMeta) => boolean
+  activeSessionId: string | null
+  agentIndicatorMap: Map<string, SessionIndicatorStatus>
+  relativeTimeNow: number
+  workspaceName?: string
+  showPinIcon: (session: AgentSessionMeta) => boolean
+  onSelect: (id: string, title: string) => void
+  onRequestDelete: (id: string) => void
+  onRequestMove: (id: string) => void
+  onRename: (id: string, newTitle: string) => Promise<void>
+  onTogglePin: (id: string) => Promise<void>
+  onToggleArchive: (id: string) => Promise<void>
+}
+
+const DelegationChildren = React.memo(function DelegationChildren({
+  parentSessionId,
+  children,
+  collapsed,
+  onToggleCollapse,
+  childFilter,
+  activeSessionId,
+  agentIndicatorMap,
+  relativeTimeNow,
+  workspaceName,
+  showPinIcon,
+  onSelect,
+  onRequestDelete,
+  onRequestMove,
+  onRename,
+  onTogglePin,
+  onToggleArchive,
+}: DelegationChildrenProps): React.ReactElement {
+  const filtered = childFilter ? children.filter(childFilter) : children
+  if (filtered.length === 0) return <></>
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onToggleCollapse(parentSessionId)
+        }}
+        className={cn(
+          'flex items-center gap-1.5 w-full text-left pl-2 pr-1.5 py-0.5 rounded text-[12px] transition-colors titlebar-no-drag border-l-2',
+          collapsed
+            ? 'text-foreground/50 hover:text-foreground/70 border-border/40 hover:bg-foreground/[0.03]'
+            : 'text-foreground/40 hover:text-foreground/60 border-border/30 hover:bg-foreground/[0.03]',
+        )}
+      >
+        <ChevronRight
+          size={10}
+          className={cn(
+            'flex-shrink-0 transition-transform duration-150',
+            collapsed ? '' : 'rotate-90',
+          )}
+        />
+        <GitBranch size={10} className="flex-shrink-0 opacity-60" />
+        <span className="tabular-nums font-medium">{children.length}</span>
+        <span className="opacity-70">个子任务</span>
+      </button>
+      {!collapsed && (
+        <div className="ml-3 border-l-2 border-border/30 pl-2 flex flex-col gap-0.5">
+          {filtered.map((child) => (
+            <AgentSessionItem
+              key={child.id}
+              session={child}
+              active={child.id === activeSessionId}
+              indicatorStatus={agentIndicatorMap.get(child.id) ?? 'idle'}
+              showPinIcon={showPinIcon(child)}
+              leftAccent={getSessionLeftAccent(agentIndicatorMap.get(child.id) ?? 'idle')}
+              relativeTimeNow={relativeTimeNow}
+              workspaceName={workspaceName}
+              onSelect={onSelect}
+              onRequestDelete={onRequestDelete}
+              onRequestMove={onRequestMove}
+              onRename={onRename}
+              onTogglePin={onTogglePin}
+              onToggleArchive={onToggleArchive}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+})
+
 // ===== 项目分组历史 =====
 
 interface AgentProjectGroupItemProps {
@@ -2939,6 +3149,14 @@ interface AgentProjectGroupItemProps {
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
+  /** 委派子会话映射（parentSessionId → 子会话列表） */
+  delegationChildrenMap: Map<string, AgentSessionMeta[]>
+  /** 折叠的委派父会话 ID 集合 */
+  collapsedDelegationParentIds: Set<string>
+  /** 切换委派子节点折叠 */
+  onToggleDelegationCollapse: (parentSessionId: string) => void
+  /** 已被置顶的委派父会话 ID（其子任务在项目列表中应隐藏，避免与置顶区重复） */
+  pinnedDelegationParentIds: Set<string>
 }
 
 const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
@@ -2973,6 +3191,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onRename,
   onTogglePin,
   onToggleArchive,
+  delegationChildrenMap,
+  collapsedDelegationParentIds,
+  onToggleDelegationCollapse,
+  pinnedDelegationParentIds,
 }: AgentProjectGroupItemProps): React.ReactElement {
   const isCurrent = group.workspace.id === currentWorkspaceId
 
@@ -3203,24 +3425,65 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         {!collapsed ? (
           group.sessions.length > 0 ? (
             <div className="flex flex-col gap-0.5">
-              {sessions.map((session) => (
-                <AgentSessionItem
-                  key={session.id}
-                  session={session}
-                  active={session.id === activeSessionId}
-                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                  showPinIcon={!!session.pinned}
-                  leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                  relativeTimeNow={relativeTimeNow}
-                  workspaceName={isAutomationGroup && session.workspaceId ? workspaceNameMap?.get(session.workspaceId) : undefined}
-                  onSelect={onSelectSession}
-                  onRequestDelete={onRequestDelete}
-                  onRequestMove={onRequestMove}
-                  onRename={onRename}
-                  onTogglePin={onTogglePin}
-                  onToggleArchive={onToggleArchive}
-                />
-              ))}
+              {(() => {
+                // 计算本组内哪些会话是其委派子节点的父级（且该父级在本组 sessions 中可见）
+                const sessionIds = new Set(sessions.map(s => s.id))
+                const parentIdsInGroup = new Set<string>()
+                for (const parentId of delegationChildrenMap.keys()) {
+                  if (sessionIds.has(parentId)) {
+                    parentIdsInGroup.add(parentId)
+                  }
+                }
+                // 过滤出顶层会话：跳过其可见父级在本组内或已被置顶的委派子会话
+                // （置顶父级的子任务应出现在置顶区，不在项目列表中展示）
+                const topLevelSessions = sessions.filter(s =>
+                  !s.parentSessionId
+                  || (!parentIdsInGroup.has(s.parentSessionId) && !pinnedDelegationParentIds.has(s.parentSessionId))
+                )
+
+                return topLevelSessions.map((session) => {
+                  const children = delegationChildrenMap.get(session.id) ?? []
+                  const delegationCollapsed = collapsedDelegationParentIds.has(session.id)
+
+                  return (
+                    <React.Fragment key={session.id}>
+                      <AgentSessionItem
+                        session={session}
+                        active={session.id === activeSessionId}
+                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
+                        showPinIcon={!!session.pinned}
+                        leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
+                        relativeTimeNow={relativeTimeNow}
+                        workspaceName={isAutomationGroup && session.workspaceId ? workspaceNameMap?.get(session.workspaceId) : undefined}
+                        onSelect={onSelectSession}
+                        onRequestDelete={onRequestDelete}
+                        onRequestMove={onRequestMove}
+                        onRename={onRename}
+                        onTogglePin={onTogglePin}
+                        onToggleArchive={onToggleArchive}
+                      />
+                      <DelegationChildren
+                        parentSessionId={session.id}
+                        children={children}
+                        collapsed={delegationCollapsed}
+                        onToggleCollapse={onToggleDelegationCollapse}
+                        childFilter={(c) => !c.pinned}
+                        activeSessionId={activeSessionId}
+                        agentIndicatorMap={agentIndicatorMap}
+                        relativeTimeNow={relativeTimeNow}
+                        workspaceName={isAutomationGroup && session.workspaceId ? workspaceNameMap?.get(session.workspaceId) : undefined}
+                        showPinIcon={(s) => !!s.pinned}
+                        onSelect={onSelectSession}
+                        onRequestDelete={onRequestDelete}
+                        onRequestMove={onRequestMove}
+                        onRename={onRename}
+                        onTogglePin={onTogglePin}
+                        onToggleArchive={onToggleArchive}
+                      />
+                    </React.Fragment>
+                  )
+                })
+              })()}
 
               {hiddenCount > 0 && (
                 <button

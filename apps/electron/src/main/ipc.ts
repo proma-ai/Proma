@@ -1821,12 +1821,32 @@ export function registerIpcHandlers(): void {
       const current = sessions.find((s) => s.id === id)
       if (!current) throw new Error(`Agent session not found: ${id}`)
       const newArchived = !current.archived
-      // 归档时自动取消置顶
-      const updates: Partial<AgentSessionMeta> = { archived: newArchived }
-      if (newArchived && current.pinned) {
-        updates.pinned = false
+
+      const buildArchiveUpdates = (session: AgentSessionMeta): Partial<AgentSessionMeta> => {
+        const u: Partial<AgentSessionMeta> = { archived: newArchived }
+        if (newArchived && session.pinned) {
+          u.pinned = false
+        }
+        return u
       }
-      return updateAgentSessionMeta(id, updates)
+
+      const result = updateAgentSessionMeta(id, buildArchiveUpdates(current))
+
+      // 联动归档/取消归档同工作区内的委派子会话（跨工作区子会话不联动）
+      const childSessions = sessions.filter(
+        (s) => s.parentSessionId === id
+          && s.workspaceId === current.workspaceId
+          && s.archived !== newArchived
+      )
+      for (const child of childSessions) {
+        try {
+          updateAgentSessionMeta(child.id, buildArchiveUpdates(child))
+        } catch (err) {
+          console.error(`[归档联动] 子会话 ${child.id} 归档失败:`, err)
+        }
+      }
+
+      return result
     }
   )
 
