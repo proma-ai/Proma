@@ -59,7 +59,7 @@ proma-v2/
 #### @proma/electron (v0.9.5)
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
-  - `@anthropic-ai/claude-agent-sdk@0.3.143` - Agent SDK
+  - `@anthropic-ai/claude-agent-sdk@0.3.185` - Agent SDK
   - `@larksuiteoapi/node-sdk` - 飞书集成
   - Radix UI、TipTap、Tailwind CSS
   - 文件解析：`pdf-parse`、`officeparser`、`word-extractor`
@@ -135,7 +135,7 @@ bun run generate:icons    # 生成应用图标
 | **构建工具** | Vite | 6.0.3 |
 | **打包工具** | esbuild | 0.24.0+ |
 | **分发工具** | Electron Builder | 25.1.8 |
-| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.3.143 |
+| **Agent SDK** | @anthropic-ai/claude-agent-sdk | 0.3.185 |
 | **飞书 SDK** | @larksuiteoapi/node-sdk | 最新 |
 
 ## 核心架构
@@ -390,7 +390,7 @@ bun run generate:icons    # 生成应用图标
 
 ## Agent SDK 集成架构
 
-基于 `@anthropic-ai/claude-agent-sdk@0.3.143` 实现 Agent 模式，与 Chat 模式并行。
+基于 `@anthropic-ai/claude-agent-sdk@0.3.185` 实现 Agent 模式，与 Chat 模式并行。
 
 ### 核心流程
 
@@ -461,6 +461,10 @@ React UI 更新
 - `0.2.120`: `query()` 省略 `settingSources` 时默认加载所有来源（Proma 已显式传 `['user', 'project']`，不受影响）
 - `0.3.142`: SDK/headless 默认使用 Task 工具（`TaskCreate` / `TaskUpdate` / `TaskGet` / `TaskList`）替代已废弃的 `TodoWrite`；MCP server 默认后台连接，慢连接会在 `init` 中呈现 `pending`
 - `0.3.143`: `@anthropic-ai/sdk` 与 `@modelcontextprotocol/sdk` 改为 peerDependencies；bun/npm/pnpm 会自动安装
+- `0.3.185`: **会话终止语义改变（重要）**。旧版链路「收到 result → `channel.close()` → SDK `endInput()` 关 stdin → 子进程 EOF 退出 → 输出流自然 yield done」已废弃（`Transport.close` 注释明确 "eliminating need for endInput"）。新版把终止逻辑全部挪进 `Query.cleanup()`，而 `cleanup()` **只在 `iterator.return()` 被调用时触发**（`next()` 仅透传，不会因输入关闭而自动 yield done）。
+  - **症状**：若 adapter 收到 terminal result 后只调 `channel.close()` 而不主动终止 iterator，输出流不会结束，消费循环挂在 `next()` 上，最终只能靠 orchestrator 的 2s drain timeout 兜底——表现为**每个会话结束都白等 2 秒**并打印 `drain timeout` 日志。
+  - **正确做法**：adapter（`claude-agent-adapter.ts`）收到非 keep-open 的 terminal result 后，在 yield 该消息后主动 `break` for-await 循环，触发 SDK `iterator.return()` → `cleanup()`（内部 `Promise.race([waitForExit(), 2s])` 有界等待子进程退出）。配合关闭 `promptSuggestions`（该消息在 result 之后到达，否则 break 会丢它）。
+  - orchestrator 的 `RESULT_DRAIN_TIMEOUT_MS` drain timeout 应退化为永不触发的兜底；若日志频繁出现 `drain timeout`，说明 adapter 主动终止路径失效，需排查。
 
 ### 共享类型（`@proma/shared`）
 
