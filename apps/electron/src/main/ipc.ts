@@ -1449,8 +1449,12 @@ export function registerIpcHandlers(): void {
       }
 
       // 主题相关设置变化时，广播给所有窗口（跨窗口同步，如 Quick Task 面板）
-      if (updates.themeMode !== undefined || updates.themeStyle !== undefined) {
-        const payload = { themeMode: result.themeMode, themeStyle: result.themeStyle }
+      if (updates.themeMode !== undefined || updates.themeStyle !== undefined || updates.interfaceVariant !== undefined) {
+        const payload = {
+          themeMode: result.themeMode,
+          themeStyle: result.themeStyle,
+          interfaceVariant: result.interfaceVariant,
+        }
         BrowserWindow.getAllWindows().forEach((win) => {
           // 跳过发起者窗口，避免重复应用
           if (win.webContents.id !== event.sender.id) {

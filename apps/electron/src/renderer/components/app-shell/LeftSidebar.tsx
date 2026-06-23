@@ -81,6 +81,7 @@ import { hasUpdateAtom } from '@/atoms/updater'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { promptConfigAtom, selectedPromptIdAtom, conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
+import { interfaceVariantAtom } from '@/atoms/theme'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
@@ -467,6 +468,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
   const promptConfig = useAtomValue(promptConfigAtom)
   const setSelectedPromptId = useSetAtom(selectedPromptIdAtom)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
 
   // Agent 模式状态
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
@@ -1623,7 +1626,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   if (sidebarCollapsed) {
     return (
       <div
-        className="relative h-full flex flex-col items-center bg-background rounded-2xl shadow-xl dark:shadow-md transition-[width] duration-300 px-2"
+        className={cn(
+          'relative h-full flex flex-col items-center transition-[width] duration-300 px-2',
+          isClassic
+            ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
+            : 'bg-[hsl(var(--sidebar-surface))]'
+        )}
         style={{ width: 60, flexShrink: 0 }}
       >
         <SidebarWindowDragStrip
@@ -1834,7 +1842,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // ===== 展开状态：完整侧边栏 =====
   return (
     <div
-      className="relative h-full flex flex-col bg-background rounded-2xl shadow-xl dark:shadow-md transition-[width] duration-300"
+      className={cn(
+        'relative h-full flex flex-col transition-[width] duration-300',
+        isClassic
+          ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
+          : 'bg-[hsl(var(--sidebar-surface))]'
+      )}
       style={{ width: width ?? 300, minWidth: 200, flexShrink: 1 }}
     >
       <SidebarWindowDragStrip
@@ -1853,7 +1866,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           <TooltipTrigger asChild>
             <button
               onClick={() => setSidebarCollapsed(true)}
-              className="mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] bg-muted text-foreground/40 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors titlebar-no-drag"
+              className={cn(
+                'sidebar-collapse-button mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 titlebar-no-drag',
+                isClassic
+                  ? 'bg-muted hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors'
+                  : 'bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-[background-color,border-color,color] duration-150 border border-border/60 hover:border-border'
+              )}
             >
               <PanelLeftClose size={14} />
             </button>
@@ -2494,6 +2512,8 @@ const ConversationItem = React.memo(function ConversationItem({
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, menuOpen)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
 
   /** 进入编辑模式 */
   const startEdit = (): void => {
@@ -2581,7 +2601,7 @@ const ConversationItem = React.memo(function ConversationItem({
             active && 'bg-foreground/[0.08]',
           )}
         >
-          {(streaming || active) && (
+          {(streaming || (isClassic && active)) && (
             <span
               className={cn(
                 'absolute inset-y-0 left-0 w-[3px] rounded-l-md pointer-events-none',
@@ -2717,6 +2737,8 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
 
   const startEdit = (): void => {
     setEditTitle(session.title)
@@ -2807,7 +2829,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
             active && leftAccent !== 'orange' && 'bg-foreground/[0.08]',
           )}
         >
-          {(leftAccent || active) && (
+          {(leftAccent || (isClassic && active)) && (
             <span
               className={cn(
                 'absolute inset-y-0 left-0 w-[3px] rounded-l-md pointer-events-none',

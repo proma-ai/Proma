@@ -72,12 +72,15 @@
 
 @layer base {
   /* ===== 全主题统一的几何与阴影 token =====
-   * --radius 基准 10px，按钮 sm/md/lg/xl 圆角全部由它派生（tailwind.config.js）；
+   * --radius 基准 6px，按钮 sm/md/lg/xl 圆角全部由它派生（tailwind.config.js）；
    * --shadow-* 五档语义阴影，由 :root（亮色）与 .dark（深色）分别定义，
    * 深色态额外加 inset 顶高光来制造"浮起"感（弥补黑底缺乏自然阴影的问题）。
    */
   :root {
-    --radius: 0.625rem;
+    --radius: 0.375rem;
+    --radius-cap: 6px;
+    --radius-xl-extra: 2px;
+    --radius-2xl-extra: 4px;
     --shadow-xs: 0 1px 1px 0 rgb(0 0 0 / 0.04);
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05), 0 1px 1px 0 rgb(0 0 0 / 0.04);
     --shadow-md: 0 4px 8px -2px rgb(0 0 0 / 0.08), 0 2px 4px -1px rgb(0 0 0 / 0.05), 0 0 0 1px rgb(0 0 0 / 0.04);
@@ -117,6 +120,10 @@
     --dialog: 0 0% 100%;
     --dialog-foreground: 0 0% 3.9%;
     --content-area: 0 0% 100%;            /* 主内容区域背景 */
+    --sidebar-surface: 60 14.3% 98.6%;    /* 默认浅色侧栏：RGB 252/252/251 */
+    --tabbar-surface: 60 14.3% 98.6%;     /* 默认浅色未选中 Tab 背景：RGB 252/252/251 */
+    --input-surface: 60 14.3% 98.6%;      /* 默认浅色输入框：RGB 252/252/251 */
+    --tab-surface: 0 0% 100%;             /* 与内容区域无缝衔接 */
     /* 毛玻璃 Tooltip：深色半透明背景 + 白色文字 */
     --tooltip: 0 0% 15%;
     --tooltip-foreground: 0 0% 98%;
@@ -154,6 +161,10 @@
     --dialog: 0 0% 12%;                   /* 设置弹窗：比背景更亮，悬浮感 */
     --dialog-foreground: 0 0% 98%;
     --content-area: 0 0% 7%;              /* 主内容区域背景 zinc-900 */
+    --sidebar-surface: 0 0% 7%;
+    --tabbar-surface: 0 0% 7%;
+    --input-surface: 0 0% 7%;
+    --tab-surface: 0 0% 7%;
     /* 毛玻璃 Tooltip：深色半透明背景 + 白色文字 */
     --tooltip: 0 0% 20%;
     --tooltip-foreground: 0 0% 98%;
@@ -189,6 +200,10 @@
     --popover-foreground: 210 30% 15%;    /* #1b2632 弹出前景 */
     --dialog: 0 0% 100%;                  /* #ffffff 弹窗背景 */
     --dialog-foreground: 210 30% 15%;     /* #1b2632 弹窗前景 */
+    --sidebar-surface: 205 35% 94%;
+    --tabbar-surface: 205 35% 94%;
+    --input-surface: 60 14.3% 98.6%;
+    --tab-surface: 205 30% 97%;
     --destructive: 0 84.2% 60.2%;         /* #ef4444 危险色 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
     --stop-hover-bg: hsla(0, 80%, 60%, 0.12);
@@ -210,6 +225,9 @@
     --background: 210 12% 13%;            /* 侧边栏：深海玻璃，色相微存 */
     --foreground: 210 14% 92%;
     --content-area: 210 14% 9%;           /* 内容区：最深，专注 */
+    --sidebar-surface: 210 12% 13%;
+    --tabbar-surface: 210 12% 13%;
+    --input-surface: 210 12% 13%;
     --muted: 210 12% 17%;
     --muted-foreground: 210 10% 60%;
     --border: 210 14% 24%;                /* 与背景拉开 11% 亮度，hairline 后可见 */
@@ -264,6 +282,10 @@
     --popover-foreground: 150 25% 15%;    /* #1d3026 弹出前景 */
     --dialog: 140 15% 96%;                /* #f3f6f4 弹窗背景 */
     --dialog-foreground: 150 25% 15%;     /* #1d3026 弹窗前景 */
+    --sidebar-surface: 140 25% 95%;
+    --tabbar-surface: 140 25% 95%;
+    --input-surface: 60 14.3% 98.6%;
+    --tab-surface: 140 20% 97%;
     --destructive: 0 72% 51%;             /* #dc2828 危险色 */
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
     --stop-hover-bg: hsla(0, 70%, 50%, 0.12);
@@ -285,6 +307,9 @@
     --background: 150 8% 14%;             /* 侧边栏：近中性灰 + 微微森绿余韵 */
     --foreground: 140 10% 92%;
     --content-area: 150 10% 9%;           /* 内容区：深林泥土 */
+    --sidebar-surface: 150 8% 14%;
+    --tabbar-surface: 150 8% 14%;
+    --input-surface: 150 8% 14%;
     --muted: 150 10% 17%;
     --muted-foreground: 145 8% 60%;
     --border: 150 12% 25%;
@@ -343,6 +368,10 @@
     --popover-foreground: 40 8% 18%;      /* #312f2a 弹出前景 */
     --dialog: 40 8% 94%;                  /* #f0efec 弹窗背景（主题色） */
     --dialog-foreground: 40 8% 18%;       /* #312f2a 弹窗前景 */
+    --sidebar-surface: 40 6% 88%;
+    --tabbar-surface: 40 6% 88%;
+    --input-surface: 60 14.3% 98.6%;
+    --tab-surface: 40 8% 94%;
     /* 功能色 */
     --destructive: 0 65% 50%;             /* #d43c3c 危险色 */
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
@@ -363,6 +392,9 @@
     --background: 260 6% 12%;             /* #1d1b20 背景（侧边栏） */
     --foreground: 30 10% 90%;             /* #e9e6e3 温暖前景文字 */
     --content-area: 270 8% 9%;            /* #161418 内容区域 */
+    --sidebar-surface: 260 6% 12%;
+    --tabbar-surface: 260 6% 12%;
+    --input-surface: 260 6% 12%;
     /* 次要色 - 淡紫灰调 */
     --muted: 260 6% 16%;                  /* #272429 次要背景 */
     --muted-foreground: 30 8% 60%;        /* #9f9690 次要文字 */
@@ -407,6 +439,9 @@
     --background: 100 6% 5%;              /* #0d0e0c 侧边栏 */
     --foreground: 90 20% 65%;             /* #acb09f 暖黄绿白 */
     --content-area: 100 6% 3%;            /* #080907 内容区：最深 */
+    --sidebar-surface: 100 6% 5%;
+    --tabbar-surface: 100 6% 5%;
+    --input-surface: 100 6% 5%;
     /* 次要色 */
     --muted: 100 5% 10%;                  /* #1a1b19 次要背景 */
     --muted-foreground: 90 12% 38%;       /* #636b5e 次要文字 */
@@ -846,27 +881,110 @@
 /* ===== TabBar 背景 ===== */
 /* 默认背景 */
 .tabbar-bg {
+  position: relative;
+  background-color: hsl(var(--tabbar-surface));
+}
+
+.tabbar-bg::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background-color: hsl(var(--border) / 0.8);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-tab-active {
+  position: relative;
+  z-index: 1;
+  background-color: hsl(var(--content-area));
+}
+
+.app-tab-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background-color: hsl(var(--content-area));
+  pointer-events: none;
+  z-index: 1;
+}
+
+.app-tab-inactive:hover {
+  background-color: hsl(var(--tab-surface) / 0.7);
+}
+
+[data-input-mode] > div:first-child {
+  background-color: hsl(var(--input-surface)) !important;
+}
+
+/* 现代界面：保留 rounded-full 的圆形/胶囊语义，只压低卡片、面板、气泡等大圆角。 */
+:root:not(.ui-classic) [class*="rounded-lg"]:not([class*="rounded-full"]),
+:root:not(.ui-classic) [class*="rounded-xl"]:not([class*="rounded-full"]),
+:root:not(.ui-classic) [class*="rounded-2xl"]:not([class*="rounded-full"]),
+:root:not(.ui-classic) [class*="rounded-3xl"]:not([class*="rounded-full"]),
+:root:not(.ui-classic) [class*="rounded-["]:not([class*="rounded-full"]) {
+  border-radius: var(--radius-cap);
+}
+
+/* 经典界面：视觉规则对齐 upstream。 */
+:root.ui-classic {
+  --radius: 0.625rem;
+  --radius-xl-extra: 4px;
+  --radius-2xl-extra: 8px;
+  --sidebar-surface: 0 0% 98%;
+}
+
+.ui-classic .tabbar-bg {
   background-color: hsl(var(--muted) / 0.5);
 }
 
-/* 远山暮霭：底部浅色阴影勾勒轮廓 */
-.theme-ocean-dark .tabbar-bg {
+.ui-classic.theme-ocean-dark .tabbar-bg {
   box-shadow: inset 0 -1px 0 0 hsl(210 14% 24% / 0.6);
 }
 
-/* 森息夜语：底部浅色阴影勾勒轮廓 */
-.theme-forest-dark .tabbar-bg {
+.ui-classic.theme-forest-dark .tabbar-bg {
   box-shadow: inset 0 -1px 0 0 hsl(150 12% 22% / 0.6);
 }
 
-/* 莫兰迪夜：底部浅色阴影勾勒轮廓 */
-.theme-slate-dark .tabbar-bg {
+.ui-classic.theme-slate-dark .tabbar-bg {
   box-shadow: inset 0 -1px 0 0 hsl(260 10% 18% / 0.6);
 }
 
-/* CRT 终端：TabBar 底部 hairline */
-.theme-terminal-dark .tabbar-bg {
+.ui-classic.theme-terminal-dark .tabbar-bg {
   box-shadow: inset 0 -1px 0 0 hsl(var(--border) / 0.6);
+}
+
+.ui-classic .tabbar-bg::after,
+.ui-classic .app-tab-active::after {
+  display: none;
+}
+
+.ui-classic .app-tab-active {
+  background-color: hsl(var(--tab-surface));
+  border-color: hsl(var(--border) / 0.5) !important;
+}
+
+.ui-classic [data-input-mode] > div:first-child {
+  background-color: hsl(var(--background) / 0.7) !important;
+}
+
+.ui-classic .mode-switcher-track {
+  background-color: hsl(var(--muted)) !important;
+}
+
+.ui-classic .sidebar-collapse-button {
+  background-color: hsl(var(--muted)) !important;
+  border-color: transparent !important;
+}
+
+.ui-classic .sidebar-collapse-button:hover {
+  background-color: hsl(var(--foreground) / 0.08) !important;
 }
 
 /* CRT 终端：Tab 流式指示器 — 保留原色，叠加 CRT 磷光质感 */

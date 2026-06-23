@@ -11,11 +11,12 @@
  */
 
 import { atom } from 'jotai'
-import { THEME_STYLES, type ThemeMode, type ThemeStyle } from '../../types'
+import { DEFAULT_INTERFACE_VARIANT, THEME_STYLES, type InterfaceVariant, type ThemeMode, type ThemeStyle } from '../../types'
 
 /** localStorage 缓存键 */
 const THEME_CACHE_KEY = 'proma-theme-mode'
 const THEME_STYLE_CACHE_KEY = 'proma-theme-style'
+const INTERFACE_VARIANT_CACHE_KEY = 'proma-interface-variant'
 
 /**
  * 从 localStorage 读取缓存的主题模式
@@ -48,6 +49,21 @@ function getCachedThemeStyle(): ThemeStyle {
 }
 
 /**
+ * 从 localStorage 读取缓存的界面风格
+ */
+function getCachedInterfaceVariant(): InterfaceVariant {
+  try {
+    const cached = localStorage.getItem(INTERFACE_VARIANT_CACHE_KEY)
+    if (cached === 'classic' || cached === 'modern') {
+      return cached
+    }
+  } catch {
+    // localStorage 不可用时忽略
+  }
+  return DEFAULT_INTERFACE_VARIANT
+}
+
+/**
  * 缓存主题模式到 localStorage
  */
 function cacheThemeMode(mode: ThemeMode): void {
@@ -69,11 +85,25 @@ function cacheThemeStyle(style: ThemeStyle): void {
   }
 }
 
+/**
+ * 缓存界面风格到 localStorage
+ */
+function cacheInterfaceVariant(variant: InterfaceVariant): void {
+  try {
+    localStorage.setItem(INTERFACE_VARIANT_CACHE_KEY, variant)
+  } catch {
+    // localStorage 不可用时忽略
+  }
+}
+
 /** 用户选择的主题模式 */
 export const themeModeAtom = atom<ThemeMode>(getCachedThemeMode())
 
 /** 用户选择的特殊风格 */
 export const themeStyleAtom = atom<ThemeStyle>(getCachedThemeStyle())
+
+/** 用户选择的界面风格 */
+export const interfaceVariantAtom = atom<InterfaceVariant>(getCachedInterfaceVariant())
 
 /** 系统当前是否为深色模式 */
 export const systemIsDarkAtom = atom<boolean>(true)
@@ -151,6 +181,28 @@ export function applyThemeToDOM(themeMode: ThemeMode, themeStyle: ThemeStyle = '
 }
 
 /**
+ * 应用界面风格到 DOM
+ */
+export function applyInterfaceVariantToDOM(variant: InterfaceVariant = DEFAULT_INTERFACE_VARIANT): void {
+  const html = document.documentElement
+  const targetClass = variant === 'classic' ? 'ui-classic' : 'ui-modern'
+  const currentClass = html.classList.contains('ui-classic')
+    ? 'ui-classic'
+    : html.classList.contains('ui-modern')
+      ? 'ui-modern'
+      : null
+
+  if (currentClass === targetClass) {
+    return
+  }
+
+  if (currentClass) {
+    html.classList.remove(currentClass)
+  }
+  html.classList.add(targetClass)
+}
+
+/**
  * 初始化主题系统
  *
  * 从主进程加载设置，监听系统主题变化。
@@ -160,6 +212,7 @@ export async function initializeTheme(
   setThemeMode: (mode: ThemeMode) => void,
   setSystemIsDark: (isDark: boolean) => void,
   setThemeStyle?: (style: ThemeStyle) => void,
+  setInterfaceVariant?: (variant: InterfaceVariant) => void,
 ): Promise<() => void> {
   // 从主进程加载持久化设置
   const settings = await window.electronAPI.getSettings()
@@ -171,6 +224,12 @@ export async function initializeTheme(
     setThemeStyle(settings.themeStyle)
     cacheThemeStyle(settings.themeStyle)
   }
+
+  const interfaceVariant = settings.interfaceVariant || DEFAULT_INTERFACE_VARIANT
+  if (setInterfaceVariant) {
+    setInterfaceVariant(interfaceVariant)
+  }
+  cacheInterfaceVariant(interfaceVariant)
 
   // 获取系统主题
   const isDark = await window.electronAPI.getSystemTheme()
@@ -185,11 +244,16 @@ export async function initializeTheme(
   const cleanupThemeSettings = window.electronAPI.onThemeSettingsChanged((payload) => {
     const mode = payload.themeMode as ThemeMode
     const style = (payload.themeStyle || 'default') as ThemeStyle
+    const variant = (payload.interfaceVariant || DEFAULT_INTERFACE_VARIANT) as InterfaceVariant
     setThemeMode(mode)
     cacheThemeMode(mode)
     if (setThemeStyle) {
       setThemeStyle(style)
       cacheThemeStyle(style)
+    }
+    if (setInterfaceVariant) {
+      setInterfaceVariant(variant)
+      cacheInterfaceVariant(variant)
     }
   })
 
@@ -215,4 +279,12 @@ export async function updateThemeMode(mode: ThemeMode): Promise<void> {
 export async function updateThemeStyle(style: ThemeStyle): Promise<void> {
   cacheThemeStyle(style)
   await window.electronAPI.updateSettings({ themeStyle: style })
+}
+
+/**
+ * 更新界面风格并持久化
+ */
+export async function updateInterfaceVariant(variant: InterfaceVariant): Promise<void> {
+  cacheInterfaceVariant(variant)
+  await window.electronAPI.updateSettings({ interfaceVariant: variant })
 }

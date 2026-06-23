@@ -10,6 +10,7 @@ import { PanelRightClose } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { agentDiffUnseenChangesAtom, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { interfaceVariantAtom } from '@/atoms/theme'
 
 type DiffPanelTab = 'session' | 'workspace' | 'changes'
 
@@ -28,6 +29,8 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
   const unseenMap = useAtomValue(agentDiffUnseenChangesAtom)
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
   const unseenChanges = unseenMap.get(currentSessionId ?? '') ?? false
   const prevTabStateRef = React.useRef<PreviousTabState>({ sessionId: currentSessionId, activeTab })
 
@@ -65,11 +68,16 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
           type="button"
           onClick={() => onTabChange('session')}
           className={cn(
-            'flex-1 px-3 h-[34px] rounded-t-lg text-xs transition-colors select-none cursor-pointer',
+            'flex-1 px-3 h-[34px] text-xs transition-colors select-none cursor-pointer',
+            isClassic ? 'rounded-t-lg' : 'rounded-none',
             'border-t border-l border-r',
             activeTab === 'session'
-              ? 'bg-content-area text-foreground border-border/50'
-              : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50',
+              ? isClassic
+                ? 'bg-content-area text-foreground border-border/50'
+                : 'app-tab-active text-foreground border-border/80'
+              : isClassic
+                ? 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50'
+                : 'app-tab-inactive text-muted-foreground border-transparent hover:text-foreground',
           )}
         >
           会话文件
@@ -78,11 +86,16 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
           type="button"
           onClick={() => onTabChange('workspace')}
           className={cn(
-            'flex-1 px-3 h-[34px] rounded-t-lg text-xs transition-colors select-none cursor-pointer',
+            'flex-1 px-3 h-[34px] text-xs transition-colors select-none cursor-pointer',
+            isClassic ? 'rounded-t-lg' : 'rounded-none',
             'border-t border-l border-r',
             activeTab === 'workspace'
-              ? 'bg-content-area text-foreground border-border/50'
-              : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50',
+              ? isClassic
+                ? 'bg-content-area text-foreground border-border/50'
+                : 'app-tab-active text-foreground border-border/80'
+              : isClassic
+                ? 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50'
+                : 'app-tab-inactive text-muted-foreground border-transparent hover:text-foreground',
           )}
         >
           工作区文件
@@ -91,11 +104,16 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
           type="button"
           onClick={handleChangesClick}
           className={cn(
-            'flex-1 px-3 h-[34px] rounded-t-lg text-xs transition-colors select-none cursor-pointer relative',
+            'flex-1 px-3 h-[34px] text-xs transition-colors select-none cursor-pointer relative',
+            isClassic ? 'rounded-t-lg' : 'rounded-none',
             'border-t border-l border-r',
             activeTab === 'changes'
-              ? 'bg-content-area text-foreground border-border/50'
-              : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50',
+              ? isClassic
+                ? 'bg-content-area text-foreground border-border/50'
+                : 'app-tab-active text-foreground border-border/80'
+              : isClassic
+                ? 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50'
+                : 'app-tab-inactive text-muted-foreground border-transparent hover:text-foreground',
           )}
         >
           <span className="inline-flex items-center gap-1">

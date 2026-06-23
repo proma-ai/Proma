@@ -17,6 +17,7 @@ import { appModeAtom } from '@/atoms/app-mode'
 import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { interfaceVariantAtom } from '@/atoms/theme'
 import { WindowControls } from '@/components/WindowControls'
 import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -81,6 +82,8 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const automationForm = useAtomValue(automationFormAtom)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
   // 定时任务表单打开时隐藏右侧文件面板，让中间区域扩展到全宽（表单内含自己的右栏配置）
   const activeView = useAtomValue(activeViewAtom)
   const showRightPanel = appMode === 'agent' && !!currentSessionId && !automationForm.open && activeView !== 'automations' && activeView !== 'agent-skills'
@@ -143,26 +146,42 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <WindowControls />
 
       <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
-        {/* 左侧边栏：可折叠，带圆角和内边距 */}
+        {/* 左侧边栏：可折叠 */}
         {/* titlebar-drag-region：wrapper 的 p-2 间隙也须可拖拽，否则 z-[60] 会把全局 z-50 drag 层挡住 */}
-        <div className="p-2 pr-0 relative z-[60] titlebar-drag-region crt-sidebar">
-
+        <div className={cn(isClassic ? 'p-2 pr-0' : '', 'relative z-[60] titlebar-drag-region crt-sidebar')}>
           <LeftSidebar />
         </div>
+        {!isClassic && (
+          <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
+        )}
 
         {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
-        <div className="flex-1 min-w-0 p-2 relative z-[60]">
+        <div className={cn('flex-1 min-w-0 relative z-[60]', isClassic && 'p-2')}>
           {/* 主内容区域（TabBar + TabContent） */}
           <MainArea />
         </div>
 
-        {/* 右侧边栏：Agent 文件面板，拖拽手柄在间距中间 */}
+        {/* 右侧边栏：Agent 文件面板 */}
         {showRightPanel && (
-          <div className={cn('relative z-[60] flex items-stretch transition-[padding] duration-300 ease-in-out crt-sidebar', isPanelOpen ? 'p-2 pl-0' : 'p-0')}>
-            {/* 拖拽手柄 — 绝对定位，居中于主区域和右侧面板的缝隙 */}
+          <div
+            className={cn(
+              'relative z-[60] flex items-stretch crt-sidebar',
+              isClassic
+                ? 'transition-[padding] duration-300 ease-in-out'
+                : '',
+              isClassic && (isPanelOpen ? 'p-2 pl-0' : 'p-0')
+            )}
+          >
+            {!isClassic && (
+              <div aria-hidden="true" className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-px bg-border/80 dark:bg-border/70" />
+            )}
+            {/* 拖拽手柄 */}
             {isPanelOpen && (
               <div
-                className="absolute left-0 top-0 bottom-0 w-[8px] -translate-x-1/2 cursor-col-resize active:bg-primary/50 transition-colors z-10"
+                className={cn(
+                  'absolute left-0 top-0 bottom-0 w-[8px] -translate-x-1/2 cursor-col-resize active:bg-primary/50 transition-colors',
+                  isClassic ? 'z-10' : 'z-20'
+                )}
                 onMouseDown={handleMouseDown}
               />
             )}

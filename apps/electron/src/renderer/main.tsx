@@ -16,9 +16,11 @@ import App from './App'
 import {
   themeModeAtom,
   themeStyleAtom,
+  interfaceVariantAtom,
   systemIsDarkAtom,
   resolvedThemeAtom,
   applyThemeToDOM,
+  applyInterfaceVariantToDOM,
   initializeTheme,
 } from './atoms/theme'
 import {
@@ -106,9 +108,11 @@ const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get(
 function ThemeInitializer(): null {
   const setThemeMode = useSetAtom(themeModeAtom)
   const setThemeStyle = useSetAtom(themeStyleAtom)
+  const setInterfaceVariant = useSetAtom(interfaceVariantAtom)
   const setSystemIsDark = useSetAtom(systemIsDarkAtom)
   const themeMode = useAtomValue(themeModeAtom)
   const themeStyle = useAtomValue(themeStyleAtom)
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
   const systemIsDark = useAtomValue(systemIsDarkAtom)
 
   // 初始化：从主进程加载设置 + 订阅系统主题变化
@@ -116,7 +120,7 @@ function ThemeInitializer(): null {
     let isMounted = true
     let cleanup: (() => void) | undefined
 
-    initializeTheme(setThemeMode, setSystemIsDark, setThemeStyle).then((fn) => {
+    initializeTheme(setThemeMode, setSystemIsDark, setThemeStyle, setInterfaceVariant).then((fn) => {
       if (isMounted) {
         cleanup = fn
       } else {
@@ -129,7 +133,7 @@ function ThemeInitializer(): null {
       isMounted = false
       cleanup?.()
     }
-  }, [setThemeMode, setSystemIsDark, setThemeStyle])
+  }, [setThemeMode, setSystemIsDark, setThemeStyle, setInterfaceVariant])
 
   // 响应式应用主题到 DOM
   // 用 useMemo 计算"实际会影响 DOM 的状态签名"作为唯一依赖：
@@ -149,6 +153,10 @@ function ThemeInitializer(): null {
     applyThemeToDOM(themeMode, themeStyle, systemIsDark)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themeSignature])
+
+  useEffect(() => {
+    applyInterfaceVariantToDOM(interfaceVariant)
+  }, [interfaceVariant])
 
   return null
 }
