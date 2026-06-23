@@ -28,6 +28,7 @@ import {
   agentModelIdAtom,
   agentChannelIdsAtom,
   agentWorkspacesAtom,
+  agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
   currentAgentSessionIdAtom,
   workspaceCapabilitiesVersionAtom,
@@ -349,15 +350,17 @@ function UpdaterInitializer(): null {
  */
 function AutomationInitializer(): null {
   const setAutomations = useSetAtom(automationsAtom)
+  const setAgentSessions = useSetAtom(agentSessionsAtom)
 
   useEffect(() => {
     const load = (): void => {
       window.electronAPI.listAutomations().then(setAutomations).catch(console.error)
+      window.electronAPI.listAgentSessions().then(setAgentSessions).catch(console.error)
     }
     load()
     const unsub = window.electronAPI.onAutomationChanged(load)
     return unsub
-  }, [setAutomations])
+  }, [setAutomations, setAgentSessions])
 
   return null
 }

@@ -138,6 +138,11 @@ export async function runAgent(
       const meta = getAgentSessionMeta(input.sessionId)
       if (meta?.sourceAutomationId && !meta.automationGraduated) {
         updateAgentSessionMeta(input.sessionId, { automationGraduated: true })
+        // 向渲染进程发送毕业事件，触发 toast 提示
+        eventBus.emit(input.sessionId, {
+          kind: 'proma_event',
+          event: { type: 'automation_graduated' },
+        })
       }
     } catch { /* 新会话可能尚未写入索引 */ }
   }
