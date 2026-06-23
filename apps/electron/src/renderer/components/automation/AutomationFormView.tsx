@@ -56,6 +56,21 @@ function formatTime(ts?: number): string {
   return new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+/** 毫秒时间戳 → <input type="datetime-local"> 需要的本地 "YYYY-MM-DDTHH:MM" 字符串（无时区后缀） */
+function tsToDatetimeLocal(ts?: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** datetime-local 字符串（按本地时区解释）→ 毫秒时间戳；空串返回 undefined */
+function datetimeLocalToTs(value: string): number | undefined {
+  if (!value) return undefined
+  const ts = new Date(value).getTime()
+  return Number.isFinite(ts) ? ts : undefined
+}
+
 function formatRunStatus(status: AutomationRun['status']): string {
   if (status === 'success') return '完成'
   if (status === 'error') return '失败'
@@ -92,6 +107,8 @@ function getDraftSignature(draft: AutomationDraft): string {
     timeOfDay: draft.timeOfDay ?? '',
     dayOfWeek: draft.dayOfWeek ?? '',
     dayOfMonth: draft.dayOfMonth ?? '',
+    scheduledAt: draft.scheduledAt ?? '',
+    maxRuns: draft.maxRuns ?? '',
     channelId: draft.channelId,
     modelId: draft.modelId ?? '',
     workspaceId: draft.workspaceId ?? '',
@@ -111,6 +128,8 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
+    scheduledAt: draft.scheduledAt,
+    maxRuns: draft.maxRuns,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId,
@@ -132,6 +151,8 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     timeOfDay: draft.timeOfDay,
     dayOfWeek: draft.dayOfWeek,
     dayOfMonth: draft.dayOfMonth,
+    scheduledAt: draft.scheduledAt,
+    maxRuns: draft.maxRuns,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId ?? '',
@@ -675,9 +696,33 @@ export function AutomationFormView(): React.ReactElement | null {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">下次运行</span>
                 <span className="text-foreground/80 tabular-nums">
-                  {live?.active ? formatTime(live?.nextRunAt) : '已暂停'}
+                  {live?.completedAt
+                    ? '已完成'
+                    : live?.active
+                      ? formatTime(live?.nextRunAt)
+                      : '已暂停'}
                 </span>
               </div>
+              {/* 已执行次数 / 上限：once 或设了 maxRuns 时才有展示意义 */}
+              {(live?.scheduleType === 'once' || live?.maxRuns !== undefined || (live?.runCount ?? 0) > 0) && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">已执行</span>
+                  <span className="text-foreground/80 tabular-nums">
+                    {live?.runCount ?? 0}
+                    {live?.scheduleType === 'once'
+                      ? ' / 1 次'
+                      : live?.maxRuns !== undefined
+                        ? ` / ${live.maxRuns} 次`
+                        : ' 次'}
+                  </span>
+                </div>
+              )}
+              {live?.completedAt && (
+                <div className="flex items-center gap-1.5 pt-0.5 text-emerald-600 dark:text-emerald-400">
+                  <Check className="size-3" />
+                  <span>任务已完成（重新启用可再跑一轮）</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -686,7 +731,15 @@ export function AutomationFormView(): React.ReactElement | null {
             <Label>运行频率</Label>
             <Select
               value={form.scheduleType}
-              onValueChange={(v) => update({ scheduleType: v as AutomationDraft['scheduleType'] })}
+              onValueChange={(v) => {
+                const next = v as AutomationDraft['scheduleType']
+                // 切到 once 且尚无触发时间时，默认填入 1 小时后，避免空值导致自动保存失败
+                if (next === 'once' && !form.scheduledAt) {
+                  update({ scheduleType: next, scheduledAt: Date.now() + 60 * 60 * 1000 })
+                } else {
+                  update({ scheduleType: next })
+                }
+              }}
             >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -694,6 +747,7 @@ export function AutomationFormView(): React.ReactElement | null {
                 <SelectItem value="daily">每天定点</SelectItem>
                 <SelectItem value="weekly">每周定点</SelectItem>
                 <SelectItem value="monthly">每月定点</SelectItem>
+                <SelectItem value="once">仅运行一次</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -811,6 +865,48 @@ export function AutomationFormView(): React.ReactElement | null {
                   如当月无 {form.dayOfMonth} 日，将在当月最后一天执行
                 </span>
               )}
+            </div>
+          )}
+
+          {/* once 模式：绝对日期 + 时刻（datetime-local） */}
+          {form.scheduleType === 'once' && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="auto-once-at">运行时间</Label>
+              <input
+                id="auto-once-at"
+                type="datetime-local"
+                value={tsToDatetimeLocal(form.scheduledAt)}
+                onChange={(e) => update({ scheduledAt: datetimeLocalToTs(e.target.value) })}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
+                任务将在该时刻运行一次后自动完成。适合"X 小时/天后跑一次"或某个具体时间点的一次性任务。
+              </span>
+            </div>
+          )}
+
+          {/* 运行次数上限（once 模式天然为 1 次，故不显示；其余循环模式可选叠加） */}
+          {form.scheduleType !== 'once' && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="auto-max-runs">运行次数上限</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="auto-max-runs"
+                  type="number"
+                  min={1}
+                  placeholder="不限"
+                  value={form.maxRuns ?? ''}
+                  onChange={(e) => {
+                    const v = Number(e.target.value)
+                    update({ maxRuns: e.target.value === '' || !Number.isFinite(v) || v < 1 ? undefined : Math.floor(v) })
+                  }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <span className="text-xs text-muted-foreground shrink-0">次后停止</span>
+              </div>
+              <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
+                留空表示不限次。按实际执行次数计（成功 / 失败都算），达到上限后任务自动完成停用。
+              </span>
             </div>
           )}
 

@@ -47,6 +47,8 @@ import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/
 import { activeViewAtom } from '@/atoms/active-view'
 import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
+import { useOpenPreview } from '@/components/diff/preview-opener'
+import { getFileParentPath } from '@/lib/file-utils'
 import type {
   SDKMessage,
   SDKAssistantMessage,
@@ -983,12 +985,34 @@ function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; o
 function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactElement {
   const isImg = isImageFile(file.filename)
   const Icon = isImg ? FileImage : FileText
+  const activeSessionId = useAtomValue(activeSessionIdAtom)
+  const openPreview = useOpenPreview()
+
+  const handleOpenPreview = React.useCallback((): void => {
+    if (!activeSessionId) return
+    const parentPath = getFileParentPath(file.path)
+    openPreview(activeSessionId, {
+      filePath: file.path,
+      previewOnly: true,
+      readOnly: true,
+      basePaths: parentPath ? [parentPath] : undefined,
+    })
+  }, [activeSessionId, file.path, openPreview])
 
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2.5 py-1 text-[12px] text-muted-foreground">
+    <button
+      type="button"
+      onClick={handleOpenPreview}
+      disabled={!activeSessionId}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2.5 py-1 text-[12px] text-muted-foreground',
+        'transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:hover:bg-muted/60 disabled:hover:text-muted-foreground'
+      )}
+      title={file.path}
+    >
       <Icon className="size-3.5 shrink-0" />
       <span className="truncate max-w-[200px]">{file.filename}</span>
-    </div>
+    </button>
   )
 }
 

@@ -64,6 +64,14 @@ function isSameLocalDay(a: number, b: number): boolean {
 }
 
 function formatScheduleLabel(a: Automation): string {
+  if (a.scheduleType === 'once') {
+    const when = a.scheduledAt
+      ? new Date(a.scheduledAt).toLocaleString('zh-CN', {
+          month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+        })
+      : '指定时间'
+    return `仅运行一次（${when}）`
+  }
   if (a.scheduleType === 'daily') return `每天 ${a.timeOfDay ?? '09:00'}`
   if (a.scheduleType === 'weekly') {
     const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']

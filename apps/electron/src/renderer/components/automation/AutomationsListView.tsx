@@ -28,6 +28,12 @@ import type { Automation } from '@proma/shared'
 
 /** 把调度配置格式化为可读文案 */
 function formatSchedule(a: Automation): string {
+  if (a.scheduleType === 'once') {
+    const when = a.scheduledAt
+      ? new Date(a.scheduledAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '指定时间'
+    return `仅一次 ${when}`
+  }
   if (a.scheduleType === 'daily') return `每天 ${a.timeOfDay ?? '09:00'}`
   if (a.scheduleType === 'weekly') {
     const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -40,9 +46,12 @@ function formatSchedule(a: Automation): string {
     return `每月 ${dom} 号 ${a.timeOfDay ?? '09:00'}${suffix}`
   }
   const min = a.intervalMinutes
-  if (min < 60) return `每 ${min} 分钟`
-  if (min < 1440) return `每 ${min / 60} 小时`
-  return `每 ${min / 1440} 天`
+  let label: string
+  if (min < 60) label = `每 ${min} 分钟`
+  else if (min < 1440) label = `每 ${min / 60} 小时`
+  else label = `每 ${min / 1440} 天`
+  // 叠加了运行次数上限时在末尾标注，让列表能看出"跑 N 次就停"
+  return a.maxRuns !== undefined ? `${label}·限 ${a.maxRuns} 次` : label
 }
 
 export function AutomationsListView(): React.ReactElement {
@@ -56,7 +65,9 @@ export function AutomationsListView(): React.ReactElement {
   }, [setAutomations])
 
   const current = automations.filter((a) => a.active)
-  const paused = automations.filter((a) => !a.active)
+  // 已完成（once 跑完 / 跑满 maxRuns 自动停用，带 completedAt）单独成组，区别于用户手动暂停 / 草稿
+  const completed = automations.filter((a) => !a.active && a.completedAt)
+  const paused = automations.filter((a) => !a.active && !a.completedAt)
 
   const handleCreate = (): void => {
     // 自动命名「定时任务 N」：取现有最大 X + 1
@@ -104,6 +115,9 @@ export function AutomationsListView(): React.ReactElement {
             {paused.length > 0 && (
               <Section title="已暂停" automations={paused} onEdit={handleEdit} onRefresh={refreshList} variant="paused" />
             )}
+            {completed.length > 0 && (
+              <Section title="已完成" automations={completed} onEdit={handleEdit} onRefresh={refreshList} variant="completed" />
+            )}
           </div>
         )}
       </div>
@@ -116,7 +130,7 @@ interface SectionProps {
   automations: Automation[]
   onEdit: (a: Automation) => void
   onRefresh: () => Promise<void>
-  variant: 'active' | 'paused'
+  variant: 'active' | 'paused' | 'completed'
 }
 
 function Section({ title, automations, onEdit, onRefresh, variant }: SectionProps): React.ReactElement {
@@ -209,7 +223,7 @@ function Section({ title, automations, onEdit, onRefresh, variant }: SectionProp
                 'absolute right-0 top-1/2 -translate-y-1/2 text-[12px] tabular-nums whitespace-nowrap transition-opacity group-hover:opacity-0',
                 variant === 'active' ? 'text-foreground/55' : 'text-foreground/35',
               )}>
-                {variant === 'paused' ? '已暂停' : formatSchedule(a)}
+                {variant === 'paused' ? '已暂停' : variant === 'completed' ? '已完成' : formatSchedule(a)}
               </span>
               <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
                 <Tooltip>

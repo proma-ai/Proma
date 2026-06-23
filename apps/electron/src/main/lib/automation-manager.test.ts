@@ -68,3 +68,28 @@ describe('computeNextRunAt 月度调度', () => {
     expect(new Date(next).getDate()).toBe(28)
   })
 })
+
+describe('computeNextRunAt 一次性调度（once）', () => {
+  const base = (y: number, m: number, d: number, hh: number, mm: number): number =>
+    new Date(y, m - 1, d, hh, mm, 0, 0).getTime()
+
+  test('Given scheduledAt 在未来 When 计算下次运行 Then 原样返回 scheduledAt', () => {
+    const from = base(2026, 6, 23, 14, 0)
+    const target = base(2026, 6, 30, 15, 0)
+    const next = computeNextRunAt({ scheduleType: 'once', scheduledAt: target }, from)
+    expect(next).toBe(target)
+  })
+
+  test('Given scheduledAt 已过去 When 计算下次运行 Then 仍返回过去的 scheduledAt（不前进，交由调度器补跑）', () => {
+    const from = base(2026, 6, 23, 14, 0)
+    const target = base(2026, 6, 20, 9, 0)
+    const next = computeNextRunAt({ scheduleType: 'once', scheduledAt: target }, from)
+    expect(next).toBe(target)
+  })
+
+  test('Given once 缺少 scheduledAt When 计算下次运行 Then 回退到 from + 10 分钟', () => {
+    const from = base(2026, 6, 23, 14, 0)
+    const next = computeNextRunAt({ scheduleType: 'once' }, from)
+    expect(next).toBe(from + 10 * 60_000)
+  })
+})

@@ -427,7 +427,7 @@ export function RichTextInput({
             return true
           }
 
-          // 换行：Shift+Enter 插入硬换行 <br>，普通 Enter 拆分段落或列表项
+          // 换行：普通段落中 Shift+Enter 插入硬换行；列表项内使用拆分列表项生成下一条。
           event.preventDefault()
           // 检查是否在列表项内（遍历祖先节点）
           let isInList = false
@@ -443,10 +443,8 @@ export function RichTextInput({
             // 空列表项再次按 Enter：退出列表，回到普通输入
             if (listItemNode && listItemNode.textContent === '') {
               editor.chain().focus().liftListItem('listItem').run()
-            } else if (hasShift) {
-              // Shift+Enter：在列表项内硬换行
-              editor.chain().focus().setHardBreak().run()
             } else {
+              // 发送模式下 Enter 会提交消息，因此 Shift+Enter 也应作为列表续项键。
               editor.chain().focus().splitListItem('listItem').run()
             }
           } else if (editor) {

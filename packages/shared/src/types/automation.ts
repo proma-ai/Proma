@@ -22,7 +22,7 @@ export interface AutomationRun {
 }
 
 /** 调度模式 */
-export type AutomationScheduleType = 'interval' | 'daily' | 'weekly' | 'monthly'
+export type AutomationScheduleType = 'interval' | 'daily' | 'weekly' | 'monthly' | 'once'
 
 /**
  * 定时任务的权限模式（无人值守运行场景）
@@ -72,7 +72,7 @@ export interface Automation {
   prompt: string
   /** 是否启用调度 */
   active: boolean
-  /** 调度模式：interval=固定间隔；daily=每天定点；weekly=每周某天定点；monthly=每月某天定点 */
+  /** 调度模式：interval=固定间隔；daily=每天定点；weekly=每周某天定点；monthly=每月某天定点；once=指定时刻只运行一次 */
   scheduleType: AutomationScheduleType
   /** 运行间隔（分钟），scheduleType==='interval' 时使用 */
   intervalMinutes: number
@@ -82,6 +82,14 @@ export interface Automation {
   dayOfWeek?: number
   /** 每月几号（1-31），scheduleType==='monthly' 时使用 */
   dayOfMonth?: number
+  /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时使用 */
+  scheduledAt?: number
+  /**
+   * 最大运行次数上限：实际执行次数（成功 + 失败，不含 skipped）达到后自动停用。
+   * undefined = 不限次（默认，向后兼容旧任务）。
+   * 与 scheduleType 正交——任意循环模式都可叠加；once 模式语义上等价于 maxRuns=1。
+   */
+  maxRuns?: number
   /** AI 渠道 ID */
   channelId: string
   /** 模型 ID（可选，继承来源会话或渠道默认） */
@@ -108,6 +116,14 @@ export interface Automation {
   lastRunAt?: number
   /** 连续失败次数（用于退避/自动暂停） */
   consecutiveFailures?: number
+  /** 已实际执行次数（成功 + 失败，不含 skipped），用于与 maxRuns 比较 */
+  runCount?: number
+  /**
+   * 因跑满 maxRuns 或 once 完成而自动停用的时间戳。
+   * 区别于用户手动暂停（active=false 但无 completedAt）和连续失败暂停，
+   * 让 UI 能把「已完成」与「已暂停」区分展示。重新启用时会被清空。
+   */
+  completedAt?: number
   /** 最近运行历史（截断保留最新 AUTOMATION_MAX_HISTORY 条） */
   runHistory: AutomationRun[]
 }
@@ -127,6 +143,10 @@ export interface CreateAutomationInput {
   timeOfDay?: string
   dayOfWeek?: number
   dayOfMonth?: number
+  /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时必填 */
+  scheduledAt?: number
+  /** 最大运行次数上限（实际执行次数），达到后自动停用；不传 = 不限次 */
+  maxRuns?: number
   channelId: string
   modelId?: string
   workspaceId?: string
@@ -148,6 +168,10 @@ export interface UpdateAutomationInput {
   timeOfDay?: string
   dayOfWeek?: number
   dayOfMonth?: number
+  /** 一次性任务的绝对触发时间戳，scheduleType==='once' 时使用 */
+  scheduledAt?: number
+  /** 最大运行次数上限（实际执行次数）；传 0 或负数等价于不限次。改动会重置已执行次数计数 */
+  maxRuns?: number
   channelId?: string
   modelId?: string
   /** 工作区（用户可在创建后调整子会话归属的工作区） */

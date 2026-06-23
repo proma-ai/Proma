@@ -11,16 +11,17 @@ import { Send, X } from 'lucide-react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
-import { allPendingAskUserRequestsAtom, agentStreamingStatesAtom, finalizeStreamingActivities } from '@/atoms/agent-atoms'
+import {
+  allPendingAskUserRequestsAtom,
+  agentStreamingStatesAtom,
+  askUserDraftsAtom,
+  finalizeStreamingActivities,
+  type AskUserQuestionDraft,
+  type AskUserRequestDraft,
+} from '@/atoms/agent-atoms'
 import type { AskUserQuestion } from '@proma/shared'
 
-interface QuestionAnswer {
-  selected: string[]
-  customText: string
-  showCustom: boolean
-}
-
-const EMPTY_ANSWER: QuestionAnswer = { selected: [], customText: '', showCustom: false }
+const EMPTY_ANSWER: AskUserQuestionDraft = { selected: [], customText: '', showCustom: false }
 
 const PREVIEW_REMARK_PLUGINS = [remarkGfm]
 
@@ -36,15 +37,19 @@ interface AskUserBannerProps {
 
 export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactElement | null {
   const [allRequests, setAllRequests] = useAtom(allPendingAskUserRequestsAtom)
+  const [drafts, setDrafts] = useAtom(askUserDraftsAtom)
   const setStreamingStates = useSetAtom(agentStreamingStatesAtom)
   const requests = allRequests.get(sessionId) ?? []
-  const [answers, setAnswers] = React.useState<Map<number, QuestionAnswer>>(new Map())
   const [submitting, setSubmitting] = React.useState(false)
-  const [activeTab, setActiveTab] = React.useState(0)
-  const [focusedOptIdx, setFocusedOptIdx] = React.useState(-1)
 
   const request = requests[0] ?? null
   const questions = request?.questions ?? []
+  const requestDraft = request ? drafts.get(request.requestId) : undefined
+  const activeTab = questions.length > 0
+    ? Math.min(Math.max(requestDraft?.activeTab ?? 0, 0), questions.length - 1)
+    : 0
+  const focusedOptIdx = requestDraft?.focusedOptIdx ?? -1
+  const answers = requestDraft?.answers ?? createInitialDraft(questions).answers
   const isLastTab = activeTab >= questions.length - 1
 
   // ===== Refs：确保 keydown handler 始终读取最新值，消除闭包过期问题 =====
@@ -69,26 +74,15 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
 
   React.useEffect(() => {
     clearAutoAdvanceTimer()
-    setActiveTab(0)
-    setFocusedOptIdx(-1)
-    const firstOpt = questions[0]?.options[0]
-    setAnswers(firstOpt
-      ? new Map([[0, { ...EMPTY_ANSWER, selected: [firstOpt.label] }]])
-      : new Map())
-  }, [request?.requestId])
-
-  // 切换 Tab 时重置焦点并默认选中第一个选项
-  React.useEffect(() => {
-    setFocusedOptIdx(-1)
-    setAnswers((prev) => {
-      if (prev.has(activeTab)) return prev
-      const firstOpt = questions[activeTab]?.options[0]
-      if (!firstOpt) return prev
+    if (!request || questions.length === 0) return
+    setDrafts((prev) => {
+      const current = prev.get(request.requestId)
+      if (current && current.activeTab >= 0 && current.activeTab < questions.length) return prev
       const map = new Map(prev)
-      map.set(activeTab, { ...EMPTY_ANSWER, selected: [firstOpt.label] })
+      map.set(request.requestId, createInitialDraft(questions))
       return map
     })
-  }, [activeTab])
+  }, [request?.requestId, questions, clearAutoAdvanceTimer, setDrafts])
 
   // 键盘导航：只在 requestId 变化时重建 handler，内部通过 ref 读取最新值
   React.useEffect(() => {
@@ -108,7 +102,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault()
           if (lastTab) submitRef.current?.()
-          else setActiveTab((prev) => prev + 1)
+          else setActiveTabByState((prev) => prev + 1)
         }
         return
       }
@@ -120,7 +114,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
           : e.key === 'ArrowDown'
             ? (curFocusIdx + 1) % itemCount
             : (curFocusIdx - 1 + itemCount) % itemCount
-        setFocusedOptIdx(nextIdx)
+        setFocusedOptIdxByState(nextIdx)
         // 移动焦点同时选中
         if (nextIdx < q.options.length) {
           const opt = q.options[nextIdx]
@@ -131,7 +125,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       } else if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault()
         if (lastTab) submitRef.current?.()
-        else setActiveTab((prev) => prev + 1)
+        else setActiveTabByState((prev) => prev + 1)
       }
     }
 
@@ -159,16 +153,57 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
       map.delete(sessionId)
       return map
     })
+    clearDrafts(requests.map((r) => r.requestId))
     // 终止 Agent
     window.electronAPI.stopAgent(sessionId).catch(console.error)
   }
 
   if (!request) return null
 
-  const getAnswer = (idx: number): QuestionAnswer => answers.get(idx) ?? EMPTY_ANSWER
+  const getAnswer = (idx: number): AskUserQuestionDraft => answers.get(idx) ?? EMPTY_ANSWER
+
+  function updateCurrentDraft(updater: (draft: AskUserRequestDraft) => AskUserRequestDraft): void {
+    if (!request) return
+    setDrafts((prev) => {
+      const current = prev.get(request.requestId) ?? createInitialDraft(questions)
+      const map = new Map(prev)
+      map.set(request.requestId, updater(current))
+      return map
+    })
+  }
+
+  function updateAnswers(updater: (prev: Map<number, AskUserQuestionDraft>) => Map<number, AskUserQuestionDraft>): void {
+    updateCurrentDraft((draft) => ({ ...draft, answers: updater(draft.answers) }))
+  }
+
+  function setActiveTabByState(update: number | ((prev: number) => number)): void {
+    updateCurrentDraft((draft) => {
+      const rawNext = typeof update === 'function' ? update(draft.activeTab) : update
+      const maxTab = Math.max(questions.length - 1, 0)
+      const nextTab = Math.min(Math.max(rawNext, 0), maxTab)
+      return {
+        ...draft,
+        activeTab: nextTab,
+        focusedOptIdx: -1,
+        answers: ensureAnswerForTab(draft.answers, questions, nextTab),
+      }
+    })
+  }
+
+  function setFocusedOptIdxByState(nextIdx: number): void {
+    updateCurrentDraft((draft) => ({ ...draft, focusedOptIdx: nextIdx }))
+  }
+
+  function clearDrafts(requestIds: string[]): void {
+    setDrafts((prev) => {
+      const map = new Map(prev)
+      requestIds.forEach((requestId) => map.delete(requestId))
+      return map
+    })
+  }
 
   function toggleOptionByState(qIdx: number, q: AskUserQuestion, label: string): void {
-    setAnswers((prev) => {
+    updateAnswers((prev) => {
       const map = new Map(prev)
       const cur = map.get(qIdx) ?? EMPTY_ANSWER
       const selected = q.multiSelect
@@ -180,7 +215,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
   }
 
   function toggleCustomByState(qIdx: number): void {
-    setAnswers((prev) => {
+    updateAnswers((prev) => {
       const map = new Map(prev)
       const cur = map.get(qIdx) ?? EMPTY_ANSWER
       map.set(qIdx, { ...cur, showCustom: !cur.showCustom, selected: cur.showCustom ? cur.selected : [] })
@@ -213,6 +248,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
         else map.set(sessionId, newValue)
         return map
       })
+      clearDrafts([request.requestId])
     } catch (error) {
       console.error('[AskUserBanner] 响应失败:', error)
     } finally {
@@ -231,7 +267,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
   if (!currentQuestion) return null
 
   const goNextTab = (): void => {
-    if (!isLastTab) setActiveTab((prev) => prev + 1)
+    if (!isLastTab) setActiveTabByState((prev) => prev + 1)
   }
 
   return (
@@ -275,7 +311,7 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
                         : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground'
                     }
                   `}
-                  onClick={() => setActiveTab(idx)}
+                  onClick={() => setActiveTabByState(idx)}
                 >
                   {`${idx + 1}-${q.multiSelect ? '多选' : '单选'}：${q.header || `问题 ${idx + 1}`}`}
                 </button>
@@ -299,12 +335,12 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
               clearAutoAdvanceTimer()
               autoAdvanceTimerRef.current = setTimeout(() => {
                 autoAdvanceTimerRef.current = null
-                setActiveTab((prev) => prev + 1)
+                setActiveTabByState((prev) => prev + 1)
               }, 150)
             }
           }}
           onToggleCustom={() => toggleCustomByState(activeTab)}
-          onCustomTextChange={(text) => setAnswers((prev) => {
+          onCustomTextChange={(text) => updateAnswers((prev) => {
             const map = new Map(prev)
             const cur = map.get(activeTab) ?? EMPTY_ANSWER
             map.set(activeTab, { ...cur, customText: text })
@@ -336,6 +372,27 @@ export function AskUserBanner({ sessionId }: AskUserBannerProps): React.ReactEle
   )
 }
 
+function createInitialDraft(questions: readonly AskUserQuestion[]): AskUserRequestDraft {
+  return {
+    activeTab: 0,
+    focusedOptIdx: -1,
+    answers: ensureAnswerForTab(new Map(), questions, 0),
+  }
+}
+
+function ensureAnswerForTab(
+  answers: Map<number, AskUserQuestionDraft>,
+  questions: readonly AskUserQuestion[],
+  tabIndex: number,
+): Map<number, AskUserQuestionDraft> {
+  if (answers.has(tabIndex)) return answers
+  const firstOpt = questions[tabIndex]?.options[0]
+  if (!firstOpt) return answers
+  const map = new Map(answers)
+  map.set(tabIndex, { ...EMPTY_ANSWER, selected: [firstOpt.label] })
+  return map
+}
+
 /** 单个问题卡片（竖向选项） */
 function QuestionCard({
   question,
@@ -350,7 +407,7 @@ function QuestionCard({
 }: {
   question: AskUserQuestion
   questionIndex: number
-  answer: QuestionAnswer
+  answer: AskUserQuestionDraft
   focusedIndex: number
   showBadge: boolean
   onToggleOption: (label: string) => void
