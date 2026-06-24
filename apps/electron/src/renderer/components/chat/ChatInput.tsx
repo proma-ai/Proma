@@ -23,6 +23,13 @@ import { AttachmentPreviewItem } from './AttachmentPreviewItem'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
+import {
+  inputToolbarActiveButtonClass,
+  inputToolbarButtonClass,
+  inputToolbarDangerButtonClass,
+  inputToolbarDisabledButtonClass,
+  inputToolbarSendButtonClass,
+} from '@/components/ai-elements/input-toolbar-styles'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -302,8 +309,8 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
               variant="ghost"
               size="icon"
               className={cn(
-                'size-[36px] shrink-0 rounded-full',
-                thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+                inputToolbarButtonClass,
+                thinkingEnabled && inputToolbarActiveButtonClass
               )}
               onClick={() => setThinkingEnabled(!thinkingEnabled)}
             >
@@ -325,7 +332,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
               type="button"
               variant="ghost"
               size="icon"
-              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              className={inputToolbarButtonClass}
               onClick={handleOpenFileDialog}
             >
               <Paperclip className="size-5" />
@@ -337,7 +344,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
         </Tooltip>
       ),
     },
-    { key: 'speech', node: <SpeechButton className="size-[36px] shrink-0 rounded-full" /> },
+    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
     { key: 'tools', node: <ToolSelectorPopover /> },
     { key: 'context', node: <ContextSettingsPopover /> },
     { key: 'clear', node: <ClearContextButton onClick={onClearContext} /> },
@@ -350,7 +357,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           type="button"
           variant="ghost"
           size="icon"
-          className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
+          className={inputToolbarDangerButtonClass}
           onClick={onStop}
         >
           <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
@@ -366,10 +373,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       variant="ghost"
       size="icon"
       className={cn(
-        'size-[36px] rounded-full',
-        canSend
-          ? 'text-primary hover:bg-primary/10'
-          : 'text-foreground/30 cursor-not-allowed'
+        canSend ? inputToolbarSendButtonClass : inputToolbarDisabledButtonClass
       )}
       onClick={handleSend}
       disabled={!canSend}

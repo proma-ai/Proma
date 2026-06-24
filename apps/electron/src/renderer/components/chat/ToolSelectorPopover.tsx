@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { Wrench, Brain, Globe, Settings, ImagePlus } from 'lucide-react'
 import { chatToolsAtom, hasActiveToolsAtom } from '@/atoms/chat-tool-atoms'
 import { settingsTabAtom, settingsOpenAtom } from '@/atoms/settings-tab'
+import { inputToolbarActiveButtonClass, inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 
 /** 工具 ID 到图标的映射 */
 function getToolIcon(iconName?: string): React.ReactElement {
@@ -75,8 +76,8 @@ export function ToolSelectorPopover(): React.ReactElement {
               variant="ghost"
               size="icon"
               className={cn(
-                'size-[30px] rounded-full',
-                hasActiveTools ? 'text-blue-500' : 'text-foreground/60 hover:text-foreground',
+                inputToolbarButtonClass,
+                hasActiveTools && inputToolbarActiveButtonClass,
               )}
             >
               <Wrench className="size-5" />

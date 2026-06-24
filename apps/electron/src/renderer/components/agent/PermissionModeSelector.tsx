@@ -15,6 +15,7 @@ import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, sessionPers
 import type { PromaPermissionMode } from '@proma/shared'
 import { PROMA_PERMISSION_MODE_CONFIG, PROMA_PERMISSION_MODE_ORDER } from '@proma/shared'
 import { updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
+import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 
 const MODE_ICONS: Record<PromaPermissionMode, React.ComponentType<{ className?: string }>> = {
   auto: Compass,
@@ -95,7 +96,7 @@ export function PermissionModeSelector({ sessionId }: PermissionModeSelectorProp
             size="icon"
             aria-label={config.label}
             onClick={() => { cycleMode(); requestAnimationFrame(() => document.querySelector<HTMLElement>('.ProseMirror')?.focus()) }}
-            className="size-[36px] rounded-full text-foreground/60 hover:text-foreground"
+            className={inputToolbarButtonClass}
           >
             <Icon className="size-5" />
           </Button>

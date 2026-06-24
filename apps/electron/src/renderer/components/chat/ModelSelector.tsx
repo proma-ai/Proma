@@ -26,6 +26,7 @@ import {
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
 import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
+import { ModelMark } from './ModelMark'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
 
@@ -232,13 +233,12 @@ export function ModelSelector({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="model-selector-trigger flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+        className="model-selector-trigger flex h-[36px] items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
       >
         {displayModelInfo ? (
-          <img
+          <ModelMark
             src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
-            alt={displayModelInfo.modelName}
-            className="size-4 rounded object-cover"
+            className="size-4 text-primary"
           />
         ) : (
           <Cpu className="size-3.5" />
@@ -289,13 +289,12 @@ export function ModelSelector({
                   <div key={channelId}>
                     {/* 供应商标题行 - 灰色背景 */}
                     <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
-                      <img
+                      <ModelMark
                         src={(() => {
                           const ch = channels.find((c) => c.id === channelId)
                           return ch ? getChannelLogo(ch) : DefaultLogo
                         })()}
-                        alt={first.channelName}
-                        className="size-5 rounded object-cover"
+                        className="size-5 text-muted-foreground/70"
                       />
                       <span className="text-sm font-medium text-muted-foreground">
                         {first.channelName}
@@ -327,10 +326,12 @@ export function ModelSelector({
                             isSelected && 'bg-foreground/10 border-l-3 border-l-primary'
                           )}
                         >
-                          <img
+                          <ModelMark
                             src={getModelLogo(option.modelId, option.provider)}
-                            alt={option.modelName}
-                            className="size-5 rounded object-cover flex-shrink-0"
+                            className={cn(
+                              'size-5 flex-shrink-0',
+                              isSelected ? 'text-primary' : 'text-muted-foreground/70'
+                            )}
                           />
                           <span className={cn(
                             'flex-1 text-sm truncate',

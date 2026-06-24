@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 import { Eraser } from 'lucide-react'
 import type { ComponentProps } from 'react'
 
@@ -39,12 +40,12 @@ export function ClearContextButton({
           type="button"
           variant="ghost"
           size="icon"
-          className={cn('h-8 w-8', className)}
+          className={cn(inputToolbarButtonClass, className)}
           onClick={onClick}
           aria-label="清除上下文"
           {...props}
         >
-          <Eraser className="h-4 w-4 text-muted-foreground" />
+          <Eraser className="size-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
