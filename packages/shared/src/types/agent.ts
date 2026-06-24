@@ -842,6 +842,7 @@ export interface Artifact {
   title: string
   type: ArtifactType
   language?: string
+  description?: string
   content: string
   version: number
   sessionId: string
@@ -857,6 +858,7 @@ export interface ArtifactCreateInput {
   type: ArtifactType
   content: string
   language?: string
+  description?: string
 }
 
 /** edit_artifact 工具入参 */
@@ -865,6 +867,26 @@ export interface ArtifactEditInput {
   title?: string
   content?: string
   language?: string
+}
+
+// ===== Artifact 共享常量与工具函数 =====
+
+export const ARTIFACT_CREATE_TOOL = 'create_artifact'
+export const ARTIFACT_EDIT_TOOL = 'edit_artifact'
+export const ARTIFACT_LOAD_GUIDELINES_TOOL = 'load_artifact_guidelines'
+export const MAX_ARTIFACT_CONTENT_CHARS = 120_000
+
+export function isArtifactToolName(toolName: string): boolean {
+  return (
+    toolName === ARTIFACT_CREATE_TOOL ||
+    toolName === ARTIFACT_EDIT_TOOL ||
+    toolName.endsWith(`__${ARTIFACT_CREATE_TOOL}`) ||
+    toolName.endsWith(`__${ARTIFACT_EDIT_TOOL}`)
+  )
+}
+
+export function isArtifactGuidelineToolName(toolName: string): boolean {
+  return toolName === ARTIFACT_LOAD_GUIDELINES_TOOL || toolName.endsWith(`__${ARTIFACT_LOAD_GUIDELINES_TOOL}`)
 }
 
 // ===== Agent 发送输入 =====

@@ -10,11 +10,27 @@ interface ArtifactToolResult extends Record<string, unknown> {
 
 type ZodNamespace = typeof import('zod')['z']
 
+import type { Artifact } from '@proma/shared'
+import {
+  ARTIFACT_CREATE_TOOL,
+  ARTIFACT_EDIT_TOOL,
+  ARTIFACT_LOAD_GUIDELINES_TOOL,
+  MAX_ARTIFACT_CONTENT_CHARS,
+  isArtifactToolName,
+  isArtifactGuidelineToolName,
+} from '@proma/shared'
+import { saveArtifact } from './artifact-service'
+
+export {
+  ARTIFACT_CREATE_TOOL,
+  ARTIFACT_EDIT_TOOL,
+  ARTIFACT_LOAD_GUIDELINES_TOOL,
+  MAX_ARTIFACT_CONTENT_CHARS,
+  isArtifactToolName,
+  isArtifactGuidelineToolName,
+}
+
 export const ARTIFACT_SERVER_NAME = 'artifact'
-export const ARTIFACT_CREATE_TOOL = 'create_artifact'
-export const ARTIFACT_EDIT_TOOL = 'edit_artifact'
-export const ARTIFACT_LOAD_GUIDELINES_TOOL = 'load_artifact_guidelines'
-export const MAX_ARTIFACT_CONTENT_CHARS = 120_000
 
 export function isArtifactsEnabled(config: { enabled?: boolean } | undefined): boolean {
   return config?.enabled === true
@@ -32,19 +48,6 @@ export function getArtifactAllowedToolNames(enabled: boolean): string[] {
     ARTIFACT_CREATE_TOOL,
     ARTIFACT_EDIT_TOOL,
   ]
-}
-
-export function isArtifactToolName(toolName: string): boolean {
-  return (
-    toolName === ARTIFACT_CREATE_TOOL ||
-    toolName === ARTIFACT_EDIT_TOOL ||
-    toolName.endsWith(`__${ARTIFACT_CREATE_TOOL}`) ||
-    toolName.endsWith(`__${ARTIFACT_EDIT_TOOL}`)
-  )
-}
-
-export function isArtifactGuidelineToolName(toolName: string): boolean {
-  return toolName === ARTIFACT_LOAD_GUIDELINES_TOOL || toolName.endsWith(`__${ARTIFACT_LOAD_GUIDELINES_TOOL}`)
 }
 
 function jsonResult(payload: Record<string, unknown>): ArtifactToolResult {
@@ -164,20 +167,26 @@ export async function injectArtifactMcpServer(
         schemas.createArtifact,
         async (args) => {
           const artifactId = `art-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+          const now = Date.now()
+          const artifact: Artifact = {
+            id: artifactId,
+            title: args.title,
+            type: args.type,
+            language: args.language,
+            content: args.content,
+            description: args.description,
+            version: 1,
+            sessionId: ctx.sessionId,
+            workspaceId: ctx.workspaceId,
+            createdAt: now,
+            updatedAt: now,
+          }
+          saveArtifact(artifact)
           return jsonResult({
             type: 'artifact_created',
             ok: true,
             artifact: {
-              id: artifactId,
-              title: args.title,
-              type: args.type,
-              language: args.language,
-              content: args.content,
-              description: args.description,
-              version: 1,
-              sessionId: ctx.sessionId,
-              workspaceId: ctx.workspaceId,
-              runId: ctx.runId,
+              ...artifact,
               contentLength: args.content.length,
             },
           })

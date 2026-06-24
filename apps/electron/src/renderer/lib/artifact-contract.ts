@@ -1,24 +1,24 @@
 import type { SDKToolUseBlock, ArtifactType } from '@proma/shared'
+import {
+  ARTIFACT_CREATE_TOOL,
+  ARTIFACT_EDIT_TOOL,
+  ARTIFACT_LOAD_GUIDELINES_TOOL,
+  MAX_ARTIFACT_CONTENT_CHARS,
+  isArtifactToolName,
+  isArtifactGuidelineToolName,
+} from '@proma/shared'
+
+export {
+  ARTIFACT_CREATE_TOOL,
+  ARTIFACT_EDIT_TOOL,
+  ARTIFACT_LOAD_GUIDELINES_TOOL,
+  MAX_ARTIFACT_CONTENT_CHARS,
+  isArtifactToolName,
+  isArtifactGuidelineToolName,
+}
 
 export const ARTIFACT_TOOL_SERVER = 'artifact'
-export const ARTIFACT_CREATE_TOOL = 'create_artifact'
-export const ARTIFACT_EDIT_TOOL = 'edit_artifact'
-export const ARTIFACT_LOAD_GUIDELINES_TOOL = 'load_artifact_guidelines'
-export const MAX_ARTIFACT_CONTENT_CHARS = 120_000
 export const DEFAULT_ARTIFACT_TITLE = 'Artifact'
-
-export function isArtifactToolName(name: string): boolean {
-  return (
-    name === ARTIFACT_CREATE_TOOL ||
-    name === ARTIFACT_EDIT_TOOL ||
-    name.endsWith(`__${ARTIFACT_CREATE_TOOL}`) ||
-    name.endsWith(`__${ARTIFACT_EDIT_TOOL}`)
-  )
-}
-
-export function isArtifactGuidelineToolName(name: string): boolean {
-  return name === ARTIFACT_LOAD_GUIDELINES_TOOL || name.endsWith(`__${ARTIFACT_LOAD_GUIDELINES_TOOL}`)
-}
 
 function normalizeString(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() : undefined
