@@ -175,6 +175,8 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   outputFormat?: JsonSchemaOutputFormat
   /** Beta 特性（如 1M context window） */
   betas?: SdkBeta[]
+  /** Skill 白名单：仅列出的 skill 对模型可见，未列出者不占上下文。'all' 启用全部已发现 skill */
+  skills?: string[] | 'all'
   /** 是否持久化会话到磁盘（默认 true） */
   persistSession?: boolean
   /** resume 时是否 fork 为新会话 */
@@ -772,6 +774,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         ...(options.maxBudgetUsd != null && { maxBudgetUsd: options.maxBudgetUsd }),
         ...(options.outputFormat && { outputFormat: options.outputFormat }),
         ...(options.betas && { betas: options.betas }),
+        ...(options.skills && { skills: options.skills }),
         ...(options.persistSession != null && { persistSession: options.persistSession }),
         ...(options.forkSession != null && { forkSession: options.forkSession }),
         ...(options.sdkSessionId && { sessionId: options.sdkSessionId }),

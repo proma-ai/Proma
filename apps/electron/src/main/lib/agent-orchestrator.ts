@@ -41,8 +41,8 @@ import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
-import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName } from './config-paths'
+import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceSkills } from './agent-workspace-manager'
+import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName, getInactiveSkillsDir } from './config-paths'
 import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
@@ -1185,6 +1185,21 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 已合并 ${Object.keys(customMcpServers).length} 个自定义 MCP 服务器`)
       }
 
+      // 11.2 Skills 白名单：仅活跃 skill 占上下文，inactive skill 仅 /skill:name 时临时可见
+      const activeSkills = workspaceSlug ? getWorkspaceSkills(workspaceSlug) : []
+      const activeSkillSlugs = new Set(activeSkills.map((s) => s.slug))
+      const extraSkillSlugs: string[] = []
+      for (const slug of mentionedSkills ?? []) {
+        if (!activeSkillSlugs.has(slug) && workspaceSlug) {
+          const inactiveMd = join(getInactiveSkillsDir(workspaceSlug), slug, 'SKILL.md')
+          if (existsSync(inactiveMd)) {
+            extraSkillSlugs.push(slug)
+            console.log(`[Agent 编排] 临时启用 inactive skill: ${slug}`)
+          }
+        }
+      }
+      const skillsWhitelist: string[] = [...activeSkillSlugs, ...extraSkillSlugs]
+
       // 11. 构建动态上下文和最终 prompt
       const dynamicCtx = buildDynamicContext({
         workspaceName: workspace?.name,
@@ -1497,6 +1512,8 @@ export class AgentOrchestrator {
         resumeSessionId: existingSdkSessionId,
         // 回退后 resume：从指定消息处继续（SDK 在同一 JSONL 内创建分支）
         ...(rewindResumeAt && { resumeSessionAt: rewindResumeAt }),
+        // Skills 白名单：仅活跃 skill + 显式 /skill:name 的 inactive skill 对模型可见
+        skills: skillsWhitelist,
         ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
         ...(workspaceSlug && { plugins: [{ type: 'local' as const, path: getAgentWorkspacePath(workspaceSlug) }] }),
         // 合并附加目录：用户当次输入 + 会话级 + 工作区级（详见 collectAttachedDirectories）

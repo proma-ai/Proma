@@ -449,25 +449,35 @@ function compareSemver(a: string, b: string): number {
 
 // ===== Plugin Manifest（SDK 插件发现） =====
 
-/** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills */
+/** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills。
+ *  同时注册 skills-inactive 作为额外发现路径，使禁用 Skill 仍可被 SDK 感知、
+ *  由 skills 白名单精确控制上下文可见性。 */
 export function ensurePluginManifest(workspaceSlug: string, workspaceName: string): void {
   const wsPath = getAgentWorkspacePath(workspaceSlug)
   const pluginDir = join(wsPath, '.claude-plugin')
   const manifestPath = join(pluginDir, 'plugin.json')
 
-  if (existsSync(manifestPath)) return
-
   if (!existsSync(pluginDir)) {
     mkdirSync(pluginDir, { recursive: true })
   }
 
-  const manifest = {
-    name: `proma-workspace-${workspaceSlug}`,
-    version: '1.0.0',
+  let manifest: { name: string; version: string; skills?: string }
+  if (existsSync(manifestPath)) {
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+    } catch {
+      manifest = { name: `proma-workspace-${workspaceSlug}`, version: '1.0.0' }
+    }
+  } else {
+    manifest = { name: `proma-workspace-${workspaceSlug}`, version: '1.0.0' }
   }
 
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
-  console.log(`[Agent 工作区] 已创建 plugin manifest: ${workspaceSlug}`)
+  // 确保 SDK 同时扫描 skills-inactive 目录，配合 skills 白名单实现按需可见
+  if (manifest.skills !== 'skills-inactive') {
+    manifest.skills = 'skills-inactive'
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+    console.log(`[Agent 工作区] 已更新 plugin manifest (skills-inactive): ${workspaceSlug}`)
+  }
 }
 
 // ===== MCP 配置管理 =====
