@@ -49,11 +49,6 @@ export function cacheFileBeforeWrite(filePath: string): void {
   }
 }
 
-/** 清除指定文件的内容缓存 */
-export function clearCachedFileContent(filePath: string): void {
-  preWriteContentCache.delete(filePath)
-}
-
 /**
  * 归一化换行符为 LF。
  *
