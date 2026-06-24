@@ -228,14 +228,17 @@ function ProactiveSection({ children }: ProactiveSectionProps): React.ReactEleme
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
+        aria-label={collapsed ? '展开 Proactive 区域' : '折叠 Proactive 区域'}
+        aria-expanded={!collapsed}
         className="w-full flex items-center gap-1.5 px-1 py-1 mb-1 rounded-md text-[11px] font-medium text-foreground/40 hover:text-foreground/60 hover:bg-foreground/[0.03] transition-colors titlebar-no-drag"
       >
-        <Sparkles size={12} className="text-foreground/40" />
-        <span>Proactive</span>
+        <Sparkles size={12} className="text-foreground/40" aria-hidden="true" />
+        <span className="select-none">Proactive</span>
         <ChevronRight
           size={12}
+          aria-hidden="true"
           className={cn(
-            'ml-auto transition-transform duration-200',
+            'ml-auto transition-transform duration-150',
             collapsed ? '' : 'rotate-90',
           )}
         />
