@@ -239,9 +239,19 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   if (fileStatus === 'broken') {
     return (
-      <code className="rounded bg-foreground/10 px-[0.35em] py-[0.15em] text-[0.875em] font-mono font-medium">
-        {trimmedPath}
-      </code>
+      <span
+        ref={chipRef}
+        title={displayPath}
+        className={cn(
+          'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
+          'select-none align-baseline not-prose',
+          'border border-dashed border-muted-foreground/25 text-muted-foreground/55',
+          className
+        )}
+      >
+        <FileTypeIcon name={filename} isDirectory={false} size={14} />
+        <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
+      </span>
     )
   }
 
