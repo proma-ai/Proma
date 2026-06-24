@@ -12,16 +12,22 @@ export function ModelMark({ src, className }: ModelMarkProps): React.ReactElemen
     return <Cpu className={cn('shrink-0', className)} aria-hidden="true" />
   }
 
+  const maskStyle: React.CSSProperties = {
+    WebkitMaskImage: `url("${src}")`,
+    maskImage: `url("${src}")`,
+    WebkitMaskPosition: 'center',
+    maskPosition: 'center',
+    WebkitMaskRepeat: 'no-repeat',
+    maskRepeat: 'no-repeat',
+    WebkitMaskSize: 'contain',
+    maskSize: 'contain',
+  }
+
   return (
-    <img
-      src={src}
-      alt=""
-      className={cn(
-        'shrink-0 object-contain grayscale opacity-70 contrast-125 brightness-90 dark:brightness-125',
-        className
-      )}
+    <span
+      className={cn('inline-block shrink-0 bg-current', className)}
+      style={maskStyle}
       aria-hidden="true"
-      draggable={false}
     />
   )
 }

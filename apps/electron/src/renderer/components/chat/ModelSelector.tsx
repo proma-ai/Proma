@@ -4,7 +4,7 @@
  * 现代化设计：
  * - 大尺寸 Dialog，宽敞易读
  * - 按渠道分组，灰色背景供应商标题行
- * - 选中项左侧绿色竖条高亮
+ * - 选中项左侧主题色竖条高亮
  * - 触发按钮：模型 logo + 模型名 + Chevron
  */
 
@@ -25,10 +25,12 @@ import {
 } from '@/atoms/chat-atoms'
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
-import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
+import { getChannelLineLogo, getModelLineLogo } from '@/lib/model-line-logo'
 import { ModelMark } from './ModelMark'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
+
+const dialogModelMarkClass = 'text-foreground/75 dark:text-foreground/90'
 
 /** 从渠道列表构建扁平化的模型选项 */
 function buildModelOptions(channels: Channel[], filterChannelId?: string, filterChannelIds?: string[]): ModelOption[] {
@@ -237,7 +239,7 @@ export function ModelSelector({
       >
         {displayModelInfo ? (
           <ModelMark
-            src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
+            src={getModelLineLogo(displayModelInfo.modelId, displayModelInfo.provider)}
             className="size-4 text-primary"
           />
         ) : (
@@ -284,17 +286,17 @@ export function ModelSelector({
                 return Array.from(filteredGrouped.entries()).map(([channelId, options]) => {
                 const first = options[0]
                 if (!first) return null
+                const channel = channels.find((item) => item.id === channelId)
 
                 return (
                   <div key={channelId}>
                     {/* 供应商标题行 - 灰色背景 */}
                     <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
                       <ModelMark
-                        src={(() => {
-                          const ch = channels.find((c) => c.id === channelId)
-                          return ch ? getChannelLogo(ch) : DefaultLogo
-                        })()}
-                        className="size-5 text-muted-foreground/70"
+                        src={channel
+                          ? getChannelLineLogo(channel, first.modelId)
+                          : getModelLineLogo(first.modelId, first.provider)}
+                        className={cn('size-5', dialogModelMarkClass)}
                       />
                       <span className="text-sm font-medium text-muted-foreground">
                         {first.channelName}
@@ -327,10 +329,10 @@ export function ModelSelector({
                           )}
                         >
                           <ModelMark
-                            src={getModelLogo(option.modelId, option.provider)}
+                            src={getModelLineLogo(option.modelId, option.provider)}
                             className={cn(
                               'size-5 flex-shrink-0',
-                              isSelected ? 'text-primary' : 'text-muted-foreground/70'
+                              isSelected ? 'text-primary' : dialogModelMarkClass
                             )}
                           />
                           <span className={cn(
