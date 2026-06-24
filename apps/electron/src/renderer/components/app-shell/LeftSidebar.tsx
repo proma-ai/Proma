@@ -3033,20 +3033,25 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       return b.updatedAt - a.updatedAt
     })
   const activeIds = new Set(activeSessions.map((s) => s.id))
-  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
-  const currentSession = activeSessionId
-    && !activeIds.has(activeSessionId)
-    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
-    : null
-  const pinnedCurrent = currentSession ? [currentSession] : []
-  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
+  // 非活跃部分按自然策略（最近 3 天窗口 + 预览上限）计算，且不依赖当前选中态，
+  // 保持 group.sessions 的 updatedAt 倒序——这样点击已可见会话时顺序保持稳定，
+  // 不会因为它变成 activeSessionId 而被提到顶部。
   const fillSessions = group.sessions
     .filter((session) =>
       !activeIds.has(session.id)
-      && !pinnedCurrentIds.has(session.id)
       && session.updatedAt >= recentCutoff
     )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
+  const fillIds = new Set(fillSessions.map((s) => s.id))
+  // 当前选中会话仅在「既非活跃、又不在自然填充集合中」时才补入折叠列表（紧接活跃区之后），
+  // 确保从搜索结果打开的旧会话（updatedAt 超窗或被上限截断）立即可见；
+  // 若它本就出现在 fillSessions 中，则不再单独前置，避免点击后被强制排到第一位。
+  const currentSession = activeSessionId
+    && !activeIds.has(activeSessionId)
+    && !fillIds.has(activeSessionId)
+    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
   const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
   const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
