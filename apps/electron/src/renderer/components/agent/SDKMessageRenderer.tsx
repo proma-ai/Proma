@@ -33,11 +33,13 @@ import {
   UserMessageContent,
 } from '@/components/ai-elements/message'
 import { UserAvatar } from '@/components/chat/UserAvatar'
+import { ModelMark, modelMarkReadableToneClass } from '@/components/chat/ModelMark'
 import { CopyButton } from '@/components/chat/CopyButton'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
-import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
+import { getModelLineLogo } from '@/lib/model-line-logo'
+import { resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { agentProcessGroupsKeepExpandedAtom, agentSessionPendingFilesAtom } from '@/atoms/agent-atoms'
@@ -245,10 +247,9 @@ function AssistantLogo({ model }: { model?: string }): React.ReactElement {
   const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
-      <img
-        src={getModelLogo(model, resolveModelProvider(model, channels))}
-        alt={model}
-        className="size-[35px] rounded-[25%] object-cover"
+      <ModelMark
+        src={getModelLineLogo(model, resolveModelProvider(model, channels))}
+        className={`size-[35px] ${modelMarkReadableToneClass}`}
       />
     )
   }

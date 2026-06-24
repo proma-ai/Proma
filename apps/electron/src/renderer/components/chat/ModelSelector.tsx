@@ -26,11 +26,9 @@ import {
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
 import { getChannelLineLogo, getModelLineLogo } from '@/lib/model-line-logo'
-import { ModelMark } from './ModelMark'
+import { ModelMark, modelMarkReadableToneClass } from './ModelMark'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
-
-const dialogModelMarkClass = 'text-foreground/75 dark:text-foreground/90'
 
 /** 从渠道列表构建扁平化的模型选项 */
 function buildModelOptions(channels: Channel[], filterChannelId?: string, filterChannelIds?: string[]): ModelOption[] {
@@ -296,7 +294,7 @@ export function ModelSelector({
                         src={channel
                           ? getChannelLineLogo(channel, first.modelId)
                           : getModelLineLogo(first.modelId, first.provider)}
-                        className={cn('size-5', dialogModelMarkClass)}
+                        className={cn('size-5', modelMarkReadableToneClass)}
                       />
                       <span className="text-sm font-medium text-muted-foreground">
                         {first.channelName}
@@ -332,7 +330,7 @@ export function ModelSelector({
                             src={getModelLineLogo(option.modelId, option.provider)}
                             className={cn(
                               'size-5 flex-shrink-0',
-                              isSelected ? 'text-primary' : dialogModelMarkClass
+                              isSelected ? 'text-primary' : modelMarkReadableToneClass
                             )}
                           />
                           <span className={cn(
