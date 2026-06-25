@@ -36,6 +36,7 @@ import {
   resolveDelegationPermissionMode,
 } from './agent-collaboration-utils'
 import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
+import { extractContextText } from './agent-session-cleaner'
 
 interface CollaborationToolContext {
   sessionId: string
@@ -324,6 +325,19 @@ function summarizeChildResult(childSessionId: string, messages?: AgentMessage[])
   if (text) return truncateText(text, RESULT_SUMMARY_CHAR_LIMIT)
 
   return '子会话已结束，但未找到可摘要的 assistant 文本。请打开子会话查看完整记录。'
+}
+
+/**
+ * 构建委托结果摘要：用 extractContextText 清洗完整对话上下文；
+ * 无有效内容时返回通用 fallback 提示。
+ */
+function buildContextualResultSummary(
+  sdkMessages: SDKMessage[],
+  meta: { title: string; goal: string },
+): string {
+  const contextText = extractContextText(sdkMessages, meta)
+  if (contextText) return truncateText(contextText, RESULT_SUMMARY_CHAR_LIMIT)
+  return '子会话已结束，但未找到可摘要的对话内容。请打开子会话查看完整记录。'
 }
 
 function markDelegationFinished(
@@ -694,7 +708,11 @@ function startDelegation(
       },
       onComplete: (messages) => {
         if (record.status !== 'running') return
-        const resultSummary = summarizeChildResult(child.id, messages)
+        const sdkMessages = getAgentSessionSDKMessages(child.id)
+        const resultSummary = buildContextualResultSummary(sdkMessages, {
+          title: record.title,
+          goal: record.goal,
+        })
         markDelegationFinished(record, 'completed', { resultSummary })
       },
       onTitleUpdated: (updatedTitle) => {
@@ -1020,7 +1038,11 @@ export async function injectAgentCollaborationMcpServer(
               },
               onComplete: (messages) => {
                 if (record.status !== 'running') return
-                const resultSummary = summarizeChildResult(record.childSessionId, messages)
+                const sdkMessages = getAgentSessionSDKMessages(record.childSessionId)
+                const resultSummary = buildContextualResultSummary(sdkMessages, {
+                  title: record.title,
+                  goal: record.goal,
+                })
                 markDelegationFinished(record, 'completed', { resultSummary })
               },
               onTitleUpdated: () => {},
