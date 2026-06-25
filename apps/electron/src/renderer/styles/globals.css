@@ -1020,28 +1020,6 @@
   background-color: hsl(var(--sidebar-control-surface-hover)) !important;
 }
 
-/* CRT 终端：Tab 流式指示器 — 保留原色，叠加 CRT 磷光质感 */
-.theme-terminal-dark .tab-stream-indicator.border-blue-500 {
-  border-color: hsl(217 91% 60%) !important;
-  box-shadow:
-    0 0 6px hsl(217 85% 55% / 0.38),
-    0 0 14px hsl(217 80% 52% / 0.20),
-    inset 0 0 5px hsl(217 85% 58% / 0.12) !important;
-}
-.theme-terminal-dark .tab-stream-indicator.border-green-500 {
-  border-color: hsl(145 80% 45%) !important;
-  box-shadow:
-    0 0 6px hsl(145 75% 42% / 0.38),
-    0 0 14px hsl(145 70% 40% / 0.20),
-    inset 0 0 5px hsl(145 78% 44% / 0.12) !important;
-}
-.theme-terminal-dark .tab-stream-indicator.border-orange-500 {
-  border-color: hsl(25 95% 53%) !important;
-  box-shadow:
-    0 0 6px hsl(25 90% 50% / 0.38),
-    0 0 14px hsl(25 85% 48% / 0.20),
-    inset 0 0 5px hsl(25 92% 52% / 0.12) !important;
-}
 
 /* ===== 输入框段落紧凑行距（仅作用于输入框内的 tiptap 编辑器） ===== */
 .rich-text-input .tiptap p {

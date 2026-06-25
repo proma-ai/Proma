@@ -15,6 +15,7 @@ import type { TabType, TabMinimapItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { interfaceVariantAtom } from '@/atoms/theme'
+import { Spinner } from '@/components/ui/spinner'
 import { TabPreviewPanel } from './TabPreviewPanel'
 
 export interface TabBarItemProps {
@@ -101,15 +102,7 @@ export function TabBarItem({
   }
 
   const isScratch = type === 'scratch'
-  const indicatorColor = isScratch
-    ? undefined
-    : isStreaming !== 'idle'
-    ? isStreaming === 'completed'
-      ? 'border-green-500'
-      : isStreaming === 'blocked'
-        ? 'border-orange-500'
-        : 'border-blue-500'
-    : undefined
+  const showAgentSpinner = type === 'agent' && isStreaming === 'running'
   const previewItems = minimapCache.get(id) ?? []
   // 当前 active Tab 不显示预览面板
   const showPreview = isHovered && !isActive
@@ -151,7 +144,7 @@ export function TabBarItem({
 
   return (
     <div
-      className="relative min-w-[120px] max-w-[200px] flex-[1_0_120px] titlebar-no-drag"
+      className="relative min-w-[132px] max-w-[240px] flex-[1_0_132px] titlebar-no-drag"
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
     >
@@ -185,9 +178,10 @@ export function TabBarItem({
           <span className="flex-1" />
         ) : (
           <span className="flex-1 min-w-0 truncate text-left flex items-center gap-1">
+            {showAgentSpinner && <Spinner size="sm" className="mr-2 shrink-0 text-primary/70" />}
             {isAutomation && <Clock className="size-3 shrink-0 text-foreground/40" />}
             {isDelegation && !isAutomation && <GitBranch className="size-3 shrink-0 text-foreground/40" />}
-            {title}
+            <span className="min-w-0 truncate">{title}</span>
           </span>
         )}
 
@@ -216,17 +210,6 @@ export function TabBarItem({
         </span>
         )}
 
-        {/* 状态包边 */}
-        {indicatorColor && (
-          <span
-            className={cn(
-              'absolute inset-0 border-t-2 border-l-2 border-r-2 border-b-0 pointer-events-none tab-stream-indicator',
-              isClassic ? 'rounded-t-lg' : 'rounded-none',
-              indicatorColor,
-            )}
-            aria-hidden="true"
-          />
-        )}
       </button>
 
       {/* 悬浮预览面板（Portal 渲染到 body） */}
