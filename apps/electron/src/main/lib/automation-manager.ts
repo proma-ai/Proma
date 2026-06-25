@@ -218,6 +218,21 @@ function normalizeMaxRuns(v: number | undefined): number | undefined {
 }
 
 /**
+ * 应用 maxRuns 变更。只要运行配额发生变化，就把已执行计数/完成标记重置到新配额的起点。
+ */
+export function applyMaxRunsUpdate(
+  target: Pick<Automation, 'maxRuns' | 'runCount' | 'completedAt'>,
+  nextMaxRuns: number | undefined,
+): void {
+  const normalizedMaxRuns = normalizeMaxRuns(nextMaxRuns)
+  if (normalizedMaxRuns !== target.maxRuns) {
+    target.runCount = 0
+    target.completedAt = undefined
+  }
+  target.maxRuns = normalizedMaxRuns
+}
+
+/**
  * 判断任务是否已达成「自动完成」条件（跑完后应停用，区别于手动暂停 / 失败暂停）：
  * - once：只要实际执行过一次（runCount ≥ 1）即完成
  * - 任意模式叠加 maxRuns：实际执行次数达到上限即完成
@@ -288,7 +303,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.permissionMode !== undefined) target.permissionMode = input.permissionMode
   if (input.sessionMode !== undefined) target.sessionMode = input.sessionMode
   if (input.notificationTargets !== undefined) target.notificationTargets = input.notificationTargets
-  if (input.maxRuns !== undefined) target.maxRuns = normalizeMaxRuns(input.maxRuns)
+  if (input.maxRuns !== undefined) applyMaxRunsUpdate(target, input.maxRuns)
 
   // 调度参数变化：重算下次运行时间（从现在起算，避免旧时间戳立即触发）
   const scheduleChanged =

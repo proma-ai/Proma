@@ -761,7 +761,7 @@ function AttachedDirsSection({ attachedDirs, onDetach, refreshVersion, onAddToCh
   }, [])
 
   return (
-    <div className="pt-2.5 pb-1 flex-shrink-0">
+    <div className="file-tree-guide-scope pt-2.5 pb-1 flex-shrink-0">
       <div className="text-[11px] font-medium text-muted-foreground mb-1 px-3">附加目录（Agent 可以读取并操作此外部文件夹）</div>
       {attachedDirs.map((dir) => {
         const isRevealRoot = dir === revealRoot
@@ -903,7 +903,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
         <div className="relative">
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
+            className="file-tree-guide pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
             style={{ left: guideLeft }}
           />
           {children.length === 0 && loaded && (
@@ -1217,7 +1217,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
         <div className="relative">
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
+            className="file-tree-guide pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
             style={{ left: guideLeft }}
           />
           {children.length === 0 && loaded && (

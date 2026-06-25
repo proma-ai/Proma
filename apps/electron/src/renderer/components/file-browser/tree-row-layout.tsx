@@ -69,7 +69,7 @@ export function AncestorGuides({ depth, isSelected }: AncestorGuidesProps): Reac
           key={`ancestor-guide-${i}`}
           aria-hidden="true"
           className={cn(
-            'pointer-events-none absolute top-0 bottom-0 w-px',
+            'file-tree-guide pointer-events-none absolute top-0 bottom-0 w-px',
             isSelected ? 'bg-accent-foreground/30' : 'bg-border/70',
           )}
           style={{ left: TREE_ROW_HORIZONTAL_MARGIN + 8 + i * TREE_INDENT_WIDTH + 7 }}

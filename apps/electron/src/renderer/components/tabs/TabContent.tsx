@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { tabsAtom } from '@/atoms/tab-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
 import { ChatView } from '@/components/chat'
@@ -74,7 +74,7 @@ export function TabContent({ tabId }: TabContentProps): React.ReactElement {
 function TutorialTabContent(): React.ReactElement {
   const [content, setContent] = React.useState('')
   const [loadState, setLoadState] = React.useState<'loading' | 'ready' | 'error'>('loading')
-  const [tocOpen] = useAtom(markdownTocOpenAtom)
+  const tocOpen = useAtomValue(markdownTocOpenAtom)
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {

@@ -565,6 +565,14 @@ export function useGlobalAgentListeners(): void {
           activateExternalAgentRun(payload.event)
         }
 
+        // 自动任务会话被用户接管（毕业）：向用户提示，后续定时运行将新建独立会话
+        if (payload.kind === 'proma_event' && payload.event.type === 'automation_graduated') {
+          toast('已接管自动任务会话，后续定时运行将创建新会话。', { duration: 3000 })
+          window.electronAPI.listAgentSessions()
+            .then((sessions) => store.set(agentSessionsAtom, sessions))
+            .catch(console.error)
+        }
+
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {

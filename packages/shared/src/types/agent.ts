@@ -566,6 +566,8 @@ export type PromaEvent =
   | { type: 'run_resumed'; sessionId: string }
   // 协作子会话阻塞事件上浮
   | { type: 'delegation_blocked'; delegationId: string; blockedEvent: unknown }
+  // 自动任务会话被用户接管（毕业）
+  | { type: 'automation_graduated' }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
@@ -952,6 +954,8 @@ export interface ForkSessionInput {
   sessionId: string
   /** SDK 消息 uuid（截断点，inclusive）。省略时复制全部历史 */
   upToMessageUuid?: string
+  /** 目标模型 ID。省略时继承源会话模型；传入时必须属于源会话同一渠道且已启用 */
+  modelId?: string
 }
 
 /** 快照回退输入（同一会话内回退到指定点） */

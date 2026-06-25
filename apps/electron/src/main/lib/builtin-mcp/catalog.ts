@@ -46,6 +46,7 @@ const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogItem[] = [
     description: '创建、等待、读取和停止真实可见的 Proma 协作子 Agent 会话。',
     category: 'collaboration',
     tools: [
+      { name: 'list_available_agent_models', description: '列出当前渠道下可用于协作子 Agent 的模型。', readOnly: true },
       { name: 'delegate_agent', description: '创建单个协作子 Agent 会话。' },
       { name: 'delegate_agents', description: '批量创建协作子 Agent 会话。' },
       { name: 'wait_for_delegations', description: '等待一组协作子会话完成。', readOnly: true },

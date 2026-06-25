@@ -4,6 +4,17 @@ export default {
   content: [
     './src/renderer/**/*.{js,ts,jsx,tsx}',
   ],
+  // 主题 class 由运行时根据设置拼接到 <html>，Tailwind 无法从 TSX 静态扫描到。
+  // 必须 safelist，否则 @layer base 中对应的 CSS 变量块会在构建时被裁掉。
+  safelist: [
+    'theme-ocean-light',
+    'theme-ocean-dark',
+    'theme-forest-light',
+    'theme-forest-dark',
+    'theme-slate-light',
+    'theme-slate-dark',
+    'theme-terminal-dark',
+  ],
   theme: {
     extend: {
       colors: {

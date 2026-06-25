@@ -45,6 +45,7 @@ interface UseSessionMiniMapHoverReturn {
   handleMouseLeave: () => void
   handlePanelMouseEnter: () => void
   handlePanelMouseLeave: () => void
+  closeNow: () => void
 }
 
 interface SessionMiniMapPopoverProps {
@@ -104,6 +105,14 @@ export function useSessionMiniMapHover(delayMs = 600, disabled = false): UseSess
     anchorRef.current = node
   }, [])
 
+  const closeNow = React.useCallback((): void => {
+    if (enterTimerRef.current) clearTimeout(enterTimerRef.current)
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current)
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+    setIsOpen(false)
+    setIsLeaving(false)
+  }, [])
+
   const handleMouseEnter = React.useCallback((): void => {
     if (disabled) return
     if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current)
@@ -140,6 +149,7 @@ export function useSessionMiniMapHover(delayMs = 600, disabled = false): UseSess
     handleMouseLeave: closeWithDelay,
     handlePanelMouseEnter,
     handlePanelMouseLeave: closeWithDelay,
+    closeNow,
   }
 }
 

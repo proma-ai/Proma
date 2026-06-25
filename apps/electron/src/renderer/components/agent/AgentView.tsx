@@ -1768,10 +1768,19 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   /** 分叉会话：从指定消息处创建新会话并自动切换 */
   const handleFork = React.useCallback(async (upToMessageUuid: string): Promise<void> => {
+    if (agentModelId && agentChannelId && sessionMetaChannelId && agentChannelId !== sessionMetaChannelId) {
+      toast.error('分叉会话失败', {
+        description: '分叉只能使用源会话同一渠道下的模型，请切回当前会话渠道后再试。',
+      })
+      return
+    }
+    const forkModelId = agentChannelId === sessionMetaChannelId ? agentModelId || undefined : undefined
+
     try {
       const meta = await window.electronAPI.forkAgentSession({
         sessionId,
         upToMessageUuid,
+        modelId: forkModelId,
       })
       setAgentSessions((prev) => [meta, ...prev])
 
@@ -1793,7 +1802,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         description: friendlyDesc,
       })
     }
-  }, [sessionId, openSession, setAgentSessions])
+  }, [sessionId, agentChannelId, agentModelId, sessionMetaChannelId, openSession, setAgentSessions])
 
   /** 快照回退：同一会话内回退到指定消息点，恢复文件 + 截断对话 */
   const [rewindTargetUuid, setRewindTargetUuid] = React.useState<string | null>(null)

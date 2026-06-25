@@ -223,6 +223,11 @@ interface AgentProjectGroup {
   sessions: AgentSessionMeta[]
 }
 
+interface AgentSessionTreeItem {
+  session: AgentSessionMeta
+  childSessions: AgentSessionMeta[]
+}
+
 /** 合成「自动任务」虚拟项目组的工作区 ID（不对应真实 workspace，仅用于聚合自动任务会话） */
 const AUTOMATION_GROUP_ID = '__automations__'
 /** 供合成组复用 AgentProjectGroupItem 时填充无意义的 workspace 专属回调 */
@@ -314,11 +319,111 @@ function getRailInitial(title: string): string {
 
 /**
  * 是否为「应从项目会话列表隐藏」的自动任务会话：
- * 来自定时任务（sourceAutomationId）、尚未被用户接管毕业（automationGraduated）、且未被置顶。
- * 这类会话的"家"是 Automation 视图；置顶或毕业后回到普通项目列表。
+ * 来自定时任务（sourceAutomationId）且未被置顶。
+ * 这类会话的"家"是「自动任务」视图，始终不出现在普通项目列表。
  */
 function isHiddenAutomationSession(session: AgentSessionMeta): boolean {
-  return !!session.sourceAutomationId && !session.automationGraduated && !session.pinned
+  return !!session.sourceAutomationId && !session.pinned
+}
+
+function isDelegatedChildSession(session: AgentSessionMeta): boolean {
+  return !!session.parentSessionId && !!session.sourceDelegationId
+}
+
+function buildAgentSessionTrees(sessions: AgentSessionMeta[]): AgentSessionTreeItem[] {
+  const sessionIds = new Set(sessions.map((session) => session.id))
+  const childrenByParentId = new Map<string, AgentSessionMeta[]>()
+  const roots: AgentSessionMeta[] = []
+
+  for (const session of sessions) {
+    if (
+      isDelegatedChildSession(session)
+      && session.parentSessionId
+      && sessionIds.has(session.parentSessionId)
+    ) {
+      const children = childrenByParentId.get(session.parentSessionId) ?? []
+      children.push(session)
+      childrenByParentId.set(session.parentSessionId, children)
+      continue
+    }
+
+    roots.push(session)
+  }
+
+  return roots.map((session) => ({
+    session,
+    childSessions: childrenByParentId.get(session.id) ?? [],
+  }))
+}
+
+function getDelegatedChildStatus(
+  session: AgentSessionMeta,
+  agentIndicatorMap: Map<string, SessionIndicatorStatus>,
+): SessionIndicatorStatus {
+  const status = agentIndicatorMap.get(session.id)
+  if (status) return status
+  return session.delegationStatus === 'running' ? 'running' : 'idle'
+}
+
+function getSessionTreeStatus(
+  item: AgentSessionTreeItem,
+  agentIndicatorMap: Map<string, SessionIndicatorStatus>,
+): SessionIndicatorStatus {
+  const statuses = [
+    agentIndicatorMap.get(item.session.id) ?? 'idle',
+    ...item.childSessions.map((session) => getDelegatedChildStatus(session, agentIndicatorMap)),
+  ]
+
+  if (statuses.includes('blocked')) return 'blocked'
+  if (statuses.includes('running')) return 'running'
+  if (statuses.includes('completed')) return 'completed'
+  return 'idle'
+}
+
+function countCompletedDelegatedChildren(childSessions: AgentSessionMeta[]): number {
+  return childSessions.filter((session) => session.delegationStatus === 'completed').length
+}
+
+function treeContainsSessionId(item: AgentSessionTreeItem, sessionId: string | null): boolean {
+  if (!sessionId) return false
+  return item.session.id === sessionId || item.childSessions.some((session) => session.id === sessionId)
+}
+
+function collectTreeSessionIds(items: AgentSessionTreeItem[]): Set<string> {
+  const ids = new Set<string>()
+  for (const item of items) {
+    ids.add(item.session.id)
+    for (const child of item.childSessions) ids.add(child.id)
+  }
+  return ids
+}
+
+function getDirectDelegatedChildren(
+  sessions: AgentSessionMeta[],
+  parentSessionId: string,
+): AgentSessionMeta[] {
+  return sessions.filter((session) => (
+    session.parentSessionId === parentSessionId
+    && !!session.sourceDelegationId
+  ))
+}
+
+function hasPinnedVisibleParent(session: AgentSessionMeta, sessions: AgentSessionMeta[]): boolean {
+  if (!isDelegatedChildSession(session) || !session.parentSessionId) return false
+  const parent = sessions.find((item) => item.id === session.parentSessionId)
+  return !!parent?.pinned && !parent.archived
+}
+
+function getSyncableDelegatedChildren(
+  sessions: AgentSessionMeta[],
+  parentSessionId: string,
+  draftSessionIds: Set<string>,
+): AgentSessionMeta[] {
+  return getDirectDelegatedChildren(sessions, parentSessionId).filter((child) => (
+    !child.archived
+    && !draftSessionIds.has(child.id)
+    && !isHiddenAutomationSession(child)
+  ))
 }
 
 interface RailRecentItem {
@@ -450,6 +555,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const [expandedExtraCountMap, setExpandedExtraCountMap] = React.useState<Map<string, number>>(new Map())
   /** 记录被用户手动折叠的工作区 ID（点击当前工作区标题时折叠/展开）。刻意不持久化：折叠被视为临时查看行为，刷新/重启后恢复默认展开 */
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = React.useState<Set<string>>(new Set())
+  /** 记录已展开的委派母会话；默认收起，避免批量派遣后撑满侧栏 */
+  const [expandedDelegationParentIds, setExpandedDelegationParentIds] = React.useState<Set<string>>(new Set())
+  /** 记录用户手动收起的委派母会话；用于覆盖“当前子会话自动展开”的兜底可见性 */
+  const [collapsedDelegationParentIds, setCollapsedDelegationParentIds] = React.useState<Set<string>>(new Set())
   /** 项目拖拽排序状态 */
   const [dragProjectId, setDragProjectId] = React.useState<string | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = React.useState<{ id: string; position: 'before' | 'after' } | null>(null)
@@ -631,10 +740,23 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       const filtered = agentSessions.filter((s) =>
         s.pinned
         && !draftSessionIds.has(s.id)
+        && !hasPinnedVisibleParent(s, agentSessions)
       )
       return sortAgentSessionsByUpdatedAtDesc(filtered)
     },
     [agentSessions, viewMode, draftSessionIds]
+  )
+
+  const pinnedAgentSessionTrees = React.useMemo<AgentSessionTreeItem[]>(
+    () => pinnedAgentSessions.map((session) => ({
+      session,
+      childSessions: getDirectDelegatedChildren(agentSessions, session.id).filter((child) => (
+        !child.archived
+        && !draftSessionIds.has(child.id)
+        && !isHiddenAutomationSession(child)
+      )),
+    })),
+    [agentSessions, draftSessionIds, pinnedAgentSessions],
   )
 
   /** 对话按日期分组（根据 viewMode 过滤归档状态，排除 draft） */
@@ -840,6 +962,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
     // 清理 per-conversation/session Map atoms 条目
     cleanupMapAtoms(pendingDeleteId)
+    setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, pendingDeleteId))
 
     if (mode === 'agent') {
       // Agent 模式：删除 Agent 会话
@@ -946,6 +1069,27 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     setCollapsedWorkspaceIds((prev) => toggleSetEntry(prev, groupId))
   }, [])
 
+  const handleToggleDelegationParent = React.useCallback((sessionId: string, expanded: boolean): void => {
+    if (expanded) {
+      setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, sessionId))
+      setCollapsedDelegationParentIds((prev) => {
+        if (prev.has(sessionId)) return prev
+        const next = new Set(prev)
+        next.add(sessionId)
+        return next
+      })
+      return
+    }
+
+    setCollapsedDelegationParentIds((prev) => deleteSetEntry(prev, sessionId))
+    setExpandedDelegationParentIds((prev) => {
+      if (prev.has(sessionId)) return prev
+      const next = new Set(prev)
+      next.add(sessionId)
+      return next
+    })
+  }, [])
+
   const canDeleteWorkspace = React.useCallback(
     (workspace: AgentWorkspace): boolean => workspace.slug !== 'default' && workspaces.length > 1,
     [workspaces.length],
@@ -1031,6 +1175,14 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       })
 
       setCollapsedWorkspaceIds((prev) => deleteSetEntry(prev, workspaceId))
+      setExpandedDelegationParentIds((prev) => {
+        let changed = false
+        const next = new Set(prev)
+        for (const sessionId of deletedSessionIds) {
+          if (next.delete(sessionId)) changed = true
+        }
+        return changed ? next : prev
+      })
 
       if (workspaceId === currentWorkspaceId) {
         const fallback = remainingWorkspaces.find((item) => item.slug === 'default') ?? remainingWorkspaces[0] ?? null
@@ -1122,7 +1274,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [])
 
   /**
-   * 合成「自动任务」项目组：聚合所有未毕业的自动任务会话（跨工作区），
+   * 合成「自动任务」项目组：聚合所有自动任务会话（跨工作区），
    * 作为这些会话在侧栏的统一归属地。会话为空时返回 null（不渲染空组）。
    */
   const automationGroup = React.useMemo<AgentProjectGroup | null>(
@@ -1133,7 +1285,6 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           && !session.pinned
           && !draftSessionIds.has(session.id)
           && !!session.sourceAutomationId
-          && !session.automationGraduated
         )
       )
       if (sessions.length === 0) return null
@@ -1295,54 +1446,129 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     }
   }, [setAgentSessions, setTabs])
 
+  const closeArchivedAgentTabs = React.useCallback((sessionIds: string[]): void => {
+    const ids = new Set(sessionIds)
+    const currentTabs = store.get(tabsAtom)
+    const currentActiveTabId = store.get(activeTabIdAtom)
+    const nextTabs = currentTabs.filter((tab) => (
+      (tab.type !== 'agent' && tab.type !== 'preview') || !ids.has(tab.sessionId)
+    ))
+    const nextActiveTabId = currentActiveTabId && nextTabs.some((tab) => tab.id === currentActiveTabId)
+      ? currentActiveTabId
+      : nextTabs[0]?.id ?? null
+
+    setTabs(nextTabs)
+    setActiveTabId(nextActiveTabId)
+    for (const sessionId of ids) cleanupMapAtoms(sessionId)
+    syncActiveTabSideEffects(nextActiveTabId ? nextTabs.find((tab) => tab.id === nextActiveTabId) ?? null : null)
+  }, [cleanupMapAtoms, setActiveTabId, setTabs, store, syncActiveTabSideEffects])
+
   /** 切换 Agent 会话置顶状态 */
   const handleTogglePinAgent = React.useCallback(async (id: string): Promise<void> => {
+    const sessions = store.get(agentSessionsAtom)
+    const original = sessions.find((s) => s.id === id)
+    const delegatedChildren = getSyncableDelegatedChildren(sessions, id, draftSessionIds)
     try {
-      const original = store.get(agentSessionsAtom).find((s) => s.id === id)
       const updated = await window.electronAPI.togglePinAgentSession(id)
-      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      const targetPinned = !!updated.pinned
+      for (const child of delegatedChildren) {
+        if (!!child.pinned !== targetPinned) {
+          await window.electronAPI.togglePinAgentSession(child.id)
+        }
+      }
+      const refreshedSessions = delegatedChildren.length > 0
+        ? await window.electronAPI.listAgentSessions()
+        : null
+      if (refreshedSessions) {
+        setAgentSessions(refreshedSessions)
+      } else {
+        setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      }
       if (updated.pinned) {
         if (original?.archived && !updated.archived) {
           toast.success('已置顶', { description: '已自动取消归档' })
+        } else if (delegatedChildren.length > 0) {
+          toast.success('已置顶', { description: `已同步 ${delegatedChildren.length} 个子会话` })
         } else {
           toast.success('已置顶')
         }
       } else {
-        toast.success('已取消置顶')
+        toast.success(
+          '已取消置顶',
+          delegatedChildren.length > 0
+            ? { description: `已同步 ${delegatedChildren.length} 个子会话` }
+            : undefined,
+        )
       }
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话置顶失败:', error)
+      // 级联可能在中途失败，导致部分子会话已切换、部分未切换。
+      // 重新拉取磁盘真实状态，避免侧边栏与磁盘不一致直到下次重载。
+      if (delegatedChildren.length > 0) {
+        try {
+          setAgentSessions(await window.electronAPI.listAgentSessions())
+        } catch (refreshError) {
+          console.error('[侧边栏] 置顶失败后刷新会话列表失败:', refreshError)
+        }
+      }
     }
-  }, [store, setAgentSessions])
+  }, [draftSessionIds, store, setAgentSessions])
 
   /** 切换 Agent 会话归档状态 */
   const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {
+    const sessions = store.get(agentSessionsAtom)
+    // 在 try 外追踪级联状态，便于失败时重新同步与关闭已归档子会话的标签页。
+    let cascaded = false
+    const changedChildIds: string[] = []
     try {
       const updated = await window.electronAPI.toggleArchiveAgentSession(id)
-      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      const targetArchived = !!updated.archived
+      const delegatedChildren = targetArchived
+        ? getSyncableDelegatedChildren(sessions, id, draftSessionIds)
+        : []
+      cascaded = delegatedChildren.length > 0
+      for (const child of delegatedChildren) {
+        if (!!child.archived !== targetArchived) {
+          const childUpdated = await window.electronAPI.toggleArchiveAgentSession(child.id)
+          changedChildIds.push(childUpdated.id)
+        }
+      }
+      const refreshedSessions = delegatedChildren.length > 0
+        ? await window.electronAPI.listAgentSessions()
+        : null
+      if (refreshedSessions) {
+        setAgentSessions(refreshedSessions)
+      } else {
+        setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+      }
       // 归档时自动关闭该会话的标签页，并同步新激活标签的副作用，
       // 否则 RightSidePanel（依赖 currentAgentSessionIdAtom）会因为
       // 指针被错误置 null 而消失。
       if (updated.archived) {
-        const currentTabs = store.get(tabsAtom)
-        const currentActiveTabId = store.get(activeTabIdAtom)
-        const wasActive = currentActiveTabId === id
-        const tabResult = closeTab(currentTabs, currentActiveTabId, id)
-        setTabs(tabResult.tabs)
-        setActiveTabId(tabResult.activeTabId)
-        cleanupMapAtoms(id)
-        if (wasActive) {
-          const newActiveTab = tabResult.activeTabId
-            ? tabResult.tabs.find((t) => t.id === tabResult.activeTabId) ?? null
-            : null
-          syncActiveTabSideEffects(newActiveTab)
-        }
+        closeArchivedAgentTabs([updated.id, ...changedChildIds])
       }
-      toast.success(updated.archived ? '已归档' : '已取消归档')
+      toast.success(
+        updated.archived ? '已归档' : '已取消归档',
+        delegatedChildren.length > 0
+          ? { description: `已同步 ${delegatedChildren.length} 个子会话` }
+          : undefined,
+      )
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
+      // 级联可能在中途失败，导致部分子会话已归档、部分未归档。
+      // 关闭已确认归档的子会话标签页，并重新拉取磁盘真实状态以避免不一致。
+      if (cascaded) {
+        if (changedChildIds.length > 0) {
+          closeArchivedAgentTabs(changedChildIds)
+        }
+        try {
+          setAgentSessions(await window.electronAPI.listAgentSessions())
+        } catch (refreshError) {
+          console.error('[侧边栏] 归档失败后刷新会话列表失败:', refreshError)
+        }
+      }
     }
-  }, [store, setAgentSessions, setTabs, setActiveTabId, cleanupMapAtoms, syncActiveTabSideEffects])
+  }, [closeArchivedAgentTabs, draftSessionIds, store, setAgentSessions])
 
   /** 请求迁移会话到其他项目（弹出迁移对话框） */
   const handleRequestMove = React.useCallback((id: string): void => {
@@ -1378,8 +1604,10 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           !session.archived
           && !session.pinned
           && !draftSessionIds.has(session.id)
-          // 未毕业的自动任务会话不进入项目列表，统一归到 Automation 视图
+          // 自动任务会话不进入项目列表，统一归到「自动任务」视图
           && !isHiddenAutomationSession(session)
+          // 已被置顶母会话收纳的子会话留在置顶区的母会话下面，避免重复显示为项目根会话
+          && !hasPinnedVisibleParent(session, agentSessions)
         )
       )
 
@@ -1496,7 +1724,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
         !session.archived
         && !draftSessionIds.has(session.id)
         && (!currentWorkspaceId || session.workspaceId === currentWorkspaceId)
-        // 未毕业的自动任务会话不出现在收起态 Rail，与项目列表保持一致
+        // 自动任务会话不出现在收起态 Rail，与展开态列表保持一致
         && !isHiddenAutomationSession(session)
       )
       .sort((a, b) => {
@@ -1708,7 +1936,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 type="button"
                 aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
                 onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 bg-primary/5 hover:bg-primary/10 hover:text-foreground transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
+                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 sidebar-control-surface hover:text-foreground transition-[background-color,color] duration-150 titlebar-no-drag"
               >
                 <Plus size={16} />
               </button>
@@ -1724,7 +1952,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 type="button"
                 aria-label="搜索"
                 onClick={() => setSearchDialogOpen(true)}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 bg-primary/5 hover:bg-primary/10 hover:text-foreground/70 transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
+                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 sidebar-control-surface hover:text-foreground/70 transition-[background-color,color] duration-150 titlebar-no-drag"
               >
                 <Search size={16} />
               </button>
@@ -1867,10 +2095,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
             <button
               onClick={() => setSidebarCollapsed(true)}
               className={cn(
-                'sidebar-collapse-button mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 titlebar-no-drag',
-                isClassic
-                  ? 'bg-muted hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors'
-                  : 'bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-[background-color,border-color,color] duration-150 border border-border/60 hover:border-border'
+                'sidebar-collapse-button mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 titlebar-no-drag transition-[background-color,color] duration-150'
               )}
             >
               <PanelLeftClose size={14} />
@@ -1884,7 +2109,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       <div className="px-3 pt-2 flex items-center gap-1.5">
         <button
           onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-primary/5 hover:bg-primary/10 hover:text-foreground transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
+          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 sidebar-control-surface hover:text-foreground transition-[background-color,color] duration-150 titlebar-no-drag"
         >
           <Plus size={14} />
           <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
@@ -1893,7 +2118,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           <TooltipTrigger asChild>
             <button
               onClick={() => setSearchDialogOpen(true)}
-              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-[background-color,border-color,color] duration-150 titlebar-no-drag border border-border/60 hover:border-border"
+              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 transition-[background-color,color] duration-150 titlebar-no-drag"
             >
               <Search size={14} />
             </button>
@@ -2002,24 +2227,63 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
               >
                 <div className="px-2">
                   <div className="ml-4 flex flex-col gap-0.5">
-                    {pinnedAgentSessions.map((session) => (
-                      <AgentSessionItem
-                        key={`pinned-${session.id}`}
-                        session={session}
-                        active={session.id === activeSessionId}
-                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                        showPinIcon={false}
-                        leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                        workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
-                        relativeTimeNow={relativeTimeNow}
-                        onSelect={handleSelectAgentSession}
-                        onRequestDelete={handleRequestDelete}
-                        onRequestMove={handleRequestMove}
-                        onRename={handleAgentRename}
-                        onTogglePin={handleTogglePinAgent}
-                        onToggleArchive={handleToggleArchiveAgent}
-                      />
-                    ))}
+                    {pinnedAgentSessionTrees.map((item) => {
+                      const childCount = item.childSessions.length
+                      const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
+                      const treeActive = treeContainsSessionId(item, activeSessionId)
+                      const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
+                      const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+                        || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+
+                      return (
+                        <div key={`pinned-${item.session.id}`} className="flex flex-col gap-0.5">
+                          <AgentSessionItem
+                            session={item.session}
+                            active={treeActive}
+                            indicatorStatus={rowStatus}
+                            showPinIcon={false}
+                            delegationSummary={childCount > 0
+                              ? {
+                                total: childCount,
+                                completed: countCompletedDelegatedChildren(item.childSessions),
+                                expanded: expandedChildren,
+                                onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
+                              }
+                              : undefined}
+                            leftAccent={getSessionLeftAccent(rowStatus)}
+                            workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
+                            relativeTimeNow={relativeTimeNow}
+                            onSelect={handleSelectAgentSession}
+                            onRequestDelete={handleRequestDelete}
+                            onRequestMove={handleRequestMove}
+                            onRename={handleAgentRename}
+                            onTogglePin={handleTogglePinAgent}
+                            onToggleArchive={handleToggleArchiveAgent}
+                          />
+
+                          {childCount > 0 && expandedChildren && (
+                            <div className="ml-3 border-l border-foreground/10 pl-2 flex flex-col gap-0.5">
+                              {item.childSessions.map((childSession) => (
+                                <DelegatedChildSessionItem
+                                  key={childSession.id}
+                                  session={childSession}
+                                  activeSessionId={activeSessionId}
+                                  agentIndicatorMap={agentIndicatorMap}
+                                  relativeTimeNow={relativeTimeNow}
+                                  workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
+                                  onSelect={handleSelectAgentSession}
+                                  onRequestDelete={handleRequestDelete}
+                                  onRequestMove={handleRequestMove}
+                                  onRename={handleAgentRename}
+                                  onTogglePin={handleTogglePinAgent}
+                                  onToggleArchive={handleToggleArchiveAgent}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -2080,6 +2344,8 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     collapsed={collapsedWorkspaceIds.has(group.workspace.id)}
                     activeSessionId={activeSessionId}
                     agentIndicatorMap={agentIndicatorMap}
+                    expandedDelegationParentIds={expandedDelegationParentIds}
+                    collapsedDelegationParentIds={collapsedDelegationParentIds}
                     relativeTimeNow={relativeTimeNow}
                     dragging={dragProjectId === group.workspace.id}
                     dropPosition={projectDropIndicator?.id === group.workspace.id ? projectDropIndicator.position : null}
@@ -2105,6 +2371,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                     onRename={handleAgentRename}
                     onTogglePin={handleTogglePinAgent}
                     onToggleArchive={handleToggleArchiveAgent}
+                    onToggleDelegationParent={handleToggleDelegationParent}
                   />
                 )
               })}
@@ -2686,6 +2953,13 @@ const SESSION_ACCENT_INDICATOR_CLASS: Record<SessionLeftAccent, string> = {
   green: 'bg-green-500',
 }
 
+const DELEGATION_STATUS_ICON_CLASS: Record<SessionIndicatorStatus, string> = {
+  idle: 'text-foreground/40',
+  running: 'text-blue-500',
+  blocked: 'text-orange-500',
+  completed: 'text-green-500',
+}
+
 function getSessionLeftAccent(status: SessionIndicatorStatus): SessionLeftAccent | undefined {
   if (status === 'blocked') return 'orange'
   if (status === 'running') return 'blue'
@@ -2698,6 +2972,12 @@ interface AgentSessionItemProps {
   active: boolean
   indicatorStatus: SessionIndicatorStatus
   showPinIcon?: boolean
+  delegationSummary?: {
+    total: number
+    completed: number
+    expanded: boolean
+    onToggle: () => void
+  }
   /** 行左侧状态色块；未传则不显示 */
   leftAccent?: SessionLeftAccent
   /** 是否禁用悬浮 Mini 地图 */
@@ -2719,6 +2999,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   active,
   indicatorStatus,
   showPinIcon,
+  delegationSummary,
   leftAccent,
   disableMiniMap,
   workspaceName,
@@ -2814,10 +3095,6 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           onClick={() => onSelect(session.id, session.title)}
           onMouseEnter={preview.handleMouseEnter}
           onMouseLeave={preview.handleMouseLeave}
-          onDoubleClick={(e) => {
-            e.stopPropagation()
-            startEdit()
-          }}
           className={cn(
             'group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'agent-session-item-active',
@@ -2861,12 +3138,25 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   <Clock size={11} className="flex-shrink-0 text-foreground/40" />
                 )}
                 {session.sourceDelegationId && !session.sourceAutomationId && (
-                  <GitBranch size={11} className="flex-shrink-0 text-foreground/40" />
+                  <GitBranch size={11} className={cn('flex-shrink-0', DELEGATION_STATUS_ICON_CLASS[indicatorStatus])} />
                 )}
-                <span className="truncate">{session.title}</span>
+                <span
+                  className="truncate"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation()
+                    startEdit()
+                  }}
+                >
+                  {session.title}
+                </span>
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
                     {workspaceName}
+                  </span>
+                )}
+                {delegationSummary && (
+                  <span className="flex-shrink-0 text-[11px] leading-4 text-foreground/45">
+                    {delegationSummary.completed}/{delegationSummary.total} 子会话
                   </span>
                 )}
               </div>
@@ -2874,16 +3164,48 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           </div>
 
           {!editing && (
-            <SessionItemActions
-              updatedAt={session.updatedAt}
-              relativeTimeNow={relativeTimeNow}
-              pinned={!!session.pinned}
-              archived={!!session.archived}
-              onTogglePin={() => onTogglePin(session.id)}
-              onToggleArchive={() => onToggleArchive(session.id)}
-              onMenuOpenChange={setMenuOpen}
-              menuItems={menuItems}
-            />
+            <>
+              {delegationSummary && (
+                <button
+                  type="button"
+                  aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
+                  onMouseEnter={preview.closeNow}
+                  onFocus={preview.closeNow}
+                  onMouseDown={(event) => {
+                    event.stopPropagation()
+                    preview.closeNow()
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    preview.closeNow()
+                    delegationSummary.onToggle()
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation()
+                    preview.closeNow()
+                  }}
+                  className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
+                >
+                  <ChevronRight
+                    size={11}
+                    className={cn(
+                      'transition-transform duration-150',
+                      delegationSummary.expanded && 'rotate-90',
+                    )}
+                  />
+                </button>
+              )}
+              <SessionItemActions
+                updatedAt={session.updatedAt}
+                relativeTimeNow={relativeTimeNow}
+                pinned={!!session.pinned}
+                archived={!!session.archived}
+                onTogglePin={() => onTogglePin(session.id)}
+                onToggleArchive={() => onToggleArchive(session.id)}
+                onMenuOpenChange={setMenuOpen}
+                menuItems={menuItems}
+              />
+            </>
           )}
         </div>
       </ContextMenuTrigger>
@@ -2909,6 +3231,52 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   )
 })
 
+interface DelegatedChildSessionItemProps {
+  session: AgentSessionMeta
+  activeSessionId: string | null
+  agentIndicatorMap: Map<string, SessionIndicatorStatus>
+  relativeTimeNow: number
+  workspaceName?: string
+  onSelect: (id: string, title: string) => void
+  onRequestDelete: (id: string) => void
+  onRequestMove: (id: string) => void
+  onRename: (id: string, newTitle: string) => Promise<void>
+  onTogglePin: (id: string) => Promise<void>
+  onToggleArchive: (id: string) => Promise<void>
+}
+
+const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem({
+  session,
+  activeSessionId,
+  agentIndicatorMap,
+  relativeTimeNow,
+  workspaceName,
+  onSelect,
+  onRequestDelete,
+  onRequestMove,
+  onRename,
+  onTogglePin,
+  onToggleArchive,
+}: DelegatedChildSessionItemProps): React.ReactElement {
+  const status = getDelegatedChildStatus(session, agentIndicatorMap)
+
+  return (
+    <AgentSessionItem
+      session={session}
+      active={session.id === activeSessionId}
+      indicatorStatus={status}
+      relativeTimeNow={relativeTimeNow}
+      workspaceName={workspaceName}
+      onSelect={onSelect}
+      onRequestDelete={onRequestDelete}
+      onRequestMove={onRequestMove}
+      onRename={onRename}
+      onTogglePin={onTogglePin}
+      onToggleArchive={onToggleArchive}
+    />
+  )
+})
+
 // ===== 项目分组历史 =====
 
 interface AgentProjectGroupItemProps {
@@ -2924,6 +3292,8 @@ interface AgentProjectGroupItemProps {
   extraCount: number
   activeSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
+  expandedDelegationParentIds: Set<string>
+  collapsedDelegationParentIds: Set<string>
   relativeTimeNow: number
   dragging: boolean
   dropPosition: 'before' | 'after' | null
@@ -2946,6 +3316,7 @@ interface AgentProjectGroupItemProps {
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
+  onToggleDelegationParent: (id: string, expanded: boolean) => void
 }
 
 const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
@@ -2958,6 +3329,8 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   extraCount,
   activeSessionId,
   agentIndicatorMap,
+  expandedDelegationParentIds,
+  collapsedDelegationParentIds,
   relativeTimeNow,
   dragging,
   dropPosition,
@@ -2980,6 +3353,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onRename,
   onTogglePin,
   onToggleArchive,
+  onToggleDelegationParent,
 }: AgentProjectGroupItemProps): React.ReactElement {
   const isCurrent = group.workspace.id === currentWorkspaceId
 
@@ -3028,38 +3402,42 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   // 状态如何，确保从搜索结果打开旧会话时左侧栏立即可见，不必等待 agent 完成。
   // 非活跃部分仍保留原"最近 3 天 + 至多 5 条"预览策略，作为额外补充展示。
   // 用户点击"显示更多"会在折叠基线之上每次再额外展开 PROJECT_SESSION_EXPAND_STEP 条。
-  const getStatus = (sessionId: string): SessionIndicatorStatus =>
-    agentIndicatorMap.get(sessionId) ?? 'idle'
-  const activeSessions = group.sessions
-    .filter((session) => ACTIVE_SESSION_STATUSES.has(getStatus(session.id)))
+  const treeItems = buildAgentSessionTrees(group.sessions)
+  const activeSessions = treeItems
+    .filter((item) => ACTIVE_SESSION_STATUSES.has(getSessionTreeStatus(item, agentIndicatorMap)))
     .slice()
     .sort((a, b) => {
-      const delta = ACTIVE_SESSION_STATUS_PRIORITY[getStatus(a.id)]
-        - ACTIVE_SESSION_STATUS_PRIORITY[getStatus(b.id)]
+      const delta = ACTIVE_SESSION_STATUS_PRIORITY[getSessionTreeStatus(a, agentIndicatorMap)]
+        - ACTIVE_SESSION_STATUS_PRIORITY[getSessionTreeStatus(b, agentIndicatorMap)]
       if (delta !== 0) return delta
-      return b.updatedAt - a.updatedAt
+      return b.session.updatedAt - a.session.updatedAt
     })
-  const activeIds = new Set(activeSessions.map((s) => s.id))
-  // 当前选中的会话若属于本 group 且未被 activeSessions 捕获，则补入折叠列表顶部
-  const currentSession = activeSessionId
-    && !activeIds.has(activeSessionId)
-    ? group.sessions.find((s) => s.id === activeSessionId) ?? null
-    : null
-  const pinnedCurrent = currentSession ? [currentSession] : []
-  const pinnedCurrentIds = new Set(pinnedCurrent.map((s) => s.id))
-  const fillSessions = group.sessions
-    .filter((session) =>
-      !activeIds.has(session.id)
-      && !pinnedCurrentIds.has(session.id)
-      && session.updatedAt >= recentCutoff
+  const activeIds = collectTreeSessionIds(activeSessions)
+  // 非活跃部分按自然策略（最近 3 天窗口 + 预览上限）计算，且不依赖当前选中态，
+  // 保持 group.sessions 的 updatedAt 倒序——这样点击已可见会话时顺序保持稳定，
+  // 不会因为它变成 activeSessionId 而被提到顶部。
+  const fillSessions = treeItems
+    .filter((item) =>
+      !activeIds.has(item.session.id)
+      && item.session.updatedAt >= recentCutoff
     )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
+  const fillIds = collectTreeSessionIds(fillSessions)
+  // 当前选中会话仅在「既非活跃、又不在自然填充集合中」时才补入折叠列表（紧接活跃区之后），
+  // 确保从搜索结果打开的旧会话（updatedAt 超窗或被上限截断）立即可见；
+  // 若它本就出现在 fillSessions 中，则不再单独前置，避免点击后被强制排到第一位。
+  const currentSession = activeSessionId
+    && !activeIds.has(activeSessionId)
+    && !fillIds.has(activeSessionId)
+    ? treeItems.find((item) => treeContainsSessionId(item, activeSessionId)) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
   const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
-  const collapsedIds = new Set(collapsedSessions.map((s) => s.id))
-  const remainingSessions = group.sessions.filter((s) => !collapsedIds.has(s.id))
+  const collapsedIds = new Set(collapsedSessions.map((item) => item.session.id))
+  const remainingSessions = treeItems.filter((item) => !collapsedIds.has(item.session.id))
   const extraSessions = remainingSessions.slice(0, extraCount)
   const sessions = [...collapsedSessions, ...extraSessions]
-  const hiddenCount = Math.max(0, group.sessions.length - sessions.length)
+  const hiddenCount = Math.max(0, treeItems.length - sessions.length)
 
   return (
     <section
@@ -3208,26 +3586,65 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
 
       <div id={`project-sessions-${group.workspace.id}`} className="ml-4 mt-px">
         {!collapsed ? (
-          group.sessions.length > 0 ? (
+          treeItems.length > 0 ? (
             <div className="flex flex-col gap-0.5">
-              {sessions.map((session) => (
-                <AgentSessionItem
-                  key={session.id}
-                  session={session}
-                  active={session.id === activeSessionId}
-                  indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                  showPinIcon={!!session.pinned}
-                  leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                  relativeTimeNow={relativeTimeNow}
-                  workspaceName={isAutomationGroup && session.workspaceId ? workspaceNameMap?.get(session.workspaceId) : undefined}
-                  onSelect={onSelectSession}
-                  onRequestDelete={onRequestDelete}
-                  onRequestMove={onRequestMove}
-                  onRename={onRename}
-                  onTogglePin={onTogglePin}
-                  onToggleArchive={onToggleArchive}
-                />
-              ))}
+              {sessions.map((item) => {
+                const childCount = item.childSessions.length
+                const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
+                const treeActive = treeContainsSessionId(item, activeSessionId)
+                const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
+                const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+                  || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+
+                return (
+                  <div key={item.session.id} className="flex flex-col gap-0.5">
+                    <AgentSessionItem
+                      session={item.session}
+                      active={treeActive}
+                      indicatorStatus={rowStatus}
+                      showPinIcon={!!item.session.pinned}
+                      delegationSummary={childCount > 0
+                        ? {
+                          total: childCount,
+                          completed: countCompletedDelegatedChildren(item.childSessions),
+                          expanded: expandedChildren,
+                          onToggle: () => onToggleDelegationParent(item.session.id, expandedChildren),
+                        }
+                        : undefined}
+                      leftAccent={getSessionLeftAccent(rowStatus)}
+                      relativeTimeNow={relativeTimeNow}
+                      workspaceName={isAutomationGroup && item.session.workspaceId ? workspaceNameMap?.get(item.session.workspaceId) : undefined}
+                      onSelect={onSelectSession}
+                      onRequestDelete={onRequestDelete}
+                      onRequestMove={onRequestMove}
+                      onRename={onRename}
+                      onTogglePin={onTogglePin}
+                      onToggleArchive={onToggleArchive}
+                    />
+
+                    {childCount > 0 && expandedChildren && (
+                      <div className="ml-3 border-l border-foreground/10 pl-2 flex flex-col gap-0.5">
+                        {item.childSessions.map((childSession) => (
+                          <DelegatedChildSessionItem
+                            key={childSession.id}
+                            session={childSession}
+                            activeSessionId={activeSessionId}
+                            agentIndicatorMap={agentIndicatorMap}
+                            relativeTimeNow={relativeTimeNow}
+                            workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMap?.get(childSession.workspaceId) : undefined}
+                            onSelect={onSelectSession}
+                            onRequestDelete={onRequestDelete}
+                            onRequestMove={onRequestMove}
+                            onRename={onRename}
+                            onTogglePin={onTogglePin}
+                            onToggleArchive={onToggleArchive}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
 
               {hiddenCount > 0 && (
                 <button

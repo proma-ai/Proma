@@ -390,7 +390,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
                     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
                     setIsLeaving(false)
                   }}
-                  className="h-7 text-xs pl-7"
+                  className="h-7 text-xs pl-7 focus-visible:!border-border/60 focus-visible:!ring-0 focus-visible:!shadow-xs"
                 />
               </div>
             </div>

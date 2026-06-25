@@ -7,6 +7,8 @@
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   type AgentDelegationRole,
+  type AgentDelegationStatus,
+  type AgentSessionMeta,
   type PromaPermissionMode,
 } from '@proma/shared'
 
@@ -18,6 +20,19 @@ const PERMISSION_RANK: Record<PromaPermissionMode, number> = {
 
 export const MAX_RUNNING_DELEGATIONS_PER_PARENT = 50
 
+export interface RecoveredDelegationState {
+  delegationId: string
+  parentSessionId: string
+  childSessionId: string
+  title: string
+  role: AgentDelegationRole
+  goal: string
+  permissionMode: PromaPermissionMode
+  status: AgentDelegationStatus
+  startedAt: number
+  completedAt?: number
+}
+
 export function resolveDelegationPermissionMode(
   parentMode: PromaPermissionMode | undefined,
   requestedMode: PromaPermissionMode | undefined,
@@ -25,6 +40,27 @@ export function resolveDelegationPermissionMode(
   const parent = parentMode ?? PROMA_DEFAULT_PERMISSION_MODE
   const requested = requestedMode ?? parent
   return PERMISSION_RANK[requested] <= PERMISSION_RANK[parent] ? requested : parent
+}
+
+export function buildRecoveredDelegationState(input: {
+  parentSessionId: string
+  delegationId: string
+  session: AgentSessionMeta
+  fallbackPermissionMode?: PromaPermissionMode
+}): RecoveredDelegationState {
+  const status = input.session.delegationStatus ?? 'interrupted'
+  return {
+    delegationId: input.delegationId,
+    parentSessionId: input.parentSessionId,
+    childSessionId: input.session.id,
+    title: input.session.title,
+    role: input.session.delegationRole ?? 'custom',
+    goal: input.session.delegationGoal ?? '',
+    permissionMode: input.session.permissionMode ?? input.fallbackPermissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
+    status,
+    startedAt: input.session.createdAt,
+    completedAt: status !== 'running' ? input.session.updatedAt : undefined,
+  }
 }
 
 export function buildDelegationPrompt(input: {

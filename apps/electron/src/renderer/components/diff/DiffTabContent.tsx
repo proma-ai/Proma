@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Code2, Copy, Check, Eye, List, Pencil, RefreshCw, Save, X } from 'lucide-react'
+import { ChevronRight, Code2, Copy, Check, Eye, List, Pencil, RefreshCw, Save, X } from 'lucide-react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
@@ -22,6 +22,7 @@ import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
@@ -1103,7 +1104,23 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           containerRef={scrollContainerRef}
           contentKey={tocContentKey}
           enabled={Boolean(isMarkdown && !markdownEditing && tocOpen)}
+          onOpenChange={setTocOpen}
         />
+        {isMarkdown && !markdownEditing && !tocOpen && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setTocOpen(true)}
+                className="mx-2 mb-2 mt-4 flex size-7 shrink-0 items-center justify-center self-start rounded-md bg-muted/40 text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/70"
+                aria-label="展开目录"
+              >
+                <ChevronRight className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">展开目录</TooltipContent>
+          </Tooltip>
+        )}
         <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full flex-1 min-w-0 overflow-auto scrollbar-thin relative">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>

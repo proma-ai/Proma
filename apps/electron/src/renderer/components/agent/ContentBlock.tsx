@@ -599,7 +599,6 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
         className={cn(
           'relative rounded-lg px-3.5 py-2.5',
           dimmed ? 'bg-muted/30' : 'bg-muted/50',
-          shouldCollapse && !isExpanded && 'pb-7',
         )}
         style={{
           border: 'none',
@@ -621,9 +620,8 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
             type="button"
             onClick={toggleExpand}
             className={cn(
-              'flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors mt-1',
-              !isExpanded &&
-                'absolute bottom-0 left-0 right-0 px-3.5 pb-2 pt-4 rounded-b-lg bg-gradient-to-t from-muted/80 to-transparent'
+              'mt-2 flex items-center gap-1 text-xs text-foreground/35 transition-colors',
+              'hover:text-foreground/55'
             )}
           >
             {isExpanded ? (

@@ -36,9 +36,9 @@ import {
 } from '@/atoms/agent-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
-import { Bot, MessageSquare } from 'lucide-react'
+import { Bot, GitBranch, MessageSquare } from 'lucide-react'
 
-type SwitchSectionId = 'recent'
+type SwitchSectionId = 'collaboration' | 'recent'
 type SwitchCandidateType = 'chat' | 'agent'
 
 interface SwitchCandidate {
@@ -49,6 +49,7 @@ interface SwitchCandidate {
   status: SessionIndicatorStatus
   workspaceId?: string
   workspaceName?: string
+  isDelegation?: boolean
 }
 
 interface SwitchSection {
@@ -110,6 +111,7 @@ export function TabSwitcher(): ReactElement | null {
         status,
         workspaceId: session.workspaceId,
         workspaceName: session.workspaceId ? workspaceNameById.get(session.workspaceId) : undefined,
+        isDelegation: !!session.sourceDelegationId,
       }
     }
 
@@ -129,9 +131,38 @@ export function TabSwitcher(): ReactElement | null {
 
     const allCandidates = [...chatCandidates, ...agentCandidates]
 
+    const candidateById = new Map(allCandidates.map((candidate) => [candidate.id, candidate]))
+    const activeAgentSession = activeSessionId
+      ? agentSessions.find((session) => session.id === activeSessionId)
+      : undefined
+    const relatedParentSessionId = activeAgentSession?.parentSessionId ?? activeAgentSession?.id
+    const relatedDelegationIds = new Set<string>()
+    if (activeAgentSession && relatedParentSessionId) {
+      relatedDelegationIds.add(relatedParentSessionId)
+      for (const session of agentSessions) {
+        if (session.parentSessionId === relatedParentSessionId) {
+          relatedDelegationIds.add(session.id)
+        }
+      }
+    }
+    const relatedCandidates = Array.from(relatedDelegationIds)
+      .map((id) => candidateById.get(id))
+      .filter((candidate): candidate is SwitchCandidate => !!candidate)
+      .sort((a, b) => {
+        if (a.id === relatedParentSessionId) return -1
+        if (b.id === relatedParentSessionId) return 1
+        return b.updatedAt - a.updatedAt
+      })
+    const shouldShowCollaborationSection = relatedCandidates.length > 1
+    const relatedCandidateIds = new Set(
+      shouldShowCollaborationSection ? relatedCandidates.map((candidate) => candidate.id) : [],
+    )
+
     // 按 MRU 排序：在 MRU 列表中的按 MRU 顺序，不在的按 updatedAt 追加到末尾
     const mruIndex = new Map(tabMru.map((id, i) => [id, i]))
-    allCandidates.sort((a, b) => {
+    const recentCandidates = allCandidates
+      .filter((candidate) => !relatedCandidateIds.has(candidate.id))
+    recentCandidates.sort((a, b) => {
       const ai = mruIndex.get(a.id)
       const bi = mruIndex.get(b.id)
       if (ai !== undefined && bi !== undefined) return ai - bi
@@ -141,20 +172,31 @@ export function TabSwitcher(): ReactElement | null {
     })
 
     const sections: SwitchSection[] = []
-    if (allCandidates.length > 0) {
+    if (shouldShowCollaborationSection) {
+      sections.push({
+        id: 'collaboration',
+        title: '当前协作',
+        description: '父会话与子会话',
+        candidates: relatedCandidates,
+      })
+    }
+    if (recentCandidates.length > 0) {
       sections.push({
         id: 'recent',
         title: '最近访问',
         description: '按访问顺序排列',
-        candidates: allCandidates,
+        candidates: recentCandidates,
       })
     }
 
+    const orderedCandidates = sections.flatMap((section) => section.candidates)
+
     return {
       sections,
-      candidates: allCandidates,
+      candidates: orderedCandidates,
     }
   }, [
+    activeSessionId,
     agentIndicatorMap,
     agentSessions,
     agentWorkspaces,
@@ -472,7 +514,12 @@ function SwitcherCandidateRow({
         />
       )}
       <span className="w-auto px-2 shrink-0 text-[10px] leading-4 rounded-full bg-foreground/[0.06] text-foreground/45 font-medium flex items-center gap-1">
-        {candidate.type === 'agent' ? (
+        {candidate.isDelegation ? (
+          <>
+            <GitBranch className="size-2.5" />
+            子会话
+          </>
+        ) : candidate.type === 'agent' ? (
           <>
             <Bot className="size-2.5" />
             Agent

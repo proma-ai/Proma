@@ -122,6 +122,9 @@
     --content-area: 0 0% 100%;            /* 主内容区域背景 */
     --sidebar-surface: 60 14.3% 98.6%;    /* 默认浅色侧栏：RGB 252/252/251 */
     --tabbar-surface: 60 14.3% 98.6%;     /* 默认浅色未选中 Tab 背景：RGB 252/252/251 */
+    --sidebar-control-surface: 60 7% 93%;
+    --sidebar-control-surface-hover: 60 7% 90%;
+    --sidebar-control-stroke: 0 0% 9% / 0.10;
     --input-surface: 60 14.3% 98.6%;      /* 默认浅色输入框：RGB 252/252/251 */
     --tab-surface: 0 0% 100%;             /* 与内容区域无缝衔接 */
     /* 毛玻璃 Tooltip：深色半透明背景 + 白色文字 */
@@ -163,6 +166,9 @@
     --content-area: 0 0% 7%;              /* 主内容区域背景 zinc-900 */
     --sidebar-surface: 0 0% 7%;
     --tabbar-surface: 0 0% 7%;
+    --sidebar-control-surface: 0 0% 14%;
+    --sidebar-control-surface-hover: 0 0% 18%;
+    --sidebar-control-stroke: 0 0% 100% / 0.08;
     --input-surface: 0 0% 7%;
     --tab-surface: 0 0% 7%;
     /* 毛玻璃 Tooltip：深色半透明背景 + 白色文字 */
@@ -202,7 +208,10 @@
     --dialog-foreground: 210 30% 15%;     /* #1b2632 弹窗前景 */
     --sidebar-surface: 205 35% 94%;
     --tabbar-surface: 205 35% 94%;
-    --input-surface: 60 14.3% 98.6%;
+    --sidebar-control-surface: 205 32% 90%;
+    --sidebar-control-surface-hover: 205 34% 87%;
+    --sidebar-control-stroke: 205 45% 34% / 0.12;
+    --input-surface: 205 32% 96%;
     --tab-surface: 205 30% 97%;
     --destructive: 0 84.2% 60.2%;         /* #ef4444 危险色 */
     --destructive-foreground: 0 0% 98%;   /* #fafafa 危险前景 */
@@ -227,6 +236,9 @@
     --content-area: 210 14% 9%;           /* 内容区：最深，专注 */
     --sidebar-surface: 210 12% 13%;
     --tabbar-surface: 210 12% 13%;
+    --sidebar-control-surface: 210 12% 18%;
+    --sidebar-control-surface-hover: 210 13% 21%;
+    --sidebar-control-stroke: 210 18% 72% / 0.10;
     --input-surface: 210 12% 13%;
     --muted: 210 12% 17%;
     --muted-foreground: 210 10% 60%;
@@ -284,7 +296,10 @@
     --dialog-foreground: 150 25% 15%;     /* #1d3026 弹窗前景 */
     --sidebar-surface: 140 25% 95%;
     --tabbar-surface: 140 25% 95%;
-    --input-surface: 60 14.3% 98.6%;
+    --sidebar-control-surface: 140 20% 91%;
+    --sidebar-control-surface-hover: 140 20% 88%;
+    --sidebar-control-stroke: 150 28% 34% / 0.12;
+    --input-surface: 140 20% 96%;
     --tab-surface: 140 20% 97%;
     --destructive: 0 72% 51%;             /* #dc2828 危险色 */
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
@@ -309,6 +324,9 @@
     --content-area: 150 10% 9%;           /* 内容区：深林泥土 */
     --sidebar-surface: 150 8% 14%;
     --tabbar-surface: 150 8% 14%;
+    --sidebar-control-surface: 150 9% 17%;
+    --sidebar-control-surface-hover: 150 10% 20%;
+    --sidebar-control-stroke: 140 14% 72% / 0.10;
     --input-surface: 150 8% 14%;
     --muted: 150 10% 17%;
     --muted-foreground: 145 8% 60%;
@@ -344,7 +362,7 @@
 
   /* 云朵舞者（浅色） - 温暖灰调，柔和舒适 */
   .theme-slate-light {
-    /* 基础色 - sidebar 比主题色深一点 */
+    /* 基础色 - sidebar 比主题色略深，保持轻分层 */
     --background: 40 6% 88%;              /* #e3e1dc 侧边栏背景（比主题色深） */
     --foreground: 40 8% 18%;              /* #312f2a 前景文字 */
     --content-area: 40 8% 94%;            /* #f0efec 内容区域（RGB 240,239,236 主题色） */
@@ -368,9 +386,12 @@
     --popover-foreground: 40 8% 18%;      /* #312f2a 弹出前景 */
     --dialog: 40 8% 94%;                  /* #f0efec 弹窗背景（主题色） */
     --dialog-foreground: 40 8% 18%;       /* #312f2a 弹窗前景 */
-    --sidebar-surface: 40 6% 88%;
-    --tabbar-surface: 40 6% 88%;
-    --input-surface: 60 14.3% 98.6%;
+    --sidebar-surface: 40 6% 92%;
+    --tabbar-surface: 40 6% 92%;
+    --sidebar-control-surface: 40 6% 88%;
+    --sidebar-control-surface-hover: 40 6% 86%;
+    --sidebar-control-stroke: 40 10% 28% / 0.11;
+    --input-surface: 40 8% 95%;
     --tab-surface: 40 8% 94%;
     /* 功能色 */
     --destructive: 0 65% 50%;             /* #d43c3c 危险色 */
@@ -394,6 +415,9 @@
     --content-area: 270 8% 9%;            /* #161418 内容区域 */
     --sidebar-surface: 260 6% 12%;
     --tabbar-surface: 260 6% 12%;
+    --sidebar-control-surface: 260 7% 18%;
+    --sidebar-control-surface-hover: 260 8% 21%;
+    --sidebar-control-stroke: 30 12% 74% / 0.10;
     --input-surface: 260 6% 12%;
     /* 次要色 - 淡紫灰调 */
     --muted: 260 6% 16%;                  /* #272429 次要背景 */
@@ -441,6 +465,9 @@
     --content-area: 100 6% 3%;            /* #080907 内容区：最深 */
     --sidebar-surface: 100 6% 5%;
     --tabbar-surface: 100 6% 5%;
+    --sidebar-control-surface: 100 5% 12%;
+    --sidebar-control-surface-hover: 100 6% 16%;
+    --sidebar-control-stroke: 100 20% 55% / 0.12;
     --input-surface: 100 6% 5%;
     /* 次要色 */
     --muted: 100 5% 10%;                  /* #1a1b19 次要背景 */
@@ -508,6 +535,15 @@
   z-index: 1;
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+.sidebar-control-surface {
+  background-color: hsl(var(--sidebar-control-surface));
+  box-shadow: inset 0 0 0 0.5px hsl(var(--sidebar-control-stroke));
+}
+
+.sidebar-control-surface:hover {
+  background-color: hsl(var(--sidebar-control-surface-hover));
 }
 
 /* Windows 自定义窗口控制按钮
@@ -729,11 +765,9 @@
 
 /* 轨道：暗底 + 稀疏未点亮灯珠 */
 .theme-terminal-dark .mode-switcher-track {
-  background-color: hsl(var(--background)) !important;
-  background-image:
-    radial-gradient(circle, hsl(var(--muted-foreground) / 0.20) 0.5px, transparent 0.5px) !important;
-  background-size: 4px 4px !important;
-  border: 1px solid hsl(var(--border)) !important;
+  background-color: hsl(var(--sidebar-control-surface)) !important;
+  background-image: none !important;
+  border: 0 !important;
 }
 
 /* 滑块：点亮灯珠面板 — 密集双层灯珠 + 磷光外溢 + 电磁闪烁
@@ -747,7 +781,7 @@
     radial-gradient(circle at 1px 1px, hsl(var(--primary) / 0.40) 0.5px, transparent 0.5px) !important;
   background-size: 3px 3px, 3px 3px !important;
   background-position: 0 0, 1px 1px !important;
-  border: 1px solid hsl(var(--primary) / 0.30) !important;
+  border: 0 !important;
   border-radius: 2px !important;
   box-shadow:
     0 0 10px hsl(var(--primary) / 0.30),
@@ -975,16 +1009,15 @@
 }
 
 .ui-classic .mode-switcher-track {
-  background-color: hsl(var(--muted)) !important;
+  background-color: hsl(var(--sidebar-control-surface)) !important;
 }
 
 .ui-classic .sidebar-collapse-button {
-  background-color: hsl(var(--muted)) !important;
-  border-color: transparent !important;
+  background-color: hsl(var(--sidebar-control-surface)) !important;
 }
 
 .ui-classic .sidebar-collapse-button:hover {
-  background-color: hsl(var(--foreground) / 0.08) !important;
+  background-color: hsl(var(--sidebar-control-surface-hover)) !important;
 }
 
 /* CRT 终端：Tab 流式指示器 — 保留原色，叠加 CRT 磷光质感 */
@@ -1467,6 +1500,17 @@
 }
 .file-browser-row-flash {
   animation: file-browser-flash 1.2s ease-out;
+}
+
+/* ===== FileBrowser 层级引导线：默认隐藏，鼠标悬浮文件树时显示（VS Code 风格） ===== */
+.file-tree-guide {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.file-tree-guide-scope:hover .file-tree-guide,
+.file-tree-guide-scope:focus-within .file-tree-guide {
+  opacity: 1;
 }
 
 /* ===== FileBrowser sticky 目录行：每条 sticky 链路最末一行加一道软扩散阴影 =====
@@ -2148,19 +2192,6 @@
   background: transparent !important;
   border-radius: 0 !important;
   padding: 2px 4px !important;
-}
-
-.theme-terminal-dark .is-user [class*="bg-gradient-to-t"] {
-  background: linear-gradient(to top, hsl(100 5% 9%), transparent) !important;
-}
-
-/* 折叠态长消息的"展开全部"按钮：默认 absolute + 渐变遮罩在 Terminal 主题下失效
- * （父容器 padding:0 撤掉了为按钮预留的 pb-6，渐变也被透明化），
- * 会让按钮文字直接压在正文最后一行上。改为流式布局，让按钮自然落到正文下方。 */
-.theme-terminal-dark .is-user button[class*="bg-gradient-to-t"] {
-  position: static !important;
-  padding: 0 !important;
-  margin-top: 0.25rem !important;
 }
 
 /* AI 消息前缀 — 已移除 */

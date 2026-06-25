@@ -593,7 +593,7 @@ interface UserMessageContentProps extends HTMLAttributes<HTMLDivElement> {
 /**
  * 用户消息内容组件
  * - 超过 4 行时默认折叠
- * - 点击展开/收起，带渐变遮罩
+ * - 点击展开/收起，底部使用低对比度文字提示
  */
 export const UserMessageContent = React.memo(
   function UserMessageContent({ children, className, ...props }: UserMessageContentProps): React.ReactElement {
@@ -618,7 +618,7 @@ export const UserMessageContent = React.memo(
     }, [])
 
     return (
-      <div className={cn('relative inline-block max-w-full rounded-[10px] bg-primary/10 px-3.5 py-2.5', shouldCollapse && !isExpanded && 'pb-6', className)} {...props}>
+      <div className={cn('relative inline-block max-w-full rounded-[10px] bg-primary/10 px-3.5 py-2.5', className)} {...props}>
         <div
           ref={contentRef}
           className={cn(
@@ -634,9 +634,8 @@ export const UserMessageContent = React.memo(
             type="button"
             onClick={toggleExpand}
             className={cn(
-              'flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors mt-1',
-              !isExpanded &&
-                'absolute bottom-0 left-0 right-0 px-3.5 pb-2.5 pt-4 rounded-b-[10px] bg-gradient-to-t from-primary/10 to-transparent'
+              'mt-2 flex items-center gap-1 text-xs text-foreground/35 transition-colors',
+              'hover:text-foreground/55'
             )}
           >
             {isExpanded ? (

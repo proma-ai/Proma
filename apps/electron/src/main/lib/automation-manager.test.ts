@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { computeNextRunAt } from './automation-manager'
+import { applyMaxRunsUpdate, computeNextRunAt } from './automation-manager'
 
 describe('computeNextRunAt 月度调度', () => {
   // 用固定 from 时间戳避免测试与当前时间耦合；2026-03-31 09:30 UTC+8
@@ -91,5 +91,36 @@ describe('computeNextRunAt 一次性调度（once）', () => {
     const from = base(2026, 6, 23, 14, 0)
     const next = computeNextRunAt({ scheduleType: 'once' }, from)
     expect(next).toBe(from + 10 * 60_000)
+  })
+})
+
+describe('updateAutomation maxRuns 配额重置', () => {
+  test('Given 任务已跑满旧上限 When 修改 maxRuns Then runCount 与 completedAt 被重置', () => {
+    const automation = {
+      maxRuns: 1,
+      runCount: 1,
+      completedAt: Date.now(),
+    }
+
+    applyMaxRunsUpdate(automation, 3)
+
+    expect(automation.maxRuns).toBe(3)
+    expect(automation.runCount).toBe(0)
+    expect(automation.completedAt).toBeUndefined()
+  })
+
+  test('Given maxRuns 未变化 When 应用更新 Then 保留现有 runCount 与 completedAt', () => {
+    const completedAt = Date.now()
+    const automation = {
+      maxRuns: 3,
+      runCount: 2,
+      completedAt,
+    }
+
+    applyMaxRunsUpdate(automation, 3)
+
+    expect(automation.maxRuns).toBe(3)
+    expect(automation.runCount).toBe(2)
+    expect(automation.completedAt).toBe(completedAt)
   })
 })

@@ -34,7 +34,10 @@ export function useTocHeadings(
       return
     }
     const container = containerRef.current
-    if (!container) return
+    if (!container) {
+      setHeadings([])
+      return
+    }
 
     const extract = (): void => {
       const slug = createSlugger()
@@ -51,6 +54,11 @@ export function useTocHeadings(
     }
 
     extract()
+    const initialTimers = [
+      window.setTimeout(extract, 0),
+      window.setTimeout(extract, 240),
+      window.setTimeout(extract, 600),
+    ]
 
     let raf = 0
     let timer: number | undefined
@@ -67,6 +75,7 @@ export function useTocHeadings(
 
     return () => {
       observer.disconnect()
+      for (const initialTimer of initialTimers) window.clearTimeout(initialTimer)
       window.clearTimeout(timer)
       cancelAnimationFrame(raf)
     }

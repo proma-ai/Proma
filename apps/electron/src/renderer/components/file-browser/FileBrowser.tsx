@@ -299,7 +299,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
   }, [rootPath])
 
   const fileTree = (
-    <div className="py-1" onClick={handleBackgroundClick}>
+    <div className="file-tree-guide-scope py-1" onClick={handleBackgroundClick}>
       {error && (
         <div className="px-3 py-2 text-xs text-destructive">{error}</div>
       )}
@@ -834,7 +834,7 @@ function FileTreeItem({
         <div className="relative">
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
+            className="file-tree-guide pointer-events-none absolute bottom-1 top-0 w-px bg-border/70"
             style={{ left: guideLeft }}
           />
           {children.length === 0 && childrenLoaded && (

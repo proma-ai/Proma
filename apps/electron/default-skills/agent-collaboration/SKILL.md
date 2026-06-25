@@ -2,7 +2,7 @@
 name: agent-collaboration
 description: Proma 协作子 Agent Skill。用户任务复杂、可并行、长耗时、需要多个独立方向同时推进、需要真实可见进展、需要保留完整子任务记录，或用户明确说“开几个 Agent/多会话/一起协作/并行处理/spawn 子 Agent”时触发。用于判断是否调用 Proma 内置 collaboration 工具创建真实子会话。简单搜索、短调研、单文件修改、一次性代码审查优先使用 SDK 内置 SubAgent，不要创建真实 Proma 子会话。
 group: proma
-version: "1.0.0"
+version: "1.0.1"
 ---
 
 # Proma Agent Collaboration
@@ -13,6 +13,7 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 
 可用工具：
 
+- `collaboration.list_available_agent_models`：查看父会话当前渠道下可用于协作子 Agent 的模型。
 - `collaboration.delegate_agent`：创建单个真实子会话。
 - `collaboration.delegate_agents`：批量创建真实子会话，适合已经明确分片的大型并行任务。
 - `collaboration.wait_for_delegations`：等待子会话，支持 `mode=all` 等全部，或 `mode=any` 先收敛一部分完成结果。
@@ -65,6 +66,7 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 - 小型并行任务优先拆 2-8 个子会话；大型扫描、批量审查、跨模块调研可以使用 `delegate_agents` 批量创建。
 - 每个子任务必须独立、自包含、可完成。
 - 委派说明里写清楚目标、范围、禁止事项、预期输出。
+- 如需让不同子会话使用同一渠道下的不同模型，先调用 `list_available_agent_models` 查看可用模型，再为 `delegate_agent` 或 `delegate_agents.items[]` 传 `modelId`；不传则继承父会话当前模型。
 - 权限模式不要高于父会话；高风险修改优先让子会话只调研或审查。
 - 子会话不能继续创建子会话。
 
@@ -72,7 +74,10 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 
 1. 判断是否真的需要真实子会话；不需要时按 Workflow / Skill 工作流、SDK SubAgent 或普通工具推进。
 2. 为每个独立方向调用 `collaboration.delegate_agent`；如果已经有清晰任务列表，用 `collaboration.delegate_agents` 批量创建。
-3. 父会话继续处理主线或等待结果。
+3. 根据任务关系决定父会话下一步：
+   - 如果父会话后续工作强依赖子会话结果，调用 `collaboration.wait_for_delegations` 等待必要结果。
+   - 如果父会话还有独立主线可推进，先继续处理自己的工作，不要因为已经派发子会话就空等。
+   - 如果需要快速校准方向，用 `mode=any` / `minCompleted` 先收敛一部分结果，再决定父会话继续做什么。
 4. 调用 `collaboration.wait_for_delegations` 收敛结果；几十个并行任务可以先用 `mode=any` 等一部分完成，再决定是否继续等待或停止剩余任务。非阻塞推进时，可以先 `list_delegations`，再用 `get_delegation_results` 按 ID 拉取结果。
 5. 整合子会话发现，明确哪些结论来自哪个子会话。
 6. 如某个子会话或一批子会话卡住、重复或方向错误，用 `collaboration.stop_delegation` / `collaboration.stop_delegations` 停止。
@@ -136,3 +141,17 @@ Given 用户说：“把 30 个模块并行分给 Agent 做只读风险扫描，
 When Agent 判断任务已经天然分片，且每片可以独立完成。
 
 Then Agent 应调用 `collaboration.delegate_agents` 批量创建子会话，并用 `collaboration.wait_for_delegations` 的 `mode=any`、`minCompleted=5` 先收敛一部分结果。
+
+### Scenario 5：父会话派发后应继续独立主线
+
+Given 用户说：“一个 Agent 查历史回归原因，你继续把当前修复做完，最后合并判断。”
+
+When Agent 判断子会话调研和父会话实现可以并行推进。
+
+Then Agent 应先调用 `collaboration.delegate_agent` 创建调研子会话。
+
+And 父会话不应立即空等全部结果。
+
+And 父会话应继续推进可独立完成的实现或验证。
+
+And 到需要调研结论做决策时，再调用 `collaboration.wait_for_delegations` 或 `collaboration.get_delegation_results` 收敛结果。

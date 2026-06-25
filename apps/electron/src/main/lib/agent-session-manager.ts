@@ -38,6 +38,7 @@ import type {
   AgentSessionReferenceSearchResult,
 } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
+import { assertEnabledModelForChannel } from './agent-model-selection'
 
 /**
  * 会话索引文件格式
@@ -629,6 +630,14 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
     throw new Error('该会话没有 SDK session，无法分叉')
   }
 
+  const forkModelId = input.modelId !== undefined
+    ? assertEnabledModelForChannel({
+        channelId: sourceMeta.channelId,
+        modelId: input.modelId,
+        purpose: '分叉 Agent 会话',
+      })
+    : sourceMeta.modelId
+
   // 2. 确定源会话的工作目录（SDK 需要从此目录的项目空间读取 session 文件）
   let sourceDir: string | undefined
   if (sourceMeta.workspaceId) {
@@ -727,6 +736,7 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
     forkTitle,
     sourceMeta.channelId,
     sourceMeta.workspaceId,
+    forkModelId,
   )
 
   updateAgentSessionMeta(newMeta.id, {

@@ -50,7 +50,7 @@ export function CollapsibleResult({
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 mt-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground/80 transition-colors"
+          className="mt-2 flex items-center gap-1 text-[11px] text-foreground/35 transition-colors hover:text-foreground/55"
         >
           {expanded ? (
             <>
@@ -60,7 +60,7 @@ export function CollapsibleResult({
           ) : (
             <>
               <ChevronDown className="size-3" />
-              显示全部 ({safeContent.length.toLocaleString()} 字符, {safeContent.split('\n').length} 行)
+              展开全部
             </>
           )}
         </button>

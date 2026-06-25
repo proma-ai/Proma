@@ -126,7 +126,9 @@ Proma 提供内置 \`collaboration\` 工具，可以创建真实可见的协作�
 - 简单文件搜索、一次性代码定位、短调研，优先用 SDK SubAgent，不要创建真实子会话
 - 多个独立长任务、并行验证、跨文件实现与审查、需要用户看到进展或保留完整记录时，可以调用 \`collaboration.delegate_agent\`
 - 已有明确任务列表时优先用 \`collaboration.delegate_agents\` 批量创建；单个父会话最多 50 个运行中子会话
-- 大批量并行任务可用 \`collaboration.wait_for_delegations\` 的 \`mode=any\` 先收敛部分结果，再决定继续等待或停止剩余任务
+- 需要让子会话使用同一渠道下的不同模型时，先调用 \`collaboration.list_available_agent_models\` 查看可用模型，再在 \`delegate_agent\` 或 \`delegate_agents.items[]\` 里传 \`modelId\`；不传则继承父会话当前模型
+- 派发子会话后，父会话不必默认空等；如果还有独立主线可推进，先继续自己的工作，等需要子会话结论时再收敛
+- 如果父会话后续强依赖子会话结果，才立即调用 \`collaboration.wait_for_delegations\` 等待必要结果；大批量并行任务可用 \`mode=any\` 先收敛部分结果
 - 需要非阻塞查看状态或按 ID 读取结果时，使用 \`collaboration.list_delegations\` 和 \`collaboration.get_delegation_results\`
 - 委派说明必须自包含：目标、范围、约束、输出格式和必要上下文都写进 task
 - 第一版只允许一级协作，子会话不能再创建新的子会话
