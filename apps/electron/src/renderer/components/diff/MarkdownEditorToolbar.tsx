@@ -338,7 +338,7 @@ export function MarkdownEditorToolbar({ editor }: MarkdownEditorToolbarProps): R
   }, [handleScreenshot])
 
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-0.5 border-b border-border/50 bg-background px-2 py-1">
+    <div className="z-10 flex shrink-0 items-center gap-0.5 border-b border-border/50 bg-background px-2 py-1">
       {/* 行内格式 */}
       <ToolbarButton icon={Bold} label="加粗" shortcut={`${mod}B`} active={activeState.bold} onClick={() => editor.chain().focus().toggleBold().run()} />
       <ToolbarButton icon={Italic} label="斜体" shortcut={`${mod}I`} active={activeState.italic} onClick={() => editor.chain().focus().toggleItalic().run()} />
