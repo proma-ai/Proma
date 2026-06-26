@@ -44,3 +44,6 @@ vendor
 
 # git worktrees (managed by proma-worktree skill)
 .worktrees
+# pnpm (本项目用 bun，禁止误提交 pnpm lockfile)
+pnpm-lock.yaml
+pnpm-workspace.yaml
