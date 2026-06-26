@@ -10,6 +10,7 @@
 
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { normalizeMcpTransportType } from '@proma/shared'
 import type { McpServerEntry } from '@proma/shared'
 
 /**
@@ -35,8 +36,18 @@ export async function validateMcpServer(
   name: string,
   entry: McpServerEntry,
 ): Promise<McpValidationResult> {
+  const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
+
+  if (!type) {
+    return {
+      name,
+      valid: false,
+      reason: `未知的传输类型: ${String((entry as { type?: unknown }).type)}`,
+    }
+  }
+
   // stdio 类型：检查命令是否存在
-  if (entry.type === 'stdio') {
+  if (type === 'stdio') {
     if (!entry.command) {
       return {
         name,
@@ -59,7 +70,7 @@ export async function validateMcpServer(
   }
 
   // http/sse 类型：检查 URL 格式
-  if (entry.type === 'http' || entry.type === 'sse') {
+  if (type === 'http' || type === 'sse') {
     if (!entry.url) {
       return {
         name,
@@ -85,11 +96,10 @@ export async function validateMcpServer(
 
     return { name, valid: true }
   }
-
   return {
     name,
     valid: false,
-    reason: `未知的传输类型: ${entry.type}`,
+    reason: `未知的传输类型: ${type}`,
   }
 }
 

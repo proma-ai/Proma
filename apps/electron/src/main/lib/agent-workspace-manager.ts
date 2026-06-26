@@ -22,6 +22,7 @@ import {
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
+import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
 import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
@@ -472,6 +473,33 @@ export function ensurePluginManifest(workspaceSlug: string, workspaceName: strin
 
 // ===== MCP 配置管理 =====
 
+function normalizeWorkspaceMcpConfig(config: Partial<WorkspaceMcpConfig>): WorkspaceMcpConfig {
+  const servers: WorkspaceMcpConfig['servers'] = {}
+  const rawServers = config.servers ?? {}
+
+  for (const [name, rawEntry] of Object.entries(rawServers)) {
+    if (!rawEntry || typeof rawEntry !== 'object') continue
+
+    const entryRecord = { ...(rawEntry as unknown as Record<string, unknown>) }
+    const entry = entryRecord as unknown as WorkspaceMcpConfig['servers'][string] & { type?: unknown }
+    const normalizedType = normalizeMcpTransportType(entry.type)
+
+    if (normalizedType) {
+      if (entry.type !== normalizedType) {
+        console.log(`[Agent 工作区] MCP 服务器 "${name}" 的 type "${String(entry.type)}" 已规范化为 "${normalizedType}"`)
+      }
+      entry.type = normalizedType
+    } else if (!entry.type) {
+      entry.type = inferMcpTransportType(entry)
+      console.log(`[Agent 工作区] MCP 服务器 "${name}" 缺少 type 字段，已自动推断为 "${entry.type}"`)
+    }
+
+    servers[name] = entry as WorkspaceMcpConfig['servers'][string]
+  }
+
+  return { servers }
+}
+
 export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig {
   const mcpPath = getWorkspaceMcpPath(workspaceSlug)
 
@@ -482,14 +510,7 @@ export function getWorkspaceMcpConfig(workspaceSlug: string): WorkspaceMcpConfig
   try {
     const raw = readFileSync(mcpPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<WorkspaceMcpConfig>
-    const servers = parsed.servers ?? {}
-    for (const [name, entry] of Object.entries(servers)) {
-      if (!entry.type) {
-        entry.type = entry.command ? 'stdio' : entry.url ? 'http' : 'stdio'
-        console.log(`[Agent 工作区] MCP 服务器 "${name}" 缺少 type 字段，已自动推断为 "${entry.type}"`)
-      }
-    }
-    return { servers }
+    return normalizeWorkspaceMcpConfig(parsed)
   } catch (error) {
     console.error('[Agent 工作区] 读取 MCP 配置失败:', error)
     return { servers: {} }
@@ -500,7 +521,7 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
   const mcpPath = getWorkspaceMcpPath(workspaceSlug)
 
   try {
-    writeFileSync(mcpPath, JSON.stringify(config, null, 2), 'utf-8')
+    writeFileSync(mcpPath, JSON.stringify(normalizeWorkspaceMcpConfig(config), null, 2), 'utf-8')
     console.log(`[Agent 工作区] 已保存 MCP 配置: ${workspaceSlug}`)
   } catch (error) {
     console.error('[Agent 工作区] 保存 MCP 配置失败:', error)

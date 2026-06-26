@@ -192,13 +192,16 @@ export function MarkdownRichEditor({
   }, [editor, isEditable])
 
   return (
-    <div className="flex h-full min-h-full flex-col">
+    // 编辑态：固定高度容器，工具条为固定行、编辑区独立滚动（toolbar 物理上在滚动区之外，
+    // 不依赖 position:sticky，彻底避免被内容滚走）。
+    // 预览态：内容驱动高度，由外层容器滚动（保持 TOC / 查找栏对外层滚动容器的依赖）。
+    <div className={cn('flex flex-col', editing ? 'h-full' : 'min-h-full')}>
       {editing && editor && <MarkdownEditorToolbar editor={editor} />}
       <EditorContent
         editor={editor}
         onMouseDown={focusEditorFromBlankArea}
         className={cn(
-          'h-full min-h-full flex-1',
+          editing ? 'min-h-0 flex-1 overflow-auto scrollbar-thin' : 'h-full min-h-full flex-1',
           isEditable
             ? '[&_.proma-mermaid-preview]:hidden [&_.proma-code-source-body]:block'
             : [

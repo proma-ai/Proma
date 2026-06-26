@@ -48,7 +48,13 @@ export function buildRecoveredDelegationState(input: {
   session: AgentSessionMeta
   fallbackPermissionMode?: PromaPermissionMode
 }): RecoveredDelegationState {
-  const status = input.session.delegationStatus ?? 'interrupted'
+  const persistedStatus = input.session.delegationStatus
+  // 从持久化记录恢复但不在 live Map 中，说明当前进程并没有这个委派在跑。
+  // 若磁盘里还残留 running（例如应用重启/崩溃后），应视为 interrupted，
+  // 否则 continue_delegation 会把它误判为“仍在运行”而拒绝恢复。
+  const status = persistedStatus === 'running'
+    ? 'interrupted'
+    : (persistedStatus ?? 'interrupted')
   return {
     delegationId: input.delegationId,
     parentSessionId: input.parentSessionId,
@@ -59,7 +65,7 @@ export function buildRecoveredDelegationState(input: {
     permissionMode: input.session.permissionMode ?? input.fallbackPermissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
     status,
     startedAt: input.session.createdAt,
-    completedAt: status !== 'running' ? input.session.updatedAt : undefined,
+    completedAt: persistedStatus ? input.session.updatedAt : undefined,
   }
 }
 

@@ -36,6 +36,10 @@ interface ScrollMinimapProps {
 const MIN_ITEMS = 1
 /** 迷你地图最多渲染的横杠数 */
 const MAX_BARS = 20
+/** 迷你地图横杠垂直间距（px） */
+const MINIMAP_BAR_SPACING = 8
+/** 右侧滚动位置条宽度（px） */
+const SCROLL_PROGRESS_WIDTH = 8
 
 // ── Markdown 预览配置（轻量级，禁用重量级渲染） ──
 
@@ -352,7 +356,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
   const thumbTopPct = scrollRange > 0 ? (scrollTop / scrollRange) * (100 - thumbHeightPct) : 0
 
   return (
-    <div className="absolute right-1 top-0 bottom-0 z-30 flex pointer-events-none">
+    <div className="absolute right-0 top-0 bottom-0 z-30 flex pointer-events-none">
       {/* ── 迷你地图悬停区域（面板 + 横杠） ── */}
       <div className="flex items-start h-full">
         {/* 展开面板 */}
@@ -424,10 +428,10 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
           </div>
         )}
 
-        {/* ── 迷你地图横杠（紧凑排列）—— 只有这里触发面板展开 ── */}
+        {/* ── 迷你地图横杠 —— 只有这里触发面板展开 ── */}
         <div
           className="relative mt-3 flex-shrink-0 pointer-events-auto"
-          style={{ width: 24, height: barCount * 6 }}
+          style={{ width: 24, height: barCount * MINIMAP_BAR_SPACING }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
@@ -457,7 +461,7 @@ export function ScrollMinimap({ items }: ScrollMinimapProps): React.ReactElement
       </div>
 
       {/* ── 滚动进度条 ── */}
-      <div className="relative ml-[4px] py-4 flex-shrink-0 pointer-events-auto" style={{ width: 7 }}>
+      <div className="relative ml-[4px] py-4 flex-shrink-0 pointer-events-auto" style={{ width: SCROLL_PROGRESS_WIDTH }}>
         <div
           ref={trackRef}
           className="relative h-full rounded-full cursor-pointer scroll-progress-track"

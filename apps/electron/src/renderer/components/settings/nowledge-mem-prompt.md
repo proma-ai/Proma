@@ -124,7 +124,7 @@ cp -R /tmp/nowledge-community/nowledge-mem-proma-plugin/skills/{read-working-mem
   "servers": {
     "nowledge-mem": {
       "url": "http://127.0.0.1:14242/mcp/",
-      "type": "streamableHttp",
+      "type": "http",
       "headers": {
         "APP": "Proma"
       }

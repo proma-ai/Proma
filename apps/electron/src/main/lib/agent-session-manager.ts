@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, copyFileSync, createReadStream } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
@@ -39,6 +39,7 @@ import type {
 } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
 import { assertEnabledModelForChannel } from './agent-model-selection'
+import { copyForkWorkspaceFiles } from './agent-fork-workspace-copy'
 
 /**
  * 会话索引文件格式
@@ -220,16 +221,9 @@ export function appendSDKMessages(id: string, messages: SDKMessage[]): void {
   const filePath = getAgentSessionMessagesPath(id)
 
   try {
-    const lines = messages.map((m) => {
-      const serialized = JSON.stringify(m)
-      if (serialized.length <= MAX_SDK_MESSAGE_LENGTH) return serialized
-      const sanitized = JSON.stringify(sanitizeOversizedMessage(m, serialized.length))
-      if (sanitized.length > MAX_SDK_MESSAGE_LENGTH) {
-        console.warn(`[Agent 会话] 消息截断后仍超限 (${(sanitized.length / 1024).toFixed(0)}K chars), session=${id}`)
-      }
-      return sanitized
-    }).join('\n') + '\n'
-    appendFileSync(filePath, lines, 'utf-8')
+    for (const message of messages) {
+      appendFileSync(filePath, serializeSDKMessageForStorage(message) + '\n', 'utf-8')
+    }
   } catch (error) {
     console.error(`[Agent 会话] 追加 SDKMessage 失败 (${id}):`, error)
     throw new Error('追加 SDKMessage 失败')
@@ -656,56 +650,20 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   let forkSourceSdkSessionId = sourceMeta.sdkSessionId
   let effectiveUpToMessageUuid = upToMessageUuid
   if (upToMessageUuid) {
-    const allMessages = getAgentSessionSDKMessages(sessionId)
-    const targetIdx = allMessages.findLastIndex(
-      (m) => 'uuid' in m && (m as { uuid?: string }).uuid === upToMessageUuid,
-    )
+    const forkTarget = await resolveForkTargetFromStoredMessages(sessionId, upToMessageUuid)
+    effectiveUpToMessageUuid = forkTarget.effectiveUpToMessageUuid
 
-    if (targetIdx < 0) {
-      throw new Error('未在会话历史中找到指定的消息，可能消息已被清理或截断')
+    if (forkTarget.usedSidechainFallback) {
+      console.log(
+        `[Agent 会话] fork 目标消息 ${upToMessageUuid} 属于 sub-agent，自动回溯到主线消息 ${effectiveUpToMessageUuid}`,
+      )
     }
 
-    const targetMsg = allMessages[targetIdx]!
-    const isSidechain =
-      targetMsg.type === 'assistant' &&
-      Boolean((targetMsg as { parent_tool_use_id?: string | null }).parent_tool_use_id)
-
-    if (isSidechain) {
-      // 向前回溯，寻找最近的主线 assistant 消息（parent_tool_use_id 为空）
-      let fallbackUuid: string | undefined
-      for (let i = targetIdx - 1; i >= 0; i--) {
-        const m = allMessages[i]!
-        if (m.type !== 'assistant') continue
-        if ((m as { parent_tool_use_id?: string | null }).parent_tool_use_id) continue
-        const u = (m as { uuid?: string }).uuid
-        if (u) {
-          fallbackUuid = u
-          break
-        }
-      }
-      if (!fallbackUuid) {
-        throw new Error('选中的是子代理执行过程中的消息，且向前找不到可分叉的主对话消息')
-      }
+    if (forkTarget.effectiveSdkSessionId && forkTarget.effectiveSdkSessionId !== sourceMeta.sdkSessionId) {
       console.log(
-        `[Agent 会话] fork 目标消息 ${upToMessageUuid} 属于 sub-agent，自动回溯到主线消息 ${fallbackUuid}`,
+        `[Agent 会话] fork 目标消息属于旧 SDK session ${forkTarget.effectiveSdkSessionId}（当前为 ${sourceMeta.sdkSessionId}），使用消息所属 session 进行 fork`,
       )
-      effectiveUpToMessageUuid = fallbackUuid
-    }
-
-    // 重新定位 effectiveUpToMessageUuid 所在消息，取其 session_id
-    // 与上面的 findLastIndex 保持一致语义（重复 uuid 时取最后一条）
-    const effectiveMsg =
-      effectiveUpToMessageUuid === upToMessageUuid
-        ? targetMsg
-        : allMessages.findLast(
-            (m) => 'uuid' in m && (m as { uuid?: string }).uuid === effectiveUpToMessageUuid,
-          )
-    const msgSessionId = (effectiveMsg as { session_id?: string } | undefined)?.session_id
-    if (msgSessionId && msgSessionId !== sourceMeta.sdkSessionId) {
-      console.log(
-        `[Agent 会话] fork 目标消息属于旧 SDK session ${msgSessionId}（当前为 ${sourceMeta.sdkSessionId}），使用消息所属 session 进行 fork`,
-      )
-      forkSourceSdkSessionId = msgSessionId
+      forkSourceSdkSessionId = forkTarget.effectiveSdkSessionId
     }
   }
 
@@ -773,9 +731,8 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
       if (!existsSync(sdkProjectsDir)) mkdirSync(sdkProjectsDir, { recursive: true })
       const destJsonl = join(sdkProjectsDir, `${forkResult.sessionId}.jsonl`)
       try {
-        copyFileSync(sourceJsonl, destJsonl)
-        rewritePathsInJsonlFile(destJsonl, sourceDir, destDir)
-        console.log(`[Agent 会话] 已将 SDK session JSONL 复制到 fork 目标目录并改写路径: ${destJsonl}`)
+        const copiedLines = await copyTextFileWithPathRewrite(sourceJsonl, destJsonl, sourceDir, destDir)
+        console.log(`[Agent 会话] 已将 SDK session JSONL 复制到 fork 目标目录并改写路径: ${destJsonl} (${copiedLines} 行)`)
       } catch (err) {
         console.warn(`[Agent 会话] 复制 SDK session JSONL 失败，fork 后首轮可能触发上下文回填:`, err)
       }
@@ -785,23 +742,16 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   }
 
   // 5. 复制源会话工作区文件到新会话目录
-  // 仅排除 .claude/（settings.json 启动时会重建）、.DS_Store、.git。
+  // 保留 .context/，但跳过依赖、构建产物和 Git 元数据，避免 fork 点击时同步复制巨量目录拖垮主进程。
   // .context/ 必须保留 — Proma 约定 .context/note.md、todo.md、plan/ 等是会话上下文，
   // 如果不复制，fork 后这些参考资料会丢失或被 Claude 误回源目录读取。
   if (sourceDir && destDir) {
-    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
     try {
-      const entries = readdirSync(sourceDir)
-      const skip = (entry: string) => entry === '.claude' || entry === '.DS_Store' || entry === '.git'
-      let copiedCount = 0
-      for (const entry of entries) {
-        if (skip(entry)) continue
-        const srcPath = join(sourceDir, entry)
-        const destPath = join(destDir, entry)
-        cpSync(srcPath, destPath, { recursive: true })
-        copiedCount += 1
-      }
-      console.log(`[Agent 会话] 已复制工作区文件: ${sourceDir} → ${destDir} (${copiedCount} 个条目)`)
+      const copyResult = copyForkWorkspaceFiles(sourceDir, destDir)
+      console.log(
+        `[Agent 会话] 已复制工作区文件: ${sourceDir} → ${destDir} `
+        + `(${copyResult.copiedCount} 个条目, 跳过 ${copyResult.skippedCount} 个, 失败 ${copyResult.failedCount} 个)`,
+      )
     } catch (err) {
       console.warn(`[Agent 会话] 复制工作区文件失败:`, err)
     }
@@ -813,28 +763,217 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   //
   // 注意：UI 截断点用原始 upToMessageUuid，保留用户实际看到的所有内容（包括 sub-agent
   // 过程消息），与 SDK forkSession 用 effectiveUpToMessageUuid（主线 uuid）解耦。
-  const sourceMessages = getAgentSessionSDKMessages(sessionId)
-  let messagesToCopy: SDKMessage[]
+  const copiedMessages = await copyForkStoredSDKMessages({
+    sourceSessionId: sessionId,
+    destSessionId: newMeta.id,
+    upToMessageUuid,
+    sourceDir,
+    destDir,
+  })
 
-  if (upToMessageUuid) {
-    const cutIndex = sourceMessages.findIndex(
-      (m) => 'uuid' in m && (m as { uuid?: string }).uuid === upToMessageUuid,
-    )
-    messagesToCopy = cutIndex >= 0 ? sourceMessages.slice(0, cutIndex + 1) : sourceMessages
-  } else {
-    messagesToCopy = sourceMessages
-  }
-
-  if (sourceDir && destDir && messagesToCopy.length > 0) {
-    messagesToCopy = messagesToCopy.map((m) => rewritePathsInSDKMessage(m, sourceDir, destDir!))
-  }
-
-  if (messagesToCopy.length > 0) {
-    appendSDKMessages(newMeta.id, messagesToCopy)
-  }
-
-  console.log(`[Agent 会话] 分叉会话已创建（SDK 原生 fork）: ${sourceMeta.title} → ${forkTitle} (${messagesToCopy.length} 条消息, sdkSessionId=${forkResult.sessionId})`)
+  console.log(`[Agent 会话] 分叉会话已创建（SDK 原生 fork）: ${sourceMeta.title} → ${forkTitle} (${copiedMessages} 条消息, sdkSessionId=${forkResult.sessionId})`)
   return newMeta
+}
+
+interface ForkStoredMessageRef {
+  uuid: string
+  sessionId?: string
+}
+
+interface ForkTargetResolution {
+  effectiveUpToMessageUuid: string
+  effectiveSdkSessionId?: string
+  usedSidechainFallback: boolean
+}
+
+async function resolveForkTargetFromStoredMessages(
+  sessionId: string,
+  upToMessageUuid: string,
+): Promise<ForkTargetResolution> {
+  const filePath = getAgentSessionMessagesPath(sessionId)
+  if (!existsSync(filePath)) {
+    throw new Error('未在会话历史中找到指定的消息，可能消息已被清理或截断')
+  }
+
+  let lastMainlineAssistant: ForkStoredMessageRef | undefined
+  let target: (ForkStoredMessageRef & {
+    isSidechain: boolean
+    fallbackMainline?: ForkStoredMessageRef
+  }) | undefined
+
+  for await (const msg of readStoredSDKMessages(filePath)) {
+    const uuid = getStoredMessageUuid(msg)
+    const isMainlineAssistant = msg.type === 'assistant'
+      && !!uuid
+      && !((msg as { parent_tool_use_id?: string | null }).parent_tool_use_id)
+
+    if (uuid === upToMessageUuid) {
+      target = {
+        uuid,
+        sessionId: (msg as { session_id?: string }).session_id,
+        isSidechain: msg.type === 'assistant'
+          && Boolean((msg as { parent_tool_use_id?: string | null }).parent_tool_use_id),
+        fallbackMainline: lastMainlineAssistant,
+      }
+    }
+
+    if (isMainlineAssistant) {
+      lastMainlineAssistant = {
+        uuid,
+        sessionId: (msg as { session_id?: string }).session_id,
+      }
+    }
+  }
+
+  if (!target) {
+    throw new Error('未在会话历史中找到指定的消息，可能消息已被清理或截断')
+  }
+
+  if (target.isSidechain) {
+    if (!target.fallbackMainline) {
+      throw new Error('选中的是子代理执行过程中的消息，且向前找不到可分叉的主对话消息')
+    }
+    return {
+      effectiveUpToMessageUuid: target.fallbackMainline.uuid,
+      effectiveSdkSessionId: target.fallbackMainline.sessionId,
+      usedSidechainFallback: true,
+    }
+  }
+
+  return {
+    effectiveUpToMessageUuid: target.uuid,
+    effectiveSdkSessionId: target.sessionId,
+    usedSidechainFallback: false,
+  }
+}
+
+interface CopyForkStoredSDKMessagesInput {
+  sourceSessionId: string
+  destSessionId: string
+  upToMessageUuid?: string
+  sourceDir?: string
+  destDir?: string
+}
+
+async function copyForkStoredSDKMessages({
+  sourceSessionId,
+  destSessionId,
+  upToMessageUuid,
+  sourceDir,
+  destDir,
+}: CopyForkStoredSDKMessagesInput): Promise<number> {
+  const sourcePath = getAgentSessionMessagesPath(sourceSessionId)
+  if (!existsSync(sourcePath)) return 0
+
+  const destPath = getAgentSessionMessagesPath(destSessionId)
+  const out = createWriteStream(destPath, { flags: 'a', encoding: 'utf-8' })
+  let copiedCount = 0
+
+  try {
+    for await (const msg of readStoredSDKMessages(sourcePath)) {
+      await writeJsonlLine(out, serializeSDKMessageForStorage(msg, sourceDir, destDir))
+      copiedCount += 1
+
+      if (upToMessageUuid && getStoredMessageUuid(msg) === upToMessageUuid) {
+        break
+      }
+    }
+    await endWriteStream(out)
+  } catch (err) {
+    out.destroy()
+    throw err
+  }
+
+  return copiedCount
+}
+
+async function* readStoredSDKMessages(filePath: string): AsyncGenerator<SDKMessage> {
+  const rl = createInterface({
+    input: createReadStream(filePath),
+    crlfDelay: Infinity,
+  })
+
+  for await (const line of rl) {
+    if (!line.trim()) continue
+    try {
+      const parsed = JSON.parse(line)
+      if ('role' in parsed && !('type' in parsed)) {
+        yield convertLegacyMessage(parsed as AgentMessage)
+      } else {
+        yield parsed as SDKMessage
+      }
+    } catch (err) {
+      console.warn(`[Agent 会话] 跳过无法解析的 SDKMessage 行 (${filePath}):`, err)
+    }
+  }
+}
+
+function getStoredMessageUuid(msg: SDKMessage): string | undefined {
+  return 'uuid' in msg ? (msg as { uuid?: string }).uuid : undefined
+}
+
+function serializeSDKMessageForStorage(
+  msg: SDKMessage,
+  sourceDir?: string,
+  destDir?: string,
+): string {
+  let serialized = JSON.stringify(msg)
+  if (sourceDir && destDir) {
+    serialized = rewriteSourceToDest(serialized, sourceDir, destDir)
+  }
+  if (serialized.length <= MAX_SDK_MESSAGE_LENGTH) return serialized
+
+  let sanitized = JSON.stringify(sanitizeOversizedMessage(msg, serialized.length))
+  if (sourceDir && destDir) {
+    sanitized = rewriteSourceToDest(sanitized, sourceDir, destDir)
+  }
+  if (sanitized.length > MAX_SDK_MESSAGE_LENGTH) {
+    console.warn(`[Agent 会话] 消息截断后仍超限 (${(sanitized.length / 1024).toFixed(0)}K chars)`)
+  }
+  return sanitized
+}
+
+async function copyTextFileWithPathRewrite(
+  sourcePath: string,
+  destPath: string,
+  sourceDir: string,
+  destDir: string,
+): Promise<number> {
+  const rl = createInterface({
+    input: createReadStream(sourcePath),
+    crlfDelay: Infinity,
+  })
+  const out = createWriteStream(destPath, { flags: 'w', encoding: 'utf-8' })
+  let lineCount = 0
+
+  try {
+    for await (const line of rl) {
+      await writeJsonlLine(out, rewriteSourceToDest(line, sourceDir, destDir))
+      lineCount += 1
+    }
+    await endWriteStream(out)
+  } catch (err) {
+    out.destroy()
+    throw err
+  }
+
+  return lineCount
+}
+
+async function writeJsonlLine(stream: WriteStream, line: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.write(line + '\n', (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
+
+async function endWriteStream(stream: WriteStream): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.once('error', reject)
+    stream.end(resolve)
+  })
 }
 
 /**
@@ -860,41 +999,6 @@ function rewriteSourceToDest(content: string, sourceDir: string, destDir: string
     rewritten = rewritten.split(sourceEscaped).join(destEscaped)
   }
   return rewritten
-}
-
-/**
- * 改写 SDK JSONL 文件中所有出现的源目录路径为目标目录路径。
- * 文件不存在或读写失败时静默忽略（fork 仍可继续，只是 resume 时可能触发上下文回填）。
- */
-function rewritePathsInJsonlFile(filePath: string, sourceDir: string, destDir: string): void {
-  try {
-    const content = readFileSync(filePath, 'utf-8')
-    const rewritten = rewriteSourceToDest(content, sourceDir, destDir)
-    if (rewritten !== content) {
-      writeFileSync(filePath, rewritten)
-    }
-  } catch (err) {
-    console.warn(`[Agent 会话] 改写 SDK JSONL 路径失败 (${filePath}):`, err)
-  }
-}
-
-/**
- * 改写 SDKMessage 中所有嵌入的源目录路径为目标目录路径。
- *
- * 通过 JSON 序列化 → 字符串替换 → 反序列化实现深度替换，
- * 覆盖 user/assistant/tool_use/tool_result 等任意嵌套结构中的绝对路径字段。
- * 失败时返回原消息，保证 fork 整体不被打断。
- */
-function rewritePathsInSDKMessage(msg: SDKMessage, sourceDir: string, destDir: string): SDKMessage {
-  try {
-    const json = JSON.stringify(msg)
-    const rewritten = rewriteSourceToDest(json, sourceDir, destDir)
-    if (rewritten === json) return msg
-    return JSON.parse(rewritten) as SDKMessage
-  } catch (err) {
-    console.warn(`[Agent 会话] 改写 SDKMessage 路径失败，使用原消息:`, err)
-    return msg
-  }
 }
 
 /**

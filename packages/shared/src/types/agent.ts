@@ -757,8 +757,14 @@ export interface AgentGenerateTitleInput {
 
 // ===== MCP 服务器配置 =====
 
-/** MCP 传输类型 */
+/** MCP 传输类型；Proma 将 Streamable HTTP 规范化存储为 http */
 export type McpTransportType = 'stdio' | 'http' | 'sse'
+
+/** 外部配置中常见的 Streamable HTTP 别名 */
+export type McpTransportTypeAlias = 'streamableHttp' | 'streamable-http' | 'streamable_http'
+
+/** MCP 传输类型输入；保存和运行前会规范化为 McpTransportType */
+export type McpTransportTypeInput = McpTransportType | McpTransportTypeAlias
 
 /** MCP 服务器条目 */
 export interface McpServerEntry {

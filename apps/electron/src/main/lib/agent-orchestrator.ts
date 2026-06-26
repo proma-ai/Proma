@@ -28,6 +28,7 @@ import {
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
+  normalizeMcpTransportType,
   supports1MContext,
 } from '@proma/shared'
 import type { PermissionRequest, PromaPermissionMode, AskUserRequest, ExitPlanModeRequest } from '@proma/shared'
@@ -661,8 +662,9 @@ export class AgentOrchestrator {
     for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
       if (!entry.enabled) continue
       if (name === 'memos-cloud') continue
+      const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
-      if (entry.type === 'stdio' && entry.command) {
+      if (type === 'stdio' && entry.command) {
         const mergedEnv: Record<string, string> = {
           ...(process.env.PATH && { PATH: process.env.PATH }),
           ...entry.env,
@@ -675,9 +677,9 @@ export class AgentOrchestrator {
           required: false,
           startup_timeout_sec: entry.timeout ?? 30,
         }
-      } else if ((entry.type === 'http' || entry.type === 'sse') && entry.url) {
+      } else if ((type === 'http' || type === 'sse') && entry.url) {
         mcpServers[name] = {
-          type: entry.type,
+          type,
           url: entry.url,
           ...(entry.headers && Object.keys(entry.headers).length > 0 && { headers: entry.headers }),
           required: false,

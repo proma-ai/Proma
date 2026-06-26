@@ -681,15 +681,8 @@ function FileTreeItem({
         ref={rowRef}
         data-sticky-row={isSticky ? 'true' : undefined}
         className={cn(
-          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group transition-colors',
+          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group',
           isSticky && STICKY_ROW_BASE_CLASS,
-          // sticky 行 hover 用不透明色，避免下方滚动内容透出；普通行保持半透明柔和感
-          isSelected
-            ? 'bg-accent'
-            : isSticky
-              ? 'hover:bg-accent'
-              : 'hover:bg-accent/50',
-          flash && 'file-browser-row-flash',
         )}
         style={{
           paddingLeft,
@@ -698,12 +691,25 @@ function FileTreeItem({
         }}
         onClick={handleClick}
       >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute inset-y-0 left-2 right-2 z-0 rounded-[17px] transition-colors',
+            // sticky 行 hover 用不透明色，避免下方滚动内容透出；普通行保持半透明柔和感
+            isSelected
+              ? 'bg-accent'
+              : isSticky
+                ? 'group-hover:bg-accent'
+                : 'group-hover:bg-accent/50',
+            flash && 'file-browser-row-flash',
+          )}
+        />
         {/* sticky 行祖先链竖线，逻辑见 tree-row-layout.tsx 的 AncestorGuides */}
         {isSticky && <AncestorGuides depth={depth} isSelected={isSelected} />}
         {recentlyModifiedSet.has(entry.path) && (
           <span
             aria-label="最近被 Agent 修改"
-            className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/80"
+            className="absolute top-1/2 z-10 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary/80"
             style={{ left: paddingLeft - 6 }}
           />
         )}
@@ -711,20 +717,25 @@ function FileTreeItem({
         {entry.isDirectory ? (
           <ChevronRight
             className={cn(
-              'size-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-150',
+              'relative z-10 size-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-150',
               expanded && 'rotate-90',
             )}
           />
         ) : (
-          <span className="w-3.5 flex-shrink-0" />
+          <span className="relative z-10 w-3.5 flex-shrink-0" />
         )}
 
         {/* 文件/文件夹图标 */}
-        <FileTypeIcon name={entry.name} isDirectory={entry.isDirectory} isOpen={expanded} />
+        <FileTypeIcon
+          name={entry.name}
+          isDirectory={entry.isDirectory}
+          isOpen={expanded}
+          className="relative z-10"
+        />
 
         {/* 文件名 / 重命名输入框 */}
         {isRenaming ? (
-          <div className="relative flex-1 min-w-0">
+          <div className="relative z-10 flex-1 min-w-0">
             <input
               ref={renameInputRef}
               value={editName}
@@ -745,12 +756,12 @@ function FileTreeItem({
             )}
           </div>
         ) : (
-          <span className="truncate text-xs flex-1">{entry.name}</span>
+          <span className="relative z-10 truncate text-xs flex-1">{entry.name}</span>
         )}
 
         {/* 右侧操作按钮占位（始终占位，避免行宽跳动） */}
         <div
-          className="flex-shrink-0"
+          className="relative z-10 flex-shrink-0"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >

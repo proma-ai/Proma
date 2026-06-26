@@ -9,7 +9,7 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": []
+    "types": ["bun"]
   },
   "include": ["src/**/*"]
 }
