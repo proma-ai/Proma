@@ -643,6 +643,7 @@ function startDelegation(
     parentSessionId: ctx.sessionId,
     rootSessionId,
     sourceDelegationId: delegationId,
+    sourceAutomationId: parent?.sourceAutomationId,
     delegationRole: role,
     delegationStatus: 'running',
     delegationDepth: (parent?.delegationDepth ?? 0) + 1,
