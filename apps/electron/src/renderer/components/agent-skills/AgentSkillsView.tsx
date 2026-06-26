@@ -512,7 +512,7 @@ function McpTab({ userEntries, builtinServers, total, onOpen, onOpenBuiltin, onT
               statusTone={getBuiltinMcpStatus(server).tone}
               readOnly
               onOpen={() => onOpenBuiltin(server)}
-              onToggle={(enabled) => onToggleBuiltin(server.id, enabled)}
+              onToggle={server.toggleable === false ? undefined : (enabled) => onToggleBuiltin(server.id, enabled)}
             />
           ))}
         </McpSection>

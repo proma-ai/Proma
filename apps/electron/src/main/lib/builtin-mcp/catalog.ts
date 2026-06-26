@@ -17,6 +17,8 @@ interface BuiltinMcpCatalogItem {
   description: string
   category: BuiltinMcpServerSummary['category']
   tools: McpToolSummary[]
+  /** 是否允许用户开关，缺省视为 true。基础设施型（如 proma-cloud）置 false */
+  toggleable?: boolean
 }
 
 interface BuiltinMcpListContext {
@@ -24,6 +26,18 @@ interface BuiltinMcpListContext {
 }
 
 const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogItem[] = [
+  {
+    id: 'proma-cloud',
+    name: 'proma-cloud',
+    displayName: 'Proma Cloud 凭据网关',
+    description: '为 Agent 提供 Proma 开放 API 凭据，支撑内部 LLM 调用、生图与 AI 应用生成等能力。登录后始终可用，作为基础设施不提供开关。',
+    category: 'system',
+    toggleable: false,
+    tools: [
+      { name: 'get_credentials', description: '获取 Agent 自用的 Proma API 凭据（Inner Key + baseUrl）。', readOnly: true },
+      { name: 'create_app_key', description: '为生成的 AI 应用创建带 quota 上限的专用 API Key。' },
+    ],
+  },
   {
     id: 'automation',
     name: 'automation',
@@ -83,6 +97,11 @@ function resolveAvailability(
   item: BuiltinMcpCatalogItem,
   ctx: BuiltinMcpListContext,
 ): Pick<BuiltinMcpServerSummary, 'enabled' | 'available' | 'availabilityReason'> {
+  // 基础设施型（如 proma-cloud）：登录后始终注入，不受用户开关影响
+  if (item.toggleable === false) {
+    return { enabled: true, available: true }
+  }
+
   const userEnabled = isBuiltinMcpUserEnabled(item.id)
   if (!userEnabled) {
     return {
@@ -134,6 +153,7 @@ function resolveAvailability(
 export function listBuiltinMcpServers(ctx: BuiltinMcpListContext = {}): BuiltinMcpServerSummary[] {
   return BUILTIN_MCP_CATALOG.map((item) => ({
     ...item,
+    toggleable: item.toggleable ?? true,
     ...resolveAvailability(item, ctx),
   }))
 }

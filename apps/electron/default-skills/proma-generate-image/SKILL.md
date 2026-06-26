@@ -35,7 +35,12 @@ version: 1.1.0
    - 默认 `gemini-3.1-flash-image-preview`（便宜、速度快、Nano Banana 2）
    - 用户明确说"要高质量 / 用 Pro / 更好的"时切到 `gemini-3-pro-image-preview`
 3. **构造请求体**（Gemini 原生格式，见 `references/api-spec.md`）
-4. **调用接口**：`POST ${baseUrl}/api/v1/tools/generate-image`，header `Authorization: Bearer ${apiKey}`
+4. **调用接口**：先归一化 baseUrl 再拼工具路径
+   ```javascript
+   const API_ROOT = baseUrl.replace(/\/api\/v1\/?$/, '')   // 幂等归一化到根域名
+   // POST ${API_ROOT}/api/v1/tools/generate-image，header Authorization: Bearer ${apiKey}
+   ```
+   > ⚠️ 务必先归一化：`get_credentials` 历史上返回过带 `/api/v1` 后缀的 baseUrl，直接 `${baseUrl}/api/v1/tools/...` 会拼成 `/api/v1/api/v1/tools/...` → 404。归一化后新旧返回值都正确。
 5. **解析响应**：从 `candidates[0].content.parts[].inlineData` 提取 base64 图片
 6. **保存图片**：写到 `${cwd}/generated-images/<timestamp>-<random>.png`
 7. **回显用户**：用 Markdown 图片语法 `![](./generated-images/xxx.png)`

@@ -24,7 +24,7 @@
 <script>
   const PROMA_API_KEY = 'pk_xxx';       // 由 Agent 注入
   const PROMA_API_BASE = 'https://api.proma.cool';
-  const MODEL = 'claude-haiku-4-5';
+  const MODEL = '{{MODEL}}';            // Agent 生成时填真实模型 ID（先查 /v1/models，勿硬编码）
 
   async function callClaude(prompt, { system = '', maxTokens = 1024 } = {}) {
     const body = {
@@ -50,10 +50,10 @@
 </script>
 ```
 
-## HTML / Browser fetch — OpenAI ChatCompletions（用 Qwen/GPT/DeepSeek）
+## HTML / Browser fetch — OpenAI ChatCompletions（用 GPT / DeepSeek / Gemini 等非 Claude 模型）
 
 ```javascript
-async function callChat(prompt, { system = '', model = 'qwen-turbo' } = {}) {
+async function callChat(prompt, { system = '', model = MODEL } = {}) {   // MODEL 由 Agent 生成时填真实 ID
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
   messages.push({ role: 'user', content: prompt });

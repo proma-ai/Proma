@@ -64,7 +64,7 @@ Agent 调 `create_app_key` 后**直接把真实值写到 HTML**。模板里还�
 # .env（被 .gitignore 忽略）
 PROMA_API_KEY=pk_xxx_real_key
 PROMA_API_BASE=https://api.proma.cool
-PROMA_MODEL=claude-haiku-4-5
+PROMA_MODEL={{MODEL}}              # Agent 生成时填真实模型 ID（先查 /v1/models，勿硬编码）
 
 # 本 key 由 Proma Agent 自动创建：app-article-polisher-20260520
 # Quota Limit: 50 积分 — 用完后可去 Proma 设置面板调整

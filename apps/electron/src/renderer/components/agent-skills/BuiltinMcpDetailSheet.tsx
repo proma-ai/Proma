@@ -31,6 +31,12 @@ interface BuiltinMcpConfigInfo {
 }
 
 function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
+  if (server.id === 'proma-cloud') {
+    return {
+      source: 'Proma 登录凭据',
+      description: '凭据网关随 Proma 登录态自动注入，是生图、AI 应用生成等能力的基础设施，因此不提供开关。',
+    }
+  }
   if (server.id === 'mem') {
     return {
       source: 'Chat 工具 / 记忆',
@@ -84,7 +90,11 @@ export function BuiltinMcpDetailSheet({ open, server, onOpenChange, onConfigure 
             <div className="grid gap-3 sm:grid-cols-2">
               <InfoItem label="MCP 名称" value={server.name} />
               <InfoItem label="分类" value={CATEGORY_LABELS[server.category]} />
-              <InfoItem label="注入开关" value={server.enabled ? '允许注入' : '已手动关闭'} tone={server.enabled ? 'success' : 'muted'} />
+              {server.toggleable === false ? (
+                <InfoItem label="注入开关" value="始终注入" tone="success" />
+              ) : (
+                <InfoItem label="注入开关" value={server.enabled ? '允许注入' : '已手动关闭'} tone={server.enabled ? 'success' : 'muted'} />
+              )}
               <InfoItem label="可用状态" value={server.available ? '当前可用' : (server.availabilityReason ?? '不可用')} tone={server.available ? 'success' : 'muted'} />
               <InfoItem label="配置来源" value={configInfo.source} />
             </div>

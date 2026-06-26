@@ -20,6 +20,20 @@ import {
   createPromaAppKey,
 } from '../proma-agent-key-service'
 
+/**
+ * 把管理 API 的 baseUrl 归一化成根域名，供 Agent 拼接 LLM / 工具端点。
+ *
+ * getCloudApiConfig() 返回的 baseUrl 形如 `https://api.proma.cool/api/v1`（管理 API base，
+ * 内部 auth/refresh 等直接用它）。但 Agent 调用的两类开放端点住在不同 base 上：
+ *   - LLM（OpenAI/Anthropic 兼容）：`{root}/v1/chat/completions`、`{root}/v1/messages`、`{root}/v1/embeddings`、`{root}/v1/models`
+ *   - 工具 / 多模态：`{root}/api/v1/tools/...`、`{root}/api/v1/multimodal-models`
+ * 两者唯一一致的锚点是根域名。统一返回根域名后，所有 Skill 的端点拼接才不会出现
+ * `/api/v1/v1/...`（LLM）或 `/api/v1/api/v1/tools/...`（工具）这类双重前缀 404。
+ */
+function toApiRoot(baseUrl: string): string {
+  return baseUrl.replace(/\/api\/v1\/?$/, '')
+}
+
 /** MCP 工具描述 — get_credentials */
 const GET_CREDENTIALS_DESCRIPTION =
   'Get Proma API credentials for Agent\'s OWN use (internal LLM batch calls, image generation, etc.). ' +
@@ -67,7 +81,7 @@ export async function injectPromaCloudMcpServer(
               content: [
                 {
                   type: 'text' as const,
-                  text: JSON.stringify({ apiKey, baseUrl }),
+                  text: JSON.stringify({ apiKey, baseUrl: toApiRoot(baseUrl) }),
                 },
               ],
             }
@@ -129,7 +143,7 @@ export async function injectPromaCloudMcpServer(
                   type: 'text' as const,
                   text: JSON.stringify({
                     apiKey: result.apiKey,
-                    baseUrl,
+                    baseUrl: toApiRoot(baseUrl),
                     keyId: result.keyId,
                     keyName: result.keyName,
                     quotaLimit: result.quotaLimit,
