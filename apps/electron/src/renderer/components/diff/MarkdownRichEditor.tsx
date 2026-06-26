@@ -192,7 +192,7 @@ export function MarkdownRichEditor({
   }, [editor, isEditable])
 
   return (
-    <div className="flex h-full min-h-full flex-col">
+    <div className="flex min-h-full flex-col">
       {editing && editor && <MarkdownEditorToolbar editor={editor} />}
       <EditorContent
         editor={editor}
