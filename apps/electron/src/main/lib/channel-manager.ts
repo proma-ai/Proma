@@ -298,7 +298,8 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 /**
  * 测试 Anthropic 兼容 API 连接（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax）
  *
- * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
+ * DeepSeek / Kimi 等以 /anthropic 为协议根路径的供应商，实际端点位于 /anthropic/v1/messages，
+ * 由 normalizeAnthropicProviderUrl 统一按需补 /v1。
  * Kimi Coding Plan 必须发送 Proma User-Agent，否则返回 403。
  */
 async function testAnthropicCompatible(
@@ -522,7 +523,8 @@ interface AnthropicModelItem {
 /**
  * 从 Anthropic 兼容 API 拉取模型列表（Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax）
  *
- * DeepSeek / Kimi 的 Anthropic API 端点无需 /v1 前缀。
+ * DeepSeek / Kimi 等以 /anthropic 为协议根路径的供应商，实际端点位于 /anthropic/v1/messages，
+ * 由 normalizeAnthropicProviderUrl 统一按需补 /v1。
  * Kimi Coding Plan 必须发送 Proma User-Agent。
  * 文档: https://docs.anthropic.com/en/api/models-list
  */
