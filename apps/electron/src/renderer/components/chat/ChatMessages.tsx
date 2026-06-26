@@ -45,9 +45,7 @@ import {
 import { useSmoothStream } from '@proma/ui'
 import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { useConversationParallelMode } from '@/hooks/useConversationSettings'
-import { ModelMark, modelMarkReadableToneClass } from './ModelMark'
-import { getModelLineLogo } from '@/lib/model-line-logo'
-import { resolveModelProvider } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
@@ -246,9 +244,10 @@ export function ChatMessages({
   )
   const streamingLogo = React.useMemo(
     () => (
-      <ModelMark
-        src={getModelLineLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
-        className={`size-[35px] ${modelMarkReadableToneClass}`}
+      <img
+        src={getModelLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
+        alt="AI"
+        className="size-[35px] rounded-[25%] object-cover"
       />
     ),
     [streamingModel, channels]

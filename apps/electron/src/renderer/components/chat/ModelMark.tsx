@@ -7,8 +7,6 @@ interface ModelMarkProps {
   className?: string
 }
 
-export const modelMarkReadableToneClass = 'text-foreground/75 dark:text-foreground/90'
-
 export function ModelMark({ src, className }: ModelMarkProps): React.ReactElement {
   if (!src) {
     return <Cpu className={cn('shrink-0', className)} aria-hidden="true" />

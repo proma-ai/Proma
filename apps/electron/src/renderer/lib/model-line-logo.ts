@@ -42,11 +42,6 @@ import PromaLineLogo from '@/assets/models/line/proma.png'
 import CohereLineLogo from '@/assets/models/line/cohere.png'
 import EmbeddingLineLogo from '@/assets/models/line/embedding.png'
 
-interface ChannelLineLogoInput {
-  provider: ProviderType
-  baseUrl: string
-}
-
 const MODEL_LINE_LOGO_MAP: Record<string, string> = {
   'gpt-image': GPTImageLineLogo,
   'gpt-3': GPT35LineLogo,
@@ -122,32 +117,6 @@ const PROVIDER_LINE_LOGO_MAP: Record<ProviderType, string> = {
   custom: DefaultLineLogo,
 }
 
-const URL_LINE_LOGO_MAP: Array<[RegExp, string]> = [
-  [/proma\.cool/i, PromaLineLogo],
-  [/moonshot\.cn|kimi/i, KimiLineLogo],
-  [/bigmodel\.cn|zhipuai/i, ZhipuLineLogo],
-  [/minimax/i, MiniMaxLineLogo],
-  [/xiaomimimo|mimo/i, XiaomiLineLogo],
-  [/volces\.com|volcengine/i, DoubaoLineLogo],
-  [/dashscope|aliyuncs/i, QwenLineLogo],
-  [/deepseek/i, DeepSeekLineLogo],
-  [/openai\.com/i, OpenAILineLogo],
-  [/googleapis|generativelanguage/i, GeminiLineLogo],
-  [/grok|x\.ai/i, GrokLineLogo],
-  [/stepfun/i, StepLineLogo],
-  [/cohere/i, CohereLineLogo],
-  [/spark-api|xfyun/i, SparkDeskLineLogo],
-  [/hunyuan/i, HunyuanLineLogo],
-  [/ernie|baidu/i, WenxinLineLogo],
-  [/yi\.com|lingyiwanwu/i, YiLineLogo],
-]
-
-const GENERIC_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
-  'anthropic',
-  'anthropic-compatible',
-  'custom',
-])
-
 export function getModelLineLogo(modelId: string, provider?: ProviderType): string {
   for (const key in MODEL_LINE_LOGO_MAP) {
     if (new RegExp(key, 'i').test(modelId)) {
@@ -155,18 +124,4 @@ export function getModelLineLogo(modelId: string, provider?: ProviderType): stri
     }
   }
   return provider ? PROVIDER_LINE_LOGO_MAP[provider] : DefaultLineLogo
-}
-
-export function getChannelLineLogo(channel: ChannelLineLogoInput, fallbackModelId?: string): string {
-  if (GENERIC_PROVIDERS.has(channel.provider) && channel.baseUrl) {
-    for (const [regex, logo] of URL_LINE_LOGO_MAP) {
-      if (regex.test(channel.baseUrl)) {
-        return logo
-      }
-    }
-  }
-
-  return fallbackModelId
-    ? getModelLineLogo(fallbackModelId, channel.provider)
-    : PROVIDER_LINE_LOGO_MAP[channel.provider]
 }

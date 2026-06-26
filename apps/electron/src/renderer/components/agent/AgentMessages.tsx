@@ -25,9 +25,7 @@ import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
 import { StickyUserMessage } from '@/components/ai-elements/sticky-user-message'
 import { useSmoothStream } from '@proma/ui'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
-import { ModelMark, modelMarkReadableToneClass } from '@/components/chat/ModelMark'
-import { getModelLineLogo } from '@/lib/model-line-logo'
-import { resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
+import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { tabMinimapCacheAtom } from '@/atoms/tab-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
@@ -123,9 +121,10 @@ function AssistantLogo({ model }: { model?: string }): React.ReactElement {
   const channels = useAtomValue(channelsAtom)
   if (model) {
     return (
-      <ModelMark
-        src={getModelLineLogo(model, resolveModelProvider(model, channels))}
-        className={`size-[35px] ${modelMarkReadableToneClass}`}
+      <img
+        src={getModelLogo(model, resolveModelProvider(model, channels))}
+        alt={model}
+        className="size-[35px] rounded-[25%] object-cover"
       />
     )
   }

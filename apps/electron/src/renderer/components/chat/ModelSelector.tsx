@@ -25,8 +25,9 @@ import {
 } from '@/atoms/chat-atoms'
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
-import { getChannelLineLogo, getModelLineLogo } from '@/lib/model-line-logo'
-import { ModelMark, modelMarkReadableToneClass } from './ModelMark'
+import { getModelLineLogo } from '@/lib/model-line-logo'
+import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
+import { ModelMark } from './ModelMark'
 import { cn } from '@/lib/utils'
 import type { Channel, ModelOption } from '@proma/shared'
 
@@ -290,11 +291,10 @@ export function ModelSelector({
                   <div key={channelId}>
                     {/* 供应商标题行 - 灰色背景 */}
                     <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
-                      <ModelMark
-                        src={channel
-                          ? getChannelLineLogo(channel, first.modelId)
-                          : getModelLineLogo(first.modelId, first.provider)}
-                        className={cn('size-5', modelMarkReadableToneClass)}
+                      <img
+                        src={channel ? getChannelLogo(channel) : DefaultLogo}
+                        alt={first.channelName}
+                        className="size-5 rounded object-cover"
                       />
                       <span className="text-sm font-medium text-muted-foreground">
                         {first.channelName}
@@ -326,12 +326,10 @@ export function ModelSelector({
                             isSelected && 'bg-foreground/10 border-l-3 border-l-primary'
                           )}
                         >
-                          <ModelMark
-                            src={getModelLineLogo(option.modelId, option.provider)}
-                            className={cn(
-                              'size-5 flex-shrink-0',
-                              isSelected ? 'text-primary' : modelMarkReadableToneClass
-                            )}
+                          <img
+                            src={getModelLogo(option.modelId, option.provider)}
+                            alt={option.modelName}
+                            className="size-5 rounded object-cover flex-shrink-0"
                           />
                           <span className={cn(
                             'flex-1 text-sm truncate',

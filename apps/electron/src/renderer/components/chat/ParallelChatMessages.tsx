@@ -29,9 +29,7 @@ import {
   ReasoningContent,
 } from '@/components/ai-elements/reasoning'
 import { streamingModelAtom, channelsAtom } from '@/atoms/chat-atoms'
-import { ModelMark, modelMarkReadableToneClass } from './ModelMark'
-import { getModelLineLogo } from '@/lib/model-line-logo'
-import { resolveModelProvider } from '@/lib/model-logo'
+import { getModelLogo, resolveModelProvider } from '@/lib/model-logo'
 import type { ChatMessage } from '@proma/shared'
 
 /** 消息段落（按分隔线分割） */
@@ -210,9 +208,10 @@ function MessageColumn({
               model={streamingModel ?? undefined}
               time={formatMessageTime(Date.now())}
               logo={
-                <ModelMark
-                  src={getModelLineLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
-                  className={`size-[35px] ${modelMarkReadableToneClass}`}
+                <img
+                  src={getModelLogo(streamingModel ?? '', resolveModelProvider(streamingModel ?? '', channels))}
+                  alt="AI"
+                  className="size-[35px] rounded-[25%] object-cover"
                 />
               }
             />
