@@ -8,7 +8,7 @@
 import type { BuiltinMcpServerSummary, McpToolSummary } from '@proma/shared'
 import { getToolCredentials, getToolState } from '../chat-tool-config'
 import { getMemoryConfig } from '../memory-service'
-import { isBuiltinMcpUserEnabled } from './settings'
+import { isBuiltinMcpDefaultDisabled, isBuiltinMcpUserEnabled } from './settings'
 
 interface BuiltinMcpCatalogItem {
   id: string
@@ -88,7 +88,9 @@ function resolveAvailability(
     return {
       enabled: false,
       available: false,
-      availabilityReason: '已手动关闭',
+      availabilityReason: isBuiltinMcpDefaultDisabled(item.id)
+        ? '默认关闭，可手动开启'
+        : '已手动关闭',
     }
   }
 

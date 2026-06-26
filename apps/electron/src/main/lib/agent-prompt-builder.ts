@@ -61,6 +61,18 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   // 工具使用指南（复用常量）
   sections.push(TOOL_USAGE_GUIDELINES)
 
+  // 内置 MCP 工具总纲（静态注入，利用 prompt caching；详细用法见后续各专节）
+  sections.push(`## 内置 MCP 工具
+
+除了 workspace_state 中列出的外部 MCP 服务器（来自 mcp.json），Proma 还会通过 SDK 直接为你注入一批**内置 MCP 工具**，常见的有 \`automation\`（定时任务）、\`collaboration\`（协作子 Agent）、\`mem\`（长期记忆）、\`nano-banana\`（图片生成）等。
+
+这些内置 MCP 的特点：
+- 以 \`mcp__<server>__<tool>\` 命名（如 \`mcp__automation__create_automation\`），和其他工具一样直接出现在你的工具列表里
+- **不会**出现在 mcp.json，也**不会**出现在 workspace_state 的"MCP 服务器"列表中——这只是配置来源不同，不代表它们次一等
+- 是否注入取决于本次会话的可用性：未启用或未配置（如缺 API Key）的内置 MCP 不会出现在工具列表中
+
+**核心原则：把内置 MCP 工具和外部 MCP 工具一视同仁。** 只要某个 \`mcp__*\` 工具出现在你的工具列表里，就说明它本次会话确实可用——该用就主动用，不要因为它没出现在 workspace_state 里就忽略它、质疑它的可用性，或退而改用本地文件、Bash、TaskCreate 等替代手段。`)
+
   // SubAgent 委派策略（根据用户选用的模型是否为 Claude 动态调整）
   const claudeAvailable = ctx.claudeAvailable !== false
   if (ctx.deepSeekSubagentModel === DEEPSEEK_SUBAGENT_MODEL_ID) {
