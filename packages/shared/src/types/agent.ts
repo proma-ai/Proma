@@ -808,6 +808,8 @@ export interface BuiltinMcpServerSummary {
   available: boolean
   availabilityReason?: string
   tools: McpToolSummary[]
+  /** 是否允许用户开关。基础设施型 MCP（如 proma-cloud）始终注入、不提供开关，置 false */
+  toggleable?: boolean
 }
 
 /** 工作区 MCP 配置文件 */

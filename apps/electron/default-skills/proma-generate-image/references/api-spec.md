@@ -5,13 +5,13 @@
 ## Endpoint
 
 ```
-POST {baseUrl}/api/v1/tools/generate-image
+POST {API_ROOT}/api/v1/tools/generate-image
 Headers:
   Authorization: Bearer {apiKey}     # 从 mcp__proma-cloud__get_credentials 获取
   Content-Type: application/json
 ```
 
-`baseUrl` 与 `apiKey` 从 `get_credentials` 工具返回值中读取，不要硬编码。
+`apiKey` 从 `get_credentials` 工具返回值中读取，不要硬编码。`API_ROOT = baseUrl.replace(/\/api\/v1\/?$/, '')` —— 先把 baseUrl 幂等归一化成根域名再拼路径，否则若 baseUrl 带 `/api/v1` 后缀会拼成 `/api/v1/api/v1/tools/...` → 404。
 
 ## 请求体（Gemini 原生格式）
 

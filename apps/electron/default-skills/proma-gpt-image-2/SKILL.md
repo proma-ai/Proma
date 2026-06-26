@@ -34,7 +34,12 @@ version: 1.1.0
    - `size`：分辨率（见下方枚举）
    - `quality`：`low` / `medium` / `high`
    - `mask`（可选，仅 edit 模式）：蒙版图片
-4. **调用接口**：`POST ${baseUrl}/api/v1/tools/gpt-image-2/generate`
+4. **调用接口**：先归一化 baseUrl 再拼工具路径
+   ```javascript
+   const API_ROOT = baseUrl.replace(/\/api\/v1\/?$/, '')   // 幂等归一化到根域名
+   // POST ${API_ROOT}/api/v1/tools/gpt-image-2/generate
+   ```
+   > ⚠️ 务必先归一化：`get_credentials` 历史上返回过带 `/api/v1` 后缀的 baseUrl，直接 `${baseUrl}/api/v1/tools/...` 会拼成 `/api/v1/api/v1/tools/...` → 404。归一化后新旧返回值都正确。
 5. **解析响应**：从 `images[]` 提取 URL 或 base64
    - URL 类型 → fetch 下载
    - base64 类型 → 直接解码保存

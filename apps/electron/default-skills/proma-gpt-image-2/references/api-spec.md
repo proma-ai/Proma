@@ -5,11 +5,13 @@
 ## Endpoint
 
 ```
-POST {baseUrl}/api/v1/tools/gpt-image-2/generate
+POST {API_ROOT}/api/v1/tools/gpt-image-2/generate
 Headers:
   Authorization: Bearer {apiKey}    # 从 mcp__proma-cloud__get_credentials 获取
   Content-Type: application/json
 ```
+
+> ⚠️ `API_ROOT = baseUrl.replace(/\/api\/v1\/?$/, '')` —— 先把 `get_credentials` 的 baseUrl 幂等归一化成根域名再拼路径。否则若 baseUrl 带 `/api/v1` 后缀，`${baseUrl}/api/v1/tools/...` 会拼成 `/api/v1/api/v1/tools/...` → 404。
 
 ## 请求体
 

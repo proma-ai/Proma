@@ -159,10 +159,10 @@ function estimateCost(usage, inPrice = 0.8, outPrice = 4) {
 
 ### 步骤 2: 选模型 + 决定 quotaLimit
 
-根据应用核心任务自行判断（**不要硬编码定价**）：
+根据应用核心任务自行判断（**不要硬编码模型 ID 或定价**，先查 `/v1/models` 拿当前真实模型）：
 
-- 纯文本任务（润色、翻译、分类） → Haiku / Qwen-turbo，默认 50 积分
-- 高质量生成 / 复杂推理 → Sonnet，默认 100 积分
+- 纯文本任务（润色、翻译、分类） → 选便宜的 fast 档模型（如 Haiku / flash 类），默认 50 积分
+- 高质量生成 / 复杂推理 → 选 smart 档（如 Sonnet），默认 100 积分
 - 含生图 → 默认 200 积分
 - 含 GPT Image 2 high quality → 默认 500 积分
 

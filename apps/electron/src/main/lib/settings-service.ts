@@ -27,6 +27,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: true,
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
+      builtinMcpEnabledIds: [],
     }
   }
 
@@ -42,6 +43,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: data.notificationsEnabled ?? true,
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       builtinMcpDisabledIds: data.builtinMcpDisabledIds ?? [],
+      builtinMcpEnabledIds: data.builtinMcpEnabledIds ?? [],
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -53,6 +55,7 @@ export function getSettings(): AppSettings {
       notificationsEnabled: true,
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
+      builtinMcpEnabledIds: [],
     }
   }
 }
