@@ -810,16 +810,29 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 打开自动任务列表 */
+  /** 打开/关闭自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
+    if (activeView === 'automations') {
+      // 编辑页 → 关表单回列表；列表页 → 退出到对话
+      if (store.get(automationFormAtom).open) {
+        setAutomationForm({ open: false, draft: null })
+        return
+      }
+      setActiveView('conversations')
+      return
+    }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView, store])
 
-  /** 打开 Agent 技能视图 */
+  /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
+    if (activeView === 'agent-skills') {
+      setActiveView('conversations')
+      return
+    }
     setActiveView('agent-skills')
-  }, [setActiveView])
+  }, [activeView, setActiveView])
 
   /** 打开当前工作区的 MCP 管理页 */
   const handleOpenMcpManagement = React.useCallback((): void => {
