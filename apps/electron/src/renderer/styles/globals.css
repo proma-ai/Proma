@@ -1008,15 +1008,6 @@
   background-color: hsl(var(--sidebar-control-surface)) !important;
 }
 
-.ui-classic .sidebar-collapse-button {
-  background-color: hsl(var(--sidebar-control-surface)) !important;
-}
-
-.ui-classic .sidebar-collapse-button:hover {
-  background-color: hsl(var(--sidebar-control-surface-hover)) !important;
-}
-
-
 /* ===== 输入框段落紧凑行距（仅作用于输入框内的 tiptap 编辑器） ===== */
 .rich-text-input .tiptap p {
   margin: 0;
