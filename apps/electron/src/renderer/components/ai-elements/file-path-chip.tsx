@@ -189,7 +189,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
           onClick={handleClick}
           title={fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
           className={cn(
-            'inline-flex items-center gap-1 rounded px-1.5 py-[2px] text-[12px] font-medium leading-[1.6]',
+            'inline-flex items-center gap-[0.25em] rounded px-[0.35em] py-[0.15em] text-[0.875em] font-medium leading-none',
             'cursor-pointer transition-colors duration-150',
             'align-baseline not-prose',
             fileStatus === 'broken'
@@ -198,8 +198,8 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
             className
           )}
         >
-          <FileTypeIcon name={filename} isDirectory={false} size={14} />
-          <span className="truncate max-w-[240px]">{filename}{lineColSuffix}</span>
+          <FileTypeIcon name={filename} isDirectory={false} size={12} />
+          <span className="truncate max-w-[240px] leading-none">{filename}{lineColSuffix}</span>
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
