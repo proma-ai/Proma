@@ -10,6 +10,7 @@
  * - 认证：Authorization: Bearer
  */
 
+import type { ProviderType } from '@proma/shared'
 import type {
   ProviderAdapter,
   ProviderRequest,
@@ -20,7 +21,7 @@ import type {
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
-import { normalizeBaseUrl } from './url-utils.ts'
+import { resolveOpenAIChatCompletionsUrl } from './url-utils.ts'
 
 // ===== OpenAI 特有类型 =====
 
@@ -185,10 +186,14 @@ function appendContinuationMessages(
 // ===== 适配器实现 =====
 
 export class OpenAIAdapter implements ProviderAdapter {
-  readonly providerType = 'openai' as const
+  readonly providerType: ProviderType
+
+  constructor(providerType: ProviderType = 'openai') {
+    this.providerType = providerType
+  }
 
   buildStreamRequest(input: StreamRequestInput): ProviderRequest {
-    const url = normalizeBaseUrl(input.baseUrl)
+    const url = resolveOpenAIChatCompletionsUrl(input.baseUrl, this.providerType)
     const messages = toOpenAIMessages(input)
 
     const bodyObj: Record<string, unknown> = {
@@ -208,7 +213,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
 
     return {
-      url: `${url}/chat/completions`,
+      url,
       headers: {
         'Authorization': `Bearer ${input.apiKey}`,
         'content-type': 'application/json',
@@ -267,10 +272,10 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {
-    const url = normalizeBaseUrl(input.baseUrl)
+    const url = resolveOpenAIChatCompletionsUrl(input.baseUrl, this.providerType)
 
     return {
-      url: `${url}/chat/completions`,
+      url,
       headers: {
         'Authorization': `Bearer ${input.apiKey}`,
         'content-type': 'application/json',

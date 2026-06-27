@@ -34,7 +34,7 @@ import type {
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
-import { normalizeAnthropicProviderUrl } from './url-utils.ts'
+import { resolveAnthropicMessagesUrl } from './url-utils.ts'
 import { detectThinkingCapability } from './thinking-capability.ts'
 import { getPromaUserAgent } from './user-agent.ts'
 
@@ -261,9 +261,9 @@ export class AnthropicAdapter implements ProviderAdapter {
     this.providerType = providerType
   }
 
-  /** 根据 provider 类型选择 URL 规范化方式 */
-  private normalizeUrl(baseUrl: string): string {
-    return normalizeAnthropicProviderUrl(baseUrl, this.providerType)
+  /** 根据 provider 类型解析 Messages 请求地址 */
+  private resolveMessagesUrl(baseUrl: string): string {
+    return resolveAnthropicMessagesUrl(baseUrl, this.providerType)
   }
 
   /**
@@ -299,7 +299,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   buildStreamRequest(input: StreamRequestInput): ProviderRequest {
-    const url = this.normalizeUrl(input.baseUrl)
+    const url = this.resolveMessagesUrl(input.baseUrl)
     const messages = toAnthropicMessages(input)
     const capability = detectThinkingCapability(this.providerType, input.modelId)
 
@@ -374,7 +374,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     return {
-      url: `${url}/messages`,
+      url,
       headers: this.buildHeaders(input.apiKey),
       body: requestBody,
     }
@@ -441,7 +441,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   buildTitleRequest(input: TitleRequestInput): ProviderRequest {
-    const url = this.normalizeUrl(input.baseUrl)
+    const url = this.resolveMessagesUrl(input.baseUrl)
     const capability = detectThinkingCapability(this.providerType, input.modelId)
 
     const body: Record<string, unknown> = {
@@ -458,7 +458,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     return {
-      url: `${url}/messages`,
+      url,
       headers: this.buildHeaders(input.apiKey),
       body: JSON.stringify(body),
     }
