@@ -1187,13 +1187,15 @@ export function rewindFilesFromSnapshot(
   projectDir?: string,
   forkSourceSdkSessionId?: string,
   attachedDirectories?: string[],
-): { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } {
+): { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number; failedFiles?: Array<{ filePath: string; reason: string }> } {
   const sdkConfigDir = getSdkConfigDir()
 
   // 1. 查找 SDK session JSONL（优先当前 session，找不到目标 UUID 时 fallback 到源会话）
   let sessionFilePath = findSdkSessionJsonl(sdkSessionId, projectDir)
   let effectiveSdkSessionId = sdkSessionId
   let isForkFallback = false
+  let filesChanged: string[] = []
+  let failedFiles: Array<{ filePath: string; reason: string }> = []
 
   // 2. 读取所有消息，构建到目标 user message 为止的文件状态
   try {
@@ -1300,7 +1302,6 @@ export function rewindFilesFromSnapshot(
 
     // 3. 恢复文件（fork 会话使用源会话的 file-history 备份）
     const fileHistoryDir = join(sdkConfigDir, 'file-history', effectiveSdkSessionId)
-    const filesChanged: string[] = []
 
     const resolvedCwd = resolve(cwd)
     // 预计算允许写入的目录列表（cwd + attachedDirectories）
@@ -1315,6 +1316,7 @@ export function rewindFilesFromSnapshot(
       const isInAllowedDir = allowedDirs.some((dir) => fullPath.startsWith(dir + '/') || fullPath === dir)
       if (!isInAllowedDir) {
         console.warn(`[Agent 会话] rewindFiles: 拒绝路径越界 ${filePath}`)
+        failedFiles.push({ filePath, reason: '路径越界：文件不在允许的目录范围内' })
         continue
       }
 
@@ -1327,6 +1329,7 @@ export function rewindFilesFromSnapshot(
             console.log(`[Agent 会话] rewindFiles: 删除 ${filePath}`)
           } catch (err) {
             console.warn(`[Agent 会话] rewindFiles: 删除失败 ${filePath}:`, err)
+            failedFiles.push({ filePath, reason: `删除失败: ${err instanceof Error ? err.message : String(err)}` })
           }
         }
       } else {
@@ -1335,10 +1338,12 @@ export function rewindFilesFromSnapshot(
         // backupPath 越界检查
         if (!backupPath.startsWith(resolve(fileHistoryDir) + '/') && backupPath !== resolve(fileHistoryDir)) {
           console.warn(`[Agent 会话] rewindFiles: 拒绝备份路径越界 ${backupFileName}`)
+          failedFiles.push({ filePath, reason: `备份路径越界: ${backupFileName}` })
           continue
         }
         if (!existsSync(backupPath)) {
           console.warn(`[Agent 会话] rewindFiles: 备份文件不存在 ${backupPath}`)
+          failedFiles.push({ filePath, reason: `备份文件不存在: ${backupFileName}` })
           continue
         }
         try {
@@ -1351,13 +1356,27 @@ export function rewindFilesFromSnapshot(
           console.log(`[Agent 会话] rewindFiles: 恢复 ${filePath} ← ${backupFileName}${isForkFallback ? ' (from source session)' : ''}`)
         } catch (err) {
           console.warn(`[Agent 会话] rewindFiles: 恢复失败 ${filePath}:`, err)
+          failedFiles.push({ filePath, reason: `恢复失败: ${err instanceof Error ? err.message : String(err)}` })
         }
       }
     }
 
-    console.log(`[Agent 会话] rewindFilesFromSnapshot 完成: ${filesChanged.length} 个文件已恢复${isForkFallback ? ' (fork fallback)' : ''}`)
-    return { canRewind: true, filesChanged }
+    console.log(`[Agent 会话] rewindFilesFromSnapshot 完成: ${filesChanged.length} 个文件已恢复${failedFiles.length > 0 ? `, ${failedFiles.length} 个失败` : ''}${isForkFallback ? ' (fork fallback)' : ''}`)
+    return {
+      canRewind: true,
+      filesChanged,
+      ...(failedFiles.length > 0 ? { failedFiles } : {}),
+    }
   } catch (err) {
+    // 部分成功：filesChanged 已有内容，保留成功信息 + 附加异常原因
+    if (filesChanged.length > 0) {
+      return {
+        canRewind: true,
+        filesChanged,
+        ...(failedFiles.length > 0 ? { failedFiles } : {}),
+        error: `恢复过程发生异常: ${err instanceof Error ? err.message : String(err)}`,
+      }
+    }
     return { canRewind: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

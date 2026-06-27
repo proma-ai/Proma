@@ -438,7 +438,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const contentCacheScope = React.useMemo(() => JSON.stringify({
     dirPath,
     gitRoot: gitRoot ?? '',
-    basePaths: basePaths ?? [],
+    basePaths: (basePaths ?? []).slice().sort(),
   }), [basePaths, dirPath, gitRoot])
 
   const getContentCacheKey = React.useCallback((mode: 'preview' | 'diff', version: number) => (

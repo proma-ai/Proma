@@ -1829,9 +1829,31 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
       if (result.fileRewind?.canRewind) {
         const fileCount = result.fileRewind.filesChanged?.length ?? 0
-        toast.success('已回退到此处', {
-          description: fileCount > 0 ? `${fileCount} 个文件已恢复` : '文件无变化',
-        })
+        const failedCount = result.fileRewind.failedFiles?.length ?? 0
+        if (failedCount > 0) {
+          toast.warning('已回退到此处（部分文件恢复失败）', {
+            description: `${fileCount} 个文件已恢复，${failedCount} 个文件恢复失败`,
+            action: {
+              label: '查看详情',
+              onClick: () => {
+                const details = result.fileRewind!.failedFiles!.map(
+                  (f) => `${f.filePath}: ${f.reason}`
+                ).join('\n')
+                console.warn('[回退] 文件恢复失败详情:\n', details)
+                toast.message('恢复失败详情', {
+                  description: result.fileRewind!.failedFiles!.map(
+                    (f, i) => `${i + 1}. \`${f.filePath}\` — ${f.reason}`
+                  ).join('\n'),
+                  duration: 10000,
+                })
+              },
+            },
+          })
+        } else {
+          toast.success('已回退到此处', {
+            description: fileCount > 0 ? `${fileCount} 个文件已恢复` : '文件无变化',
+          })
+        }
       } else if (result.fileRewind?.error) {
         toast.warning('已回退对话', {
           description: `文件恢复不可用：${result.fileRewind.error}`,

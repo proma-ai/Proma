@@ -983,6 +983,8 @@ export interface RewindSessionResult {
     filesChanged?: string[]
     insertions?: number
     deletions?: number
+    /** 单个文件恢复失败详情（部分成功时保留） */
+    failedFiles?: Array<{ filePath: string; reason: string }>
   }
 }
 
