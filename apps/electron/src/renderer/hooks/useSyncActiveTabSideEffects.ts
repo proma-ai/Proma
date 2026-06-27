@@ -62,11 +62,17 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
       setCurrentAgentSessionId(newActiveTab.sessionId)
       setCurrentConversationId(null)
 
-      // 清除该会话的"已完成未查看"标记
+      // 清除该会话及其所有委托子会话的"已完成未查看"标记
+      // 若不级联清除子会话，母会话的树状态会因子会话的 unviewedCompleted
+      // 而持续显示 green accent，导致点击/切换后绿色不消失。
+      const childIds = agentSessions
+        .filter((s) => s.parentSessionId === newActiveTab.sessionId && !!s.sourceDelegationId)
+        .map((s) => s.id)
       setUnviewedCompleted((prev) => {
-        if (!prev.has(newActiveTab.sessionId)) return prev
+        const allIds = [newActiveTab.sessionId, ...childIds]
+        if (!allIds.some((rid) => prev.has(rid))) return prev
         const next = new Set(prev)
-        next.delete(newActiveTab.sessionId)
+        for (const rid of allIds) next.delete(rid)
         return next
       })
 

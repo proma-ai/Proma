@@ -1411,15 +1411,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   /** 选择 Agent 会话（打开或聚焦标签页） */
   const handleSelectAgentSession = React.useCallback((id: string, title: string): void => {
     openSession('agent', id, title)
-    setActiveView('conversations')
-    // 清除该会话的"已完成未查看"标记
-    setUnviewedCompleted((prev: Set<string>) => {
-      if (!prev.has(id)) return prev
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-  }, [openSession, setActiveView, setUnviewedCompleted])
+  }, [openSession])
 
   /** 重命名工作区（项目）名称 */
   const handleWorkspaceRename = React.useCallback(async (workspaceId: string, newName: string): Promise<void> => {
@@ -1524,7 +1516,11 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       const targetArchived = !!updated.archived
       const delegatedChildren = targetArchived
         ? getSyncableDelegatedChildren(sessions, id, draftSessionIds)
-        : []
+        : getDirectDelegatedChildren(sessions, id).filter((child) => (
+          !!child.archived
+          && !draftSessionIds.has(child.id)
+          && !isHiddenAutomationSession(child)
+        ))
       cascaded = delegatedChildren.length > 0
       for (const child of delegatedChildren) {
         if (!!child.archived !== targetArchived) {
@@ -1642,11 +1638,17 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [agentProjectGroups, automationGroup, automationGroupOrder],
   )
 
-  /** Agent 归档会话按日期分组（跨项目） */
-  const agentSessionGroups = React.useMemo(
-    () => groupByDate(sortAgentSessionsByUpdatedAtDesc(
-      agentSessions.filter((session) => session.archived && !draftSessionIds.has(session.id))
-    )),
+  /** Agent 归档会话：构建树后按根会话日期分组（跨项目） */
+  const agentArchivedTreeGroups = React.useMemo(
+    () => {
+      const archived = agentSessions.filter((s) => s.archived && !draftSessionIds.has(s.id))
+      if (archived.length === 0) return []
+      const trees = buildAgentSessionTrees(archived)
+      // 按根会话 updatedAt 降序排列
+      const sorted = [...trees].sort((a, b) => b.session.updatedAt - a.session.updatedAt)
+      // groupByDate 需要 { updatedAt } 形状，用根 session 的日期代表整棵树
+      return groupByDate(sorted.map((t) => ({ updatedAt: t.session.updatedAt, tree: t })))
+    },
     [agentSessions, draftSessionIds]
   )
 
@@ -2417,31 +2419,70 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
                 </div>
               ))
             ) : (
-              /* Agent 模式归档：Agent 会话按日期分组 */
-              agentSessionGroups.map((group) => (
+              /* Agent 模式归档：Agent 会话树按日期分组 */
+              agentArchivedTreeGroups.map((group) => (
                 <div key={group.label} className="mb-1">
                   <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
                     {group.label}
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    {group.items.map((session) => (
-                      <AgentSessionItem
-                        key={session.id}
-                        session={session}
-                        active={session.id === activeSessionId}
-                        indicatorStatus={agentIndicatorMap.get(session.id) ?? 'idle'}
-                        showPinIcon={!!session.pinned}
-                        leftAccent={getSessionLeftAccent(agentIndicatorMap.get(session.id) ?? 'idle')}
-                        workspaceName={session.workspaceId ? workspaceNameMap.get(session.workspaceId) : undefined}
-                        relativeTimeNow={relativeTimeNow}
-                        onSelect={handleSelectAgentSession}
-                        onRequestDelete={handleRequestDelete}
-                        onRequestMove={handleRequestMove}
-                        onRename={handleAgentRename}
-                        onTogglePin={handleTogglePinAgent}
-                        onToggleArchive={handleToggleArchiveAgent}
-                      />
-                    ))}
+                    {group.items.map(({ tree: item }) => {
+                      const childCount = item.childSessions.length
+                      const rowStatus = getSessionTreeStatus(item, agentIndicatorMap)
+                      const treeActive = treeContainsSessionId(item, activeSessionId)
+                      const activeChildVisible = item.childSessions.some((child) => child.id === activeSessionId)
+                      const expandedChildren = expandedDelegationParentIds.has(item.session.id)
+                        || (activeChildVisible && !collapsedDelegationParentIds.has(item.session.id))
+
+                      return (
+                        <div key={item.session.id} className="flex flex-col gap-0.5">
+                          <AgentSessionItem
+                            session={item.session}
+                            active={treeActive}
+                            indicatorStatus={rowStatus}
+                            showPinIcon={!!item.session.pinned}
+                            delegationSummary={childCount > 0
+                              ? {
+                                total: childCount,
+                                completed: countCompletedDelegatedChildren(item.childSessions),
+                                expanded: expandedChildren,
+                                onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
+                              }
+                              : undefined}
+                            leftAccent={getSessionLeftAccent(rowStatus)}
+                            workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
+                            relativeTimeNow={relativeTimeNow}
+                            onSelect={handleSelectAgentSession}
+                            onRequestDelete={handleRequestDelete}
+                            onRequestMove={handleRequestMove}
+                            onRename={handleAgentRename}
+                            onTogglePin={handleTogglePinAgent}
+                            onToggleArchive={handleToggleArchiveAgent}
+                          />
+
+                          {childCount > 0 && expandedChildren && (
+                            <div className="ml-3 border-l border-foreground/10 pl-2 flex flex-col gap-0.5">
+                              {item.childSessions.map((childSession) => (
+                                <DelegatedChildSessionItem
+                                  key={childSession.id}
+                                  session={childSession}
+                                  activeSessionId={activeSessionId}
+                                  agentIndicatorMap={agentIndicatorMap}
+                                  relativeTimeNow={relativeTimeNow}
+                                  workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
+                                  onSelect={handleSelectAgentSession}
+                                  onRequestDelete={handleRequestDelete}
+                                  onRequestMove={handleRequestMove}
+                                  onRename={handleAgentRename}
+                                  onTogglePin={handleTogglePinAgent}
+                                  onToggleArchive={handleToggleArchiveAgent}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))
@@ -3258,6 +3299,7 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
       session={session}
       active={session.id === activeSessionId}
       indicatorStatus={status}
+      leftAccent={getSessionLeftAccent(status)}
       relativeTimeNow={relativeTimeNow}
       workspaceName={workspaceName}
       onSelect={onSelect}

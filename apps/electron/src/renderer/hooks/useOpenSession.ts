@@ -66,10 +66,16 @@ export function useOpenSession(): OpenSessionFn {
         setCurrentAgentSessionId(sessionId)
 
         // 用户打开查看后只清除未读角标；是否完成由用户通过对勾确认。
+        // 同时级联清除所有委托子会话的完成标记，避免子会话的
+        // unviewedCompleted 使母会话树状态持续显示 green accent。
         setUnviewedCompleted((prev) => {
-          if (!prev.has(sessionId)) return prev
+          const childIds = agentSessions
+            .filter((s) => s.parentSessionId === sessionId && !!s.sourceDelegationId)
+            .map((s) => s.id)
+          const allIds = [sessionId, ...childIds]
+          if (!allIds.some((rid) => prev.has(rid))) return prev
           const next = new Set(prev)
-          next.delete(sessionId)
+          for (const rid of allIds) next.delete(rid)
           return next
         })
 
