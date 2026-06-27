@@ -4,10 +4,15 @@
  */
 
 import * as React from 'react'
+import { useAtomValue } from 'jotai'
 import { detectIsWindows } from '@/lib/platform'
+import { interfaceVariantAtom } from '@/atoms/theme'
+import { cn } from '@/lib/utils'
 
 export function WindowControls(): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const isClassic = interfaceVariant === 'classic'
   const [isMaximized, setIsMaximized] = React.useState(false)
 
   // 初始化最大化状态并监听窗口 resize 事件
@@ -28,7 +33,10 @@ export function WindowControls(): React.ReactElement | null {
   if (!isWindows) return null
 
   return (
-    <div className="window-controls fixed top-[8px] right-[8px] z-[100] flex select-none">
+    <div className={cn(
+      "window-controls fixed z-[100] flex select-none",
+      isClassic ? "right-[16px] top-[12px]" : "right-[8px] top-[5px]"
+    )}>
       {/* 最小化 */}
       <button
         type="button"

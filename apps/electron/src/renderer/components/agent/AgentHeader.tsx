@@ -11,6 +11,8 @@ import { Pencil, Check, X } from 'lucide-react'
 import { agentSessionsAtom } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
+import { detectIsWindows } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 
 /** AgentHeader 属性接口 */
 interface AgentHeaderProps {
@@ -18,6 +20,7 @@ interface AgentHeaderProps {
 }
 
 export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement | null {
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
   const sessions = useAtomValue(agentSessionsAtom)
   const session = sessions.find((s) => s.id === sessionId) ?? null
   const setAgentSessions = useSetAtom(agentSessionsAtom)
@@ -67,8 +70,8 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
 
   return (
     <div className="relative z-[51] flex items-center gap-2 px-4 h-[48px]">
-      {/* 拖拽层覆盖整行，编辑/标题按钮内部已自带 titlebar-no-drag。 */}
-      <div className="absolute inset-0 titlebar-drag-region pointer-events-none" />
+      {/* 拖拽层覆盖整行（Windows 避开右上角 WindowControls ~126px），编辑/标题按钮内部已自带 titlebar-no-drag。 */}
+      <div className={cn("absolute inset-0 titlebar-drag-region pointer-events-none", isWindows && "right-[126px]")} />
       {editing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 titlebar-no-drag">
           <input

@@ -376,10 +376,8 @@ function TabBarInner({
         ref={scrollRef}
         className={cn(
           "relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none",
-          // 右上角同时存在窗口控件（Windows ~126px）和文件面板按钮（~40px）时，给 scroll 预留对应宽度，
-          // 避免最右一个 Tab 被遮挡。
-          isWindows && !showOpenPanelButton && "pr-[126px]",
-          isWindows && showOpenPanelButton && "pr-[166px]",
+          // Windows 始终避开 WindowControls（~126px）；非 Windows 打开按钮时给 scroll 预留空间
+          isWindows && "pr-[126px]",
           !isWindows && showOpenPanelButton && "pr-10",
         )}
       >
@@ -418,7 +416,9 @@ function TabBarInner({
   )
 }
 
-/** 打开 Agent 文件面板按钮。 */
+/** 打开 Agent 文件面板按钮。
+ *  非 Windows：inset-y-0 撑满 TabBar，贴右边缘 right-1。
+ *  Windows：溢出到 TabBar 下方（top-[37px]），避开 WindowControls，贴右边缘与关闭按钮对齐。 */
 function AgentPanelOpenButton({
   isWindows,
   onToggle,
@@ -429,8 +429,10 @@ function AgentPanelOpenButton({
   return (
     <div
       className={cn(
-        "absolute inset-y-0 z-10 flex items-end pb-[3px] titlebar-no-drag",
-        isWindows ? "right-[132px]" : "right-[9px]",
+        "absolute flex titlebar-no-drag",
+        isWindows
+          ? "top-[37px] right-1 h-7 z-[52]"
+          : "inset-y-0 right-1 items-end pb-[3px] z-10",
       )}
     >
       <Tooltip>

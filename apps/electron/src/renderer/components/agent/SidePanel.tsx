@@ -416,7 +416,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}
         >
-          <DiffPanelTabBar activeTab={activeTab} onTabChange={onTabChange} onClose={() => setIsOpen(false)} />
+          <DiffPanelTabBar activeTab={activeTab} onTabChange={onTabChange} onClose={() => setIsOpen(false)} isWindows={isWindows} />
 
           {activeTab === 'changes' ? (
             sessionPath ? (

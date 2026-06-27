@@ -18,6 +18,7 @@ interface DiffPanelTabBarProps {
   activeTab: DiffPanelTab
   onTabChange: (tab: DiffPanelTab) => void
   onClose?: () => void
+  isWindows?: boolean
 }
 
 interface PreviousTabState {
@@ -25,7 +26,7 @@ interface PreviousTabState {
   activeTab: DiffPanelTab
 }
 
-export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTabBarProps): React.ReactElement {
+export function DiffPanelTabBar({ activeTab, onTabChange, onClose, isWindows = false }: DiffPanelTabBarProps): React.ReactElement {
   const unseenMap = useAtomValue(agentDiffUnseenChangesAtom)
   const setUnseenMap = useSetAtom(agentDiffUnseenChangesAtom)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
@@ -62,7 +63,7 @@ export function DiffPanelTabBar({ activeTab, onTabChange, onClose }: DiffPanelTa
 
   return (
     <div className="flex items-end h-[34px] tabbar-bg relative flex-shrink-0">
-      <div className="absolute inset-0 titlebar-drag-region" />
+      <div className={cn("absolute inset-0 titlebar-drag-region", isWindows && "right-[126px]")} />
       <div className="relative flex items-end flex-1 titlebar-no-drag">
         <button
           type="button"
