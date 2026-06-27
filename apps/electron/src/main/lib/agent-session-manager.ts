@@ -8,7 +8,7 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, cpSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
@@ -540,8 +540,28 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
             console.warn(`[Agent 会话] 清理目标目录失败，跳过目录迁移:`, cleanupError)
           }
         }
-        renameSync(srcDir, destDir)
-        console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
+        try {
+          renameSync(srcDir, destDir)
+          console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
+        } catch (renameError) {
+          // Windows: 文件监听器(chokidar)或子进程持有目录句柄时 rename 会抛 EBUSY，
+          // 降级为 先复制再删除 策略，cpSync 不需要独占访问源目录
+          const errnoErr = renameError as NodeJS.ErrnoException
+          if (errnoErr?.code === 'EBUSY') {
+            console.log(`[Agent 会话] rename 被锁定(EBUSY)，降级为复制+删除: ${srcDir} → ${destDir}`)
+            cpSync(srcDir, destDir, { recursive: true })
+            try {
+              rmSync(srcDir, { recursive: true })
+              console.log(`[Agent 会话] 已复制并删除源目录: ${srcDir} → ${destDir}`)
+            } catch (rmError) {
+              // Windows: 源目录可能仍被 chokidar/子进程占用无法立即删除，
+              // 但数据已完整复制到目标位置，迁移实际已生效，仅记录警告
+              console.warn(`[Agent 会话] 源目录删除失败（可能仍被占用），数据已复制到目标: ${srcDir}`, (rmError as NodeJS.ErrnoException)?.message)
+            }
+          } else {
+            throw renameError
+          }
+        }
       }
     }
   }
