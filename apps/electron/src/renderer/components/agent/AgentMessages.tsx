@@ -40,11 +40,19 @@ import { parseThinkTagsFromText } from './thinking-tag-parser'
 import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
+const stableStringifySeen = new WeakSet<object>()
+
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value) ?? String(value)
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  const record = value as Record<string, unknown>
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+  if (stableStringifySeen.has(value)) return '"[Circular]"'
+  stableStringifySeen.add(value)
+  try {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+  } finally {
+    stableStringifySeen.delete(value)
+  }
 }
 
 /** 消息对象引用 → 稳定 key 缓存，避免内容相同的消息产生重复 key */
