@@ -1187,7 +1187,7 @@ export function rewindFilesFromSnapshot(
   projectDir?: string,
   forkSourceSdkSessionId?: string,
   attachedDirectories?: string[],
-): { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } {
+): { canRewind: boolean; error?: string; filesChanged?: string[] } {
   const sdkConfigDir = getSdkConfigDir()
 
   // 1. 查找 SDK session JSONL（优先当前 session，找不到目标 UUID 时 fallback 到源会话）

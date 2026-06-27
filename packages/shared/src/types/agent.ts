@@ -981,8 +981,6 @@ export interface RewindSessionResult {
     canRewind: boolean
     error?: string
     filesChanged?: string[]
-    insertions?: number
-    deletions?: number
   }
 }
 
