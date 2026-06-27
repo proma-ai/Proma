@@ -70,7 +70,7 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; backgroundTasksPending?: boolean }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
   /** 用户消息已持久化，外部入口可据此通知前端切到实时会话 */
@@ -973,7 +973,7 @@ export class AgentOrchestrator {
     }
     const completeRun = (
       messages?: AgentMessage[],
-      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string },
+      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
@@ -984,14 +984,14 @@ export class AgentOrchestrator {
     // UI 侧通过 backgroundTasksPending 进入"空闲可输入"态（spinner 停、输入框启用）。
     const idleComplete = (
       messages?: AgentMessage[],
-      opts?: { startedAt?: number; resultSubtype?: string },
+      opts?: { startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
     }
     const failRun = (
       error: string,
       messages?: AgentMessage[],
-      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string },
+      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
       callbacks.onError(error)
@@ -1649,6 +1649,9 @@ export class AgentOrchestrator {
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
+          // 捕获 result.errors[] 错误详情：SDK 在 error_during_execution 等场景下会把真实错误原因
+          // 放进 errors[]，透传到前端用于展示具体错误（而非泛泛的"任务执行过程中发生错误"）。
+          let capturedResultErrors: string[] | undefined
           // result 收到后的安全超时：正常情况下 adapter 收到 terminal result 后会主动 break 自己的
           // for-await 循环（触发 SDK iterator.return → cleanup），让此处的 next() 立即拿到 done。
           // 此 timeout 仅作真正的兜底安全网，防止极端情况（SDK 行为再次变化等）下 iterator 不关闭、
@@ -1846,6 +1849,12 @@ export class AgentOrchestrator {
             // Turn 结束时：持久化累积消息
             if (msg.type === 'result') {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
+              // SDK 的 SDKResultError 在 errors[] 中携带真实错误原因（error_during_execution 等场景），
+              // 捕获后既用于重试判定，也透传到前端展示具体错误。
+              const rawResultErrors = (msg as { errors?: unknown }).errors
+              capturedResultErrors = Array.isArray(rawResultErrors)
+                ? rawResultErrors.filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+                : undefined
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
               // 软中断 / 延迟工具 / hook 暂停等场景下，adapter 保留 channel
@@ -1862,13 +1871,30 @@ export class AgentOrchestrator {
                 `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}, ` +
                 `terminal_reason=${resultTerminalReason ?? 'undefined'}, keepChannelOpen=${keepChannelOpen}` +
                 (keptOpenForTasks ? ', keptOpenForTasks=true' : '') +
-                (hasDeferredTool ? ', hasDeferredTool=true' : ''),
+                (hasDeferredTool ? ', hasDeferredTool=true' : '') +
+                (capturedResultErrors?.length ? `, errors=${JSON.stringify(capturedResultErrors)}` : ''),
               )
+              // error_during_execution 是 SDK 的兜底错误码，以 result（而非 assistant.error / 抛异常）形式到达，
+              // 默认不会触发上面两条重试路径。这里用 errors[] 文本喂给现有的可重试判定（502/529/overloaded/
+              // 网络瞬断 / 响应体解析失败等），命中则进入重试循环，复用统一的退避逻辑。
+              if (
+                capturedResultSubtype === 'error_during_execution' &&
+                capturedResultErrors?.length &&
+                isAutoRetryableCatchError(null, capturedResultErrors.join('\n')) &&
+                canAutoRetry(attempt)
+              ) {
+                lastRetryableError = capturedResultErrors[0]
+                console.log(`[Agent 编排] 可重试错误 (result error_during_execution, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
+                // 与 assistant.error / catch 重试路径保持一致：清空已累积 stderr，避免重试上限内无限增长
+                stderrChunks.length = 0
+                shouldRetryFromError = true
+                break
+              }
               if (keptOpenForTasks) {
                 // 轻量完成：UI 置空闲可输入，但 host 保持运行态（不 releaseActiveRun、不 break、不启动 drain 超时），
                 // while 循环继续 park 在 queryIterator.next()，等待后台任务完成时 SDK 自动 yield 的新一轮消息。
                 awaitingBackgroundWake = true
-                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
               } else if (!keepChannelOpen && !drainTimeoutPromise) {
                 // 启动 drain 超时安全网：正常情况下 adapter 收到 terminal result 会主动 break
                 // 触发 iterator.return → 下一次 next() 立即返回 done，此 timeout 不会触发。
@@ -1927,7 +1953,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
           break  // 成功完成，退出重试循环
 
