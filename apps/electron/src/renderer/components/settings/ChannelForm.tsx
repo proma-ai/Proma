@@ -588,11 +588,13 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             </div>
             {testResult && (
               <div className={cn(
-                'flex items-center gap-1.5 text-xs',
+                'flex items-start gap-1.5 text-xs',
                 testResult.success ? 'text-emerald-600' : 'text-destructive'
               )}>
-                {testResult.success ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                <span>{testResult.message}</span>
+                {testResult.success
+                  ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" />
+                  : <XCircle size={12} className="mt-0.5 shrink-0" />}
+                <span className="min-w-0 break-all">{testResult.message}</span>
               </div>
             )}
           </div>

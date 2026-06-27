@@ -173,13 +173,37 @@ export interface ChannelsConfig {
 }
 
 /**
+ * 连接测试失败的归一化分类
+ *
+ * 以 HTTP 状态码为主轴判定；UI 可据此渲染不同提示 / 图标，
+ * 而无需解析 message 字符串。
+ */
+export type ChannelTestErrorType =
+  | 'auth'
+  | 'permission'
+  | 'not_found'
+  | 'rate_limit'
+  | 'quota'
+  | 'bad_request'
+  | 'server'
+  | 'network'
+  | 'timeout'
+  | 'unknown'
+
+/**
  * 连接测试结果
  */
 export interface ChannelTestResult {
   /** 是否成功 */
   success: boolean
-  /** 结果消息 */
+  /** 结果消息（含分类提示与脱敏后的供应商摘要） */
   message: string
+  /** 归一化错误分类，成功时为空 */
+  errorType?: ChannelTestErrorType
+  /** HTTP 状态码，网络 / 超时等无响应异常时为空 */
+  statusCode?: number
+  /** 供应商原始错误摘要，已脱敏并截断 */
+  detail?: string
 }
 
 /**
