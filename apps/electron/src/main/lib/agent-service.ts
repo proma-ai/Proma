@@ -376,6 +376,9 @@ export async function queueAgentMessage(
     undefined,
     input.uuid,
     { interrupt: input.interrupt },
+    input.mentionedSkills,
+    input.mentionedMcpServers,
+    input.mentionedSessionIds,
   )
 }
 

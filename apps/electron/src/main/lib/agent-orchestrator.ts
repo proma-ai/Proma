@@ -1212,7 +1212,7 @@ export class AgentOrchestrator {
         for (const name of mentionedMcpServers ?? []) {
           toolLines.push(`- MCP 服务器: ${name}（请使用此 MCP 服务器的工具来完成任务）`)
         }
-        enrichedMessage = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${userMessage}`
+        enrichedMessage = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
 
@@ -2317,6 +2317,9 @@ export class AgentOrchestrator {
     _priority?: string,
     presetUuid?: string,
     opts?: { interrupt?: boolean },
+    mentionedSkills?: string[],
+    mentionedMcpServers?: string[],
+    mentionedSessionIds?: string[],
   ): Promise<string> {
     if (!this.activeSessions.has(sessionId)) {
       throw new Error(`[Agent 编排] 会话未运行，无法追加消息: ${sessionId}`)
@@ -2324,6 +2327,31 @@ export class AgentOrchestrator {
 
     if (!this.adapter.sendQueuedMessage) {
       throw new Error('[Agent 编排] 当前适配器不支持流式追加消息')
+    }
+
+    // 注入 mention 引用指令（Skill/MCP/会话）— 与 sendMessage 路径保持一致的 prompt 加工
+    const meta = getAgentSessionMeta(sessionId)
+    const workspaceSlug = meta?.workspaceId
+      ? getAgentWorkspace(meta.workspaceId)?.slug
+      : undefined
+
+    let enrichedText = text
+    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, meta?.workspaceId)
+    if (referencedSessionsBlock) {
+      enrichedText = `${referencedSessionsBlock}\n\n${enrichedText}`
+    }
+    if (mentionedSkills?.length || mentionedMcpServers?.length) {
+      const toolLines: string[] = ['用户在消息中明确引用了以下工具，请在本次回复中主动调用：']
+      for (const slug of mentionedSkills ?? []) {
+        const qualifiedName = workspaceSlug
+          ? `proma-workspace-${workspaceSlug}:${slug}`
+          : slug
+        toolLines.push(`- Skill: ${qualifiedName}（请立即调用此 Skill）`)
+      }
+      for (const name of mentionedMcpServers ?? []) {
+        toolLines.push(`- MCP 服务器: ${name}（请使用此 MCP 服务器的工具来完成任务）`)
+      }
+      enrichedText = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${enrichedText}`
     }
 
     const uuid = presetUuid || randomUUID()
@@ -2336,7 +2364,7 @@ export class AgentOrchestrator {
     // 构造 SDKUserMessage 并注入（强制 'now' 优先级）
     const sdkMessage = {
       type: 'user' as const,
-      message: { role: 'user' as const, content: text },
+      message: { role: 'user' as const, content: enrichedText },
       parent_tool_use_id: null,
       priority: 'now' as const,
       uuid,
@@ -2363,7 +2391,7 @@ export class AgentOrchestrator {
         type: 'user',
         uuid,
         message: {
-          content: [{ type: 'text', text }],
+          content: [{ type: 'text', text: enrichedText }],
         },
         parent_tool_use_id: null,
         _createdAt: Date.now(),

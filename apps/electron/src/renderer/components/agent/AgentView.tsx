@@ -1276,14 +1276,42 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return
       }
 
+      // 流式注入路径：提取 Proma 引用语法并结构化传递，剥离引用文本后其余原样透传 SDK
+      // queueMessage 已支持 mentionedSkills/Mcp/SessionIds，引用可完整传递。
+      const REF_PATTERN = /\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>\S+)/g
+      const mentionedSkills: string[] = []
+      const mentionedMcpServers: string[] = []
+      const mentionedSessionIds: string[] = []
+      for (const m of effectiveText.matchAll(REF_PATTERN)) {
+        const { skill, mcp, session } = m.groups ?? {}
+        if (skill) mentionedSkills.push(skill)
+        else if (mcp) mentionedMcpServers.push(mcp)
+        else if (session) mentionedSessionIds.push(session)
+      }
+      const cleanedText = effectiveText.replace(REF_PATTERN, '').trim()
+      // 引用已受理：告知用户引用将注入下一轮 prompt
+      const hasRefs = mentionedSkills.length > 0 || mentionedMcpServers.length > 0 || mentionedSessionIds.length > 0
+      if (hasRefs) {
+        const labels = [
+          ...mentionedSkills.map(s => `/skill:${s}`),
+          ...mentionedMcpServers.map(m => `#mcp:${m}`),
+          ...mentionedSessionIds.map(id => `&session:${id}`),
+        ]
+        toast.info(`已受理引用：${labels.join('、')}`, {
+          description: '将在下一轮 Agent 回复中生效',
+        })
+      }
+
       const localUuid = crypto.randomUUID()
 
       // 1. 立即注入 liveMessages（作为普通用户消息显示）
+      // 若纯引用无实质文本，用原始输入作为气泡内容（避免空气泡）
+      const displayText = cleanedText || effectiveText
       const syntheticMsg: import('@proma/shared').SDKMessage = {
         type: 'user',
         uuid: localUuid,
         message: {
-          content: [{ type: 'text', text: effectiveText }],
+          content: [{ type: 'text', text: displayText }],
         },
         parent_tool_use_id: null,
         _createdAt: Date.now(),
@@ -1315,9 +1343,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       //    - backgroundWaiting（软空闲，无活跃 turn）：直接注入，无需中断
       window.electronAPI.queueAgentMessage({
         sessionId,
-        userMessage: effectiveText,
+        userMessage: cleanedText,
         uuid: localUuid,
         interrupt: streaming,
+        ...(mentionedSkills.length > 0 && { mentionedSkills }),
+        ...(mentionedMcpServers.length > 0 && { mentionedMcpServers }),
+        ...(mentionedSessionIds.length > 0 && { mentionedSessionIds }),
       }).catch((error) => {
         console.error('[AgentView] 追加消息失败:', error)
         toast.error('追加消息失败', { description: String(error) })
