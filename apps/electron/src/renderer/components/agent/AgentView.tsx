@@ -17,7 +17,7 @@ import * as React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye, Loader2 } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -89,11 +89,13 @@ import {
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
   agentProcessGroupsKeepExpandedAtom,
+  backgroundTasksAtomFamily,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
+import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
@@ -299,6 +301,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 软空闲态：本轮主体已结束、UI 可输入，但 SDK 通道仍开着等后台任务唤醒。
   // 此时服务端 activeSessions 仍保留，新消息须走注入通道而非新建 run。
   const backgroundWaiting = streamState?.backgroundWaiting ?? false
+  const { tasks: backgroundTasks } = useBackgroundTasks(sessionId)
   const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
   const stoppedByUser = stoppedByUserSessions.has(sessionId)
@@ -1569,22 +1572,28 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [inputContent, attachedDirs, attachedFileDirectories, sessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, setStreamingStates, setPendingFiles, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded])
 
-  /** 停止生成 */
+  /** 停止生成（含后台任务等待态） */
   const handleStop = React.useCallback((): void => {
     setStreamingStates((prev) => {
       const current = prev.get(sessionId)
-      if (!current || !current.running) return prev
+      if (!current) return prev
+      // running=false 且非 backgroundWaiting 时才跳过
+      if (!current.running && !current.backgroundWaiting) return prev
       const map = new Map(prev)
       map.set(sessionId, {
         ...current,
         running: false,
-        ...finalizeStreamingActivities(current.toolActivities),
+        backgroundWaiting: false,
+        ...(current.running ? finalizeStreamingActivities(current.toolActivities) : {}),
       })
       return map
     })
 
+    // 同步清除后台任务列表，避免 badge 残留
+    store.set(backgroundTasksAtomFamily(sessionId), [])
+
     window.electronAPI.stopAgent(sessionId).catch(console.error)
-  }, [sessionId, setStreamingStates])
+  }, [sessionId, setStreamingStates, store])
 
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
@@ -2010,8 +2019,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setProcessGroupsKeepExpanded,
   ])
 
-  const inputTrailingNode = streaming && !hasTextInput ? (
-    <Tooltip>
+  const showBadge = backgroundTasks.length > 0 || backgroundWaiting
+  const showStop = (streaming || backgroundWaiting) && !hasTextInput
+
+  const inputTrailingNode = (
+    <div className="flex items-center gap-1">
+      {showBadge && (
+        <div
+          className="flex items-center gap-1.5 h-8 px-2 rounded-full text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 animate-in slide-in-from-right-2 fade-in duration-300"
+        >
+          <Loader2 className="size-3 animate-spin" />
+          <span className="whitespace-nowrap">
+            {backgroundTasks.length > 0
+              ? `${backgroundTasks.length} 个后台任务运行中`
+              : '后台任务运行中'}
+          </span>
+        </div>
+      )}
+      {showStop ? (
+        <Tooltip>
       <TooltipTrigger asChild>
         <Button
           type="button"
@@ -2024,7 +2050,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
+        <p>停止 Agent{backgroundWaiting ? '（后台任务运行中）' : ''} ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
       </TooltipContent>
     </Tooltip>
   ) : (
@@ -2043,6 +2069,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     >
       <CornerDownLeft className="size-[22px]" />
     </Button>
+      )}
+    </div>
   )
 
   return (

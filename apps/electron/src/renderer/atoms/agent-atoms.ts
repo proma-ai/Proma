@@ -519,7 +519,7 @@ export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
   const states = get(agentStreamingStatesAtom)
   const ids = new Set<string>()
   for (const [id, state] of states) {
-    if (state.running) ids.add(id)
+    if (state.running || state.backgroundWaiting) ids.add(id)
   }
   return ids
 })
@@ -566,7 +566,7 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
   const map = new Map<string, SessionIndicatorStatus>()
 
   for (const [id, state] of streamStates) {
-    if (!state.running) continue
+    if (!state.running && !state.backgroundWaiting) continue
     const hasBlock = (pendingPerms.get(id)?.length ?? 0) > 0
       || (pendingAskUser.get(id)?.length ?? 0) > 0
       || (pendingExitPlan.get(id)?.length ?? 0) > 0
