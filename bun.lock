@@ -41,6 +41,7 @@
         "@emoji-mart/react": "^1.1.1",
         "@larksuiteoapi/node-sdk": "^1.65.0",
         "@proma/core": "workspace:*",
+        "@proma/session-core": "workspace:*",
         "@proma/shared": "workspace:*",
         "@proma/ui": "workspace:*",
         "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -100,6 +101,7 @@
         "electron-updater": "^6.7.3",
         "electronmon": "^2.0.4",
         "esbuild": "^0.24.0",
+        "jszip": "^3.10.1",
         "katex": "^0.16",
         "lowlight": "^3.3.0",
         "lucide-react": "^0.460.0",
@@ -154,9 +156,19 @@
         "@modelcontextprotocol/sdk": ">=1.0.0",
       },
     },
+    "packages/session-core": {
+      "name": "@proma/session-core",
+      "version": "0.1.0",
+      "dependencies": {
+        "@proma/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^5.0.0",
+      },
+    },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.31",
+      "version": "0.1.35",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
@@ -416,6 +428,8 @@
     "@proma/core": ["@proma/core@workspace:packages/core"],
 
     "@proma/electron": ["@proma/electron@workspace:apps/electron"],
+
+    "@proma/session-core": ["@proma/session-core@workspace:packages/session-core"],
 
     "@proma/shared": ["@proma/shared@workspace:packages/shared"],
 

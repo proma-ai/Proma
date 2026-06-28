@@ -38,6 +38,8 @@ import type {
   AgentSessionReferenceSearchResult,
 } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
+// 旧格式 → SDKMessage 的转换逻辑下沉到 @proma/session-core 作为唯一真源，避免主进程与渲染层各存一份。
+import { convertLegacyMessage } from '@proma/session-core'
 import { clearNanoBananaAgentHistory } from './chat-tools/nano-banana-mcp'
 import { assertEnabledModelForChannel } from './agent-model-selection'
 import { copyForkWorkspaceFiles } from './agent-fork-workspace-copy'
@@ -310,64 +312,8 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
 }
 
 /**
- * 将旧的 AgentMessage 转换为近似的 SDKMessage（向后兼容）
- *
- * 不需要完美还原，只需在 UI 中可读即可。
+ * convertLegacyMessage 已迁移至 @proma/session-core（本文件从该包 import 使用）。
  */
-function convertLegacyMessage(legacy: AgentMessage): SDKMessage {
-  if (legacy.role === 'user') {
-    return {
-      type: 'user',
-      message: {
-        content: [{ type: 'text', text: legacy.content }],
-      },
-      parent_tool_use_id: null,
-      // 附加元数据供渲染器使用
-      _legacy: true,
-      _createdAt: legacy.createdAt,
-    } as unknown as SDKMessage
-  }
-
-  if (legacy.role === 'assistant') {
-    return {
-      type: 'assistant',
-      message: {
-        content: [{ type: 'text', text: legacy.content }],
-        model: legacy.model,
-      },
-      parent_tool_use_id: null,
-      _legacy: true,
-      _createdAt: legacy.createdAt,
-    } as unknown as SDKMessage
-  }
-
-  if (legacy.role === 'status') {
-    // 错误消息转换为 assistant error 格式
-    return {
-      type: 'assistant',
-      message: {
-        content: [{ type: 'text', text: legacy.content }],
-      },
-      parent_tool_use_id: null,
-      error: { message: legacy.content, errorType: legacy.errorCode },
-      _legacy: true,
-      _createdAt: legacy.createdAt,
-      _errorCode: legacy.errorCode,
-      _errorTitle: legacy.errorTitle,
-      _errorDetails: legacy.errorDetails,
-      _errorCanRetry: legacy.errorCanRetry,
-      _errorActions: legacy.errorActions,
-    } as unknown as SDKMessage
-  }
-
-  // 其他类型，作为 system 消息返回
-  return {
-    type: 'system',
-    subtype: 'init',
-    _legacy: true,
-    _createdAt: legacy.createdAt,
-  } as unknown as SDKMessage
-}
 
 /**
  * 更新会话元数据

@@ -58,6 +58,7 @@
     "@emoji-mart/react": "^1.1.1",
     "@larksuiteoapi/node-sdk": "^1.65.0",
     "@proma/core": "workspace:*",
+    "@proma/session-core": "workspace:*",
     "@proma/shared": "workspace:*",
     "@proma/ui": "workspace:*",
     "@radix-ui/react-alert-dialog": "^1.1.15",
