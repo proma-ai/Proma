@@ -409,6 +409,7 @@ function buildReferencedSessionsPrompt(
   currentSessionId: string,
   mentionedSessionIds?: string[],
   workspaceId?: string,
+  workspaceSlug?: string,
 ): string {
   const uniqueIds = [...new Set((mentionedSessionIds ?? []).filter(Boolean))]
   if (uniqueIds.length === 0) return ''
@@ -433,6 +434,17 @@ function buildReferencedSessionsPrompt(
   }
 
   if (sessionBlocks.length === 0) return ''
+
+  // 打包模式下 proma CLI 二进制随 App 分发，可用 session-cleaner skill 对引用会话做渐进式读取
+  //（先看体量/大纲，再搜索定位，最后只取相关 turn 区间），避免一次性读入大 .jsonl 撑爆上下文。
+  // 开发模式（getBundledCliPath 返回 undefined，CLI 不可用）回退到原有的 Grep 局部读指引。
+  const cliAvailable = !!getBundledCliPath()
+  if (cliAvailable) {
+    const skillName = workspaceSlug
+      ? `proma-workspace-${workspaceSlug}:session-cleaner`
+      : 'session-cleaner'
+    return `<referenced_sessions>\n用户在消息中明确引用了以下同工作区 Agent 会话。需要这些会话的上下文时，使用 session-cleaner skill（${skillName}）读取——它会通过 proma CLI 对会话做渐进式读取：先看体量与大纲、再按关键词搜索定位、最后只导出相关的 turn 区间。不要假设会话内容，也不要直接 Read 原始 .jsonl 历史文件（可能非常大）。\n${sessionBlocks.join('\n\n')}\n</referenced_sessions>`
+  }
 
   return `<referenced_sessions>\n用户在消息中明确引用了以下同工作区 Agent 会话。不要假设这些会话的内容；需要上下文时，请先读取对应的 History path，再基于读取结果继续完成任务。\n\n重要提示：会话历史文件（.jsonl）可能包含大量消息和 tool results，文件较大。请优先使用 Grep 搜索关键词定位相关消息片段，再局部读取。避免一次性 Read 整个大文件。\n${sessionBlocks.join('\n\n')}\n</referenced_sessions>`
 }
@@ -1200,7 +1212,7 @@ export class AgentOrchestrator {
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
-      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId)
+      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId, workspaceSlug)
       if (referencedSessionsBlock) {
         enrichedMessage = `${referencedSessionsBlock}\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 referenced_sessions: ${mentionedSessionIds?.length ?? 0} sessions`)
