@@ -238,6 +238,8 @@ export interface AppSettings {
   stickyUserMessageEnabled?: boolean
   /** 粘贴超过阈值的长文本时是否自动转为附件（默认 false） */
   longTextPasteAsAttachmentEnabled?: boolean
+  /** 输入框粘贴内容是否按富文本/Markdown 渲染（默认 true，关闭后粘贴为纯文本） */
+  renderInputAsRichTextEnabled?: boolean
   /** Markdown 预览字号档位（默认 'medium'，对应 15px） */
   markdownFontSize?: MarkdownFontSize
   /** 上次是否在 Scratch Pad 页（用于重启恢复） */

@@ -83,6 +83,8 @@ interface RichTextInputProps {
   onPasteLongText?: (text: string) => void
   /** 触发超长文本粘贴回调的字符数阈值 */
   longTextPasteThreshold?: number
+  /** 是否将粘贴内容按富文本/Markdown 渲染（false 时粘贴为纯文本，默认 true） */
+  renderPastedAsRichText?: boolean
   /** 占位文字 */
   placeholder?: string
   /** 是否显示建议样式（斜体占位符） */
@@ -129,6 +131,7 @@ export function RichTextInput({
   onPasteFiles,
   onPasteLongText,
   longTextPasteThreshold,
+  renderPastedAsRichText = true,
   placeholder = '有什么可以帮助到你的呢？',
   suggestionActive = false,
   className,
@@ -169,6 +172,9 @@ export function RichTextInput({
   onPasteLongTextRef.current = onPasteLongText
   const longTextPasteThresholdRef = useRef(longTextPasteThreshold)
   longTextPasteThresholdRef.current = longTextPasteThreshold
+  // 保持粘贴富文本配置最新
+  const renderPastedAsRichTextRef = useRef(renderPastedAsRichText)
+  renderPastedAsRichTextRef.current = renderPastedAsRichText
   // 保持 onHtmlChange 引用最新
   const onHtmlChangeRef = useRef(onHtmlChange)
   onHtmlChangeRef.current = onHtmlChange
@@ -361,17 +367,23 @@ export function RichTextInput({
                 .replace(/<\/div>/gi, '</p>')
             ).trim() || plainText)
           : plainText
+        const longPasteText = renderPastedAsRichTextRef.current ? text : plainText
         if (
           shouldConvertClipboardTextToAttachment({
             enabled: Boolean(threshold && onPasteLongTextRef.current),
             plainText,
-            normalizedText: text,
+            normalizedText: longPasteText,
             threshold: threshold ?? 0,
           }) &&
           onPasteLongTextRef.current
         ) {
           event.preventDefault()
-          onPasteLongTextRef.current(text)
+          onPasteLongTextRef.current(longPasteText)
+          return true
+        }
+        if (!renderPastedAsRichTextRef.current) {
+          event.preventDefault()
+          view.dispatch(view.state.tr.insertText(plainText))
           return true
         }
         return false

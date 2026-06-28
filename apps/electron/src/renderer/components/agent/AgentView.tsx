@@ -92,7 +92,7 @@ import {
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
-import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
+import { longTextPasteAsAttachmentEnabledAtom, renderInputAsRichTextEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
@@ -303,6 +303,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
   const longTextPasteAsAttachmentEnabled = useAtomValue(longTextPasteAsAttachmentEnabledAtom)
+  const renderInputAsRichText = useAtomValue(renderInputAsRichTextEnabledAtom)
   const stoppedByUser = stoppedByUserSessions.has(sessionId)
   const liveMessagesMap = useAtomValue(liveMessagesMapAtom)
   const setLiveMessagesMap = useSetAtom(liveMessagesMapAtom)
@@ -2169,6 +2170,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onPasteFiles={handlePasteFiles}
               onPasteLongText={handlePasteLongText}
               longTextPasteThreshold={longTextPasteAsAttachmentEnabled ? LONG_TEXT_ATTACHMENT_THRESHOLD : undefined}
+              renderPastedAsRichText={renderInputAsRichText}
               placeholder={
                 agentChannelId && hasAvailableModel
                   ? sendWithCmdEnter

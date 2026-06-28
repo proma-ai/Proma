@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils'
 import { fileToBase64, formatFileNames } from '@/lib/file-utils'
 import { MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
+import { renderInputAsRichTextEnabledAtom } from '@/atoms/ui-preferences'
 import { toast } from 'sonner'
 
 interface ChatInputProps {
@@ -63,6 +64,7 @@ interface ChatInputProps {
 
 export function ChatInput({ conversationId, streaming, pendingAttachments, onSetPendingAttachments, onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
+  const renderInputAsRichText = useAtomValue(renderInputAsRichTextEnabledAtom)
   // 从 Map atom 读写草稿
   const draftsMap = useAtomValue(conversationDraftsAtom)
   const setDraftsMap = useSetAtom(conversationDraftsAtom)
@@ -413,6 +415,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
             onChange={setContent}
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
+            renderPastedAsRichText={renderInputAsRichText}
             placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
             autoFocusTrigger={conversationId}
             sendWithCmdEnter={sendWithCmdEnter}

@@ -14,6 +14,9 @@ export const stickyUserMessageEnabledAtom = atom<boolean>(true)
 /** 粘贴长文本时是否自动转为附件 */
 export const longTextPasteAsAttachmentEnabledAtom = atom<boolean>(false)
 
+/** 输入框是否按富文本/Markdown 渲染粘贴内容 */
+export const renderInputAsRichTextEnabledAtom = atom<boolean>(true)
+
 // ===== 初始化 =====
 
 /**
@@ -21,12 +24,14 @@ export const longTextPasteAsAttachmentEnabledAtom = atom<boolean>(false)
  */
 export async function initializeUiPreferences(
   setStickyUserMessageEnabled: (enabled: boolean) => void,
-  setLongTextPasteAsAttachmentEnabled?: (enabled: boolean) => void
+  setLongTextPasteAsAttachmentEnabled?: (enabled: boolean) => void,
+  setRenderInputAsRichTextEnabled?: (enabled: boolean) => void
 ): Promise<void> {
   try {
     const settings = await window.electronAPI.getSettings()
     setStickyUserMessageEnabled(settings.stickyUserMessageEnabled ?? true)
     setLongTextPasteAsAttachmentEnabled?.(settings.longTextPasteAsAttachmentEnabled ?? false)
+    setRenderInputAsRichTextEnabled?.(settings.renderInputAsRichTextEnabled ?? true)
   } catch (error) {
     console.error('[UI偏好] 初始化失败:', error)
   }
@@ -53,5 +58,16 @@ export async function updateLongTextPasteAsAttachmentEnabled(enabled: boolean): 
     await window.electronAPI.updateSettings({ longTextPasteAsAttachmentEnabled: enabled })
   } catch (error) {
     console.error('[UI偏好] 更新长文本粘贴附件设置失败:', error)
+  }
+}
+
+/**
+ * 更新输入框富文本粘贴开关并持久化
+ */
+export async function updateRenderInputAsRichTextEnabled(enabled: boolean): Promise<void> {
+  try {
+    await window.electronAPI.updateSettings({ renderInputAsRichTextEnabled: enabled })
+  } catch (error) {
+    console.error('[UI偏好] 更新输入框富文本粘贴设置失败:', error)
   }
 }

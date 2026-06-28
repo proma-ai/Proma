@@ -39,8 +39,10 @@ import {
 } from '@/atoms/notifications'
 import {
   longTextPasteAsAttachmentEnabledAtom,
+  renderInputAsRichTextEnabledAtom,
   stickyUserMessageEnabledAtom,
   updateLongTextPasteAsAttachmentEnabled,
+  updateRenderInputAsRichTextEnabled,
   updateStickyUserMessageEnabled,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
@@ -64,6 +66,7 @@ export function GeneralSettings(): React.ReactElement {
   const [notificationSounds, setNotificationSounds] = useAtom(notificationSoundsAtom)
   const [stickyUserMessageEnabled, setStickyUserMessageEnabled] = useAtom(stickyUserMessageEnabledAtom)
   const [longTextPasteAsAttachmentEnabled, setLongTextPasteAsAttachmentEnabled] = useAtom(longTextPasteAsAttachmentEnabledAtom)
+  const [renderInputAsRichText, setRenderInputAsRichText] = useAtom(renderInputAsRichTextEnabledAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [nameInput, setNameInput] = React.useState(userProfile.userName)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
@@ -329,6 +332,15 @@ export function GeneralSettings(): React.ReactElement {
             onCheckedChange={(checked) => {
               setLongTextPasteAsAttachmentEnabled(checked)
               updateLongTextPasteAsAttachmentEnabled(checked)
+            }}
+          />
+          <SettingsToggle
+            label="输入框富文本渲染"
+            description="开启后，粘贴的内容会按 Markdown/富文本格式渲染；关闭后粘贴为纯文本，便于引用或编辑原始内容"
+            checked={renderInputAsRichText}
+            onCheckedChange={(checked) => {
+              setRenderInputAsRichText(checked)
+              updateRenderInputAsRichTextEnabled(checked)
             }}
           />
         </SettingsCard>
