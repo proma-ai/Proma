@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.13.20",
+  "version": "0.13.22",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -117,6 +117,7 @@
     "electron-updater": "^6.7.3",
     "electronmon": "^2.0.4",
     "esbuild": "^0.24.0",
+    "jszip": "^3.10.1",
     "katex": "^0.16",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.460.0",

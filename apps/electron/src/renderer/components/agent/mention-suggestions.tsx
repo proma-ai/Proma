@@ -11,7 +11,7 @@ import type { SuggestionOptions } from '@tiptap/suggestion'
 import { MessageSquareText, Sparkles, Server } from 'lucide-react'
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
-import { createMentionPopup, positionPopup } from './mention-popup-utils'
+import { createMentionPopup, positionPopup, isSuggestionTriggerPresent } from './mention-popup-utils'
 import type { AgentSessionReferenceSearchResult } from '@proma/shared'
 
 // ===== 泛型工厂 =====
@@ -42,6 +42,9 @@ function createMentionSuggestion<T>(
   return {
     char: config.char,
     allowSpaces: false,
+    // allowedPrefixes 为 null：允许任意字符前缀触发（含中文等无空格场景，如 `你好#`）。
+    // 注意：设为 [' '] 不能阻止"空输入框触发"——TipTap 在块开头的前缀为空串，
+    // 始终通过校验；却会让中文/单词后紧跟触发符无法触发，属回归。
     allowedPrefixes: null,
 
     items: async ({ query }): Promise<T[]> => {
@@ -78,6 +81,12 @@ function createMentionSuggestion<T>(
         onStart(props) {
           if (popup || renderer) {
             cleanup()
+          }
+
+          // 防御异步竞态：await items() 期间触发符可能已被删除导致 suggestion 退出，
+          // 插件仍会用过期 props 调用 onStart；过期则跳过建弹窗，避免残留幽灵弹窗。
+          if (!isSuggestionTriggerPresent(props.editor, props.range, config.char)) {
+            return
           }
 
           mentionActiveRef.current = true

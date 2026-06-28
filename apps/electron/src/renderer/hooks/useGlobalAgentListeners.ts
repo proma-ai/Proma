@@ -59,6 +59,7 @@ import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
 import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
+import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
@@ -388,7 +389,24 @@ export function useGlobalAgentListeners(): void {
         // 只更新驱动左侧边栏列表与状态指示条所需的状态，让用户自行决定是否切过去。
         // 若该会话恰好是用户当前正在查看的会话，这里不动 Tab/激活，流式内容会通过
         // agentStreamingStatesAtom 自然刷新，用户视角无任何跳动。
-        store.set(agentSessionsAtom, sessions)
+        // 只 upsert 本次 event 对应的会话，绝不用这份快照整体覆盖列表。
+        //
+        // 一次派发多个子会话时，多个 external_run_started 回调会各自带着
+        // 「事件触发那一刻」或「异步 fetch 那一刻」的快照进来。若整体覆盖
+        // agentSessionsAtom，后 resolve 的回调会用自己那份可能缺失了刚结束
+        // turn 的父会话的快照，把父会话冲掉——父会话从列表消失后，其子会话
+        // 因找不到父而从树形子节点变成根节点直接显示（用户观察到的现象）。
+        // 改为单条 upsert 后，每个回调只负责自己那一个会话，互不干扰。
+        const sessionMeta = sessions.find((item) => item.id === event.sessionId)
+        const upserted: AgentSessionMeta = sessionMeta ?? {
+          id: event.sessionId,
+          title: activation.title,
+          workspaceId: activation.workspaceId,
+          modelId: activation.modelId,
+          createdAt: event.startedAt,
+          updatedAt: event.startedAt,
+        }
+        store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, upserted))
         const activationModelId = activation.modelId
         if (activationModelId) {
           store.set(agentSessionModelMapAtom, (prev) => {
@@ -569,7 +587,7 @@ export function useGlobalAgentListeners(): void {
         if (payload.kind === 'proma_event' && payload.event.type === 'automation_graduated') {
           toast('已接管自动任务会话，后续定时运行将创建新会话。', { duration: 3000 })
           window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, sessions))
+            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
             .catch(console.error)
         }
 
@@ -577,7 +595,7 @@ export function useGlobalAgentListeners(): void {
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
           window.electronAPI.listAgentSessions()
-            .then((sessions) => store.set(agentSessionsAtom, sessions))
+            .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
             .catch(console.error)
         }
 
@@ -1034,7 +1052,9 @@ export function useGlobalAgentListeners(): void {
           window.electronAPI
             .listAgentSessions()
             .then((sessions) => {
-              store.set(agentSessionsAtom, sessions)
+              // 合并而非整体覆盖：避免与并发的 external_run_started 回调互相用
+              // 陈旧快照冲掉对方刚写入的会话（如刚结束 turn 的父会话）。
+              store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))
               // 从持久化 meta 对齐 stoppedByUser 状态
               store.set(stoppedByUserSessionsAtom, new Set<string>(
                 sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
@@ -1092,7 +1112,7 @@ export function useGlobalAgentListeners(): void {
       window.electronAPI
         .listAgentSessions()
         .then((sessions) => {
-          store.set(agentSessionsAtom, sessions)
+          store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))
         })
         .catch(console.error)
     })

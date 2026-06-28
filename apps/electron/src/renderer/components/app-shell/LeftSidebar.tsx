@@ -3149,7 +3149,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 )}
                 {delegationSummary && (
                   <span className="flex-shrink-0 text-[11px] leading-4 text-foreground/45">
-                    {delegationSummary.completed}/{delegationSummary.total} 子会话
+                    {delegationSummary.completed}/{delegationSummary.total}
                   </span>
                 )}
               </div>
@@ -3159,34 +3159,36 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           {!editing && (
             <>
               {delegationSummary && (
-                <button
-                  type="button"
-                  aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
-                  onMouseEnter={preview.closeNow}
-                  onFocus={preview.closeNow}
-                  onMouseDown={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                    delegationSummary.onToggle()
-                  }}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                  }}
-                  className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
-                >
-                  <ChevronRight
-                    size={11}
-                    className={cn(
-                      'transition-transform duration-150',
-                      delegationSummary.expanded && 'rotate-90',
-                    )}
-                  />
-                </button>
+                <SafeTooltip content={delegationSummary.expanded ? '收起子会话' : '展开子会话'} side="top">
+                  <button
+                    type="button"
+                    aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
+                    onMouseEnter={preview.closeNow}
+                    onFocus={preview.closeNow}
+                    onMouseDown={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                      delegationSummary.onToggle()
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
+                  >
+                    <ChevronRight
+                      size={11}
+                      className={cn(
+                        'transition-transform duration-150',
+                        delegationSummary.expanded && 'rotate-90',
+                      )}
+                    />
+                  </button>
+                </SafeTooltip>
               )}
               <SessionItemActions
                 updatedAt={session.updatedAt}
