@@ -215,3 +215,47 @@ export function resolveAnthropicModelsUrl(baseUrl: string, provider: ProviderTyp
   }
   return `${normalizeAnthropicProviderUrl(baseUrl, provider)}/models`
 }
+
+/**
+ * 将旧版本（v1）存储的通用兼容渠道 Base URL 一次性迁移为完整请求端点。
+ *
+ * 背景：custom / anthropic-compatible 两类通用兼容渠道，旧版本把存储值当作 Base URL，
+ * 运行时再自动补全 /chat/completions 或 /v1/messages。新版本改为「用户填写完整请求地址，
+ * 原样使用」。若不迁移，存量渠道升级后会向缺少端点后缀的地址发请求而失败（通常 404）。
+ *
+ * 本函数把存量 Base URL 补全为旧版本「实际请求过」的完整 URL，使升级后的运行时行为与升级前一致：
+ * - custom（OpenAI 兼容）：复现旧 OpenAIAdapter 的 `normalizeBaseUrl(base) + '/chat/completions'`
+ * - anthropic-compatible：复现旧 normalizeAnthropicProviderUrl 的 versioned 分支
+ *   `normalizeVersionedAnthropicBaseUrl(base) + '/messages'`
+ *
+ * 幂等保证：空值、非这两类 provider、以及已经是完整端点的值都原样返回，可安全重复执行。
+ *
+ * 注意：anthropic-compatible 渠道的 baseUrl 同时被 Agent SDK 路径
+ * （normalizeAnthropicBaseUrlForSdk）消费，该函数会剥除 /v\d+/messages 后缀，
+ * 因此迁移成完整 /v1/messages 端点后 SDK 路径仍能还原出与升级前一致的根地址，互不影响。
+ */
+export function migrateCompatibleChannelBaseUrl(baseUrl: string, provider: ProviderType): string {
+  const trimmed = baseUrl.trim()
+  // 空 Base URL（如未配置的渠道）无需迁移
+  if (trimmed === '') {
+    return baseUrl
+  }
+
+  if (provider === 'custom') {
+    // 已是完整端点则不重复追加
+    if (hasPathSuffix(trimmed, '/chat/completions')) {
+      return trimTrailingUrlPathSlash(trimmed)
+    }
+    return `${normalizeBaseUrl(trimmed)}/chat/completions`
+  }
+
+  if (provider === 'anthropic-compatible') {
+    if (hasPathSuffix(trimmed, '/messages')) {
+      return trimTrailingUrlPathSlash(trimmed)
+    }
+    return `${normalizeVersionedAnthropicBaseUrl(trimmed)}/messages`
+  }
+
+  // 其他 provider 的 URL 语义未改变，原样返回
+  return baseUrl
+}

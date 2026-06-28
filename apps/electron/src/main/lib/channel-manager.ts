@@ -26,6 +26,7 @@ import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import {
   getPromaUserAgent,
+  migrateCompatibleChannelBaseUrl,
   normalizeBaseUrl,
   resolveAnthropicMessagesUrl,
   resolveAnthropicModelsUrl,
@@ -36,7 +37,7 @@ import { normalizeHttpResponse, normalizeRequestError } from './channel-test-err
 import pkg from '../../../package.json' with { type: 'json' }
 
 /** 当前配置版本 */
-const CONFIG_VERSION = 1
+const CONFIG_VERSION = 2
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 
@@ -49,7 +50,43 @@ function withTimeout(init: RequestInit): RequestInit {
 }
 
 /**
+ * 将渠道配置迁移到最新版本。
+ *
+ * v1 → v2：custom / anthropic-compatible 两类通用兼容渠道的 baseUrl 语义从「Base URL（运行时
+ * 自动补端点后缀）」改为「完整请求地址（原样使用）」。把存量 baseUrl 一次性补全为旧版本实际
+ * 请求过的完整端点，使升级后的运行时行为与升级前保持一致。详见 migrateCompatibleChannelBaseUrl。
+ *
+ * @returns 迁移后的配置；`changed` 标记是否发生实际变更（决定是否需要回写文件）
+ */
+function migrateConfig(config: ChannelsConfig): { config: ChannelsConfig; changed: boolean } {
+  const version = config.version ?? 1
+  if (version >= CONFIG_VERSION) {
+    return { config, changed: false }
+  }
+
+  let mutated = false
+  const channels = config.channels.map((channel) => {
+    if (channel.provider !== 'custom' && channel.provider !== 'anthropic-compatible') {
+      return channel
+    }
+    const migratedUrl = migrateCompatibleChannelBaseUrl(channel.baseUrl, channel.provider)
+    if (migratedUrl === channel.baseUrl) {
+      return channel
+    }
+    mutated = true
+    console.log(
+      `[渠道管理] v${version}→v${CONFIG_VERSION} 迁移渠道 ${channel.name} (${channel.provider}) Base URL: ${channel.baseUrl} → ${migratedUrl}`,
+    )
+    return { ...channel, baseUrl: migratedUrl }
+  })
+
+  return { config: { version: CONFIG_VERSION, channels }, changed: true }
+}
+
+/**
  * 读取渠道配置文件
+ *
+ * 读取时自动将旧版本配置迁移到 CONFIG_VERSION，并在发生变更时回写。
  */
 function readConfig(): ChannelsConfig {
   const configPath = getChannelsPath()
@@ -60,7 +97,13 @@ function readConfig(): ChannelsConfig {
 
   try {
     const raw = readFileSync(configPath, 'utf-8')
-    return JSON.parse(raw) as ChannelsConfig
+    const parsed = JSON.parse(raw) as ChannelsConfig
+    const { config, changed } = migrateConfig(parsed)
+    if (changed) {
+      writeConfig(config)
+      console.log('[渠道管理] 渠道配置已迁移并持久化')
+    }
+    return config
   } catch (error) {
     console.error('[渠道管理] 读取配置文件失败:', error)
     return { version: CONFIG_VERSION, channels: [] }
