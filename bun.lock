@@ -20,6 +20,20 @@
         "typescript": "^5",
       },
     },
+    "apps/cli": {
+      "name": "@proma/cli",
+      "version": "0.1.0",
+      "bin": {
+        "proma": "./src/index.ts",
+      },
+      "dependencies": {
+        "@proma/session-core": "workspace:*",
+        "@proma/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^5.0.0",
+      },
+    },
     "apps/electron": {
       "name": "@proma/electron",
       "version": "0.13.21",
@@ -424,6 +438,8 @@
     "@pierre/theme": ["@pierre/theme@0.0.28", "", {}, "sha512-1j/H/fECBuc9dEvntdWI+l435HZapw+RCJTlqCA6BboQ5TjlnE005j/ROWutXIs8aq5OAc82JI2Kwk4A1WWBgw=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
+
+    "@proma/cli": ["@proma/cli@workspace:apps/cli"],
 
     "@proma/core": ["@proma/core@workspace:packages/core"],
 

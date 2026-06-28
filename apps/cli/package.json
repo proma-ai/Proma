@@ -1,0 +1,22 @@
+{
+  "name": "@proma/cli",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "description": "proma — Proma 命令行工具。面向有限上下文的 Agent 消费者，提供会话的渐进式读取（list / info / outline / search / export）。",
+  "type": "module",
+  "bin": {
+    "proma": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --compile --outfile dist/proma src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@proma/session-core": "workspace:*",
+    "@proma/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
