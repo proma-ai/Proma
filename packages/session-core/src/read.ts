@@ -6,7 +6,13 @@
  * Electron 主进程与 proma CLI 共用。旧扁平格式（AgentMessage，带 role 字段）
  * 在此统一归一为近似 SDKMessage，下游无需再区分「格式 A / 格式 B」。
  */
-import { readFileSync } from 'node:fs'
+/**
+ * 解析会话 JSONL 文本为 SDKMessage[]（纯函数，浏览器安全，无文件 IO）。
+ *
+ * 注意：本文件刻意不 import 'node:fs'，以便被 Electron 渲染层（浏览器环境）
+ * 经主 barrel 引入。需要从磁盘读取的 readSessionMessages 在 './read-fs' 中，
+ * 仅通过 '@proma/session-core/node' 子路径暴露给 Node 侧（CLI / 主进程）。
+ */
 import type { AgentMessage, SDKMessage } from '@proma/shared'
 
 /**
@@ -90,12 +96,4 @@ export function readSessionMessagesFromString(raw: string): SDKMessage[] {
     }
   }
   return messages
-}
-
-/**
- * 从磁盘读取一份会话 JSONL 并解析为 SDKMessage[]。
- */
-export function readSessionMessages(filePath: string): SDKMessage[] {
-  const raw = readFileSync(filePath, 'utf-8')
-  return readSessionMessagesFromString(raw)
 }
