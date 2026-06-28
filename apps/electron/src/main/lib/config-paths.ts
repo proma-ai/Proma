@@ -396,6 +396,23 @@ export function getDefaultSkillsDir(): string {
 }
 
 /**
+ * 获取打包进 App 的 proma CLI 二进制路径。
+ *
+ * 打包模式下从 process.resourcesPath/bin 取（electron-builder extraResources 注入）。
+ * 开发模式下没有编译二进制——返回 undefined，由调用方回退到源码运行
+ * （bun apps/cli/src/index.ts）。
+ *
+ * @returns 二进制绝对路径；不存在时返回 undefined
+ */
+export function getBundledCliPath(): string | undefined {
+  const { app } = require('electron')
+  if (!app.isPackaged) return undefined
+  const binName = process.platform === 'win32' ? 'proma.exe' : 'proma'
+  const cliPath = join(process.resourcesPath, 'bin', binName)
+  return existsSync(cliPath) ? cliPath : undefined
+}
+
+/**
  * 从 SKILL.md 的 YAML frontmatter 中解析 version 字段
  *
  * 无 version 字段时返回 '0.0.0'（确保旧 Skill 会被更新）。

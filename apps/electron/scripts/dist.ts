@@ -167,7 +167,7 @@ function main(): void {
   console.log(`  ${color.bold}详细日志${color.reset}: ${opts.verbose ? '开启' : '关闭'}`)
   printSeparator()
 
-  const totalSteps = 5
+  const totalSteps = 6
   let step = 0
 
   // ── 步骤 1: 构建主进程 ──
@@ -197,7 +197,16 @@ function main(): void {
   printStepResult(results[results.length - 1])
   if (!results[results.length - 1].success) return printSummary(results)
 
-  // ── 步骤 4: 复制资源文件 ──
+  // ── 步骤 4: 编译 proma CLI 二进制 ──
+  step++
+  printStepStart(step, totalSteps, '编译 proma CLI (bun --compile)')
+  results.push(
+    runStep('编译 proma CLI', 'bun', ['run', 'build:cli'], { verbose: opts.verbose })
+  )
+  printStepResult(results[results.length - 1])
+  if (!results[results.length - 1].success) return printSummary(results)
+
+  // ── 步骤 5: 复制资源文件 ──
   step++
   printStepStart(step, totalSteps, '复制资源文件')
   results.push(
@@ -205,7 +214,7 @@ function main(): void {
   )
   printStepResult(results[results.length - 1])
 
-  // ── 步骤 5: electron-builder 打包 ──
+  // ── 步骤 6: electron-builder 打包 ──
   step++
   printStepStart(step, totalSteps, 'Electron Builder 打包')
 

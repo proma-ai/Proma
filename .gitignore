@@ -6,6 +6,11 @@ out
 dist
 *.tgz
 
+# 编译产物：proma CLI 二进制（build:cli 用 bun build --compile 生成，打包时现编，不进 git）
+apps/electron/resources/bin/
+# bun build --compile 的临时中间产物
+*.bun-build
+
 # code coverage
 coverage
 *.lcov
