@@ -809,6 +809,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
             env: spawnOpts.env,
             signal: spawnOpts.signal,
             stdio: ['pipe', 'pipe', 'pipe'],
+            // 与 SDK 默认 spawnLocalProcess 保持一致，避免 Windows 上为 claude.exe 创建独立控制台。
+            windowsHide: true,
           })
           // 手动转发 stderr（SDK 默认在 spawnLocalProcess 里做，自定义 spawn 需自己做）
           // 同时必须消费 stderr 流避免缓冲区满（默认 64KB）导致子进程挂起
