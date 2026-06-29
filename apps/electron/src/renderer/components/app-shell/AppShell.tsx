@@ -19,7 +19,7 @@ import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import { WindowControls } from '@/components/WindowControls'
-import { detectIsWindows } from '@/lib/platform'
+import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
@@ -138,7 +138,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <div
         className={cn(
           'titlebar-drag-region fixed top-0 left-0 h-[50px] z-50',
-          isWindows ? 'right-[126px]' : 'right-0'
+          isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0'
         )}
       />
 

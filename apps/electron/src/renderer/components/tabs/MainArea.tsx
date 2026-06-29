@@ -72,7 +72,7 @@ export function MainArea(): React.ReactElement {
     prevPreviewStateRef.current = { open: previewOpen, sessionId: previewSessionId }
   }, [previewOpen, previewSessionId])
 
-  const showPreview = (previewOpen || closing) && previewSessionId
+  const showPreview = (previewOpen || closing) && previewSessionId && activeView === 'conversations'
 
   const handlePreviewDragStart = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -138,7 +138,7 @@ export function MainArea(): React.ReactElement {
 
   // 左侧容器宽度：预览打开时固定占 splitRatio；其他情况（含 closing 动画期间）
   // 直接 1 1 auto 占满——closing 时右侧 absolute 脱离 flex 流，所以左侧自然占 100%。
-  const leftFlexStyle: React.CSSProperties = (previewOpen && previewSessionId)
+  const leftFlexStyle: React.CSSProperties = (previewOpen && previewSessionId && activeView === 'conversations')
     ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
     : { flex: '1 1 auto' }
 

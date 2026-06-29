@@ -811,16 +811,29 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     return () => window.removeEventListener('focus', handleFocus)
   }, [setConversations, setAgentSessions])
 
-  /** 打开自动任务列表 */
+  /** 打开/关闭自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
+    if (activeView === 'automations') {
+      // 编辑页 → 关表单回列表；列表页 → 退出到对话
+      if (store.get(automationFormAtom).open) {
+        setAutomationForm({ open: false, draft: null })
+        return
+      }
+      setActiveView('conversations')
+      return
+    }
     setAutomationForm({ open: false, draft: null })
     setActiveView('automations')
-  }, [setAutomationForm, setActiveView])
+  }, [activeView, setAutomationForm, setActiveView, store])
 
-  /** 打开 Agent 技能视图 */
+  /** 打开/关闭 Agent 技能视图 */
   const handleOpenSkills = React.useCallback((): void => {
+    if (activeView === 'agent-skills') {
+      setActiveView('conversations')
+      return
+    }
     setActiveView('agent-skills')
-  }, [setActiveView])
+  }, [activeView, setActiveView])
 
   /** 打开当前工作区的 MCP 管理页 */
   const handleOpenMcpManagement = React.useCallback((): void => {
@@ -3134,10 +3147,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 {showPinIcon && (
                   <Pin size={11} className="flex-shrink-0 text-primary/60" />
                 )}
-                {session.sourceAutomationId && (
+                {session.sourceAutomationId && !session.sourceDelegationId && (
                   <Clock size={11} className="flex-shrink-0 text-foreground/40" />
                 )}
-                {session.sourceDelegationId && !session.sourceAutomationId && (
+                {session.sourceDelegationId && (
                   <GitBranch size={11} className={cn('flex-shrink-0', DELEGATION_STATUS_ICON_CLASS[indicatorStatus])} />
                 )}
                 <span
@@ -3156,7 +3169,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 )}
                 {delegationSummary && (
                   <span className="flex-shrink-0 text-[11px] leading-4 text-foreground/45">
-                    {delegationSummary.completed}/{delegationSummary.total} 子会话
+                    {delegationSummary.completed}/{delegationSummary.total}
                   </span>
                 )}
               </div>
@@ -3166,34 +3179,36 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           {!editing && (
             <>
               {delegationSummary && (
-                <button
-                  type="button"
-                  aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
-                  onMouseEnter={preview.closeNow}
-                  onFocus={preview.closeNow}
-                  onMouseDown={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                    delegationSummary.onToggle()
-                  }}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation()
-                    preview.closeNow()
-                  }}
-                  className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
-                >
-                  <ChevronRight
-                    size={11}
-                    className={cn(
-                      'transition-transform duration-150',
-                      delegationSummary.expanded && 'rotate-90',
-                    )}
-                  />
-                </button>
+                <SafeTooltip content={delegationSummary.expanded ? '收起子会话' : '展开子会话'} side="top">
+                  <button
+                    type="button"
+                    aria-label={`${delegationSummary.expanded ? '收起' : '展开'}子会话`}
+                    onMouseEnter={preview.closeNow}
+                    onFocus={preview.closeNow}
+                    onMouseDown={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                      delegationSummary.onToggle()
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
+                  >
+                    <ChevronRight
+                      size={11}
+                      className={cn(
+                        'transition-transform duration-150',
+                        delegationSummary.expanded && 'rotate-90',
+                      )}
+                    />
+                  </button>
+                </SafeTooltip>
               )}
               <SessionItemActions
                 updatedAt={session.updatedAt}
@@ -3422,21 +3437,22 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       && item.session.updatedAt >= recentCutoff
     )
     .slice(0, PROJECT_SESSION_PREVIEW_LIMIT)
-  const fillIds = collectTreeSessionIds(fillSessions)
-  // 当前选中会话仅在「既非活跃、又不在自然填充集合中」时才补入折叠列表（紧接活跃区之后），
-  // 确保从搜索结果打开的旧会话（updatedAt 超窗或被上限截断）立即可见；
-  // 若它本就出现在 fillSessions 中，则不再单独前置，避免点击后被强制排到第一位。
-  const currentSession = activeSessionId
-    && !activeIds.has(activeSessionId)
-    && !fillIds.has(activeSessionId)
-    ? treeItems.find((item) => treeContainsSessionId(item, activeSessionId)) ?? null
-    : null
-  const pinnedCurrent = currentSession ? [currentSession] : []
-  const collapsedSessions = [...activeSessions, ...pinnedCurrent, ...fillSessions]
+  // 先拼不含置顶项的可见列表
+  const collapsedSessions = [...activeSessions, ...fillSessions]
   const collapsedIds = new Set(collapsedSessions.map((item) => item.session.id))
   const remainingSessions = treeItems.filter((item) => !collapsedIds.has(item.session.id))
   const extraSessions = remainingSessions.slice(0, extraCount)
-  const sessions = [...collapsedSessions, ...extraSessions]
+  const sessionsWithoutPinned = [...collapsedSessions, ...extraSessions]
+  // 仅当选中会话不在当前可见列表中时才置顶（如搜索结果打开旧会话），
+  // 若会话已在可见区域则保持原位不跳
+  const sessionIds = new Set(sessionsWithoutPinned.map((item) => item.session.id))
+  const currentSession = activeSessionId && !sessionIds.has(activeSessionId)
+    ? treeItems.find((item) => treeContainsSessionId(item, activeSessionId)) ?? null
+    : null
+  const pinnedCurrent = currentSession ? [currentSession] : []
+  const sessions = pinnedCurrent.length > 0
+    ? [...activeSessions, ...pinnedCurrent, ...fillSessions, ...extraSessions]
+    : sessionsWithoutPinned
   const hiddenCount = Math.max(0, treeItems.length - sessions.length)
 
   return (

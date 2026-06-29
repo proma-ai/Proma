@@ -681,7 +681,7 @@ function FileTreeItem({
         ref={rowRef}
         data-sticky-row={isSticky ? 'true' : undefined}
         className={cn(
-          'relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group',
+          'file-tree-row relative flex h-8 items-center gap-1 pr-2 text-sm cursor-pointer group',
           isSticky && STICKY_ROW_BASE_CLASS,
         )}
         style={{

@@ -44,7 +44,7 @@ export function WelcomeEmptyState(): React.ReactElement {
   const displayName = userProfile.userName || '用户'
 
   // 森息晨光主题下选中按钮使用主色
-  const selectedColor = themeStyle === 'forest-light' ? '#3f8361' : undefined
+  const selectedColor = themeStyle === 'forest-light' ? '#4a7858' : undefined
 
   /** 切换模式：仅切换模式，不创建新会话 */
   const handleModeSwitch = React.useCallback((targetMode: AppMode): void => {

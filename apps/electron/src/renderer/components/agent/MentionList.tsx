@@ -70,9 +70,10 @@ function MentionListInner<T>(
         if (item) onSelect(item)
         return true
       }
-      if (event.key === 'Escape') {
-        return true
-      }
+      // Escape 不在此处理：返回 false 交还给 TipTap suggestion 插件内置的
+      // Escape 分支，由它调用 onExit（触发我们的 cleanup 移除弹窗）并 dispatchExit
+      // 重置插件 active 状态。若在此 return true，插件会认为已处理而跳过退出，
+      // 导致弹窗无法关闭，必须靠输入空格让 suggestion 匹配失效才会消失。
       return false
     },
   }))

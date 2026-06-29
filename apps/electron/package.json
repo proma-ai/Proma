@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.13.16",
+  "version": "0.13.22",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -21,7 +21,8 @@
     "watch:preload": "esbuild src/preload/index.ts --bundle --platform=node --format=cjs --outfile=dist/preload.cjs --external:electron --watch=forever",
     "build:renderer": "vite build",
     "build:resources": "cp -r resources dist/ 2>/dev/null || true",
-    "build": "bun run build:main && bun run build:preload && bun run build:renderer && bun run build:resources",
+    "build:cli": "bun run scripts/build-cli.ts",
+    "build": "bun run build:main && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:resources",
     "start": "bun run build && bunx electron .",
     "typecheck": "tsc --noEmit",
     "generate:icons": "cd resources && ./generate-icons.sh",
@@ -63,6 +64,7 @@
     "@larksuiteoapi/node-sdk": "^1.65.0",
     "@proma/cloud": "workspace:*",
     "@proma/core": "workspace:*",
+    "@proma/session-core": "workspace:*",
     "@proma/shared": "workspace:*",
     "@proma/ui": "workspace:*",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -127,6 +129,7 @@
     "electron-updater": "^6.7.3",
     "electronmon": "^2.0.4",
     "esbuild": "^0.24.0",
+    "jszip": "^3.10.1",
     "katex": "^0.16",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.460.0",

@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry, FileSearchResult } from '@proma/shared'
-import { createMentionPopup, positionPopup } from '@/components/agent/mention-popup-utils'
+import { createMentionPopup, positionPopup, isSuggestionTriggerPresent } from '@/components/agent/mention-popup-utils'
 
 export function createFileMentionSuggestion(
   workspacePathRef: React.RefObject<string | null>,
@@ -121,6 +121,12 @@ export function createFileMentionSuggestion(
           // 防御竞态：如果上一次弹窗未被正确清理，先清理残留
           if (popup || renderer) {
             cleanup()
+          }
+
+          // 防御异步竞态：await items() 期间 @ 触发符可能已被删除导致 suggestion 退出，
+          // 插件仍会用过期 props 调用 onStart；过期则跳过建弹窗，避免残留幽灵弹窗。
+          if (!isSuggestionTriggerPresent(props.editor, props.range, '@')) {
+            return
           }
 
           mentionActiveRef.current = true

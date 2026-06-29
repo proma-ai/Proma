@@ -5,6 +5,11 @@ import {
   normalizeAnthropicBaseUrlForSdk,
   normalizeBaseUrl,
   normalizeAnthropicProviderUrl,
+  resolveOpenAIChatCompletionsUrl,
+  resolveOpenAIModelsUrl,
+  resolveAnthropicMessagesUrl,
+  resolveAnthropicModelsUrl,
+  migrateCompatibleChannelBaseUrl,
 } from './url-utils.ts'
 
 describe('normalizeAnthropicBaseUrl', () => {
@@ -115,9 +120,11 @@ describe('normalizeAnthropicProviderUrl', () => {
     )
   })
 
-  test('anthropic-compatible 协议根路径补全 /v1', () => {
+  test('anthropic-compatible 不再走 versioned 分支（PR: 改为完整请求地址，运行时由 resolveAnthropicMessagesUrl 短路）', () => {
+    // anthropic-compatible 已从 normalizeAnthropicProviderUrl 的 versioned 列表移除，
+    // 落到通用 normalizeAnthropicBaseUrl：对已有非版本路径（/anthropic）不再追加 /v1。
     expect(normalizeAnthropicProviderUrl('https://gateway.example.com/anthropic', 'anthropic-compatible')).toBe(
-      'https://gateway.example.com/anthropic/v1',
+      'https://gateway.example.com/anthropic',
     )
   })
 
@@ -148,5 +155,166 @@ describe('normalizeAnthropicProviderUrl', () => {
 
   test('原生 anthropic 已含 /v1 保持不变', () => {
     expect(normalizeAnthropicProviderUrl('https://api.anthropic.com/v1', 'anthropic')).toBe('https://api.anthropic.com/v1')
+  })
+})
+
+describe('resolveOpenAIChatCompletionsUrl', () => {
+  test('custom 原样使用完整端点（去尾斜杠）', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1/chat/completions', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions',
+    )
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1/chat/completions/', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions',
+    )
+  })
+
+  test('custom 不向用户填写的地址追加后缀', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1', 'custom')).toBe('https://api.example.com/v1')
+  })
+
+  test('内置 openai 协议根地址补全 /chat/completions', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.openai.com/v1', 'openai')).toBe(
+      'https://api.openai.com/v1/chat/completions',
+    )
+  })
+
+  test('内置 openai 已是完整端点不重复追加', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.openai.com/v1/chat/completions', 'openai')).toBe(
+      'https://api.openai.com/v1/chat/completions',
+    )
+  })
+
+  test('保留查询参数', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1/chat/completions?api-version=2024', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions?api-version=2024',
+    )
+  })
+})
+
+describe('resolveOpenAIModelsUrl', () => {
+  test('完整 chat/completions 端点回到同级 /models', () => {
+    expect(resolveOpenAIModelsUrl('https://api.example.com/v1/chat/completions')).toBe(
+      'https://api.example.com/v1/models',
+    )
+  })
+
+  test('协议根地址推导 /models', () => {
+    expect(resolveOpenAIModelsUrl('https://api.openai.com/v1')).toBe('https://api.openai.com/v1/models')
+  })
+
+  test('保留查询参数', () => {
+    expect(resolveOpenAIModelsUrl('https://api.example.com/v1/chat/completions?x=1')).toBe(
+      'https://api.example.com/v1/models?x=1',
+    )
+  })
+})
+
+describe('resolveAnthropicMessagesUrl', () => {
+  test('anthropic-compatible 原样使用完整端点', () => {
+    expect(resolveAnthropicMessagesUrl('https://gateway.example.com/v1/messages', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/messages',
+    )
+    expect(resolveAnthropicMessagesUrl('https://gateway.example.com/v1/messages/', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/messages',
+    )
+  })
+
+  test('anthropic-compatible 不向用户填写的地址追加后缀', () => {
+    expect(resolveAnthropicMessagesUrl('https://gateway.example.com/custom-path', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/custom-path',
+    )
+  })
+
+  test('内置 minimax 协议根地址补全 /v1/messages', () => {
+    expect(resolveAnthropicMessagesUrl('https://api.minimaxi.com/anthropic', 'minimax')).toBe(
+      'https://api.minimaxi.com/anthropic/v1/messages',
+    )
+  })
+
+  test('内置 anthropic 已是完整端点不重复追加', () => {
+    expect(resolveAnthropicMessagesUrl('https://api.anthropic.com/v1/messages', 'anthropic')).toBe(
+      'https://api.anthropic.com/v1/messages',
+    )
+  })
+})
+
+describe('resolveAnthropicModelsUrl', () => {
+  test('anthropic-compatible 原样使用（不推导模型端点）', () => {
+    expect(resolveAnthropicModelsUrl('https://gateway.example.com/v1/messages', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/messages',
+    )
+  })
+
+  test('内置完整 messages 端点回到同级 /models', () => {
+    expect(resolveAnthropicModelsUrl('https://api.anthropic.com/v1/messages', 'anthropic')).toBe(
+      'https://api.anthropic.com/v1/models',
+    )
+  })
+
+  test('内置协议根地址推导 /models', () => {
+    expect(resolveAnthropicModelsUrl('https://api.minimaxi.com/anthropic', 'minimax')).toBe(
+      'https://api.minimaxi.com/anthropic/v1/models',
+    )
+  })
+})
+
+describe('migrateCompatibleChannelBaseUrl', () => {
+  // 迁移目标 = 复现 PR 之前旧代码「实际请求过」的完整 URL，保证升级后运行时行为不变。
+
+  test('custom: 旧 Base URL 补全为 /chat/completions（与旧 OpenAIAdapter 一致）', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://api.example.com/v1', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions',
+    )
+  })
+
+  test('custom: 去尾斜杠后再补全', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://api.example.com/v1/', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions',
+    )
+  })
+
+  test('custom: 幂等 —— 已是完整端点不重复追加', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://api.example.com/v1/chat/completions', 'custom')).toBe(
+      'https://api.example.com/v1/chat/completions',
+    )
+  })
+
+  test('anthropic-compatible: 协议根地址补全为 /v1/messages（与旧 versioned 分支一致）', () => {
+    // 旧代码：normalizeAnthropicProviderUrl 把 anthropic-compatible 走 versioned 分支 → 补 /v1 再拼 /messages
+    expect(migrateCompatibleChannelBaseUrl('https://gateway.example.com/anthropic', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/anthropic/v1/messages',
+    )
+  })
+
+  test('anthropic-compatible: 已含 /v1 的地址只补 /messages', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://gateway.example.com/v1', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/messages',
+    )
+  })
+
+  test('anthropic-compatible: 幂等 —— 已是完整端点不重复追加', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://gateway.example.com/v1/messages', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/messages',
+    )
+  })
+
+  test('迁移后的 anthropic-compatible 端点经 SDK 归一化可还原为升级前的根地址', () => {
+    // 关键不变量：channel.baseUrl 同时被 Agent SDK 路径消费（normalizeAnthropicBaseUrlForSdk 剥除 /v\d+/messages）
+    const migrated = migrateCompatibleChannelBaseUrl('https://gateway.example.com/anthropic', 'anthropic-compatible')
+    expect(normalizeAnthropicBaseUrlForSdk(migrated)).toBe(
+      normalizeAnthropicBaseUrlForSdk('https://gateway.example.com/anthropic'),
+    )
+  })
+
+  test('空 Base URL 原样返回（未配置渠道不迁移）', () => {
+    expect(migrateCompatibleChannelBaseUrl('', 'custom')).toBe('')
+    expect(migrateCompatibleChannelBaseUrl('   ', 'anthropic-compatible')).toBe('   ')
+  })
+
+  test('非通用兼容 provider 原样返回（语义未变）', () => {
+    expect(migrateCompatibleChannelBaseUrl('https://api.openai.com/v1', 'openai')).toBe('https://api.openai.com/v1')
+    expect(migrateCompatibleChannelBaseUrl('https://api.deepseek.com/anthropic', 'deepseek')).toBe(
+      'https://api.deepseek.com/anthropic',
+    )
   })
 })

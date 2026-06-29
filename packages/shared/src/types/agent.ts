@@ -934,6 +934,8 @@ export interface AgentQueueMessageInput {
   sessionId: string
   /** 用户消息内容 */
   userMessage: string
+  /** 仅用于持久化/重放的原始用户输入；省略时回退到 userMessage */
+  rawUserMessage?: string
   /** 前端预生成的 UUID（用于乐观更新去重） */
   uuid?: string
   /**
@@ -942,6 +944,12 @@ export interface AgentQueueMessageInput {
    * false / undefined：排队追加（默认行为，turn 结束后才会被消费）。
    */
   interrupt?: boolean
+  /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */
+  mentionedSkills?: string[]
+  /** 用户通过 #mcp:xxx 引用的 MCP 服务器名称列表 */
+  mentionedMcpServers?: string[]
+  /** 用户通过 &session:xxx 引用的 Agent 会话 ID 列表 */
+  mentionedSessionIds?: string[]
 }
 
 // ===== 会话迁移输入 =====
@@ -1050,6 +1058,8 @@ export interface AgentStreamCompletePayload {
   startedAt?: number
   /** SDK result 消息的 subtype（success / error_max_turns / error_max_budget_usd / error_during_execution 等） */
   resultSubtype?: string
+  /** SDK result 消息携带的错误详情（error_during_execution 等场景下的真实错误原因，用于展示具体错误） */
+  resultErrors?: string[]
   /** 本轮主体结束但仍有后台任务/定时任务在飞行：UI 进入"空闲可输入"态，等待任务完成自动唤醒 */
   backgroundTasksPending?: boolean
 }

@@ -46,7 +46,7 @@ import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName } from './config-paths'
+import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getConfigDirName, getBundledCliPath } from './config-paths'
 import { getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
@@ -73,7 +73,7 @@ export interface SessionCallbacks {
   /** 发送流式错误 */
   onError: (error: string) => void
   /** 发送流式完成（携带已持久化的消息列表） */
-  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; backgroundTasksPending?: boolean }) => void
+  onComplete: (messages?: AgentMessage[], opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[]; backgroundTasksPending?: boolean }) => void
   /** 发送标题更新 */
   onTitleUpdated: (title: string) => void
   /** 用户消息已持久化，外部入口可据此通知前端切到实时会话 */
@@ -428,6 +428,7 @@ function buildReferencedSessionsPrompt(
   currentSessionId: string,
   mentionedSessionIds?: string[],
   workspaceId?: string,
+  workspaceSlug?: string,
 ): string {
   const uniqueIds = [...new Set((mentionedSessionIds ?? []).filter(Boolean))]
   if (uniqueIds.length === 0) return ''
@@ -452,6 +453,17 @@ function buildReferencedSessionsPrompt(
   }
 
   if (sessionBlocks.length === 0) return ''
+
+  // 打包模式下 proma CLI 二进制随 App 分发，可用 session-cleaner skill 读取引用会话：
+  // 默认正常完整读取（export 全量）；仅当会话过大、完整读入会撑爆上下文时，才用搜索 + turn 区间省着读。
+  // 开发模式（getBundledCliPath 返回 undefined，CLI 不可用）回退到原有的 Grep 局部读指引。
+  const cliAvailable = !!getBundledCliPath()
+  if (cliAvailable) {
+    const skillName = workspaceSlug
+      ? `proma-workspace-${workspaceSlug}:session-cleaner`
+      : 'session-cleaner'
+    return `<referenced_sessions>\n用户在消息中明确引用了以下同工作区 Agent 会话。需要这些会话的上下文时，使用 session-cleaner skill（${skillName}）读取——它通过 proma CLI 把会话清洗为干净对话。默认正常完整读取整个会话；仅当某个会话过大、完整读入会撑爆上下文时，才改用 skill 的搜索 + turn 区间能力按需节省。不要假设会话内容，也不要直接 Read 原始 .jsonl 历史文件。\n${sessionBlocks.join('\n\n')}\n</referenced_sessions>`
+  }
 
   return `<referenced_sessions>\n用户在消息中明确引用了以下同工作区 Agent 会话。不要假设这些会话的内容；需要上下文时，请先读取对应的 History path，再基于读取结果继续完成任务。\n\n重要提示：会话历史文件（.jsonl）可能包含大量消息和 tool results，文件较大。请优先使用 Grep 搜索关键词定位相关消息片段，再局部读取。避免一次性 Read 整个大文件。\n${sessionBlocks.join('\n\n')}\n</referenced_sessions>`
 }
@@ -571,6 +583,10 @@ export class AgentOrchestrator {
       ...cleanEnv,
       // 提升输出 token 上限，避免 "exceeded 32000 output token maximum" 错误
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000',
+      // 暴露打包进 App 的 proma CLI 路径，供 session-cleaner 等 skill / Agent 调用
+      // （开发模式无编译二进制，getBundledCliPath 返回 undefined，此处不注入，
+      //   skill 回退到源码运行 bun apps/cli/src/index.ts）。
+      ...(getBundledCliPath() ? { PROMA_CLI: getBundledCliPath() } : {}),
       // 启用 Tasks 功能
       CLAUDE_CODE_ENABLE_TASKS: 'true',
       // 禁用实验性 beta 功能，使用稳定模式
@@ -1035,7 +1051,7 @@ export class AgentOrchestrator {
     }
     const completeRun = (
       messages?: AgentMessage[],
-      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string },
+      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
@@ -1046,14 +1062,14 @@ export class AgentOrchestrator {
     // UI 侧通过 backgroundTasksPending 进入"空闲可输入"态（spinner 停、输入框启用）。
     const idleComplete = (
       messages?: AgentMessage[],
-      opts?: { startedAt?: number; resultSubtype?: string },
+      opts?: { startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
     }
     const failRun = (
       error: string,
       messages?: AgentMessage[],
-      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string },
+      opts?: { stoppedByUser?: boolean; startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       releaseActiveRun()
       callbacks.onError(error)
@@ -1313,7 +1329,7 @@ export class AgentOrchestrator {
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
-      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId)
+      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId, workspaceSlug)
       if (referencedSessionsBlock) {
         enrichedMessage = `${referencedSessionsBlock}\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 referenced_sessions: ${mentionedSessionIds?.length ?? 0} sessions`)
@@ -1329,7 +1345,7 @@ export class AgentOrchestrator {
         for (const name of mentionedMcpServers ?? []) {
           toolLines.push(`- MCP 服务器: ${name}（请使用此 MCP 服务器的工具来完成任务）`)
         }
-        enrichedMessage = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${userMessage}`
+        enrichedMessage = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 mentioned_tools: ${mentionedSkills?.length ?? 0} skills, ${mentionedMcpServers?.length ?? 0} MCP`)
       }
 
@@ -1766,6 +1782,9 @@ export class AgentOrchestrator {
           let pendingNext: Promise<IteratorResult<SDKMessage>> | null = null
           // 捕获 result.subtype 以传递给前端（用于区分 success/error_max_turns/error_max_budget_usd）
           let capturedResultSubtype: string | undefined
+          // 捕获 result.errors[] 错误详情：SDK 在 error_during_execution 等场景下会把真实错误原因
+          // 放进 errors[]，透传到前端用于展示具体错误（而非泛泛的"任务执行过程中发生错误"）。
+          let capturedResultErrors: string[] | undefined
           // result 收到后的安全超时：正常情况下 adapter 收到 terminal result 后会主动 break 自己的
           // for-await 循环（触发 SDK iterator.return → cleanup），让此处的 next() 立即拿到 done。
           // 此 timeout 仅作真正的兜底安全网，防止极端情况（SDK 行为再次变化等）下 iterator 不关闭、
@@ -2000,6 +2019,12 @@ export class AgentOrchestrator {
             // Turn 结束时：持久化累积消息
             if (msg.type === 'result') {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
+              // SDK 的 SDKResultError 在 errors[] 中携带真实错误原因（error_during_execution 等场景），
+              // 捕获后既用于重试判定，也透传到前端展示具体错误。
+              const rawResultErrors = (msg as { errors?: unknown }).errors
+              capturedResultErrors = Array.isArray(rawResultErrors)
+                ? rawResultErrors.filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+                : undefined
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
               // 软中断 / 延迟工具 / hook 暂停等场景下，adapter 保留 channel
@@ -2016,13 +2041,30 @@ export class AgentOrchestrator {
                 `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}, ` +
                 `terminal_reason=${resultTerminalReason ?? 'undefined'}, keepChannelOpen=${keepChannelOpen}` +
                 (keptOpenForTasks ? ', keptOpenForTasks=true' : '') +
-                (hasDeferredTool ? ', hasDeferredTool=true' : ''),
+                (hasDeferredTool ? ', hasDeferredTool=true' : '') +
+                (capturedResultErrors?.length ? `, errors=${JSON.stringify(capturedResultErrors)}` : ''),
               )
+              // error_during_execution 是 SDK 的兜底错误码，以 result（而非 assistant.error / 抛异常）形式到达，
+              // 默认不会触发上面两条重试路径。这里用 errors[] 文本喂给现有的可重试判定（502/529/overloaded/
+              // 网络瞬断 / 响应体解析失败等），命中则进入重试循环，复用统一的退避逻辑。
+              if (
+                capturedResultSubtype === 'error_during_execution' &&
+                capturedResultErrors?.length &&
+                isAutoRetryableCatchError(null, capturedResultErrors.join('\n')) &&
+                canAutoRetry(attempt)
+              ) {
+                lastRetryableError = capturedResultErrors[0]
+                console.log(`[Agent 编排] 可重试错误 (result error_during_execution, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
+                // 与 assistant.error / catch 重试路径保持一致：清空已累积 stderr，避免重试上限内无限增长
+                stderrChunks.length = 0
+                shouldRetryFromError = true
+                break
+              }
               if (keptOpenForTasks) {
                 // 轻量完成：UI 置空闲可输入，但 host 保持运行态（不 releaseActiveRun、不 break、不启动 drain 超时），
                 // while 循环继续 park 在 queryIterator.next()，等待后台任务完成时 SDK 自动 yield 的新一轮消息。
                 awaitingBackgroundWake = true
-                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
               } else if (!keepChannelOpen && !drainTimeoutPromise) {
                 // 启动 drain 超时安全网：正常情况下 adapter 收到 terminal result 会主动 break
                 // 触发 iterator.return → 下一次 next() 立即返回 done，此 timeout 不会触发。
@@ -2081,7 +2123,7 @@ export class AgentOrchestrator {
           }
 
           // 发送完成信号
-          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype })
+          completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
           break  // 成功完成，退出重试循环
 
@@ -2485,9 +2527,13 @@ export class AgentOrchestrator {
   async queueMessage(
     sessionId: string,
     text: string,
+    rawText?: string,
     _priority?: string,
     presetUuid?: string,
     opts?: { interrupt?: boolean },
+    mentionedSkills?: string[],
+    mentionedMcpServers?: string[],
+    mentionedSessionIds?: string[],
   ): Promise<string> {
     if (!this.activeSessions.has(sessionId)) {
       throw new Error(`[Agent 编排] 会话未运行，无法追加消息: ${sessionId}`)
@@ -2495,6 +2541,31 @@ export class AgentOrchestrator {
 
     if (!this.adapter.sendQueuedMessage) {
       throw new Error('[Agent 编排] 当前适配器不支持流式追加消息')
+    }
+
+    // 注入 mention 引用指令（Skill/MCP/会话）— 与 sendMessage 路径保持一致的 prompt 加工
+    const meta = getAgentSessionMeta(sessionId)
+    const workspaceSlug = meta?.workspaceId
+      ? getAgentWorkspace(meta.workspaceId)?.slug
+      : undefined
+
+    let enrichedText = text
+    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, meta?.workspaceId, workspaceSlug)
+    if (referencedSessionsBlock) {
+      enrichedText = `${referencedSessionsBlock}\n\n${enrichedText}`
+    }
+    if (mentionedSkills?.length || mentionedMcpServers?.length) {
+      const toolLines: string[] = ['用户在消息中明确引用了以下工具，请在本次回复中主动调用：']
+      for (const slug of mentionedSkills ?? []) {
+        const qualifiedName = workspaceSlug
+          ? `proma-workspace-${workspaceSlug}:${slug}`
+          : slug
+        toolLines.push(`- Skill: ${qualifiedName}（请立即调用此 Skill）`)
+      }
+      for (const name of mentionedMcpServers ?? []) {
+        toolLines.push(`- MCP 服务器: ${name}（请使用此 MCP 服务器的工具来完成任务）`)
+      }
+      enrichedText = `<mentioned_tools>\n${toolLines.join('\n')}\n</mentioned_tools>\n\n${enrichedText}`
     }
 
     const uuid = presetUuid || randomUUID()
@@ -2507,7 +2578,7 @@ export class AgentOrchestrator {
     // 构造 SDKUserMessage 并注入（强制 'now' 优先级）
     const sdkMessage = {
       type: 'user' as const,
-      message: { role: 'user' as const, content: text },
+      message: { role: 'user' as const, content: enrichedText },
       parent_tool_use_id: null,
       priority: 'now' as const,
       uuid,
@@ -2529,12 +2600,12 @@ export class AgentOrchestrator {
       await this.adapter.sendQueuedMessage(sessionId, sdkMessage)
       console.log(`[Agent 编排] 追加消息已注入: sessionId=${sessionId}, uuid=${uuid}, interrupt=${!!opts?.interrupt}`)
 
-      // 立即持久化到 JSONL
+      // 立即持久化到 JSONL — 仅存原始文本，不含 prompt 工程块（与 sendMessage 路径一致）
       const persistMsg: SDKMessage = {
         type: 'user',
         uuid,
         message: {
-          content: [{ type: 'text', text }],
+          content: [{ type: 'text', text: rawText ?? text }],
         },
         parent_tool_use_id: null,
         _createdAt: Date.now(),

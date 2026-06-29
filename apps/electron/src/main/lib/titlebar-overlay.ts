@@ -17,7 +17,7 @@ const THEME_COLORS: Record<string, { color: string; symbolColor: string }> = {
   'default-dark': { color: '#1c1c1c', symbolColor: '#fafafa' },
   'ocean-light': { color: '#e6eef5', symbolColor: '#1b2632' },
   'ocean-dark': { color: '#131c26', symbolColor: '#e7ebef' },
-  'forest-light': { color: '#ecf1ee', symbolColor: '#1d3026' },
+  'forest-light': { color: '#e6e9d9', symbolColor: '#263529' },
   'forest-dark': { color: '#16201b', symbolColor: '#e3e8e5' },
   'slate-light': { color: '#e6e4df', symbolColor: '#312f2a' },
   'slate-dark': { color: '#1f1c21', symbolColor: '#e9e6e3' },

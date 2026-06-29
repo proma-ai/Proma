@@ -1,0 +1,23 @@
+{
+  "name": "@proma/session-core",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "description": "Headless core for reading, grouping, searching and rendering Proma agent sessions. Single source of truth shared by the Electron app, the proma CLI and future query surfaces.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@proma/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

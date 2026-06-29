@@ -6,6 +6,18 @@ export interface ClipboardTextDraft {
   size: number
 }
 
+export interface ShouldConvertClipboardTextInput {
+  enabled: boolean
+  plainText: string
+  normalizedText: string
+  threshold: number
+}
+
+export function shouldConvertClipboardTextToAttachment(input: ShouldConvertClipboardTextInput): boolean {
+  if (!input.enabled || input.threshold <= 0) return false
+  return input.plainText.length >= input.threshold || input.normalizedText.length >= input.threshold
+}
+
 export function makeUniqueAttachmentName(originalName: string, existingNames: string[]): string {
   if (!existingNames.includes(originalName)) return originalName
   const dotIdx = originalName.lastIndexOf('.')

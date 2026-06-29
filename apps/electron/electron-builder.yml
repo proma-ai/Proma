@@ -49,6 +49,12 @@ files:
 
 # 通用额外资源
 extraResources:
+  # proma CLI 自包含二进制（build:cli 用 bun build --compile 产出到 resources/bin/）。
+  # 运行时由主进程注入 PROMA_CLI 环境变量，暴露给 skill / Agent 调用。
+  - from: resources/bin
+    to: bin
+    filter:
+      - "**/*"
   # 默认 Skills 模板（首次启动时同步到 ~/.proma/default-skills/）
   - from: default-skills
     to: default-skills

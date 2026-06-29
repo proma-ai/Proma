@@ -122,6 +122,7 @@
     --content-area: 0 0% 100%;            /* 主内容区域背景 */
     --sidebar-surface: 60 14.3% 98.6%;    /* 默认浅色侧栏：RGB 252/252/251 */
     --tabbar-surface: 60 14.3% 98.6%;     /* 默认浅色未选中 Tab 背景：RGB 252/252/251 */
+    --tab-indicator: var(--primary);       /* 顶部 Tab 选中条，默认跟随主色 */
     --sidebar-control-surface: 60 7% 93%;
     --sidebar-control-surface-hover: 60 7% 90%;
     --sidebar-control-stroke: 0 0% 9% / 0.10;
@@ -166,6 +167,7 @@
     --content-area: 0 0% 7%;              /* 主内容区域背景 zinc-900 */
     --sidebar-surface: 0 0% 7%;
     --tabbar-surface: 0 0% 7%;
+    --tab-indicator: var(--primary);
     --sidebar-control-surface: 0 0% 14%;
     --sidebar-control-surface-hover: 0 0% 18%;
     --sidebar-control-stroke: 0 0% 100% / 0.08;
@@ -208,6 +210,7 @@
     --dialog-foreground: 210 30% 15%;     /* #1b2632 弹窗前景 */
     --sidebar-surface: 205 35% 94%;
     --tabbar-surface: 205 35% 94%;
+    --tab-indicator: 205 50% 50%;
     --sidebar-control-surface: 205 32% 90%;
     --sidebar-control-surface-hover: 205 34% 87%;
     --sidebar-control-stroke: 205 45% 34% / 0.12;
@@ -236,6 +239,7 @@
     --content-area: 210 14% 9%;           /* 内容区：最深，专注 */
     --sidebar-surface: 210 12% 13%;
     --tabbar-surface: 210 12% 13%;
+    --tab-indicator: 210 28% 38%;
     --sidebar-control-surface: 210 12% 18%;
     --sidebar-control-surface-hover: 210 13% 21%;
     --sidebar-control-stroke: 210 18% 72% / 0.10;
@@ -272,46 +276,45 @@
 
   /* ===== 森系色系 ===== */
 
-  /* 森息晨光（浅色） - 自然绿调，清新明亮 */
+  /* 森息晨光（浅色） - 低饱和纸感背景 */
   .theme-forest-light {
-    --background: 140 25% 95%;            /* #eff5f1 背景 */
-    --foreground: 150 25% 15%;            /* #1d3026 前景文字 */
-    --content-area: 140 20% 97%;          /* #f6f9f7 内容区域 */
-    --muted: 140 15% 90%;                 /* #e2e9e4 次要背景 */
-    --muted-foreground: 145 10% 45%;      /* #677e71 次要文字 */
-    --border: 140 15% 82%;                /* #cad8cf 边框 */
-    --primary: 150 35% 38%;               /* #3f8361 主色 */
-    --primary-foreground: 0 0% 100%;      /* #ffffff 主色前景 */
-    --secondary: 140 15% 92%;             /* #e8eeea 二级背景 */
-    --secondary-foreground: 150 20% 20%;  /* #293d33 二级前景 */
-    --accent: 145 20% 88%;                /* #dae7df 强调背景 */
-    --accent-foreground: 150 30% 30%;     /* #36634d 强调文字 */
-    --ring: 150 35% 38%;                  /* #3f8361 聚焦环 */
-    --card: 140 20% 97%;                  /* #f6f9f7 卡片背景 */
-    --card-foreground: 150 25% 15%;       /* #1d3026 卡片前景 */
-    --input: 140 18% 92%;                 /* #e7eee9 输入框背景 */
-    --popover: 140 18% 98%;               /* #f9fbfa 弹出层 */
-    --popover-foreground: 150 25% 15%;    /* #1d3026 弹出前景 */
-    --dialog: 140 15% 96%;                /* #f3f6f4 弹窗背景 */
-    --dialog-foreground: 150 25% 15%;     /* #1d3026 弹窗前景 */
-    --sidebar-surface: 140 25% 95%;
-    --tabbar-surface: 140 25% 95%;
-    --sidebar-control-surface: 140 20% 91%;
-    --sidebar-control-surface-hover: 140 20% 88%;
-    --sidebar-control-stroke: 150 28% 34% / 0.12;
-    --input-surface: 140 20% 96%;
-    --tab-surface: 140 20% 97%;
-    --destructive: 0 72% 51%;             /* #dc2828 危险色 */
+    --background: 84 24% 92%;             /* 降低白底亮度，侧栏像浅草纸 */
+    --foreground: 132 16% 18%;            /* 暖墨绿文字 */
+    --content-area: 80 26% 96%;           /* 主阅读区仍保持干净 */
+    --muted: 82 18% 88%;
+    --muted-foreground: 96 8% 42%;
+    --border: 84 14% 78%;
+    --primary: 134 24% 38%;               /* 鼠尾草绿主色，不用荧光绿 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 82 20% 90%;
+    --secondary-foreground: 132 16% 22%;
+    --accent: 76 20% 84%;                 /* 微暖黄绿强调，减少单一绿调 */
+    --accent-foreground: 132 24% 28%;
+    --ring: 134 24% 42%;
+    --card: 80 26% 96%;
+    --card-foreground: 132 16% 18%;
+    --input: 82 20% 90%;
+    --popover: 80 26% 97%;
+    --popover-foreground: 132 16% 18%;
+    --dialog: 80 24% 95%;
+    --dialog-foreground: 132 16% 18%;
+    --sidebar-surface: 84 24% 92%;
+    --tabbar-surface: 84 24% 92%;
+    --tab-indicator: 134 24% 38%;
+    --sidebar-control-surface: 82 20% 87%;
+    --sidebar-control-surface-hover: 82 18% 84%;
+    --sidebar-control-stroke: 132 20% 30% / 0.12;
+    --input-surface: 80 24% 95%;
+    --tab-surface: 80 26% 96%;
+    --destructive: 2 58% 48%;
     --destructive-foreground: 0 0% 100%;  /* #ffffff 危险前景 */
-    --stop-hover-bg: hsla(0, 70%, 50%, 0.12);
-    --tooltip: 150 20% 18%;               /* #25372e Tooltip */
-    --tooltip-foreground: 0 0% 98%;       /* #fafafa Tooltip前景 */
-    --tooltip-muted: 140 10% 60%;         /* #8fa396 Tooltip弱 */
-    /* 代码块背景 - 森林绿调 */
-    --code-bg: 150 35% 12%;               /* #142820 深森绿 */
-    /* 虚线边框色 */
-    --dashed-border: 150 35% 38% / 0.35;
-    --dashed-border-hover: 150 35% 38% / 0.50;
+    --stop-hover-bg: hsla(2, 58%, 48%, 0.12);
+    --tooltip: 132 18% 18%;
+    --tooltip-foreground: 0 0% 98%;
+    --tooltip-muted: 82 12% 68%;
+    --code-bg: 138 22% 13%;
+    --dashed-border: 134 24% 38% / 0.34;
+    --dashed-border-hover: 134 24% 38% / 0.50;
   }
 
   /* 森息夜语（深色）— "雾林清晨"
@@ -324,6 +327,7 @@
     --content-area: 150 10% 9%;           /* 内容区：深林泥土 */
     --sidebar-surface: 150 8% 14%;
     --tabbar-surface: 150 8% 14%;
+    --tab-indicator: 150 22% 42%;
     --sidebar-control-surface: 150 9% 17%;
     --sidebar-control-surface-hover: 150 10% 20%;
     --sidebar-control-stroke: 140 14% 72% / 0.10;
@@ -388,6 +392,7 @@
     --dialog-foreground: 40 8% 18%;       /* #312f2a 弹窗前景 */
     --sidebar-surface: 40 6% 92%;
     --tabbar-surface: 40 6% 92%;
+    --tab-indicator: 18 24% 52%;
     --sidebar-control-surface: 40 6% 88%;
     --sidebar-control-surface-hover: 40 6% 86%;
     --sidebar-control-stroke: 40 10% 28% / 0.11;
@@ -415,6 +420,7 @@
     --content-area: 270 8% 9%;            /* #161418 内容区域 */
     --sidebar-surface: 260 6% 12%;
     --tabbar-surface: 260 6% 12%;
+    --tab-indicator: 15 25% 68%;
     --sidebar-control-surface: 260 7% 18%;
     --sidebar-control-surface-hover: 260 8% 21%;
     --sidebar-control-stroke: 30 12% 74% / 0.10;
@@ -459,12 +465,13 @@
    * CRT 氛围交给扫描线和辉光，颜色本身收敛。
    */
   .theme-terminal-dark {
-    /* 基础色 — 近纯黑的极暗暖灰底 */
+    /* 基础色 — 现代布局会让内容区铺满屏幕，避免沿用极暗底导致整体发黑 */
     --background: 100 6% 5%;              /* #0d0e0c 侧边栏 */
     --foreground: 90 20% 65%;             /* #acb09f 暖黄绿白 */
-    --content-area: 100 6% 3%;            /* #080907 内容区：最深 */
+    --content-area: 100 6% 6%;            /* #0f100e 内容区：比旧版回调再提亮 1% */
     --sidebar-surface: 100 6% 5%;
     --tabbar-surface: 100 6% 5%;
+    --tab-indicator: 100 40% 52%;
     --sidebar-control-surface: 100 5% 12%;
     --sidebar-control-surface-hover: 100 6% 16%;
     --sidebar-control-stroke: 100 20% 55% / 0.12;
@@ -617,11 +624,11 @@
 /* 特殊主题外层缝隙背景色覆盖 */
 .theme-ocean-light .shell-bg { background: linear-gradient(135deg, hsl(205 35% 88%) 0%, hsl(205 30% 91%) 100%); }
 .theme-ocean-dark .shell-bg  { background: linear-gradient(135deg, hsl(210 14% 5%) 0%, hsl(210 12% 7%) 100%); }
-.theme-forest-light .shell-bg { background: linear-gradient(135deg, hsl(140 15% 90%) 0%, hsl(140 15% 92%) 100%); }
+.theme-forest-light .shell-bg { background: linear-gradient(135deg, hsl(84 20% 86%) 0%, hsl(80 22% 89%) 100%); }
 .theme-forest-dark .shell-bg { background: linear-gradient(135deg, hsl(150 10% 5%) 0%, hsl(150 10% 7%) 100%); }
 .theme-slate-light .shell-bg { background: linear-gradient(135deg, hsl(40 6% 84%) 0%, hsl(40 6% 86%) 100%); }
 .theme-slate-dark .shell-bg  { background: linear-gradient(135deg, hsl(270 10% 7%) 0%, hsl(260 8% 9%) 100%); }
-.theme-terminal-dark .shell-bg { background: linear-gradient(135deg, hsl(100 6% 3%) 0%, hsl(100 8% 5%) 100%); }
+.theme-terminal-dark .shell-bg { background: linear-gradient(135deg, hsl(100 6% 6%) 0%, hsl(100 8% 7%) 100%); }
 
 /* ===== 特殊主题：模式切换器选中状态 ===== */
 /* 晴空碧海：蓝色背景滑块 + 白色文字 */
@@ -644,8 +651,8 @@
 
 /* 森息晨光主题 */
 .theme-forest-light .mode-slider {
-  background: hsl(150 35% 38%) !important;  /* #3f8361 主色 */
-  box-shadow: 0 2px 4px rgba(63, 131, 97, 0.3);
+  background: hsl(134 24% 38%) !important;
+  box-shadow: 0 2px 4px hsl(134 24% 38% / 0.24);
 }
 .theme-forest-light .mode-btn-selected {
   color: #ffffff !important;
@@ -713,8 +720,8 @@
 .theme-forest-light .session-item-selected,
 .theme-forest-light .workspace-item-selected,
 .theme-forest-light .tab-item-selected {
-  background: hsl(145 25% 82%) !important;  /* 浅绿色背景 */
-  color: hsl(150 35% 25%) !important;       /* 深绿色文字 */
+  background: hsl(78 22% 82%) !important;
+  color: hsl(132 24% 26%) !important;
 }
 .theme-forest-light .session-item-selected *,
 .theme-forest-light .workspace-item-selected *,
@@ -892,7 +899,7 @@
 }
 /* 森息晨光 */
 .theme-forest-light .workspace-badge {
-  color: hsl(150 35% 25%);
+  color: hsl(132 24% 26%);
 }
 /* 森息夜语 */
 .theme-forest-dark .workspace-badge {
@@ -951,6 +958,25 @@
 
 .app-tab-inactive:hover {
   background-color: hsl(var(--tab-surface) / 0.7);
+}
+
+.main-tabbar .app-tab-active {
+  background-color: transparent;
+  border-color: transparent !important;
+}
+
+.main-tabbar .app-tab-active::after {
+  left: 5px;
+  right: 5px;
+  height: 3px;
+  border-radius: 0;
+  background-color: hsl(var(--tab-indicator));
+  box-shadow: 0 0 10px hsl(var(--tab-indicator) / 0.28);
+  z-index: 2;
+}
+
+.main-tabbar .app-tab-inactive:hover {
+  background-color: hsl(var(--tab-surface) / 0.42);
 }
 
 [data-input-mode] > div:first-child {
@@ -1344,13 +1370,13 @@
 
 /* 森息晨光 forest-light */
 .theme-forest-light .scroll-progress-thumb {
-  background-color: hsl(150 35% 38% / 0.18);
+  background-color: hsl(134 24% 38% / 0.18);
 }
 .theme-forest-light .scroll-progress-thumb:hover {
-  background-color: hsl(150 35% 38% / 0.30);
+  background-color: hsl(134 24% 38% / 0.30);
 }
 .theme-forest-light .scroll-progress-thumb-active {
-  background-color: hsl(150 35% 38% / 0.40) !important;
+  background-color: hsl(134 24% 38% / 0.40) !important;
 }
 
 /* 森息夜语 forest-dark */
@@ -1497,6 +1523,23 @@
    - 单棵展开链路：只有最深一层 sticky 子行有阴影（父行的子项容器内含子 sticky，被规则排除）。
    - 多个平行展开（多个根目录同时打开）：每条链路各自一道阴影——这里把每棵独立树视为独立视觉单元。
    要做到全局唯一一道阴影需要 JS 监听滚动 + 展开状态动态打标记，目前不做。 */
+.file-tree-row {
+  isolation: isolate;
+}
+
+.file-tree-sticky-row {
+  background-color: hsl(var(--content-area));
+}
+
+.file-tree-sticky-row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: hsl(var(--content-area));
+}
+
 [data-sticky-row="true"]:not(:has(~ * [data-sticky-row="true"])) {
   box-shadow: 0 2px 4px -1px hsl(var(--foreground) / 0.08);
 }
