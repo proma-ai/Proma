@@ -1,5 +1,10 @@
 import type { AgentSessionMeta } from '@proma/shared'
 
+interface AgentSessionTreeLike {
+  session: Pick<AgentSessionMeta, 'id'>
+  childSessions: readonly Pick<AgentSessionMeta, 'id'>[]
+}
+
 /** 按最近更新时间排序 Agent 会话，保持与主进程 listAgentSessions 一致。 */
 export function sortAgentSessionsByUpdatedAtDesc(
   sessions: readonly AgentSessionMeta[],
@@ -74,4 +79,24 @@ export function mergeFetchedAgentSessions(
   )
 
   return sortAgentSessionsByUpdatedAtDesc([...fetched, ...survivingLocalOnly])
+}
+
+/** 收集可见会话树里的父/子会话 id，用于判断当前会话是否已显示在侧栏中。 */
+export function collectAgentSessionTreeIds(
+  items: readonly AgentSessionTreeLike[],
+): Set<string> {
+  const ids = new Set<string>()
+  for (const item of items) {
+    ids.add(item.session.id)
+    for (const child of item.childSessions) ids.add(child.id)
+  }
+  return ids
+}
+
+export function isAgentSessionVisibleInTrees(
+  items: readonly AgentSessionTreeLike[],
+  sessionId: string | null,
+): boolean {
+  if (!sessionId) return false
+  return collectAgentSessionTreeIds(items).has(sessionId)
 }

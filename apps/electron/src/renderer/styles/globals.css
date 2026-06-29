@@ -90,10 +90,10 @@
 
   .dark {
     --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.4);
-    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.03);
-    --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 0.55), 0 2px 4px 0 rgb(0 0 0 / 0.35), inset 0 1px 0 0 hsl(0 0% 100% / 0.04);
-    --shadow-lg: 0 16px 32px -8px rgb(0 0 0 / 0.6), 0 6px 12px -2px rgb(0 0 0 / 0.4), inset 0 1px 0 0 hsl(0 0% 100% / 0.05);
-    --shadow-xl: 0 32px 64px -16px rgb(0 0 0 / 0.7), 0 16px 32px -8px rgb(0 0 0 / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.06);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.06);
+    --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 0.55), 0 2px 4px 0 rgb(0 0 0 / 0.35), inset 0 1px 0 0 hsl(0 0% 100% / 0.08);
+    --shadow-lg: 0 16px 32px -8px rgb(0 0 0 / 0.6), 0 6px 12px -2px rgb(0 0 0 / 0.4), inset 0 1px 0 0 hsl(0 0% 100% / 0.10);
+    --shadow-xl: 0 32px 64px -16px rgb(0 0 0 / 0.7), 0 16px 32px -8px rgb(0 0 0 / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.12);
   }
 
   :root {
@@ -142,37 +142,37 @@
   }
 
   .dark {
-    --background: 0 0% 7%;                /* 统一背景色 zinc-900 */
+    --background: 0 0% 10%;                /* 侧栏锚点，略亮于内容区 */
     --foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
+    --muted: 0 0% 17%;
     --muted-foreground: 0 0% 63.9%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
     --ring: 0 0% 83.1%;
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
+    --secondary: 0 0% 17%;
     --secondary-foreground: 0 0% 98%;
     --accent: 0 0% 40%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 55% 45%;
     --destructive-foreground: 0 0% 98%;
     --stop-hover-bg: hsl(0, 40%, 18%);
-    --card: 0 0% 7%;                      /* 卡片背景 = 背景色 */
+    --card: 0 0% 13%;                      /* 卡片：浮起于背景 */
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 7%;                   /* 弹出层 = 背景色 */
+    --popover: 0 0% 14%;                   /* 弹出层：最高浮起 */
     --popover-foreground: 0 0% 98%;
-    --dialog: 0 0% 12%;                   /* 设置弹窗：比背景更亮，悬浮感 */
+    --dialog: 0 0% 16%;                    /* 弹窗：比弹出层更亮 */
     --dialog-foreground: 0 0% 98%;
-    --content-area: 0 0% 7%;              /* 主内容区域背景 zinc-900 */
-    --sidebar-surface: 0 0% 7%;
-    --tabbar-surface: 0 0% 7%;
+    --content-area: 0 0% 7%;              /* 主内容区域：最深，专注 */
+    --sidebar-surface: 0 0% 10%;
+    --tabbar-surface: 0 0% 10%;
     --tab-indicator: var(--primary);
-    --sidebar-control-surface: 0 0% 14%;
-    --sidebar-control-surface-hover: 0 0% 18%;
-    --sidebar-control-stroke: 0 0% 100% / 0.08;
-    --input-surface: 0 0% 7%;
-    --tab-surface: 0 0% 7%;
+    --sidebar-control-surface: 0 0% 17%;
+    --sidebar-control-surface-hover: 0 0% 21%;
+    --sidebar-control-stroke: 0 0% 100% / 0.10;
+    --input-surface: 0 0% 9%;              /* 输入区：介于背景和内容区之间 */
+    --tab-surface: 0 0% 7%;                /* 与内容区域无缝衔接 */
     /* 毛玻璃 Tooltip：深色半透明背景 + 白色文字 */
     --tooltip: 0 0% 20%;
     --tooltip-foreground: 0 0% 98%;
