@@ -1,0 +1,75 @@
+{
+  "comment": "Proma 内置 MCP 单一事实源。这里是唯一定义内置 MCP 运行时名字（name）、展示信息和约束的地方，注入器、UI catalog、系统提示词全部从这里取值，杜绝三处手写漂移。name 必须是下划线安全名（SDK 会把 server 名里的连字符规范化成下划线，源名与运行名不一致正是工具被 Agent 调错的根因），id 保持历史值（设置/凭据键，向后兼容）。kind=internal 表示由代码注入、不写入工作区 mcp.json。",
+  "version": 1,
+  "servers": [
+    {
+      "id": "automation",
+      "name": "automation",
+      "displayName": "定时任务",
+      "description": "创建、查看、更新、删除和立即运行 Proma 持久化定时任务。",
+      "category": "automation",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": true,
+      "toggleable": true,
+      "tools": [
+        { "name": "list_automations", "description": "列出 Proma 定时任务。", "readOnly": true },
+        { "name": "get_automation", "description": "读取单个定时任务详情和运行记录。", "readOnly": true },
+        { "name": "create_automation", "description": "创建持久化定时任务。" },
+        { "name": "update_automation", "description": "更新定时任务配置。" },
+        { "name": "delete_automation", "description": "删除定时任务。" },
+        { "name": "run_automation_now", "description": "立即运行一次定时任务。" }
+      ]
+    },
+    {
+      "id": "collaboration",
+      "name": "collaboration",
+      "displayName": "协作子 Agent",
+      "description": "创建、等待、读取和停止真实可见的 Proma 协作子 Agent 会话。",
+      "category": "collaboration",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": true,
+      "toggleable": true,
+      "tools": [
+        { "name": "list_available_agent_models", "description": "列出当前渠道下可用于协作子 Agent 的模型。", "readOnly": true },
+        { "name": "delegate_agent", "description": "创建单个协作子 Agent 会话。" },
+        { "name": "delegate_agents", "description": "批量创建协作子 Agent 会话。" },
+        { "name": "wait_for_delegations", "description": "等待一组协作子会话完成。", "readOnly": true },
+        { "name": "list_delegations", "description": "列出当前父会话创建的子会话。", "readOnly": true },
+        { "name": "get_delegation_results", "description": "按委派 ID 读取子会话结果摘要。", "readOnly": true },
+        { "name": "stop_delegation", "description": "停止单个协作子会话。" },
+        { "name": "stop_delegations", "description": "批量停止协作子会话。" }
+      ]
+    },
+    {
+      "id": "mem",
+      "name": "mem",
+      "displayName": "记忆",
+      "description": "通过 MemOS Cloud 检索和写入长期记忆。",
+      "category": "memory",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": false,
+      "toggleable": true,
+      "tools": [
+        { "name": "recall_memory", "description": "检索用户长期记忆。", "readOnly": true },
+        { "name": "add_memory", "description": "写入一条长期记忆。" }
+      ]
+    },
+    {
+      "id": "nano-banana",
+      "name": "nano_banana",
+      "displayName": "Nano Banana 生图",
+      "description": "通过 Gemini Image Generation 为 Agent 提供图片生成和编辑能力。",
+      "category": "media",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": false,
+      "toggleable": true,
+      "tools": [
+        { "name": "generate_image", "description": "生成或编辑图片。" }
+      ]
+    }
+  ]
+}

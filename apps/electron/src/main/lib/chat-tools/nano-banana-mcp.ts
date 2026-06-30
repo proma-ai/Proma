@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, resolve, isAbsolute, join } from 'node:path'
 import { getToolState, getToolCredentials } from '../chat-tool-config'
+import { getBuiltinMcpName } from '../builtin-mcp/baseline'
 import { saveAttachment, isImageAttachment } from '../attachment-service'
 
 // ===== Gemini API 类型（REST API 使用 camelCase） =====
@@ -336,9 +337,10 @@ export async function injectNanoBananaMcpServer(
   if (!toolState.enabled || !credentials.apiKey) return
 
   const { z } = await import('zod')
+  const serverName = getBuiltinMcpName('nano-banana')
 
   const server = sdk.createSdkMcpServer({
-    name: 'nano-banana',
+    name: serverName,
     version: '1.0.0',
     tools: [
       sdk.tool(
@@ -370,8 +372,8 @@ export async function injectNanoBananaMcpServer(
     ],
   })
 
-  mcpServers['nano-banana'] = server as unknown as Record<string, unknown>
-  console.log(`[Nano Banana MCP] 已注入内置生图工具 (nano-banana)`)
+  mcpServers[serverName] = server as unknown as Record<string, unknown>
+  console.log(`[Nano Banana MCP] 已注入内置生图工具 (${serverName})`)
 }
 
 // ===== 清理 =====

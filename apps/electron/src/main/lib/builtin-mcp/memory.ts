@@ -7,6 +7,7 @@
 
 import { getMemoryConfig } from '../memory-service'
 import { addMemory, formatSearchResult, searchMemory } from '../memos-client'
+import { getBuiltinMcpName } from './baseline'
 
 export async function injectMemoryMcpServer(
   sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
@@ -17,8 +18,9 @@ export async function injectMemoryMcpServer(
   if (!memoryConfig.enabled || !memoryConfig.apiKey) return
 
   const { z } = await import('zod')
+  const serverName = getBuiltinMcpName('mem')
   const memosServer = sdk.createSdkMcpServer({
-    name: 'mem',
+    name: serverName,
     version: '1.0.0',
     tools: [
       sdk.tool(
