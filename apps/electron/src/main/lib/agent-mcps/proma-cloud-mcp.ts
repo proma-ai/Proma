@@ -19,6 +19,7 @@ import {
   invalidatePromaAgentInnerKeyCache,
   createPromaAppKey,
 } from '../proma-agent-key-service'
+import { getBuiltinMcpName } from '../builtin-mcp/baseline'
 
 /**
  * 把管理 API 的 baseUrl 归一化成根域名，供 Agent 拼接 LLM / 工具端点。
@@ -63,9 +64,10 @@ export async function injectPromaCloudMcpServer(
   mcpServers: Record<string, Record<string, unknown>>,
 ): Promise<void> {
   const { z } = await import('zod')
+  const serverName = getBuiltinMcpName('proma-cloud')
 
   const server = sdk.createSdkMcpServer({
-    name: 'proma-cloud',
+    name: serverName,
     version: '1.1.0',
     tools: [
       // ===== Tool 1: get_credentials =====
@@ -168,6 +170,6 @@ export async function injectPromaCloudMcpServer(
     ],
   })
 
-  mcpServers['proma-cloud'] = server as unknown as Record<string, unknown>
-  console.log(`[Proma Cloud MCP] 已注入凭据网关 (proma-cloud, v1.1.0 — get_credentials + create_app_key)`)
+  mcpServers[serverName] = server as unknown as Record<string, unknown>
+  console.log(`[Proma Cloud MCP] 已注入凭据网关 (${serverName}, v1.1.0 — get_credentials + create_app_key)`)
 }

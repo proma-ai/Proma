@@ -24,6 +24,7 @@ import {
   runAutomationNow,
 } from './automation-scheduler'
 import { getAgentSessionMeta } from './agent-session-manager'
+import { getBuiltinMcpName } from './builtin-mcp/baseline'
 
 interface AutomationAgentToolContext {
   sessionId: string
@@ -191,9 +192,10 @@ export async function injectAutomationMcpServer(
 ): Promise<void> {
   const { z } = await import('zod')
   const schemas = buildAutomationSchemas(z)
+  const serverName = getBuiltinMcpName('automation')
 
   const server = sdk.createSdkMcpServer({
-    name: 'automation',
+    name: serverName,
     version: '1.0.0',
     tools: [
       sdk.tool(

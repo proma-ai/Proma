@@ -28,6 +28,7 @@ import {
   runRegisteredHeadlessAgent,
   stopRegisteredAgent,
 } from './agent-headless-runner-registry'
+import { getBuiltinMcpName } from './builtin-mcp/baseline'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   buildRecoveredDelegationState,
@@ -775,9 +776,10 @@ export async function injectAgentCollaborationMcpServer(
 ): Promise<void> {
   const { z } = await import('zod')
   const schemas = buildCollaborationSchemas(z)
+  const serverName = getBuiltinMcpName('collaboration')
 
   const server = sdk.createSdkMcpServer({
-    name: 'collaboration',
+    name: serverName,
     version: '1.0.0',
     tools: [
       sdk.tool(

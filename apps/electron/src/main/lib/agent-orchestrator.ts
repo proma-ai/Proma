@@ -60,6 +60,7 @@ import { getMemoryConfig } from './memory-service'
 import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
+import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 
 // ===== 类型定义 =====
 
@@ -1321,10 +1322,16 @@ export class AgentOrchestrator {
       }
 
       // 11. 构建动态上下文和最终 prompt
+      // 收集本次实际注入的内置 MCP server 真实名（mcpServers 的 key 已是下划线安全名），
+      // 供动态上下文按真实名枚举，杜绝模型凭配置名手写错误的工具名。
+      const builtinMcpServerNames = Object.keys(mcpServers).filter((name) =>
+        RESERVED_BUILTIN_KEYS.has(name),
+      )
       const dynamicCtx = buildDynamicContext({
         workspaceName: workspace?.name,
         workspaceSlug,
         agentCwd,
+        builtinMcpServerNames,
       })
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化

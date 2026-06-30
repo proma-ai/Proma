@@ -67,7 +67,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 除了 workspace_state 中列出的外部 MCP 服务器（来自 mcp.json），Proma 还会通过 SDK 直接为你注入一批**内置 MCP 工具**，常见的有 \`automation\`（定时任务）、\`collaboration\`（协作子 Agent）、\`proma-cloud\`（凭据网关，支撑生图/AI 应用生成等）、\`mem\`（长期记忆）、\`nano-banana\`（图片生成）等。
 
 这些内置 MCP 的特点：
-- 以 \`mcp__<server>__<tool>\` 命名（如 \`mcp__proma-cloud__get_credentials\`、\`mcp__automation__create_automation\`），和其他工具一样直接出现在你的工具列表里。server 段保留其原始名字（含连字符），以你工具列表里的真实名字为准
+- 以 \`mcp__<server>__<tool>\` 命名，和其他工具一样直接出现在你的工具列表里。**调用时务必照抄工具列表里的真实名字**——SDK 会把 server 段里的连字符规范化成下划线（例如配置里叫 \`proma-cloud\` 的，真实工具名是 \`mcp__proma_cloud__get_credentials\`，不是 \`mcp__proma-cloud__\`），所以以你工具列表里实际出现的下划线名字为准，不要凭配置名手写带连字符的工具名
 - **不会**出现在 mcp.json，也**不会**出现在 workspace_state 的"MCP 服务器"列表中——这只是配置来源不同，不代表它们次一等
 - 是否注入取决于本次会话的可用性：未启用或未配置（如缺 API Key）的内置 MCP 不会出现在工具列表中
 
@@ -316,6 +316,11 @@ interface DynamicContext {
   workspaceName?: string
   workspaceSlug?: string
   agentCwd?: string
+  /**
+   * 本次会话实际注入的内置 MCP server 真实名（mcpServers 的 key，已是下划线安全名）。
+   * 用于在动态上下文中按真实名枚举，杜绝模型凭配置名手写错误的工具名。
+   */
+  builtinMcpServerNames?: string[]
 }
 
 /**
@@ -364,6 +369,15 @@ export function buildDynamicContext(ctx: DynamicContext): string {
 
     // Skills 列表已通过 SDK plugin 机制自动发现并注册，无需手动注入
     // skill-creator 的持续改进提示已移至 buildSystemPrompt（静态注入，避免 per-message 重复）
+
+    // 本次会话实际注入的内置 MCP 工具（按真实 server 名枚举，杜绝模型手写错误名）
+    const builtinNames = ctx.builtinMcpServerNames ?? []
+    if (builtinNames.length > 0) {
+      wsLines.push('内置 MCP 工具（本次会话可用，调用时照抄以下真实名）:')
+      for (const name of builtinNames) {
+        wsLines.push(`- mcp__${name}__*`)
+      }
+    }
 
     if (wsLines.length > 0) {
       sections.push(`<workspace_state>\n${wsLines.join('\n')}\n</workspace_state>`)

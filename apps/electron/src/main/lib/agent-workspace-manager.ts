@@ -22,6 +22,7 @@ import {
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
+import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
 import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
 
@@ -479,6 +480,14 @@ function normalizeWorkspaceMcpConfig(config: Partial<WorkspaceMcpConfig>): Works
 
   for (const [name, rawEntry] of Object.entries(rawServers)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue
+
+    // 删除护栏：内置 MCP（kind=internal，由代码注入）的保留名不允许出现在工作区 mcp.json。
+    // 任何同名条目都是误写或冲突——剔除它，既防止用户/UI 占用保留名，也让手改 mcp.json
+    // 写入的冲突项在下次读取时自愈。内置 MCP 的开关由 builtin-mcp/settings 管理，不在此文件。
+    if (RESERVED_BUILTIN_KEYS.has(name)) {
+      console.warn(`[Agent 工作区] MCP 服务器 "${name}" 与内置 MCP 保留名冲突，已忽略（内置 MCP 不写入 mcp.json）`)
+      continue
+    }
 
     const entryRecord = { ...(rawEntry as unknown as Record<string, unknown>) }
     const entry = entryRecord as unknown as WorkspaceMcpConfig['servers'][string] & { type?: unknown }
