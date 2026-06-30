@@ -2,93 +2,38 @@
  * Proma 内置 MCP 能力目录
  *
  * 这里只维护可展示的元数据和可用性判断，不负责运行时注入。
- * 这样前端能力摘要可以安全读取内置 MCP 列表，而不会引入 Agent 编排层循环依赖。
+ * 元数据本身来自 default-mcp.json（经 baseline 加载），本文件只在其上叠加
+ * 运行时可用性判断（API Key、工作区、登录态等）。这样前端能力摘要可以安全读取
+ * 内置 MCP 列表，而不会引入 Agent 编排层循环依赖。
  */
 
-import type { BuiltinMcpServerSummary, McpToolSummary } from '@proma/shared'
+import type { BuiltinMcpServerSummary } from '@proma/shared'
 import { getToolCredentials, getToolState } from '../chat-tool-config'
 import { getMemoryConfig } from '../memory-service'
-import { isBuiltinMcpUserEnabled } from './settings'
-
-interface BuiltinMcpCatalogItem {
-  id: string
-  name: string
-  displayName: string
-  description: string
-  category: BuiltinMcpServerSummary['category']
-  tools: McpToolSummary[]
-}
+import { getBuiltinMcpDefinitions, type BuiltinMcpDefinition } from './baseline'
+import { isBuiltinMcpDefaultDisabled, isBuiltinMcpUserEnabled } from './settings'
 
 interface BuiltinMcpListContext {
   workspaceSlug?: string
 }
 
-const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogItem[] = [
-  {
-    id: 'automation',
-    name: 'automation',
-    displayName: '定时任务',
-    description: '创建、查看、更新、删除和立即运行 Proma 持久化定时任务。',
-    category: 'automation',
-    tools: [
-      { name: 'list_automations', description: '列出 Proma 定时任务。', readOnly: true },
-      { name: 'get_automation', description: '读取单个定时任务详情和运行记录。', readOnly: true },
-      { name: 'create_automation', description: '创建持久化定时任务。' },
-      { name: 'update_automation', description: '更新定时任务配置。' },
-      { name: 'delete_automation', description: '删除定时任务。' },
-      { name: 'run_automation_now', description: '立即运行一次定时任务。' },
-    ],
-  },
-  {
-    id: 'collaboration',
-    name: 'collaboration',
-    displayName: '协作子 Agent',
-    description: '创建、等待、读取和停止真实可见的 Proma 协作子 Agent 会话。',
-    category: 'collaboration',
-    tools: [
-      { name: 'list_available_agent_models', description: '列出当前渠道下可用于协作子 Agent 的模型。', readOnly: true },
-      { name: 'delegate_agent', description: '创建单个协作子 Agent 会话。' },
-      { name: 'delegate_agents', description: '批量创建协作子 Agent 会话。' },
-      { name: 'wait_for_delegations', description: '等待一组协作子会话完成。', readOnly: true },
-      { name: 'list_delegations', description: '列出当前父会话创建的子会话。', readOnly: true },
-      { name: 'get_delegation_results', description: '按委派 ID 读取子会话结果摘要。', readOnly: true },
-      { name: 'stop_delegation', description: '停止单个协作子会话。' },
-      { name: 'stop_delegations', description: '批量停止协作子会话。' },
-    ],
-  },
-  {
-    id: 'mem',
-    name: 'mem',
-    displayName: '记忆',
-    description: '通过 MemOS Cloud 检索和写入长期记忆。',
-    category: 'memory',
-    tools: [
-      { name: 'recall_memory', description: '检索用户长期记忆。', readOnly: true },
-      { name: 'add_memory', description: '写入一条长期记忆。' },
-    ],
-  },
-  {
-    id: 'nano-banana',
-    name: 'nano-banana',
-    displayName: 'Nano Banana 生图',
-    description: '通过 Gemini Image Generation 为 Agent 提供图片生成和编辑能力。',
-    category: 'media',
-    tools: [
-      { name: 'generate_image', description: '生成或编辑图片。' },
-    ],
-  },
-]
-
 function resolveAvailability(
-  item: BuiltinMcpCatalogItem,
+  item: BuiltinMcpDefinition,
   ctx: BuiltinMcpListContext,
 ): Pick<BuiltinMcpServerSummary, 'enabled' | 'available' | 'availabilityReason'> {
+  // 基础设施型（如 proma-cloud）：登录后始终注入，不受用户开关影响
+  if (item.toggleable === false) {
+    return { enabled: true, available: true }
+  }
+
   const userEnabled = isBuiltinMcpUserEnabled(item.id)
   if (!userEnabled) {
     return {
       enabled: false,
       available: false,
-      availabilityReason: '已手动关闭',
+      availabilityReason: isBuiltinMcpDefaultDisabled(item.id)
+        ? '默认关闭，可手动开启'
+        : '已手动关闭',
     }
   }
 
@@ -130,8 +75,14 @@ function resolveAvailability(
 }
 
 export function listBuiltinMcpServers(ctx: BuiltinMcpListContext = {}): BuiltinMcpServerSummary[] {
-  return BUILTIN_MCP_CATALOG.map((item) => ({
-    ...item,
+  return getBuiltinMcpDefinitions().map((item) => ({
+    id: item.id,
+    name: item.name,
+    displayName: item.displayName,
+    description: item.description,
+    category: item.category,
+    tools: item.tools,
+    toggleable: item.toggleable,
     ...resolveAvailability(item, ctx),
   }))
 }
