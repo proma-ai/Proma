@@ -10,7 +10,7 @@
 import { atom } from 'jotai'
 
 export type ActiveView = 'conversations' | 'automations' | 'agent-skills'
-export type AgentSkillsCapabilityTab = 'skills' | 'mcp'
+export type AgentSkillsCapabilityTab = 'skills' | 'mcp' | 'memory'
 
 /** 当前活跃视图（不持久化，每次启动默认显示对话） */
 export const activeViewAtom = atom<ActiveView>('conversations')

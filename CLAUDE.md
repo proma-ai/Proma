@@ -160,7 +160,6 @@ bun run generate:icons    # 生成应用图标
 - `ENVIRONMENT_IPC_CHANNELS` - 环境检查
 - `PROXY_IPC_CHANNELS` - 代理设置
 - `SYSTEM_PROMPT_IPC_CHANNELS` - 系统提示词
-- `MEMORY_IPC_CHANNELS` - 记忆功能
 - `CHAT_TOOL_IPC_CHANNELS` - Chat 工具
 - `FEISHU_IPC_CHANNELS` - 飞书集成
 - `GITHUB_RELEASE_IPC_CHANNELS` - GitHub 发布
@@ -187,8 +186,6 @@ bun run generate:icons    # 生成应用图标
 | 服务 | 职责 |
 |------|------|
 | `feishu-bridge.ts` | 飞书集成（68KB）：消息同步、任务通知、OAuth 认证 |
-| `memory-service.ts` | 记忆管理：跨会话记忆存储与检索 |
-| `memos-client.ts` | Memos 客户端：笔记服务集成 |
 
 #### 工具与文件
 
@@ -495,7 +492,6 @@ React UI 更新
 - ✅ **飞书集成**：消息同步、任务通知、OAuth 认证（68KB 核心服务）
 - ✅ **工作区管理**：多工作区隔离、MCP Server 配置、Skills 管理
 - ✅ **权限系统**：工具权限检查、用户确认流程
-- ✅ **记忆系统**：跨会话记忆存储与检索
 - ✅ **自动更新**：Electron Updater 集成
 - ✅ **代理支持**：系统代理检测与配置
 - ✅ **文档解析**：PDF、Office、文本文件提取

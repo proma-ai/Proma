@@ -9,7 +9,6 @@
 
 import type { BuiltinMcpServerSummary } from '@proma/shared'
 import { getToolCredentials, getToolState } from '../chat-tool-config'
-import { getMemoryConfig } from '../memory-service'
 import { getBuiltinMcpDefinitions, type BuiltinMcpDefinition } from './baseline'
 import { isBuiltinMcpDefaultDisabled, isBuiltinMcpUserEnabled } from './settings'
 
@@ -43,18 +42,6 @@ function resolveAvailability(
       enabled: true,
       available,
       availabilityReason: available ? undefined : '需要先选择工作区',
-    }
-  }
-
-  if (item.id === 'mem') {
-    const config = getMemoryConfig()
-    const available = config.enabled && !!config.apiKey
-    return {
-      enabled: true,
-      available,
-      availabilityReason: available
-        ? undefined
-        : config.enabled ? '需要配置 MemOS API Key' : '记忆工具未启用',
     }
   }
 

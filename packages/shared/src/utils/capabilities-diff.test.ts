@@ -11,6 +11,10 @@ function makeCaps(
     mcpServers: mcpServers.map((s) => ({ ...s, type: 'stdio' as const })),
     builtinMcpServers: [],
     skills: skills.map((s) => ({ ...s })),
+    memory: {
+      claudeMd: { exists: false, path: '', size: 0 },
+      autoMemory: { directory: '', memoryMdExists: false, fileCount: 0, totalSize: 0 },
+    },
   }
 }
 

@@ -21,7 +21,7 @@ import {
   getAgentWorkspacePath,
   getSdkConfigDir,
 } from './config-paths'
-import { getAgentWorkspace } from './agent-workspace-manager'
+import { getAgentWorkspace, getWorkspaceAutoMemoryDir } from './agent-workspace-manager'
 
 // 在模块加载时一次性设置 SDK 配置目录，避免在 forkSession 等异步调用中临时修改/恢复
 // process.env 导致的并发安全问题（异步操作的 await 间隙其他代码可能读到错误值）
@@ -54,6 +54,61 @@ interface AgentSessionsIndex {
 
 /** 当前索引版本 */
 const INDEX_VERSION = 1
+
+interface JsonlParseError {
+  lineNumber: number
+  message: string
+}
+
+/**
+ * 逐行解析 JSONL，调用方按业务场景决定容错或严格失败。
+ */
+function parseJsonlLines<T>(lines: string[]): { records: T[]; errors: JsonlParseError[] } {
+  const records: T[] = []
+  const errors: JsonlParseError[] = []
+  for (let i = 0; i < lines.length; i++) {
+    try {
+      records.push(JSON.parse(lines[i]!) as T)
+    } catch (err) {
+      errors.push({
+        lineNumber: i + 1,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  return { records, errors }
+}
+
+/**
+ * 展示/检索类读取：跳过损坏行，保留其它可读消息。
+ */
+function parseJsonlLenient<T>(lines: string[], context: string): T[] {
+  const { records, errors } = parseJsonlLines<T>(lines)
+  for (const error of errors) {
+    console.warn(`[Agent 会话] ${context} — JSONL 第 ${error.lineNumber} 行解析失败，已跳过:`, error.message)
+  }
+  return records
+}
+
+/**
+ * 回退/文件恢复类读取：任何损坏行都可能破坏消息顺序或快照完整性，必须停止。
+ */
+function parseJsonlStrict<T>(lines: string[], context: string): T[] {
+  const { records, errors } = parseJsonlLines<T>(lines)
+  if (errors.length > 0) {
+    const first = errors[0]!
+    throw new Error(`${context} 失败：JSONL 第 ${first.lineNumber} 行解析失败: ${first.message}`)
+  }
+  return records
+}
+
+function normalizePersistedSDKMessage(parsed: unknown): SDKMessage {
+  // 旧格式检测：AgentMessage 有 `role` 字段，SDKMessage 有 `type` 字段
+  if (parsed && typeof parsed === 'object' && 'role' in parsed && !('type' in parsed)) {
+    return convertLegacyMessage(parsed as AgentMessage)
+  }
+  return parsed as SDKMessage
+}
 
 /**
  * 读取会话索引文件
@@ -146,6 +201,11 @@ export function createAgentSession(
         sdkSettings.skipWebFetchPreflight = true
         needsWrite = true
       }
+      const autoMemoryDirectory = getWorkspaceAutoMemoryDir(ws.slug)
+      if (sdkSettings.autoMemoryDirectory !== autoMemoryDirectory) {
+        sdkSettings.autoMemoryDirectory = autoMemoryDirectory
+        needsWrite = true
+      }
       if (needsWrite) {
         writeFileSync(settingsPath, JSON.stringify(sdkSettings, null, 2))
       }
@@ -173,7 +233,7 @@ export function getAgentSessionMessages(id: string): AgentMessage[] {
   try {
     const raw = readFileSync(filePath, 'utf-8')
     const lines = raw.split('\n').filter((line) => line.trim())
-    return lines.map((line) => JSON.parse(line) as AgentMessage)
+    return parseJsonlLenient<AgentMessage>(lines, `读取会话消息 (${id})`)
   } catch (error) {
     console.error(`[Agent 会话] 读取消息失败 (${id}):`, error)
     return []
@@ -295,14 +355,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
   try {
     const raw = readFileSync(filePath, 'utf-8')
     const lines = raw.split('\n').filter((line) => line.trim())
-    return lines.map((line) => {
-      const parsed = JSON.parse(line)
-      // 旧格式检测：AgentMessage 有 `role` 字段，SDKMessage 有 `type` 字段
-      if ('role' in parsed && !('type' in parsed)) {
-        return convertLegacyMessage(parsed as AgentMessage)
-      }
-      return parsed as SDKMessage
-    })
+    return parseJsonlLenient<unknown>(lines, `读取 SDKMessage (${id})`).map(normalizePersistedSDKMessage)
   } catch (error) {
     console.error(`[Agent 会话] 读取 SDKMessage 失败 (${id}):`, error)
     return []
@@ -955,7 +1008,14 @@ function rewriteSourceToDest(content: string, sourceDir: string, destDir: string
  * @returns 截断后保留的消息列表
  */
 export function truncateSDKMessages(id: string, upToUuidInclusive: string): SDKMessage[] {
-  const messages = getAgentSessionSDKMessages(id)
+  const filePath = getAgentSessionMessagesPath(id)
+  if (!existsSync(filePath)) {
+    throw new Error(`[Agent 会话] 截断失败: 会话消息文件不存在, sessionId=${id}`)
+  }
+
+  const raw = readFileSync(filePath, 'utf-8')
+  const lines = raw.split('\n').filter((line) => line.trim())
+  const messages = parseJsonlStrict<unknown>(lines, `截断读取 SDKMessage (${id})`).map(normalizePersistedSDKMessage)
   const cutIndex = messages.findIndex(
     (m) => 'uuid' in m && (m as { uuid?: string }).uuid === upToUuidInclusive,
   )
@@ -964,7 +1024,6 @@ export function truncateSDKMessages(id: string, upToUuidInclusive: string): SDKM
   }
   const kept = messages.slice(0, cutIndex + 1)
 
-  const filePath = getAgentSessionMessagesPath(id)
   const content = kept.map((m) => JSON.stringify(m)).join('\n') + (kept.length > 0 ? '\n' : '')
   writeFileSync(filePath, content, 'utf-8')
 
@@ -1036,7 +1095,7 @@ export function resolveUserUuidFromSDK(
   // 读取并解析 SDK JSONL
   try {
     const lines = readFileSync(sessionFilePath, 'utf-8').split('\n').filter(Boolean)
-    const messages = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+    const messages = parseJsonlStrict<Record<string, unknown>>(lines, `rewind 解析 SDK JSONL (${usingSourceSession ? '源会话' : '当前会话'})`)
 
     // 找到 assistant message 的位置
     const assistantIdx = messages.findIndex((m) => m.uuid === assistantMessageUuid)
@@ -1141,7 +1200,7 @@ export function rewindFilesFromSnapshot(
     let messages: Record<string, unknown>[] = []
     if (sessionFilePath) {
       const lines = readFileSync(sessionFilePath, 'utf-8').split('\n').filter(Boolean)
-      messages = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+      messages = parseJsonlStrict<Record<string, unknown>>(lines, 'rewindFilesFromSnapshot 解析当前 JSONL')
     }
 
     // 找到目标 user message 的位置
@@ -1156,7 +1215,7 @@ export function rewindFilesFromSnapshot(
         return { canRewind: false, error: '未找到源会话 SDK session JSONL（fork 回退需要源会话数据）' }
       }
       const sourceLines = readFileSync(sourceFilePath, 'utf-8').split('\n').filter(Boolean)
-      messages = sourceLines.map((l) => JSON.parse(l) as Record<string, unknown>)
+      messages = parseJsonlStrict<Record<string, unknown>>(sourceLines, 'rewindFilesFromSnapshot 解析源会话 JSONL')
       targetIdx = messages.findIndex((m) => m.uuid === userMessageUuid)
       effectiveSdkSessionId = forkSourceSdkSessionId
       isForkFallback = true
@@ -1551,7 +1610,14 @@ function findSessionMessageSnippet(sessionId: string, query: string): string | u
     const lines = raw.split('\n').filter((line) => line.trim())
 
     for (const line of lines) {
-      const textContent = extractTextFromPersistedMessage(JSON.parse(line))
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(line)
+      } catch (error) {
+        console.warn(`[Agent 会话] 会话引用摘要跳过无法解析的 JSONL 行 (${sessionId}):`, error)
+        continue
+      }
+      const textContent = extractTextFromPersistedMessage(parsed)
       if (!textContent) continue
 
       const matchIndex = textContent.toLowerCase().indexOf(queryLower)

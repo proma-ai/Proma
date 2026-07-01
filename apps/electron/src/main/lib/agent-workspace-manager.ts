@@ -6,7 +6,7 @@
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
@@ -24,7 +24,7 @@ import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
-import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent } from '@proma/shared'
+import type { AgentWorkspace, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, WorkspaceMemorySummary } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
@@ -612,6 +612,7 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
   const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
   const skills = getWorkspaceSkills(workspaceSlug)
   const builtinMcpServers = listBuiltinMcpServers({ workspaceSlug })
+  const memory = getWorkspaceMemorySummary(workspaceSlug)
 
   const mcpServers = Object.entries(mcpConfig.servers ?? {}).map(([name, entry]) => ({
     name,
@@ -619,7 +620,7 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
     type: entry.type,
   }))
 
-  return { mcpServers, builtinMcpServers, skills }
+  return { mcpServers, builtinMcpServers, skills, memory }
 }
 
 export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): void {
@@ -909,6 +910,236 @@ export function writeWorkspaceSkillContent(workspaceSlug: string, skillSlug: str
 const SKILL_FILE_SIZE_LIMIT = 10 * 1024 * 1024
 /** 文件树递归深度上限，防止异常深嵌套 */
 const SKILL_TREE_MAX_DEPTH = 8
+
+const WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
+const AUTO_MEMORY_DIR = '.claude/memory'
+const AUTO_MEMORY_INDEX = 'MEMORY.md'
+
+function fileSummary(absPath: string): WorkspaceMemorySummary['claudeMd'] {
+  if (!existsSync(absPath)) {
+    return { exists: false, path: absPath, size: 0 }
+  }
+  const st = statSync(absPath)
+  return {
+    exists: st.isFile(),
+    path: absPath,
+    size: st.isFile() ? st.size : 0,
+    updatedAt: st.mtimeMs,
+  }
+}
+
+export function getWorkspaceClaudeMdPath(workspaceSlug: string): string {
+  return join(getAgentWorkspacePath(workspaceSlug), WORKSPACE_CLAUDE_MD)
+}
+
+function getWorkspaceAutoMemoryPath(workspaceSlug: string): string {
+  return join(getAgentWorkspacePath(workspaceSlug), AUTO_MEMORY_DIR)
+}
+
+export function getWorkspaceAutoMemoryDir(workspaceSlug: string): string {
+  const dir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  return dir
+}
+
+function resolveAutoMemoryFilePath(memoryDir: string, relativePath: string): string {
+  if (typeof relativePath !== 'string' || relativePath.length === 0) {
+    throw new Error('相对路径不能为空')
+  }
+  if (isAbsolute(relativePath)) {
+    throw new Error('禁止传入绝对路径')
+  }
+  const normalized = relativePath.replace(/\\/g, '/')
+  const resolved = resolve(memoryDir, normalized)
+  const rel = relative(memoryDir, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('非法路径：禁止访问 auto memory 目录外')
+  }
+  // 防御 symlink 逃逸：字符串层面的 relative 检查无法识别目录内指向外部的软链接。
+  // 对真实存在的最近祖先做 realpath 校验，确保解析后仍落在 memoryDir 之内。
+  const memoryRealDir = existsSync(memoryDir) ? realpathSync(memoryDir) : memoryDir
+  let probe = resolved
+  while (probe !== memoryDir && !existsSync(probe)) {
+    const parent = dirname(probe)
+    if (parent === probe) break
+    probe = parent
+  }
+  if (existsSync(probe)) {
+    const realProbe = realpathSync(probe)
+    const realRel = relative(memoryRealDir, realProbe)
+    if (realRel.startsWith('..') || isAbsolute(realRel)) {
+      throw new Error('非法路径：禁止通过软链接访问 auto memory 目录外')
+    }
+  }
+  return resolved
+}
+
+function collectAutoMemorySummary(memoryDir: string): WorkspaceMemorySummary['autoMemory'] {
+  let fileCount = 0
+  let totalSize = 0
+  let updatedAt: number | undefined
+
+  const walk = (dir: string, depth: number): void => {
+    if (depth > SKILL_TREE_MAX_DEPTH) return
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const absPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(absPath, depth + 1)
+      } else if (entry.isFile()) {
+        const st = statSync(absPath)
+        if (isLikelyBinaryFile(absPath, st.size)) continue
+        fileCount += 1
+        totalSize += st.size
+        updatedAt = updatedAt == null ? st.mtimeMs : Math.max(updatedAt, st.mtimeMs)
+      }
+    }
+  }
+
+  walk(memoryDir, 0)
+  return {
+    directory: memoryDir,
+    memoryMdExists: existsSync(join(memoryDir, AUTO_MEMORY_INDEX)),
+    fileCount,
+    totalSize,
+    updatedAt,
+  }
+}
+
+function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number): SkillFileNode[] {
+  if (depth > SKILL_TREE_MAX_DEPTH) return []
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(currentDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const nodes: SkillFileNode[] = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    const absPath = join(currentDir, entry.name)
+    const rel = relative(rootDir, absPath).split(/[\\/]/).join('/')
+
+    if (entry.isDirectory()) {
+      nodes.push({
+        relativePath: rel,
+        name: entry.name,
+        type: 'directory',
+        children: buildMemoryFileTree(rootDir, absPath, depth + 1),
+      })
+    } else if (entry.isFile()) {
+      let size = 0
+      try {
+        size = statSync(absPath).size
+      } catch {
+        // ignore
+      }
+      nodes.push({
+        relativePath: rel,
+        name: entry.name,
+        type: 'file',
+        size,
+        isText: !isLikelyBinaryFile(absPath, size),
+      })
+    }
+  }
+
+  nodes.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+    if (a.relativePath === AUTO_MEMORY_INDEX) return -1
+    if (b.relativePath === AUTO_MEMORY_INDEX) return 1
+    return a.name.localeCompare(b.name)
+  })
+  return nodes
+}
+
+export function getWorkspaceMemorySummary(workspaceSlug: string): WorkspaceMemorySummary {
+  const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  return {
+    claudeMd: fileSummary(getWorkspaceClaudeMdPath(workspaceSlug)),
+    autoMemory: collectAutoMemorySummary(memoryDir),
+  }
+}
+
+export function readWorkspaceClaudeMd(workspaceSlug: string): SkillFileContent {
+  const abs = getWorkspaceClaudeMdPath(workspaceSlug)
+  if (!existsSync(abs)) {
+    return { relativePath: WORKSPACE_CLAUDE_MD, isText: true, size: 0, content: '' }
+  }
+  const st = statSync(abs)
+  if (!st.isFile()) throw new Error(`${WORKSPACE_CLAUDE_MD} 不是文件`)
+  if (st.size > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`文件过大（${(st.size / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+  const binary = isLikelyBinaryFile(abs, st.size)
+  return {
+    relativePath: WORKSPACE_CLAUDE_MD,
+    isText: !binary,
+    size: st.size,
+    content: binary ? undefined : readFileSync(abs, 'utf-8'),
+  }
+}
+
+export function writeWorkspaceClaudeMd(workspaceSlug: string, content: string): void {
+  const byteLen = Buffer.byteLength(content, 'utf-8')
+  if (byteLen > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+  writeFileSync(getWorkspaceClaudeMdPath(workspaceSlug), content, 'utf-8')
+  console.log(`[Agent 工作区] 已更新工作区 CLAUDE.md: ${workspaceSlug}`)
+}
+
+export function listWorkspaceAutoMemoryFiles(workspaceSlug: string): SkillFileNode[] {
+  const dir = getWorkspaceAutoMemoryDir(workspaceSlug)
+  return buildMemoryFileTree(dir, dir, 0)
+}
+
+export function readWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath: string): SkillFileContent {
+  const dir = getWorkspaceAutoMemoryDir(workspaceSlug)
+  const abs = resolveAutoMemoryFilePath(dir, relativePath)
+  if (!existsSync(abs) && relativePath === AUTO_MEMORY_INDEX) {
+    return { relativePath: AUTO_MEMORY_INDEX, isText: true, size: 0, content: '' }
+  }
+  if (!existsSync(abs)) throw new Error(`文件不存在: ${relativePath}`)
+
+  const st = statSync(abs)
+  if (!st.isFile()) throw new Error(`目标不是文件: ${relativePath}`)
+  if (st.size > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`文件过大（${(st.size / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+
+  const binary = isLikelyBinaryFile(abs, st.size)
+  return {
+    relativePath: relative(dir, abs).split(/[\\/]/).join('/'),
+    isText: !binary,
+    size: st.size,
+    content: binary ? undefined : readFileSync(abs, 'utf-8'),
+  }
+}
+
+export function writeWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath: string, content: string): void {
+  const dir = getWorkspaceAutoMemoryDir(workspaceSlug)
+  const abs = resolveAutoMemoryFilePath(dir, relativePath)
+  const byteLen = Buffer.byteLength(content, 'utf-8')
+  if (byteLen > SKILL_FILE_SIZE_LIMIT) {
+    throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
+  }
+  const parent = dirname(abs)
+  if (!existsSync(parent)) {
+    mkdirSync(parent, { recursive: true })
+  }
+  writeFileSync(abs, content, 'utf-8')
+  console.log(`[Agent 工作区] 已更新 auto memory 文件: ${workspaceSlug}/${relativePath}`)
+}
 
 /** 把相对路径限制在 Skill 根目录内，并拒绝直接覆盖 SKILL.md */
 function resolveSkillChildPath(skillDir: string, relativePath: string, opts: { allowSkillMd?: boolean } = {}): string {

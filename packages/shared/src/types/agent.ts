@@ -4,32 +4,6 @@
  * 包含 Agent SDK 集成所需的事件类型、会话管理、消息持久化和 IPC 通道常量。
  */
 
-// ===== 记忆配置 =====
-
-/** 全局记忆配置（MemOS Cloud） */
-export interface MemoryConfig {
-  /** 是否启用记忆功能 */
-  enabled: boolean
-  /** MemOS Cloud API Key */
-  apiKey: string
-  /** 用户标识 */
-  userId: string
-  /** 自定义 API 地址（可选，默认 MemOS Cloud） */
-  baseUrl?: string
-}
-
-/**
- * 全局记忆配置 IPC 通道常量
- */
-export const MEMORY_IPC_CHANNELS = {
-  /** 获取全局记忆配置 */
-  GET_CONFIG: 'memory:get-config',
-  /** 保存全局记忆配置 */
-  SET_CONFIG: 'memory:set-config',
-  /** 测试记忆连接 */
-  TEST_CONNECTION: 'memory:test-connection',
-} as const
-
 // ===== Agent 工作区 =====
 
 /** Agent 工作区 */
@@ -884,11 +858,43 @@ export interface SkillFileContent {
   size: number
 }
 
+/** 工作区记忆文件摘要 */
+export interface WorkspaceMemoryFileSummary {
+  /** 文件是否存在 */
+  exists: boolean
+  /** 绝对路径 */
+  path: string
+  /** 文件大小（字节） */
+  size: number
+  /** 最近修改时间戳 */
+  updatedAt?: number
+}
+
+/** 工作区记忆摘要 */
+export interface WorkspaceMemorySummary {
+  /** 工作区级 CLAUDE.md */
+  claudeMd: WorkspaceMemoryFileSummary
+  /** SDK auto memory 目录 */
+  autoMemory: {
+    /** 绝对目录路径 */
+    directory: string
+    /** MEMORY.md 是否存在 */
+    memoryMdExists: boolean
+    /** 文本文件数量 */
+    fileCount: number
+    /** 总大小（字节） */
+    totalSize: number
+    /** 最近修改时间戳 */
+    updatedAt?: number
+  }
+}
+
 /** 工作区能力摘要（MCP + Skill 计数） */
 export interface WorkspaceCapabilities {
   mcpServers: Array<{ name: string; enabled: boolean; type: McpTransportType }>
   builtinMcpServers: BuiltinMcpServerSummary[]
   skills: SkillMeta[]
+  memory: WorkspaceMemorySummary
 }
 
 // ===== Agent 发送输入 =====
@@ -1461,6 +1467,18 @@ export const AGENT_IPC_CHANNELS = {
   DELETE_SKILL_ENTRY: 'agent:delete-skill-entry',
   /** 重命名/移动 Skill 目录下的文件或目录 */
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
+  /** 获取工作区记忆摘要 */
+  GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
+  /** 读取工作区 CLAUDE.md */
+  READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
+  /** 写入工作区 CLAUDE.md */
+  WRITE_WORKSPACE_CLAUDE_MD: 'agent:write-workspace-claude-md',
+  /** 列出工作区 auto memory 文件树 */
+  LIST_WORKSPACE_AUTO_MEMORY_FILES: 'agent:list-workspace-auto-memory-files',
+  /** 读取工作区 auto memory 文件 */
+  READ_WORKSPACE_AUTO_MEMORY_FILE: 'agent:read-workspace-auto-memory-file',
+  /** 写入工作区 auto memory 文件 */
+  WRITE_WORKSPACE_AUTO_MEMORY_FILE: 'agent:write-workspace-auto-memory-file',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

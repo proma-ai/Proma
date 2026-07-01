@@ -12,11 +12,6 @@ import type { ToolDefinition, ToolParameterProperty } from '@proma/core'
 import type { ChatToolInfo, ChatToolMeta } from '@proma/shared'
 import { getChatToolsConfig } from './chat-tool-config'
 import {
-  MEMORY_TOOL_META,
-  MEMORY_TOOL_DEFINITIONS,
-  isMemoryAvailable,
-} from './chat-tools/memory-tool'
-import {
   WEB_SEARCH_TOOL_META,
   WEB_SEARCH_TOOL_DEFINITIONS,
   isWebSearchAvailable,
@@ -49,11 +44,6 @@ interface BuiltinToolEntry {
 
 /** 所有内置工具 */
 const BUILTIN_TOOLS: BuiltinToolEntry[] = [
-  {
-    meta: MEMORY_TOOL_META,
-    getDefinitions: () => MEMORY_TOOL_DEFINITIONS,
-    checkAvailable: isMemoryAvailable,
-  },
   {
     meta: WEB_SEARCH_TOOL_META,
     getDefinitions: () => WEB_SEARCH_TOOL_DEFINITIONS,

@@ -229,7 +229,7 @@ Main-process services live in `apps/electron/src/main/lib/`:
 - `conversation-manager.ts`: Chat session index and message storage.
 - `channel-manager.ts`: channel CRUD, API key encryption, connection tests, model fetching.
 - `feishu-bridge.ts` / `dingtalk-bridge.ts` / `wechat-bridge.ts`: remote bot bridges.
-- `memory-service.ts`, `chat-tool-*`, `document-parser.ts`, `workspace-watcher.ts`: memory, tools, document parsing, and file watching.
+- `chat-tool-*`, `document-parser.ts`, `workspace-watcher.ts`: tools, document parsing, and file watching.
 
 Renderer state is managed with Jotai. Key atoms live in `apps/electron/src/renderer/atoms/`. Agent IPC listeners are mounted globally at the app root so streaming events, permission requests, and background tasks survive view changes.
 
@@ -281,7 +281,6 @@ Proma currently has a PR bounty program. You can leave your email in the PR desc
 - [Cherry Studio](https://github.com/CherryHQ/cherry-studio): inspiration for multi-provider desktop AI products.
 - [Lobe Icons](https://github.com/lobehub/lobe-icons): AI / LLM brand icons.
 - [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss): Agent SDK integration reference.
-- [MemOS](https://memos.openmem.net): memory reference and integration.
 
 ## License
 

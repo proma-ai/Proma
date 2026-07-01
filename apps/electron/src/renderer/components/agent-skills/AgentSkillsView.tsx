@@ -33,6 +33,7 @@ import { SkillDetailSheet } from './SkillDetailSheet'
 import { McpDetailSheet } from './McpDetailSheet'
 import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
+import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 
 export function AgentSkillsView(): React.ReactElement {
   const data = useAgentSkillsData()
@@ -91,6 +92,7 @@ export function AgentSkillsView(): React.ReactElement {
     () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length + data.builtinMcpServers.length,
     [data.mcpConfig, data.builtinMcpServers],
   )
+  const memoryCount = (data.capabilities?.memory.claudeMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
 
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
@@ -178,17 +180,20 @@ export function AgentSkillsView(): React.ReactElement {
 
       {/* 工具条 */}
       <div className="titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center gap-3 px-8 pb-4">
-        {/* Skills / MCP 切换 */}
+        {/* Skills / MCP / 记忆切换 */}
         <div className="relative flex h-8 items-stretch rounded-xl bg-muted p-0.5">
           <div
             className={cn(
-              'absolute bottom-0.5 top-0.5 w-[calc(50%-3px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
-              tab === 'skills' ? 'translate-x-0' : 'translate-x-[100%]',
+              'absolute bottom-0.5 top-0.5 w-[calc(33.333%-3px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
+              tab === 'skills' && 'translate-x-0',
+              tab === 'mcp' && 'translate-x-full',
+              tab === 'memory' && 'translate-x-[200%]',
             )}
           />
           {([
             { value: 'skills' as const, label: 'Skills', count: data.skills.length },
             { value: 'mcp' as const, label: 'MCP', count: mcpCount },
+            { value: 'memory' as const, label: '记忆', count: memoryCount },
           ]).map(({ value, label, count }) => (
             <button
               key={value}
@@ -210,25 +215,27 @@ export function AgentSkillsView(): React.ReactElement {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={tab === 'skills' ? '搜索 Skills...' : '搜索 MCP 服务器...'}
+            placeholder={tab === 'skills' ? '搜索 Skills...' : tab === 'mcp' ? '搜索 MCP 服务器...' : '搜索记忆文件...'}
             className="w-full bg-transparent text-[13px] text-foreground placeholder:text-foreground/35 focus:outline-none"
           />
         </div>
 
         {/* 社区市场（占位） */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              disabled
-              className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border/60 px-3 text-[13px] font-medium text-foreground/35"
-            >
-              <Store size={14} />
-              <span>社区市场</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">即将上线：一键浏览、安装与更新社区 Skills</TooltipContent>
-        </Tooltip>
+        {tab === 'skills' && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled
+                className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border/60 px-3 text-[13px] font-medium text-foreground/35"
+              >
+                <Store size={14} />
+                <span>社区市场</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">即将上线：一键浏览、安装与更新社区 Skills</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Skills：从其他工作区导入 */}
         {tab === 'skills' && (
@@ -272,7 +279,7 @@ export function AgentSkillsView(): React.ReactElement {
               onToggle={data.toggleSkill}
               onUpdate={data.updateSkill}
             />
-          ) : (
+          ) : tab === 'mcp' ? (
             <McpTab
               userEntries={userMcpEntries}
               builtinServers={builtinMcpServers}
@@ -284,6 +291,8 @@ export function AgentSkillsView(): React.ReactElement {
               onRequestDelete={setPendingDeleteMcpName}
               onAdd={() => { setEditingMcp(null); setMcpSheetOpen(true) }}
             />
+          ) : (
+            <WorkspaceMemoryTab workspaceSlug={data.workspaceSlug} search={search} />
           )}
         </div>
       </div>

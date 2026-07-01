@@ -233,7 +233,7 @@ shared 类型和 IPC 常量
 - `conversation-manager.ts`：Chat 会话索引和消息存储。
 - `channel-manager.ts`：渠道 CRUD、API Key 加密、连接测试、模型获取。
 - `feishu-bridge.ts` / `dingtalk-bridge.ts` / `wechat-bridge.ts`：远程机器人桥接。
-- `memory-service.ts`、`chat-tool-*`、`document-parser.ts`、`workspace-watcher.ts`：记忆、工具、文档解析和文件监听。
+- `chat-tool-*`、`document-parser.ts`、`workspace-watcher.ts`：工具、文档解析和文件监听。
 
 渲染进程以 Jotai 管理状态，关键 atoms 位于 `apps/electron/src/renderer/atoms/`。Agent IPC 监听器在应用顶层全局挂载，避免切换页面时丢失流式事件、权限请求或后台任务状态。
 
@@ -290,7 +290,6 @@ Proma 目前设有 PR 赠金计划。提交 PR 时可以在描述中留下邮箱
 - [Cherry Studio](https://github.com/CherryHQ/cherry-studio)：多供应商桌面 AI 产品启发。
 - [Lobe Icons](https://github.com/lobehub/lobe-icons)：AI / LLM 品牌图标。
 - [Craft Agents OSS](https://github.com/lukilabs/craft-agents-oss)：Agent SDK 集成模式参考。
-- [MemOS](https://memos.openmem.net)：记忆能力参考与集成。
 
 ## 许可证
 

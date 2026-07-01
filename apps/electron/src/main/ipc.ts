@@ -9,7 +9,7 @@ import { join, resolve, sep, dirname } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -57,7 +57,9 @@ import type {
   StopTaskInput,
   WorkspaceMcpConfig,
   SkillMeta,
+  SkillFileContent,
   WorkspaceCapabilities,
+  WorkspaceMemorySummary,
   FileEntry,
   FileSearchResult,
   EnvironmentCheckResult,
@@ -76,7 +78,6 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
-  MemoryConfig,
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
@@ -219,6 +220,12 @@ import {
   createSkillEntry,
   deleteSkillEntry,
   renameSkillEntry,
+  getWorkspaceMemorySummary,
+  readWorkspaceClaudeMd,
+  writeWorkspaceClaudeMd,
+  listWorkspaceAutoMemoryFiles,
+  readWorkspaceAutoMemoryFile,
+  writeWorkspaceAutoMemoryFile,
   getWorkspaceAttachedDirectories,
   getWorkspaceAttachedFiles,
   attachWorkspaceDirectory,
@@ -230,7 +237,6 @@ import {
   removeWorktreeRepo,
   cleanupStaleWorkspaceAttachedPaths,
 } from './lib/agent-workspace-manager'
-import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import { getAllToolInfos } from './lib/chat-tool-registry'
 import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
 import {
@@ -2157,6 +2163,50 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // ===== 工作区记忆文件管理 =====
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY,
+    async (_, workspaceSlug: string): Promise<WorkspaceMemorySummary> => {
+      return getWorkspaceMemorySummary(workspaceSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD,
+    async (_, workspaceSlug: string): Promise<SkillFileContent> => {
+      return readWorkspaceClaudeMd(workspaceSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD,
+    async (_, workspaceSlug: string, content: string): Promise<void> => {
+      writeWorkspaceClaudeMd(workspaceSlug, content)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_WORKSPACE_AUTO_MEMORY_FILES,
+    async (_, workspaceSlug: string) => {
+      return listWorkspaceAutoMemoryFiles(workspaceSlug)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_WORKSPACE_AUTO_MEMORY_FILE,
+    async (_, workspaceSlug: string, relativePath: string): Promise<SkillFileContent> => {
+      return readWorkspaceAutoMemoryFile(workspaceSlug, relativePath)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE,
+    async (_, workspaceSlug: string, relativePath: string, content: string): Promise<void> => {
+      writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content)
+    }
+  )
+
   // 发送 Agent 消息（触发 Agent SDK 流式响应）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
@@ -2274,43 +2324,6 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 全局记忆配置
-  ipcMain.handle(
-    MEMORY_IPC_CHANNELS.GET_CONFIG,
-    async (): Promise<MemoryConfig> => {
-      return getMemoryConfig()
-    }
-  )
-
-  ipcMain.handle(
-    MEMORY_IPC_CHANNELS.SET_CONFIG,
-    async (_, config: MemoryConfig): Promise<void> => {
-      setMemoryConfig(config)
-    }
-  )
-
-  ipcMain.handle(
-    MEMORY_IPC_CHANNELS.TEST_CONNECTION,
-    async (): Promise<{ success: boolean; message: string }> => {
-      const config = getMemoryConfig()
-      if (!config.apiKey) {
-        return { success: false, message: '请先填写 API Key' }
-      }
-      try {
-        const { searchMemory } = await import('./lib/memos-client')
-        const result = await searchMemory(
-          { apiKey: config.apiKey, userId: config.userId?.trim() || 'proma-user', baseUrl: config.baseUrl },
-          'test connection',
-          1,
-        )
-        return { success: true, message: `连接成功，已检索到 ${result.facts.length} 条事实、${result.preferences.length} 条偏好` }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error)
-        return { success: false, message: `连接失败: ${msg}` }
-      }
-    }
-  )
-
   // ===== Chat 工具管理 =====
 
   // 获取所有工具信息
@@ -2365,25 +2378,6 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     CHAT_TOOL_IPC_CHANNELS.TEST_TOOL,
     async (_, toolId: string): Promise<{ success: boolean; message: string }> => {
-      // 记忆工具复用现有测试逻辑
-      if (toolId === 'memory') {
-        const config = getMemoryConfig()
-        if (!config.apiKey) {
-          return { success: false, message: '请先填写 API Key' }
-        }
-        try {
-          const { searchMemory } = await import('./lib/memos-client')
-          const result = await searchMemory(
-            { apiKey: config.apiKey, userId: config.userId?.trim() || 'proma-user', baseUrl: config.baseUrl },
-            'test connection',
-            1,
-          )
-          return { success: true, message: `连接成功，已检索到 ${result.facts.length} 条事实、${result.preferences.length} 条偏好` }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error)
-          return { success: false, message: `连接失败: ${msg}` }
-        }
-      }
       // 联网搜索工具测试
       if (toolId === 'web-search') {
         const { getToolCredentials: getCredentials } = await import('./lib/chat-tool-config')

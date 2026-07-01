@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS } from '@proma/shared'
 // Cloud 模式专属 IPC 通道
 import { CLOUD_IPC_CHANNELS, SYNC_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
@@ -54,6 +54,7 @@ import type {
   SkillMeta,
   OtherWorkspaceSkillsGroup,
   WorkspaceCapabilities,
+  WorkspaceMemorySummary,
   FileEntry,
   CloudAuthState,
   CloudAuthIpcResponse,
@@ -91,7 +92,6 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
-  MemoryConfig,
   // Cloud 模式专属类型
   DownloadCloudPromptsResult,
   UsageQueryParams,
@@ -582,6 +582,24 @@ export interface ElectronAPI {
   /** 重命名/移动 Skill 目录下的文件或目录 */
   renameSkillEntry: (workspaceSlug: string, skillSlug: string, fromRelative: string, toRelative: string) => Promise<void>
 
+  /** 获取工作区记忆摘要 */
+  getWorkspaceMemorySummary: (workspaceSlug: string) => Promise<WorkspaceMemorySummary>
+
+  /** 读取工作区 CLAUDE.md */
+  readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
+
+  /** 写入工作区 CLAUDE.md */
+  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => Promise<void>
+
+  /** 列出工作区 auto memory 文件树 */
+  listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
+
+  /** 读取工作区 auto memory 文件 */
+  readWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string) => Promise<import('@proma/shared').SkillFileContent>
+
+  /** 写入工作区 auto memory 文件 */
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => Promise<void>
+
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
 
@@ -601,15 +619,6 @@ export interface ElectronAPI {
 
   /** 热切换指定会话的权限模式（运行中生效，仅影响该 session） */
   updateSessionPermissionMode: (sessionId: string, mode: PromaPermissionMode) => Promise<void>
-
-  /** 获取全局记忆配置 */
-  getMemoryConfig: () => Promise<MemoryConfig>
-
-  /** 保存全局记忆配置 */
-  setMemoryConfig: (config: MemoryConfig) => Promise<void>
-
-  /** 测试记忆连接 */
-  testMemoryConnection: () => Promise<{ success: boolean; message: string }>
 
   // ===== Chat 工具管理 =====
 
@@ -1762,6 +1771,30 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RENAME_SKILL_ENTRY, workspaceSlug, skillSlug, fromRelative, toRelative)
   },
 
+  getWorkspaceMemorySummary: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY, workspaceSlug)
+  },
+
+  readWorkspaceClaudeMd: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD, workspaceSlug)
+  },
+
+  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD, workspaceSlug, content)
+  },
+
+  listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_WORKSPACE_AUTO_MEMORY_FILES, workspaceSlug)
+  },
+
+  readWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath)
+  },
+
+  writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content)
+  },
+
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {
     const listener = (_: unknown, event: AgentStreamEvent): void => callback(event)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_EVENT, listener)
@@ -1794,18 +1827,6 @@ const electronAPI: ElectronAPI = {
 
   updateSessionPermissionMode: (sessionId: string, mode: PromaPermissionMode) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_PERMISSION_MODE, sessionId, mode)
-  },
-
-  getMemoryConfig: () => {
-    return ipcRenderer.invoke(MEMORY_IPC_CHANNELS.GET_CONFIG)
-  },
-
-  setMemoryConfig: (config: MemoryConfig) => {
-    return ipcRenderer.invoke(MEMORY_IPC_CHANNELS.SET_CONFIG, config)
-  },
-
-  testMemoryConnection: () => {
-    return ipcRenderer.invoke(MEMORY_IPC_CHANNELS.TEST_CONNECTION)
   },
 
   // Chat 工具管理
