@@ -253,10 +253,10 @@ chat/completions 的 `usage` 字段在 Proma 平台上较「丰富」，但有�
 
 | 场景 | 推荐（以 `/v1/models` 实际清单为准）|
 |---|---|
-| 通用聊天 / 写作 | claude-sonnet-4-6 / gpt-5.4 |
+| 通用聊天 / 写作 | claude-sonnet-5 / gpt-5.4 |
 | 便宜批处理 | deepseek-v4-flash / gpt-5-mini / gemini-3-flash-preview |
 | 中文 | glm-5.2 / deepseek-v4-* |
-| 代码生成 | deepseek-v4-pro / claude-sonnet-4-6 |
+| 代码生成 | deepseek-v4-pro / claude-sonnet-5 |
 | 长文档 | gemini-3.1-pro-preview / deepseek-v4-*（1M 上下文）|
 | 最高质量 | claude-opus-4-8 / gpt-5.5 |
 

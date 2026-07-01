@@ -84,7 +84,7 @@ curl -X POST "${API_ROOT}/v1/messages" \
 
 ```json
 {
-  "model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
   "max_tokens": 4096,
   "stream": true,
   "messages": [...]
@@ -109,7 +109,7 @@ data: { "type": "message_stop" }
 
 ```json
 {
-  "model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
   "max_tokens": 1024,
   "tools": [
     {
@@ -155,7 +155,7 @@ data: { "type": "message_stop" }
 
 ```json
 {
-  "model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
   "max_tokens": 2048,
   "thinking": { "type": "enabled", "budget_tokens": 8000 },
   "messages": [...]

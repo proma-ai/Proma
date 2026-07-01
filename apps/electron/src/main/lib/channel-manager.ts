@@ -500,7 +500,7 @@ async function testAnthropicCompatible(
       testModel = 'qwen3.7-plus'
       break
     default:
-      testModel = 'claude-sonnet-4-6'
+      testModel = 'claude-sonnet-5'
   }
 
   const headers: Record<string, string> = {

@@ -11,7 +11,7 @@
  *
  * 思考模式按模型能力分支（见 thinking-capability.ts）：
  * - Opus 4.7 / Mythos Preview：adaptive 唯一模式（发 `{type: 'adaptive'}`）
- * - Opus 4.6 / Sonnet 4.6：推荐 adaptive
+ * - Opus 4.6 / Sonnet 5：推荐 adaptive
  * - DeepSeek v4 系列：`{type: 'enabled'}` + `output_config.effort = 'max'`
  * - 更老的 Claude 系列及 DeepSeek v3：manual（旧版 `{type: 'enabled', budget_tokens}`）
  * - Kimi（kimi-api / kimi-coding）：不发 thinking 字段（K2 系列非 reasoning 模型）

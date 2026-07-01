@@ -93,7 +93,7 @@ LLM 端点（OpenAI / Anthropic 兼容）：API_ROOT + /v1/...
 | `chinese` | 中文优势 | glm-5.2 / deepseek-v4-* / Qwen（若上线）|
 | `code` | 代码生成 | deepseek-v4-pro / Sonnet |
 
-> ⚠️ 上表只是命名约定示例，**绝不要硬编码**。模型清单会随平台迭代（实测当前有 claude-opus-4-8 / claude-sonnet-4-6 / claude-haiku-4-5-20251001 / glm-5.2 / gpt-5.4 / gpt-5.5 / gpt-5-mini / gemini-3.1-pro-preview / gemini-3-flash-preview / deepseek-v4-pro / deepseek-v4-flash 等，命名与旧版完全不同）。每次都现查 `/v1/models`。
+> ⚠️ 上表只是命名约定示例，**绝不要硬编码**。模型清单会随平台迭代（实测当前有 claude-opus-4-8 / claude-sonnet-5 / claude-haiku-4-5-20251001 / glm-5.2 / gpt-5.4 / gpt-5.5 / gpt-5-mini / gemini-3.1-pro-preview / gemini-3-flash-preview / deepseek-v4-pro / deepseek-v4-flash 等，命名与旧版完全不同）。每次都现查 `/v1/models`。
 >
 > **embedding 模型不在 `/v1/models` 里**——它们在 multimodal-models 端点，见 `references/embeddings.md`。
 

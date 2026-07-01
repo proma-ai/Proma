@@ -738,7 +738,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
       const sdkOptions = {
         // 基础字段
         pathToClaudeCodeExecutable: options.sdkCliPath,
-        model: options.model || 'claude-sonnet-4-6',
+        model: options.model || 'claude-sonnet-5',
         ...(options.maxTurns != null && { maxTurns: options.maxTurns }),
         permissionMode: options.sdkPermissionMode,
         allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,

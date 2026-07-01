@@ -105,7 +105,7 @@ export function DeveloperLetterDialog({
                       <p>
                         Agent
                         模式下会大幅加快积分的消耗，因为这会产生大量的模型请求，我们推荐可以切换不同的模型对任务进行尝试。除了性能极佳的
-                        Opus 4.7 外，Sonnet 4.6\Kimi K2.6 以及 DeepSeek V4 Pro
+                        Opus 4.7 外，Sonnet 5\Kimi K2.6 以及 DeepSeek V4 Pro
                         都可以在一些相对不那么复杂的任务上表现的还不错。
                       </p>
                       <p>
