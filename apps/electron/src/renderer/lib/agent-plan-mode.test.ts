@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from './agent-plan-mode'
+import { getDisplayedPermissionMode, getPlanModeChangeFromToolName, updatePlanModeSessionSet } from './agent-plan-mode'
 
 describe('Agent 计划阶段状态', () => {
   test('Given EnterPlanMode 工具 When 解析计划状态 Then 标记进入计划阶段', () => {
@@ -38,5 +38,16 @@ describe('Agent 计划阶段状态', () => {
 
     expect(updatePlanModeSessionSet(prev, 'session-a', true)).toBe(prev)
     expect(updatePlanModeSessionSet(prev, 'session-b', false)).toBe(prev)
+  })
+
+  test('Given Agent 自己进入计划阶段 When 权限按钮显示模式 Then 优先显示计划模式', () => {
+    expect(getDisplayedPermissionMode('auto', true)).toBe('plan')
+    expect(getDisplayedPermissionMode('bypassPermissions', true)).toBe('plan')
+  })
+
+  test('Given Agent 不在计划阶段 When 权限按钮显示模式 Then 保留真实权限模式', () => {
+    expect(getDisplayedPermissionMode('auto', false)).toBe('auto')
+    expect(getDisplayedPermissionMode('bypassPermissions', false)).toBe('bypassPermissions')
+    expect(getDisplayedPermissionMode('plan', false)).toBe('plan')
   })
 })

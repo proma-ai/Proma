@@ -24,11 +24,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { inputToolbarButtonClass } from './input-toolbar-styles'
 
 export interface ToolbarItem {
   /** 唯一标识 */
   key: string
-  /** 行内渲染的节点（建议是 36px 圆形按钮或带文本的紧凑按钮） */
+  /** 行内渲染的节点（建议是 36px 圆角矩形按钮或带文本的紧凑按钮） */
   node: React.ReactNode
 }
 
@@ -183,7 +184,7 @@ export function InputToolbarOverflow({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+                    className={inputToolbarButtonClass}
                     aria-label="更多工具"
                   >
                     <MoreHorizontal className="size-5" />

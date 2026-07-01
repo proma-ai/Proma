@@ -394,6 +394,7 @@ export interface RecoveryAction {
     | 'compact'
     | 'open_environment_check'
     | 'open_channel_settings'
+    | 'select_model'
     | 'open_external'
     | (string & {})
   /** 操作附带的载荷，例如 open_external 的 URL */

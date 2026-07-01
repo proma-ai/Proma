@@ -1,7 +1,7 @@
 /**
  * 自动更新核心模块
  *
- * 检测新版本 → 自动后台下载 → 用户确认后重启安装。
+ * 检测新版本 → 自动后台下载 → 用户从更新入口确认后重启安装。
  * 仅在打包后的生产环境中工作。
  */
 
@@ -86,9 +86,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     debug: (...args: unknown[]) => console.log('[更新-updater:debug]', ...args),
   }
 
-  // 自动下载，退出时自动安装
+  // 自动下载，但不在用户正常退出时自动安装，避免重启应用后被动进入更新流程。
   autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false
 
   // 监听更新事件
   autoUpdater.on('checking-for-update', () => {
@@ -162,5 +162,5 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     win = null
   })
 
-  console.log('[更新] 自动更新模块已初始化（自动下载，用户确认后安装）')
+  console.log('[更新] 自动更新模块已初始化（自动下载，用户主动确认后安装）')
 }

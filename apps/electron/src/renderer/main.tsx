@@ -89,7 +89,6 @@ import { toast } from 'sonner'
 import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, calcTotalAvailable } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
-import { UpdateDialog } from './components/settings/UpdateDialog'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
@@ -1122,7 +1121,6 @@ if (isQuickTaskWindow) {
       <GlobalShortcuts />
       <TabSwitcher />
       <App />
-      <UpdateDialog />
       <Toaster position="top-right" />
     </React.StrictMode>
   )

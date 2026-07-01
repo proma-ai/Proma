@@ -27,6 +27,8 @@ import {
   resolveModelByIndex,
   describeBindingModel,
 } from './bridge-model-utils'
+import type { BridgeChatBindingStore } from './bridge-binding-store'
+import { filterExistingBridgeBindings } from './bridge-binding-store'
 
 // ===== 接口定义 =====
 
@@ -56,6 +58,8 @@ export interface BridgeCommandHandlerConfig {
   getDefaultWorkspaceId?: () => string | undefined
   /** 工作区切换后的回调 */
   onWorkspaceSwitched?: (workspaceId: string) => void
+  /** 可选持久化存储：用于跨应用重启恢复 chatId → sessionId 绑定 */
+  bindingStore?: BridgeChatBindingStore
 }
 
 /** 通用聊天绑定 */
@@ -106,6 +110,7 @@ export class BridgeCommandHandler {
   constructor(config: BridgeCommandHandlerConfig) {
     this.config = config
     this.log = (msg: string) => console.log(`[${config.platformName} Bridge] ${msg}`)
+    this.loadPersistedBindings()
   }
 
   // ===== 公开 API =====
@@ -155,6 +160,7 @@ export class BridgeCommandHandler {
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
+    this.saveBindings()
     this.log(`为 ${chatId.slice(0, 8)}... 创建会话: ${session.id.slice(0, 8)}`)
     this.notifySessionCreated(session.id, session.title)
     return binding
@@ -192,6 +198,29 @@ export class BridgeCommandHandler {
     this.chatBindings.clear()
     this.sessionToChat.clear()
     this.sessionBuffers.clear()
+    this.saveBindings()
+  }
+
+  private loadPersistedBindings(): void {
+    const bindings = this.config.bindingStore?.load()
+    if (!bindings || bindings.length === 0) return
+
+    const existingBindings = filterExistingBridgeBindings(bindings, (sessionId) => Boolean(getAgentSessionMeta(sessionId)))
+    for (const binding of existingBindings) {
+      this.chatBindings.set(binding.chatId, binding)
+      this.sessionToChat.set(binding.sessionId, binding.chatId)
+    }
+
+    if (existingBindings.length !== bindings.length) {
+      this.config.bindingStore?.save(existingBindings)
+    }
+    if (existingBindings.length > 0) {
+      this.log(`已恢复 ${existingBindings.length} 个聊天绑定`)
+    }
+  }
+
+  private saveBindings(): void {
+    this.config.bindingStore?.save(Array.from(this.chatBindings.values()))
   }
 
   // ===== 命令路由 =====
@@ -299,6 +328,7 @@ export class BridgeCommandHandler {
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
+    this.saveBindings()
 
     // 通知渲染进程刷新会话列表
     this.notifySessionCreated(session.id, session.title)
@@ -397,6 +427,7 @@ export class BridgeCommandHandler {
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(match.id, chatId)
+    this.saveBindings()
 
     await this.send(chatId, `✅ 已切换到会话: ${match.title} (${match.id.slice(0, 8)})`, contextData)
   }
@@ -441,6 +472,7 @@ export class BridgeCommandHandler {
     if (binding) {
       this.sessionToChat.delete(binding.sessionId)
       this.chatBindings.delete(chatId)
+      this.saveBindings()
     }
 
     // 通知平台持久化
@@ -632,6 +664,7 @@ export class BridgeCommandHandler {
 
     binding.channelId = channel.id
     binding.modelId = model.id
+    this.saveBindings()
 
     await this.send(
       chatId,

@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch } from 'lucide-react'
+import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -20,7 +20,7 @@ import { UserAvatar } from '@/components/chat/UserAvatar'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { automationFormAtom, automationsAtom } from '@/atoms/automation-atoms'
 import { appModeAtom, type AppMode } from '@/atoms/app-mode'
-import { settingsOpenAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
@@ -77,7 +77,7 @@ import {
 import { userProfileAtom } from '@/atoms/user-profile'
 import { sidebarViewModeAtom } from '@/atoms/sidebar-atoms'
 import { searchDialogOpenAtom } from '@/atoms/search-atoms'
-import { hasUpdateAtom } from '@/atoms/updater'
+import { hasUpdateAtom, updateStatusAtom, type UpdateStatus } from '@/atoms/updater'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { promptConfigAtom, selectedPromptIdAtom, conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
@@ -128,6 +128,84 @@ import { CloudSidebarDownloadButton, CloudSidebarCreditIndicator } from './Cloud
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
+}
+
+function getSidebarUpdateLabel(status: string, version?: string): string {
+  const versionText = version ? ` v${version}` : ''
+  switch (status) {
+    case 'available':
+      return `发现新版本${versionText}`
+    case 'downloading':
+      return `正在下载更新${versionText}`
+    case 'downloaded':
+      return `立即重启更新${versionText}`
+    default:
+      return '软件更新'
+  }
+}
+
+function getSidebarUpdateButtonText(status: string): string {
+  switch (status) {
+    case 'available':
+      return '查看'
+    case 'downloading':
+      return '下载中'
+    case 'downloaded':
+      return '更新'
+    default:
+      return '更新'
+  }
+}
+
+interface SidebarUpdateButtonProps {
+  status: UpdateStatus
+  onClick: () => void
+  tooltipSide: React.ComponentPropsWithoutRef<typeof TooltipContent>['side']
+  className: string
+  readyDotClassName: string
+  showText?: boolean
+  hideIcon?: boolean
+}
+
+function SidebarUpdateButton({
+  status,
+  onClick,
+  tooltipSide,
+  className,
+  readyDotClassName,
+  showText = false,
+  hideIcon = false,
+}: SidebarUpdateButtonProps): React.ReactElement {
+  const label = getSidebarUpdateLabel(status.status, status.version)
+  const buttonText = getSidebarUpdateButtonText(status.status)
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+          className={cn('relative bg-primary/10 text-primary transition-colors titlebar-no-drag hover:bg-primary/15', className)}
+        >
+          {!hideIcon && (
+            status.status === 'downloading' ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : status.status === 'downloaded' ? (
+              <RotateCw size={16} />
+            ) : (
+              <Download size={16} />
+            )
+          )}
+          {showText && <span>{buttonText}</span>}
+          {status.status === 'downloaded' && (
+            <span className={readyDotClassName} />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side={tooltipSide}>{label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 interface AutomationSidebarEntryProps {
@@ -531,6 +609,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const setAutomations = useSetAtom(automationsAtom)
   const automationCount = automations.length
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const [conversations, setConversations] = useAtom(conversationsAtom)
   const [currentConversationId, setCurrentConversationId] = useAtom(currentConversationIdAtom)
   const draftSessionIds = useAtomValue(draftSessionIdsAtom)
@@ -569,6 +648,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   const mode = useAtomValue(appModeAtom)
   const isMac = React.useMemo(() => detectIsMac(), [])
   const hasUpdate = useAtomValue(hasUpdateAtom)
+  const updateStatus = useAtomValue(updateStatusAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
   const promptConfig = useAtomValue(promptConfigAtom)
   const setSelectedPromptId = useSetAtom(selectedPromptIdAtom)
@@ -607,6 +687,20 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   // 归档 & 搜索状态
   const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
   const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
+
+  const handleOpenSettings = React.useCallback((): void => {
+    setSettingsOpen(true)
+  }, [setSettingsOpen])
+
+  const handleUpdateButtonClick = React.useCallback((): void => {
+    if (updateStatus.status === 'downloaded') {
+      void window.electronAPI.updater?.quitAndInstall()
+      return
+    }
+
+    setSettingsTab('about')
+    setSettingsOpen(true)
+  }, [setSettingsOpen, setSettingsTab, updateStatus.status])
 
   React.useEffect(() => {
     const id = window.setInterval(() => setRelativeTimeNow(Date.now()), 60_000)
@@ -2052,18 +2146,27 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
           </div>
         </div>
 
-        {/* 用户头像（点击打开设置） */}
-        <div className="pt-3 pb-3">
+        {/* 更新入口 + 用户头像（点击打开设置） */}
+        <div className="flex flex-col items-center gap-1.5 pt-3 pb-3">
+          {hasUpdate && (
+            <SidebarUpdateButton
+              status={updateStatus}
+              onClick={handleUpdateButtonClick}
+              tooltipSide="right"
+              className="size-10 flex items-center justify-center rounded-[12px]"
+              readyDotClassName="absolute top-0 right-0 w-2 h-2 rounded-full bg-primary"
+            />
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 aria-label="打开设置"
-                onClick={() => setSettingsOpen(true)}
+                onClick={handleOpenSettings}
                 className="relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag hover:bg-foreground/5"
               >
                 <UserAvatar avatar={userProfile.avatar} size={28} />
-                {(hasUpdate || hasEnvironmentIssues) && (
+                {hasEnvironmentIssues && (
                   <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>
@@ -2506,19 +2609,39 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
 
       {/* 底部：用户资料 + 设置入口 */}
       <div className="px-3 pb-3">
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] transition-colors titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
-        >
-          <UserAvatar avatar={userProfile.avatar} size={28} />
-          <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
-          <div className="relative flex-shrink-0 text-foreground/40">
-            <Settings size={16} />
-            {(hasUpdate || hasEnvironmentIssues) && (
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
-            )}
-          </div>
-        </button>
+        <div className="flex items-center gap-2 rounded-[10px] px-3 py-2 text-foreground/70 transition-colors titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground">
+          <button
+            onClick={handleOpenSettings}
+            className="min-w-0 flex flex-1 items-center gap-3 text-left"
+          >
+            <UserAvatar avatar={userProfile.avatar} size={28} />
+            <span className="flex-1 text-sm truncate text-left">{userProfile.userName}</span>
+          </button>
+          {hasUpdate && (
+            <SidebarUpdateButton
+              status={updateStatus}
+              onClick={handleUpdateButtonClick}
+              tooltipSide="top"
+              className="h-6 flex-shrink-0 inline-flex items-center justify-center rounded-full bg-primary/10 px-2 text-[11px] font-medium leading-none text-primary hover:bg-primary/15"
+              readyDotClassName="hidden"
+              showText
+              hideIcon
+            />
+          )}
+          <button
+            type="button"
+            aria-label="打开设置"
+            onClick={handleOpenSettings}
+            className="relative flex size-7 flex-shrink-0 items-center justify-center rounded-[8px] text-foreground/40 transition-colors hover:bg-foreground/[0.05] hover:text-foreground/70"
+          >
+            <div className="relative flex-shrink-0 text-foreground/40">
+              <Settings size={16} />
+              {hasEnvironmentIssues && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+              )}
+            </div>
+          </button>
+        </div>
       </div>
 
       {deleteDialog}

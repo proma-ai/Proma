@@ -299,8 +299,8 @@ export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 /** 侧面板当前 Tab：'session' | 'workspace' | 'changes'（per-session Map） */
 export const agentDiffPanelTabAtom = atom<Map<string, 'session' | 'workspace' | 'changes'>>(new Map())
 
-/** Diff 视图模式：'split' | 'unified' */
-export const agentDiffViewModeAtom = atom<'split' | 'unified'>('split')
+/** Diff 视图模式：'split' | 'unified'，默认使用统一预览 */
+export const agentDiffViewModeAtom = atom<'split' | 'unified'>('unified')
 
 /** Diff 刷新版本号 — 按 session 隔离，Agent 写工具完成时递增 */
 export const agentDiffRefreshVersionAtom = atom(new Map<string, number>())

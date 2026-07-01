@@ -11,6 +11,12 @@ import { Send, X } from 'lucide-react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
+import { SpeechButton } from '@/components/ai-elements/speech-button'
+import {
+  VOICE_DICTATION_INSERT_EVENT,
+  getLastFocusedVoiceInputId,
+  setLastFocusedVoiceInputId,
+} from '@/lib/voice-input-focus'
 import {
   allPendingAskUserRequestsAtom,
   agentStreamingStatesAtom,
@@ -415,11 +421,48 @@ function QuestionCard({
   onCustomTextChange: (text: string) => void
   onSubmit: () => void
 }): React.ReactElement {
+  const customInputRef = React.useRef<HTMLInputElement | null>(null)
+  const voiceInputIdRef = React.useRef(`ask-user-custom-${Math.random().toString(36).slice(2)}`)
+  const customTextRef = React.useRef(answer.customText)
+  const onCustomTextChangeRef = React.useRef(onCustomTextChange)
   const optionCount = question.options.length
   const previewOption = focusedIndex >= 0 && focusedIndex < optionCount
     ? question.options[focusedIndex]
     : question.options.find((o) => answer.selected.includes(o.label))
   const previewContent = previewOption?.preview
+
+  customTextRef.current = answer.customText
+  onCustomTextChangeRef.current = onCustomTextChange
+
+  React.useEffect(() => {
+    if (!answer.showCustom) return
+
+    const handler = (event: Event): void => {
+      if (getLastFocusedVoiceInputId() !== voiceInputIdRef.current) return
+
+      const customEvent = event as CustomEvent<{ text?: string }>
+      const text = customEvent.detail?.text?.trim()
+      if (!text) return
+
+      const input = customInputRef.current
+      const currentText = customTextRef.current
+      const start = input?.selectionStart ?? currentText.length
+      const end = input?.selectionEnd ?? start
+      const nextText = `${currentText.slice(0, start)}${text}${currentText.slice(end)}`
+      const nextCursor = start + text.length
+
+      onCustomTextChangeRef.current(nextText)
+      event.preventDefault()
+
+      requestAnimationFrame(() => {
+        input?.focus()
+        input?.setSelectionRange(nextCursor, nextCursor)
+      })
+    }
+
+    window.addEventListener(VOICE_DICTATION_INSERT_EVENT, handler)
+    return () => window.removeEventListener(VOICE_DICTATION_INSERT_EVENT, handler)
+  }, [answer.showCustom])
 
   return (
     <div className="space-y-2">
@@ -487,21 +530,26 @@ function QuestionCard({
 
       {/* 自由文本输入 */}
       {answer.showCustom && (
-        <input
-          type="text"
-          className="w-full px-3 py-2 rounded-lg text-xs bg-muted/40 focus:bg-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground/40 transition-colors"
-          placeholder="输入自定义答案..."
-          value={answer.customText}
-          onChange={(e) => onCustomTextChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault()
-              e.stopPropagation() // 阻止冒泡到 document handler，避免重复触发 setActiveTab
-              onSubmit()
-            }
-          }}
-          autoFocus
-        />
+        <div className="relative">
+          <input
+            ref={customInputRef}
+            type="text"
+            className="w-full px-3 py-2 pr-9 rounded-lg text-xs bg-muted/40 focus:bg-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground/40 transition-colors"
+            placeholder="输入自定义答案..."
+            value={answer.customText}
+            onChange={(e) => onCustomTextChange(e.target.value)}
+            onFocus={() => setLastFocusedVoiceInputId(voiceInputIdRef.current)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                e.stopPropagation() // 阻止冒泡到 document handler，避免重复触发 setActiveTab
+                onSubmit()
+              }
+            }}
+            autoFocus
+          />
+          <SpeechButton className="absolute right-1 top-1/2 -translate-y-1/2 size-6 rounded-full" />
+        </div>
       )}
 
       {/* 选项 Preview（聚焦或选中时展示） */}

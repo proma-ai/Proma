@@ -33,6 +33,13 @@ import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
+import {
+  inputToolbarActiveButtonClass,
+  inputToolbarButtonClass,
+  inputToolbarDangerButtonClass,
+  inputToolbarDisabledButtonClass,
+  inputToolbarSendButtonClass,
+} from '@/components/ai-elements/input-toolbar-styles'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -176,8 +183,8 @@ function AgentThinkingPopover({ agentThinking, onToggle }: AgentThinkingPopoverP
           variant="ghost"
           size="icon"
           className={cn(
-            'size-[36px] rounded-full',
-            isEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+            inputToolbarButtonClass,
+            isEnabled && inputToolbarActiveButtonClass
           )}
           onClick={onToggle}
           onMouseEnter={handleMouseEnter}
@@ -254,14 +261,14 @@ function DisplayOptionsPopover({
           variant="ghost"
           size="icon"
           className={cn(
-            'size-[36px] rounded-full',
-            processGroupsKeepExpanded ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
+            inputToolbarButtonClass,
+            processGroupsKeepExpanded && inputToolbarActiveButtonClass
           )}
           aria-label="显示选项"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <Eye className={cn('size-5', processGroupsKeepExpanded && 'text-green-500')} />
+          <Eye className="size-5" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -1944,6 +1951,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           externalSelectedModel={externalSelectedModel}
           onModelSelect={handleModelSelect}
           useAgentModels
+          useSharedOpenState
         />
       ),
     },
@@ -1963,7 +1971,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    { key: 'speech', node: <SpeechButton className="size-[36px] shrink-0 rounded-full" /> },
+    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
     {
       key: 'attach-file',
       node: (
@@ -1973,7 +1981,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               type="button"
               variant="ghost"
               size="icon"
-              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              className={inputToolbarButtonClass}
               onClick={handleOpenFileDialog}
             >
               <Paperclip className="size-5" />
@@ -1994,7 +2002,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               type="button"
               variant="ghost"
               size="icon"
-              className="size-[36px] shrink-0 rounded-full text-foreground/60 hover:text-foreground"
+              className={inputToolbarButtonClass}
               onClick={handleAttachFolder}
             >
               <FolderPlus className="size-5" />
@@ -2071,7 +2079,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           type="button"
           variant="ghost"
           size="icon"
-          className="size-[36px] rounded-full text-destructive hover:!text-[hsl(0,75%,55%)] hover:!bg-[var(--stop-hover-bg)]"
+          className={inputToolbarDangerButtonClass}
           onClick={handleStop}
         >
           <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
@@ -2087,10 +2095,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       variant="ghost"
       size="icon"
       className={cn(
-        'size-[36px] rounded-full',
-        canSend
-          ? 'text-primary hover:bg-primary/10'
-          : 'text-foreground/30 cursor-not-allowed'
+        canSend ? inputToolbarSendButtonClass : inputToolbarDisabledButtonClass
       )}
       onClick={() => handleSend()}
       disabled={!canSend}

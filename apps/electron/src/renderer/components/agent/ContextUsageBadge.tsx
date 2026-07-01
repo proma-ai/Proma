@@ -1,7 +1,7 @@
 /**
  * ContextUsageBadge — 上下文使用量指示器
  *
- * 输入框工具栏上的一个 36×36 圆形按钮：
+ * 输入框工具栏上的一个 36×36 按钮：
  * - 内部为 16px 圆环，按 displayTokens / displayWindow 比例渲染
  * - hover / click 弹出 Popover，内含 token 明细 + 手动压缩按钮
  * - 压缩中时按钮位置显示 Loader2 旋转图标
@@ -13,6 +13,7 @@ import * as React from 'react'
 import { Loader2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 import { cn } from '@/lib/utils'
 
 /** 压缩阈值比例（SDK 在 ~77.5% 窗口大小时自动压缩） */
@@ -173,7 +174,7 @@ export function ContextUsageBadge({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-[36px] rounded-full text-muted-foreground cursor-default"
+        className={cn(inputToolbarButtonClass, 'text-muted-foreground cursor-default')}
         disabled
       >
         <Loader2 className="size-4 animate-spin" />
@@ -235,7 +236,7 @@ export function ContextUsageBadge({
           variant="ghost"
           size="icon"
           className={cn(
-            'size-[36px] rounded-full',
+            inputToolbarButtonClass,
             isWarning ? 'text-amber-600 dark:text-amber-400' : 'text-foreground/60 hover:text-foreground',
           )}
           onMouseEnter={() => {

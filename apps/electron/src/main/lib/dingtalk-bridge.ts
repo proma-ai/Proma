@@ -22,6 +22,8 @@ import { BridgeCommandHandler, type BridgeAttachment } from './bridge-command-ha
 import { inferImageMediaType, saveImageToSession, inferExtension, MAX_IMAGE_SIZE } from './bridge-attachment-utils'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import { getSettings } from './settings-service'
+import { getDingTalkBotBindingsPath } from './config-paths'
+import { createJsonBridgeChatBindingStore } from './bridge-binding-store'
 
 // ===== 类型声明 =====
 
@@ -149,6 +151,10 @@ class DingTalkBridge {
         },
       },
       getDefaultWorkspaceId: () => this.botConfig.defaultWorkspaceId,
+      bindingStore: createJsonBridgeChatBindingStore(
+        getDingTalkBotBindingsPath(botConfig.id),
+        `钉钉 Bridge/${botConfig.name}`,
+      ),
       onWorkspaceSwitched: async (workspaceId) => {
         const { saveDingTalkBotConfig } = await import('./dingtalk-config')
         saveDingTalkBotConfig({

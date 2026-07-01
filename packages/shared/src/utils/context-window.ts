@@ -13,38 +13,48 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000
 export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
 
 /**
- * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）。
+ * 上下文窗口配置表 — 新增模型只需在此处加一行。
  *
- * 当前支持：
- * - Claude Sonnet 4 / 4.5 / 4.6
- * - Claude Opus 4.6 / 4.7 / 4.8
- * - Claude Fable 5
- * - DeepSeek V4 系列
- * - 小米 MiMo V2.5 / V2.5 Pro / V2 Pro
- * - 智谱 GLM-5.2、GLM-X-Preview[1m]
- * - MiniMax M3（智谱式兼容端点支持）
- * - Qwen3.7 Max / Plus（DashScope Anthropic 兼容端点，默认 1M，无需 beta header）
+ * 匹配规则：modelId.toLowerCase() 包含 pattern 即命中（substring match）。
+ * exclude 列表优先级最高：命中 exclude 的模型始终返回 DEFAULT_CONTEXT_WINDOW。
  *
  * 参考：https://docs.anthropic.com/en/docs/build-with-claude/context-windows
+ */
+const CONTEXT_WINDOW_CONFIG = {
+  /** 始终使用默认窗口的模型特征（优先级高于 rules） */
+  exclude: ['haiku'],
+
+  /** 1M 上下文模型匹配规则 */
+  rules: [
+    // Claude 系列
+    'claude-sonnet-4',
+    'claude-sonnet-5',
+    'claude-opus-4-6',
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-fable-5',
+    // DeepSeek
+    'deepseek-v4',
+    // 小米 MiMo
+    'mimo-v2.5',
+    'mimo-v2-pro',
+    // 智谱 GLM
+    'glm-5.2',
+    // MiniMax
+    'minimax-m3',
+    // Qwen3.7（DashScope Anthropic 兼容端点默认 1M，无需 context-1m beta header）
+    'qwen3.7',
+  ] as const,
+} as const
+
+/**
+ * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）。
  */
 export function supports1MContext(modelId: string): boolean {
   if (!modelId) return false
   const m = modelId.toLowerCase()
-  if (m.includes('haiku')) return false
-  if (m.includes('claude')) {
-    if (m.includes('sonnet-4')) return true
-    if (m.includes('opus-4-6') || m.includes('opus-4-7') || m.includes('opus-4-8')) return true
-    if (m.includes('fable-5')) return true
-    return false
-  }
-  if (m.includes('deepseek-v4')) return true
-  if (m.includes('mimo-v2.5') || m.includes('mimo-v2-pro')) return true
-  if (m.includes('glm-5.2')) return true
-  if (m.includes('glm-x-preview[1m]')) return true
-  if (m.includes('minimax-m3')) return true
-  // Qwen3.7 系列（DashScope Anthropic 兼容端点默认 1M，无需 context-1m beta header）
-  if (m.includes('qwen3.7')) return true
-  return false
+  if (CONTEXT_WINDOW_CONFIG.exclude.some((p) => m.includes(p))) return false
+  return CONTEXT_WINDOW_CONFIG.rules.some((p) => m.includes(p))
 }
 
 /**

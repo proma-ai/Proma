@@ -478,12 +478,18 @@ export function mapSDKErrorToTypedError(
     canRetry: false,
   }
 
+  // “未选择正确渠道/模型”场景：友好化后的文案已固定，无法登录多半是渠道或模型配置有误，
+  // 引导用户直接重新选择模型，而非跳转设置页面
+  const isInvalidChannelOrModel = /请检查是否选择了正确的 Proma 供应渠道和模型/.test(mapped.message)
+
   return {
     code: mapped.code,
     title: mapped.title,
     message: mapped.code === 'billing_error' ? mapped.message : (detailedMessage || mapped.message),
     actions: [
-      { key: 's', label: '设置', action: 'settings' },
+      isInvalidChannelOrModel
+        ? { key: 'm', label: '重新选择模型', action: 'select_model' }
+        : { key: 's', label: '设置', action: 'settings' },
       ...(mapped.canRetry ? [{ key: 'r', label: '重试', action: 'retry' }] : []),
       ...(mapped.code === 'prompt_too_long' ? [{ key: 'c', label: '压缩上下文', action: 'compact' }] : []),
     ],

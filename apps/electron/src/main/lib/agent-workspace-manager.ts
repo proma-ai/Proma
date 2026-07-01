@@ -474,12 +474,16 @@ export function ensurePluginManifest(workspaceSlug: string, workspaceName: strin
 
 // ===== MCP 配置管理 =====
 
-function normalizeWorkspaceMcpConfig(config: Partial<WorkspaceMcpConfig>): WorkspaceMcpConfig {
+export function normalizeWorkspaceMcpConfig(config: Partial<WorkspaceMcpConfig>): WorkspaceMcpConfig {
   const servers: WorkspaceMcpConfig['servers'] = {}
   const rawServers = config.servers ?? {}
 
   for (const [name, rawEntry] of Object.entries(rawServers)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue
+    if (RESERVED_BUILTIN_KEYS.has(name)) {
+      console.warn(`[Agent 工作区] MCP 服务器 "${name}" 与内置 MCP 保留名冲突，已忽略（内置 MCP 不写入 mcp.json）`)
+      continue
+    }
 
     // 删除护栏：内置 MCP（kind=internal，由代码注入）的保留名不允许出现在工作区 mcp.json。
     // 任何同名条目都是误写或冲突——剔除它，既防止用户/UI 占用保留名，也让手改 mcp.json

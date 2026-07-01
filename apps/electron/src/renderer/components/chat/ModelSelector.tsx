@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, Cpu, Search } from 'lucide-react'
 import {
   Dialog,
@@ -22,6 +22,7 @@ import {
   selectedModelAtom,
   channelsAtom,
   channelsLoadedAtom,
+  modelSelectorOpenAtom,
 } from '@/atoms/chat-atoms'
 import { useConversationModelOptional } from '@/hooks/useConversationSettings'
 import { useConversationIdOptional } from '@/contexts/session-context'
@@ -94,6 +95,8 @@ interface ModelSelectorProps {
   useAgentModels?: boolean
   /** 触发按钮是否显示「渠道 · 模型」（默认只显示模型名） */
   showChannelInTrigger?: boolean
+  /** 是否使用全局 modelSelectorOpenAtom 控制打开状态（用于外部拉起，如错误提示按钮） */
+  useSharedOpenState?: boolean
 }
 
 export function ModelSelector({
@@ -103,6 +106,7 @@ export function ModelSelector({
   onModelSelect,
   useAgentModels,
   showChannelInTrigger = false,
+  useSharedOpenState = false,
 }: ModelSelectorProps = {}): React.ReactElement {
   const [conversationModel, setConversationModel] = useConversationModelOptional()
   const conversationId = useConversationIdOptional()
@@ -111,7 +115,10 @@ export function ModelSelector({
   const channels = useAtomValue(channelsAtom)
   const channelsLoaded = useAtomValue(channelsLoadedAtom)
   const setChannels = useSetAtom(channelsAtom)
-  const [open, setOpen] = React.useState(false)
+  const [localOpen, setLocalOpen] = React.useState(false)
+  const [sharedOpen, setSharedOpen] = useAtom(modelSelectorOpenAtom)
+  const open = useSharedOpenState ? sharedOpen : localOpen
+  const setOpen = useSharedOpenState ? setSharedOpen : setLocalOpen
   const [search, setSearch] = React.useState('')
 
   // 外部模型优先 → per-conversation 模型

@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { Settings2 } from 'lucide-react'
+import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 import {
   CONTEXT_LENGTH_OPTIONS,
   type ContextLengthValue,
@@ -61,8 +62,8 @@ export function ContextSettingsPopover(): React.ReactElement {
       <Tooltip open={open ? false : undefined}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" className="h-8 w-8">
-              <Settings2 className="h-4 w-4 text-muted-foreground" />
+            <Button type="button" variant="ghost" size="icon" className={inputToolbarButtonClass}>
+              <Settings2 className="size-4" />
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>

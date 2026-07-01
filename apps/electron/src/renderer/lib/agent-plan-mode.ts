@@ -1,4 +1,4 @@
-import type { AgentPlanModeChangeSource } from '@proma/shared'
+import type { AgentPlanModeChangeSource, PromaPermissionMode } from '@proma/shared'
 
 export interface PlanModeChange {
   active: boolean
@@ -32,4 +32,12 @@ export function updatePlanModeSessionSet(
   const next = new Set(prev)
   next.delete(sessionId)
   return next
+}
+
+/** 输入区处于计划阶段时，权限按钮也优先展示计划模式图标。 */
+export function getDisplayedPermissionMode(
+  permissionMode: PromaPermissionMode,
+  planModeActive: boolean,
+): PromaPermissionMode {
+  return planModeActive ? 'plan' : permissionMode
 }

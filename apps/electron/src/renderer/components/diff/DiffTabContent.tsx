@@ -982,7 +982,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
-        <span className="text-[12px] text-foreground/60 truncate" title={filePath}>
+        <span className="min-w-0 flex-1 text-[12px] text-foreground/60 truncate" title={filePath}>
           {filePath}
         </span>
 

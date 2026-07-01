@@ -32,7 +32,7 @@ interface UpdateStatus {
   error?: string
 }
 
-/** 更新 API（仅版本检测，不自动下载/安装） */
+/** 更新 API */
 interface UpdaterAPI {
   checkForUpdates: () => Promise<void>
   getStatus: () => Promise<UpdateStatus>
