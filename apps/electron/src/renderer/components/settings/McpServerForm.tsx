@@ -90,7 +90,7 @@ interface McpFormValues {
 function buildEntryFromValues(values: McpFormValues, includeTestResult = false): McpServerEntry {
   const base: McpServerEntry = {
     type: values.transportType,
-    enabled: values.enabled && values.testResult?.success === true,
+    enabled: values.enabled,
     ...(values.isBuiltin && { isBuiltin: true }),
     ...(includeTestResult && values.testResult && {
       lastTestResult: {
@@ -166,7 +166,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     }
   }, [name, transportType, command, url, argsText, envText, headersText, timeoutStr, enabled, testResult, isBuiltin])
 
-  // 监听配置改变，清空测试结果（避免使用过期的测试结果）
+  // 监听配置改变，清空测试结果（避免展示过期的测试结果）
   React.useEffect(() => {
     if (!server) return // 新建时不需要清空
 
@@ -182,7 +182,6 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
 
     if (configChanged) {
       setTestResult(null)
-      setEnabled(false) // 配置改变时自动关闭开关
     }
   }, [transportType, command, url, argsText, envText, headersText, server])
 
@@ -337,19 +336,13 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
     if (transportType === 'stdio' && !command.trim()) return
     if (transportType !== 'stdio' && !url.trim()) return
 
-    // 警告：如果用户试图启用但测试未成功
-    if (enabled && !testResult?.success) {
-      console.warn('[MCP 表单] 用户试图启用未测试成功的 MCP，将强制禁用')
-    }
-
     setSaving(true)
     try {
       // 读取现有配置
       const config = await window.electronAPI.getWorkspaceMcpConfig(workspaceSlug)
       const entry = buildEntry(true) // 保存时包含测试结果
 
-      // 日志记录实际保存的状态
-      console.log(`[MCP 表单] 保存 MCP: ${serverName}, enabled: ${entry.enabled}, testResult: ${testResult?.success}`)
+      console.log(`[MCP 表单] 保存 MCP: ${serverName}, enabled: ${entry.enabled}, testResult: ${testResult?.success ?? '未测试'}`)
 
       const newConfig: WorkspaceMcpConfig = {
         servers: {
@@ -527,7 +520,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
               <div>
                 <div className="text-sm font-medium text-foreground">连接测试</div>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  必须测试成功后才能启用；测试失败的 MCP 可能导致整个 Agent 运行失败
+                  可选的诊断工具；测试结果不会影响 MCP 是否启用
                 </div>
               </div>
               <Button
@@ -571,7 +564,7 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
               <div className="flex items-start gap-2 px-3 py-2 rounded-md text-sm bg-amber-500/10 text-amber-700 dark:text-amber-400">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
                 <div className="text-xs">
-                  尚未测试连接。请先点击"测试连接"按钮验证配置是否正确。
+                  尚未测试连接。如需排查配置，可以点击"测试连接"。
                 </div>
               </div>
             )}
@@ -583,11 +576,10 @@ export function McpServerForm({ server, workspaceSlug, onSaved, onChanged, onCan
             description={
               testResult?.success
                 ? '开启后该 MCP 服务器将在 Agent 会话中加载'
-                : '只有测试成功后才能启用，否则可能导致整个 Agent 运行失败'
+                : '开启后该 MCP 服务器将在 Agent 会话中加载；如配置有误，Agent 会按运行时错误提示处理'
             }
             checked={enabled}
             onCheckedChange={setEnabled}
-            disabled={!testResult?.success}
           />
         </SettingsCard>
       </SettingsSection>
