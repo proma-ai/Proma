@@ -302,8 +302,41 @@ export const agentDiffPanelTabAtom = atom<Map<string, 'session' | 'workspace' | 
 /** Diff 视图模式：'split' | 'unified'，默认使用统一预览 */
 export const agentDiffViewModeAtom = atom<'split' | 'unified'>('unified')
 
-/** Diff 刷新版本号 — 按 session 隔离，Agent 写工具完成时递增 */
-export const agentDiffRefreshVersionAtom = atom(new Map<string, number>())
+/**
+ * Diff 刷新版本号 — 按 session 隔离，Agent 写工具完成时递增。
+ *
+ * value 为 { version, writtenPath? }：
+ * - version：单调递增，缓存 key 含 version 使旧缓存自然失效
+ * - writtenPath：可选，定向失效时携带被写文件路径；消费方据此跳过无关路径的刷新
+ *   - 写工具 / Markdown 保存：带 writtenPath，仅刷新命中该路径的面板/目录
+ *   - git 突变 / revert / 手动刷新 / 独立窗口刷新：不带 writtenPath，全域刷新
+ */
+export interface AgentDiffRefreshVersion {
+  version: number
+  /** 定向失效的被写文件路径；undefined 表示全域刷新 */
+  writtenPath?: string
+}
+export const agentDiffRefreshVersionAtom = atom(new Map<string, AgentDiffRefreshVersion>())
+
+/**
+ * 递增 session 的 diff 刷新版本号，返回新 Map。
+ *
+ * 定向失效语义：携带 writtenPath 时仅刷新命中该路径的面板；
+ * 消费方（DiffTabContent）按 version 单调递增响应，每帧定向信息独立生效，
+ * 无需担心连续写不同文件时中间态被覆盖——每个 version 都会被订阅消费一次。
+ *
+ * @param writtenPath 省略表示显式全域刷新（git 突变/revert/手动/聚焦检测）
+ */
+export function bumpDiffRefreshVersion(
+  prev: Map<string, AgentDiffRefreshVersion>,
+  sessionId: string,
+  writtenPath?: string,
+): Map<string, AgentDiffRefreshVersion> {
+  const m = new Map(prev)
+  const prevVersion = prev.get(sessionId)?.version ?? 0
+  m.set(sessionId, { version: prevVersion + 1, writtenPath })
+  return m
+}
 
 /** 当前会话选中的 worktree 路径，null = 默认行为（显示 session 改动） */
 export const agentSelectedWorktreeAtom = atom(new Map<string, string | null>())

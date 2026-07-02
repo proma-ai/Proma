@@ -12,7 +12,7 @@ import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
+import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom, bumpDiffRefreshVersion } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
@@ -24,6 +24,19 @@ import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
+
+/**
+ * 判断定向失效的 writtenPath 是否指向当前预览文件。
+ * writtenPath 来自 Agent 工具 input.file_path（可能绝对路径），
+ * filePath 来自 previewFileMap（可能相对路径），两者形态可能不一致。
+ * 统一正斜杠后比较：完全相等，或 writtenPath 以 '/'+filePath 结尾（绝对路径包住相对路径）。
+ * Windows 文件系统大小写不敏感，比较前统一 toLowerCase，避免同文件因大小写差异被误判为无关。
+ */
+function isSameFile(writtenPath: string, filePath: string): boolean {
+  const w = writtenPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const f = filePath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return w === f || (f.length > 0 && w.endsWith('/' + f))
+}
 
 const MD_EXTS = new Set(['.md', '.markdown'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
@@ -229,7 +242,12 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [copied, setCopied] = React.useState(false)
   const refreshVersionMap = useAtomValue(agentDiffRefreshVersionAtom)
   const setRefreshVersionMap = useSetAtom(agentDiffRefreshVersionAtom)
-  const refreshVersion = refreshVersionMap.get(sessionId) ?? 0
+  const refreshEntry = refreshVersionMap.get(sessionId) ?? { version: 0 }
+  const refreshVersion = refreshEntry.version
+  /** 定向失效的被写文件路径；undefined 表示全域刷新（git 突变/revert/手动/聚焦检测） */
+  const refreshWrittenPath = refreshEntry.writtenPath
+  /** 本次定向失效未命中当前预览文件 → 无关刷新，跳过重读/清滚动以保留位置 */
+  const isUnrelatedRefresh = refreshWrittenPath !== undefined && !isSameFile(refreshWrittenPath, filePath)
   const previewContentVersion = previewOnly ? refreshVersion : 0
   const theme = useAtomValue(resolvedThemeAtom)
   const [tocOpen, setTocOpen] = useAtom(markdownTocOpenAtom)
@@ -524,9 +542,16 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   // 主加载 effect：上下文变化（filePath/dirPath/gitRoot/previewOnly）时触发；
   // 纯预览模式也跟随 refreshVersion 失效，保证同一文件二次写入后重新读盘。
-  // 命中缓存时跳过 loading 闪烁直接渲染；未命中走 IPC 拉取
+  // 命中缓存时跳过 loading 闪烁直接渲染；未命中走 IPC 拉取。
+  // 定向失效优化：若 bump 携带 writtenPath 且不是当前预览文件，说明改的是别的文件，
+  // 当前预览内容未变，跳过重读以保留滚动位置和渲染态。
   React.useEffect(() => {
     let cancelled = false
+
+    if (previewOnly && isUnrelatedRefresh) {
+      // 与本次 bump 无关：内容未变，不重读、不清空，保留当前渲染与滚动位置
+      return
+    }
 
     // 所有文件类型均可缓存（含 PDF/DOCX/Office/Image）
     const cacheKey = previewOnly
@@ -655,7 +680,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     load()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, fileAccess, isPdf, isDocx, isOfficePreview, isLegacyOffice, isImage, sessionId, ext, getContentCacheKey])
+  }, [filePath, dirPath, gitRoot, previewOnly, previewContentVersion, isUnrelatedRefresh, fileAccess, isPdf, isDocx, isOfficePreview, isLegacyOffice, isImage, sessionId, ext, getContentCacheKey])
 
   // refreshVersion 触发的静默刷新：仅 diff 模式、内容有变化时才更新 state
   const prevRefreshRef = React.useRef(-1)
@@ -736,15 +761,19 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const restoreRafRef = React.useRef(0)
 
   // WHEN content version changes (refreshVersion bump): delete stored scroll position
-  // 只在内容变化时清除，切换文件时保留位置以支持返回导航
+  // 只在内容变化时清除，切换文件时保留位置以支持返回导航。
+  // 定向失效：若 bump 携带 writtenPath 且不是当前预览文件，说明改的是别的文件，
+  // 当前预览内容未变，保留滚动位置不动。
   React.useEffect(() => {
     if (loading) return // still loading, don't clear yet
     if (prevRefreshVersionRef.current !== refreshVersion) {
-      scrollPositionCache.delete(scrollKey)
-      restoreScrollRef.current = false
+      if (!isUnrelatedRefresh) {
+        scrollPositionCache.delete(scrollKey)
+        restoreScrollRef.current = false
+      }
       prevRefreshVersionRef.current = refreshVersion
     }
-  }, [scrollKey, refreshVersion, loading])
+  }, [scrollKey, refreshVersion, isUnrelatedRefresh, loading])
 
   // RESTORE scroll position after cached content renders.
   // 等待滚动容器内容高度连续 3 帧稳定后再恢复，避免异步渲染
@@ -877,9 +906,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         setNewContent(draft)
         cacheSet(getContentCacheKey('preview', refreshVersion + 1), { oldContent: '', newContent: draft })
         setRefreshVersionMap((prev) => {
-          const m = new Map(prev)
-          m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
-          return m
+          // 自己改自己：定向失效到当前文件，避免误清其他预览面板的滚动位置
+          return bumpDiffRefreshVersion(prev, sessionId, fp)
         })
         setAutosaveStatus('saved')
       }
@@ -912,11 +940,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   }, [fileAccess, filePath, isEditableText, markdownDraft, markdownSaving, persistMarkdownDraft])
 
   const handleManualRefresh = React.useCallback(() => {
-    setRefreshVersionMap((prev) => {
-      const m = new Map(prev)
-      m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
-      return m
-    })
+    // 用户主动刷新：全域失效
+    setRefreshVersionMap((prev) => bumpDiffRefreshVersion(prev, sessionId))
   }, [sessionId, setRefreshVersionMap])
 
   // persistRef 始终持有最新 persistMarkdownDraft，供 setTimeout / unmount cleanup 调用。

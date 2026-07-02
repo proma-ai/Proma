@@ -8,7 +8,7 @@ import * as React from 'react'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { useSetAtom } from 'jotai'
 import type { DetachedPreviewWindowData } from '@proma/shared'
-import { agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
+import { agentDiffRefreshVersionAtom, bumpDiffRefreshVersion } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
@@ -54,11 +54,8 @@ export function DetachedPreviewApp(): React.ReactElement {
 
   const handleRefresh = React.useCallback(() => {
     if (!data) return
-    setRefreshVersionMap((prev) => {
-      const map = new Map(prev)
-      map.set(data.sessionId, (prev.get(data.sessionId) ?? 0) + 1)
-      return map
-    })
+    // 用户主动刷新：全域失效
+    setRefreshVersionMap((prev) => bumpDiffRefreshVersion(prev, data.sessionId))
   }, [data, setRefreshVersionMap])
 
   if (loading) {

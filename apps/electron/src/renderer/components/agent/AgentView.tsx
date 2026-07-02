@@ -96,6 +96,7 @@ import {
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
   agentProcessGroupsKeepExpandedAtom,
+  bumpDiffRefreshVersion,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
@@ -1864,9 +1865,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
 
       // 刷新预览面板的 diff（文件已被回退，当前显示的内容已过期）
-      store.set(agentDiffRefreshVersionAtom, (prev) => {
-        const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
-      })
+      // revert 可能影响多文件，保持全域刷新
+      store.set(agentDiffRefreshVersionAtom, (prev) => bumpDiffRefreshVersion(prev, sessionId))
 
       if (result.fileRewind?.canRewind) {
         const fileCount = result.fileRewind.filesChanged?.length ?? 0

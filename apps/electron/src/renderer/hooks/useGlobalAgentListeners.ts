@@ -52,7 +52,7 @@ import {
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab, updateTabTitle } from '@/atoms/tab-atoms'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
-import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/agent-atoms'
+import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom, bumpDiffRefreshVersion } from '@/atoms/agent-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
@@ -750,9 +750,7 @@ export function useGlobalAgentListeners(): void {
               const entry = pendingWriteTools.get(event.toolUseId)!
               const writtenPath = entry.path
               pendingWriteTools.delete(event.toolUseId)
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
-              })
+              store.set(agentDiffRefreshVersionAtom, (prev) => bumpDiffRefreshVersion(prev, sessionId, writtenPath))
               if (writtenPath) {
                 buildWrittenFilePreviewInfo(sessionId, writtenPath).then((previewFile) => {
                   if (!previewFile || previewFile.previewOnly || !previewFile.inDiffScope) return
@@ -774,9 +772,8 @@ export function useGlobalAgentListeners(): void {
             // Bash git 突变命令完成时，仅刷新 diff 列表（不标记 unseen，避免红点）
             if (pendingGitMutateTools.has(event.toolUseId)) {
               pendingGitMutateTools.delete(event.toolUseId)
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
-              })
+              // git 突变（commit/checkout/reset 等）可能影响多文件，保持全域刷新
+              store.set(agentDiffRefreshVersionAtom, (prev) => bumpDiffRefreshVersion(prev, sessionId))
             }
           } else if (event.type === 'shell_killed') {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) => {
@@ -1141,12 +1138,8 @@ export function useGlobalAgentListeners(): void {
     const fileContentHashMap = new Map<string, string>()
     const HASH_MAX = 100
     let focusCheckSeq = 0
-    const bumpDiffRefresh = (sessionId: string) => {
-      store.set(agentDiffRefreshVersionAtom, (prev) => {
-        const m = new Map(prev)
-        m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
-        return m
-      })
+    const bumpDiffRefresh = (sessionId: string, writtenPath?: string) => {
+      store.set(agentDiffRefreshVersionAtom, (prev) => bumpDiffRefreshVersion(prev, sessionId, writtenPath))
     }
 
     const onWindowFocus = async () => {
