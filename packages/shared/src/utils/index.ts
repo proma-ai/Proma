@@ -29,3 +29,8 @@ export {
   normalizeThinkingSignatureError,
 } from './thinking-signature-error'
 export { normalizePathForCompare } from './normalize-path'
+export {
+  getSDKCompactStatus,
+  isPersistableSDKSystemMessage,
+  type SDKCompactStatus,
+} from './agent-system-message'

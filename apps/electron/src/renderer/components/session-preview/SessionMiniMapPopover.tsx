@@ -26,6 +26,7 @@ import type {
   SDKUserContentBlock,
   SDKUserMessage,
 } from '@proma/shared'
+import { getSDKCompactStatus } from '@proma/shared'
 
 export type SessionMiniMapType = 'chat' | 'agent'
 
@@ -224,13 +225,16 @@ function buildAgentMinimapItems(messages: SDKMessage[], userAvatar?: string): Ta
 
     if (message.type === 'system') {
       const system = message as SDKSystemMessage
-      const preview = system.subtype === 'compact_boundary'
+      const compactStatus = getSDKCompactStatus(system)
+      const preview = compactStatus === 'success'
         ? '上下文已压缩'
-        : system.subtype === 'compacting'
+        : compactStatus === 'compacting'
           ? '正在压缩上下文...'
-          : system.subtype === 'permission_denied'
-            ? '自动审批已拒绝操作'
-            : ''
+          : compactStatus === 'failed'
+            ? '上下文压缩失败'
+            : system.subtype === 'permission_denied'
+              ? '权限检查已拒绝操作'
+              : ''
       if (preview) {
         items.push({
           id: `${system.subtype ?? 'system'}-${items.length}`,

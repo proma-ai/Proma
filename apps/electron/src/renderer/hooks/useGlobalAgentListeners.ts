@@ -243,7 +243,16 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         modelUsage?: Record<string, { contextWindow?: number }>
         usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
       }
-      const contextWindow = rMsg.modelUsage ? Object.values(rMsg.modelUsage)[0]?.contextWindow : undefined
+      // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow，
+      // 避免子 Agent 的小窗口覆盖主模型的大窗口、导致指示器飘忽。
+      let contextWindow: number | undefined
+      if (rMsg.modelUsage) {
+        for (const info of Object.values(rMsg.modelUsage)) {
+          if (info?.contextWindow && (contextWindow === undefined || info.contextWindow > contextWindow)) {
+            contextWindow = info.contextWindow
+          }
+        }
+      }
       // result.usage 是整个 query 内所有模型调用的累计求和，不能当成当前上下文占用，
       // 否则进度环会虚高、冲破 100%（PR #821 修的正是这个问题）。
       //
@@ -272,6 +281,12 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       const sMsg = msg as SDKSystemMessage
       if (sMsg.subtype === 'compact_boundary') return [{ type: 'compact_complete' }]
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
+      if (sMsg.subtype === 'status') {
+        if (sMsg.status === 'compacting') return [{ type: 'compacting' }]
+        if (sMsg.compact_result === 'success' || sMsg.compact_result === 'failed' || typeof sMsg.compact_error === 'string') {
+          return [{ type: 'compact_complete' }]
+        }
+      }
       if (sMsg.subtype === 'task_started' && sMsg.task_id) {
         return [{ type: 'task_started', taskId: sMsg.task_id, description: sMsg.description ?? '', taskType: sMsg.task_type, toolUseId: sMsg.tool_use_id }]
       }
@@ -876,7 +891,7 @@ export function useGlobalAgentListeners(): void {
               updatePlanModeSessionSet(prev, sessionId, event.active)
             )
           } else if (event.type === 'permission_mode_changed') {
-            // 权限模式变更（如 Plan 模式退出后切换到自动审批或完全自动）
+            // 权限模式变更（如 Plan 模式退出后切换到完全自动）
             console.log(`[GlobalAgentListeners] 权限模式变更: ${event.mode}`)
             store.set(agentPermissionModeMapAtom, (prev: Map<string, import('@proma/shared').PromaPermissionMode>) => {
               const next = new Map(prev)

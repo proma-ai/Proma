@@ -1,6 +1,6 @@
 {
   "name": "@proma/session-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "AGPL-3.0-only",
   "description": "Headless core for reading, grouping, searching and rendering Proma agent sessions. Single source of truth shared by the Electron app, the proma CLI and future query surfaces.",
   "type": "module",

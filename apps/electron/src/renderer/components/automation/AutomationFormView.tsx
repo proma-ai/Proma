@@ -1051,32 +1051,10 @@ export function AutomationFormView(): React.ReactElement | null {
           {/* 会话模式选择已隐藏：默认采用 daily（同日复用、跨日新建）。
               schema/scheduler/Agent 工具层仍保留 reuse 模式，方便老配置和高级用户继续使用。 */}
 
-          {/* 权限模式 */}
-          <div className="flex flex-col gap-2">
-            <Label>运行权限</Label>
-            <Select
-              value={form.permissionMode}
-              onValueChange={(v) => update({ permissionMode: v as AutomationDraft['permissionMode'] })}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bypassPermissions">完全自动</SelectItem>
-                <SelectItem value="auto">自动审批</SelectItem>
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground leading-relaxed">
-              {form.permissionMode === 'bypassPermissions'
-                ? '所有工具调用自动允许（推荐用于无人值守）。'
-                : '由 SDK 内置审批器判断，危险操作仍会请求确认；无人值守时这些请求会一直挂起，需手动到会话中处理。'}
-            </span>
+          <div className="flex gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+            <span>此任务将以「完全权限」无人值守运行，可自主读写文件、执行命令。请确认任务内容安全可信。</span>
           </div>
-
-          {form.permissionMode === 'bypassPermissions' && (
-            <div className="flex gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-              <span>此任务将以「完全权限」无人值守运行，可自主读写文件、执行命令。请确认任务内容安全可信。</span>
-            </div>
-          )}
 
           {/* 运行历史（编辑模式） */}
           {isEdit && live && (

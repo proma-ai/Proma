@@ -750,15 +750,20 @@ export function applyAgentEvent(
       //
       // 折中：仅当「整个 query 期间从未收到流式 usage_update」（prev.inputTokens 为空/0）
       // 才从 result.usage 兜底写入 token 字段；已有流式真实值时不动。
-      // - contextWindow：始终覆盖（result 才是权威分母）
+      // - contextWindow：取流式与 result 的较大值（result 未必更权威——多 entry 时
+      //   子 Agent 的小窗口可能拉低值，Fix 1/2 已从源头取 max，此处作为安全网）。
       // - costUsd：始终覆盖（本就该是整轮累计成本）
       const needResultFallback = !prev.inputTokens || prev.inputTokens <= 0
       return {
         ...prev,
         ...(event.usage ? {
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
-          ...(event.usage.contextWindow != null && { usageUpdatedAt: Date.now() }),
+          ...(event.usage.contextWindow != null && {
+            contextWindow: prev.contextWindow != null
+              ? Math.max(prev.contextWindow, event.usage.contextWindow)
+              : event.usage.contextWindow,
+            usageUpdatedAt: Date.now(),
+          }),
           ...(needResultFallback && event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
           ...(needResultFallback && event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
           ...(needResultFallback && event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
@@ -792,9 +797,13 @@ export function applyAgentEvent(
         ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
         ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
         ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-        // 流式中 assistant 消息的 usage_update 可能携带推断的 contextWindow，
-        // 若已有 result 消息提供的真实值，则不再覆盖
-        ...(event.usage.contextWindow && !prev.contextWindow && { contextWindow: event.usage.contextWindow }),
+        // contextWindow 取 max：本分支同时承载「流式 assistant 消息按模型名推断的窗口」
+        // 与「后端从 SDK result 透传的真实窗口（context_window 事件）」两个来源。
+        // 模型窗口在同一会话内不会缩小，取更大值可兼顾两类端点——既不会让推断偏小的
+        // 端点（如 GLM 剥掉 [1m] 后缀）挡住真实的 1M，也不会让回报偏小的端点覆盖正确的 1M。
+        ...(event.usage.contextWindow && {
+          contextWindow: Math.max(prev.contextWindow ?? 0, event.usage.contextWindow),
+        }),
         usageUpdatedAt: Date.now(),
       }
 

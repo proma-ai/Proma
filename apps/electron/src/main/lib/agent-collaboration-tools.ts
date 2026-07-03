@@ -714,7 +714,7 @@ function startDelegation(
 function buildCollaborationSchemas(z: ZodModule['z']) {
   const nonBlankString = z.string().trim().min(1)
   const role = z.enum(['explore', 'research', 'implement', 'review', 'custom'])
-  const permissionMode = z.enum(['plan', 'auto', 'bypassPermissions'])
+  const permissionMode = z.enum(['plan', 'bypassPermissions'])
   const delegateItem = z.object({
     title: z.string().optional().describe('子会话标题，简短说明子任务'),
     role: role.optional().describe('子任务角色：explore/research/implement/review/custom'),

@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { CheckCircle2, Settings2, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Plug, Settings2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -61,67 +61,89 @@ export function BuiltinMcpDetailSheet({ open, server, onOpenChange, onConfigure 
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[560px] sm:max-w-[560px] overflow-y-auto scrollbar-thin pt-12">
-        {server && configInfo && (
-          <div className="flex flex-col gap-6">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <SheetTitle>{server.displayName}</SheetTitle>
-                <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                  Proma 内置
-                </span>
-              </div>
-              <SheetDescription>{server.description}</SheetDescription>
+      <SheetContent hideClose side="right" className="w-[560px] sm:max-w-[560px] p-0 flex flex-col gap-0">
+        <SheetTitle className="sr-only">{server ? `MCP 详情 · ${server.displayName}` : 'MCP 详情'}</SheetTitle>
+        <div className="flex h-full flex-col min-h-0">
+          <div className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" className="h-8 w-8" type="button" onClick={() => onOpenChange(false)}>
+                <ArrowLeft size={18} />
+              </Button>
+              <h3 className="text-lg font-medium text-foreground">MCP 详情</h3>
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <InfoItem label="MCP 名称" value={server.name} />
-              <InfoItem label="分类" value={CATEGORY_LABELS[server.category]} />
-              <InfoItem label="注入开关" value={server.enabled ? '允许注入' : '已手动关闭'} tone={server.enabled ? 'success' : 'muted'} />
-              <InfoItem label="可用状态" value={server.available ? '当前可用' : (server.availabilityReason ?? '不可用')} tone={server.available ? 'success' : 'muted'} />
-              <InfoItem label="配置来源" value={configInfo.source} />
-            </div>
-
-            <section className="rounded-lg bg-muted/45 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-foreground">如何配置</div>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{configInfo.description}</p>
+            {server && (
+              <div className="mt-4 flex items-start gap-3">
+                <div className="rounded-xl bg-blue-500/12 p-2 text-blue-500 shadow-sm shrink-0">
+                  <Plug size={18} />
                 </div>
-                {configInfo.actionLabel && onConfigure && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => onConfigure(server.id)}
-                  >
-                    <Settings2 size={14} />
-                    <span>{configInfo.actionLabel}</span>
-                  </Button>
-                )}
-              </div>
-            </section>
-
-            <section className="flex flex-col gap-3">
-              <div className="text-sm font-medium text-foreground">工具</div>
-              <div className="flex flex-col gap-2">
-                {server.tools.map((tool) => (
-                  <div key={tool.name} className="rounded-lg bg-muted/45 p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{tool.name}</span>
-                      {tool.readOnly && (
-                        <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                          只读
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{tool.description}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-base font-semibold text-foreground">{server.displayName}</h3>
+                    <span className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                      Proma 内置
+                    </span>
                   </div>
-                ))}
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">{server.name}</div>
+                </div>
               </div>
-            </section>
+            )}
           </div>
-        )}
+
+          <div className="flex-1 overflow-y-auto scrollbar-thin p-5">
+            {server && configInfo && (
+              <div className="flex flex-col gap-6">
+                <SheetDescription>{server.description}</SheetDescription>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <InfoItem label="MCP 名称" value={server.name} />
+                  <InfoItem label="分类" value={CATEGORY_LABELS[server.category]} />
+                  <InfoItem label="注入开关" value={server.enabled ? '允许注入' : '已手动关闭'} tone={server.enabled ? 'success' : 'muted'} />
+                  <InfoItem label="可用状态" value={server.available ? '当前可用' : (server.availabilityReason ?? '不可用')} tone={server.available ? 'success' : 'muted'} />
+                  <InfoItem label="配置来源" value={configInfo.source} />
+                </div>
+
+                <section className="rounded-lg bg-muted/45 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-foreground">如何配置</div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{configInfo.description}</p>
+                    </div>
+                    {configInfo.actionLabel && onConfigure && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={() => onConfigure(server.id)}
+                      >
+                        <Settings2 size={14} />
+                        <span>{configInfo.actionLabel}</span>
+                      </Button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="flex flex-col gap-3">
+                  <div className="text-sm font-medium text-foreground">工具</div>
+                  <div className="flex flex-col gap-2">
+                    {server.tools.map((tool) => (
+                      <div key={tool.name} className="rounded-lg bg-muted/45 p-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{tool.name}</span>
+                          {tool.readOnly && (
+                            <span className="rounded-md bg-foreground/5 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                              只读
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{tool.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
+        </div>
       </SheetContent>
     </Sheet>
   )

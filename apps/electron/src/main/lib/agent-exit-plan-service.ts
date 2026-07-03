@@ -100,7 +100,7 @@ export class AgentExitPlanService {
     this.pendingRequests.delete(response.requestId)
 
     switch (response.action) {
-      case 'approve_auto': {
+      case 'approve_bypass': {
         // 批准 + 切换到完全自动模式
         pending.resolve({
           behavior: 'allow' as const,
@@ -108,15 +108,6 @@ export class AgentExitPlanService {
           targetMode: 'bypassPermissions',
         })
         return { sessionId, targetMode: 'bypassPermissions' }
-      }
-      case 'approve_edit': {
-        // 批准 + 切换到自动审批模式
-        pending.resolve({
-          behavior: 'allow' as const,
-          updatedInput: pending.toolInput,
-          targetMode: 'auto',
-        })
-        return { sessionId, targetMode: 'auto' }
       }
       case 'deny': {
         // 拒绝计划

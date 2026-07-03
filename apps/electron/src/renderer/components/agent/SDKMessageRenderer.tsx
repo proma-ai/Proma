@@ -77,6 +77,7 @@ import type {
 } from '@proma/shared'
 import type { AgentPendingFile } from '@proma/shared'
 import {
+  getSDKCompactStatus,
   THINKING_SIGNATURE_ERROR_CODE,
   THINKING_SIGNATURE_ERROR_TITLE,
   THINKING_SIGNATURE_ERROR_MESSAGE,
@@ -132,7 +133,7 @@ function PermissionDeniedNotice({ message }: { message: SDKSystemMessage }): Rea
         <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-foreground">自动审批已拒绝操作</span>
+            <span className="font-medium text-foreground">权限检查已拒绝操作</span>
             {toolName && (
               <span className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
                 {toolName}
@@ -166,6 +167,38 @@ export function CompactingIndicator(): React.ReactElement {
   )
 }
 
+function CompactStatusNotice({ message, active = false }: { message: SDKSystemMessage; active?: boolean }): React.ReactElement | null {
+  const compactStatus = getSDKCompactStatus(message)
+  if (compactStatus === 'success') return <CompactBoundaryDivider />
+  if (compactStatus === 'compacting') {
+    if (active) return <CompactingIndicator />
+    return (
+      <div className="flex items-center gap-3 my-4 px-1">
+        <div className="flex-1 h-px bg-border/40" />
+        <span className="shrink-0 text-[11px] text-muted-foreground/60 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
+          开始压缩上下文
+        </span>
+        <div className="flex-1 h-px bg-border/40" />
+      </div>
+    )
+  }
+  if (compactStatus === 'failed') {
+    const error = typeof message.compact_error === 'string' ? message.compact_error : undefined
+    return (
+      <div className="my-3 pl-[46px] pr-1">
+        <div className="flex items-start gap-2.5 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-xs text-foreground/80">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          <div className="min-w-0 space-y-1">
+            <div className="font-medium text-foreground">上下文压缩失败</div>
+            {error && <p className="break-words text-muted-foreground">{error}</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
 // extractMeta / MessageMeta 已迁移至 @proma/session-core
 
 /** 从 turn 消息列表中提取 result 消息的耗时和用量数据 */
@@ -177,9 +210,15 @@ function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; us
     const durationMs = typeof raw._durationMs === 'number' ? raw._durationMs : undefined
     const u = resultMsg.usage
     if (!u) return { durationMs }
-    const contextWindow = resultMsg.modelUsage
-      ? Object.values(resultMsg.modelUsage)[0]?.contextWindow
-      : undefined
+    // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow
+    let contextWindow: number | undefined
+    if (resultMsg.modelUsage) {
+      for (const info of Object.values(resultMsg.modelUsage)) {
+        if (info?.contextWindow && (contextWindow === undefined || info.contextWindow > contextWindow)) {
+          contextWindow = info.contextWindow
+        }
+      }
+    }
     return {
       durationMs,
       usage: {
@@ -661,15 +700,12 @@ export function SDKMessageRenderer({
   if (msgType === 'system') {
     const sysMsg = message as SDKSystemMessage
     const subtype = sysMsg.subtype
+    const compactStatus = getSDKCompactStatus(sysMsg)
 
-    if (subtype === 'compact_boundary') {
-      return <CompactBoundaryDivider />
-    }
+    if (compactStatus) return <CompactStatusNotice message={sysMsg} />
     if (subtype === 'permission_denied') {
       return <PermissionDeniedNotice message={sysMsg} />
     }
-
-    // compacting 事件已由 isCompacting flag 驱动的尾部指示器接管（见 AgentMessages），此处不再渲染持久条目
 
     return null
   }
@@ -1254,8 +1290,7 @@ export function MessageGroupRenderer({ group, allMessages, historicalTaskSubject
 
   if (group.type === 'system') {
     const subtype = group.message.subtype
-    if (subtype === 'compact_boundary') return <div data-message-id={groupId}><CompactBoundaryDivider /></div>
-    if (subtype === 'compacting') return <div data-message-id={groupId}><CompactingIndicator /></div>
+    if (getSDKCompactStatus(group.message)) return <div data-message-id={groupId}><CompactStatusNotice message={group.message} active={isStreaming} /></div>
     if (subtype === 'permission_denied') return <div data-message-id={groupId}><PermissionDeniedNotice message={group.message} /></div>
     return null
   }

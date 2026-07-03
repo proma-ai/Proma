@@ -37,6 +37,7 @@ import type {
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
 } from '@proma/shared'
+import { migratePermissionMode } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
 // 旧格式 → SDKMessage 的转换逻辑下沉到 @proma/session-core 作为唯一真源，避免主进程与渲染层各存一份。
 import { convertLegacyMessage } from '@proma/session-core'
@@ -112,13 +113,33 @@ function normalizePersistedSDKMessage(parsed: unknown): SDKMessage {
   return parsed as SDKMessage
 }
 
+function migrateLegacyPermissionMode(index: AgentSessionsIndex): boolean {
+  let changed = false
+  for (const session of index.sessions) {
+    const rawMode = session.permissionMode as string | undefined
+    if (!rawMode) continue
+    const nextMode = migratePermissionMode(rawMode)
+    if (nextMode !== rawMode) {
+      session.permissionMode = nextMode
+      changed = true
+    }
+  }
+  return changed
+}
+
 /**
  * 读取会话索引文件
  */
 function readIndex(): AgentSessionsIndex {
   const indexPath = getAgentSessionsIndexPath()
   const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
-  if (data) return data
+  if (data) {
+    if (migrateLegacyPermissionMode(data)) {
+      writeIndex(data)
+      console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
+    }
+    return data
+  }
   return { version: INDEX_VERSION, sessions: [] }
 }
 

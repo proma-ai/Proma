@@ -1,11 +1,10 @@
 /**
  * ExitPlanModeBanner — Agent ExitPlanMode 计划审批横幅
  *
- * 仿照 Claude Code 的计划审批 UI，提供 4 个选项：
+ * 仿照 Claude Code 的计划审批 UI，提供 3 个选项：
  * 1. 批准并完全自动执行 — 切换到 bypassPermissions
- * 2. 批准并自动审批 — 切换到 auto
- * 3. 拒绝计划 — deny
- * 4. 提供反馈 — 自由输入修改意见
+ * 2. 拒绝计划 — deny
+ * 3. 提供反馈 — 自由输入修改意见
  *
  * 键盘：↑↓ 选择，Enter 确认，数字键快速选择。
  */
@@ -14,7 +13,6 @@ import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import {
   Check,
-  ShieldCheck,
   X,
   MessageSquare,
   Send,
@@ -35,18 +33,11 @@ interface PlanOption {
 
 const PLAN_OPTIONS: PlanOption[] = [
   {
-    action: 'approve_auto',
+    action: 'approve_bypass',
     label: '批准并完全自动执行',
     description: '后续工具调用全部自动允许',
     icon: <Check className="size-3.5" />,
     variant: 'default',
-  },
-  {
-    action: 'approve_edit',
-    label: '批准并自动审批',
-    description: '使用 SDK 自动审批器判断后续操作',
-    icon: <ShieldCheck className="size-3.5" />,
-    variant: 'secondary',
   },
   {
     action: 'deny',
@@ -181,7 +172,7 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
             handleActionRef.current?.(option.action)
           }
         }
-      } else if (e.key >= '1' && e.key <= '4') {
+      } else if (e.key >= '1' && e.key <= '3') {
         const idx = parseInt(e.key) - 1
         const option = PLAN_OPTIONS[idx]
         if (option) {
@@ -306,7 +297,7 @@ export function ExitPlanModeBanner({ sessionId }: ExitPlanModeBannerProps): Reac
       {/* 底部提示 */}
       <div className="flex items-center px-4 pb-3">
         <span className="text-[10px] text-muted-foreground/40">
-          点击选择 · ↑↓ Enter 确认 · 1-4 快速选择
+          点击选择 · ↑↓ Enter 确认 · 1-3 快速选择
         </span>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { test, expect, describe } from 'bun:test'
 import {
   readSessionMessagesFromString,
   groupIntoTurns,
+  getGroupPreview,
   toTranscript,
   searchTurns,
   selectTurns,
@@ -62,6 +63,23 @@ describe('工具折叠 ×N', () => {
     expect(summarizeToolInput('Read', { file_path: '/a', limit: 0, empty: '' })).toBe('Read file_path=/a limit=0')
     const long = 'x'.repeat(200)
     expect(summarizeToolInput('Bash', { command: long }).length).toBeLessThan(100)
+  })
+})
+
+describe('SDK 压缩状态分组', () => {
+  test('status 压缩事件独立成组并生成预览', () => {
+    const raw = jsonl([
+      { type: 'user', message: { content: [{ type: 'text', text: '压缩测试' }] }, parent_tool_use_id: null },
+      { type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: '准备压缩' }] }, parent_tool_use_id: null },
+      { type: 'system', subtype: 'status', status: 'compacting' },
+      { type: 'system', subtype: 'status', compact_result: 'failed', compact_error: 'token budget exhausted' },
+    ])
+
+    const groups = groupIntoTurns(readSessionMessagesFromString(raw))
+
+    expect(groups.map((g) => g.type)).toEqual(['user', 'assistant-turn', 'system', 'system'])
+    expect(getGroupPreview(groups[2]!)).toBe('正在压缩上下文...')
+    expect(getGroupPreview(groups[3]!)).toBe('上下文压缩失败')
   })
 })
 

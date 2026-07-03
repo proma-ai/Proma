@@ -4236,8 +4236,8 @@ export function registerIpcHandlers(): void {
   const isFiniteInt = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)
   const validScheduleType = (v: unknown): v is 'interval' | 'daily' | 'weekly' | 'monthly' =>
     v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly'
-  const validPermissionMode = (v: unknown): v is 'auto' | 'bypassPermissions' =>
-    v === 'auto' || v === 'bypassPermissions'
+  const validPermissionMode = (v: unknown): v is 'bypassPermissions' =>
+    v === 'bypassPermissions'
   const validAutomationNotificationTrigger = (v: unknown): v is 'always' | 'success' | 'error' =>
     v === 'always' || v === 'success' || v === 'error'
   const validTimeOfDay = (v: unknown): boolean => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)

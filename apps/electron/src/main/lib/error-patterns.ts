@@ -39,3 +39,19 @@ export function isMalformedResponseError(message?: string, stderr?: string): boo
     (!!stderr && MALFORMED_RESPONSE_PATTERN.test(stderr))
   )
 }
+
+/**
+ * SDK resume 指向的会话不存在。
+ *
+ * Claude Agent SDK 不同版本/路径的错误文案不完全一致，线上已见到：
+ * - "No conversation found with session ID: ..."
+ * - "No conversation found withsessionID: ..."
+ * 第二种少了空格，不能依赖逐字匹配。
+ */
+export function isSessionNotFoundError(...messages: Array<string | undefined>): boolean {
+  return messages.some((message) => {
+    if (!message) return false
+    const compact = message.replace(/\s+/g, '').toLowerCase()
+    return /noconversationfound(?:with)?session(?:id)?/.test(compact)
+  })
+}

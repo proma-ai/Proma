@@ -103,14 +103,6 @@ export interface SDKSessionMessage {
 }
 
 /**
- * SDK Beta 特性标识
- *
- * 当前支持：
- * - context-1m-2025-08-07: 启用 1M token 上下文窗口（Claude Sonnet 4+ / Opus 4.6+、DeepSeek V4 系列）
- */
-export type SdkBeta = 'context-1m-2025-08-07'
-
-/**
  * JSON Schema 输出格式
  *
  * 用于指定结构化输出，Agent 将返回符合 Schema 的 JSON 数据。
@@ -240,6 +232,10 @@ export interface SDKSystemMessage {
   task_type?: string
   tool_use_id?: string
   status?: string
+  /** SDK status: 上下文压缩结果 */
+  compact_result?: 'success' | 'failed'
+  /** SDK status: 上下文压缩失败原因 */
+  compact_error?: string
   summary?: string
   output_file?: string
   last_tool_name?: string
@@ -1257,7 +1253,7 @@ export interface ExitPlanModeRequest {
 }
 
 /** ExitPlanMode 用户选择行为 */
-export type ExitPlanModeAction = 'approve_auto' | 'approve_edit' | 'deny' | 'feedback'
+export type ExitPlanModeAction = 'approve_bypass' | 'deny' | 'feedback'
 
 /** ExitPlanMode 响应（渲染进程 → 主进程） */
 export interface ExitPlanModeResponse {
@@ -1272,7 +1268,7 @@ export interface ExitPlanModeResponse {
 // ===== 权限系统类型 =====
 
 /** 当前 Proma 支持的权限模式，值直接映射 SDK 原生 permissionMode */
-export const PROMA_PERMISSION_MODES = ['auto', 'bypassPermissions', 'plan'] as const
+export const PROMA_PERMISSION_MODES = ['bypassPermissions', 'plan'] as const
 
 export type PromaPermissionMode = typeof PROMA_PERMISSION_MODES[number]
 
@@ -1287,11 +1283,6 @@ export interface PromaPermissionModeConfig {
 
 /** Proma 权限模式的单一配置来源 */
 export const PROMA_PERMISSION_MODE_CONFIG = {
-  auto: {
-    sdkMode: 'auto',
-    label: '自动审批',
-    description: 'SDK 内置审批器自动判断，危险操作才需确认',
-  },
   bypassPermissions: {
     sdkMode: 'bypassPermissions',
     label: '完全自动',
@@ -1311,7 +1302,7 @@ export function isPromaPermissionMode(mode: string): mode is PromaPermissionMode
   return (PROMA_PERMISSION_MODES as readonly string[]).includes(mode)
 }
 
-/** 规范化权限模式：不匹配当前三种模式时统一回到默认自动审批 */
+/** 规范化权限模式：历史 auto 或其它非法值统一回到默认完全自动模式 */
 export function migratePermissionMode(mode: string): PromaPermissionMode {
   if (isPromaPermissionMode(mode)) return mode
   return PROMA_DEFAULT_PERMISSION_MODE
