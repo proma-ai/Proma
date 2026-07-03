@@ -1694,8 +1694,8 @@ export class AgentOrchestrator {
                 appendSDKMessages(sessionId, [errorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
-                // 如果之前有重试记录，发送 retry_failed
-                if (retryAttemptsScheduled > 0 && lastRetryableError) {
+                // 如果之前有可见重试记录，发送 retry_failed
+                if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD && lastRetryableError) {
                   this.eventBus.emit(sessionId, {
                     kind: 'proma_event',
                     event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled, timestamp: Date.now(), reason: lastRetryableError, errorMessage: typedError.message, delaySeconds: 0 } },
