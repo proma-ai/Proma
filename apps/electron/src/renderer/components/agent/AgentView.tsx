@@ -1523,6 +1523,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       sendPlainTextAgentMessage(message).catch((error) => {
         console.error('[AgentView] 追加消息失败:', error)
         toast.error('追加消息失败', { description: String(error) })
+        // 回滚：恢复输入框内容和建议，避免用户输入丢失
+        setInputContent(effectiveText)
+        setInputHtmlContent('')
+        setPromptSuggestions((prev) => {
+          const map = new Map(prev)
+          map.set(sessionId, suggestion ?? null)
+          return map
+        })
       })
       return
     }
