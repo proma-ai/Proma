@@ -54,6 +54,7 @@ import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
+import { removePromaAutoCompactSettings } from './agent-auto-compact-settings'
 import { applyAgentModelRoutingToEnv, resolveAgentModelRouting } from './agent-model-routing'
 import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
@@ -288,47 +289,6 @@ function resolveSDKCliPath(): string {
   }
 
   return binaryPath
-}
-
-/** DeepSeek 1M 上下文的保守自动压缩窗口，给上游真实限制和输出预留安全垫。 */
-const DEEPSEEK_AUTO_COMPACT_WINDOW = 850_000
-
-function resolvePromaAutoCompactWindow(provider: ProviderType, modelId: string | undefined): number | undefined {
-  const model = (modelId || '').toLowerCase()
-  if (provider === 'deepseek' || model.startsWith('deepseek-v4') || model.includes('/deepseek-v4')) {
-    return DEEPSEEK_AUTO_COMPACT_WINDOW
-  }
-  return undefined
-}
-
-function applyPromaAutoCompactSettings(settings: Record<string, unknown>, targetWindow: number | undefined): boolean {
-  let changed = false
-
-  if (targetWindow != null) {
-    if (settings.autoCompactEnabled !== true) {
-      settings.autoCompactEnabled = true
-      changed = true
-    }
-
-    const currentWindow = typeof settings.autoCompactWindow === 'number'
-      ? settings.autoCompactWindow
-      : undefined
-    const nextWindow = currentWindow != null && currentWindow > 0
-      ? Math.min(currentWindow, targetWindow)
-      : targetWindow
-    if (settings.autoCompactWindow !== nextWindow) {
-      settings.autoCompactWindow = nextWindow
-      changed = true
-    }
-    return changed
-  }
-
-  if (settings.autoCompactWindow === DEEPSEEK_AUTO_COMPACT_WINDOW) {
-    delete settings.autoCompactWindow
-    changed = true
-  }
-
-  return changed
 }
 
 /** 标题生成 Prompt */
@@ -1170,10 +1130,7 @@ export class AgentOrchestrator {
             needsWrite = true
           }
         }
-        if (applyPromaAutoCompactSettings(
-          sdkProjectSettings,
-          resolvePromaAutoCompactWindow(channel.provider, modelId || DEFAULT_MODEL_ID),
-        )) {
+        if (removePromaAutoCompactSettings(sdkProjectSettings)) {
           needsWrite = true
         }
         if (needsWrite) {

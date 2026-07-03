@@ -37,7 +37,8 @@ import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extr
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
-import type { AgentEventUsage, RetryAttempt, SDKMessage } from '@proma/shared'
+import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
+import { getSDKCompactStatus } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
 
 function stableStringify(value: unknown): string {
@@ -84,6 +85,13 @@ function getSDKMessageStableKey(message: SDKMessage): string {
 
   stableKeyCache.set(message, key)
   return key
+}
+
+function hasCompactStatus(messages: SDKMessage[]): boolean {
+  return messages.some((message) => {
+    if (message.type !== 'system') return false
+    return getSDKCompactStatus(message as SDKSystemMessage) != null
+  })
 }
 
 /** AgentMessages 属性接口 */
@@ -538,6 +546,9 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
   // 直到整个 stream 结束（stream state 被删除）才消失。
   const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
+  const compactStatusInLiveMessages = React.useMemo(() => {
+    return hasCompactStatus(liveMessages ?? [])
+  }, [liveMessages])
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
@@ -694,7 +705,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
             {/* 压缩中指示器：由 isCompacting flag 驱动的尾部元素，compact_boundary 到达时 flag 翻 false 自然消失，
                 视觉上被流中新出现的"上下文已压缩"分隔符无缝替换 */}
-            {streamState?.isCompacting && <CompactingIndicator />}
+            {streamState?.isCompacting && !compactStatusInLiveMessages && <CompactingIndicator />}
 
           </>
         )}

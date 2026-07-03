@@ -1534,7 +1534,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         setInputHtmlContent('')
         setPromptSuggestions((prev) => {
           const map = new Map(prev)
-          map.set(sessionId, suggestion ?? null)
+          if (suggestion) {
+            map.set(sessionId, suggestion)
+          } else {
+            map.delete(sessionId)
+          }
           return map
         })
       })
