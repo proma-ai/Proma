@@ -1,8 +1,10 @@
 /**
  * 模型上下文窗口推断 — 单一 source of truth。
  *
- * 后端（agent-orchestrator 是否发 `context-1m-2025-08-07` beta）和
- * 前端（ContextUsageBadge 进度环分母 fallback）必须共用同一份判定，
+ * 1M 上下文已随各家模型转正为默认能力（Anthropic 于 2026-03 对 Opus 4.6 /
+ * Sonnet 4.6 起 GA，无需 context-1m beta header；Sonnet 5 / Opus 4.7+ 延续），
+ * 故不再下发任何 beta。本文件仅用于「按模型名推断上下文窗口大小」，供前端
+ * ContextUsageBadge 进度环分母 fallback 与后端用量统计共用同一份判定，
  * 否则会出现"UI 显示 1M 但实际只 200K"或反过来的不一致。
  */
 
@@ -48,7 +50,7 @@ const CONTEXT_WINDOW_CONFIG = {
 } as const
 
 /**
- * 判断模型是否支持 1M context window beta（context-1m-2025-08-07）。
+ * 判断模型是否支持 1M context window（现为各模型默认能力，无需 beta header）。
  */
 export function supports1MContext(modelId: string): boolean {
   if (!modelId) return false

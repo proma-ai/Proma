@@ -108,13 +108,17 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentSendInput, AgentPendingFile, FileDialogLargeFile, ModelOption, SDKMessage } from '@proma/shared'
-import { MAX_ATTACHMENT_SIZE, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
+import { inferContextWindow, MAX_ATTACHMENT_SIZE, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
 const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
+
+function resolveRunContextWindow(modelId: string | undefined, previous: number | undefined): number | undefined {
+  return inferContextWindow(modelId) ?? previous
+}
 
 interface SDKMessageRecord {
   type?: string
@@ -795,7 +799,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           model: snapshot.modelId,
           startedAt: streamStartedAt,
           inputTokens: existing?.inputTokens,
-          contextWindow: existing?.contextWindow,
+          contextWindow: resolveRunContextWindow(snapshot.modelId, existing?.contextWindow),
         })
         return map
       })
@@ -1559,7 +1563,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
-        contextWindow: existing?.contextWindow,
+        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
       })
       return map
     })
@@ -1746,7 +1750,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
-        contextWindow: existing?.contextWindow,
+        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
       })
       return map
     })

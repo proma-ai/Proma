@@ -1,14 +1,14 @@
 /**
  * PermissionModeSelector — Agent 权限模式切换器
  *
- * 集成在 AgentHeader 中，紧凑的三模式切换按钮。
+ * 集成在 AgentHeader 中，紧凑的双模式切换按钮。
  * 支持循环切换和工作区级别的持久化。
  * 每个会话独立维护自己的权限模式。
  */
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { Zap, Compass, Map as MapIcon } from 'lucide-react'
+import { Zap, Map as MapIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { agentPermissionModeMapAtom, agentDefaultPermissionModeAtom, sessionPersistedPermissionModeAtom, sessionExistsAtom, agentPlanModeSessionsAtom } from '@/atoms/agent-atoms'
@@ -18,7 +18,6 @@ import { getDisplayedPermissionMode, updatePlanModeSessionSet } from '@/lib/agen
 import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 
 const MODE_ICONS: Record<PromaPermissionMode, React.ComponentType<{ className?: string }>> = {
-  auto: Compass,
   bypassPermissions: Zap,
   plan: MapIcon,
 }

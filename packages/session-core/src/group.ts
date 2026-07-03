@@ -7,11 +7,13 @@
  *
  * 逻辑逐字迁移自 apps/electron 渲染层 SDKMessageRenderer.tsx，保持行为一致。
  */
-import type {
-  SDKMessage,
-  SDKAssistantMessage,
-  SDKUserMessage,
-  SDKSystemMessage,
+import {
+  getSDKCompactStatus,
+  isPersistableSDKSystemMessage,
+  type SDKMessage,
+  type SDKAssistantMessage,
+  type SDKUserMessage,
+  type SDKSystemMessage,
 } from '@proma/shared'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tags'
 
@@ -86,13 +88,16 @@ export type MessageGroup =
  * 规则：
  * 1. user（真正用户输入）→ 单独的 user group
  * 2. assistant + user(tool_result) + assistant... → 合并为一个 assistant-turn
- * 3. system（compact_boundary / compacting / permission_denied）→ 独立渲染，其他归入当前 turn
+ * 3. system（压缩状态 / permission_denied）→ 独立渲染，其他归入当前 turn
  * 4. 其他类型（result, tool_progress 等）→ 归入当前 assistant-turn
  * 5. 后处理：合并相邻同模型的 assistant-turn（处理子代理切换模型导致的碎片化）
  */
 export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
+  const hasCompactBoundary = messages.some((msg) => {
+    return msg.type === 'system' && (msg as SDKSystemMessage).subtype === 'compact_boundary'
+  })
   // 收到后台任务完成通知（task_notification）后，若没有用户输入就直接出现新的 assistant 输出，
   // 说明这是自动唤醒的新一轮，应另起独立消息块，而不是续接上一轮。
   // 注意：不能用 result 做信号——正常对话每轮也以 result 结束，会误伤普通回复。
@@ -144,9 +149,12 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       }
     } else if (msg.type === 'system') {
       const sysMsg = msg as SDKSystemMessage
-      // 仅需要独立渲染的 system 消息才中断 turn（compact_boundary / compacting / permission_denied）
+      if (hasCompactBoundary && sysMsg.subtype === 'status' && sysMsg.compact_result === 'success') {
+        continue
+      }
+      // 仅需要独立渲染的 system 消息才中断 turn（压缩状态 / permission_denied）
       // 其他 system 消息（如 init、task_started、task_progress）归入当前 turn，不中断分组
-      if (sysMsg.subtype === 'compact_boundary' || sysMsg.subtype === 'compacting' || sysMsg.subtype === 'permission_denied') {
+      if (isPersistableSDKSystemMessage(sysMsg)) {
         flushTurn()
         groups.push({ type: 'system', message: sysMsg })
       } else if (sysMsg.subtype === 'task_notification') {
@@ -205,7 +213,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
     for (let i = result.length - 1; i >= 0; i--) {
       const prev = result[i]!
       if (prev.type === 'user') break // 真正的用户输入阻断合并
-      if (prev.type === 'system' && ['compact_boundary', 'permission_denied'].includes((prev.message as SDKSystemMessage).subtype ?? '')) break
+      if (prev.type === 'system' && isPersistableSDKSystemMessage(prev.message as SDKSystemMessage)) break
       if (prev.type === 'assistant-turn') {
         if (prev.model === group.model) {
           mergeTargetIdx = i
@@ -246,9 +254,11 @@ export function getGroupPreview(group: MessageGroup): string {
       .slice(0, 200)
   }
   if (group.type === 'system') {
-    if (group.message.subtype === 'compact_boundary') return '上下文已压缩'
-    if (group.message.subtype === 'compacting') return '正在压缩上下文...'
-    if (group.message.subtype === 'permission_denied') return '自动审批已拒绝操作'
+    const compactStatus = getSDKCompactStatus(group.message)
+    if (compactStatus === 'success') return '上下文已压缩'
+    if (compactStatus === 'compacting') return '正在压缩上下文...'
+    if (compactStatus === 'failed') return '上下文压缩失败'
+    if (group.message.subtype === 'permission_denied') return '权限检查已拒绝操作'
     return ''
   }
   // assistant-turn：收集所有 text 块

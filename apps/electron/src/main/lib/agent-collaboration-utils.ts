@@ -14,8 +14,7 @@ import {
 
 const PERMISSION_RANK: Record<PromaPermissionMode, number> = {
   plan: 0,
-  auto: 1,
-  bypassPermissions: 2,
+  bypassPermissions: 1,
 }
 
 export const MAX_RUNNING_DELEGATIONS_PER_PARENT = 50
