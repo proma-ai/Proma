@@ -175,6 +175,9 @@ function isAutoRetryableCatchError(
 /** 最大自动重试次数 */
 const MAX_AUTO_RETRIES = 25
 
+/** 重试可见性阈值：前 N 次重试不通知 UI，避免偶发瞬时波动频繁惊扰用户 */
+const RETRY_VISIBILITY_THRESHOLD = 5
+
 /** 自动重试累计等待预算（毫秒） */
 const MAX_AUTO_RETRY_WAIT_MS = 5 * 60_000
 
@@ -1467,16 +1470,19 @@ export class AgentOrchestrator {
               delaySeconds: delaySec,
             }
 
-            this.eventBus.emit(sessionId, {
-              kind: 'proma_event',
-              event: { type: 'retry', status: 'starting', attempt: retryAttempt, maxAttempts: MAX_AUTO_RETRIES, delaySeconds: delaySec, reason: lastRetryableError ?? '未知错误' },
-            })
-            this.eventBus.emit(sessionId, {
-              kind: 'proma_event',
-              event: { type: 'retry', status: 'attempt', attemptData },
-            })
+            // 前 RETRY_VISIBILITY_THRESHOLD 次重试静默进行，避免偶发瞬时波动频繁惊扰用户
+            if (retryAttempt > RETRY_VISIBILITY_THRESHOLD) {
+              this.eventBus.emit(sessionId, {
+                kind: 'proma_event',
+                event: { type: 'retry', status: 'starting', attempt: retryAttempt, maxAttempts: MAX_AUTO_RETRIES, delaySeconds: delaySec, reason: lastRetryableError ?? '未知错误' },
+              })
+              this.eventBus.emit(sessionId, {
+                kind: 'proma_event',
+                event: { type: 'retry', status: 'attempt', attemptData },
+              })
+            }
 
-            console.log(`[Agent 编排] 第 ${retryAttempt} 次重试，等待 ${delaySec}s...`)
+            console.log(`[Agent 编排] 第 ${retryAttempt} 次重试${retryAttempt <= RETRY_VISIBILITY_THRESHOLD ? '(静默)' : ''}，等待 ${delaySec}s...`)
             await new Promise((r) => setTimeout(r, delayMs))
 
             // 等待期间如果会话被中止，退出
@@ -1834,8 +1840,8 @@ export class AgentOrchestrator {
 
           const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
 
-          // 正常完成 — 如果之前有重试，发送 retry_cleared
-          if (!wasStoppedByUser && retryAttemptsScheduled > 0) {
+          // 正常完成 — 如果之前有可见重试，发送 retry_cleared
+          if (!wasStoppedByUser && retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD) {
             this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', status: 'cleared' } })
             console.log(`[Agent 编排] 重试成功，已在第 ${attempt} 次尝试后恢复`)
           }
@@ -2044,8 +2050,8 @@ export class AgentOrchestrator {
             console.error('[Agent 编排] 保存错误消息失败:', saveError)
           }
 
-          // 如果之前有重试记录，发送 retry_failed
-          if (retryAttemptsScheduled > 0 && lastRetryableError) {
+          // 如果之前有可见重试记录，发送 retry_failed
+          if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD && lastRetryableError) {
             this.eventBus.emit(sessionId, {
               kind: 'proma_event',
               event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled, timestamp: Date.now(), reason: lastRetryableError, errorMessage: userFacingError, delaySeconds: 0 } },
@@ -2074,10 +2080,14 @@ export class AgentOrchestrator {
         const retryFailureMessage = retryDelayElapsedMs >= MAX_AUTO_RETRY_WAIT_MS
           ? '重试等待已达到 5 分钟后仍然失败'
           : `重试 ${retryAttemptsScheduled || MAX_AUTO_RETRIES} 次后仍然失败`
-        this.eventBus.emit(sessionId, {
-          kind: 'proma_event',
-          event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled || MAX_AUTO_RETRIES, timestamp: Date.now(), reason: lastRetryableError, errorMessage: retryFailureMessage, delaySeconds: 0 } },
-        })
+
+        // 仅当重试曾经对用户可见时才发送 retry_failed 事件
+        if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD) {
+          this.eventBus.emit(sessionId, {
+            kind: 'proma_event',
+            event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled || MAX_AUTO_RETRIES, timestamp: Date.now(), reason: lastRetryableError, errorMessage: retryFailureMessage, delaySeconds: 0 } },
+          })
+        }
 
         // 保存错误消息
         const retryErrorContent = `${retryFailureMessage}: ${lastRetryableError}`
