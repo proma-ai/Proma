@@ -452,6 +452,8 @@ export class AgentOrchestrator {
       ...(getBundledCliPath() ? { PROMA_CLI: getBundledCliPath() } : {}),
       // 启用 Tasks 功能
       CLAUDE_CODE_ENABLE_TASKS: 'true',
+      // 禁用 SDK 内置 Workflows，避免每轮注入 workflow 相关提示词。
+      CLAUDE_CODE_DISABLE_WORKFLOWS: '1',
       // 禁用实验性 beta 功能，使用稳定模式
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
       // 禁用 attribution block：SDK 默认会在 system prompt 最前面注入一段

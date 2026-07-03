@@ -758,7 +758,7 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         abortController: controller,
         env: options.env,
         systemPrompt: options.systemPrompt,
-        // 不加载 user 级别的 ~/.claude/settings.json
+        // 不加载 local 级别的 .claude/settings.local.json
         settingSources: ['user', 'project'],
 
         // 条件字段
