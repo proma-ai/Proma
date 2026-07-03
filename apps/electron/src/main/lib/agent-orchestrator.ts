@@ -456,6 +456,11 @@ export class AgentOrchestrator {
       CLAUDE_CODE_DISABLE_WORKFLOWS: '1',
       // 禁用实验性 beta 功能，使用稳定模式
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      // 禁用 Tool Search：Claude 模型连接第一方 Anthropic API 时，SDK CLI 会自动启用
+      // Tool Search（optimistic 模式），将外部 MCP 工具标记为 deferred 而非 eager 注册，
+      // 导致 HTTP MCP 服务器（如 Nowledge Mem）的工具无法直接调用。
+      // Proma 自行管理工具呈现和 MCP 连接，不依赖此机制。
+      ENABLE_TOOL_SEARCH: 'false',
       // 禁用 attribution block：SDK 默认会在 system prompt 最前面注入一段
       // 文本（含客户端版本号与基于会话内容计算的指纹），且每次请求都变化。
       // 经第三方 Anthropic 兼容代理/网关中转时，会导致缓存前缀变化、命中率骤降。

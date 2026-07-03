@@ -761,7 +761,7 @@ function FileTreeItem({
 
         {/* 右侧操作按钮占位（始终占位，避免行宽跳动） */}
         <div
-          className="relative z-10 flex-shrink-0"
+          className="relative z-10 flex-shrink-0 mr-1"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >

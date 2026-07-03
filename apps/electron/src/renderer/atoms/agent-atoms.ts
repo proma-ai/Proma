@@ -10,6 +10,7 @@ import { atomFamily, atomWithStorage } from 'jotai/utils'
 import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
+import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -265,6 +266,35 @@ export const agentPendingFilesAtomFamily = atomFamily((sessionId: string) =>
     (get) => get(agentSessionPendingFilesAtom).get(sessionId) ?? [],
     (_get, set, update: AgentPendingFile[] | ((prev: AgentPendingFile[]) => AgentPendingFile[])) => {
       set(agentSessionPendingFilesAtom, (prev) => {
+        const current = prev.get(sessionId) ?? []
+        const next = typeof update === 'function' ? update(current) : update
+        const map = new Map(prev)
+        if (next.length === 0) {
+          map.delete(sessionId)
+        } else {
+          map.set(sessionId, next)
+        }
+        return map
+      })
+    },
+  ),
+)
+
+/**
+ * Agent 运行中待发送消息队列 Map — 以 sessionId 为 key。
+ * 队列只保存在渲染进程内存中，避免跨重启恢复时误把过期上下文继续发送。
+ */
+export const agentSessionMessageQueueAtom = atom<Map<string, AgentQueuedMessage[]>>(new Map())
+
+/**
+ * 单个 session 的队列派生 atom（读写）。
+ * 空队列写回时删除 Map entry，避免长时间使用后残留空数组。
+ */
+export const agentMessageQueueAtomFamily = atomFamily((sessionId: string) =>
+  atom(
+    (get) => get(agentSessionMessageQueueAtom).get(sessionId) ?? [],
+    (_get, set, update: AgentQueuedMessage[] | ((prev: AgentQueuedMessage[]) => AgentQueuedMessage[])) => {
+      set(agentSessionMessageQueueAtom, (prev) => {
         const current = prev.get(sessionId) ?? []
         const next = typeof update === 'function' ? update(current) : update
         const map = new Map(prev)
@@ -720,15 +750,20 @@ export function applyAgentEvent(
       //
       // 折中：仅当「整个 query 期间从未收到流式 usage_update」（prev.inputTokens 为空/0）
       // 才从 result.usage 兜底写入 token 字段；已有流式真实值时不动。
-      // - contextWindow：始终覆盖（result 才是权威分母）
+      // - contextWindow：取流式与 result 的较大值（result 未必更权威——多 entry 时
+      //   子 Agent 的小窗口可能拉低值，Fix 1/2 已从源头取 max，此处作为安全网）。
       // - costUsd：始终覆盖（本就该是整轮累计成本）
       const needResultFallback = !prev.inputTokens || prev.inputTokens <= 0
       return {
         ...prev,
         ...(event.usage ? {
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-          ...(event.usage.contextWindow != null && { contextWindow: event.usage.contextWindow }),
-          ...(event.usage.contextWindow != null && { usageUpdatedAt: Date.now() }),
+          ...(event.usage.contextWindow != null && {
+            contextWindow: prev.contextWindow != null
+              ? Math.max(prev.contextWindow, event.usage.contextWindow)
+              : event.usage.contextWindow,
+            usageUpdatedAt: Date.now(),
+          }),
           ...(needResultFallback && event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
           ...(needResultFallback && event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
           ...(needResultFallback && event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
@@ -762,9 +797,13 @@ export function applyAgentEvent(
         ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
         ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
         ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-        // 流式中 assistant 消息的 usage_update 可能携带推断的 contextWindow，
-        // 若已有 result 消息提供的真实值，则不再覆盖
-        ...(event.usage.contextWindow && !prev.contextWindow && { contextWindow: event.usage.contextWindow }),
+        // contextWindow 取 max：本分支同时承载「流式 assistant 消息按模型名推断的窗口」
+        // 与「后端从 SDK result 透传的真实窗口（context_window 事件）」两个来源。
+        // 模型窗口在同一会话内不会缩小，取更大值可兼顾两类端点——既不会让推断偏小的
+        // 端点（如 GLM 剥掉 [1m] 后缀）挡住真实的 1M，也不会让回报偏小的端点覆盖正确的 1M。
+        ...(event.usage.contextWindow && {
+          contextWindow: Math.max(prev.contextWindow ?? 0, event.usage.contextWindow),
+        }),
         usageUpdatedAt: Date.now(),
       }
 
@@ -1006,7 +1045,7 @@ export const currentAgentSessionDraftAtom = atom(
 // ===== 提示建议 Atoms =====
 
 /** Agent 提示建议 Map — 以 sessionId 为 key，存储最近一条建议 */
-export const agentPromptSuggestionsAtom = atom<Map<string, string>>(new Map())
+export const agentPromptSuggestionsAtom = atom<Map<string, string | null>>(new Map())
 
 /** 当前 Agent 会话的提示建议（派生只读原子） */
 export const currentAgentSuggestionAtom = atom<string | null>((get) => {

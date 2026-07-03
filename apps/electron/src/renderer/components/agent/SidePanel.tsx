@@ -641,7 +641,7 @@ function AttachedFilesSection({ attachedFiles, onDetach, onAddToChat, onFilePrev
             <FileTypeIcon name={name} isDirectory={false} />
             <span className="text-xs truncate flex-1" title={filePath}>{name}</span>
             <div
-              className="flex-shrink-0"
+              className="flex-shrink-0 mr-1"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
@@ -899,7 +899,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
           type="button"
           variant="ghost"
           size="icon"
-          className="relative z-10 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          className="relative z-10 h-5 w-5 mr-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
           onClick={(e) => { e.stopPropagation(); onDetach() }}
         >
           <X className="size-3" />
@@ -1157,7 +1157,7 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
 
         {/* 右侧操作按钮占位 */}
         <div
-          className="relative z-10 flex-shrink-0"
+          className="relative z-10 flex-shrink-0 mr-1"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >

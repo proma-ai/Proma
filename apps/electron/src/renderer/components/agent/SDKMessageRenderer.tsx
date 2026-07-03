@@ -210,9 +210,15 @@ function extractTurnUsage(turnMessages: SDKMessage[]): { durationMs?: number; us
     const durationMs = typeof raw._durationMs === 'number' ? raw._durationMs : undefined
     const u = resultMsg.usage
     if (!u) return { durationMs }
-    const contextWindow = resultMsg.modelUsage
-      ? Object.values(resultMsg.modelUsage)[0]?.contextWindow
-      : undefined
+    // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow
+    let contextWindow: number | undefined
+    if (resultMsg.modelUsage) {
+      for (const info of Object.values(resultMsg.modelUsage)) {
+        if (info?.contextWindow && (contextWindow === undefined || info.contextWindow > contextWindow)) {
+          contextWindow = info.contextWindow
+        }
+      }
+    }
     return {
       durationMs,
       usage: {
