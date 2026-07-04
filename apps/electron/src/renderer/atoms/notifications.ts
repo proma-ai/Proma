@@ -40,11 +40,6 @@ export const NOTIFICATION_SOUNDS: NotificationSoundMeta[] = [
   { id: 'quiet', label: 'Quiet', url: soundQuiet },
 ]
 
-/** 音频 URL 映射（快速查找） */
-const SOUND_URL_MAP: Record<string, string> = Object.fromEntries(
-  NOTIFICATION_SOUNDS.map((s) => [s.id, s.url])
-)
-
 /** 各场景的默认通知音 */
 export const DEFAULT_NOTIFICATION_SOUNDS: Required<NotificationSoundSettings> = {
   taskComplete: 'ding',
@@ -81,6 +76,8 @@ export async function initializeNotifications(
   } catch (error) {
     console.error('[通知] 初始化失败:', error)
   }
+  // 后台预加载所有通知音到 AudioBuffer，不阻塞设置加载
+  void preloadAllSounds()
 }
 
 // ===== 持久化更新 =====
@@ -126,49 +123,147 @@ export async function updateNotificationSound(
 
 // ===== 音频播放 =====
 
-/** 音频元素缓存池（按 soundId 缓存，避免重复创建） */
-const audioCache = new Map<string, HTMLAudioElement>()
+// Web Audio API 替代 HTML5 Audio，解决 AirPods 等蓝牙设备上的破音问题：
+// 1. 预解码所有通知音到 AudioBuffer，播放时零解码延迟
+// 2. 每次播放创建新的 BufferSource，无需 currentTime seek，消除 seek-play 竞态
+// 3. AudioContext 保持活跃，避免蓝牙管线冷启动延迟
+
+/** 懒初始化 AudioContext */
+let audioCtx: AudioContext | null = null
+
+async function getAudioContext(): Promise<AudioContext> {
+  if (!audioCtx) {
+    audioCtx = new AudioContext()
+  }
+  // 浏览器自动播放策略可能导致 AudioContext 挂起，播放前必须 await resume()
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume()
+  }
+  return audioCtx
+}
+
+/** 预解码的 AudioBuffer 缓存（按 soundId） */
+const audioBufferCache = new Map<string, AudioBuffer>()
+
+/** 上一次播放通知音的时间戳，用于防重叠 */
+let lastPlayTime = 0
+const MIN_PLAY_INTERVAL_MS = 300
 
 /**
- * 获取或创建音频元素
+ * 通过 XHR 加载音频文件（Electron file:// 协议下 fetch 可能受限的 fallback）
  */
-function getAudioElement(soundId: NotificationSoundId): HTMLAudioElement | null {
-  if (soundId === 'none') return null
+function loadAudioViaXHR(url: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('GET', url)
+    xhr.responseType = 'arraybuffer'
+    xhr.onload = () => {
+      if (xhr.status === 200 || xhr.status === 0) {
+        resolve(xhr.response as ArrayBuffer)
+      } else {
+        reject(new Error(`XHR ${xhr.status}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('XHR load error'))
+    xhr.send()
+  })
+}
 
-  const url = SOUND_URL_MAP[soundId]
-  if (!url) return null
-
-  let audio = audioCache.get(soundId)
-  if (!audio) {
-    audio = new Audio(url)
-    audioCache.set(soundId, audio)
+/**
+ * 加载音频文件为 ArrayBuffer，fetch 优先，失败时降级到 XHR
+ */
+async function loadAudioData(url: string): Promise<ArrayBuffer> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return await response.arrayBuffer()
+  } catch {
+    // fetch 在 Electron file:// 协议下可能受限，降级到 XHR
+    return loadAudioViaXHR(url)
   }
-  return audio
+}
+
+/** 预加载并解码单个通知音 */
+async function preloadSound(soundId: string, url: string): Promise<void> {
+  try {
+    const [ctx, arrayBuffer] = await Promise.all([
+      getAudioContext(),
+      loadAudioData(url),
+    ])
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+    audioBufferCache.set(soundId, audioBuffer)
+  } catch (error) {
+    console.error(`[通知] 预加载音频失败 ${soundId}:`, error)
+  }
+}
+
+/** 批量预加载所有通知音 */
+export async function preloadAllSounds(): Promise<void> {
+  await Promise.all(NOTIFICATION_SOUNDS.map((s) => preloadSound(s.id, s.url)))
+}
+
+/**
+ * 即时加载并解码单个通知音（预加载未就绪时的降级路径）
+ */
+async function decodeSoundOnTheFly(url: string): Promise<AudioBuffer | undefined> {
+  try {
+    const [ctx, arrayBuffer] = await Promise.all([
+      getAudioContext(),
+      loadAudioData(url),
+    ])
+    return await ctx.decodeAudioData(arrayBuffer)
+  } catch (error) {
+    console.error('[通知] 即时解码音频失败:', error)
+    return undefined
+  }
 }
 
 /**
  * 播放指定通知音
+ *
+ * 使用 Web Audio API 的 createBufferSource + start(0) 替代 HTML5 Audio.play()。
+ * 每次播放创建独立的 BufferSource，避免蓝牙设备上 currentTime seek 导致的破音。
  */
-export function playNotificationSound(soundId: NotificationSoundId): void {
+export async function playNotificationSound(soundId: NotificationSoundId): Promise<void> {
   try {
-    const audio = getAudioElement(soundId)
-    if (!audio) return
-    audio.currentTime = 0
-    audio.play().catch(() => {})
-  } catch {
-    // 静默失败
+    if (soundId === 'none') return
+
+    // 防重叠：短时间内多次触发时抑制后续播放
+    const now = Date.now()
+    if (now - lastPlayTime < MIN_PLAY_INTERVAL_MS) return
+    lastPlayTime = now
+
+    let buffer = audioBufferCache.get(soundId)
+
+    // 预加载未就绪时，即时解码作为降级
+    if (!buffer) {
+      const meta = NOTIFICATION_SOUNDS.find((s) => s.id === soundId)
+      if (!meta) return
+      buffer = await decodeSoundOnTheFly(meta.url)
+      if (!buffer) return
+      // 缓存到 bufferCache 以便后续直接使用
+      audioBufferCache.set(soundId, buffer)
+    }
+
+    const ctx = await getAudioContext()
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(ctx.destination)
+    source.start(0)
+  } catch (error) {
+    console.warn('[通知] 播放通知音失败:', soundId, error)
   }
 }
 
 /**
  * 根据场景类型播放对应通知音
  */
-export function playNotificationSoundForType(
+export async function playNotificationSoundForType(
   type: NotificationSoundType,
   sounds: NotificationSoundSettings
-): void {
+): Promise<void> {
   const soundId = sounds[type] ?? DEFAULT_NOTIFICATION_SOUNDS[type]
-  playNotificationSound(soundId)
+  await playNotificationSound(soundId)
 }
 
 // ===== 桌面通知 =====
@@ -201,10 +296,10 @@ export function sendDesktopNotification(
   options?: DesktopNotificationOptions
 ): void {
   // 将音频播放和系统通知推迟到下一个宏任务，避免在 React batchedUpdates
-  // 同步调用栈中阻塞主线程（audio.currentTime seek + Notification 创建会导致掉帧）
-  setTimeout(() => {
+  // 同步调用栈中阻塞主线程（Notification 创建会导致掉帧）
+  setTimeout(async () => {
     if (options?.playSound && options.soundType) {
-      playNotificationSoundForType(options.soundType, options.sounds ?? {})
+      await playNotificationSoundForType(options.soundType, options.sounds ?? {})
     }
 
     if (!enabled) return
@@ -216,4 +311,16 @@ export function sendDesktopNotification(
       options?.onNavigate?.()
     }
   }, 0)
+}
+
+// ===== AudioContext 生命周期管理 =====
+
+/** 应用退出时释放音频硬件资源 */
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (audioCtx && audioCtx.state !== 'closed') {
+      audioCtx.close()
+      audioCtx = null
+    }
+  })
 }

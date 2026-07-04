@@ -570,7 +570,7 @@ function NotificationsInitializer(): null {
   const setSounds = useSetAtom(notificationSoundsAtom)
 
   useEffect(() => {
-    initializeNotifications(setEnabled, setSoundEnabled, setSounds)
+    void initializeNotifications(setEnabled, setSoundEnabled, setSounds)
   }, [setEnabled, setSoundEnabled, setSounds])
 
   return null
