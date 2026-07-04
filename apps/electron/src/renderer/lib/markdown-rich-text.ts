@@ -357,7 +357,7 @@ export function markdownToHtml(markdown: string): string {
 }
 
 /** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
-export function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: boolean }): string {
   if (!html || html === '<p></p>') return ''
 
   const div = document.createElement('div')
@@ -366,7 +366,8 @@ export function htmlToMarkdown(html: string): string {
   function processNode(node: Node, context: 'normal' | 'code' = 'normal'): string {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent || ''
-      return context === 'code' ? text : escapeMarkdownText(text)
+      if (context === 'code' || options?.skipMarkdownEscape) return text
+      return escapeMarkdownText(text)
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) {
