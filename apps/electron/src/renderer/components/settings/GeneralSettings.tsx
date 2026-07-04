@@ -386,7 +386,7 @@ function SoundPicker({ label, type, sounds, disabled, onSoundChange }: SoundPick
           size="icon"
           className="h-8 w-8 shrink-0"
           disabled={disabled || currentId === 'none'}
-          onClick={() => playNotificationSound(currentId)}
+          onClick={() => { void playNotificationSound(currentId) }}
           title="试听"
         >
           <Volume2 size={14} />
