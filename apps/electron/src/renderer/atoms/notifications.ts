@@ -150,6 +150,14 @@ let lastPlayTime = 0
 const MIN_PLAY_INTERVAL_MS = 300
 
 /**
+ * 正在播放的 AudioBufferSourceNode 集合。
+ *
+ * 必须持有 source 的 JS 引用直到播放完成，否则 GC 可能在音频播完前回收 source，
+ * 导致声音被截断（Web Audio API 的常见陷阱）。
+ */
+const activeSources = new Set<AudioBufferSourceNode>()
+
+/**
  * 通过 XHR 加载音频文件（Electron file:// 协议下 fetch 可能受限的 fallback）
  */
 function loadAudioViaXHR(url: string): Promise<ArrayBuffer> {
@@ -249,6 +257,9 @@ export async function playNotificationSound(soundId: NotificationSoundId): Promi
     const source = ctx.createBufferSource()
     source.buffer = buffer
     source.connect(ctx.destination)
+    // 持有引用直到播放完成，防止 GC 中途回收导致声音截断
+    activeSources.add(source)
+    source.onended = () => { activeSources.delete(source) }
     source.start(0)
   } catch (error) {
     console.warn('[通知] 播放通知音失败:', soundId, error)
