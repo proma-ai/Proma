@@ -24,6 +24,8 @@ export interface StreamSSEOptions {
   onEvent: StreamEventCallback
   /** AbortSignal 用于取消请求 */
   signal?: AbortSignal
+  /** 首字节超时（毫秒），默认 30s。超时触发 AbortError，可被重试逻辑捕获并自动重试 */
+  timeoutMs?: number
   /** 自定义 fetch 函数（代理等场景下由调用方注入） */
   fetchFn?: typeof globalThis.fetch
 }
@@ -176,14 +178,22 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
 
 /** 单次 SSE 流式尝试（不含重试逻辑） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const { request, adapter, onEvent, signal, fetchFn = fetch } = options
+  const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000 } = options
+
+  // 合并用户取消信号和首字节超时信号。
+  // 超时产生的 AbortError 会被外层 streamSSE 的 isRetriableError 识别为可重试，
+  // 从而触发指数退避重试（最多 5 次 / 30s 预算）。
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const effectiveSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal
 
   // 1. 发起请求（支持通过 fetchFn 注入代理）
   const response = await fetchFn(request.url, {
     method: 'POST',
     headers: request.headers,
     body: request.body,
-    signal,
+    signal: effectiveSignal,
   })
 
   // 2. 错误检查

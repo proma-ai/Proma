@@ -502,6 +502,26 @@ export async function sendMessage(
       } catch {
         // 索引更新失败不影响主流程
       }
+    } else {
+      // 即使没有累积内容，也保存一条错误消息到 JSONL，
+      // 确保切换对话或重启后错误仍然可见（而非仅靠临时 atom 横幅）
+      const assistantMsgId = randomUUID()
+      const errorMsg: ChatMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        model: modelId,
+        stopped: true,
+        error: errorMessage,
+      }
+      appendMessage(conversationId, errorMsg)
+
+      try {
+        updateConversationMeta(conversationId, {})
+      } catch {
+        // 索引更新失败不影响主流程
+      }
     }
 
     webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
