@@ -5,7 +5,8 @@
  * 由设置面板"磁盘管理"Tab 和启动时自动清理逻辑调用。
  */
 
-import { existsSync, statSync, unlinkSync, rmSync } from 'node:fs'
+import { existsSync, statSync, unlinkSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import { promises as fsPromises } from 'node:fs'
 import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -117,7 +118,7 @@ function safeUnlink(filePath: string): number {
 async function safeRmDir(dirPath: string): Promise<number> {
   try {
     const { bytes } = await getDirSize(dirPath)
-    rmSync(dirPath, { recursive: true, force: true })
+    rmSyncWithRetry(dirPath, { recursive: true, force: true })
     return bytes
   } catch {
     return 0
@@ -454,7 +455,7 @@ async function cleanupOrphanSdkConfig(): Promise<CleanupResult> {
           // 若目录为空则删除
           const remaining = await fsPromises.readdir(projPath)
           if (remaining.length === 0) {
-            rmSync(projPath, { recursive: true, force: true })
+            rmSyncWithRetry(projPath, { recursive: true, force: true })
           }
         } catch { /* skip */ }
       }
@@ -541,7 +542,7 @@ function cleanupArchivedSessions(beforeDays: number): CleanupResult {
       const histDir = join(sdkDir, 'file-history', session.sdkSessionId)
       if (existsSync(histDir)) {
         try {
-          rmSync(histDir, { recursive: true, force: true })
+          rmSyncWithRetry(histDir, { recursive: true, force: true })
           deletedCount++
         } catch { /* skip */ }
       }

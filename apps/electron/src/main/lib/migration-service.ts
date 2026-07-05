@@ -8,7 +8,8 @@
  * 导入时自动检测跨平台差异并提示用户处理路径映射。
  */
 
-import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, rmSync, type Dirent } from 'node:fs'
+import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, type Dirent } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { homedir, platform, arch, tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -613,13 +614,13 @@ export async function parseImportFile(filePath: string): Promise<ImportPreview |
 
   const manifestPath = join(tempDir, 'manifest.json')
   if (!existsSync(manifestPath)) {
-    rmSync(tempDir, { recursive: true, force: true })
+    rmSyncWithRetry(tempDir, { recursive: true, force: true })
     throw new Error('无效的迁移文件：缺少 manifest.json')
   }
 
   const rawManifest = readJsonSafe<MigrationManifest & { workspaces?: WorkspaceExportEntry[] }>(manifestPath)
   if (!rawManifest) {
-    rmSync(tempDir, { recursive: true, force: true })
+    rmSyncWithRetry(tempDir, { recursive: true, force: true })
     throw new Error('无法解析 manifest.json')
   }
 
@@ -829,7 +830,7 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
     return { success: true }
   } finally {
     try {
-      rmSync(tempDir, { recursive: true, force: true })
+      rmSyncWithRetry(tempDir, { recursive: true, force: true })
     } catch {
       // 忽略清理失败
     }
@@ -990,7 +991,7 @@ function _importSkills(tempDir: string, targetWorkspace: AgentWorkspace, overwri
       const dest = join(targetSkillsDir, skillName)
       if (existsSync(dest)) {
         if (!overwrite) continue
-        rmSync(dest, { recursive: true, force: true })
+        rmSyncWithRetry(dest, { recursive: true, force: true })
       }
       cpSync(src, dest, { recursive: true })
     }
@@ -1141,7 +1142,7 @@ function _importSkillsV2(tempDir: string, sourceSlug: string, targetWorkspace: A
       const dest = join(targetSkillsDir, entry.name)
       if (existsSync(dest)) {
         if (!overwrite) continue
-        rmSync(dest, { recursive: true, force: true })
+        rmSyncWithRetry(dest, { recursive: true, force: true })
       }
       cpSync(join(activeDir, entry.name), dest, { recursive: true })
     }
@@ -1155,7 +1156,7 @@ function _importSkillsV2(tempDir: string, sourceSlug: string, targetWorkspace: A
       const dest = join(targetInactiveDir, entry.name)
       if (existsSync(dest)) {
         if (!overwrite) continue
-        rmSync(dest, { recursive: true, force: true })
+        rmSyncWithRetry(dest, { recursive: true, force: true })
       }
       cpSync(join(inactiveDir, entry.name), dest, { recursive: true })
     }

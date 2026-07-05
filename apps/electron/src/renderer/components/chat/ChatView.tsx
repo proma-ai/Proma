@@ -351,6 +351,12 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
         map.delete(conversationId)
         return map
       })
+      // 显示错误横幅，确保用户看到发送失败的反馈
+      setChatStreamErrors((prev) => {
+        const map = new Map(prev)
+        map.set(conversationId, '发送失败，请重试')
+        return map
+      })
     })
   }, [
     conversationId,

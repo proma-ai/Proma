@@ -26,7 +26,7 @@ interface MoveSessionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sessionId: string
-  currentWorkspaceId: string | undefined
+  sourceWorkspaceId: string | undefined
   workspaces: AgentWorkspace[]
   onMoved: (updatedSession: AgentSessionMeta, targetWorkspaceName: string) => void
 }
@@ -35,17 +35,17 @@ export function MoveSessionDialog({
   open,
   onOpenChange,
   sessionId,
-  currentWorkspaceId,
+  sourceWorkspaceId,
   workspaces,
   onMoved,
 }: MoveSessionDialogProps): React.ReactElement {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<string>('')
   const [moving, setMoving] = React.useState(false)
 
-  // 过滤掉当前工作区
+  // 过滤掉会话已属的工作区
   const availableWorkspaces = React.useMemo(
-    () => workspaces.filter((ws) => ws.id !== currentWorkspaceId),
-    [workspaces, currentWorkspaceId]
+    () => workspaces.filter((ws) => ws.id !== sourceWorkspaceId),
+    [workspaces, sourceWorkspaceId]
   )
 
   // 打开时重置选择

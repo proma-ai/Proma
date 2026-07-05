@@ -195,7 +195,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                   )}
                 </>
               ) : message.error ? (
-                null
+                <div className="flex items-center gap-1.5 text-sm text-destructive mt-2">
+                  <AlertCircle className="size-3.5 shrink-0" />
+                  <span>生成失败</span>
+                </div>
               ) : message.stopped ? (
                 <MessageStopped />
               ) : null}

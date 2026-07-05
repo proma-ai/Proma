@@ -6,7 +6,8 @@
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, renameSync, openSync, readSync, closeSync, realpathSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, openSync, readSync, closeSync, realpathSync } from 'node:fs'
+import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
@@ -77,7 +78,7 @@ function activateSkillCreatorInAllWorkspaces(index: AgentWorkspacesIndex): void 
       if (!existsSync(activeDir)) {
         mkdirSync(activeDir, { recursive: true })
       }
-      renameSync(inactivePath, activePath)
+      renameWithRetry(inactivePath, activePath)
       console.log(`[Agent 工作区] 已为 ${workspace.slug} 启用 skill-creator`)
     } catch (err) {
       console.warn(`[Agent 工作区] 启用 skill-creator 失败 (${workspace.slug}):`, err)
@@ -272,7 +273,7 @@ export function deleteAgentWorkspace(id: string): void {
 
   if (existsSync(workspaceDir)) {
     try {
-      rmSync(workspaceDir, { recursive: true, force: true })
+      rmSyncWithRetry(workspaceDir, { recursive: true, force: true })
       console.log(`[Agent 工作区] 已删除工作区目录: ${workspaceDir}`)
     } catch (error) {
       console.warn(`[Agent 工作区] 删除工作区目录失败，已残留无引用目录 (${target.slug}):`, error)
@@ -412,7 +413,7 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
  */
 function safeReplaceSkillDir(sourcePath: string, targetPath: string): boolean {
   try {
-    rmSync(targetPath, { recursive: true, force: true })
+    rmSyncWithRetry(targetPath, { recursive: true, force: true })
     cpSync(sourcePath, targetPath, { recursive: true, filter: skillCopyFilter })
     return true
   } catch (err) {
@@ -631,7 +632,7 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
     throw new Error(`Skill 不存在: ${skillSlug}`)
   }
 
-  rmSync(skillPath, { recursive: true, force: true })
+  rmSyncWithRetry(skillPath, { recursive: true, force: true })
   console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}`)
 }
 
@@ -716,7 +717,7 @@ export function toggleWorkspaceSkill(workspaceSlug: string, skillSlug: string, e
     throw new Error(`目标目录已存在同名 Skill: ${skillSlug}`)
   }
 
-  renameSync(srcPath, destPath)
+  renameWithRetry(srcPath, destPath)
   console.log(`[Agent 工作区] Skill ${enabled ? '启用' : '禁用'}: ${workspaceSlug}/${skillSlug}`)
 }
 
@@ -836,11 +837,11 @@ export function updateSkillFromSource(
     cpSync(sourcePath, tmpPath, { recursive: true })
   } catch (err) {
     // 复制失败时清理临时目录，保留原目录不变
-    if (existsSync(tmpPath)) rmSync(tmpPath, { recursive: true, force: true })
+    if (existsSync(tmpPath)) rmSyncWithRetry(tmpPath, { recursive: true, force: true })
     throw err
   }
-  rmSync(targetPath, { recursive: true, force: true })
-  renameSync(tmpPath, targetPath)
+  rmSyncWithRetry(targetPath, { recursive: true, force: true })
+  renameWithRetry(tmpPath, targetPath)
 
   // 更新来源元数据（保留原始 importedAt）
   const sourceWorkspace = listAgentWorkspaces().find((w) => w.slug === existingSource.sourceWorkspaceSlug)
@@ -1312,7 +1313,7 @@ export function deleteSkillEntry(workspaceSlug: string, skillSlug: string, relat
   if (!existsSync(abs)) {
     throw new Error(`目标不存在: ${relativePath}`)
   }
-  rmSync(abs, { recursive: true, force: true })
+  rmSyncWithRetry(abs, { recursive: true, force: true })
   console.log(`[Agent 工作区] 已删除 Skill 子项: ${workspaceSlug}/${skillSlug}/${relativePath}`)
 }
 
@@ -1336,7 +1337,7 @@ export function renameSkillEntry(
   if (!existsSync(parent)) {
     mkdirSync(parent, { recursive: true })
   }
-  renameSync(fromAbs, toAbs)
+  renameWithRetry(fromAbs, toAbs)
   console.log(`[Agent 工作区] Skill 子项重命名: ${workspaceSlug}/${skillSlug}: ${fromRelative} → ${toRelative}`)
 }
 

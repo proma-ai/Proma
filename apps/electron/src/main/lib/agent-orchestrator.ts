@@ -452,6 +452,12 @@ export class AgentOrchestrator {
       sdkEnv.ANTHROPIC_API_KEY = apiKey
     }
 
+    // 全局 API 超时保护：防止网络环境变化（代理断开/WiFi 切换等）导致 SDK 子进程的
+    // HTTP 请求无限挂起。MiniMax 有自己的超时值，不覆盖。
+    if (!sdkEnv.API_TIMEOUT_MS) {
+      sdkEnv.API_TIMEOUT_MS = '300000' // 5 分钟
+    }
+
     // 显式控制 ANTHROPIC_BASE_URL：
     // - Proma 渠道：上层已处理 sdkBaseUrl 的 /api/v1 剥离，这里直接透传，不再 normalize
     // - 其它渠道：使用 normalizeAnthropicBaseUrlForSdk 规范化，SDK 内部会自动拼接 /v1/messages

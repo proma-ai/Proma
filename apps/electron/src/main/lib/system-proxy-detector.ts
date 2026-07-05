@@ -40,7 +40,9 @@ export async function detectSystemProxy(): Promise<SystemProxyDetectResult> {
 /**
  * 检测 macOS 系统代理
  *
- * 使用 networksetup 命令读取网络偏好设置中的 HTTP/HTTPS 代理配置。
+ * 使用 networksetup 命令读取网络偏好设置中的 HTTPS/HTTP 代理配置。
+ * 优先使用 HTTPS 代理（Secure Web Proxy），回退到 HTTP 代理。
+ * 解决用户仅配置 HTTPS 代理而未配置 HTTP 代理时检测失败的问题。
  */
 async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
   try {
@@ -65,33 +67,55 @@ async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
       // 如果获取服务列表失败，使用默认的 Wi-Fi
     }
 
-    // 读取 Web 代理（HTTP）配置
-    const proxyOutput = execSync(`networksetup -getwebproxy "${networkService}"`, {
-      encoding: 'utf-8',
-    })
+    /** 解析 networksetup 输出的代理配置行 */
+    function parseProxyOutput(output: string): { enabled: boolean; server: string; port: string } {
+      const lines = output.split('\n')
+      let enabled = false
+      let server = ''
+      let port = ''
 
-    // 解析输出
-    const lines = proxyOutput.split('\n')
-    let enabled = false
-    let server = ''
-    let port = ''
-
-    for (const line of lines) {
-      if (line.includes('Enabled: Yes')) {
-        enabled = true
-      } else if (line.includes('Server:')) {
-        server = line.split(':')[1]?.trim() || ''
-      } else if (line.includes('Port:')) {
-        port = line.split(':')[1]?.trim() || ''
+      for (const line of lines) {
+        if (line.includes('Enabled: Yes')) {
+          enabled = true
+        } else if (line.includes('Server:')) {
+          server = line.split(':')[1]?.trim() || ''
+        } else if (line.includes('Port:')) {
+          port = line.split(':')[1]?.trim() || ''
+        }
       }
+
+      return { enabled, server, port }
     }
 
-    if (enabled && server && port) {
-      const proxyUrl = `http://${server}:${port}`
+    // 优先检查 HTTPS 代理（Secure Web Proxy）
+    try {
+      const httpsOutput = execSync(`networksetup -getsecurewebproxy "${networkService}"`, {
+        encoding: 'utf-8',
+      })
+      const httpsProxy = parseProxyOutput(httpsOutput)
+      if (httpsProxy.enabled && httpsProxy.server && httpsProxy.port) {
+        const proxyUrl = `http://${httpsProxy.server}:${httpsProxy.port}`
+        return {
+          success: true,
+          proxyUrl,
+          message: `检测到系统 HTTPS 代理: ${proxyUrl}`,
+        }
+      }
+    } catch {
+      // HTTPS 代理检测失败，回退到 HTTP 代理检测
+    }
+
+    // 回退：检查 HTTP 代理（Web Proxy）
+    const httpOutput = execSync(`networksetup -getwebproxy "${networkService}"`, {
+      encoding: 'utf-8',
+    })
+    const httpProxy = parseProxyOutput(httpOutput)
+    if (httpProxy.enabled && httpProxy.server && httpProxy.port) {
+      const proxyUrl = `http://${httpProxy.server}:${httpProxy.port}`
       return {
         success: true,
         proxyUrl,
-        message: `检测到系统代理: ${proxyUrl}`,
+        message: `检测到系统 HTTP 代理: ${proxyUrl}`,
       }
     }
 

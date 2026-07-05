@@ -55,3 +55,6 @@ vendor
 # pnpm (本项目用 bun，禁止误提交 pnpm lockfile)
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# Proma 会话/工作区文档（不应入仓，见 CLAUDE.md 红线）
+.context/

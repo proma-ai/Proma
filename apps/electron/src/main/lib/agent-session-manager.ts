@@ -8,10 +8,11 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, rmSync, renameSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
+import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
 import { join, resolve, dirname } from 'node:path'
 import {
   getAgentSessionsIndexPath,
@@ -451,7 +452,7 @@ export function deleteAgentSession(id: string): void {
       try {
         const sessionDir = getAgentSessionWorkspacePath(ws.slug, id)
         if (existsSync(sessionDir)) {
-          rmSync(sessionDir, { recursive: true, force: true })
+          rmSyncWithRetry(sessionDir, { recursive: true, force: true })
           console.log(`[Agent 会话] 已清理 session 工作目录: ${sessionDir}`)
         }
       } catch (error) {
@@ -472,7 +473,7 @@ export function deleteAgentSession(id: string): void {
       const histDir = join(fileHistoryDir, sid)
       if (existsSync(histDir)) {
         try {
-          rmSync(histDir, { recursive: true, force: true })
+          rmSyncWithRetry(histDir, { recursive: true, force: true })
           console.log(`[Agent 会话] 已清理 file-history: ${sid}`)
         } catch (e) {
           console.warn(`[Agent 会话] 清理 file-history 失败 (${sid}):`, e)
@@ -497,7 +498,7 @@ export function deleteAgentSession(id: string): void {
             }
           }
           try {
-            if (readdirSync(projPath).length === 0) rmSync(projPath, { recursive: true })
+            if (readdirSync(projPath).length === 0) rmSyncWithRetry(projPath, { recursive: true })
           } catch { /* ignore */ }
         }
       } catch { /* ignore */ }
@@ -544,18 +545,21 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
           try {
             const contents = readdirSync(destDir)
             if (contents.length === 0) {
-              rmSync(destDir, { recursive: true })
+              rmSyncWithRetry(destDir, { recursive: true, force: true })
               console.log(`[Agent 会话] 已清理空目标目录: ${destDir}`)
             } else {
               // 目标目录非空，合并：先移除目标，再移动源
-              rmSync(destDir, { recursive: true })
+              rmSyncWithRetry(destDir, { recursive: true, force: true })
               console.log(`[Agent 会话] 已清理非空目标目录（以源目录为准）: ${destDir}`)
             }
           } catch (cleanupError) {
             console.warn(`[Agent 会话] 清理目标目录失败，跳过目录迁移:`, cleanupError)
+            // 清理失败时不可继续 cpSync，否则会与残留目录混合
+            throw cleanupError
           }
         }
-        renameSync(srcDir, destDir)
+        // renameWithRetry：优先 renameSync（原子），跨设备或句柄占用时自动降级 cpSync + rmSyncWithRetry
+        renameWithRetry(srcDir, destDir)
         console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
       }
     }

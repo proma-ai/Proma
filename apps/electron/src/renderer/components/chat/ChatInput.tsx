@@ -243,6 +243,11 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   /** 发送消息 */
   const handleSend = React.useCallback((): void => {
     if (!canSend) return
+    // 发送前检查网络状态：离线时立即反馈，避免消息发出后静默失败
+    if (!navigator.onLine) {
+      toast.error('当前无网络连接，请检查网络后重试')
+      return
+    }
     onSend(content.trim())
     setContent('')
     // 附件清理由 ChatView 的 handleSend 负责

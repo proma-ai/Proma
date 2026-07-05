@@ -55,9 +55,18 @@ const DOC_EXTS = new Set(['pdf', 'docx'])
 /** 所有可预览的扩展名集合（用于相对路径检测） */
 const ALL_PREVIEWABLE_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS, ...CODE_EXTS, ...DOC_EXTS])
 
-/** 从路径提取文件名 */
+/** 路径分隔符正则（同时匹配 / 和 \） */
+const PATH_SEP_RE = /[\\/]/
+
+/** 末尾路径分隔符正则（用于剥除 base 末尾的斜杠） */
+const TRAILING_SEP_RE = /[\\/]+$/
+
+/** Windows 盘符绝对路径前缀（如 C:\ D:/ e:\） */
+const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
+
+/** 从路径提取文件名（同时支持 / 和 \） */
 function getFileName(filePath: string): string {
-  const parts = filePath.split('/')
+  const parts = filePath.split(PATH_SEP_RE)
   return parts[parts.length - 1] || filePath
 }
 
@@ -97,7 +106,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const filename = getFileName(cleanPath)
 
-  const isAbsolute = cleanPath.startsWith('/') || /^[A-Z]:\\/.test(cleanPath)
+  const isAbsolute = cleanPath.startsWith('/') || WIN_DRIVE_RE.test(cleanPath)
 
   const chipRef = React.useRef<HTMLButtonElement>(null)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
@@ -115,20 +124,25 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
   const displayPath = React.useMemo(() => {
     if (isAbsolute) return trimmedPath
     if (candidateBases.length > 0) {
-      const firstSegment = cleanPath.split('/')[0]
+      // 同时支持 / 和 \ 路径分隔符（Windows 兼容）
+      const segments = cleanPath.split(PATH_SEP_RE)
+      const firstSegment = segments[0]
       if (firstSegment) {
         for (const base of candidateBases) {
-          const baseName = base.endsWith('/') ? base.slice(0, -1).split('/').pop() : base.split('/').pop()
+          // 剥除末尾分隔符后取最后一段作为目录名
+          const normalized = base.replace(TRAILING_SEP_RE, '')
+          const baseName = normalized.split(PATH_SEP_RE).pop()
           if (baseName === firstSegment) {
-            const parentDir = base.endsWith('/')
-              ? base.slice(0, base.slice(0, -1).lastIndexOf('/'))
-              : base.slice(0, base.lastIndexOf('/'))
-            return parentDir.endsWith('/') ? `${parentDir}${cleanPath}` : `${parentDir}/${cleanPath}`
+            // 剥除最后一段得到父目录
+            const lastSep = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+            const parentDir = lastSep >= 0 ? normalized.slice(0, lastSep) : ''
+            if (!normalized) return cleanPath
+            return parentDir ? `${parentDir}/${cleanPath}` : `/${cleanPath}`
           }
         }
       }
       const base = candidateBases[0]!
-      return base.endsWith('/') ? `${base}${cleanPath}` : `${base}/${cleanPath}`
+      return TRAILING_SEP_RE.test(base) ? `${base}${cleanPath}` : `${base}/${cleanPath}`
     }
     return trimmedPath
   }, [trimmedPath, cleanPath, isAbsolute, candidateBases])
@@ -202,7 +216,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
           <span className="truncate max-w-[240px] leading-none">{filename}{lineColSuffix}</span>
         </button>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className="w-48 z-[9999]">
         <ContextMenuItem onClick={handleClick}>
           打开预览
         </ContextMenuItem>
@@ -220,7 +234,7 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
  *
  * 匹配规则：
  * - macOS/Linux: 以 / 开头，至少两级路径
- * - Windows: 以 C:\ 等盘符开头
+ * - Windows: 以 C:\ 或 C:/ 等盘符开头（大小写盘符均支持，反斜杠和正斜杠均支持）
  */
 export function isAbsoluteFilePath(text: string): boolean {
   const trimmed = text.trim()
@@ -236,8 +250,8 @@ export function isAbsoluteFilePath(text: string): boolean {
     return true
   }
 
-  // Windows 绝对路径
-  if (/^[A-Z]:\\/.test(clean)) return true
+  // Windows 绝对路径（支持反斜杠和正斜杠、大小写盘符）
+  if (WIN_DRIVE_RE.test(clean)) return true
 
   return false
 }
@@ -249,6 +263,7 @@ export function isAbsoluteFilePath(text: string): boolean {
  * - 含有可预览的文件扩展名
  * - 看起来像文件名或相对路径（不含空格、不含特殊字符）
  * - 排除常见的非路径 inline code（如命令、变量名等）
+ * - 同时支持 / 和 \ 路径分隔符
  */
 export function isRelativeFilePath(text: string): boolean {
   const trimmed = text.trim()
@@ -261,12 +276,12 @@ export function isRelativeFilePath(text: string): boolean {
   const ext = getExtension(clean)
   if (!ext || !ALL_PREVIEWABLE_EXTS.has(ext)) return false
 
-  // 必须看起来像文件路径：允许 字母数字、点、横线、下划线、斜杠
+  // 必须看起来像文件路径：允许 字母数字、点、横线、下划线、斜杠（含反斜杠）
   // 排除含空格或特殊字符的（太可能是其他内容）
-  if (!/^[\w./@-]+$/.test(clean)) return false
+  if (!/^[\w./@\\-]+$/.test(clean)) return false
 
-  // 排除以点开头的隐藏文件（如 .gitignore），但保留含子路径的目录相对路径（如 .context/file.md）
-  if (clean.startsWith('.') && !clean.startsWith('./') && !clean.includes('/')) return false
+  // 排除以点开头的隐藏文件（如 .gitignore），但保留含子路径的相对路径（如 .context/file.md）
+  if (clean.startsWith('.') && !PATH_SEP_RE.test(clean)) return false
 
   return true
 }

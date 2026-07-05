@@ -497,6 +497,22 @@ function getSyncableDelegatedChildren(
   ))
 }
 
+/**
+ * 解归档时收集应跟随父会话一起恢复的子会话：
+ * 已归档、非 draft、非隐藏自动任务会话的委派子会话。
+ */
+function getArchivedDelegatedChildren(
+  sessions: AgentSessionMeta[],
+  parentSessionId: string,
+  draftSessionIds: Set<string>,
+): AgentSessionMeta[] {
+  return getDirectDelegatedChildren(sessions, parentSessionId).filter((child) => (
+    child.archived
+    && !draftSessionIds.has(child.id)
+    && !isHiddenAutomationSession(child)
+  ))
+}
+
 interface RailRecentItem {
   id: string
   title: string
@@ -805,6 +821,12 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     [pendingDeleteWorkspaceId, workspaces],
   )
 
+  /** 待删除 Agent 会话下的委派子会话数量，用于删除确认弹窗提示是否级联删除 */
+  const pendingDeleteChildCount = React.useMemo<number>(() => {
+    if (!pendingDeleteId || mode !== 'agent') return 0
+    return getDirectDelegatedChildren(agentSessions, pendingDeleteId).length
+  }, [agentSessions, mode, pendingDeleteId])
+
   React.useEffect(() => {
     if (!currentWorkspaceSlug || mode !== 'agent') {
       setCapabilities(null)
@@ -1032,7 +1054,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [store, setConversations, setTabs, setActiveTabId, cleanupMapAtoms, syncActiveTabSideEffects])
 
   /** 确认删除对话 */
-  const handleConfirmDelete = async (): Promise<void> => {
+  const handleConfirmDelete = async (cascade: boolean = false): Promise<void> => {
     if (!pendingDeleteId) return
 
     // 关闭对应的标签页：setTabs 与 setActiveTabId 成组更新，便于阅读，
@@ -1072,7 +1094,37 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       // syncActiveTabSideEffects 在 wasActive 分支同步到新激活标签，
       // 这里不要再按旧闭包值强制置 null，否则会覆盖新 sessionId，
       // 导致 RightSidePanel 消失（依赖 currentAgentSessionIdAtom）。
+      // 级联删除时在发起 IPC 前固定子会话快照，确保删除范围与弹窗展示一致，
+      // 避免弹窗打开期间新增的子会话被意外删除。
+      const childIds = cascade
+        ? getDirectDelegatedChildren(store.get(agentSessionsAtom), pendingDeleteId).map((child) => child.id)
+        : []
       try {
+        // 先删子后删父：若子会话删除中途失败，父会话仍在，UI 一致性更好。
+        if (childIds.length > 0) {
+          const failedChildIds: string[] = []
+          for (const childId of childIds) {
+            try {
+              await window.electronAPI.deleteAgentSession(childId)
+            } catch (error) {
+              console.error(`[侧边栏] 级联删除子会话失败 (${childId}):`, error)
+              failedChildIds.push(childId)
+            }
+          }
+          if (failedChildIds.length > 0) {
+            toast.error(`部分子会话删除失败（${failedChildIds.length} 个），请手动清理`)
+          }
+          closeArchivedAgentTabs(childIds)
+          for (const childId of childIds) {
+            setExpandedDelegationParentIds((prev) => deleteSetEntry(prev, childId))
+            setAgentMessagesCache((prev) => {
+              if (!prev.has(childId)) return prev
+              const next = new Map(prev)
+              next.delete(childId)
+              return next
+            })
+          }
+        }
         await window.electronAPI.deleteAgentSession(pendingDeleteId)
         // 全量刷新确保与后端同步
         const sessions = await window.electronAPI.listAgentSessions()
@@ -1568,10 +1620,15 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
   }, [cleanupMapAtoms, setActiveTabId, setTabs, store, syncActiveTabSideEffects])
 
   /** 切换 Agent 会话置顶状态 */
-  const handleTogglePinAgent = React.useCallback(async (id: string): Promise<void> => {
+  const handleTogglePinAgent = React.useCallback(async (
+    id: string,
+    cascade: boolean = true,
+  ): Promise<void> => {
     const sessions = store.get(agentSessionsAtom)
     const original = sessions.find((s) => s.id === id)
-    const delegatedChildren = getSyncableDelegatedChildren(sessions, id, draftSessionIds)
+    const delegatedChildren = cascade
+      ? getSyncableDelegatedChildren(sessions, id, draftSessionIds)
+      : []
     try {
       const updated = await window.electronAPI.togglePinAgentSession(id)
       const targetPinned = !!updated.pinned
@@ -1627,14 +1684,22 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     try {
       const updated = await window.electronAPI.toggleArchiveAgentSession(id)
       const targetArchived = !!updated.archived
+      // 归档：同步未归档的子会话一起进归档
+      // 解归档：同步已归档的子会话一起恢复（修复"归档是单向级联"问题）
       const delegatedChildren = targetArchived
         ? getSyncableDelegatedChildren(sessions, id, draftSessionIds)
-        : []
+        : getArchivedDelegatedChildren(sessions, id, draftSessionIds)
       cascaded = delegatedChildren.length > 0
+      const failedChildIds: string[] = []
       for (const child of delegatedChildren) {
         if (!!child.archived !== targetArchived) {
-          const childUpdated = await window.electronAPI.toggleArchiveAgentSession(child.id)
-          changedChildIds.push(childUpdated.id)
+          try {
+            const childUpdated = await window.electronAPI.toggleArchiveAgentSession(child.id)
+            changedChildIds.push(childUpdated.id)
+          } catch (childError) {
+            console.error(`[侧边栏] 级联归档子会话失败 (${child.id}):`, childError)
+            failedChildIds.push(child.id)
+          }
         }
       }
       const refreshedSessions = delegatedChildren.length > 0
@@ -1651,16 +1716,19 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       if (updated.archived) {
         closeArchivedAgentTabs([updated.id, ...changedChildIds])
       }
-      toast.success(
-        updated.archived ? '已归档' : '已取消归档',
-        delegatedChildren.length > 0
-          ? { description: `已同步 ${delegatedChildren.length} 个子会话` }
-          : undefined,
-      )
+      if (failedChildIds.length > 0) {
+        toast.error(`部分子会话${updated.archived ? '归档' : '解归档'}失败（${failedChildIds.length} 个）`)
+      } else {
+        toast.success(
+          updated.archived ? '已归档' : '已取消归档',
+          delegatedChildren.length > 0
+            ? { description: `已同步 ${delegatedChildren.length} 个子会话` }
+            : undefined,
+        )
+      }
     } catch (error) {
       console.error('[侧边栏] 切换 Agent 会话归档失败:', error)
-      // 级联可能在中途失败，导致部分子会话已归档、部分未归档。
-      // 关闭已确认归档的子会话标签页，并重新拉取磁盘真实状态以避免不一致。
+      // 父会话操作本身失败。已成功归档的子会话仍需关闭标签并全量刷新。
       if (cascaded) {
         if (changedChildIds.length > 0) {
           closeArchivedAgentTabs(changedChildIds)
@@ -1883,26 +1951,48 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
     >
       <AlertDialogContent
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            handleConfirmDelete()
-          }
+          if (e.key !== 'Enter') return
+          // 若焦点已在某个 Action 按钮上，让按钮自身的 onClick 处理（避免重复触发）
+          const target = e.target as HTMLElement
+          if (target.closest('button[role="menuitem"], button[data-radix-dialog-action], button')) return
+          e.preventDefault()
+          // 有子会话时默认不级联，避免 Enter 误删子会话
+          void handleConfirmDelete(false)
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>确认删除对话</AlertDialogTitle>
+          <AlertDialogTitle>确认删除{mode === 'agent' ? '会话' : '对话'}</AlertDialogTitle>
           <AlertDialogDescription>
-            删除后将无法恢复，确定要删除这个对话吗？
+            {mode === 'agent' && pendingDeleteChildCount > 0
+              ? `此会话下还有 ${pendingDeleteChildCount} 个子会话。删除后将无法恢复，请选择是否一并删除子会话。`
+              : '删除后将无法恢复，确定要删除这个对话吗？'}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={handleConfirmDelete}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            删除
-          </AlertDialogAction>
+          {mode === 'agent' && pendingDeleteChildCount > 0 ? (
+            <>
+              <AlertDialogAction
+                onClick={() => { void handleConfirmDelete(false) }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                只删这个
+              </AlertDialogAction>
+              <AlertDialogAction
+                onClick={() => { void handleConfirmDelete(true) }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                连子会话一起删
+              </AlertDialogAction>
+            </>
+          ) : (
+            <AlertDialogAction
+              onClick={() => { void handleConfirmDelete(false) }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              删除
+            </AlertDialogAction>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1951,7 +2041,7 @@ export function LeftSidebar({ width }: LeftSidebarProps): React.ReactElement {
       open={moveTargetId !== null}
       onOpenChange={(open) => { if (!open) setMoveTargetId(null) }}
       sessionId={moveTargetId ?? ''}
-      currentWorkspaceId={moveSourceWorkspaceId ?? undefined}
+      sourceWorkspaceId={moveSourceWorkspaceId ?? undefined}
       workspaces={workspaces}
       onMoved={handleSessionMoved}
     />
@@ -3126,7 +3216,7 @@ interface AgentSessionItemProps {
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
-  onTogglePin: (id: string) => Promise<void>
+  onTogglePin: (id: string, cascade: boolean) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
 }
 
@@ -3190,15 +3280,35 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 
   const canMove = indicatorStatus === 'idle' || indicatorStatus === 'completed'
 
+  const childCount = delegationSummary?.total ?? 0
+  const hasChildren = childCount > 0
+  const pinLabel = session.pinned ? '取消置顶' : '置顶会话'
+  const cascadePinLabel = session.pinned
+    ? `取消置顶(含 ${childCount} 个子会话)`
+    : `置顶会话(含 ${childCount} 个子会话)`
+
   const menuItems = (
     MenuItem: typeof ContextMenuItem | typeof DropdownMenuItem,
     MenuSeparator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
   ) => (
     <>
-      <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id)}>
-        {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-        {session.pinned ? '取消置顶' : '置顶会话'}
-      </MenuItem>
+      {hasChildren ? (
+        <>
+          <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id, false)}>
+            {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+            仅{pinLabel}
+          </MenuItem>
+          <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id, true)}>
+            {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+            {cascadePinLabel}
+          </MenuItem>
+        </>
+      ) : (
+        <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onTogglePin(session.id, true)}>
+          {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+          {pinLabel}
+        </MenuItem>
+      )}
       {canMove && (
         <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onRequestMove(session.id)}>
           <ArrowRightLeft size={14} />
@@ -3338,7 +3448,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 relativeTimeNow={relativeTimeNow}
                 pinned={!!session.pinned}
                 archived={!!session.archived}
-                onTogglePin={() => onTogglePin(session.id)}
+                onTogglePin={() => onTogglePin(session.id, true)}
                 onToggleArchive={() => onToggleArchive(session.id)}
                 onMenuOpenChange={setMenuOpen}
                 menuItems={menuItems}
@@ -3379,7 +3489,7 @@ interface DelegatedChildSessionItemProps {
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
-  onTogglePin: (id: string) => Promise<void>
+  onTogglePin: (id: string, cascade: boolean) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
 }
 
@@ -3452,7 +3562,7 @@ interface AgentProjectGroupItemProps {
   onRequestDelete: (id: string) => void
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
-  onTogglePin: (id: string) => Promise<void>
+  onTogglePin: (id: string, cascade: boolean) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
   onToggleDelegationParent: (id: string, expanded: boolean) => void
 }
