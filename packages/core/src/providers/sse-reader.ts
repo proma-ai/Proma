@@ -180,13 +180,16 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
   const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000 } = options
 
-  // 合并用户取消信号和首字节超时信号。
+  // 真正的"首字节超时"：仅在等待 HTTP 响应期间计时，收到响应后立即清除。
+  // 使用 setTimeout + clearTimeout 而非 AbortSignal.timeout() 因为后者是绝对超时，
+  // 会无条件 abort 整个流（包括已开始的内容输出），导致正常长回复被截断。
   // 超时产生的 AbortError 会被外层 streamSSE 的 isRetriableError 识别为可重试，
   // 从而触发指数退避重试（最多 5 次 / 30s 预算）。
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const timeoutController = new AbortController()
+  const timer = setTimeout(() => timeoutController.abort(new DOMException('First byte timeout', 'TimeoutError')), timeoutMs)
   const effectiveSignal = signal
-    ? AbortSignal.any([signal, timeoutSignal])
-    : timeoutSignal
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal
 
   // 1. 发起请求（支持通过 fetchFn 注入代理）
   const response = await fetchFn(request.url, {
@@ -195,6 +198,9 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
     body: request.body,
     signal: effectiveSignal,
   })
+
+  // 已收到 HTTP 响应头，清除首字节超时——后续流式读取不应受时间限制
+  clearTimeout(timer)
 
   // 2. 错误检查
   if (!response.ok) {

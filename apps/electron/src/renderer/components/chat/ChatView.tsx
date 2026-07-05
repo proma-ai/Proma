@@ -354,7 +354,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       // 显示错误横幅，确保用户看到发送失败的反馈
       setChatStreamErrors((prev) => {
         const map = new Map(prev)
-        map.set(conversationId, '发送失败，请检查网络连接后重试')
+        map.set(conversationId, '发送失败，请重试')
         return map
       })
     })

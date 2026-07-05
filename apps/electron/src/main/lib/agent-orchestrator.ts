@@ -1526,10 +1526,6 @@ export class AgentOrchestrator {
           // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
           // 置回 false 并发 run_resumed，让 UI 从空闲态恢复运行态。
           let awaitingBackgroundWake = false
-          // 消息看门狗：如果 SDK 在 N 秒内没有任何消息产出，判定为网络挂起并触发重试。
-          // 每次收到消息后自动重置（因为 pendingNext 被置 null 然后重新调用 next()，
-          // 新的迭代会创建新的超时 promise）。
-          const MESSAGE_WATCHDOG_MS = 120_000 // 2 分钟
 
           while (true) {
             if (!pendingNext) {
@@ -1542,23 +1538,8 @@ export class AgentOrchestrator {
             if (drainTimeoutPromise) {
               racePromises.push(drainTimeoutPromise.then(() => ({ kind: 'drain_timeout' as const, result: null })))
             }
-            // 消息看门狗超时：SDK 长时间无消息视为网络挂起，触发自动重试
-            racePromises.push(
-              new Promise<'message_watchdog'>((resolve) => {
-                setTimeout(() => resolve('message_watchdog'), MESSAGE_WATCHDOG_MS)
-              }).then(() => ({ kind: 'message_watchdog' as const, result: null })),
-            )
 
             const raceResult = await Promise.race(racePromises)
-
-            if (raceResult.kind === 'message_watchdog') {
-              console.warn(`[Agent 编排] 消息看门狗超时: SDK ${MESSAGE_WATCHDOG_MS}ms 无消息，判定网络挂起`)
-              pendingNext?.catch(() => {})
-              pendingNext = null
-              // 抛出可重试的网络错误，消息中包含 "request timed out" 以匹配
-              // TRANSIENT_NETWORK_PATTERN，确保外层的 auto-retry 逻辑能识别并触发重试。
-              throw new Error('Agent 请求超时（request timed out）：长时间未收到响应，请检查网络连接')
-            }
 
             if (raceResult.kind === 'drain_timeout') {
               // 安全网：channel.close() 后 SDK 仍未在超时内关闭 iterator，强制退出
