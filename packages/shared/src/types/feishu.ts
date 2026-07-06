@@ -129,9 +129,11 @@ export interface FeishuUpdateBindingInput {
   workspaceId?: string
   /** 新的会话 ID（不传则不修改） */
   sessionId?: string
+  /** 是否归档该绑定（不传则不修改） */
+  archived?: boolean
 }
 
-/** 飞书聊天 → Proma 会话绑定（内存态，不持久化） */
+/** 飞书聊天 → Proma 会话绑定（由各 Bot 绑定文件持久化） */
 export interface FeishuChatBinding {
   /** 飞书 chat_id（单聊或群聊） */
   chatId: string
@@ -149,6 +151,12 @@ export interface FeishuChatBinding {
   modelId?: string
   /** 绑定来源：飞书主动绑定或 Proma 桌面 Session 镜像 */
   source?: 'feishu' | 'session-mirror'
+  /** 是否已归档 */
+  archived?: boolean
+  /** 归档时间 */
+  archivedAt?: number
+  /** 最近一次收到该聊天消息的时间 */
+  lastUsedAt?: number
   /** 聊天类型（单聊或群聊） */
   chatType?: 'p2p' | 'group'
   /** 群名称（群聊时） */

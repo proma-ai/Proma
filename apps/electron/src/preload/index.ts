@@ -990,7 +990,7 @@ export interface ElectronAPI {
   stopFeishuBridge: () => Promise<void>
   /** 获取飞书 Bridge 状态 */
   getFeishuStatus: () => Promise<FeishuBridgeState>
-  /** 获取活跃绑定列表 */
+  /** 获取绑定列表（包含已归档，调用方按视图过滤） */
   listFeishuBindings: () => Promise<FeishuChatBinding[]>
   /** 更新绑定（修改工作区/会话） */
   updateFeishuBinding: (input: FeishuUpdateBindingInput) => Promise<FeishuChatBinding | null>

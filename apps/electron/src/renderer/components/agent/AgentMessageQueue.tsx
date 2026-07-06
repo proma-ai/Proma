@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Clock3, CornerDownLeft, GripVertical, Trash2, Undo2 } from 'lucide-react'
+import { Clock3, CornerDownLeft, GripVertical, Quote, Trash2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -105,8 +105,16 @@ export function AgentMessageQueue({
               {isDropBefore && <div className="absolute left-2 right-2 top-0 h-0.5 rounded-full bg-primary" />}
               {isDropAfter && <div className="absolute left-2 right-2 bottom-0 h-0.5 rounded-full bg-primary" />}
               <GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground/55 active:cursor-grabbing" />
-              <div className="min-w-0 flex-1 text-[13px] leading-5 text-foreground/80 line-clamp-2">
-                {item.text}
+              <div className="min-w-0 flex-1 text-[13px] leading-5 text-foreground/80">
+                {item.quotedSelection && (
+                  <div className="mb-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-muted-foreground">
+                    <Quote className="size-3 shrink-0" />
+                    <span className="truncate">
+                      引用：{item.quotedSelection.sourceLabel ?? item.quotedSelection.filePath}
+                    </span>
+                  </div>
+                )}
+                <div className="line-clamp-2">{item.text}</div>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <QueueIconButton

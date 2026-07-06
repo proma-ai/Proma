@@ -357,7 +357,7 @@ export function RichTextInput({
           const fragment = range.cloneContents()
           const tempDiv = document.createElement('div')
           tempDiv.appendChild(fragment)
-          const text = htmlToMarkdown(tempDiv.innerHTML) || selection.toString()
+          const text = htmlToMarkdown(tempDiv.innerHTML, { skipMarkdownEscape: !richTextEnabledRef.current }) || selection.toString()
           event.preventDefault()
           event.clipboardData.setData('text/plain', text)
           event.clipboardData.setData('text/html', '')

@@ -63,6 +63,8 @@ import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { getFileParentPath } from '@/lib/file-utils'
+import { parseQuotedSelectionRefs } from '@/lib/quoted-selection'
+import type { ParsedQuotedSelectionRef } from '@/lib/quoted-selection'
 import type {
   SDKMessage,
   SDKAssistantMessage,
@@ -722,36 +724,17 @@ export interface AttachedFileRef {
 }
 
 /** 解析的引用文件 */
-export interface QuotedFileRef {
-  /** 源文件路径 */
-  path: string
-  /** 源文件名 */
-  filename: string
-}
+export type QuotedFileRef = ParsedQuotedSelectionRef
 
-/** 解析消息中的 <attached_files> 块和 <quoted_file> 块，返回文件列表、引用列表和剩余文本 */
+/** 解析消息中的 <attached_files>、<quoted_file> 和 <quoted_context> 块，返回文件列表、引用列表和剩余文本 */
 export function parseAttachedFiles(content: string): { files: AttachedFileRef[]; quotes: QuotedFileRef[]; text: string } {
-  const quoteRegex = /<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g
-  const quotes: QuotedFileRef[] = []
-  let quoteMatch: RegExpExecArray | null
-  while ((quoteMatch = quoteRegex.exec(content)) !== null) {
-    const pathMatch = quoteMatch[0].match(/path="([^"]*)"/)
-    if (pathMatch) {
-      // 反解 XML 实体：&amp; 必须最后做，否则会被先一步解出的 & 误伤
-      const filePath = pathMatch[1]!
-        .replace(/&quot;/g, '"')
-        .replace(/&gt;/g, '>')
-        .replace(/&lt;/g, '<')
-        .replace(/&amp;/g, '&')
-      quotes.push({ path: filePath, filename: filePath.split('/').pop() ?? filePath })
-    }
-  }
+  const parsedQuotes = parseQuotedSelectionRefs(content)
+  const quotes: QuotedFileRef[] = parsedQuotes.quotes
 
   const regex = /<attached_files>\n?([\s\S]*?)\n?<\/attached_files>\n*/
   const match = content.match(regex)
   if (!match) {
-    const cleanText = content.replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '').trim()
-    return { files: [], quotes, text: cleanText }
+    return { files: [], quotes, text: parsedQuotes.text }
   }
 
   const files: AttachedFileRef[] = []
@@ -763,9 +746,7 @@ export function parseAttachedFiles(content: string): { files: AttachedFileRef[];
     }
   }
 
-  let text = content.replace(regex, '')
-  text = text.replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
-  text = text.trim()
+  const text = parsedQuotes.text.replace(regex, '').trim()
   return { files, quotes, text }
 }
 
@@ -866,10 +847,11 @@ function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactEleme
 
 /** 引用文件 Chip（显示在用户消息中，表示该消息引用了某个文件的选中内容） */
 function QuoteChip({ quote }: { quote: QuotedFileRef }): React.ReactElement {
+  const label = quote.label ?? quote.filename
   return (
     <div className="inline-flex items-center gap-1.5 rounded-md bg-primary/8 border border-primary/20 px-2.5 py-1 text-[12px] text-muted-foreground">
       <Quote className="size-3.5 shrink-0 text-primary/60" />
-      <span className="truncate max-w-[200px]">{quote.filename}</span>
+      <span className="truncate max-w-[200px]">{label}</span>
     </div>
   )
 }

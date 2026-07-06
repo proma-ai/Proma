@@ -239,9 +239,21 @@ describe('resolveAnthropicMessagesUrl', () => {
 })
 
 describe('resolveAnthropicModelsUrl', () => {
-  test('anthropic-compatible 原样使用（不推导模型端点）', () => {
+  test('anthropic-compatible 从完整 messages 端点推导同级 /models', () => {
     expect(resolveAnthropicModelsUrl('https://gateway.example.com/v1/messages', 'anthropic-compatible')).toBe(
-      'https://gateway.example.com/v1/messages',
+      'https://gateway.example.com/v1/models',
+    )
+  })
+
+  test('anthropic-compatible 协议根地址推导 /models', () => {
+    expect(resolveAnthropicModelsUrl('https://gateway.example.com/v1', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/models',
+    )
+  })
+
+  test('anthropic-compatible 推导模型端点时保留查询参数', () => {
+    expect(resolveAnthropicModelsUrl('https://gateway.example.com/v1/messages?api-version=2024', 'anthropic-compatible')).toBe(
+      'https://gateway.example.com/v1/models?api-version=2024',
     )
   })
 

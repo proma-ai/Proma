@@ -204,12 +204,10 @@ export function resolveAnthropicMessagesUrl(baseUrl: string, provider: ProviderT
 /**
  * 解析 Anthropic Models 地址。
  *
- * Anthropic 兼容格式不推导模型端点；内置供应商按协议根地址推导 /models。
+ * Anthropic 兼容格式使用用户填写的请求地址推导同级模型端点；
+ * 内置供应商按协议根地址推导 /models。
  */
 export function resolveAnthropicModelsUrl(baseUrl: string, provider: ProviderType): string {
-  if (provider === 'anthropic-compatible') {
-    return trimTrailingUrlPathSlash(baseUrl)
-  }
   if (hasPathSuffix(baseUrl, '/messages')) {
     return replacePathSuffix(baseUrl, '/messages', '/models')
   }

@@ -36,6 +36,9 @@ export const conversationsAtom = atom<ConversationMeta[]>([])
 /** 当前对话 ID */
 export const currentConversationIdAtom = atom<string | null>(null)
 
+/** Agent 会话右侧 Chat 面板，key 为 Agent sessionId，value 为 Chat conversationId */
+export const agentSideChatMapAtom = atom<Map<string, string>>(new Map())
+
 /** 当前对话的消息列表 */
 export const currentMessagesAtom = atom<ChatMessage[]>([])
 

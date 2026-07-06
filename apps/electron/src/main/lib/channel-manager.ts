@@ -28,9 +28,7 @@ import {
   getPromaUserAgent,
   migrateCompatibleChannelBaseUrl,
   normalizeBaseUrl,
-  resolveAnthropicMessagesUrl,
   resolveAnthropicModelsUrl,
-  resolveOpenAIChatCompletionsUrl,
   resolveOpenAIModelsUrl,
 } from '@proma/core'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
@@ -472,40 +470,11 @@ async function testAnthropicCompatible(
   proxyUrl?: string,
   provider: ProviderType = 'anthropic',
 ): Promise<ChannelTestResult> {
-  const url = resolveAnthropicMessagesUrl(baseUrl, provider)
+  const url = resolveAnthropicModelsUrl(baseUrl, provider)
   const fetchFn = getFetchFn(proxyUrl)
-
-  let testModel: string
-  switch (provider) {
-    case 'deepseek':
-      testModel = 'deepseek-v4-pro'
-      break
-    case 'kimi-api':
-      testModel = 'kimi-k2.6'
-      break
-    case 'kimi-coding':
-      testModel = 'kimi-for-coding'
-      break
-    case 'zhipu-coding':
-      testModel = 'glm-5.2'
-      break
-    case 'minimax':
-      testModel = 'MiniMax-M3'
-      break
-    case 'xiaomi':
-    case 'xiaomi-token-plan':
-      testModel = 'mimo-v2.5-pro'
-      break
-    case 'qwen-anthropic':
-      testModel = 'qwen3.7-plus'
-      break
-    default:
-      testModel = 'claude-sonnet-5'
-  }
 
   const headers: Record<string, string> = {
     'anthropic-version': '2023-06-01',
-    'content-type': 'application/json',
   }
   if (provider === 'kimi-coding' || provider === 'zhipu-coding') {
     headers.Authorization = `Bearer ${apiKey}`
@@ -521,13 +490,8 @@ async function testAnthropicCompatible(
   }
 
   const response = await fetchFn(url, withTimeout({
-    method: 'POST',
+    method: 'GET',
     headers,
-    body: JSON.stringify({
-      model: testModel,
-      max_tokens: 1,
-      messages: [{ role: 'user', content: 'hi' }],
-    }),
   }))
 
   return normalizeHttpResponse(response)
@@ -542,24 +506,6 @@ async function testOpenAICompatible(
   proxyUrl?: string,
   provider: ProviderType = 'openai',
 ): Promise<ChannelTestResult> {
-  if (provider === 'custom') {
-    const url = resolveOpenAIChatCompletionsUrl(baseUrl, provider)
-    const fetchFn = getFetchFn(proxyUrl)
-    const response = await fetchFn(url, withTimeout({
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1,
-      }),
-    }))
-    return normalizeHttpResponse(response)
-  }
-
   const url = resolveOpenAIModelsUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
 
@@ -696,10 +642,6 @@ async function fetchAnthropicCompatibleModels(
   proxyUrl?: string,
   provider: ProviderType = 'anthropic',
 ): Promise<FetchModelsResult> {
-  if (provider === 'anthropic-compatible') {
-    return { success: false, message: 'Anthropic 兼容格式使用完整请求地址，请手动添加模型', models: [] }
-  }
-
   const url = resolveAnthropicModelsUrl(baseUrl, provider)
   const fetchFn = getFetchFn(proxyUrl)
 
@@ -765,10 +707,6 @@ async function fetchOpenAICompatibleModels(
   proxyUrl?: string,
   provider: ProviderType = 'openai',
 ): Promise<FetchModelsResult> {
-  if (provider === 'custom') {
-    return { success: false, message: 'OpenAI 兼容格式使用完整请求地址，请手动添加模型', models: [] }
-  }
-
   const url = resolveOpenAIModelsUrl(baseUrl)
   const fetchFn = getFetchFn(proxyUrl)
 

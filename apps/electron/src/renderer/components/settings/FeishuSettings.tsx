@@ -9,8 +9,9 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight, PlayCircle, QrCode, MessageSquare, AlertTriangle } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ExternalLink, Users, User, Trash2, RefreshCw, Copy, Check, Power, PowerOff, Plus, ChevronRight, PlayCircle, QrCode, MessageSquare, AlertTriangle, Archive, ArchiveRestore, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -45,7 +46,15 @@ import { SettingsRow } from './primitives/SettingsRow'
 import { feishuBotStatesAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
 import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
-import type { FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus, FeishuSessionMirrorSettings, FeishuSessionSyncMode } from '@proma/shared'
+import {
+  FEISHU_BINDING_PAGE_SIZE,
+  filterFeishuBindings,
+  groupFeishuBindings,
+  type FeishuBindingSourceFilter,
+  type FeishuBindingTypeFilter,
+  type FeishuBindingViewMode,
+} from '@/lib/feishu-bindings'
+import type { AgentSessionMeta, AgentWorkspace, FeishuTestResult, FeishuChatBinding, FeishuBotConfig, FeishuBotBridgeState, FeishuRegisterAppQRCode, FeishuRegisterAppStatus, FeishuSessionMirrorSettings, FeishuSessionSyncMode } from '@proma/shared'
 
 // ===== 常量 =====
 
@@ -398,28 +407,43 @@ function FeishuCliSection(): React.ReactElement {
 
 interface FeishuBindingCardProps {
   binding: FeishuChatBinding
+  workspaces: AgentWorkspace[]
+  workspaceById: Map<string, AgentWorkspace>
+  sessionById: Map<string, AgentSessionMeta>
+  sessionsByWorkspaceId: Map<string, AgentSessionMeta[]>
   onUpdate: (chatId: string, updates: { workspaceId?: string; sessionId?: string }) => void
+  onArchive: (chatId: string, archived: boolean) => void
   onRemove: (chatId: string) => void
 }
 
-function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardProps): React.ReactElement {
-  const workspaces = useAtomValue(agentWorkspacesAtom)
-  const sessions = useAtomValue(agentSessionsAtom)
-
+const FeishuBindingCard = React.memo(function FeishuBindingCard({
+  binding,
+  workspaces,
+  workspaceById,
+  sessionById,
+  sessionsByWorkspaceId,
+  onUpdate,
+  onArchive,
+  onRemove,
+}: FeishuBindingCardProps): React.ReactElement {
+  const [workspaceSelectOpen, setWorkspaceSelectOpen] = React.useState(false)
+  const [sessionSelectOpen, setSessionSelectOpen] = React.useState(false)
   const isGroup = binding.chatType === 'group'
   const displayName = isGroup ? (binding.groupName ?? '未知群组') : '单聊'
+  const isArchived = !!binding.archived
 
   // 当前绑定工作区下的会话列表
   const workspaceSessions = React.useMemo(
-    () => sessions.filter((s) => s.workspaceId === binding.workspaceId),
-    [sessions, binding.workspaceId]
+    () => sessionsByWorkspaceId.get(binding.workspaceId) ?? [],
+    [sessionsByWorkspaceId, binding.workspaceId]
   )
 
-  const currentWorkspace = workspaces.find((w) => w.id === binding.workspaceId)
-  const currentSession = sessions.find((s) => s.id === binding.sessionId)
+  const currentWorkspace = workspaceById.get(binding.workspaceId)
+  const currentSession = sessionById.get(binding.sessionId)
+  const lastUsedAt = binding.lastUsedAt ?? binding.createdAt
 
   return (
-    <div className="px-4 py-3 space-y-3">
+    <div className={cn('px-4 py-3 space-y-3', isArchived && 'opacity-75')}>
       {/* 头部：类型图标 + 名称 + 删除 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -432,32 +456,44 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
           <div>
             <div className="text-sm font-medium text-foreground">{displayName}</div>
             <div className="text-xs text-muted-foreground">
-              {isGroup ? '群聊' : '私聊'} · {new Date(binding.createdAt).toLocaleDateString('zh-CN')}
+              {isGroup ? '群聊' : '私聊'} · 最近 {new Date(lastUsedAt).toLocaleDateString('zh-CN')}
+              {binding.source === 'session-mirror' && ' · Session 镜像'}
             </div>
           </div>
         </div>
 
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive">
-              <Trash2 size={14} />
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>解除绑定</AlertDialogTitle>
-              <AlertDialogDescription>
-                确定要解除「{displayName}」的飞书聊天绑定吗？解除后下次在飞书发消息会自动创建新绑定。
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction onClick={() => onRemove(binding.chatId)}>
-                确认解除
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-muted-foreground"
+            onClick={() => onArchive(binding.chatId, !isArchived)}
+            title={isArchived ? '取消归档' : '归档'}
+          >
+            {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive">
+                <Trash2 size={14} />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>解除绑定</AlertDialogTitle>
+                <AlertDialogDescription>
+                  确定要解除「{displayName}」的飞书聊天绑定吗？解除后下次在飞书发消息会自动创建新绑定。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction onClick={() => onRemove(binding.chatId)}>
+                  确认解除
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
 
       {/* 工作区选择 */}
@@ -465,6 +501,8 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
         <span className="text-muted-foreground">工作区</span>
         <Select
           value={binding.workspaceId}
+          open={workspaceSelectOpen}
+          onOpenChange={setWorkspaceSelectOpen}
           onValueChange={(value) => onUpdate(binding.chatId, { workspaceId: value })}
         >
           <SelectTrigger className="h-8 text-xs">
@@ -473,16 +511,17 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {workspaces.map((w) => (
+            {workspaceSelectOpen && workspaces.map((w) => (
               <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        {/* 会话显示 */}
         <span className="text-muted-foreground">会话</span>
         <Select
           value={binding.sessionId}
+          open={sessionSelectOpen}
+          onOpenChange={setSessionSelectOpen}
           onValueChange={(value) => onUpdate(binding.chatId, { sessionId: value })}
         >
           <SelectTrigger className="h-8 text-xs">
@@ -491,7 +530,7 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {workspaceSessions.map((s) => (
+            {sessionSelectOpen && workspaceSessions.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.title}
               </SelectItem>
@@ -501,17 +540,75 @@ function FeishuBindingCard({ binding, onUpdate, onRemove }: FeishuBindingCardPro
       </div>
     </div>
   )
-}
+})
 
 // ===== 绑定管理 Tab =====
 
 function FeishuBindingsTab(): React.ReactElement {
   const bindings = useAtomValue(feishuBindingsAtom)
   const setBindings = useSetAtom(feishuBindingsAtom)
-  const botStates = useAtomValue(feishuBotStatesAtom)
+  const workspaces = useAtomValue(agentWorkspacesAtom)
+  const sessions = useAtomValue(agentSessionsAtom)
   const [refreshing, setRefreshing] = React.useState(false)
+  const [viewMode, setViewMode] = React.useState<FeishuBindingViewMode>('active')
+  const [query, setQuery] = React.useState('')
+  const [chatTypeFilter, setChatTypeFilter] = React.useState<FeishuBindingTypeFilter>('all')
+  const [sourceFilter, setSourceFilter] = React.useState<FeishuBindingSourceFilter>('all')
+  const [visibleLimit, setVisibleLimit] = React.useState(FEISHU_BINDING_PAGE_SIZE)
 
-  const anyConnected = Object.values(botStates).some((b) => b.status === 'connected')
+  const activeCount = React.useMemo(
+    () => bindings.filter((binding) => !binding.archived).length,
+    [bindings],
+  )
+  const archivedCount = React.useMemo(
+    () => bindings.filter((binding) => binding.archived).length,
+    [bindings],
+  )
+
+  const workspaceById = React.useMemo(
+    () => new Map(workspaces.map((workspace) => [workspace.id, workspace])),
+    [workspaces],
+  )
+  const sessionById = React.useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions],
+  )
+  const sessionsByWorkspaceId = React.useMemo(() => {
+    const grouped = new Map<string, AgentSessionMeta[]>()
+    for (const session of sessions) {
+      if (!session.workspaceId) continue
+      const list = grouped.get(session.workspaceId) ?? []
+      list.push(session)
+      grouped.set(session.workspaceId, list)
+    }
+    for (const list of grouped.values()) {
+      list.sort((a, b) => b.updatedAt - a.updatedAt)
+    }
+    return grouped
+  }, [sessions])
+
+  const filteredBindings = React.useMemo(
+    () => filterFeishuBindings(bindings, {
+      viewMode,
+      chatType: chatTypeFilter,
+      source: sourceFilter,
+      query,
+    }),
+    [bindings, chatTypeFilter, query, sourceFilter, viewMode],
+  )
+
+  const visibleBindings = React.useMemo(
+    () => filteredBindings.slice(0, visibleLimit),
+    [filteredBindings, visibleLimit],
+  )
+  const { groupBindings, p2pBindings } = React.useMemo(
+    () => groupFeishuBindings(visibleBindings),
+    [visibleBindings],
+  )
+
+  React.useEffect(() => {
+    setVisibleLimit(FEISHU_BINDING_PAGE_SIZE)
+  }, [chatTypeFilter, query, sourceFilter, viewMode])
 
   // 刷新绑定列表
   const refreshBindings = React.useCallback(async () => {
@@ -531,13 +628,6 @@ function FeishuBindingsTab(): React.ReactElement {
     refreshBindings()
   }, [refreshBindings])
 
-  // 有 Bot 连接时刷新
-  React.useEffect(() => {
-    if (anyConnected) {
-      refreshBindings()
-    }
-  }, [anyConnected, refreshBindings])
-
   // 更新绑定
   const handleUpdate = React.useCallback(async (chatId: string, updates: { workspaceId?: string; sessionId?: string }) => {
     try {
@@ -548,6 +638,19 @@ function FeishuBindingsTab(): React.ReactElement {
       }
     } catch {
       toast.error('更新绑定失败')
+    }
+  }, [setBindings])
+
+  // 归档 / 恢复绑定
+  const handleArchive = React.useCallback(async (chatId: string, archived: boolean) => {
+    try {
+      const result = await window.electronAPI.updateFeishuBinding({ chatId, archived })
+      if (result) {
+        setBindings((prev) => prev.map((binding) => binding.chatId === chatId ? result : binding))
+        toast.success(archived ? '绑定已归档' : '绑定已恢复')
+      }
+    } catch {
+      toast.error(archived ? '归档绑定失败' : '恢复绑定失败')
     }
   }, [setBindings])
 
@@ -564,15 +667,11 @@ function FeishuBindingsTab(): React.ReactElement {
     }
   }, [setBindings])
 
-  // 按类型分组：群聊 + 单聊
-  const groupBindings = bindings.filter((b) => b.chatType === 'group')
-  const p2pBindings = bindings.filter((b) => b.chatType !== 'group')
-
   return (
     <div className="space-y-8">
       <SettingsSection
         title="绑定管理"
-        description="查看和管理飞书聊天与 Proma 工作区/会话的绑定关系"
+        description={`${activeCount} 个活跃绑定，${archivedCount} 个已归档绑定`}
         action={
           <Button
             size="sm"
@@ -585,10 +684,78 @@ function FeishuBindingsTab(): React.ReactElement {
           </Button>
         }
       >
+        <SettingsCard divided={false}>
+          <div className="px-4 py-3 space-y-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="inline-flex rounded-lg bg-muted p-1 gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('active')}
+                  className={cn(
+                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                    viewMode === 'active' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  活跃 ({activeCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('archived')}
+                  className={cn(
+                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                    viewMode === 'archived' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  已归档 ({archivedCount})
+                </button>
+              </div>
+
+              <div className="relative min-w-0 flex-1">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索群名、chat_id、session"
+                  className="h-9 pl-8 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                <Select value={chatTypeFilter} onValueChange={(value) => setChatTypeFilter(value as FeishuBindingTypeFilter)}>
+                  <SelectTrigger className="h-9 w-full sm:w-[118px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部类型</SelectItem>
+                    <SelectItem value="group">群聊</SelectItem>
+                    <SelectItem value="p2p">单聊</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sourceFilter} onValueChange={(value) => setSourceFilter(value as FeishuBindingSourceFilter)}>
+                  <SelectTrigger className="h-9 w-full sm:w-[138px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部来源</SelectItem>
+                    <SelectItem value="feishu">飞书主动</SelectItem>
+                    <SelectItem value="session-mirror">Session 镜像</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </SettingsCard>
+
         {bindings.length === 0 ? (
           <SettingsCard divided={false}>
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              暂无活跃绑定。启动 Bridge 后在飞书中发消息即可自动创建绑定。
+              暂无绑定。启动 Bridge 后在飞书中发消息即可自动创建绑定。
+            </div>
+          </SettingsCard>
+        ) : filteredBindings.length === 0 ? (
+          <SettingsCard divided={false}>
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              没有匹配的绑定。
             </div>
           </SettingsCard>
         ) : (
@@ -604,7 +771,12 @@ function FeishuBindingsTab(): React.ReactElement {
                     <FeishuBindingCard
                       key={binding.chatId}
                       binding={binding}
+                      workspaces={workspaces}
+                      workspaceById={workspaceById}
+                      sessionById={sessionById}
+                      sessionsByWorkspaceId={sessionsByWorkspaceId}
                       onUpdate={handleUpdate}
+                      onArchive={handleArchive}
                       onRemove={handleRemove}
                     />
                   ))}
@@ -623,11 +795,28 @@ function FeishuBindingsTab(): React.ReactElement {
                     <FeishuBindingCard
                       key={binding.chatId}
                       binding={binding}
+                      workspaces={workspaces}
+                      workspaceById={workspaceById}
+                      sessionById={sessionById}
+                      sessionsByWorkspaceId={sessionsByWorkspaceId}
                       onUpdate={handleUpdate}
+                      onArchive={handleArchive}
                       onRemove={handleRemove}
                     />
                   ))}
                 </SettingsCard>
+              </div>
+            )}
+
+            {visibleBindings.length < filteredBindings.length && (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVisibleLimit((limit) => limit + FEISHU_BINDING_PAGE_SIZE)}
+                >
+                  加载更多（{visibleBindings.length}/{filteredBindings.length}）
+                </Button>
               </div>
             )}
           </div>
@@ -862,7 +1051,7 @@ function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.Reac
   )
   const selectedBotHasBinding = React.useMemo(
     () => Boolean(settings.botId && bindings.some((binding) =>
-      binding.botId === settings.botId && binding.userId && binding.userId !== 'unknown'
+      !binding.archived && binding.botId === settings.botId && binding.userId && binding.userId !== 'unknown'
     )),
     [bindings, settings.botId],
   )

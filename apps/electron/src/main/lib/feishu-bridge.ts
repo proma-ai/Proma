@@ -366,6 +366,10 @@ class FeishuBridge {
         // 验证对应会话仍然存在
         const session = getAgentSessionMeta(b.sessionId)
         if (session) {
+          if (b.source === 'session-mirror' && session.archived) {
+            b.archived = true
+            b.archivedAt ??= session.updatedAt
+          }
           // 同步最新的渠道和模型设置（用户可能已更改）
           if (appSettings.agentChannelId) {
             b.channelId = appSettings.agentChannelId
@@ -374,12 +378,14 @@ class FeishuBridge {
             b.modelId = appSettings.agentModelId
           }
           this.chatBindings.set(b.chatId, b)
-          this.sessionToChat.set(b.sessionId, b.chatId)
+          if (!b.archived) {
+            this.sessionToChat.set(b.sessionId, b.chatId)
+          }
         }
       }
       if (this.chatBindings.size > 0) {
         console.log(`[飞书 Bridge] 已恢复 ${this.chatBindings.size} 个聊天绑定`)
-        this.updateStatus({ activeBindings: this.chatBindings.size })
+        this.updateStatus({ activeBindings: this.getActiveBindingCount() })
       }
     } catch (error) {
       console.error('[飞书 Bridge] 加载绑定失败:', error)
@@ -445,6 +451,29 @@ class FeishuBridge {
     return Array.from(this.chatBindings.values())
   }
 
+  private getActiveBindingCount(): number {
+    return Array.from(this.chatBindings.values()).filter((binding) => !binding.archived).length
+  }
+
+  private markBindingUsed(chatId: string): void {
+    const binding = this.chatBindings.get(chatId)
+    if (!binding) return
+
+    const wasArchived = !!binding.archived
+    const now = Date.now()
+    const shouldPersistLastUsedAt = now - (binding.lastUsedAt ?? 0) > 60_000
+    binding.lastUsedAt = now
+    if (wasArchived) {
+      binding.archived = false
+      binding.archivedAt = undefined
+      this.sessionToChat.set(binding.sessionId, chatId)
+      this.updateStatus({ activeBindings: this.getActiveBindingCount() })
+    }
+    if (wasArchived || shouldPersistLastUsedAt) {
+      this.saveBindings()
+    }
+  }
+
   /** 更新绑定的工作区/会话（从设置页调用） */
   updateBinding(input: FeishuUpdateBindingInput): FeishuChatBinding | null {
     const binding = this.chatBindings.get(input.chatId)
@@ -457,7 +486,20 @@ class FeishuBridge {
       // 清理旧反向索引，建立新的
       this.sessionToChat.delete(binding.sessionId)
       binding.sessionId = input.sessionId
-      this.sessionToChat.set(input.sessionId, input.chatId)
+      if (!binding.archived) {
+        this.sessionToChat.set(input.sessionId, input.chatId)
+      }
+    }
+    if (input.archived !== undefined) {
+      binding.archived = input.archived
+      binding.archivedAt = input.archived ? Date.now() : undefined
+      if (input.archived) {
+        this.sessionToChat.delete(binding.sessionId)
+      } else {
+        this.sessionToChat.set(binding.sessionId, input.chatId)
+        binding.lastUsedAt ??= Date.now()
+      }
+      this.updateStatus({ activeBindings: this.getActiveBindingCount() })
     }
 
     this.saveBindings()
@@ -472,7 +514,7 @@ class FeishuBridge {
     this.sessionToChat.delete(binding.sessionId)
     this.streamingTerminalHandledSessions.delete(binding.sessionId)
     this.chatBindings.delete(chatId)
-    this.updateStatus({ activeBindings: this.chatBindings.size })
+    this.updateStatus({ activeBindings: this.getActiveBindingCount() })
     this.saveBindings()
     return true
   }
@@ -523,11 +565,12 @@ class FeishuBridge {
       chatType: 'group',
       groupName,
       createdAt: Date.now(),
+      lastUsedAt: Date.now(),
     }
 
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
-    this.updateStatus({ activeBindings: this.chatBindings.size })
+    this.updateStatus({ activeBindings: this.getActiveBindingCount() })
     this.saveBindings()
     console.log(`[飞书 Session 镜像] 已创建群: session=${session.id.slice(0, 8)}, chat=${chatId}`)
   }
@@ -817,6 +860,7 @@ class FeishuBridge {
 
     const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0
     if (!text && !hasAttachments) return
+    this.markBindingUsed(chatId)
 
     // 纯附件消息（无文本）：暂存，等待后续文本一起触发 Agent
     if (!text && hasAttachments) {
@@ -1068,10 +1112,11 @@ class FeishuBridge {
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
       createdAt: Date.now(),
+      lastUsedAt: Date.now(),
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(session.id, chatId)
-    this.updateStatus({ activeBindings: this.chatBindings.size })
+    this.updateStatus({ activeBindings: this.getActiveBindingCount() })
     this.saveBindings()
 
     // 通知渲染进程刷新会话列表（复用 TITLE_UPDATED 通道触发列表刷新）
@@ -1265,10 +1310,11 @@ class FeishuBridge {
       chatType: msgCtx.chatType,
       groupName: msgCtx.groupName,
       createdAt: Date.now(),
+      lastUsedAt: Date.now(),
     }
     this.chatBindings.set(chatId, binding)
     this.sessionToChat.set(match.id, chatId)
-    this.updateStatus({ activeBindings: this.chatBindings.size })
+    this.updateStatus({ activeBindings: this.getActiveBindingCount() })
     this.saveBindings()
 
     await this.sendMessage(chatId, `已切换到会话: ${match.title} (${match.id.slice(0, 8)})`)
@@ -1309,7 +1355,7 @@ class FeishuBridge {
     if (binding) {
       this.sessionToChat.delete(binding.sessionId)
       this.chatBindings.delete(chatId)
-      this.updateStatus({ activeBindings: this.chatBindings.size })
+      this.updateStatus({ activeBindings: this.getActiveBindingCount() })
       this.saveBindings()
     }
 

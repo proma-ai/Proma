@@ -251,6 +251,7 @@ export function getGroupPreview(group: MessageGroup): string {
     return stripScheduledRunMarker(extractUserText(group.message) ?? '')
       .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/, '')
       .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+      .replace(/<quoted_context[^>]*>[\s\S]*?<\/quoted_context>\n*/g, '')
       .slice(0, 200)
   }
   if (group.type === 'system') {

@@ -25,6 +25,7 @@ import {
   agentSessionIndicatorMapAtom,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
+import { agentSideChatMapAtom } from '@/atoms/chat-atoms'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 
 interface UseCloseTabReturn {
@@ -42,6 +43,7 @@ export function useCloseTab(): UseCloseTabReturn {
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setViewStateMap = useSetAtom(sessionViewStateMapAtom)
+  const setSideChatMap = useSetAtom(agentSideChatMapAtom)
 
   const clearIdleAgentCompletionNotice = React.useCallback((sessionId: string) => {
     const indicatorMap = store.get(agentSessionIndicatorMapAtom)
@@ -93,6 +95,27 @@ export function useCloseTab(): UseCloseTabReturn {
           return next
         })
       }
+
+      if (closingTab.type === 'agent') {
+        setSideChatMap((prev) => {
+          if (!prev.has(closingTab.sessionId)) return prev
+          const next = new Map(prev)
+          next.delete(closingTab.sessionId)
+          return next
+        })
+      } else if (closingTab.type === 'chat') {
+        setSideChatMap((prev) => {
+          let changed = false
+          const next = new Map(prev)
+          for (const [ownerSessionId, conversationId] of next) {
+            if (conversationId === closingTab.sessionId) {
+              next.delete(ownerSessionId)
+              changed = true
+            }
+          }
+          return changed ? next : prev
+        })
+      }
     }
 
     if (wasActive) {
@@ -106,7 +129,7 @@ export function useCloseTab(): UseCloseTabReturn {
     if (closingTab && closingTab.type === 'agent') {
       clearIdleAgentCompletionNotice(closingTab.sessionId)
     }
-  }, [tabs, activeTabId, setTabs, setActiveTabId, setViewStateMap, syncActiveTabSideEffects, clearIdleAgentCompletionNotice])
+  }, [tabs, activeTabId, setTabs, setActiveTabId, setViewStateMap, setSideChatMap, syncActiveTabSideEffects, clearIdleAgentCompletionNotice])
 
   const requestClose = React.useCallback((tabId: string) => {
     executeClose(tabId)

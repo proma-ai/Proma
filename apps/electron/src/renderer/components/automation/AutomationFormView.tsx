@@ -321,7 +321,7 @@ export function AutomationFormView(): React.ReactElement | null {
   React.useEffect(() => {
     if (!formState.open) return
     window.electronAPI.listFeishuBindings()
-      .then(setFeishuBindings)
+      .then((bindings) => setFeishuBindings(bindings.filter((binding) => !binding.archived)))
       .catch((err: unknown) => {
         console.error('[定时任务] 获取飞书绑定失败:', err)
       })

@@ -20,6 +20,7 @@ import { ClearContextButton } from './ClearContextButton'
 import { ContextSettingsPopover } from './ContextSettingsPopover'
 import { ToolSelectorPopover } from './ToolSelectorPopover'
 import { AttachmentPreviewItem } from './AttachmentPreviewItem'
+import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
@@ -41,6 +42,7 @@ import {
   conversationDraftsAtom,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment } from '@/atoms/chat-atoms'
+import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
   useConversationModel,
   useConversationThinkingEnabled,
@@ -73,6 +75,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   // 从 Map atom 读写草稿
   const draftsMap = useAtomValue(conversationDraftsAtom)
   const setDraftsMap = useSetAtom(conversationDraftsAtom)
+  const quotedSelectionMap = useAtomValue(quotedSelectionMapAtom)
+  const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
+  const currentQuotedSelection = quotedSelectionMap.get(conversationId) ?? null
   const content = draftsMap.get(conversationId) ?? ''
   const setContent = React.useCallback((value: string) => {
     setDraftsMap((prev) => {
@@ -212,6 +217,16 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       return prev.filter((a) => a.id !== id)
     })
   }, [setPendingAttachments])
+
+  /** 移除当前引用选中文本 */
+  const handleRemoveQuotedSelection = React.useCallback((): void => {
+    setQuotedSelectionMap((prev) => {
+      if (!prev.has(conversationId)) return prev
+      const next = new Map(prev)
+      next.delete(conversationId)
+      return next
+    })
+  }, [conversationId, setQuotedSelectionMap])
 
   /** 编辑完成 — 用编辑后的图片替换原 pending 附件 */
   const handleEditComplete = React.useCallback((attachmentId: string, editedDataUrl: string): void => {
@@ -400,9 +415,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* 附件预览区域 — Cherry Studio: padding 5px 15px, flex-wrap, gap 4px */}
-          {pendingAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 px-[15px] pt-[10px] pb-[15px]">
+          {/* 附件 + 引用选中文本 Chip（与 Agent 输入框保持一致） */}
+          {(pendingAttachments.length > 0 || currentQuotedSelection) && (
+            <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
               {pendingAttachments.map((att) => (
                 <AttachmentPreviewItem
                   key={att.id}
@@ -413,6 +428,14 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
                   onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
                 />
               ))}
+              {currentQuotedSelection && (
+                <QuotedSelectionChip
+                  text={currentQuotedSelection.text}
+                  filePath={currentQuotedSelection.filePath}
+                  sourceLabel={currentQuotedSelection.sourceLabel}
+                  onRemove={handleRemoveQuotedSelection}
+                />
+              )}
             </div>
           )}
 

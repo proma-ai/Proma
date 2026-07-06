@@ -62,12 +62,23 @@ export const currentSessionPreviewOpenAtom = atom<boolean>((get) => {
 
 // ===== 引用选中文本（Quoted Selection）=====
 
-/** 从预览面板中选中的文本引用 */
+/** 选中文本引用的来源 */
+export type QuotedSelectionSourceType = 'file' | 'agent-history' | 'scratch-pad'
+
+/** 从预览面板或 Agent 历史中选中的文本引用 */
 export interface QuotedSelection {
   /** 选中的文本内容 */
   text: string
-  /** 来源文件路径 */
+  /** 来源文件路径；历史引用时作为兼容展示字段 */
   filePath: string
+  /** 引用来源类型 */
+  sourceType?: QuotedSelectionSourceType
+  /** 面向用户展示的来源名称 */
+  sourceLabel?: string
+  /** Agent 历史消息 ID */
+  messageId?: string
+  /** Agent 历史消息角色 */
+  messageRole?: 'user' | 'assistant' | 'system'
   /** 起始行号（1-based，代码文件可计算，markdown 等无法计算时为 undefined） */
   startLine?: number
   /** 结束行号（1-based） */

@@ -14,6 +14,7 @@ import {
   agentSessionPathMapAtom,
   agentDiffPanelTabAtom,
 } from '@/atoms/agent-atoms'
+import type { AgentSidePanelTab } from '@/atoms/agent-atoms'
 import { SidePanel } from '@/components/agent/SidePanel'
 
 export function RightSidePanel({ width }: { width?: number }): React.ReactElement | null {
@@ -23,7 +24,7 @@ export function RightSidePanel({ width }: { width?: number }): React.ReactElemen
   const diffPanelTabMap = useAtomValue(agentDiffPanelTabAtom)
   const setDiffPanelTabMap = useSetAtom(agentDiffPanelTabAtom)
 
-  const setActiveTab = React.useCallback((tab: 'session' | 'workspace' | 'changes') => {
+  const setActiveTab = React.useCallback((tab: AgentSidePanelTab) => {
     if (!currentSessionId) return
     setDiffPanelTabMap((prev) => {
       const map = new Map(prev)

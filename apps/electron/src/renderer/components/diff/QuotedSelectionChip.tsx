@@ -14,6 +14,8 @@ interface QuotedSelectionChipProps {
   text: string
   /** 来源文件路径（截断显示） */
   filePath: string
+  /** 来源展示名称 */
+  sourceLabel?: string
   /** 移除回调 */
   onRemove: () => void
   className?: string
@@ -35,6 +37,7 @@ function truncatePath(filePath: string, maxLen: number = 40): string {
 export function QuotedSelectionChip({
   text,
   filePath,
+  sourceLabel,
   onRemove,
   className,
 }: QuotedSelectionChipProps): React.ReactElement {
@@ -46,7 +49,7 @@ export function QuotedSelectionChip({
   return (
     <div
       className={cn(
-        'group/chip relative flex items-start gap-2 shrink-0 max-w-[33%]',
+        'group/chip relative flex min-w-0 max-w-full items-start gap-2',
         'rounded-lg bg-primary/8 border border-primary/20',
         'pl-2.5 pr-7 py-1.5 text-[13px]',
         'transition-colors hover:bg-primary/12',
@@ -55,11 +58,11 @@ export function QuotedSelectionChip({
     >
       <Quote className="size-4 shrink-0 mt-0.5 text-primary/60" />
       <div className="flex flex-col min-w-0">
-        <span className="text-foreground/80 line-clamp-2 leading-snug">
+        <span className="text-foreground/80 line-clamp-2 leading-snug break-words [overflow-wrap:anywhere]">
           {truncateText(text)}
         </span>
-        <span className="text-[11px] text-muted-foreground/60 mt-0.5">
-          {truncatePath(filePath)}
+        <span className="text-[11px] text-muted-foreground/60 mt-0.5 break-words [overflow-wrap:anywhere]">
+          {sourceLabel ?? truncatePath(filePath)}
         </span>
       </div>
       <button

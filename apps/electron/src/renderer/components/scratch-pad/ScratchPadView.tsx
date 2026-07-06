@@ -12,10 +12,20 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { FileDown } from 'lucide-react'
+import { toast } from 'sonner'
 import { scratchPadContentAtom, scratchPadLoadedAtom, tabsAtom, activeTabIdAtom } from '@/atoms/tab-atoms'
-import { currentAgentWorkspaceIdAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
+import {
+  agentDiffPanelTabAtom,
+  agentSidePanelOpenAtom,
+  currentAgentSessionIdAtom,
+  currentAgentWorkspaceIdAtom,
+  agentWorkspacesAtom,
+} from '@/atoms/agent-atoms'
+import { agentSideChatMapAtom, conversationsAtom, conversationDraftsAtom, selectedModelAtom } from '@/atoms/chat-atoms'
+import { appModeAtom } from '@/atoms/app-mode'
+import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -45,15 +55,48 @@ import {
   getLastFocusedVoiceInputId,
   setLastFocusedVoiceInputId,
 } from '@/lib/voice-input-focus'
+import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
+import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
+
+const MAX_SCRATCH_PAD_QUOTED_CHARS = 2000
+
+interface ScratchPadSelection {
+  text: string
+  x: number
+  y: number
+}
+
+function normalizeSelectionText(text: string): string {
+  return text.replace(/\s+\n/g, '\n').replace(/\n\s+/g, '\n').trim()
+}
+
+function getElementFromNode(node: Node | null): Element | null {
+  if (!node) return null
+  return node instanceof Element ? node : node.parentElement
+}
 
 export function ScratchPadView(): React.ReactElement {
   const [content, setContent] = useAtom(scratchPadContentAtom)
   const loaded = useAtomValue(scratchPadLoadedAtom)
   const containerRef = React.useRef<HTMLDivElement>(null)
+  const [selection, setSelection] = React.useState<ScratchPadSelection | null>(null)
+  const pointerSelectingRef = React.useRef(false)
+  const captureTimerRef = React.useRef<number | null>(null)
+  const openSideChatPendingRef = React.useRef(false)
 
   // 用 ref 追踪最新内容，避免在 useEffect deps 里包含 content 导致循环
   const contentRef = React.useRef(content)
   contentRef.current = content
+
+  const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
+  const selectedChatModel = useAtomValue(selectedModelAtom)
+  const setConversations = useSetAtom(conversationsAtom)
+  const setConversationDrafts = useSetAtom(conversationDraftsAtom)
+  const setAgentSideChatMap = useSetAtom(agentSideChatMapAtom)
+  const setAgentSidePanelOpen = useSetAtom(agentSidePanelOpenAtom)
+  const setAgentSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
+  const setAppMode = useSetAtom(appModeAtom)
 
   const extensions = React.useMemo(() => [
     StarterKit.configure({
@@ -109,6 +152,209 @@ export function ScratchPadView(): React.ReactElement {
     const agentTab = tabs.find((t) => t.sessionId === activeSessionId && t.type === 'agent')
     return agentTab?.title ?? null
   }, [tabs, activeSessionId])
+
+  const clearSelection = React.useCallback((): void => {
+    setSelection(null)
+  }, [])
+
+  const captureSelection = React.useCallback((): void => {
+    const editorRoot = editor?.view.dom
+    if (!editorRoot) return
+
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      clearSelection()
+      return
+    }
+
+    const range = sel.getRangeAt(0)
+    const startEl = getElementFromNode(range.startContainer)
+    const endEl = getElementFromNode(range.endContainer)
+    if (!startEl || !endEl || !editorRoot.contains(startEl) || !editorRoot.contains(endEl)) {
+      clearSelection()
+      return
+    }
+
+    const rawText = normalizeSelectionText(sel.toString())
+    if (!rawText) {
+      clearSelection()
+      return
+    }
+
+    const truncated = rawText.length > MAX_SCRATCH_PAD_QUOTED_CHARS
+    const text = truncated ? rawText.slice(0, MAX_SCRATCH_PAD_QUOTED_CHARS) : rawText
+    const rect = range.getBoundingClientRect()
+    const firstRect = range.getClientRects()[0]
+    const anchorRect = rect.width > 0 || rect.height > 0 ? rect : firstRect
+    if (!anchorRect) return
+
+    setSelection({
+      text,
+      x: anchorRect.left + anchorRect.width / 2,
+      y: Math.max(12, anchorRect.top - 12),
+    })
+
+    if (truncated) {
+      toast.warning(`已选中超过 ${MAX_SCRATCH_PAD_QUOTED_CHARS} 字符，仅引用前 ${MAX_SCRATCH_PAD_QUOTED_CHARS} 字符`, {
+        id: 'scratch-pad-selection-cap',
+        duration: 3000,
+      })
+    }
+  }, [clearSelection, editor])
+
+  const scheduleCaptureSelection = React.useCallback((): void => {
+    if (captureTimerRef.current != null) {
+      window.clearTimeout(captureTimerRef.current)
+    }
+    captureTimerRef.current = window.setTimeout(() => {
+      captureTimerRef.current = null
+      captureSelection()
+    }, 80)
+  }, [captureSelection])
+
+  React.useEffect(() => {
+    const editorRoot = editor?.view.dom
+    if (!editorRoot) return
+
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (target instanceof Element && target.closest(SELECTION_ACTION_POPOVER_SELECTOR)) return
+      if (target instanceof Element && editorRoot.contains(target)) {
+        pointerSelectingRef.current = true
+        clearSelection()
+        return
+      }
+      clearSelection()
+    }
+    const onPointerUp = (): void => {
+      if (!pointerSelectingRef.current) return
+      pointerSelectingRef.current = false
+      scheduleCaptureSelection()
+    }
+    const onPointerCancel = (): void => {
+      pointerSelectingRef.current = false
+    }
+    const onSelectionChange = (): void => {
+      if (pointerSelectingRef.current) return
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) {
+        clearSelection()
+        return
+      }
+      scheduleCaptureSelection()
+    }
+
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('pointerup', onPointerUp, true)
+    document.addEventListener('pointercancel', onPointerCancel, true)
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => {
+      if (captureTimerRef.current != null) {
+        window.clearTimeout(captureTimerRef.current)
+        captureTimerRef.current = null
+      }
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('pointerup', onPointerUp, true)
+      document.removeEventListener('pointercancel', onPointerCancel, true)
+      document.removeEventListener('selectionchange', onSelectionChange)
+    }
+  }, [clearSelection, editor, scheduleCaptureSelection])
+
+  const getTargetAgentSessionId = React.useCallback((): string | null => {
+    if (activeSessionId) return activeSessionId
+    toast.warning('请先打开一个 Agent 会话，再引用草稿选区')
+    return null
+  }, [activeSessionId])
+
+  const handleAddToAgent = React.useCallback((): void => {
+    if (!selection) return
+    const sessionId = getTargetAgentSessionId()
+    if (!sessionId) return
+
+    setQuotedSelectionMap((prev) => {
+      const next = new Map(prev)
+      next.set(sessionId, {
+        text: selection.text,
+        filePath: '草稿页',
+        sourceType: 'scratch-pad',
+        sourceLabel: '草稿页',
+        capturedAt: Date.now(),
+      })
+      return next
+    })
+    window.getSelection()?.removeAllRanges()
+    clearSelection()
+    toast.success('已添加到 Agent 引用')
+  }, [clearSelection, getTargetAgentSessionId, selection, setQuotedSelectionMap])
+
+  const handleOpenSideChat = React.useCallback(async (): Promise<void> => {
+    if (!selection) return
+    if (openSideChatPendingRef.current) return
+    const sessionId = getTargetAgentSessionId()
+    if (!sessionId) return
+
+    openSideChatPendingRef.current = true
+    try {
+      const conversation = await window.electronAPI.createConversation(
+        '草稿选区问答',
+        selectedChatModel?.modelId,
+        selectedChatModel?.channelId,
+      )
+      setConversations((prev) => {
+        if (prev.some((item) => item.id === conversation.id)) return prev
+        return [conversation, ...prev]
+      })
+      setConversationDrafts((prev) => {
+        const next = new Map(prev)
+        next.set(conversation.id, '我的问题：')
+        return next
+      })
+      setQuotedSelectionMap((prev) => {
+        const next = new Map(prev)
+        next.set(conversation.id, {
+          text: selection.text,
+          filePath: '草稿页',
+          sourceType: 'scratch-pad',
+          sourceLabel: '草稿页',
+          capturedAt: Date.now(),
+        })
+        return next
+      })
+      setCurrentAgentSessionId(sessionId)
+      setAppMode('agent')
+      setAgentSideChatMap((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, conversation.id)
+        return next
+      })
+      setAgentSidePanelOpen(true)
+      setAgentSidePanelTabMap((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, 'chat')
+        return next
+      })
+      window.getSelection()?.removeAllRanges()
+      clearSelection()
+    } catch (error) {
+      console.error('[ScratchPad] 打开草稿选区右侧问答失败:', error)
+      toast.error('打开右侧问答失败')
+    } finally {
+      openSideChatPendingRef.current = false
+    }
+  }, [
+    clearSelection,
+    getTargetAgentSessionId,
+    selectedChatModel,
+    selection,
+    setAgentSideChatMap,
+    setAgentSidePanelOpen,
+    setAgentSidePanelTabMap,
+    setAppMode,
+    setConversationDrafts,
+    setConversations,
+    setCurrentAgentSessionId,
+    setQuotedSelectionMap,
+  ])
 
   const makeFilename = () => {
     const now = new Date()
@@ -279,6 +525,14 @@ export function ScratchPadView(): React.ReactElement {
           )}
         </div>
       </div>
+      {selection && (
+        <SelectionActionPopover
+          x={selection.x}
+          y={selection.y}
+          onAddToAgent={handleAddToAgent}
+          onOpenChat={handleOpenSideChat}
+        />
+      )}
       {/* 底部居中悬浮：圆形语音输入按钮 */}
       <div className="absolute left-1/2 -translate-x-1/2 bottom-10 z-20">
         <SpeechButton className="size-11 rounded-full bg-background/95 border border-border/60 shadow-md backdrop-blur hover:bg-accent text-foreground/80" />

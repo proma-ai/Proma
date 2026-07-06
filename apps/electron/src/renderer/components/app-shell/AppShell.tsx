@@ -15,6 +15,8 @@ import { AppShellProvider, type AppShellContextType } from '@/contexts/AppShellC
 import { conversationsAtom, syncProgressAtom, isSyncingAtom, lastSyncResultAtom } from '@/atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { agentSidePanelWidthAtom, currentAgentSessionIdAtom, currentSessionSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
+import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { interfaceVariantAtom } from '@/atoms/theme'
@@ -24,10 +26,17 @@ import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
 
 const MIN_RIGHT_PANEL_WIDTH = 300
-const MAX_RIGHT_PANEL_WIDTH = 420
+const MAX_RIGHT_PANEL_WIDTH = 560
 
 function clampRightPanelWidth(width: number): number {
   return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width))
+}
+
+const MIN_LEFT_SIDEBAR_WIDTH = 300
+const MAX_LEFT_SIDEBAR_WIDTH = 420
+
+function clampLeftSidebarWidth(width: number): number {
+  return Math.max(MIN_LEFT_SIDEBAR_WIDTH, Math.min(MAX_LEFT_SIDEBAR_WIDTH, width))
 }
 
 export interface AppShellProps {
@@ -89,6 +98,61 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const showRightPanel = appMode === 'agent' && !!currentSessionId && !automationForm.open && activeView !== 'automations' && activeView !== 'agent-skills'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
+  // 左侧边栏可拖拽宽度
+  const [leftSidebarWidth, setLeftSidebarWidth] = useAtom(leftSidebarWidthAtom)
+  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom)
+  const leftDragging = React.useRef(false)
+  const [isDraggingLeftSidebar, setIsDraggingLeftSidebar] = React.useState(false)
+  const clampedLeftSidebarWidth = clampLeftSidebarWidth(leftSidebarWidth)
+
+  React.useEffect(() => {
+    if (clampedLeftSidebarWidth !== leftSidebarWidth) {
+      setLeftSidebarWidth(clampedLeftSidebarWidth)
+    }
+  }, [clampedLeftSidebarWidth, leftSidebarWidth, setLeftSidebarWidth])
+
+  const handleLeftSidebarMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    leftDragging.current = true
+    setIsDraggingLeftSidebar(true)
+    const startX = e.clientX
+    const startWidth = clampedLeftSidebarWidth
+    // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
+    let latestClientX = startX
+    let rafId = 0
+
+    const applyWidth = () => {
+      const delta = latestClientX - startX
+      setLeftSidebarWidth(clampLeftSidebarWidth(startWidth + delta))
+    }
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!leftDragging.current) return
+      latestClientX = ev.clientX
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        applyWidth()
+      })
+    }
+
+    const onMouseUp = () => {
+      leftDragging.current = false
+      setIsDraggingLeftSidebar(false)
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧
+      applyWidth()
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [clampedLeftSidebarWidth, setLeftSidebarWidth])
+
   // 右侧面板可拖拽宽度
   const [rightPanelWidth, setRightPanelWidth] = useAtom(agentSidePanelWidthAtom)
   const dragging = React.useRef(false)
@@ -105,22 +169,33 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
     dragging.current = true
     const startX = e.clientX
     const startWidth = clampedRightPanelWidth
+    // 记录最新光标位置，rAF 回调读取它而非调度时捕获的旧事件，避免快拖时坐标滞后
+    let latestClientX = startX
     let rafId = 0
+
+    const applyWidth = () => {
+      const delta = startX - latestClientX
+      setRightPanelWidth(clampRightPanelWidth(startWidth + delta))
+    }
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!dragging.current) return
+      latestClientX = ev.clientX
       if (rafId) return
       rafId = requestAnimationFrame(() => {
         rafId = 0
-        const delta = startX - ev.clientX
-        const newWidth = clampRightPanelWidth(startWidth + delta)
-        setRightPanelWidth(newWidth)
+        applyWidth()
       })
     }
 
     const onMouseUp = () => {
       dragging.current = false
-      if (rafId) cancelAnimationFrame(rafId)
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      // 补一次最终 flush，保证落点停在光标实际位置而非上一帧
+      applyWidth()
       document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)
     }
@@ -146,10 +221,21 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       <WindowControls />
 
       <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
-        {/* 左侧边栏：可折叠 */}
+        {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
         {/* titlebar-drag-region：wrapper 的 p-2 间隙也须可拖拽，否则 z-[60] 会把全局 z-50 drag 层挡住 */}
         <div className={cn(isClassic ? 'p-2 pr-0' : '', 'relative z-[60] titlebar-drag-region crt-sidebar')}>
-          <LeftSidebar />
+          <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
+          {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
+          {/* titlebar-no-drag：手柄是 titlebar-drag-region wrapper 的子元素，
+              必须显式 opt-out，否则 OS 会把手柄上的鼠标事件当窗口拖动吞掉，宽度拖拽失效 */}
+          {!sidebarCollapsed && (
+            <div
+              className={cn(
+                'titlebar-no-drag absolute right-0 top-0 bottom-0 w-4 translate-x-1/2 cursor-col-resize hover:bg-primary/5 active:bg-primary/50 transition-colors z-20'
+              )}
+              onMouseDown={handleLeftSidebarMouseDown}
+            />
+          )}
         </div>
         {!isClassic && (
           <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />

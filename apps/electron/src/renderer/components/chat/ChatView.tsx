@@ -14,7 +14,7 @@
  */
 
 import * as React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AlertCircle, X } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
 import { ChatMessages } from './ChatMessages'
@@ -33,6 +33,7 @@ import {
   INITIAL_MESSAGE_LIMIT,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment, ChatPendingMessage } from '@/atoms/chat-atoms'
+import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import { promptConfigAtom, promptSidebarOpenAtom, conversationPromptIdAtom, resolveSystemMessage, selectedPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { activeToolIdsAtom } from '@/atoms/chat-tool-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
@@ -46,6 +47,7 @@ import {
 import { registerPendingTitle } from '@/hooks/useGlobalChatListeners'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { cn } from '@/lib/utils'
+import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import type {
   ChatMessage,
   ChatSendInput,
@@ -83,6 +85,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
   const [hasMoreMessages, setHasMoreMessages] = React.useState(false)
   const [messagesLoaded, setMessagesLoaded] = React.useState(false)
   const [inlineEditingMessageId, setInlineEditingMessageId] = React.useState<string | null>(null)
+  const store = useStore()
 
   // ===== Per-conversation hooks（分屏独立） =====
   const [selectedModel, setSelectedModel] = useConversationModel()
@@ -290,6 +293,22 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       setPendingAttachments([])
     }
 
+    const quotedSelection = store.get(quotedSelectionMapAtom).get(conversationId)
+    const finalContent = quotedSelection
+      ? buildQuotedSelectionBlock(quotedSelection) + content
+      : content
+
+    if (quotedSelection) {
+      const capturedAt = quotedSelection.capturedAt
+      store.set(quotedSelectionMapAtom, (prev) => {
+        const current = prev.get(conversationId)
+        if (!current || current.capturedAt !== capturedAt) return prev
+        const next = new Map(prev)
+        next.delete(conversationId)
+        return next
+      })
+    }
+
     // 初始化当前对话的流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
@@ -319,7 +338,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
 
     const input: ChatSendInput = {
       conversationId,
-      userMessage: content,
+      userMessage: finalContent,
       messageHistory: [], // 后端已改为从磁盘读取完整历史，无需前端传入
       channelId: selectedModel.channelId,
       modelId: selectedModel.modelId,
@@ -337,7 +356,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
       {
         id: `temp-${Date.now()}`,
         role: 'user',
-        content,
+        content: finalContent,
         createdAt: Date.now(),
         attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
       },
@@ -373,6 +392,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
     setChatStreamErrors,
     setStreamingStates,
     setConversations,
+    store,
   ])
 
   // ===== 自动发送快速任务消息 =====

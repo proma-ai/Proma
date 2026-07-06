@@ -102,6 +102,7 @@ export function toTranscript(groups: MessageGroup[]): TranscriptTurn[] {
       const text = stripScheduledRunMarker(extractUserText(group.message) ?? '')
         .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/g, '')
         .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+        .replace(/<quoted_context[^>]*>[\s\S]*?<\/quoted_context>\n*/g, '')
         .trim()
       return {
         index,

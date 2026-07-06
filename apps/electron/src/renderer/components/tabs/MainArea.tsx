@@ -139,7 +139,7 @@ export function MainArea(): React.ReactElement {
   // 左侧容器宽度：预览打开时固定占 splitRatio；其他情况（含 closing 动画期间）
   // 直接 1 1 auto 占满——closing 时右侧 absolute 脱离 flex 流，所以左侧自然占 100%。
   const leftFlexStyle: React.CSSProperties = (previewOpen && previewSessionId && activeView === 'conversations')
-    ? { flex: `0 0 calc(${splitRatio * 100}% - 4px)` }
+    ? { flex: `0 0 calc(${splitRatio * 100}% - 6px)` }
     : { flex: '1 1 auto' }
 
   return (
@@ -154,7 +154,7 @@ export function MainArea(): React.ReactElement {
               视觉上像"内容从右向左推送"。让左侧瞬间变宽，由右侧 absolute 滑出动画
               覆盖期内呈现"被剥离"的视觉效果。 */}
           <div
-            className="flex flex-col min-w-0 h-full relative"
+            className="flex flex-col min-w-0 h-full relative mr-0.5"
             style={leftFlexStyle}
           >
             {activeView === 'automations' ? (

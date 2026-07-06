@@ -158,6 +158,7 @@ function normalizePreviewText(text: string): string {
   return text
     .replace(/<attached_files>[\s\S]*?<\/attached_files>\n*/g, '')
     .replace(/<quoted_file[^>]*>[\s\S]*?<\/quoted_file>\n*/g, '')
+    .replace(/<quoted_context[^>]*>[\s\S]*?<\/quoted_context>\n*/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

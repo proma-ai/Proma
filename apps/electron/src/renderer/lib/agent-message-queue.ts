@@ -1,21 +1,27 @@
+import type { QuotedSelection } from '@/atoms/preview-atoms'
+
 export type QueueDropPlacement = 'before' | 'after'
 
 export interface AgentQueuedMessage {
   id: string
   text: string
   createdAt: number
+  quotedSelection?: QuotedSelection
 }
 
 export function createAgentQueuedMessage(
   text: string,
   id: string,
   createdAt: number,
+  quotedSelection?: QuotedSelection | null,
 ): AgentQueuedMessage {
-  return {
+  const message: AgentQueuedMessage = {
     id,
     text: text.trim(),
     createdAt,
   }
+  if (quotedSelection) message.quotedSelection = quotedSelection
+  return message
 }
 
 export function removeQueuedMessage(
@@ -63,6 +69,12 @@ export interface ParsedQueuedMessageMentions {
   mentionedSessionIds: string[]
 }
 
+export interface QueuedMessageSendPayload {
+  rawText: string
+  sdkText: string
+  mentions: ParsedQueuedMessageMentions
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -104,5 +116,22 @@ export function parseQueuedMessageMentions(text: string): ParsedQueuedMessageMen
     mentionedSkills,
     mentionedMcpServers,
     mentionedSessionIds,
+  }
+}
+
+export function buildQueuedMessageSendPayload(
+  message: AgentQueuedMessage,
+  quotedSelectionBlock = '',
+): QueuedMessageSendPayload {
+  const text = message.text.trim()
+  const mentions = parseQueuedMessageMentions(text)
+  const prefix = quotedSelectionBlock.trim().length > 0
+    ? `${quotedSelectionBlock.trimEnd()}\n\n`
+    : ''
+
+  return {
+    rawText: `${prefix}${text}`.trim(),
+    sdkText: `${prefix}${mentions.cleanedText}`.trim(),
+    mentions,
   }
 }

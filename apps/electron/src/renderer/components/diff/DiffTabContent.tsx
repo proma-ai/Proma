@@ -12,9 +12,20 @@ import DOMPurify from 'dompurify'
 import { File as PierreFile } from '@pierre/diffs/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { agentDiffViewModeAtom, agentDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
+import {
+  agentDiffPanelTabAtom,
+  agentDiffViewModeAtom,
+  agentDiffRefreshVersionAtom,
+  agentSidePanelOpenAtom,
+} from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
+import {
+  agentSideChatMapAtom,
+  conversationsAtom,
+  conversationDraftsAtom,
+  selectedModelAtom,
+} from '@/atoms/chat-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
 import { useShortcut } from '@/hooks/useShortcut'
 import { initShortcutRegistry } from '@/lib/shortcut-registry'
@@ -24,6 +35,8 @@ import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
+import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
+import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
@@ -53,6 +66,19 @@ type CacheEntry = {
   officeHtml?: string
   officeText?: string
 }
+
+interface DeepSelection {
+  text: string
+  rect: DOMRect | null
+}
+
+interface PreviewTextSelection {
+  text: string
+  x: number
+  y: number
+  filePath: string
+}
+
 const CACHE_MAX = 50
 const contentCache = new Map<string, CacheEntry>()
 
@@ -127,13 +153,21 @@ function isSelectionInside(container: HTMLElement, selection: Selection): boolea
   return false
 }
 
+function getSelectionAnchorRect(selection: Selection): DOMRect | null {
+  if (selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  if (rect.width > 0 || rect.height > 0) return rect
+  return range.getClientRects()[0] ?? null
+}
+
 /** 获取容器内的选区：先查光 DOM，再遍历缓存的 ShadowRoot 集合 */
-function getDeepSelection(container: HTMLElement, shadowRoots?: Set<ShadowRoot> | null): { text: string } | null {
+function getDeepSelection(container: HTMLElement, shadowRoots?: Set<ShadowRoot> | null): DeepSelection | null {
   const docSel = document.getSelection()
   if (docSel && !docSel.isCollapsed && docSel.rangeCount > 0) {
     if (isSelectionInside(container, docSel)) {
       const text = docSel.toString().trim()
-      if (text) return { text }
+      if (text) return { text, rect: getSelectionAnchorRect(docSel) }
     }
   }
 
@@ -145,19 +179,19 @@ function getDeepSelection(container: HTMLElement, shadowRoots?: Set<ShadowRoot> 
       const shadowSel = (sr as { getSelection?: () => Selection | null }).getSelection?.()
       if (shadowSel && !shadowSel.isCollapsed && shadowSel.rangeCount > 0) {
         const text = shadowSel.toString().trim()
-        if (text) return { text }
+        if (text) return { text, rect: getSelectionAnchorRect(shadowSel) }
       }
     }
     return null
   }
 
   // 兜底：无缓存时递归遍历（组件初始化瞬间可能命中一次）
-  function walk(node: Node): { text: string } | null {
+  function walk(node: Node): DeepSelection | null {
     if (node instanceof HTMLElement && node.shadowRoot) {
       const shadowSel = (node.shadowRoot as { getSelection?: () => Selection | null }).getSelection?.()
       if (shadowSel && !shadowSel.isCollapsed && shadowSel.rangeCount > 0) {
         const text = shadowSel.toString().trim()
-        if (text) return { text }
+        if (text) return { text, rect: getSelectionAnchorRect(shadowSel) }
       }
       const result = walk(node.shadowRoot)
       if (result) return result
@@ -277,9 +311,19 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   // ===== 选中文本引用（Quoted Selection）=====
 
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
+  const selectedChatModel = useAtomValue(selectedModelAtom)
+  const setConversations = useSetAtom(conversationsAtom)
+  const setConversationDrafts = useSetAtom(conversationDraftsAtom)
+  const setSideChatMap = useSetAtom(agentSideChatMapAtom)
+  const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtom)
+  const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const [previewSelection, setPreviewSelection] = React.useState<PreviewTextSelection | null>(null)
   const filePathRef = React.useRef(filePath)
   filePathRef.current = filePath
   const shadowRootsRef = React.useRef<Set<ShadowRoot>>(new Set())
+  const pointerSelectingRef = React.useRef(false)
+  const captureTimerRef = React.useRef<number | null>(null)
+  const openSelectionChatPendingRef = React.useRef(false)
   /** 当前正在展示的截断 toast id；选中回落到上限内或选区消失时主动 dismiss */
   const lastToastIdRef = React.useRef<string | null>(null)
 
@@ -290,46 +334,36 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
   }, [])
 
-  /** 捕获预览面板中的文本选中，写入 quotedSelectionMapAtom */
+  const clearPreviewSelection = React.useCallback(() => {
+    setPreviewSelection(null)
+  }, [])
+
+  /** 捕获预览面板中的文本选中，显示动作弹层 */
   const handleSelectionCapture = React.useCallback(() => {
     if (!previewOnly) return
+    if (markdownEditing) return
     const container = scrollContainerRef.current
     if (!container) return
 
     const deepSel = getDeepSelection(container, shadowRootsRef.current)
     if (!deepSel) {
-      // 选区消失：先撤掉截断 toast，再判断是否清 Chip
-      dismissTruncationToast()
-      // 若焦点在 ProseMirror 编辑器（输入框），保留 Chip；否则清除
-      const activeEl = document.activeElement
-      if (activeEl && (activeEl.closest?.('.ProseMirror') || activeEl.closest?.('[data-input-mode]'))) return
-      setQuotedSelectionMap((prev) => {
-        const m = new Map(prev)
-        if (!m.has(sessionId)) return prev
-        m.delete(sessionId)
-        return m
-      })
+      clearPreviewSelection()
       return
     }
 
-    // 实时更新只存文本 + 路径，不计算行号
     const truncated = deepSel.text.length > MAX_QUOTED_CHARS
     const newText = truncated ? deepSel.text.slice(0, MAX_QUOTED_CHARS) : deepSel.text
     const newFilePath = filePathRef.current
-    setQuotedSelectionMap((prev) => {
-      const existing = prev.get(sessionId)
-      // 选区文本与路径都未变 → 跳过 atom 写入，避免触发 AgentView 整树重渲染
-      if (existing && existing.text === newText && existing.filePath === newFilePath) {
-        return prev
-      }
-      const m = new Map(prev)
-      m.set(sessionId, {
-        text: newText,
-        filePath: newFilePath,
-        capturedAt: Date.now(),
-      })
-      return m
+    const anchorRect = deepSel.rect
+    if (!anchorRect) return
+
+    setPreviewSelection({
+      text: newText,
+      x: anchorRect.left + anchorRect.width / 2,
+      y: Math.max(12, anchorRect.top - 12),
+      filePath: newFilePath,
     })
+
     // 超过上限时按千位分档 toast；跨档时撤掉上一档，回到上限内则全部撤掉
     if (truncated) {
       const k = Math.floor(deepSel.text.length / 1000) * 1000
@@ -345,7 +379,17 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     } else {
       dismissTruncationToast()
     }
-  }, [previewOnly, sessionId, setQuotedSelectionMap, dismissTruncationToast])
+  }, [clearPreviewSelection, dismissTruncationToast, markdownEditing, previewOnly, sessionId])
+
+  const scheduleSelectionCapture = React.useCallback((): void => {
+    if (captureTimerRef.current != null) {
+      window.clearTimeout(captureTimerRef.current)
+    }
+    captureTimerRef.current = window.setTimeout(() => {
+      captureTimerRef.current = null
+      handleSelectionCapture()
+    }, 80)
+  }, [handleSelectionCapture])
 
   // 监听选区变化：document selectionchange + 容器内鼠标拖拽轮询
   React.useEffect(() => {
@@ -377,58 +421,48 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     })
     mo.observe(container, { childList: true, subtree: true })
 
-    let tracking = false
-    let rafId = 0
-
-    const scheduleCapture = () => {
-      // 快速路径：非拖拽时若 document 选区已折叠（输入框打字/点击），跳过昂贵的树遍历。
-      // @pierre/diffs 使用 open Shadow DOM，Chrome/Electron 会将 shadow 内选区反映到
-      // document.getSelection()，因此键盘选区（Shift+Arrow）也能通过此检查。
-      if (!tracking) {
-        const docSel = document.getSelection()
-        if (!docSel || docSel.isCollapsed) return
-        // 光 DOM 快速检查：选区不在预览容器内也跳过
-        if (!isSelectionInside(container, docSel)) return
-      }
-      if (rafId) return
-      rafId = requestAnimationFrame(() => {
-        rafId = 0
-        handleSelectionCapture()
-      })
-    }
-
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) tracking = true
-    }
-    const onMouseMove = () => {
-      if (tracking) scheduleCapture()
+      const target = e.target
+      if (target instanceof Element && target.closest(SELECTION_ACTION_POPOVER_SELECTOR)) return
+      if (e.button === 0) {
+        pointerSelectingRef.current = true
+        clearPreviewSelection()
+      }
     }
     const onMouseUp = () => {
-      if (tracking) {
-        tracking = false
-        scheduleCapture()
-      }
+      if (!pointerSelectingRef.current) return
+      pointerSelectingRef.current = false
+      scheduleSelectionCapture()
     }
     const onSelectionChange = () => {
-      scheduleCapture()
+      if (pointerSelectingRef.current) return
+      const docSel = document.getSelection()
+      if (!docSel || docSel.isCollapsed) {
+        clearPreviewSelection()
+        return
+      }
+      if (isSelectionInside(container, docSel)) {
+        scheduleSelectionCapture()
+      }
     }
 
     container.addEventListener('mousedown', onMouseDown)
-    document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
     document.addEventListener('selectionchange', onSelectionChange)
     return () => {
-      if (rafId) cancelAnimationFrame(rafId)
+      if (captureTimerRef.current != null) {
+        window.clearTimeout(captureTimerRef.current)
+        captureTimerRef.current = null
+      }
       mo.disconnect()
       shadowRoots.clear()
       container.removeEventListener('mousedown', onMouseDown)
-      document.removeEventListener('mousemove', onMouseMove)
       document.removeEventListener('mouseup', onMouseUp)
       document.removeEventListener('selectionchange', onSelectionChange)
       // unmount / 切预览 / 切 session 时撤掉残留的截断 toast，避免贴脸 3 秒
       dismissTruncationToast()
     }
-  }, [previewOnly, handleSelectionCapture, dismissTruncationToast])
+  }, [previewOnly, clearPreviewSelection, dismissTruncationToast, scheduleSelectionCapture])
 
   const fileAccess = React.useMemo(() => ({
     sessionId,
@@ -919,6 +953,86 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     })
   }, [sessionId, setRefreshVersionMap])
 
+  const handleAddSelectionToAgent = React.useCallback(() => {
+    if (!previewSelection) return
+    setQuotedSelectionMap((prev) => {
+      const next = new Map(prev)
+      next.set(sessionId, {
+        text: previewSelection.text,
+        filePath: previewSelection.filePath,
+        sourceType: 'file',
+        sourceLabel: previewSelection.filePath,
+        capturedAt: Date.now(),
+      })
+      return next
+    })
+    window.getSelection()?.removeAllRanges()
+    clearPreviewSelection()
+    toast.success('已添加到 Agent 引用')
+  }, [clearPreviewSelection, previewSelection, sessionId, setQuotedSelectionMap])
+
+  const handleOpenSelectionChat = React.useCallback(async (): Promise<void> => {
+    if (!previewSelection) return
+    if (openSelectionChatPendingRef.current) return
+    openSelectionChatPendingRef.current = true
+    try {
+      const conversation = await window.electronAPI.createConversation(
+        '预览选区问答',
+        selectedChatModel?.modelId,
+        selectedChatModel?.channelId,
+      )
+      setConversations((prev) => {
+        if (prev.some((item) => item.id === conversation.id)) return prev
+        return [conversation, ...prev]
+      })
+      setConversationDrafts((prev) => {
+        const next = new Map(prev)
+        next.set(conversation.id, '我的问题：')
+        return next
+      })
+      setQuotedSelectionMap((prev) => {
+        const next = new Map(prev)
+        next.set(conversation.id, {
+          text: previewSelection.text,
+          filePath: previewSelection.filePath,
+          sourceType: 'file',
+          sourceLabel: previewSelection.filePath,
+          capturedAt: Date.now(),
+        })
+        return next
+      })
+      setSideChatMap((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, conversation.id)
+        return next
+      })
+      setSidePanelOpen(true)
+      setSidePanelTabMap((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, 'chat')
+        return next
+      })
+      window.getSelection()?.removeAllRanges()
+      clearPreviewSelection()
+    } catch (error) {
+      console.error('[DiffTabContent] 打开预览选区聊天标签失败:', error)
+      toast.error('打开聊天标签失败')
+    } finally {
+      openSelectionChatPendingRef.current = false
+    }
+  }, [
+    clearPreviewSelection,
+    previewSelection,
+    selectedChatModel,
+    sessionId,
+    setConversationDrafts,
+    setConversations,
+    setQuotedSelectionMap,
+    setSideChatMap,
+    setSidePanelOpen,
+    setSidePanelTabMap,
+  ])
+
   // persistRef 始终持有最新 persistMarkdownDraft，供 setTimeout / unmount cleanup 调用。
   // 用 effect 而非渲染期赋值，避免 React 19 严格模式下并发渲染中途读到中间态。
   React.useEffect(() => {
@@ -1291,6 +1405,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             <DiffView oldContent={oldContent} newContent={newContent} filePath={filePath} viewMode={viewMode} />
           )}
         </div>
+        {previewSelection && (
+          <SelectionActionPopover
+            x={previewSelection.x}
+            y={previewSelection.y}
+            onAddToAgent={handleAddSelectionToAgent}
+            onOpenChat={handleOpenSelectionChat}
+          />
+        )}
       </div>
     </div>
   )

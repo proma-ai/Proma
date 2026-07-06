@@ -2388,9 +2388,11 @@ export function registerIpcHandlers(): void {
         try {
           const response = await fetch('https://api.tavily.com/search', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${credentials.apiKey}`,
+            },
             body: JSON.stringify({
-              api_key: credentials.apiKey,
               query: 'test connection',
               search_depth: 'basic',
               max_results: 1,
@@ -3613,7 +3615,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 获取活跃绑定列表
+  // 获取绑定列表（包含已归档，前端按视图过滤）
   ipcMain.handle(
     FEISHU_IPC_CHANNELS.LIST_BINDINGS,
     async (): Promise<FeishuChatBinding[]> => {
