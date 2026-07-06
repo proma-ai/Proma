@@ -3815,9 +3815,15 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               ? <Clock size={13} className="flex-shrink-0 text-foreground/40" />
               : <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
             }
-            <span className="flex-1 min-w-0 truncate text-[13px] font-medium leading-[18px]">
-              {group.workspace.name}
+            <span className="flex min-w-0 items-center">
+              <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">
+                {group.workspace.name}
+              </span>
+              {isCurrent && (
+                <span className="workspace-selected-triangle flex-shrink-0" aria-hidden="true" />
+              )}
             </span>
+            <span className="min-w-[4px] flex-1" aria-hidden="true" />
             <ChevronRight
               size={12}
               className={cn(

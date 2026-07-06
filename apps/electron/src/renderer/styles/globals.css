@@ -553,6 +553,16 @@
   background-color: hsl(var(--sidebar-control-surface-hover));
 }
 
+/* 当前工作区选中指示：纯三角，颜色跟随工作区文字色 */
+.workspace-selected-triangle {
+  width: 0;
+  height: 0;
+  margin-left: 5px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 7px solid currentColor;
+}
+
 /* Windows 自定义窗口控制按钮
  *
  * 可点击性关键点（解决 Windows 用户点击失效 / 需要双击的 bug）：
