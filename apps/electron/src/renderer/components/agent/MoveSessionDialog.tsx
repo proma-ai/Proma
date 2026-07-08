@@ -28,7 +28,7 @@ interface MoveSessionDialogProps {
   sessionId: string
   sourceWorkspaceId: string | undefined
   workspaces: AgentWorkspace[]
-  onMoved: (updatedSession: AgentSessionMeta, targetWorkspaceName: string) => void
+  onMoved: (updatedSession: AgentSessionMeta, targetWorkspaceName: string) => void | Promise<void>
 }
 
 export function MoveSessionDialog({
@@ -66,7 +66,7 @@ export function MoveSessionDialog({
         sessionId,
         targetWorkspaceId: selectedWorkspaceId,
       })
-      onMoved(updated, targetWs?.name ?? '未知工作区')
+      await onMoved(updated, targetWs?.name ?? '未知工作区')
       onOpenChange(false)
     } catch (error) {
       console.error('[迁移会话] 迁移失败:', error)

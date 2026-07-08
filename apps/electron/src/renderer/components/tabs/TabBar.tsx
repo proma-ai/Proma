@@ -30,6 +30,7 @@ import {
 import { appModeAtom } from '@/atoms/app-mode'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { tearOffPreviewToSplit } from '@/components/diff/preview-opener'
+import { tearOffScratchToSplit } from '@/components/scratch-pad/scratch-pad-opener'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TabBarItem } from './TabBarItem'
@@ -59,12 +60,19 @@ export function TabBar(): React.ReactElement {
   const store = useStore()
 
   /**
-   * Tear-off：把 preview Tab 拖出 TabBar 时，转成右侧分屏预览。
-   * 公共实现在 preview-opener.ts，PreviewTabContent 顶栏切换按钮共用同一份逻辑。
+   * Tear-off：把 preview/scratch Tab 拖出 TabBar 时，转成 Agent 右侧分屏。
+   * preview 公共实现在 preview-opener.ts，PreviewTabContent 顶栏切换按钮共用同一份逻辑。
    */
   const handleTearOff = React.useCallback((tabId: string) => {
-    tearOffPreviewToSplit(store, tabId)
-  }, [store])
+    const tab = tabs.find((item) => item.id === tabId)
+    if (tab?.type === 'preview') {
+      tearOffPreviewToSplit(store, tabId)
+      return
+    }
+    if (tab?.type === 'scratch') {
+      tearOffScratchToSplit(store)
+    }
+  }, [store, tabs])
 
   const workspaceNameBySessionId = React.useMemo(() => {
     const workspaceNameMap = new Map(agentWorkspaces.map((workspace) => [workspace.id, workspace.name]))
@@ -240,14 +248,14 @@ function TabBarInner({
   // 整条 TabBar 容器 ref，用于拖拽 tear-off 时检测鼠标是否离开 TabBar 区域
   const barRef = React.useRef<HTMLDivElement>(null)
 
-  // 拖出 TabBar 区域时给出视觉提示（仅 preview Tab 可 tear-off）
+  // 拖出 TabBar 区域时给出视觉提示（preview/scratch Tab 可 tear-off）
   const [tearingOff, setTearingOff] = React.useState<string | null>(null)
 
-  // 拦截外层 handleDragStart：若拖出 TabBar 区域且是 preview Tab，触发 tear-off
+  // 拦截外层 handleDragStart：若拖出 TabBar 区域且是 preview/scratch Tab，触发 tear-off
   const handleDragStartWithTearOff = React.useCallback((tabId: string, e: React.PointerEvent) => {
     const tab = tabs.find((t) => t.id === tabId)
-    // 仅 preview Tab 支持拖出转分屏
-    if (!tab || tab.type !== 'preview') {
+    // 仅 preview / scratch Tab 支持拖出转分屏
+    if (!tab || (tab.type !== 'preview' && tab.type !== 'scratch')) {
       onDragStart(tabId, e)
       return
     }

@@ -19,6 +19,7 @@ export type ProviderType =
   | 'kimi-coding'
   | 'zhipu'
   | 'zhipu-coding'
+  | 'ark-coding-plan'
   | 'minimax'
   | 'doubao'
   | 'qwen'
@@ -47,6 +48,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   'kimi-coding': 'https://api.kimi.com/coding/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
+  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
   minimax: 'https://api.minimaxi.com/anthropic',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -70,6 +72,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'kimi-coding': 'Kimi Coding Plan',
   zhipu: '智谱 AI',
   'zhipu-coding': '智谱 Coding Plan',
+  'ark-coding-plan': '火山方舟 Coding Plan',
   minimax: 'MiniMax (API&编程包)',
   doubao: '豆包',
   qwen: '通义千问',
@@ -92,6 +95,7 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'kimi-api',
   'kimi-coding',
   'zhipu-coding',
+  'ark-coding-plan',
   'minimax',
   'xiaomi',
   'xiaomi-token-plan',

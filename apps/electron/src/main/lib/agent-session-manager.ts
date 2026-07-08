@@ -507,11 +507,67 @@ export function deleteAgentSession(id: string): void {
 }
 
 /**
+ * 收集会话及其全部委派子会话。
+ */
+function collectSessionTreeIds(sessions: AgentSessionMeta[], sessionId: string): Set<string> {
+  const ids = new Set<string>([sessionId])
+  let changed = true
+
+  while (changed) {
+    changed = false
+    for (const session of sessions) {
+      if (ids.has(session.id)) continue
+      // 仅收集协作委派子会话。parent/root 负责维护树结构，sourceDelegationId 负责限定来源。
+      if (!session.sourceDelegationId) continue
+      if (session.parentSessionId && ids.has(session.parentSessionId)) {
+        ids.add(session.id)
+        changed = true
+        continue
+      }
+      if (session.rootSessionId === sessionId) {
+        ids.add(session.id)
+        changed = true
+      }
+    }
+  }
+
+  return ids
+}
+
+function moveSessionWorkspaceDir(session: AgentSessionMeta, targetWorkspaceSlug: string): void {
+  if (!session.workspaceId) return
+
+  const sourceWs = getAgentWorkspace(session.workspaceId)
+  if (!sourceWs || sourceWs.slug === targetWorkspaceSlug) return
+
+  const srcDir = join(getAgentWorkspacePath(sourceWs.slug), session.id)
+  if (!existsSync(srcDir)) return
+
+  const destDir = join(getAgentWorkspacePath(targetWorkspaceSlug), session.id)
+  // 清理已存在的目标目录，防止 renameSync 抛出 ENOTEMPTY/EEXIST。
+  if (existsSync(destDir)) {
+    try {
+      const contents = readdirSync(destDir)
+      rmSyncWithRetry(destDir, { recursive: true, force: true })
+      const reason = contents.length === 0 ? '空目标目录' : '非空目标目录（以源目录为准）'
+      console.log(`[Agent 会话] 已清理${reason}: ${destDir}`)
+    } catch (cleanupError) {
+      console.warn('[Agent 会话] 清理目标目录失败，跳过目录迁移:', cleanupError)
+      throw cleanupError
+    }
+  }
+
+  // renameWithRetry：优先 renameSync（原子），跨设备或句柄占用时自动降级 cpSync + rmSyncWithRetry。
+  renameWithRetry(srcDir, destDir)
+  console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
+}
+
+/**
  * 迁移 Agent 会话到另一个工作区
  *
  * 操作步骤：
  * 1. 验证会话和目标工作区存在
- * 2. 源 == 目标 → no-op
+ * 2. 收集目标会话及其委派子会话
  * 3. 移动会话工作目录到目标工作区
  * 4. 更新元数据（workspaceId + 清空 sdkSessionId）
  * 5. JSONL 消息文件保持原位（全局目录）
@@ -525,61 +581,43 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
 
   const session = index.sessions[idx]!
 
-  // 源 == 目标 → 直接返回
-  if (session.workspaceId === targetWorkspaceId) return session
-
   const targetWs = getAgentWorkspace(targetWorkspaceId)
   if (!targetWs) {
     throw new Error(`目标工作区不存在: ${targetWorkspaceId}`)
   }
 
-  // 移动工作目录（如果源工作区存在）
-  if (session.workspaceId) {
-    const sourceWs = getAgentWorkspace(session.workspaceId)
-    if (sourceWs) {
-      const srcDir = join(getAgentWorkspacePath(sourceWs.slug), sessionId)
-      if (existsSync(srcDir)) {
-        const destDir = join(getAgentWorkspacePath(targetWs.slug), sessionId)
-        // 清理已存在的空目标目录，防止 renameSync 抛出 ENOTEMPTY/EEXIST
-        if (existsSync(destDir)) {
-          try {
-            const contents = readdirSync(destDir)
-            if (contents.length === 0) {
-              rmSyncWithRetry(destDir, { recursive: true, force: true })
-              console.log(`[Agent 会话] 已清理空目标目录: ${destDir}`)
-            } else {
-              // 目标目录非空，合并：先移除目标，再移动源
-              rmSyncWithRetry(destDir, { recursive: true, force: true })
-              console.log(`[Agent 会话] 已清理非空目标目录（以源目录为准）: ${destDir}`)
-            }
-          } catch (cleanupError) {
-            console.warn(`[Agent 会话] 清理目标目录失败，跳过目录迁移:`, cleanupError)
-            // 清理失败时不可继续 cpSync，否则会与残留目录混合
-            throw cleanupError
-          }
-        }
-        // renameWithRetry：优先 renameSync（原子），跨设备或句柄占用时自动降级 cpSync + rmSyncWithRetry
-        renameWithRetry(srcDir, destDir)
-        console.log(`[Agent 会话] 已移动工作目录: ${srcDir} → ${destDir}`)
-      }
+  const sessionTreeIds = collectSessionTreeIds(index.sessions, sessionId)
+  const sessionsToMove = index.sessions.filter((item) => sessionTreeIds.has(item.id) && item.workspaceId !== targetWorkspaceId)
+  if (sessionsToMove.length === 0) return session
+
+  const now = Date.now()
+  let updatedRoot = session
+  let movedCount = 0
+
+  for (let i = 0; i < index.sessions.length; i++) {
+    const current = index.sessions[i]!
+    if (!sessionTreeIds.has(current.id) || current.workspaceId === targetWorkspaceId) continue
+
+    moveSessionWorkspaceDir(current, targetWs.slug)
+    // 确保目标工作区下有 session 目录。
+    getAgentSessionWorkspacePath(targetWs.slug, current.id)
+
+    const updated: AgentSessionMeta = {
+      ...current,
+      workspaceId: targetWorkspaceId,
+      sdkSessionId: undefined, // SDK 上下文与工作区 cwd 绑定，必须清空
+      updatedAt: now,
+    }
+    index.sessions[i] = updated
+    writeIndex(index)
+    movedCount++
+    if (current.id === sessionId) {
+      updatedRoot = updated
     }
   }
 
-  // 确保目标工作区下有 session 目录
-  getAgentSessionWorkspacePath(targetWs.slug, sessionId)
-
-  // 更新元数据
-  const updated: AgentSessionMeta = {
-    ...session,
-    workspaceId: targetWorkspaceId,
-    sdkSessionId: undefined, // SDK 上下文与工作区 cwd 绑定，必须清空
-    updatedAt: Date.now(),
-  }
-  index.sessions[idx] = updated
-  writeIndex(index)
-
-  console.log(`[Agent 会话] 已迁移会话到工作区: ${updated.title} → ${targetWs.name}`)
-  return updated
+  console.log(`[Agent 会话] 已迁移会话及子会话到工作区: ${updatedRoot.title}（${movedCount} 个）→ ${targetWs.name}`)
+  return updatedRoot
 }
 
 /**

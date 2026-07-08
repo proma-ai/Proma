@@ -8,7 +8,7 @@
 import { existsSync, statSync, unlinkSync } from 'node:fs'
 import { rmSyncWithRetry } from './fs-retry'
 import { promises as fsPromises } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, relative, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
 import { app } from 'electron'
 import {
@@ -40,6 +40,15 @@ export interface StorageCategory {
   hasOrphans: boolean
   orphanBytes: number
   orphanCount: number
+  orphanItems: StorageOrphanItem[]
+  orphanItemsTruncated: boolean
+}
+
+export interface StorageOrphanItem {
+  kind: 'file' | 'directory'
+  path: string
+  bytes: number
+  count: number
 }
 
 export interface StorageStats {
@@ -71,8 +80,43 @@ const SKIP_DIRS = new Set([
 
 // 单次扫描最大文件数上限，防止超大工作区导致无限递归
 const MAX_FILE_SCAN = 100_000
+const MAX_ORPHAN_ITEM_PREVIEW = 80
 
-async function getDirSize(dirPath: string): Promise<{ bytes: number; count: number }> {
+const WORKSPACE_METADATA_DIRS = new Set([
+  'workspace-files',
+  'skills',
+  'skills-inactive',
+  '.claude',
+  '.claude-plugin',
+])
+
+const PRESERVED_ORPHAN_SESSION_DIRS = new Set([
+  '.context',
+])
+
+function isWorkspaceMetadataDir(entryName: string): boolean {
+  return WORKSPACE_METADATA_DIRS.has(entryName)
+}
+
+function displayStoragePath(filePath: string): string {
+  const configDir = getConfigDir()
+  const rel = relative(configDir, filePath)
+  if (!rel.startsWith('..') && !isAbsolute(rel)) {
+    return `~/${basename(configDir)}/${rel.split(/[\\/]/).join('/')}`
+  }
+  return filePath
+}
+
+function addOrphanItem(items: StorageOrphanItem[], item: StorageOrphanItem): boolean {
+  if (items.length >= MAX_ORPHAN_ITEM_PREVIEW) return true
+  items.push(item)
+  return false
+}
+
+async function getDirSize(
+  dirPath: string,
+  options: { skipTopLevelDirs?: Set<string> } = {}
+): Promise<{ bytes: number; count: number }> {
   let bytes = 0
   let count = 0
   if (!existsSync(dirPath)) return { bytes, count }
@@ -80,7 +124,7 @@ async function getDirSize(dirPath: string): Promise<{ bytes: number; count: numb
   // limit 对象通过闭包在整个递归树内共享，作为全局文件计数上限
   const limit = { remaining: MAX_FILE_SCAN }
 
-  async function walk(dir: string): Promise<void> {
+  async function walk(dir: string, depth: number): Promise<void> {
     try {
       const entries = await fsPromises.readdir(dir, { withFileTypes: true })
       for (const entry of entries) {
@@ -88,8 +132,9 @@ async function getDirSize(dirPath: string): Promise<{ bytes: number; count: numb
         const fullPath = join(dir, entry.name)
         try {
           if (entry.isDirectory()) {
+            if (depth === 0 && options.skipTopLevelDirs?.has(entry.name)) continue
             if (SKIP_DIRS.has(entry.name)) continue
-            await walk(fullPath)
+            await walk(fullPath, depth + 1)
           } else if (entry.isFile()) {
             const stat = await fsPromises.stat(fullPath)
             bytes += stat.size
@@ -101,7 +146,7 @@ async function getDirSize(dirPath: string): Promise<{ bytes: number; count: numb
     } catch { /* skip inaccessible dir */ }
   }
 
-  await walk(dirPath)
+  await walk(dirPath, 0)
   return { bytes, count }
 }
 
@@ -123,6 +168,39 @@ async function safeRmDir(dirPath: string): Promise<number> {
   } catch {
     return 0
   }
+}
+
+async function cleanupOrphanSessionWorkspaceDir(sessionDir: string): Promise<number> {
+  let freedBytes = 0
+  let deletedAny = false
+
+  try {
+    const entries = await fsPromises.readdir(sessionDir)
+    for (const entry of entries) {
+      if (PRESERVED_ORPHAN_SESSION_DIRS.has(entry)) continue
+      const entryPath = join(sessionDir, entry)
+      try {
+        const stat = await fsPromises.lstat(entryPath)
+        if (stat.isDirectory()) {
+          freedBytes += await safeRmDir(entryPath)
+          deletedAny = true
+        } else if (stat.isFile()) {
+          const freed = safeUnlink(entryPath)
+          freedBytes += freed
+          deletedAny = true
+        }
+      } catch { /* skip */ }
+    }
+
+    const remaining = await fsPromises.readdir(sessionDir)
+    if (remaining.length === 0) {
+      rmSyncWithRetry(sessionDir, { recursive: true, force: true })
+    }
+  } catch {
+    return 0
+  }
+
+  return deletedAny ? freedBytes : 0
 }
 
 // ─── 统计 ───
@@ -148,6 +226,8 @@ async function calcAgentSessionsCategory(): Promise<StorageCategory> {
   const dir = getAgentSessionsDir()
   const activeIds = getActiveSessionIds()
   let bytes = 0, count = 0, orphanBytes = 0, orphanCount = 0
+  const orphanItems: StorageOrphanItem[] = []
+  let orphanItemsTruncated = false
 
   if (existsSync(dir)) {
     try {
@@ -163,6 +243,12 @@ async function calcAgentSessionsCategory(): Promise<StorageCategory> {
           if (!activeIds.has(id)) {
             orphanBytes += stat.size
             orphanCount++
+            orphanItemsTruncated = addOrphanItem(orphanItems, {
+              kind: 'file',
+              path: displayStoragePath(fullPath),
+              bytes: stat.size,
+              count: 1,
+            }) || orphanItemsTruncated
           }
         } catch { /* skip */ }
       }
@@ -175,6 +261,7 @@ async function calcAgentSessionsCategory(): Promise<StorageCategory> {
     bytes, count,
     hasOrphans: orphanCount > 0,
     orphanBytes, orphanCount,
+    orphanItems, orphanItemsTruncated,
   }
 }
 
@@ -182,6 +269,8 @@ async function calcSdkConfigCategory(): Promise<StorageCategory> {
   const sdkDir = getSdkConfigDir()
   const activeSdkIds = getActiveSdkSessionIds()
   let bytes = 0, count = 0, orphanBytes = 0, orphanCount = 0
+  const orphanItems: StorageOrphanItem[] = []
+  let orphanItemsTruncated = false
 
   const projectsDir = join(sdkDir, 'projects')
   if (existsSync(projectsDir)) {
@@ -203,6 +292,12 @@ async function calcSdkConfigCategory(): Promise<StorageCategory> {
               if (!activeSdkIds.has(sdkId)) {
                 orphanBytes += stat.size
                 orphanCount++
+                orphanItemsTruncated = addOrphanItem(orphanItems, {
+                  kind: 'file',
+                  path: displayStoragePath(fullPath),
+                  bytes: stat.size,
+                  count: 1,
+                }) || orphanItemsTruncated
               }
             } catch { /* skip */ }
           }
@@ -225,6 +320,12 @@ async function calcSdkConfigCategory(): Promise<StorageCategory> {
           if (!activeSdkIds.has(sdkId)) {
             orphanBytes += sub.bytes
             orphanCount += sub.count
+            orphanItemsTruncated = addOrphanItem(orphanItems, {
+              kind: 'directory',
+              path: displayStoragePath(histPath),
+              bytes: sub.bytes,
+              count: sub.count,
+            }) || orphanItemsTruncated
           }
         } catch { /* skip */ }
       }
@@ -259,6 +360,7 @@ async function calcSdkConfigCategory(): Promise<StorageCategory> {
     bytes, count,
     hasOrphans: orphanCount > 0,
     orphanBytes, orphanCount,
+    orphanItems, orphanItemsTruncated,
   }
 }
 
@@ -267,6 +369,8 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
   const activeIds = getActiveSessionIds()
   const activeSlugs = getActiveWorkspaceSlugs()
   let bytes = 0, count = 0, orphanBytes = 0, orphanCount = 0
+  const orphanItems: StorageOrphanItem[] = []
+  let orphanItemsTruncated = false
 
   if (existsSync(wsDir)) {
     try {
@@ -279,9 +383,16 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
           for (const entry of entries) {
             const entryPath = join(slugDir, entry)
             try {
-              if (!(await fsPromises.lstat(entryPath)).isDirectory()) continue
-              // workspace-files, skills, skills-inactive 等元目录不算孤儿
-              if (['workspace-files', 'skills', 'skills-inactive', '.claude-plugin'].includes(entry)) {
+              const stat = await fsPromises.lstat(entryPath)
+              if (!stat.isDirectory()) {
+                if (stat.isFile()) {
+                  bytes += stat.size
+                  count++
+                }
+                continue
+              }
+              // 工作区级元目录不属于会话目录，不能按 orphan session 清理。
+              if (isWorkspaceMetadataDir(entry)) {
                 const sub = await getDirSize(entryPath)
                 bytes += sub.bytes
                 count += sub.count
@@ -292,8 +403,17 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
               count += sub.count
               // session 目录的 ID 不在活跃列表中 → 孤儿
               if (!activeIds.has(entry) && !activeSlugs.has(entry)) {
-                orphanBytes += sub.bytes
-                orphanCount++
+                const cleanable = await getDirSize(entryPath, { skipTopLevelDirs: PRESERVED_ORPHAN_SESSION_DIRS })
+                if (cleanable.count > 0) {
+                  orphanBytes += cleanable.bytes
+                  orphanCount++
+                  orphanItemsTruncated = addOrphanItem(orphanItems, {
+                    kind: 'directory',
+                    path: displayStoragePath(entryPath),
+                    bytes: cleanable.bytes,
+                    count: cleanable.count,
+                  }) || orphanItemsTruncated
+                }
               }
             } catch { /* skip */ }
           }
@@ -308,6 +428,7 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
     bytes, count,
     hasOrphans: orphanCount > 0,
     orphanBytes, orphanCount,
+    orphanItems, orphanItemsTruncated,
   }
 }
 
@@ -320,6 +441,7 @@ async function calcConversationsCategory(): Promise<StorageCategory> {
     bytes, count,
     hasOrphans: false,
     orphanBytes: 0, orphanCount: 0,
+    orphanItems: [], orphanItemsTruncated: false,
   }
 }
 
@@ -332,6 +454,7 @@ async function calcAttachmentsCategory(): Promise<StorageCategory> {
     bytes, count,
     hasOrphans: false,
     orphanBytes: 0, orphanCount: 0,
+    orphanItems: [], orphanItemsTruncated: false,
   }
 }
 
@@ -349,6 +472,7 @@ async function calcTempFilesCategory(): Promise<StorageCategory> {
     count: preview.count + installer.count,
     hasOrphans: false,
     orphanBytes: 0, orphanCount: 0,
+    orphanItems: [], orphanItemsTruncated: false,
   }
 }
 
@@ -502,12 +626,12 @@ async function cleanupOrphanWorkspaces(): Promise<CleanupResult> {
         if (!(await fsPromises.lstat(slugDir)).isDirectory()) continue
         const entries = await fsPromises.readdir(slugDir)
         for (const entry of entries) {
-          if (['workspace-files', 'skills', 'skills-inactive', '.claude-plugin'].includes(entry)) continue
+          if (isWorkspaceMetadataDir(entry)) continue
           const entryPath = join(slugDir, entry)
           try {
             if (!(await fsPromises.lstat(entryPath)).isDirectory()) continue
             if (activeIds.has(entry) || activeSlugs.has(entry)) continue
-            const freed = await safeRmDir(entryPath)
+            const freed = await cleanupOrphanSessionWorkspaceDir(entryPath)
             if (freed > 0) { freedBytes += freed; deletedCount++ }
           } catch { /* skip */ }
         }

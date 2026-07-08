@@ -482,6 +482,29 @@ function getDirectDelegatedChildren(
   ))
 }
 
+function collectDelegatedSessionTreeIds(sessions: AgentSessionMeta[], rootSessionId: string): Set<string> {
+  const ids = new Set<string>([rootSessionId])
+  let changed = true
+
+  while (changed) {
+    changed = false
+    for (const session of sessions) {
+      if (ids.has(session.id)) continue
+      // 与主进程迁移逻辑保持一致：只处理协作委派子会话。
+      if (!session.sourceDelegationId) continue
+      if (
+        (session.parentSessionId && ids.has(session.parentSessionId))
+        || session.rootSessionId === rootSessionId
+      ) {
+        ids.add(session.id)
+        changed = true
+      }
+    }
+  }
+
+  return ids
+}
+
 function hasPinnedVisibleParent(session: AgentSessionMeta, sessions: AgentSessionMeta[]): boolean {
   if (!isDelegatedChildSession(session) || !session.parentSessionId) return false
   const parent = sessions.find((item) => item.id === session.parentSessionId)
@@ -1765,18 +1788,38 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   }, [agentSessions])
 
   /** 迁移会话到另一个项目后的回调 */
-  const handleSessionMoved = (updatedSession: AgentSessionMeta, targetWorkspaceName: string): void => {
-    setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updatedSession))
-    // 如果迁移的是当前选中的会话，取消选中并关闭标签页
-    if (currentAgentSessionId === updatedSession.id) {
-      const tabResult = closeTab(tabs, activeTabId, updatedSession.id)
+  const handleSessionMoved = async (updatedSession: AgentSessionMeta, targetWorkspaceName: string): Promise<void> => {
+    const movedSessionIds = collectDelegatedSessionTreeIds(store.get(agentSessionsAtom), updatedSession.id)
+    try {
+      const sessions = await window.electronAPI.listAgentSessions()
+      setAgentSessions(sessions)
+    } catch (error) {
+      console.error('[侧边栏] 迁移后刷新 Agent 会话列表失败:', error)
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updatedSession))
+    }
+    const hasMovedOpenTab = tabs.some((tab) => (
+      (tab.type === 'agent' || tab.type === 'preview')
+      && movedSessionIds.has(tab.sessionId)
+    ))
+    if (hasMovedOpenTab) {
+      let tabResult = { tabs, activeTabId }
+      for (const sessionId of movedSessionIds) {
+        tabResult = closeTab(tabResult.tabs, tabResult.activeTabId, sessionId)
+        cleanupMapAtoms(sessionId)
+      }
       setTabs(tabResult.tabs)
       setActiveTabId(tabResult.activeTabId)
+      const nextActiveTab = tabResult.activeTabId
+        ? tabResult.tabs.find((tab) => tab.id === tabResult.activeTabId) ?? null
+        : null
+      syncActiveTabSideEffects(nextActiveTab)
+    }
+    if (currentAgentSessionId && movedSessionIds.has(currentAgentSessionId)) {
       setCurrentAgentSessionId(null)
     }
     setMoveTargetId(null)
     toast.success('会话已迁移', {
-      description: `已迁移到「${targetWorkspaceName}」，请切换项目查看`,
+      description: `已迁移到「${targetWorkspaceName}」，子会话会一起移动`,
     })
   }
 

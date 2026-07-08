@@ -118,6 +118,7 @@ import { startScheduler, stopScheduler } from './lib/automation-scheduler'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
+import { getPersistableMainWindowState, hideMacMainWindowAfterClose } from './lib/main-window-lifecycle'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
@@ -320,17 +321,10 @@ function getIconPath(): string {
 
 function saveMainWindowState(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  const isMaximized = mainWindow.isMaximized()
-  // 最大化时用恢复尺寸（unmaximize 后的尺寸），避免记录最大化的全屏 bounds
-  const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+  const mainWindowState = getPersistableMainWindowState(mainWindow)
+  if (!mainWindowState) return
   updateSettings({
-    mainWindowState: {
-      width: bounds.width,
-      height: bounds.height,
-      x: bounds.x,
-      y: bounds.y,
-      isMaximized,
-    },
+    mainWindowState,
   })
 }
 
@@ -438,8 +432,9 @@ function createWindow(): void {
         }
         saveMainWindowState()
         event.preventDefault()
-        mainWindow?.hide()
-        app.hide()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          hideMacMainWindowAfterClose(mainWindow, app)
+        }
       }
     })
   }

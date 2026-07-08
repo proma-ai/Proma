@@ -1,6 +1,6 @@
 {
   "name": "@proma/core",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "license": "AGPL-3.0-only",
   "description": "proma core types,storage and core logic with agents",
   "type": "module",

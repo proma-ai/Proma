@@ -12,8 +12,8 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import { FileDown } from 'lucide-react'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
+import { FileDown, PanelRight, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { scratchPadContentAtom, scratchPadLoadedAtom, tabsAtom, activeTabIdAtom } from '@/atoms/tab-atoms'
 import {
@@ -57,6 +57,8 @@ import {
 } from '@/lib/voice-input-focus'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { openScratchInSplit } from './scratch-pad-opener'
 
 const MAX_SCRATCH_PAD_QUOTED_CHARS = 2000
 
@@ -64,6 +66,14 @@ interface ScratchPadSelection {
   text: string
   x: number
   y: number
+}
+
+interface ScratchPadPaneProps {
+  onClose: () => void
+}
+
+interface ScratchPadEditorProps {
+  variant: 'page' | 'pane'
 }
 
 function normalizeSelectionText(text: string): string {
@@ -76,8 +86,47 @@ function getElementFromNode(node: Node | null): Element | null {
 }
 
 export function ScratchPadView(): React.ReactElement {
+  return <ScratchPadEditor variant="page" />
+}
+
+export function ScratchPadPane({ onClose }: ScratchPadPaneProps): React.ReactElement {
+  return (
+    <div className="flex h-full flex-col overflow-hidden bg-content-area titlebar-no-drag">
+      <div className="flex-shrink-0 border-b border-border/30 titlebar-no-drag">
+        <div className="flex h-[34px] items-center px-3">
+          <span className="truncate text-xs text-muted-foreground">
+            草稿
+          </span>
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  aria-label="关闭草稿分屏"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>关闭草稿分屏</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ScratchPadEditor variant="pane" />
+      </div>
+    </div>
+  )
+}
+
+function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElement {
   const [content, setContent] = useAtom(scratchPadContentAtom)
   const loaded = useAtomValue(scratchPadLoadedAtom)
+  const store = useStore()
   const containerRef = React.useRef<HTMLDivElement>(null)
   const [selection, setSelection] = React.useState<ScratchPadSelection | null>(null)
   const pointerSelectingRef = React.useRef(false)
@@ -152,6 +201,13 @@ export function ScratchPadView(): React.ReactElement {
     const agentTab = tabs.find((t) => t.sessionId === activeSessionId && t.type === 'agent')
     return agentTab?.title ?? null
   }, [tabs, activeSessionId])
+
+  const handleOpenScratchPanel = React.useCallback((): void => {
+    const opened = openScratchInSplit(store)
+    if (!opened) {
+      toast.info('先打开一个 Agent 会话，再把草稿放到右侧。')
+    }
+  }, [store])
 
   const clearSelection = React.useCallback((): void => {
     setSelection(null)
@@ -496,23 +552,56 @@ export function ScratchPadView(): React.ReactElement {
     return () => el.removeEventListener('paste', handlePaste, true)
   }, [editor])
 
+  const isPane = variant === 'pane'
+  const scrollClassName = isPane
+    ? 'flex-1 overflow-auto scrollbar-thin px-4 pt-4 pb-20'
+    : 'flex-1 overflow-auto scrollbar-thin px-8 pt-6 pb-20'
+  const contentClassName = isPane ? 'h-full max-w-none' : 'max-w-3xl mx-auto h-full'
+  const speechWrapperClassName = isPane
+    ? 'absolute left-1/2 -translate-x-1/2 bottom-9 z-20'
+    : 'absolute left-1/2 -translate-x-1/2 bottom-10 z-20'
+  const speechButtonClassName = isPane
+    ? 'size-9 rounded-full bg-background/95 border border-border/60 shadow-md backdrop-blur hover:bg-accent text-foreground/80'
+    : 'size-11 rounded-full bg-background/95 border border-border/60 shadow-md backdrop-blur hover:bg-accent text-foreground/80'
+
   return (
     <div ref={containerRef} className="relative flex flex-col h-full">
-      <div className="flex-1 overflow-auto scrollbar-thin px-8 pt-6 pb-20">
-        <div className="max-w-3xl mx-auto h-full">
-          <div className="mb-5 flex flex-col gap-2">
-            <div>
-              <h1 className="text-xl font-semibold tracking-normal text-foreground">草稿页</h1>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                临时记录内容、整理 Todo、暂存剪贴板文本，稍后再导出到会话或工作区。
-              </p>
+      <div className={scrollClassName}>
+        <div className={contentClassName}>
+          {isPane ? (
+            <div className="mb-3 text-[11px] text-muted-foreground">自动保存到本地</div>
+          ) : (
+            <div className="mb-5 flex flex-col gap-2">
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-xl font-semibold tracking-normal text-foreground">草稿页</h1>
+                  <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                    临时记录内容、整理 Todo、暂存剪贴板文本，稍后再导出到会话或工作区。
+                  </p>
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleOpenScratchPanel}
+                      className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                      aria-label="在右侧边栏打开草稿"
+                    >
+                      <PanelRight className="size-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>在右侧边栏打开草稿（也可将草稿 Tab 拖出标签栏）</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground/80">
+                <span className="rounded-md bg-muted px-2 py-1">临时笔记</span>
+                <span className="rounded-md bg-muted px-2 py-1">Todo 草稿</span>
+                <span className="rounded-md bg-muted px-2 py-1">剪贴板暂存</span>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground/80">
-              <span className="rounded-md bg-muted px-2 py-1">临时笔记</span>
-              <span className="rounded-md bg-muted px-2 py-1">Todo 草稿</span>
-              <span className="rounded-md bg-muted px-2 py-1">剪贴板暂存</span>
-            </div>
-          </div>
+          )}
           {loaded ? (
             <EditorContent
               editor={editor}
@@ -534,12 +623,12 @@ export function ScratchPadView(): React.ReactElement {
         />
       )}
       {/* 底部居中悬浮：圆形语音输入按钮 */}
-      <div className="absolute left-1/2 -translate-x-1/2 bottom-10 z-20">
-        <SpeechButton className="size-11 rounded-full bg-background/95 border border-border/60 shadow-md backdrop-blur hover:bg-accent text-foreground/80" />
+      <div className={speechWrapperClassName}>
+        <SpeechButton className={speechButtonClassName} />
       </div>
       <div className="h-[28px] border-t border-border/40 px-4 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground/60">
-          Scratch Pad — 内容自动保存到本地
+          {isPane ? '草稿自动保存' : 'Scratch Pad — 内容自动保存到本地'}
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

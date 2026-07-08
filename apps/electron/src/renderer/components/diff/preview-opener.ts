@@ -113,4 +113,3 @@ export function tearOffPreviewToSplit(store: JotaiStore, tabId: string): void {
     return m
   })
 }
-

@@ -20,7 +20,24 @@ import {
   SelectValue,
 } from '../ui/select'
 import { Button } from '../ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog'
 import { cn } from '@/lib/utils'
+
+interface StorageOrphanItem {
+  kind: 'file' | 'directory'
+  path: string
+  bytes: number
+  count: number
+}
 
 interface StorageCategory {
   label: string
@@ -30,6 +47,8 @@ interface StorageCategory {
   hasOrphans: boolean
   orphanBytes: number
   orphanCount: number
+  orphanItems: StorageOrphanItem[]
+  orphanItemsTruncated: boolean
 }
 
 interface StorageStats {
@@ -42,6 +61,12 @@ interface CleanupResult {
   freedBytes: number
   deletedCount: number
   errors: string[]
+}
+
+interface PendingCleanup {
+  label: string
+  cleaningKey: string
+  categories: string[]
 }
 
 function formatBytes(bytes: number): string {
@@ -90,6 +115,7 @@ export function StorageSettings(): React.ReactElement {
   const [lastResult, setLastResult] = React.useState<CleanupResult | null>(null)
   const [autoCleanupTemp, setAutoCleanupTemp] = React.useState(true)
   const [autoCleanupDays, setAutoCleanupDays] = React.useState(0)
+  const [pendingCleanup, setPendingCleanup] = React.useState<PendingCleanup | null>(null)
 
   const loadStats = React.useCallback(async () => {
     setLoading(true)
@@ -111,13 +137,13 @@ export function StorageSettings(): React.ReactElement {
     }).catch(console.error)
   }, [loadStats])
 
-  const handleCleanCategory = async (key: string, orphansOnly: boolean): Promise<void> => {
-    setCleaningKey(key)
+  const handleCleanOrphans = async (target: PendingCleanup): Promise<void> => {
+    setCleaningKey(target.cleaningKey)
     setLastResult(null)
     try {
       const result = await window.electronAPI.cleanupStorage({
-        categories: [key],
-        orphansOnly,
+        categories: target.categories,
+        orphansOnly: true,
         archivedBeforeDays: 0,
       }) as CleanupResult
       setLastResult(result)
@@ -143,22 +169,20 @@ export function StorageSettings(): React.ReactElement {
     }
   }
 
-  const handleCleanAllOrphans = async (): Promise<void> => {
-    setCleaningKey('all-orphans')
-    setLastResult(null)
-    try {
-      const result = await window.electronAPI.cleanupStorage({
-        categories: ['agent-sessions', 'sdk-config', 'workspaces'],
-        orphansOnly: true,
-        archivedBeforeDays: 0,
-      }) as CleanupResult
-      setLastResult(result)
-      await loadStats()
-    } catch (e) {
-      console.error('[存储管理] 清理孤儿数据失败:', e)
-    } finally {
-      setCleaningKey(null)
-    }
+  const requestCleanCategory = (category: StorageCategory): void => {
+    setPendingCleanup({
+      label: category.label,
+      cleaningKey: category.key,
+      categories: [category.key],
+    })
+  }
+
+  const requestCleanAllOrphans = (): void => {
+    setPendingCleanup({
+      label: '全部孤儿数据',
+      cleaningKey: 'all-orphans',
+      categories: ['agent-sessions', 'sdk-config', 'workspaces'],
+    })
   }
 
   const handleAutoCleanupTempChange = async (enabled: boolean): Promise<void> => {
@@ -182,6 +206,15 @@ export function StorageSettings(): React.ReactElement {
 
   const totalOrphanBytes = stats?.categories.reduce((sum, c) => sum + c.orphanBytes, 0) ?? 0
   const hasOrphans = totalOrphanBytes > 0
+  const pendingCategories = React.useMemo(() => {
+    if (!pendingCleanup || !stats) return []
+    const keys = new Set(pendingCleanup.categories)
+    return stats.categories.filter((category) => keys.has(category.key) && category.hasOrphans)
+  }, [pendingCleanup, stats])
+  const pendingOrphanItems = pendingCategories.flatMap((category) => category.orphanItems)
+  const pendingOrphanBytes = pendingCategories.reduce((sum, category) => sum + category.orphanBytes, 0)
+  const pendingOrphanCount = pendingCategories.reduce((sum, category) => sum + category.orphanCount, 0)
+  const pendingOrphanItemsTruncated = pendingCategories.some((category) => category.orphanItemsTruncated)
 
   return (
     <div className="space-y-6">
@@ -240,7 +273,7 @@ export function StorageSettings(): React.ReactElement {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleCleanCategory(cat.key, true)}
+                    onClick={() => requestCleanCategory(cat)}
                     disabled={cleaningKey !== null}
                     className="h-7 gap-1 text-xs"
                   >
@@ -302,7 +335,7 @@ export function StorageSettings(): React.ReactElement {
               <Button
                 variant={hasOrphans ? 'default' : 'ghost'}
                 size="sm"
-                onClick={handleCleanAllOrphans}
+                onClick={requestCleanAllOrphans}
                 disabled={cleaningKey !== null || !hasOrphans}
                 className="gap-1.5"
               >
@@ -331,6 +364,55 @@ export function StorageSettings(): React.ReactElement {
           )}
         </div>
       )}
+
+      <AlertDialog
+        open={pendingCleanup !== null}
+        onOpenChange={(open) => { if (!open) setPendingCleanup(null) }}
+      >
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认清理{pendingCleanup?.label}？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除 {pendingOrphanCount} 项孤儿数据，预计释放 {formatBytes(pendingOrphanBytes)}。请确认下面的路径都不再需要。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2">
+            {pendingOrphanItems.length > 0 ? (
+              <div className="space-y-1">
+                {pendingOrphanItems.map((item) => (
+                  <div key={`${item.kind}:${item.path}`} className="flex items-start justify-between gap-3 rounded-sm px-2 py-1.5 text-xs">
+                    <div className="min-w-0">
+                      <div className="break-all font-mono text-foreground">{item.path}</div>
+                      <div className="mt-0.5 text-muted-foreground">
+                        {item.kind === 'directory' ? '目录' : '文件'} · {item.count} 个文件
+                      </div>
+                    </div>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{formatBytes(item.bytes)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-2 py-6 text-center text-sm text-muted-foreground">没有可展示的孤儿路径</div>
+            )}
+          </div>
+          {pendingOrphanItemsTruncated && (
+            <div className="text-xs text-amber-500">列表较长，仅展示前 80 项；确认后会清理当前分类下全部孤儿数据。</div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingCleanup(null)}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/92"
+              onClick={() => {
+                const target = pendingCleanup
+                setPendingCleanup(null)
+                if (target) void handleCleanOrphans(target)
+              }}
+            >
+              确认清理
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -117,6 +117,15 @@ export const tabMinimapCacheAtom = atom<Map<string, TabMinimapItem[]>>(new Map()
 export const scratchPadContentAtom = atom<string>('')
 /** Scratch Pad 内容是否已从磁盘加载 */
 export const scratchPadLoadedAtom = atom<boolean>(false)
+/** Scratch Pad 是否固定在 Agent 右侧分屏；通过拖出 Scratch Tab 打开 */
+export const scratchPadPanelOpenAtom = atom<boolean>(false)
+/** 右侧工作区中 Preview 与 Scratch 并排时，Preview 占比 */
+export const rightWorkspaceSplitRatioAtom = atomWithStorage<number>(
+  'proma-right-workspace-split-ratio',
+  0.58,
+  undefined,
+  { getOnInit: true },
+)
 
 // ===== 派生 Atoms =====
 

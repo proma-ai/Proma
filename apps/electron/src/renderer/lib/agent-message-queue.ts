@@ -2,11 +2,21 @@ import type { QuotedSelection } from '@/atoms/preview-atoms'
 
 export type QueueDropPlacement = 'before' | 'after'
 
+export interface AgentQueuedAttachment {
+  filename: string
+  mediaType: string
+  size: number
+  targetPath: string
+}
+
 export interface AgentQueuedMessage {
   id: string
   text: string
   createdAt: number
   quotedSelection?: QuotedSelection
+  fileReferenceBlock?: string
+  attachments?: AgentQueuedAttachment[]
+  additionalDirectories?: string[]
 }
 
 export function createAgentQueuedMessage(
@@ -14,6 +24,11 @@ export function createAgentQueuedMessage(
   id: string,
   createdAt: number,
   quotedSelection?: QuotedSelection | null,
+  options?: {
+    fileReferenceBlock?: string
+    attachments?: AgentQueuedAttachment[]
+    additionalDirectories?: string[]
+  },
 ): AgentQueuedMessage {
   const message: AgentQueuedMessage = {
     id,
@@ -21,6 +36,9 @@ export function createAgentQueuedMessage(
     createdAt,
   }
   if (quotedSelection) message.quotedSelection = quotedSelection
+  if (options?.fileReferenceBlock) message.fileReferenceBlock = options.fileReferenceBlock
+  if (options?.attachments && options.attachments.length > 0) message.attachments = options.attachments
+  if (options?.additionalDirectories && options.additionalDirectories.length > 0) message.additionalDirectories = options.additionalDirectories
   return message
 }
 
@@ -125,8 +143,12 @@ export function buildQueuedMessageSendPayload(
 ): QueuedMessageSendPayload {
   const text = message.text.trim()
   const mentions = parseQueuedMessageMentions(text)
-  const prefix = quotedSelectionBlock.trim().length > 0
-    ? `${quotedSelectionBlock.trimEnd()}\n\n`
+  const contextBlocks = [
+    message.fileReferenceBlock?.trim(),
+    quotedSelectionBlock.trim(),
+  ].filter((block): block is string => Boolean(block))
+  const prefix = contextBlocks.length > 0
+    ? `${contextBlocks.join('\n\n')}\n\n`
     : ''
 
   return {

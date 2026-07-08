@@ -925,12 +925,17 @@ export function useGlobalAgentListeners(): void {
         // 不发"任务已完成"通知（任务并未真正完成）、不清后台任务列表、不重载消息——
         // 等后台任务完成时 Agent 会自动唤醒续轮。
         const backgroundTasksPending = data.backgroundTasksPending === true
-        // 发送桌面通知（任务完成，始终播放提示音）
+        const hasStreamError = store.get(agentStreamErrorsAtom).has(data.sessionId)
+        const isSuccessfulCompletion = !data.stoppedByUser &&
+          !hasStreamError &&
+          (!data.resultSubtype || data.resultSubtype === 'success')
+
+        // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
         const sounds = store.get(notificationSoundsAtom)
         const sessionTitle = getSessionTitle(data.sessionId)
-        if (!backgroundTasksPending) {
+        if (!backgroundTasksPending && isSuccessfulCompletion) {
           sendDesktopNotification(
             'Agent 任务完成',
             `[${sessionTitle}] 任务已完成`,
@@ -1003,6 +1008,7 @@ export function useGlobalAgentListeners(): void {
             error_max_turns: '任务被中断：已达到轮次上限。继续对话可让 Agent 接着完成。',
             error_max_budget_usd: '任务被中断：已达到预算上限。',
             error_during_execution: '任务执行过程中发生错误。',
+            empty_response: 'Agent 本轮结束了，但没有返回任何可展示内容。你的消息已保留，可以直接重试或切换模型。',
           }
           // error_during_execution 等执行期错误：优先展示 SDK result.errors[] 携带的真实原因，
           // 让用户能据此判断重试 / 改提问 / 报 bug，而非只看到泛泛的兜底文案。

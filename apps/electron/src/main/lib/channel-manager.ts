@@ -28,6 +28,7 @@ import {
   getPromaUserAgent,
   migrateCompatibleChannelBaseUrl,
   normalizeBaseUrl,
+  resolveAnthropicMessagesUrl,
   resolveAnthropicModelsUrl,
   resolveOpenAIModelsUrl,
 } from '@proma/core'
@@ -38,6 +39,17 @@ import pkg from '../../../package.json' with { type: 'json' }
 const CONFIG_VERSION = 2
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
+const ARK_CODING_PLAN_TEST_MODEL = 'doubao-seed-2.0-code'
+const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
+  { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
+  { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
+  { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
+  { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
+  { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
+  { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+]
 
 /**
  * 为连接测试 / 模型拉取请求统一附加超时信号。
@@ -436,10 +448,14 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'kimi-api':
       case 'kimi-coding':
       case 'zhipu-coding':
+      case 'ark-coding-plan':
       case 'minimax':
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+        if (channel.provider === 'ark-coding-plan') {
+          return await testArkCodingPlan(channel.baseUrl, apiKey, proxyUrl)
+        }
         return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
       case 'openai':
       case 'zhipu':
@@ -492,6 +508,35 @@ async function testAnthropicCompatible(
   const response = await fetchFn(url, withTimeout({
     method: 'GET',
     headers,
+  }))
+
+  return normalizeHttpResponse(response)
+}
+
+/**
+ * 火山方舟 Coding Plan 当前没有可用的模型列表端点，连接测试改用极小的 messages 请求。
+ */
+async function testArkCodingPlan(
+  baseUrl: string,
+  apiKey: string,
+  proxyUrl?: string,
+): Promise<ChannelTestResult> {
+  const url = resolveAnthropicMessagesUrl(baseUrl, 'ark-coding-plan')
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'POST',
+    headers: {
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: ARK_CODING_PLAN_TEST_MODEL,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    }),
   }))
 
   return normalizeHttpResponse(response)
@@ -554,10 +599,14 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
       case 'kimi-api':
       case 'kimi-coding':
       case 'zhipu-coding':
+      case 'ark-coding-plan':
       case 'minimax':
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+        if (input.provider === 'ark-coding-plan') {
+          return await testArkCodingPlan(input.baseUrl, input.apiKey, proxyUrl)
+        }
         return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'zhipu':
@@ -596,10 +645,18 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'kimi-api':
       case 'kimi-coding':
       case 'zhipu-coding':
+      case 'ark-coding-plan':
       case 'minimax':
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+        if (input.provider === 'ark-coding-plan') {
+          return {
+            success: true,
+            message: `火山方舟 Coding Plan 未开放模型列表端点，已加载 ${ARK_CODING_PLAN_MODELS.length} 个预设模型`,
+            models: ARK_CODING_PLAN_MODELS,
+          }
+        }
         return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
       case 'openai':
       case 'zhipu':

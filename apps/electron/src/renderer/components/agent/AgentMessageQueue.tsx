@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Clock3, CornerDownLeft, GripVertical, Quote, Trash2, Undo2 } from 'lucide-react'
+import { Clock3, CornerDownLeft, GripVertical, Paperclip, Quote, Trash2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -114,7 +114,17 @@ export function AgentMessageQueue({
                     </span>
                   </div>
                 )}
-                <div className="line-clamp-2">{item.text}</div>
+                {item.attachments && item.attachments.length > 0 && (
+                  <div className="mb-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-muted-foreground">
+                    <Paperclip className="size-3 shrink-0" />
+                    <span className="truncate">
+                      {item.attachments.length === 1
+                        ? item.attachments[0]?.filename
+                        : `${item.attachments.length} 个附件`}
+                    </span>
+                  </div>
+                )}
+                <div className="line-clamp-2">{item.text || '仅附件'}</div>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <QueueIconButton
