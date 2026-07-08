@@ -418,16 +418,27 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           {/* 附件 + 引用选中文本 Chip（与 Agent 输入框保持一致） */}
           {(pendingAttachments.length > 0 || currentQuotedSelection) && (
             <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
-              {pendingAttachments.map((att) => (
-                <AttachmentPreviewItem
-                  key={att.id}
-                  filename={att.filename}
-                  mediaType={att.mediaType}
-                  previewUrl={att.previewUrl}
-                  onRemove={() => handleRemoveAttachment(att.id)}
-                  onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
-                />
-              ))}
+              {(() => {
+                // 同批图片附件 — 用于大图预览时左右翻页
+                const imageAttachments = pendingAttachments.filter((a) => a.mediaType.startsWith('image/') && !!a.previewUrl)
+                const imageSiblings = imageAttachments.map((a) => ({
+                  previewUrl: a.previewUrl as string,
+                  filename: a.filename,
+                  onEditComplete: (editedDataUrl: string) => handleEditComplete(a.id, editedDataUrl),
+                }))
+                return pendingAttachments.map((att) => (
+                  <AttachmentPreviewItem
+                    key={att.id}
+                    filename={att.filename}
+                    mediaType={att.mediaType}
+                    previewUrl={att.previewUrl}
+                    onRemove={() => handleRemoveAttachment(att.id)}
+                    onEditComplete={(editedDataUrl) => handleEditComplete(att.id, editedDataUrl)}
+                    imageSiblings={imageSiblings}
+                    siblingIndex={imageAttachments.findIndex((a) => a.id === att.id)}
+                  />
+                ))
+              })()}
               {currentQuotedSelection && (
                 <QuotedSelectionChip
                   text={currentQuotedSelection.text}

@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
 import { Button } from '@/components/ui/button'
-import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import {
   Tooltip,
   TooltipContent,
@@ -712,13 +712,46 @@ export function MessageAttachments({
   const fileAttachments = attachments.filter((att) => !att.mediaType.startsWith('image/'))
   const isSingleImage = imageAttachments.length === 1 && fileAttachments.length === 0
 
+  // 共享大图预览状态（多图可左右翻页）
+  const [lightboxOpen, setLightboxOpen] = React.useState(false)
+  const [lightboxIndex, setLightboxIndex] = React.useState(0)
+  // 各图加载好的 src（key = attachment.id）——缩略图渲染时已加载，翻页复用不再触发 IO
+  const [loadedSrcs, setLoadedSrcs] = React.useState<Record<string, string>>({})
+
+  const handleLoaded = React.useCallback((id: string, src: string): void => {
+    setLoadedSrcs((prev) => (prev[id] ? prev : { ...prev, [id]: src }))
+  }, [])
+
+  const openLightbox = React.useCallback((index: number): void => {
+    setLightboxIndex(index)
+    setLightboxOpen(true)
+  }, [])
+
+  // lightbox 图片列表（索引与 imageAttachments 对齐，每张带自己的保存/编辑回调）
+  const lightboxImages = React.useMemo<LightboxImage[]>(
+    () => imageAttachments.map((att) => ({
+      src: loadedSrcs[att.id] ?? '',
+      alt: att.filename,
+      onSave: () => window.electronAPI.saveImageAs(att.localPath, att.filename),
+      onEditComplete: onImageEditComplete,
+    })),
+    [imageAttachments, loadedSrcs, onImageEditComplete]
+  )
+
   return (
     <div className={cn('flex flex-col gap-2 mb-2', className)} {...props}>
       {/* 图片附件 */}
       {imageAttachments.length > 0 && (
         <div className="flex flex-wrap gap-2.5">
-          {imageAttachments.map((att) => (
-            <MessageAttachmentImage key={att.id} attachment={att} isSingle={isSingleImage} onEditComplete={onImageEditComplete} />
+          {imageAttachments.map((att, index) => (
+            <MessageAttachmentImage
+              key={att.id}
+              attachment={att}
+              isSingle={isSingleImage}
+              index={index}
+              onOpen={openLightbox}
+              onLoaded={handleLoaded}
+            />
           ))}
         </div>
       )}
@@ -730,6 +763,16 @@ export function MessageAttachments({
           ))}
         </div>
       )}
+      {/* 共享大图预览 — 单图时无翻页，行为同以前 */}
+      {imageAttachments.length > 0 && (
+        <ImageLightbox
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          images={lightboxImages}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
     </div>
   )
 }
@@ -740,25 +783,30 @@ interface MessageAttachmentImageProps {
   attachment: FileAttachment
   /** 是否为唯一附件（单图模式） */
   isSingle?: boolean
-  /** 编辑完成回调 */
-  onEditComplete?: (editedDataUrl: string) => void
+  /** 该图在同批图片中的索引 */
+  index: number
+  /** 点击缩略图打开大图预览（第 index 张） */
+  onOpen: (index: number) => void
+  /** 图片 src 加载完成上报父组件（供共享 lightbox 翻页使用） */
+  onLoaded: (id: string, src: string) => void
 }
 
 /** 图片附件展示（单图: max 500px，多图: 280px 方块），点击可预览大图 */
-function MessageAttachmentImage({ attachment, isSingle = false, onEditComplete }: MessageAttachmentImageProps): React.ReactElement {
+function MessageAttachmentImage({ attachment, isSingle = false, index, onOpen, onLoaded }: MessageAttachmentImageProps): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
-  const [lightboxOpen, setLightboxOpen] = React.useState(false)
 
   React.useEffect(() => {
     window.electronAPI
       .readAttachment(attachment.localPath)
       .then((base64) => {
-        setImageSrc(`data:${attachment.mediaType};base64,${base64}`)
+        const src = `data:${attachment.mediaType};base64,${base64}`
+        setImageSrc(src)
+        onLoaded(attachment.id, src)
       })
       .catch((error) => {
         console.error('[MessageAttachmentImage] 读取附件失败:', error)
       })
-  }, [attachment.localPath, attachment.mediaType])
+  }, [attachment.id, attachment.localPath, attachment.mediaType, onLoaded])
 
   /** 保存图片到本地 */
   const handleSave = React.useCallback((): void => {
@@ -779,14 +827,14 @@ function MessageAttachmentImage({ attachment, isSingle = false, onEditComplete }
       src={imageSrc}
       alt={attachment.filename}
       className="max-w-[500px] max-h-[min(500px,50vh)] rounded-lg object-contain cursor-pointer"
-      onClick={() => setLightboxOpen(true)}
+      onClick={() => onOpen(index)}
     />
   ) : (
     <img
       src={imageSrc}
       alt={attachment.filename}
       className="size-[280px] rounded-lg object-cover shrink-0 cursor-pointer"
-      onClick={() => setLightboxOpen(true)}
+      onClick={() => onOpen(index)}
     />
   )
 
@@ -801,14 +849,6 @@ function MessageAttachmentImage({ attachment, isSingle = false, onEditComplete }
       >
         <Download className="size-4" />
       </button>
-      <ImageLightbox
-        src={imageSrc}
-        alt={attachment.filename}
-        open={lightboxOpen}
-        onOpenChange={setLightboxOpen}
-        onSave={handleSave}
-        onEditComplete={onEditComplete}
-      />
     </div>
   )
 }

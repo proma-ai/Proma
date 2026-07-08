@@ -2512,17 +2512,28 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             {/* 附件 + 引用选中文本 Chip（同排并排） */}
             {(pendingFiles.length > 0 || currentQuotedSelection) && (
               <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1.5">
-                {pendingFiles.map((file) => (
-                  <AttachmentPreviewItem
-                    key={file.id}
-                    filename={file.filename}
-                    mediaType={file.mediaType}
-                    previewUrl={file.previewUrl}
-                    onRemove={() => handleRemoveFile(file.id)}
-                    onClick={file.filename.startsWith('clipboard-') ? () => handleClipboardPreview(file) : undefined}
-                    onEditComplete={(editedDataUrl) => handleAttachmentEditComplete(file.id, editedDataUrl)}
-                  />
-                ))}
+                {(() => {
+                  // 同批图片附件 — 用于大图预览时左右翻页
+                  const imageFiles = pendingFiles.filter((f) => f.mediaType.startsWith('image/') && !!f.previewUrl)
+                  const imageSiblings = imageFiles.map((f) => ({
+                    previewUrl: f.previewUrl as string,
+                    filename: f.filename,
+                    onEditComplete: (editedDataUrl: string) => handleAttachmentEditComplete(f.id, editedDataUrl),
+                  }))
+                  return pendingFiles.map((file) => (
+                    <AttachmentPreviewItem
+                      key={file.id}
+                      filename={file.filename}
+                      mediaType={file.mediaType}
+                      previewUrl={file.previewUrl}
+                      onRemove={() => handleRemoveFile(file.id)}
+                      onClick={file.filename.startsWith('clipboard-') ? () => handleClipboardPreview(file) : undefined}
+                      onEditComplete={(editedDataUrl) => handleAttachmentEditComplete(file.id, editedDataUrl)}
+                      imageSiblings={imageSiblings}
+                      siblingIndex={imageFiles.findIndex((f) => f.id === file.id)}
+                    />
+                  ))
+                })()}
                 {currentQuotedSelection && (
                   <QuotedSelectionChip
                     text={currentQuotedSelection.text}

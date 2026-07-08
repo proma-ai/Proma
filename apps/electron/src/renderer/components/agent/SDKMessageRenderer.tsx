@@ -15,7 +15,7 @@ import * as React from 'react'
 import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
-import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
 import { TaskProgressCard } from './TaskProgressCard'
 import { TurnFileChangesSummary } from './TurnFileChangesSummary'
@@ -756,9 +756,16 @@ export function isImageFile(filename: string): boolean {
 }
 
 /** 图片附件缩略图，点击可预览大图 */
-function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; onEditComplete?: (editedDataUrl: string) => void }): React.ReactElement {
+function AttachedImageThumb({ file, index, onOpen, onLoaded }: {
+  file: AttachedFileRef
+  /** 该图在同批图片中的索引 */
+  index: number
+  /** 点击缩略图打开大图预览（第 index 张） */
+  onOpen: (index: number) => void
+  /** 图片 src 加载完成上报父组件（供共享 lightbox 翻页使用） */
+  onLoaded: (path: string, src: string) => void
+}): React.ReactElement {
   const [imageSrc, setImageSrc] = React.useState<string | null>(null)
-  const [lightboxOpen, setLightboxOpen] = React.useState(false)
 
   React.useEffect(() => {
     const ext = file.filename.split('.').pop()?.toLowerCase() ?? 'png'
@@ -770,9 +777,13 @@ function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; o
 
     window.electronAPI
       .readAttachment(file.path)
-      .then((base64) => setImageSrc(`data:${mediaType};base64,${base64}`))
+      .then((base64) => {
+        const src = `data:${mediaType};base64,${base64}`
+        setImageSrc(src)
+        onLoaded(file.path, src)
+      })
       .catch((err) => console.error('[AttachedImageThumb] 读取附件失败:', err))
-  }, [file.path, file.filename])
+  }, [file.path, file.filename, onLoaded])
 
   const handleSave = React.useCallback((): void => {
     window.electronAPI.saveImageAs(file.path, file.filename)
@@ -788,7 +799,7 @@ function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; o
         src={imageSrc}
         alt={file.filename}
         className="max-w-[300px] max-h-[200px] rounded-lg object-contain cursor-pointer"
-        onClick={() => setLightboxOpen(true)}
+        onClick={() => onOpen(index)}
       />
       <button
         type="button"
@@ -798,14 +809,6 @@ function AttachedImageThumb({ file, onEditComplete }: { file: AttachedFileRef; o
       >
         <Download className="size-4" />
       </button>
-      <ImageLightbox
-        src={imageSrc}
-        alt={file.filename}
-        open={lightboxOpen}
-        onOpenChange={setLightboxOpen}
-        onSave={handleSave}
-        onEditComplete={onEditComplete}
-      />
     </div>
   )
 }
@@ -934,6 +937,32 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
     })
   }, [activeSessionId, setSessionPendingFiles])
 
+  // 共享大图预览状态（多图可左右翻页）
+  const [lightboxOpen, setLightboxOpen] = React.useState(false)
+  const [lightboxIndex, setLightboxIndex] = React.useState(0)
+  // 各图加载好的 src（key = file.path）——缩略图渲染时已加载，翻页复用不再触发 IO
+  const [loadedSrcs, setLoadedSrcs] = React.useState<Record<string, string>>({})
+
+  const handleImageLoaded = React.useCallback((path: string, src: string): void => {
+    setLoadedSrcs((prev) => (prev[path] ? prev : { ...prev, [path]: src }))
+  }, [])
+
+  const openLightbox = React.useCallback((index: number): void => {
+    setLightboxIndex(index)
+    setLightboxOpen(true)
+  }, [])
+
+  // lightbox 图片列表（索引与 imageFiles 对齐，每张带自己的保存回调）
+  const lightboxImages = React.useMemo<LightboxImage[]>(
+    () => imageFiles.map((file) => ({
+      src: loadedSrcs[file.path] ?? '',
+      alt: file.filename,
+      onSave: () => window.electronAPI.saveImageAs(file.path, file.filename),
+      onEditComplete: handleImageEditComplete,
+    })),
+    [imageFiles, loadedSrcs, handleImageEditComplete]
+  )
+
   return (
     <Message from="user">
       <div className="flex items-start gap-2.5 mb-2.5">
@@ -964,8 +993,14 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         {/* 图片缩略图 */}
         {imageFiles.length > 0 && (
           <div className="flex flex-wrap gap-2.5 mb-2">
-            {imageFiles.map((file) => (
-              <AttachedImageThumb key={file.path} file={file} onEditComplete={handleImageEditComplete} />
+            {imageFiles.map((file, index) => (
+              <AttachedImageThumb
+                key={file.path}
+                file={file}
+                index={index}
+                onOpen={openLightbox}
+                onLoaded={handleImageLoaded}
+              />
             ))}
           </div>
         )}
@@ -979,6 +1014,16 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
         )}
         {text && <UserMessageContent>{text}</UserMessageContent>}
       </MessageContent>
+      {/* 共享大图预览 — 单图时无翻页，行为同以前 */}
+      {imageFiles.length > 0 && (
+        <ImageLightbox
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          images={lightboxImages}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
       {text && (
         <MessageActions className="pl-[46px] mt-0.5">
           <CopyButton content={text} />

@@ -238,15 +238,25 @@ export function InlineEditForm({ message, onSubmit, onCancel }: InlineEditFormPr
     >
       {editableAttachments.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {editableAttachments.map((item) => (
-            <AttachmentPreviewItem
-              key={item.id}
-              filename={item.attachment.filename}
-              mediaType={item.attachment.mediaType}
-              previewUrl={item.previewUrl}
-              onRemove={() => removeEditableAttachment(item.id)}
-            />
-          ))}
+          {(() => {
+            // 同批图片附件 — 用于大图预览时左右翻页（内联编辑为只读预览，无编辑回调）
+            const imageItems = editableAttachments.filter((it) => it.attachment.mediaType.startsWith('image/') && !!it.previewUrl)
+            const imageSiblings = imageItems.map((it) => ({
+              previewUrl: it.previewUrl as string,
+              filename: it.attachment.filename,
+            }))
+            return editableAttachments.map((item) => (
+              <AttachmentPreviewItem
+                key={item.id}
+                filename={item.attachment.filename}
+                mediaType={item.attachment.mediaType}
+                previewUrl={item.previewUrl}
+                onRemove={() => removeEditableAttachment(item.id)}
+                imageSiblings={imageSiblings}
+                siblingIndex={imageItems.findIndex((it) => it.id === item.id)}
+              />
+            ))
+          })()}
         </div>
       )}
       <textarea

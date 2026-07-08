@@ -10,7 +10,17 @@
 import * as React from 'react'
 import { X, Paperclip } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
+
+/** 同批图片附件（用于大图预览时左右翻页） */
+export interface AttachmentSibling {
+  /** 本地预览 URL */
+  previewUrl: string
+  /** 文件名 */
+  filename: string
+  /** 该图的编辑完成回调（可选） */
+  onEditComplete?: (editedDataUrl: string) => void
+}
 
 interface AttachmentPreviewItemProps {
   /** 原始文件名 */
@@ -25,6 +35,10 @@ interface AttachmentPreviewItemProps {
   onClick?: () => void
   /** 编辑完成回调 — 提供则启用图片编辑功能 */
   onEditComplete?: (editedDataUrl: string) => void
+  /** 同批图片列表（可选）— 提供则大图预览时可左右翻页 */
+  imageSiblings?: AttachmentSibling[]
+  /** 当前图片在同批列表中的索引（可选） */
+  siblingIndex?: number
   className?: string
 }
 
@@ -45,9 +59,29 @@ export function AttachmentPreviewItem({
   onRemove,
   onClick,
   onEditComplete,
+  imageSiblings,
+  siblingIndex,
   className,
 }: AttachmentPreviewItemProps): React.ReactElement {
   const [lightboxOpen, setLightboxOpen] = React.useState(false)
+  // 大图预览当前索引（多图翻页时受控）
+  const [lightboxIndex, setLightboxIndex] = React.useState(0)
+
+  // 同批图片映射成 lightbox 的 images（每张带自己的编辑回调）
+  const hasSiblings = Array.isArray(imageSiblings) && imageSiblings.length > 1
+  const lightboxImages = React.useMemo<LightboxImage[] | undefined>(() => {
+    if (!hasSiblings) return undefined
+    return imageSiblings!.map((sib) => ({
+      src: sib.previewUrl,
+      alt: sib.filename,
+      onEditComplete: sib.onEditComplete,
+    }))
+  }, [hasSiblings, imageSiblings])
+
+  const openLightbox = React.useCallback(() => {
+    setLightboxIndex(hasSiblings ? (siblingIndex ?? 0) : 0)
+    setLightboxOpen(true)
+  }, [hasSiblings, siblingIndex])
   const handleRemoveClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onRemove()
@@ -69,7 +103,7 @@ export function AttachmentPreviewItem({
           src={previewUrl}
           alt={filename}
           className="size-full object-cover cursor-pointer"
-          onClick={() => setLightboxOpen(true)}
+          onClick={openLightbox}
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
         />
         {/* hover 关闭按钮 */}
@@ -93,6 +127,9 @@ export function AttachmentPreviewItem({
           open={lightboxOpen}
           onOpenChange={setLightboxOpen}
           onEditComplete={onEditComplete}
+          images={lightboxImages}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
         />
       </div>
     )
