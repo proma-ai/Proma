@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SettingsSection } from './primitives'
 import type {
   DateFilter,
@@ -229,6 +230,19 @@ function EmptyState(): React.ReactElement {
   )
 }
 
+function TruncatedTooltipText({ value }: { value: string }): React.ReactElement {
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>
+        <span className="block truncate">{value}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[360px] break-all text-xs">
+        {value}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 // ===== 模型调用日志表 =====
 
 function ModelUsageTable({
@@ -272,7 +286,9 @@ function ModelUsageTable({
           {data.items.map((item) => (
             <TableRow key={item.id}>
               <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
-              <TableCell className="font-medium text-xs">{item.modelName}</TableCell>
+              <TableCell className="font-medium text-xs max-w-[180px]">
+                <TruncatedTooltipText value={item.modelName} />
+              </TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatCost(item.totalCost)}</TableCell>
@@ -394,7 +410,9 @@ function SpeechUsageTable({
           {data.items.map((item) => (
             <TableRow key={item.id}>
               <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
-              <TableCell className="font-medium text-xs">{item.modelName}</TableCell>
+              <TableCell className="font-medium text-xs max-w-[180px]">
+                <TruncatedTooltipText value={item.modelName} />
+              </TableCell>
               <TableCell className="text-right text-xs">{formatDuration(item.durationSeconds)}</TableCell>
               <TableCell className="text-right text-xs">{formatCost(item.cost)}</TableCell>
               <TableCell className="text-center">
@@ -471,7 +489,9 @@ function AgentUsageTable({
             <TableRow key={item.id}>
               <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
               <TableCell className="font-medium text-xs truncate max-w-[100px]">{item.apiKeyName}</TableCell>
-              <TableCell className="text-xs truncate max-w-[100px]">{item.modelId ?? '-'}</TableCell>
+              <TableCell className="text-xs max-w-[120px]">
+                <TruncatedTooltipText value={item.modelId ?? '-'} />
+              </TableCell>
               <TableCell className="text-xs truncate max-w-[120px]">{item.endpoint}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
