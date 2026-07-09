@@ -2298,3 +2298,46 @@
 .theme-terminal-dark [class*="rounded"] {
   border-radius: 0 !important;
 }
+
+/* ===== 草稿区：待办清单排版 =====
+ * TaskList/TaskItem 扩展带 not-prose，默认丢失了 prose 的行距/间距，且 flex 布局下
+ * 空待办项的正文 div 会塌缩到 0 宽导致光标无处落脚。以下规则仅作用于草稿区
+ * （.scratch-pad-editor），把待办项的行距、间距、字号对齐到正文与无序列表，
+ * 并保证空项也能落下光标。不改共享的扩展配置，故不影响 diff 预览等其它用到该扩展处。
+ */
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] {
+  margin: 0.75em 0;
+  padding-left: 0;
+  list-style: none;
+}
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin: 0.25em 0;
+}
+/* 正文撑开：空待办项也有宽度，光标可正常显示与闪烁 */
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 待办项段落行距对齐正文（prose-sm 约 1.71） */
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+  line-height: 1.7142857;
+}
+/* 勾选后置灰划线 —— 用语义色，跟随各主题 */
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
+  text-decoration: line-through;
+  color: hsl(var(--muted-foreground) / 0.6);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+/* 复选框与首行文字对齐 */
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > label {
+  flex: 0 0 auto;
+  margin-top: 0.28em;
+  user-select: none;
+}
+.scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > label > input {
+  cursor: pointer;
+}
