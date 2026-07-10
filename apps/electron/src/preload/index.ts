@@ -712,7 +712,7 @@ export interface ElectronAPI {
   showInFolder: (filePath: string) => Promise<void>
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */
-  showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => Promise<void>
+  showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => Promise<boolean>
 
   /** 解析文件路径并读取内容（供内联预览使用） */
   resolveAndReadFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<{ resolvedPath: string; content: string } | null>
@@ -1844,7 +1844,7 @@ const electronAPI: ElectronAPI = {
   },
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */
-  showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => {
+  showItemInFolder: (filePath: string, candidateBasePaths?: string[]): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.SHOW_ITEM_IN_FOLDER, filePath, candidateBasePaths)
   },
 
