@@ -1,4 +1,4 @@
-import type { ProviderType } from '@proma/shared'
+import { resolveAgentSdkModelId, type ProviderType } from '@proma/shared'
 
 export const DEEPSEEK_SUBAGENT_MODEL_ID = 'deepseek-v4-flash'
 export interface AgentModelRoutingInput {
@@ -37,7 +37,7 @@ export function applyAgentModelRoutingToEnv(
   policy: AgentModelRoutingPolicy,
 ): void {
   if (policy.subagentModel) {
-    env.CLAUDE_CODE_SUBAGENT_MODEL = policy.subagentModel
+    env.CLAUDE_CODE_SUBAGENT_MODEL = resolveAgentSdkModelId(policy.subagentModel)
   } else {
     delete env.CLAUDE_CODE_SUBAGENT_MODEL
   }

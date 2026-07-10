@@ -49,6 +49,6 @@ describe('Agent 辅助模型路由', () => {
       provider: 'deepseek',
     }))
 
-    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(DEEPSEEK_SUBAGENT_MODEL_ID)
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(`${DEEPSEEK_SUBAGENT_MODEL_ID}[1m]`)
   })
 })

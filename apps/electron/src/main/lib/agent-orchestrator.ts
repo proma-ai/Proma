@@ -29,6 +29,7 @@ import {
   THINKING_SIGNATURE_ERROR_TITLE,
   isPersistableSDKSystemMessage,
   normalizeMcpTransportType,
+  resolveAgentSdkModelId,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -60,6 +61,7 @@ import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
+import { isVisibleRunMessage } from './agent-run-message-visibility'
 
 // ===== 类型定义 =====
 
@@ -88,46 +90,12 @@ function sdkPermissionModeForPromaMode(mode: PromaPermissionMode): PromaPermissi
 
 const EMPTY_RESPONSE_RESULT_SUBTYPE = 'empty_response'
 
-function isNonEmptyString(value: unknown): boolean {
-  return typeof value === 'string' && value.trim().length > 0
-}
-
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 function isMissingActiveQueueChannelError(error: unknown): boolean {
   return errorMessageOf(error).includes('无活跃消息通道可注入队列消息')
-}
-
-function isVisibleRunMessage(message: SDKMessage): boolean {
-  const msgRecord = message as Record<string, unknown>
-  if (msgRecord.isReplay) return false
-
-  if (message.type === 'assistant') {
-    const assistantMsg = message as SDKAssistantMessage
-    if (assistantMsg.error) return true
-    const content = assistantMsg.message?.content
-    if (!Array.isArray(content)) return false
-    return content.some((block) => {
-      if (block.type === 'text') return isNonEmptyString((block as { text?: unknown }).text)
-      if (block.type === 'thinking') return isNonEmptyString((block as { thinking?: unknown }).thinking)
-      if (block.type === 'tool_use') return true
-      return Object.keys(block).length > 1
-    })
-  }
-
-  if (message.type === 'user') {
-    const content = (message as { message?: { content?: Array<{ type: string }> } }).message?.content
-    return Array.isArray(content) && content.some((block) => block.type === 'tool_result')
-  }
-
-  if (message.type === 'system') {
-    const subtype = (message as SDKSystemMessage).subtype
-    return subtype === 'task_started' || subtype === 'task_progress' || subtype === 'task_notification'
-  }
-
-  return false
 }
 
 /**
@@ -1545,14 +1513,16 @@ export class AgentOrchestrator {
 
       // 13. 构建 Adapter 查询选项
       // 检测用户选用的模型是否为 Claude 系列，决定 SubAgent 是否使用独立模型分层
-      const claudeAvailable = (modelId || DEFAULT_MODEL_ID).toLowerCase().includes('claude')
+      const selectedModelId = modelId || DEFAULT_MODEL_ID
+      const claudeAvailable = selectedModelId.toLowerCase().includes('claude')
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
       const queryOptions: ClaudeAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
-        model: modelId || DEFAULT_MODEL_ID,
+        // SDK 需要 `[1m]` 显式选择扩展上下文；发送给提供商前会自动剥离后缀。
+        model: resolveAgentSdkModelId(selectedModelId),
         cwd: agentCwd,
         sdkCliPath: cliPath,
         env: sdkEnv,
@@ -1636,10 +1606,11 @@ export class AgentOrchestrator {
           }
         },
         onModelResolved: (model: string) => {
-          resolvedModel = model
+          // `[1m]` 是 SDK 内部上下文变体，不应泄漏到标题生成或用户可见的模型名。
+          resolvedModel = model.replace(/\[1m\]$/i, '')
           console.log(`[Agent 编排] SDK 确认模型: ${resolvedModel}`)
           // 通知渲染进程更新流式状态中的模型信息
-          this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'model_resolved', model } })
+          this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'model_resolved', model: resolvedModel } })
         },
         onContextWindow: (cw: number) => {
           console.log(`[Agent 编排] 缓存 contextWindow: ${cw}`)

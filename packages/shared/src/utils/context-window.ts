@@ -3,9 +3,9 @@
  *
  * 1M 上下文已随各家模型转正为默认能力（Anthropic 于 2026-03 对 Opus 4.6 /
  * Sonnet 4.6 起 GA，无需 context-1m beta header；Sonnet 5 / Opus 4.7+ 延续），
- * 故不再下发任何 beta。本文件仅用于「按模型名推断上下文窗口大小」，供前端
- * ContextUsageBadge 进度环分母 fallback 与后端用量统计共用同一份判定，
- * 否则会出现"UI 显示 1M 但实际只 200K"或反过来的不一致。
+ * 故不再下发任何 beta。Claude Agent SDK 仍要求通过 `[1m]` 模型后缀显式选择
+ * 扩展上下文（发送请求前会自动剥离），因此前端推断、后端用量统计和 SDK 模型
+ * 选择必须共用同一份判定，否则会出现"UI 显示 1M 但实际只 200K"的不一致。
  */
 
 /** 默认上下文窗口（无法识别模型时使用） */
@@ -14,8 +14,35 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000
 /** 1M 上下文窗口 */
 export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
 
+/** 已确认需要显式选择 Claude Agent SDK `[1m]` 变体的模型。 */
+const AGENT_SDK_1M_CONTEXT_RULES = [
+  // Claude 系列
+  'claude-sonnet-4-6',
+  'claude-sonnet-5',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-fable-5',
+  // DeepSeek
+  'deepseek-v4',
+  // 智谱 GLM
+  'glm-5.2',
+  // 小米 MiMo
+  'mimo-v2.5',
+  // MiniMax
+  'minimax-m3',
+  // 通义千问
+  'qwen3.7',
+  'qwen3.6-plus',
+  'qwen3.6-flash',
+  'qwen3.5-plus',
+  'qwen3.5-flash',
+  'qwen3-coder-plus',
+] as const
+
 /**
- * 上下文窗口配置表 — 新增模型只需在此处加一行。
+ * 上下文窗口配置表。仅影响显示推断的模型加在 rules；已实测 Agent SDK 1M
+ * 行为的模型加在上方 AGENT_SDK_1M_CONTEXT_RULES，并自动复用于 rules。
  *
  * 匹配规则：modelId.toLowerCase() 包含 pattern 即命中（substring match）。
  * exclude 列表优先级最高：命中 exclude 的模型始终返回 DEFAULT_CONTEXT_WINDOW。
@@ -28,24 +55,9 @@ const CONTEXT_WINDOW_CONFIG = {
 
   /** 1M 上下文模型匹配规则 */
   rules: [
-    // Claude 系列
-    'claude-sonnet-4',
-    'claude-sonnet-5',
-    'claude-opus-4-6',
-    'claude-opus-4-7',
-    'claude-opus-4-8',
-    'claude-fable-5',
-    // DeepSeek
-    'deepseek-v4',
-    // 小米 MiMo
-    'mimo-v2.5',
+    ...AGENT_SDK_1M_CONTEXT_RULES,
+    // 已废弃的 MiMo V2 Pro 仅保留历史显示推断，不主动启用 SDK 1M 变体
     'mimo-v2-pro',
-    // 智谱 GLM
-    'glm-5.2',
-    // MiniMax
-    'minimax-m3',
-    // Qwen3.7（DashScope Anthropic 兼容端点默认 1M，无需 context-1m beta header）
-    'qwen3.7',
   ] as const,
 } as const
 
@@ -69,4 +81,19 @@ export function inferContextWindow(model?: string): number | undefined {
   if (!model) return undefined
   if (supports1MContext(model)) return ONE_MILLION_CONTEXT_WINDOW
   return DEFAULT_CONTEXT_WINDOW
+}
+
+/**
+ * 将已确认的 1M Agent 模型转换为 Claude Agent SDK 的扩展上下文变体。
+ *
+ * `[1m]` 仅影响 SDK 的窗口与自动压缩判定；SDK 发给提供商前会自动剥离该后缀，
+ * 因此不会改变 Proma 渠道路由使用的真实模型 ID。
+ */
+export function resolveAgentSdkModelId(modelId: string): string {
+  if (!modelId || /\[1m\]$/i.test(modelId)) {
+    return modelId
+  }
+  const model = modelId.toLowerCase()
+  if (!AGENT_SDK_1M_CONTEXT_RULES.some((pattern) => model.includes(pattern))) return modelId
+  return `${modelId}[1m]`
 }

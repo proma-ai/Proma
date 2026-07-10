@@ -67,7 +67,7 @@ describe('工具折叠 ×N', () => {
 })
 
 describe('SDK 压缩状态分组', () => {
-  test('status 压缩事件独立成组并生成预览', () => {
+  test('Given 压缩从进行中变为失败 When 分组 Then 原位更新同一个状态组', () => {
     const raw = jsonl([
       { type: 'user', message: { content: [{ type: 'text', text: '压缩测试' }] }, parent_tool_use_id: null },
       { type: 'assistant', message: { id: 'a1', content: [{ type: 'text', text: '准备压缩' }] }, parent_tool_use_id: null },
@@ -77,9 +77,47 @@ describe('SDK 压缩状态分组', () => {
 
     const groups = groupIntoTurns(readSessionMessagesFromString(raw))
 
-    expect(groups.map((g) => g.type)).toEqual(['user', 'assistant-turn', 'system', 'system'])
-    expect(getGroupPreview(groups[2]!)).toBe('正在压缩上下文...')
-    expect(getGroupPreview(groups[3]!)).toBe('上下文压缩失败')
+    expect(groups.map((g) => g.type)).toEqual(['user', 'assistant-turn', 'system'])
+    expect(getGroupPreview(groups[2]!)).toBe('上下文压缩失败')
+    expect(groups[2]).toMatchObject({
+      type: 'system',
+      identityMessage: { status: 'compacting' },
+      message: { compact_result: 'failed' },
+    })
+  })
+
+  test('Given 压缩产生多个成功事件 When 分组 Then 只保留一条已完成分界线', () => {
+    const raw = jsonl([
+      { type: 'user', message: { content: [{ type: 'text', text: '/compact' }] }, parent_tool_use_id: null },
+      { type: 'system', subtype: 'compacting' },
+      { type: 'system', subtype: 'status', compact_result: 'success' },
+      { type: 'system', subtype: 'compact_boundary' },
+      { type: 'result', subtype: 'success' },
+    ])
+
+    const groups = groupIntoTurns(readSessionMessagesFromString(raw))
+
+    expect(groups.map((g) => g.type)).toEqual(['user', 'system'])
+    expect(getGroupPreview(groups[1]!)).toBe('上下文已压缩')
+    expect(groups[1]).toMatchObject({
+      type: 'system',
+      identityMessage: { subtype: 'compacting' },
+      message: { subtype: 'compact_boundary' },
+    })
+  })
+
+  test('Given 上一次压缩已结束且下一次立即开始 When 分组 Then 保留两个压缩周期', () => {
+    const raw = jsonl([
+      { type: 'system', subtype: 'compacting' },
+      { type: 'system', subtype: 'compact_boundary' },
+      { type: 'system', subtype: 'compacting' },
+    ])
+
+    const groups = groupIntoTurns(readSessionMessagesFromString(raw))
+
+    expect(groups).toHaveLength(2)
+    expect(getGroupPreview(groups[0]!)).toBe('上下文已压缩')
+    expect(getGroupPreview(groups[1]!)).toBe('正在压缩上下文...')
   })
 })
 

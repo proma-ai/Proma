@@ -1294,10 +1294,10 @@ export function getGroupId(group: MessageGroup): string {
     return messageIdCache.get(group.message)!
   }
   if (group.type === 'system') {
-    if (!messageIdCache.has(group.message)) {
-      messageIdCache.set(group.message, `system-${group.message.subtype ?? 'unknown'}-${++fallbackIdCounter}`)
+    if (!messageIdCache.has(group.identityMessage)) {
+      messageIdCache.set(group.identityMessage, `system-${group.identityMessage.subtype ?? 'unknown'}-${++fallbackIdCounter}`)
     }
-    return messageIdCache.get(group.message)!
+    return messageIdCache.get(group.identityMessage)!
   }
   // assistant-turn：取首条 assistant 消息的 uuid
   const first = group.assistantMessages[0]

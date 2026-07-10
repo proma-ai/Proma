@@ -79,7 +79,13 @@ export interface AssistantTurn {
 
 export type MessageGroup =
   | { type: 'user'; message: SDKUserMessage }
-  | { type: 'system'; message: SDKSystemMessage }
+  | {
+      type: 'system'
+      /** 当前需要渲染的最新状态。 */
+      message: SDKSystemMessage
+      /** 首次创建该 group 的消息，用于压缩状态原位更新时保持稳定身份。 */
+      identityMessage: SDKSystemMessage
+    }
   | AssistantTurn
 
 /**
@@ -95,9 +101,6 @@ export type MessageGroup =
 export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
-  const hasCompactBoundary = messages.some((msg) => {
-    return msg.type === 'system' && (msg as SDKSystemMessage).subtype === 'compact_boundary'
-  })
   // 收到后台任务完成通知（task_notification）后，若没有用户输入就直接出现新的 assistant 输出，
   // 说明这是自动唤醒的新一轮，应另起独立消息块，而不是续接上一轮。
   // 注意：不能用 result 做信号——正常对话每轮也以 result 结束，会误伤普通回复。
@@ -149,14 +152,30 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
       }
     } else if (msg.type === 'system') {
       const sysMsg = msg as SDKSystemMessage
-      if (hasCompactBoundary && sysMsg.subtype === 'status' && sysMsg.compact_result === 'success') {
-        continue
-      }
       // 仅需要独立渲染的 system 消息才中断 turn（压缩状态 / permission_denied）
       // 其他 system 消息（如 init、task_started、task_progress）归入当前 turn，不中断分组
       if (isPersistableSDKSystemMessage(sysMsg)) {
         flushTurn()
-        groups.push({ type: 'system', message: sysMsg })
+        const previousGroup = groups.at(-1)
+        const compactStatus = getSDKCompactStatus(sysMsg)
+        const previousCompactStatus = previousGroup?.type === 'system'
+          ? getSDKCompactStatus(previousGroup.message)
+          : undefined
+        const startsNewCompactLifecycle = compactStatus === 'compacting'
+          && previousCompactStatus !== undefined
+          && previousCompactStatus !== 'compacting'
+        // 同一次压缩会依次产生 compacting、status success/failed、compact_boundary。
+        // 这些事件共同更新一个 group，避免界面为一个压缩生命周期渲染多条分界线。
+        if (
+          compactStatus
+          && previousGroup?.type === 'system'
+          && previousCompactStatus
+          && !startsNewCompactLifecycle
+        ) {
+          previousGroup.message = sysMsg
+        } else {
+          groups.push({ type: 'system', message: sysMsg, identityMessage: sysMsg })
+        }
       } else if (sysMsg.subtype === 'task_notification') {
         // 后台任务完成通知：仅在没有进行中的 turn 时标记唤醒边界（真正的唤醒场景）。
         // 若当前有 turn 正在进行，归入当前 turn 不截断。
