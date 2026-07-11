@@ -76,12 +76,27 @@ interface ChannelFormProps {
 /** 所有可选供应商 */
 const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
+/** 需要用 messages 端点测试的供应商预设模型 */
+const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+  'kimi-api': ['kimi-k2.6'],
+  xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
+  'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
+}
+
 /** 供应商选项（用于 SettingsSelect） */
 const PROVIDER_SELECT_OPTIONS = PROVIDER_OPTIONS.map((p) => ({
   value: p,
   label: PROVIDER_LABELS[p],
   icon: getProviderLogo(p),
 }))
+
+function resolveDirectTestModelId(provider: ProviderType, models: ChannelModel[]): string | undefined {
+  if (!PROVIDER_TEST_MODEL_PRESETS[provider]) return undefined
+  const configuredModelId = models.find((model) => model.enabled)?.id ?? models[0]?.id
+  if (configuredModelId) return configuredModelId
+  return PROVIDER_TEST_MODEL_PRESETS[provider]?.[0]
+}
 
 /** 走 Anthropic 协议的供应商集合（共用 /v1/messages 端点） */
 const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
@@ -392,10 +407,12 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     setTestResult(null)
 
     try {
+      const modelId = resolveDirectTestModelId(provider, models)
       const result = await window.electronAPI.testChannelDirect({
         provider,
         baseUrl,
         apiKey,
+        ...(modelId ? { modelId } : {}),
       })
       setTestResult(result)
     } catch (error) {

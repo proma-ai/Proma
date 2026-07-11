@@ -232,6 +232,18 @@ export interface FetchModelsInput {
 }
 
 /**
+ * 直接测试渠道连接的输入参数（无需已保存的渠道，直接传入凭证）
+ */
+export interface ChannelDirectTestInput {
+  provider: ProviderType
+  baseUrl: string
+  /** 明文 API Key */
+  apiKey: string
+  /** 用于 messages 端点测试的模型 ID；不需要模型的供应商可忽略 */
+  modelId?: string
+}
+
+/**
  * 拉取模型的结果
  */
 export interface FetchModelsResult {

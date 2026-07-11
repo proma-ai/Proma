@@ -16,6 +16,7 @@ import type {
   ChannelUpdateInput,
   ChannelsConfig,
   ChannelTestResult,
+  ChannelDirectTestInput,
   ChannelModel,
   FetchModelsInput,
   FetchModelsResult,
@@ -40,6 +41,20 @@ const CONFIG_VERSION = 2
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
 const ARK_CODING_PLAN_TEST_MODEL = 'doubao-seed-2.0-code'
+const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+]
+const KIMI_PRESET_MODELS: ChannelModel[] = [
+  { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
+]
+const XIAOMI_PRESET_MODELS: ChannelModel[] = [
+  { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
+  { id: 'mimo-v2-pro', name: 'MiMo V2 Pro', enabled: true },
+  { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
+  { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
+  { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
+]
 const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
   { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
@@ -57,6 +72,67 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
  */
 function withTimeout(init: RequestInit): RequestInit {
   return { ...init, signal: AbortSignal.timeout(CHANNEL_TEST_TIMEOUT_MS) }
+}
+
+function cloneModels(models: ChannelModel[]): ChannelModel[] {
+  return models.map((model) => ({ ...model }))
+}
+
+function createPresetModelsResult(providerName: string, models: ChannelModel[]): FetchModelsResult {
+  return {
+    success: true,
+    message: `${providerName} 未开放模型列表端点，已加载 ${models.length} 个预设模型`,
+    models: cloneModels(models),
+  }
+}
+
+function resolveFirstTestModelId(models?: ChannelModel[]): string | undefined {
+  return models?.find((model) => model.enabled)?.id ?? models?.[0]?.id
+}
+
+function resolveDeepSeekTestModelId(modelId?: string, models?: ChannelModel[]): string {
+  const explicitModelId = modelId?.trim()
+  if (explicitModelId) return explicitModelId
+  return resolveFirstTestModelId(models) ?? DEEPSEEK_PRESET_MODELS[0]!.id
+}
+
+function resolveKimiTestModelId(modelId?: string, models?: ChannelModel[]): string {
+  const explicitModelId = modelId?.trim()
+  if (explicitModelId) return explicitModelId
+  return resolveFirstTestModelId(models) ?? KIMI_PRESET_MODELS[0]!.id
+}
+
+function resolveXiaomiTestModelId(modelId?: string, models?: ChannelModel[]): string {
+  const explicitModelId = modelId?.trim()
+  if (explicitModelId) return explicitModelId
+  return resolveFirstTestModelId(models) ?? XIAOMI_PRESET_MODELS[0]!.id
+}
+
+function resolveDeepSeekModelsUrl(baseUrl: string): string {
+  return `${new URL(baseUrl.trim()).origin}/models`
+}
+
+function resolveKimiModelsUrl(baseUrl: string): string {
+  const origin = new URL(baseUrl.trim()).origin
+  return `${origin}/v1/models`
+}
+
+function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): ProviderType {
+  try {
+    const hostname = new URL(baseUrl.trim()).hostname
+    if (hostname.startsWith('token-plan-') && hostname.endsWith('.xiaomimimo.com')) {
+      return 'xiaomi-token-plan'
+    }
+    if (hostname === 'api.xiaomimimo.com') {
+      return 'xiaomi'
+    }
+    if (hostname === 'api.moonshot.cn' || hostname === 'api.moonshot.ai') {
+      return 'kimi-api'
+    }
+    return provider
+  } catch {
+    return provider
+  }
 }
 
 /**
@@ -293,10 +369,7 @@ export function listChannels(): Channel[] {
       provider: 'deepseek',
       baseUrl: PROVIDER_DEFAULT_URLS.deepseek,
       apiKey: encryptApiKey(''),
-      models: [
-        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
-        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
-      ],
+      models: cloneModels(DEEPSEEK_PRESET_MODELS),
       enabled: false,
       createdAt: now,
       updatedAt: now,
@@ -437,9 +510,10 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
 
   const apiKey = decryptKey(channel.apiKey)
   const proxyUrl = await getEffectiveProxyUrl()
+  const provider = inferProviderFromBaseUrl(channel.provider, channel.baseUrl)
 
   try {
-    switch (channel.provider) {
+    switch (provider) {
       case 'proma':
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
@@ -453,20 +527,54 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
-        if (channel.provider === 'ark-coding-plan') {
+        if (provider === 'deepseek') {
+          return await testDeepSeekMessages(
+            channel.baseUrl,
+            apiKey,
+            resolveDeepSeekTestModelId(undefined, channel.models),
+            proxyUrl,
+          )
+        }
+        if (provider === 'kimi-api') {
+          return await testKimiMessages(
+            channel.baseUrl,
+            apiKey,
+            resolveKimiTestModelId(undefined, channel.models),
+            proxyUrl,
+          )
+        }
+        if (provider === 'xiaomi') {
+          return await testXiaomiMessages(
+            channel.baseUrl,
+            apiKey,
+            resolveXiaomiTestModelId(undefined, channel.models),
+            'xiaomi',
+            proxyUrl,
+          )
+        }
+        if (provider === 'xiaomi-token-plan') {
+          return await testXiaomiMessages(
+            channel.baseUrl,
+            apiKey,
+            resolveXiaomiTestModelId(undefined, channel.models),
+            'xiaomi-token-plan',
+            proxyUrl,
+          )
+        }
+        if (provider === 'ark-coding-plan') {
           return await testArkCodingPlan(channel.baseUrl, apiKey, proxyUrl)
         }
-        return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
+        return await testAnthropicCompatible(channel.baseUrl, apiKey, proxyUrl, provider)
       case 'openai':
       case 'zhipu':
       case 'doubao':
       case 'qwen':
       case 'custom':
-        return await testOpenAICompatible(channel.baseUrl, apiKey, proxyUrl, channel.provider)
+        return await testOpenAICompatible(channel.baseUrl, apiKey, proxyUrl, provider)
       case 'google':
         return await testGoogle(channel.baseUrl, apiKey, proxyUrl)
       default:
-        return { success: false, message: `不支持的供应商: ${channel.provider}。你可能过去使用的是 Proma 商业版，请重新下载商业版覆盖安装，当前版本为开源版本。` }
+        return { success: false, message: `不支持的供应商: ${provider}。你可能过去使用的是 Proma 商业版，请重新下载商业版覆盖安装，当前版本为开源版本。` }
     }
   } catch (error) {
     return normalizeRequestError(error)
@@ -508,6 +616,99 @@ async function testAnthropicCompatible(
   const response = await fetchFn(url, withTimeout({
     method: 'GET',
     headers,
+  }))
+
+  return normalizeHttpResponse(response)
+}
+
+/**
+ * DeepSeek 的 /models 端点可用性与具体模型可用性不完全等价。
+ * 连接测试使用渠道第一个可用模型发极小 messages 请求，更贴近真实使用路径。
+ */
+async function testDeepSeekMessages(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  proxyUrl?: string,
+): Promise<ChannelTestResult> {
+  const url = resolveAnthropicMessagesUrl(baseUrl, 'deepseek')
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'POST',
+    headers: {
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    }),
+  }))
+
+  return normalizeHttpResponse(response)
+}
+
+/**
+ * Kimi API 的连接测试使用 Anthropic messages 端点和第一个可用模型。
+ */
+async function testKimiMessages(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  proxyUrl?: string,
+): Promise<ChannelTestResult> {
+  const url = resolveAnthropicMessagesUrl(baseUrl, 'kimi-api')
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'POST',
+    headers: {
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    }),
+  }))
+
+  return normalizeHttpResponse(response)
+}
+
+/**
+ * 小米 API 的模型可用性需要走真实 messages 请求验证。
+ */
+async function testXiaomiMessages(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  provider: 'xiaomi' | 'xiaomi-token-plan',
+  proxyUrl?: string,
+): Promise<ChannelTestResult> {
+  const url = resolveAnthropicMessagesUrl(baseUrl, provider)
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+    'api-key': apiKey,
+  }
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    }),
   }))
 
   return normalizeHttpResponse(response)
@@ -586,11 +787,12 @@ async function testGoogle(baseUrl: string, apiKey: string, proxyUrl?: string): P
  * 使用传入的明文凭证直接向提供商发送测试请求。
  * 适用于创建/编辑渠道时用户在保存前先验证连接。
  */
-export async function testChannelDirect(input: FetchModelsInput): Promise<ChannelTestResult> {
+export async function testChannelDirect(input: ChannelDirectTestInput): Promise<ChannelTestResult> {
   const proxyUrl = await getEffectiveProxyUrl()
+  const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 
   try {
-    switch (input.provider) {
+    switch (provider) {
       case 'proma':
         return { success: true, message: '官方渠道无需测试' }
       case 'anthropic':
@@ -604,20 +806,54 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
-        if (input.provider === 'ark-coding-plan') {
+        if (provider === 'deepseek') {
+          return await testDeepSeekMessages(
+            input.baseUrl,
+            input.apiKey,
+            resolveDeepSeekTestModelId(input.modelId),
+            proxyUrl,
+          )
+        }
+        if (provider === 'kimi-api') {
+          return await testKimiMessages(
+            input.baseUrl,
+            input.apiKey,
+            resolveKimiTestModelId(input.modelId),
+            proxyUrl,
+          )
+        }
+        if (provider === 'xiaomi') {
+          return await testXiaomiMessages(
+            input.baseUrl,
+            input.apiKey,
+            resolveXiaomiTestModelId(input.modelId),
+            'xiaomi',
+            proxyUrl,
+          )
+        }
+        if (provider === 'xiaomi-token-plan') {
+          return await testXiaomiMessages(
+            input.baseUrl,
+            input.apiKey,
+            resolveXiaomiTestModelId(input.modelId),
+            'xiaomi-token-plan',
+            proxyUrl,
+          )
+        }
+        if (provider === 'ark-coding-plan') {
           return await testArkCodingPlan(input.baseUrl, input.apiKey, proxyUrl)
         }
-        return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+        return await testAnthropicCompatible(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'zhipu':
       case 'doubao':
       case 'qwen':
       case 'custom':
-        return await testOpenAICompatible(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+        return await testOpenAICompatible(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'google':
         return await testGoogle(input.baseUrl, input.apiKey, proxyUrl)
       default:
-        return { success: false, message: `不支持的提供商: ${input.provider}` }
+        return { success: false, message: `不支持的提供商: ${provider}` }
     }
   } catch (error) {
     return normalizeRequestError(error)
@@ -634,9 +870,10 @@ export async function testChannelDirect(input: FetchModelsInput): Promise<Channe
  */
 export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsResult> {
   const proxyUrl = await getEffectiveProxyUrl()
+  const provider = inferProviderFromBaseUrl(input.provider, input.baseUrl)
 
   try {
-    switch (input.provider) {
+    switch (provider) {
       case 'proma':
         return { success: false, message: '官方渠道模型由服务端管理', models: [] }
       case 'anthropic':
@@ -650,29 +887,129 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
-        if (input.provider === 'ark-coding-plan') {
+        if (provider === 'deepseek') {
+          return await fetchDeepSeekModels(input.baseUrl, input.apiKey, proxyUrl)
+        }
+        if (provider === 'kimi-api') {
+          return await fetchKimiModels(input.baseUrl, input.apiKey, proxyUrl)
+        }
+        if (provider === 'xiaomi') {
+          return createPresetModelsResult('小米 API', XIAOMI_PRESET_MODELS)
+        }
+        if (provider === 'xiaomi-token-plan') {
+          return createPresetModelsResult('小米 Token Plan', XIAOMI_PRESET_MODELS)
+        }
+        if (provider === 'ark-coding-plan') {
           return {
             success: true,
             message: `火山方舟 Coding Plan 未开放模型列表端点，已加载 ${ARK_CODING_PLAN_MODELS.length} 个预设模型`,
             models: ARK_CODING_PLAN_MODELS,
           }
         }
-        return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+        return await fetchAnthropicCompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'openai':
       case 'zhipu':
       case 'doubao':
       case 'qwen':
       case 'custom':
-        return await fetchOpenAICompatibleModels(input.baseUrl, input.apiKey, proxyUrl, input.provider)
+        return await fetchOpenAICompatibleModels(input.baseUrl, input.apiKey, proxyUrl, provider)
       case 'google':
         return await fetchGoogleModels(input.baseUrl, input.apiKey, proxyUrl)
       default:
-        return { success: false, message: `不支持的供应商: ${input.provider}`, models: [] }
+        return { success: false, message: `不支持的供应商: ${provider}`, models: [] }
     }
   } catch (error) {
     console.error('[渠道管理] 拉取模型列表失败:', error)
     const result = normalizeRequestError(error)
     return { success: false, message: result.message, models: [] }
+  }
+}
+
+/**
+ * 从 DeepSeek 原生模型 API 拉取模型列表。
+ *
+ * DeepSeek 的 Anthropic 对话端点是 /anthropic/v1/messages，但模型列表端点固定在 /models。
+ */
+async function fetchDeepSeekModels(
+  baseUrl: string,
+  apiKey: string,
+  proxyUrl?: string,
+): Promise<FetchModelsResult> {
+  const url = resolveDeepSeekModelsUrl(baseUrl)
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+  }))
+
+  if (!response.ok) {
+    const result = await normalizeHttpResponse(response)
+    return { success: false, message: result.message, models: [] }
+  }
+
+  const data = await response.json() as { data?: OpenAIModelItem[] }
+  const items = data.data ?? []
+
+  const models: ChannelModel[] = items.map((item) => ({
+    id: item.id,
+    name: item.id,
+    enabled: true,
+  }))
+
+  models.sort((a, b) => a.id.localeCompare(b.id))
+
+  return {
+    success: true,
+    message: `成功获取 ${models.length} 个模型`,
+    models,
+  }
+}
+
+/**
+ * 从 Kimi OpenAI-compatible 模型列表端点拉取模型。
+ *
+ * Kimi 的 Anthropic 对话端点保留 /anthropic/v1/messages；模型列表使用官方 /v1/models。
+ */
+async function fetchKimiModels(
+  baseUrl: string,
+  apiKey: string,
+  proxyUrl?: string,
+): Promise<FetchModelsResult> {
+  const url = resolveKimiModelsUrl(baseUrl)
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+  }))
+
+  if (!response.ok) {
+    const result = await normalizeHttpResponse(response)
+    return { success: false, message: result.message, models: [] }
+  }
+
+  const data = await response.json() as { data?: OpenAIModelItem[] }
+  const items = data.data ?? []
+
+  const models: ChannelModel[] = items.map((item) => ({
+    id: item.id,
+    name: item.id,
+    enabled: true,
+  }))
+
+  models.sort((a, b) => a.id.localeCompare(b.id))
+
+  return {
+    success: true,
+    message: `成功获取 ${models.length} 个模型`,
+    models,
   }
 }
 

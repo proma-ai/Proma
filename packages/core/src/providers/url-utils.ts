@@ -196,6 +196,9 @@ export function resolveAnthropicMessagesUrl(baseUrl: string, provider: ProviderT
   if (provider === 'anthropic-compatible') {
     return trimTrailingUrlPathSlash(baseUrl)
   }
+  if (provider === 'xiaomi' || provider === 'xiaomi-token-plan') {
+    return `${new URL(baseUrl.trim()).origin}/anthropic/v1/messages`
+  }
   if (hasPathSuffix(baseUrl, '/messages')) {
     return trimTrailingUrlPathSlash(baseUrl)
   }

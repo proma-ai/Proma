@@ -31,6 +31,7 @@ import type {
   ChannelCreateInput,
   ChannelUpdateInput,
   ChannelTestResult,
+  ChannelDirectTestInput,
   FetchModelsInput,
   FetchModelsResult,
   ConversationMeta,
@@ -1139,7 +1140,7 @@ export function registerIpcHandlers(): void {
   // 直接测试连接（无需已保存渠道，传入明文凭证）
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.TEST_DIRECT,
-    async (_, input: FetchModelsInput): Promise<ChannelTestResult> => {
+    async (_, input: ChannelDirectTestInput): Promise<ChannelTestResult> => {
       return testChannelDirect(input)
     }
   )

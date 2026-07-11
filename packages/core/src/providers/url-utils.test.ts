@@ -243,6 +243,18 @@ describe('resolveAnthropicMessagesUrl', () => {
     )
   })
 
+  test('小米 Token Plan 从 OpenAI Base URL 纠正到 Anthropic messages 端点', () => {
+    expect(resolveAnthropicMessagesUrl('https://token-plan-cn.xiaomimimo.com/v1', 'xiaomi-token-plan')).toBe(
+      'https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages',
+    )
+  })
+
+  test('小米 API 从 OpenAI Base URL 纠正到 Anthropic messages 端点', () => {
+    expect(resolveAnthropicMessagesUrl('https://api.xiaomimimo.com/v1', 'xiaomi')).toBe(
+      'https://api.xiaomimimo.com/anthropic/v1/messages',
+    )
+  })
+
   test('内置 anthropic 已是完整端点不重复追加', () => {
     expect(resolveAnthropicMessagesUrl('https://api.anthropic.com/v1/messages', 'anthropic')).toBe(
       'https://api.anthropic.com/v1/messages',
