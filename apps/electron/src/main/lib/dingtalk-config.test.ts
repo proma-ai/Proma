@@ -143,4 +143,44 @@ describe('钉钉 Bot 配置迁移', () => {
     const shared = merged.find((b: { chatId: string }) => b.chatId === 'chat-shared')
     expect(shared.sessionId).toBe('new-session')
   })
+
+  test('Given 已有 Bot 修改 Client ID When 保存配置 Then 立即返回新稳定 Bot ID 并迁移绑定文件', () => {
+    const oldClientId = 'ding-old-app-key'
+    const nextClientId = 'ding-next-app-key'
+    const oldBotId = createStableDingTalkBotId(oldClientId)!
+    const nextBotId = createStableDingTalkBotId(nextClientId)!
+    const bindings = [
+      { chatId: 'chat-existing', sessionId: 'session-existing', workspaceId: 'ws-1', channelId: 'ch-1' },
+    ]
+
+    writeFileSync(configPaths.getDingTalkConfigPath(), JSON.stringify({
+      version: 2,
+      bots: [
+        {
+          id: oldBotId,
+          name: '钉钉助手',
+          enabled: true,
+          clientId: oldClientId,
+          clientSecret: 'secret',
+          defaultWorkspaceId: 'ws-1',
+        },
+      ],
+    }, null, 2), 'utf-8')
+    writeFileSync(configPaths.getDingTalkBotBindingsPath(oldBotId), JSON.stringify(bindings, null, 2), 'utf-8')
+
+    const saved = dingtalkConfig.saveDingTalkBotConfig({
+      id: oldBotId,
+      name: '钉钉助手',
+      enabled: true,
+      clientId: nextClientId,
+      clientSecret: '',
+      defaultWorkspaceId: 'ws-1',
+    })
+
+    expect(saved.id).toBe(nextBotId)
+    expect(dingtalkConfig.getDingTalkBotById(nextBotId)?.clientId).toBe(nextClientId)
+    expect(dingtalkConfig.getDingTalkBotById(oldBotId)).toBeUndefined()
+    expect(existsSync(configPaths.getDingTalkBotBindingsPath(oldBotId))).toBe(false)
+    expect(JSON.parse(readFileSync(configPaths.getDingTalkBotBindingsPath(nextBotId), 'utf-8'))).toEqual(bindings)
+  })
 })

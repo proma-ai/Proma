@@ -13,7 +13,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
-import { FileDown, PanelRight, X } from 'lucide-react'
+import { FileDown, List, ListTodo, PanelRight, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { scratchPadContentAtom, scratchPadLoadedAtom, tabsAtom, activeTabIdAtom } from '@/atoms/tab-atoms'
 import {
@@ -605,7 +605,7 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
           {loaded ? (
             <EditorContent
               editor={editor}
-              className="prose prose-sm dark:prose-invert max-w-none h-full [&_.ProseMirror]:min-h-full [&_.ProseMirror]:outline-none [&_.ProseMirror]:text-sm [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground/50 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0"
+              className="scratch-pad-editor prose prose-sm dark:prose-invert max-w-none h-full [&_.ProseMirror]:min-h-full [&_.ProseMirror]:outline-none [&_.ProseMirror]:text-sm [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground/50 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0"
             />
           ) : (
             <div className="min-h-[200px] flex items-center justify-center">
@@ -627,9 +627,29 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
         <SpeechButton className={speechButtonClassName} />
       </div>
       <div className="h-[28px] border-t border-border/40 px-4 flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground/60">
-          {isPane ? '草稿自动保存' : 'Scratch Pad — 内容自动保存到本地'}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => editor?.chain().focus().toggleTaskList().run()}
+            className="text-[11px] text-muted-foreground/60 hover:text-foreground flex items-center gap-1 transition-colors"
+            title="插入 / 切换待办清单（也可在行首输入 [ ] 加空格）"
+          >
+            <ListTodo className="w-3 h-3" />
+            待办清单
+          </button>
+          <button
+            type="button"
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+            className="text-[11px] text-muted-foreground/60 hover:text-foreground flex items-center gap-1 transition-colors"
+            title="插入 / 切换无序列表（也可在行首输入 - 加空格）"
+          >
+            <List className="w-3 h-3" />
+            无序列表
+          </button>
+          <span className="text-[11px] text-muted-foreground/60">
+            {isPane ? '草稿自动保存' : 'Scratch Pad — 内容自动保存到本地'}
+          </span>
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

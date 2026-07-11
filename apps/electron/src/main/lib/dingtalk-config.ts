@@ -199,11 +199,19 @@ export function saveDingTalkBotConfig(input: DingTalkBotConfigInput): DingTalkBo
       throw new Error(`Bot ${input.id} 不存在`)
     }
     const existing = config.bots[idx]!
+    const clientId = input.clientId.trim()
+    const resolvedId = resolveBotId(clientId, input.id)
+    const nextId = config.bots.some((b, i) => i !== idx && b.id === resolvedId)
+      ? input.id
+      : resolvedId
+    if (nextId !== input.id) {
+      migrateDingTalkBindingFile(input.id, nextId)
+    }
     const updated: DingTalkBotConfig = {
-      id: input.id,
+      id: nextId,
       name: input.name,
       enabled: input.enabled,
-      clientId: input.clientId.trim(),
+      clientId,
       clientSecret: input.clientSecret ? encryptSecret(input.clientSecret) : existing.clientSecret,
       defaultWorkspaceId: input.defaultWorkspaceId,
       defaultChannelId: input.defaultChannelId,
