@@ -53,6 +53,28 @@ function writeSdkSessionJsonl(sdkSessionId: string, rows: string[]): void {
   writeFileSync(join(dir, `${sdkSessionId}.jsonl`), jsonl(rows), 'utf-8')
 }
 
+function writeAgentSessionsIndex(sessions: Array<{
+  id: string
+  title: string
+  workspaceId: string
+  createdAt: number
+  updatedAt: number
+}>): void {
+  const dir = join(tempHome, '.proma')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'agent-sessions.json'), JSON.stringify({ version: 1, sessions }), 'utf-8')
+}
+
+function createIndexedSessions(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `session-${index}`,
+    title: `会话 ${index}`,
+    workspaceId: 'workspace-a',
+    createdAt: index,
+    updatedAt: index,
+  }))
+}
+
 beforeAll(async () => {
   tempHome = mkdtempSync(join(os.tmpdir(), 'proma-agent-session-manager-'))
   process.env.HOME = tempHome
@@ -125,5 +147,32 @@ describe('Agent 会话 JSONL 读取', () => {
 
     expect(() => manager.truncateSDKMessages('session-truncate-bad-line', 'assistant-1'))
       .toThrow('JSONL 第 2 行解析失败')
+  })
+})
+
+describe('Agent 会话引用搜索', () => {
+  test('Given 工作区有超过 20 个会话 When 请求最近 200 条 Then 按更新时间返回 200 条', () => {
+    writeAgentSessionsIndex(createIndexedSessions(220))
+
+    const results = manager.searchAgentSessionReferences({
+      workspaceId: 'workspace-a',
+      limit: 200,
+    })
+
+    expect(results).toHaveLength(200)
+    expect(results[0]?.sessionId).toBe('session-219')
+    expect(results.at(-1)?.sessionId).toBe('session-20')
+    expect(results.every((result) => result.matchSource === 'recent')).toBe(true)
+  })
+
+  test('Given 请求数量超过性能上限 When 搜索可引用会话 Then 最多返回 200 条', () => {
+    writeAgentSessionsIndex(createIndexedSessions(220))
+
+    const results = manager.searchAgentSessionReferences({
+      workspaceId: 'workspace-a',
+      limit: 500,
+    })
+
+    expect(results).toHaveLength(200)
   })
 })

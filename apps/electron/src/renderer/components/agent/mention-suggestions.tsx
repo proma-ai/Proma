@@ -231,6 +231,10 @@ export function createMcpMentionSuggestion(
 
 export type SessionMentionItem = AgentSessionReferenceSearchResult
 
+// 空查询只读会话索引，可安全展示更多；搜索会读取 JSONL 消息，保持较小上限避免阻塞主进程。
+const RECENT_SESSION_MENTION_LIMIT = 200
+const SEARCHED_SESSION_MENTION_LIMIT = 20
+
 export function createSessionMentionSuggestion(
   workspaceIdRef: React.RefObject<string | null>,
   currentSessionIdRef: React.RefObject<string | null>,
@@ -249,7 +253,7 @@ export function createSessionMentionSuggestion(
           workspaceId,
           excludeSessionId: currentSessionIdRef.current ?? undefined,
           query: q,
-          limit: 20,
+          limit: q ? SEARCHED_SESSION_MENTION_LIMIT : RECENT_SESSION_MENTION_LIMIT,
         })
       },
       keyExtractor: (item) => item.sessionId,

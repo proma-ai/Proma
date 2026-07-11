@@ -57,6 +57,14 @@ interface AgentSessionsIndex {
 /** 当前索引版本 */
 const INDEX_VERSION = 1
 
+/**
+ * 会话引用最大返回数。
+ *
+ * 无搜索词时只返回索引中的轻量元数据，200 条可以显著扩大可选范围，
+ * 同时避免极端会话数量下向渲染进程传输过大列表。
+ */
+const MAX_SESSION_REFERENCE_LIMIT = 200
+
 interface JsonlParseError {
   lineNumber: number
   message: string
@@ -1707,7 +1715,7 @@ export function searchAgentSessionReferences(input: AgentSessionReferenceSearchI
   const query = (input?.query ?? '').trim()
   const queryLower = query.toLowerCase()
   const requestedLimit = Number.isFinite(input?.limit) ? input.limit! : 20
-  const limit = Math.min(Math.max(requestedLimit, 1), 50)
+  const limit = Math.min(Math.max(requestedLimit, 1), MAX_SESSION_REFERENCE_LIMIT)
 
   const candidates = listAgentSessions()
     .filter((session) => session.workspaceId === workspaceId)
