@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
 import { TaskProgressCard } from './TaskProgressCard'
-import { TurnFileChangesSummary } from './TurnFileChangesSummary'
+import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
@@ -45,6 +45,7 @@ import {
   MessageAction,
   MessageResponse,
   UserMessageContent,
+  TurnFileMapProvider,
 } from '@/components/ai-elements/message'
 import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
@@ -485,6 +486,12 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
     })
   }, [topLevelBlocks, isStreaming, completedToolResultIds])
 
+  // 本轮「文件名 → 绝对路径」映射：与 footer chips 同源，供正文内联文件引用补全裸文件名
+  const turnFileMap = React.useMemo(
+    () => buildTurnFileNameMap(turn.turnMessages),
+    [turn.turnMessages]
+  )
+
   // 如果只有错误消息
   if (enrichedBlocks.length === 0 && hasError && errorContent) {
     return (
@@ -549,6 +556,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
         logo={<AssistantLogo model={turn.model} />}
       />
       <MessageContent>
+        <TurnFileMapProvider map={turnFileMap}>
         <div className={cn('space-y-2')}>
           {renderItems.map((item, itemIndex) => {
             if (item.type === 'block') {
@@ -578,6 +586,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
               : (errorContent.error?.message ?? '未知错误')}
           </div>
         )}
+        </TurnFileMapProvider>
       </MessageContent>
       {/* 文件改动汇总：流式结束后展示本轮所有 Edit/Write/MultiEdit/NotebookEdit 文件 */}
       {!isStreaming && (

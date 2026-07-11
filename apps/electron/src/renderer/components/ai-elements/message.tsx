@@ -372,6 +372,19 @@ export function BasePathsProvider({ basePaths, children }: { basePaths?: string[
   return <BasePathsContext.Provider value={basePaths}>{children}</BasePathsContext.Provider>
 }
 
+/**
+ * 本轮「文件名 → 绝对路径」映射上下文 — 由 AssistantTurnRenderer 提供，作用域为单个 turn。
+ * 正文里内联的文件引用往往只有裸文件名（如 `user-profile.md`），无法定位真实文档；
+ * 命中本轮实际触及文件的映射时，MarkdownInlineCode 会把裸名补全为绝对路径，
+ * 使其与 footer 文件 chip 走同一条可靠的绝对路径解析。未命中则维持原样降级。
+ */
+const TurnFileMapContext = React.createContext<Map<string, string> | undefined>(undefined)
+
+/** 提供本轮文件名→绝对路径映射给所有内嵌的 MessageResponse */
+export function TurnFileMapProvider({ map, children }: { map?: Map<string, string>; children: React.ReactNode }): React.ReactElement {
+  return <TurnFileMapContext.Provider value={map}>{children}</TurnFileMapContext.Provider>
+}
+
 interface MessageResponseProps {
   /** Markdown 内容 */
   children: string
@@ -498,6 +511,8 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
 }: React.HTMLAttributes<HTMLElement> & { basePath?: string; basePaths?: string[] }): React.ReactElement {
   // 兜底：从 context 读附加 basePaths（避免穿透 SDKMessageRenderer / ContentBlock 等中间层）
   const ctxBasePaths = React.useContext(BasePathsContext)
+  // 本轮「文件名 → 绝对路径」映射：命中时把内联裸文件名补全为绝对路径
+  const turnFileMap = React.useContext(TurnFileMapContext)
   if (codeClassName) {
     return <code className={codeClassName} {...codeProps}>{codeChildren}</code>
   }
@@ -518,7 +533,21 @@ const MarkdownInlineCode = React.memo(function MarkdownInlineCode({
       return <FilePathChip filePath={text.trim()} basePaths={merged.length > 0 ? merged : undefined} />
     }
     if (merged.length > 0 && isRelativeFilePath(text)) {
-      return <FilePathChip filePath={text.trim()} basePaths={merged} />
+      // 命中本轮实际触及文件的映射时，用绝对路径替换裸文件名（保留行号后缀），
+      // 使内联引用与 footer chip 走同一条可靠解析；未命中则维持原样降级。
+      const trimmed = text.trim()
+      if (turnFileMap && turnFileMap.size > 0) {
+        const lineColMatch = trimmed.match(/^(.+?)(:\d+(?::\d+)?)$/)
+        const hasLineCol = !!lineColMatch && !lineColMatch[1]!.endsWith(':')
+        const pathPart = hasLineCol ? lineColMatch![1]! : trimmed
+        const suffix = hasLineCol ? lineColMatch![2]! : ''
+        const baseName = pathPart.split(/[\\/]/).pop() || pathPart
+        const abs = turnFileMap.get(baseName)
+        if (abs) {
+          return <FilePathChip filePath={abs + suffix} basePaths={merged} />
+        }
+      }
+      return <FilePathChip filePath={trimmed} basePaths={merged} />
     }
   }
 

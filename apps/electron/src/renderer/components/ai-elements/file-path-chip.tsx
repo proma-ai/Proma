@@ -8,6 +8,7 @@
 
 import * as React from 'react'
 import { useStore } from 'jotai'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
@@ -191,8 +192,10 @@ export function FilePathChip({ filePath, basePath, basePaths, className }: FileP
 
   const handleShowInFolder = React.useCallback(() => {
     const bases = candidateBases.length > 0 ? candidateBases : undefined
-    window.electronAPI.showItemInFolder(cleanPath, bases).catch(console.error)
-  }, [cleanPath, candidateBases])
+    window.electronAPI.showItemInFolder(cleanPath, bases)
+      .then((ok) => { if (!ok) toast.error(`未找到文件：${filename}`) })
+      .catch(() => toast.error(`未找到文件：${filename}`))
+  }, [cleanPath, candidateBases, filename])
 
   return (
     <ContextMenu>
