@@ -841,6 +841,55 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   // SAVE scroll position on scroll (throttled via rAF)
   const scrollRafRef = React.useRef(0)
+
+  // 首次打开 diff（无缓存滚动位置）时自动定位到第一个变更行。
+  // 有缓存位置时由上方 restoreScroll 恢复用户上次位置，本 effect 不介入。
+  const autoScrollChangeFiredRef = React.useRef(false)
+  const autoScrollChangeRafRef = React.useRef(0)
+  React.useEffect(() => {
+    autoScrollChangeFiredRef.current = false
+  }, [filePath, sessionId])
+  React.useEffect(() => {
+    if (previewOnly || loading) return
+    if (restoreScrollRef.current) return // 有缓存位置，交给 restoreScroll
+    if (autoScrollChangeFiredRef.current) return
+    if (scrollPositionCache.has(scrollKey)) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    autoScrollChangeFiredRef.current = true
+    // 等待 Shiki tokenize 等异步渲染完成（连续 3 帧 scrollHeight 稳定），
+    // 再定位第一个变更行，避免变更行尚未渲染到位时定位失败。
+    let prevHeight = container.scrollHeight
+    let stableFrames = 0
+    const tryScroll = () => {
+      const curHeight = container.scrollHeight
+      if (curHeight === prevHeight) {
+        stableFrames++
+      } else {
+        stableFrames = 0
+        prevHeight = curHeight
+      }
+      if (stableFrames >= 3) {
+        autoScrollChangeRafRef.current = 0
+        const target = container.querySelector<HTMLElement>(
+          '[data-line-type=change-addition], [data-line-type=change-deletion]',
+        )
+        if (target) target.scrollIntoView({ block: 'center' })
+        return
+      }
+      autoScrollChangeRafRef.current = requestAnimationFrame(tryScroll)
+    }
+    autoScrollChangeRafRef.current = requestAnimationFrame(tryScroll)
+
+    return () => {
+      if (autoScrollChangeRafRef.current) {
+        cancelAnimationFrame(autoScrollChangeRafRef.current)
+        autoScrollChangeRafRef.current = 0
+      }
+    }
+  }, [previewOnly, loading, scrollKey])
+
   const handleScroll = React.useCallback(() => {
     if (scrollRafRef.current) return
     scrollRafRef.current = requestAnimationFrame(() => {
@@ -857,6 +906,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     return () => {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
       if (restoreRafRef.current) cancelAnimationFrame(restoreRafRef.current)
+      if (autoScrollChangeRafRef.current) cancelAnimationFrame(autoScrollChangeRafRef.current)
     }
   }, [])
 
