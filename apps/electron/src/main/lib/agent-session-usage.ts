@@ -20,10 +20,15 @@
  * 避免对整份会话 JSONL 全量 JSON.parse（高频 daily 任务一天可触发数百次）。
  */
 
-import { calculateContextUsageRatio, inferContextWindow } from '@proma/shared'
+import {
+  calculateContextUsageRatio,
+  resolveDisplayContextWindow,
+} from '@proma/shared'
 import type { SDKAssistantMessage, SDKResultMessage } from '@proma/shared'
 import { existsSync, readFileSync } from 'node:fs'
 import { getAgentSessionMessagesPath } from './config-paths'
+import { getAgentSessionMeta } from './agent-session-manager'
+import { getChannelById } from './channel-manager'
 
 interface UsageTokens {
   input_tokens: number
@@ -40,6 +45,29 @@ function sumUsedTokens(usage: UsageTokens): number {
     (usage.cache_read_input_tokens ?? 0) +
     (usage.cache_creation_input_tokens ?? 0)
   )
+}
+
+/**
+ * 从会话对应渠道的模型配置中读取用户手动填写的 contextWindow 覆盖值。
+ *
+ * 主进程 daily 用量统计路径：第三方兼容渠道改写 modelId 后按 modelId 推断可能不准，
+ * 优先采用用户在渠道模型配置中填写的 contextWindow。SDK result 的 modelUsage[].contextWindow
+ * 仍为最高优先级（在 pickResultContextWindow 内部处理）。
+ */
+function resolveSessionUserContextWindow(
+  sessionId: string,
+  modelId?: string,
+): number | undefined {
+  const meta = getAgentSessionMeta(sessionId)
+  const channelId = meta?.channelId
+  if (!channelId) return undefined
+  const channel = getChannelById(channelId)
+  if (!channel) return undefined
+  // 优先匹配会话记录的 modelId，其次取任一配置了 contextWindow 的模型
+  const byModel = channel.models.find((m) => m.id === modelId)
+  if (byModel?.contextWindow != null) return byModel.contextWindow
+  const anyOverride = channel.models.find((m) => m.contextWindow != null)
+  return anyOverride?.contextWindow
 }
 
 export function getSessionContextUsageRatio(sessionId: string): number | undefined {
@@ -72,7 +100,8 @@ export function getSessionContextUsageRatio(sessionId: string): number | undefin
       const result = parsed as SDKResultMessage
       if (!result.usage) continue
       const usedTokens = sumUsedTokens(result.usage)
-      const contextWindow = pickResultContextWindow(result)
+      const userContextWindow = resolveSessionUserContextWindow(sessionId)
+      const contextWindow = pickResultContextWindow(result, userContextWindow)
       return calculateContextUsageRatio(usedTokens, contextWindow)
     }
 
@@ -81,7 +110,11 @@ export function getSessionContextUsageRatio(sessionId: string): number | undefin
       const usage = asst.message?.usage
       if (!usage) continue
       const usedTokens = sumUsedTokens(usage)
-      const contextWindow = inferContextWindow(asst.message?.model)
+      const userContextWindow = resolveSessionUserContextWindow(sessionId, asst.message?.model)
+      const contextWindow = resolveDisplayContextWindow({
+        userContextWindow,
+        modelId: asst.message?.model,
+      })
       return calculateContextUsageRatio(usedTokens, contextWindow)
     }
   }
@@ -100,12 +133,19 @@ export function getSessionContextUsageRatio(sessionId: string): number | undefin
  *
  * 每个 entry 优先用 SDK 实测的 contextWindow，缺失时按 modelId 推断。
  */
-function pickResultContextWindow(result: SDKResultMessage): number | undefined {
+function pickResultContextWindow(
+  result: SDKResultMessage,
+  userContextWindow?: number,
+): number | undefined {
   if (!result.modelUsage) return undefined
   let best: number | undefined
   for (const [modelId, info] of Object.entries(result.modelUsage)) {
-    const win = info?.contextWindow ?? inferContextWindow(modelId)
-    if (win === undefined) continue
+    // SDK 实测 contextWindow 为最高优先级，缺失时回退到用户覆盖值 / modelId 推断
+    const win = resolveDisplayContextWindow({
+      sdkContextWindow: info?.contextWindow,
+      userContextWindow,
+      modelId,
+    })
     if (best === undefined || win > best) best = win
   }
   return best

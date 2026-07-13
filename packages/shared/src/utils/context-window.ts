@@ -6,6 +6,9 @@
  * 故不再下发任何 beta。Claude Agent SDK 仍要求通过 `[1m]` 模型后缀显式选择
  * 扩展上下文（发送请求前会自动剥离），因此前端推断、后端用量统计和 SDK 模型
  * 选择必须共用同一份判定，否则会出现"UI 显示 1M 但实际只 200K"的不一致。
+ * 注意：SDK [1m] 模型选择路径（resolveAgentSdkModelId）有意不读取用户手动填写的
+ * contextWindow 覆盖字段。该字段仅参与显示推断（resolveDisplayContextWindow），
+ * 用于第三方兼容渠道改写 modelId 后修正圆环分母，绝不污染 SDK 路由决策。
  */
 
 /** 默认上下文窗口（无法识别模型时使用） */
@@ -96,4 +99,28 @@ export function resolveAgentSdkModelId(modelId: string): string {
   const model = modelId.toLowerCase()
   if (!AGENT_SDK_1M_CONTEXT_RULES.some((pattern) => model.includes(pattern))) return modelId
   return `${modelId}[1m]`
+}
+
+/** resolveDisplayContextWindow 入参 */
+export interface ResolveDisplayContextWindowOptions {
+  /** SDK result 携带的 contextWindow（最高优先级，部分渠道不返回） */
+  sdkContextWindow?: number
+  /** 用户手动填写的 contextWindow 覆盖值（来自渠道模型配置） */
+  userContextWindow?: number
+  /** 模型 ID，用于回退推断 */
+  modelId?: string
+}
+
+/**
+ * 解析用于显示的 contextWindow（圆环分母）。
+ *
+ * 优先级：sdkContextWindow > userContextWindow > inferContextWindow(modelId) > DEFAULT_CONTEXT_WINDOW。
+ * 该函数仅用于 UI 显示与用量统计的圆环分母，绝不参与 Agent SDK 的 [1m] 模型选择路径。
+ */
+export function resolveDisplayContextWindow(opts: ResolveDisplayContextWindowOptions): number {
+  const { sdkContextWindow, userContextWindow, modelId } = opts
+  if (typeof sdkContextWindow === 'number' && sdkContextWindow > 0) return sdkContextWindow
+  if (typeof userContextWindow === 'number' && userContextWindow > 0) return userContextWindow
+  const inferred = inferContextWindow(modelId)
+  return inferred ?? DEFAULT_CONTEXT_WINDOW
 }

@@ -15,6 +15,8 @@ export {
   supports1MContext,
   inferContextWindow,
   resolveAgentSdkModelId,
+  resolveDisplayContextWindow,
+  type ResolveDisplayContextWindowOptions,
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'
 export {

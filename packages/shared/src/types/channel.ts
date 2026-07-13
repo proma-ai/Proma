@@ -112,6 +112,14 @@ export interface ChannelModel {
   enabled: boolean
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
+  /**
+   * 用户手动指定的上下文窗口（token 数）。
+   *
+   * 仅用于显示推断（圆环分母），不影响 Agent SDK 的 [1m] 模型选择路径。
+   * 第三方兼容渠道改写 modelId 后，按 modelId 推断可能拿不到正确窗口，
+   * 允许用户在此覆盖。未填写时由 resolveDisplayContextWindow 回退到推断逻辑。
+   */
+  contextWindow?: number
 }
 
 /**

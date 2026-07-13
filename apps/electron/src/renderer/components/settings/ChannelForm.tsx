@@ -353,6 +353,23 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     )
   }
 
+  /** 更新模型的用户手动 contextWindow 覆盖值（仅第三方兼容渠道可填） */
+  const handleModelContextWindowChange = (modelId: string, value: string): void => {
+    const trimmed = value.trim()
+    const parsed = trimmed === '' ? undefined : Number(trimmed)
+    setModels((prev) =>
+      prev.map((m) =>
+        m.id === modelId
+          ? {
+              ...m,
+              contextWindow:
+                parsed != null && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+            }
+          : m
+      )
+    )
+  }
+
   /** 从供应商 API 拉取可用模型列表 */
   const handleFetchModels = async (): Promise<void> => {
     if (!apiKey.trim() || !baseUrl.trim()) return
@@ -382,7 +399,14 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         const manualKept = prev.filter((m) => m.source === 'manual' && !fetchedById.has(m.id))
         const merged = fetchedModels.map((m) => {
           const old = prev.find((p) => p.id === m.id)
-          return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
+          // 重新拉取时保留旧的 enabled 状态与用户手动填写的 contextWindow 覆盖值，
+          // 避免刷新模型列表覆盖用户已填的上下文窗口配置
+          if (!old) return { ...m, enabled: false }
+          return {
+            ...m,
+            enabled: old.enabled,
+            ...(old.contextWindow != null && { contextWindow: old.contextWindow }),
+          }
         })
         return [...manualKept, ...merged]
       })
@@ -650,6 +674,20 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
                       <span className="text-muted-foreground ml-1">({model.id})</span>
                     )}
                   </span>
+                  {provider === 'anthropic-compatible' || provider === 'custom' ? (
+                    <div className="flex items-center gap-1.5" title="手动指定上下文窗口（token 数），仅影响用量圆环显示">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">上下文窗口</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={model.contextWindow ?? ''}
+                        onChange={(e) => handleModelContextWindowChange(model.id, e.target.value)}
+                        placeholder="自动"
+                        className="h-7 w-28 text-xs"
+                      />
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => handleToggleModel(model.id)}

@@ -153,7 +153,14 @@ function createUserSDKMessage(text: string, uuid?: string, createdAt = Date.now(
   return message
 }
 
-function resolveRunContextWindow(modelId: string | undefined, previous: number | undefined): number | undefined {
+function resolveRunContextWindow(
+  modelId: string | undefined,
+  previous: number | undefined,
+  userContextWindow?: number,
+): number | undefined {
+  // 优先用用户手动填写的 contextWindow，其次 modelId 推断，最后沿用 previous。
+  // SDK result 的真实 contextWindow 会通过 context_window 事件覆盖。
+  if (typeof userContextWindow === 'number' && userContextWindow > 0) return userContextWindow
   return inferContextWindow(modelId) ?? previous
 }
 
@@ -535,6 +542,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // 渠道已选但模型未选时，自动选择第一个可用模型
   const globalChannels = useAtomValue(channelsAtom)
+
+  // 当前渠道模型上用户手动填写的 contextWindow 覆盖值（仅第三方兼容渠道有）
+  const currentUserContextWindow = React.useMemo(() => {
+    if (!agentChannelId) return undefined
+    const channel = globalChannels.find((c) => c.id === agentChannelId)
+    if (!channel) return undefined
+    const model = channel.models.find((m) => m.id === agentModelId)
+    return model?.contextWindow
+  }, [globalChannels, agentChannelId, agentModelId])
 
   // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
   const hasAvailableModel = React.useMemo(() => {
@@ -1035,7 +1051,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           model: snapshot.modelId,
           startedAt: streamStartedAt,
           inputTokens: existing?.inputTokens,
-          contextWindow: resolveRunContextWindow(snapshot.modelId, existing?.contextWindow),
+          contextWindow: resolveRunContextWindow(snapshot.modelId, existing?.contextWindow, currentUserContextWindow),
         })
         return map
       })
@@ -1813,7 +1829,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
-        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
+        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow, currentUserContextWindow),
       })
       return map
     })
@@ -1998,7 +2014,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         model: agentModelId || undefined,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
-        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow),
+        contextWindow: resolveRunContextWindow(agentModelId || undefined, existing?.contextWindow, currentUserContextWindow),
       })
       return map
     })

@@ -26,6 +26,7 @@ import {
   applyAgentEvent,
   liveMessagesMapAtom,
   agentSessionModelMapAtom,
+  agentSessionChannelMapAtom,
   agentModelIdAtom,
   agentPermissionModeMapAtom,
   stoppedByUserSessionsAtom,
@@ -43,6 +44,7 @@ import {
   agentDiffRefreshVersionAtom,
   askUserDraftsAtom,
 } from '@/atoms/agent-atoms'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -56,8 +58,8 @@ import { agentDiffUnseenChangesAtom, agentDiffUnseenFilesAtom } from '@/atoms/ag
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
-import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta } from '@proma/shared'
-import { inferContextWindow } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta, Channel, ChannelModel } from '@proma/shared'
+import { resolveDisplayContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
@@ -103,7 +105,30 @@ function uniqueTruthyPaths(paths: Array<string | null | undefined>): string[] {
 // Phase 2 将移除此转换，直接使用 SDKMessage 渲染
 // ============================================================================
 
-function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
+/**
+ * 解析当前会话渠道模型上用户手动填写的 contextWindow 覆盖值。
+ *
+ * 用于流式 fallback 的圆环分母：第三方兼容渠道改写 modelId 后按 modelId 推断
+ * 可能不准，优先采用用户在渠道模型配置中填写的 contextWindow。SDK result 的
+ * 真实 contextWindow 会通过 context_window 事件覆盖此 fallback。
+ */
+function resolveUserContextWindow(store: ReturnType<typeof useStore>, sessionId: string): number | undefined {
+  const channelId = store.get(agentSessionChannelMapAtom).get(sessionId)
+  if (!channelId) return undefined
+  const channel = store.get(channelsAtom).find((c: Channel) => c.id === channelId)
+  if (!channel) return undefined
+  // 优先用会话记录的 modelId 匹配，其次退到第一个配置了 contextWindow 的模型
+  const sessionModelId = store.get(agentSessionModelMapAtom).get(sessionId)
+  const model = channel.models.find((m: ChannelModel) => m.id === sessionModelId)
+  if (model?.contextWindow != null) return model.contextWindow
+  const anyOverride = channel.models.find((m: ChannelModel) => m.contextWindow != null)
+  return anyOverride?.contextWindow
+}
+
+function payloadToLegacyEvents(
+  payload: AgentStreamPayload,
+  userContextWindow?: number,
+): AgentEvent[] {
   if (payload.kind === 'proma_event') {
     const evt = payload.event
     switch (evt.type) {
@@ -200,7 +225,12 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         // 因为部分端点（如智谱）会在 message.model 里剥掉 [1m] 等规格后缀，
         // 导致 glm-x-preview[1m] 被识别成 glm-x-preview（200K）。
         const modelName = aMsg._channelModelId ?? aMsg.message.model
-        const fallbackWindow = inferContextWindow(modelName)
+        // 流式 fallback：优先用用户手动填写的 contextWindow，其次按 modelId 推断。
+        // SDK result 的真实 contextWindow 会通过 context_window 事件覆盖，此处只是流式过程中的临时分母。
+        const fallbackWindow = resolveDisplayContextWindow({
+          userContextWindow,
+          modelId: modelName,
+        })
         events.push({
           type: 'usage_update',
           usage: {
@@ -208,7 +238,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
             outputTokens: u.output_tokens,
             cacheReadTokens: u.cache_read_input_tokens,
             cacheCreationTokens: u.cache_creation_input_tokens,
-            ...(fallbackWindow ? { contextWindow: fallbackWindow } : {}),
+            contextWindow: fallbackWindow,
           },
         })
       }
@@ -654,7 +684,9 @@ export function useGlobalAgentListeners(): void {
         }
 
         // Phase 1 兼容：将新 AgentStreamPayload 转换为旧 AgentEvent[]
-        const legacyEvents = payloadToLegacyEvents(payload)
+        // 解析当前会话渠道模型上用户手动填写的 contextWindow 覆盖值，传入用于流式 fallback 分母
+        const userContextWindow = resolveUserContextWindow(store, sessionId)
+        const legacyEvents = payloadToLegacyEvents(payload, userContextWindow)
 
         for (const event of legacyEvents) {
           // 会话首次进入 running 时，清除旧的完成提醒状态
