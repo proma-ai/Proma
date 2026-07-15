@@ -20,6 +20,7 @@ interface DefaultAppCacheFile {
 
 const CACHE_VERSION = 1
 const MAX_CACHE_ENTRIES = 80
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 let loaded = false
 let entries = new Map<string, DefaultAppCacheEntry>()
@@ -89,6 +90,10 @@ export function getCachedDefaultAppInfo(cacheKey: string): DefaultAppInfo | null
   loadCache()
   const entry = entries.get(cacheKey)
   if (!entry) return null
+  if (Date.now() - entry.updatedAt > CACHE_TTL_MS) {
+    entries.delete(cacheKey)
+    return null
+  }
   return {
     name: entry.name,
     appPath: entry.appPath,
