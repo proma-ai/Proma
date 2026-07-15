@@ -1977,10 +1977,9 @@ export class AgentOrchestrator {
                   }
                   // 为 assistant 消息注入渠道信息，确保持久化后能正确匹配模型显示名与 Agent SDK 窗口
                   if (msg.type === 'assistant') {
-                    if (modelId) {
-                      (msg as Record<string, unknown>)._channelModelId = modelId
-                    }
+                    if (modelId) (msg as Record<string, unknown>)._channelModelId = modelId
                     ;(msg as Record<string, unknown>)._channelProvider = channel.provider
+                    if (channelId) (msg as Record<string, unknown>)._channelId = channelId
                   }
                   accumulatedMessages.push(msg)
                 }

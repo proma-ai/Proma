@@ -647,11 +647,18 @@ export function useGlobalAgentListeners(): void {
               msgRecord._createdAt = Date.now()
             }
 
-            // 为 assistant 消息注入渠道信息，确保流式期间就绑定正确模型与 Agent SDK 窗口
-            if (msgRecord.type === 'assistant' && !msgRecord._channelModelId) {
-              const sessionModelMap = store.get(agentSessionModelMapAtom)
-              const defaultModelId = store.get(agentModelIdAtom)
-              msgRecord._channelModelId = sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
+            // 为 assistant 消息注入渠道信息，确保流式期间就绑定正确的渠道+模型与 Agent SDK 窗口
+            // （多渠道同名模型场景下，显示名必须结合 channelId 精确匹配，否则会错配促销文案）
+            if (msgRecord.type === 'assistant') {
+              if (!msgRecord._channelModelId) {
+                const sessionModelMap = store.get(agentSessionModelMapAtom)
+                const defaultModelId = store.get(agentModelIdAtom)
+                msgRecord._channelModelId = sessionModelMap.get(sessionId) ?? defaultModelId ?? undefined
+              }
+              if (!msgRecord._channelId) {
+                const sessionChannelMap = store.get(agentSessionChannelMapAtom)
+                msgRecord._channelId = sessionChannelMap.get(sessionId) ?? undefined
+              }
             }
             if (msgRecord.type === 'assistant' && !msgRecord._channelProvider) {
               const sessionChannelMap = store.get(agentSessionChannelMapAtom)

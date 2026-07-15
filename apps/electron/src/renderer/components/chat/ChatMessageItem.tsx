@@ -36,7 +36,7 @@ import { InlineEditForm } from './InlineEditForm'
 import { UserAvatar } from './UserAvatar'
 import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
-import { channelsAtom } from '@/atoms/chat-atoms'
+import { channelsAtom, conversationsAtom } from '@/atoms/chat-atoms'
 import type { ChatMessage } from '@proma/shared'
 import type { InlineEditSubmitPayload } from './InlineEditForm'
 import { ChatToolActivityIndicator } from './ChatToolActivityIndicator'
@@ -135,6 +135,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   const [isDeleting, setIsDeleting] = React.useState(false)
   const userProfile = useAtomValue(userProfileAtom)
   const channels = useAtomValue(channelsAtom)
+  const conversations = useAtomValue(conversationsAtom)
+  // 多渠道同名模型场景下，显示名需结合会话 channelId 精确匹配（chat 消息本身不存 channelId，
+  // 从所属 conversation 取；普通一会话一渠道场景完全覆盖，并行模式多渠道消息会回退到干净 modelId）
+  const conversationChannelId = conversations.find((c) => c.id === conversationId)?.channelId
   const parsedUserContent = React.useMemo(
     () => message.role === 'user' ? parseQuotedMessageContent(message.content) : { quotes: [], text: message.content },
     [message.content, message.role],
@@ -167,7 +171,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
         {/* assistant 头像 + 模型名 + 时间 */}
         {message.role === 'assistant' && (
           <MessageHeader
-            model={message.model ? resolveModelDisplayName(message.model, channels) : undefined}
+            model={message.model ? resolveModelDisplayName(message.model, channels, conversationChannelId) : undefined}
             time={formatMessageTime(message.createdAt)}
             logo={
               <img

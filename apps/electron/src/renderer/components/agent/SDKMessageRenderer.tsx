@@ -562,7 +562,7 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   return (
     <Message from="assistant">
       <MessageHeader
-        model={turn.model ? resolveModelDisplayName(turn.model, channels) : undefined}
+        model={turn.model ? resolveModelDisplayName(turn.model, channels, turn.channelId) : undefined}
         time={turn.createdAt ? formatMessageTime(turn.createdAt) : undefined}
         logo={<AssistantLogo model={turn.model} />}
       />
@@ -686,7 +686,7 @@ export function SDKMessageRenderer({
       <Message from="assistant">
         {showHeader && (
           <MessageHeader
-            model={model ? resolveModelDisplayName(model, channels) : undefined}
+            model={model ? resolveModelDisplayName(model, channels, aMsg._channelId) : undefined}
             time={meta.createdAt ? formatMessageTime(meta.createdAt) : undefined}
             logo={<AssistantLogo model={model} />}
           />

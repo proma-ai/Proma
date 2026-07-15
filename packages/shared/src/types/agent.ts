@@ -186,6 +186,8 @@ export interface SDKAssistantMessage {
   _channelModelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
   _channelProvider?: ProviderType
+  /** 渠道 ID，持久化/流式期间注入，用于在多渠道同名模型时精确匹配显示名 */
+  _channelId?: string
 }
 
 /** SDK user 消息 */

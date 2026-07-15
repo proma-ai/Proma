@@ -68,6 +68,8 @@ export interface AssistantTurn {
   turnMessages: SDKMessage[]
   /** 模型名称（取首条 assistant 消息的 model） */
   model?: string
+  /** 渠道 ID（取首条 assistant 消息的 _channelId，多渠道同名模型时用于精确匹配显示名） */
+  channelId?: string
   /** 创建时间（取首条 assistant 消息的时间） */
   createdAt?: number
   /**
@@ -140,6 +142,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           assistantMessages: [aMsg],
           turnMessages: [msg],
           model: aMsg._channelModelId || aMsg.message?.model || sessionModelId,
+          channelId: aMsg._channelId,
           createdAt: meta.createdAt,
           // 紧跟在后台任务唤醒之后的新 turn：阻断与上一轮的合并
           startsAfterWake: pendingWakeBoundary || undefined,

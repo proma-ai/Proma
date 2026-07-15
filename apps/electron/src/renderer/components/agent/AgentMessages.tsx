@@ -40,7 +40,7 @@ import { parseThinkTagsFromText } from './thinking-tag-parser'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
-import type { AgentStreamState } from '@/atoms/agent-atoms'
+import { agentSessionChannelMapAtom, type AgentStreamState } from '@/atoms/agent-atoms'
 
 function stableStringify(value: unknown): string {
   if (value == null || typeof value !== 'object') return JSON.stringify(value) ?? String(value)
@@ -449,7 +449,10 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 从 streamState 属性中计算派生值
   const streamingContent = streamState?.content ?? ''
   const streamingModelId = streamState?.model || sessionModelId
-  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels) : undefined
+  // 多渠道同名模型场景下，流式 header 显示名必须结合当前会话 channelId 精确匹配
+  const sessionChannelMap = useAtomValue(agentSessionChannelMapAtom)
+  const streamingChannelId = sessionChannelMap.get(sessionId)
+  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels, streamingChannelId) : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 

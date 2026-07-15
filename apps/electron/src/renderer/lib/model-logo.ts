@@ -368,14 +368,43 @@ export function getChannelLogo(channel: { provider: ProviderType; baseUrl: strin
  *
  * 优先返回别名（name !== id），未找到则返回原始 modelId。
  * 用于将 SDK 返回的 model ID 转为用户友好的显示名称。
+ *
+ * 当同一 modelId 在多个渠道都配置了别名时（例如官方渠道和第三方渠道都有 glm-5.2，
+ * 官方那条 name 可能带「限时 85 折」促销文案），必须结合 channelId 精确匹配，
+ * 否则会错把别的渠道的别名显示出来。无 channelId 或该渠道未命中时，仅当别名唯一
+ * （单一渠道拥有别名）才返回，多渠道歧义时回退到干净的 modelId。
  */
-export function resolveModelDisplayName(modelId: string, channels: import('@proma/shared').Channel[]): string {
+export function resolveModelDisplayName(
+  modelId: string,
+  channels: import('@proma/shared').Channel[],
+  channelId?: string,
+): string {
+  // 有 channelId：优先在该渠道内精确匹配
+  if (channelId) {
+    const ch = channels.find((c) => c.id === channelId)
+    if (ch) {
+      const m = ch.models.find((mm) => mm.id === modelId)
+      if (m && m.name && m.name !== m.id) {
+        return m.name
+      }
+    }
+  }
+
+  // 无 channelId 或该渠道未命中：统计该 modelId 在多少渠道拥有别名
+  let aliasName: string | undefined
+  let aliasCount = 0
   for (const channel of channels) {
     for (const model of channel.models) {
       if (model.id === modelId && model.name && model.name !== model.id) {
-        return model.name
+        aliasName = model.name
+        aliasCount++
       }
     }
+  }
+  // 仅单渠道有别名时返回（向后兼容独家别名场景）；多渠道歧义时回退到干净 modelId，
+  // 避免显示错误渠道的促销文案（如把官方渠道的「限时 85 折」错配到第三方渠道消息上）
+  if (aliasCount === 1 && aliasName) {
+    return aliasName
   }
   return modelId
 }
