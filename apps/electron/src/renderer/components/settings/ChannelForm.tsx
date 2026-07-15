@@ -35,6 +35,7 @@ import {
   PROVIDER_LABELS,
   PROMA_OFFICIAL_CHANNEL_ID,
   isAgentCompatibleProvider,
+  parseZhipuTeamCredentials,
 } from '@proma/shared'
 import type {
   Channel,
@@ -74,7 +75,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -106,6 +107,7 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'kimi-api',
   'kimi-coding',
   'zhipu-coding',
+  'zhipu-coding-team',
   'ark-coding-plan',
   'minimax',
   'xiaomi',
@@ -141,6 +143,44 @@ function getUrlInputPlaceholder(provider: ProviderType): string {
   return 'https://api.example.com'
 }
 
+function getApiKeyPlaceholder(provider: ProviderType, isEdit: boolean): string {
+  if (isEdit) return '留空则不更新'
+  if (provider === 'zhipu-coding-team') {
+    return '输入 API Token'
+  }
+  return '输入 API Key'
+}
+
+interface ZhipuTeamSecretForm {
+  apiKey: string
+  organization: string
+  project: string
+}
+
+const EMPTY_ZHIPU_TEAM_SECRET: ZhipuTeamSecretForm = {
+  apiKey: '',
+  organization: '',
+  project: '',
+}
+
+function parseZhipuTeamSecret(secret: string): Partial<ZhipuTeamSecretForm> {
+  const credentials = parseZhipuTeamCredentials(secret)
+  if (!credentials) return {}
+  return {
+    apiKey: credentials.apiKey,
+    organization: credentials.organization ?? '',
+    project: credentials.project ?? '',
+  }
+}
+
+function buildZhipuTeamSecret(secret: ZhipuTeamSecretForm): string {
+  const payload: Record<string, string> = {}
+  if (secret.apiKey.trim()) payload.apiKey = secret.apiKey.trim()
+  if (secret.organization.trim()) payload.organization = secret.organization.trim()
+  if (secret.project.trim()) payload.project = secret.project.trim()
+  return Object.keys(payload).length > 0 ? JSON.stringify(payload) : ''
+}
+
 /** auto-save 防抖延迟 */
 const AUTO_SAVE_DELAY = 600
 
@@ -157,6 +197,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [provider, setProvider] = React.useState<ProviderType>(channel?.provider ?? 'anthropic')
   const [baseUrl, setBaseUrl] = React.useState(channel?.baseUrl ?? PROVIDER_DEFAULT_URLS.anthropic)
   const [apiKey, setApiKey] = React.useState('')
+  const [zhipuTeamSecret, setZhipuTeamSecret] = React.useState<ZhipuTeamSecretForm>(EMPTY_ZHIPU_TEAM_SECRET)
   const [showApiKey, setShowApiKey] = React.useState(false)
   const [models, setModels] = React.useState<ChannelModel[]>(channel?.models ?? [])
   const [enabled, setEnabled] = React.useState(channel?.enabled ?? true)
@@ -189,6 +230,9 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     if (isEdit && channel && !apiKeyLoaded && !isPromaOfficial) {
       window.electronAPI.decryptApiKey(channel.id).then((key) => {
         setApiKey(key)
+        if (channel.provider === 'zhipu-coding-team') {
+          setZhipuTeamSecret({ ...EMPTY_ZHIPU_TEAM_SECRET, ...parseZhipuTeamSecret(key) })
+        }
         setApiKeyLoaded(true)
       }).catch((error) => {
         console.error('[模型配置表单] 解密 API Key 失败:', error)
@@ -196,6 +240,20 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       })
     }
   }, [isEdit, channel, apiKeyLoaded])
+
+  const isZhipuTeamProvider = provider === 'zhipu-coding-team'
+  const effectiveApiKey = isZhipuTeamProvider ? buildZhipuTeamSecret(zhipuTeamSecret) : apiKey
+  const hasRequiredSecret = isZhipuTeamProvider
+    ? Boolean(zhipuTeamSecret.apiKey.trim())
+    : Boolean(apiKey.trim())
+
+  const updateZhipuTeamSecret = React.useCallback((patch: Partial<ZhipuTeamSecretForm>) => {
+    setZhipuTeamSecret((prev) => {
+      const next = { ...prev, ...patch }
+      setApiKey(buildZhipuTeamSecret(next))
+      return next
+    })
+  }, [])
 
   // ===== Auto-save（仅编辑模式） =====
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -263,9 +321,9 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   // 监听字段变化触发 auto-save
   React.useEffect(() => {
-    scheduleAutoSave(models, name, provider, baseUrl, apiKey, enabled)
+    scheduleAutoSave(models, name, provider, baseUrl, effectiveApiKey, enabled)
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
-  }, [models, name, provider, baseUrl, apiKey, enabled, scheduleAutoSave])
+  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, scheduleAutoSave])
 
   // 切换供应商时自动更新 Base URL 与名称，Anthropic 兼容渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
@@ -278,6 +336,15 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
     setTestResult(null)
+    setFetchResult(null)
+    if (p === 'zhipu-coding-team') {
+      const parsed = parseZhipuTeamSecret(apiKey)
+      setZhipuTeamSecret({ ...EMPTY_ZHIPU_TEAM_SECRET, ...parsed })
+      setApiKey(buildZhipuTeamSecret({ ...EMPTY_ZHIPU_TEAM_SECRET, ...parsed }))
+    } else if (provider === 'zhipu-coding-team') {
+      setApiKey(zhipuTeamSecret.apiKey)
+      setZhipuTeamSecret(EMPTY_ZHIPU_TEAM_SECRET)
+    }
     // 预设模型：首次切换到对应 provider 且无模型时自动填充
     if (models.length === 0) {
       if (p === 'deepseek') {
@@ -293,7 +360,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         setModels([
           { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
         ])
-      } else if (p === 'zhipu' || p === 'zhipu-coding') {
+      } else if (p === 'zhipu' || p === 'zhipu-coding' || p === 'zhipu-coding-team') {
         setModels([
           { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
           { id: 'glm-5.1', name: 'GLM-5.1', enabled: false },
@@ -361,7 +428,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 从供应商 API 拉取可用模型列表 */
   const handleFetchModels = async (): Promise<void> => {
-    if (!apiKey.trim() || !baseUrl.trim()) return
+    if (!hasRequiredSecret || !baseUrl.trim()) return
 
     setFetchingModels(true)
     setFetchResult(null)
@@ -370,7 +437,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       const result = await window.electronAPI.fetchModels({
         provider,
         baseUrl,
-        apiKey,
+        apiKey: effectiveApiKey,
       })
 
       setFetchResult(result)
@@ -401,7 +468,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 测试连接（直接使用表单当前值，无需先保存） */
   const handleTest = async (): Promise<void> => {
-    if (!apiKey.trim() || !baseUrl.trim()) return
+    if (!hasRequiredSecret || !baseUrl.trim()) return
 
     setTesting(true)
     setTestResult(null)
@@ -411,7 +478,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       const result = await window.electronAPI.testChannelDirect({
         provider,
         baseUrl,
-        apiKey,
+        apiKey: effectiveApiKey,
         ...(modelId ? { modelId } : {}),
       })
       setTestResult(result)
@@ -424,7 +491,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 执行创建渠道 */
   const doCreate = React.useCallback(async (): Promise<Channel | null> => {
-    if (!name.trim() || !apiKey.trim()) return null
+    if (!name.trim() || !hasRequiredSecret) return null
 
     setSaving(true)
     try {
@@ -432,7 +499,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         name,
         provider,
         baseUrl,
-        apiKey,
+        apiKey: effectiveApiKey,
         models,
         enabled,
       }
@@ -449,7 +516,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     } finally {
       setSaving(false)
     }
-  }, [name, provider, baseUrl, apiKey, models, enabled, onAgentEligibilityChange])
+  }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled, onAgentEligibilityChange])
 
   /** 创建渠道（仅新建模式） */
   const handleCreate = async (): Promise<void> => {
@@ -462,7 +529,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   }
 
   /** 检测表单是否有未保存内容 */
-  const isDirty = !isEdit && (name.trim() !== '' || apiKey.trim() !== '' || models.length > 0)
+  const isDirty = !isEdit && (name.trim() !== '' || effectiveApiKey.trim() !== '' || models.length > 0)
   const hasNoModels = !isEdit && models.length === 0
 
   /** 返回按钮：创建模式下有未保存内容时拦截 */
@@ -541,7 +608,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           <Button
             size="sm"
             onClick={handleCreate}
-            disabled={saving || !name.trim() || !apiKey.trim()}
+            disabled={saving || !name.trim() || !hasRequiredSecret}
           >
             {saving && <Loader2 size={14} className="animate-spin" />}
             <span>创建</span>
@@ -585,13 +652,15 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             {/* API Key + 测试连接同行 */}
             <div className="px-4 py-3 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-foreground">API Key</div>
+                <div className="text-sm font-medium text-foreground">
+                  {isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
                   type="button"
                   onClick={handleTest}
-                  disabled={testing || !apiKey.trim() || !baseUrl.trim()}
+                  disabled={testing || !hasRequiredSecret || !baseUrl.trim()}
                   className="h-7 text-xs"
                 >
                   {testing ? (
@@ -602,24 +671,72 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
                   <span>测试连接</span>
                 </Button>
               </div>
-              <div className="relative">
-                <Input
-                  type={showApiKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={isEdit ? '留空则不更新' : '输入 API Key'}
-                  required={!isEdit}
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  tabIndex={-1}
-                >
-                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
+              {isZhipuTeamProvider ? (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={zhipuTeamSecret.apiKey}
+                      onChange={(e) => updateZhipuTeamSecret({ apiKey: e.target.value })}
+                      placeholder="API Token"
+                      required={!isEdit}
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                      tabIndex={-1}
+                      title={showApiKey ? '隐藏凭证' : '显示凭证'}
+                    >
+                      {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Input
+                      value={zhipuTeamSecret.organization}
+                      onChange={(e) => updateZhipuTeamSecret({ organization: e.target.value })}
+                      placeholder="组织 ID（可选）"
+                    />
+                    <Input
+                      value={zhipuTeamSecret.project}
+                      onChange={(e) => updateZhipuTeamSecret({ project: e.target.value })}
+                      placeholder="项目 ID（可选）"
+                    />
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    组织 ID 和项目 ID 可在{' '}
+                    <a
+                      href="https://bigmodel.cn/usercenter/proj-mgmt/org-mgmt"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      智谱组织与项目管理
+                    </a>
+                    {' '}查看；不填写时使用 API Token 的默认组织与项目上下文查询。
+                  </div>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder={getApiKeyPlaceholder(provider, isEdit)}
+                    required={!isEdit}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              )}
               {testResult && (
                 <div className={cn(
                   'flex items-start gap-1.5 text-xs',
@@ -691,7 +808,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
               size="sm"
               type="button"
               onClick={handleFetchModels}
-              disabled={fetchingModels || !apiKey.trim() || !baseUrl.trim()}
+              disabled={fetchingModels || !hasRequiredSecret || !baseUrl.trim()}
               className="h-7 text-xs"
             >
               {fetchingModels ? (
@@ -841,7 +958,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             <AlertDialogCancel onClick={handleDiscard}>放弃编辑</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleSaveAndClose}
-              disabled={saving || !name.trim() || !apiKey.trim()}
+              disabled={saving || !name.trim() || !hasRequiredSecret}
             >
               {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : '保存并关闭'}
             </AlertDialogAction>

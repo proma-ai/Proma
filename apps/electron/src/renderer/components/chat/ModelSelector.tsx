@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils'
 import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel, ModelOption } from '@proma/shared'
+import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
 
 /** 从渠道列表构建扁平化的模型选项 */
 function buildModelOptions(channels: Channel[], filterChannelId?: string, filterChannelIds?: string[], useAgentModels?: boolean): ModelOption[] {
@@ -306,22 +307,21 @@ export function ModelSelector({
                 return Array.from(filteredGrouped.entries()).map(([channelId, options]) => {
                 const first = options[0]
                 if (!first) return null
+                const channel = channels.find((c) => c.id === channelId)
 
                 return (
                   <div key={channelId}>
                     {/* 供应商标题行 - 灰色背景 */}
                     <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border/30">
                       <img
-                        src={(() => {
-                          const ch = channels.find((c) => c.id === channelId)
-                          return ch ? getChannelLogo(ch) : DefaultLogo
-                        })()}
+                        src={channel ? getChannelLogo(channel) : DefaultLogo}
                         alt={first.channelName}
                         className="size-5 rounded object-cover"
                       />
-                      <span className="text-sm font-medium text-muted-foreground">
+                      <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
                         {first.channelName}
                       </span>
+                      {channel ? <ChannelPlanQuotaBadge channel={channel} /> : null}
                     </div>
 
                     {/* 该渠道下的模型列表 */}

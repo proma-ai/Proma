@@ -1318,6 +1318,38 @@
 .spinner-cube:nth-child(8) { animation-delay: 0.1s; }
 .spinner-cube:nth-child(9) { animation-delay: 0.2s; }
 
+/* ===== Session 快速切换提示 ===== */
+.session-quick-switch-row[data-quick-switch-label]::after {
+  content: attr(data-quick-switch-label);
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 8;
+  min-width: 24px;
+  height: 18px;
+  padding: 0 5px;
+  transform: translateY(-50%) scale(0.96);
+  border: 1px solid hsl(var(--border) / 0.72);
+  border-radius: 6px;
+  background: hsl(var(--popover) / 0.96);
+  color: hsl(var(--popover-foreground) / 0.78);
+  box-shadow: 0 4px 14px hsl(var(--foreground) / 0.10);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label]::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
 /* ===== 深色主题：迷你导航当前可见范围指示器 — 加亮 ===== */
 .theme-ocean-dark .minimap-visible-indicator {
   background-color: hsl(210 30% 50%) !important;   /* 雾蓝灰，对齐主色 */

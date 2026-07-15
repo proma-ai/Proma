@@ -246,6 +246,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   'kimi-coding': KimiLogo,
   zhipu: ZhipuLogo,
   'zhipu-coding': ZhipuLogo,
+  'zhipu-coding-team': ZhipuLogo,
   'ark-coding-plan': DoubaoLogo,
   minimax: MiniMaxLogo,
   doubao: DoubaoLogo,

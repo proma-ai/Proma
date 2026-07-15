@@ -19,6 +19,7 @@ export type ProviderType =
   | 'kimi-coding'
   | 'zhipu'
   | 'zhipu-coding'
+  | 'zhipu-coding-team'
   | 'ark-coding-plan'
   | 'minimax'
   | 'doubao'
@@ -48,6 +49,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   'kimi-coding': 'https://api.kimi.com/coding/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
+  'zhipu-coding-team': 'https://open.bigmodel.cn/api/anthropic',
   'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
   minimax: 'https://api.minimaxi.com/anthropic',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -72,6 +74,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'kimi-coding': 'Kimi Coding Plan',
   zhipu: '智谱 AI',
   'zhipu-coding': '智谱 Coding Plan',
+  'zhipu-coding-team': '智谱 Coding Plan 团队版',
   'ark-coding-plan': '火山方舟 Coding Plan',
   minimax: 'MiniMax (API&编程包)',
   doubao: '豆包',
@@ -95,6 +98,7 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'kimi-api',
   'kimi-coding',
   'zhipu-coding',
+  'zhipu-coding-team',
   'ark-coding-plan',
   'minimax',
   'xiaomi',
@@ -107,6 +111,66 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
  */
 export function isAgentCompatibleProvider(provider: ProviderType): boolean {
   return AGENT_COMPATIBLE_PROVIDERS.has(provider)
+}
+
+export interface ZhipuTeamCredentials {
+  apiKey: string
+  organization?: string
+  project?: string
+}
+
+function normalizeZhipuCredentialKey(key: string): string {
+  return key.trim().toLowerCase().replace(/[_-]/g, '')
+}
+
+export function parseZhipuTeamCredentials(secret: string): ZhipuTeamCredentials | null {
+  const trimmed = secret.trim()
+  if (!trimmed) return null
+
+  const pick = (record: Record<string, unknown>): ZhipuTeamCredentials | null => {
+    const normalized = new Map<string, string>()
+    for (const [key, value] of Object.entries(record)) {
+      if (typeof value === 'string' && value.trim()) {
+        normalized.set(normalizeZhipuCredentialKey(key), value.trim())
+      }
+    }
+    const apiKey = normalized.get('apikey')
+      ?? normalized.get('apitoken')
+      ?? normalized.get('token')
+      ?? normalized.get('authorization')
+      ?? normalized.get('auth')
+      ?? normalized.get('bearer')
+    const organization = normalized.get('bigmodelorganization') ?? normalized.get('organization') ?? normalized.get('org')
+    const project = normalized.get('bigmodelproject') ?? normalized.get('project')
+    if (!apiKey) return null
+    return { apiKey, organization, project }
+  }
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return pick(parsed as Record<string, unknown>)
+      }
+    } catch {
+      return null
+    }
+  }
+
+  const entries: Record<string, string> = {}
+  for (const part of trimmed.split(/[;\n]+/)) {
+    const index = part.indexOf('=')
+    if (index <= 0) continue
+    entries[part.slice(0, index).trim()] = part.slice(index + 1).trim()
+  }
+  return pick(entries)
+}
+
+export function extractZhipuCodingTeamApiToken(secret: string): string {
+  const credentials = parseZhipuTeamCredentials(secret)
+  if (credentials) return credentials.apiKey
+  const trimmed = secret.trim()
+  return trimmed || secret
 }
 
 /**
@@ -256,6 +320,46 @@ export interface FetchModelsResult {
 }
 
 /**
+ * 订阅 Plan 的窗口型额度。
+ *
+ * 用于展示类似「每 5 小时」和「每周」这类限频窗口的剩余比例。
+ */
+export interface ChannelPlanQuotaWindow {
+  /** 窗口类型标识 */
+  type: '5h' | 'weekly' | 'custom'
+  /** 展示标签 */
+  label: string
+  /** 剩余额度百分比，0-100 */
+  remainingPercent: number
+  /** 已使用百分比，0-100 */
+  usedPercent: number
+  /** 覆盖展示值。用于余额等无法自然转成百分比的额度。 */
+  remainingLabel?: string
+  /** 是否展示进度条。默认展示。 */
+  showProgress?: boolean
+  /** 重置时间戳（毫秒） */
+  resetAt?: number
+}
+
+/**
+ * 渠道订阅 Plan 额度查询结果。
+ */
+export interface ChannelPlanQuotaResult {
+  /** 当前渠道是否支持订阅额度查询 */
+  supported: boolean
+  /** 渠道供应商类型 */
+  provider: ProviderType
+  /** Plan 展示名称 */
+  planName?: string
+  /** 查询到的窗口额度列表 */
+  windows: ChannelPlanQuotaWindow[]
+  /** 查询时间戳（毫秒） */
+  updatedAt: number
+  /** 不支持或查询失败时的用户可读原因 */
+  message?: string
+}
+
+/**
  * 渠道相关 IPC 通道常量
  */
 export const CHANNEL_IPC_CHANNELS = {
@@ -275,4 +379,6 @@ export const CHANNEL_IPC_CHANNELS = {
   FETCH_MODELS: 'channel:fetch-models',
   /** 直接测试连接（无需已保存渠道，传入明文凭证） */
   TEST_DIRECT: 'channel:test-direct',
+  /** 查询订阅 Plan 额度 */
+  GET_PLAN_QUOTA: 'channel:get-plan-quota',
 } as const

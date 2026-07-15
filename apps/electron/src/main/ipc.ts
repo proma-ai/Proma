@@ -127,6 +127,7 @@ import {
   testChannel,
   testChannelDirect,
   fetchModels,
+  getChannelPlanQuota,
 } from './lib/channel-manager'
 import {
   listConversations,
@@ -1153,6 +1154,14 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 查询订阅 Plan 额度（用于 Agent Context 圆环 hover 信息）
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA,
+    async (_, channelId: string): Promise<import('@proma/shared').ChannelPlanQuotaResult> => {
+      return getChannelPlanQuota(channelId)
+    }
+  )
+
   // ===== 对话管理相关 =====
 
   // 获取对话列表
@@ -1760,8 +1769,8 @@ export function registerIpcHandlers(): void {
   // 创建 Agent 会话
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
-    async (_, title?: string, channelId?: string, workspaceId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId)
+    async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
+      const session = createAgentSession(title, channelId, workspaceId, modelId)
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -1782,6 +1791,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.UPDATE_TITLE,
     async (_, id: string, title: string): Promise<AgentSessionMeta> => {
       return updateAgentSessionMeta(id, { title })
+    }
+  )
+
+  // 更新 Agent 会话模型选择
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SESSION_MODEL,
+    async (_, id: string, channelId?: string, modelId?: string): Promise<AgentSessionMeta> => {
+      return updateAgentSessionMeta(id, { channelId, modelId })
     }
   )
 

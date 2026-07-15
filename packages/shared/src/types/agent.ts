@@ -1,3 +1,5 @@
+import type { ProviderType } from './channel'
+
 /**
  * Agent 相关类型定义
  *
@@ -182,6 +184,8 @@ export interface SDKAssistantMessage {
   isReplay?: boolean
   /** 渠道配置的模型 ID，持久化/流式期间注入，用于正确匹配模型显示名 */
   _channelModelId?: string
+  /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
+  _channelProvider?: ProviderType
 }
 
 /** SDK user 消息 */
@@ -217,6 +221,10 @@ export interface SDKResultMessage {
   background_tasks?: SDKBackgroundTaskSummary[]
   session_crons?: SDKSessionCronSummary[]
   session_id?: string
+  /** 渠道配置的模型 ID，用于缺失 modelUsage.contextWindow 时按 Agent SDK 运行窗口兜底 */
+  _channelModelId?: string
+  /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */
+  _channelProvider?: ProviderType
 }
 
 /** SDK system 消息（init / compact_boundary / permission_denied / task_started / task_progress / task_notification） */
@@ -1366,6 +1374,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_SDK_MESSAGES: 'agent:get-sdk-messages',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
+  /** 更新会话模型选择 */
+  UPDATE_SESSION_MODEL: 'agent:update-session-model',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
   /** 迁移 Chat 对话记录到 Agent 会话 */

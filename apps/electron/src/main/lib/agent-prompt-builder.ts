@@ -10,6 +10,8 @@
  */
 
 import type { PromaPermissionMode } from '@proma/shared'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
@@ -36,6 +38,24 @@ interface SystemPromptContext {
   collaborationAvailable?: boolean
 }
 
+function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string) {
+  const configDirName = getConfigDirName()
+  const workspaceRoot = join(homedir(), configDirName, 'agent-workspaces', workspaceSlug)
+  const autoMemoryDir = join(workspaceRoot, '.claude', 'memory')
+
+  return {
+    workspaceRoot,
+    sessionDir: join(workspaceRoot, sessionId),
+    mcpConfig: join(workspaceRoot, 'mcp.json'),
+    skillsDir: join(workspaceRoot, 'skills'),
+    workspaceContextDir: join(workspaceRoot, 'workspace-files', '.context'),
+    claudeMd: join(workspaceRoot, 'CLAUDE.md'),
+    autoMemoryDir,
+    autoMemoryIndex: join(autoMemoryDir, 'MEMORY.md'),
+    sdkConfigDir: join(homedir(), configDirName, 'sdk-config'),
+  }
+}
+
 /**
  * 构建完整的系统提示词
  *
@@ -48,6 +68,9 @@ interface SystemPromptContext {
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const profile = getUserProfile()
   const userName = profile.userName || '用户'
+  const workspacePaths = ctx.workspaceSlug
+    ? buildWorkspacePromptPaths(ctx.workspaceSlug, ctx.sessionId)
+    : undefined
 
   const sections: string[] = []
 
@@ -190,20 +213,23 @@ Proma 提供内置 \`collaboration\` 工具，可以创建真实可见的协作�
 
   // 工作区信息
   if (ctx.workspaceName && ctx.workspaceSlug) {
-    const configDirName = getConfigDirName()
     sections.push(`## 工作区
 
 - 工作区名称: ${ctx.workspaceName}
-- 工作区根目录: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/
-- 当前会话目录（cwd）: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/${ctx.sessionId}/
-- MCP 配置: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/mcp.json（顶层 key 是 \`servers\`）
-- Skills 目录: ~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/skills/（Proma 只从此目录加载 skill；npx skills add 等外部命令安装到 .agents/skills/ 不会被加载，需手动 mv 到此目录）
+- 工作区根目录: ${workspacePaths?.workspaceRoot}
+- 当前会话目录（cwd）: ${workspacePaths?.sessionDir}
+- 工作区 CLAUDE.md: ${workspacePaths?.claudeMd}
+- 工作区 Auto Memory 目录: ${workspacePaths?.autoMemoryDir}
+- 工作区 Auto Memory 索引: ${workspacePaths?.autoMemoryIndex}
+- SDK 隔离配置目录: ${workspacePaths?.sdkConfigDir}（用于 Proma 与 Claude Code CLI 的 SDK 配置隔离；不要把它当作工作区长期 memory 目录）
+- MCP 配置: ${workspacePaths?.mcpConfig}（顶层 key 是 \`servers\`）
+- Skills 目录: ${workspacePaths?.skillsDir}/（Proma 只从此目录加载 skill；npx skills add 等外部命令安装到 .agents/skills/ 不会被加载，需手动 mv 到此目录）
 
 ### .context 目录层级
 
 存在两个 \`.context/\` 目录，用途不同：
 - **会话级** \`.context/\`（当前 cwd 下）：当前会话的临时工作台，存放本次任务的 todo.md、plan/、临时笔记等
-- **工作区级** \`~/${configDirName}/agent-workspaces/${ctx.workspaceSlug}/workspace-files/.context/\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等
+- **工作区级** \`${workspacePaths?.workspaceContextDir}\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等
 
 选择写入哪个目录时：
 - 只与当前任务相关的内容 → 会话级 \`.context/\`
@@ -247,16 +273,17 @@ Proma 提供内置 \`collaboration\` 工具，可以创建真实可见的协作�
 
 ### CLAUDE.md — 工作区项目指令（长期持久化）
 
-维护工作区根目录下的 CLAUDE.md，记录未来任何 Agent 都应默认遵守的项目规则和入口。注意：当前会话目录是工作区根目录下的 session 子目录，不要把长期知识写到 session 子目录的 CLAUDE.md：
+维护工作区根目录下的 CLAUDE.md${workspacePaths ? `（\`${workspacePaths.claudeMd}\`）` : ''}，记录未来任何 Agent 都应默认遵守的项目规则和入口。注意：当前会话目录是工作区根目录下的 session 子目录，不要把长期知识写到 session 子目录的 CLAUDE.md：
 - **适合写入**：项目硬约束、架构边界、常用命令、测试/发布流程、关键路径索引、明确的工作区规则
 - **不适合写入**：临时调试过程、一次性偏好、长篇调研正文、从代码中显而易见的内容
 - **维护要求**：保持精炼（<200 行），发现已有内容不准确时小幅修订或标注过时，避免追加冲突结论
 
 ### SDK auto memory — 自动记忆（用户可审计）
 
-Claude Agent SDK 可能会维护工作区级 auto memory 文件，目录由 Proma 指向工作区根目录的 \`.claude/memory/\`：
+Claude Agent SDK 可能会维护工作区级 auto memory 文件，目录由 Proma 显式指向工作区根目录的 \`.claude/memory/\`${workspacePaths ? `（\`${workspacePaths.autoMemoryDir}\`）` : ''}：
 - **用途**：沉淀跨会话学习到的经验、用户偏好、误判纠正、问题状态变化和易错点
-- **入口文件**：\`.claude/memory/MEMORY.md\` 只放主题索引和路由；详细内容拆到同目录或子目录下的主题文件
+- **入口文件**：${workspacePaths ? `\`${workspacePaths.autoMemoryIndex}\`` : '`.claude/memory/MEMORY.md`'} 只放主题索引和路由；详细内容拆到同目录或子目录下的主题文件
+- **路径边界**：当前 cwd 是 session 子目录，\`./.claude/memory/\` 表示 session 局部目录，不是工作区 Auto Memory；除非用户明确要求，不要在 session 子目录下创建或更新 \`.claude/memory/\`
 - **使用要求**：不要把它当聊天流水账；只有明确重复出现、用户明确要求记住，或删掉后未来 Agent 明显会犯错的稳定经验才写入
 - **会话内维护**：当用户确认问题已解决、否定先前判断、说明问题仍存在/加重，或明确表达长期偏好时，判断是否应更新 memory；纠正旧记忆时应修订或标注旧结论，而不是只追加冲突新结论
 - **弱信号处理**：一次性偏好、临时过程和证据不足的判断，不要直接写入 auto memory；可在最终回复中建议用户确认后再沉淀

@@ -1,3 +1,5 @@
+import type { ProviderType } from '../types/channel'
+
 /**
  * 模型上下文窗口推断 — 单一 source of truth。
  *
@@ -15,30 +17,51 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000
 export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
 
 /** 已确认需要显式选择 Claude Agent SDK `[1m]` 变体的模型。 */
-const AGENT_SDK_1M_CONTEXT_RULES = [
+const AGENT_SDK_1M_CONTEXT_RULES = {
   // Claude 系列
-  'claude-sonnet-4-6',
-  'claude-sonnet-5',
-  'claude-opus-4-6',
-  'claude-opus-4-7',
-  'claude-opus-4-8',
-  'claude-fable-5',
+  claude: [
+    'claude-sonnet-4-6',
+    'claude-sonnet-5',
+    'claude-opus-4-6',
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-fable-5',
+  ],
   // DeepSeek
-  'deepseek-v4',
+  deepseek: ['deepseek-v4'],
   // 智谱 GLM
-  'glm-5.2',
+  glm: ['glm-5.2'],
   // 小米 MiMo
-  'mimo-v2.5',
+  mimo: ['mimo-v2.5'],
   // MiniMax
-  'minimax-m3',
+  minimax: ['minimax-m3'],
   // 通义千问
-  'qwen3.7',
-  'qwen3.6-plus',
-  'qwen3.6-flash',
-  'qwen3.5-plus',
-  'qwen3.5-flash',
-  'qwen3-coder-plus',
-] as const
+  qwen: [
+    'qwen3.7',
+    'qwen3.6-plus',
+    'qwen3.6-flash',
+    'qwen3.5-plus',
+    'qwen3.5-flash',
+    'qwen3-coder-plus',
+  ],
+} as const
+
+const AGENT_SDK_1M_CONTEXT_PROVIDER_RULES: Partial<Record<ProviderType, readonly string[]>> = {
+  anthropic: AGENT_SDK_1M_CONTEXT_RULES.claude,
+  deepseek: AGENT_SDK_1M_CONTEXT_RULES.deepseek,
+  'zhipu-coding': AGENT_SDK_1M_CONTEXT_RULES.glm,
+  'zhipu-coding-team': AGENT_SDK_1M_CONTEXT_RULES.glm,
+  minimax: AGENT_SDK_1M_CONTEXT_RULES.minimax,
+  xiaomi: AGENT_SDK_1M_CONTEXT_RULES.mimo,
+  'xiaomi-token-plan': AGENT_SDK_1M_CONTEXT_RULES.mimo,
+  'ark-coding-plan': [
+    ...AGENT_SDK_1M_CONTEXT_RULES.deepseek,
+    ...AGENT_SDK_1M_CONTEXT_RULES.glm,
+    ...AGENT_SDK_1M_CONTEXT_RULES.minimax,
+  ],
+}
+
+const AGENT_SDK_1M_CONTEXT_DISPLAY_RULES = Object.values(AGENT_SDK_1M_CONTEXT_RULES).flat()
 
 /**
  * 上下文窗口配置表。仅影响显示推断的模型加在 rules；已实测 Agent SDK 1M
@@ -55,7 +78,7 @@ const CONTEXT_WINDOW_CONFIG = {
 
   /** 1M 上下文模型匹配规则 */
   rules: [
-    ...AGENT_SDK_1M_CONTEXT_RULES,
+    ...AGENT_SDK_1M_CONTEXT_DISPLAY_RULES,
     // 已废弃的 MiMo V2 Pro 仅保留历史显示推断，不主动启用 SDK 1M 变体
     'mimo-v2-pro',
   ] as const,
@@ -84,16 +107,33 @@ export function inferContextWindow(model?: string): number | undefined {
 }
 
 /**
+ * 按 Agent SDK 实际启用的窗口推断 contextWindow。
+ *
+ * 与 resolveAgentSdkModelId 不同，这里只判断模型窗口能力，不判断是否要把
+ * `[1m]` 后缀传给 SDK。通用 Anthropic-compatible 端点可能不接受带后缀的
+ * 模型名，但这不应把已知 1M 模型的上下文分母降级为 200K。
+ */
+export function inferAgentSdkContextWindow(modelId: string | undefined, provider: ProviderType): number | undefined {
+  if (!modelId) return undefined
+  return supports1MContext(modelId)
+    || resolveAgentSdkModelId(modelId, provider) !== modelId
+    || /\[1m\]$/i.test(modelId)
+    ? ONE_MILLION_CONTEXT_WINDOW
+    : DEFAULT_CONTEXT_WINDOW
+}
+
+/**
  * 将已确认的 1M Agent 模型转换为 Claude Agent SDK 的扩展上下文变体。
  *
- * `[1m]` 仅影响 SDK 的窗口与自动压缩判定；SDK 发给提供商前会自动剥离该后缀，
- * 因此不会改变 Proma 渠道路由使用的真实模型 ID。
+ * `[1m]` 仅用于已验证的内置供应商组合。泛化的 Anthropic-compatible
+ * 端点无法保证 SDK 会在请求前剥离后缀，因此必须保留用户配置的真实模型 ID。
  */
-export function resolveAgentSdkModelId(modelId: string): string {
+export function resolveAgentSdkModelId(modelId: string, provider: ProviderType): string {
   if (!modelId || /\[1m\]$/i.test(modelId)) {
     return modelId
   }
   const model = modelId.toLowerCase()
-  if (!AGENT_SDK_1M_CONTEXT_RULES.some((pattern) => model.includes(pattern))) return modelId
+  const rules = AGENT_SDK_1M_CONTEXT_PROVIDER_RULES[provider]
+  if (!rules?.some((pattern) => model.includes(pattern))) return modelId
   return `${modelId}[1m]`
 }

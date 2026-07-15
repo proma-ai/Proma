@@ -15,6 +15,7 @@ export {
   ONE_MILLION_CONTEXT_WINDOW,
   supports1MContext,
   inferContextWindow,
+  inferAgentSdkContextWindow,
   resolveAgentSdkModelId,
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'

@@ -35,7 +35,7 @@ describe('Agent 辅助模型路由', () => {
       modelId: 'claude-sonnet-4-6',
       provider: 'anthropic',
     })
-    applyAgentModelRoutingToEnv(env, policy)
+    applyAgentModelRoutingToEnv(env, policy, 'anthropic')
 
     expect(policy.deepSeekFamily).toBe(false)
     expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined()
@@ -47,8 +47,19 @@ describe('Agent 辅助模型路由', () => {
     applyAgentModelRoutingToEnv(env, resolveAgentModelRouting({
       modelId: 'deepseek-v4-flash',
       provider: 'deepseek',
-    }))
+    }), 'deepseek')
 
     expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(`${DEEPSEEK_SUBAGENT_MODEL_ID}[1m]`)
+  })
+
+  test('Given 通用 Anthropic-compatible DeepSeek 模型 When 应用模型路由 Then SubAgent 模型不追加 SDK 后缀', () => {
+    const env: Record<string, string | undefined> = {}
+
+    applyAgentModelRoutingToEnv(env, resolveAgentModelRouting({
+      modelId: 'gateway/deepseek-v4-pro',
+      provider: 'anthropic-compatible',
+    }), 'anthropic-compatible')
+
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe(DEEPSEEK_SUBAGENT_MODEL_ID)
   })
 })

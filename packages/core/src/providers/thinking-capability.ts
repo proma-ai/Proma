@@ -79,6 +79,7 @@ export function detectThinkingCapability(
     providerType === 'kimi-api'
     || providerType === 'kimi-coding'
     || providerType === 'zhipu-coding'
+    || providerType === 'zhipu-coding-team'
     || providerType === 'ark-coding-plan'
     || providerType === 'minimax'
   ) {

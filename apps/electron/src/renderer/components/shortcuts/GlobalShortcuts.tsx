@@ -28,6 +28,7 @@ import {
   agentSessionsAtom,
   currentAgentSessionIdAtom,
   agentChannelIdAtom,
+  agentModelIdAtom,
   currentAgentWorkspaceIdAtom,
   agentWorkspacesAtom,
   agentAttachedFilesMapAtom,
@@ -204,11 +205,13 @@ export function GlobalShortcuts(): null {
         if (data.mode === 'agent') {
           // Agent 模式：创建会话 + 保存附件到 session 目录
           const channelId = store.get(agentChannelIdAtom) || undefined
+          const modelId = store.get(agentModelIdAtom) || undefined
           const workspaceId = store.get(currentAgentWorkspaceIdAtom) || undefined
           const meta = await window.electronAPI.createAgentSession(
             undefined,
             channelId,
             workspaceId,
+            modelId,
           )
           // 更新 atom 状态
           store.set(agentSessionsAtom, (prev) => [meta, ...prev])

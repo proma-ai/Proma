@@ -35,9 +35,10 @@ export function resolveAgentModelRouting(input: AgentModelRoutingInput): AgentMo
 export function applyAgentModelRoutingToEnv(
   env: Record<string, string | undefined>,
   policy: AgentModelRoutingPolicy,
+  provider: ProviderType,
 ): void {
   if (policy.subagentModel) {
-    env.CLAUDE_CODE_SUBAGENT_MODEL = resolveAgentSdkModelId(policy.subagentModel)
+    env.CLAUDE_CODE_SUBAGENT_MODEL = resolveAgentSdkModelId(policy.subagentModel, provider)
   } else {
     delete env.CLAUDE_CODE_SUBAGENT_MODEL
   }
