@@ -13,7 +13,7 @@
  * - 自动扩高
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -38,6 +38,29 @@ import {
 } from '@/lib/voice-input-focus'
 
 // ===== 行数计算 =====
+
+const SESSION_QUICK_SWITCH_KEYDOWN_EVENT = 'proma:session-quick-switch-keydown'
+const SESSION_QUICK_SWITCH_KEYUP_EVENT = 'proma:session-quick-switch-keyup'
+
+function isMacPlatform(): boolean {
+  return typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || '')
+}
+
+function isPrimaryModifierEvent(event: KeyboardEvent, isMac: boolean): boolean {
+  if (isMac) {
+    return event.key === 'Meta' || event.key === 'OS' || event.code === 'MetaLeft' || event.code === 'MetaRight'
+  }
+  return event.key === 'Control' || event.code === 'ControlLeft' || event.code === 'ControlRight'
+}
+
+function shouldForwardSessionQuickSwitchEvent(event: KeyboardEvent, isMac: boolean): boolean {
+  if (isPrimaryModifierEvent(event, isMac)) return true
+  if (!/^[1-9]$/.test(event.key)) return false
+  if (isMac) {
+    return event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+  }
+  return event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+}
 
 /** 计算编辑器内容的行数 */
 function countEditorLines(editor: ReturnType<typeof useEditor>): number {
@@ -207,6 +230,16 @@ export function RichTextInput({
   const richTextEnabled = useAtomValue(richTextRenderingEnabledAtom)
   const richTextEnabledRef = useRef(richTextEnabled)
   richTextEnabledRef.current = richTextEnabled
+  const isMac = useMemo(() => isMacPlatform(), [])
+
+  const forwardSessionQuickSwitchKeyEvent = useCallback((event: React.KeyboardEvent<HTMLDivElement>, type: 'keydown' | 'keyup'): void => {
+    const nativeEvent = event.nativeEvent
+    if (!shouldForwardSessionQuickSwitchEvent(nativeEvent, isMac)) return
+    window.dispatchEvent(new CustomEvent(
+      type === 'keydown' ? SESSION_QUICK_SWITCH_KEYDOWN_EVENT : SESSION_QUICK_SWITCH_KEYUP_EVENT,
+      { detail: { event: nativeEvent } },
+    ))
+  }, [isMac])
 
   // Mention Suggestion 配置（稳定引用，不随 workspacePath 变化重建）
   const mentionSuggestion = useMemo(
@@ -666,6 +699,8 @@ export function RichTextInput({
 
   return (
     <div
+      onKeyDownCapture={(event) => forwardSessionQuickSwitchKeyEvent(event, 'keydown')}
+      onKeyUpCapture={(event) => forwardSessionQuickSwitchKeyEvent(event, 'keyup')}
       className={cn(
         'rich-text-input relative w-full overflow-y-auto scrollbar-thin transition-[max-height] duration-200 ease-in-out',
         isManuallyCollapsed

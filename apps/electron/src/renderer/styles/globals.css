@@ -1319,35 +1319,56 @@
 .spinner-cube:nth-child(9) { animation-delay: 0.2s; }
 
 /* ===== Session 快速切换提示 ===== */
-.session-quick-switch-row[data-quick-switch-label]::after {
-  content: attr(data-quick-switch-label);
+.session-quick-switch-keycap {
   position: absolute;
   top: 50%;
-  right: 6px;
+  right: 7px;
   z-index: 8;
-  min-width: 24px;
-  height: 18px;
-  padding: 0 5px;
+  display: inline-flex;
+  height: 17px;
+  width: max-content;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
   transform: translateY(-50%) scale(0.96);
-  border: 1px solid hsl(var(--border) / 0.72);
-  border-radius: 6px;
-  background: hsl(var(--popover) / 0.96);
-  color: hsl(var(--popover-foreground) / 0.78);
-  box-shadow: 0 4px 14px hsl(var(--foreground) / 0.10);
+  border: 1px solid hsl(var(--primary) / 0.28);
+  border-radius: 5px;
+  background: hsl(var(--primary) / 0.10);
+  color: hsl(var(--primary) / 0.92);
+  box-shadow: 0 2px 6px hsl(var(--primary) / 0.10);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
+  font-weight: 400;
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
-[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label]::after {
+.session-quick-switch-modifier {
+  font-size: 16px;
+  line-height: 15px;
+  font-weight: 400;
+}
+
+.session-quick-switch-number {
+  font-size: 9px;
+  line-height: 11px;
+  font-weight: 400;
+}
+
+[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label] .session-quick-switch-keycap {
   opacity: 1;
   transform: translateY(-50%) scale(1);
+}
+
+[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label] {
+  padding-right: 44px;
+}
+
+[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label] .session-item-actions,
+[data-session-switch-hints="true"] .session-quick-switch-row[data-quick-switch-label] .session-delegation-toggle {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ===== 深色主题：迷你导航当前可见范围指示器 — 加亮 ===== */

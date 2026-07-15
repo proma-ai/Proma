@@ -327,6 +327,8 @@ const PINNED_SESSION_ROW_HEIGHT_PX = 32
 const PINNED_SESSION_MAX_HEIGHT = PINNED_SESSION_VISIBLE_LIMIT * PINNED_SESSION_ROW_HEIGHT_PX
 const SESSION_QUICK_SWITCH_HINT_DELAY_MS = 1000
 const SESSION_QUICK_SWITCH_LIMIT = 9
+const SESSION_QUICK_SWITCH_KEYDOWN_EVENT = 'proma:session-quick-switch-keydown'
+const SESSION_QUICK_SWITCH_KEYUP_EVENT = 'proma:session-quick-switch-keyup'
 
 const ACTIVE_SESSION_STATUSES: ReadonlySet<SessionIndicatorStatus> = new Set([
   'blocked',
@@ -405,7 +407,7 @@ interface QuickSwitchTarget {
 }
 
 function getPrimaryModifierLabel(isMac: boolean): string {
-  return isMac ? '⌘' : 'Ctrl+'
+  return isMac ? '⌘' : 'Ctrl'
 }
 
 function isPrimaryModifierKey(event: KeyboardEvent, isMac: boolean): boolean {
@@ -447,6 +449,15 @@ function isQuickSwitchRowVisible(row: HTMLElement, root: HTMLElement): boolean {
   }
 
   return true
+}
+
+function SessionQuickSwitchKeycap(): React.ReactElement {
+  return (
+    <span className="session-quick-switch-keycap" aria-hidden="true">
+      <span className="session-quick-switch-modifier" />
+      <span className="session-quick-switch-number" />
+    </span>
+  )
 }
 
 function getRailInitial(title: string): string {
@@ -619,15 +630,11 @@ function RailRecentButton({
           <button
             ref={preview.setAnchorRef}
             type="button"
-            data-session-switch-id={item.id}
-            data-session-switch-title={item.title}
-            data-session-switch-type={item.type}
             aria-label={`打开${item.type === 'agent' ? 'Agent 会话' : 'Chat 对话'}：${item.title}`}
             onClick={() => onSelect(item)}
             onMouseEnter={preview.handleMouseEnter}
             onMouseLeave={preview.handleMouseLeave}
             className={cn(
-              'session-quick-switch-row',
               'relative size-10 flex items-center justify-center overflow-hidden rounded-[12px] transition-colors titlebar-no-drag',
               item.active
                 ? 'bg-primary/10 text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
@@ -784,6 +791,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const sidebarRootRef = React.useRef<HTMLDivElement>(null)
   const quickSwitchTargetsRef = React.useRef<QuickSwitchTarget[]>([])
   const quickSwitchHintTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const processedQuickSwitchEventsRef = React.useRef<WeakSet<KeyboardEvent>>(new WeakSet())
   const [quickSwitchHintsVisible, setQuickSwitchHintsVisible] = React.useState(false)
 
   // 归档 & 搜索状态
@@ -1690,6 +1698,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     for (const row of rows) {
       delete row.dataset.quickSwitchLabel
       delete row.dataset.quickSwitchIndex
+      row.querySelector<HTMLElement>('.session-quick-switch-modifier')?.replaceChildren()
+      row.querySelector<HTMLElement>('.session-quick-switch-number')?.replaceChildren()
     }
 
     const targets: QuickSwitchTarget[] = []
@@ -1710,6 +1720,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       const index = targets.length + 1
       row.dataset.quickSwitchIndex = String(index)
       row.dataset.quickSwitchLabel = `${modifierLabel}${index}`
+      const modifier = row.querySelector<HTMLElement>('.session-quick-switch-modifier')
+      const number = row.querySelector<HTMLElement>('.session-quick-switch-number')
+      if (modifier) modifier.textContent = modifierLabel
+      if (number) number.textContent = String(index)
       targets.push({
         id: sessionSwitchId,
         title: sessionSwitchTitle,
@@ -1730,6 +1744,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       for (const row of rows) {
         delete row.dataset.quickSwitchLabel
         delete row.dataset.quickSwitchIndex
+        row.querySelector<HTMLElement>('.session-quick-switch-modifier')?.replaceChildren()
+        row.querySelector<HTMLElement>('.session-quick-switch-number')?.replaceChildren()
       }
       quickSwitchTargetsRef.current = []
       return
@@ -1777,6 +1793,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
 
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (processedQuickSwitchEventsRef.current.has(event)) return
+      processedQuickSwitchEventsRef.current.add(event)
       if (event.isComposing) return
       if (settingsOpen || searchDialogOpen) return
 
@@ -1806,18 +1824,36 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
 
     const handleKeyUp = (event: KeyboardEvent): void => {
+      if (processedQuickSwitchEventsRef.current.has(event)) return
+      processedQuickSwitchEventsRef.current.add(event)
       if (isPrimaryModifierKey(event, isMac)) {
         hideHints()
       }
     }
 
+    const handleForwardedKeyDown = (event: Event): void => {
+      const forwarded = event as CustomEvent<{ event?: KeyboardEvent }>
+      const originalEvent = forwarded.detail?.event
+      if (originalEvent) handleKeyDown(originalEvent)
+    }
+
+    const handleForwardedKeyUp = (event: Event): void => {
+      const forwarded = event as CustomEvent<{ event?: KeyboardEvent }>
+      const originalEvent = forwarded.detail?.event
+      if (originalEvent) handleKeyUp(originalEvent)
+    }
+
     window.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('keyup', handleKeyUp, true)
+    window.addEventListener(SESSION_QUICK_SWITCH_KEYDOWN_EVENT, handleForwardedKeyDown)
+    window.addEventListener(SESSION_QUICK_SWITCH_KEYUP_EVENT, handleForwardedKeyUp)
     window.addEventListener('blur', hideHints)
     document.addEventListener('visibilitychange', hideHints)
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('keyup', handleKeyUp, true)
+      window.removeEventListener(SESSION_QUICK_SWITCH_KEYDOWN_EVENT, handleForwardedKeyDown)
+      window.removeEventListener(SESSION_QUICK_SWITCH_KEYUP_EVENT, handleForwardedKeyUp)
       window.removeEventListener('blur', hideHints)
       document.removeEventListener('visibilitychange', hideHints)
       clearHintTimer()
@@ -3220,7 +3256,7 @@ function SessionItemActions({
 
   return (
     <div
-      className="relative flex-shrink-0 h-[18px] w-[58px]"
+      className="session-item-actions relative flex-shrink-0 h-[18px] w-[58px]"
       onClick={(e) => e.stopPropagation()}
     >
       <span
@@ -3410,8 +3446,7 @@ const ConversationItem = React.memo(function ConversationItem({
             startEdit()
           }}
           className={cn(
-            'session-quick-switch-row',
-            'group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'session-item-selected',
             streaming
               ? 'text-foreground font-medium hover:bg-foreground/[0.03]'
@@ -3467,6 +3502,7 @@ const ConversationItem = React.memo(function ConversationItem({
               menuItems={menuItems}
             />
           )}
+          <SessionQuickSwitchKeycap />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-40 z-[9999] min-w-0 p-0.5">
@@ -3670,8 +3706,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           onMouseEnter={preview.handleMouseEnter}
           onMouseLeave={preview.handleMouseLeave}
           className={cn(
-            'session-quick-switch-row',
-            'group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
@@ -3760,7 +3795,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                       event.stopPropagation()
                       preview.closeNow()
                     }}
-                    className="flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
+                    className="session-delegation-toggle flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70 transition-colors"
                   >
                     <ChevronRight
                       size={11}
@@ -3782,6 +3817,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 onMenuOpenChange={setMenuOpen}
                 menuItems={menuItems}
               />
+              <SessionQuickSwitchKeycap />
             </>
           )}
         </div>

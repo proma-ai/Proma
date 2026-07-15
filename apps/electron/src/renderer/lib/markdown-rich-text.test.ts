@@ -112,3 +112,28 @@ describe('markdownToHtml rich preview blocks', () => {
     expect(html).not.toContain('<h3>Agent 模式</h3>')
   })
 })
+
+describe('linkify 合成链接防护', () => {
+  test('markdownToHtml 不把 SKILL.md 文件名误判为 URL 链接', () => {
+    const html = markdownToHtml('请查看 SKILL.md 了解更多')
+    expect(html).not.toContain('http://SKILL.md')
+    expect(html).not.toContain('<a')
+  })
+
+  test('markdownToHtml 仍对带 scheme 的真实 URL 自动链接', () => {
+    const html = markdownToHtml('访问 https://example.com 了解更多')
+    expect(html).toContain('<a href="https://example.com">')
+  })
+
+  test('markdownToHtml 不把裸域名 google.com 误判为链接', () => {
+    const html = markdownToHtml('访问 google.com 搜索')
+    expect(html).not.toContain('<a')
+  })
+
+  test('markdownToHtml 不把裸邮箱 foo@bar.com 误判为 mailto 链接', () => {
+    const html = markdownToHtml('联系 foo@bar.com')
+    expect(html).not.toContain('mailto:')
+    expect(html).not.toContain('<a')
+    expect(html).toContain('foo@bar.com')
+  })
+})

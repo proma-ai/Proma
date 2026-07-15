@@ -152,6 +152,11 @@ const markdownIt = new MarkdownIt({
   breaks: false,
 })
 
+// 关闭 linkify 的模糊匹配：避免把形如 SKILL.md 的文件名（.md 被误判为摩尔多瓦 TLD）
+// 自动包装成 http://SKILL.md 这样的合成链接。带 scheme 的真实 URL（http(s)://...）
+// 仍会被正常链接。fuzzyEmail 同理关闭，防止 foo@bar.com 被误判。
+markdownIt.linkify.set({ fuzzyLink: false, fuzzyEmail: false })
+
 addMathSupport(markdownIt)
 
 markdownIt.core.ruler.after('inline', 'emoji_shortcode', (state: any) => {
