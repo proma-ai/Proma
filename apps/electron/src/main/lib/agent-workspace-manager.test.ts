@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 
@@ -86,6 +86,31 @@ describe('Agent 工作区 MCP 配置', () => {
 
     expect(Object.keys(normalized.servers).sort()).toEqual(['github'])
     expect(normalized.servers.github?.command).toBe('github-mcp')
+  })
+})
+
+describe('Agent 工作区创建', () => {
+  test('Given 项目名称是 Windows 保留设备名 When 创建工作区 Then slug 避免直接使用保留名', () => {
+    const workspace = manager.createAgentWorkspace('CON')
+
+    expect(workspace.slug).toBe('workspace-con')
+    expect(existsSync(configPaths.getAgentWorkspacePath(workspace.slug))).toBe(true)
+  })
+
+  test('Given 默认 Skill 包含 blocklist 目录 When 创建工作区 Then 初始化 Skills 时跳过高风险目录', () => {
+    const defaultSkillDir = join(configPaths.getDefaultSkillsDir(), 'sample-skill')
+    mkdirSync(join(defaultSkillDir, '.git', 'objects'), { recursive: true })
+    mkdirSync(join(defaultSkillDir, 'node_modules', 'pkg'), { recursive: true })
+    writeFileSync(join(defaultSkillDir, 'SKILL.md'), '---\nname: Sample\n---\n', 'utf-8')
+    writeFileSync(join(defaultSkillDir, '.git', 'objects', 'locked'), 'skip', 'utf-8')
+    writeFileSync(join(defaultSkillDir, 'node_modules', 'pkg', 'index.js'), 'skip', 'utf-8')
+
+    const workspace = manager.createAgentWorkspace('Filtered Copy')
+    const copiedSkillDir = join(configPaths.getWorkspaceSkillsDir(workspace.slug), 'sample-skill')
+
+    expect(existsSync(join(copiedSkillDir, 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(copiedSkillDir, '.git'))).toBe(false)
+    expect(existsSync(join(copiedSkillDir, 'node_modules'))).toBe(false)
   })
 })
 
