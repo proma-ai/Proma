@@ -15,6 +15,7 @@ import {
   tabsAtom,
   activeTabIdAtom,
   tabIndicatorMapAtom,
+  sidebarCollapsedAtom,
 } from '@/atoms/tab-atoms'
 import type { TabItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -35,7 +36,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TabBarItem } from './TabBarItem'
 import { useCloseTab } from '@/hooks/useCloseTab'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT } from '@/lib/platform'
+import { detectIsWindows, detectIsMac, WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT } from '@/lib/platform'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { cn } from '@/lib/utils'
 
@@ -225,6 +226,8 @@ function TabBarInner({
   const leaveTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const isMac = React.useMemo(() => detectIsMac(), [])
+  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom)
 
   // 文件面板切换（全局共享）：活动 Tab 是 Agent 且面板关闭时，在 TabBar 右上角展示"打开"按钮。
   // 该按钮的 absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
@@ -387,6 +390,8 @@ function TabBarInner({
           // Windows 始终避开 WindowControls（~126px）；非 Windows 打开按钮时给 scroll 预留空间
           isWindows && WINDOW_CONTROLS_PADDING_RIGHT,
           !isWindows && showOpenPanelButton && "pr-10",
+          // macOS 侧边栏收起时，避让 traffic lights 右侧
+          isMac && sidebarCollapsed && "pl-4",
         )}
       >
         {tabs.map((tab) => (

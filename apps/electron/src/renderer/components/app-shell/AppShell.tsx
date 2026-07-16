@@ -20,7 +20,7 @@ import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import { WindowControls } from '@/components/WindowControls'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
+import { detectIsWindows, detectIsMac, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 
 const MIN_RIGHT_PANEL_WIDTH = 300
@@ -53,6 +53,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const activeView = useAtomValue(activeViewAtom)
   const showRightPanel = appMode === 'agent' && !!currentSessionId && !automationForm.open && activeView !== 'automations' && activeView !== 'agent-skills'
   const isWindows = React.useMemo(() => detectIsWindows(), [])
+  const isMac = React.useMemo(() => detectIsMac(), [])
 
   // 左侧边栏可拖拽宽度
   const [leftSidebarWidth, setLeftSidebarWidth] = useAtom(leftSidebarWidthAtom)
@@ -180,6 +181,10 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
         {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
         <div className={cn(isClassic ? 'p-2 pr-0' : '', 'relative z-[60] crt-sidebar')}>
           <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
+          {/* 侧边栏右侧分隔线：absolute 定位避免 flex gap 暴露父级渐变背景 */}
+          {!isClassic && (
+            <div aria-hidden="true" className={cn('absolute right-0 w-px z-[61] bg-border/80 dark:bg-border/70', isMac && sidebarCollapsed ? 'top-[34px] bottom-0' : 'top-0 bottom-0')} />
+          )}
           {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
           {!sidebarCollapsed && (
             <div
@@ -190,9 +195,6 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
             />
           )}
         </div>
-        {!isClassic && (
-          <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
-        )}
 
         {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
         <div className={cn('flex-1 min-w-0 relative z-[60]', isClassic && 'p-2')}>

@@ -828,6 +828,36 @@ export function resolveAppIconPath(variantId: string): string | null {
   return join(resourcesDir, 'proma-logos', `proma-${variantId}.png`)
 }
 
+/**
+ * macOS: 将 PNG 图标写入 .app bundle 的自定义图标属性，
+ * 使 Finder / Launchpad / Dock（未运行时）也显示用户选择的图标。
+ * 传 null 清除自定义图标，恢复 bundle 内置 .icns。
+ */
+export async function setAppBundleIcon(pngPath: string | null): Promise<void> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return
+  const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/.*$/, '')
+  if (!appPath.endsWith('.app')) return
+  const { execFile } = await import('node:child_process')
+  const script = pngPath
+    ? `
+    ObjC.import('AppKit');
+    const ws = $.NSWorkspace.sharedWorkspace;
+    const img = $.NSImage.alloc.initWithContentsOfFile('${pngPath.replace(/'/g, "\\'")}');
+    ws.setIconForFileOptions(img, '${appPath.replace(/'/g, "\\'")}', 0);
+  `
+    : `
+    ObjC.import('AppKit');
+    const ws = $.NSWorkspace.sharedWorkspace;
+    ws.setIconForFileOptions($.nil, '${appPath.replace(/'/g, "\\'")}', 0);
+  `
+  return new Promise<void>((resolve) => {
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], (err) => {
+      if (err) console.warn('[图标] 设置 bundle 图标失败:', err.message)
+      resolve()
+    })
+  })
+}
+
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
 
@@ -1637,9 +1667,11 @@ export function registerIpcHandlers(): void {
           return false
         }
 
-        // macOS: 设置 Dock 图标
+        // macOS: 设置 Dock 图标（运行时）+ bundle 图标（Finder/Launchpad/Dock 未运行时）
         if (process.platform === 'darwin' && app.dock) {
           app.dock.setIcon(iconPath)
+          const isDefault = !variantId || variantId === 'default'
+          await setAppBundleIcon(isDefault ? null : iconPath)
         }
 
         // 持久化到设置

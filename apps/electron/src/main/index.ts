@@ -503,12 +503,14 @@ async function bootstrap(): Promise<void> {
   // 如果用户有保存的图标偏好则使用，否则用默认图标
   if (process.platform === 'darwin' && app.dock) {
     await app.dock.show()
-    const { resolveAppIconPath } = require('./ipc')
+    const { resolveAppIconPath, setAppBundleIcon } = require('./ipc')
     const settings = getSettings()
     const variantId = settings.appIconVariant
     const dockIconPath = resolveAppIconPath(variantId ?? 'default')
     if (dockIconPath && existsSync(dockIconPath)) {
       app.dock.setIcon(dockIconPath)
+      const isDefault = !variantId || variantId === 'default'
+      setAppBundleIcon(isDefault ? null : dockIconPath)
     }
   }
 
