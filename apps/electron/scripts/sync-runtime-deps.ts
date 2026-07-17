@@ -7,7 +7,7 @@
  * apps/electron/node_modules，保证 packaged app 中 Node 模块解析可用。
  */
 
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
 interface PackageManifest {
@@ -24,7 +24,8 @@ interface RuntimeDependency {
 interface SyncContext {
   sourceNodeModules: string
   targetNodeModules: string
-  copiedPackages: Set<string>
+  copiedPackages: Map<string, string>
+  topLevelPackageSources: Map<string, string>
   skippedOptionalPackages: string[]
 }
 
@@ -52,7 +53,9 @@ export const EXTERNAL_RUNTIME_PACKAGES: readonly string[] = [
 
 const appDir = resolve(import.meta.dir, '..')
 const repoRoot = resolve(appDir, '../..')
-const defaultSourceNodeModules = join(repoRoot, 'node_modules')
+const repoNodeModules = join(repoRoot, 'node_modules')
+const bunVirtualNodeModules = join(repoNodeModules, '.bun', 'node_modules')
+const defaultSourceNodeModules = existsSync(bunVirtualNodeModules) ? bunVirtualNodeModules : repoNodeModules
 const defaultTargetNodeModules = join(appDir, 'node_modules')
 
 function getPackageDir(nodeModulesDir: string, packageName: string): string {
@@ -66,10 +69,43 @@ function getPackageDir(nodeModulesDir: string, packageName: string): string {
   return join(nodeModulesDir, packageName)
 }
 
-function getPackageManifest(ctx: SyncContext, packageName: string): PackageManifest | undefined {
-  const manifestPath = join(getPackageDir(ctx.sourceNodeModules, packageName), 'package.json')
-  if (!existsSync(manifestPath)) return undefined
-  return JSON.parse(readFileSync(manifestPath, 'utf-8')) as PackageManifest
+function resolvePackageFromNodeModules(nodeModulesDir: string, packageName: string): string | undefined {
+  const packageDir = getPackageDir(nodeModulesDir, packageName)
+  if (existsSync(join(packageDir, 'package.json'))) {
+    return realpathSync(packageDir)
+  }
+  return undefined
+}
+
+function resolvePackageUpwards(startDir: string, packageName: string): string | undefined {
+  let currentDir = resolve(startDir)
+
+  while (true) {
+    const resolvedPackageDir = resolvePackageFromNodeModules(join(currentDir, 'node_modules'), packageName)
+    if (resolvedPackageDir) return resolvedPackageDir
+
+    const parentDir = dirname(currentDir)
+    if (parentDir === currentDir) return undefined
+    currentDir = parentDir
+  }
+}
+
+function resolvePackageSourceDir(ctx: SyncContext, packageName: string, resolveFromDir?: string): string | undefined {
+  if (resolveFromDir) {
+    const parentResolvedDir = resolvePackageUpwards(resolveFromDir, packageName)
+    if (parentResolvedDir) return parentResolvedDir
+  }
+
+  for (const nodeModulesDir of [ctx.sourceNodeModules, bunVirtualNodeModules, repoNodeModules]) {
+    const resolvedPackageDir = resolvePackageFromNodeModules(nodeModulesDir, packageName)
+    if (resolvedPackageDir) return resolvedPackageDir
+  }
+
+  return undefined
+}
+
+function readPackageManifest(sourceDir: string): PackageManifest {
+  return JSON.parse(readFileSync(join(sourceDir, 'package.json'), 'utf-8')) as PackageManifest
 }
 
 function listRuntimeDependencies(manifest: PackageManifest): RuntimeDependency[] {
@@ -78,34 +114,84 @@ function listRuntimeDependencies(manifest: PackageManifest): RuntimeDependency[]
   return [...dependencies, ...optionalDependencies]
 }
 
-function copyPackage(ctx: SyncContext, packageName: string, optional = false): void {
-  if (ctx.copiedPackages.has(packageName)) return
-
-  const sourceDir = getPackageDir(ctx.sourceNodeModules, packageName)
-  const manifest = getPackageManifest(ctx, packageName)
-  if (!manifest || !existsSync(sourceDir)) {
+function copyPackage(
+  ctx: SyncContext,
+  packageName: string,
+  optional = false,
+  resolveFromDir?: string,
+  targetNodeModules = ctx.targetNodeModules,
+  sourceAncestors = new Set<string>(),
+): void {
+  const sourceDir = resolvePackageSourceDir(ctx, packageName, resolveFromDir)
+  if (!sourceDir) {
     if (optional) {
       ctx.skippedOptionalPackages.push(packageName)
       return
     }
-    throw new Error(`缺少运行时依赖: ${packageName} (${sourceDir})`)
+    throw new Error(`缺少运行时依赖: ${packageName} (${getPackageDir(ctx.sourceNodeModules, packageName)})`)
+  }
+  const manifest = readPackageManifest(sourceDir)
+  const isTopLevel = targetNodeModules === ctx.targetNodeModules
+
+  const targetDir = getPackageDir(targetNodeModules, packageName)
+  const targetKey = resolve(targetDir)
+  const existingSourceDir = ctx.copiedPackages.get(targetKey)
+  if (existingSourceDir) {
+    if (existingSourceDir === sourceDir) return
+    throw new Error(`运行时依赖版本冲突: ${packageName} 已复制自 ${existingSourceDir}，又解析到 ${sourceDir}`)
   }
 
-  ctx.copiedPackages.add(packageName)
+  ctx.copiedPackages.set(targetKey, sourceDir)
+  if (isTopLevel) ctx.topLevelPackageSources.set(packageName, sourceDir)
 
-  const targetDir = getPackageDir(ctx.targetNodeModules, packageName)
   mkdirSync(dirname(targetDir), { recursive: true })
+  rmSync(targetDir, { recursive: true, force: true })
   cpSync(sourceDir, targetDir, {
     recursive: true,
-    dereference: false,
+    dereference: true,
     force: true,
     preserveTimestamps: true,
-    verbatimSymlinks: true,
   })
 
+  const nextAncestors = new Set(sourceAncestors)
+  nextAncestors.add(sourceDir)
   for (const dependency of listRuntimeDependencies(manifest)) {
-    copyPackage(ctx, dependency.name, dependency.optional)
+    copyDependency(ctx, dependency, sourceDir, targetDir, nextAncestors)
   }
+}
+
+function copyDependency(
+  ctx: SyncContext,
+  dependency: RuntimeDependency,
+  parentSourceDir: string,
+  parentTargetDir: string,
+  sourceAncestors: Set<string>,
+): void {
+  const sourceDir = resolvePackageSourceDir(ctx, dependency.name, parentSourceDir)
+  if (!sourceDir) {
+    if (dependency.optional) {
+      ctx.skippedOptionalPackages.push(dependency.name)
+      return
+    }
+    throw new Error(`缺少运行时依赖: ${dependency.name} (${parentSourceDir})`)
+  }
+
+  if (sourceAncestors.has(sourceDir)) return
+
+  const topLevelSourceDir = ctx.topLevelPackageSources.get(dependency.name)
+  if (!topLevelSourceDir || topLevelSourceDir === sourceDir) {
+    copyPackage(ctx, dependency.name, dependency.optional, parentSourceDir, ctx.targetNodeModules, sourceAncestors)
+    return
+  }
+
+  copyPackage(
+    ctx,
+    dependency.name,
+    dependency.optional,
+    parentSourceDir,
+    join(parentTargetDir, 'node_modules'),
+    sourceAncestors,
+  )
 }
 
 function assertNoAbsoluteSymlinks(dir: string): void {
@@ -148,7 +234,8 @@ export function syncRuntimeDeps(options: SyncRuntimeDepsOptions = {}): SyncRunti
   const ctx: SyncContext = {
     sourceNodeModules: options.sourceNodeModules ?? defaultSourceNodeModules,
     targetNodeModules: options.targetNodeModules ?? defaultTargetNodeModules,
-    copiedPackages: new Set<string>(),
+    copiedPackages: new Map<string, string>(),
+    topLevelPackageSources: new Map<string, string>(),
     skippedOptionalPackages: [],
   }
   const externalRuntimePackages = options.externalRuntimePackages ?? EXTERNAL_RUNTIME_PACKAGES
@@ -175,7 +262,7 @@ export function syncRuntimeDeps(options: SyncRuntimeDepsOptions = {}): SyncRunti
 
   return {
     copiedPackageCount: ctx.copiedPackages.size,
-    copiedPackages: [...ctx.copiedPackages],
+    copiedPackages: [...ctx.copiedPackages.keys()],
     skippedOptionalPackages: [...ctx.skippedOptionalPackages],
   }
 }
