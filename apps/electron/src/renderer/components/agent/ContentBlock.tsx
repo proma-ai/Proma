@@ -613,7 +613,9 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
             shouldCollapse && !isExpanded && 'max-h-[5.6em]',
           )}
         >
-          <MessageResponse>{block.thinking}</MessageResponse>
+          <MessageResponse className="font-normal prose-strong:font-normal [&_strong]:font-normal [&_b]:font-normal">
+            {block.thinking}
+          </MessageResponse>
         </div>
         {shouldCollapse && (
           <button
