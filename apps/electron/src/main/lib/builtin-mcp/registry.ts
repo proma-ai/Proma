@@ -5,7 +5,7 @@
  * 都收敛在本模块，避免主编排流程继续膨胀。
  */
 
-import type { AgentSessionMeta, PromaPermissionMode } from '@proma/shared'
+import type { AgentRuntime, AgentSessionMeta, PromaPermissionMode } from '@proma/shared'
 import { injectAgentCollaborationMcpServer } from '../agent-collaboration-tools'
 import { injectAutomationMcpServer } from '../automation-agent-tools'
 import { injectNanoBananaMcpServer } from '../chat-tools/nano-banana-mcp'
@@ -17,6 +17,7 @@ export interface BuiltinMcpInjectContext {
   sessionId: string
   channelId: string
   modelId?: string
+  agentRuntime?: AgentRuntime
   workspaceId?: string
   workspaceSlug?: string
   agentCwd?: string
@@ -48,6 +49,7 @@ export async function injectBuiltinMcpServers(ctx: BuiltinMcpInjectContext): Pro
       sessionId: ctx.sessionId,
       channelId: ctx.channelId,
       modelId: ctx.modelId,
+      agentRuntime: ctx.agentRuntime,
       workspaceId: ctx.workspaceId,
       triggeredBy: ctx.triggeredBy,
     }))

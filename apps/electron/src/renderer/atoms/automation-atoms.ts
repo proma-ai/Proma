@@ -12,6 +12,7 @@ import type {
   AutomationScheduleType,
   AutomationPermissionMode,
   AutomationSessionMode,
+  AgentRuntime,
 } from '@proma/shared'
 import { AUTOMATION_DEFAULT_PERMISSION_MODE, AUTOMATION_DEFAULT_SESSION_MODE } from '@proma/shared'
 
@@ -37,6 +38,7 @@ export interface AutomationDraft {
   scheduledAt?: number
   /** 最大运行次数上限（实际执行次数）；undefined = 不限次 */
   maxRuns?: number
+  agentRuntime: AgentRuntime
   channelId: string
   modelId?: string
   workspaceId?: string
@@ -68,6 +70,7 @@ export function createEmptyDraft(): AutomationDraft {
     timeOfDay: '09:00',
     dayOfWeek: 1,
     dayOfMonth: 1,
+    agentRuntime: 'claude',
     channelId: '',
     permissionMode: AUTOMATION_DEFAULT_PERMISSION_MODE,
     sessionMode: AUTOMATION_DEFAULT_SESSION_MODE,
@@ -91,6 +94,7 @@ export function automationToDraft(a: Automation): AutomationDraft {
     dayOfMonth: a.dayOfMonth,
     scheduledAt: a.scheduledAt,
     maxRuns: a.maxRuns,
+    agentRuntime: a.agentRuntime ?? 'claude',
     channelId: a.channelId,
     modelId: a.modelId,
     workspaceId: a.workspaceId,

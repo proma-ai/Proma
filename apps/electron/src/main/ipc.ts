@@ -4324,8 +4324,8 @@ export function registerIpcHandlers(): void {
   const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0
   const isNonBlankString = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0
   const isFiniteInt = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)
-  const validScheduleType = (v: unknown): v is 'interval' | 'daily' | 'weekly' | 'monthly' =>
-    v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly'
+  const validScheduleType = (v: unknown): v is 'interval' | 'daily' | 'weekly' | 'monthly' | 'once' =>
+    v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly' || v === 'once'
   const validPermissionMode = (v: unknown): v is 'bypassPermissions' =>
     v === 'bypassPermissions'
   const validAutomationNotificationTrigger = (v: unknown): v is 'always' | 'success' | 'error' =>
@@ -4366,6 +4366,9 @@ export function registerIpcHandlers(): void {
     if (i.dayOfMonth !== undefined && (!isFiniteInt(i.dayOfMonth) || i.dayOfMonth < 1 || i.dayOfMonth > 31)) {
       throw new Error(`非法的 dayOfMonth: ${String(i.dayOfMonth)}`)
     }
+    if (i.agentRuntime !== undefined && !isAgentRuntime(i.agentRuntime)) {
+      throw new Error(`非法的 agentRuntime: ${String(i.agentRuntime)}`)
+    }
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {
       throw new Error(`非法的 permissionMode: ${String(i.permissionMode)}`)
     }
@@ -4392,6 +4395,7 @@ export function registerIpcHandlers(): void {
       if ((input.scheduleType === 'daily' || input.scheduleType === 'weekly' || input.scheduleType === 'monthly') && !validTimeOfDay(input.timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
       if (input.scheduleType === 'weekly' && !isFiniteInt(input.dayOfWeek)) throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
       if (input.scheduleType === 'monthly' && input.dayOfMonth === undefined) throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+      if (input.scheduleType === 'once' && input.scheduledAt === undefined) throw new Error('scheduleType=once 时 scheduledAt 必填')
       const a = createAutomation(input)
       broadcastAutomationsChanged()
       return a
