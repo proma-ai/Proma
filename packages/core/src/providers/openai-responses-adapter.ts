@@ -121,6 +121,18 @@ function splitResponsesToolCallId(toolCallId: string): { callId: string; itemId?
   return { callId: callId || toolCallId, ...(itemId ? { itemId } : {}) }
 }
 
+function buildResponsesToolCallId(item: ResponsesStreamItem, outputIndex?: number): string {
+  const callId = item.call_id || item.id || `call_${outputIndex ?? 0}`
+  return item.id ? `${callId}|${item.id}` : callId
+}
+
+function buildResponsesToolCallMetadata(item: ResponsesStreamItem, outputIndex?: number): Record<string, unknown> | undefined {
+  const metadata: Record<string, unknown> = {}
+  if (item.id) metadata.itemId = item.id
+  if (outputIndex !== undefined) metadata.outputIndex = outputIndex
+  return Object.keys(metadata).length > 0 ? metadata : undefined
+}
+
 function toResponsesInput(input: StreamRequestInput): ResponsesInputItem[] {
   const { history, userMessage, systemMessage, attachments, readImageAttachments } = input
   const items: ResponsesInputItem[] = []
@@ -276,24 +288,63 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
 
         case 'response.output_item.added':
           if (event.item?.type === 'function_call') {
-            const callId = event.item.call_id || event.item.id || `call_${event.output_index ?? 0}`
             events.push({
               type: 'tool_call_start',
-              toolCallId: event.item.id ? `${callId}|${event.item.id}` : callId,
+              toolCallId: buildResponsesToolCallId(event.item, event.output_index),
               toolName: event.item.name || 'function',
-              metadata: event.item.id ? { itemId: event.item.id } : undefined,
+              metadata: buildResponsesToolCallMetadata(event.item, event.output_index),
             })
             if (event.item.arguments) {
-              events.push({ type: 'tool_call_delta', toolCallId: '', argumentsDelta: event.item.arguments })
+              events.push({
+                type: 'tool_call_delta',
+                toolCallId: '',
+                argumentsDelta: event.item.arguments,
+                metadata: buildResponsesToolCallMetadata(event.item, event.output_index),
+              })
             }
           }
           break
 
         case 'response.function_call_arguments.delta':
           if (event.delta) {
-            // Responses API 的参数 delta 通常只带 output_index，不重复 call_id；交由 sse-reader
-            // 使用最近的 tool_call_start 关联。
-            events.push({ type: 'tool_call_delta', toolCallId: '', argumentsDelta: event.delta })
+            events.push({
+              type: 'tool_call_delta',
+              toolCallId: '',
+              argumentsDelta: event.delta,
+              metadata: event.output_index !== undefined ? { outputIndex: event.output_index } : undefined,
+            })
+          }
+          break
+
+        case 'response.function_call_arguments.done':
+          if (event.arguments !== undefined) {
+            events.push({
+              type: 'tool_call_delta',
+              toolCallId: '',
+              argumentsDelta: '',
+              finalArguments: event.arguments,
+              metadata: event.output_index !== undefined ? { outputIndex: event.output_index } : undefined,
+            })
+          }
+          break
+
+        case 'response.output_item.done':
+          if (event.item?.type === 'function_call') {
+            events.push({
+              type: 'tool_call_start',
+              toolCallId: buildResponsesToolCallId(event.item, event.output_index),
+              toolName: event.item.name || 'function',
+              metadata: buildResponsesToolCallMetadata(event.item, event.output_index),
+            })
+            if (event.item.arguments !== undefined) {
+              events.push({
+                type: 'tool_call_delta',
+                toolCallId: buildResponsesToolCallId(event.item, event.output_index),
+                argumentsDelta: '',
+                finalArguments: event.item.arguments,
+                metadata: buildResponsesToolCallMetadata(event.item, event.output_index),
+              })
+            }
           }
           break
 

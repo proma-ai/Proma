@@ -185,6 +185,12 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   }
 }
 
+function normalizeToolCallOutputIndex(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'string' && value) return value
+  return undefined
+}
+
 /** 单次 SSE 流式尝试（不含重试逻辑） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
   const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000 } = options
@@ -231,6 +237,7 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
 
   // 工具调用追踪
   const pendingToolCalls = new Map<string, { id: string; name: string; args: string; metadata?: Record<string, unknown> }>()
+  const toolCallIdsByOutputIndex = new Map<string, string>()
   let currentToolCallId: string | undefined
 
   // 思考块追踪（Anthropic 协议：每个 thinking 块由多个 thinking_delta + signature_delta 组成）
@@ -290,18 +297,24 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
             currentThinking = null
           } else if (event.type === 'tool_call_start') {
             currentToolCallId = event.toolCallId
+            const outputIndex = normalizeToolCallOutputIndex(event.metadata?.outputIndex)
+            if (outputIndex) toolCallIdsByOutputIndex.set(outputIndex, event.toolCallId)
+            const existing = pendingToolCalls.get(event.toolCallId)
             pendingToolCalls.set(event.toolCallId, {
               id: event.toolCallId,
               name: event.toolName,
-              args: '',
-              metadata: event.metadata,
+              args: existing?.args ?? '',
+              metadata: { ...existing?.metadata, ...event.metadata },
             })
           } else if (event.type === 'tool_call_delta') {
-            const tcId = event.toolCallId || currentToolCallId
+            const outputIndex = normalizeToolCallOutputIndex(event.metadata?.outputIndex)
+            const tcId = event.toolCallId || (outputIndex ? toolCallIdsByOutputIndex.get(outputIndex) : undefined) || currentToolCallId
             if (tcId) {
               const pending = pendingToolCalls.get(tcId)
               if (pending) {
-                pending.args += event.argumentsDelta
+                pending.args = event.finalArguments !== undefined
+                  ? event.finalArguments
+                  : pending.args + event.argumentsDelta
               }
             }
           } else if (event.type === 'done' && event.stopReason) {

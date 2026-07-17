@@ -1,7 +1,28 @@
 import { describe, expect, test } from 'bun:test'
 import { OpenAIResponsesAdapter } from './openai-responses-adapter.ts'
+import { streamSSE } from './sse-reader.ts'
 
 const adapter = new OpenAIResponsesAdapter()
+
+function createSSEFetch(events: unknown[]): typeof fetch {
+  return (async () => new Response(new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder()
+      for (const event of events) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      }
+      controller.close()
+    },
+  }), { status: 200 })) as unknown as typeof fetch
+}
+
+function buildRequest() {
+  return {
+    url: 'https://api.openai.com/v1/responses',
+    headers: { Authorization: 'Bearer sk-test', 'content-type': 'application/json' },
+    body: '{}',
+  }
+}
 
 describe('OpenAIResponsesAdapter', () => {
   test('Given 基础输入 When buildStreamRequest Then 使用 /responses 和 input 格式', () => {
@@ -49,9 +70,71 @@ describe('OpenAIResponsesAdapter', () => {
       type: 'tool_call_start',
       toolCallId: 'call_1|fc_1',
       toolName: 'search',
-      metadata: { itemId: 'fc_1' },
+      metadata: { itemId: 'fc_1', outputIndex: 0 },
     }])
-    expect(delta).toEqual([{ type: 'tool_call_delta', toolCallId: '', argumentsDelta: '{"query":"Proma"}' }])
+    expect(delta).toEqual([{
+      type: 'tool_call_delta',
+      toolCallId: '',
+      argumentsDelta: '{"query":"Proma"}',
+      metadata: { outputIndex: 0 },
+    }])
+  })
+
+  test('Given 多个工具调用参数交错 When streamSSE Then 按 output_index 分别累积参数', async () => {
+    const result = await streamSSE({
+      request: buildRequest(),
+      adapter,
+      fetchFn: createSSEFetch([
+        { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search' } },
+        { type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', id: 'fc_2', call_id: 'call_2', name: 'read' } },
+        { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"query"' },
+        { type: 'response.function_call_arguments.delta', output_index: 1, delta: '{"path"' },
+        { type: 'response.function_call_arguments.delta', output_index: 0, delta: ':"Proma"}' },
+        { type: 'response.function_call_arguments.delta', output_index: 1, delta: ':"README.md"}' },
+        { type: 'response.completed', response: { status: 'completed' } },
+      ]),
+      onEvent: () => {},
+    })
+
+    expect(result.stopReason).toBe('tool_use')
+    expect(result.toolCalls).toEqual([
+      { id: 'call_1|fc_1', name: 'search', arguments: { query: 'Proma' }, metadata: { itemId: 'fc_1', outputIndex: 0 } },
+      { id: 'call_2|fc_2', name: 'read', arguments: { path: 'README.md' }, metadata: { itemId: 'fc_2', outputIndex: 1 } },
+    ])
+  })
+
+  test('Given done 事件携带完整参数 When streamSSE Then 使用 finalArguments 替换增量兜底', async () => {
+    const result = await streamSSE({
+      request: buildRequest(),
+      adapter,
+      fetchFn: createSSEFetch([
+        { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search' } },
+        { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"query":"partial"' },
+        { type: 'response.function_call_arguments.done', output_index: 0, arguments: '{"query":"Proma"}' },
+        { type: 'response.completed', response: { status: 'completed' } },
+      ]),
+      onEvent: () => {},
+    })
+
+    expect(result.toolCalls).toEqual([
+      { id: 'call_1|fc_1', name: 'search', arguments: { query: 'Proma' }, metadata: { itemId: 'fc_1', outputIndex: 0 } },
+    ])
+  })
+
+  test('Given 仅 output_item.done 携带工具调用 When streamSSE Then 仍可恢复工具参数', async () => {
+    const result = await streamSSE({
+      request: buildRequest(),
+      adapter,
+      fetchFn: createSSEFetch([
+        { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search', arguments: '{"query":"Proma"}' } },
+        { type: 'response.completed', response: { status: 'completed' } },
+      ]),
+      onEvent: () => {},
+    })
+
+    expect(result.toolCalls).toEqual([
+      { id: 'call_1|fc_1', name: 'search', arguments: { query: 'Proma' }, metadata: { itemId: 'fc_1', outputIndex: 0 } },
+    ])
   })
 
   test('Given completed 事件 When parseSSELine Then 不提前固定 stopReason 以允许工具调用推断', () => {

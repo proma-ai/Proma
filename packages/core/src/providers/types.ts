@@ -161,8 +161,14 @@ export interface StreamToolCallStartEvent {
 /** 工具调用参数增量事件 */
 export interface StreamToolCallDeltaEvent {
   type: 'tool_call_delta'
+  /** 为空时由 reader 按 metadata / 当前工具调用关联 */
   toolCallId: string
+  /** 参数增量；finalArguments 存在时可为空字符串 */
   argumentsDelta: string
+  /** 完整参数兜底（如 provider 的 arguments.done 事件），存在时替换已累积参数 */
+  finalArguments?: string
+  /** 供应商特定的元数据（如 OpenAI Responses 的 outputIndex） */
+  metadata?: Record<string, unknown>
 }
 
 /** 所有流式事件的联合类型 */
