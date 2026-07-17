@@ -36,7 +36,13 @@ const buildOptions: esbuild.BuildOptions = {
   platform: 'node',
   format: 'cjs',
   outfile: 'dist/main.cjs',
-  external: ['electron', '@anthropic-ai/claude-agent-sdk'],
+  external: [
+    'electron',
+    '@anthropic-ai/claude-agent-sdk',
+    '@earendil-works/pi-coding-agent',
+    '@earendil-works/pi-agent-core',
+    '@earendil-works/pi-ai',
+  ],
   define: {
     'process.env.PROMA_API_URL': JSON.stringify(PROMA_API_URL),
   },

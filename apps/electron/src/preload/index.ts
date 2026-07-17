@@ -21,6 +21,7 @@ import type {
   FetchModelsInput,
   FetchModelsResult,
   ChannelPlanQuotaResult,
+  CodexOAuthLoginResult,
   ConversationMeta,
   ChatMessage,
   ChatSendInput,
@@ -38,6 +39,7 @@ import type {
   AgentSessionMeta,
   SDKMessage,
   AgentSendInput,
+  AgentRuntime,
   AgentStreamEvent,
   AgentStreamCompletePayload,
   AgentWorkspace,
@@ -247,6 +249,12 @@ export interface ElectronAPI {
   /** 查询渠道订阅 Plan 额度 */
   getChannelPlanQuota: (channelId: string) => Promise<ChannelPlanQuotaResult>
 
+  /** 发起 ChatGPT (Codex) OAuth 登录，返回序列化凭据（作为 apiKey 存储） */
+  codexOAuthLogin: () => Promise<CodexOAuthLoginResult>
+
+  /** 取消进行中的 ChatGPT (Codex) OAuth 登录 */
+  codexOAuthCancel: () => Promise<void>
+
   // ===== 对话管理相关 =====
 
   /** 获取对话列表 */
@@ -452,6 +460,9 @@ export interface ElectronAPI {
 
   /** 更新 Agent 会话标题 */
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
+
+  /** 切换 Agent 会话 runtime */
+  updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => Promise<AgentSessionMeta>
 
   /** 更新 Agent 会话模型选择 */
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => Promise<AgentSessionMeta>
@@ -1326,6 +1337,14 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA, channelId)
   },
 
+  codexOAuthLogin: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_LOGIN)
+  },
+
+  codexOAuthCancel: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_CANCEL)
+  },
+
   // 对话管理
   listConversations: () => {
     return ipcRenderer.invoke(CHAT_IPC_CHANNELS.LIST_CONVERSATIONS)
@@ -1591,6 +1610,10 @@ const electronAPI: ElectronAPI = {
 
   updateAgentSessionTitle: (id: string, title: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_TITLE, id, title)
+  },
+
+  updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME, sessionId, runtime)
   },
 
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => {

@@ -27,6 +27,7 @@ export type ProviderType =
   | 'qwen-anthropic'
   | 'xiaomi'
   | 'xiaomi-token-plan'
+  | 'openai-codex'
   | 'custom'
 
 /** Proma 官方渠道固定 ID */
@@ -57,6 +58,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   'qwen-anthropic': 'https://dashscope.aliyuncs.com/apps/anthropic',
   xiaomi: 'https://api.xiaomimimo.com/anthropic',
   'xiaomi-token-plan': 'https://token-plan-cn.xiaomimimo.com/anthropic',
+  // ChatGPT 订阅登录：baseUrl 由 Pi SDK 内部管理（登录后从 OAuth token 派生），无需用户填写。
+  'openai-codex': '',
   custom: '',
 }
 
@@ -82,6 +85,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   'qwen-anthropic': '通义千问 (Anthropic 协议)',
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
+  'openai-codex': 'ChatGPT 订阅 (Codex)',
   custom: 'OpenAI 兼容格式',
 }
 
@@ -92,6 +96,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
  * 因此所有 Anthropic 协议兼容的供应商都可以用于 Agent。
  */
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
+  'proma',
   'anthropic',
   'anthropic-compatible',
   'deepseek',
@@ -104,6 +109,7 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'xiaomi',
   'xiaomi-token-plan',
   'qwen-anthropic',
+  'openai-codex',
 ])
 
 /**
@@ -171,6 +177,62 @@ export function extractZhipuCodingTeamApiToken(secret: string): string {
   if (credentials) return credentials.apiKey
   const trimmed = secret.trim()
   return trimmed || secret
+}
+
+/**
+ * ChatGPT (OpenAI Codex) OAuth 凭据。
+ *
+ * 复用 Channel.apiKey 字段承载：序列化为 JSON 后经 safeStorage 加密存储，
+ * 与 zhipu-coding-team 的结构化 secret 同一套「凭据塞进 apiKey 字段」模式，
+ * 避免为 OAuth 单独扩展存储 schema。字段命名对齐 Pi SDK 的 OAuthCredentials
+ * （access/refresh/expires），expires 为 Unix 毫秒时间戳。
+ */
+export interface CodexOAuthCredentials {
+  /** access token（作为 bearer token 传给 Pi SDK provider） */
+  access: string
+  /** refresh token（过期时用于换取新 token） */
+  refresh: string
+  /** access token 过期时间戳（Unix 毫秒） */
+  expires: number
+  /** 可选：从 id_token 解析出的账号标识，用于展示登录身份 */
+  accountId?: string
+}
+
+/** 将 OAuth 凭据序列化为存入 apiKey 字段的 JSON 字符串。 */
+export function serializeCodexCredentials(credentials: CodexOAuthCredentials): string {
+  return JSON.stringify(credentials)
+}
+
+/** 从 apiKey 字段解析 OAuth 凭据；非合法 JSON 或缺少必需字段时返回 null。 */
+export function parseCodexCredentials(secret: string): CodexOAuthCredentials | null {
+  const trimmed = secret.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<CodexOAuthCredentials>
+    if (typeof parsed.access === 'string' && parsed.access
+      && typeof parsed.refresh === 'string' && parsed.refresh
+      && typeof parsed.expires === 'number') {
+      return {
+        access: parsed.access,
+        refresh: parsed.refresh,
+        expires: parsed.expires,
+        ...(typeof parsed.accountId === 'string' && parsed.accountId ? { accountId: parsed.accountId } : {}),
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
+ * 判断 OAuth 凭据是否已过期或即将过期。
+ *
+ * 默认预留 60s 时钟偏移余量，确保 access token 在真正过期前就触发刷新，
+ * 避免边界请求打出去才发现过期。
+ */
+export function isCodexCredentialExpired(credentials: CodexOAuthCredentials, skewMs = 60_000): boolean {
+  return Date.now() >= credentials.expires - skewMs
 }
 
 /**
@@ -381,4 +443,28 @@ export const CHANNEL_IPC_CHANNELS = {
   TEST_DIRECT: 'channel:test-direct',
   /** 查询订阅 Plan 额度 */
   GET_PLAN_QUOTA: 'channel:get-plan-quota',
+  /** 发起 ChatGPT (Codex) OAuth 登录，返回加密凭据与账号信息 */
+  CODEX_OAUTH_LOGIN: 'channel:codex-oauth-login',
+  /** 取消进行中的 ChatGPT OAuth 登录流程 */
+  CODEX_OAUTH_CANCEL: 'channel:codex-oauth-cancel',
 } as const
+
+/**
+ * ChatGPT (Codex) OAuth 登录结果。
+ *
+ * 登录在主进程执行（Pi SDK 的 codex 流程用 Node crypto + 本地回调服务），
+ * 成功后返回已加密的凭据 JSON（可直接作为 Channel.apiKey 存储）与展示信息。
+ */
+export interface CodexOAuthLoginResult {
+  /** 是否登录成功 */
+  success: boolean
+  /**
+   * 序列化后的凭据 JSON（明文）。与现有 apiKey 明文回传模式一致：
+   * 渲染层拿到后作为 Channel.apiKey 传给 create/update，由 channel-manager 加密存储。
+   */
+  credentials?: string
+  /** 登录账号标识，用于 UI 展示 */
+  accountId?: string
+  /** 失败或取消时的用户可读原因 */
+  message?: string
+}

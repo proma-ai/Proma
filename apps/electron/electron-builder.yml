@@ -17,10 +17,14 @@ directories:
 compression: normal
 
 # ASAR 打包配置
-# 启用 ASAR 归档，将 SDK native binary 解压到 app.asar.unpacked/ 避免路径问题
+# 启用 ASAR 归档，将 SDK native binary / Pi native addon 解压到 app.asar.unpacked/ 避免路径问题
 asar: true
 asarUnpack:
   - "node_modules/@anthropic-ai/**"
+  - "node_modules/@silvia-odwyer/**"
+  - "node_modules/@mariozechner/**"
+  - "node_modules/@napi-rs/**"
+  - "node_modules/@earendil-works/pi-tui/native/**"
 
 # 跳过 npm install（代码已被 esbuild/Vite 打包，npm 不识别 workspace:* 协议）
 npmRebuild: false
@@ -32,20 +36,23 @@ files:
   # buildResources 从 resources/ 直接使用 icon/plist，避免产物里重复打包一份）
   - "!dist/resources/**"
   - package.json
-  # 包含 SDK 主包到 app/node_modules/@anthropic-ai/ 目录中（与 dist 和 package.json 同级）
-  - node_modules/@anthropic-ai/claude-agent-sdk/**/*
-  # 0.2.113+ SDK 改为按平台分发 native binary，通过 optionalDependencies 安装到
-  # @anthropic-ai/claude-agent-sdk-{platform}-{arch}/ 子包。
-  # 必须将当前 CI 构建矩阵覆盖的平台子包打入安装包，否则运行时找不到 binary。
-  # 宿主平台上 os/cpu 不匹配的包会被 bun 跳过安装，打包时 electron-builder 会对不存在的 glob 静默跳过。
-  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**/*
-  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**/*
-  - node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*
-  - node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**/*
-  # PDF 内联预览使用本地 PDF.js 资源，避免运行时依赖 CDN。
-  - node_modules/pdfjs-dist/**/*
+  # Claude SDK 与 Pi runtime 均作为主进程 external 运行。打包前 sync:runtime-deps 会
+  # 将 external 依赖闭包同步到 apps/electron/node_modules。
+  - node_modules/**/*
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
   - "!node_modules/@proma/**"
+  # 排除明确只在开发/构建期使用的大体积包。
+  - "!node_modules/electron/**"
+  - "!node_modules/electron-builder/**"
+  - "!node_modules/electronmon/**"
+  - "!node_modules/esbuild/**"
+  - "!node_modules/@electron/**"
+  - "!node_modules/@electron-builder/**"
+  - "!node_modules/@esbuild/**"
+  # 排除 Pi SDK 纯演示/文档/sourcemap 内容，保留运行时必需文件。
+  - "!node_modules/@earendil-works/*/examples/**"
+  - "!node_modules/@earendil-works/*/docs/**"
+  - "!node_modules/@earendil-works/**/*.map"
 
 # 通用额外资源
 extraResources:

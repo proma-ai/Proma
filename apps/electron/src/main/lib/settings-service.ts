@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
-import { DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
+import { DEFAULT_AGENT_RUNTIME, DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
 import type { AppSettings } from '../../types'
 
 /**
@@ -30,6 +30,8 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
       builtinMcpEnabledIds: [],
+      experimentalAgentRuntimeSwitchEnabled: false,
+      agentRuntime: DEFAULT_AGENT_RUNTIME,
     }
   }
 
@@ -48,6 +50,10 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       builtinMcpDisabledIds: data.builtinMcpDisabledIds ?? [],
       builtinMcpEnabledIds: data.builtinMcpEnabledIds ?? [],
+      experimentalAgentRuntimeSwitchEnabled: data.experimentalAgentRuntimeSwitchEnabled ?? false,
+      agentRuntime: data.experimentalAgentRuntimeSwitchEnabled === true
+        ? data.agentRuntime ?? DEFAULT_AGENT_RUNTIME
+        : DEFAULT_AGENT_RUNTIME,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -62,6 +68,8 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
       builtinMcpEnabledIds: [],
+      experimentalAgentRuntimeSwitchEnabled: false,
+      agentRuntime: DEFAULT_AGENT_RUNTIME,
     }
   }
 }
@@ -76,6 +84,9 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const updated: AppSettings = {
     ...current,
     ...updates,
+  }
+  if (updated.experimentalAgentRuntimeSwitchEnabled !== true) {
+    updated.agentRuntime = DEFAULT_AGENT_RUNTIME
   }
 
   const filePath = getSettingsPath()

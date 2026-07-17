@@ -48,6 +48,9 @@ export type ThinkingConfig =
  */
 export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
 
+/** Agent 思考等级（用于 Pi runtime；Claude runtime 继续使用 ThinkingConfig/AgentEffort） */
+export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
 /**
  * 自定义子代理定义
  *
@@ -355,8 +358,12 @@ export type ErrorCode =
   // 环境 / 配置类错误（本地可修复）
   | 'windows_shell_missing'
   | 'channel_not_found'
+  | 'channel_disabled'
+  | 'agent_provider_not_supported'
+  | 'agent_model_unavailable'
   | 'api_key_decrypt_failed'
   | 'claude_binary_not_found'
+  | 'agent_runtime_not_found'
   | 'session_busy'
   | 'unknown_error'
 
@@ -577,6 +584,8 @@ export interface AgentSessionMeta {
   modelId?: string
   /** SDK 内部会话 ID（用于 resume 衔接上下文） */
   sdkSessionId?: string
+  /** 当前会话使用的 Agent runtime；历史会话缺省为 claude */
+  agentRuntime?: import('./agent-provider').AgentRuntime
   /** 所属工作区 ID */
   workspaceId?: string
   /** 是否置顶 */
@@ -917,6 +926,8 @@ export interface AgentSendInput {
   channelId: string
   /** 模型 ID */
   modelId?: string
+  /** 本轮请求使用的 Agent runtime（用于输入区快速切换后的兜底同步） */
+  agentRuntime?: import('./agent-provider').AgentRuntime
   /** 工作区 ID（用于确定 cwd） */
   workspaceId?: string
   /** 附加的外部目录（绝对路径，传递给 SDK additionalDirectories） */
@@ -1574,6 +1585,8 @@ export const AGENT_IPC_CHANNELS = {
   PERMISSION_RESPOND: 'agent:permission:respond',
   /** 热切换指定会话的权限模式（运行中生效，不广播到其他会话） */
   UPDATE_SESSION_PERMISSION_MODE: 'agent:update-session-permission-mode',
+  /** 切换指定会话的 Agent runtime（下一轮生效，跨 runtime 时清空 SDK resume ID） */
+  UPDATE_SESSION_AGENT_RUNTIME: 'agent:update-session-agent-runtime',
 
   // AskUserQuestion 交互式问答
   /** AskUser 响应（渲染进程 → 主进程） */

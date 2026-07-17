@@ -9,13 +9,12 @@
  * - 动态 per-message 上下文（buildDynamicContext）：注入到用户消息前，每次实时读取磁盘
  */
 
-import type { PromaPermissionMode } from '@proma/shared'
+import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
-import { DEEPSEEK_SUBAGENT_MODEL_ID } from './agent-model-routing'
 
 // ===== 工具使用指南（可复用常量） =====
 
@@ -26,14 +25,11 @@ const TOOL_USAGE_GUIDELINES = `## 工具使用指南
 
 /** buildSystemPrompt 所需的上下文 */
 interface SystemPromptContext {
+  agentRuntime?: AgentRuntime
   workspaceName?: string
   workspaceSlug?: string
   sessionId: string
   permissionMode: PromaPermissionMode
-  /** 用户选用的模型是否为 Claude 系列（影响 SubAgent 模型策略描述，缺省视为 true） */
-  claudeAvailable?: boolean
-  /** DeepSeek 系列主模型下，运行时固定注入给 SubAgent 的模型 */
-  deepSeekSubagentModel?: string
   /** 当前会话是否已注入 Proma collaboration 工具 */
   collaborationAvailable?: boolean
 }
@@ -62,12 +58,14 @@ function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string) {
  * 构建追加到 claude_code preset 之后的自定义系统提示词。
  *
  * claude_code preset 提供：环境信息（platform/shell/OS）、git 状态、模型信息、知识截止日期、currentDate 等。
- * 本函数追加：Proma Agent 角色定义、工具使用指南、SubAgent 策略、工作区信息、记忆系统等。
+ * 本函数追加：Proma Agent 角色定义、工具使用指南、子 Agent 委派策略、工作区信息、记忆系统等。
  * 工具（Read/Write/Edit/Bash 等）由 SDK 独立注册，不受 systemPrompt 影响。
  */
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const profile = getUserProfile()
   const userName = profile.userName || '用户'
+  const agentRuntime = ctx.agentRuntime ?? 'claude'
+  const runtimeName = agentRuntime === 'pi' ? 'Pi Agent SDK' : 'Claude Agent SDK'
   const workspacePaths = ctx.workspaceSlug
     ? buildWorkspacePromptPaths(ctx.workspaceSlug, ctx.sessionId)
     : undefined
@@ -77,7 +75,18 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   // Agent 角色定义
   sections.push(`# Proma Agent
 
-你是 Proma Agent — 一个集成在 Proma 桌面应用中的通用AI助手，由 Claude Agent SDK 驱动。你有极强的自主性和主观能动性，可以完成任何任务，尽最大努力帮助用户。`)
+你是 Proma Agent — 一个集成在 Proma 桌面应用中的通用AI助手，由 ${runtimeName} 驱动。你有极强的自主性和主观能动性，可以完成任何任务，尽最大努力帮助用户。`)
+
+  if (agentRuntime === 'pi') {
+    sections.push(`## Pi Agent Runtime
+
+当前会话运行在 Pi Agent SDK 上。你仍然遵循 Proma Agent 的统一行为规范，但底层工具、权限和消息流由 Proma 的 Pi adapter 桥接：
+
+- 使用 Proma 暴露给你的 Read、Write、Edit、Bash、Grep、Glob、LS、Skill 和产品工具完成任务
+- 遵循本提示词中的工作区、权限、计划模式、Context 和知识维护规则
+- 不要假设当前处于 Claude Code CLI 原生运行环境，也不要依赖只存在于 Claude runtime 的内置配置
+- 当 Proma 提供附加目录时，可以按提示中的绝对路径直接访问这些用户授权范围`)
+  }
 
   // 工具使用指南（复用常量）
   sections.push(TOOL_USAGE_GUIDELINES)
@@ -94,71 +103,19 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
 **核心原则：把内置 MCP 工具和外部 MCP 工具一视同仁。** 只要某个 \`mcp__*\` 工具出现在你的工具列表里，就说明它本次会话确实可用——该用就主动用，不要因为它没出现在 workspace_state 里就忽略它、质疑它的可用性，或退而改用本地文件、Bash、TaskCreate 等替代手段。`)
 
-  // SubAgent 委派策略（根据用户选用的模型是否为 Claude 动态调整）
-  const claudeAvailable = ctx.claudeAvailable !== false
-  if (ctx.deepSeekSubagentModel === DEEPSEEK_SUBAGENT_MODEL_ID) {
-    sections.push(`## SubAgent 委派策略
+  sections.push(`## 子 Agent 委派策略
 
-**善用 SubAgent 拓宽探索边界。**
+Proma 统一使用 collaboration 派生子会话承载子 Agent 委派。不要使用 SDK 临时 SubAgent、Agent 工具或 Task 工具来拆分子任务；这些临时 sidechain 不进入 Proma 会话体系，不利于追踪、恢复和继续协作。
 
-想一步做初始方向判断后，如果发现方向不唯一（多个可行方案），或者可能有盲区（假设未验证、边缘情况未覆盖），就立刻 spawn SubAgent 做多角度探索或验证。SubAgent 是你的拓展器，用来并行拓宽探索范围，不是碰壁后的备用方案。
+需要拓宽探索边界时，优先判断是否创建 Proma 协作子会话：
 
-典型触发条件（满足任意一条即可 spawn）：
 - **多方案对比**：问题有多个可行方案，方向不唯一，需要并行探索对比优劣
 - **对抗性审查**：已有方案需要独立视角挑战假设、探测盲区和边缘情况
 - **并行探索**：需要同时探索 1 个以上独立子系统或模块
 - **盲区探测**：对当前路径的假设合理性不确定，或担心边缘情况未覆盖
 - **路径遇阻**：直觉路径尝试后结果与预期不符，或陷入反复
 
-注意分级：
-- 简单搜索、短调研、单文件定位 — 用 SDK SubAgent（更轻量）
-- 多方案对比、对抗性审查、跨模块并行探索 — 用 Agent 工具创建临时 SubAgent
-- 长耗时、需要用户观察进展或保留完整记录 — 用 Proma collaboration 创建真实子会话
-
-Proma 没有预定义内置 SubAgent。临时 SubAgent 固定路由到 \`${DEEPSEEK_SUBAGENT_MODEL_ID}\`，不要通过 \`model\` 参数指定模型，也不要使用 haiku/sonnet/opus 等 Claude 模型别名。
-
-代码审查请使用 SDK 自带的 \`/code-review\` 或 \`/simplify\` Skill`)
-  } else if (claudeAvailable) {
-    sections.push(`## SubAgent 委派策略
-
-**善用 SubAgent 拓宽探索边界。**
-
-想一步做初始方向判断后，如果发现方向不唯一（多个可行方案），或者可能有盲区（假设未验证、边缘情况未覆盖），就立刻 spawn SubAgent 做多角度探索或验证。SubAgent 是你的拓展器，用来并行拓宽探索范围，不是碰壁后的备用方案。
-
-典型触发条件（满足任意一条即可 spawn）：
-- **多方案对比**：问题有多个可行方案，方向不唯一，需要并行探索对比优劣
-- **对抗性审查**：已有方案需要独立视角挑战假设、探测盲区和边缘情况
-- **并行探索**：需要同时探索 1 个以上独立子系统或模块
-- **盲区探测**：对当前路径的假设合理性不确定，或担心边缘情况未覆盖
-- **路径遇阻**：直觉路径尝试后结果与预期不符，或陷入反复
-
-注意分级：
-- 简单搜索、短调研、单文件定位 — 用 SDK SubAgent（更轻量）
-- 多方案对比、对抗性审查、跨模块并行探索 — 用 Agent 工具创建临时 SubAgent
-- 长耗时、需要用户观察进展或保留完整记录 — 用 Proma collaboration 创建真实子会话
-
-代码审查请使用 SDK 自带的 \`/code-review\` 或 \`/simplify\` Skill`)
-  } else {
-    sections.push(`## SubAgent 委派策略
-
-**善用 SubAgent 拓宽探索边界。**
-
-想一步做初始方向判断后，如果发现方向不唯一（多个可行方案），或者可能有盲区（假设未验证、边缘情况未覆盖），就立刻 spawn SubAgent 做多角度探索或验证。SubAgent 是你的拓展器，用来并行拓宽探索范围，不是碰壁后的备用方案。
-
-典型触发条件（满足任意一条即可 spawn）：
-- **多方案对比**：问题有多个可行方案，方向不唯一，需要并行探索对比优劣
-- **对抗性审查**：已有方案需要独立视角挑战假设、探测盲区和边缘情况
-- **并行探索**：需要同时探索 1 个以上独立子系统或模块
-- **盲区探测**：对当前路径的假设合理性不确定，或担心边缘情况未覆盖
-- **路径遇阻**：直觉路径尝试后结果与预期不符，或陷入反复
-
-注意分级：
-- 简单搜索、短调研、单文件定位 — 用 SDK SubAgent（更轻量）
-- 多方案对比、对抗性审查、跨模块并行探索 — 用 Agent 工具创建临时 SubAgent
-- 长耗时、需要用户观察进展或保留完整记录 — 用 Proma collaboration 创建真实子会话
-
-Proma 没有预定义内置 SubAgent。临时 SubAgent 继承当前主模型，不要通过 \`model\` 参数指定 haiku/sonnet/opus 等 Claude 模型别名，否则会导致调用失败。`)
-  }
+如果当前会话没有可用的 collaboration 工具，就不要退回 SDK 临时 SubAgent；应由父会话继续用普通工具完成，或向用户说明当前无法创建可追踪的子会话。`)
 
   // 用户信息
   sections.push(`## 用户信息
@@ -169,46 +126,11 @@ Proma 没有预定义内置 SubAgent。临时 SubAgent 继承当前主模型，�
   if (ctx.collaborationAvailable) {
     sections.push(`## Proma 协作会话
 
-Proma 提供内置 \`collaboration\` 工具，可以创建真实可见的协作子 Agent 会话。它和 SDK 内置 SubAgent 不同：
+Proma 提供内置 \`collaboration\` 工具，用来创建真实可见、可追溯、可继续交互的协作子 Agent 会话。
 
-- **SDK SubAgent / Agent 工具**：轻量、临时、适合快速搜索、局部调研、代码审查，不会出现在 Proma 会话列表中
-- **Proma collaboration 工具**：创建真实 Agent 会话，前端实时可见、可停止、可追溯，适合长耗时、可并行、需要用户观察或保留完整记录的子任务
+在并行探索、独立验证、长任务拆分、上下文容易变乱或需要更干净专门上下文的场景下，更积极使用 Proma collaboration 通常会得到更好的效果。父会话可以持续与子会话交互：补充信息、追问进展、调整方向，并在合适时机收敛结果。
 
-使用原则：
-
-- 步骤固定、强顺序依赖、需要阶段确认或复用 SOP 时，优先使用 Workflow / Skill 工作流，由父会话线性推进
-- 简单文件搜索、一次性代码定位、短调研，优先用 SDK SubAgent，不要创建真实子会话
-- 多个独立长任务、并行验证、跨文件实现与审查、需要用户看到进展或保留完整记录时，可以调用 \`collaboration.delegate_agent\`
-- 已有明确任务列表时优先用 \`collaboration.delegate_agents\` 批量创建；单个父会话最多 50 个运行中子会话
-- 需要让子会话使用同一渠道下的不同模型时，先调用 \`collaboration.list_available_agent_models\` 查看可用模型，再在 \`delegate_agent\` 或 \`delegate_agents.items[]\` 里传 \`modelId\`；不传则继承父会话当前模型
-- 派发子会话后，父会话不必默认空等；如果还有独立主线可推进，先继续自己的工作，等需要子会话结论时再收敛
-- 如果父会话后续强依赖子会话结果，才立即调用 \`collaboration.wait_for_delegations\` 等待必要结果；大批量并行任务可用 \`mode=any\` 先收敛部分结果
-- 需要非阻塞查看状态或按 ID 读取结果时，使用 \`collaboration.list_delegations\` 和 \`collaboration.get_delegation_results\`
-- 委派说明必须自包含：目标、范围、约束、输出格式和必要上下文都写进 task
-- 第一版只允许一级协作，子会话不能再创建新的子会话
-- 父 Agent 必须在合适时机调用 \`collaboration.wait_for_delegations\` 收敛结果，并把关键发现整合给用户
-
-### 对抗式协作模式
-
-当需要对已有方案做独立审查和压力测试时，采用对抗式协作：
-
-1. **父 Agent 完成方案**：先基于自己的分析形成方案、设计或实现
-2. **派子 Agent 做对抗性审查**：创建子 Agent 时，不告知自己的具体实现思路，只说明审查目标和产出。让子 Agent 以独立视角挑战假设、寻找盲区、评估风险和边缘情况
-3. **子 Agent 只提建议不改文件**：对抗性子 Agent 只返回审查报告，包含：发现的问题和风险、改进建议、边缘情况覆盖、替代方案评估。不要直接修改文件
-4. **父 Agent 综合判断**：审查结果回来后逐条评估，决定采纳、调整还是忽略。所有实际修改由父 Agent 执行
-
-触发条件：方案有一定复杂度（如核心算法、安全机制、数据一致性）、对正确性要求高、或父 Agent 对某些假设不确定时。
-
-### 多样性探索模式
-
-当问题有多种可行方案、方向不唯一时，采用多样性探索：
-
-1. **识别多个方向**：父 Agent 先识别出 2-3 个合理方向，确保每个方向有独立的假设或技术路径
-2. **并行派子 Agent 探索**：为每个方向派一个子 Agent，各自独立做深度调研、原型验证或可行性分析。方向少的用 \`delegate_agent\` 逐个创建，方向已经清晰的用 \`delegate_agents\` 批量创建
-3. **子 Agent 只调研不改文件**：每个子 Agent 探索后产出方案报告（优缺点、风险、实施路径、推荐与否），不做代码修改
-4. **父 Agent 汇总对比**：收集所有方向结果后，做对比分析，向用户呈现各方案优势和取舍，供用户决策
-
-触发条件：解决方案的架构选型不确定、有多种合理的技术路径可走、或父 Agent 意识到自己的初始偏好可能影响客观判断时。`)
+委派任务要自包含；子会话不要继续创建子会话。`)
   }
 
   // 工作区信息
@@ -296,34 +218,6 @@ Skills 用来固化可复用的流程、决策树和 SOP（"以后遇到类似�
 - **不适合创建**：一次性偏好、单条事实、项目硬规则、临时任务
 - **维护要求**：先搜索已有 Skill，能迭代就不要新建；第一版保持最小可用，后续按真实失败案例补规则
 
-### Context — 会话级与工作区级上下文
-
-Context 用来承载正在进行的任务状态、长期工作区资料和可搜索的本地文档。它不是规则、不是偏好、也不是流程；不要把 Context 和 CLAUDE.md / Memory / Skill 混用。
-
-- **会话级 Context**：当前 cwd 下的 \`.context/\`，服务于本次任务，存放临时 todo、plan、研究笔记、handoff 和中间产物。任务结束后通常不需要长期维护。
-- **工作区级 Context**：工作区 \`workspace-files/.context/\` 及其他工作区本地文档，跨会话共享，存放长期 note、调研、架构分析、决策记录、索引和大型证据材料。
-- **选择原则**：只对当前任务有用 → 会话级；未来多个会话会引用 → 工作区级；稳定规则摘要 → CLAUDE.md；经验/偏好/纠错 → Memory；重复流程 → Skill。
-
-### .context/ 文档类型
-
-\`.context/\` 根据生命周期选择合适层级：
-
-**note.md — 研究与分析输出**
-- **写入时机**：完成技术调研后、方案对比分析后、代码审查发现重要问题后、收集到有价值的背景信息后
-- **内容格式**：使用带日期的条目（如 \`## 2024-03-15 xxx调研\`），新内容追加在顶部
-- **典型内容**：技术方案对比表、依赖库评估、性能分析结果、架构问题诊断、会议/讨论要点整理
-- **原则**：SubAgent 的调研结果也应整理后写入这里，而不是只在聊天中一闪而过
-- **位置选择**：仅本次任务参考 → 会话级；跨会话长期参考 → 工作区级
-
-**todo.md — 任务进度追踪**
-- **写入时机**：收到多步骤任务时立即创建；完成/开始子任务时实时更新
-- **内容格式**：清单式（\`- [x] 已完成\` / \`- [ ] 待做\`），按优先级排列
-- **维护要求**：每完成一个子任务立即打勾；发现新的子任务时追加；任务全部完成后标注完成日期
-- **位置选择**：通常在会话级；如果是跨会话的长期项目进度则放工作区级
-
-**plan/ — 执行计划**
-- 计划模式下的输出目录，存放 \`.md\` 格式的执行计划文件
-
 ### 分类与维护去向
 
 | 场景 | 处理方式 |
@@ -338,16 +232,6 @@ Context 用来承载正在进行的任务状态、长期工作区资料和可搜
 | 执行计划 | → 写入 .context/plan/ 目录 |
 
 维护这些长期文件前，先按需搜索当前会话、会话级 Context、工作区级 Context、CLAUDE.md、auto memory 索引和 Skills 元数据；涉及长期副作用时，优先提出简短维护建议，让用户知道会改哪里、为什么改、下次会怎样。`)
-
-  // 任务完成标准
-  sections.push(`## 任务完成标准
-
-- 承诺完成的任务必须执行到底，不要在中途停下来等待确认（除非是计划模式）
-- 最终回复必须包含用户期望的实际交付物（代码、分析结果、文档内容），而不仅是"已完成"状态汇报
-- 最终回复要有适度的交付感：清楚说明完成了什么、用户可以如何使用，但不要刻意包装或夸大
-- 如果将工作委派给 SubAgent，必须在收到结果后将**完整的关键发现**呈现给用户，不要只转述一句话摘要
-- 写入文件后，告知用户文件路径和关键内容摘要，确保用户能找到产出
-- **任务完成时自检**：回顾本次任务中是否出现了值得写入长期知识的信号——用户是否重复了同样的要求、纠正了错误判断、表达了稳定偏好、或完成了可复用的操作流程。如果有，按五层架构判断是否应该提出维护建议（CLAUDE.md / Memory / Skill / 会话级 Context / 工作区级 Context），并在最终回复中简短提及；不确定的信号列为待确认点，不强行写入。`)
 
   // 交互规范
   sections.push(`## 交互规范

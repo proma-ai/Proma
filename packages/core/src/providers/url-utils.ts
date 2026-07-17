@@ -46,6 +46,25 @@ function replacePathSuffix(rawUrl: string, suffix: string, replacement: string):
   }
 }
 
+function removePathSuffixForSdkBaseUrl(rawUrl: string, suffix: string): string {
+  const trimmed = rawUrl.trim()
+  try {
+    const parsed = new URL(trimmed)
+    const pathname = parsed.pathname.replace(/\/+$/, '')
+    if (!pathname.endsWith(suffix)) return normalizeBaseUrl(trimmed)
+
+    parsed.pathname = pathname.slice(0, -suffix.length) || '/'
+    parsed.search = ''
+    parsed.hash = ''
+    return trimTrailingUrlPathSlash(parsed.toString())
+  } catch {
+    const pathPart = trimmed.split(/[?#]/, 1)[0] ?? trimmed
+    const normalizedPath = pathPart.replace(/\/+$/, '')
+    if (!normalizedPath.endsWith(suffix)) return normalizeBaseUrl(trimmed)
+    return normalizedPath.slice(0, -suffix.length)
+  }
+}
+
 /**
  * 规范化 Anthropic Base URL（用于 Proma Chat 直接调用 API）
  *
@@ -125,6 +144,19 @@ export function normalizeAnthropicBaseUrlForSdk(baseUrl: string): string {
  */
 export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '')
+}
+
+/**
+ * 规范化 OpenAI 兼容 Base URL（用于 Pi Agent runtime）。
+ *
+ * Pi / OpenAI client 会自行拼接 /chat/completions；custom 渠道若保存的是完整端点，
+ * 这里需要还原成协议根地址，避免重复拼接。
+ */
+export function normalizeOpenAIBaseUrlForSdk(baseUrl: string): string {
+  if (hasPathSuffix(baseUrl, '/chat/completions')) {
+    return removePathSuffixForSdkBaseUrl(baseUrl, '/chat/completions')
+  }
+  return normalizeBaseUrl(baseUrl)
 }
 
 /**

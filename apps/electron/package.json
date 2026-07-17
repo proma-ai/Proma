@@ -1,6 +1,6 @@
 {
   "name": "@proma/electron",
-  "version": "0.14.23",
+  "version": "0.14.26",
   "description": "Proma next gen ai software with general agents - Electron App",
   "main": "dist/main.cjs",
   "author": {
@@ -22,15 +22,17 @@
     "build:renderer": "vite build",
     "build:resources": "cp -r resources dist/ 2>/dev/null || true",
     "build:cli": "bun run scripts/build-cli.ts",
+    "sync:runtime-deps": "bun run scripts/sync-runtime-deps.ts",
+    "sync:runtime-deps:dev": "bun run scripts/sync-runtime-deps.ts --no-clean",
     "build": "bun run build:main && bun run build:preload && bun run build:renderer && bun run build:cli && bun run build:resources",
     "start": "bun run build && bunx electron .",
     "typecheck": "tsc --noEmit",
     "generate:icons": "cd resources && ./generate-icons.sh",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
+    "pack": "bun run build && bun run sync:runtime-deps && bunx electron-builder@25.1.8 --dir",
+    "dist": "bun run build && bun run sync:runtime-deps && bunx electron-builder@25.1.8",
+    "dist:mac": "bun run build && bun run sync:runtime-deps && bunx electron-builder@25.1.8 --mac",
+    "dist:win": "bun run build && bun run sync:runtime-deps && bunx electron-builder@25.1.8 --win",
+    "dist:linux": "bun run build && bun run sync:runtime-deps && bunx electron-builder@25.1.8 --linux",
     "dist:visual": "bun run scripts/dist.ts",
     "dist:fast": "bun run scripts/dist.ts --current-arch --dmg",
     "dist:debug": "bun run scripts/dist.ts --current-arch --verbose",
@@ -42,6 +44,9 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.201",
     "@anthropic-ai/sdk": "^0.93.0",
+    "@earendil-works/pi-agent-core": "0.80.3",
+    "@earendil-works/pi-ai": "0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.3",
     "@fontsource-variable/inter": "5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@pierre/diffs": "^1.1.20",
@@ -50,7 +55,8 @@
     "dompurify": "^3.4.5",
     "iconv-lite": "^0.6.3",
     "mammoth": "^1.12.0",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "typebox": "1.1.38"
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.201",

@@ -23,6 +23,7 @@ import {
   Mic,
   HardDriveDownload,
   HardDrive,
+  FlaskConical,
 } from "lucide-react";
 // Cloud 模式专属图标
 import { CreditCard, KeyRound, ScrollText } from "lucide-react";
@@ -60,6 +61,7 @@ import { ShortcutSettings } from "./ShortcutSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { MigrationSettings } from "./MigrationSettings";
 import { StorageSettings } from "./StorageSettings";
+import { ExperimentalSettings } from "./ExperimentalSettings";
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -72,6 +74,7 @@ interface TabItem {
 const BASE_TABS: TabItem[] = [
   { id: "general", label: "通用设置", icon: <Settings size={16} /> },
   { id: "channels", label: "模型配置", icon: <Radio size={16} /> },
+  { id: "experimental", label: "实验性功能", icon: <FlaskConical size={16} /> },
   { id: "prompts", label: "提示词管理", icon: <BookOpen size={16} /> },
   { id: "proxy", label: "代理设置", icon: <Globe size={16} /> },
 ];
@@ -145,6 +148,8 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
       return <UsageSettings />;
     case "channels":
       return <ChannelSettings />;
+    case "experimental":
+      return <ExperimentalSettings />;
     case "prompts":
       return <PromptSettings />;
     case "proxy":

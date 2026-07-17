@@ -30,6 +30,8 @@ import type {
   AgentMessage,
 } from '@proma/shared'
 import { ClaudeAgentAdapter, scanAndKillOrphanedClaudeSubprocesses } from './adapters/claude-agent-adapter'
+import { PiAgentAdapter, cleanupPiRuntimeResources } from './adapters/pi-agent-adapter'
+import { RuntimeRoutingAgentAdapter } from './adapters/runtime-routing-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
@@ -40,7 +42,10 @@ import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner
 // ===== 实例创建 =====
 
 const eventBus = new AgentEventBus()
-const adapter = new ClaudeAgentAdapter()
+const adapter = new RuntimeRoutingAgentAdapter({
+  claude: new ClaudeAgentAdapter(),
+  pi: new PiAgentAdapter(),
+})
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
 
 /** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
@@ -365,6 +370,7 @@ export function stopAllAgents(): void {
  */
 export function killOrphanedClaudeSubprocesses(): void {
   scanAndKillOrphanedClaudeSubprocesses()
+  cleanupPiRuntimeResources()
 }
 
 /**

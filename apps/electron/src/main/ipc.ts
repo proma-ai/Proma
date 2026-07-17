@@ -44,6 +44,7 @@ import type {
   RecentMessagesResult,
   AgentSessionMeta,
   AgentSendInput,
+  AgentRuntime,
   AgentWorkspace,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
@@ -129,6 +130,8 @@ import {
   fetchModels,
   getChannelPlanQuota,
 } from './lib/channel-manager'
+import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
+import { serializeCodexCredentials } from '@proma/shared'
 import {
   listConversations,
   createConversation,
@@ -818,6 +821,10 @@ function cacheNull(key: string): null {
   return null
 }
 
+function isAgentRuntime(value: unknown): value is AgentRuntime {
+  return value === 'claude' || value === 'pi'
+}
+
 /**
  * 解析应用图标变体的文件路径
  */
@@ -1159,6 +1166,36 @@ export function registerIpcHandlers(): void {
     CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA,
     async (_, channelId: string): Promise<import('@proma/shared').ChannelPlanQuotaResult> => {
       return getChannelPlanQuota(channelId)
+    }
+  )
+
+  // 发起 ChatGPT (Codex) OAuth 登录。登录在主进程执行（Pi SDK 用 Node crypto +
+  // 本地 :1455 回调服务）；成功后返回序列化的凭据 JSON（明文），由渲染层作为
+  // apiKey 传给 create/update，channel-manager 加密后存储——与现有 apiKey 明文回传模式一致。
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.CODEX_OAUTH_LOGIN,
+    async (): Promise<import('@proma/shared').CodexOAuthLoginResult> => {
+      try {
+        const credentials = await loginCodexOAuth()
+        return {
+          success: true,
+          credentials: serializeCodexCredentials(credentials),
+          ...(credentials.accountId ? { accountId: credentials.accountId } : {}),
+        }
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+  )
+
+  // 取消进行中的 ChatGPT OAuth 登录流程
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.CODEX_OAUTH_CANCEL,
+    async (): Promise<void> => {
+      cancelCodexOAuthLogin()
     }
   )
 
@@ -2339,6 +2376,38 @@ export function registerIpcHandlers(): void {
           throw err
         })
       }
+    }
+  )
+
+  // 切换指定会话的 Agent runtime（空闲后下一轮生效）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME,
+    async (_, sessionId: string, runtime: AgentRuntime): Promise<AgentSessionMeta> => {
+      if (!isAgentRuntime(runtime)) {
+        throw new Error(`无效的 Agent runtime: ${String(runtime)}`)
+      }
+      if (runtime !== 'claude' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
+        throw new Error('实验性 Agent 内核切换未开启')
+      }
+
+      const current = getAgentSessionMeta(sessionId)
+      if (!current) {
+        throw new Error(`Agent 会话不存在: ${sessionId}`)
+      }
+
+      if (isAgentSessionActive(sessionId)) {
+        throw new Error('Agent 正在运行，完成后再切换内核')
+      }
+
+      const previousRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : undefined
+      const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId'>> = {
+        agentRuntime: runtime,
+      }
+      if (previousRuntime && previousRuntime !== runtime) {
+        updates.sdkSessionId = undefined
+      }
+
+      return updateAgentSessionMeta(sessionId, updates)
     }
   )
 

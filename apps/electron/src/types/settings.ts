@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings } from '@proma/shared'
+import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings } from '@proma/shared'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
@@ -184,6 +184,9 @@ export type InterfaceVariant = 'classic' | 'modern'
 /** 默认界面风格 */
 export const DEFAULT_INTERFACE_VARIANT: InterfaceVariant = 'modern'
 
+/** 默认 Agent runtime；历史配置缺省继续使用 Claude */
+export const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'claude'
+
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'
 
@@ -206,6 +209,10 @@ export interface AppSettings {
   agentChannelIds?: string[]
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string
+  /** 是否启用实验性的 Agent runtime 切换能力（默认 false） */
+  experimentalAgentRuntimeSwitchEnabled?: boolean
+  /** 新 Agent 会话默认使用的 runtime；历史会话缺省为 claude */
+  agentRuntime?: AgentRuntime
   /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；可拖拽调整） */
   agentAutomationGroupOrder?: number
   /** 是否已完成 Onboarding 流程 */

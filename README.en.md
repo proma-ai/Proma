@@ -260,10 +260,6 @@ Before opening a PR, please check:
 - Bump the patch version of affected packages when behavior changes.
 - Add focused tests where possible, especially for shared logic, IPC contracts, and persistence formats.
 
-Proma currently has a PR bounty program. You can leave your email in the PR description for follow-up.
-
-![Proma PR Bounty](https://img.erlich.fun/personal-blog/uPic/PR%20%E8%B5%A0%E9%87%91%201.png)
-
 ## Star History
 
 <a href="https://www.star-history.com/?repos=ErlichLiu%2FProma&type=date&legend=top-left">

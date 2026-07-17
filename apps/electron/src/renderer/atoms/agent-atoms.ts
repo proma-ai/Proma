@@ -214,6 +214,10 @@ export const agentChannelIdAtom = atom<string | null>(null)
 export const agentModelIdAtom = atom<string | null>(null)
 /** Agent 启用的渠道 ID 列表（多选，设置页 Switch 开关控制） */
 export const agentChannelIdsAtom = atom<string[]>([])
+/** 实验性 Agent runtime 切换开关 */
+export const experimentalAgentRuntimeSwitchEnabledAtom = atom<boolean>(false)
+/** 新 Agent 会话默认 runtime */
+export const agentRuntimeAtom = atom<'claude' | 'pi'>('claude')
 
 /** Per-session 渠道 ID Map — sessionId → channelId */
 export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())

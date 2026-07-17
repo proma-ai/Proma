@@ -24,7 +24,17 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
-import { extractZhipuCodingTeamApiToken, parseZhipuTeamCredentials, PROMA_OFFICIAL_CHANNEL_ID, PROVIDER_DEFAULT_URLS } from '@proma/shared'
+import {
+  extractZhipuCodingTeamApiToken,
+  parseZhipuTeamCredentials,
+  PROMA_OFFICIAL_CHANNEL_ID,
+  PROVIDER_DEFAULT_URLS,
+  parseCodexCredentials,
+  serializeCodexCredentials,
+  isCodexCredentialExpired,
+} from '@proma/shared'
+import { refreshCodexOAuth } from './codex-oauth-service'
+import { listCodexModels } from './adapters/pi-model-registry'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import {
@@ -497,6 +507,82 @@ export function decryptApiKey(channelId: string): string {
   }
 
   return decryptKey(channel.apiKey)
+}
+
+/**
+ * 进行中的 codex token 刷新（按 channelId 去重）。
+ *
+ * 多个 Agent 会话可能并发触发同一渠道的 token 刷新；若不去重会造成对
+ * OpenAI token 端点的重复请求，且后写覆盖先写。此 Map 保证同一渠道同一时刻
+ * 只有一次刷新在飞行，其余调用复用同一 Promise。对应 memory 里记过的
+ * 「OAuth 刷新需并发锁」经验。
+ */
+const inflightCodexRefresh = new Map<string, Promise<string>>()
+
+/**
+ * 解析渠道存储的 ChatGPT (Codex) OAuth 凭据，按需刷新并回写，返回可用的 access token。
+ *
+ * - 渠道 apiKey 字段存的是加密后的凭据 JSON（access/refresh/expires）。
+ * - access token 未过期：直接返回。
+ * - 已过期或即将过期：用 refresh token 换新，加密回写渠道，返回新的 access token。
+ *
+ * 仅用于 provider === 'openai-codex' 的渠道。刷新失败时抛错，交由上层映射为
+ * expired_oauth_token 并引导用户重新登录。
+ */
+export async function resolveCodexAccessToken(channelId: string): Promise<string> {
+  const config = readConfig()
+  const channel = config.channels.find((c) => c.id === channelId)
+  if (!channel) {
+    throw new Error(`渠道不存在: ${channelId}`)
+  }
+
+  const credentials = parseCodexCredentials(decryptKey(channel.apiKey))
+  if (!credentials) {
+    throw new Error('ChatGPT 登录凭据无效或缺失，请重新登录')
+  }
+
+  if (!isCodexCredentialExpired(credentials)) {
+    return credentials.access
+  }
+
+  // 过期：去重刷新。同一渠道并发调用复用同一个刷新 Promise。
+  const existing = inflightCodexRefresh.get(channelId)
+  if (existing) return existing
+
+  const refreshPromise = (async (): Promise<string> => {
+    try {
+      const refreshed = await refreshCodexOAuth(credentials.refresh)
+      // 回写加密凭据（保留刚拿到的 accountId，缺省沿用旧值）。
+      const merged = {
+        ...refreshed,
+        accountId: refreshed.accountId ?? credentials.accountId,
+      }
+      updateChannel(channelId, { apiKey: serializeCodexCredentials(merged) })
+      return refreshed.access
+    } finally {
+      inflightCodexRefresh.delete(channelId)
+    }
+  })()
+
+  inflightCodexRefresh.set(channelId, refreshPromise)
+  return refreshPromise
+}
+
+/**
+ * 解析渠道运行时实际使用的认证 token。
+ *
+ * 普通渠道直接解密 API Key；ChatGPT (Codex) OAuth 渠道的 apiKey 字段存储的是
+ * OAuth 凭据 JSON，运行时必须取出 access token 并按需刷新。
+ */
+export async function resolveChannelRuntimeApiKey(channelId: string): Promise<string> {
+  const channel = getChannelById(channelId)
+  if (!channel) {
+    throw new Error(`渠道不存在: ${channelId}`)
+  }
+
+  return channel.provider === 'openai-codex'
+    ? resolveCodexAccessToken(channelId)
+    : decryptApiKey(channelId)
 }
 
 /**
@@ -1499,6 +1585,16 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+      case 'openai-codex':
+        if (provider === 'openai-codex') {
+          // ChatGPT (Codex) 走 Pi SDK 内置模型目录，不依赖 baseUrl/apiKey。
+          const codexModels = await listCodexModels()
+          return {
+            success: true,
+            message: `已加载 ${codexModels.length} 个 ChatGPT (Codex) 模型`,
+            models: codexModels.map((m) => ({ id: m.id, name: m.name, enabled: true, source: 'fetched' as const })),
+          }
+        }
         if (provider === 'deepseek') {
           return await fetchDeepSeekModels(input.baseUrl, input.apiKey, proxyUrl)
         }

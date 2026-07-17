@@ -36,6 +36,7 @@ import {
   PROMA_OFFICIAL_CHANNEL_ID,
   isAgentCompatibleProvider,
   parseZhipuTeamCredentials,
+  parseCodexCredentials,
 } from '@proma/shared'
 import type {
   Channel,
@@ -75,7 +76,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -217,6 +218,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [fetchResult, setFetchResult] = React.useState<FetchModelsResult | null>(null)
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false)
   const [showExitDialog, setShowExitDialog] = React.useState(false)
+  const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
   const lastAgentEligibleRef = React.useRef(channel ? isAgentEligibleChannel(channel) : false)
@@ -242,10 +244,15 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   }, [isEdit, channel, apiKeyLoaded])
 
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
+  const isCodexProvider = provider === 'openai-codex'
   const effectiveApiKey = isZhipuTeamProvider ? buildZhipuTeamSecret(zhipuTeamSecret) : apiKey
+  // ChatGPT (Codex)：apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
+  const codexCredentials = isCodexProvider ? parseCodexCredentials(apiKey) : null
   const hasRequiredSecret = isZhipuTeamProvider
     ? Boolean(zhipuTeamSecret.apiKey.trim())
-    : Boolean(apiKey.trim())
+    : isCodexProvider
+      ? Boolean(codexCredentials)
+      : Boolean(apiKey.trim())
 
   const updateZhipuTeamSecret = React.useCallback((patch: Partial<ZhipuTeamSecretForm>) => {
     setZhipuTeamSecret((prev) => {
@@ -429,9 +436,68 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     )
   }
 
+  /** 发起 ChatGPT (Codex) OAuth 登录：打开浏览器授权，成功后把凭据写入 apiKey */
+  const handleCodexLogin = async (): Promise<void> => {
+    setCodexLoggingIn(true)
+    setTestResult(null)
+    try {
+      const result = await window.electronAPI.codexOAuthLogin()
+      if (!result.success || !result.credentials) {
+        toast.error(result.message ?? 'ChatGPT 登录失败，请重试')
+        return
+      }
+      const credentials = result.credentials
+      // 凭据 JSON 已含 accountId，写入 apiKey 后由 codexCredentials 派生展示，无需单独 state。
+      setApiKey(credentials)
+
+      // codex 模型是 Pi SDK 内置目录、不依赖凭据/baseUrl。登录后自动拉取并全部启用。
+      // 不复用 handleFetchModels：其 gate 读派生自 apiKey state 的 hasRequiredSecret，
+      // 而 setApiKey 是异步的，同一 tick 内仍是旧值，这里直接内联拉取。
+      let codexModels: ChannelModel[] = []
+      try {
+        const modelsResult = await window.electronAPI.fetchModels({ provider, baseUrl, apiKey: credentials })
+        setFetchResult(modelsResult)
+        if (modelsResult.success && modelsResult.models.length > 0) {
+          codexModels = modelsResult.models.map((m) => ({ ...m, enabled: true }))
+          setModels(codexModels)
+        }
+      } catch (modelErr) {
+        console.error('[模型配置表单] 拉取 ChatGPT 模型失败:', modelErr)
+      }
+
+      // OAuth 流程中用户很容易在浏览器授权后直接关闭表单，来不及点「创建」而丢失凭据。
+      // 登录成功即明确的保存意图：创建模式下自动落库（编辑模式由 effectiveApiKey 变化触发 auto-save）。
+      // 用刚拿到的凭据/模型直接构造入参，避免依赖 setState 后同一 tick 仍是旧值的闭包。
+      if (isEdit) {
+        toast.success('ChatGPT 登录成功')
+      } else {
+        const input: ChannelCreateInput = {
+          name: name.trim() || PROVIDER_LABELS['openai-codex'],
+          provider,
+          baseUrl,
+          apiKey: credentials,
+          models: codexModels,
+          enabled,
+        }
+        const saved = await window.electronAPI.createChannel(input)
+        if (isAgentEligibleChannel(saved)) {
+          await onAgentEligibilityChange?.(saved, true)
+        }
+        toast.success('ChatGPT 渠道已创建')
+        onSaved(saved)
+      }
+    } catch (error) {
+      console.error('[模型配置表单] ChatGPT 登录失败:', error)
+      toast.error('ChatGPT 登录失败，请重试')
+    } finally {
+      setCodexLoggingIn(false)
+    }
+  }
+
   /** 从供应商 API 拉取可用模型列表 */
   const handleFetchModels = async (): Promise<void> => {
-    if (!hasRequiredSecret || !baseUrl.trim()) return
+    // ChatGPT (Codex) 走 SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
+    if (!hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())) return
 
     setFetchingModels(true)
     setFetchResult(null)
@@ -458,6 +524,10 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         const manualKept = prev.filter((m) => m.source === 'manual' && !fetchedById.has(m.id))
         const merged = fetchedModels.map((m) => {
           const old = prev.find((p) => p.id === m.id)
+          // ChatGPT (Codex) 是 SDK 内置的少量精选模型，拉取即全部启用，
+          // 与登录自动拉取路径（handleCodexLogin）保持一致，避免新模型（如 gpt-5.6 系列）
+          // 默认未启用而沉到「可用模型」折叠区，被误认为"拉不到"。
+          if (isCodexProvider) return { ...m, enabled: true }
           return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
         })
         return [...manualKept, ...merged]
@@ -645,36 +715,78 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
               placeholder="例如: My Anthropic"
               required
             />
-            <SettingsInput
-              label={getUrlInputLabel(provider)}
-              value={baseUrl}
-              onChange={setBaseUrl}
-              placeholder={getUrlInputPlaceholder(provider)}
-              description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
-            />
+            {/* ChatGPT (Codex) 的请求地址由 Pi SDK 内置管理，无需用户填写 */}
+            {!isCodexProvider && (
+              <SettingsInput
+                label={getUrlInputLabel(provider)}
+                value={baseUrl}
+                onChange={setBaseUrl}
+                placeholder={getUrlInputPlaceholder(provider)}
+                description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
+              />
+            )}
             {/* API Key + 测试连接同行 */}
             <div className="px-4 py-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium text-foreground">
-                  {isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
+                  {isCodexProvider ? 'ChatGPT 登录' : isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={handleTest}
-                  disabled={testing || !hasRequiredSecret || !baseUrl.trim()}
-                  className="h-7 text-xs"
-                >
-                  {testing ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <Zap size={12} />
-                  )}
-                  <span>测试连接</span>
-                </Button>
+                {!isCodexProvider && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={handleTest}
+                    disabled={testing || !hasRequiredSecret || !baseUrl.trim()}
+                    className="h-7 text-xs"
+                  >
+                    {testing ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Zap size={12} />
+                    )}
+                    <span>测试连接</span>
+                  </Button>
+                )}
               </div>
-              {isZhipuTeamProvider ? (
+              {isCodexProvider ? (
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={handleCodexLogin}
+                    disabled={codexLoggingIn}
+                    className="w-full"
+                  >
+                    {codexLoggingIn ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Zap size={14} />
+                    )}
+                    <span>
+                      {codexLoggingIn
+                        ? '等待浏览器授权…'
+                        : hasRequiredSecret
+                          ? '重新登录 ChatGPT'
+                          : '用 ChatGPT 登录'}
+                    </span>
+                  </Button>
+                  {hasRequiredSecret ? (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                      <CheckCircle2 size={12} className="shrink-0" />
+                      <span>
+                        已登录 ChatGPT 订阅
+                        {codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      使用 ChatGPT Plus/Pro 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。
+                    </div>
+                  )}
+                </div>
+              ) : isZhipuTeamProvider ? (
                 <div className="space-y-2">
                   <div className="relative">
                     <Input
@@ -811,7 +923,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
               size="sm"
               type="button"
               onClick={handleFetchModels}
-              disabled={fetchingModels || !hasRequiredSecret || !baseUrl.trim()}
+              disabled={fetchingModels || !hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())}
               className="h-7 text-xs"
             >
               {fetchingModels ? (

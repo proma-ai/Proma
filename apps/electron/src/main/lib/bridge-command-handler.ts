@@ -29,6 +29,7 @@ import {
 } from './bridge-model-utils'
 import type { BridgeChatBindingStore } from './bridge-binding-store'
 import { filterExistingBridgeBindings } from './bridge-binding-store'
+import { extractFinalAssistantText } from './bridge-agent-message-utils'
 
 // ===== 接口定义 =====
 
@@ -77,19 +78,6 @@ interface SessionBuffer {
   chatId: string
   contextData: unknown
   startedAt: number
-}
-
-/** Agent SDK 消息中的内容块 */
-interface ContentBlock {
-  type: string
-  text?: string
-}
-
-/** Agent SDK assistant 消息结构 */
-interface AssistantMessagePayload {
-  message?: {
-    content?: ContentBlock[]
-  }
 }
 
 // ===== 命令处理器实现 =====
@@ -766,14 +754,10 @@ export class BridgeCommandHandler {
     if (payload.kind === 'sdk_message') {
       const msg = payload.message
 
-      // 从 assistant 消息中提取文本
+      // 从 assistant 终态消息中提取文本。Pi 的 _partial 预览帧携带累计全文，
+      // 如果进入 buffer，会在钉钉/微信最终回复里形成多段重复内容。
       if (msg.type === 'assistant') {
-        const aMsg = msg as AssistantMessagePayload
-        for (const block of aMsg.message?.content ?? []) {
-          if (block.type === 'text' && block.text) {
-            buffer.text += block.text
-          }
-        }
+        buffer.text += extractFinalAssistantText(msg)
       }
 
       // result → 会话完成
