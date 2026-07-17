@@ -58,6 +58,7 @@ import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
+import { buildPiMcpTools } from './adapters/pi-mcp-tools'
 import type { AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
@@ -1188,6 +1189,7 @@ export class AgentOrchestrator {
       // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
       let piBuiltinTools: unknown[] = []
+      let piMcpTools: unknown[] = []
       const builtinMcpResult = agentRuntime === 'claude' && sdk
         ? await injectBuiltinMcpServers({
           sdk,
@@ -1222,6 +1224,16 @@ export class AgentOrchestrator {
       if (customMcpServers) {
         Object.assign(mcpServers, customMcpServers)
         console.log(`[Agent 编排] 已合并 ${Object.keys(customMcpServers).length} 个自定义 MCP 服务器`)
+      }
+
+      // Pi SDK 没有 Claude Agent SDK 的 mcpServers 参数；Claude 路径保持原生 MCP 不变，
+      // Pi 路径由 Proma 主进程连接用户 MCP server，并转换为 Pi customTools。
+      if (agentRuntime === 'pi' && Object.keys(mcpServers).length > 0) {
+        try {
+          piMcpTools = await buildPiMcpTools(mcpServers)
+        } catch (error) {
+          console.warn('[Agent 编排] Pi MCP 工具桥接失败，已跳过用户 MCP:', error)
+        }
       }
 
       // 11. 构建动态上下文和最终 prompt
@@ -1531,6 +1543,7 @@ export class AgentOrchestrator {
           event: { type: 'context_window', contextWindow },
         })
       }
+      const piCustomTools = [...piBuiltinTools, ...piMcpTools]
       const queryOptions: ClaudeAgentQueryOptions | PiAgentQueryOptions = agentRuntime === 'pi' ? {
         agentRuntime: 'pi',
         sessionId,
@@ -1561,7 +1574,7 @@ export class AgentOrchestrator {
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
-        ...(piBuiltinTools.length > 0 && { customTools: piBuiltinTools as PiAgentQueryOptions['customTools'] }),
+        ...(piCustomTools.length > 0 && { customTools: piCustomTools as PiAgentQueryOptions['customTools'] }),
         onSessionId: handleSessionId,
         onModelResolved: handleModelResolved,
         onContextWindow: handleContextWindow,
