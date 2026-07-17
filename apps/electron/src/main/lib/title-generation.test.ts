@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createFallbackTitle, sanitizeGeneratedTitle } from './title-generation'
+import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle } from './title-generation'
 
 describe('标题生成辅助逻辑', () => {
   test('Given ChatGPT OAuth 无标题适配器 When 本地兜底 Then 使用首个有效行并限制长度', () => {
@@ -12,5 +12,13 @@ describe('标题生成辅助逻辑', () => {
     const title = sanitizeGeneratedTitle('「OpenAI OAuth 标题修复」')
 
     expect(title).toBe('OpenAI OAuth 标题修复')
+  })
+
+  test('Given Codex OAuth 且已登录 Proma Cloud When 选择标题来源 Then 使用 Proma 轻量模型', () => {
+    expect(resolveCodexTitleSource(true)).toBe('proma')
+  })
+
+  test('Given Codex OAuth 且未登录 Proma Cloud When 选择标题来源 Then 使用本地输入兜底', () => {
+    expect(resolveCodexTitleSource(false)).toBe('fallback')
   })
 })

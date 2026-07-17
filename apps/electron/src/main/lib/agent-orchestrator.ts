@@ -66,7 +66,7 @@ import type { AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
-import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
 
@@ -668,17 +668,20 @@ export class AgentOrchestrator {
         return null
       }
 
-      if (channel.provider === 'openai-codex') {
+      const codexPromaToken = channel.provider === 'openai-codex' ? getAuthToken() : undefined
+      if (channel.provider === 'openai-codex' && resolveCodexTitleSource(Boolean(codexPromaToken)) === 'fallback') {
         const fallbackTitle = createFallbackTitle(userMessage)
-        console.log('[Agent 标题生成] ChatGPT OAuth 渠道使用本地标题:', fallbackTitle)
+        console.log('[Agent 标题生成] ChatGPT OAuth 未登录 Proma Cloud，使用本地标题:', fallbackTitle)
         return fallbackTitle
       }
 
+      // Proma 官方渠道及已登录 Proma Cloud 的 Codex OAuth 渠道，均使用轻量标题模型。
+      // Codex Responses 协议不适配 @proma/core 的标题请求，但 Cloud 标题接口可正常调用。
+      const usePromaTitleModel = channel.provider === 'proma' || channel.provider === 'openai-codex'
       let apiKey: string
       let baseUrl: string
-      if (channel.provider === 'proma') {
-        // Proma 官方渠道：使用缓存的 auth token（同步，轻量）
-        const token = getAuthToken()
+      if (usePromaTitleModel) {
+        const token = codexPromaToken ?? getAuthToken()
         if (!token) {
           console.warn('[Agent 标题生成] 未找到 Proma auth token，请检查登录状态')
           return null
@@ -690,10 +693,10 @@ export class AgentOrchestrator {
         baseUrl = channel.baseUrl
       }
 
-      // Proma 官方渠道使用轻量 Chat 模型（快速且低成本）
-      const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
+      // Proma Cloud 标题模型独立于 Agent 当前使用的模型，确保低成本、稳定生成。
+      const titleModelId = usePromaTitleModel ? PROMA_TITLE_MODEL : modelId
 
-      const providerAdapter = getAdapter(channel.provider)
+      const providerAdapter = getAdapter(usePromaTitleModel ? 'proma' : channel.provider)
       const proxyUrl = await getEffectiveProxyUrl()
       const fetchFn = getFetchFn(proxyUrl)
 
@@ -710,7 +713,7 @@ export class AgentOrchestrator {
       let title = await doFetch(apiKey)
 
       // Proma 渠道：token 过期时尝试刷新后重试一次
-      if (!title && channel.provider === 'proma') {
+      if (!title && usePromaTitleModel) {
         const newToken = await tryRefreshAuthToken()
         if (newToken) {
           console.log('[Agent 标题生成] Token 已刷新，重试...')
