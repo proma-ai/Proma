@@ -53,6 +53,7 @@ interface McpToolBinding {
 }
 
 function stableStringify(value: unknown): string {
+  if (value === undefined) return 'null'
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
   const obj = value as Record<string, unknown>
@@ -154,7 +155,7 @@ function isObjectSchema(schema: unknown): schema is Record<string, unknown> {
 function toTypeBoxSchema(schema: unknown): TSchema {
   if (!isObjectSchema(schema)) return Type.Object({})
   if (schema.type !== 'object') return Type.Object({})
-  return schema as unknown as TSchema
+  return Type.Unsafe(schema)
 }
 
 function stringifyForTool(content: unknown): string {
@@ -203,6 +204,25 @@ function convertMcpResult(result: McpCallToolResult): AgentToolResult<unknown> {
 
 class PiMcpClientManager {
   private readonly connections = new Map<string, Promise<McpConnection>>()
+
+  /**
+   * 关闭所有活跃的 MCP 连接，释放 stdio 子进程和网络资源。
+   * 应在 app quit 或 agent session 结束时调用。
+   */
+  async dispose(): Promise<void> {
+    const entries = [...this.connections.entries()]
+    this.connections.clear()
+    await Promise.allSettled(
+      entries.map(async ([, connPromise]) => {
+        try {
+          const conn = await connPromise
+          await conn.transport.close()
+        } catch {
+          // 连接本身就失败了，忽略
+        }
+      }),
+    )
+  }
 
   async listTools(serverName: string, config: PiMcpServerConfig): Promise<McpToolInfo[]> {
     const connection = await this.getConnection(serverName, config)
@@ -286,18 +306,26 @@ export async function buildPiMcpTools(mcpServers: PiMcpServers): Promise<ToolDef
   const tools: ToolDefinition[] = []
   const seenToolNames = new Set<string>()
 
-  for (const [serverName, rawConfig] of Object.entries(mcpServers)) {
-    const config = rawConfig as PiMcpServerConfig
-    if (config.type !== 'stdio' && config.type !== 'http' && config.type !== 'sse') continue
+  // 并行连接所有 MCP 服务器，避免串行等待导致启动慢
+  const entries = Object.entries(mcpServers).filter(([, rawConfig]) => {
+    const type = (rawConfig as PiMcpServerConfig).type
+    return type === 'stdio' || type === 'http' || type === 'sse'
+  })
 
-    let mcpTools: McpToolInfo[]
-    try {
-      mcpTools = await manager.listTools(serverName, config)
-    } catch (error) {
-      console.warn(`[Pi MCP] 连接或列出 MCP 服务器 ${serverName} 工具失败，已跳过:`, error)
+  const results = await Promise.allSettled(
+    entries.map(async ([serverName, rawConfig]) => {
+      const config = rawConfig as PiMcpServerConfig
+      const mcpTools = await manager.listTools(serverName, config)
+      return { serverName, config, mcpTools }
+    }),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.warn('[Pi MCP] 连接或列出 MCP 服务器工具失败，已跳过:', result.reason)
       continue
     }
-
+    const { serverName, config, mcpTools } = result.value
     for (const tool of mcpTools) {
       const piToolName = mcpToolName(serverName, tool.name)
       if (seenToolNames.has(piToolName)) {
@@ -320,4 +348,11 @@ export async function buildPiMcpTools(mcpServers: PiMcpServers): Promise<ToolDef
   }
 
   return tools
+}
+
+/**
+ * 关闭所有 MCP 连接。应在 app quit 时调用以清理 stdio 子进程。
+ */
+export async function disposePiMcpConnections(): Promise<void> {
+  await manager.dispose()
 }

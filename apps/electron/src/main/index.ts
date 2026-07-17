@@ -87,6 +87,7 @@ import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
 import { stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
+import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
@@ -672,6 +673,8 @@ app.on('before-quit', () => {
   // 销毁快速任务窗口
   destroyQuickTaskWindow()
   destroyVoiceDictationWindow()
+  // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
+  disposePiMcpConnections().catch(() => {})
   // Clean up system tray before quitting
   destroyTray()
 })
