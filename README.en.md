@@ -11,8 +11,8 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 ## What Proma Can Do
 
 - **Chat mode**: multi-model conversations, attachments, image input, Markdown / Mermaid / KaTeX / code highlighting, parallel conversations, system prompts, and context controls.
-- **Agent mode**: general-purpose Agent powered by `@anthropic-ai/claude-agent-sdk`, with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions.
-- **SubAgents / Tasks**: complex tasks can be delegated through the Claude Agent SDK Agent tool, with sub-agent calls and results shown in the message stream.
+- **Agent mode**: two built-in runtimes—Claude Agent SDK and Pi Agent SDK—with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions. Claude is the default; Pi is available behind an experimental setting.
+- **Collaboration and tasks**: complex work can be split into traceable collaboration agents and tasks, with calls and results shown in the message stream.
 - **Skills & MCP**: each workspace can manage its own Skills, MCP servers, and workspace files.
 - **Remote bots**: Lark / Feishu bot bridging is supported, with DingTalk and WeChat bridge entry points also present in the app.
 - **Memory and tools**: Chat and Agent can share memory, with web search, built-in Chat tools, and Agent recommendation helpers.
@@ -23,7 +23,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 
 ### Download
 
-Download the open-source version from [GitHub Releases](https://github.com/ErlichLiu/Proma/releases). The current release notes are for `v0.9.12`, with builds for macOS Apple Silicon, macOS Intel, and Windows.
+Download the open-source version from [GitHub Releases](https://github.com/ErlichLiu/Proma/releases), with builds for macOS Apple Silicon, macOS Intel, and Windows.
 
 If you want fewer API setup steps, you can also use the [Proma commercial version](https://proma.cool/download). The commercial and open-source versions run in parallel; the commercial version mainly adds built-in model channels and subscription options.
 
@@ -32,9 +32,10 @@ If you want fewer API setup steps, you can also use the [Proma commercial versio
 1. Open Proma and finish the environment check. Agent mode depends on local tooling, especially Git, Node.js / Bun, and a usable shell.
 2. Go to **Settings > Channels**, add at least one AI provider channel, and fill in Base URL, API Key, and model list.
 3. Chat mode can use OpenAI, Anthropic, Google, or OpenAI-compatible channels.
-4. Agent mode requires an Anthropic or Anthropic-compatible channel, such as Anthropic, DeepSeek, Kimi API, or Kimi Coding Plan.
-5. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
-6. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
+4. The default Claude Agent Runtime requires an Anthropic or Anthropic-compatible channel, such as Anthropic, DeepSeek, Kimi API, or Kimi Coding Plan.
+5. To use the **experimental Pi Agent Runtime**, open **Settings > Experimental**, enable **Agent runtime switching**, then choose a default runtime for new sessions or switch Claude / Pi below the Agent input. Pi can use any enabled model channel.
+6. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
+7. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
 
 ## Choosing A Mode
 
@@ -89,25 +90,24 @@ Proma supports Doubao-powered streaming voice input, both inside Proma and acros
 
 ![Proma voice input](./docs/assets/screenshots/proma-typeless-input.png)
 
-## Supported Providers
+## Agent Runtimes and Providers
 
-| Provider | Chat | Agent | Protocol |
+Proma provides two switchable Agent runtimes:
+
+- **Claude Agent Runtime (default)**: powered by `@anthropic-ai/claude-agent-sdk` and using the Anthropic Messages API or compatible endpoints.
+- **Pi Agent Runtime (experimental)**: powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. It dynamically registers enabled Proma channels as Pi providers and supports OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
+
+| Channel type | Chat | Claude Agent | Pi Agent (experimental) |
 | --- | --- | --- | --- |
-| Anthropic | Supported | Supported | Anthropic Messages API |
-| DeepSeek | Supported | Supported | Anthropic-compatible protocol |
-| Kimi API | Supported | Supported | Anthropic-compatible protocol |
-| Kimi Coding Plan | Supported | Supported | Anthropic-compatible protocol with dedicated auth headers |
-| OpenAI | Supported | Not yet | Chat Completions |
-| Google | Supported | Not yet | Gemini Generative Language API |
-| Zhipu AI | Supported | Supported | Anthropic-compatible protocol |
-| MiniMax | Supported | Supported | Anthropic-compatible protocol |
-| Doubao | Supported | Supported | Anthropic-compatible protocol |
-| Qwen | Supported | Supported | Anthropic-compatible protocol |
-| Custom endpoint | Supported | Not yet | OpenAI-compatible protocol |
+| Anthropic / Anthropic-compatible | Supported | Supported | Supported |
+| Anthropic-protocol channels such as DeepSeek, Kimi API / Coding Plan, Zhipu Coding Plan, MiniMax, and Xiaomi MiMo | Supported | Supported | Supported |
+| OpenAI, OpenAI Responses, Google, Zhipu AI, Doubao, and Qwen | Supported | Not yet | Supported |
+| Custom OpenAI-compatible endpoints | Supported | Not yet | Supported |
+| ChatGPT subscription (Codex OAuth) | — | Supported | Supported |
+
+> **Experimental notice**: Pi Runtime is off by default. Once enabled, it can be switched per Agent session. Switching starts a new underlying SDK session but does not delete Proma's saved messages. Pi bridges workspace Skills, user-configured MCP servers, and Proma's built-in Automation / Collaboration tools. Tool calling, reasoning, and context capabilities still vary by model provider.
 
 > **Kimi Coding Plan users**: Proma is officially whitelisted by Kimi. Using Proma with your Kimi Coding Plan subscription will not trigger any third-party client ban policy.
-
-Agent mode is powered by Claude Agent SDK, so it currently requires an Anthropic or Anthropic-compatible channel. Chat mode uses Provider Adapters from `@proma/core` to support different protocols.
 
 ## Local Data
 
@@ -153,10 +153,10 @@ Current package versions:
 
 | Package | Version | Responsibility |
 | --- | --- | --- |
-| `@proma/electron` | `0.9.12` | Electron desktop app |
-| `@proma/shared` | `0.1.17` | shared types, IPC constants, config, utilities |
-| `@proma/core` | `0.2.9` | Provider Adapters, SSE, Shiki highlighting |
-| `@proma/ui` | `0.1.3` | shared React UI components |
+| `@proma/electron` | `0.14.26` | Electron desktop app |
+| `@proma/shared` | `0.1.42` | shared types, IPC constants, config, utilities |
+| `@proma/core` | `0.2.15` | Provider Adapters, SSE, Shiki highlighting |
+| `@proma/ui` | `0.1.9` | shared React UI components |
 
 Common commands:
 
@@ -207,7 +207,7 @@ bun run dist:fast
 | Code highlighting | Shiki |
 | Build | Vite + esbuild |
 | Distribution | electron-builder |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.3.143` |
+| Agent runtimes | Claude: `@anthropic-ai/claude-agent-sdk@0.3.201`; Pi: `@earendil-works/pi-* @0.80.3` |
 
 ## Architecture
 
@@ -222,7 +222,8 @@ shared types and IPC constants
 
 Main-process services live in `apps/electron/src/main/lib/`:
 
-- `agent-orchestrator.ts`: Agent orchestration, environment variables, SDK calls, event streams, error handling.
+- `agent-orchestrator.ts`: Agent orchestration, runtime routing, environment variables, SDK calls, event streams, and error handling.
+- `adapters/claude-agent-adapter.ts` / `adapters/pi-agent-adapter.ts`: runtime adapters for Claude and Pi; `runtime-routing-agent-adapter.ts` routes each session to its selected runtime.
 - `agent-session-manager.ts`: Agent session index and JSONL message persistence.
 - `agent-workspace-manager.ts`: workspaces, MCP, Skills, and workspace files.
 - `chat-service.ts`: Chat streaming, Provider Adapters, tool activity.
@@ -235,14 +236,18 @@ Renderer state is managed with Jotai. Key atoms live in `apps/electron/src/rende
 
 ## Packaging Notes
 
-`@anthropic-ai/claude-agent-sdk` uses platform native binaries since `0.2.113+`. Proma marks the SDK as external in esbuild and includes the SDK main package plus platform subpackages in `electron-builder.yml`.
+Both Agent runtimes run as esbuild external dependencies in the main process. Before invoking `electron-builder`, the Electron packaging scripts run `bun run sync:runtime-deps` to copy these runtime dependency closures into the app directory:
 
-When changing packaging configuration, make sure:
+- `@anthropic-ai/claude-agent-sdk` (including the platform-specific Claude native binary)
+- `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`
+- Pi runtime native modules and `pdfjs-dist`
 
-- Main-process esbuild keeps `--external:@anthropic-ai/claude-agent-sdk`.
-- `apps/electron/package.json` includes target SDK platform subpackages in `optionalDependencies`.
-- `apps/electron/electron-builder.yml` includes the SDK main package and platform subpackages in `files`.
-- Ordinary npm dependencies should usually be bundled into `main.cjs` by esbuild instead of being marked external.
+When changing packaging, verify that:
+
+- `build:main` / `watch:main` keep both Agent SDKs external.
+- `scripts/sync-runtime-deps.ts` stays aligned with the external runtime dependency list.
+- `electron-builder.yml` retains the `asarUnpack` rules for the Claude binary and Pi native add-ons.
+- After `bun run dist:fast` on a target platform, both Claude and Pi (when enabled) can start, call tools, and resume sessions.
 
 See [AGENTS.md](./AGENTS.md) for the full engineering conventions.
 
