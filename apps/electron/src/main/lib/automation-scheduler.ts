@@ -36,6 +36,7 @@ import { createAgentSession, updateAgentSessionMeta, getAgentSessionMeta } from 
 import { getSessionContextUsageRatio } from './agent-session-usage'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
 import { notifyAutomationRunFinished } from './automation-notification-service'
+import { getSettings } from './settings-service'
 
 /** tick 周期：每 30s 检查一次到期任务（短轮询，抗休眠漂移） */
 const TICK_INTERVAL_MS = 30_000
@@ -126,7 +127,8 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     //  - daily：再叠加一层「同一自然日」+「上下文占用率 < 阈值」双重判断
     //    （基于 automation.lastRunAt 排除 skipped 运行；占用率读不到时按"未知"保守复用）
     const sessionMode = automation.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE
-    const agentRuntime: AgentRuntime = automation.agentRuntime ?? 'claude'
+    const runtimeSwitchEnabled = getSettings().experimentalAgentRuntimeSwitchEnabled === true
+    const agentRuntime: AgentRuntime = runtimeSwitchEnabled ? automation.agentRuntime ?? 'claude' : 'claude'
 
     let reuseSessionId: string | undefined
     const lastSessionMeta = automation.lastSessionId ? getAgentSessionMeta(automation.lastSessionId) : undefined
@@ -164,10 +166,11 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     }
 
     const targetSessionMeta = getAgentSessionMeta(targetSessionId)
-    if (targetSessionMeta && targetSessionMeta.agentRuntime !== agentRuntime) {
+    const previousAgentRuntime: AgentRuntime = targetSessionMeta?.agentRuntime ?? 'claude'
+    if (targetSessionMeta && previousAgentRuntime !== agentRuntime) {
       updateAgentSessionMeta(targetSessionId, {
         agentRuntime,
-        ...(targetSessionMeta.agentRuntime ? { sdkSessionId: undefined } : {}),
+        sdkSessionId: undefined,
       })
     }
 

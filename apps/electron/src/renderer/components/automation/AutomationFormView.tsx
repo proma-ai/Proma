@@ -192,6 +192,23 @@ function createFeishuTarget(binding: FeishuChatBinding): AutomationFeishuNotific
   }
 }
 
+function coerceAutomationDraftRuntime(
+  draft: AutomationDraft,
+  experimentalRuntimeSwitchEnabled: boolean,
+  defaultAgentRuntime: AgentRuntime,
+  agentChannelIds: string[],
+): AutomationDraft {
+  const runtime: AgentRuntime = experimentalRuntimeSwitchEnabled
+    ? (draft.id ? draft.agentRuntime : defaultAgentRuntime)
+    : 'claude'
+
+  if (runtime === 'claude' && draft.channelId && !agentChannelIds.includes(draft.channelId)) {
+    return { ...draft, agentRuntime: runtime, channelId: '', modelId: undefined, active: false }
+  }
+
+  return draft.agentRuntime === runtime ? draft : { ...draft, agentRuntime: runtime }
+}
+
 function AutomationPromptEmptyGuide(): React.ReactElement {
   return (
     <div className="rounded-xl bg-foreground/[0.035] p-4 shadow-inner">
@@ -368,12 +385,12 @@ export function AutomationFormView(): React.ReactElement | null {
 
   React.useEffect(() => {
     if (formState.open && formState.draft) {
-      const draft: AutomationDraft = {
-        ...formState.draft,
-        agentRuntime: experimentalRuntimeSwitchEnabled
-          ? (formState.draft.id ? formState.draft.agentRuntime : defaultAgentRuntime)
-          : 'claude',
-      }
+      const draft = coerceAutomationDraftRuntime(
+        formState.draft,
+        experimentalRuntimeSwitchEnabled,
+        defaultAgentRuntime,
+        agentChannelIds,
+      )
       setForm(draft)
       lastSavedSignatureRef.current = draft.id && canPersistDraft(draft)
         ? getDraftSignature(draft)
@@ -396,9 +413,13 @@ export function AutomationFormView(): React.ReactElement | null {
   }, [formState.open, form?.id, form?.workspaceId, currentAgentWorkspaceId, workspaces])
 
   React.useEffect(() => {
-    if (!formState.open || !form || experimentalRuntimeSwitchEnabled || form.agentRuntime === 'claude') return
-    setForm((prev) => (prev ? { ...prev, agentRuntime: 'claude' } : prev))
-  }, [formState.open, form, experimentalRuntimeSwitchEnabled])
+    if (!formState.open || !form || experimentalRuntimeSwitchEnabled) return
+    setForm((prev) => {
+      if (!prev) return prev
+      const next = coerceAutomationDraftRuntime(prev, false, defaultAgentRuntime, agentChannelIds)
+      return getDraftSignature(next) === getDraftSignature(prev) ? prev : next
+    })
+  }, [formState.open, form, experimentalRuntimeSwitchEnabled, defaultAgentRuntime, agentChannelIds])
 
   React.useEffect(() => {
     if (!formState.open) return
