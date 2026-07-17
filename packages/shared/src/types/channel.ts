@@ -13,6 +13,7 @@ export type ProviderType =
   | 'anthropic'
   | 'anthropic-compatible'
   | 'openai'
+  | 'openai-responses'
   | 'deepseek'
   | 'google'
   | 'kimi-api'
@@ -44,6 +45,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   anthropic: 'https://api.anthropic.com',
   'anthropic-compatible': '',
   openai: 'https://api.openai.com/v1',
+  'openai-responses': 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com/anthropic',
   google: 'https://generativelanguage.googleapis.com',
   'kimi-api': 'https://api.moonshot.cn/anthropic',
@@ -71,6 +73,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   anthropic: 'Anthropic',
   'anthropic-compatible': 'Anthropic 兼容格式',
   openai: 'OpenAI',
+  'openai-responses': 'OpenAI Responses 格式',
   deepseek: 'DeepSeek',
   google: 'Google',
   'kimi-api': 'Kimi API (Anthropic 协议)',
@@ -109,6 +112,7 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'xiaomi',
   'xiaomi-token-plan',
   'qwen-anthropic',
+  'openai-responses',
   'openai-codex',
 ])
 

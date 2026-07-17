@@ -19,6 +19,7 @@ import {
   AUTOMATION_MAX_CONSECUTIVE_FAILURES,
   AUTOMATION_IPC_CHANNELS,
   AUTOMATION_DEFAULT_SESSION_MODE,
+  type AgentRuntime,
   type Automation,
   type AutomationRun,
 } from '@proma/shared'
@@ -35,6 +36,7 @@ import { createAgentSession, updateAgentSessionMeta, getAgentSessionMeta } from 
 import { getSessionContextUsageRatio } from './agent-session-usage'
 import { runAgentHeadless, isAgentSessionActive } from './agent-service'
 import { notifyAutomationRunFinished } from './automation-notification-service'
+import { getSettings } from './settings-service'
 
 /** tick 周期：每 30s 检查一次到期任务（短轮询，抗休眠漂移） */
 const TICK_INTERVAL_MS = 30_000
@@ -125,6 +127,8 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     //  - daily：再叠加一层「同一自然日」+「上下文占用率 < 阈值」双重判断
     //    （基于 automation.lastRunAt 排除 skipped 运行；占用率读不到时按"未知"保守复用）
     const sessionMode = automation.sessionMode ?? AUTOMATION_DEFAULT_SESSION_MODE
+    const runtimeSwitchEnabled = getSettings().experimentalAgentRuntimeSwitchEnabled === true
+    const agentRuntime: AgentRuntime = runtimeSwitchEnabled ? automation.agentRuntime ?? 'claude' : 'claude'
 
     let reuseSessionId: string | undefined
     const lastSessionMeta = automation.lastSessionId ? getAgentSessionMeta(automation.lastSessionId) : undefined
@@ -156,9 +160,18 @@ export async function runAutomation(automation: Automation, manual = false): Pro
       targetSessionId = reuseSessionId
     } else {
       const created = createAgentSession(automation.name, automation.channelId, automation.workspaceId, automation.modelId)
-      updateAgentSessionMeta(created.id, { sourceAutomationId: automation.id })
+      updateAgentSessionMeta(created.id, { sourceAutomationId: automation.id, agentRuntime })
       targetSessionId = created.id
       setLastSessionId(automation.id, created.id)
+    }
+
+    const targetSessionMeta = getAgentSessionMeta(targetSessionId)
+    const previousAgentRuntime: AgentRuntime = targetSessionMeta?.agentRuntime ?? 'claude'
+    if (targetSessionMeta && previousAgentRuntime !== agentRuntime) {
+      updateAgentSessionMeta(targetSessionId, {
+        agentRuntime,
+        sdkSessionId: undefined,
+      })
     }
 
     await new Promise<void>((resolveRun) => {
@@ -206,6 +219,7 @@ export async function runAutomation(automation: Automation, manual = false): Pro
           automationContext: `这是 Proma 定时任务「${automation.name}」的自动执行（ID: ${automation.id}，${formatScheduleLabel(automation)}）。这本身就是定时任务，不要建议用户再创建定时任务。直接执行任务即可。如发现本任务连续失败、输出价值低、频率不合适或提示词不完整，可以使用 automation 工具读取并更新当前任务。`,
           channelId: automation.channelId,
           modelId: automation.modelId,
+          agentRuntime,
           workspaceId: automation.workspaceId,
           permissionModeOverride: automation.permissionMode ?? 'bypassPermissions',
           triggeredBy: 'automation',

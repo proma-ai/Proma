@@ -272,6 +272,7 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     dayOfMonth: input.dayOfMonth,
     scheduledAt: input.scheduledAt,
     maxRuns: normalizeMaxRuns(input.maxRuns),
+    agentRuntime: input.agentRuntime,
     channelId: input.channelId,
     modelId: input.modelId,
     workspaceId: input.workspaceId,
@@ -301,6 +302,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   const now = Date.now()
   if (input.name !== undefined) target.name = input.name
   if (input.prompt !== undefined) target.prompt = input.prompt
+  if (input.agentRuntime !== undefined) target.agentRuntime = input.agentRuntime
   if (input.channelId !== undefined) target.channelId = input.channelId
   if (input.modelId !== undefined) target.modelId = input.modelId
   // workspaceId 允许设为空字符串表示「无工作区」；用 undefined 区分「不修改」

@@ -149,12 +149,15 @@ export function normalizeBaseUrl(baseUrl: string): string {
 /**
  * 规范化 OpenAI 兼容 Base URL（用于 Pi Agent runtime）。
  *
- * Pi / OpenAI client 会自行拼接 /chat/completions；custom 渠道若保存的是完整端点，
- * 这里需要还原成协议根地址，避免重复拼接。
+ * Pi / OpenAI client 会自行拼接 /chat/completions 或 /responses；custom / OpenAI Responses
+ * 渠道若保存的是完整端点，这里需要还原成协议根地址，避免重复拼接。
  */
 export function normalizeOpenAIBaseUrlForSdk(baseUrl: string): string {
   if (hasPathSuffix(baseUrl, '/chat/completions')) {
     return removePathSuffixForSdkBaseUrl(baseUrl, '/chat/completions')
+  }
+  if (hasPathSuffix(baseUrl, '/responses')) {
+    return removePathSuffixForSdkBaseUrl(baseUrl, '/responses')
   }
   return normalizeBaseUrl(baseUrl)
 }
@@ -178,13 +181,28 @@ export function resolveOpenAIChatCompletionsUrl(baseUrl: string, provider: Provi
 }
 
 /**
+ * 解析 OpenAI Responses 请求地址。
+ *
+ * 内置 OpenAI Responses 渠道允许填写协议根地址或完整 /responses 端点。
+ */
+export function resolveOpenAIResponsesUrl(baseUrl: string, _provider: ProviderType = 'openai-responses'): string {
+  if (hasPathSuffix(baseUrl, '/responses')) {
+    return trimTrailingUrlPathSlash(baseUrl)
+  }
+  return `${normalizeBaseUrl(baseUrl)}/responses`
+}
+
+/**
  * 解析 OpenAI Models 地址。
  *
- * 当用户把兼容格式配置为完整 /chat/completions 端点时，模型列表需要回到同级 /models。
+ * 当用户把兼容格式配置为完整 /chat/completions 或 /responses 端点时，模型列表需要回到同级 /models。
  */
 export function resolveOpenAIModelsUrl(baseUrl: string): string {
   if (hasPathSuffix(baseUrl, '/chat/completions')) {
     return replacePathSuffix(baseUrl, '/chat/completions', '/models')
+  }
+  if (hasPathSuffix(baseUrl, '/responses')) {
+    return replacePathSuffix(baseUrl, '/responses', '/models')
   }
   return `${normalizeBaseUrl(baseUrl)}/models`
 }

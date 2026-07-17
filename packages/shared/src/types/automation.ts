@@ -89,6 +89,8 @@ export interface Automation {
    * 与 scheduleType 正交——任意循环模式都可叠加；once 模式语义上等价于 maxRuns=1。
    */
   maxRuns?: number
+  /** 本任务运行时使用的 Agent runtime；历史任务缺省为 claude */
+  agentRuntime?: import('./agent-provider').AgentRuntime
   /** AI 渠道 ID */
   channelId: string
   /** 模型 ID（可选，继承来源会话或渠道默认） */
@@ -146,6 +148,8 @@ export interface CreateAutomationInput {
   scheduledAt?: number
   /** 最大运行次数上限（实际执行次数），达到后自动停用；不传 = 不限次 */
   maxRuns?: number
+  /** 本任务运行时使用的 Agent runtime；不传则为 claude */
+  agentRuntime?: import('./agent-provider').AgentRuntime
   channelId: string
   modelId?: string
   workspaceId?: string
@@ -171,6 +175,8 @@ export interface UpdateAutomationInput {
   scheduledAt?: number
   /** 最大运行次数上限（实际执行次数）；传 0 或负数等价于不限次。改动会重置已执行次数计数 */
   maxRuns?: number
+  /** 本任务运行时使用的 Agent runtime */
+  agentRuntime?: import('./agent-provider').AgentRuntime
   channelId?: string
   modelId?: string
   /** 工作区（用户可在创建后调整子会话归属的工作区） */

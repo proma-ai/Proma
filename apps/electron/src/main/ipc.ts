@@ -171,6 +171,7 @@ import { getProxySettings, saveProxySettings } from './lib/proxy-settings-servic
 import { detectSystemProxy } from './lib/system-proxy-detector'
 import {
   listAutomations,
+  getAutomation,
   createAutomation,
   updateAutomation,
   deleteAutomation,
@@ -4328,8 +4329,8 @@ export function registerIpcHandlers(): void {
   const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0
   const isNonBlankString = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0
   const isFiniteInt = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)
-  const validScheduleType = (v: unknown): v is 'interval' | 'daily' | 'weekly' | 'monthly' =>
-    v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly'
+  const validScheduleType = (v: unknown): v is 'interval' | 'daily' | 'weekly' | 'monthly' | 'once' =>
+    v === 'interval' || v === 'daily' || v === 'weekly' || v === 'monthly' || v === 'once'
   const validPermissionMode = (v: unknown): v is 'bypassPermissions' =>
     v === 'bypassPermissions'
   const validAutomationNotificationTrigger = (v: unknown): v is 'always' | 'success' | 'error' =>
@@ -4370,6 +4371,15 @@ export function registerIpcHandlers(): void {
     if (i.dayOfMonth !== undefined && (!isFiniteInt(i.dayOfMonth) || i.dayOfMonth < 1 || i.dayOfMonth > 31)) {
       throw new Error(`非法的 dayOfMonth: ${String(i.dayOfMonth)}`)
     }
+    if (i.scheduledAt !== undefined && (typeof i.scheduledAt !== 'number' || !Number.isFinite(i.scheduledAt) || i.scheduledAt <= 0)) {
+      throw new Error(`非法的 scheduledAt: ${String(i.scheduledAt)}`)
+    }
+    if (i.maxRuns !== undefined && (!isFiniteInt(i.maxRuns) || i.maxRuns < 1)) {
+      throw new Error(`非法的 maxRuns: ${String(i.maxRuns)}`)
+    }
+    if (i.agentRuntime !== undefined && !isAgentRuntime(i.agentRuntime)) {
+      throw new Error(`非法的 agentRuntime: ${String(i.agentRuntime)}`)
+    }
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {
       throw new Error(`非法的 permissionMode: ${String(i.permissionMode)}`)
     }
@@ -4377,6 +4387,53 @@ export function registerIpcHandlers(): void {
       throw new Error(`非法的 sessionMode: ${String(i.sessionMode)}`)
     }
     validateAutomationNotificationTargets(i.notificationTargets)
+  }
+
+  const validateAutomationRuntimePolicy = (
+    input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+    existing?: Automation,
+  ): void => {
+    const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? 'claude'
+    if (finalRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
+      throw new Error('实验性 Agent 内核切换未开启')
+    }
+
+    const finalChannelId = input.channelId !== undefined ? input.channelId : existing?.channelId
+    if (finalRuntime === 'claude' && finalChannelId) {
+      const agentChannelIds = getSettings().agentChannelIds ?? []
+      if (!agentChannelIds.includes(finalChannelId)) {
+        throw new Error('Claude Agent 内核只能使用已启用的 Agent 兼容渠道')
+      }
+    }
+  }
+
+  const validateAutomationScheduleComplete = (
+    input: Partial<CreateAutomationInput | UpdateAutomationInput>,
+    existing?: Automation,
+  ): void => {
+    const scheduleType = input.scheduleType ?? existing?.scheduleType
+    if (scheduleType === 'interval') {
+      const intervalMinutes = input.intervalMinutes ?? existing?.intervalMinutes
+      if (!isFiniteInt(intervalMinutes) || intervalMinutes < 1) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
+    }
+    if (scheduleType === 'daily' || scheduleType === 'weekly' || scheduleType === 'monthly') {
+      const timeOfDay = input.timeOfDay ?? existing?.timeOfDay
+      if (!validTimeOfDay(timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
+    }
+    if (scheduleType === 'weekly') {
+      const dayOfWeek = input.dayOfWeek ?? existing?.dayOfWeek
+      if (!isFiniteInt(dayOfWeek)) throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
+    }
+    if (scheduleType === 'monthly') {
+      const dayOfMonth = input.dayOfMonth ?? existing?.dayOfMonth
+      if (!isFiniteInt(dayOfMonth)) throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+    }
+    if (scheduleType === 'once') {
+      const scheduledAt = input.scheduledAt ?? existing?.scheduledAt
+      if (typeof scheduledAt !== 'number' || !Number.isFinite(scheduledAt) || scheduledAt <= 0) {
+        throw new Error('scheduleType=once 时 scheduledAt 必填')
+      }
+    }
   }
 
   ipcMain.handle(
@@ -4392,10 +4449,8 @@ export function registerIpcHandlers(): void {
       if (!isNonEmptyString(input.prompt)) throw new Error('prompt 必填')
       // channelId / workspaceId 允许为空（草稿态），但此时任务不能被启用
       validateAutomationFields(input)
-      if (input.scheduleType === 'interval' && !isFiniteInt(input.intervalMinutes)) throw new Error('scheduleType=interval 时 intervalMinutes 必填')
-      if ((input.scheduleType === 'daily' || input.scheduleType === 'weekly' || input.scheduleType === 'monthly') && !validTimeOfDay(input.timeOfDay)) throw new Error('scheduleType=daily/weekly/monthly 时 timeOfDay 必填')
-      if (input.scheduleType === 'weekly' && !isFiniteInt(input.dayOfWeek)) throw new Error('scheduleType=weekly 时 dayOfWeek 必填')
-      if (input.scheduleType === 'monthly' && input.dayOfMonth === undefined) throw new Error('scheduleType=monthly 时 dayOfMonth 必填')
+      validateAutomationRuntimePolicy(input)
+      validateAutomationScheduleComplete(input)
       const a = createAutomation(input)
       broadcastAutomationsChanged()
       return a
@@ -4409,7 +4464,11 @@ export function registerIpcHandlers(): void {
       if (!isNonEmptyString(input.id)) throw new Error('id 必填')
       if (input.name !== undefined && !isNonBlankString(input.name)) throw new Error('name 不能为空')
       if (input.prompt !== undefined && !isNonBlankString(input.prompt)) throw new Error('prompt 不能为空')
+      const existing = getAutomation(input.id)
+      if (!existing) return undefined
       validateAutomationFields(input)
+      validateAutomationRuntimePolicy(input, existing)
+      validateAutomationScheduleComplete(input, existing)
       const a = updateAutomation(input)
       broadcastAutomationsChanged()
       return a

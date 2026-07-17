@@ -9,9 +9,10 @@
  */
 
 import { Type } from 'typebox'
+import { getCloudApiConfig } from '@proma/cloud'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
-import type { PromaPermissionMode } from '@proma/shared'
+import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
 import type {
   CreateAutomationInput,
   UpdateAutomationInput,
@@ -30,6 +31,13 @@ import {
 import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
+import { getSettings } from '../settings-service'
+import {
+  createPromaAppKey,
+  ensurePromaAgentInnerKey,
+  invalidatePromaAgentInnerKeyCache,
+} from '../proma-agent-key-service'
+import { getBuiltinMcpName } from '../builtin-mcp/baseline'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -39,6 +47,7 @@ export interface PiBuiltinToolsContext {
   sessionId: string
   channelId: string
   modelId?: string
+  agentRuntime?: AgentRuntime
   workspaceId?: string
   workspaceSlug?: string
   permissionMode?: PromaPermissionMode
@@ -79,6 +88,7 @@ function summarizeAutomation(a: import('@proma/shared').Automation, includeHisto
     scheduledAt: a.scheduledAt,
     maxRuns: a.maxRuns,
     runCount: a.runCount ?? 0,
+    agentRuntime: a.agentRuntime ?? 'claude',
     completedAt: a.completedAt,
     sessionMode: a.sessionMode,
     workspaceId: a.workspaceId,
@@ -134,6 +144,12 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.maxRuns !== undefined && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
     throw new Error(`非法的 maxRuns: ${String(input.maxRuns)}（应为 ≥1 的整数）`)
+  }
+  if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
+    throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
+  }
+  if (input.agentRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
+    throw new Error('实验性 Agent 内核切换未开启')
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)
@@ -195,6 +211,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填' })),
         maxRuns: Type.Optional(Type.Number({ description: '最大运行次数上限；达到后任务自动停用' })),
         active: Type.Optional(Type.Boolean({ description: '创建后是否启用，默认 true' })),
+        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '运行该任务的 Agent runtime；不传则继承当前会话 runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')], { description: '会话模式' })),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -212,6 +229,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           dayOfMonth: args.dayOfMonth as number | undefined,
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
+          agentRuntime: (args.agentRuntime as AgentRuntime | undefined) ?? ctx.agentRuntime,
           channelId: ctx.channelId,
           modelId: ctx.modelId,
           workspaceId: ctx.workspaceId,
@@ -262,6 +280,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '新的一次性触发时间（毫秒时间戳）' })),
         maxRuns: Type.Optional(Type.Number({ description: '新的最大运行次数上限' })),
         active: Type.Optional(Type.Boolean({ description: '启用或暂停任务' })),
+        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '新的 Agent runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')])),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -280,6 +299,7 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
           active: args.active as boolean | undefined,
+          agentRuntime: args.agentRuntime as AgentRuntime | undefined,
           sessionMode: args.sessionMode as 'daily' | 'reuse' | undefined,
         }
         if (input.name !== undefined) assertNonBlank(input.name, 'name')
@@ -340,14 +360,59 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
 
 // ===== Proma Cloud 工具 =====
 
+function getCloudApiRoot(): string {
+  return getCloudApiConfig().baseUrl.replace(/\/api\/v1\/?$/, '')
+}
+
 function buildPromaCloudTools(sdk: PiSdk, _ctx: PiBuiltinToolsContext): ToolDefinition[] {
-  // proma-cloud MCP 工具（get_credentials / create_app_key）通常由 Proma 的
-  // 内置 MCP server 进程独立提供（非 SDK in-process），Pi adapter 在 orchestrator
-  // 构建 mcpServers 后通过 customTools 或 MCP stdio 通道访问。
-  // 如果 proma-cloud 是 SDK in-process MCP，需要在此桥接：
-  // 当前实现中 proma-cloud 走的是外部 MCP（不在 injectBuiltinMcpServers 内），
-  // 所以 Pi runtime 需要通过 MCP stdio transport 独立连接，不在这里注册。
-  return []
+  const serverName = getBuiltinMcpName('proma-cloud')
+
+  return [
+    sdk.defineTool({
+      name: `mcp__${serverName}__get_credentials`,
+      label: '获取 Proma Cloud 凭据',
+      description: 'Get Proma API credentials for Agent\'s OWN use (internal LLM batch calls, image generation, etc.). Returns { apiKey, baseUrl }. Always fetch fresh credentials when you need a Proma API. The shared inner key can be revoked by the user in Settings. DO NOT use this credential in an app built for the user; use create_app_key instead.',
+      parameters: Type.Object({}),
+      async execute() {
+        try {
+          const apiKey = await ensurePromaAgentInnerKey()
+          return jsonToolResult({ apiKey, baseUrl: getCloudApiRoot() })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          invalidatePromaAgentInnerKeyCache()
+          console.error('[Pi Proma Cloud] get_credentials failed:', error)
+          return jsonToolResult({ error: `Failed to get Proma credentials: ${message}. The user may not be logged in, or there may be a network issue. Ask the user to check their login status.` })
+        }
+      },
+    }),
+    sdk.defineTool({
+      name: `mcp__${serverName}__create_app_key`,
+      label: '创建应用专用 Proma API Key',
+      description: 'Create a dedicated quota-limited API Key ONLY for a standalone AI app you are building for the user via proma-build-ai-app; do not use it for your own API calls. Tell the user the key name and quota limit, and that they can adjust or delete it in Proma Settings. Write the returned key to the app\'s .env, never .env.example.',
+      parameters: Type.Object({
+        appName: Type.String({ pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', minLength: 2, maxLength: 50, description: 'Kebab-case application name' }),
+        description: Type.String({ minLength: 1, maxLength: 200, description: 'User-facing purpose shown in Proma settings' }),
+        quotaLimit: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: 'Optional positive credit cap; defaults to 50' })),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { appName: string; description: string; quotaLimit?: number }
+        try {
+          const result = await createPromaAppKey(args)
+          return jsonToolResult({
+            apiKey: result.apiKey,
+            baseUrl: getCloudApiRoot(),
+            keyId: result.keyId,
+            keyName: result.keyName,
+            quotaLimit: result.quotaLimit,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('[Pi Proma Cloud] create_app_key failed:', error)
+          return jsonToolResult({ error: `Failed to create app key: ${message}` })
+        }
+      },
+    }),
+  ] as unknown as ToolDefinition[]
 }
 
 // ===== 统一入口 =====

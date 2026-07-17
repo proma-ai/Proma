@@ -75,6 +75,14 @@ class HTTPError extends Error {
   }
 }
 
+/** Provider 在 200 流内返回的语义错误，通常不是瞬时网络问题，不应自动重试。 */
+class ProviderStreamError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ProviderStreamError'
+  }
+}
+
 /**
  * 计算重试延迟（指数退避 + ±20% jitter）
  *
@@ -97,6 +105,7 @@ function getSSERetryDelayMs(attempt: number, elapsedRetryDelayMs: number): numbe
  * - 无状态码（网络错误 / 流读取中断 / 空响应体）：视为瞬时问题，可重试
  */
 function isRetriableError(error: unknown): boolean {
+  if (error instanceof ProviderStreamError) return false
   if (error instanceof HTTPError) {
     return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
   }
@@ -176,6 +185,12 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   }
 }
 
+function normalizeToolCallOutputIndex(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'string' && value) return value
+  return undefined
+}
+
 /** 单次 SSE 流式尝试（不含重试逻辑） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
   const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000 } = options
@@ -222,6 +237,7 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
 
   // 工具调用追踪
   const pendingToolCalls = new Map<string, { id: string; name: string; args: string; metadata?: Record<string, unknown> }>()
+  const toolCallIdsByOutputIndex = new Map<string, string>()
   let currentToolCallId: string | undefined
 
   // 思考块追踪（Anthropic 协议：每个 thinking 块由多个 thinking_delta + signature_delta 组成）
@@ -281,25 +297,31 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
             currentThinking = null
           } else if (event.type === 'tool_call_start') {
             currentToolCallId = event.toolCallId
+            const outputIndex = normalizeToolCallOutputIndex(event.metadata?.outputIndex)
+            if (outputIndex) toolCallIdsByOutputIndex.set(outputIndex, event.toolCallId)
+            const existing = pendingToolCalls.get(event.toolCallId)
             pendingToolCalls.set(event.toolCallId, {
               id: event.toolCallId,
               name: event.toolName,
-              args: '',
-              metadata: event.metadata,
+              args: existing?.args ?? '',
+              metadata: { ...existing?.metadata, ...event.metadata },
             })
           } else if (event.type === 'tool_call_delta') {
-            const tcId = event.toolCallId || currentToolCallId
+            const outputIndex = normalizeToolCallOutputIndex(event.metadata?.outputIndex)
+            const tcId = event.toolCallId || (outputIndex ? toolCallIdsByOutputIndex.get(outputIndex) : undefined) || currentToolCallId
             if (tcId) {
               const pending = pendingToolCalls.get(tcId)
               if (pending) {
-                pending.args += event.argumentsDelta
+                pending.args = event.finalArguments !== undefined
+                  ? event.finalArguments
+                  : pending.args + event.argumentsDelta
               }
             }
-          } else if (event.type === 'error') {
-            onEvent(event)
-            throw new Error(event.error)
           } else if (event.type === 'done' && event.stopReason) {
             stopReason = event.stopReason
+          } else if (event.type === 'error') {
+            onEvent(event)
+            throw new ProviderStreamError(event.error)
           }
           onEvent(event)
         }

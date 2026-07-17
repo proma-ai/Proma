@@ -219,7 +219,7 @@ export function ChannelSettings(): React.ReactElement {
   const officialChannel = channels.find((c) => c.id === PROMA_OFFICIAL_CHANNEL_ID)
   const userChannels = channels.filter((c) => c.id !== PROMA_OFFICIAL_CHANNEL_ID)
 
-  // Agent 供应商渠道（Proma 官方 + Anthropic 兼容：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax，已启用）
+  // Agent 供应商：Proma 官方及所有已启用的 Agent 兼容渠道（含 OpenAI Responses / ChatGPT Codex）
   const agentProviderChannels = channels.filter(
     (c) => (c.provider === 'proma' || isAgentCompatibleProvider(c.provider)) && c.enabled
   )
