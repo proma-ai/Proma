@@ -3,9 +3,11 @@ import {
   normalizeAnthropicBaseUrl,
   normalizeVersionedAnthropicBaseUrl,
   normalizeAnthropicBaseUrlForSdk,
+  normalizeOpenAIBaseUrlForSdk,
   normalizeBaseUrl,
   normalizeAnthropicProviderUrl,
   resolveOpenAIChatCompletionsUrl,
+  resolveOpenAIResponsesUrl,
   resolveOpenAIModelsUrl,
   resolveAnthropicMessagesUrl,
   resolveAnthropicModelsUrl,
@@ -77,6 +79,16 @@ describe('normalizeAnthropicBaseUrlForSdk', () => {
     expect(normalizeAnthropicBaseUrlForSdk('https://gateway.example.com/anthropic/')).toBe(
       'https://gateway.example.com/anthropic',
     )
+  })
+})
+
+describe('normalizeOpenAIBaseUrlForSdk', () => {
+  test('去除完整 /responses 端点，供 Pi runtime 重新拼接', () => {
+    expect(normalizeOpenAIBaseUrlForSdk('https://api.openai.com/v1/responses')).toBe('https://api.openai.com/v1')
+  })
+
+  test('去除完整 /chat/completions 端点', () => {
+    expect(normalizeOpenAIBaseUrlForSdk('https://api.openai.com/v1/chat/completions')).toBe('https://api.openai.com/v1')
   })
 })
 
@@ -197,9 +209,29 @@ describe('resolveOpenAIChatCompletionsUrl', () => {
   })
 })
 
+describe('resolveOpenAIResponsesUrl', () => {
+  test('协议根地址补全 /responses', () => {
+    expect(resolveOpenAIResponsesUrl('https://api.openai.com/v1', 'openai-responses')).toBe(
+      'https://api.openai.com/v1/responses',
+    )
+  })
+
+  test('完整 /responses 端点不重复追加', () => {
+    expect(resolveOpenAIResponsesUrl('https://api.openai.com/v1/responses/', 'openai-responses')).toBe(
+      'https://api.openai.com/v1/responses',
+    )
+  })
+})
+
 describe('resolveOpenAIModelsUrl', () => {
   test('完整 chat/completions 端点回到同级 /models', () => {
     expect(resolveOpenAIModelsUrl('https://api.example.com/v1/chat/completions')).toBe(
+      'https://api.example.com/v1/models',
+    )
+  })
+
+  test('完整 responses 端点回到同级 /models', () => {
+    expect(resolveOpenAIModelsUrl('https://api.example.com/v1/responses')).toBe(
       'https://api.example.com/v1/models',
     )
   })

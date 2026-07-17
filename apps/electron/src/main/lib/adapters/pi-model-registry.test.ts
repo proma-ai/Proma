@@ -72,6 +72,28 @@ describe('Pi runtime 模型 ID [1m] 剥离', () => {
   })
 })
 
+describe('Pi runtime OpenAI Responses 渠道', () => {
+  test('Given openai-responses 渠道 When buildModel Then 注册为 Pi openai-responses 协议', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-responses',
+      prompt: 'hi',
+      apiKey: 'sk-test',
+      provider: 'openai-responses',
+      baseUrl: 'https://api.openai.com/v1/responses',
+      model: 'gpt-5.1',
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.id).toBe('gpt-5.1')
+    expect(result.model.api).toBe('openai-responses')
+    expect(result.model.baseUrl).toBe('https://api.openai.com/v1')
+  })
+})
+
 describe('ChatGPT Codex 模型目录补丁', () => {
   test('Given Pi SDK 内置目录缺少 5.6 When listCodexModels Then 补齐 5.6 系列', async () => {
     const models = await listCodexModels()

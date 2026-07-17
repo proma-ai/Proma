@@ -75,6 +75,14 @@ class HTTPError extends Error {
   }
 }
 
+/** Provider 在 200 流内返回的语义错误，通常不是瞬时网络问题，不应自动重试。 */
+class ProviderStreamError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ProviderStreamError'
+  }
+}
+
 /**
  * 计算重试延迟（指数退避 + ±20% jitter）
  *
@@ -97,6 +105,7 @@ function getSSERetryDelayMs(attempt: number, elapsedRetryDelayMs: number): numbe
  * - 无状态码（网络错误 / 流读取中断 / 空响应体）：视为瞬时问题，可重试
  */
 function isRetriableError(error: unknown): boolean {
+  if (error instanceof ProviderStreamError) return false
   if (error instanceof HTTPError) {
     return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
   }
@@ -297,6 +306,8 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
             }
           } else if (event.type === 'done' && event.stopReason) {
             stopReason = event.stopReason
+          } else if (event.type === 'error') {
+            throw new ProviderStreamError(event.error)
           }
           onEvent(event)
         }

@@ -108,6 +108,8 @@ function normalizePiApi(provider: ProviderType): Api {
     case 'qwen':
     case 'custom':
       return 'openai-completions'
+    case 'openai-responses':
+      return 'openai-responses'
     case 'google':
       return 'google-generative-ai'
     default:
@@ -120,6 +122,7 @@ function candidatePiProviders(provider: ProviderType): KnownProvider[] {
     case 'anthropic':
       return ['anthropic']
     case 'openai':
+    case 'openai-responses':
       return ['openai']
     case 'deepseek':
       return ['deepseek']
@@ -193,7 +196,7 @@ function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType)
   if (normalizePiApi(provider) === 'anthropic-messages') {
     return normalizeAnthropicBaseUrlForSdk(resolveAnthropicMessagesUrl(baseUrl, provider))
   }
-  if (provider === 'custom') {
+  if (provider === 'custom' || provider === 'openai-responses') {
     return normalizeOpenAIBaseUrlForSdk(baseUrl)
   }
   return baseUrl.trim().replace(/\/$/, '')

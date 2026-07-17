@@ -204,7 +204,7 @@ export function ChannelSettings(): React.ReactElement {
     )
   }
 
-  // Agent 兼容渠道（已启用）：Anthropic / DeepSeek / Kimi API / Kimi Coding Plan / MiniMax
+  // Agent 兼容渠道（已启用）：Anthropic 协议家族 / OpenAI Responses / ChatGPT Codex
   const agentCapableChannels = channels.filter(
     (c) => isAgentCompatibleProvider(c.provider) && c.enabled
   )

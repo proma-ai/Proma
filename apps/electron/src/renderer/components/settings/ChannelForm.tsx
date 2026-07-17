@@ -44,7 +44,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
-import { resolveAnthropicMessagesUrl, resolveOpenAIChatCompletionsUrl } from '@proma/core'
+import { resolveAnthropicMessagesUrl, resolveOpenAIChatCompletionsUrl, resolveOpenAIResponsesUrl } from '@proma/core'
 import { getProviderLogo } from '@/lib/model-logo'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -74,7 +74,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -126,6 +126,9 @@ function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   if (provider === 'google') {
     return `${baseUrl.trim().replace(/\/+$/, '')}/v1beta/models/{model}:generateContent`
   }
+  if (provider === 'openai-responses') {
+    return resolveOpenAIResponsesUrl(baseUrl, provider)
+  }
   return resolveOpenAIChatCompletionsUrl(baseUrl, provider)
 }
 
@@ -135,6 +138,7 @@ function getUrlInputLabel(provider: ProviderType): string {
 
 function getUrlInputPlaceholder(provider: ProviderType): string {
   if (provider === 'custom') return 'https://api.example.com/v1/chat/completions'
+  if (provider === 'openai-responses') return 'https://api.example.com/v1/responses'
   if (provider === 'anthropic-compatible') return 'https://api.example.com/v1/messages'
   return 'https://api.example.com'
 }

@@ -238,6 +238,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   anthropic: ClaudeLogo,
   'anthropic-compatible': DefaultLogo,
   openai: OpenAILogo,
+  'openai-responses': OpenAILogo,
   deepseek: DeepSeekLogo,
   google: GeminiLogo,
   'kimi-api': KimiLogo,

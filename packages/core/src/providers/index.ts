@@ -9,6 +9,7 @@ import type { ProviderType } from '@proma/shared'
 import type { ProviderAdapter } from './types.ts'
 import { AnthropicAdapter } from './anthropic-adapter.ts'
 import { OpenAIAdapter } from './openai-adapter.ts'
+import { OpenAIResponsesAdapter } from './openai-responses-adapter.ts'
 import { GoogleAdapter } from './google-adapter.ts'
 
 // 导出所有类型和工具
@@ -21,6 +22,7 @@ export * from './user-agent.ts'
 // 导出适配器类
 export { AnthropicAdapter } from './anthropic-adapter.ts'
 export { OpenAIAdapter } from './openai-adapter.ts'
+export { OpenAIResponsesAdapter } from './openai-responses-adapter.ts'
 export { GoogleAdapter } from './google-adapter.ts'
 
 /** 供应商适配器注册表 */
@@ -28,6 +30,7 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['anthropic', new AnthropicAdapter()],
   ['anthropic-compatible', new AnthropicAdapter('anthropic-compatible')],
   ['openai', new OpenAIAdapter()],
+  ['openai-responses', new OpenAIResponsesAdapter()],
   ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['kimi-api', new AnthropicAdapter('kimi-api')],       // Kimi API 的 Anthropic 协议端点
   ['kimi-coding', new AnthropicAdapter('kimi-coding')], // Kimi Coding Plan 订阅制（强制 User-Agent）
