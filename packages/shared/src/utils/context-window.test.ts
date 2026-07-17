@@ -32,6 +32,9 @@ describe('模型上下文窗口', () => {
     expect(resolveAgentSdkModelId('mimo-v2.5-pro', 'xiaomi')).toBe('mimo-v2.5-pro[1m]')
     expect(resolveAgentSdkModelId('mimo-v2.5', 'xiaomi-token-plan')).toBe('mimo-v2.5[1m]')
     expect(resolveAgentSdkModelId('MiniMax-M3', 'minimax')).toBe('MiniMax-M3[1m]')
+    expect(resolveAgentSdkModelId('k3', 'kimi-api')).toBe('k3[1m]')
+    expect(resolveAgentSdkModelId('k3', 'kimi-coding')).toBe('k3[1m]')
+    expect(resolveAgentSdkModelId('k3', 'ark-coding-plan')).toBe('k3[1m]')
   })
 
   test('Given 已带后缀或未纳入 SDK 1M 的模型 When 解析 SDK 模型 Then 保持原值', () => {
@@ -40,6 +43,8 @@ describe('模型上下文窗口', () => {
     expect(resolveAgentSdkModelId('claude-haiku-4-5-20251001', 'anthropic')).toBe('claude-haiku-4-5-20251001')
     expect(resolveAgentSdkModelId('mimo-v2-pro', 'xiaomi')).toBe('mimo-v2-pro')
     expect(resolveAgentSdkModelId('MiniMax-M2.7', 'minimax')).toBe('MiniMax-M2.7')
+    expect(resolveAgentSdkModelId('kimi-k2.6', 'kimi-api')).toBe('kimi-k2.6')
+    expect(resolveAgentSdkModelId('not-k3-compatible', 'kimi-api')).toBe('not-k3-compatible')
     expect(resolveAgentSdkModelId('qwen3-max', 'qwen-anthropic')).toBe('qwen3-max')
     expect(resolveAgentSdkModelId('qwen3.6-max-preview', 'qwen-anthropic')).toBe('qwen3.6-max-preview')
     expect(resolveAgentSdkModelId('qwen3.5-397b-a17b', 'qwen-anthropic')).toBe('qwen3.5-397b-a17b')
@@ -61,6 +66,7 @@ describe('模型上下文窗口', () => {
     expect(resolveAgentSdkModelId('qwen3.7-plus', 'anthropic-compatible')).toBe('qwen3.7-plus')
     expect(resolveAgentSdkModelId('deepseek-v4-pro', 'anthropic-compatible')).toBe('deepseek-v4-pro')
     expect(resolveAgentSdkModelId('glm-5.2', 'anthropic-compatible')).toBe('glm-5.2')
+    expect(resolveAgentSdkModelId('k3', 'anthropic-compatible')).toBe('k3')
   })
 
   test('Given Agent SDK 运行窗口推断 When 模型名命中 1M 规则 Then 按模型能力返回 1M', () => {
@@ -70,5 +76,7 @@ describe('模型上下文窗口', () => {
     expect(inferAgentSdkContextWindow('deepseek-v4-pro', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('qwen3.7-plus', 'qwen-anthropic')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('claude-sonnet-5', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('k3', 'kimi-api')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('k3', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
   })
 })

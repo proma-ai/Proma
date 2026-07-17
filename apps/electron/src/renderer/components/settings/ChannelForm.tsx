@@ -80,7 +80,7 @@ const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', '
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
-  'kimi-api': ['kimi-k2.6'],
+  'kimi-api': ['k3', 'kimi-k2.6'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
 }
@@ -354,10 +354,12 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         ])
       } else if (p === 'kimi-api') {
         setModels([
+          { id: 'k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
         ])
       } else if (p === 'kimi-coding') {
         setModels([
+          { id: 'k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
         ])
       } else if (p === 'zhipu' || p === 'zhipu-coding' || p === 'zhipu-coding-team') {
@@ -371,6 +373,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
           { id: 'doubao-seed-2.0-lite', name: 'Doubao Seed 2.0 Lite', enabled: true },
           { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
+          { id: 'k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
           { id: 'minimax-m3', name: 'MiniMax M3', enabled: true },
           { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },

@@ -35,6 +35,8 @@ const AGENT_SDK_1M_CONTEXT_RULES = {
   mimo: ['mimo-v2.5'],
   // MiniMax
   minimax: ['minimax-m3'],
+  // Kimi
+  kimi: ['k3'],
   // 通义千问
   qwen: [
     'qwen3.7',
@@ -57,11 +59,21 @@ const AGENT_SDK_1M_CONTEXT_PROVIDER_RULES: Partial<Record<ProviderType, readonly
   'ark-coding-plan': [
     ...AGENT_SDK_1M_CONTEXT_RULES.deepseek,
     ...AGENT_SDK_1M_CONTEXT_RULES.glm,
+    ...AGENT_SDK_1M_CONTEXT_RULES.kimi,
     ...AGENT_SDK_1M_CONTEXT_RULES.minimax,
   ],
+  'kimi-api': AGENT_SDK_1M_CONTEXT_RULES.kimi,
+  'kimi-coding': AGENT_SDK_1M_CONTEXT_RULES.kimi,
 }
 
 const AGENT_SDK_1M_CONTEXT_DISPLAY_RULES = Object.values(AGENT_SDK_1M_CONTEXT_RULES).flat()
+
+function matchesContextRule(model: string, pattern: string): boolean {
+  if (pattern.length <= 3) {
+    return model === pattern || model.startsWith(`${pattern}[`)
+  }
+  return model.includes(pattern)
+}
 
 /**
  * 上下文窗口配置表。仅影响显示推断的模型加在 rules；已实测 Agent SDK 1M
@@ -91,7 +103,7 @@ export function supports1MContext(modelId: string): boolean {
   if (!modelId) return false
   const m = modelId.toLowerCase()
   if (CONTEXT_WINDOW_CONFIG.exclude.some((p) => m.includes(p))) return false
-  return CONTEXT_WINDOW_CONFIG.rules.some((p) => m.includes(p))
+  return CONTEXT_WINDOW_CONFIG.rules.some((p) => matchesContextRule(m, p))
 }
 
 /**
@@ -134,6 +146,6 @@ export function resolveAgentSdkModelId(modelId: string, provider: ProviderType):
   }
   const model = modelId.toLowerCase()
   const rules = AGENT_SDK_1M_CONTEXT_PROVIDER_RULES[provider]
-  if (!rules?.some((pattern) => model.includes(pattern))) return modelId
+  if (!rules?.some((pattern) => matchesContextRule(model, pattern))) return modelId
   return `${modelId}[1m]`
 }
