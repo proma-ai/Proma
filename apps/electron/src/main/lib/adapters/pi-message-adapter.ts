@@ -219,7 +219,9 @@ export function convertPiMessage(
               type: 'tool_use',
               id: block.id,
               name: displayToolName(block.name, block.arguments as Record<string, unknown>),
-              input: normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>),
+              // Pi 的 toolcall_delta 每帧携带累计 arguments。大 Write content 会随每个 token
+              // 反复穿过 IPC、Jotai 和 React；预览帧只需保留工具身份，最终帧再提供完整 input。
+              input: final ? normalizeToolUseInput(block.name, block.arguments as Record<string, unknown>) : {},
             }
           }
           return block as unknown as Record<string, unknown>
