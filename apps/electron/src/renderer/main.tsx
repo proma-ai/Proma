@@ -87,6 +87,12 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow
+
+// 仅主窗口禁用页面级滚动；独立浮窗各自管理自己的内容高度和滚动。
+if (isMainWindow) {
+  document.documentElement.classList.add('proma-main-window')
+}
 
 /**
  * 主题初始化组件
