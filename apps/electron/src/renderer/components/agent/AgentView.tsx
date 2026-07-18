@@ -56,6 +56,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { nextAgentChannelIdsAfterModelSelect } from '@/lib/agent-channel-selection'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
@@ -1771,10 +1772,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
 
-    // 自动将选中的渠道加入 Agent 可用渠道白名单
-    const updatedChannelIds = agentChannelIds.includes(option.channelId)
-      ? agentChannelIds
-      : [...agentChannelIds, option.channelId]
+    const updatedChannelIds = nextAgentChannelIdsAfterModelSelect(
+      agentChannelIds,
+      option.channelId,
+      sessionAgentRuntime,
+    )
     if (updatedChannelIds !== agentChannelIds) {
       setAgentChannelIds(updatedChannelIds)
     }
@@ -1797,7 +1799,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )))
       })
       .catch(console.error)
-  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds, setAgentSessions])
+  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, sessionAgentRuntime, setAgentChannelIds, setAgentSessions])
 
   const handleAgentRuntimeChange = React.useCallback(async (runtime: AgentRuntime): Promise<void> => {
     if (runtime === sessionAgentRuntime) {
@@ -2504,7 +2506,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const canSend = messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => {
-    if (agentChannelIds.length === 0) return []
+    // Pi runtime 可使用所有已启用渠道；空 Claude 白名单不应隐藏其模型/运行时控件。
+    if (sessionAgentRuntime === 'claude' && agentChannelIds.length === 0) return []
     return [
     {
       key: 'model',
@@ -2748,7 +2751,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           >
             {(isPlanMode || isPermissionPlanMode) && !isDragOver && <PlanModeDashedBorder />}
             {/* 无 Agent 渠道或无可用模型提示 */}
-            {(agentChannelIds.length === 0 || !hasAvailableModel) && (
+            {((sessionAgentRuntime === 'claude' && agentChannelIds.length === 0) || !hasAvailableModel) && (
               <div className="flex items-center gap-2 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
                 <Settings size={14} />
                 <span>{!agentChannelId ? '请在设置中选择 Agent 供应商' : '暂无可用模型，请在设置中启用 Agent 渠道并配置模型'}</span>

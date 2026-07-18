@@ -515,6 +515,16 @@
 }
 
 @layer base {
+  /* Electron 主窗口不应成为滚动容器；所有滚动必须停留在各自面板内。 */
+  html.proma-main-window,
+  html.proma-main-window body,
+  html.proma-main-window #root {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   * {
     @apply border-border;
   }

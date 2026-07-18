@@ -94,6 +94,7 @@ import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
+import { nextAgentChannelIdsAfterModelSelect } from './lib/agent-channel-selection'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -101,6 +102,12 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow
+
+// 仅主窗口禁用页面级滚动；独立浮窗各自管理自己的内容高度和滚动。
+if (isMainWindow) {
+  document.documentElement.classList.add('proma-main-window')
+}
 
 /**
  * 主题初始化组件
@@ -228,7 +235,8 @@ function AgentSettingsInitializer(): null {
       if (settings.agentModelId && (!settings.agentChannelId || channelIds.has(settings.agentChannelId))) {
         setAgentModelId(settings.agentModelId)
       }
-      setAgentRuntime(settings.agentRuntime ?? 'claude')
+      const defaultAgentRuntime = settings.agentRuntime ?? 'claude'
+      setAgentRuntime(defaultAgentRuntime)
 
       // 加载 Agent 启用渠道列表，过滤已删除的渠道
       if (settings.agentChannelIds && settings.agentChannelIds.length > 0) {
@@ -241,9 +249,11 @@ function AgentSettingsInitializer(): null {
         }
       } else if (settings.agentChannelId && channelIds.has(settings.agentChannelId)) {
         // 迁移：旧版本只有 agentChannelId，自动转为数组
-        const migrated = [settings.agentChannelId]
-        setAgentChannelIds(migrated)
-        window.electronAPI.updateSettings({ agentChannelIds: migrated }).catch(console.error)
+        const migrated = nextAgentChannelIdsAfterModelSelect([], settings.agentChannelId, defaultAgentRuntime)
+        if (migrated.length > 0) {
+          setAgentChannelIds(migrated)
+          window.electronAPI.updateSettings({ agentChannelIds: migrated }).catch(console.error)
+        }
       }
 
       // 自动选择 Agent 渠道：当 agentChannelId 未设置时，从已启用的供应商列表中选择
@@ -270,7 +280,7 @@ function AgentSettingsInitializer(): null {
             (c) => c.id === PROMA_OFFICIAL_CHANNEL_ID && c.enabled
           )
           if (officialChannel) {
-            const autoIds = [officialChannel.id]
+            const autoIds = nextAgentChannelIdsAfterModelSelect([], officialChannel.id, defaultAgentRuntime)
             setAgentChannelIds(autoIds)
             setAgentChannelId(officialChannel.id)
             window.electronAPI.updateSettings({
@@ -282,8 +292,8 @@ function AgentSettingsInitializer(): null {
       } else {
         // 兜底：agentChannelId 存在但不在 agentChannelIds 白名单中，自动修复不一致
         const currentIds = settings.agentChannelIds?.filter((id) => channelIds.has(id)) ?? []
-        if (!currentIds.includes(resolvedChannelId)) {
-          const fixedIds = [...currentIds, resolvedChannelId]
+        const fixedIds = nextAgentChannelIdsAfterModelSelect(currentIds, resolvedChannelId, defaultAgentRuntime)
+        if (fixedIds !== currentIds) {
           setAgentChannelIds(fixedIds)
           window.electronAPI.updateSettings({ agentChannelIds: fixedIds }).catch(console.error)
         }
