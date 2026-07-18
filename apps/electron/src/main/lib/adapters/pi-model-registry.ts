@@ -208,14 +208,22 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
   return undefined
 }
 
+function positiveInteger(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
+  // Proma 官方模型的规格由 Admin/后端维护，必须优先于本地 Pi catalog。
+  // catalog 只作为第三方渠道或旧服务端不下发规格时的兼容 fallback。
+  const configuredContextWindow = positiveInteger(input.modelContextWindow)
+  const configuredMaxTokens = positiveInteger(input.modelMaxOutputTokens)
   return {
     reasoning: catalogModel?.reasoning ?? true,
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
-    contextWindow: catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTokens: catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    contextWindow: configuredContextWindow ?? catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens: configuredMaxTokens ?? catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS,
   }
 }
 

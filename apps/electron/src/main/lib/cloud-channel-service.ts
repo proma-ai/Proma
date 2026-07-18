@@ -112,6 +112,9 @@ interface AgentModelItem {
   display_name?: string
   apiProtocol?: 'anthropic-messages' | 'openai-responses'
   runtime?: 'both' | 'pi'
+  contextWindow?: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
 }
 
 /**
@@ -145,6 +148,9 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
       enabled: true,
       ...(item.apiProtocol ? { apiProtocol: item.apiProtocol } : {}),
       ...(item.runtime ? { agentRuntime: item.runtime } : {}),
+      ...(item.contextWindow ? { contextWindow: item.contextWindow } : {}),
+      ...(item.maxInputTokens ? { maxInputTokens: item.maxInputTokens } : {}),
+      ...(item.maxOutputTokens ? { maxOutputTokens: item.maxOutputTokens } : {}),
     }))
 
     if (models.length > 0) {

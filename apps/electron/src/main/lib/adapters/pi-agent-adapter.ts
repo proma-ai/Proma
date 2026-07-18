@@ -74,6 +74,10 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   provider: ProviderType
   /** 官方 Agent 模型由后端下发的协议契约；缺失时兼容旧客户端的 ID 推断。 */
   modelApiProtocol?: 'anthropic-messages' | 'openai-responses'
+  /** 官方 Admin 配置的上下文窗口，优先于 Pi catalog 与 200K fallback。 */
+  modelContextWindow?: number
+  /** 官方 Admin 配置的最大输出 token 数，优先于 Pi catalog default。 */
+  modelMaxOutputTokens?: number
   channelName?: string
   maxTurns?: number
   permissionMode: PromaPermissionMode

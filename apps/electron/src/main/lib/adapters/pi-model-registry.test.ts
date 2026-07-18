@@ -122,6 +122,39 @@ describe('Proma 官方渠道 Pi runtime 注册', () => {
   })
 
   test.each([
+    [
+      'gpt-5.5',
+      272_000,
+      32_000,
+    ],
+    [
+      'gpt-5.6-terra',
+      1_000_000,
+      64_000,
+    ],
+  ])('Given 官方服务端下发 %s 窗口 When buildModel Then 覆盖 catalog 与 200K fallback', async (model, contextWindow, maxTokens) => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: `session-proma-context-${model}`,
+      prompt: 'hi',
+      apiKey: 'system-key',
+      baseUrl: 'https://api.proma.cool/api/v1',
+      provider: 'proma',
+      model,
+      modelApiProtocol: 'openai-responses',
+      modelContextWindow: contextWindow,
+      modelMaxOutputTokens: maxTokens,
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.contextWindow).toBe(contextWindow)
+    expect(result.model.maxTokens).toBe(maxTokens)
+  })
+
+  test.each([
     'https://api.proma.cool',
     'https://api.proma.cool/v1',
     'https://api.proma.cool/api/v1',

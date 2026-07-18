@@ -253,6 +253,12 @@ export interface ChannelModel {
   apiProtocol?: 'anthropic-messages' | 'openai-responses'
   /** 官方 Agent 模型可使用的 runtime；`pi` 表示 Claude runtime 不可选。 */
   agentRuntime?: 'both' | 'pi'
+  /** 官方 Agent 模型由 Admin 下发的上下文窗口；优先于本地模型 catalog。 */
+  contextWindow?: number
+  /** 官方 Agent 模型由 Admin 下发的最大输入 token 数。 */
+  maxInputTokens?: number
+  /** 官方 Agent 模型由 Admin 下发的最大输出 token 数。 */
+  maxOutputTokens?: number
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
 }

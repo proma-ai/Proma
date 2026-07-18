@@ -1728,6 +1728,8 @@ export class AgentOrchestrator {
         baseUrl: sdkBaseUrl,
         provider: channel.provider,
         ...(selectedOfficialAgentModel?.apiProtocol && { modelApiProtocol: selectedOfficialAgentModel.apiProtocol }),
+        ...(selectedOfficialAgentModel?.contextWindow && { modelContextWindow: selectedOfficialAgentModel.contextWindow }),
+        ...(selectedOfficialAgentModel?.maxOutputTokens && { modelMaxOutputTokens: selectedOfficialAgentModel.maxOutputTokens }),
         channelName: channel.name,
         proxyUrl,
         runtimeEnv: buildPiRuntimeEnv(sdkEnv),
