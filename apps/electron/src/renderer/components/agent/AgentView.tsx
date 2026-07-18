@@ -2540,17 +2540,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             <Button
               type="button"
               variant="ghost"
-              className={cn(
-                'h-8 min-w-10 rounded-md px-2 text-xs font-medium transition-transform active:scale-[0.96]',
-                codexFastModeEnabled
-                  ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-                  : 'text-foreground/60 hover:bg-muted/50 hover:text-foreground',
-              )}
+              className="h-8 min-w-10 rounded-md px-2 text-xs font-medium text-foreground/60 transition-transform hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
               onClick={handleCodexFastModeChange}
               disabled={streaming || backgroundWaiting}
               aria-pressed={codexFastModeEnabled}
             >
-              {codexFastModeEnabled ? 'Fast' : '标准'}
+              {codexFastModeEnabled ? '快速' : '标准'}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top">
