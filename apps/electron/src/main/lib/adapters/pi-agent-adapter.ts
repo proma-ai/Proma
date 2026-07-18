@@ -23,6 +23,7 @@ import type {
   SDKUserMessageInput,
   TypedError,
 } from '@proma/shared'
+import { isCodexFastModeSupportedModel } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
@@ -48,6 +49,7 @@ import {
   type AgentRuntimeGuard,
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
+import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-fast-mode'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
   convertPiMessage,
@@ -61,6 +63,7 @@ import {
   restorePiInput,
 } from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
+import { createPartialMessageCoalescer, type PartialMessageCoalescer } from './pi-streaming-control'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type BashOperations = import('@earendil-works/pi-coding-agent').BashOperations
@@ -112,6 +115,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   runtimeEnv?: AgentRuntimeEnv
   /** 手动压缩请求：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型 */
   compactRequest?: boolean
+  /** ChatGPT Codex Fast Mode；仅 openai-codex 的受支持模型实际注入 priority service tier。 */
+  codexFastMode?: boolean
 }
 
 interface ActivePiSession {
@@ -170,6 +175,9 @@ interface AsyncQueue<T> {
   close: () => void
   next: () => Promise<IteratorResult<T>>
 }
+
+/** Pi 原生每个 delta 都携带累计消息；20fps 足够流畅，同时避免 IPC/React 事件风暴。 */
+const PI_PARTIAL_UPDATE_INTERVAL_MS = 50
 
 const PI_PROXY_ENV_KEYS = [
   'HTTP_PROXY',
@@ -1269,11 +1277,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     active.runtimeGuard = runtimeGuard
     let unsubscribe: (() => void) | undefined
     let restorePiProxyEnv: (() => void) | undefined
+    let partialAssistantCoalescer: PartialMessageCoalescer<{ message: AssistantMessage; uuid: string }> | undefined
 
     const cleanupActiveSession = (): void => {
       try {
         unsubscribe?.()
         unsubscribe = undefined
+        partialAssistantCoalescer?.dispose()
+        partialAssistantCoalescer = undefined
         if (!active.disposed) {
           active.disposed = true
           rejectPendingInterruptPrompts(active, createAbortError())
@@ -1290,6 +1301,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
 
     try {
       const sdk = await import('@earendil-works/pi-coding-agent')
+      const piAi = input.codexFastMode && input.provider === 'openai-codex'
+        ? await import('@earendil-works/pi-ai/compat')
+        : undefined
       restorePiProxyEnv = applyPiProxySettingsForQuery(sdk, input)
       if (active.abortRequested) throw createAbortError()
 
@@ -1330,6 +1344,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
+        ...(input.codexFastMode && input.provider === 'openai-codex' && {
+          extensionFactories: [createCodexFastModeExtension()],
+        }),
         systemPromptOverride: () => input.systemPrompt,
       })
       await resourceLoader.reload()
@@ -1355,6 +1372,31 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         customTools,
       })
       session.agent.toolExecution = 'sequential'
+      if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
+        // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
+        // provider stream，确保 request body 与 usage.cost 都使用 priority tier。
+        session.agent.streamFn = async (requestModel, context, options) => {
+          const auth = await registry.getApiKeyAndHeaders(requestModel)
+          if (!auth.ok) throw new Error(auth.error)
+
+          const env = auth.env || options?.env ? { ...(auth.env ?? {}), ...(options?.env ?? {}) } : undefined
+          const retrySettings = settingsManager.getProviderRetrySettings()
+          const configuredTimeoutMs = settingsManager.getHttpIdleTimeoutMs()
+          const timeoutMs = options?.timeoutMs ?? retrySettings.timeoutMs ?? (configuredTimeoutMs === 0 ? 2_147_483_647 : configuredTimeoutMs)
+          const websocketConnectTimeoutMs = options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs()
+
+          return piAi.stream(requestModel, context, withCodexFastModeServiceTier({
+            ...options,
+            apiKey: auth.apiKey,
+            env,
+            timeoutMs,
+            websocketConnectTimeoutMs,
+            maxRetries: options?.maxRetries ?? retrySettings.maxRetries,
+            maxRetryDelayMs: options?.maxRetryDelayMs ?? retrySettings.maxRetryDelayMs,
+            headers: { ...auth.headers, ...options?.headers },
+          }))
+        }
+      }
       installRuntimeGuardHooks(session, runtimeGuard)
       active.session = session
       resolveActiveReady(active, session)
@@ -1387,21 +1429,27 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         return uuid
       }
 
+      partialAssistantCoalescer = createPartialMessageCoalescer(({ message, uuid }) => {
+        const converted = convertPiMessage(message, session.sessionId, input.model, {
+          final: false,
+          uuid,
+        })
+        if (converted?.type === 'assistant') queue.push(converted)
+      }, PI_PARTIAL_UPDATE_INTERVAL_MS)
+
       unsubscribe = session.subscribe((event: AgentSessionEvent) => {
         try {
           switch (event.type) {
             case 'message_update': {
-              if (isAssistantPiMessage(event.message)) {
-                lastPartialAssistant = event.message
-              }
-              const converted = convertPiMessage(event.message, session.sessionId, input.model, {
-                final: false,
-                uuid: assistantUuidFor(),
-              })
-              if (converted?.type === 'assistant') queue.push(converted)
+              if (!isAssistantPiMessage(event.message)) break
+              lastPartialAssistant = event.message
+              // Pi 的 partial 是累计全文。合并为最多 20fps 的最新帧，避免每 token 都在
+              // main → IPC → renderer 路径重复复制整段消息；message_end 始终立即透传。
+              partialAssistantCoalescer?.schedule({ message: event.message, uuid: assistantUuidFor() })
               break
             }
             case 'message_end': {
+              partialAssistantCoalescer?.flush()
               if (active.interrupting && isAbortedAssistantMessage(event.message)) {
                 if (lastPartialAssistant) {
                   const converted = convertPiMessage(lastPartialAssistant, session.sessionId, input.model, {

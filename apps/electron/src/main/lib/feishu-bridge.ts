@@ -82,6 +82,7 @@ import { buildSessionMirrorGroupName } from './feishu/session-mirror'
 import { resolveGroupMessageAccess } from './feishu/group-message-policy'
 import { ScopedQueue } from './feishu/scoped-queue'
 import { RunCoordinator } from './feishu/run-coordinator'
+import { extractFinalAssistantText, isPartialSDKMessage } from './bridge-agent-message-utils'
 import {
   buildAgentUserMessage,
   fetchQuotedMessage,
@@ -1818,13 +1819,11 @@ class FeishuBridge {
     if (buffer && payload.kind === 'sdk_message') {
       const msg = payload.message
       // 从 assistant 消息中提取文本与工具使用摘要
-      if (msg.type === 'assistant') {
+      if (msg.type === 'assistant' && !isPartialSDKMessage(msg)) {
         const aMsg = msg as SDKAssistantMessage
+        buffer.text += extractFinalAssistantText(msg)
         for (const block of aMsg.message?.content ?? []) {
-          if (block.type === 'text') {
-            const text = (block as { text?: unknown }).text
-            if (typeof text === 'string') buffer.text += text
-          } else if (block.type === 'tool_use') {
+          if (block.type === 'tool_use') {
             const tb = block as { name?: unknown }
             if (typeof tb.name === 'string') {
               accumulateToolStart(buffer.toolSummaries, tb.name)

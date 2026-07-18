@@ -45,6 +45,8 @@ interface ContextUsageBadgeProps {
   sessionId?: string
   /** 当前 Agent 渠道 ID，用于 hover 时查询订阅 Plan 剩余额度 */
   channelId?: string | null
+  /** 渠道保存时间；凭据变更后用于使旧额度缓存失效。 */
+  channelUpdatedAt?: number
 }
 
 /** 格式化 token 数为可读字符串（如 1234 → "1.2k"） */
@@ -170,6 +172,7 @@ export function ContextUsageBadge({
   onCompact,
   sessionId,
   channelId,
+  channelUpdatedAt,
 }: ContextUsageBadgeProps): React.ReactElement | null {
   // 保留最近一次有效的 token 值，避免切换会话时闪烁消失
   const stableRef = React.useRef<{
@@ -216,7 +219,7 @@ export function ContextUsageBadge({
     let cancelled = false
     setQuotaLoading(true)
 
-    fetchChannelPlanQuota(channelId)
+    fetchChannelPlanQuota(channelId, channelUpdatedAt)
       .then((result) => {
         if (!cancelled) setQuota(result)
       })
@@ -227,7 +230,7 @@ export function ContextUsageBadge({
     return () => {
       cancelled = true
     }
-  }, [open, channelId])
+  }, [open, channelId, channelUpdatedAt])
 
   // 压缩中 → 按钮位置显示 spinner
   if (isCompacting) {

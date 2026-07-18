@@ -13,6 +13,8 @@
 
 import { shell } from 'electron'
 import type { CodexOAuthCredentials } from '@proma/shared'
+import { getFetchFn } from './proxy-fetch'
+import { getEffectiveProxyUrl } from './proxy-settings-service'
 
 /** Pi SDK oauth 模块类型（external 包，运行时动态 import） */
 type PiOAuthModule = typeof import('@earendil-works/pi-ai/oauth')
@@ -26,6 +28,16 @@ function loadPiOAuth(): Promise<PiOAuthModule> {
 
 /** 进行中的登录流程的取消控制器（同一时刻只允许一个登录流程）。 */
 let activeLoginAbort: AbortController | undefined
+
+/**
+ * 创建用于 Codex OAuth HTTP 请求的 fetch。
+ *
+ * Pi OAuth 支持注入 fetch；通过这里统一复用 Proma 的全局代理配置，避免 OAuth
+ * 授权码换 token 和 refresh token 请求绕过用户设置的代理。
+ */
+async function getCodexOAuthFetch(): Promise<typeof globalThis.fetch> {
+  return getFetchFn(await getEffectiveProxyUrl())
+}
 
 export interface CodexLoginCallbacks {
   /** SDK 生成授权 URL 后回调，用于（除自动开浏览器外）通知渲染层展示 URL。 */
@@ -49,6 +61,7 @@ export async function loginCodexOAuth(callbacks?: CodexLoginCallbacks): Promise<
   activeLoginAbort = abort
 
   try {
+    const fetch = await getCodexOAuthFetch()
     const credentials = await loginOpenAICodex({
       onAuth: (info: { url: string; instructions?: string }) => {
         callbacks?.onAuthUrl?.(info.url)
@@ -64,6 +77,8 @@ export async function loginCodexOAuth(callbacks?: CodexLoginCallbacks): Promise<
       // 浏览器流程以 :1455 本地回调服务为主路径完成；手动粘贴码不在 v1 UI 中提供，
       // 用一个永不 resolve 的 promise 占位，交由回调服务赢得竞争。
       onPrompt: () => new Promise<string>(() => {}),
+      // Pi OAuth 的 token 请求使用显式注入的 fetch，因而会继承 Proma 代理设置。
+      fetch,
     })
 
     return {
@@ -94,7 +109,9 @@ export function cancelCodexOAuthLogin(): void {
  */
 export async function refreshCodexOAuth(refreshToken: string): Promise<CodexOAuthCredentials> {
   const { refreshOpenAICodexToken } = await loadPiOAuth()
-  const credentials = await refreshOpenAICodexToken(refreshToken)
+  const credentials = await refreshOpenAICodexToken(refreshToken, {
+    fetch: await getCodexOAuthFetch(),
+  })
   return {
     access: credentials.access,
     refresh: credentials.refresh,
