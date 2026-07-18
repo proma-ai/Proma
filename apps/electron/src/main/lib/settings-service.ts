@@ -29,16 +29,17 @@ export function getSettings(): AppSettings {
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
-      experimentalAgentRuntimeSwitchEnabled: false,
       agentRuntime: DEFAULT_AGENT_RUNTIME,
     }
   }
 
   try {
     const raw = readFileSync(filePath, 'utf-8')
-    const data = JSON.parse(raw) as Partial<AppSettings>
+    const data = JSON.parse(raw) as Partial<AppSettings> & { experimentalAgentRuntimeSwitchEnabled?: boolean }
+    // Pi runtime 已默认可用；读取时清理旧版本遗留的实验开关。
+    const { experimentalAgentRuntimeSwitchEnabled: _legacyRuntimeSwitch, ...settings } = data
     return {
-      ...data,
+      ...settings,
       themeMode: data.themeMode || DEFAULT_THEME_MODE,
       interfaceVariant: data.interfaceVariant || DEFAULT_INTERFACE_VARIANT,
       onboardingCompleted: data.onboardingCompleted ?? false,
@@ -47,11 +48,8 @@ export function getSettings(): AppSettings {
       longTextPasteAsAttachmentEnabled: data.longTextPasteAsAttachmentEnabled ?? false,
       richTextRenderingEnabled: data.richTextRenderingEnabled ?? false,
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
-      builtinMcpDisabledIds: data.builtinMcpDisabledIds ?? [],
-      experimentalAgentRuntimeSwitchEnabled: data.experimentalAgentRuntimeSwitchEnabled ?? false,
-      agentRuntime: data.experimentalAgentRuntimeSwitchEnabled === true
-        ? data.agentRuntime ?? DEFAULT_AGENT_RUNTIME
-        : DEFAULT_AGENT_RUNTIME,
+      builtinMcpDisabledIds: settings.builtinMcpDisabledIds ?? [],
+      agentRuntime: settings.agentRuntime ?? DEFAULT_AGENT_RUNTIME,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -65,7 +63,6 @@ export function getSettings(): AppSettings {
       richTextRenderingEnabled: false,
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
-      experimentalAgentRuntimeSwitchEnabled: false,
       agentRuntime: DEFAULT_AGENT_RUNTIME,
     }
   }
@@ -82,10 +79,6 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
     ...current,
     ...updates,
   }
-  if (updated.experimentalAgentRuntimeSwitchEnabled !== true) {
-    updated.agentRuntime = DEFAULT_AGENT_RUNTIME
-  }
-
   const filePath = getSettingsPath()
 
   try {

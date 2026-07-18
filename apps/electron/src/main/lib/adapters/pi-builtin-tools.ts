@@ -30,7 +30,6 @@ import {
 import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
-import { getSettings } from '../settings-service'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -140,9 +139,6 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
     throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
-  }
-  if (input.agentRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-    throw new Error('实验性 Agent 内核切换未开启')
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)

@@ -4,7 +4,6 @@
  * 管理设置面板中当前激活的标签页：
  * - general: 通用设置
  * - channels: 渠道配置
- * - experimental: 实验性功能
  * - proxy: 代理配置
  * - tools: Chat 工具配置
  * - appearance: 外观设置
@@ -13,7 +12,7 @@
 
 import { atom } from 'jotai'
 
-export type SettingsTab = 'general' | 'channels' | 'experimental' | 'proxy' | 'appearance' | 'about' | 'prompts' | 'tools' | 'bots' | 'tutorial' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
+export type SettingsTab = 'general' | 'channels' | 'proxy' | 'appearance' | 'about' | 'prompts' | 'tools' | 'bots' | 'tutorial' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
 export type ToolSettingsFocus = 'memory' | 'web-search' | 'nano-banana' | 'custom-tools'
 
 /** 当前设置标签页（不持久化，每次打开设置默认显示渠道） */

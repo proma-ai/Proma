@@ -27,7 +27,6 @@ import {
   agentChannelIdAtom,
   agentModelIdAtom,
   agentChannelIdsAtom,
-  experimentalAgentRuntimeSwitchEnabledAtom,
   agentRuntimeAtom,
   agentWorkspacesAtom,
   agentSessionsAtom,
@@ -159,7 +158,6 @@ function AgentSettingsInitializer(): null {
   const setAgentChannelId = useSetAtom(agentChannelIdAtom)
   const setAgentModelId = useSetAtom(agentModelIdAtom)
   const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
-  const setExperimentalAgentRuntimeSwitchEnabled = useSetAtom(experimentalAgentRuntimeSwitchEnabledAtom)
   const setAgentRuntime = useSetAtom(agentRuntimeAtom)
   const setAgentWorkspaces = useSetAtom(agentWorkspacesAtom)
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
@@ -215,9 +213,7 @@ function AgentSettingsInitializer(): null {
       if (settings.agentModelId && (!settings.agentChannelId || channelIds.has(settings.agentChannelId))) {
         setAgentModelId(settings.agentModelId)
       }
-      const runtimeSwitchEnabled = settings.experimentalAgentRuntimeSwitchEnabled === true
-      setExperimentalAgentRuntimeSwitchEnabled(runtimeSwitchEnabled)
-      setAgentRuntime(runtimeSwitchEnabled ? settings.agentRuntime ?? 'claude' : 'claude')
+      setAgentRuntime(settings.agentRuntime ?? 'claude')
 
       // 加载 Agent 启用渠道列表，过滤已删除的渠道
       if (settings.agentChannelIds && settings.agentChannelIds.length > 0) {

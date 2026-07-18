@@ -66,7 +66,6 @@ import {
   agentChannelIdAtom,
   agentModelIdAtom,
   agentChannelIdsAtom,
-  experimentalAgentRuntimeSwitchEnabledAtom,
   agentRuntimeAtom,
   agentSessionChannelMapAtom,
   agentSessionModelMapAtom,
@@ -489,7 +488,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const agentModelId = sessionMetaModelId ?? sessionModelMap.get(sessionId) ?? defaultModelId
   const agentChannelIds = useAtomValue(agentChannelIdsAtom)
   const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
-  const experimentalRuntimeSwitchEnabled = useAtomValue(experimentalAgentRuntimeSwitchEnabledAtom)
   const [agentRuntime, setAgentRuntime] = useAtom(agentRuntimeAtom)
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
@@ -512,9 +510,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 已有会话首次打开时，从会话元数据初始化 per-session map。
   // setter 内的 `prev.has(sessionId)` 守卫保证幂等，外层不再订阅 Map atom，
   // 避免 setter 写入 → atom 引用变化 → effect 重跑的自循环（React #185）。
-  const sessionAgentRuntime: AgentRuntime = experimentalRuntimeSwitchEnabled
-    ? sessionMeta?.agentRuntime ?? agentRuntime
-    : 'claude'
+  const sessionAgentRuntime: AgentRuntime = sessionMeta?.agentRuntime ?? agentRuntime
   // 只有会话元数据尚未加载时，才允许使用全局默认值初始化新会话。
   React.useEffect(() => {
     if (!sessionId) return
@@ -1792,10 +1788,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds, setAgentSessions])
 
   const handleAgentRuntimeChange = React.useCallback(async (runtime: AgentRuntime): Promise<void> => {
-    if (!experimentalRuntimeSwitchEnabled && runtime !== 'claude') {
-      toast.info('实验性 Agent 内核切换未开启')
-      return
-    }
     if (runtime === sessionAgentRuntime) {
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-input-mode="agent"] .ProseMirror')?.focus())
       return
@@ -1835,7 +1827,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [
     agentRuntime,
     backgroundWaiting,
-    experimentalRuntimeSwitchEnabled,
     sessionAgentRuntime,
     sessionId,
     sessionMeta,
@@ -2512,7 +2503,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    ...(experimentalRuntimeSwitchEnabled ? [{
+    {
       key: 'runtime',
       node: (
         <AgentRuntimeSelector
@@ -2521,7 +2512,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onChange={handleAgentRuntimeChange}
         />
       ),
-    }] : []),
+    },
     { key: 'permission-mode', node: <PermissionModeSelector sessionId={sessionId} /> },
     {
       key: 'thinking',
@@ -2615,7 +2606,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     agentModelId,
     handleModelSelect,
     sessionAgentRuntime,
-    experimentalRuntimeSwitchEnabled,
     backgroundWaiting,
     handleAgentRuntimeChange,
     sessionId,

@@ -11,7 +11,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 ## What Proma Can Do
 
 - **Chat mode**: multi-model conversations, attachments, image input, Markdown / Mermaid / KaTeX / code highlighting, parallel conversations, system prompts, and context controls.
-- **Agent mode**: two built-in runtimes—Claude Agent SDK and Pi Agent SDK—with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions. Claude is the default; Pi is available behind an experimental setting.
+- **Agent mode**: two built-in runtimes—Claude Agent SDK and Pi Agent SDK—with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions. Claude is the default; switch runtimes below the Agent input.
 - **Collaboration and tasks**: complex work can be split into traceable collaboration agents and tasks, with calls and results shown in the message stream.
 - **Skills & MCP**: each workspace can manage its own Skills, MCP servers, and workspace files.
 - **Remote bots**: Lark / Feishu bot bridging is supported, with DingTalk and WeChat bridge entry points also present in the app.
@@ -33,7 +33,7 @@ If you want fewer API setup steps, you can also use the [Proma commercial versio
 2. Go to **Settings > Channels**, add at least one AI provider channel, and fill in Base URL, API Key, and model list.
 3. Chat mode can use OpenAI, Anthropic, Google, or OpenAI-compatible channels.
 4. The default Claude Agent Runtime requires an Anthropic or Anthropic-compatible channel, such as Anthropic, DeepSeek, Kimi API, or Kimi Coding Plan.
-5. To use the **experimental Pi Agent Runtime**, open **Settings > Experimental**, enable **Agent runtime switching**, then choose a default runtime for new sessions or switch Claude / Pi below the Agent input. Pi can use any enabled model channel.
+5. Switch Claude / Pi directly below the Agent input. Pi can use any enabled model channel.
 6. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
 7. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
 
@@ -95,9 +95,9 @@ Proma supports Doubao-powered streaming voice input, both inside Proma and acros
 Proma provides two switchable Agent runtimes:
 
 - **Claude Agent Runtime (default)**: powered by `@anthropic-ai/claude-agent-sdk` and using the Anthropic Messages API or compatible endpoints.
-- **Pi Agent Runtime (experimental)**: powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. It dynamically registers enabled Proma channels as Pi providers and supports OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
+- **Pi Agent Runtime**: powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. It dynamically registers enabled Proma channels as Pi providers and supports OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
 
-| Channel type | Chat | Claude Agent | Pi Agent (experimental) |
+| Channel type | Chat | Claude Agent | Pi Agent |
 | --- | --- | --- | --- |
 | Anthropic / Anthropic-compatible | Supported | Supported | Supported |
 | Anthropic-protocol channels such as DeepSeek, Kimi API / Coding Plan, Zhipu Coding Plan, MiniMax, and Xiaomi MiMo | Supported | Supported | Supported |
@@ -105,7 +105,7 @@ Proma provides two switchable Agent runtimes:
 | Custom OpenAI-compatible endpoints | Supported | Not yet | Supported |
 | ChatGPT subscription (Codex OAuth) | — | Supported | Supported |
 
-> **Experimental notice**: Pi Runtime is off by default. Once enabled, it can be switched per Agent session. Switching starts a new underlying SDK session but does not delete Proma's saved messages. Pi bridges workspace Skills, user-configured MCP servers, and Proma's built-in Automation / Collaboration tools. Tool calling, reasoning, and context capabilities still vary by model provider.
+> Pi Runtime can be switched directly below the input of each Agent session. Switching starts a new underlying SDK session but does not delete Proma's saved messages. Pi bridges workspace Skills, user-configured MCP servers, and Proma's built-in Automation / Collaboration tools. Tool calling, reasoning, and context capabilities still vary by model provider.
 
 > **Kimi Coding Plan users**: Proma is officially whitelisted by Kimi. Using Proma with your Kimi Coding Plan subscription will not trigger any third-party client ban policy.
 
@@ -153,7 +153,7 @@ Current package versions:
 
 | Package | Version | Responsibility |
 | --- | --- | --- |
-| `@proma/electron` | `0.14.26` | Electron desktop app |
+| `@proma/electron` | `0.15.0` | Electron desktop app |
 | `@proma/shared` | `0.1.42` | shared types, IPC constants, config, utilities |
 | `@proma/core` | `0.2.15` | Provider Adapters, SSE, Shiki highlighting |
 | `@proma/ui` | `0.1.9` | shared React UI components |

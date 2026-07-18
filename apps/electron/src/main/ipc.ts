@@ -2383,10 +2383,6 @@ export function registerIpcHandlers(): void {
       if (!isAgentRuntime(runtime)) {
         throw new Error(`无效的 Agent runtime: ${String(runtime)}`)
       }
-      if (runtime !== 'claude' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-        throw new Error('实验性 Agent 内核切换未开启')
-      }
-
       const current = getAgentSessionMeta(sessionId)
       if (!current) {
         throw new Error(`Agent 会话不存在: ${sessionId}`)
@@ -4390,10 +4386,6 @@ export function registerIpcHandlers(): void {
     existing?: Automation,
   ): void => {
     const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? 'claude'
-    if (finalRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-      throw new Error('实验性 Agent 内核切换未开启')
-    }
-
     const finalChannelId = input.channelId !== undefined ? input.channelId : existing?.channelId
     if (finalRuntime === 'claude' && finalChannelId) {
       const agentChannelIds = getSettings().agentChannelIds ?? []

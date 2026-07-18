@@ -977,10 +977,7 @@ export class AgentOrchestrator {
 
     const appSettings = getSettings()
     let sessionMeta = getAgentSessionMeta(sessionId)
-    const runtimeSwitchEnabled = appSettings.experimentalAgentRuntimeSwitchEnabled === true
-    const agentRuntime = runtimeSwitchEnabled
-      ? normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? appSettings.agentRuntime)
-      : 'claude'
+    const agentRuntime = normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? appSettings.agentRuntime)
     const previousAgentRuntime = sessionMeta?.agentRuntime ? normalizeAgentRuntime(sessionMeta.agentRuntime) : undefined
     if (!sessionMeta?.agentRuntime || previousAgentRuntime !== agentRuntime) {
       try {

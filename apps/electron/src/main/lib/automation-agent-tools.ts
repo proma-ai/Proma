@@ -24,7 +24,6 @@ import {
   runAutomationNow,
 } from './automation-scheduler'
 import { getAgentSessionMeta } from './agent-session-manager'
-import { getSettings } from './settings-service'
 
 interface AutomationAgentToolContext {
   sessionId: string
@@ -82,9 +81,6 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
     throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
-  }
-  if (input.agentRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-    throw new Error('实验性 Agent 内核切换未开启')
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)

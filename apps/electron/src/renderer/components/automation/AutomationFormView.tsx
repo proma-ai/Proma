@@ -34,7 +34,7 @@ import {
   automationToDraft,
   type AutomationDraft,
 } from '@/atoms/automation-atoms'
-import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom, agentRuntimeAtom, currentAgentWorkspaceIdAtom, experimentalAgentRuntimeSwitchEnabledAtom } from '@/atoms/agent-atoms'
+import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom, agentRuntimeAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
@@ -194,13 +194,12 @@ function createFeishuTarget(binding: FeishuChatBinding): AutomationFeishuNotific
 
 function coerceAutomationDraftRuntime(
   draft: AutomationDraft,
-  experimentalRuntimeSwitchEnabled: boolean,
   defaultAgentRuntime: AgentRuntime,
   agentChannelIds: string[],
 ): AutomationDraft {
-  const runtime: AgentRuntime = experimentalRuntimeSwitchEnabled
-    ? (draft.id ? draft.agentRuntime : defaultAgentRuntime)
-    : 'claude'
+  const runtime: AgentRuntime = draft.id
+    ? draft.agentRuntime ?? defaultAgentRuntime
+    : defaultAgentRuntime
 
   if (runtime === 'claude' && draft.channelId && !agentChannelIds.includes(draft.channelId)) {
     return { ...draft, agentRuntime: runtime, channelId: '', modelId: undefined, active: false }
@@ -353,7 +352,6 @@ export function AutomationFormView(): React.ReactElement | null {
   const automations = useAtomValue(automationsAtom)
   const agentChannelIds = useAtomValue(agentChannelIdsAtom)
   const defaultAgentRuntime = useAtomValue(agentRuntimeAtom)
-  const experimentalRuntimeSwitchEnabled = useAtomValue(experimentalAgentRuntimeSwitchEnabledAtom)
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const currentAgentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
@@ -387,7 +385,6 @@ export function AutomationFormView(): React.ReactElement | null {
     if (formState.open && formState.draft) {
       const draft = coerceAutomationDraftRuntime(
         formState.draft,
-        experimentalRuntimeSwitchEnabled,
         defaultAgentRuntime,
         agentChannelIds,
       )
@@ -411,15 +408,6 @@ export function AutomationFormView(): React.ReactElement | null {
       setForm((prev) => (prev && !prev.id && !prev.workspaceId ? { ...prev, workspaceId: fallback } : prev))
     }
   }, [formState.open, form?.id, form?.workspaceId, currentAgentWorkspaceId, workspaces])
-
-  React.useEffect(() => {
-    if (!formState.open || !form || experimentalRuntimeSwitchEnabled) return
-    setForm((prev) => {
-      if (!prev) return prev
-      const next = coerceAutomationDraftRuntime(prev, false, defaultAgentRuntime, agentChannelIds)
-      return getDraftSignature(next) === getDraftSignature(prev) ? prev : next
-    })
-  }, [formState.open, form, experimentalRuntimeSwitchEnabled, defaultAgentRuntime, agentChannelIds])
 
   React.useEffect(() => {
     if (!formState.open) return
@@ -1022,16 +1010,13 @@ export function AutomationFormView(): React.ReactElement | null {
             </div>
           )}
 
-          {/* Agent runtime：实验性开关开启后，自动任务可固定使用 Claude / Pi 内核运行 */}
-          {experimentalRuntimeSwitchEnabled && (
-            <div className="flex flex-col gap-2">
-              <Label>Agent 内核</Label>
-              <AutomationRuntimeSelector runtime={form.agentRuntime} onChange={handleRuntimeChange} />
-              <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
-                Pi 内核支持选择任意已启用模型渠道；Claude 内核仅显示已勾选为 Agent 兼容的渠道。
-              </span>
-            </div>
-          )}
+          <div className="flex flex-col gap-2">
+            <Label>Agent 内核</Label>
+            <AutomationRuntimeSelector runtime={form.agentRuntime} onChange={handleRuntimeChange} />
+            <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
+              Pi 内核支持选择任意已启用模型渠道；Claude 内核仅显示已勾选为 Agent 兼容的渠道。
+            </span>
+          </div>
 
           {/* 选择模型（Claude 内核仅显示 Agent 兼容渠道；Pi 内核显示所有已启用渠道） */}
           <div className="flex flex-col gap-2">
