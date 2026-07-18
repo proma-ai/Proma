@@ -58,6 +58,7 @@ import {
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { openScratchInSplit } from './scratch-pad-opener'
 
 const MAX_SCRATCH_PAD_QUOTED_CHARS = 2000
@@ -133,6 +134,11 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
   const captureTimerRef = React.useRef<number | null>(null)
   const openSideChatPendingRef = React.useRef(false)
 
+  // Image lightbox state for edit functionality
+  const [lightboxSrc, setLightboxSrc] = React.useState<string | null>(null)
+  const [lightboxMode, setLightboxMode] = React.useState<'preview' | 'editing'>('preview')
+  const lightboxGetPosRef = React.useRef<(() => number) | null>(null)
+
   // 用 ref 追踪最新内容，避免在 useEffect deps 里包含 content 导致循环
   const contentRef = React.useRef(content)
   contentRef.current = content
@@ -195,6 +201,39 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
     },
     immediatelyRender: false,
   })
+
+  // ===== 图片编辑 =====
+
+  React.useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const handler = (e: Event) => {
+      const { src, getPos, mode } = (e as CustomEvent).detail
+      setLightboxSrc(src)
+      setLightboxMode(mode || 'preview')
+      lightboxGetPosRef.current = typeof getPos === 'function' ? getPos : null
+    }
+    container.addEventListener('scratch-pad-edit-image', handler)
+    return () => container.removeEventListener('scratch-pad-edit-image', handler)
+  }, [])
+
+  const handleImageEditComplete = React.useCallback((editedDataUrl: string) => {
+    const getPos = lightboxGetPosRef.current
+    if (editor && getPos) {
+      const pos = getPos()
+      editor.chain().focus()
+        .command(({ tr }) => {
+          const node = tr.doc.nodeAt(pos)
+          if (node) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: editedDataUrl, width: null })
+          }
+          return true
+        })
+        .run()
+    }
+    setLightboxSrc(null)
+    lightboxGetPosRef.current = null
+  }, [editor])
 
   // ===== 导出 =====
 
@@ -713,6 +752,13 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
           </DropdownMenuPortal>
         </DropdownMenu>
       </div>
+      <ImageLightbox
+        src={lightboxSrc}
+        open={!!lightboxSrc}
+        onOpenChange={(open) => { if (!open) setLightboxSrc(null) }}
+        onEditComplete={handleImageEditComplete}
+        initialMode={lightboxMode}
+      />
     </div>
   )
 }

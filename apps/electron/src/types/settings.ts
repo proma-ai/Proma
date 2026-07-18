@@ -309,6 +309,8 @@ export const SCRATCH_PAD_IPC_CHANNELS = {
   EXPORT: 'scratch-pad:export',
   /** 打开保存对话框选择导出路径 */
   CHOOSE_EXPORT_PATH: 'scratch-pad:choose-export-path',
+  /** 将图片写入系统剪贴板 */
+  COPY_IMAGE: 'scratch-pad:copy-image',
 } as const
 
 /** 应用图标 IPC 通道 */

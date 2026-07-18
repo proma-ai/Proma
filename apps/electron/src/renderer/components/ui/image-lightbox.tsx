@@ -47,6 +47,8 @@ interface ImageLightboxProps {
   index?: number
   /** 翻页回调（多图模式） */
   onIndexChange?: (nextIndex: number) => void
+  /** 打开时的初始模式（默认 'preview'） */
+  initialMode?: 'preview' | 'editing'
 }
 
 export function ImageLightbox({
@@ -59,6 +61,7 @@ export function ImageLightbox({
   images,
   index,
   onIndexChange,
+  initialMode = 'preview',
 }: ImageLightboxProps): React.ReactElement | null {
   const [mode, setMode] = React.useState<'preview' | 'editing'>('preview')
 
@@ -67,10 +70,10 @@ export function ImageLightbox({
   const hasMultiple = total > 1
   const safeIndex = hasImages ? Math.min(Math.max(index ?? 0, 0), total - 1) : 0
 
-  // 关闭时重置模式
   React.useEffect(() => {
-    if (!open) setMode('preview')
-  }, [open])
+    if (open) setMode(initialMode)
+    else setMode('preview')
+  }, [open, initialMode])
 
   // 多图模式下监听方向键翻页（编辑模式禁用）
   React.useEffect(() => {
@@ -103,7 +106,11 @@ export function ImageLightbox({
   }
 
   const handleEditCancel = (): void => {
-    setMode('preview')
+    if (initialMode === 'editing') {
+      onOpenChange(false)
+    } else {
+      setMode('preview')
+    }
   }
 
   const goPrev = (): void => onIndexChange?.((safeIndex - 1 + total) % total)

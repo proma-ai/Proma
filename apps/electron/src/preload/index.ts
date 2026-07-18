@@ -361,6 +361,9 @@ export interface ElectronAPI {
   /** 打开原生保存对话框，返回用户选择的路径 */
   chooseExportPath: (defaultName: string) => Promise<string | null>
 
+  /** 将图片 data URL 写入系统剪贴板 */
+  copyImageToClipboard: (dataUrl: string) => Promise<{ success: boolean; message?: string }>
+
   // ===== 应用图标切换 =====
 
   /** 设置应用图标变体（传入 variant ID，如 'blue'、'cyberpunk'，'default' 恢复默认） */
@@ -1373,6 +1376,10 @@ const electronAPI: ElectronAPI = {
 
   chooseExportPath: (defaultName: string) => {
     return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.CHOOSE_EXPORT_PATH, defaultName)
+  },
+
+  copyImageToClipboard: (dataUrl: string) => {
+    return ipcRenderer.invoke(SCRATCH_PAD_IPC_CHANNELS.COPY_IMAGE, dataUrl)
   },
 
   // 应用图标切换

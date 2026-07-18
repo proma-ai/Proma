@@ -2404,3 +2404,52 @@
 .scratch-pad-editor .ProseMirror ul[data-type="taskList"] > li > label > input {
   cursor: pointer;
 }
+
+/* Scratch Pad 图片 resize handle */
+.scratch-pad-image-resize-container {
+  display: inline-flex;
+  max-width: 100%;
+}
+.scratch-pad-image-resize-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.scratch-pad-image-resize-handle {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: hsl(var(--primary));
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  cursor: nwse-resize;
+}
+.scratch-pad-image-resize-wrapper:hover .scratch-pad-image-resize-handle,
+.scratch-pad-image-resizing .scratch-pad-image-resize-handle {
+  opacity: 1;
+}
+.scratch-pad-image-resizing {
+  user-select: none;
+}
+
+/* Gapcursor: 在 atom block 节点前后显示光标 */
+.ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: relative;
+}
+.ProseMirror-gapcursor::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid currentColor;
+  animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+}
+@keyframes ProseMirror-cursor-blink {
+  to { visibility: hidden; }
+}
+.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
+}

@@ -337,12 +337,23 @@ function enhanceMarkdownHtml(html: string): string {
   root.innerHTML = html
 
   for (const li of Array.from(root.querySelectorAll('li'))) {
-    const first = li.firstChild
-    const textNode = first?.nodeType === Node.TEXT_NODE
-      ? first
-      : first instanceof HTMLElement && first.tagName.toLowerCase() === 'p' && first.firstChild?.nodeType === Node.TEXT_NODE
-        ? first.firstChild
-        : null
+    let textNode: ChildNode | null = null
+    let first = li.firstChild
+    // Skip whitespace-only text nodes to find the meaningful first child
+    while (first && first.nodeType === Node.TEXT_NODE && !first.textContent?.trim()) {
+      first = first.nextSibling
+    }
+    if (first?.nodeType === Node.TEXT_NODE) {
+      textNode = first
+    } else if (first instanceof HTMLElement && first.tagName.toLowerCase() === 'p') {
+      let pChild = first.firstChild
+      while (pChild && pChild.nodeType === Node.TEXT_NODE && !pChild.textContent?.trim()) {
+        pChild = pChild.nextSibling
+      }
+      if (pChild?.nodeType === Node.TEXT_NODE) {
+        textNode = pChild
+      }
+    }
     const text = textNode?.textContent ?? ''
     const match = text.match(/^\s*\[([ xX])\]\s*/)
     if (!match || !textNode) continue
@@ -403,7 +414,11 @@ export function htmlToMarkdown(
         const src = el.getAttribute('src') || ''
         const alt = el.getAttribute('alt') || ''
         const title = el.getAttribute('title') || ''
-        return `![${escapeMarkdownText(alt)}](${escapeMarkdownLinkTarget(src)}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})`
+        const width = el.getAttribute('width')
+        if (width) {
+          return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}"${title ? ` title="${escapeAttr(title)}"` : ''}>\n\n`
+        }
+        return `![${escapeMarkdownText(alt)}](${escapeMarkdownLinkTarget(src)}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})\n\n`
       }
       case 'video': {
         const src = el.getAttribute('src') || el.querySelector('source')?.getAttribute('src') || ''

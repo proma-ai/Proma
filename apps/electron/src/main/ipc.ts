@@ -4,7 +4,7 @@
  * 负责注册主进程和渲染进程之间的通信处理器
  */
 
-import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app } from 'electron'
+import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app, clipboard, nativeImage } from 'electron'
 import { join, resolve, sep, dirname } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
@@ -1660,6 +1660,27 @@ export function registerIpcHandlers(): void {
         ],
       })
       return result.canceled ? null : result.filePath
+    }
+  )
+
+  // 将图片 data URL 写入系统剪贴板
+  ipcMain.handle(
+    SCRATCH_PAD_IPC_CHANNELS.COPY_IMAGE,
+    async (_, dataUrl: string): Promise<{ success: boolean; message?: string }> => {
+      try {
+        if (!dataUrl || typeof dataUrl !== 'string') {
+          return { success: false, message: '无效的图片数据' }
+        }
+        const img = nativeImage.createFromDataURL(dataUrl)
+        if (img.isEmpty()) {
+          return { success: false, message: '该格式图片暂不支持复制' }
+        }
+        clipboard.writeImage(img)
+        return { success: true }
+      } catch (err) {
+        console.error('[ScratchPad] 复制图片到剪贴板失败:', err)
+        return { success: false, message: '复制失败' }
+      }
     }
   )
 
