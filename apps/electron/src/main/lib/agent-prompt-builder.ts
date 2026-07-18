@@ -83,6 +83,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 当前会话运行在 Pi Agent SDK 上。你仍然遵循 Proma Agent 的统一行为规范，但底层工具、权限和消息流由 Proma 的 Pi adapter 桥接：
 
 - 使用 Proma 暴露给你的 Read、Write、Edit、Bash、Grep、Glob、LS、Skill 和产品工具完成任务
+- 调用 \`write\` 时必须在同一次调用中同时提供 \`path\` 和完整的字符串 \`content\`；不要只提供路径。需要创建空文件时显式传入 \`content: ""\`
 - 遵循本提示词中的工作区、权限、计划模式、Context 和知识维护规则
 - 不要假设当前处于 Claude Code CLI 原生运行环境，也不要依赖只存在于 Claude runtime 的内置配置
 - 当 Proma 提供附加目录时，可以按提示中的绝对路径直接访问这些用户授权范围`)
