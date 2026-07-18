@@ -1808,7 +1808,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId)
+      const session = createAgentSession(title, channelId, workspaceId, modelId, getSettings().agentRuntime ?? 'claude')
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2387,10 +2387,6 @@ export function registerIpcHandlers(): void {
       if (!isAgentRuntime(runtime)) {
         throw new Error(`无效的 Agent runtime: ${String(runtime)}`)
       }
-      if (runtime !== 'claude' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-        throw new Error('实验性 Agent 内核切换未开启')
-      }
-
       const current = getAgentSessionMeta(sessionId)
       if (!current) {
         throw new Error(`Agent 会话不存在: ${sessionId}`)
@@ -2400,11 +2396,12 @@ export function registerIpcHandlers(): void {
         throw new Error('Agent 正在运行，完成后再切换内核')
       }
 
-      const previousRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : undefined
+      // 历史会话缺失 runtime 时按 Claude 处理，避免将 Claude SDK 会话 ID 交给 Pi 恢复。
+      const previousRuntime: AgentRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : 'claude'
       const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId'>> = {
         agentRuntime: runtime,
       }
-      if (previousRuntime && previousRuntime !== runtime) {
+      if (previousRuntime !== runtime) {
         updates.sdkSessionId = undefined
       }
 
@@ -4394,10 +4391,6 @@ export function registerIpcHandlers(): void {
     existing?: Automation,
   ): void => {
     const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? 'claude'
-    if (finalRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-      throw new Error('实验性 Agent 内核切换未开启')
-    }
-
     const finalChannelId = input.channelId !== undefined ? input.channelId : existing?.channelId
     if (finalRuntime === 'claude' && finalChannelId) {
       const agentChannelIds = getSettings().agentChannelIds ?? []

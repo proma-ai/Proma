@@ -361,6 +361,7 @@ export type ErrorCode =
   | 'channel_disabled'
   | 'agent_provider_not_supported'
   | 'agent_model_unavailable'
+  | 'model_requires_pi_runtime'
   | 'api_key_decrypt_failed'
   | 'claude_binary_not_found'
   | 'agent_runtime_not_found'
@@ -791,7 +792,7 @@ export interface McpToolSummary {
 }
 
 /** Proma 内置 MCP 分类 */
-export type BuiltinMcpCategory = 'system' | 'automation' | 'collaboration' | 'memory' | 'media'
+export type BuiltinMcpCategory = 'system' | 'automation' | 'collaboration' | 'memory' | 'media' | 'browser'
 
 /** Proma 内置 MCP 摘要，不写入工作区 mcp.json */
 export interface BuiltinMcpServerSummary {

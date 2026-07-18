@@ -31,13 +31,20 @@ import {
 import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
-import { getSettings } from '../settings-service'
 import {
   createPromaAppKey,
   ensurePromaAgentInnerKey,
   invalidatePromaAgentInnerKeyCache,
 } from '../proma-agent-key-service'
 import { getBuiltinMcpName } from '../builtin-mcp/baseline'
+import {
+  fetchWebPage,
+  formatFetchResults,
+  formatSearchResults,
+  isWebFetchEnabledForAgent,
+  isWebSearchEnabledForAgent,
+  searchWeb,
+} from '../web-search-service'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -59,6 +66,89 @@ function jsonToolResult(payload: unknown): AgentToolResult<unknown> {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
     details: payload,
   } as AgentToolResult<unknown>
+}
+
+function textToolResult(text: string, details?: unknown): AgentToolResult<unknown> {
+  return {
+    content: [{ type: 'text', text }],
+    details,
+  } as AgentToolResult<unknown>
+}
+
+// ===== Web 工具 =====
+
+type WebSearchDepth = 'basic' | 'advanced'
+
+function isWebSearchDepth(value: unknown): value is WebSearchDepth {
+  return value === 'basic' || value === 'advanced'
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value.map((item) => String(item).trim()).filter(Boolean)
+  return items.length > 0 ? items : undefined
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function buildWebTools(sdk: PiSdk): ToolDefinition[] {
+  return [
+    sdk.defineTool({
+      name: 'WebSearch',
+      label: '搜索网页',
+      description: 'Search the web for up-to-date information through Proma\'s Tavily integration. Use for current events, recent data, facts that may be stale, or when the user explicitly asks to search.',
+      promptSnippet: 'WebSearch: search the web for current information and cite source URLs in the final answer.',
+      parameters: Type.Object({
+        query: Type.String({ description: 'Search query. Keep it concise and avoid including private local file contents, API keys, tokens, or secrets.' }),
+        maxResults: Type.Optional(Type.Number({ description: 'Maximum number of results to return. Default 5, max 10.' })),
+        searchDepth: Type.Optional(Type.Union([Type.Literal('basic'), Type.Literal('advanced')], { description: 'Search depth. Use basic by default; advanced costs more but may improve recall.' })),
+        includeDomains: Type.Optional(Type.Array(Type.String({ description: 'Domain to include, e.g. example.com' }), { description: 'Optional allowlist of domains.' })),
+        excludeDomains: Type.Optional(Type.Array(Type.String({ description: 'Domain to exclude, e.g. example.com' }), { description: 'Optional blocklist of domains.' })),
+      }),
+      async execute(_toolCallId, params, signal) {
+        const args = params as Record<string, unknown>
+        const query = typeof args.query === 'string' ? args.query.trim() : ''
+        if (!query) throw new Error('query 必填')
+        const result = await searchWeb({
+          query,
+          maxResults: numberOrUndefined(args.maxResults),
+          searchDepth: isWebSearchDepth(args.searchDepth) ? args.searchDepth : undefined,
+          includeDomains: stringArray(args.includeDomains),
+          excludeDomains: stringArray(args.excludeDomains),
+          signal,
+        })
+        return textToolResult(formatSearchResults(result), result)
+      },
+    }),
+    sdk.defineTool({
+      name: 'WebFetch',
+      label: '抓取网页',
+      description: 'Fetch and extract readable Markdown content from a URL through Proma\'s Tavily integration. Use after WebSearch or when the user gives a URL and asks to inspect page content.',
+      promptSnippet: 'WebFetch: fetch readable webpage content by URL. Use it to inspect source pages and cite URLs.',
+      parameters: Type.Object({
+        url: Type.String({ description: 'HTTP/HTTPS URL to fetch.' }),
+        prompt: Type.Optional(Type.String({ description: 'Optional extraction focus or question. Use when only part of a page is relevant.' })),
+        extractDepth: Type.Optional(Type.Union([Type.Literal('basic'), Type.Literal('advanced')], { description: 'Extraction depth. Use basic by default; advanced may handle difficult pages better.' })),
+        maxChars: Type.Optional(Type.Number({ description: 'Maximum characters returned to the model. Default 20000.' })),
+      }),
+      async execute(_toolCallId, params, signal) {
+        const args = params as Record<string, unknown>
+        const url = typeof args.url === 'string' ? args.url.trim() : ''
+        if (!url) throw new Error('url 必填')
+        const maxChars = numberOrUndefined(args.maxChars)
+        const result = await fetchWebPage({
+          url,
+          prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
+          extractDepth: isWebSearchDepth(args.extractDepth) ? args.extractDepth : undefined,
+          maxChars,
+          signal,
+        })
+        return textToolResult(formatFetchResults(result, { maxChars }), result)
+      },
+    }),
+  ] as unknown as ToolDefinition[]
 }
 
 // ===== Automation 工具 =====
@@ -147,9 +237,6 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
     throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
-  }
-  if (input.agentRuntime === 'pi' && getSettings().experimentalAgentRuntimeSwitchEnabled !== true) {
-    throw new Error('实验性 Agent 内核切换未开启')
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)
@@ -427,6 +514,18 @@ export async function buildPiBuiltinTools(
   ctx: PiBuiltinToolsContext,
 ): Promise<PiBuiltinToolsResult> {
   const tools: ToolDefinition[] = []
+
+  if (isWebSearchEnabledForAgent()) {
+    try {
+      const webTools = buildWebTools(sdk)
+      // Proma Cloud 当前仅代理 WebSearch；未配置 Tavily 时不暴露会稳定失败的 WebFetch。
+      tools.push(...(isWebFetchEnabledForAgent()
+        ? webTools
+        : webTools.filter((tool) => tool.name !== 'WebFetch')))
+    } catch (error) {
+      console.error('[Pi 桥接] 注入 WebSearch/WebFetch 工具失败:', error)
+    }
+  }
 
   if (isBuiltinMcpUserEnabled('automation')) {
     try {

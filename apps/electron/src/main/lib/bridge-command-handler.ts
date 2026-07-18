@@ -137,6 +137,8 @@ export class BridgeCommandHandler {
       `${this.config.platformName}会话`,
       channelId,
       workspaceId || undefined,
+      undefined,
+      settings.agentRuntime ?? 'claude',
     )
 
     const binding: BridgeChatBinding = {
@@ -299,6 +301,8 @@ export class BridgeCommandHandler {
       title || '新会话',
       channelId,
       workspaceId || undefined,
+      undefined,
+      settings.agentRuntime ?? 'claude',
     )
 
     // 清理旧绑定

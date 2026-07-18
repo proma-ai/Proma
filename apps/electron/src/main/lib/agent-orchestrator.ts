@@ -61,6 +61,8 @@ import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
+import { injectChromeDevtoolsMcpServer } from './builtin-mcp/chrome-devtools'
+import { isBuiltinMcpUserEnabled } from './builtin-mcp/settings'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { buildPiMcpTools } from './adapters/pi-mcp-tools'
 import type { AgentRuntimeEnv } from './agent-runtime-env'
@@ -1046,29 +1048,30 @@ export class AgentOrchestrator {
 
     const appSettings = getSettings()
     let sessionMeta = getAgentSessionMeta(sessionId)
-    const runtimeSwitchEnabled = appSettings.experimentalAgentRuntimeSwitchEnabled === true
-    const agentRuntime = runtimeSwitchEnabled
-      ? normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? appSettings.agentRuntime)
-      : 'claude'
+    // 历史会话缺失 runtime 时按 Claude 兼容；新会话创建时已持久化其默认 runtime。
+    const previousAgentRuntime = normalizeAgentRuntime(sessionMeta?.agentRuntime ?? 'claude')
+    const agentRuntime = normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? 'claude')
     const requestedModelId = modelId || DEFAULT_MODEL_ID
     const selectedOfficialAgentModel = channel.provider === 'proma'
       ? (channel.agentModels ?? channel.models).find((candidate) => candidate.id === requestedModelId)
       : undefined
-    if (selectedOfficialAgentModel?.agentRuntime === 'pi' && agentRuntime !== 'pi') {
+    if ((selectedOfficialAgentModel?.agentRuntime === 'pi' || selectedOfficialAgentModel?.apiProtocol === 'openai-responses') && agentRuntime !== 'pi') {
       reportPreflightError({
         code: 'model_requires_pi_runtime',
         title: '该模型需要 Pi Agent',
-        message: `${selectedOfficialAgentModel.name} 使用 OpenAI Responses API，仅支持 Pi Agent runtime。请在实验设置中启用 Pi runtime 后重试。`,
+        message: `${selectedOfficialAgentModel.name} 使用 OpenAI Responses API，仅支持 Pi Agent runtime。请在新建会话中使用 Pi runtime 后重试。`,
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
         canRetry: false,
       })
       return
     }
-    const previousAgentRuntime = sessionMeta?.agentRuntime ? normalizeAgentRuntime(sessionMeta.agentRuntime) : undefined
     if (!sessionMeta?.agentRuntime || previousAgentRuntime !== agentRuntime) {
       try {
         sessionMeta = updateAgentSessionMeta(sessionId, {
           agentRuntime,
-          ...(previousAgentRuntime && previousAgentRuntime !== agentRuntime ? { sdkSessionId: undefined } : {}),
+          ...(previousAgentRuntime !== agentRuntime ? { sdkSessionId: undefined } : {}),
         })
       } catch {
         // 新会话索引异常时继续运行，后续错误路径会正常暴露。
@@ -1328,6 +1331,9 @@ export class AgentOrchestrator {
 
       // 10. 构建 MCP 服务器配置 + 内置 MCP + Proma Cloud 凭据 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
+      if (isBuiltinMcpUserEnabled('chrome-devtools')) {
+        injectChromeDevtoolsMcpServer(mcpServers)
+      }
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []
       const builtinMcpResult = agentRuntime === 'claude' && sdk
@@ -1496,7 +1502,7 @@ export class AgentOrchestrator {
 
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
       const PLAN_MODE_ALLOWED_TOOLS = new Set([
-        'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+        'Read', 'LS', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
         'TodoRead', 'TodoWrite', 'TaskOutput',
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',
@@ -1504,6 +1510,13 @@ export class AgentOrchestrator {
       const DEFERRED_OR_PROACTIVE_TOOLS = new Set([
         'REPL', 'Workflow', 'ScheduleWakeup', 'Monitor', 'PushNotification',
         'CronCreate', 'CronDelete', 'RemoteTrigger',
+      ])
+      const PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS = new Set([
+        'mcp__chrome_devtools__list_pages',
+        'mcp__chrome_devtools__take_snapshot',
+        'mcp__chrome_devtools__take_screenshot',
+        'mcp__chrome_devtools__list_network_requests',
+        'mcp__chrome_devtools__performance_stop_trace',
       ])
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1624,7 +1637,14 @@ export class AgentOrchestrator {
               }
               return { behavior: 'deny' as const, message: '计划模式下不允许执行写操作，请在计划审批通过后再执行' }
             }
-            // MCP 工具（以 mcp__ 开头）允许调用（调研用）
+            // Chrome DevTools MCP 同时包含只读观察和会改变页面状态的操作。
+            // 计划模式只允许快照、截图、网络列表等调研工具；点击、输入、脚本执行等需等计划通过。
+            if (toolName.startsWith('mcp__chrome_devtools__')) {
+              return PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS.has(toolName)
+                ? { behavior: 'allow' as const, updatedInput: input }
+                : { behavior: 'deny' as const, message: '计划模式下不允许执行会改变浏览器页面状态的 Chrome DevTools 操作，请在计划审批通过后再执行' }
+            }
+            // 其他 MCP 工具维持既有策略：计划模式下允许调研用 MCP。
             if (toolName.startsWith('mcp__')) {
               return { behavior: 'allow' as const, updatedInput: input }
             }

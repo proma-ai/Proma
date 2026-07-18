@@ -17,8 +17,8 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 ## 现在能做什么
 
 - **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
-- **Agent 模式**：基于 `@anthropic-ai/claude-agent-sdk` 的通用 Agent，支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
-- **SubAgent / Tasks**：复杂任务可以通过 Claude Agent SDK 的 Agent 工具拆分为子 Agent / Task，并在消息流中展示调用过程和结果。
+- **Agent 模式**：内置 Claude Agent SDK 与 Pi Agent SDK 两套运行时；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。Claude 是默认内核，Pi 可在实验性设置中开启。
+- **协作与任务**：复杂任务可拆分为可追踪的协作子 Agent / Task，并在消息流中展示调用过程和结果。
 - **Skills & MCP**：每个工作区可以独立配置 Skills、MCP Server 和工作区文件，适合沉淀可复用能力。
 - **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
 - **记忆与工具**：Chat 和 Agent 可共享记忆能力，并支持联网搜索、内置 Chat 工具、Agent 推荐等辅助能力。
@@ -29,7 +29,7 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 
 ### 下载安装
 
-从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本。当前 release notes 以 `v0.9.12` 为准，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
+从 [GitHub Releases](https://github.com/ErlichLiu/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、macOS Intel 和 Windows 安装包。
 
 如果你希望开箱即用、减少 API 配置成本，也可以使用 [Proma 商业版](https://proma.cool/download)。商业版和开源版并行运行，主要区别是商业版提供内置渠道和订阅方案。
 
@@ -38,9 +38,10 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，尤其是 Git、Node.js / Bun 以及可用的 Shell。
 2. 进入 **设置 > 渠道**，添加至少一个 AI 供应商渠道，填写 Base URL、API Key 和模型列表。
 3. Chat 模式可以使用 OpenAI、Anthropic、Google 或 OpenAI 兼容协议的渠道。
-4. Agent 模式需要 Anthropic 协议或 Anthropic 兼容协议渠道，例如 Anthropic、DeepSeek、Kimi API、Kimi Coding Plan。
-5. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
-6. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
+4. 默认的 Claude Agent Runtime 需要 Anthropic 或 Anthropic 兼容协议渠道，例如 Anthropic、DeepSeek、Kimi API、Kimi Coding Plan。
+5. Agent 输入框下方可直接切换 Claude / Pi 内核；Pi 可使用任意已启用的模型渠道。
+6. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
+7. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
 
 ## 模式选择
 
@@ -93,25 +94,24 @@ Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用�
 - 
 ![Proma 语音输入](./docs/assets/screenshots/proma-typeless-input.png)
 
-## 支持的模型渠道
+## Agent 运行时与模型渠道
 
-| 供应商 | Chat | Agent | 协议说明 |
+Proma 的 Agent 模式提供两套可切换的内核：
+
+- **Claude Agent Runtime（默认）**：基于 `@anthropic-ai/claude-agent-sdk`，使用 Anthropic Messages API 或兼容端点。
+- **Pi Agent Runtime**：基于 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai`，将 Proma 的已启用渠道动态注册为 Pi provider；支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。
+
+| 渠道类型 | Chat | Claude Agent | Pi Agent |
 | --- | --- | --- | --- |
-| Anthropic | 支持 | 支持 | Anthropic Messages API |
-| DeepSeek | 支持 | 支持 | Anthropic 兼容协议 |
-| Kimi API | 支持 | 支持 | Anthropic 兼容协议 |
-| Kimi Coding Plan | 支持 | 支持 | Anthropic 兼容协议，使用专用认证头 |
-| OpenAI | 支持 | 暂不支持 | Chat Completions |
-| Google | 支持 | 暂不支持 | Gemini Generative Language API |
-| 智谱 AI | 支持 | 支持 | Anthropic 兼容协议 |
-| MiniMax | 支持 | 支持 | Anthropic 兼容协议 |
-| 豆包 | 支持 | 支持 | Anthropic 兼容协议 |
-| 通义千问 | 支持 | 支持 | Anthropic 兼容协议 |
-| 自定义端点 | 支持 | 暂不支持 | OpenAI 兼容协议 |
+| Anthropic / Anthropic 兼容 | 支持 | 支持 | 支持 |
+| DeepSeek、Kimi API / Coding Plan、智谱 Coding Plan、MiniMax、小米 MiMo 等 Anthropic 协议渠道 | 支持 | 支持 | 支持 |
+| OpenAI、OpenAI Responses、Google、智谱 AI、豆包、通义千问 | 支持 | 暂不支持 | 支持 |
+| OpenAI 兼容自定义端点 | 支持 | 暂不支持 | 支持 |
+| ChatGPT 订阅（Codex OAuth） | — | 支持 | 支持 |
+
+> Pi Runtime 可在每个 Agent 会话的输入框下方直接切换；切换会开启新的底层 SDK 会话，但不会删除 Proma 中已保存的消息。Pi 会桥接工作区 Skills、用户 MCP Server，以及 Proma 内置的 Automation / Collaboration 工具；不同模型供应商对工具调用、推理和上下文长度的支持仍可能不同。
 
 > **Kimi Coding Plan 用户须知**：Proma 已获得 Kimi 官方白名单支持，使用 Proma 连接 Kimi Coding Plan 不会触发第三方客户端封号策略，可放心使用。
-
-Agent 模式底层使用 Claude Agent SDK，因此目前要求渠道提供 Anthropic 或 Anthropic 兼容协议。Chat 模式则通过 `@proma/core` 的 Provider Adapter 统一接入不同协议。
 
 ## 本地数据
 
@@ -157,10 +157,10 @@ proma-v2/
 
 | 包 | 版本 | 职责 |
 | --- | --- | --- |
-| `@proma/electron` | `0.10.7` | Electron 桌面应用 |
-| `@proma/shared` | `0.1.20` | 共享类型、IPC 常量、配置和工具 |
-| `@proma/core` | `0.2.9` | Provider Adapter、SSE、Shiki 高亮 |
-| `@proma/ui` | `0.1.6` | 共享 React UI 组件 |
+| `@proma/electron` | `0.15.0` | Electron 桌面应用 |
+| `@proma/shared` | `0.1.42` | 共享类型、IPC 常量、配置和工具 |
+| `@proma/core` | `0.2.15` | Provider Adapter、SSE、Shiki 高亮 |
+| `@proma/ui` | `0.1.9` | 共享 React UI 组件 |
 
 常用命令：
 
@@ -211,7 +211,7 @@ bun run dist:fast
 | 代码高亮 | Shiki |
 | 构建 | Vite + esbuild |
 | 分发 | electron-builder |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk@0.3.143` |
+| Agent Runtime | Claude: `@anthropic-ai/claude-agent-sdk@0.3.201`；Pi: `@earendil-works/pi-* @0.80.3` |
 
 ## 架构概览
 
@@ -226,7 +226,8 @@ shared 类型和 IPC 常量
 
 主进程服务集中在 `apps/electron/src/main/lib/`：
 
-- `agent-orchestrator.ts`：Agent 编排、环境变量、SDK 调用、事件流、错误处理。
+- `agent-orchestrator.ts`：Agent 编排、运行时路由、环境变量、SDK 调用、事件流、错误处理。
+- `adapters/claude-agent-adapter.ts` / `adapters/pi-agent-adapter.ts`：Claude 与 Pi 运行时适配；`runtime-routing-agent-adapter.ts` 依据会话内核路由。
 - `agent-session-manager.ts`：Agent 会话索引和 JSONL 消息持久化。
 - `agent-workspace-manager.ts`：工作区、MCP、Skills 和工作区文件管理。
 - `chat-service.ts`：Chat 流式调用、Provider Adapter、工具活动。
@@ -239,14 +240,18 @@ shared 类型和 IPC 常量
 
 ## 打包注意事项
 
-`@anthropic-ai/claude-agent-sdk` 在 `0.2.113+` 后改为平台 native binary 分发。Proma 的 esbuild 配置会把 SDK 标记为 external，`electron-builder.yml` 会把 SDK 主包和平台子包一起打进安装包。
+Claude 与 Pi 运行时都在主进程中作为 esbuild external 依赖运行。`apps/electron` 的打包脚本会在 `electron-builder` 前执行 `bun run sync:runtime-deps`，把下列依赖及其运行时闭包复制到应用目录：
 
-修改打包配置时请特别确认：
+- `@anthropic-ai/claude-agent-sdk`（包含按平台分发的 Claude native binary）
+- `@earendil-works/pi-coding-agent`、`pi-agent-core`、`pi-ai`
+- Pi 运行时所需的原生模块和 `pdfjs-dist`
 
-- 主进程 esbuild 保持 `--external:@anthropic-ai/claude-agent-sdk`。
-- `apps/electron/package.json` 的 `optionalDependencies` 包含目标平台的 SDK 子包。
-- `apps/electron/electron-builder.yml` 的 `files` 包含 SDK 主包和平台子包。
-- 其它普通 npm 依赖通常应由 esbuild 打包进 `main.cjs`，不要随意 external。
+修改打包配置时，请确认：
+
+- `build:main` / `watch:main` 仍将两套 Agent SDK 标记为 external。
+- `scripts/sync-runtime-deps.ts` 的 external runtime 清单与实际依赖一致。
+- `electron-builder.yml` 保留 Claude binary 与 Pi native addon 的 `asarUnpack` 规则。
+- 在目标平台测试 `bun run dist:fast` 后，分别验证 Claude 与 Pi（若已启用）可以启动、调用工具和恢复会话。
 
 更完整的工程约定见 [AGENTS.md](./AGENTS.md)。
 

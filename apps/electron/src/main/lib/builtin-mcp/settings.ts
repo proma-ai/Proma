@@ -13,7 +13,7 @@ import { getSettings, updateSettings } from '../settings-service'
  * 这些 MCP 需要用户额外配置（如 API Key）才有意义，默认不向 Agent 注入，
  * 需用户在能力列表中手动开启。
  */
-const DEFAULT_DISABLED_IDS = new Set<string>(['nano-banana'])
+const DEFAULT_DISABLED_IDS = new Set<string>(['nano-banana', 'chrome-devtools'])
 
 /** 判断某个内置 MCP 是否默认关闭（需用户手动开启） */
 export function isBuiltinMcpDefaultDisabled(id: string): boolean {
