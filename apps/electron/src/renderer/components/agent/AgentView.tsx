@@ -2711,6 +2711,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <AgentMessages
           sessionId={sessionId}
           sessionModelId={agentModelId || undefined}
+          sessionChannelId={agentChannelId || undefined}
           messagesLoaded={messagesLoaded}
           persistedSDKMessages={persistedSDKMessages}
           streaming={streaming}

@@ -2114,6 +2114,7 @@ export class AgentOrchestrator {
                   parent_tool_use_id: null,
                   _channelModelId: modelId,
                   _channelProvider: channel.provider,
+                  _channelId: channelId,
                   error: { message: typedError.message, errorType: typedError.code },
                   _createdAt: Date.now(),
                   _errorCode: typedError.code,

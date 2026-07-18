@@ -100,6 +100,8 @@ interface AgentMessagesProps {
   sessionId: string
   /** 用户在前端选择的模型 ID（用于显示渠道配置的 Model Name） */
   sessionModelId?: string
+  /** 当前会话选定的渠道；用于 session map 初始化前的显示名归属兜底。 */
+  sessionChannelId?: string
   /** 消息是否已完成首次加载 */
   messagesLoaded?: boolean
   /** Phase 4: 持久化的 SDKMessage（新格式） */
@@ -403,7 +405,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -451,8 +453,10 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const streamingModelId = streamState?.model || sessionModelId
   // 多渠道同名模型场景下，流式 header 显示名必须结合当前会话 channelId 精确匹配
   const sessionChannelMap = useAtomValue(agentSessionChannelMapAtom)
-  const streamingChannelId = sessionChannelMap.get(sessionId)
-  const agentStreamingModel = streamingModelId ? resolveModelDisplayName(streamingModelId, channels, streamingChannelId) : undefined
+  const streamingChannelId = sessionChannelMap.get(sessionId) ?? sessionChannelId
+  const agentStreamingModel = streamingModelId
+    ? resolveModelDisplayName(streamingModelId, channels, streamingChannelId, 'agent')
+    : undefined
   const retrying = streamState?.retrying
   const startedAt = streamState?.startedAt
 
