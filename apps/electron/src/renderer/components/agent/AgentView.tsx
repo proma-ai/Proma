@@ -55,6 +55,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { nextAgentChannelIdsAfterModelSelect } from '@/lib/agent-channel-selection'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { supportsChannelPlanQuota } from '@/lib/channel-plan-quota'
@@ -1761,10 +1762,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
 
-    // 自动将选中的渠道加入 Agent 可用渠道白名单
-    const updatedChannelIds = agentChannelIds.includes(option.channelId)
-      ? agentChannelIds
-      : [...agentChannelIds, option.channelId]
+    const updatedChannelIds = nextAgentChannelIdsAfterModelSelect(
+      agentChannelIds,
+      option.channelId,
+      sessionAgentRuntime,
+    )
     if (updatedChannelIds !== agentChannelIds) {
       setAgentChannelIds(updatedChannelIds)
     }
@@ -1787,7 +1789,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )))
       })
       .catch(console.error)
-  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, setAgentChannelIds, setAgentSessions])
+  }, [sessionId, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, agentChannelIds, sessionAgentRuntime, setAgentChannelIds, setAgentSessions])
 
   const handleAgentRuntimeChange = React.useCallback(async (runtime: AgentRuntime): Promise<void> => {
     if (runtime === sessionAgentRuntime) {
