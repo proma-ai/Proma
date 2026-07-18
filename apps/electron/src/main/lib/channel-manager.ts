@@ -33,6 +33,7 @@ import {
   isCodexCredentialExpired,
 } from '@proma/shared'
 import { refreshCodexOAuth } from './codex-oauth-service'
+import { parseCodexPlanQuotaResponse } from './codex-plan-quota'
 import { listCodexModels } from './adapters/pi-model-registry'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -51,6 +52,8 @@ import pkg from '../../../package.json' with { type: 'json' }
 const CONFIG_VERSION = 2
 /** 连接测试 / 模型拉取的统一超时时间 */
 const CHANNEL_TEST_TIMEOUT_MS = 15_000
+// ChatGPT backend 首次经代理 / Cloudflare 建连可能超过普通模型探测的 15 秒。
+const CODEX_PLAN_QUOTA_TIMEOUT_MS = 30_000
 const ARK_CODING_PLAN_TEST_MODEL = 'doubao-seed-2.0-code'
 const DEEPSEEK_PRESET_MODELS: ChannelModel[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
@@ -83,8 +86,8 @@ const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
  * 为连接测试 / 模型拉取请求统一附加超时信号。
  * 避免供应商不响应时请求无限挂起。
  */
-function withTimeout(init: RequestInit): RequestInit {
-  return { ...init, signal: AbortSignal.timeout(CHANNEL_TEST_TIMEOUT_MS) }
+function withTimeout(init: RequestInit, timeoutMs = CHANNEL_TEST_TIMEOUT_MS): RequestInit {
+  return { ...init, signal: AbortSignal.timeout(timeoutMs) }
 }
 
 function cloneModels(models: ChannelModel[]): ChannelModel[] {
@@ -802,6 +805,57 @@ function createUnsupportedPlanQuota(provider: ProviderType, message: string): Ch
   }
 }
 
+/**
+ * 查询 ChatGPT (Codex) OAuth 订阅的滚动额度。
+ *
+ * `wham/usage` 是 Codex CLI 使用的 ChatGPT backend 接口；除 bearer token 外，
+ * 团队/企业账号还需要 `ChatGPT-Account-Id` 以定位当前订阅。
+ */
+async function queryCodexPlanQuota(
+  channelId: string,
+  serializedCredentials: string,
+  proxyUrl?: string,
+): Promise<ChannelPlanQuotaResult> {
+  const credentials = parseCodexCredentials(serializedCredentials)
+  if (!credentials) {
+    return createUnsupportedPlanQuota('openai-codex', 'ChatGPT 登录凭据无效或缺失，请重新登录')
+  }
+
+  const accessToken = await resolveCodexAccessToken(channelId)
+  // token 刷新时会把新凭据回写到 Channel，重新读取以取得可能更新的 accountId。
+  const activeCredentials = parseCodexCredentials(decryptApiKey(channelId)) ?? credentials
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json',
+    'User-Agent': getPromaUserAgent(pkg.version),
+  }
+  if (activeCredentials.accountId) {
+    headers['ChatGPT-Account-Id'] = activeCredentials.accountId
+  }
+
+  try {
+    const response = await getFetchFn(proxyUrl)(
+      'https://chatgpt.com/backend-api/wham/usage',
+      withTimeout({ method: 'GET', headers }, CODEX_PLAN_QUOTA_TIMEOUT_MS),
+    )
+    const responseText = await response.text()
+    if (!response.ok) {
+      return createUnsupportedPlanQuota('openai-codex', `ChatGPT Codex 额度查询失败: HTTP ${response.status}`)
+    }
+
+    try {
+      return parseCodexPlanQuotaResponse(JSON.parse(responseText))
+    } catch {
+      return createUnsupportedPlanQuota('openai-codex', 'ChatGPT Codex 额度响应格式错误')
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      return createUnsupportedPlanQuota('openai-codex', 'ChatGPT Codex 额度查询超时，请检查网络或代理后重试')
+    }
+    throw error
+  }
+}
+
 async function queryKimiPlanQuota(apiKey: string, proxyUrl?: string): Promise<ChannelPlanQuotaResult> {
   const fetchFn = getFetchFn(proxyUrl)
   const response = await fetchFn('https://api.kimi.com/coding/v1/usages', withTimeout({
@@ -1349,6 +1403,9 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
   }
 
   try {
+    if (provider === 'openai-codex') {
+      return await queryCodexPlanQuota(channelId, apiKey, proxyUrl)
+    }
     if (provider === 'deepseek') {
       return await queryDeepSeekBalance(apiKey, channel.baseUrl, proxyUrl)
     }
