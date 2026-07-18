@@ -49,4 +49,30 @@ describe('飞书流式卡状态', () => {
       tool: { id: 'tool-1', name: 'Bash', input: { command: 'ls' }, status: 'running' },
     }])
   })
+
+  test('保留 Pi partial 中 tool_use 与 text 的原始顺序', () => {
+    const message = (partial: boolean, text: string): AgentStreamPayload => ({
+      kind: 'sdk_message',
+      message: {
+        type: 'assistant',
+        uuid: 'assistant-1',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'tool-1', name: 'Bash', input: {} },
+            { type: 'text', text },
+          ],
+        },
+        ...(partial && { _partial: true }),
+      } as unknown as SDKMessage,
+    })
+
+    const afterPreview = reduce(createInitialState(), message(true, '完成'))
+    const afterFinal = reduce(afterPreview, message(false, '完成！'))
+
+    expect(afterPreview.blocks.map((block) => block.kind)).toEqual(['tool', 'text'])
+    expect(afterFinal.blocks).toEqual([
+      { kind: 'tool', tool: { id: 'tool-1', name: 'Bash', input: {}, status: 'running' } },
+      { kind: 'text', content: '完成！', streaming: true },
+    ])
+  })
 })

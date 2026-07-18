@@ -36,8 +36,7 @@ export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null
 export type Terminal = 'running' | 'done' | 'interrupted' | 'error' | 'idle_timeout'
 
 interface PartialAssistantSnapshot {
-  text: string
-  thinking: string
+  blocks: Record<number, { type: 'text' | 'thinking'; content: string }>
 }
 
 export interface RunState {
@@ -139,16 +138,6 @@ function completeTool(state: RunState, id: string, output: string, isError: bool
   return { ...state, blocks }
 }
 
-function snapshotAssistantContent(message: SDKAssistantMessage): PartialAssistantSnapshot {
-  let text = ''
-  let thinking = ''
-  for (const block of message.message?.content ?? []) {
-    if (block.type === 'text' && typeof block.text === 'string') text += block.text
-    if (block.type === 'thinking' && typeof block.thinking === 'string') thinking += block.thinking
-  }
-  return { text, thinking }
-}
-
 function cumulativeDelta(current: string, previous: string): string {
   return current.startsWith(previous) ? current.slice(previous.length) : current
 }
@@ -191,7 +180,8 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
       if (isPartial && !assistantId) return state
 
       const previousSnapshot = assistantId ? state.partialAssistantSnapshots[assistantId] : undefined
-      const currentSnapshot = (isPartial || previousSnapshot) ? snapshotAssistantContent(am) : undefined
+      const useCumulativeSnapshot = isPartial || previousSnapshot != null
+      const partialBlocks: PartialAssistantSnapshot['blocks'] = {}
       let next = state
       if (am.message?.model && !next.meta.model) {
         next = { ...next, meta: { ...next.meta, model: am.message.model } }
@@ -202,20 +192,27 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
         return markError(state, am.error.message)
       }
 
-      if (currentSnapshot) {
-        const text = cumulativeDelta(currentSnapshot.text, previousSnapshot?.text ?? '')
-        const thinking = cumulativeDelta(currentSnapshot.thinking, previousSnapshot?.thinking ?? '')
-        if (text) next = appendText(next, text)
-        if (thinking) next = appendThinking(next, thinking)
-      }
-
-      for (const block of am.message?.content ?? []) {
-        if (!currentSnapshot && block.type === 'text') {
+      for (const [index, block] of (am.message?.content ?? []).entries()) {
+        if (block.type === 'text') {
           const text = (block as { text?: unknown }).text
-          if (typeof text === 'string' && text) next = appendText(next, text)
-        } else if (!currentSnapshot && block.type === 'thinking') {
+          if (typeof text === 'string') {
+            const previous = previousSnapshot?.blocks[index]
+            const delta = useCumulativeSnapshot && previous?.type === 'text'
+              ? cumulativeDelta(text, previous.content)
+              : text
+            if (delta) next = appendText(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'text', content: text }
+          }
+        } else if (block.type === 'thinking') {
           const thinking = (block as { thinking?: unknown }).thinking
-          if (typeof thinking === 'string' && thinking) next = appendThinking(next, thinking)
+          if (typeof thinking === 'string') {
+            const previous = previousSnapshot?.blocks[index]
+            const delta = useCumulativeSnapshot && previous?.type === 'thinking'
+              ? cumulativeDelta(thinking, previous.content)
+              : thinking
+            if (delta) next = appendThinking(next, delta)
+            if (isPartial) partialBlocks[index] = { type: 'thinking', content: thinking }
+          }
         } else if (block.type === 'tool_use') {
           const tb = block as { id?: unknown; name?: unknown; input?: unknown }
           if (typeof tb.id === 'string' && typeof tb.name === 'string') {
@@ -224,10 +221,10 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
         }
       }
 
-      if (assistantId && isPartial && currentSnapshot) {
+      if (assistantId && isPartial) {
         return {
           ...next,
-          partialAssistantSnapshots: { ...next.partialAssistantSnapshots, [assistantId]: currentSnapshot },
+          partialAssistantSnapshots: { ...next.partialAssistantSnapshots, [assistantId]: { blocks: partialBlocks } },
         }
       }
       if (assistantId && previousSnapshot) {
