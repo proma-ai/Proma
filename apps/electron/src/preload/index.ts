@@ -437,6 +437,9 @@ export interface ElectronAPI {
   /** 切换 Agent 会话 runtime */
   updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => Promise<AgentSessionMeta>
 
+  /** 切换当前会话的 ChatGPT Codex Fast Mode */
+  updateSessionCodexFastMode: (sessionId: string, enabled: boolean) => Promise<AgentSessionMeta>
+
   /** 更新 Agent 会话模型选择 */
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => Promise<AgentSessionMeta>
 
@@ -1459,6 +1462,10 @@ const electronAPI: ElectronAPI = {
 
   updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME, sessionId, runtime)
+  },
+
+  updateSessionCodexFastMode: (sessionId: string, enabled: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_CODEX_FAST_MODE, sessionId, enabled)
   },
 
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => {

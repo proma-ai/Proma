@@ -2378,6 +2378,22 @@ export function registerIpcHandlers(): void {
 
   // 切换指定会话的 Agent runtime（空闲后下一轮生效）
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SESSION_CODEX_FAST_MODE,
+    async (_, sessionId: string, enabled: boolean): Promise<AgentSessionMeta> => {
+      if (typeof enabled !== 'boolean') {
+        throw new Error(`无效的 Codex Fast Mode 状态: ${String(enabled)}`)
+      }
+      if (!getAgentSessionMeta(sessionId)) {
+        throw new Error(`Agent 会话不存在: ${sessionId}`)
+      }
+      if (isAgentSessionActive(sessionId)) {
+        throw new Error('Agent 正在运行，完成后再切换快速模式')
+      }
+      return updateAgentSessionMeta(sessionId, { codexFastMode: enabled })
+    }
+  )
+
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME,
     async (_, sessionId: string, runtime: AgentRuntime): Promise<AgentSessionMeta> => {
       if (!isAgentRuntime(runtime)) {

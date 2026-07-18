@@ -1589,6 +1589,7 @@ export class AgentOrchestrator {
         ...(workspaceSlug ? { additionalSkillPaths: [getWorkspaceSkillsDir(workspaceSlug)] } : {}),
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
+        ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
         thinkingLevel: resolvePiThinkingLevel(appSettings),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,

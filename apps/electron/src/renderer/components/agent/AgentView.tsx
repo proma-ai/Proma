@@ -114,7 +114,7 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, FileDialogLargeFile, ModelOption, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
-import { inferAgentSdkContextWindow, inferContextWindow, MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
@@ -654,6 +654,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     () => globalChannels.find((c) => c.id === agentChannelId)?.provider,
     [globalChannels, agentChannelId],
   )
+  const isCodexFastModeAvailable = hasSessionMeta
+    && sessionAgentRuntime === 'pi'
+    && agentChannelProvider === 'openai-codex'
+    && isCodexFastModeSupportedModel(agentModelId ?? undefined)
+  const codexFastModeEnabled = isCodexFastModeAvailable && sessionMeta?.codexFastMode === true
 
   // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
   const hasAvailableModel = React.useMemo(() => {
@@ -1840,6 +1845,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     streaming,
   ])
 
+  const handleCodexFastModeChange = React.useCallback(async (): Promise<void> => {
+    if (!isCodexFastModeAvailable || streaming || backgroundWaiting || !sessionMeta) return
+
+    const previousSessionMeta = sessionMeta
+    const nextEnabled = !codexFastModeEnabled
+    setAgentSessions((prev) => prev.map((item) => (
+      item.id === sessionId ? { ...item, codexFastMode: nextEnabled, updatedAt: Date.now() } : item
+    )))
+
+    try {
+      const updated = await window.electronAPI.updateSessionCodexFastMode(sessionId, nextEnabled)
+      setAgentSessions((prev) => prev.map((item) => item.id === sessionId ? updated : item))
+    } catch (error) {
+      console.error('[AgentView] 切换 Codex Fast Mode 失败:', error)
+      setAgentSessions((prev) => prev.map((item) => item.id === sessionId ? previousSessionMeta : item))
+      toast.error('快速模式切换失败', { description: getErrorMessage(error) })
+    }
+  }, [backgroundWaiting, codexFastModeEnabled, isCodexFastModeAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
+
   /** 构建 externalSelectedModel 给 ModelSelector */
   const computedSelectedModel = React.useMemo(() => {
     if (!agentChannelId || !agentModelId) return null
@@ -2508,6 +2532,33 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
+    ...(isCodexFastModeAvailable ? [{
+      key: 'codex-fast-mode',
+      node: (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn(
+                'h-8 min-w-10 rounded-md px-2 text-xs font-medium transition-transform active:scale-[0.96]',
+                codexFastModeEnabled
+                  ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+                  : 'text-foreground/60 hover:bg-muted/50 hover:text-foreground',
+              )}
+              onClick={handleCodexFastModeChange}
+              disabled={streaming || backgroundWaiting}
+              aria-pressed={codexFastModeEnabled}
+            >
+              {codexFastModeEnabled ? 'Fast' : '标准'}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{codexFastModeEnabled ? '已启用快速模式：优先响应，消耗更多额度' : '开启快速模式：优先响应，消耗更多额度'}</p>
+          </TooltipContent>
+        </Tooltip>
+      ),
+    }] : []),
     {
       key: 'runtime',
       node: (
@@ -2610,6 +2661,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     agentChannelId,
     planQuotaChannelId,
     planQuotaChannelUpdatedAt,
+    isCodexFastModeAvailable,
+    codexFastModeEnabled,
+    handleCodexFastModeChange,
     agentModelId,
     handleModelSelect,
     sessionAgentRuntime,

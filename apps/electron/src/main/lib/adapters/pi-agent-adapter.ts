@@ -48,6 +48,7 @@ import {
   type AgentRuntimeGuard,
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
+import { createCodexFastModeExtension } from './pi-codex-fast-mode'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
   convertPiMessage,
@@ -106,6 +107,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   runtimeEnv?: AgentRuntimeEnv
   /** 手动压缩请求：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型 */
   compactRequest?: boolean
+  /** ChatGPT Codex Fast Mode；仅 openai-codex 的受支持模型实际注入 priority service tier。 */
+  codexFastMode?: boolean
 }
 
 interface ActivePiSession {
@@ -1324,6 +1327,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
+        ...(input.codexFastMode && input.provider === 'openai-codex' && {
+          extensionFactories: [createCodexFastModeExtension()],
+        }),
         systemPromptOverride: () => input.systemPrompt,
       })
       await resourceLoader.reload()

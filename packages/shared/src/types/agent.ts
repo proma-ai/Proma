@@ -51,6 +51,20 @@ export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
 /** Agent 思考等级（用于 Pi runtime；Claude runtime 继续使用 ThinkingConfig/AgentEffort） */
 export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
+/** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
+export const CODEX_FAST_MODE_MODEL_IDS = [
+  'gpt-5.4',
+  'gpt-5.5',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+] as const
+
+/** 模型 ID 是否可通过 ChatGPT Codex OAuth 使用 Fast Mode。 */
+export function isCodexFastModeSupportedModel(modelId: string | undefined): boolean {
+  return modelId !== undefined && (CODEX_FAST_MODE_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase())
+}
+
 /**
  * 自定义子代理定义
  *
@@ -584,6 +598,8 @@ export interface AgentSessionMeta {
   sdkSessionId?: string
   /** 当前会话使用的 Agent runtime；历史会话缺省为 claude */
   agentRuntime?: import('./agent-provider').AgentRuntime
+  /** ChatGPT Codex Fast Mode 开关；仅 Pi + ChatGPT OAuth 的受支持模型实际生效。 */
+  codexFastMode?: boolean
   /** 所属工作区 ID */
   workspaceId?: string
   /** 是否置顶 */
@@ -1583,6 +1599,8 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_SESSION_PERMISSION_MODE: 'agent:update-session-permission-mode',
   /** 切换指定会话的 Agent runtime（下一轮生效，跨 runtime 时清空 SDK resume ID） */
   UPDATE_SESSION_AGENT_RUNTIME: 'agent:update-session-agent-runtime',
+  /** 切换指定会话的 ChatGPT Codex Fast Mode（下一轮 Pi 请求生效） */
+  UPDATE_SESSION_CODEX_FAST_MODE: 'agent:update-session-codex-fast-mode',
 
   // AskUserQuestion 交互式问答
   /** AskUser 响应（渲染进程 → 主进程） */
