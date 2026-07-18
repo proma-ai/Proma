@@ -1050,6 +1050,19 @@ export class AgentOrchestrator {
     const agentRuntime = runtimeSwitchEnabled
       ? normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? appSettings.agentRuntime)
       : 'claude'
+    const requestedModelId = modelId || DEFAULT_MODEL_ID
+    const selectedOfficialAgentModel = channel.provider === 'proma'
+      ? (channel.agentModels ?? channel.models).find((candidate) => candidate.id === requestedModelId)
+      : undefined
+    if (selectedOfficialAgentModel?.agentRuntime === 'pi' && agentRuntime !== 'pi') {
+      reportPreflightError({
+        code: 'model_requires_pi_runtime',
+        title: '该模型需要 Pi Agent',
+        message: `${selectedOfficialAgentModel.name} 使用 OpenAI Responses API，仅支持 Pi Agent runtime。请在实验设置中启用 Pi runtime 后重试。`,
+        canRetry: false,
+      })
+      return
+    }
     const previousAgentRuntime = sessionMeta?.agentRuntime ? normalizeAgentRuntime(sessionMeta.agentRuntime) : undefined
     if (!sessionMeta?.agentRuntime || previousAgentRuntime !== agentRuntime) {
       try {
@@ -1694,6 +1707,7 @@ export class AgentOrchestrator {
         apiKey,
         baseUrl: sdkBaseUrl,
         provider: channel.provider,
+        ...(selectedOfficialAgentModel?.apiProtocol && { modelApiProtocol: selectedOfficialAgentModel.apiProtocol }),
         channelName: channel.name,
         proxyUrl,
         runtimeEnv: buildPiRuntimeEnv(sdkEnv),

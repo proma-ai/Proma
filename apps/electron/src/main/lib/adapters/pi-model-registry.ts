@@ -100,7 +100,12 @@ function loadPiAiCompat(): Promise<PiAiCompat> {
   return piAiCompatPromise
 }
 
-function resolvePromaOfficialApi(modelId: string | undefined): Api {
+function resolvePromaOfficialApi(
+  modelId: string | undefined,
+  explicitProtocol?: PiAgentQueryOptions['modelApiProtocol'],
+): Api {
+  if (explicitProtocol) return explicitProtocol
+
   const normalized = stripAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
   const leafModelId = normalized?.split('/').pop()
   if (!leafModelId) return 'anthropic-messages'
@@ -117,10 +122,14 @@ function resolvePromaOfficialApi(modelId: string | undefined): Api {
   return 'anthropic-messages'
 }
 
-function normalizePiApi(provider: ProviderType, modelId?: string): Api {
+function normalizePiApi(
+  provider: ProviderType,
+  modelId?: string,
+  modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
+): Api {
   switch (provider) {
     case 'proma':
-      return resolvePromaOfficialApi(modelId)
+      return resolvePromaOfficialApi(modelId, modelApiProtocol)
     case 'openai':
     case 'zhipu':
     case 'doubao':
@@ -363,7 +372,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   // pi runtime 统一剥离 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
   const registry = sdk.ModelRegistry.inMemory(authStorage)
-  const api = normalizePiApi(input.provider, resolvedModelId)
+  const api = normalizePiApi(input.provider, resolvedModelId, input.modelApiProtocol)
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })
   const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider, api)
   if (!baseUrl) {

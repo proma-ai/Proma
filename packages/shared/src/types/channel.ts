@@ -95,8 +95,8 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
 /**
  * 支持 Agent 模式的供应商类型
  *
- * Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点，
- * 因此所有 Anthropic 协议兼容的供应商都可以用于 Agent。
+ * Agent runtime 会按渠道与模型协议使用 Anthropic Messages、OpenAI Responses
+ * 或 Codex Responses；并非所有 Agent 请求都走 `/v1/messages`。
  */
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'proma',
@@ -249,6 +249,10 @@ export interface ChannelModel {
   name: string
   /** 是否启用 */
   enabled: boolean
+  /** 官方 Agent 模型的请求协议；未下发时兼容历史客户端的本地推断。 */
+  apiProtocol?: 'anthropic-messages' | 'openai-responses'
+  /** 官方 Agent 模型可使用的 runtime；`pi` 表示 Claude runtime 不可选。 */
+  agentRuntime?: 'both' | 'pi'
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
 }

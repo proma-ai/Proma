@@ -101,6 +101,26 @@ describe('Proma 官方渠道 Pi runtime 注册', () => {
     },
   )
 
+  test('Given 后端显式下发 Responses 协议 When buildModel Then 优先使用服务端契约', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-proma-protocol',
+      prompt: 'hi',
+      apiKey: 'system-key',
+      baseUrl: 'https://api.proma.cool/api/v1',
+      provider: 'proma',
+      model: 'internal-gpt-alias',
+      modelApiProtocol: 'openai-responses',
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.api).toBe('openai-responses')
+    expect(result.model.baseUrl).toBe('https://api.proma.cool/v1')
+  })
+
   test.each([
     'https://api.proma.cool',
     'https://api.proma.cool/v1',

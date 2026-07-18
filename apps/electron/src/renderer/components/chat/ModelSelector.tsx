@@ -34,7 +34,13 @@ import type { Channel, ModelOption } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
 
 /** 从渠道列表构建扁平化的模型选项 */
-function buildModelOptions(channels: Channel[], filterChannelId?: string, filterChannelIds?: string[], useAgentModels?: boolean): ModelOption[] {
+function buildModelOptions(
+  channels: Channel[],
+  filterChannelId?: string,
+  filterChannelIds?: string[],
+  useAgentModels?: boolean,
+  agentRuntime?: 'claude' | 'pi',
+): ModelOption[] {
   const options: ModelOption[] = []
 
   // Proma 官方渠道置顶（若已启用且未被过滤掉），其余保持原有相对顺序
@@ -54,6 +60,9 @@ function buildModelOptions(channels: Channel[], filterChannelId?: string, filter
 
     for (const model of modelList) {
       if (!model.enabled) continue
+      // 官方 GPT Agent 模型使用 OpenAI Responses，仅能被 Pi runtime 调用。
+      // 其它渠道不受该官方元数据限制。
+      if (useAgentModels && channel.provider === 'proma' && model.agentRuntime === 'pi' && agentRuntime !== 'pi') continue
 
       options.push({
         channelId: channel.id,
@@ -94,6 +103,8 @@ interface ModelSelectorProps {
   onModelSelect?: (option: ModelOption) => void
   /** 使用 Agent 专用模型列表（仅 Proma 官方渠道） */
   useAgentModels?: boolean
+  /** 当前 Agent runtime；用于隐藏 Pi-only 的官方模型。 */
+  agentRuntime?: 'claude' | 'pi'
   /** 触发按钮是否显示「渠道 · 模型」（默认只显示模型名） */
   showChannelInTrigger?: boolean
   /** 是否使用全局 modelSelectorOpenAtom 控制打开状态（用于外部拉起，如错误提示按钮） */
@@ -106,6 +117,7 @@ export function ModelSelector({
   externalSelectedModel,
   onModelSelect,
   useAgentModels,
+  agentRuntime,
   showChannelInTrigger = false,
   useSharedOpenState = false,
 }: ModelSelectorProps = {}): React.ReactElement {
@@ -133,7 +145,10 @@ export function ModelSelector({
     }
   }, [open, setChannels])
 
-  const modelOptions = React.useMemo(() => buildModelOptions(channels, filterChannelId, filterChannelIds, useAgentModels), [channels, filterChannelId, filterChannelIds, useAgentModels])
+  const modelOptions = React.useMemo(
+    () => buildModelOptions(channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime),
+    [channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime],
+  )
   const grouped = React.useMemo(() => groupByChannel(modelOptions), [modelOptions])
 
   // 搜索过滤

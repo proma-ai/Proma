@@ -72,6 +72,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   apiKey: string
   baseUrl?: string
   provider: ProviderType
+  /** 官方 Agent 模型由后端下发的协议契约；缺失时兼容旧客户端的 ID 推断。 */
+  modelApiProtocol?: 'anthropic-messages' | 'openai-responses'
   channelName?: string
   maxTurns?: number
   permissionMode: PromaPermissionMode

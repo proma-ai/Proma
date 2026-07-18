@@ -658,9 +658,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
   const hasAvailableModel = React.useMemo(() => {
-    // Proma 官方渠道（商业版）：只要 enabled 且有可用模型，直接视为可用
+    // Proma 官方渠道：GPT Agent 模型是 Pi-only，Claude runtime 不能把它算作可用模型。
     const promaOfficial = globalChannels.find((c) => c.id === 'proma-official')
-    if (promaOfficial?.enabled && promaOfficial.models.some((m) => m.enabled)) return true
+    const officialAgentModels = promaOfficial?.agentModels ?? promaOfficial?.models ?? []
+    if (promaOfficial?.enabled && officialAgentModels.some(
+      (model) => model.enabled && (sessionAgentRuntime === 'pi' || model.agentRuntime !== 'pi'),
+    )) return true
     // Pi runtime 支持所有协议，任何已启用渠道都可用
     if (sessionAgentRuntime === 'pi') {
       return globalChannels.some((c) => c.enabled && c.models.some((m) => m.enabled))
@@ -2518,6 +2521,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           externalSelectedModel={externalSelectedModel}
           onModelSelect={handleModelSelect}
           useAgentModels
+          agentRuntime={sessionAgentRuntime}
           useSharedOpenState
         />
       ),

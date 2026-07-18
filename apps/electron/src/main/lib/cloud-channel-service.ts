@@ -110,6 +110,8 @@ function broadcastOfficialChannelUpdated(): void {
 interface AgentModelItem {
   id: string
   display_name?: string
+  apiProtocol?: 'anthropic-messages' | 'openai-responses'
+  runtime?: 'both' | 'pi'
 }
 
 /**
@@ -141,6 +143,8 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
       id: item.id,
       name: item.display_name || item.id,
       enabled: true,
+      ...(item.apiProtocol ? { apiProtocol: item.apiProtocol } : {}),
+      ...(item.runtime ? { agentRuntime: item.runtime } : {}),
     }))
 
     if (models.length > 0) {
