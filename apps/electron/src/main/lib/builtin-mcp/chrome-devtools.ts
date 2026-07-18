@@ -21,6 +21,11 @@ export function injectChromeDevtoolsMcpServer(mcpServers: Record<string, Record<
     type: 'stdio',
     command: npxCommand(),
     args: ['-y', 'chrome-devtools-mcp@latest'],
+    // Chrome DevTools is an optional visual-inspection enhancement. Startup
+    // failures (missing npx, first-run package download failure, no Chrome,
+    // etc.) must not block the main Agent session.
+    required: false,
+    startup_timeout_sec: 60,
     env: {
       ...(process.env.PATH && { PATH: process.env.PATH }),
       ...(process.env.HOME && { HOME: process.env.HOME }),
