@@ -977,13 +977,14 @@ export class AgentOrchestrator {
 
     const appSettings = getSettings()
     let sessionMeta = getAgentSessionMeta(sessionId)
-    const agentRuntime = normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? appSettings.agentRuntime)
-    const previousAgentRuntime = sessionMeta?.agentRuntime ? normalizeAgentRuntime(sessionMeta.agentRuntime) : undefined
+    // 历史会话缺失 runtime 时按 Claude 兼容；新会话创建时已持久化其默认 runtime。
+    const previousAgentRuntime = normalizeAgentRuntime(sessionMeta?.agentRuntime ?? 'claude')
+    const agentRuntime = normalizeAgentRuntime(inputAgentRuntime ?? sessionMeta?.agentRuntime ?? 'claude')
     if (!sessionMeta?.agentRuntime || previousAgentRuntime !== agentRuntime) {
       try {
         sessionMeta = updateAgentSessionMeta(sessionId, {
           agentRuntime,
-          ...(previousAgentRuntime && previousAgentRuntime !== agentRuntime ? { sdkSessionId: undefined } : {}),
+          ...(previousAgentRuntime !== agentRuntime ? { sdkSessionId: undefined } : {}),
         })
       } catch {
         // 新会话索引异常时继续运行，后续错误路径会正常暴露。

@@ -1804,7 +1804,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId)
+      const session = createAgentSession(title, channelId, workspaceId, modelId, getSettings().agentRuntime ?? 'claude')
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2392,11 +2392,12 @@ export function registerIpcHandlers(): void {
         throw new Error('Agent 正在运行，完成后再切换内核')
       }
 
-      const previousRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : undefined
+      // 历史会话缺失 runtime 时按 Claude 处理，避免将 Claude SDK 会话 ID 交给 Pi 恢复。
+      const previousRuntime: AgentRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : 'claude'
       const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId'>> = {
         agentRuntime: runtime,
       }
-      if (previousRuntime && previousRuntime !== runtime) {
+      if (previousRuntime !== runtime) {
         updates.sdkSessionId = undefined
       }
 

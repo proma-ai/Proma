@@ -1097,6 +1097,8 @@ class FeishuBridge {
       title,
       channelId,
       workspaceId,
+      undefined,
+      appSettings.agentRuntime ?? 'claude',
     )
 
     // 绑定
