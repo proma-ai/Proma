@@ -61,6 +61,7 @@ import {
   restorePiInput,
 } from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
+import { createPartialMessageCoalescer, type PartialMessageCoalescer } from './pi-streaming-control'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type BashOperations = import('@earendil-works/pi-coding-agent').BashOperations
@@ -164,6 +165,9 @@ interface AsyncQueue<T> {
   close: () => void
   next: () => Promise<IteratorResult<T>>
 }
+
+/** Pi 原生每个 delta 都携带累计消息；20fps 足够流畅，同时避免 IPC/React 事件风暴。 */
+const PI_PARTIAL_UPDATE_INTERVAL_MS = 50
 
 const PI_PROXY_ENV_KEYS = [
   'HTTP_PROXY',
@@ -1263,11 +1267,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     active.runtimeGuard = runtimeGuard
     let unsubscribe: (() => void) | undefined
     let restorePiProxyEnv: (() => void) | undefined
+    let partialAssistantCoalescer: PartialMessageCoalescer<{ message: AssistantMessage; uuid: string }> | undefined
 
     const cleanupActiveSession = (): void => {
       try {
         unsubscribe?.()
         unsubscribe = undefined
+        partialAssistantCoalescer?.dispose()
+        partialAssistantCoalescer = undefined
         if (!active.disposed) {
           active.disposed = true
           rejectPendingInterruptPrompts(active, createAbortError())
@@ -1381,21 +1388,27 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         return uuid
       }
 
+      partialAssistantCoalescer = createPartialMessageCoalescer(({ message, uuid }) => {
+        const converted = convertPiMessage(message, session.sessionId, input.model, {
+          final: false,
+          uuid,
+        })
+        if (converted?.type === 'assistant') queue.push(converted)
+      }, PI_PARTIAL_UPDATE_INTERVAL_MS)
+
       unsubscribe = session.subscribe((event: AgentSessionEvent) => {
         try {
           switch (event.type) {
             case 'message_update': {
-              if (isAssistantPiMessage(event.message)) {
-                lastPartialAssistant = event.message
-              }
-              const converted = convertPiMessage(event.message, session.sessionId, input.model, {
-                final: false,
-                uuid: assistantUuidFor(),
-              })
-              if (converted?.type === 'assistant') queue.push(converted)
+              if (!isAssistantPiMessage(event.message)) break
+              lastPartialAssistant = event.message
+              // Pi 的 partial 是累计全文。合并为最多 20fps 的最新帧，避免每 token 都在
+              // main → IPC → renderer 路径重复复制整段消息；message_end 始终立即透传。
+              partialAssistantCoalescer?.schedule({ message: event.message, uuid: assistantUuidFor() })
               break
             }
             case 'message_end': {
+              partialAssistantCoalescer?.flush()
               if (active.interrupting && isAbortedAssistantMessage(event.message)) {
                 if (lastPartialAssistant) {
                   const converted = convertPiMessage(lastPartialAssistant, session.sessionId, input.model, {
