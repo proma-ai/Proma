@@ -31,6 +31,7 @@ import { useShortcut } from '@/hooks/useShortcut'
 import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
 import { MarkdownRichEditor } from './MarkdownRichEditor'
+import { getPreviewCandidateBasePaths, isAbsoluteFilePath } from './preview-open-path'
 import { PreviewFindBar } from './PreviewFindBar'
 import { MarkdownToc } from './MarkdownToc'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -481,8 +482,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const fileAccess = React.useMemo(() => ({
     sessionId,
-    candidateBasePaths: basePaths,
-  }), [sessionId, basePaths])
+    // 历史工具调用的预览仅有相对 filePath；以当前 dirPath（通常是会话 CWD）补全解析上下文。
+    // 绝对路径不追加该回退，避免失效路径按同名文件误命中会话目录。
+    candidateBasePaths: getPreviewCandidateBasePaths(basePaths, isAbsoluteFilePath(filePath) ? undefined : dirPath),
+  }), [sessionId, basePaths, dirPath, filePath])
 
   const contentCacheScope = React.useMemo(() => JSON.stringify({
     dirPath,
