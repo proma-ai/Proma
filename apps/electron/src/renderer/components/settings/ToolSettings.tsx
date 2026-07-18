@@ -488,11 +488,6 @@ export function ToolSettings(): React.ReactElement {
 
   return (
     <div className="space-y-8">
-      {/* 记忆工具（复用现有 MemorySettings 组件） */}
-      <div ref={memoryRef}>
-        <MemorySettings />
-      </div>
-
       {/* 联网搜索工具 */}
       <div ref={webSearchRef}>
         <WebSearchSettings />
@@ -506,6 +501,11 @@ export function ToolSettings(): React.ReactElement {
       {/* 自定义工具 */}
       <div ref={customToolsRef}>
         <CustomToolsSection />
+      </div>
+
+      {/* 记忆工具（复用现有 MemorySettings 组件，置于列表末尾） */}
+      <div ref={memoryRef}>
+        <MemorySettings />
       </div>
     </div>
   )
