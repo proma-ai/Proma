@@ -55,6 +55,29 @@
       "tools": [
         { "name": "generate_image", "description": "生成或编辑图片。" }
       ]
+    },
+    {
+      "id": "chrome-devtools",
+      "name": "chrome_devtools",
+      "displayName": "Chrome 浏览器",
+      "description": "通过 Chrome DevTools MCP 打开和检查真实网页，支持截图、DOM 快照、点击输入、网络与性能分析。",
+      "category": "browser",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": false,
+      "toggleable": true,
+      "tools": [
+        { "name": "list_pages", "description": "列出当前浏览器页面。", "readOnly": true },
+        { "name": "navigate_page", "description": "导航到指定 URL。" },
+        { "name": "take_snapshot", "description": "获取页面可访问性快照，用于理解页面结构。", "readOnly": true },
+        { "name": "take_screenshot", "description": "截取页面或元素截图，用于视觉检查。", "readOnly": true },
+        { "name": "click", "description": "点击页面元素。" },
+        { "name": "type", "description": "向页面元素输入文本。" },
+        { "name": "evaluate_script", "description": "在页面上下文执行脚本，用于诊断页面状态。" },
+        { "name": "list_network_requests", "description": "查看页面网络请求。", "readOnly": true },
+        { "name": "performance_start_trace", "description": "开始性能追踪。" },
+        { "name": "performance_stop_trace", "description": "停止性能追踪并返回结果。", "readOnly": true }
+      ]
     }
   ]
 }

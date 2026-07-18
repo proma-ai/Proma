@@ -7,7 +7,11 @@
 
 import type { ToolCall, ToolResult, ToolDefinition } from '@proma/core'
 import type { ChatToolMeta } from '@proma/shared'
-import { getToolCredentials } from '../chat-tool-config'
+import {
+  formatSearchResults,
+  searchWeb,
+} from '../web-search-service'
+export { isWebSearchAvailable } from '../web-search-service'
 
 // ===== 工具元数据 =====
 
@@ -51,16 +55,6 @@ export const WEB_SEARCH_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
 ]
 
-// ===== 可用性检查 =====
-
-/**
- * 检查搜索工具是否可用（API Key 已配置）
- */
-export function isWebSearchAvailable(): boolean {
-  const credentials = getToolCredentials('web-search')
-  return !!credentials.apiKey
-}
-
 // ===== 工具执行 =====
 
 /** 搜索工具名称集合 */
@@ -73,33 +67,10 @@ export function isWebSearchToolCall(toolName: string): boolean {
   return WEB_SEARCH_TOOL_NAMES.has(toolName)
 }
 
-/** Tavily API 搜索结果类型 */
-interface TavilySearchResult {
-  title: string
-  url: string
-  content: string
-  score: number
-}
-
-interface TavilySearchResponse {
-  results: TavilySearchResult[]
-  answer?: string
-}
-
 /**
  * 执行联网搜索工具调用
  */
 export async function executeWebSearchTool(toolCall: ToolCall): Promise<ToolResult> {
-  const credentials = getToolCredentials('web-search')
-
-  if (!credentials.apiKey) {
-    return {
-      toolCallId: toolCall.id,
-      content: '搜索工具未配置 API Key',
-      isError: true,
-    }
-  }
-
   try {
     const query = toolCall.arguments.query as string | undefined
 
@@ -111,30 +82,7 @@ export async function executeWebSearchTool(toolCall: ToolCall): Promise<ToolResu
       }
     }
 
-    const response = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${credentials.apiKey}`,
-      },
-      body: JSON.stringify({
-        query,
-        search_depth: 'basic',
-        max_results: 5,
-        include_answer: true,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      return {
-        toolCallId: toolCall.id,
-        content: `搜索请求失败 (${response.status}): ${errorText}`,
-        isError: true,
-      }
-    }
-
-    const data = await response.json() as TavilySearchResponse
+    const data = await searchWeb({ query })
     return {
       toolCallId: toolCall.id,
       content: formatSearchResults(data),
@@ -148,29 +96,4 @@ export async function executeWebSearchTool(toolCall: ToolCall): Promise<ToolResu
       isError: true,
     }
   }
-}
-
-/**
- * 格式化搜索结果为 LLM 可读文本
- */
-function formatSearchResults(data: TavilySearchResponse): string {
-  const parts: string[] = []
-
-  if (data.answer) {
-    parts.push(`**概要：** ${data.answer}`)
-    parts.push('')
-  }
-
-  if (data.results && data.results.length > 0) {
-    parts.push('**搜索结果：**')
-    for (const result of data.results) {
-      parts.push(`- [${result.title}](${result.url})`)
-      parts.push(`  ${result.content.slice(0, 300)}`)
-      parts.push('')
-    }
-  } else {
-    parts.push('未找到相关结果。')
-  }
-
-  return parts.join('\n')
 }

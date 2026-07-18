@@ -57,6 +57,8 @@ import { removePromaAutoCompactSettings } from './agent-auto-compact-settings'
 import { validateToolInput } from './agent-tool-input-validator'
 import { estimateTokenCount, WRITE_CONTENT_TOKEN_THRESHOLD } from './agent-tool-token-estimator'
 import { injectBuiltinMcpServers } from './builtin-mcp/registry'
+import { injectChromeDevtoolsMcpServer } from './builtin-mcp/chrome-devtools'
+import { isBuiltinMcpUserEnabled } from './builtin-mcp/settings'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { buildPiMcpTools } from './adapters/pi-mcp-tools'
 import type { AgentRuntimeEnv } from './agent-runtime-env'
@@ -1186,6 +1188,9 @@ export class AgentOrchestrator {
 
       // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
+      if (isBuiltinMcpUserEnabled('chrome-devtools')) {
+        injectChromeDevtoolsMcpServer(mcpServers)
+      }
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []
       const builtinMcpResult = agentRuntime === 'claude' && sdk
