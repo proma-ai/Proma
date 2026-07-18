@@ -23,6 +23,7 @@ import type {
   SDKUserMessageInput,
   TypedError,
 } from '@proma/shared'
+import { isCodexFastModeSupportedModel } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
@@ -48,7 +49,7 @@ import {
   type AgentRuntimeGuard,
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
-import { createCodexFastModeExtension } from './pi-codex-fast-mode'
+import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-fast-mode'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
   convertPiMessage,
@@ -1355,6 +1356,12 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         customTools,
       })
       session.agent.toolExecution = 'sequential'
+      if (input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
+        const originalStreamFn = session.agent.streamFn
+        session.agent.streamFn = (model, context, options) => (
+          originalStreamFn(model, context, withCodexFastModeServiceTier(options) as typeof options)
+        )
+      }
       installRuntimeGuardHooks(session, runtimeGuard)
       active.session = session
       resolveActiveReady(active, session)

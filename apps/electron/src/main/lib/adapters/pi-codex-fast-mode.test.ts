@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { injectCodexFastMode } from './pi-codex-fast-mode'
+import { injectCodexFastMode, withCodexFastModeServiceTier } from './pi-codex-fast-mode'
 
 describe('Pi Codex Fast Mode', () => {
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
@@ -14,9 +14,18 @@ describe('Pi Codex Fast Mode', () => {
     expect(injectCodexFastMode(payload)).toBe(payload)
   })
 
-  test('Given existing service tier When injecting Then respects prior value', () => {
-    const payload = { model: 'gpt-5.6-terra', service_tier: 'flex' }
-    expect(injectCodexFastMode(payload)).toBe(payload)
+  test('Given existing service tier When injecting Then Fast Mode overrides it', () => {
+    expect(injectCodexFastMode({ model: 'gpt-5.6-terra', service_tier: 'flex' })).toEqual({
+      model: 'gpt-5.6-terra',
+      service_tier: 'priority',
+    })
+  })
+
+  test('Given provider stream options When applying Fast Mode Then preserves priority tier for cost accounting', () => {
+    expect(withCodexFastModeServiceTier({ transport: 'websocket' })).toEqual({
+      transport: 'websocket',
+      serviceTier: 'priority',
+    })
   })
 
   test('Given non-object payload When injecting Then leaves payload unchanged', () => {
