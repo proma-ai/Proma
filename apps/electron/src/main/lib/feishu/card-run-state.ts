@@ -4,6 +4,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@proma/shared'
+import { isPartialSDKMessage } from '../bridge-agent-message-utils'
 
 /**
  * 飞书流式卡片的运行时状态机。
@@ -34,9 +35,16 @@ export type FooterStatus = 'thinking' | 'tool_running' | 'streaming' | null
 
 export type Terminal = 'running' | 'done' | 'interrupted' | 'error' | 'idle_timeout'
 
+interface PartialAssistantSnapshot {
+  text: string
+  thinking: string
+}
+
 export interface RunState {
   blocks: Block[]
   reasoning: { content: string; active: boolean }
+  /** Pi partial 帧按 assistant UUID 保存的累计快照，用于计算增量。 */
+  partialAssistantSnapshots: Record<string, PartialAssistantSnapshot>
   footer: FooterStatus
   terminal: Terminal
   errorMsg?: string
@@ -57,6 +65,7 @@ export function createInitialState(): RunState {
   return {
     blocks: [],
     reasoning: { content: '', active: false },
+    partialAssistantSnapshots: {},
     footer: 'thinking',
     terminal: 'running',
     startedAt: Date.now(),
@@ -98,6 +107,18 @@ function appendThinking(state: RunState, delta: string): RunState {
 }
 
 function startTool(state: RunState, id: string, name: string, input: unknown): RunState {
+  const existing = state.blocks.find((block) => block.kind === 'tool' && block.tool.id === id)
+  if (existing?.kind === 'tool') {
+    return {
+      ...state,
+      blocks: state.blocks.map((block) => block.kind === 'tool' && block.tool.id === id
+        ? { ...block, tool: { ...block.tool, name, input } }
+        : block),
+      reasoning: { ...state.reasoning, active: false },
+      footer: existing.tool.status === 'running' ? 'tool_running' : state.footer,
+    }
+  }
+
   const tool: ToolEntry = { id, name, input, status: 'running' }
   return {
     ...state,
@@ -116,6 +137,20 @@ function completeTool(state: RunState, id: string, output: string, isError: bool
     }
   })
   return { ...state, blocks }
+}
+
+function snapshotAssistantContent(message: SDKAssistantMessage): PartialAssistantSnapshot {
+  let text = ''
+  let thinking = ''
+  for (const block of message.message?.content ?? []) {
+    if (block.type === 'text' && typeof block.text === 'string') text += block.text
+    if (block.type === 'thinking' && typeof block.thinking === 'string') thinking += block.thinking
+  }
+  return { text, thinking }
+}
+
+function cumulativeDelta(current: string, previous: string): string {
+  return current.startsWith(previous) ? current.slice(previous.length) : current
 }
 
 function stringifyToolResult(content: unknown): string {
@@ -148,6 +183,15 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
 
     if (msg.type === 'assistant') {
       const am = msg as SDKAssistantMessage
+      const isPartial = isPartialSDKMessage(msg)
+      const assistantId = typeof (msg as { uuid?: unknown }).uuid === 'string'
+        ? (msg as { uuid: string }).uuid
+        : undefined
+      // 没有稳定 UUID 时无法从累计快照推导增量，等待终态帧可避免重复文本。
+      if (isPartial && !assistantId) return state
+
+      const previousSnapshot = assistantId ? state.partialAssistantSnapshots[assistantId] : undefined
+      const currentSnapshot = (isPartial || previousSnapshot) ? snapshotAssistantContent(am) : undefined
       let next = state
       if (am.message?.model && !next.meta.model) {
         next = { ...next, meta: { ...next.meta, model: am.message.model } }
@@ -157,23 +201,38 @@ export function reduce(state: RunState, payload: AgentStreamPayload): RunState {
       if (am.error?.message) {
         return markError(state, am.error.message)
       }
+
+      if (currentSnapshot) {
+        const text = cumulativeDelta(currentSnapshot.text, previousSnapshot?.text ?? '')
+        const thinking = cumulativeDelta(currentSnapshot.thinking, previousSnapshot?.thinking ?? '')
+        if (text) next = appendText(next, text)
+        if (thinking) next = appendThinking(next, thinking)
+      }
+
       for (const block of am.message?.content ?? []) {
-        if (block.type === 'text') {
+        if (!currentSnapshot && block.type === 'text') {
           const text = (block as { text?: unknown }).text
-          if (typeof text === 'string' && text) {
-            next = appendText(next, text)
-          }
-        } else if (block.type === 'thinking') {
+          if (typeof text === 'string' && text) next = appendText(next, text)
+        } else if (!currentSnapshot && block.type === 'thinking') {
           const thinking = (block as { thinking?: unknown }).thinking
-          if (typeof thinking === 'string' && thinking) {
-            next = appendThinking(next, thinking)
-          }
+          if (typeof thinking === 'string' && thinking) next = appendThinking(next, thinking)
         } else if (block.type === 'tool_use') {
           const tb = block as { id?: unknown; name?: unknown; input?: unknown }
           if (typeof tb.id === 'string' && typeof tb.name === 'string') {
             next = startTool(next, tb.id, tb.name, tb.input)
           }
         }
+      }
+
+      if (assistantId && isPartial && currentSnapshot) {
+        return {
+          ...next,
+          partialAssistantSnapshots: { ...next.partialAssistantSnapshots, [assistantId]: currentSnapshot },
+        }
+      }
+      if (assistantId && previousSnapshot) {
+        const { [assistantId]: _, ...partialAssistantSnapshots } = next.partialAssistantSnapshots
+        return { ...next, partialAssistantSnapshots }
       }
       return next
     }
