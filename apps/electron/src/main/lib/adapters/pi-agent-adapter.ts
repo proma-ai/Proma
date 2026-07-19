@@ -1316,6 +1316,13 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           }))
         }
       }
+      // 代理作用域必须只覆盖模型 provider stream：在整个 session.prompt() 链上设
+      // AsyncLocalStorage 会把 MCP/产品工具等同一 Agent loop 中的 fetch 也错误地送进 Codex 代理。
+      const providerStreamFn = session.agent.streamFn
+      session.agent.streamFn = (requestModel, context, options) => runWithPiRequestProxy(
+        requestProxyDispatcher,
+        () => providerStreamFn(requestModel, context, options),
+      )
       installRuntimeGuardHooks(session, runtimeGuard)
       active.session = session
       resolveActiveReady(active, session)
@@ -1444,7 +1451,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         // 手动压缩：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型。
         // compaction_start/end 事件已在上面的 subscribe 中转成 compacting/compact_boundary system 消息；
         // compact() 不发 agent_end，故这里补一个合成 result 消息收束本轮（供 orchestrator 结束消费循环）。
-        runWithPiRequestProxy(requestProxyDispatcher, () => session.compact())
+        session.compact()
           .then(() => {
             queue.push({
               type: 'result',
@@ -1509,7 +1516,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 return
               }
               currentInterrupt?.resolveAccepted()
-              await runWithPiRequestProxy(requestProxyDispatcher, () => session.prompt(prompt, { source: 'rpc' }))
+              await session.prompt(prompt, { source: 'rpc' })
             } finally {
               if (active.interrupting) {
                 session.agent.state.messages = dropTrailingAbortedAssistant(session.agent.state.messages)
