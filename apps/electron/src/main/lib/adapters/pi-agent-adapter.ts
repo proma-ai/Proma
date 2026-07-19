@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import type { Dispatcher } from 'undici'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
@@ -64,6 +65,12 @@ import {
 } from './pi-message-adapter'
 import { DEFAULT_CONTEXT_WINDOW, buildModel } from './pi-model-registry'
 import { createPartialMessageCoalescer, type PartialMessageCoalescer } from './pi-streaming-control'
+import {
+  closePiRequestProxyDispatcher,
+  createPiRequestProxyDispatcher,
+  installPiRequestProxyFetch,
+  runWithPiRequestProxy,
+} from './pi-request-proxy'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type BashOperations = import('@earendil-works/pi-coding-agent').BashOperations
@@ -154,15 +161,6 @@ export interface PiRemoteConnectionSettings {
   websocketConnectTimeoutMs?: number
 }
 
-interface PiProxySettingsModule {
-  applyHttpProxySettings?: (httpProxy: string | undefined) => void
-}
-
-interface ScopedProxyEnvEntry {
-  id: symbol
-  proxyUrl: string
-}
-
 interface AsyncQueue<T> {
   push: (value: T) => void
   fail: (error: unknown) => void
@@ -172,18 +170,6 @@ interface AsyncQueue<T> {
 
 /** Pi 原生每个 delta 都携带累计消息；20fps 足够流畅，同时避免 IPC/React 事件风暴。 */
 const PI_PARTIAL_UPDATE_INTERVAL_MS = 50
-
-const PI_PROXY_ENV_KEYS = [
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'ALL_PROXY',
-  'http_proxy',
-  'https_proxy',
-  'all_proxy',
-] as const
-
-const scopedProxyEnvStack: ScopedProxyEnvEntry[] = []
-let scopedProxyEnvOriginal: Map<string, string | undefined> | undefined
 
 function getCaseInsensitiveRuntimeEnvValue(env: Record<string, string> | undefined, key: string): string | undefined {
   if (!env) return undefined
@@ -213,87 +199,21 @@ function isNonNegativeFiniteNumber(value: number | undefined): value is number {
 export function buildPiRemoteConnectionSettings(
   input: Pick<
     PiAgentQueryOptions,
-    'proxyUrl' | 'runtimeEnv' | 'transport' | 'httpIdleTimeoutMs' | 'websocketConnectTimeoutMs'
+    'provider' | 'proxyUrl' | 'runtimeEnv' | 'transport' | 'httpIdleTimeoutMs' | 'websocketConnectTimeoutMs'
   >,
 ): PiRemoteConnectionSettings {
   const httpProxy = resolvePiHttpProxy(input)
+  // Node/Electron 的 WebSocket 不支持请求级 HTTP 代理注入；有代理的 Codex
+  // 默认改走可由 undici dispatcher 承载的 SSE。用户显式选择 transport 时保留其意图。
+  const transport = input.transport ?? (httpProxy && input.provider === 'openai-codex' ? 'sse' : undefined)
   return {
     ...(httpProxy ? { httpProxy } : {}),
-    ...(input.transport ? { transport: input.transport } : {}),
+    ...(transport ? { transport } : {}),
     ...(isNonNegativeFiniteNumber(input.httpIdleTimeoutMs) ? { httpIdleTimeoutMs: input.httpIdleTimeoutMs } : {}),
     ...(isNonNegativeFiniteNumber(input.websocketConnectTimeoutMs)
       ? { websocketConnectTimeoutMs: input.websocketConnectTimeoutMs }
       : {}),
   }
-}
-
-function setScopedProxyEnv(proxyUrl: string): void {
-  for (const key of PI_PROXY_ENV_KEYS) {
-    process.env[key] = proxyUrl
-  }
-}
-
-function restoreOriginalProxyEnv(): void {
-  if (!scopedProxyEnvOriginal) return
-  for (const key of PI_PROXY_ENV_KEYS) {
-    const originalValue = scopedProxyEnvOriginal.get(key)
-    if (originalValue === undefined) {
-      delete process.env[key]
-    } else {
-      process.env[key] = originalValue
-    }
-  }
-  scopedProxyEnvOriginal = undefined
-}
-
-function enterScopedProxyEnv(proxyUrl: string): () => void {
-  if (!scopedProxyEnvOriginal) {
-    scopedProxyEnvOriginal = new Map(PI_PROXY_ENV_KEYS.map((key) => [key, process.env[key]]))
-  }
-
-  const entry: ScopedProxyEnvEntry = { id: Symbol('pi-proxy-env'), proxyUrl }
-  scopedProxyEnvStack.push(entry)
-  setScopedProxyEnv(proxyUrl)
-
-  let restored = false
-  return () => {
-    if (restored) return
-    restored = true
-    const index = scopedProxyEnvStack.findIndex((item) => item.id === entry.id)
-    if (index >= 0) scopedProxyEnvStack.splice(index, 1)
-
-    const current = scopedProxyEnvStack.at(-1)
-    if (current) {
-      setScopedProxyEnv(current.proxyUrl)
-    } else {
-      restoreOriginalProxyEnv()
-    }
-  }
-}
-
-function getApplyHttpProxySettings(sdk: unknown): PiProxySettingsModule['applyHttpProxySettings'] {
-  if (!sdk || typeof sdk !== 'object') return undefined
-  const candidate = (sdk as { applyHttpProxySettings?: unknown }).applyHttpProxySettings
-  return typeof candidate === 'function'
-    ? (candidate as PiProxySettingsModule['applyHttpProxySettings'])
-    : undefined
-}
-
-export function applyPiProxySettingsForQuery(
-  sdk: unknown,
-  input: Pick<PiAgentQueryOptions, 'proxyUrl' | 'runtimeEnv'>,
-): () => void {
-  const proxyUrl = resolvePiHttpProxy(input)
-  if (!proxyUrl) return () => {}
-
-  const restoreProxyEnv = enterScopedProxyEnv(proxyUrl)
-  try {
-    getApplyHttpProxySettings(sdk)?.(proxyUrl)
-  } catch (error) {
-    console.warn('[Pi SDK] 应用 Pi proxy helper 失败，已回退到 scoped proxy env:', error)
-  }
-  setScopedProxyEnv(proxyUrl)
-  return restoreProxyEnv
 }
 
 function createAsyncQueue<T>(): AsyncQueue<T> {
@@ -1270,7 +1190,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     const runtimeGuard = createAgentRuntimeGuard(input)
     active.runtimeGuard = runtimeGuard
     let unsubscribe: (() => void) | undefined
-    let restorePiProxyEnv: (() => void) | undefined
+    let requestProxyDispatcher: Dispatcher | undefined
     let partialAssistantCoalescer: PartialMessageCoalescer<{ message: AssistantMessage; uuid: string }> | undefined
 
     const cleanupActiveSession = (): void => {
@@ -1288,17 +1208,22 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           this.activeSessions.delete(input.sessionId)
         }
       } finally {
-        restorePiProxyEnv?.()
-        restorePiProxyEnv = undefined
+        void closePiRequestProxyDispatcher(requestProxyDispatcher)
+        requestProxyDispatcher = undefined
       }
     }
 
     try {
+      installPiRequestProxyFetch()
+      requestProxyDispatcher = createPiRequestProxyDispatcher({
+        proxyUrl: resolvePiHttpProxy(input),
+        noProxy: getCaseInsensitiveRuntimeEnvValue(input.runtimeEnv?.env, 'NO_PROXY'),
+        httpIdleTimeoutMs: input.httpIdleTimeoutMs,
+      })
       const sdk = await import('@earendil-works/pi-coding-agent')
       const piAi = input.codexFastMode && input.provider === 'openai-codex'
         ? await import('@earendil-works/pi-ai/compat')
         : undefined
-      restorePiProxyEnv = applyPiProxySettingsForQuery(sdk, input)
       if (active.abortRequested) throw createAbortError()
 
       if (!existsSync(input.piSessionDir)) mkdirSync(input.piSessionDir, { recursive: true })
@@ -1519,7 +1444,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         // 手动压缩：走 pi 原生 session.compact()，而非把 /compact 当普通 prompt 发给模型。
         // compaction_start/end 事件已在上面的 subscribe 中转成 compacting/compact_boundary system 消息；
         // compact() 不发 agent_end，故这里补一个合成 result 消息收束本轮（供 orchestrator 结束消费循环）。
-        session.compact()
+        runWithPiRequestProxy(requestProxyDispatcher, () => session.compact())
           .then(() => {
             queue.push({
               type: 'result',
@@ -1584,7 +1509,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 return
               }
               currentInterrupt?.resolveAccepted()
-              await session.prompt(prompt, { source: 'rpc' })
+              await runWithPiRequestProxy(requestProxyDispatcher, () => session.prompt(prompt, { source: 'rpc' }))
             } finally {
               if (active.interrupting) {
                 session.agent.state.messages = dropTrailingAbortedAssistant(session.agent.state.messages)
