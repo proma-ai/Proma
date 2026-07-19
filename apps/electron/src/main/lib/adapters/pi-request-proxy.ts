@@ -2,8 +2,8 @@
  * Pi runtime 的请求级 HTTP 代理。
  *
  * Pi 的程序化 SDK 不会执行 CLI 入口的 configureHttpDispatcher()。这里用
- * AsyncLocalStorage 为一次 session.prompt()/compact() 调用绑定 dispatcher，避免
- * 进程级环境变量或 setGlobalDispatcher() 在并发会话间串线。
+ * AsyncLocalStorage 为每次模型 provider stream 绑定 dispatcher，避免进程级环境变量
+ * 或 setGlobalDispatcher() 在并发会话间串线。
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
