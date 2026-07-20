@@ -13,16 +13,12 @@ function activity(toolName: string, input: Record<string, unknown>, result?: str
 }
 
 describe('任务进度聚合', () => {
-  test('given Pi and Claude compatible statuses when aggregating then preserves terminal and blocked states', () => {
+  test('given Pi and Claude compatible TaskUpdate statuses when aggregating then preserves terminal and blocked states', () => {
     const activities = [
-      activity('TodoWrite', {
-        todos: [
-          { subject: '完成项', status: 'completed' },
-          { subject: '阻塞项', status: 'blocked' },
-          { subject: '取消项', status: 'cancelled' },
-          { subject: '失败项', status: 'error' },
-        ],
-      }),
+      activity('TaskUpdate', { taskId: 'done', subject: '完成项', status: 'completed' }),
+      activity('TaskUpdate', { taskId: 'blocked', subject: '阻塞项', status: 'blocked' }),
+      activity('TaskUpdate', { taskId: 'cancelled', subject: '取消项', status: 'cancelled' }),
+      activity('TaskUpdate', { taskId: 'error', subject: '失败项', status: 'error' }),
     ]
 
     const items = aggregateTaskItems(activities, false)
@@ -31,6 +27,14 @@ describe('任务进度聚合', () => {
     expect(isTerminalTaskStatus('cancelled')).toBe(true)
     expect(isTerminalTaskStatus('error')).toBe(true)
     expect(isTerminalTaskStatus('blocked')).toBe(false)
+  })
+
+  test('given a legacy TodoWrite activity when aggregating then ignores the snapshot instead of showing false progress', () => {
+    const activities = [activity('TodoWrite', {
+      todos: [{ subject: '不应展示', status: 'in_progress' }],
+    })]
+
+    expect(aggregateTaskItems(activities, false)).toEqual([])
   })
 
   test('given a TaskCreate tool result and update when aggregating then links the SDK task id', () => {

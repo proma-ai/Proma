@@ -945,30 +945,7 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
         return createJsonToolResult({ todos: [...tasks.values()].filter((task) => task.status !== 'deleted') })
       },
     }),
-    sdk.defineTool({
-      name: 'TodoWrite',
-      label: '旧版待办快照（不可用）',
-      description: '旧版整表待办快照接口。为避免覆盖可见任务，常规任务追踪请使用 TaskCreate 和 TaskUpdate。',
-      promptSnippet: '不要调用；请改用 TaskCreate 或 TaskUpdate。',
-      parameters: Type.Object({
-        todos: Type.Array(Type.Object({
-          content: Type.Optional(Type.String()),
-          subject: Type.Optional(Type.String()),
-          status: Type.Union([
-            Type.Literal('pending'),
-            Type.Literal('in_progress'),
-            Type.Literal('completed'),
-            Type.Literal('blocked'),
-            Type.Literal('cancelled'),
-            Type.Literal('error'),
-          ]),
-          activeForm: Type.Optional(Type.String()),
-        })),
-      }),
-      async execute() {
-        throw new Error('TodoWrite 会整表覆盖任务，已禁用。请用 TaskCreate 追加任务，或用 TaskUpdate 更新指定 taskId。')
-      },
-    }),
+
   ] as unknown as ToolDefinition[]
 
   return definitions.map((tool) =>

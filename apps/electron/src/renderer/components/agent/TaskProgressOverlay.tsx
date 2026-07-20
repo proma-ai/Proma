@@ -80,6 +80,8 @@ export function TaskProgressOverlay({ activities, streaming }: TaskProgressOverl
     const hideTimer = window.setTimeout(() => {
       setVisible(false)
       setOpen(false)
+      setRetainedActivities([])
+      setRetainedSignature('')
     }, FINISH_RETENTION_MS)
     return () => {
       window.clearTimeout(fadeTimer)

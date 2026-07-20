@@ -713,7 +713,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
           )}
         </ConversationContent>
         <ScrollMinimap items={minimapItems} />
-        <TaskProgressOverlay activities={liveTaskActivities} streaming={streaming} />
+        <TaskProgressOverlay key={sessionId} activities={liveTaskActivities} streaming={streaming} />
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage userMessages={allUserMessagesData} />
         )}
