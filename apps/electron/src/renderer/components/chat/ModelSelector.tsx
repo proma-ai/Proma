@@ -30,7 +30,7 @@ import { getModelLogo, getChannelLogo, DefaultLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 import { ModelHealthIndicator } from './ModelHealthIndicator'
 import { PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
-import type { Channel, ModelOption } from '@proma/shared'
+import type { Channel, ModelOption, ProviderType } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
 
 /** 从渠道列表构建扁平化的模型选项 */
@@ -40,6 +40,7 @@ export function buildModelOptions(
   filterChannelIds?: string[],
   useAgentModels?: boolean,
   agentRuntime?: 'claude' | 'pi',
+  excludedProviders?: readonly ProviderType[],
 ): ModelOption[] {
   const options: ModelOption[] = []
 
@@ -55,6 +56,7 @@ export function buildModelOptions(
     if (!channel.enabled) continue
     if (filterChannelId && channel.id !== filterChannelId) continue
     if (filterChannelIds && !filterChannelIds.includes(channel.id)) continue
+    if (excludedProviders?.includes(channel.provider)) continue
 
     const modelList = (useAgentModels && channel.agentModels) ? channel.agentModels : channel.models
 
@@ -107,6 +109,8 @@ interface ModelSelectorProps {
   agentRuntime?: 'claude' | 'pi'
   /** 触发按钮是否显示「渠道 · 模型」（默认只显示模型名） */
   showChannelInTrigger?: boolean
+  /** 不在此选择器中显示的供应商（例如 Chat 暂不支持的协议） */
+  excludedProviders?: readonly ProviderType[]
   /** 是否使用全局 modelSelectorOpenAtom 控制打开状态（用于外部拉起，如错误提示按钮） */
   useSharedOpenState?: boolean
 }
@@ -119,6 +123,7 @@ export function ModelSelector({
   useAgentModels,
   agentRuntime,
   showChannelInTrigger = false,
+  excludedProviders,
   useSharedOpenState = false,
 }: ModelSelectorProps = {}): React.ReactElement {
   const [conversationModel, setConversationModel] = useConversationModelOptional()
@@ -146,8 +151,15 @@ export function ModelSelector({
   }, [open, setChannels])
 
   const modelOptions = React.useMemo(
-    () => buildModelOptions(channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime),
-    [channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime],
+    () => buildModelOptions(
+      channels,
+      filterChannelId,
+      filterChannelIds,
+      useAgentModels,
+      agentRuntime,
+      excludedProviders,
+    ),
+    [channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime, excludedProviders],
   )
   const grouped = React.useMemo(() => groupByChannel(modelOptions), [modelOptions])
 

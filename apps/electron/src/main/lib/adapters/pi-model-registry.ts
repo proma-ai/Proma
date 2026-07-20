@@ -40,6 +40,44 @@ const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
 const CODEX_56_CONTEXT_WINDOW = 1_050_000
 const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
 
+type CodexRuntimeCredential = {
+  type: 'oauth'
+  access: string
+  refresh: string
+  expires: number
+}
+
+function createCodexRuntimeCredentialStore(access: string) {
+  let credential: CodexRuntimeCredential | undefined = {
+    type: 'oauth',
+    access,
+    // Proma refreshes the persisted credential before each agent execution.
+    // Keep this one-run store valid so Pi never tries to write or refresh ~/.pi.
+    refresh: '',
+    expires: Number.MAX_SAFE_INTEGER,
+  }
+
+  return {
+    async read(providerId: string): Promise<CodexRuntimeCredential | undefined> {
+      return providerId === 'openai-codex' ? credential : undefined
+    },
+    async list(): Promise<readonly { providerId: string; type: 'oauth' }[]> {
+      return credential ? [{ providerId: 'openai-codex', type: 'oauth' }] : []
+    },
+    async modify(
+      providerId: string,
+      fn: (current: CodexRuntimeCredential | undefined) => Promise<CodexRuntimeCredential | undefined>,
+    ): Promise<CodexRuntimeCredential | undefined> {
+      if (providerId !== 'openai-codex') return undefined
+      credential = await fn(credential)
+      return credential
+    },
+    async delete(providerId: string): Promise<void> {
+      if (providerId === 'openai-codex') credential = undefined
+    },
+  }
+}
+
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-5.4',
@@ -369,18 +407,18 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  *
  * openai-codex 是 Pi SDK 的内置 KnownProvider：模型目录、baseUrl 和
  * `openai-codex-responses` 协议全部内置，无需（也不能）手工构造 models 或 baseUrl。
- * 只需把 OAuth access token 作为 runtime key 注入到内置 provider 名 `openai-codex`
- * 下，SDK 的 getApiKey 会按 model.provider 解析到它。
+ * Pi 0.80.10 将它声明为 OAuth-only provider；runtime API key 不会参与其认证解析。
+ * 因此将 Proma 已刷新过的 access token 放入一次性内存 OAuth credential store，
+ * 避免 Pi 读取或写入全局 ~/.pi 认证文件。
  *
  * 注意：这里的 input.apiKey 必须是编排层用 resolveCodexAccessToken 解析并按需
  * 刷新后的 access token，而不是存储的凭据 JSON。
  */
 async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
-  // Pi 0.80.10 移除了 AuthStorage / ModelRegistry facade，统一由 ModelRuntime
-  // 管理内置模型、临时 API key 与 provider 配置。
-  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
-  // 内置 codex 模型的 provider 字段即 'openai-codex'，token 必须设在该名下。
-  await modelRuntime.setRuntimeApiKey('openai-codex', input.apiKey)
+  const modelRuntime = await sdk.ModelRuntime.create({
+    credentials: createCodexRuntimeCredentialStore(input.apiKey),
+    allowModelNetwork: false,
+  })
 
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
   const codexModels = await getCodexCatalogModels()

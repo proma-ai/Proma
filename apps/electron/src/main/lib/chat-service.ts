@@ -276,6 +276,17 @@ export async function sendMessage(
     return
   }
 
+  // Codex OAuth uses the ChatGPT-specific Responses protocol, which Chat does
+  // not currently implement. Keep this guard for historical conversations that
+  // still reference a formerly selectable Codex model.
+  if (channel.provider === 'openai-codex') {
+    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+      conversationId,
+      error: 'Chat 模式暂不支持 ChatGPT 订阅（Codex OAuth），请切换到 Agent 模式使用。',
+    })
+    return
+  }
+
   // 2. 获取 API Key 和 Base URL
   let apiKey: string
   let baseUrl: string
