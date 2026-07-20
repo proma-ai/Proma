@@ -55,6 +55,8 @@ interface AgentSessionsIndex {
   version: number
   /** 会话元数据列表 */
   sessions: AgentSessionMeta[]
+  /** 是否已将旧版默认关闭的 OpenAI 推理会话升级为默认开启。 */
+  openAIThinkingDefaultEnabledMigrationCompleted?: boolean
 }
 
 /** 当前索引版本 */
@@ -138,15 +140,38 @@ function migrateLegacyPermissionMode(index: AgentSessionsIndex): boolean {
 }
 
 /**
+ * 在此版本前，所有新建 OpenAI Agent 会话都会写入 off，无法与用户主动关闭区分。
+ * 因此仅执行一次历史升级；之后用户手动关闭会保留 off。
+ */
+function migrateLegacyOpenAIThinkingDefault(index: AgentSessionsIndex): boolean {
+  if (index.openAIThinkingDefaultEnabledMigrationCompleted) return false
+
+  for (const session of index.sessions) {
+    if (session.openAIThinkingLevel === 'off') {
+      session.openAIThinkingLevel = 'high'
+    }
+  }
+  index.openAIThinkingDefaultEnabledMigrationCompleted = true
+  return true
+}
+
+/**
  * 读取会话索引文件
  */
 function readIndex(): AgentSessionsIndex {
   const indexPath = getAgentSessionsIndexPath()
   const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
   if (data) {
-    if (migrateLegacyPermissionMode(data)) {
+    const permissionModeMigrated = migrateLegacyPermissionMode(data)
+    const thinkingDefaultMigrated = migrateLegacyOpenAIThinkingDefault(data)
+    if (permissionModeMigrated || thinkingDefaultMigrated) {
       writeIndex(data)
-      console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
+      if (permissionModeMigrated) {
+        console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
+      }
+      if (thinkingDefaultMigrated) {
+        console.log('[Agent 会话] 已将历史 OpenAI 会话的思考深度默认值升级为高')
+      }
     }
     return data
   }
@@ -203,8 +228,8 @@ export function createAgentSession(
     modelId,
     workspaceId,
     agentRuntime,
-    // OpenAI 推理配置从创建起归属于会话；历史会话缺省时由编排层兼容旧全局设置。
-    openAIThinkingLevel: 'off',
+    // OpenAI 推理配置从创建起归属于会话；默认启用高思考深度。
+    openAIThinkingLevel: 'high',
     createdAt: now,
     updatedAt: now,
   }

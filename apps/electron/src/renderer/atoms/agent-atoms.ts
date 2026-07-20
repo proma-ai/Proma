@@ -411,8 +411,8 @@ export const sessionExistsAtom = atomFamily((sessionId: string) =>
   }),
 )
 
-/** Agent 思考模式 */
-export const agentThinkingAtom = atom<ThinkingConfig | undefined>(undefined)
+/** Agent 思考模式：未加载持久化设置前也默认开启，避免输入栏按钮短暂显示为关闭。 */
+export const agentThinkingAtom = atom<ThinkingConfig | undefined>({ type: 'adaptive' })
 
 /** Agent 推理深度 */
 export const agentEffortAtom = atom<AgentEffort | undefined>(undefined)

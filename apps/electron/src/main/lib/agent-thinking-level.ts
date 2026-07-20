@@ -18,5 +18,6 @@ export function resolvePiThinkingLevel(
   }
   if (settings.agentThinking?.type === 'disabled') return 'off'
   if (settings.agentEffort === 'max') return 'xhigh'
-  return settings.agentEffort ?? (settings.agentThinking ? 'high' : 'off')
+  // 无持久化配置的旧用户也采用新的默认值；显式 disabled 仍优先关闭。
+  return settings.agentEffort ?? 'high'
 }
