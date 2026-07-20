@@ -213,7 +213,7 @@ export const agentModelIdAtom = atom<string | null>(null)
 /** Agent 启用的渠道 ID 列表（多选，设置页 Switch 开关控制） */
 export const agentChannelIdsAtom = atom<string[]>([])
 /** 新 Agent 会话默认 runtime */
-export const agentRuntimeAtom = atom<'claude' | 'pi'>('claude')
+export const agentRuntimeAtom = atom<'claude' | 'pi'>('pi')
 
 /** Per-session 渠道 ID Map — sessionId → channelId */
 export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())

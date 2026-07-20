@@ -209,7 +209,7 @@ function AgentSettingsInitializer(): null {
         store.set(selectedModelAtom, null)
       }
 
-      const defaultAgentRuntime = settings.agentRuntime ?? 'claude'
+      const defaultAgentRuntime = settings.agentRuntime ?? 'pi'
       setAgentRuntime(defaultAgentRuntime)
 
       // 渠道的启用状态是唯一开关：启动时也必须从实际渠道派生 Claude 白名单，

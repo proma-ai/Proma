@@ -70,7 +70,7 @@ export function createEmptyDraft(): AutomationDraft {
     timeOfDay: '09:00',
     dayOfWeek: 1,
     dayOfMonth: 1,
-    agentRuntime: 'claude',
+    agentRuntime: 'pi',
     channelId: '',
     permissionMode: AUTOMATION_DEFAULT_PERMISSION_MODE,
     sessionMode: AUTOMATION_DEFAULT_SESSION_MODE,

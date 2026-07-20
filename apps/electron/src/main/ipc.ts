@@ -1805,7 +1805,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId, getSettings().agentRuntime ?? 'claude')
+      const session = createAgentSession(title, channelId, workspaceId, modelId, getSettings().agentRuntime ?? 'pi')
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -4423,7 +4423,8 @@ export function registerIpcHandlers(): void {
     input: Partial<CreateAutomationInput | UpdateAutomationInput>,
     existing?: Automation,
   ): void => {
-    const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? 'claude'
+    // 更新历史任务时，缺失的持久化 runtime 仍按 Claude 解释；仅新建任务使用 Pi 默认值。
+    const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? (existing ? 'claude' : 'pi')
     const finalChannelId = input.channelId !== undefined ? input.channelId : existing?.channelId
     if (finalRuntime === 'claude' && finalChannelId) {
       const agentChannelIds = getSettings().agentChannelIds ?? []
