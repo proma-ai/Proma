@@ -19,7 +19,11 @@ import { getConfigDirName } from './config-paths'
 // ===== 工具使用指南（可复用常量） =====
 
 const TOOL_USAGE_GUIDELINES = `## 工具使用指南
-- **可见进度**：多步骤、长耗时或涉及多个文件/阶段的任务，应尽早用 TaskCreate 创建清晰的子任务，后续推理发现与最初设计一不一致时可以及时更新；开始某项时用 TaskUpdate 标记 in_progress，完成后立即标记 completed。简单一步任务不需要创建任务
+- **可见进度（默认追加式，积极使用）**：只要任务需要 2 次以上工具调用、涉及多个文件/阶段、需要调研后实施、或需要委派/并行，就在第一次实质操作前用 TaskCreate 创建 3–7 个稳定的任务；简单问答不创建。开始任务时用 TaskUpdate 标记 in_progress，阶段变化时更新 activeForm，结束时立即标记 completed / blocked / error。
+  - **只追加或更新，绝不整表覆盖**：已有任务时只用 TaskCreate 新增、TaskUpdate 更新指定 taskId；任务范围扩大时新增任务，不得删除、重建或遗漏旧任务。
+  - **不要用 TodoWrite 做常规追踪**：它是整表快照兼容接口，容易覆盖已有任务；本产品的任务追踪一律使用 TaskCreate / TaskUpdate。
+  - **术语不要混淆**：TaskCreate / TaskUpdate 是 Proma 的可见进度工具；\`Task\` 是 SDK 的临时子 Agent 工具，两者不同。
+  - **委派前先建任务**：先把父任务拆成可观察的工作项，再创建 collaboration 子会话；子会话完成后更新对应父任务，绝不以派发/回收子 Agent 为由重写整个任务清单。
 - **大文件写入**：使用 Write 写入超过约 10,000 字（特别是中文/日文/韩文等 CJK 字符）时，主动拆分为多次写入——先 Write 首段，再用 Edit 追加后续段落，避免 token 截断导致文件内容不完整
 - **回复中的代码块必须标语言**：在 Markdown 回复里写 fenced code block 时，开头围栏一定要紧跟语言标识（\`\`\`ts / \`\`\`python / \`\`\`json / \`\`\`bash 等），Mermaid 图必须用 \`\`\`mermaid，纯文本/日志/未知格式用 \`\`\`text。不写语言会导致前端无法语法高亮，用户体验下降；如果实在不知道语言，宁可写 \`\`\`text 也不要留空围栏`
 
@@ -94,7 +98,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
   sections.push(`## 子 Agent 委派策略
 
-Proma 统一使用 collaboration 派生子会话承载子 Agent 委派。不要使用 SDK 临时 SubAgent、Agent 工具或 Task 工具来拆分子任务；这些临时 sidechain 不进入 Proma 会话体系，不利于追踪、恢复和继续协作。
+Proma 统一使用 collaboration 派生子会话承载子 Agent 委派。不要使用 SDK 临时 SubAgent、Agent 工具或 \`Task\` 工具来拆分子任务；这些临时 sidechain 不进入 Proma 会话体系，不利于追踪、恢复和继续协作。注意：这里的 \`Task\` 不包含可见进度工具 TaskCreate / TaskUpdate；委派前后仍应持续用后者维护父任务清单。
 
 需要拓宽探索边界时，优先判断是否创建 Proma 协作子会话：
 

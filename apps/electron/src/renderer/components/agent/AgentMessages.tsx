@@ -18,7 +18,6 @@ import {
 import {
   Conversation,
   ConversationContent,
-  ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import { ScrollMinimap } from '@/components/ai-elements/scroll-minimap'
 import type { MinimapItem } from '@/components/ai-elements/scroll-minimap'
@@ -33,11 +32,12 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildHistoricalTaskSubjects, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
+import { TaskProgressOverlay } from './TaskProgressOverlay'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
@@ -543,6 +543,13 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   }, [persistedSDKMessages, liveMessages, streaming])
   const hasContent = allSDKMessages.length > 0
 
+  // 仅扫描当前 live turn；不从持久化历史恢复任务，避免跨 turn 显示旧进度。
+  const liveTaskActivities = React.useMemo(() => {
+    const liveGroups = groupIntoTurns(liveMessages ?? [], sessionModelId)
+    const currentTurn = [...liveGroups].reverse().find((group) => group.type === 'assistant-turn')
+    return currentTurn ? buildTaskProgressDataForTurn(currentTurn).taskActivities : []
+  }, [liveMessages, sessionModelId])
+
   // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
   // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
   // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
@@ -556,13 +563,6 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const allGroups = React.useMemo(() => {
     return groupIntoTurns(allSDKMessages, sessionModelId)
   }, [allSDKMessages, sessionModelId])
-
-  // 跨 turn 历史 TaskCreate id → subject 映射：顶层算一次，避免每个 AssistantTurnRenderer
-  // 都对全量 allMessages 做 O(M) 扫描（流式期间 useMemo 因 allMessages 引用变化失效，
-  // 长会话会触发 O(T × M) 雪崩）。
-  const historicalTaskSubjects = React.useMemo(() => {
-    return buildHistoricalTaskSubjects(allSDKMessages)
-  }, [allSDKMessages])
 
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
@@ -646,7 +646,6 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                     key={getGroupId(group)}
                     group={group}
                     allMessages={allSDKMessages}
-                    historicalTaskSubjects={historicalTaskSubjects}
                     basePath={sessionPath || undefined}
                     onFork={shouldDisableActions ? undefined : onFork}
                     onRewind={shouldDisableActions ? undefined : onRewind}
@@ -714,7 +713,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
           )}
         </ConversationContent>
         <ScrollMinimap items={minimapItems} />
-        <ConversationScrollButton />
+        <TaskProgressOverlay activities={liveTaskActivities} streaming={streaming} />
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage userMessages={allUserMessagesData} />
         )}

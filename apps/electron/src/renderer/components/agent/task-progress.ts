@@ -4,7 +4,12 @@ import type { ToolActivity } from '@/atoms/agent-atoms'
  * 注意：TaskGet/TaskList 是只读查询工具，不纳入聚合，保留为普通工具活动行 */
 export const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
 
-export type TaskItemStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
+export type TaskItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'error' | 'deleted'
+
+/** Claude SDK 与 Pi 兼容任务工具共用的终态集合。 */
+export function isTerminalTaskStatus(status: TaskItemStatus): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'error' || status === 'deleted'
+}
 
 export interface TaskItem {
   id: string
@@ -70,7 +75,15 @@ export function parseTaskCreateResult(result: string | undefined): { id: string;
 }
 
 function toTaskStatus(value: unknown, fallback: TaskItemStatus = 'pending'): TaskItemStatus {
-  if (value === 'pending' || value === 'in_progress' || value === 'completed' || value === 'deleted') {
+  if (
+    value === 'pending'
+    || value === 'in_progress'
+    || value === 'completed'
+    || value === 'blocked'
+    || value === 'cancelled'
+    || value === 'error'
+    || value === 'deleted'
+  ) {
     return value
   }
   return fallback

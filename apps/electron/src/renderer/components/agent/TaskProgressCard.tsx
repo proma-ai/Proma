@@ -12,6 +12,8 @@ import {
   CheckCircle2,
   Loader2,
   Circle,
+  CircleAlert,
+  CircleX,
   ListTodo,
   ChevronDown,
   ChevronUp,
@@ -29,6 +31,8 @@ interface TaskRowProps {
 function TaskRow({ item }: TaskRowProps): React.ReactElement {
   const isCompleted = item.status === 'completed'
   const isInProgress = item.status === 'in_progress'
+  const isCancelled = item.status === 'cancelled'
+  const isError = item.status === 'error'
 
   return (
     <div
@@ -49,15 +53,25 @@ function TaskRow({ item }: TaskRowProps): React.ReactElement {
         {isCompleted && (
           <CheckCircle2 className="size-2.5 text-green-500" />
         )}
+        {item.status === 'blocked' && (
+          <CircleAlert className="size-2.5 text-amber-500" />
+        )}
+        {isCancelled && (
+          <CircleX className="size-2.5 text-muted-foreground/50" />
+        )}
+        {isError && (
+          <CircleAlert className="size-2.5 text-destructive" />
+        )}
       </span>
 
       {/* 任务文字 */}
       <span
         className={cn(
           'truncate flex-1',
-          isCompleted && 'text-muted-foreground line-through',
+          (isCompleted || isCancelled) && 'text-muted-foreground line-through',
+          isError && 'text-destructive',
           isInProgress && 'text-foreground/90',
-          !isCompleted && !isInProgress && 'text-muted-foreground',
+          !isCompleted && !isInProgress && !isCancelled && !isError && 'text-muted-foreground',
         )}
       >
         {isInProgress && item.activeForm ? item.activeForm : item.subject}
@@ -86,12 +100,6 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 
 const MAX_VISIBLE = 8
 
-/** 虚线边框 SVG（与 Thinking 块相同风格） */
-const dashedBorderStyle = {
-  border: 'none',
-  backgroundImage: `url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='8' ry='8' stroke='rgba(128,128,128,0.4)' stroke-width='1.5' stroke-dasharray='8%2c 6' stroke-dashoffset='0' stroke-linecap='round'/%3e%3c/svg%3e")`,
-} as const
-
 interface TaskProgressCardProps {
   /** 包含 TaskCreate/TaskUpdate/TodoWrite 的活动列表 */
   activities: ToolActivity[]
@@ -101,9 +109,11 @@ interface TaskProgressCardProps {
   streamEnded?: boolean
   /** 历史 TaskCreate 的 taskId → subject 映射（跨 turn 回溯，用于恢复任务名） */
   historicalTaskSubjects?: Map<string, string>
+  /** 用于浮层详情时一次展示全部任务。 */
+  alwaysExpanded?: boolean
 }
 
-export function TaskProgressCard({ activities, animate = false, streamEnded = false, historicalTaskSubjects }: TaskProgressCardProps): React.ReactElement | null {
+export function TaskProgressCard({ activities, animate = false, streamEnded = false, historicalTaskSubjects, alwaysExpanded = false }: TaskProgressCardProps): React.ReactElement | null {
   const items = React.useMemo(() => aggregateTaskItems(activities, streamEnded, historicalTaskSubjects), [activities, streamEnded, historicalTaskSubjects])
   const [expanded, setExpanded] = React.useState(false)
 
@@ -112,15 +122,12 @@ export function TaskProgressCard({ activities, animate = false, streamEnded = fa
   const completedCount = items.filter((t) => t.status === 'completed').length
   const totalCount = items.length
   const needsCollapse = items.length > MAX_VISIBLE
-  const visibleItems = needsCollapse && !expanded ? items.slice(0, MAX_VISIBLE) : items
+  const visibleItems = needsCollapse && !expanded && !alwaysExpanded ? items.slice(0, MAX_VISIBLE) : items
 
   return (
     <div className={cn('my-1', animate && 'animate-in fade-in duration-200')}>
       {/* 虚线边框容器 */}
-      <div
-        className="rounded-lg bg-muted/40 px-3.5 py-3"
-        style={dashedBorderStyle}
-      >
+      <div className="rounded-md border border-border/50 bg-muted/35 px-3 py-2.5 shadow-sm">
         {/* 标题行 */}
         <div className="flex items-center gap-1.5 mb-1.5">
           <ListTodo className="size-3.5 text-muted-foreground" />
@@ -143,7 +150,7 @@ export function TaskProgressCard({ activities, animate = false, streamEnded = fa
         </div>
 
         {/* 展开/收起按钮 */}
-        {needsCollapse && (
+        {needsCollapse && !alwaysExpanded && (
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}

@@ -17,10 +17,9 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
-import { TaskProgressCard } from './TaskProgressCard'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
-import { extractToolResultText, parseTaskCreateResult, TASK_TOOL_NAMES } from './task-progress'
+import { extractToolResultText, TASK_TOOL_NAMES } from './task-progress'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
 // 会话转录的纯逻辑(Turn 分组 / 快照去重 / 预览)已下沉到 @proma/session-core 作为唯一真源。
 // 这里 import 供本文件内部使用，并 re-export 以保持既有 `from './SDKMessageRenderer'` 导入方零改动。
@@ -295,7 +294,7 @@ function AssistantLogo({ model }: { model?: string }): React.ReactElement {
 
 // groupIntoTurns / mergeAdjacentSameModelTurns 已迁移至 @proma/session-core
 
-function buildTaskProgressData(
+export function buildTaskProgressData(
   topLevelBlocks: SDKContentBlock[],
   turnMessages: SDKMessage[],
 ): {
@@ -340,56 +339,38 @@ function buildTaskProgressData(
 }
 
 /**
- * 扫描全部消息，构建跨 turn 的「历史 TaskCreate id → subject」映射。
+ * 提取一个 turn 中直接属于当前 Agent 的任务工具活动。
  *
- * 早期把这部分逻辑放在 buildTaskProgressData 里，每个 AssistantTurnRenderer 渲染都要
- * 跑一次 → O(T × M)；流式期间 allMessages 引用每帧变化，useMemo 缓存失效，长会话
- * 雪崩。提升到 AgentMessages 顶层后只算一次，O(M)。
+ * Task/Agent 容器内的子 Agent 工具不会进入父会话的浮动进度，避免跨执行单元串扰。
  */
-export function buildHistoricalTaskSubjects(allMessages: SDKMessage[]): Map<string, string> {
-  const historicalTaskSubjects = new Map<string, string>()
-  const globalResultMap = new Map<string, string>()
-  const pendingTaskCreates: SDKToolUseBlock[] = []
+export function buildTaskProgressDataForTurn(turn: AssistantTurn): { taskActivities: ToolActivity[] } {
+  const enrichedBlocks: Array<{ block: SDKContentBlock; parentToolUseId?: string | null }> = []
 
-  for (const msg of allMessages) {
-    if (msg.type === 'user') {
-      const userMsg = msg as SDKUserMessage
-      const blocks = userMsg.message?.content
-      if (!Array.isArray(blocks)) continue
-      for (const b of blocks) {
-        if (b.type === 'tool_result') {
-          const rb = b as SDKToolResultBlock
-          const text = extractToolResultForTask(userMsg, rb)
-          if (text) globalResultMap.set(rb.tool_use_id, text)
-        }
-      }
-    } else if (msg.type === 'assistant') {
-      const aMsg = msg as SDKAssistantMessage
-      const blocks = aMsg.message?.content
-      if (!Array.isArray(blocks)) continue
-      for (const b of blocks) {
-        if (b.type === 'tool_use' && (b as SDKToolUseBlock).name === 'TaskCreate') {
-          pendingTaskCreates.push(b as SDKToolUseBlock)
-        }
+  for (const message of turn.assistantMessages) {
+    const blocks = message.message?.content
+    if (!Array.isArray(blocks)) continue
+    for (const block of blocks) {
+      for (const normalizedBlock of normalizeThinkTagsInContentBlocks([block])) {
+        enrichedBlocks.push({ block: normalizedBlock, parentToolUseId: message.parent_tool_use_id })
       }
     }
   }
 
-  for (const tb of pendingTaskCreates) {
-    const input = tb.input as Record<string, unknown>
-    const subject = typeof input.subject === 'string'
-      ? input.subject
-      : typeof input.description === 'string'
-        ? input.description
-        : undefined
-    if (!subject) continue
-    const resultText = globalResultMap.get(tb.id)
-    const parsedResult = parseTaskCreateResult(resultText)
-    if (parsedResult?.id) historicalTaskSubjects.set(parsedResult.id, parsedResult.subject ?? subject)
+  const agentToolIds = new Set<string>()
+  for (const { block } of enrichedBlocks) {
+    if (block.type !== 'tool_use') continue
+    const tool = block as { name: string; id: string }
+    if (tool.name === 'Agent' || tool.name === 'Task') agentToolIds.add(tool.id)
   }
 
-  return historicalTaskSubjects
+  const topLevelBlocks = enrichedBlocks
+    .filter(({ parentToolUseId }) => !parentToolUseId || !agentToolIds.has(parentToolUseId))
+    .map(({ block }) => block)
+
+  const { taskActivities } = buildTaskProgressData(topLevelBlocks, turn.turnMessages)
+  return { taskActivities }
 }
+
 
 // ===== AssistantTurnRenderer — 渲染一个完整的 assistant turn =====
 
@@ -397,8 +378,6 @@ export interface AssistantTurnRendererProps {
   turn: AssistantTurn
   /** 所有消息（全局，供工具结果查找跨 turn 的结果） */
   allMessages: SDKMessage[]
-  /** 跨 turn 历史 TaskCreate id → subject 映射（由父组件 useMemo 算一次后传入） */
-  historicalTaskSubjects: Map<string, string>
   basePath?: string
   /** 分叉回调（传入最后一条 assistant 消息的 uuid） */
   onFork?: (upToMessageUuid: string) => void
@@ -418,7 +397,7 @@ export interface AssistantTurnRendererProps {
   sessionModelId?: string
 }
 
-export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
+export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   const processGroupsKeepExpanded = useAtomValue(agentProcessGroupsKeepExpandedAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
@@ -483,10 +462,6 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
     (b) => b.type === 'text' && 'text' in b && !!(b as { text: string }).text
   )
 
-  // Task 聚合数据（useMemo 防止每次渲染重算）
-  const { taskActivities, firstTaskIndex } = React.useMemo(() => {
-    return buildTaskProgressData(topLevelBlocks, turn.turnMessages)
-  }, [topLevelBlocks, turn.turnMessages])
   const completedToolResultIds = React.useMemo(() => {
     return buildCompletedToolResultIds(turn.turnMessages)
   }, [turn.turnMessages])
@@ -519,18 +494,8 @@ export function AssistantTurnRenderer({ turn, allMessages, historicalTaskSubject
   if (enrichedBlocks.length === 0 && !hasError) return null
 
   const renderTopLevelBlock = (block: SDKContentBlock, i: number): React.ReactNode => {
-    // Task 工具块：聚合为卡片，此处用索引定位首个任务工具
+    // 任务进度由底部浮层统一呈现，输出记录不再重复显示任务卡。
     if (block.type === 'tool_use' && TASK_TOOL_NAMES.has((block as SDKToolUseBlock).name)) {
-      if (i === firstTaskIndex) {
-        return (
-          <TaskProgressCard
-            key="task-progress-card"
-            activities={taskActivities}
-            streamEnded={!isStreaming}
-            historicalTaskSubjects={historicalTaskSubjects}
-          />
-        )
-      }
       return null
     }
 
@@ -1259,8 +1224,6 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
 export interface MessageGroupRendererProps {
   group: MessageGroup
   allMessages: SDKMessage[]
-  /** 跨 turn 历史 TaskCreate id → subject 映射（由父组件 useMemo 算一次后传入） */
-  historicalTaskSubjects: Map<string, string>
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
@@ -1324,7 +1287,7 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, historicalTaskSubjects, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -1348,7 +1311,6 @@ export function MessageGroupRenderer({ group, allMessages, historicalTaskSubject
       <AssistantTurnRenderer
         turn={group}
         allMessages={allMessages}
-        historicalTaskSubjects={historicalTaskSubjects}
         basePath={basePath}
         onFork={onFork}
         onRewind={onRewind}

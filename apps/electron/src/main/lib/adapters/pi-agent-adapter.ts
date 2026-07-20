@@ -947,9 +947,9 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
     }),
     sdk.defineTool({
       name: 'TodoWrite',
-      label: '更新待办',
-      description: '以 Claude SDK TodoWrite 兼容格式更新当前 turn 的任务列表。',
-      promptSnippet: '更新当前待办列表。',
+      label: '旧版待办快照（不可用）',
+      description: '旧版整表待办快照接口。为避免覆盖可见任务，常规任务追踪请使用 TaskCreate 和 TaskUpdate。',
+      promptSnippet: '不要调用；请改用 TaskCreate 或 TaskUpdate。',
       parameters: Type.Object({
         todos: Type.Array(Type.Object({
           content: Type.Optional(Type.String()),
@@ -965,19 +965,8 @@ function buildPromaProductToolDefinitions(sdk: PiSdk, canUseTool: PiAgentQueryOp
           activeForm: Type.Optional(Type.String()),
         })),
       }),
-      async execute(_toolCallId, params) {
-        const input = params as { todos?: Array<Record<string, unknown>> }
-        tasks.clear()
-        for (const [index, todo] of (input.todos ?? []).entries()) {
-          const id = String(index + 1)
-          tasks.set(id, {
-            id,
-            subject: stringFromInput(todo, ['subject', 'content'], `待办 #${id}`),
-            status: normalizeTaskStatus(todo.status, 'pending'),
-            activeForm: typeof todo.activeForm === 'string' ? todo.activeForm : undefined,
-          })
-        }
-        return createJsonToolResult({ todos: [...tasks.values()] })
+      async execute() {
+        throw new Error('TodoWrite 会整表覆盖任务，已禁用。请用 TaskCreate 追加任务，或用 TaskUpdate 更新指定 taskId。')
       },
     }),
   ] as unknown as ToolDefinition[]
