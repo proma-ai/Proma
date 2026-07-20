@@ -19,6 +19,39 @@ const PERMISSION_RANK: Record<PromaPermissionMode, number> = {
 
 export const MAX_RUNNING_DELEGATIONS_PER_PARENT = 50
 
+/**
+ * 为具有副作用的工具调用提供进程内幂等保护。
+ *
+ * Pi runtime 在流恢复或上游重放时可能再次执行同一个 toolCallId；以父会话和
+ * toolCallId 作为键可复用第一次的结果，避免重复创建子会话。缓存有界，防止长
+ * 会话中的工具调用 ID 无限累积。
+ */
+export function createToolCallIdempotencyCache<T>(maxEntries = 512): {
+  getOrCreate: (parentSessionId: string, toolCallId: string | undefined, create: () => T) => T
+} {
+  const entries = new Map<string, T>()
+
+  return {
+    getOrCreate(parentSessionId, toolCallId, create) {
+      const normalizedCallId = toolCallId?.trim()
+      // 缺少稳定调用 ID 时无法安全去重，保持原有执行语义。
+      if (!normalizedCallId) return create()
+
+      const key = `${parentSessionId}:${normalizedCallId}`
+      if (entries.has(key)) return entries.get(key)!
+
+      const result = create()
+      entries.set(key, result)
+      while (entries.size > maxEntries) {
+        const oldestKey = entries.keys().next().value
+        if (!oldestKey) break
+        entries.delete(oldestKey)
+      }
+      return result
+    },
+  }
+}
+
 export interface RecoveredDelegationState {
   delegationId: string
   parentSessionId: string

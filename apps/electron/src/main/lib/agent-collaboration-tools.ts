@@ -33,6 +33,7 @@ import {
   buildRecoveredDelegationState,
   buildDelegationTaskWithSharedContext,
   buildDelegationPrompt,
+  createToolCallIdempotencyCache,
   resolveDelegationPermissionMode,
 } from './agent-collaboration-utils'
 import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel } from './agent-model-selection'
@@ -79,6 +80,9 @@ const DELEGATION_GOAL_CHAR_LIMIT = 1_000
 const MAX_RETAINED_FINISHED_DELEGATIONS = 200
 
 const delegations = new Map<string, DelegationRecord>()
+// Pi 的 provider/retry 流可能重放同一个 tool call；委派会创建真实会话，必须幂等。
+const piDelegateAgentCalls = createToolCallIdempotencyCache<PiDelegationToolResult>()
+const piDelegateAgentsCalls = createToolCallIdempotencyCache<PiBatchDelegationResult>()
 
 // ===== 阻塞事件追踪（Level 1: Blocked Event Bubbling） =====
 
@@ -246,6 +250,17 @@ interface StartDelegationResult {
   record: DelegationRecord
   effectivePermissionMode: PromaPermissionMode
   effectiveModelId?: string
+}
+
+interface PiDelegationToolResult {
+  delegationId: string
+  effectivePermissionMode: PromaPermissionMode
+  effectiveModelId?: string
+}
+
+interface PiBatchDelegationResult {
+  created: PiDelegationToolResult[]
+  failures: Array<{ index: number; title?: string; error: string }>
 }
 
 function getRunningDelegationCount(parentSessionId: string): number {
@@ -1112,12 +1127,19 @@ export function buildPiCollaborationTools(
         permissionMode: permissionModeType,
         modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
       }),
-      async execute(_toolCallId: string, params: unknown) {
+      async execute(toolCallId: string, params: unknown) {
         const args = params as DelegateAgentArgs
-        const parent = assertCanCreateDelegation(ctx)
-        const result = startDelegation(ctx, parent, args)
+        const result = piDelegateAgentCalls.getOrCreate(ctx.sessionId, toolCallId, () => {
+          const parent = assertCanCreateDelegation(ctx)
+          const created = startDelegation(ctx, parent, args)
+          return {
+            delegationId: created.record.delegationId,
+            effectivePermissionMode: created.effectivePermissionMode,
+            effectiveModelId: created.effectiveModelId,
+          }
+        })
         return piJsonResult({
-          delegation: getDelegationSummary(result.record),
+          delegation: getDelegationResult(ctx.sessionId, result.delegationId),
           effectivePermissionMode: result.effectivePermissionMode,
           effectiveModelId: result.effectiveModelId,
           note: '子会话已启动。需要结果时调用 wait_for_delegations。',
@@ -1132,41 +1154,49 @@ export function buildPiCollaborationTools(
         sharedContext: Type.Optional(Type.String({ description: '批量子任务共用背景' })),
         items: Type.Array(delegateItemType, { description: '要创建的子会话列表，最多 50 个' }),
       }),
-      async execute(_toolCallId: string, params: unknown) {
+      async execute(toolCallId: string, params: unknown) {
         const args = params as { sharedContext?: string; items: DelegateAgentArgs[] }
-        const parent = assertCanCreateDelegation(ctx, args.items.length)
-        const created: StartDelegationResult[] = []
-        const failures: Array<{ index: number; title?: string; error: string }> = []
-        args.items.forEach((item, index) => {
-          try {
-            created.push(startDelegation(ctx, parent, {
-              ...item,
-              task: buildDelegationTaskWithSharedContext({
-                sharedContext: args.sharedContext,
-                task: item.task,
-              }),
-            }))
-          } catch (error) {
-            failures.push({
-              index,
-              title: item.title,
-              error: error instanceof Error ? error.message : '未知错误',
-            })
-          }
+        const batch = piDelegateAgentsCalls.getOrCreate(ctx.sessionId, toolCallId, () => {
+          const parent = assertCanCreateDelegation(ctx, args.items.length)
+          const created: PiDelegationToolResult[] = []
+          const failures: Array<{ index: number; title?: string; error: string }> = []
+          args.items.forEach((item, index) => {
+            try {
+              const started = startDelegation(ctx, parent, {
+                ...item,
+                task: buildDelegationTaskWithSharedContext({
+                  sharedContext: args.sharedContext,
+                  task: item.task,
+                }),
+              })
+              created.push({
+                delegationId: started.record.delegationId,
+                effectivePermissionMode: started.effectivePermissionMode,
+                effectiveModelId: started.effectiveModelId,
+              })
+            } catch (error) {
+              failures.push({
+                index,
+                title: item.title,
+                error: error instanceof Error ? error.message : '未知错误',
+              })
+            }
+          })
+          return { created, failures }
         })
         return piJsonResult({
-          delegations: created.map((item) => getDelegationSummary(item.record)),
-          effectivePermissionModes: created.map((item) => ({
-            delegationId: item.record.delegationId,
+          delegations: batch.created.map((item) => getDelegationResult(ctx.sessionId, item.delegationId)),
+          effectivePermissionModes: batch.created.map((item) => ({
+            delegationId: item.delegationId,
             permissionMode: item.effectivePermissionMode,
           })),
-          effectiveModels: created.map((item) => ({
-            delegationId: item.record.delegationId,
+          effectiveModels: batch.created.map((item) => ({
+            delegationId: item.delegationId,
             modelId: item.effectiveModelId,
           })),
-          failures,
-          createdCount: created.length,
-          failedCount: failures.length,
+          failures: batch.failures,
+          createdCount: batch.created.length,
+          failedCount: batch.failures.length,
           maxRunningDelegations: MAX_RUNNING_DELEGATIONS_PER_PARENT,
         })
       },
