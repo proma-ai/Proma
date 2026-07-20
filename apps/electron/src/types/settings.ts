@@ -197,11 +197,11 @@ export interface AppSettings {
   themeStyle?: ThemeStyle
   /** 界面风格 */
   interfaceVariant?: InterfaceVariant
-  /** Agent 默认渠道 ID（仅限 Anthropic 渠道） — 当前选中的渠道 */
+  /** Agent 默认渠道 ID（由当前 Agent Core 解释） — 当前选中的渠道 */
   agentChannelId?: string
   /** Agent 默认模型 ID */
   agentModelId?: string
-  /** Agent 启用的渠道 ID 列表（多选，Switch 开关） */
+  /** Claude Agent 可用渠道 ID 列表（由渠道启用状态与协议兼容性派生） */
   agentChannelIds?: string[]
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string

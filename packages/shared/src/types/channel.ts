@@ -28,6 +28,12 @@ export type ProviderType =
   | 'xiaomi'
   | 'xiaomi-token-plan'
   | 'openai-codex'
+  /**
+   * OpenAI Chat Completions 的自定义请求地址。
+   *
+   * Chat 会原样请求 `baseUrl`；`openai` 则将其视为协议根地址并自动补
+   * `/chat/completions`。这保留了接入自定义网关的能力。
+   */
   | 'custom'
 
 /**
@@ -80,13 +86,13 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
   'openai-codex': 'ChatGPT 订阅 (Codex)',
-  custom: 'OpenAI 兼容格式',
+  custom: 'OpenAI Chat Completions（自定义地址）',
 }
 
 /**
- * 支持 Agent 模式的供应商类型
+ * 支持 Claude Agent Core 的供应商类型
  *
- * Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点，
+ * Claude Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点，
  * 因此所有 Anthropic 协议兼容的供应商都可以用于 Agent。
  */
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
@@ -102,12 +108,10 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'xiaomi',
   'xiaomi-token-plan',
   'qwen-anthropic',
-  'openai-responses',
-  'openai-codex',
 ])
 
 /**
- * 判断供应商是否兼容 Agent 模式
+ * 判断供应商是否兼容 Claude Agent Core
  */
 export function isAgentCompatibleProvider(provider: ProviderType): boolean {
   return AGENT_COMPATIBLE_PROVIDERS.has(provider)

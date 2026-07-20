@@ -1,12 +1,13 @@
-import type { AgentRuntime } from '@proma/shared'
+import { isAgentCompatibleProvider, type Channel } from '@proma/shared'
 
-export function nextAgentChannelIdsAfterModelSelect(
-  currentChannelIds: string[],
-  selectedChannelId: string,
-  runtime: AgentRuntime,
+/**
+ * 没有独立渠道开关时，Claude runtime 的白名单完全由「渠道已启用 + 协议兼容」派生。
+ * Pi runtime 不读取该白名单。
+ */
+export function getEnabledClaudeAgentChannelIds(
+  channels: readonly Pick<Channel, 'id' | 'enabled' | 'provider'>[],
 ): string[] {
-  if (runtime !== 'claude') return currentChannelIds
-  return currentChannelIds.includes(selectedChannelId)
-    ? currentChannelIds
-    : [...currentChannelIds, selectedChannelId]
+  return channels
+    .filter((channel) => channel.enabled && isAgentCompatibleProvider(channel.provider))
+    .map((channel) => channel.id)
 }

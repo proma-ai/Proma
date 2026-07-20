@@ -137,7 +137,7 @@ function getUrlInputLabel(provider: ProviderType): string {
 }
 
 function getUrlInputPlaceholder(provider: ProviderType): string {
-  if (provider === 'custom') return 'https://api.example.com/v1/chat/completions'
+  if (provider === 'custom') return 'https://api.example.com/v2（Chat 按原样请求）'
   if (provider === 'openai-responses') return 'https://api.example.com/v1/responses'
   if (provider === 'anthropic-compatible') return 'https://api.example.com/v1/messages'
   return 'https://api.example.com'
@@ -697,6 +697,11 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             options={PROVIDER_SELECT_OPTIONS}
             placeholder="选择供应商"
           />
+          {provider === 'custom' && (
+            <div className="px-4 pb-3 text-xs text-muted-foreground">
+              用于 OpenAI Chat Completions 的自定义请求地址，Chat 会按原样发送请求。用于 Agent 时请选择 Pi；若服务提供 Anthropic Messages 端点，请选择「Anthropic 兼容格式」。
+            </div>
+          )}
           <SettingsInput
             label="供应商名称"
             value={name}

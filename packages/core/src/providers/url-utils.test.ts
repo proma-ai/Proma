@@ -186,8 +186,8 @@ describe('resolveOpenAIChatCompletionsUrl', () => {
     )
   })
 
-  test('custom 不向用户填写的地址追加后缀', () => {
-    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1', 'custom')).toBe('https://api.example.com/v1')
+  test('custom 不向自定义 Chat 请求地址追加后缀', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v2', 'custom')).toBe('https://api.example.com/v2')
   })
 
   test('内置 openai 协议根地址补全 /chat/completions', () => {

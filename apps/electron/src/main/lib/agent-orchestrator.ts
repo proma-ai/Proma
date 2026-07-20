@@ -31,6 +31,7 @@ import {
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
   isOpenAIReasoningSupportedModel,
+  isAgentCompatibleProvider,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -989,6 +990,32 @@ export class AgentOrchestrator {
       }
     }
     console.log(`[Agent 编排] Agent runtime: ${agentRuntime}`)
+
+    if (!channel.enabled) {
+      reportPreflightError({
+        code: 'channel_disabled',
+        title: '渠道已禁用',
+        message: '当前会话引用的渠道已被禁用，请在设置中启用渠道或重新选择模型。',
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
+        canRetry: false,
+      })
+      return
+    }
+
+    if (agentRuntime === 'claude' && !isAgentCompatibleProvider(channel.provider)) {
+      reportPreflightError({
+        code: 'agent_provider_not_supported',
+        title: '渠道不兼容 Claude Core',
+        message: '此渠道使用的不是 Anthropic Messages 协议。请切换到 Pi Core，或在设置中配置 Anthropic 兼容渠道。',
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
+        canRetry: false,
+      })
+      return
+    }
 
     // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
