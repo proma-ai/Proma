@@ -24,7 +24,7 @@ import type {
   SDKUserMessageInput,
   TypedError,
 } from '@proma/shared'
-import { isCodexFastModeSupportedModel } from '@proma/shared'
+import { isCodexFastModeSupportedModel, isOpenAIReasoningSupportedModel } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
@@ -1265,8 +1265,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
-        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses') && model.reasoning && {
-          extensionFactories: [createCodexRequestSettingsExtension({
+        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses')
+          && model.reasoning
+          && isOpenAIReasoningSupportedModel(input.model) && {
+            extensionFactories: [createCodexRequestSettingsExtension({
             fastMode: input.codexFastMode,
             thinkingLevel: input.openAIThinkingLevel,
           })],

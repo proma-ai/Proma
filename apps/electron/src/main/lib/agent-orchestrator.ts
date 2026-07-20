@@ -30,6 +30,7 @@ import {
   isPersistableSDKSystemMessage,
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
+  isOpenAIReasoningSupportedModel,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -1595,9 +1596,10 @@ export class AgentOrchestrator {
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
-        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses') && {
-          openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
-        }),
+        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses')
+          && isOpenAIReasoningSupportedModel(selectedModelId) && {
+            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
+          }),
         thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,

@@ -4,8 +4,16 @@ import {
   injectOpenAIThinkingLevel,
   withCodexFastModeServiceTier,
 } from './pi-codex-request-settings'
+import { isOpenAIReasoningSupportedModel } from '@proma/shared'
 
 describe('Pi Codex request settings', () => {
+  test('Given OpenAI model IDs When checking reasoning support Then excludes non-reasoning GPT-4 models', () => {
+    expect(isOpenAIReasoningSupportedModel('gpt-5.6')).toBe(true)
+    expect(isOpenAIReasoningSupportedModel('o4-mini')).toBe(true)
+    expect(isOpenAIReasoningSupportedModel('gpt-4o')).toBe(false)
+    expect(isOpenAIReasoningSupportedModel('gpt-4.1')).toBe(false)
+  })
+
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
     'Given supported %s When injecting Then requests priority tier',
     (model) => {
