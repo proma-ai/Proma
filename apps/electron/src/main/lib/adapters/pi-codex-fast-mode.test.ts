@@ -12,6 +12,8 @@ describe('Pi Codex request settings', () => {
     expect(isOpenAIReasoningSupportedModel('o4-mini')).toBe(true)
     expect(isOpenAIReasoningSupportedModel('gpt-4o')).toBe(false)
     expect(isOpenAIReasoningSupportedModel('gpt-4.1')).toBe(false)
+    expect(isOpenAIReasoningSupportedModel('gpt-5-chat-latest')).toBe(false)
+    expect(isOpenAIReasoningSupportedModel('gpt-5.3-chat-latest')).toBe(false)
   })
 
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(

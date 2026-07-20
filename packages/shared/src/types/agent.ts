@@ -54,6 +54,9 @@ export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' |
 /** 是否为 Proma 可暴露 reasoning.effort 的 OpenAI 推理模型。 */
 export function isOpenAIReasoningSupportedModel(modelId: string | undefined): boolean {
   const normalized = modelId?.toLowerCase() ?? ''
+  // Pi catalog 中 gpt-5*-chat-latest 是非 reasoning 的对话变体；它们不能接受
+  // reasoning.effort，必须在 UI 层与请求层共同排除。
+  if (normalized.endsWith('-chat-latest')) return false
   return normalized.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(normalized)
 }
 
