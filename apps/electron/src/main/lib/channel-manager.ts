@@ -20,6 +20,7 @@ import type {
   ChannelModel,
   ChannelPlanQuotaResult,
   ChannelPlanQuotaWindow,
+  CodexOAuthCredentials,
   FetchModelsInput,
   FetchModelsResult,
   ProviderType,
@@ -534,19 +535,28 @@ export function decryptApiKey(channelId: string): string {
  * 只有一次刷新在飞行，其余调用复用同一 Promise。对应 memory 里记过的
  * 「OAuth 刷新需并发锁」经验。
  */
-const inflightCodexRefresh = new Map<string, Promise<string>>()
+const inflightCodexRefresh = new Map<string, Promise<CodexOAuthCredentials>>()
+
+/** 保存 Pi 或 Proma 刷新后的完整 Codex OAuth 凭据。 */
+export function persistCodexOAuthCredentials(channelId: string, credentials: CodexOAuthCredentials): void {
+  const channel = getChannelById(channelId)
+  if (!channel || channel.provider !== 'openai-codex') {
+    throw new Error(`Codex 渠道不存在或类型不匹配: ${channelId}`)
+  }
+
+  const existing = parseCodexCredentials(decryptKey(channel.apiKey))
+  const merged = {
+    ...credentials,
+    accountId: credentials.accountId ?? existing?.accountId,
+  }
+  updateChannel(channelId, { apiKey: serializeCodexCredentials(merged) })
+}
 
 /**
- * 解析渠道存储的 ChatGPT (Codex) OAuth 凭据，按需刷新并回写，返回可用的 access token。
- *
- * - 渠道 apiKey 字段存的是加密后的凭据 JSON（access/refresh/expires）。
- * - access token 未过期：直接返回。
- * - 已过期或即将过期：用 refresh token 换新，加密回写渠道，返回新的 access token。
- *
- * 仅用于 provider === 'openai-codex' 的渠道。刷新失败时抛错，交由上层映射为
- * expired_oauth_token 并引导用户重新登录。
+ * 解析渠道存储的 ChatGPT (Codex) OAuth 凭据，按需刷新并回写。
+ * Pi runtime 必须接收完整 credential，才能在长时间运行时按真实 expires 刷新 token。
  */
-export async function resolveCodexAccessToken(channelId: string): Promise<string> {
+export async function resolveCodexOAuthCredentials(channelId: string): Promise<CodexOAuthCredentials> {
   const config = readConfig()
   const channel = config.channels.find((c) => c.id === channelId)
   if (!channel) {
@@ -559,23 +569,21 @@ export async function resolveCodexAccessToken(channelId: string): Promise<string
   }
 
   if (!isCodexCredentialExpired(credentials)) {
-    return credentials.access
+    return credentials
   }
 
-  // 过期：去重刷新。同一渠道并发调用复用同一个刷新 Promise。
   const existing = inflightCodexRefresh.get(channelId)
   if (existing) return existing
 
-  const refreshPromise = (async (): Promise<string> => {
+  const refreshPromise = (async (): Promise<CodexOAuthCredentials> => {
     try {
       const refreshed = await refreshCodexOAuth(credentials.refresh)
-      // 回写加密凭据（保留刚拿到的 accountId，缺省沿用旧值）。
       const merged = {
         ...refreshed,
         accountId: refreshed.accountId ?? credentials.accountId,
       }
-      updateChannel(channelId, { apiKey: serializeCodexCredentials(merged) })
-      return refreshed.access
+      persistCodexOAuthCredentials(channelId, merged)
+      return merged
     } finally {
       inflightCodexRefresh.delete(channelId)
     }
@@ -583,6 +591,11 @@ export async function resolveCodexAccessToken(channelId: string): Promise<string
 
   inflightCodexRefresh.set(channelId, refreshPromise)
   return refreshPromise
+}
+
+/** 返回当前有效的 Codex access token，兼容只需要 bearer token 的调用方。 */
+export async function resolveCodexAccessToken(channelId: string): Promise<string> {
+  return (await resolveCodexOAuthCredentials(channelId)).access
 }
 
 /**

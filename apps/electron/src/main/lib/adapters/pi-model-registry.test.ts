@@ -278,6 +278,11 @@ describe('ChatGPT Codex 模型目录补丁', () => {
       sessionId: 'session-1',
       prompt: 'hi',
       apiKey: 'oauth-access-token',
+      codexOAuthCredentials: {
+        access: 'oauth-access-token',
+        refresh: 'oauth-refresh-token',
+        expires: Date.now() + 3_600_000,
+      },
       provider: 'openai-codex',
       model: 'gpt-5.6-terra',
       permissionMode: 'plan',

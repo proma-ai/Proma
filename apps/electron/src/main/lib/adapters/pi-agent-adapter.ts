@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import type {
   AgentThinkingLevel,
   AgentProviderAdapter,
+  CodexOAuthCredentials,
   AgentQueryInput,
   ErrorCode,
   JsonSchemaOutputFormat,
@@ -131,6 +132,10 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   compactRequest?: boolean
   /** ChatGPT Codex Fast Mode；仅 openai-codex 的受支持模型实际注入 priority service tier。 */
   codexFastMode?: boolean
+  /** Pi 的 OAuth credential store 使用真实 expires 和 refresh，不读取 ~/.pi。 */
+  codexOAuthCredentials?: CodexOAuthCredentials
+  /** Pi 运行中刷新 OAuth 后，将新凭据回写到 Proma 渠道存储。 */
+  onCodexOAuthCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
   /** 会话级 OpenAI（Codex OAuth / Responses API）思考深度。 */
   openAIThinkingLevel?: AgentThinkingLevel
 }

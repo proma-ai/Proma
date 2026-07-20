@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
+import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -40,7 +40,14 @@ import { isPromptTooLongError, isThinkingSignatureError, friendlyErrorMessage, m
 import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { isTransientNetworkError, isMalformedResponseError, isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
-import { decryptApiKey, getChannelById, listChannels, resolveChannelRuntimeApiKey, resolveCodexAccessToken } from './channel-manager'
+import {
+  decryptApiKey,
+  getChannelById,
+  listChannels,
+  persistCodexOAuthCredentials,
+  resolveChannelRuntimeApiKey,
+  resolveCodexOAuthCredentials,
+} from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import { getCloudApiConfig } from '@proma/cloud'
@@ -1057,7 +1064,7 @@ export class AgentOrchestrator {
       reportPreflightError({
         code: 'model_requires_pi_runtime',
         title: '该模型需要 Pi Agent',
-        message: `${selectedOfficialAgentModel.name} 使用 OpenAI Responses API，仅支持 Pi Agent runtime。请在新建会话中使用 Pi runtime 后重试。`,
+        message: `${selectedOfficialAgentModel.name} 使用 OpenAI Responses API，仅支持 Pi Agent runtime。请在新建会话中使用 Pi Agent runtime 后重试。`,
         actions: [
           { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
         ],
@@ -1144,6 +1151,7 @@ export class AgentOrchestrator {
     }
 
     let apiKey: string
+    let codexOAuthCredentials: CodexOAuthCredentials | undefined
     if (channel.provider === 'proma') {
       // Proma 官方渠道：使用系统 API Key（由 Cloud 服务管理）
       try {
@@ -1167,7 +1175,8 @@ export class AgentOrchestrator {
       }
     } else if (channel.provider === 'openai-codex') {
       try {
-        apiKey = await resolveCodexAccessToken(channelId)
+        codexOAuthCredentials = await resolveCodexOAuthCredentials(channelId)
+        apiKey = codexOAuthCredentials.access
       } catch {
         failRun('ChatGPT 登录已失效，请在设置中重新登录 ChatGPT', [], { startedAt: streamStartedAt })
         return
@@ -1773,6 +1782,12 @@ export class AgentOrchestrator {
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
+        ...(codexOAuthCredentials && {
+          codexOAuthCredentials,
+          onCodexOAuthCredentialsRefreshed: (credentials: CodexOAuthCredentials) => {
+            persistCodexOAuthCredentials(channelId, credentials)
+          },
+        }),
         ...((channel.provider === 'openai-codex'
           || channel.provider === 'openai-responses'
           || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId)))

@@ -5,7 +5,12 @@
  * ProviderType 到 Pi API 协议、baseUrl、认证头和模型 catalog 默认值的映射。
  */
 
-import { extractZhipuCodingTeamApiToken, inferAgentSdkContextWindow, type ProviderType } from '@proma/shared'
+import {
+  extractZhipuCodingTeamApiToken,
+  inferAgentSdkContextWindow,
+  type CodexOAuthCredentials,
+  type ProviderType,
+} from '@proma/shared'
 import {
   getPromaUserAgent,
   normalizeAnthropicBaseUrlForSdk,
@@ -40,22 +45,16 @@ const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
 const CODEX_56_CONTEXT_WINDOW = 1_050_000
 const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
 
-type CodexRuntimeCredential = {
+type CodexRuntimeCredential = CodexOAuthCredentials & {
   type: 'oauth'
-  access: string
-  refresh: string
-  expires: number
+  [key: string]: unknown
 }
 
-function createCodexRuntimeCredentialStore(access: string) {
-  let credential: CodexRuntimeCredential | undefined = {
-    type: 'oauth',
-    access,
-    // Proma refreshes the persisted credential before each agent execution.
-    // Keep this one-run store valid so Pi never tries to write or refresh ~/.pi.
-    refresh: '',
-    expires: Number.MAX_SAFE_INTEGER,
-  }
+function createCodexRuntimeCredentialStore(
+  initial: CodexOAuthCredentials,
+  onRefreshed?: PiAgentQueryOptions['onCodexOAuthCredentialsRefreshed'],
+) {
+  let credential: CodexRuntimeCredential | undefined = { type: 'oauth', ...initial }
 
   return {
     async read(providerId: string): Promise<CodexRuntimeCredential | undefined> {
@@ -69,7 +68,21 @@ function createCodexRuntimeCredentialStore(access: string) {
       fn: (current: CodexRuntimeCredential | undefined) => Promise<CodexRuntimeCredential | undefined>,
     ): Promise<CodexRuntimeCredential | undefined> {
       if (providerId !== 'openai-codex') return undefined
+      const previous = credential
       credential = await fn(credential)
+
+      if (credential && (
+        previous?.access !== credential.access
+        || previous?.refresh !== credential.refresh
+        || previous?.expires !== credential.expires
+        || previous?.accountId !== credential.accountId
+      )) {
+        try {
+          await onRefreshed?.(credential)
+        } catch (error) {
+          console.warn('[Pi Codex OAuth] 刷新后的凭据回写失败，将在下次执行前重试:', error)
+        }
+      }
       return credential
     },
     async delete(providerId: string): Promise<void> {
@@ -408,15 +421,19 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * openai-codex 是 Pi SDK 的内置 KnownProvider：模型目录、baseUrl 和
  * `openai-codex-responses` 协议全部内置，无需（也不能）手工构造 models 或 baseUrl。
  * Pi 0.80.10 将它声明为 OAuth-only provider；runtime API key 不会参与其认证解析。
- * 因此将 Proma 已刷新过的 access token 放入一次性内存 OAuth credential store，
- * 避免 Pi 读取或写入全局 ~/.pi 认证文件。
- *
- * 注意：这里的 input.apiKey 必须是编排层用 resolveCodexAccessToken 解析并按需
- * 刷新后的 access token，而不是存储的凭据 JSON。
+ * 因此将 Proma 已刷新过的完整凭据放入一次性内存 OAuth credential store，
+ * 按真实 expires 刷新并回写 Proma，避免读写全局 ~/.pi 认证文件。
  */
 async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
+  if (!input.codexOAuthCredentials) {
+    throw new Error('ChatGPT (Codex) OAuth 凭据缺失，请重新登录')
+  }
+
   const modelRuntime = await sdk.ModelRuntime.create({
-    credentials: createCodexRuntimeCredentialStore(input.apiKey),
+    credentials: createCodexRuntimeCredentialStore(
+      input.codexOAuthCredentials,
+      input.onCodexOAuthCredentialsRefreshed,
+    ),
     allowModelNetwork: false,
   })
 
