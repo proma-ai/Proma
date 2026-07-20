@@ -14,6 +14,7 @@ import type {
 } from '@proma/shared'
 import { DingTalkBridge } from './dingtalk-bridge'
 import { getDingTalkMultiBotConfig, getDingTalkBotById } from './dingtalk-config'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 
 class DingTalkBridgeManager {
   /** botId → Bridge 实例 */
@@ -30,7 +31,7 @@ class DingTalkBridgeManager {
       try {
         await this.startBot(bot.id)
       } catch (error) {
-        console.error(`[钉钉 BridgeManager] Bot "${bot.name}" 启动失败:`, error)
+        console.error(`[钉钉 BridgeManager] Bot "${bot.name}" 启动失败:`, redactSensitiveLogValue(error))
       }
     }
 
@@ -45,7 +46,7 @@ class DingTalkBridgeManager {
       try {
         bridge.stop()
       } catch (error) {
-        console.error(`[钉钉 BridgeManager] Bot ${botId} 停止失败:`, error)
+        console.error(`[钉钉 BridgeManager] Bot ${botId} 停止失败:`, redactSensitiveLogValue(error))
       }
     }
     this.bridges.clear()

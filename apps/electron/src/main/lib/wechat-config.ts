@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { getWeChatConfigPath } from './config-paths'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 import type { WeChatConfig, WeChatCredentials } from '@proma/shared'
 
 /** 默认配置 */
@@ -33,7 +34,7 @@ function decryptToken(encryptedToken: string): string {
   try {
     return safeStorage.decryptString(Buffer.from(encryptedToken, 'base64'))
   } catch (error) {
-    console.error('[微信配置] 解密 Bot Token 失败:', error)
+    console.error('[微信配置] 解密 Bot Token 失败:', redactSensitiveLogValue(error))
     throw new Error('解密 Bot Token 失败')
   }
 }
@@ -49,7 +50,7 @@ export function getWeChatConfig(): WeChatConfig {
     const data = JSON.parse(raw) as Partial<WeChatConfig>
     return { ...DEFAULT_CONFIG, ...data }
   } catch (error) {
-    console.error('[微信配置] 读取配置失败:', error)
+    console.error('[微信配置] 读取配置失败:', redactSensitiveLogValue(error))
     return { ...DEFAULT_CONFIG }
   }
 }
