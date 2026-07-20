@@ -116,7 +116,7 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, ModelOption, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
-import { inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel, isOpenAIReasoningSupportedModel, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
@@ -720,6 +720,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const isOpenAIThinkingAvailable = hasSessionMeta
     && sessionAgentRuntime === 'pi'
     && (agentChannelProvider === 'openai-codex' || agentChannelProvider === 'openai-responses')
+    && isOpenAIReasoningSupportedModel(agentModelId ?? undefined)
   const fallbackOpenAIThinkingLevel: AgentThinkingLevel = agentEffort === 'max'
     ? 'xhigh'
     : agentEffort ?? (agentThinking?.type === 'adaptive' ? 'high' : 'off')

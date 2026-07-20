@@ -43,8 +43,11 @@ export function injectOpenAIThinkingLevel(payload: unknown, settings: CodexReque
   if (!effort) return payload
 
   const existingReasoning = isReasoningPayload(payload.reasoning) ? payload.reasoning : {}
+  // ChatGPT Codex OAuth 不支持 reasoning.mode；直接 Responses 本次也明确不暴露该
+  // 维度，因此统一剥离，避免上游 Pi 或其他扩展将该字段透传到请求。
+  const { mode: _unsupportedReasoningMode, ...reasoningWithoutMode } = existingReasoning
   const reasoning = {
-    ...existingReasoning,
+    ...reasoningWithoutMode,
     // 已有 provider 值优先，避免覆盖 Pi 模型 catalog 的未来专属映射；Fast Mode
     // 的直接 provider stream 不会写入它，因此会落到会话级滑块值。
     ...(effort === 'none' || existingReasoning.effort === undefined ? { effort } : {}),

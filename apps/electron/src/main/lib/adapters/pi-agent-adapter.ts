@@ -1265,7 +1265,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
-        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses') && {
+        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses') && model.reasoning && {
           extensionFactories: [createCodexRequestSettingsExtension({
             fastMode: input.codexFastMode,
             thinkingLevel: input.openAIThinkingLevel,

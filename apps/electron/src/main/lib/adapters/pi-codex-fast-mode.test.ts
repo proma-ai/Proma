@@ -46,6 +46,16 @@ describe('Pi Codex request settings', () => {
     })
   })
 
+  test('Given an upstream reasoning mode When injecting Then strips mode from the request', () => {
+    expect(injectOpenAIThinkingLevel({
+      model: 'gpt-5.6',
+      reasoning: { effort: 'high', mode: 'pro', summary: 'auto' },
+    }, { thinkingLevel: 'high' })).toEqual({
+      model: 'gpt-5.6',
+      reasoning: { effort: 'high', summary: 'auto' },
+    })
+  })
+
   test('Given non-object payload When injecting Then leaves payload unchanged', () => {
     expect(injectCodexFastMode('not-a-request')).toBe('not-a-request')
   })
