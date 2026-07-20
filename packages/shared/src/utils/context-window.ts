@@ -27,6 +27,8 @@ const AGENT_SDK_1M_CONTEXT_RULES = {
     'claude-opus-4-8',
     'claude-fable-5',
   ],
+  // OpenAI ChatGPT (Codex OAuth)：GPT-5.6 系列均为 1M。
+  gpt: ['gpt-5.6'],
   // DeepSeek
   deepseek: ['deepseek-v4'],
   // 智谱 GLM
