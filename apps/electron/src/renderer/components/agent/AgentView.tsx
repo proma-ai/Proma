@@ -120,6 +120,7 @@ import {
   inferContextWindow,
   isCodexFastModeSupportedModel,
   isOpenAIReasoningSupportedModel,
+  isPromaOfficialOpenAIReasoningModel,
   MAX_ATTACHMENT_SIZE,
   PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
 } from '@proma/shared'
@@ -654,7 +655,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const codexFastModeEnabled = isCodexFastModeAvailable && sessionMeta?.codexFastMode === true
   const isOpenAIThinkingAvailable = hasSessionMeta
     && sessionAgentRuntime === 'pi'
-    && (agentChannelProvider === 'openai-codex' || agentChannelProvider === 'openai-responses')
+    && (agentChannelProvider === 'openai-codex'
+      || agentChannelProvider === 'openai-responses'
+      || (agentChannelProvider === 'proma' && isPromaOfficialOpenAIReasoningModel(agentModelId ?? undefined)))
     && isOpenAIReasoningSupportedModel(agentModelId ?? undefined)
   const fallbackOpenAIThinkingLevel: AgentThinkingLevel = agentEffort === 'max'
     ? 'xhigh'

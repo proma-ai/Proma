@@ -60,14 +60,22 @@ export function isOpenAIReasoningSupportedModel(modelId: string | undefined): bo
   return normalized.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(normalized)
 }
 
-/** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
-export const CODEX_FAST_MODE_MODEL_IDS = [
+/** Proma 官方渠道已验证可配置 Responses reasoning.effort 的 GPT 模型。 */
+export const PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS = [
   'gpt-5.4',
   'gpt-5.5',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
   'gpt-5.6-luna',
 ] as const
+
+export function isPromaOfficialOpenAIReasoningModel(modelId: string | undefined): boolean {
+  return modelId !== undefined
+    && (PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS as readonly string[]).includes(modelId.toLowerCase())
+}
+
+/** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
+export const CODEX_FAST_MODE_MODEL_IDS = PROMA_OFFICIAL_OPENAI_REASONING_MODEL_IDS
 
 /** 模型 ID 是否可通过 ChatGPT Codex OAuth 使用 Fast Mode。 */
 export function isCodexFastModeSupportedModel(modelId: string | undefined): boolean {

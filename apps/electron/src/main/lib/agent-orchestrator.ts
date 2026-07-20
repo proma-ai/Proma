@@ -31,6 +31,7 @@ import {
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
   isOpenAIReasoningSupportedModel,
+  isPromaOfficialOpenAIReasoningModel,
   isAgentCompatibleProvider,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
@@ -1772,11 +1773,13 @@ export class AgentOrchestrator {
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
-        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses')
+        ...((channel.provider === 'openai-codex'
+          || channel.provider === 'openai-responses'
+          || (channel.provider === 'proma' && isPromaOfficialOpenAIReasoningModel(selectedModelId)))
           && isOpenAIReasoningSupportedModel(selectedModelId) && {
-            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
+            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId),
           }),
-        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
+        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
