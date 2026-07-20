@@ -95,7 +95,9 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   piAgentDir: string
   piSessionDir: string
   customTools?: ToolDefinition[]
-  onSessionId?: (sdkSessionId: string) => void
+  onSessionId?: (sdkSessionId: string, sessionFile?: string) => void
+  /** Pi final assistant UI UUID → 持久树状 session entry ID。 */
+  onPiEntryBindings?: (bindings: Record<string, string>) => void
   onModelResolved?: (model: string) => void
   onContextWindow?: (contextWindow: number) => void
   thinkingLevel?: AgentThinkingLevel
@@ -1237,7 +1239,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       const sessionManager = sessionFile
         ? sdk.SessionManager.open(sessionFile, input.piSessionDir, cwd)
         : sdk.SessionManager.create(cwd, input.piSessionDir)
-      const { authStorage, registry, model } = await buildModel(sdk, input)
+      const { modelRuntime, model } = await buildModel(sdk, input)
       const customTools = [
         ...buildBuiltinToolDefinitions(
           sdk,
@@ -1287,8 +1289,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       const { session } = await sdk.createAgentSession({
         cwd,
         agentDir: input.piAgentDir,
-        authStorage,
-        modelRegistry: registry,
+        modelRuntime,
         settingsManager,
         resourceLoader,
         sessionManager,
@@ -1302,10 +1303,11 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
         // provider stream，确保 request body 与 usage.cost 都使用 priority tier。
         session.agent.streamFn = async (requestModel, context, options) => {
-          const auth = await registry.getApiKeyAndHeaders(requestModel)
-          if (!auth.ok) throw new Error(auth.error)
+          const authResult = await modelRuntime.getAuth(requestModel)
+          if (!authResult?.auth.apiKey) throw new Error('无法获取 ChatGPT (Codex) OAuth access token')
+          const auth = authResult.auth
 
-          const env = auth.env || options?.env ? { ...(auth.env ?? {}), ...(options?.env ?? {}) } : undefined
+          const env = authResult.env || options?.env ? { ...(authResult.env ?? {}), ...(options?.env ?? {}) } : undefined
           const retrySettings = settingsManager.getProviderRetrySettings()
           const configuredTimeoutMs = settingsManager.getHttpIdleTimeoutMs()
           const timeoutMs = options?.timeoutMs ?? retrySettings.timeoutMs ?? (configuredTimeoutMs === 0 ? 2_147_483_647 : configuredTimeoutMs)
@@ -1339,7 +1341,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         throw createAbortError()
       }
 
-      input.onSessionId?.(session.sessionId)
+      input.onSessionId?.(session.sessionId, session.sessionFile)
       input.onModelResolved?.(session.model?.id ?? input.model ?? 'default')
       input.onContextWindow?.(model.contextWindow ?? DEFAULT_CONTEXT_WINDOW)
 
@@ -1352,6 +1354,19 @@ export class PiAgentAdapter implements AgentProviderAdapter {
 
       let activeAssistant: AssistantMessageState = {}
       let lastPartialAssistant: AssistantMessage | undefined
+      // message_end 发生在 Pi 落盘前；保留对象身份，待 prompt 完成后从
+      // SessionManager entries 精确取得 Pi entry ID，绝不按文本猜测。
+      const finalAssistantUuids = new Map<AssistantMessage, string>()
+
+      const persistPiEntryBindings = (): void => {
+        const bindings: Record<string, string> = {}
+        for (const entry of sessionManager.getEntries()) {
+          if (entry.type !== 'message' || entry.message.role !== 'assistant') continue
+          const uuid = finalAssistantUuids.get(entry.message as AssistantMessage)
+          if (uuid) bindings[uuid] = entry.id
+        }
+        if (Object.keys(bindings).length > 0) input.onPiEntryBindings?.(bindings)
+      }
 
       const assistantUuidFor = (): string => {
         if (!activeAssistant.uuid) {
@@ -1402,6 +1417,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 ...(isAssistant && { uuid: assistantUuidFor() }),
               })
               if (converted && (converted.type !== 'user' || hasToolResult(converted))) queue.push(converted)
+              if (isAssistant) finalAssistantUuids.set(event.message as AssistantMessage, assistantUuidFor())
               if (isAssistant) {
                 activeAssistant = {}
                 lastPartialAssistant = undefined
@@ -1524,6 +1540,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               }
               currentInterrupt?.resolveAccepted()
               await session.prompt(prompt, { source: 'rpc' })
+              persistPiEntryBindings()
             } finally {
               if (active.interrupting) {
                 session.agent.state.messages = dropTrailingAbortedAssistant(session.agent.state.messages)

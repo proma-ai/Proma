@@ -605,6 +605,10 @@ export interface AgentSessionMeta {
   modelId?: string
   /** SDK 内部会话 ID（用于 resume 衔接上下文） */
   sdkSessionId?: string
+  /** Pi session JSONL 的精确路径；避免仅按 session ID 子串定位 artifact。 */
+  piSessionFile?: string
+  /** Proma assistant UI UUID 到 Pi 树状 session entry ID 的持久映射。 */
+  piEntryBindings?: Record<string, string>
   /** 当前会话使用的 Agent runtime；历史会话缺省为 claude */
   agentRuntime?: import('./agent-provider').AgentRuntime
   /** ChatGPT Codex Fast Mode 开关；仅 Pi + ChatGPT OAuth 的受支持模型实际生效。 */

@@ -156,7 +156,7 @@ function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string
 async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCatalogModel[]> {
   try {
     const { getModels } = await loadPiAiCompat()
-    return getModels(provider)
+    return getModels(provider as Parameters<typeof getModels>[0])
   } catch {
     return []
   }
@@ -166,7 +166,7 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
   const checked = new Set<string>()
   for (const candidate of candidatePiProviders(provider)) {
     checked.add(candidate)
-    const model = findCatalogModelById(await getCatalogModels(candidate), modelId)
+    const model = findCatalogModelById(await getCatalogModels(candidate as KnownProvider), modelId)
     if (model) return model
   }
 
@@ -300,21 +300,22 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * 刷新后的 access token，而不是存储的凭据 JSON。
  */
 async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
-  const authStorage = sdk.AuthStorage.inMemory()
+  // Pi 0.80.10 移除了 AuthStorage / ModelRegistry facade，统一由 ModelRuntime
+  // 管理内置模型、临时 API key 与 provider 配置。
+  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
   // 内置 codex 模型的 provider 字段即 'openai-codex'，token 必须设在该名下。
-  authStorage.setRuntimeApiKey('openai-codex', input.apiKey)
-  const registry = sdk.ModelRegistry.inMemory(authStorage)
+  await modelRuntime.setRuntimeApiKey('openai-codex', input.apiKey)
 
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
   const codexModels = await getCodexCatalogModels()
-  const model = (resolvedModelId ? registry.find('openai-codex', resolvedModelId) : undefined)
+  const model = (resolvedModelId ? modelRuntime.getModel('openai-codex', resolvedModelId) : undefined)
     ?? (resolvedModelId ? findCatalogModelById(codexModels, resolvedModelId) : undefined)
     // 指定模型缺失时回退到首个内置 codex 模型，避免因模型 ID 漂移直接失败。
-    ?? registry.getAll().find((m) => m.provider === 'openai-codex')
+    ?? modelRuntime.getModels('openai-codex')[0]
   if (!model) {
     throw new Error('未找到可用的 ChatGPT (Codex) 模型，请确认已登录并升级 Pi 运行时')
   }
-  return { authStorage, registry, model }
+  return { modelRuntime, model }
 }
 
 /** 列出 Pi SDK 内置的 ChatGPT (Codex) 模型 ID，供渲染层"模型拉取"使用。 */
@@ -326,16 +327,11 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   if (input.provider === 'openai-codex') {
     return buildCodexModel(sdk, input)
   }
-  const authStorage = sdk.AuthStorage.inMemory()
   const providerName = `proma-${input.provider}-${input.sessionId}`
   const resolvedApiKey = resolvePiApiKey(input.provider, input.apiKey)
-  const runtimeApiKey = shouldUseRuntimeApiKey(input.provider) ? resolvedApiKey : undefined
-  if (runtimeApiKey) {
-    authStorage.setRuntimeApiKey(providerName, runtimeApiKey)
-  }
   // pi runtime 统一剥离 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
-  const registry = sdk.ModelRegistry.inMemory(authStorage)
+  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
   const api = normalizePiApi(input.provider)
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })
   const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider)
@@ -343,7 +339,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
     throw new Error(`渠道 ${input.channelName ?? input.provider} 缺少 Base URL`)
   }
   const headers = buildPiRequestHeaders(input.provider, resolvedApiKey)
-  registry.registerProvider(providerName, {
+  modelRuntime.registerProvider(providerName, {
     name: input.channelName ?? providerName,
     apiKey: resolvedApiKey,
     ...(headers ? { headers } : {}),
@@ -361,7 +357,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
       maxTokens: modelDefaults.maxTokens,
     }],
   })
-  const model = registry.find(providerName, resolvedModelId ?? 'default')
+  const model = modelRuntime.getModel(providerName, resolvedModelId ?? 'default')
   if (!model) throw new Error(`Pi model registration failed: ${resolvedModelId ?? 'default'}`)
-  return { authStorage, registry, model }
+  return { modelRuntime, model }
 }

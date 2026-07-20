@@ -408,7 +408,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'agentRuntime' | 'codexFastMode' | 'openAIThinkingLevel' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'agentRuntime' | 'codexFastMode' | 'openAIThinkingLevel' | 'workspaceId' | 'pinned' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -703,6 +703,10 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
     throw new Error('该会话没有 SDK session，无法分叉')
   }
 
+  if (sourceMeta.agentRuntime === 'pi') {
+    return forkPiAgentSession(sourceMeta, input)
+  }
+
   const forkModelId = input.modelId !== undefined
     ? assertEnabledModelForChannel({
         channelId: sourceMeta.channelId,
@@ -853,6 +857,95 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
 
   console.log(`[Agent 会话] 分叉会话已创建（SDK 原生 fork）: ${sourceMeta.title} → ${forkTitle} (${copiedMessages} 条消息, sdkSessionId=${forkResult.sessionId})`)
   return newMeta
+}
+
+/**
+ * Pi 的 session 是 append-only tree。分叉必须由 SessionManager 导出目标 branch，
+ * 不能只复制 Proma 的展示 JSONL，否则下一轮 resume 仍会看到被截断的上下文。
+ */
+async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessionInput): Promise<AgentSessionMeta> {
+  const targetUuid = input.upToMessageUuid
+  if (!targetUuid) throw new Error('Pi 分叉需要指定一条已完成的 assistant 消息')
+  const entryId = sourceMeta.piEntryBindings?.[targetUuid]
+  if (!entryId) throw new Error('该 Pi 历史消息尚无 entry ID 映射，无法安全分叉；请在新版 Proma 中继续一次对话后再试')
+  if (!sourceMeta.piSessionFile || !existsSync(sourceMeta.piSessionFile)) {
+    throw new Error('未找到 Pi session artifact，无法安全分叉')
+  }
+
+  const forkModelId = input.modelId !== undefined
+    ? assertEnabledModelForChannel({ channelId: sourceMeta.channelId, modelId: input.modelId, purpose: '分叉 Pi Agent 会话' })
+    : sourceMeta.modelId
+  const sourceDir = sourceMeta.workspaceId
+    ? getAgentWorkspace(sourceMeta.workspaceId)
+      ? getAgentSessionWorkspacePath(getAgentWorkspace(sourceMeta.workspaceId)!.slug, sourceMeta.id)
+      : undefined
+    : undefined
+  const newMeta = createAgentSession(`${sourceMeta.title} (fork)`, sourceMeta.channelId, sourceMeta.workspaceId, forkModelId, 'pi')
+  const destDir = sourceMeta.workspaceId && getAgentWorkspace(sourceMeta.workspaceId)
+    ? getAgentSessionWorkspacePath(getAgentWorkspace(sourceMeta.workspaceId)!.slug, newMeta.id)
+    : undefined
+
+  try {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const sessionDir = join(getSdkConfigDir(), 'sessions')
+    const sourceManager = sdk.SessionManager.open(sourceMeta.piSessionFile, sessionDir, sourceDir)
+    const branchFile = sourceManager.createBranchedSession(entryId)
+    if (!branchFile || !existsSync(branchFile)) {
+      throw new Error('Pi 未能生成分叉 session artifact')
+    }
+    const forkedManager = sdk.SessionManager.forkFrom(branchFile, destDir ?? sourceDir ?? process.cwd(), sessionDir)
+    const piSessionFile = forkedManager.getSessionFile()
+    if (!piSessionFile || !existsSync(piSessionFile)) throw new Error('Pi 分叉 artifact 校验失败')
+
+    updateAgentSessionMeta(newMeta.id, {
+      sdkSessionId: forkedManager.getSessionId(),
+      piSessionFile,
+      piEntryBindings: { ...(sourceMeta.piEntryBindings ?? {}) },
+      forkSourceDir: sourceDir,
+    })
+    newMeta.sdkSessionId = forkedManager.getSessionId()
+    newMeta.piSessionFile = piSessionFile
+    newMeta.piEntryBindings = { ...(sourceMeta.piEntryBindings ?? {}) }
+
+    if (sourceDir && destDir) copyForkWorkspaceFiles(sourceDir, destDir)
+    await copyForkStoredSDKMessages({
+      sourceSessionId: sourceMeta.id,
+      destSessionId: newMeta.id,
+      upToMessageUuid: targetUuid,
+      sourceDir,
+      destDir,
+    })
+    return newMeta
+  } catch (error) {
+    // 尚未对外返回的新 session 可安全清理，避免留下会被侧栏打开的半成品。
+    try { deleteAgentSession(newMeta.id) } catch { /* 保留原始错误 */ }
+    throw error
+  }
+}
+
+/** 将当前 Pi 会话切换到指定 assistant turn 的新 branch artifact（持久化回退）。 */
+export async function rewindPiAgentSession(sessionId: string, assistantMessageUuid: string): Promise<void> {
+  const meta = getAgentSessionMeta(sessionId)
+  if (!meta || meta.agentRuntime !== 'pi') throw new Error('不是 Pi Agent 会话')
+  const entryId = meta.piEntryBindings?.[assistantMessageUuid]
+  if (!entryId) throw new Error('该 Pi 历史消息尚无 entry ID 映射，无法安全回退')
+  if (!meta.piSessionFile || !existsSync(meta.piSessionFile)) throw new Error('未找到 Pi session artifact，无法安全回退')
+  const cwd = meta.workspaceId && getAgentWorkspace(meta.workspaceId)
+    ? getAgentSessionWorkspacePath(getAgentWorkspace(meta.workspaceId)!.slug, meta.id)
+    : process.cwd()
+  const sdk = await import('@earendil-works/pi-coding-agent')
+  const manager = sdk.SessionManager.open(meta.piSessionFile, join(getSdkConfigDir(), 'sessions'), cwd)
+  const branchFile = manager.createBranchedSession(entryId)
+  if (!branchFile || !existsSync(branchFile)) throw new Error('Pi 未能生成回退 session artifact')
+  const rewindManager = sdk.SessionManager.open(branchFile, join(getSdkConfigDir(), 'sessions'), cwd)
+  const retainedBindings = Object.fromEntries(
+    Object.entries(meta.piEntryBindings ?? {}).filter(([, mappedEntryId]) => Boolean(rewindManager.getEntry(mappedEntryId))),
+  )
+  updateAgentSessionMeta(sessionId, {
+    sdkSessionId: rewindManager.getSessionId(),
+    piSessionFile: branchFile,
+    piEntryBindings: retainedBindings,
+  })
 }
 
 interface ForkStoredMessageRef {
