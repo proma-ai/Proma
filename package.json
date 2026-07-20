@@ -81,9 +81,10 @@
     "@tiptap/starter-kit": "3.19.0",
     "@tiptap/suggestion": "3.20.0",
     "prosemirror-model": "1.25.9",
-    "@earendil-works/pi-agent-core": "0.80.10",
-    "@earendil-works/pi-ai": "0.80.10",
-    "@earendil-works/pi-coding-agent": "0.80.10"
+    "@earendil-works/pi-agent-core": "0.80.9",
+    "@earendil-works/pi-ai": "0.80.9",
+    "@earendil-works/pi-coding-agent": "0.80.9",
+    "@earendil-works/pi-tui": "0.80.9"
   },
   "patchedDependencies": {}
 }
