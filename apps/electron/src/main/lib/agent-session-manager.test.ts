@@ -151,15 +151,15 @@ describe('Agent 会话 JSONL 读取', () => {
 })
 
 describe('Agent 会话 runtime 元数据', () => {
-  test('Given 新建会话 When 指定或省略 runtime Then 持久化指定值并默认 Pi', () => {
+  test('Given 新建会话 When 指定或省略 runtime Then 持久化指定值并默认 Claude', () => {
     const defaultRuntimeSession = manager.createAgentSession('默认内核会话')
-    const claudeRuntimeSession = manager.createAgentSession('Claude 内核会话', undefined, undefined, undefined, 'claude')
+    const piRuntimeSession = manager.createAgentSession('Pi 内核会话', undefined, undefined, undefined, 'pi')
 
-    expect(defaultRuntimeSession.agentRuntime).toBe('pi')
-    expect(claudeRuntimeSession.agentRuntime).toBe('claude')
-    expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('pi')
-    expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.agentRuntime).toBe('claude')
-    expect(defaultRuntimeSession.openAIThinkingLevel).toBe('high')
+    expect(defaultRuntimeSession.agentRuntime).toBe('claude')
+    expect(piRuntimeSession.agentRuntime).toBe('pi')
+    expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('claude')
+    expect(manager.getAgentSessionMeta(piRuntimeSession.id)?.agentRuntime).toBe('pi')
+    expect(defaultRuntimeSession.openAIThinkingLevel).toBe('off')
   })
 
   test('Given Codex session settings When updating Then persists depth per session', () => {
