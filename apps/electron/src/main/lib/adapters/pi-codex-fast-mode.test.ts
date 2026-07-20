@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { injectCodexFastMode, withCodexFastModeServiceTier } from './pi-codex-fast-mode'
+import {
+  injectCodexFastMode,
+  injectOpenAIThinkingLevel,
+  withCodexFastModeServiceTier,
+} from './pi-codex-request-settings'
 
-describe('Pi Codex Fast Mode', () => {
+describe('Pi Codex request settings', () => {
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
     'Given supported %s When injecting Then requests priority tier',
     (model) => {
@@ -25,6 +29,20 @@ describe('Pi Codex Fast Mode', () => {
     expect(withCodexFastModeServiceTier({ transport: 'websocket' })).toEqual({
       transport: 'websocket',
       serviceTier: 'priority',
+    })
+  })
+
+  test('Given thinking is disabled When injecting Then explicitly sends none', () => {
+    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'off' })).toEqual({
+      model: 'gpt-5.5',
+      reasoning: { effort: 'none' },
+    })
+  })
+
+  test('Given direct Codex provider stream When injecting Then fills the selected non-off effort', () => {
+    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'high' })).toEqual({
+      model: 'gpt-5.5',
+      reasoning: { effort: 'high' },
     })
   })
 

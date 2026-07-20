@@ -110,7 +110,12 @@ function buildPiRuntimeEnv(env: Record<string, string | undefined>): AgentRuntim
   return { env: cleanEnv }
 }
 
-function resolvePiThinkingLevel(settings: ReturnType<typeof getSettings>): AgentThinkingLevel {
+function resolvePiThinkingLevel(
+  settings: ReturnType<typeof getSettings>,
+  sessionMeta?: AgentSessionMeta,
+): AgentThinkingLevel {
+  // 会话级 Codex 设置优先；缺失时才兼容历史全局思考开关。
+  if (sessionMeta?.openAIThinkingLevel) return sessionMeta.openAIThinkingLevel
   if (settings.agentThinking?.type === 'disabled') return 'off'
   if (settings.agentEffort === 'max') return 'xhigh'
   return settings.agentEffort ?? (settings.agentThinking ? 'high' : 'off')
@@ -1590,7 +1595,10 @@ export class AgentOrchestrator {
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
-        thinkingLevel: resolvePiThinkingLevel(appSettings),
+        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses') && {
+          openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
+        }),
+        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),

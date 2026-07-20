@@ -45,6 +45,7 @@ import type {
   AgentSessionMeta,
   AgentSendInput,
   AgentRuntime,
+  AgentThinkingLevel,
   AgentWorkspace,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
@@ -1832,6 +1833,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_SESSION_MODEL,
     async (_, id: string, channelId?: string, modelId?: string): Promise<AgentSessionMeta> => {
+      if (isAgentSessionActive(id)) {
+        throw new Error('Agent 正在运行，完成后再切换模型')
+      }
       return updateAgentSessionMeta(id, { channelId, modelId })
     }
   )
@@ -2390,6 +2394,23 @@ export function registerIpcHandlers(): void {
         throw new Error('Agent 正在运行，完成后再切换快速模式')
       }
       return updateAgentSessionMeta(sessionId, { codexFastMode: enabled })
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SESSION_OPENAI_REASONING,
+    async (_, sessionId: string, thinkingLevel: AgentThinkingLevel): Promise<AgentSessionMeta> => {
+      const validThinkingLevels: AgentThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+      if (!validThinkingLevels.includes(thinkingLevel)) {
+        throw new Error(`无效的 Codex 思考深度: ${String(thinkingLevel)}`)
+      }
+      if (!getAgentSessionMeta(sessionId)) {
+        throw new Error(`Agent 会话不存在: ${sessionId}`)
+      }
+      if (isAgentSessionActive(sessionId)) {
+        throw new Error('Agent 正在运行，完成后再切换思考深度')
+      }
+      return updateAgentSessionMeta(sessionId, { openAIThinkingLevel: thinkingLevel })
     }
   )
 

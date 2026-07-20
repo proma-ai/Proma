@@ -600,6 +600,8 @@ export interface AgentSessionMeta {
   agentRuntime?: import('./agent-provider').AgentRuntime
   /** ChatGPT Codex Fast Mode 开关；仅 Pi + ChatGPT OAuth 的受支持模型实际生效。 */
   codexFastMode?: boolean
+  /** 本会话的 OpenAI（Codex OAuth / Responses API）推理深度；未设置时兼容旧版全局思考设置。 */
+  openAIThinkingLevel?: AgentThinkingLevel
   /** 所属工作区 ID */
   workspaceId?: string
   /** 是否置顶 */
@@ -1601,6 +1603,8 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_SESSION_AGENT_RUNTIME: 'agent:update-session-agent-runtime',
   /** 切换指定会话的 ChatGPT Codex Fast Mode（下一轮 Pi 请求生效） */
   UPDATE_SESSION_CODEX_FAST_MODE: 'agent:update-session-codex-fast-mode',
+  /** 更新指定会话的 OpenAI 推理设置（下一轮 Pi 请求生效） */
+  UPDATE_SESSION_OPENAI_REASONING: 'agent:update-session-openai-reasoning',
 
   // AskUserQuestion 交互式问答
   /** AskUser 响应（渲染进程 → 主进程） */
