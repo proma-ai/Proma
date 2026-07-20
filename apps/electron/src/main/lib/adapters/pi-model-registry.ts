@@ -257,13 +257,36 @@ function usesBearerOnlyAnthropicAuth(provider: ProviderType): boolean {
   return requiresPromaUserAgent(provider) || provider === 'minimax' || provider === 'qwen-anthropic'
 }
 
-export function buildPiRequestHeaders(provider: ProviderType, apiKey: string, api = normalizePiApi(provider)): PiRequestHeaders | undefined {
-  if (api !== 'anthropic-messages') return undefined
+const PROMA_RUNTIME_TELEMETRY_HOSTS = new Set([
+  'api.proma.cool',
+  'online-dev-api.proma.cool',
+])
 
-  const headers: PiRequestHeaders = {
-    Authorization: `Bearer ${apiKey}`,
+function isPromaCloudBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false
+  try {
+    return PROMA_RUNTIME_TELEMETRY_HOSTS.has(new URL(baseUrl).hostname)
+  } catch {
+    return false
+  }
+}
+
+export function buildPiRequestHeaders(
+  provider: ProviderType,
+  apiKey: string,
+  api = normalizePiApi(provider),
+  baseUrl?: string,
+): PiRequestHeaders | undefined {
+  const headers: PiRequestHeaders = {}
+  // 运行时埋点只发送给 Proma Cloud；第三方/用户自建渠道不应收到 Proma 专用头。
+  if (isPromaCloudBaseUrl(baseUrl)) {
+    headers['X-Proma-Agent-Runtime'] = 'pi'
+  }
+  if (api !== 'anthropic-messages') {
+    return Object.keys(headers).length > 0 ? headers : undefined
   }
 
+  headers.Authorization = `Bearer ${apiKey}`
   if (requiresPromaUserAgent(provider)) {
     headers['User-Agent'] = getPromaUserAgent()
   }
@@ -386,7 +409,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   if (!baseUrl) {
     throw new Error(`渠道 ${input.channelName ?? input.provider} 缺少 Base URL`)
   }
-  const headers = buildPiRequestHeaders(input.provider, resolvedApiKey, api)
+  const headers = buildPiRequestHeaders(input.provider, resolvedApiKey, api, baseUrl)
   registry.registerProvider(providerName, {
     name: input.channelName ?? providerName,
     apiKey: resolvedApiKey,

@@ -31,6 +31,7 @@ describe('Pi runtime 智谱团队版认证', () => {
     expect(headers?.Authorization).toBe('Bearer model-key')
     expect(headers?.Authorization).not.toContain('organization')
     expect(headers?.['User-Agent']).toBeDefined()
+    expect(headers?.['X-Proma-Agent-Runtime']).toBeUndefined()
   })
 
   test('Given zhipu-coding-team When requiresPromaUserAgent Then true', () => {
@@ -47,6 +48,24 @@ describe('Pi runtime 智谱团队版认证', () => {
   test('Given 普通 anthropic 渠道 When resolvePiApiKey Then 原样返回', () => {
     expect(resolvePiApiKey('anthropic', 'plain-key')).toBe('plain-key')
     expect(requiresPromaUserAgent('anthropic')).toBe(false)
+  })
+
+  test('Given Proma Cloud Responses model When build headers Then it marks Pi runtime', () => {
+    const headers = buildPiRequestHeaders('proma', 'test-key', 'openai-responses', 'https://api.proma.cool/api/v1')
+    expect(headers).toEqual({ 'X-Proma-Agent-Runtime': 'pi' })
+  })
+
+  test.each([
+    'https://api.proma.cool/api/v1',
+    'https://online-dev-api.proma.cool/api/v1',
+  ])('Given Proma API host %s When build headers Then it marks Pi runtime', (baseUrl) => {
+    const headers = buildPiRequestHeaders('proma', 'test-key', 'openai-responses', baseUrl)
+    expect(headers).toEqual({ 'X-Proma-Agent-Runtime': 'pi' })
+  })
+
+  test('Given third-party Responses channel When build headers Then it does not send Proma runtime header', () => {
+    const headers = buildPiRequestHeaders('openai', 'test-key', 'openai-responses', 'https://api.example.com/v1')
+    expect(headers).toBeUndefined()
   })
 })
 
