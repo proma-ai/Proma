@@ -94,6 +94,26 @@ describe('Pi runtime OpenAI Responses 渠道', () => {
   })
 })
 
+describe('Pi runtime 火山方舟模型限制', () => {
+  test('Given 火山方舟的 GLM-5.2 When buildModel Then 使用其 128000 输出上限', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-volcengine-glm-52',
+      prompt: 'hi',
+      apiKey: 'test-key',
+      provider: 'doubao',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      model: 'glm-5.2',
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.maxTokens).toBe(128_000)
+  })
+})
+
 describe('ChatGPT Codex 模型目录补丁', () => {
   test('Given Pi SDK 内置目录缺少 5.6 When listCodexModels Then 补齐 5.6 系列', async () => {
     const models = await listCodexModels()

@@ -33,6 +33,7 @@ interface PiModelDefaults {
 const ZERO_MODEL_COST: PiModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
+const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
@@ -182,12 +183,16 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
+  const isVolcengineGlm52 = input.provider === 'doubao' && input.model?.toLowerCase() === 'glm-5.2'
   return {
     reasoning: catalogModel?.reasoning ?? true,
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     contextWindow: catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTokens: catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    // Pi 的智谱目录将 GLM-5.2 标为 131072，但火山方舟兼容端点上限为 128000。
+    maxTokens: isVolcengineGlm52
+      ? VOLCENGINE_GLM_52_MAX_TOKENS
+      : (catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS),
   }
 }
 
