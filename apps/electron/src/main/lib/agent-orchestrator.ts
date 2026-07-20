@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType, AgentThinkingLevel } from '@proma/shared'
+import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -66,6 +66,7 @@ import type { AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
+import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -109,17 +110,6 @@ function buildPiRuntimeEnv(env: Record<string, string | undefined>): AgentRuntim
     if (value !== undefined) cleanEnv[key] = value
   }
   return { env: cleanEnv }
-}
-
-function resolvePiThinkingLevel(
-  settings: ReturnType<typeof getSettings>,
-  sessionMeta?: AgentSessionMeta,
-): AgentThinkingLevel {
-  // 会话级 Codex 设置优先；缺失时才兼容历史全局思考开关。
-  if (sessionMeta?.openAIThinkingLevel) return sessionMeta.openAIThinkingLevel
-  if (settings.agentThinking?.type === 'disabled') return 'off'
-  if (settings.agentEffort === 'max') return 'xhigh'
-  return settings.agentEffort ?? (settings.agentThinking ? 'high' : 'off')
 }
 
 const EMPTY_RESPONSE_RESULT_SUBTYPE = 'empty_response'
@@ -1598,9 +1588,9 @@ export class AgentOrchestrator {
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
         ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses')
           && isOpenAIReasoningSupportedModel(selectedModelId) && {
-            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
+            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
           }),
-        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta),
+        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
