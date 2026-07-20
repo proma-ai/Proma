@@ -82,8 +82,6 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 当前 thinking block 的 token 估算值（SDK 实时估算，非计费值） */
   thinkingEstimatedTokens?: number
-  /** usage 数据最后更新时间戳（毫秒），用于 UI 提示数据时效 */
-  usageUpdatedAt?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
   /**
@@ -766,13 +764,11 @@ export function applyAgentEvent(
             contextWindow: prev.contextWindow != null
               ? Math.max(prev.contextWindow, event.usage.contextWindow)
               : event.usage.contextWindow,
-            usageUpdatedAt: Date.now(),
           }),
           ...(needResultFallback && event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
           ...(needResultFallback && event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
           ...(needResultFallback && event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
           ...(needResultFallback && event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
-          ...(needResultFallback && { usageUpdatedAt: Date.now() }),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
@@ -808,7 +804,6 @@ export function applyAgentEvent(
         ...(event.usage.contextWindow && {
           contextWindow: Math.max(prev.contextWindow ?? 0, event.usage.contextWindow),
         }),
-        usageUpdatedAt: Date.now(),
       }
 
     case 'compacting':
@@ -901,8 +896,6 @@ export interface AgentContextStatus {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
-  /** usage 数据最后更新时间戳（毫秒） */
-  usageUpdatedAt?: number
 }
 
 /** 当前会话的上下文使用量派生 atom */
@@ -918,7 +911,6 @@ export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
     cacheCreationTokens: state?.cacheCreationTokens,
     costUsd: state?.costUsd,
     contextWindow: state?.contextWindow,
-    usageUpdatedAt: state?.usageUpdatedAt,
   }
 })
 
