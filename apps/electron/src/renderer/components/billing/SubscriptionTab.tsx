@@ -118,21 +118,19 @@ const DEFAULT_VISUAL = TIER_VISUALS.lite!
 
 /** 所有档位共享的功能列表 */
 const FEATURES = [
-  '全部顶尖 AI 模型',
-  'Claude API 访问',
+  'Proma Cloud 官方模型',
   'Proma Agent',
-  'Agent 开发',
-  'Nano Banana',
-  'GPT Image 2',
-  'DeepSeek 视觉（仅 Proma 渠道支持）',
+  'Agent 专用模型',
+  '联网搜索与图像生成工具',
+  '统一额度与用量管理',
 ]
 
 /** 档位描述 */
 const TIER_DESC: Record<string, string> = {
-  lite: '适合探索 AI 能力，体验基础模型的入门方案',
-  standard: '适合偶尔使用，可满足传统聊天对话需求',
-  pro: '面向专业用户，支持密集 Agent 工作',
-  max: '专为重度用户设计，无限制释放 AI 生产力',
+  lite: '适合体验 Proma Cloud 与轻度日常对话',
+  standard: '适合日常对话、开发辅助与偶尔的 Agent 任务',
+  pro: '适合高频开发工作流与密集 Agent 任务',
+  max: '适合重度使用与更高额度的长期工作流',
 }
 
 const RECOMMENDED_TIER = 'standard'
@@ -322,11 +320,12 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
 
       {/* 订阅计划卡片 */}
       <div className="space-y-4">
-        {!subStatus?.has_active && (
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold">选择适合你的 Proma Cloud 使用额度</h3>
           <p className="text-xs text-muted-foreground">
-            推荐从低档位开始，随时可叠加更多额度
+            额度可用于官方模型调用、Proma Agent 与云端工具；按实际模型和任务规模消耗。
           </p>
-        )}
+        </div>
 
         <div className="grid grid-cols-4 gap-3">
           {tiers.map((tier: SubscriptionTier) => {
@@ -415,9 +414,9 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <div className="flex items-start gap-2">
           <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
           <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
-            <p>所有模型价格与官方 API 美元计价保持一致</p>
-            <p>1 积分 = ¥1 = $0.128，订阅有效期 31 天，到期后未使用积分清零（团队采用单独计费层），</p>
-            <p>支持重复购买叠加，优先消耗先购买的积分 (FIFO)</p>
+            <p>Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</p>
+            <p>订阅额度有效期为 31 天，到期后未使用额度清零（团队采用单独计费层）。</p>
+            <p>支持重复购买叠加，优先消耗先购买的额度（FIFO）。</p>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useAtom, useStore } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { AppShell } from './components/app-shell/AppShell'
 import { OnboardingView } from './components/onboarding/OnboardingView'
 import { TutorialBanner } from './components/tutorial/TutorialBanner'
@@ -9,7 +9,9 @@ import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
 import { SettingsDialog } from './components/settings/SettingsDialog'
-import { conversationsAtom } from './atoms/chat-atoms'
+import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSessionIdAtom, currentAgentWorkspaceIdAtom } from './atoms/agent-atoms'
+import { appModeAtom } from './atoms/app-mode'
+import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
@@ -23,6 +25,11 @@ export default function App(): React.ReactElement {
   }
 
   const store = useStore()
+  const agentChannelId = useAtomValue(agentChannelIdAtom)
+  const agentModelId = useAtomValue(agentModelIdAtom)
+  const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
+  const setAppMode = useSetAtom(appModeAtom)
+  const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const [isLoading, setIsLoading] = React.useState(true)
   const [showOnboarding, setShowOnboarding] = React.useState(false)
 
@@ -46,7 +53,7 @@ export default function App(): React.ReactElement {
     initialize()
   }, [])
 
-  // 完成 onboarding 回调：创建欢迎对话，可选打开教程 Tab
+  // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，可选打开教程 Tab
   const handleOnboardingComplete = async (openTutorial?: boolean) => {
     setShowOnboarding(false)
 
@@ -59,20 +66,35 @@ export default function App(): React.ReactElement {
     }
 
     try {
-      const meta = await window.electronAPI.createWelcomeConversation()
-      if (meta) {
-        const conversations = store.get(conversationsAtom)
-        store.set(conversationsAtom, [meta, ...conversations])
+      const meta = await window.electronAPI.createAgentSession(
+        '开始使用 Proma',
+        agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
+        currentWorkspaceId || undefined,
+        agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
+      )
+      const sessions = store.get(agentSessionsAtom)
+      store.set(agentSessionsAtom, [meta, ...sessions])
+      setAppMode('agent')
+      setCurrentAgentSessionId(meta.id)
 
-        const tabs = store.get(tabsAtom)
-        const result = openTab(tabs, {
-          type: 'chat',
-          sessionId: meta.id,
-          title: meta.title,
-        })
-        store.set(tabsAtom, result.tabs)
-        store.set(activeTabIdAtom, result.activeTabId)
-      }
+      const tabs = store.get(tabsAtom)
+      const result = openTab(tabs, {
+        type: 'agent',
+        sessionId: meta.id,
+        title: meta.title,
+      })
+      store.set(tabsAtom, result.tabs)
+      store.set(activeTabIdAtom, result.activeTabId)
+
+      // 首次会话以一条真实用户消息启动，让 Agent 基于当前工作区主动完成引导。
+      await window.electronAPI.sendAgentMessage({
+        sessionId: meta.id,
+        channelId: meta.channelId ?? agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
+        modelId: meta.modelId ?? agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
+        workspaceId: meta.workspaceId ?? currentWorkspaceId ?? undefined,
+        agentRuntime: 'pi',
+        userMessage: '你好，我刚完成 Proma 的首次设置。请作为我的上手引导助手：先用简洁友好的方式欢迎我，说明你可以如何协助我完成真实工作；然后只问我一个最关键的问题，帮助你了解我现在想完成的第一件事。请不要一次性罗列大量功能，也不要执行任何工具或修改文件，等我回复后再继续。',
+      })
     } catch (error) {
       console.error('[App] 创建欢迎对话失败:', error)
     }

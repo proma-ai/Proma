@@ -88,7 +88,7 @@ import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
-import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, calcTotalAvailable } from '@proma/shared'
+import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL, calcTotalAvailable } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
@@ -245,6 +245,7 @@ function AgentSettingsInitializer(): null {
       if (whitelistChanged) updates.agentChannelIds = claudeChannelIds
 
       // 验证并加载 Agent 默认渠道/模型。Claude runtime 不能恢复到 Pi 专用或已禁用渠道。
+      const hasStoredAgentModel = Boolean(settings.agentModelId)
       if (settings.agentChannelId && selectedChannelIsUsable) {
         setAgentChannelId(settings.agentChannelId)
         if (settings.agentModelId) setAgentModelId(settings.agentModelId)
@@ -269,6 +270,19 @@ function AgentSettingsInitializer(): null {
         if (resolvedChannelId) {
           setAgentChannelId(resolvedChannelId)
           updates.agentChannelId = resolvedChannelId
+        }
+      }
+
+      // 新用户没有持久化模型时，官方渠道优先使用官方声明的默认 Agent 模型；
+      // 若它尚未同步或被禁用，回退到官方 Agent 模型列表中的第一个可用模型。
+      if (!hasStoredAgentModel && resolvedChannelId === PROMA_OFFICIAL_CHANNEL_ID) {
+        const officialChannel = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
+        const modelList = officialChannel?.agentModels ?? officialChannel?.models ?? []
+        const defaultModel = modelList.find((model) => model.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL && model.enabled)
+          ?? modelList.find((model) => model.enabled)
+        if (defaultModel) {
+          setAgentModelId(defaultModel.id)
+          updates.agentModelId = defaultModel.id
         }
       }
 
@@ -434,6 +448,34 @@ function checkLowBalanceWarning(totalAvailable: number): void {
  * - 获取账单信息
  * - 订阅额度不足事件
  */
+function CloudWelcomeNoticeInitializer(): null {
+  const user = useAtomValue(cloudUserAtom)
+  const setAppMode = useSetAtom(appModeAtom)
+
+  useEffect(() => {
+    if (!isCloudMode() || !user) return
+
+    try {
+      const key = `proma-cloud-welcome-notice:${user.id}`
+      if (localStorage.getItem(key) !== null) return
+
+      // Persist before emitting the toast so StrictMode/remounts cannot duplicate it.
+      localStorage.setItem(key, '1')
+      toast.message('已获赠 5 积分体验额度，使用 Proma Cloud 即可开始体验 Agent。', {
+        duration: 10_000,
+        action: {
+          label: '打开 Agent',
+          onClick: () => setAppMode('agent'),
+        },
+      })
+    } catch {
+      // Storage may be unavailable; skip rather than repeatedly interrupting the user.
+    }
+  }, [user, setAppMode])
+
+  return null
+}
+
 function BillingInitializer(): null {
   const setBillingInfo = useSetAtom(billingInfoAtom)
   const setBillingLoading = useSetAtom(billingLoadingAtom)
@@ -1097,6 +1139,7 @@ if (isQuickTaskWindow) {
     <React.StrictMode>
       <ThemeInitializer />
       <CloudAuthInitializer />
+      <CloudWelcomeNoticeInitializer />
       <BillingInitializer />
       <OfficialChannelInitializer />
       <ModelHealthInitializer />

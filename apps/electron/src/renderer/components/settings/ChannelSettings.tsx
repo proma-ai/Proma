@@ -395,9 +395,9 @@ function AgentOfficialProviderRow({ channel, enabled, onToggle, onRefresh }: Age
 
   return (
     <SettingsRow
-      label="Proma 官方"
+      label="Proma Cloud"
       icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
-      description={`官方供应商 · ${enabledCount} 个模型可用 · 稳定可靠 · 可用于 Agent`}
+      description={`免配置 · Agent 专用模型 · 云端工具已就绪 · ${enabledCount} 个模型可用`}
       className="group"
     >
       <div className="flex items-center gap-2">
@@ -452,9 +452,9 @@ function OfficialChannelRow({ channel, onEdit, onToggle, onRefresh }: OfficialCh
 
   return (
     <SettingsRow
-      label="Proma 官方"
+      label="Proma Cloud"
       icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
-      description={<div className="flex items-center gap-x-2 gap-y-1"><span>{`官方供应商 · ${enabledCount} 个模型可用`}</span><AgentCoreChips provider={channel.provider} /></div>}
+      description={<div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span>{`免配置 · Agent 专用模型 · 云端工具已就绪 · ${enabledCount} 个模型可用`}</span><AgentCoreChips provider={channel.provider} /></div>}
       className="group"
     >
       <div className="flex items-center gap-2">

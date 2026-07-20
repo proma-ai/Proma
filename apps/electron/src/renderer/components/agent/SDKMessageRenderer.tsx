@@ -1170,7 +1170,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
           <div className="mt-3">
             <Button size="sm" onClick={handleGoToBilling}>
               <CreditCard className="size-3.5 mr-1.5" />
-              去充值
+              查看使用额度
             </Button>
           </div>
         ) : hasActions && (

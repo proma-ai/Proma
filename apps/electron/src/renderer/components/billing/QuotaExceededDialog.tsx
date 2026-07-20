@@ -1,7 +1,7 @@
 /**
  * QuotaExceededDialog - 额度不足弹窗
  *
- * 402 响应时弹出，引导用户去充值
+ * 402 响应时弹出，引导用户查看使用额度
  */
 
 import * as React from 'react'
@@ -34,15 +34,15 @@ export function QuotaExceededDialog(): React.ReactElement {
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>积分不足</AlertDialogTitle>
+          <AlertDialogTitle>Proma Cloud 额度不足</AlertDialogTitle>
           <AlertDialogDescription>
-            您的积分已耗尽，请充值后继续使用
+            当前官方额度不足。订阅后可继续使用 Proma Cloud 的模型、Agent 与云端工具。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
           <AlertDialogAction onClick={handleRecharge}>
-            去充值
+            查看使用额度
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

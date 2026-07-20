@@ -690,7 +690,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           <ArrowLeft size={18} />
         </Button>
         <h3 className="text-lg font-medium text-foreground flex-1">
-          {isPromaOfficial ? 'Proma 官方渠道' : isEdit ? '编辑渠道' : '添加渠道'}
+          {isPromaOfficial ? 'Proma Cloud' : isEdit ? '编辑渠道' : '添加渠道'}
         </h3>
         {/* 新建模式：创建按钮（官方渠道无创建动作） */}
         {!isEdit && !isPromaOfficial && (
@@ -709,7 +709,25 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       {isPromaOfficial && (
         <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/5 text-sm text-primary">
           <Info size={15} className="flex-shrink-0" />
-          <span>模型由服务端管理，自动更新。如需调整可启用/禁用单个模型。</span>
+          <span>Proma Cloud 由 Proma 管理模型连接、额度与云端工具。模型会自动更新；你仍可按需启用或停用单个模型。</span>
+        </div>
+      )}
+
+      {/* 创建第三方渠道时的非阻断对比提示 */}
+      {!isPromaOfficial && !isEdit && (
+        <div className="flex items-start gap-2 px-3 py-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
+          <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
+          <div className="space-y-1">
+            <p>已有 API Key、Coding Plan 或中转服务？可以继续添加。</p>
+            <p>Proma Cloud 则免去模型连接配置，并已准备好 Agent 专用模型、联网与生图等云端工具，适合直接开始工作。</p>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              返回渠道列表
+            </button>
+          </div>
         </div>
       )}
 

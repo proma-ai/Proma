@@ -95,6 +95,12 @@ export function WelcomeEmptyState(): React.ReactElement {
           )
         })}
       </div>
+
+      {mode === 'agent' && (
+        <p className="text-xs text-muted-foreground">
+          Proma Cloud 已就绪：免配置使用 Agent 专用模型与云端工具
+        </p>
+      )}
     </div>
   )
 }

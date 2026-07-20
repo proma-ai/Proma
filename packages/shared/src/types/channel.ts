@@ -42,7 +42,7 @@ export type ProviderType =
 export const PROMA_OFFICIAL_CHANNEL_ID = 'proma-official'
 
 /** Proma 官方渠道 Agent 模式默认模型 */
-export const PROMA_OFFICIAL_DEFAULT_AGENT_MODEL = 'claude-opus-4-6'
+export const PROMA_OFFICIAL_DEFAULT_AGENT_MODEL = 'gpt-5.6-luna'
 
 /**
  * 各供应商的默认 Base URL
@@ -78,7 +78,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
  * 供应商显示名称
  */
 export const PROVIDER_LABELS: Record<ProviderType, string> = {
-  proma: 'Proma 官方',
+  proma: 'Proma Cloud',
   anthropic: 'Anthropic',
   'anthropic-compatible': 'Anthropic 兼容格式',
   openai: 'OpenAI',
