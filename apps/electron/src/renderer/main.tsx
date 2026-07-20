@@ -94,7 +94,7 @@ import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
-import { nextAgentChannelIdsAfterModelSelect } from './lib/agent-channel-selection'
+import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -224,79 +224,56 @@ function AgentSettingsInitializer(): null {
         store.set(selectedModelAtom, null)
       }
 
-      // 验证并加载 Agent 渠道/模型
-      if (settings.agentChannelId && channelIds.has(settings.agentChannelId)) {
-        setAgentChannelId(settings.agentChannelId)
-      } else if (settings.agentChannelId && !channelIds.has(settings.agentChannelId)) {
-        // 渠道已删除，清除无效设置
-        console.warn('[AgentSettings] agentChannelId 指向已删除的渠道，清除')
-        window.electronAPI.updateSettings({ agentChannelId: undefined, agentModelId: undefined }).catch(console.error)
-      }
-      if (settings.agentModelId && (!settings.agentChannelId || channelIds.has(settings.agentChannelId))) {
-        setAgentModelId(settings.agentModelId)
-      }
       const defaultAgentRuntime = settings.agentRuntime ?? 'claude'
       setAgentRuntime(defaultAgentRuntime)
 
-      // 加载 Agent 启用渠道列表，过滤已删除的渠道
-      if (settings.agentChannelIds && settings.agentChannelIds.length > 0) {
-        const validIds = settings.agentChannelIds.filter((id) => channelIds.has(id))
-        setAgentChannelIds(validIds)
-        // 如果有渠道被清理，持久化更新后的列表
-        if (validIds.length !== settings.agentChannelIds.length) {
-          console.warn('[AgentSettings] 清理了已删除的 agentChannelIds')
-          window.electronAPI.updateSettings({ agentChannelIds: validIds }).catch(console.error)
-        }
-      } else if (settings.agentChannelId && channelIds.has(settings.agentChannelId)) {
-        // 迁移：旧版本只有 agentChannelId，自动转为数组
-        const migrated = nextAgentChannelIdsAfterModelSelect([], settings.agentChannelId, defaultAgentRuntime)
-        if (migrated.length > 0) {
-          setAgentChannelIds(migrated)
-          window.electronAPI.updateSettings({ agentChannelIds: migrated }).catch(console.error)
+      // 渠道的启用状态是唯一开关：启动时也必须从实际渠道派生 Claude 白名单，
+      // 不能继承旧版独立开关，或把 Pi 专用渠道带入 Claude runtime。
+      const claudeChannelIds = getEnabledClaudeAgentChannelIds(channels)
+      setAgentChannelIds(claudeChannelIds)
+
+      const selectedChannel = settings.agentChannelId
+        ? channels.find((channel) => channel.id === settings.agentChannelId)
+        : undefined
+      const selectedChannelIsUsable = selectedChannel?.enabled
+        && (defaultAgentRuntime === 'pi' || claudeChannelIds.includes(selectedChannel.id))
+
+      const updates: Parameters<typeof window.electronAPI.updateSettings>[0] = {}
+      const storedClaudeChannelIds = settings.agentChannelIds ?? []
+      const whitelistChanged = claudeChannelIds.length !== storedClaudeChannelIds.length
+        || claudeChannelIds.some((id, index) => id !== storedClaudeChannelIds[index])
+      if (whitelistChanged) updates.agentChannelIds = claudeChannelIds
+
+      // 验证并加载 Agent 默认渠道/模型。Claude runtime 不能恢复到 Pi 专用或已禁用渠道。
+      if (settings.agentChannelId && selectedChannelIsUsable) {
+        setAgentChannelId(settings.agentChannelId)
+        if (settings.agentModelId) setAgentModelId(settings.agentModelId)
+      } else if (settings.agentChannelId) {
+        console.warn('[AgentSettings] agentChannelId 指向当前 Core 不可用的渠道，清除')
+        setAgentChannelId(null)
+        setAgentModelId(null)
+        updates.agentChannelId = undefined
+        updates.agentModelId = undefined
+      }
+
+      // 保留有效选择；无效或为空时，优先选择已启用的 Proma 官方渠道。
+      let resolvedChannelId = selectedChannelIsUsable ? settings.agentChannelId : undefined
+      if (!resolvedChannelId) {
+        const officialChannel = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID && channel.enabled)
+        const fallbackChannelId = defaultAgentRuntime === 'pi'
+          ? channels.find((channel) => channel.enabled)?.id
+          : claudeChannelIds[0]
+        resolvedChannelId = officialChannel && (defaultAgentRuntime === 'pi' || claudeChannelIds.includes(officialChannel.id))
+          ? officialChannel.id
+          : fallbackChannelId
+        if (resolvedChannelId) {
+          setAgentChannelId(resolvedChannelId)
+          updates.agentChannelId = resolvedChannelId
         }
       }
 
-      // 自动选择 Agent 渠道：当 agentChannelId 未设置时，从已启用的供应商列表中选择
-      // 优先选择 Proma 官方渠道；如果供应商列表也为空，自动启用官方渠道
-      // 注意：使用本地变量追踪状态，避免 store.get() 读不到刚 set 的值
-      const resolvedChannelId = (settings.agentChannelId && channelIds.has(settings.agentChannelId))
-        ? settings.agentChannelId
-        : null
-      const resolvedChannelIds: string[] = settings.agentChannelIds?.filter((id) => channelIds.has(id)) ?? (
-        (settings.agentChannelId && channelIds.has(settings.agentChannelId)) ? [settings.agentChannelId] : []
-      )
-
-      if (!resolvedChannelId) {
-        if (resolvedChannelIds.length > 0) {
-          // 有已启用的供应商，自动选择第一个（优先官方）
-          const preferredId = resolvedChannelIds.includes(PROMA_OFFICIAL_CHANNEL_ID)
-            ? PROMA_OFFICIAL_CHANNEL_ID
-            : resolvedChannelIds[0]!
-          setAgentChannelId(preferredId)
-          window.electronAPI.updateSettings({ agentChannelId: preferredId }).catch(console.error)
-        } else {
-          // 供应商列表为空，检查是否有可用的 Proma 官方渠道，自动启用
-          const officialChannel = channels.find(
-            (c) => c.id === PROMA_OFFICIAL_CHANNEL_ID && c.enabled
-          )
-          if (officialChannel) {
-            const autoIds = nextAgentChannelIdsAfterModelSelect([], officialChannel.id, defaultAgentRuntime)
-            setAgentChannelIds(autoIds)
-            setAgentChannelId(officialChannel.id)
-            window.electronAPI.updateSettings({
-              agentChannelIds: autoIds,
-              agentChannelId: officialChannel.id,
-            }).catch(console.error)
-          }
-        }
-      } else {
-        // 兜底：agentChannelId 存在但不在 agentChannelIds 白名单中，自动修复不一致
-        const currentIds = settings.agentChannelIds?.filter((id) => channelIds.has(id)) ?? []
-        const fixedIds = nextAgentChannelIdsAfterModelSelect(currentIds, resolvedChannelId, defaultAgentRuntime)
-        if (fixedIds !== currentIds) {
-          setAgentChannelIds(fixedIds)
-          window.electronAPI.updateSettings({ agentChannelIds: fixedIds }).catch(console.error)
-        }
+      if (Object.keys(updates).length > 0) {
+        window.electronAPI.updateSettings(updates).catch(console.error)
       }
 
       if (settings.agentThinking) {

@@ -7,7 +7,9 @@ function buildRequest(provider: ProviderType, apiKey = 'test-key') {
   const adapter = new AnthropicAdapter(provider)
   const baseUrl = provider === 'xiaomi-token-plan'
     ? 'https://token-plan-cn.xiaomimimo.com/anthropic'
-    : provider === 'zhipu-coding-team'
+    : provider === 'qwen-token-plan'
+      ? 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages'
+      : provider === 'zhipu-coding-team'
       ? 'https://open.bigmodel.cn/api/anthropic'
       : 'https://api.xiaomimimo.com/anthropic'
 
@@ -38,6 +40,17 @@ describe('AnthropicAdapter headers', () => {
     expect(request.headers.Authorization).toBe('Bearer test-key')
     expect(request.headers['User-Agent']).toBe('Proma/9.9.9 (+https://github.com/ErlichLiu/Proma)')
     expect(request.headers['api-key']).toBeUndefined()
+  })
+
+  test('qwen token plan uses the complete Anthropic endpoint with bearer authentication and Proma User-Agent', () => {
+    setPromaVersion('9.9.9')
+
+    const request = buildRequest('qwen-token-plan')
+
+    expect(request.url).toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages')
+    expect(request.headers.Authorization).toBe('Bearer test-key')
+    expect(request.headers['User-Agent']).toBe('Proma/9.9.9 (+https://github.com/ErlichLiu/Proma)')
+    expect(request.headers['x-api-key']).toBeUndefined()
   })
 
   test('zhipu team plan uses apiKey from JSON for model calls', () => {

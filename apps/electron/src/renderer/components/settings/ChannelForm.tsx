@@ -76,7 +76,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -84,6 +84,7 @@ const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   'kimi-api': ['k3', 'kimi-k2.6'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
+  'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.6-flash'],
 }
 
 /** 供应商选项（用于 SettingsSelect） */
@@ -114,6 +115,7 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
   'xiaomi',
   'xiaomi-token-plan',
   'qwen-anthropic',
+  'qwen-token-plan',
 ])
 
 /**
@@ -142,7 +144,7 @@ function getUrlInputLabel(provider: ProviderType): string {
 }
 
 function getUrlInputPlaceholder(provider: ProviderType): string {
-  if (provider === 'custom') return 'https://api.example.com/v1/chat/completions'
+  if (provider === 'custom') return 'https://api.example.com/v2（Chat 按原样请求）'
   if (provider === 'openai-responses') return 'https://api.example.com/v1/responses'
   if (provider === 'anthropic-compatible') return 'https://api.example.com/v1/messages'
   return 'https://api.example.com'
@@ -231,9 +233,13 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     lastAgentEligibleRef.current = channel ? isAgentEligibleChannel(channel) : false
   }, [channel])
 
-  // 编辑模式下加载明文 API Key（官方渠道跳过）
+  // 编辑模式下加载明文 API Key（官方渠道无密钥，但仍须完成初始化以允许模型开关自动保存）
   React.useEffect(() => {
-    if (isEdit && channel && !apiKeyLoaded && !isPromaOfficial) {
+    if (isEdit && channel && !apiKeyLoaded) {
+      if (isPromaOfficial) {
+        setApiKeyLoaded(true)
+        return
+      }
       window.electronAPI.decryptApiKey(channel.id).then((key) => {
         setApiKey(key)
         if (channel.provider === 'zhipu-coding-team') {
@@ -245,7 +251,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         setApiKeyLoaded(true)
       })
     }
-  }, [isEdit, channel, apiKeyLoaded])
+  }, [isEdit, channel, apiKeyLoaded, isPromaOfficial])
 
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
   const isCodexProvider = provider === 'openai-codex'
@@ -407,6 +413,12 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         setModels([
           { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
           { id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', enabled: true },
+        ])
+      } else if (p === 'qwen-token-plan') {
+        setModels([
+          { id: 'qwen3.8-max-preview', name: 'Qwen3.8 Max Preview', enabled: true },
+          { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
+          { id: 'qwen3.6-flash', name: 'Qwen3.6 Flash', enabled: true },
         ])
       }
     }
@@ -712,6 +724,11 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
               options={PROVIDER_SELECT_OPTIONS}
               placeholder="选择供应商"
             />
+            {provider === 'custom' && (
+              <div className="px-4 pb-3 text-xs text-muted-foreground">
+                用于 OpenAI Chat Completions 的自定义请求地址，Chat 会按原样发送请求。用于 Agent 时请选择 Pi；若服务提供 Anthropic Messages 端点，请选择「Anthropic 兼容格式」。
+              </div>
+            )}
             <SettingsInput
               label="供应商名称"
               value={name}

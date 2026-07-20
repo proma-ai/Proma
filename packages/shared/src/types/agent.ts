@@ -51,6 +51,15 @@ export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
 /** Agent 思考等级（用于 Pi runtime；Claude runtime 继续使用 ThinkingConfig/AgentEffort） */
 export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
+/** 是否为 Proma 可暴露 reasoning.effort 的 OpenAI 推理模型。 */
+export function isOpenAIReasoningSupportedModel(modelId: string | undefined): boolean {
+  const normalized = modelId?.toLowerCase() ?? ''
+  // Pi catalog 中 gpt-5*-chat-latest 是非 reasoning 的对话变体；它们不能接受
+  // reasoning.effort，必须在 UI 层与请求层共同排除。
+  if (normalized.endsWith('-chat-latest')) return false
+  return normalized.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(normalized)
+}
+
 /** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
 export const CODEX_FAST_MODE_MODEL_IDS = [
   'gpt-5.4',
@@ -599,10 +608,16 @@ export interface AgentSessionMeta {
   modelId?: string
   /** SDK 内部会话 ID（用于 resume 衔接上下文） */
   sdkSessionId?: string
+  /** Pi session JSONL 的精确路径；避免仅按 session ID 子串定位 artifact。 */
+  piSessionFile?: string
+  /** Proma assistant UI UUID 到 Pi 树状 session entry ID 的持久映射。 */
+  piEntryBindings?: Record<string, string>
   /** 当前会话使用的 Agent runtime；历史会话缺省为 claude */
   agentRuntime?: import('./agent-provider').AgentRuntime
   /** ChatGPT Codex Fast Mode 开关；仅 Pi + ChatGPT OAuth 的受支持模型实际生效。 */
   codexFastMode?: boolean
+  /** 本会话的 OpenAI（Codex OAuth / Responses API）推理深度；未设置时兼容旧版全局思考设置。 */
+  openAIThinkingLevel?: AgentThinkingLevel
   /** 所属工作区 ID */
   workspaceId?: string
   /** 是否置顶 */
@@ -1606,6 +1621,8 @@ export const AGENT_IPC_CHANNELS = {
   UPDATE_SESSION_AGENT_RUNTIME: 'agent:update-session-agent-runtime',
   /** 切换指定会话的 ChatGPT Codex Fast Mode（下一轮 Pi 请求生效） */
   UPDATE_SESSION_CODEX_FAST_MODE: 'agent:update-session-codex-fast-mode',
+  /** 更新指定会话的 OpenAI 推理设置（下一轮 Pi 请求生效） */
+  UPDATE_SESSION_OPENAI_REASONING: 'agent:update-session-openai-reasoning',
 
   // AskUserQuestion 交互式问答
   /** AskUser 响应（渲染进程 → 主进程） */

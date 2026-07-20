@@ -81,7 +81,7 @@ describe('Agent 过程块折叠分组', () => {
     }
   })
 
-  test('given keep expanded after complete when grouping then still keeps final output outside process group', () => {
+  test('given completed turn when grouping then keeps final output outside process group', () => {
     const items = buildAssistantTurnRenderItems([
       tool('tool-1'),
       text('最终输出'),

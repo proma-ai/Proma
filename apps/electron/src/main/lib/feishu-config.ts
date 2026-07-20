@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { safeStorage } from 'electron'
 import { getFeishuConfigPath } from './config-paths'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 import type {
   FeishuConfig,
   FeishuConfigInput,
@@ -40,7 +41,7 @@ function decryptSecret(encryptedSecret: string): string {
     const buffer = Buffer.from(encryptedSecret, 'base64')
     return safeStorage.decryptString(buffer)
   } catch (error) {
-    console.error('[飞书配置] 解密 App Secret 失败:', error)
+    console.error('[飞书配置] 解密 App Secret 失败:', redactSensitiveLogValue(error))
     throw new Error('解密 App Secret 失败')
   }
 }
@@ -89,7 +90,7 @@ function readRawConfig(): FeishuMultiBotConfig {
     console.log('[飞书配置] 已从 v1 迁移到 v2 多 Bot 格式')
     return v2
   } catch (error) {
-    console.error('[飞书配置] 读取配置文件失败:', error)
+    console.error('[飞书配置] 读取配置文件失败:', redactSensitiveLogValue(error))
     return { ...EMPTY_MULTI_CONFIG }
   }
 }

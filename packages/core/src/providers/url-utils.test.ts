@@ -140,9 +140,12 @@ describe('normalizeAnthropicProviderUrl', () => {
     )
   })
 
-  test('qwen-anthropic 补全 /v1', () => {
+  test('qwen Anthropic 渠道补全 /v1', () => {
     expect(normalizeAnthropicProviderUrl('https://dashscope.aliyuncs.com/apps/anthropic', 'qwen-anthropic')).toBe(
       'https://dashscope.aliyuncs.com/apps/anthropic/v1',
+    )
+    expect(normalizeAnthropicProviderUrl('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic', 'qwen-token-plan')).toBe(
+      'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1',
     )
   })
 
@@ -186,8 +189,8 @@ describe('resolveOpenAIChatCompletionsUrl', () => {
     )
   })
 
-  test('custom 不向用户填写的地址追加后缀', () => {
-    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1', 'custom')).toBe('https://api.example.com/v1')
+  test('custom 不向自定义 Chat 请求地址追加后缀', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v2', 'custom')).toBe('https://api.example.com/v2')
   })
 
   test('内置 openai 协议根地址补全 /chat/completions', () => {
@@ -287,9 +290,12 @@ describe('resolveAnthropicMessagesUrl', () => {
     )
   })
 
-  test('内置 anthropic 已是完整端点不重复追加', () => {
+  test('内置完整 messages 端点不重复追加', () => {
     expect(resolveAnthropicMessagesUrl('https://api.anthropic.com/v1/messages', 'anthropic')).toBe(
       'https://api.anthropic.com/v1/messages',
+    )
+    expect(resolveAnthropicMessagesUrl('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages', 'qwen-token-plan')).toBe(
+      'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
     )
   })
 })

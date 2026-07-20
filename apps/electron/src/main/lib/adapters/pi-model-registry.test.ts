@@ -38,12 +38,19 @@ describe('Pi runtime 智谱团队版认证', () => {
     expect(requiresPromaUserAgent('zhipu-coding-team')).toBe(true)
   })
 
-  test.each(['kimi-coding', 'zhipu-coding', 'xiaomi-token-plan'] as const)(
+  test.each(['kimi-coding', 'zhipu-coding', 'xiaomi-token-plan', 'qwen-token-plan'] as const)(
     'Given %s When requiresPromaUserAgent Then true',
     (provider) => {
       expect(requiresPromaUserAgent(provider)).toBe(true)
     },
   )
+
+  test('Given qwen Token Plan When buildPiRequestHeaders Then 使用 Bearer 与 Proma User-Agent', () => {
+    const headers = buildPiRequestHeaders('qwen-token-plan', 'model-key')
+
+    expect(headers?.Authorization).toBe('Bearer model-key')
+    expect(headers?.['User-Agent']).toBeDefined()
+  })
 
   test('Given 普通 anthropic 渠道 When resolvePiApiKey Then 原样返回', () => {
     expect(resolvePiApiKey('anthropic', 'plain-key')).toBe('plain-key')
@@ -129,8 +136,7 @@ describe('Proma 官方渠道 Pi runtime 注册', () => {
       baseUrl: 'https://api.proma.cool/api/v1',
       provider: 'proma',
       model: 'internal-gpt-alias',
-      modelApiProtocol: 'openai-responses',
-      permissionMode: 'plan',
+      modelApiProtocol: 'openai-responses',      permissionMode: 'plan',
       systemPrompt: 'system',
       piAgentDir: '/tmp/pi-agent',
       piSessionDir: '/tmp/pi-session',
@@ -197,7 +203,20 @@ describe('Proma 官方渠道 Pi runtime 注册', () => {
       expect(result.model.api).toBe('openai-responses')
       expect(result.model.baseUrl).toBe('https://api.proma.cool/v1')
     },
-  )
+  )})
+
+describe('Pi runtime 通义千问 Token Plan 渠道', () => {
+  test('保留完整端点、Bearer 认证和 1M 上下文', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-qwen-token-plan', prompt: 'hi', apiKey: 'sk-test', provider: 'qwen-token-plan',
+      baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
+      model: 'qwen3.8-max-preview', permissionMode: 'plan', systemPrompt: 'system', piAgentDir: '/tmp/pi-agent', piSessionDir: '/tmp/pi-session',
+    })
+    expect(result.model.api).toBe('anthropic-messages')
+    expect(result.model.baseUrl).toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic')
+    expect(result.model.contextWindow).toBe(1_000_000)
+  })
 })
 
 describe('Pi runtime OpenAI Responses 渠道', () => {
@@ -219,6 +238,26 @@ describe('Pi runtime OpenAI Responses 渠道', () => {
     expect(result.model.id).toBe('gpt-5.1')
     expect(result.model.api).toBe('openai-responses')
     expect(result.model.baseUrl).toBe('https://api.openai.com/v1')
+  })
+})
+
+describe('Pi runtime 火山方舟模型限制', () => {
+  test('Given 火山方舟的 GLM-5.2 When buildModel Then 使用其 128000 输出上限', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-volcengine-glm-52',
+      prompt: 'hi',
+      apiKey: 'test-key',
+      provider: 'doubao',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      model: 'glm-5.2',
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.maxTokens).toBe(128_000)
   })
 })
 

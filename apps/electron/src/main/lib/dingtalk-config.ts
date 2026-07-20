@@ -14,6 +14,7 @@ import { safeStorage } from 'electron'
 import { getDingTalkConfigPath, getDingTalkBotBindingsPath } from './config-paths'
 import { writeJsonFileAtomic } from './safe-file'
 import { createStableDingTalkBotId } from './dingtalk-bot-identity'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 import type {
   DingTalkConfig,
   DingTalkConfigInput,
@@ -42,7 +43,7 @@ function decryptSecret(encryptedSecret: string): string {
     const buffer = Buffer.from(encryptedSecret, 'base64')
     return safeStorage.decryptString(buffer)
   } catch (error) {
-    console.error('[钉钉配置] 解密 Client Secret 失败:', error)
+    console.error('[钉钉配置] 解密 Client Secret 失败:', redactSensitiveLogValue(error))
     throw new Error('解密 Client Secret 失败')
   }
 }
@@ -96,7 +97,7 @@ function migrateDingTalkBindingFile(oldBotId: string, nextBotId: string): void {
     }
     console.log(`[钉钉配置] 已迁移 Bot 绑定文件: ${oldBotId} → ${nextBotId}`)
   } catch (error) {
-    console.warn('[钉钉配置] 迁移 Bot 绑定文件失败:', error)
+    console.warn('[钉钉配置] 迁移 Bot 绑定文件失败:', redactSensitiveLogValue(error))
   }
 }
 
@@ -165,7 +166,7 @@ function readRawConfig(): DingTalkMultiBotConfig {
     console.log('[钉钉配置] 已从 v1 迁移到 v2 多 Bot 格式')
     return v2
   } catch (error) {
-    console.error('[钉钉配置] 读取配置文件失败:', error)
+    console.error('[钉钉配置] 读取配置文件失败:', redactSensitiveLogValue(error))
     return { ...EMPTY_MULTI_CONFIG }
   }
 }

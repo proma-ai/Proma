@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { applyAgentSdkAuthEnv, usesAgentSdkBearerWithUserAgent } from './agent-sdk-auth-env'
 
 describe('Agent SDK 认证环境变量', () => {
-  test.each(['kimi-coding', 'zhipu-coding', 'zhipu-coding-team', 'xiaomi-token-plan'] as const)(
+  test.each(['kimi-coding', 'zhipu-coding', 'zhipu-coding-team', 'xiaomi-token-plan', 'qwen-token-plan'] as const)(
     'Given %s When 写入 SDK 认证 env Then 使用 Bearer 与 Proma User-Agent',
     (provider) => {
       const env: Record<string, string | undefined> = {}

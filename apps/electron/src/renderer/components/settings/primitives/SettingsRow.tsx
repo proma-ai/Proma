@@ -15,7 +15,7 @@ interface SettingsRowProps {
   /** 标签左侧图标（可选） */
   icon?: React.ReactNode
   /** 行描述（可选） */
-  description?: string
+  description?: React.ReactNode
   /** 右侧控件 */
   children?: React.ReactNode
   /** 额外 className */

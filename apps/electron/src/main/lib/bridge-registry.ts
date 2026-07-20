@@ -1,4 +1,5 @@
 import { powerMonitor } from 'electron'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 
 /**
  * Bridge Registry — 统一管理 IM Bridge 生命周期
@@ -60,7 +61,7 @@ export async function startAllBridges(): Promise<void> {
   for (const bridge of bridges) {
     if (bridge.shouldAutoStart()) {
       bridge.start().catch((err) => {
-        console.error(`[Bridge Registry] ${bridge.name} 自动启动失败:`, err)
+        console.error(`[Bridge Registry] ${bridge.name} 自动启动失败:`, redactSensitiveLogValue(err))
       })
     }
   }
@@ -127,13 +128,13 @@ export async function recoverAllBridges(
           try {
             bridge.stop()
           } catch (err) {
-            console.error(`[Bridge Registry] ${bridge.name} 自愈停止失败:`, err)
+            console.error(`[Bridge Registry] ${bridge.name} 自愈停止失败:`, redactSensitiveLogValue(err))
           }
           await bridge.start()
         }
         console.log(`[Bridge Registry] ${bridge.name} 自愈恢复完成`)
       } catch (err) {
-        console.error(`[Bridge Registry] ${bridge.name} 自愈恢复失败:`, err)
+        console.error(`[Bridge Registry] ${bridge.name} 自愈恢复失败:`, redactSensitiveLogValue(err))
       }
     }
   } finally {
@@ -166,7 +167,7 @@ export function stopAllBridges(): void {
     try {
       bridge.stop()
     } catch (err) {
-      console.error(`[Bridge Registry] ${bridge.name} 停止失败:`, err)
+      console.error(`[Bridge Registry] ${bridge.name} 停止失败:`, redactSensitiveLogValue(err))
     }
   }
 }

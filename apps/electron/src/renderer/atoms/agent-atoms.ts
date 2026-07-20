@@ -82,8 +82,6 @@ export interface AgentStreamState {
   contextWindow?: number
   /** 当前 thinking block 的 token 估算值（SDK 实时估算，非计费值） */
   thinkingEstimatedTokens?: number
-  /** usage 数据最后更新时间戳（毫秒），用于 UI 提示数据时效 */
-  usageUpdatedAt?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
   /**
@@ -223,12 +221,6 @@ export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())
 export const agentSessionModelMapAtom = atom<Map<string, string>>(new Map())
 export const currentAgentSessionIdAtom = atom<string | null>(null)
 export const agentStreamingStatesAtom = atom<Map<string, AgentStreamState>>(new Map())
-
-/** Agent 流式结束后是否保持过程组展开，默认收起以降低结果阅读干扰 */
-export const agentProcessGroupsKeepExpandedAtom = atomWithStorage<boolean>(
-  'proma-agent-process-groups-keep-expanded',
-  false,
-)
 
 /**
  * 单个 session 的 streaming state 派生 atomFamily — 按 sessionId 切片订阅。
@@ -766,13 +758,11 @@ export function applyAgentEvent(
             contextWindow: prev.contextWindow != null
               ? Math.max(prev.contextWindow, event.usage.contextWindow)
               : event.usage.contextWindow,
-            usageUpdatedAt: Date.now(),
           }),
           ...(needResultFallback && event.usage.inputTokens != null && { inputTokens: event.usage.inputTokens }),
           ...(needResultFallback && event.usage.outputTokens != null && { outputTokens: event.usage.outputTokens }),
           ...(needResultFallback && event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
           ...(needResultFallback && event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
-          ...(needResultFallback && { usageUpdatedAt: Date.now() }),
         } : {}),
         retrying: undefined,
         ...finalizeStreamingActivities(prev.toolActivities),
@@ -808,7 +798,6 @@ export function applyAgentEvent(
         ...(event.usage.contextWindow && {
           contextWindow: Math.max(prev.contextWindow ?? 0, event.usage.contextWindow),
         }),
-        usageUpdatedAt: Date.now(),
       }
 
     case 'compacting':
@@ -901,8 +890,6 @@ export interface AgentContextStatus {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
-  /** usage 数据最后更新时间戳（毫秒） */
-  usageUpdatedAt?: number
 }
 
 /** 当前会话的上下文使用量派生 atom */
@@ -918,7 +905,6 @@ export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
     cacheCreationTokens: state?.cacheCreationTokens,
     costUsd: state?.costUsd,
     contextWindow: state?.contextWindow,
-    usageUpdatedAt: state?.usageUpdatedAt,
   }
 })
 

@@ -15,6 +15,7 @@ import type {
   AgentSessionMeta,
 } from '@proma/shared'
 import { FeishuBridge } from './feishu-bridge'
+import { redactSensitiveLogValue } from './bridge-log-redaction'
 import { getFeishuMultiBotConfig, getFeishuBotById } from './feishu-config'
 import { getSettings } from './settings-service'
 import { resolveSessionMirrorBot } from './feishu/session-mirror'
@@ -34,7 +35,7 @@ class FeishuBridgeManager {
       try {
         await this.startBot(bot.id)
       } catch (error) {
-        console.error(`[飞书 BridgeManager] Bot "${bot.name}" 启动失败:`, error)
+        console.error(`[飞书 BridgeManager] Bot "${bot.name}" 启动失败:`, redactSensitiveLogValue(error))
       }
     }
 
@@ -49,7 +50,7 @@ class FeishuBridgeManager {
       try {
         bridge.stop()
       } catch (error) {
-        console.error(`[飞书 BridgeManager] Bot ${botId} 停止失败:`, error)
+        console.error(`[飞书 BridgeManager] Bot ${botId} 停止失败:`, redactSensitiveLogValue(error))
       }
     }
     this.bridges.clear()

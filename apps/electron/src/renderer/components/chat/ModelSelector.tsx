@@ -34,7 +34,7 @@ import type { Channel, ModelOption } from '@proma/shared'
 import { ChannelPlanQuotaBadge } from './ChannelPlanQuotaBadge'
 
 /** 从渠道列表构建扁平化的模型选项 */
-function buildModelOptions(
+export function buildModelOptions(
   channels: Channel[],
   filterChannelId?: string,
   filterChannelIds?: string[],
@@ -54,7 +54,7 @@ function buildModelOptions(
   for (const channel of ordered) {
     if (!channel.enabled) continue
     if (filterChannelId && channel.id !== filterChannelId) continue
-    if (filterChannelIds && filterChannelIds.length > 0 && !filterChannelIds.includes(channel.id)) continue
+    if (filterChannelIds && !filterChannelIds.includes(channel.id)) continue
 
     const modelList = (useAgentModels && channel.agentModels) ? channel.agentModels : channel.models
 

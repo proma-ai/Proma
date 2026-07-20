@@ -13,7 +13,6 @@ import type {
 interface ProcessBlockGroupProps {
   blocks: SDKContentBlock[]
   isStreaming?: boolean
-  keepExpandedAfterComplete: boolean
   // 该过程组是否为整条消息的末尾项：是则流式中保留最后一段为正常显示，
   // 否则（最终答案已作为后续兄弟块外置）整组统一弱化。
   isMessageTail?: boolean
@@ -168,8 +167,8 @@ export function buildProcessGroupToolNames(blocks: SDKContentBlock[]): string[] 
   return toolNames
 }
 
-export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComplete, isMessageTail = false, children }: ProcessBlockGroupProps): React.ReactElement {
-  const shouldExpandByDefault = !!isStreaming || keepExpandedAfterComplete
+export function ProcessBlockGroup({ blocks, isStreaming, isMessageTail = false, children }: ProcessBlockGroupProps): React.ReactElement {
+  const shouldExpandByDefault = !!isStreaming
   const [expanded, setExpanded] = React.useState(shouldExpandByDefault)
   const [shouldRenderContent, setShouldRenderContent] = React.useState(shouldExpandByDefault)
   const [collapseCountdown, setCollapseCountdown] = React.useState<number | null>(null)
@@ -187,7 +186,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
   React.useEffect(() => {
     clearAutoCollapseTimers()
 
-    if (isStreaming || keepExpandedAfterComplete) {
+    if (isStreaming) {
       setCollapseCountdown(null)
       if (isStreaming && !wasStreamingRef.current) {
         userToggledRef.current = false
@@ -225,7 +224,7 @@ export function ProcessBlockGroup({ blocks, isStreaming, keepExpandedAfterComple
     autoCollapseTimersRef.current.push(soundDelayTimer)
 
     return clearAutoCollapseTimers
-  }, [clearAutoCollapseTimers, isStreaming, keepExpandedAfterComplete])
+  }, [clearAutoCollapseTimers, isStreaming])
 
   // 折叠前测量实际高度，用于丝滑的 height 过渡（子元素不 reflow，只裁剪边界）
   React.useEffect(() => {

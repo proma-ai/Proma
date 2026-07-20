@@ -1,10 +1,14 @@
 import type { ToolActivity } from '@/atoms/agent-atoms'
 
-/** Task 工具名集合（用于聚合判断，与 SDKMessageRenderer 共享语义）
- * 注意：TaskGet/TaskList 是只读查询工具，不纳入聚合，保留为普通工具活动行 */
-export const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
+/** 可见进度工具名集合（用于聚合判断，与 SDKMessageRenderer 共享语义）。 */
+export const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate'])
 
-export type TaskItemStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
+export type TaskItemStatus = 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'error' | 'deleted'
+
+/** Claude SDK 与 Pi 兼容任务工具共用的终态集合。 */
+export function isTerminalTaskStatus(status: TaskItemStatus): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'error' || status === 'deleted'
+}
 
 export interface TaskItem {
   id: string
@@ -70,7 +74,15 @@ export function parseTaskCreateResult(result: string | undefined): { id: string;
 }
 
 function toTaskStatus(value: unknown, fallback: TaskItemStatus = 'pending'): TaskItemStatus {
-  if (value === 'pending' || value === 'in_progress' || value === 'completed' || value === 'deleted') {
+  if (
+    value === 'pending'
+    || value === 'in_progress'
+    || value === 'completed'
+    || value === 'blocked'
+    || value === 'cancelled'
+    || value === 'error'
+    || value === 'deleted'
+  ) {
     return value
   }
   return fallback
@@ -99,7 +111,6 @@ export function aggregateTaskItems(
   historicalTaskSubjects?: Map<string, string>,
 ): TaskItem[] {
   const taskMap = new Map<string, TaskItem>()
-  let todoAutoId = 0
 
   const taskCreateIdMap = new Map<string, string>()
   const taskCreateSubjectMap = new Map<string, string>()
@@ -117,23 +128,7 @@ export function aggregateTaskItems(
   }
 
   for (const activity of activities) {
-    if (activity.toolName === 'TodoWrite') {
-      const todos = activity.input.todos
-      if (Array.isArray(todos)) {
-        for (const key of taskMap.keys()) {
-          if (key.startsWith('todo-')) taskMap.delete(key)
-        }
-        for (const t of todos as Array<Record<string, unknown>>) {
-          const id = `todo-${todoAutoId++}`
-          taskMap.set(id, {
-            id,
-            subject: String(t.subject ?? t.content ?? ''),
-            status: toTaskStatus(t.status),
-            activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
-          })
-        }
-      }
-    } else if (activity.toolName === 'TaskCreate') {
+    if (activity.toolName === 'TaskCreate') {
       const id = taskCreateIdMap.get(activity.toolUseId) ?? activity.toolUseId
       const subject = typeof activity.input.subject === 'string'
         ? activity.input.subject

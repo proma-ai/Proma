@@ -39,6 +39,7 @@ const AGENT_SDK_1M_CONTEXT_RULES = {
   kimi: ['k3'],
   // 通义千问
   qwen: [
+    'qwen3.8',
     'qwen3.7',
     'qwen3.6-plus',
     'qwen3.6-flash',

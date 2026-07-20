@@ -159,6 +159,16 @@ describe('Agent 会话 runtime 元数据', () => {
     expect(piRuntimeSession.agentRuntime).toBe('pi')
     expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('claude')
     expect(manager.getAgentSessionMeta(piRuntimeSession.id)?.agentRuntime).toBe('pi')
+    expect(defaultRuntimeSession.openAIThinkingLevel).toBe('off')
+  })
+
+  test('Given Codex session settings When updating Then persists depth per session', () => {
+    const session = manager.createAgentSession('Codex 会话', undefined, undefined, undefined, 'pi')
+
+    const updated = manager.updateAgentSessionMeta(session.id, { openAIThinkingLevel: 'xhigh' })
+
+    expect(updated.openAIThinkingLevel).toBe('xhigh')
+    expect(manager.getAgentSessionMeta(session.id)).toMatchObject({ openAIThinkingLevel: 'xhigh' })
   })
 })
 

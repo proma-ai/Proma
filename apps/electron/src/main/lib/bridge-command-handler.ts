@@ -30,6 +30,7 @@ import {
 import type { BridgeChatBindingStore } from './bridge-binding-store'
 import { filterExistingBridgeBindings } from './bridge-binding-store'
 import { extractFinalAssistantText } from './bridge-agent-message-utils'
+import { redactSensitiveLogText, redactSensitiveLogValue } from './bridge-log-redaction'
 
 // ===== 接口定义 =====
 
@@ -97,7 +98,7 @@ export class BridgeCommandHandler {
 
   constructor(config: BridgeCommandHandlerConfig) {
     this.config = config
-    this.log = (msg: string) => console.log(`[${config.platformName} Bridge] ${msg}`)
+    this.log = (msg: string) => console.log(`[${config.platformName} Bridge] ${redactSensitiveLogText(msg)}`)
     this.loadPersistedBindings()
   }
 
@@ -737,7 +738,7 @@ export class BridgeCommandHandler {
     runAgentHeadless(input, {
       onError: (error) => {
         this.log(`Agent 错误: ${error}`)
-        this.send(chatId, `❌ Agent 错误: ${error}`, contextData).catch(console.error)
+        this.send(chatId, `❌ Agent 错误: ${error}`, contextData).catch((sendError) => console.error(`[${this.config.platformName} Bridge] 发送错误消息失败:`, redactSensitiveLogValue(sendError)))
         this.sessionBuffers.delete(binding!.sessionId)
       },
       onComplete: () => {
@@ -779,7 +780,7 @@ export class BridgeCommandHandler {
     const replyText = buffer.text.trim() || '✅ Agent 已完成（无文本输出）'
 
     this.log(`Agent 回复 (${duration}s): ${replyText.slice(0, 100)}${replyText.length > 100 ? '...' : ''}`)
-    this.send(buffer.chatId, replyText, buffer.contextData).catch(console.error)
+    this.send(buffer.chatId, replyText, buffer.contextData).catch((sendError) => console.error(`[${this.config.platformName} Bridge] 发送回复失败:`, redactSensitiveLogValue(sendError)))
     this.sessionBuffers.delete(sessionId)
   }
 

@@ -26,9 +26,16 @@ export type ProviderType =
   | 'doubao'
   | 'qwen'
   | 'qwen-anthropic'
+  | 'qwen-token-plan'
   | 'xiaomi'
   | 'xiaomi-token-plan'
   | 'openai-codex'
+  /**
+   * OpenAI Chat Completions 的自定义请求地址。
+   *
+   * Chat 会原样请求 `baseUrl`；`openai` 则将其视为协议根地址并自动补
+   * `/chat/completions`。这保留了接入自定义网关的能力。
+   */
   | 'custom'
 
 /** Proma 官方渠道固定 ID */
@@ -58,6 +65,8 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   'qwen-anthropic': 'https://dashscope.aliyuncs.com/apps/anthropic',
+  // Token Plan Anthropic endpoint is provided as a complete messages URL.
+  'qwen-token-plan': 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
   xiaomi: 'https://api.xiaomimimo.com/anthropic',
   'xiaomi-token-plan': 'https://token-plan-cn.xiaomimimo.com/anthropic',
   // ChatGPT 订阅登录：baseUrl 由 Pi SDK 内部管理（登录后从 OAuth token 派生），无需用户填写。
@@ -86,17 +95,19 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   doubao: '豆包',
   qwen: '通义千问',
   'qwen-anthropic': '通义千问 (Anthropic 协议)',
+  'qwen-token-plan': '通义千问 Token Plan',
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
   'openai-codex': 'ChatGPT 订阅 (Codex)',
-  custom: 'OpenAI 兼容格式',
+  custom: 'OpenAI Chat Completions（自定义地址）',
 }
 
 /**
- * 支持 Agent 模式的供应商类型
+ * 支持 Claude Agent Core 的供应商类型
  *
- * Agent runtime 会按渠道与模型协议使用 Anthropic Messages、OpenAI Responses
- * 或 Codex Responses；并非所有 Agent 请求都走 `/v1/messages`。
+ * Claude Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点。
+ * Pi runtime 可额外使用 OpenAI Responses 与 Codex Responses；官方 Proma 渠道
+ * 由服务端模型协议决定，但对 Claude Core 仍保持 Anthropic 兼容。
  */
 export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
   'proma',
@@ -112,12 +123,11 @@ export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<Pro
   'xiaomi',
   'xiaomi-token-plan',
   'qwen-anthropic',
-  'openai-responses',
-  'openai-codex',
+  'qwen-token-plan',
 ])
 
 /**
- * 判断供应商是否兼容 Agent 模式
+ * 判断供应商是否兼容 Claude Agent Core
  */
 export function isAgentCompatibleProvider(provider: ProviderType): boolean {
   return AGENT_COMPATIBLE_PROVIDERS.has(provider)

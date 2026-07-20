@@ -5,7 +5,7 @@
  * ProviderType 到 Pi API 协议、baseUrl、认证头和模型 catalog 默认值的映射。
  */
 
-import { extractZhipuCodingTeamApiToken, type ProviderType } from '@proma/shared'
+import { extractZhipuCodingTeamApiToken, inferAgentSdkContextWindow, type ProviderType } from '@proma/shared'
 import {
   getPromaUserAgent,
   normalizeAnthropicBaseUrlForSdk,
@@ -33,6 +33,7 @@ interface PiModelDefaults {
 const ZERO_MODEL_COST: PiModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 export const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_TOKENS = 64_000
+const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
@@ -184,7 +185,7 @@ function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string
 async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCatalogModel[]> {
   try {
     const { getModels } = await loadPiAiCompat()
-    return getModels(provider)
+    return getModels(provider as Parameters<typeof getModels>[0])
   } catch {
     return []
   }
@@ -194,7 +195,7 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
   const checked = new Set<string>()
   for (const candidate of candidatePiProviders(provider)) {
     checked.add(candidate)
-    const model = findCatalogModelById(await getCatalogModels(candidate), modelId)
+    const model = findCatalogModelById(await getCatalogModels(candidate as KnownProvider), modelId)
     if (model) return model
   }
 
@@ -218,12 +219,19 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   // catalog 只作为第三方渠道或旧服务端不下发规格时的兼容 fallback。
   const configuredContextWindow = positiveInteger(input.modelContextWindow)
   const configuredMaxTokens = positiveInteger(input.modelMaxOutputTokens)
+  const isVolcengineGlm52 = input.provider === 'doubao' && input.model?.toLowerCase() === 'glm-5.2'
+  const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  const inferredContextWindow = inferAgentSdkContextWindow(input.model, input.provider) ?? DEFAULT_CONTEXT_WINDOW
   return {
     reasoning: catalogModel?.reasoning ?? true,
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
-    contextWindow: configuredContextWindow ?? catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTokens: configuredMaxTokens ?? catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    // Provider catalogues may omit or under-report newer models; never lower verified capability.
+    contextWindow: configuredContextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
+    // 火山方舟兼容端点的 GLM-5.2 上限为 128000。
+    maxTokens: isVolcengineGlm52
+      ? VOLCENGINE_GLM_52_MAX_TOKENS
+      : (configuredMaxTokens ?? catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS),
   }
 }
 
@@ -249,6 +257,7 @@ function normalizePiBaseUrl(baseUrl: string | undefined, provider: ProviderType,
 export function requiresPromaUserAgent(provider: ProviderType): boolean {
   return provider === 'kimi-coding'
     || provider === 'xiaomi-token-plan'
+    || provider === 'qwen-token-plan'
     || provider === 'zhipu-coding'
     || provider === 'zhipu-coding-team'
 }
@@ -367,21 +376,22 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * 刷新后的 access token，而不是存储的凭据 JSON。
  */
 async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
-  const authStorage = sdk.AuthStorage.inMemory()
+  // Pi 0.80.10 移除了 AuthStorage / ModelRegistry facade，统一由 ModelRuntime
+  // 管理内置模型、临时 API key 与 provider 配置。
+  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
   // 内置 codex 模型的 provider 字段即 'openai-codex'，token 必须设在该名下。
-  authStorage.setRuntimeApiKey('openai-codex', input.apiKey)
-  const registry = sdk.ModelRegistry.inMemory(authStorage)
+  await modelRuntime.setRuntimeApiKey('openai-codex', input.apiKey)
 
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
   const codexModels = await getCodexCatalogModels()
-  const model = (resolvedModelId ? registry.find('openai-codex', resolvedModelId) : undefined)
+  const model = (resolvedModelId ? modelRuntime.getModel('openai-codex', resolvedModelId) : undefined)
     ?? (resolvedModelId ? findCatalogModelById(codexModels, resolvedModelId) : undefined)
     // 指定模型缺失时回退到首个内置 codex 模型，避免因模型 ID 漂移直接失败。
-    ?? registry.getAll().find((m) => m.provider === 'openai-codex')
+    ?? modelRuntime.getModels('openai-codex')[0]
   if (!model) {
     throw new Error('未找到可用的 ChatGPT (Codex) 模型，请确认已登录并升级 Pi 运行时')
   }
-  return { authStorage, registry, model }
+  return { modelRuntime, model }
 }
 
 /** 列出 Pi SDK 内置的 ChatGPT (Codex) 模型 ID，供渲染层"模型拉取"使用。 */
@@ -393,16 +403,11 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   if (input.provider === 'openai-codex') {
     return buildCodexModel(sdk, input)
   }
-  const authStorage = sdk.AuthStorage.inMemory()
   const providerName = `proma-${input.provider}-${input.sessionId}`
   const resolvedApiKey = resolvePiApiKey(input.provider, input.apiKey)
-  const runtimeApiKey = shouldUseRuntimeApiKey(input.provider) ? resolvedApiKey : undefined
-  if (runtimeApiKey) {
-    authStorage.setRuntimeApiKey(providerName, runtimeApiKey)
-  }
   // pi runtime 统一剥离 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
   const resolvedModelId = stripAgentSdkContextSuffix(input.model)
-  const registry = sdk.ModelRegistry.inMemory(authStorage)
+  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
   const api = normalizePiApi(input.provider, resolvedModelId, input.modelApiProtocol)
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })
   const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider, api)
@@ -410,7 +415,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
     throw new Error(`渠道 ${input.channelName ?? input.provider} 缺少 Base URL`)
   }
   const headers = buildPiRequestHeaders(input.provider, resolvedApiKey, api, baseUrl)
-  registry.registerProvider(providerName, {
+  modelRuntime.registerProvider(providerName, {
     name: input.channelName ?? providerName,
     apiKey: resolvedApiKey,
     ...(headers ? { headers } : {}),
@@ -428,7 +433,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
       maxTokens: modelDefaults.maxTokens,
     }],
   })
-  const model = registry.find(providerName, resolvedModelId ?? 'default')
+  const model = modelRuntime.getModel(providerName, resolvedModelId ?? 'default')
   if (!model) throw new Error(`Pi model registration failed: ${resolvedModelId ?? 'default'}`)
-  return { authStorage, registry, model }
+  return { modelRuntime, model }
 }

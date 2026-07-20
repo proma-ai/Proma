@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType, AgentThinkingLevel } from '@proma/shared'
+import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -30,6 +30,8 @@ import {
   isPersistableSDKSystemMessage,
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
+  isOpenAIReasoningSupportedModel,
+  isAgentCompatibleProvider,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
@@ -45,7 +47,7 @@ import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAg
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getBundledCliPath, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -69,6 +71,7 @@ import type { AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
+import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -129,12 +132,6 @@ function updatePromaQueryApiKey(queryOptions: ClaudeAgentQueryOptions | PiAgentQ
     queryOptions.runtimeEnv.env.ANTHROPIC_AUTH_TOKEN = newApiKey
     delete queryOptions.runtimeEnv.env.ANTHROPIC_API_KEY
   }
-}
-
-function resolvePiThinkingLevel(settings: ReturnType<typeof getSettings>): AgentThinkingLevel {
-  if (settings.agentThinking?.type === 'disabled') return 'off'
-  if (settings.agentEffort === 'max') return 'xhigh'
-  return settings.agentEffort ?? (settings.agentThinking ? 'high' : 'off')
 }
 
 const EMPTY_RESPONSE_RESULT_SUBTYPE = 'empty_response'
@@ -1078,6 +1075,32 @@ export class AgentOrchestrator {
       }
     }
     console.log(`[Agent 编排] Agent runtime: ${agentRuntime}`)
+
+    if (!channel.enabled) {
+      reportPreflightError({
+        code: 'channel_disabled',
+        title: '渠道已禁用',
+        message: '当前会话引用的渠道已被禁用，请在设置中启用渠道或重新选择模型。',
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
+        canRetry: false,
+      })
+      return
+    }
+
+    if (agentRuntime === 'claude' && !isAgentCompatibleProvider(channel.provider)) {
+      reportPreflightError({
+        code: 'agent_provider_not_supported',
+        title: '渠道不兼容 Claude Core',
+        message: '此渠道使用的不是 Anthropic Messages 协议。请切换到 Pi Core，或在设置中配置 Anthropic 兼容渠道。',
+        actions: [
+          { key: 's', label: '打开渠道设置', action: 'open_channel_settings' },
+        ],
+        canRetry: false,
+      })
+      return
+    }
     // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
@@ -1677,14 +1700,18 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         collaborationAvailable,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
-      const handleSessionId = (sdkSessionId: string): void => {
+      const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
         // 仅在 session_id 真正变化时才持久化。SDK v2 几乎每条消息都会回调 onSessionId，
         // capturedSdkSessionId 已初始化为 existingSdkSessionId，并在 recovery 时同步重置。
         const isNewSessionId = sdkSessionId !== capturedSdkSessionId
+        const needsPiSessionFile = agentRuntime === 'pi' && !!piSessionFile && sessionMeta?.piSessionFile !== piSessionFile
         capturedSdkSessionId = sdkSessionId
-        if (isNewSessionId) {
+        if (isNewSessionId || needsPiSessionFile) {
           try {
-            updateAgentSessionMeta(sessionId, { sdkSessionId })
+            updateAgentSessionMeta(sessionId, {
+              sdkSessionId,
+              ...(agentRuntime === 'pi' && piSessionFile ? { piSessionFile } : {}),
+            })
             console.log(`[Agent 编排] 已保存 SDK session_id: ${sdkSessionId}`)
           } catch (err) {
             console.error(`[Agent 编排] 保存 SDK session_id 失败:`, err)
@@ -1745,14 +1772,27 @@ export class AgentOrchestrator {
         ...(mentionedSkills?.length ? { skillMentions: mentionedSkills } : {}),
         ...(isCompactCommand ? { compactRequest: true } : {}),
         ...(sessionMeta?.codexFastMode && channel.provider === 'openai-codex' ? { codexFastMode: true } : {}),
-        thinkingLevel: resolvePiThinkingLevel(appSettings),
+        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses')
+          && isOpenAIReasoningSupportedModel(selectedModelId) && {
+            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
+          }),
+        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),
         ...(piCustomTools.length > 0 && { customTools: piCustomTools as PiAgentQueryOptions['customTools'] }),
         onSessionId: handleSessionId,
+        onPiEntryBindings: (bindings) => {
+          const latest = getAgentSessionMeta(sessionId)
+          updateAgentSessionMeta(sessionId, {
+            piEntryBindings: { ...(latest?.piEntryBindings ?? {}), ...bindings },
+          })
+        },
         onModelResolved: handleModelResolved,
         onContextWindow: handleContextWindow,
+        onRetry: (retry) => {
+          this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', ...retry } })
+        },
       } : {
         agentRuntime: 'claude',
         sessionId,
@@ -1821,6 +1861,10 @@ export class AgentOrchestrator {
       let invisibleRecoveryAttempts = 0
       const canAutoRetry = (attempt: number): boolean =>
         attempt <= MAX_AUTO_RETRIES && retryDelayElapsedMs < MAX_AUTO_RETRY_WAIT_MS
+      // Pi runtime 使用其 session 内的 native retry（agent.continue），能保留已完成的
+      // tool_result；禁止外层以原 prompt 重开 query，但保留 session-not-found 等显式恢复。
+      const canReplayPromptForRetry = (attempt: number): boolean =>
+        agentRuntime !== 'pi' && canAutoRetry(attempt)
 
       const canTryThinkingSignatureRecovery = (attempt: number): boolean =>
         !thinkingSignatureRecoveryAttempted &&
@@ -2084,7 +2128,7 @@ export class AgentOrchestrator {
                 }
 
                 // 判断是否可自动重试
-                if (isAutoRetryableTypedError(typedError) && canAutoRetry(attempt)) {
+                if (isAutoRetryableTypedError(typedError) && canReplayPromptForRetry(attempt)) {
                   lastRetryableError = typedError.title
                     ? `${typedError.title}: ${typedError.message}`
                     : typedError.message
@@ -2232,7 +2276,7 @@ export class AgentOrchestrator {
                 capturedResultSubtype === 'error_during_execution' &&
                 capturedResultErrors?.length &&
                 isAutoRetryableCatchError(null, capturedResultErrors.join('\n')) &&
-                canAutoRetry(attempt)
+                canReplayPromptForRetry(attempt)
               ) {
                 lastRetryableError = capturedResultErrors[0]
                 console.log(`[Agent 编排] 可重试错误 (result error_during_execution, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
@@ -2440,7 +2484,7 @@ export class AgentOrchestrator {
           }
 
           // 判断是否可重试
-          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && canAutoRetry(attempt)) {
+          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && canReplayPromptForRetry(attempt)) {
             lastRetryableError = apiError
               ? `API Error ${apiError.statusCode}: ${apiError.message}`
               : (error instanceof Error ? error.message : '未知错误')
@@ -2675,6 +2719,20 @@ export class AgentOrchestrator {
     const sessionMeta = getAgentSessionMeta(sessionId)
     if (!sessionMeta?.sdkSessionId) {
       throw new Error('会话没有 SDK session ID，无法回退')
+    }
+
+    // Pi 使用原生树状 session 导出一个持久 artifact；不能复用 Claude snapshot
+    // 或仅截断 renderer JSONL，否则下一轮 resume 会重新加载被舍弃的上下文。
+    if (sessionMeta.agentRuntime === 'pi') {
+      await rewindPiAgentSession(sessionId, assistantMessageUuid)
+      const kept = truncateSDKMessages(sessionId, assistantMessageUuid)
+      return {
+        remainingMessages: kept.length,
+        fileRewind: {
+          canRewind: false,
+          error: '已回退 Pi 对话；Pi 文件回退尚未启用，当前未修改任何文件。',
+        },
+      }
     }
 
     // 0.5 从 SDK session JSONL 解析对应的 user message UUID（rewindFiles 需要）
