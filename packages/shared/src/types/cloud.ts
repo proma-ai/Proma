@@ -202,6 +202,8 @@ export interface CloudModelConfig {
   icon: string
   provider: string
   supportsReasoning?: boolean
+  /** Global order for the official Chat model picker. Optional for API rollout compatibility. */
+  chatSortOrder?: number
 }
 
 /** Cloud 模型分组（按供应商分组） */

@@ -78,22 +78,34 @@ export function clearSystemKeyCache(): void {
 // ===== 模型转换 =====
 
 /**
- * 将 Cloud 模型分组转换为 ChannelModel 列表
- *
- * 展平所有分组中的模型，使用 CloudModelConfig.id 作为 ChannelModel.id。
+ * Flatten provider groups into the global Chat picker order. The Cloud API
+ * remains grouped for compatibility, so the client applies chatSortOrder here.
  */
 function flattenModels(groups: CloudModelGroup[]): ChannelModel[] {
-  const models: ChannelModel[] = []
-  for (const group of groups) {
-    for (const model of group.models) {
-      models.push({
-        id: model.id,
-        name: model.name,
-        enabled: true,
-      })
-    }
-  }
+  const models = groups.flatMap((group, groupIndex) =>
+    group.models.map((model, modelIndex) => ({
+      model,
+      // Older APIs omit chatSortOrder; preserve the original group order then.
+      sourceIndex: groupIndex * 1_000_000 + modelIndex,
+    })),
+  )
+
   return models
+    .sort((a, b) => {
+      const aOrder = a.model.chatSortOrder
+      const bOrder = b.model.chatSortOrder
+      if (typeof aOrder === 'number' && typeof bOrder === 'number') {
+        return aOrder - bOrder || a.model.id.localeCompare(b.model.id)
+      }
+      if (typeof aOrder === 'number') return -1
+      if (typeof bOrder === 'number') return 1
+      return a.sourceIndex - b.sourceIndex
+    })
+    .map(({ model }) => ({
+      id: model.id,
+      name: model.name,
+      enabled: true,
+    }))
 }
 
 // ===== 广播 =====
@@ -153,10 +165,10 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
       ...(item.maxOutputTokens ? { maxOutputTokens: item.maxOutputTokens } : {}),
     }))
 
-    if (models.length > 0) {
-      syncOfficialAgentModels(models)
-      console.log(`[Cloud Channel] Agent 模型已同步，共 ${models.length} 个`)
-    }
+    // A successful empty response must clear stale local Agent models; only
+    // transport or HTTP failures above retain the previous cached list.
+    syncOfficialAgentModels(models)
+    console.log(`[Cloud Channel] Agent 模型已同步，共 ${models.length} 个`)
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
     console.warn('[Cloud Channel] Agent 模型拉取失败:', message)
