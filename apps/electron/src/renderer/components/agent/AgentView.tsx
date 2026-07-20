@@ -17,7 +17,7 @@ import * as React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, Eye, ChevronDown } from 'lucide-react'
+import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, ChevronDown } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
@@ -103,7 +103,6 @@ import {
   allPendingPermissionRequestsAtom,
   allPendingExitPlanRequestsAtom,
   finalizeStreamingActivities,
-  agentProcessGroupsKeepExpandedAtom,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
@@ -430,75 +429,6 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
               </Button>
             )
           })}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-interface DisplayOptionsPopoverProps {
-  processGroupsKeepExpanded: boolean
-  onProcessGroupsKeepExpandedChange: (expanded: boolean) => void
-}
-
-function DisplayOptionsPopover({
-  processGroupsKeepExpanded,
-  onProcessGroupsKeepExpandedChange,
-}: DisplayOptionsPopoverProps): React.ReactElement {
-  const [open, setOpen] = React.useState(false)
-  const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const handleMouseEnter = React.useCallback(() => {
-    if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
-    setOpen(true)
-  }, [])
-
-  const handleMouseLeave = React.useCallback(() => {
-    hoverTimeout.current = setTimeout(() => setOpen(false), 150)
-  }, [])
-
-  React.useEffect(() => {
-    return () => {
-      if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
-    }
-  }, [])
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn(
-            inputToolbarButtonClass,
-            processGroupsKeepExpanded && inputToolbarActiveButtonClass
-          )}
-          aria-label="显示选项"
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-        >
-          <Eye className="size-5" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="center"
-        sideOffset={8}
-        className="w-auto min-w-[190px] p-2 px-2.5"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-foreground/70">输出完保持展开</span>
-            <Switch
-              checked={processGroupsKeepExpanded}
-              onCheckedChange={onProcessGroupsKeepExpandedChange}
-              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
-            />
-          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -2578,7 +2508,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // ===== 预览面板状态（toggle 快捷键，分屏布局在 MainArea） =====
   const setPreviewOpenMap = useSetAtom(previewPanelOpenMapAtom)
-  const [processGroupsKeepExpanded, setProcessGroupsKeepExpanded] = useAtom(agentProcessGroupsKeepExpandedAtom)
 
   const togglePreviewPanel = React.useCallback(() => {
     setPreviewOpenMap((prev) => {
@@ -2722,15 +2651,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    {
-      key: 'display-options',
-      node: (
-        <DisplayOptionsPopover
-          processGroupsKeepExpanded={processGroupsKeepExpanded}
-          onProcessGroupsKeepExpandedChange={setProcessGroupsKeepExpanded}
-        />
-      ),
-    },
   ], [
     agentChannelIds,
     agentChannelId,
@@ -2760,8 +2680,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     contextStatus.isCompacting,
     streaming,
     handleCompact,
-    processGroupsKeepExpanded,
-    setProcessGroupsKeepExpanded,
   ])
 
   const inputTrailingNode = streaming && !hasTextInput ? (

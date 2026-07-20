@@ -54,7 +54,7 @@ import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo, resolveModelDisplayName, resolveModelProvider } from '@/lib/model-logo'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { channelsAtom, modelSelectorOpenAtom } from '@/atoms/chat-atoms'
-import { agentProcessGroupsKeepExpandedAtom, agentSessionPendingFilesAtom } from '@/atoms/agent-atoms'
+import { agentSessionPendingFilesAtom } from '@/atoms/agent-atoms'
 import { agentSessionsAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/automation-atoms'
@@ -399,7 +399,6 @@ export interface AssistantTurnRendererProps {
 
 export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
-  const processGroupsKeepExpanded = useAtomValue(agentProcessGroupsKeepExpandedAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
     block: SDKContentBlock
@@ -546,7 +545,6 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
                 key={`process-${firstIndex}`}
                 blocks={groupBlocks}
                 isStreaming={isStreaming}
-                keepExpandedAfterComplete={processGroupsKeepExpanded}
                 isMessageTail={itemIndex === renderItems.length - 1}
               >
                 {item.items.map((groupItem) => renderProcessGroupBlock(groupItem.block, groupItem.index))}
