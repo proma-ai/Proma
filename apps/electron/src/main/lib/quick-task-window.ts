@@ -48,7 +48,7 @@ export function createQuickTaskWindow(): void {
   // 加载渲染进程（附带 query 参数区分窗口类型）
   const isDev = !app.isPackaged
   if (isDev) {
-    quickTaskWindow.loadURL('http://localhost:5173?window=quick-task')
+    quickTaskWindow.loadURL('http://127.0.0.1:5173?window=quick-task')
   } else {
     quickTaskWindow.loadFile(join(__dirname, 'renderer', 'index.html'), {
       query: { window: 'quick-task' },

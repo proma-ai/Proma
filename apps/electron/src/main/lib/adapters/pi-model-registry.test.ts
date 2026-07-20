@@ -37,12 +37,19 @@ describe('Pi runtime 智谱团队版认证', () => {
     expect(requiresPromaUserAgent('zhipu-coding-team')).toBe(true)
   })
 
-  test.each(['kimi-coding', 'zhipu-coding', 'xiaomi-token-plan'] as const)(
+  test.each(['kimi-coding', 'zhipu-coding', 'xiaomi-token-plan', 'qwen-token-plan'] as const)(
     'Given %s When requiresPromaUserAgent Then true',
     (provider) => {
       expect(requiresPromaUserAgent(provider)).toBe(true)
     },
   )
+
+  test('Given qwen Token Plan When buildPiRequestHeaders Then 使用 Bearer 与 Proma User-Agent', () => {
+    const headers = buildPiRequestHeaders('qwen-token-plan', 'model-key')
+
+    expect(headers?.Authorization).toBe('Bearer model-key')
+    expect(headers?.['User-Agent']).toBeDefined()
+  })
 
   test('Given 普通 anthropic 渠道 When resolvePiApiKey Then 原样返回', () => {
     expect(resolvePiApiKey('anthropic', 'plain-key')).toBe('plain-key')
@@ -69,6 +76,28 @@ describe('Pi runtime 模型 ID [1m] 剥离', () => {
 
   test('Given undefined When strip Then 返回 undefined', () => {
     expect(stripAgentSdkContextSuffix(undefined)).toBeUndefined()
+  })
+})
+
+describe('Pi runtime 通义千问 Token Plan 渠道', () => {
+  test('Given qwen3.8 Token Plan 模型 When buildModel Then 保留完整端点、Bearer 认证和 1M 上下文', async () => {
+    const sdk = await import('@earendil-works/pi-coding-agent')
+    const result = await buildModel(sdk, {
+      sessionId: 'session-qwen-token-plan',
+      prompt: 'hi',
+      apiKey: 'sk-test',
+      provider: 'qwen-token-plan',
+      baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
+      model: 'qwen3.8-max-preview',
+      permissionMode: 'plan',
+      systemPrompt: 'system',
+      piAgentDir: '/tmp/pi-agent',
+      piSessionDir: '/tmp/pi-session',
+    })
+
+    expect(result.model.api).toBe('anthropic-messages')
+    expect(result.model.baseUrl).toBe('https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic')
+    expect(result.model.contextWindow).toBe(1_000_000)
   })
 })
 

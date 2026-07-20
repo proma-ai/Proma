@@ -251,6 +251,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   doubao: DoubaoLogo,
   qwen: QwenLogo,
   'qwen-anthropic': QwenLogo,
+  'qwen-token-plan': QwenLogo,
   xiaomi: XiaomiLogo,
   'xiaomi-token-plan': XiaomiLogo,
   'openai-codex': OpenAILogo,

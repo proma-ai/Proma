@@ -14,6 +14,14 @@ const previewDataById = new Map<string, DetachedPreviewWindowData>()
 const previewWindowsById = new Map<string, BrowserWindow>()
 const previewIdBySignature = new Map<string, string>()
 
+function isDevServerNavigation(url: string): boolean {
+  try {
+    return new URL(url).origin === 'http://127.0.0.1:5173'
+  } catch {
+    return false
+  }
+}
+
 function makePreviewId(): string {
   return `preview-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
@@ -110,7 +118,7 @@ export function openDetachedPreviewWindow(
 
   const isDev = !app.isPackaged
   if (isDev) {
-    win.loadURL(`http://localhost:5173?window=detached-preview&previewId=${encodeURIComponent(id)}`)
+    win.loadURL(`http://127.0.0.1:5173?window=detached-preview&previewId=${encodeURIComponent(id)}`)
   } else {
     win.loadFile(join(__dirname, 'renderer', 'index.html'), {
       query: { window: 'detached-preview', previewId: id },
@@ -129,7 +137,7 @@ export function openDetachedPreviewWindow(
   })
 
   win.webContents.on('will-navigate', (event, url) => {
-    if (isDev && url.startsWith('http://localhost:')) return
+    if (isDev && isDevServerNavigation(url)) return
     event.preventDefault()
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url)

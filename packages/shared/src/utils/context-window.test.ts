@@ -53,6 +53,9 @@ describe('模型上下文窗口', () => {
   })
 
   test('Given Qwen Anthropic 协议渠道 When 模型名命中 1M 规则 Then 保持真实模型 ID', () => {
+    expect(resolveAgentSdkModelId('qwen3.8-max-preview', 'qwen-token-plan')).toBe('qwen3.8-max-preview')
+    expect(resolveAgentSdkModelId('qwen3.7-max', 'qwen-token-plan')).toBe('qwen3.7-max')
+    expect(resolveAgentSdkModelId('qwen3.6-flash', 'qwen-token-plan')).toBe('qwen3.6-flash')
     expect(resolveAgentSdkModelId('qwen3.7-max', 'qwen-anthropic')).toBe('qwen3.7-max')
     expect(resolveAgentSdkModelId('qwen3.7-plus', 'qwen-anthropic')).toBe('qwen3.7-plus')
     expect(resolveAgentSdkModelId('qwen3.6-plus', 'qwen-anthropic')).toBe('qwen3.6-plus')
@@ -74,6 +77,9 @@ describe('模型上下文窗口', () => {
     expect(inferAgentSdkContextWindow('glm-5.2', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('deepseek-v4-pro', 'deepseek')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('deepseek-v4-pro', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('qwen3.8-max-preview', 'qwen-token-plan')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('qwen3.7-max', 'qwen-token-plan')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('qwen3.6-flash', 'qwen-token-plan')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('qwen3.7-plus', 'qwen-anthropic')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('claude-sonnet-5', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('k3', 'kimi-api')).toBe(ONE_MILLION_CONTEXT_WINDOW)

@@ -70,6 +70,11 @@ const XIAOMI_PRESET_MODELS: ChannelModel[] = [
   { id: 'mimo-v2-omni', name: 'MiMo V2 Omni', enabled: true },
   { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', enabled: true },
 ]
+const QWEN_TOKEN_PLAN_PRESET_MODELS: ChannelModel[] = [
+  { id: 'qwen3.8-max-preview', name: 'Qwen3.8 Max Preview', enabled: true },
+  { id: 'qwen3.7-max', name: 'Qwen3.7 Max', enabled: true },
+  { id: 'qwen3.6-flash', name: 'Qwen3.6 Flash', enabled: true },
+]
 const ARK_CODING_PLAN_MODELS: ChannelModel[] = [
   { id: 'doubao-seed-2.0-code', name: 'Doubao Seed 2.0 Code', enabled: true },
   { id: 'doubao-seed-2.0-pro', name: 'Doubao Seed 2.0 Pro', enabled: true },
@@ -124,6 +129,12 @@ function resolveXiaomiTestModelId(modelId?: string, models?: ChannelModel[]): st
   return resolveFirstTestModelId(models) ?? XIAOMI_PRESET_MODELS[0]!.id
 }
 
+function resolveQwenTokenPlanTestModelId(modelId?: string, models?: ChannelModel[]): string {
+  const explicitModelId = modelId?.trim()
+  if (explicitModelId) return explicitModelId
+  return resolveFirstTestModelId(models) ?? QWEN_TOKEN_PLAN_PRESET_MODELS[0]!.id
+}
+
 function resolveDeepSeekModelsUrl(baseUrl: string): string {
   return `${new URL(baseUrl.trim()).origin}/models`
 }
@@ -136,6 +147,9 @@ function resolveKimiModelsUrl(baseUrl: string): string {
 function inferProviderFromBaseUrl(provider: ProviderType, baseUrl: string): ProviderType {
   try {
     const hostname = new URL(baseUrl.trim()).hostname
+    if (hostname === 'token-plan.cn-beijing.maas.aliyuncs.com') {
+      return 'qwen-token-plan'
+    }
     if (hostname.startsWith('token-plan-') && hostname.endsWith('.xiaomimimo.com')) {
       return 'xiaomi-token-plan'
     }
@@ -516,6 +530,7 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+      case 'qwen-token-plan':
         if (provider === 'deepseek') {
           return await testDeepSeekMessages(
             channel.baseUrl,
@@ -547,6 +562,14 @@ export async function testChannel(channelId: string): Promise<ChannelTestResult>
             apiKey,
             resolveXiaomiTestModelId(undefined, channel.models),
             'xiaomi-token-plan',
+            proxyUrl,
+          )
+        }
+        if (provider === 'qwen-token-plan') {
+          return await testQwenTokenPlanMessages(
+            channel.baseUrl,
+            apiKey,
+            resolveQwenTokenPlanTestModelId(undefined, channel.models),
             proxyUrl,
           )
         }
@@ -703,6 +726,36 @@ async function testXiaomiMessages(
   const response = await fetchFn(url, withTimeout({
     method: 'POST',
     headers,
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    }),
+  }))
+
+  return normalizeHttpResponse(response)
+}
+
+/**
+ * 通义千问 Token Plan 未开放 /models，连接测试改用用户选择的模型发起极小的 messages 请求。
+ */
+async function testQwenTokenPlanMessages(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  proxyUrl?: string,
+): Promise<ChannelTestResult> {
+  const url = resolveAnthropicMessagesUrl(baseUrl, 'qwen-token-plan')
+  const fetchFn = getFetchFn(proxyUrl)
+
+  const response = await fetchFn(url, withTimeout({
+    method: 'POST',
+    headers: {
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'User-Agent': getPromaUserAgent(pkg.version),
+    },
     body: JSON.stringify({
       model: modelId,
       max_tokens: 8,
@@ -1451,6 +1504,7 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+      case 'qwen-token-plan':
         if (provider === 'deepseek') {
           return await testDeepSeekMessages(
             input.baseUrl,
@@ -1482,6 +1536,14 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
             input.apiKey,
             resolveXiaomiTestModelId(input.modelId),
             'xiaomi-token-plan',
+            proxyUrl,
+          )
+        }
+        if (provider === 'qwen-token-plan') {
+          return await testQwenTokenPlanMessages(
+            input.baseUrl,
+            input.apiKey,
+            resolveQwenTokenPlanTestModelId(input.modelId),
             proxyUrl,
           )
         }
@@ -1535,6 +1597,7 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'xiaomi':
       case 'xiaomi-token-plan':
       case 'qwen-anthropic':
+      case 'qwen-token-plan':
       case 'openai-codex':
         if (provider === 'openai-codex') {
           // ChatGPT (Codex) 走 Pi SDK 内置模型目录，不依赖 baseUrl/apiKey。
@@ -1556,6 +1619,9 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
         }
         if (provider === 'xiaomi-token-plan') {
           return createPresetModelsResult('小米 Token Plan', XIAOMI_PRESET_MODELS)
+        }
+        if (provider === 'qwen-token-plan') {
+          return createPresetModelsResult('通义千问 Token Plan', QWEN_TOKEN_PLAN_PRESET_MODELS)
         }
         if (provider === 'ark-coding-plan') {
           return {

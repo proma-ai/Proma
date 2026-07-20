@@ -5,6 +5,7 @@ export function usesAgentSdkBearerWithUserAgent(provider: ProviderType): boolean
     || provider === 'zhipu-coding'
     || provider === 'zhipu-coding-team'
     || provider === 'xiaomi-token-plan'
+    || provider === 'qwen-token-plan'
 }
 
 export function applyAgentSdkAuthEnv(
