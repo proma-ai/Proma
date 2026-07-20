@@ -38,9 +38,10 @@
     "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.201",
     "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.201",
     "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.201",
-    "@earendil-works/pi-agent-core": "0.80.10",
-    "@earendil-works/pi-ai": "0.80.10",
-    "@earendil-works/pi-coding-agent": "0.80.10"
+    "@earendil-works/pi-agent-core": "0.80.9",
+    "@earendil-works/pi-ai": "0.80.9",
+    "@earendil-works/pi-coding-agent": "0.80.9",
+    "@earendil-works/pi-tui": "0.80.9"
   },
   "patchedDependencies": {
   }
