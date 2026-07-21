@@ -21,12 +21,17 @@ import {
   streamSSE,
   fetchTitle,
 } from '@proma/core'
-import type { ImageAttachmentData, ContinuationMessage } from '@proma/core'
+import type { ImageAttachmentData, DocumentAttachmentData, ContinuationMessage } from '@proma/core'
 import { listChannels, resolveChannelRuntimeApiKey } from './channel-manager'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
-import { estimatePromptTokens, retrieveDocumentContext } from './document-context'
+import {
+  estimateDocumentTokensConservatively,
+  estimatePromptTokens,
+  PROMPT_SAFE_INPUT_TOKENS,
+  retrieveDocumentContexts,
+} from './document-context'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { getEnabledTools } from './chat-tool-registry'
@@ -39,8 +44,16 @@ const activeControllers = new Map<string, AbortController>()
 /** 最大工具续接轮数（安全上限，防止极端情况下的无限循环） */
 const MAX_TOOL_ROUNDS = 999
 
-function escapeXmlAttribute(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const NATIVE_DOCUMENT_MAX_FILE_BYTES = 8 * 1024 * 1024
+const NATIVE_DOCUMENT_MAX_TOTAL_BYTES = 16 * 1024 * 1024
+const NATIVE_DOCUMENT_MAX_TEXT_TOKENS = 80_000
+const NATIVE_DOCUMENT_MAX_TOTAL_TEXT_TOKENS = 120_000
+
+interface PreparedDocuments {
+  nativeDocumentIds: Set<string>
+  nativeEstimatedTokens: number
+  retrievalSources: Array<{ filename: string; text: string }>
+  notices: string[]
 }
 
 // ===== 平台相关：图片附件读取器 =====
@@ -62,6 +75,57 @@ function getImageAttachmentData(attachments?: FileAttachment[]): ImageAttachment
     }))
 }
 
+function getDocumentAttachmentData(
+  attachments: FileAttachment[] | undefined,
+  nativeDocumentIds: Set<string>,
+): DocumentAttachmentData[] {
+  return (attachments ?? []).filter((attachment) => nativeDocumentIds.has(attachment.id)).map((attachment) => ({
+    filename: attachment.filename,
+    mediaType: attachment.mediaType,
+    data: readAttachmentAsBase64(attachment.localPath),
+  }))
+}
+
+async function prepareDocuments(attachments?: FileAttachment[]): Promise<PreparedDocuments> {
+  const prepared: PreparedDocuments = {
+    nativeDocumentIds: new Set<string>(),
+    nativeEstimatedTokens: 0,
+    retrievalSources: [],
+    notices: [],
+  }
+  if (!attachments || attachments.length === 0) return prepared
+
+  let nativeBytes = 0
+  for (const attachment of attachments.filter((item) => isDocumentAttachment(item.mediaType))) {
+    try {
+      const text = await extractTextFromAttachment(attachment.localPath)
+      const normalizedText = text.trim()
+      const estimatedTokens = normalizedText ? estimateDocumentTokensConservatively(normalizedText) : 0
+      const canUseNativePdf = attachment.mediaType === 'application/pdf'
+        && normalizedText.length > 0
+        && attachment.size <= NATIVE_DOCUMENT_MAX_FILE_BYTES
+        && nativeBytes + attachment.size <= NATIVE_DOCUMENT_MAX_TOTAL_BYTES
+        && estimatedTokens <= NATIVE_DOCUMENT_MAX_TEXT_TOKENS
+        && prepared.nativeEstimatedTokens + estimatedTokens <= NATIVE_DOCUMENT_MAX_TOTAL_TEXT_TOKENS
+
+      if (canUseNativePdf) {
+        prepared.nativeDocumentIds.add(attachment.id)
+        prepared.nativeEstimatedTokens += estimatedTokens
+        nativeBytes += attachment.size
+      } else if (normalizedText) {
+        prepared.retrievalSources.push({ filename: attachment.filename, text: normalizedText })
+      } else {
+        prepared.notices.push(`[文档 ${attachment.filename} 内容为空]`)
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误'
+      console.warn(`[聊天服务] 文档提取失败: ${attachment.filename}`, error)
+      prepared.notices.push(`[文档 ${attachment.filename} 内容提取失败: ${errorMsg}]`)
+    }
+  }
+  return prepared
+}
+
 // ===== 文档附件文本提取 =====
 
 /**
@@ -76,33 +140,13 @@ function getImageAttachmentData(attachments?: FileAttachment[]): ImageAttachment
  */
 async function enrichMessageWithDocuments(
   messageText: string,
-  attachments?: FileAttachment[],
+  prepared: PreparedDocuments,
 ): Promise<string> {
-  if (!attachments || attachments.length === 0) return messageText
-
-  // 筛选出文档类附件（非图片）
-  const docAttachments = attachments.filter((att) => isDocumentAttachment(att.mediaType))
-  if (docAttachments.length === 0) return messageText
-
-  const parts: string[] = [messageText]
-
-  for (const att of docAttachments) {
-    try {
-      const text = await extractTextFromAttachment(att.localPath)
-      if (text.trim()) {
-        const context = retrieveDocumentContext(text, messageText)
-        parts.push(`\n<file name="${escapeXmlAttribute(att.filename)}" mode="retrieved-chunks">\n${context}\n</file>`)
-      } else {
-        parts.push(`\n<file name="${att.filename}">\n[文件内容为空]\n</file>`)
-      }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : '未知错误'
-      console.warn(`[聊天服务] 文档提取失败: ${att.filename}`, error)
-      parts.push(`\n<file name="${att.filename}">\n[文件内容提取失败: ${errorMsg}]\n</file>`)
-    }
-  }
-
-  return parts.join('')
+  const context = retrieveDocumentContexts(prepared.retrievalSources, messageText)
+  const sections = [messageText]
+  if (context.content) sections.push(context.content)
+  if (prepared.notices.length > 0) sections.push(prepared.notices.join('\n'))
+  return sections.filter(Boolean).join('\n\n')
 }
 
 /**
@@ -256,17 +300,18 @@ export async function sendMessage(
   // 5. 过滤历史并提取文档附件文本
   const filteredHistory = filterHistory(fullHistory, contextDividers, contextLength)
   const enrichedHistory = await enrichHistoryWithDocuments(filteredHistory)
-  const enrichedUserMessage = await enrichMessageWithDocuments(userMessage, attachments)
+  const preparedDocuments = await prepareDocuments(attachments)
+  const enrichedUserMessage = await enrichMessageWithDocuments(userMessage, preparedDocuments)
   const estimatedPromptTokens = estimatePromptTokens([
     systemMessage ?? '',
     ...enrichedHistory.map((message) => message.content),
     enrichedUserMessage,
-  ])
+  ]) + preparedDocuments.nativeEstimatedTokens
   // 留出模型回复和工具调用空间。超限必须由客户端明确提示，不能让 A2 静默截断。
-  if (estimatedPromptTokens > 180_000) {
+  if (estimatedPromptTokens > PROMPT_SAFE_INPUT_TOKENS) {
     webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
       conversationId,
-      error: `当前对话预计 ${estimatedPromptTokens.toLocaleString()} tokens，超过安全输入预算 180,000。请新建会话、缩小 PDF 范围或使用文档摘要。`,
+      error: `当前对话预计 ${estimatedPromptTokens.toLocaleString()} tokens，超过快速稳定模式的安全输入预算 ${PROMPT_SAFE_INPUT_TOKENS.toLocaleString()}。请新建会话、缩小文档范围或先生成文档摘要。`,
     })
     return
   }
@@ -349,6 +394,10 @@ export async function sendMessage(
         systemMessage: effectiveSystemMessage,
         attachments,
         readImageAttachments: getImageAttachmentData,
+        readDocumentAttachments: (requestAttachments) => getDocumentAttachmentData(
+          requestAttachments,
+          preparedDocuments.nativeDocumentIds,
+        ),
         thinkingEnabled,
         tools,
         continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
@@ -425,6 +474,10 @@ export async function sendMessage(
         systemMessage: effectiveSystemMessage,
         attachments,
         readImageAttachments: getImageAttachmentData,
+        readDocumentAttachments: (requestAttachments) => getDocumentAttachmentData(
+          requestAttachments,
+          preparedDocuments.nativeDocumentIds,
+        ),
         thinkingEnabled,
         // 不传 tools，强制模型生成文本回复而非继续调用工具
         continuationMessages,

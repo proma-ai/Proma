@@ -66,3 +66,46 @@ describe('AnthropicAdapter headers', () => {
     expect(request.headers['api-key']).toBeUndefined()
   })
 })
+
+describe('AnthropicAdapter document blocks', () => {
+  test('forwards the current PDF as a native Anthropic document block', () => {
+    const adapter = new AnthropicAdapter('anthropic')
+    const request = adapter.buildStreamRequest({
+      baseUrl: 'https://newapi.example.com',
+      apiKey: 'test-key',
+      modelId: 'claude-opus-4-8',
+      history: [],
+      userMessage: '分析这份文档',
+      attachments: [{
+        id: 'pdf-1',
+        filename: '研究报告.pdf',
+        mediaType: 'application/pdf',
+        localPath: 'conversation/pdf-1.pdf',
+        size: 1024,
+      }],
+      readImageAttachments: () => [],
+      readDocumentAttachments: () => [{
+        filename: '研究报告.pdf',
+        mediaType: 'application/pdf',
+        data: 'JVBERi0xLjQ=',
+      }],
+    })
+
+    const body = JSON.parse(request.body) as {
+      messages: Array<{ content: Array<Record<string, unknown>> }>
+    }
+    expect(body.messages[0]?.content).toEqual([
+      {
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: 'JVBERi0xLjQ=',
+        },
+        name: '研究报告.pdf',
+        cache_control: { type: 'ephemeral' },
+      },
+      { type: 'text', text: '分析这份文档' },
+    ])
+  })
+})

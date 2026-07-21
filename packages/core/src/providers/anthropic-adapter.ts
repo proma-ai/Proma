@@ -31,6 +31,7 @@ import type {
   StreamEvent,
   TitleRequestInput,
   ImageAttachmentData,
+  DocumentAttachmentData,
   ToolDefinition,
   ContinuationMessage,
 } from './types.ts'
@@ -42,7 +43,7 @@ import { getPromaUserAgent } from './user-agent.ts'
 
 /** Anthropic 内容块（扩展支持 tool_use / tool_result） */
 interface AnthropicContentBlock {
-  type: 'text' | 'image' | 'tool_use' | 'tool_result' | 'thinking'
+  type: 'text' | 'image' | 'document' | 'tool_use' | 'tool_result' | 'thinking'
   text?: string
   source?: {
     type: 'base64'
@@ -61,6 +62,7 @@ interface AnthropicContentBlock {
   tool_use_id?: string
   content?: string | AnthropicContentBlock[]
   is_error?: boolean
+  cache_control?: { type: 'ephemeral' }
 }
 
 /** Anthropic 消息格式 */
@@ -118,6 +120,19 @@ function buildImageBlocks(imageData: ImageAttachmentData[]): AnthropicContentBlo
   }))
 }
 
+function buildDocumentBlocks(documentData: DocumentAttachmentData[]): AnthropicContentBlock[] {
+  return documentData.map((document) => ({
+    type: 'document' as const,
+    source: {
+      type: 'base64' as const,
+      media_type: document.mediaType,
+      data: document.data,
+    },
+    name: document.filename,
+    cache_control: { type: 'ephemeral' as const },
+  }))
+}
+
 /**
  * 构建包含图片和文本的消息内容
  *
@@ -126,10 +141,14 @@ function buildImageBlocks(imageData: ImageAttachmentData[]): AnthropicContentBlo
 function buildMessageContent(
   text: string,
   imageData: ImageAttachmentData[],
+  documentData: DocumentAttachmentData[] = [],
 ): string | AnthropicContentBlock[] {
-  if (imageData.length === 0) return text
+  if (imageData.length === 0 && documentData.length === 0) return text
 
-  const content: AnthropicContentBlock[] = buildImageBlocks(imageData)
+  const content: AnthropicContentBlock[] = [
+    ...buildImageBlocks(imageData),
+    ...buildDocumentBlocks(documentData),
+  ]
   if (text) {
     content.push({ type: 'text', text })
   }
@@ -152,7 +171,7 @@ function buildMessageContent(
 function toAnthropicMessages(
   input: StreamRequestInput,
 ): AnthropicMessage[] {
-  const { history, userMessage, attachments, readImageAttachments } = input
+  const { history, userMessage, attachments, readImageAttachments, readDocumentAttachments } = input
 
   // 历史消息转换
   const messages: AnthropicMessage[] = history
@@ -171,9 +190,10 @@ function toAnthropicMessages(
 
   // 当前用户消息
   const currentImages = readImageAttachments(attachments)
+  const currentDocuments = readDocumentAttachments?.(attachments) ?? []
   messages.push({
     role: 'user',
-    content: buildMessageContent(userMessage, currentImages),
+    content: buildMessageContent(userMessage, currentImages, currentDocuments),
   })
 
   return messages

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 import { serializeCodexCredentials } from '@proma/shared'
+import { createElectronMock } from './test-helpers/electron-mock'
 
 type ChannelManagerModule = typeof import('./channel-manager')
 
@@ -11,20 +12,9 @@ let tempHome: string
 const originalHome = process.env.HOME
 const originalPromaDev = process.env.PROMA_DEV
 
-mock.module('electron', () => ({
-  app: {
-    isPackaged: true,
-    getPath: () => join(process.env.HOME ?? tempHome, 'Library', 'Application Support'),
-  },
-  safeStorage: {
-    isEncryptionAvailable: () => false,
-    encryptString: (value: string) => Buffer.from(value),
-    decryptString: (value: Buffer) => value.toString('utf-8'),
-  },
-  shell: {
-    openExternal: async () => undefined,
-  },
-}))
+mock.module('electron', () => createElectronMock(
+  () => join(process.env.HOME ?? tempHome, 'Library', 'Application Support'),
+))
 
 mock.module('node:os', () => ({
   ...os,

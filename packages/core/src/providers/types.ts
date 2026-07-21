@@ -18,6 +18,13 @@ export interface ImageAttachmentData {
   data: string
 }
 
+/** 文档附件的 base64 数据（已从磁盘读取） */
+export interface DocumentAttachmentData {
+  filename: string
+  mediaType: string
+  data: string
+}
+
 /**
  * 图片附件读取器
  *
@@ -25,6 +32,9 @@ export interface ImageAttachmentData {
  * core 层不直接访问文件系统。
  */
 export type ImageAttachmentReader = (attachments?: FileAttachment[]) => ImageAttachmentData[]
+
+/** 文档附件读取器；未启用原生文档时返回空数组 */
+export type DocumentAttachmentReader = (attachments?: FileAttachment[]) => DocumentAttachmentData[]
 
 // ===== Tool Use（Function Calling）=====
 
@@ -218,6 +228,8 @@ export interface StreamRequestInput {
   attachments?: FileAttachment[]
   /** 图片附件读取器（由 Electron 层注入） */
   readImageAttachments: ImageAttachmentReader
+  /** 原生文档读取器（由 Electron 层注入，可选） */
+  readDocumentAttachments?: DocumentAttachmentReader
   /** 是否启用思考模式（各适配器根据供应商 API 自行转换） */
   thinkingEnabled?: boolean
   /** 工具定义列表（可选，启用 function calling） */
