@@ -6,8 +6,9 @@
 
 | 用途 | 接口 |
 |---|---|
-| Claude 系列文本（首选） | `POST {baseUrl}/v1/messages` |
-| 其他模型文本 | `POST {baseUrl}/v1/chat/completions` |
+| Claude / GLM / DeepSeek 文本（支持 Messages 的模型） | `POST {baseUrl}/v1/messages` |
+| GPT-5.6 Terra / Sol / Luna（必须使用原生 Responses） | `POST {baseUrl}/v1/responses` |
+| 其它 Chat Completions 兼容模型 | `POST {baseUrl}/v1/chat/completions` |
 | Embeddings | `POST {baseUrl}/v1/embeddings` |
 | 生图 (Nano Banana) | `POST {baseUrl}/api/v1/tools/generate-image` |
 | 生图 (GPT Image 2) | `POST {baseUrl}/api/v1/tools/gpt-image-2/generate` |
@@ -71,6 +72,33 @@ async function callChat(prompt, { system = '', model = MODEL } = {}) {   // MODE
   return { text: data.choices[0].message.content, usage: data.usage };
 }
 ```
+
+## HTML / Browser fetch — OpenAI Responses（GPT-5.6 系列）
+
+> `gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-5.6-luna` 必须调用 `/v1/responses`，不要调用 `/v1/chat/completions`。Responses 使用 `input`，不是 `messages`。
+
+```javascript
+async function callResponses(prompt, { model = 'gpt-5.6-terra', maxOutputTokens = 1024 } = {}) {
+  const r = await fetch(`${PROMA_API_BASE}/v1/responses`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${PROMA_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      input: prompt,
+      max_output_tokens: maxOutputTokens,
+    }),
+  });
+  const traceId = r.headers.get('X-Proma-Trace-ID');
+  if (!r.ok) throw new Error(`HTTP ${r.status} (trace: ${traceId ?? 'n/a'}): ${await r.text()}`);
+  const data = await r.json();
+  return { text: data.output_text, usage: data.usage, traceId, response: data };
+}
+```
+
+对于流式 Responses，监听 `response.output_text.delta` 拼接正文，并在 `response.completed.response.usage` 获取最终用量；Responses 不使用 `[DONE]`。完整 SSE 与 function tools 示例见 `proma-cloud-sdk/references/responses.md`。
 
 ## 流式输出（Anthropic SSE）
 
@@ -155,7 +183,8 @@ async function callWithRetry(fn, maxRetries = 2) {
 如果应用需要 prompt caching / tool use / vision / 批量并发，让 Agent 读 `proma-cloud-sdk` 的 references：
 
 - `proma-cloud-sdk/references/messages.md` — Anthropic 完整能力
-- `proma-cloud-sdk/references/chat-completions.md` — OpenAI 兼容完整能力
+- `proma-cloud-sdk/references/chat-completions.md` — OpenAI Chat Completions 完整能力
+- `proma-cloud-sdk/references/responses.md` — GPT-5.6 原生 Responses、SSE 与 function tools
 - `proma-cloud-sdk/references/embeddings.md`
 - `proma-cloud-sdk/references/error-handling.md`
 - `proma-cloud-sdk/references/model-selection.md`

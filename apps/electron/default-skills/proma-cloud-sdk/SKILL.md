@@ -1,7 +1,7 @@
 ---
 name: proma-cloud-sdk
-description: Proma Cloud LLM API 调用指南。当 Agent 需要批量调用 LLM 处理任务（批量抽取、翻译、分类、打标签、OCR、长文档摘要、检索）、用便宜模型代替自己直接回答、或使用专用模型（Gemini 长上下文、Qwen 中文、DeepSeek 代码）时触发。提供 Anthropic Messages、OpenAI ChatCompletions、Embeddings 三套接口的完整调用模板、模型 preset 归类、错误处理。凭据通过 mcp__proma-cloud__get_credentials 获取。
-version: 1.2.0
+description: Proma Cloud LLM API 调用指南。当 Agent 需要批量调用 LLM 处理任务（批量抽取、翻译、分类、打标签、OCR、长文档摘要、检索）、用便宜模型代替自己直接回答、或使用专用模型（GPT-5.6 推理、Gemini 长上下文、Qwen 中文、DeepSeek 代码）时触发。提供 Anthropic Messages、OpenAI Chat Completions、OpenAI Responses、Embeddings 四套接口的完整调用模板、模型 preset 归类、错误处理。凭据通过 mcp__proma-cloud__get_credentials 获取。
+version: 1.3.0
 ---
 
 # Proma Cloud LLM 调用 SDK
@@ -45,6 +45,7 @@ API_ROOT="${BASE_URL%/api/v1}"   # bash 等价写法
 ```text
 LLM 端点（OpenAI / Anthropic 兼容）：API_ROOT + /v1/...
 ✅ POST ${API_ROOT}/v1/chat/completions
+✅ POST ${API_ROOT}/v1/responses
 ✅ POST ${API_ROOT}/v1/messages
 ✅ POST ${API_ROOT}/v1/embeddings
 ✅ GET  ${API_ROOT}/v1/models
@@ -61,22 +62,24 @@ LLM 端点（OpenAI / Anthropic 兼容）：API_ROOT + /v1/...
 
 1. **获取凭据**：调 `mcp__proma-cloud__get_credentials` 拿 `{ apiKey, baseUrl }`，按上面规则归一化出 `API_ROOT`
 2. **首次列模型**（会话内一次）：`GET ${API_ROOT}/v1/models` 获取可用模型列表，按规则归类到 preset
-3. **按场景调用**：chat/completions / messages / embeddings
+3. **按场景调用**：chat/completions / responses / messages / embeddings
 4. **处理响应 + 成本聚合**
 
 完整模型选择流程见 `references/model-selection.md`。
 
-## 三套接口快速选择
+## 四套接口快速选择
 
 | 任务 | 用哪套 | 接口 |
 |---|---|---|
 | Claude / glm / deepseek 模型、prompt caching、tool use、thinking | Anthropic Messages | `POST /v1/messages` |
-| GPT / Gemini 等模型，或统一 OpenAI 风格 | OpenAI ChatCompletions | `POST /v1/chat/completions` |
+| GPT-5.6 Terra / Sol / Luna、原生推理事件或 Responses function tools | **OpenAI Responses** | `POST /v1/responses` |
+| 其它支持 Chat Completions 的模型，或统一 OpenAI 风格 | OpenAI Chat Completions | `POST /v1/chat/completions` |
 | 文本向量化 | OpenAI Embeddings | `POST /v1/embeddings` |
 
 注：
 
-- **Messages 接口有模型白名单**。只有 `enabledForMessages=true` 的模型能走 `/v1/messages`（实测：Claude 系列、`glm-5.2`、`deepseek-v4-*`）。GPT / Gemini 系列走 messages 会返回 `400 Model is not available`，**只能用 chat/completions**。模型的 `enabledForMessages` 字段在 `GET /api/v1/models` 的元数据里。
+- **GPT-5.6 系列必须使用 `/v1/responses`**：目前包括 `gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-5.6-luna`。不要把它们的 Chat Completions 风格 `messages` 请求体发到 `/v1/responses`；Responses 使用 `input`，流式终态为 `response.completed` 而非 `[DONE]`。完整示例见 `references/responses.md`。
+- **Messages 接口有模型白名单**。只有 `enabledForMessages=true` 的模型能走 `/v1/messages`（实测：Claude 系列、`glm-5.2`、`deepseek-v4-*`）。GPT / Gemini 系列走 messages 会返回 `400 Model is not available`；其中 GPT-5.6 系列必须走 Responses，其它模型再根据 `/v1/models` 和实际协议选择 chat/completions。模型的 `enabledForMessages` 字段在 `GET /api/v1/models` 的元数据里。
 - Messages 是 Claude 系模型的首选——支持 prompt caching（重复 system prompt 大幅省成本）、thinking、tool use 表达力最强。
 - **没有 `count_tokens` 端点**（`/v1/messages/count_tokens` 返回 404）。要预估成本，先用小 `max_tokens` 跑一条样本看 `usage`，再按比例推算批量总量。
 
@@ -87,8 +90,8 @@ LLM 端点（OpenAI / Anthropic 兼容）：API_ROOT + /v1/...
 | Preset | 用途 | 典型候选（以实际清单为准，会随平台变） |
 |---|---|---|
 | `fast` | 简单任务、批处理 | Haiku / gpt-5-mini / gemini-flash / deepseek-v4-flash |
-| `smart` | 复杂推理、生成 | Sonnet / gpt-5.4 / deepseek-v4-pro |
-| `smartest` | 最高质量 | Opus / gpt-5.5 |
+| `smart` | 复杂推理、生成 | Sonnet / GPT-5.6 Terra / deepseek-v4-pro |
+| `smartest` | 最高质量 | Opus / GPT-5.6 Sol |
 | `long-context` | 长文档 (>50k tokens) | gemini-*-pro / Sonnet / deepseek-v4-*（1M 上下文）|
 | `chinese` | 中文优势 | glm-5.2 / deepseek-v4-* / Qwen（若上线）|
 | `code` | 代码生成 | deepseek-v4-pro / Sonnet |
@@ -123,7 +126,8 @@ API 响应里都带 `usage` 字段。**注意推理模型下 `output_tokens` 可
 ## 详细参考
 
 - `references/messages.md` — Anthropic Messages（含 tool use / thinking / prompt caching / vision）
-- `references/chat-completions.md` — OpenAI 兼容接口完整参数（流式 / function calling / response_format）
+- `references/chat-completions.md` — OpenAI Chat Completions 完整参数（流式 / function calling / response_format）
+- `references/responses.md` — GPT-5.6 原生 OpenAI Responses（input / SSE / usage / tools / trace）
 - `references/embeddings.md` — 向量接口（模型选择、batch、维度）
 - `references/model-selection.md` — 动态查询 + preset 归类（含可执行脚本）
 - `references/error-handling.md` — 错误码处理、重试退避策略

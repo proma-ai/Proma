@@ -740,7 +740,7 @@ function ApiUsageGuide(): React.ReactElement {
           <div>
             <p className="text-sm font-medium">API 使用说明</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              使用 API Key 可以通过 HTTP 请求访问 Proma API，兼容 OpenAI/Anthropic 格式。
+              使用 API Key 可以通过 HTTP 请求访问 Proma API，支持 OpenAI Chat Completions、Responses 与 Anthropic Messages 格式。
             </p>
           </div>
           <Button
@@ -764,9 +764,9 @@ function ApiUsageGuide(): React.ReactElement {
         </div>
 
         <div className="mt-3 space-y-3">
-          {/* 默认显示 - OpenAI 格式 */}
+          {/* 默认显示 - OpenAI Chat Completions */}
           <div className="rounded-lg bg-muted p-3">
-            <p className="mb-1.5 text-xs font-medium">OpenAI 兼容格式</p>
+            <p className="mb-1.5 text-xs font-medium">OpenAI Chat Completions（通用兼容格式）</p>
             <pre className="overflow-x-auto text-xs text-muted-foreground">
 {expanded
   ? `curl https://api.proma.cool/v1/chat/completions \\
@@ -786,14 +786,33 @@ function ApiUsageGuide(): React.ReactElement {
           {/* 展开后显示 */}
           {expanded && (
             <>
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                <p className="mb-1 text-xs font-medium">OpenAI Responses（GPT-5.6 系列）</p>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  <code>gpt-5.6-terra</code>、<code>gpt-5.6-sol</code>、<code>gpt-5.6-luna</code> 必须使用此接口；请求体使用 <code>input</code>，不是 <code>messages</code>。
+                </p>
+                <pre className="overflow-x-auto text-xs text-muted-foreground">
+{`curl https://api.proma.cool/v1/responses \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -d '{
+    "model": "gpt-5.6-terra",
+    "input": "Hello!",
+    "max_output_tokens": 1024
+  }'`}
+                </pre>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  设为 <code>"stream": true</code> 可获得 SSE；以 <code>response.completed</code> 作为终态事件，并可从响应头读取 <code>X-Proma-Trace-ID</code> 用于排障。
+                </p>
+              </div>
               <div className="rounded-lg bg-muted p-3">
-                <p className="mb-1.5 text-xs font-medium">Anthropic 兼容格式</p>
+                <p className="mb-1.5 text-xs font-medium">Anthropic Messages</p>
                 <pre className="overflow-x-auto text-xs text-muted-foreground">
 {`curl https://api.proma.cool/v1/messages \\
   -H "Content-Type: application/json" \\
   -H "X-Api-Key: YOUR_API_KEY" \\
   -d '{
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-5",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`}
@@ -802,8 +821,12 @@ function ApiUsageGuide(): React.ReactElement {
               <div className="rounded-lg bg-muted p-3">
                 <p className="mb-1.5 text-xs font-medium">获取模型列表</p>
                 <pre className="overflow-x-auto text-xs text-muted-foreground">
-{`curl https://api.proma.cool/v1/models`}
+{`curl https://api.proma.cool/v1/models \\
+  -H "Authorization: Bearer YOUR_API_KEY"`}
                 </pre>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  请先查询当前可用模型；模型和协议能力会随平台更新。
+                </p>
               </div>
             </>
           )}
