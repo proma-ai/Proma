@@ -43,8 +43,10 @@ const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
-// ChatGPT Codex OAuth currently exposes a 372K context window for GPT-5.6 models.
-// This differs from the 1.05M API model specification.
+// ChatGPT Codex OAuth 实际上下文窗口（与 1.05M API 规格不同）：
+// - GPT-5.4 / 5.5：272K
+// - GPT-5.6 系列：372K
+const CODEX_54_55_CONTEXT_WINDOW = 272_000
 const CODEX_56_CONTEXT_WINDOW = 372_000
 const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
 
@@ -97,7 +99,7 @@ function createCodexRuntimeCredentialStore(
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-5.4',
-    contextWindow: CODEX_56_CONTEXT_WINDOW,
+    contextWindow: CODEX_54_55_CONTEXT_WINDOW,
   },
   {
     id: 'gpt-5.4-mini',
@@ -105,7 +107,7 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   },
   {
     id: 'gpt-5.5',
-    contextWindow: CODEX_56_CONTEXT_WINDOW,
+    contextWindow: CODEX_54_55_CONTEXT_WINDOW,
   },
   {
     id: 'gpt-5.6-sol',
