@@ -19,6 +19,7 @@ import {
 } from '@proma/core'
 import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
 import type { PiAgentQueryOptions } from './pi-agent-adapter'
+import { supportsPiDeveloperRole } from './pi-provider-compat'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type PiAiCompat = typeof import('@earendil-works/pi-ai/compat')
@@ -42,7 +43,9 @@ const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
-const CODEX_56_CONTEXT_WINDOW = 1_050_000
+// ChatGPT Codex OAuth currently exposes a 372K context window for GPT-5.6 models.
+// This differs from the 1.05M API model specification.
+const CODEX_56_CONTEXT_WINDOW = 372_000
 const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
 
 type CodexRuntimeCredential = CodexOAuthCredentials & {
@@ -486,6 +489,9 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
       cost: modelDefaults.cost,
       contextWindow: modelDefaults.contextWindow,
       maxTokens: modelDefaults.maxTokens,
+      ...(supportsPiDeveloperRole(input.provider) ? {} : {
+        compat: { supportsDeveloperRole: false },
+      }),
     }],
   })
   const model = modelRuntime.getModel(providerName, resolvedModelId ?? 'default')

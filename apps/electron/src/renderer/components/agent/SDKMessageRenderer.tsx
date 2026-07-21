@@ -383,8 +383,8 @@ export interface AssistantTurnRendererProps {
   onFork?: (upToMessageUuid: string) => void
   /** 回退回调（传入 assistant message uuid） */
   onRewind?: (assistantMessageUuid: string) => void
-  /** 错误重试回调（仅当 turn 含错误消息时使用） */
-  onRetry?: () => void
+  /** 错误重试回调（传入本轮开始前应删除的错误 UUID） */
+  onRetry?: (errorUuid?: string) => void
   /** 在新会话中重试回调（仅当 turn 含错误消息时使用） */
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */
@@ -1024,7 +1024,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
 interface ErrorMessageProps {
   message: SDKAssistantMessage
   /** 重试回调（在当前会话内重试） */
-  onRetry?: () => void
+  onRetry?: (errorUuid?: string) => void
   /** 在新会话中重试回调（创建新会话并引用当前会话继续） */
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */
@@ -1097,7 +1097,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onSwit
         }
         break
       case 'retry':
-        onRetry?.()
+        onRetry?.(typeof message.uuid === 'string' ? message.uuid : undefined)
         break
       case 'compact':
         onCompact?.()
@@ -1215,7 +1215,11 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onSwit
               </Button>
             )}
             {!hasStructuredActions && onRetry && (
-              <Button size="sm" variant={isPromptTooLong || isThinkingSignature ? 'outline' : 'default'} onClick={onRetry}>
+              <Button
+                size="sm"
+                variant={isPromptTooLong || isThinkingSignature ? 'outline' : 'default'}
+                onClick={() => onRetry(typeof message.uuid === 'string' ? message.uuid : undefined)}
+              >
                 <RotateCw className="size-3.5 mr-1.5" />
                 重试
               </Button>
@@ -1249,8 +1253,8 @@ export interface MessageGroupRendererProps {
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
-  /** 错误重试回调（仅当 turn 含错误消息时使用） */
-  onRetry?: () => void
+  /** 错误重试回调（传入本轮开始前应删除的错误 UUID） */
+  onRetry?: (errorUuid?: string) => void
   /** 在新会话中重试回调（仅当 turn 含错误消息时使用） */
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */

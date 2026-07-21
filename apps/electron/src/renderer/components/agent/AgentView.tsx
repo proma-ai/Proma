@@ -2223,7 +2223,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [agentError])
 
   /** 重试：在当前会话中重新发送最后一条用户消息。可显式覆盖渠道/模型，避免切换后仍捕获旧闭包配置。 */
-  const handleRetry = React.useCallback((overrides?: { channelId: string; modelId: string }): void => {
+  const handleRetry = React.useCallback((overridesOrErrorUuid?: { channelId: string; modelId: string } | string): void => {
+    const overrides = typeof overridesOrErrorUuid === 'object' ? overridesOrErrorUuid : undefined
+    const retryOfErrorUuid = typeof overridesOrErrorUuid === 'string' ? overridesOrErrorUuid : undefined
     const retryChannelId = overrides?.channelId ?? agentChannelId
     const retryModelId = overrides?.modelId ?? agentModelId
     if (!retryChannelId || streaming) return
@@ -2269,6 +2271,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
       permissionModeOverride: permissionMode,
+      ...(retryOfErrorUuid && { retryOfErrorUuid }),
     }).catch(console.error)
   }, [persistedSDKMessages, sessionId, agentChannelId, agentModelId, sessionAgentRuntime, agentChannelProvider, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
 

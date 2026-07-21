@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
+import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
 import { join, resolve, dirname } from 'node:path'
@@ -53,6 +53,8 @@ interface AgentSessionsIndex {
   version: number
   /** 会话元数据列表 */
   sessions: AgentSessionMeta[]
+  /** 是否已将旧版默认关闭的 OpenAI 推理会话升级为默认开启。 */
+  openAIThinkingDefaultEnabledMigrationCompleted?: boolean
 }
 
 /** 当前索引版本 */
@@ -136,15 +138,38 @@ function migrateLegacyPermissionMode(index: AgentSessionsIndex): boolean {
 }
 
 /**
+ * 在此版本前，所有新建 OpenAI Agent 会话都会写入 off，无法与用户主动关闭区分。
+ * 因此仅执行一次历史升级；之后用户手动关闭会保留 off。
+ */
+function migrateLegacyOpenAIThinkingDefault(index: AgentSessionsIndex): boolean {
+  if (index.openAIThinkingDefaultEnabledMigrationCompleted) return false
+
+  for (const session of index.sessions) {
+    if (session.openAIThinkingLevel === 'off') {
+      session.openAIThinkingLevel = 'high'
+    }
+  }
+  index.openAIThinkingDefaultEnabledMigrationCompleted = true
+  return true
+}
+
+/**
  * 读取会话索引文件
  */
 function readIndex(): AgentSessionsIndex {
   const indexPath = getAgentSessionsIndexPath()
   const data = readJsonFileSafe<AgentSessionsIndex>(indexPath)
   if (data) {
-    if (migrateLegacyPermissionMode(data)) {
+    const permissionModeMigrated = migrateLegacyPermissionMode(data)
+    const thinkingDefaultMigrated = migrateLegacyOpenAIThinkingDefault(data)
+    if (permissionModeMigrated || thinkingDefaultMigrated) {
       writeIndex(data)
-      console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
+      if (permissionModeMigrated) {
+        console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
+      }
+      if (thinkingDefaultMigrated) {
+        console.log('[Agent 会话] 已将历史 OpenAI 会话的思考深度默认值升级为高')
+      }
     }
     return data
   }
@@ -189,7 +214,7 @@ export function createAgentSession(
   channelId?: string,
   workspaceId?: string,
   modelId?: string,
-  agentRuntime: AgentRuntime = 'claude',
+  agentRuntime: AgentRuntime = 'pi',
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
@@ -201,8 +226,8 @@ export function createAgentSession(
     modelId,
     workspaceId,
     agentRuntime,
-    // OpenAI 推理配置从创建起归属于会话；历史会话缺省时由编排层兼容旧全局设置。
-    openAIThinkingLevel: 'off',
+    // OpenAI 推理配置从创建起归属于会话；默认启用高思考深度。
+    openAIThinkingLevel: 'high',
     createdAt: now,
     updatedAt: now,
   }
@@ -1173,7 +1198,7 @@ function rewriteSourceToDest(content: string, sourceDir: string, destDir: string
  * 截断 Agent 会话的 SDK 消息到指定 UUID（inclusive）
  *
  * 保留 uuid 匹配消息及之前的所有消息，删除之后的消息。
- * 通过 writeFileSync 全量重写 JSONL 文件。
+ * 通过原子替换全量重写 JSONL 文件。
  *
  * @returns 截断后保留的消息列表
  */
@@ -1195,10 +1220,36 @@ export function truncateSDKMessages(id: string, upToUuidInclusive: string): SDKM
   const kept = messages.slice(0, cutIndex + 1)
 
   const content = kept.map((m) => JSON.stringify(m)).join('\n') + (kept.length > 0 ? '\n' : '')
-  writeFileSync(filePath, content, 'utf-8')
+  writeTextFileAtomic(filePath, content)
 
   console.log(`[Agent 会话] 消息已截断: sessionId=${id}, 保留 ${kept.length}/${messages.length} 条`)
   return kept
+}
+
+/**
+ * 删除指定 UUID 的持久化错误消息。
+ *
+ * 仅删除 assistant error，避免调用方误删普通回复；找不到时保持幂等。
+ */
+export function removeSDKErrorMessage(id: string, errorUuid: string): boolean {
+  const filePath = getAgentSessionMessagesPath(id)
+  if (!existsSync(filePath)) return false
+
+  const raw = readFileSync(filePath, 'utf-8')
+  const lines = raw.split('\n').filter((line) => line.trim())
+  const messages = parseJsonlStrict<unknown>(lines, `删除错误消息 (${id})`).map(normalizePersistedSDKMessage)
+  const targetIndex = messages.findIndex((message) =>
+    message.type === 'assistant'
+      && (message as { uuid?: string }).uuid === errorUuid
+      && Boolean((message as { error?: unknown }).error),
+  )
+  if (targetIndex < 0) return false
+
+  const kept = messages.filter((_, index) => index !== targetIndex)
+  const content = kept.map((message) => JSON.stringify(message)).join('\n') + (kept.length > 0 ? '\n' : '')
+  writeTextFileAtomic(filePath, content)
+  console.log(`[Agent 会话] 已删除重试前错误: sessionId=${id}, uuid=${errorUuid}`)
+  return true
 }
 
 /**

@@ -116,7 +116,7 @@ interface AgentMessagesProps {
   attachedDirs?: string[]
   /** 最后一轮是否被用户中断 */
   stoppedByUser?: boolean
-  onRetry?: () => void
+  onRetry?: (errorUuid?: string) => void
   onRetryInNewSession?: () => void
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
