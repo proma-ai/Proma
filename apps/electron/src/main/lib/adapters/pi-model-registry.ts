@@ -43,7 +43,9 @@ const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
 const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
-const CODEX_56_CONTEXT_WINDOW = 1_050_000
+// ChatGPT Codex OAuth currently exposes a 272K context window for GPT-5.6 models.
+// This differs from the 1.05M API model specification.
+const CODEX_56_CONTEXT_WINDOW = 272_000
 const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
 
 type CodexRuntimeCredential = CodexOAuthCredentials & {
