@@ -1,7 +1,7 @@
 /**
  * DeveloperLetterDialog - 开发者信封弹窗
  *
- * 信封翻开动画 → 信纸滑出 → 开发者声明 → 立即订阅
+ * 信封翻开动画 → 信纸滑出 → 开发者声明 → 一次性购买
  */
 
 import * as React from "react";
@@ -87,12 +87,15 @@ export function DeveloperLetterDialog({
                         </span>{" "}
                         方案。
                       </p>
-                      <p>在你开始订阅之前，我想和你坦诚地聊几句。</p>
+                      <p>在你开始购买额度之前，我想和你坦诚地聊几句。</p>
                       <p>
                         我希望能帮助大家快速上手 Agent 模式，同时把更多精力投入到 Proma 的持续迭代中。
                       </p>
                       <p>
                         Proma Cloud 将模型连接、额度、Agent 专用能力与云端工具整合在一起，让你无需配置多个 API Key 就能直接开始工作。
+                      </p>
+                      <p>
+                        Proma Cloud 不追求成为最低报价的中转服务。我们优先保障模型质量、Agent 协议兼容、稳定性与可持续运营，同时在部分模型上提供有竞争力的专属优惠。
                       </p>
                       <p>
                         不同模型和任务的消耗不同，尤其是复杂 Agent 任务会产生多轮模型调用。请根据任务复杂度选择合适模型，并在余额页面查看可用额度与用量。
@@ -119,9 +122,12 @@ export function DeveloperLetterDialog({
                     </div>
                   </div>
 
-                  {/* 订阅按钮（固定在底部，不随内容滚动） */}
+                  {/* 一次性购买按钮（固定在底部，不随内容滚动） */}
+                  <p className="mt-4 text-center text-xs text-stone-500">
+                    本次为一次性支付，不会自动续费或自动扣款。
+                  </p>
                   <Button
-                    className="w-full bg-stone-800 hover:bg-stone-700 text-white mt-4 flex-shrink-0"
+                    className="w-full bg-stone-800 hover:bg-stone-700 text-white mt-2 flex-shrink-0"
                     size="default"
                     disabled={loading}
                     onClick={() => onConfirm()}
@@ -129,7 +135,7 @@ export function DeveloperLetterDialog({
                     {loading ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    立即订阅
+                    确认一次性购买
                   </Button>
                 </div>
               </div>

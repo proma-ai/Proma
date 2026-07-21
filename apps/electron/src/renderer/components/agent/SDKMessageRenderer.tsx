@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, CreditCard, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock, Sparkles } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -389,6 +389,8 @@ export interface AssistantTurnRendererProps {
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */
   onCompact?: () => void
+  /** 切换到 Proma Cloud 并重试 */
+  onSwitchToPromaCloud?: () => void
   /** 是否正在流式输出中（隐藏操作栏） */
   isStreaming?: boolean
   /** 是否被用户中断 */
@@ -397,7 +399,7 @@ export interface AssistantTurnRendererProps {
   sessionModelId?: string
 }
 
-export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
+export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
@@ -485,6 +487,7 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         onRetry={onRetry}
         onRetryInNewSession={onRetryInNewSession}
         onCompact={onCompact}
+        onSwitchToPromaCloud={onSwitchToPromaCloud}
       />
     )
   }
@@ -1026,9 +1029,11 @@ interface ErrorMessageProps {
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */
   onCompact?: () => void
+  /** 切换到 Proma Cloud 并重试（仅第三方渠道的鉴权/余额/限流错误） */
+  onSwitchToPromaCloud?: () => void
 }
 
-function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: ErrorMessageProps): React.ReactElement {
+function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud }: ErrorMessageProps): React.ReactElement {
   const meta = extractMeta(message as unknown as SDKMessage)
   const errorText = message.error?.message ?? '未知错误'
 
@@ -1062,6 +1067,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
     if (action.action === 'retry' && !onRetry) return false
     if (action.action === 'compact' && !onCompact) return false
     if (action.action === 'retry_in_new_session' && !onRetryInNewSession) return false
+    if (action.action === 'switch_to_proma_cloud' && !onSwitchToPromaCloud) return false
     return true
   })
 
@@ -1099,6 +1105,9 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
       case 'retry_in_new_session':
         onRetryInNewSession?.()
         break
+      case 'switch_to_proma_cloud':
+        onSwitchToPromaCloud?.()
+        break
       default:
         console.warn('[ErrorMessage] 未处理的 recovery action:', action)
     }
@@ -1121,6 +1130,8 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
         return <Minimize2 className="size-3.5 mr-1.5" />
       case 'retry_in_new_session':
         return <Plus className="size-3.5 mr-1.5" />
+      case 'switch_to_proma_cloud':
+        return <Sparkles className="size-3.5 mr-1.5" />
       default:
         return null
     }
@@ -1166,7 +1177,7 @@ function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact }: Erro
             )}
           </div>
         )}
-        {isBillingError ? (
+        {isBillingError && !hasStructuredActions ? (
           <div className="mt-3">
             <Button size="sm" onClick={handleGoToBilling}>
               <CreditCard className="size-3.5 mr-1.5" />
@@ -1244,6 +1255,8 @@ export interface MessageGroupRendererProps {
   onRetryInNewSession?: () => void
   /** 压缩上下文回调（仅 prompt_too_long 错误使用） */
   onCompact?: () => void
+  /** 切换到 Proma Cloud 并重试 */
+  onSwitchToPromaCloud?: () => void
   /** 是否正在流式输出中（隐藏操作栏） */
   isStreaming?: boolean
   /** 是否被用户中断 */
@@ -1298,7 +1311,7 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -1328,6 +1341,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
         onRetry={onRetry}
         onRetryInNewSession={onRetryInNewSession}
         onCompact={onCompact}
+        onSwitchToPromaCloud={onSwitchToPromaCloud}
         isStreaming={isStreaming}
         stoppedByUser={stoppedByUser}
         sessionModelId={sessionModelId}

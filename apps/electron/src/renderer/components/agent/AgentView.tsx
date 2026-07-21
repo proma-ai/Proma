@@ -17,6 +17,8 @@ import * as React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
+import { calcTotalAvailable, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
+import { billingInfoAtom } from '@/atoms/cloud-billing'
 import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, ChevronDown } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
@@ -472,6 +474,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const setSessionModelMap = useSetAtom(agentSessionModelMapAtom)
   const [defaultChannelId, setDefaultChannelId] = useAtom(agentChannelIdAtom)
   const [defaultModelId, setDefaultModelId] = useAtom(agentModelIdAtom)
+  const billingInfo = useAtomValue(billingInfoAtom)
+  const [showPromaCloudConfirm, setShowPromaCloudConfirm] = React.useState(false)
   const sessions = useAtomValue(agentSessionsAtom)
   const sessionMeta = React.useMemo(
     () => sessions.find((s) => s.id === sessionId),
@@ -2218,9 +2222,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [agentError])
 
-  /** 重试：在当前会话中重新发送最后一条用户消息 */
-  const handleRetry = React.useCallback((): void => {
-    if (!agentChannelId || streaming) return
+  /** 重试：在当前会话中重新发送最后一条用户消息。可显式覆盖渠道/模型，避免切换后仍捕获旧闭包配置。 */
+  const handleRetry = React.useCallback((overrides?: { channelId: string; modelId: string }): void => {
+    const retryChannelId = overrides?.channelId ?? agentChannelId
+    const retryModelId = overrides?.modelId ?? agentModelId
+    if (!retryChannelId || streaming) return
 
     // 找到最后一条用户消息
     const lastUserMessage = [...persistedSDKMessages]
@@ -2246,10 +2252,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         running: true,
         content: '',
         toolActivities: [],
-        model: agentModelId || undefined,
+        model: retryModelId || undefined,
         startedAt: streamStartedAt,
         inputTokens: existing?.inputTokens,
-        contextWindow: resolveRunContextWindow(agentModelId || undefined, agentChannelProvider, existing?.contextWindow),
+        contextWindow: resolveRunContextWindow(retryModelId || undefined, overrides ? 'proma' : agentChannelProvider, existing?.contextWindow),
       })
       return map
     })
@@ -2257,14 +2263,50 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     window.electronAPI.sendAgentMessage({
       sessionId,
       userMessage: lastUserMessage,
-      channelId: agentChannelId,
-      modelId: agentModelId || undefined,
+      channelId: retryChannelId,
+      modelId: retryModelId || undefined,
       agentRuntime: sessionAgentRuntime,
       workspaceId: currentWorkspaceId || undefined,
       startedAt: streamStartedAt,
       permissionModeOverride: permissionMode,
     }).catch(console.error)
   }, [persistedSDKMessages, sessionId, agentChannelId, agentModelId, sessionAgentRuntime, agentChannelProvider, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
+
+  const promaCloudRecoveryModel = sessionAgentRuntime === 'claude'
+    ? 'claude-opus-4-8'
+    : 'gpt-5.6-terra'
+
+  const handlePromaCloudRetryRequest = React.useCallback((): void => {
+    if (streaming) return
+    if (!billingInfo || calcTotalAvailable(billingInfo) <= 0) {
+      setSettingsOpen(true)
+      toast.info('Proma Cloud 额度不足，请先订阅后继续。')
+      return
+    }
+    setShowPromaCloudConfirm(true)
+  }, [streaming, billingInfo, setSettingsOpen])
+
+  const handleConfirmPromaCloudRetry = React.useCallback(async (): Promise<void> => {
+    setShowPromaCloudConfirm(false)
+    if (streaming) return
+
+    const channelId = PROMA_OFFICIAL_CHANNEL_ID
+    const modelId = promaCloudRecoveryModel
+    try {
+      const updated = await window.electronAPI.updateAgentSessionModel(sessionId, channelId, modelId)
+      setSessionChannelMap((prev) => new Map(prev).set(sessionId, channelId))
+      setSessionModelMap((prev) => new Map(prev).set(sessionId, modelId))
+      setDefaultChannelId(channelId)
+      setDefaultModelId(modelId)
+      setAgentSessions((prev) => prev.map((session) => session.id === updated.id ? updated : session))
+      await window.electronAPI.updateSettings({ agentChannelId: channelId, agentModelId: modelId })
+      // 显式传入目标渠道/模型，不能等待 React state 刷新后再使用旧闭包重试。
+      handleRetry({ channelId, modelId })
+    } catch (error) {
+      console.error('[AgentView] 切换 Proma Cloud 并重试失败:', error)
+      toast.error('切换 Proma Cloud 失败', { description: getErrorMessage(error) })
+    }
+  }, [streaming, sessionId, promaCloudRecoveryModel, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, setAgentSessions, handleRetry])
 
   /** 在新对话继续：创建新会话 + 切换 tab + 使用 &session 引用旧会话 */
   const handleRetryInNewSession = React.useCallback(async (): Promise<void> => {
@@ -2758,6 +2800,22 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   return (
     <>
     <AgentSessionProvider sessionId={sessionId}>
+      <AlertDialog open={showPromaCloudConfirm} onOpenChange={setShowPromaCloudConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>使用 Proma Cloud 继续任务？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将使用 Proma Cloud 的 {promaCloudRecoveryModel} 重新执行本次请求，并按实际用量消耗 Proma Cloud 额度。Proma Cloud 由官方持续维护模型质量、Agent 兼容性与运行保障；你的原渠道配置不会被修改。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void handleConfirmPromaCloudRetry() }}>
+              切换并重试
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex h-full min-h-0 flex-1 min-w-0 max-w-[min(72rem,100%)] flex-col overflow-hidden mx-auto">
         {/* Agent Header */}
         <AgentHeader sessionId={sessionId} />
@@ -2780,6 +2838,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onFork={handleFork}
           onRewind={handleRewindRequest}
           onCompact={handleCompact}
+          onSwitchToPromaCloud={handlePromaCloudRetryRequest}
         />
 
         {/* 权限请求横幅 */}

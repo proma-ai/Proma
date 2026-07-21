@@ -80,6 +80,7 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
+import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -2184,7 +2185,10 @@ export class AgentOrchestrator {
                   _errorTitle: typedError.title,
                   _errorDetails: typedError.details,
                   _errorCanRetry: typedError.canRetry,
-                  _errorActions: typedError.actions,
+                  _errorActions: [
+                    ...typedError.actions,
+                    ...(getPromaCloudRecoveryAction(channel.provider, typedError.code) ? [getPromaCloudRecoveryAction(channel.provider, typedError.code)!] : []),
+                  ],
                 } as unknown as SDKMessage
                 appendSDKMessages(sessionId, [errorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
@@ -2577,12 +2581,15 @@ export class AgentOrchestrator {
                 : isThinkingSignature
                   ? `${THINKING_SIGNATURE_ERROR_TITLE}：${THINKING_SIGNATURE_ERROR_MESSAGE}`
                   : userFacingError
-            const errorActions = isThinkingSignature
-              ? [
-                  { key: 'n', label: '在新对话继续', action: 'retry_in_new_session' },
-                  { key: 'r', label: '重试', action: 'retry' },
-                ]
-              : undefined
+            const errorActions = [
+              ...(isThinkingSignature
+                ? [
+                    { key: 'n', label: '在新对话继续', action: 'retry_in_new_session' },
+                    { key: 'r', label: '重试', action: 'retry' },
+                  ]
+                : []),
+              ...(getPromaCloudRecoveryAction(channel.provider, errorCode) ? [getPromaCloudRecoveryAction(channel.provider, errorCode)!] : []),
+            ]
             userFacingError = errorContent
             if (isPromptTooLong) {
               try { updateAgentSessionMeta(sessionId, { sdkSessionId: undefined }) } catch { /* 忽略 */ }

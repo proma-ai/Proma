@@ -517,7 +517,7 @@ export function mapSDKErrorToTypedError(errorCode: string, message: string, orig
     // pi runtime 动态 import 失败（打包遗漏依赖 / 安装损坏），产出定向的「核心未就绪」错误码，
     // 让 UI 给出「请重新安装」引导，而非泛化的 unknown_error
     code = 'agent_runtime_not_found'
-  } else if (/api.*key|unauthorized|authentication|invalid.*credential/i.test(diagnosticText)) {
+  } else if (httpStatus === 401 || httpStatus === 403 || /api.*key|unauthorized|authentication|invalid.*credential|无效的令牌|令牌无效|token.*invalid/i.test(diagnosticText)) {
     code = 'invalid_api_key'
   } else if (/billing|quota|insufficient_quota|credit|balance|payment|subscription/i.test(diagnosticText)) {
     code = 'billing_error'

@@ -323,8 +323,26 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <div className="space-y-1">
           <h3 className="text-base font-semibold">选择适合你的 Proma Cloud 使用额度</h3>
           <p className="text-xs text-muted-foreground">
-            额度可用于官方模型调用、Proma Agent 与云端工具；按实际模型和任务规模消耗。
+            品质、稳定与价格优势兼顾；额度可用于官方模型调用、Proma Agent 与云端工具，按实际模型和任务规模消耗。
           </p>
+          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+            一次性购买，不自动续费或自动扣款；建议按需少量多次叠加。
+          </p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
+            <p className="text-xs font-semibold text-foreground">部分模型专属优惠</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">精选高质量模型，部分模型享 Proma Cloud 专属优惠，最高可低至官方参考价 2 折。</p>
+          </div>
+          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
+            <p className="text-xs font-semibold text-foreground">为 Agent 真实任务而维护</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">持续验证多轮工具调用、长上下文与流式任务，让模型不只停留在一次 API 调用。</p>
+          </div>
+          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
+            <p className="text-xs font-semibold text-foreground">稳定状态实时可见</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">官方渠道提供模型健康状态、统一额度和故障恢复，不必自行排查多个 Key 与上游。</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-3">
@@ -332,6 +350,10 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
             const isSelected = selectedTier === tier.id
             const isRecommended = tier.id === RECOMMENDED_TIER
             const actualCny = tier.amount_cny / 100
+            const baseQuota = Number(tier.base_quota ?? tier.quota)
+            const bonusQuota = Number(tier.bonus_quota ?? 0)
+            const durationDays = tier.duration_days ?? 31
+            const hasBonus = bonusQuota > 0
             const visual = TIER_VISUALS[tier.id] ?? DEFAULT_VISUAL
 
             return (
@@ -351,19 +373,30 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                   {/* 档位名称 */}
                   <div className="mb-4">
                     <h3 className={cn('text-base font-bold', visual.textColor)}>{tier.name}</h3>
-                    <p className={cn('text-[11px] mt-0.5', visual.mutedColor)}>
-                      {tier.quota} 积分/月
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge className={cn('border-0 px-1.5 py-0 text-[10px] font-medium', visual.buttonClass)}>
+                        {durationDays} 天有效
+                      </Badge>
+                      {bonusQuota > 0 && (
+                        <Badge className={cn('border-0 px-1.5 py-0 text-[10px] font-medium', visual.buttonClass)}>
+                          额外赠送 {bonusQuota} 积分
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
-                  {/* 价格 */}
+                  {/* 价格与到账额度 */}
                   <div className="mb-1">
                     <div className="flex items-baseline gap-1.5">
                       <span className={cn('text-2xl font-bold tracking-tight', visual.priceColor)}>
                         ¥{actualCny}
                       </span>
-                      <span className={cn('text-[11px]', visual.mutedColor)}>/月</span>
                     </div>
+                    <p className={cn('mt-0.5 text-[11px] font-medium', visual.mutedColor)}>
+                      {hasBonus && <span className="line-through opacity-65">{baseQuota} 积分</span>}
+                      {hasBonus && <span className="mx-1">→</span>}
+                      到账 {tier.quota} 积分
+                    </p>
                   </div>
 
                   {/* 描述 */}
@@ -371,7 +404,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                     {TIER_DESC[tier.id] ?? ''}
                   </p>
 
-                  {/* 立即订阅按钮 */}
+                  {/* 一次性购买按钮 */}
                   <button
                     className={cn(
                       'w-full py-2 rounded-lg text-xs font-medium transition-all mb-4',
@@ -383,7 +416,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                       setShowLetterDialog(true)
                     }}
                   >
-                    立即订阅 · ¥{actualCny}
+                    一次性购买 · ¥{actualCny}
                   </button>
 
                   {/* 分隔线 */}
@@ -415,8 +448,9 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
           <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
           <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
             <p>Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</p>
-            <p>订阅额度有效期为 31 天，到期后未使用额度清零（团队采用单独计费层）。</p>
-            <p>支持重复购买叠加，优先消耗先购买的额度（FIFO）。</p>
+            <p>各额度包按档位独立有效 31 或 90 天，到期后未使用额度清零（团队采用单独计费层）。</p>
+            <p>每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。</p>
+            <p>支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。</p>
           </div>
         </div>
       </div>

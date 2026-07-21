@@ -79,7 +79,7 @@ const BASE_TABS: TabItem[] = [
 /** Cloud 模式专属 Tab */
 const BILLING_TAB: TabItem = {
   id: "billing",
-  label: "立即订阅",
+  label: "购买额度",
   icon: <CreditCard size={16} />,
 };
 

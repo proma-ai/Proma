@@ -36,7 +36,7 @@ export function QuotaExceededDialog(): React.ReactElement {
         <AlertDialogHeader>
           <AlertDialogTitle>Proma Cloud 额度不足</AlertDialogTitle>
           <AlertDialogDescription>
-            当前官方额度不足。订阅后可继续使用 Proma Cloud 的模型、Agent 与云端工具。
+            当前官方额度不足。购买额度后可继续使用 Proma Cloud 的模型、Agent 与云端工具。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

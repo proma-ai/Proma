@@ -46,7 +46,7 @@ export function TeamPromoBanner(): React.ReactElement {
           Proma 团队版已开放
         </p>
         <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/70 mt-0.5">
-          团队额度自动分配与共享(需满足三人以上使用，团队版 1K 积分起充值) · 点击复制微信号 <span className="font-mono font-semibold">{WECHAT_ID}</span> 联系开通
+          团队额度自动分配与共享（需满足三人以上使用，团队版 ¥1000 起购买，赠送 10% 额度）· 点击复制微信号 <span className="font-mono font-semibold">{WECHAT_ID}</span> 联系开通
         </p>
       </div>
 

@@ -439,6 +439,22 @@ export function mapSDKErrorToTypedError(
   }
 
   const httpStatus = extractHttpStatusFromErrorText(detailedMessage, originalError)
+  const looksLikeInvalidCredential = httpStatus === 401 || httpStatus === 403
+    || /api.*key|unauthorized|authentication|invalid.*credential|无效的令牌|令牌无效|token.*invalid/i.test(`${detailedMessage}\n${originalError ?? ''}`)
+  if (looksLikeInvalidCredential) {
+    return {
+      code: 'invalid_api_key',
+      title: '认证失败',
+      message: detailedMessage || '无法通过 API 认证，API Key 或令牌可能无效或已过期',
+      actions: [
+        { key: 's', label: '设置', action: 'settings' },
+        { key: 'r', label: '重试', action: 'retry' },
+      ],
+      canRetry: true,
+      retryDelayMs: 1000,
+      originalError,
+    }
+  }
   if (httpStatus != null && (httpStatus === 429 || httpStatus >= 500)) {
     const isRateLimited = httpStatus === 429
     const isUnavailable = httpStatus === 503
