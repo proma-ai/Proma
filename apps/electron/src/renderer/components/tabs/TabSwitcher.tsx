@@ -487,7 +487,7 @@ function SwitcherCandidateRow({
   onClick: () => void
 }): ReactElement {
   const indicatorColor = getIndicatorColor(candidate.status)
-  const indicatorPulse = candidate.status === 'running' || candidate.status === 'blocked'
+  const indicatorPulse = candidate.status === 'running'
 
   return (
     <button
@@ -553,5 +553,6 @@ function getIndicatorColor(status: SessionIndicatorStatus): string | undefined {
   if (status === 'idle') return undefined
   if (status === 'completed') return 'bg-green-500'
   if (status === 'blocked') return 'bg-orange-500'
+  if (status === 'error') return 'bg-red-500'
   return 'bg-blue-500'
 }

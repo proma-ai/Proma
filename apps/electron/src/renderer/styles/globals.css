@@ -832,6 +832,33 @@
   }
 }
 
+.agent-status-pulse-light {
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+.agent-status-pulse-light-running {
+  animation: agent-status-pulse-light-breathe 1.5s ease-in-out infinite;
+}
+
+@keyframes agent-status-pulse-light-breathe {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: drop-shadow(0 0 3px currentColor);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.18);
+    filter: drop-shadow(0 0 7px currentColor);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-status-pulse-light-running {
+    animation: none;
+  }
+}
+
 .theme-terminal-dark .mode-btn-selected {
   color: #000000 !important;
 }

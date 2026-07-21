@@ -551,7 +551,7 @@ export const agentRunningSessionIdsAtom = atom<Set<string>>((get) => {
 })
 
 /** 侧边栏会话指示点状态 */
-export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed'
+export type SessionIndicatorStatus = 'idle' | 'running' | 'blocked' | 'completed' | 'error'
 
 /** 已完成但用户尚未查看的会话 ID 集合 */
 export const unviewedCompletedSessionIdsAtom = atom<Set<string>>(new Set<string>())
@@ -580,7 +580,7 @@ export const dockBadgeCountAtom = atom<number>((get) => {
 
 /**
  * 每个会话的指示点状态（只包含非 idle 的会话）
- * 优先级：blocked > running > completed > idle
+ * 优先级：blocked > error > running > completed > idle
  */
 export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorStatus>>((get) => {
   const streamStates = get(agentStreamingStatesAtom)
@@ -588,6 +588,7 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
   const pendingAskUser = get(allPendingAskUserRequestsAtom)
   const pendingExitPlan = get(allPendingExitPlanRequestsAtom)
   const unviewedCompleted = get(unviewedCompletedSessionIdsAtom)
+  const streamErrors = get(agentStreamErrorsAtom)
 
   const map = new Map<string, SessionIndicatorStatus>()
 
@@ -597,6 +598,12 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
       || (pendingAskUser.get(id)?.length ?? 0) > 0
       || (pendingExitPlan.get(id)?.length ?? 0) > 0
     map.set(id, hasBlock ? 'blocked' : 'running')
+  }
+
+  for (const id of streamErrors.keys()) {
+    if (map.get(id) !== 'blocked') {
+      map.set(id, 'error')
+    }
   }
 
   for (const id of unviewedCompleted) {

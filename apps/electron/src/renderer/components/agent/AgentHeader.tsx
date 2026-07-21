@@ -8,8 +8,10 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Pencil, Check, X } from 'lucide-react'
-import { agentSessionsAtom } from '@/atoms/agent-atoms'
+import { agentSessionsAtom, agentSessionIndicatorMapAtom, agentSessionStreamingStateAtomFamily, agentStreamErrorsAtom, type SessionIndicatorStatus } from '@/atoms/agent-atoms'
 import { tabsAtom, updateTabTitle } from '@/atoms/tab-atoms'
+import type { AgentSessionMeta } from '@proma/shared'
+import { AgentStatusPulseLight, buildAgentDelegationProgressSummary } from './AgentStatusPulseLight'
 import { replaceAgentSessionInFreshnessOrder } from '@/lib/agent-session-list'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -19,10 +21,45 @@ interface AgentHeaderProps {
   sessionId: string
 }
 
+function getDirectDelegatedChildren(sessions: AgentSessionMeta[], parentSessionId: string): AgentSessionMeta[] {
+  return sessions.filter((session) => session.parentSessionId === parentSessionId && session.sourceDelegationId)
+}
+
+function aggregateHeaderStatus(
+  sessionId: string,
+  sessions: AgentSessionMeta[],
+  indicatorMap: Map<string, SessionIndicatorStatus>,
+): SessionIndicatorStatus {
+  const childSessions = getDirectDelegatedChildren(sessions, sessionId)
+  const statuses = [
+    indicatorMap.get(sessionId) ?? 'idle',
+    ...childSessions.map((session) => {
+      const status = indicatorMap.get(session.id)
+      if (status) return status
+      return session.delegationStatus === 'running' ? 'running' : 'idle'
+    }),
+  ]
+
+  if (statuses.includes('blocked')) return 'blocked'
+  if (statuses.includes('error')) return 'error'
+  if (statuses.includes('running')) return 'running'
+  if (statuses.includes('completed')) return 'completed'
+  return 'idle'
+}
+
 export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
   const sessions = useAtomValue(agentSessionsAtom)
+  const indicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
+  const streamState = useAtomValue(agentSessionStreamingStateAtomFamily(sessionId))
+  const streamErrors = useAtomValue(agentStreamErrorsAtom)
   const session = sessions.find((s) => s.id === sessionId) ?? null
+  const status = aggregateHeaderStatus(sessionId, sessions, indicatorMap)
+  const errorMessage = streamErrors.get(sessionId) ?? null
+  const delegationSummary = buildAgentDelegationProgressSummary(
+    getDirectDelegatedChildren(sessions, sessionId),
+    streamState?.running ? streamState.startedAt : undefined,
+  )
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const setTabs = useSetAtom(tabsAtom)
   const [editing, setEditing] = React.useState(false)
@@ -102,9 +139,15 @@ export function AgentHeader({ sessionId }: AgentHeaderProps): React.ReactElement
         </div>
       ) : (
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className="truncate text-sm font-medium text-foreground">
+          <span className="min-w-0 truncate text-sm font-medium text-foreground">
             {session.title}
           </span>
+          <AgentStatusPulseLight
+            status={status}
+            streamState={streamState}
+            errorMessage={errorMessage}
+            delegationSummary={delegationSummary}
+          />
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}

@@ -52,6 +52,7 @@ import {
   agentDiffUnseenFilesAtom,
   agentDiffDataAtom,
   agentStreamingStatesAtom,
+  agentStreamErrorsAtom,
   liveMessagesMapAtom,
   agentSessionPendingFilesAtom,
   agentSessionStreamingStateAtomFamily,
@@ -86,6 +87,7 @@ import { interfaceVariantAtom } from '@/atoms/theme'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
+import { AgentStatusPulseLight, buildAgentDelegationProgressSummary, type AgentDelegationProgressSummary } from '@/components/agent/AgentStatusPulseLight'
 import { MoveSessionDialog } from '@/components/agent/MoveSessionDialog'
 import {
   SessionMiniMapPopover,
@@ -331,15 +333,17 @@ const SESSION_QUICK_SWITCH_KEYUP_EVENT = 'proma:session-quick-switch-keyup'
 
 const ACTIVE_SESSION_STATUSES: ReadonlySet<SessionIndicatorStatus> = new Set([
   'blocked',
+  'error',
   'running',
   'completed',
 ])
 
 const ACTIVE_SESSION_STATUS_PRIORITY: Record<SessionIndicatorStatus, number> = {
   blocked: 0,
-  running: 1,
-  completed: 2,
-  idle: 3,
+  error: 1,
+  running: 2,
+  completed: 3,
+  idle: 4,
 }
 
 function formatRelativeUpdatedAt(updatedAt: number, now: number): string {
@@ -390,6 +394,7 @@ const RAIL_STATUS_CLASS: Record<SessionIndicatorStatus, string> = {
   running: 'border-blue-500 animate-pulse',
   blocked: 'border-orange-500',
   completed: 'border-emerald-500',
+  error: 'border-red-500',
 }
 
 const SIDEBAR_DRAG_STRIP_HEIGHT = {
@@ -521,6 +526,7 @@ function getSessionTreeStatus(
   ]
 
   if (statuses.includes('blocked')) return 'blocked'
+  if (statuses.includes('error')) return 'error'
   if (statuses.includes('running')) return 'running'
   if (statuses.includes('completed')) return 'completed'
   return 'idle'
@@ -528,6 +534,13 @@ function getSessionTreeStatus(
 
 function countCompletedDelegatedChildren(childSessions: AgentSessionMeta[]): number {
   return childSessions.filter((session) => session.delegationStatus === 'completed').length
+}
+
+function countDelegatedChildrenByStatus(
+  childSessions: AgentSessionMeta[],
+  status: AgentSessionMeta['delegationStatus'],
+): number {
+  return childSessions.filter((session) => session.delegationStatus === status).length
 }
 
 function treeContainsSessionId(item: AgentSessionTreeItem, sessionId: string | null): boolean {
@@ -763,6 +776,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const [currentAgentSessionId, setCurrentAgentSessionId] = useAtom(currentAgentSessionIdAtom)
   const agentIndicatorMap = useAtomValue(agentSessionIndicatorMapAtom)
+  const agentStreamErrors = useAtomValue(agentStreamErrorsAtom)
   const unviewedCompletedSessionIds = useAtomValue(unviewedCompletedSessionIdsAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
@@ -2219,10 +2233,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         const priority = (session: AgentSessionMeta, status: SessionIndicatorStatus): number => {
           if (session.id === activeSessionId) return 0
           if (status === 'blocked') return 1
-          if (status === 'running') return 2
-          if (session.pinned) return 3
-          if (status === 'completed') return 4
-          return 5
+          if (status === 'error') return 2
+          if (status === 'running') return 3
+          if (session.pinned) return 4
+          if (status === 'completed') return 5
+          return 6
         }
         const priorityDelta = priority(a, statusA) - priority(b, statusB)
         if (priorityDelta !== 0) return priorityDelta
@@ -2764,15 +2779,21 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                             session={item.session}
                             active={treeActive}
                             indicatorStatus={rowStatus}
+                            errorMessage={agentStreamErrors.get(item.session.id)}
                             showPinIcon={false}
                             delegationSummary={childCount > 0
                               ? {
                                 total: childCount,
                                 completed: countCompletedDelegatedChildren(item.childSessions),
+                                running: countDelegatedChildrenByStatus(item.childSessions, 'running'),
+                                failed: countDelegatedChildrenByStatus(item.childSessions, 'failed'),
+                                cancelled: countDelegatedChildrenByStatus(item.childSessions, 'cancelled'),
+                                interrupted: countDelegatedChildrenByStatus(item.childSessions, 'interrupted'),
                                 expanded: expandedChildren,
                                 onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
                               }
                               : undefined}
+                            delegationChildSessions={item.childSessions}
                             leftAccent={getSessionLeftAccent(rowStatus)}
                             workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
                             relativeTimeNow={relativeTimeNow}
@@ -2792,6 +2813,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                                   session={childSession}
                                   activeSessionId={activeSessionId}
                                   agentIndicatorMap={agentIndicatorMap}
+                                  agentStreamErrors={agentStreamErrors}
                                   relativeTimeNow={relativeTimeNow}
                                   workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
                                   onSelect={handleSelectAgentSession}
@@ -2867,6 +2889,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     collapsed={collapsedWorkspaceIds.has(group.workspace.id)}
                     activeSessionId={activeSessionId}
                     agentIndicatorMap={agentIndicatorMap}
+                    agentStreamErrors={agentStreamErrors}
                     expandedDelegationParentIds={expandedDelegationParentIds}
                     collapsedDelegationParentIds={collapsedDelegationParentIds}
                     relativeTimeNow={relativeTimeNow}
@@ -2962,15 +2985,21 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                             session={item.session}
                             active={treeActive}
                             indicatorStatus={rowStatus}
+                            errorMessage={agentStreamErrors.get(item.session.id)}
                             showPinIcon={!!item.session.pinned}
                             delegationSummary={childCount > 0
                               ? {
                                 total: childCount,
                                 completed: countCompletedDelegatedChildren(item.childSessions),
+                                running: countDelegatedChildrenByStatus(item.childSessions, 'running'),
+                                failed: countDelegatedChildrenByStatus(item.childSessions, 'failed'),
+                                cancelled: countDelegatedChildrenByStatus(item.childSessions, 'cancelled'),
+                                interrupted: countDelegatedChildrenByStatus(item.childSessions, 'interrupted'),
                                 expanded: expandedChildren,
                                 onToggle: () => handleToggleDelegationParent(item.session.id, expandedChildren),
                               }
                               : undefined}
+                            delegationChildSessions={item.childSessions}
                             leftAccent={getSessionLeftAccent(rowStatus)}
                             workspaceName={item.session.workspaceId ? workspaceNameMap.get(item.session.workspaceId) : undefined}
                             relativeTimeNow={relativeTimeNow}
@@ -2990,6 +3019,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                                   session={childSession}
                                   activeSessionId={activeSessionId}
                                   agentIndicatorMap={agentIndicatorMap}
+                                  agentStreamErrors={agentStreamErrors}
                                   relativeTimeNow={relativeTimeNow}
                                   workspaceName={childSession.workspaceId ? workspaceNameMap.get(childSession.workspaceId) : undefined}
                                   onSelect={handleSelectAgentSession}
@@ -3520,17 +3550,19 @@ const ConversationItem = React.memo(function ConversationItem({
 // ===== Agent 会话列表项 =====
 
 /** 会话行左侧状态条的颜色 — 与 SessionIndicatorStatus 呼应 */
-type SessionLeftAccent = 'orange' | 'blue' | 'green'
+type SessionLeftAccent = 'orange' | 'blue' | 'green' | 'red'
 const SESSION_ACCENT_ROW_CLASS: Record<SessionLeftAccent, string> = {
   orange: 'bg-orange-500/[0.08] text-foreground font-medium',
   blue: 'text-foreground font-medium hover:bg-foreground/[0.03]',
   green: 'text-foreground font-medium hover:bg-foreground/[0.03]',
+  red: 'text-foreground font-medium hover:bg-foreground/[0.03]',
 }
 
 const SESSION_ACCENT_INDICATOR_CLASS: Record<SessionLeftAccent, string> = {
   orange: 'bg-orange-500',
   blue: 'bg-blue-500',
   green: 'bg-green-500',
+  red: 'bg-red-500',
 }
 
 const DELEGATION_STATUS_ICON_CLASS: Record<SessionIndicatorStatus, string> = {
@@ -3538,12 +3570,14 @@ const DELEGATION_STATUS_ICON_CLASS: Record<SessionIndicatorStatus, string> = {
   running: 'text-blue-500',
   blocked: 'text-orange-500',
   completed: 'text-green-500',
+  error: 'text-red-500',
 }
 
 function getSessionLeftAccent(status: SessionIndicatorStatus): SessionLeftAccent | undefined {
   if (status === 'blocked') return 'orange'
   if (status === 'running') return 'blue'
   if (status === 'completed') return 'green'
+  if (status === 'error') return 'red'
   return undefined
 }
 
@@ -3551,13 +3585,13 @@ interface AgentSessionItemProps {
   session: AgentSessionMeta
   active: boolean
   indicatorStatus: SessionIndicatorStatus
+  errorMessage?: string | null
   showPinIcon?: boolean
-  delegationSummary?: {
-    total: number
-    completed: number
+  delegationSummary?: AgentDelegationProgressSummary & {
     expanded: boolean
     onToggle: () => void
   }
+  delegationChildSessions?: AgentSessionMeta[]
   /** 行左侧状态色块；未传则不显示 */
   leftAccent?: SessionLeftAccent
   /** 是否禁用悬浮 Mini 地图 */
@@ -3578,8 +3612,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   session,
   active,
   indicatorStatus,
+  errorMessage,
   showPinIcon,
   delegationSummary,
+  delegationChildSessions,
   leftAccent,
   disableMiniMap,
   workspaceName,
@@ -3599,6 +3635,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
   const preview = useSessionMiniMapHover(600, disableMiniMap || menuOpen)
   const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const streamState = useAtomValue(agentSessionStreamingStateAtomFamily(session.id))
   const isClassic = interfaceVariant === 'classic'
 
   const startEdit = (): void => {
@@ -3636,6 +3673,10 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
 
   const childCount = delegationSummary?.total ?? 0
   const hasChildren = childCount > 0
+  const pulseDelegationSummary = buildAgentDelegationProgressSummary(
+    delegationChildSessions ?? [],
+    streamState?.running ? streamState.startedAt : undefined,
+  )
   const pinLabel = session.pinned ? '取消置顶' : '置顶会话'
   const cascadePinLabel = session.pinned
     ? `取消置顶(含 ${childCount} 个子会话)`
@@ -3744,7 +3785,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                   <GitBranch size={11} className={cn('flex-shrink-0', DELEGATION_STATUS_ICON_CLASS[indicatorStatus])} />
                 )}
                 <span
-                  className="truncate"
+                  className="min-w-0 truncate"
                   onDoubleClick={(event) => {
                     event.stopPropagation()
                     startEdit()
@@ -3752,6 +3793,14 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 >
                   {session.title}
                 </span>
+                <AgentStatusPulseLight
+                  status={indicatorStatus}
+                  streamState={streamState}
+                  errorMessage={errorMessage}
+                  delegationSummary={pulseDelegationSummary}
+                  tooltipSide="right"
+                  className="-ml-0.5"
+                />
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
                     {workspaceName}
@@ -3841,6 +3890,7 @@ interface DelegatedChildSessionItemProps {
   session: AgentSessionMeta
   activeSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
+  agentStreamErrors: Map<string, string>
   relativeTimeNow: number
   workspaceName?: string
   onSelect: (id: string, title: string) => void
@@ -3855,6 +3905,7 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
   session,
   activeSessionId,
   agentIndicatorMap,
+  agentStreamErrors,
   relativeTimeNow,
   workspaceName,
   onSelect,
@@ -3871,6 +3922,7 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
       session={session}
       active={session.id === activeSessionId}
       indicatorStatus={status}
+      errorMessage={agentStreamErrors.get(session.id)}
       relativeTimeNow={relativeTimeNow}
       workspaceName={workspaceName}
       onSelect={onSelect}
@@ -3898,6 +3950,7 @@ interface AgentProjectGroupItemProps {
   extraCount: number
   activeSessionId: string | null
   agentIndicatorMap: Map<string, SessionIndicatorStatus>
+  agentStreamErrors: Map<string, string>
   expandedDelegationParentIds: Set<string>
   collapsedDelegationParentIds: Set<string>
   relativeTimeNow: number
@@ -3935,6 +3988,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   extraCount,
   activeSessionId,
   agentIndicatorMap,
+  agentStreamErrors,
   expandedDelegationParentIds,
   collapsedDelegationParentIds,
   relativeTimeNow,
@@ -4221,15 +4275,21 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                       session={item.session}
                       active={treeActive}
                       indicatorStatus={rowStatus}
+                      errorMessage={agentStreamErrors.get(item.session.id)}
                       showPinIcon={!!item.session.pinned}
                       delegationSummary={childCount > 0
                         ? {
                           total: childCount,
                           completed: countCompletedDelegatedChildren(item.childSessions),
+                          running: countDelegatedChildrenByStatus(item.childSessions, 'running'),
+                          failed: countDelegatedChildrenByStatus(item.childSessions, 'failed'),
+                          cancelled: countDelegatedChildrenByStatus(item.childSessions, 'cancelled'),
+                          interrupted: countDelegatedChildrenByStatus(item.childSessions, 'interrupted'),
                           expanded: expandedChildren,
                           onToggle: () => onToggleDelegationParent(item.session.id, expandedChildren),
                         }
                         : undefined}
+                      delegationChildSessions={item.childSessions}
                       leftAccent={getSessionLeftAccent(rowStatus)}
                       relativeTimeNow={relativeTimeNow}
                       workspaceName={isAutomationGroup && item.session.workspaceId ? workspaceNameMap?.get(item.session.workspaceId) : undefined}
@@ -4249,6 +4309,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                             session={childSession}
                             activeSessionId={activeSessionId}
                             agentIndicatorMap={agentIndicatorMap}
+                            agentStreamErrors={agentStreamErrors}
                             relativeTimeNow={relativeTimeNow}
                             workspaceName={isAutomationGroup && childSession.workspaceId ? workspaceNameMap?.get(childSession.workspaceId) : undefined}
                             onSelect={onSelectSession}
