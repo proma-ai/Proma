@@ -179,8 +179,10 @@ function resolveRunContextWindow(
 
 interface SDKMessageRecord {
   type?: string
+  uuid?: string
   parent_tool_use_id?: string | null
   isSynthetic?: boolean
+  error?: unknown
   message?: {
     content?: unknown
   }
@@ -205,6 +207,15 @@ function getUserTextFromSDKMessage(message: SDKMessage): string | null {
     .map((block) => (block as { text: string }).text)
 
   return texts.length > 0 ? texts.join('\n') : null
+}
+
+function removeRetriedErrorSDKMessage(messages: SDKMessage[], errorUuid: string | undefined): SDKMessage[] {
+  if (!errorUuid) return messages
+  const next = messages.filter((message) => {
+    const record = message as unknown as SDKMessageRecord
+    return !(record.type === 'assistant' && record.uuid === errorUuid && record.error !== undefined && record.error !== null)
+  })
+  return next.length === messages.length ? messages : next
 }
 
 function getErrorMessage(error: unknown): string {
@@ -2237,6 +2248,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       .find((text): text is string => text !== null)
     if (!lastUserMessage) return
 
+    // 与主进程按 UUID 的原子删除同步更新当前 React 状态和 LRU cache，避免旧错误
+    // 在下一轮回复开始前仍被页面渲染。旧会话没有 UUID 时保留历史，由主进程幂等处理。
+    const messagesAfterCleanup = removeRetriedErrorSDKMessage(persistedSDKMessages, retryOfErrorUuid)
+    if (messagesAfterCleanup !== persistedSDKMessages) {
+      persistedSDKMessagesRef.current = messagesAfterCleanup
+      setPersistedSDKMessages(messagesAfterCleanup)
+      setMessagesCache((prev) => setSessionMessagesCache(prev, sessionId, messagesAfterCleanup))
+    }
+
     // 清除错误状态
     setAgentStreamErrors((prev) => {
       if (!prev.has(sessionId)) return prev
@@ -2273,7 +2293,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       permissionModeOverride: permissionMode,
       ...(retryOfErrorUuid && { retryOfErrorUuid }),
     }).catch(console.error)
-  }, [persistedSDKMessages, sessionId, agentChannelId, agentModelId, sessionAgentRuntime, agentChannelProvider, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, permissionMode])
+  }, [persistedSDKMessages, sessionId, agentChannelId, agentModelId, sessionAgentRuntime, agentChannelProvider, currentWorkspaceId, streaming, setAgentStreamErrors, setStreamingStates, setMessagesCache, permissionMode])
 
   const promaCloudRecoveryModel = sessionAgentRuntime === 'claude'
     ? 'claude-opus-4-8'

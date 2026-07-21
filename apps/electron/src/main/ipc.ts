@@ -1892,6 +1892,17 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 切换 Agent 会话星标状态
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.TOGGLE_STAR,
+    async (_, id: string): Promise<AgentSessionMeta> => {
+      const sessions = listAgentSessions()
+      const current = sessions.find((s) => s.id === id)
+      if (!current) throw new Error(`Agent session not found: ${id}`)
+      return updateAgentSessionMeta(id, { starred: !current.starred })
+    }
+  )
+
   // 清除 Agent 会话完成状态（兼容清除旧版 manualWorking）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CLEAR_COMPLETION_STATE,

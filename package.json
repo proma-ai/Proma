@@ -86,5 +86,7 @@
     "@earendil-works/pi-coding-agent": "0.80.9",
     "@earendil-works/pi-tui": "0.80.9"
   },
-  "patchedDependencies": {}
+  "patchedDependencies": {
+    "@earendil-works/pi-ai@0.80.9": "patches/@earendil-works%2Fpi-ai@0.80.9.patch"
+  }
 }

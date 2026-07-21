@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -1964,6 +1964,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     }
   }, [draftSessionIds, store, setAgentSessions])
 
+  /** 切换 Agent 会话星标状态 */
+  const handleToggleStarAgent = React.useCallback(async (id: string): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.toggleStarAgentSession(id)
+      setAgentSessions((prev) => replaceAgentSessionInFreshnessOrder(prev, updated))
+    } catch (error) {
+      console.error('[侧边栏] 切换 Agent 会话星标失败:', error)
+    }
+  }, [setAgentSessions])
+
   /** 切换 Agent 会话归档状态 */
   const handleToggleArchiveAgent = React.useCallback(async (id: string): Promise<void> => {
     const sessions = store.get(agentSessionsAtom)
@@ -2782,6 +2792,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                             onRequestMove={handleRequestMove}
                             onRename={handleAgentRename}
                             onTogglePin={handleTogglePinAgent}
+                            onToggleStar={handleToggleStarAgent}
                             onToggleArchive={handleToggleArchiveAgent}
                           />
 
@@ -2800,6 +2811,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                                   onRequestMove={handleRequestMove}
                                   onRename={handleAgentRename}
                                   onTogglePin={handleTogglePinAgent}
+                                  onToggleStar={handleToggleStarAgent}
                                   onToggleArchive={handleToggleArchiveAgent}
                                 />
                               ))}
@@ -2894,6 +2906,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                     onRequestMove={handleRequestMove}
                     onRename={handleAgentRename}
                     onTogglePin={handleTogglePinAgent}
+                    onToggleStar={handleToggleStarAgent}
                     onToggleArchive={handleToggleArchiveAgent}
                     onToggleDelegationParent={handleToggleDelegationParent}
                   />
@@ -2980,6 +2993,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                             onRequestMove={handleRequestMove}
                             onRename={handleAgentRename}
                             onTogglePin={handleTogglePinAgent}
+                            onToggleStar={handleToggleStarAgent}
                             onToggleArchive={handleToggleArchiveAgent}
                           />
 
@@ -2998,6 +3012,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                                   onRequestMove={handleRequestMove}
                                   onRename={handleAgentRename}
                                   onTogglePin={handleTogglePinAgent}
+                                  onToggleStar={handleToggleStarAgent}
                                   onToggleArchive={handleToggleArchiveAgent}
                                 />
                               ))}
@@ -3578,6 +3593,7 @@ interface AgentSessionItemProps {
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string, cascade: boolean) => Promise<void>
+  onToggleStar: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
 }
 
@@ -3596,11 +3612,13 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   onRequestMove,
   onRename,
   onTogglePin,
+  onToggleStar,
   onToggleArchive,
 }: AgentSessionItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const [rowHovered, setRowHovered] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const justStartedEditing = React.useRef(false)
   // 菜单打开时关闭迷你地图预览，避免预览面板盖住菜单项导致点不动
@@ -3703,8 +3721,8 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           data-session-switch-title={session.title}
           data-session-switch-type="agent"
           onClick={() => onSelect(session.id, session.title)}
-          onMouseEnter={preview.handleMouseEnter}
-          onMouseLeave={preview.handleMouseLeave}
+          onMouseEnter={() => { setRowHovered(true); preview.handleMouseEnter() }}
+          onMouseLeave={() => { setRowHovered(false); preview.handleMouseLeave() }}
           className={cn(
             'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'agent-session-item-active',
@@ -3759,6 +3777,37 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
                 >
                   {session.title}
                 </span>
+                <SafeTooltip content={session.starred ? '取消星标' : '添加星标'} side="top">
+                  <button
+                    type="button"
+                    aria-label={session.starred ? '取消星标' : '添加星标'}
+                    aria-pressed={!!session.starred}
+                    onMouseEnter={preview.closeNow}
+                    onFocus={preview.closeNow}
+                    onMouseDown={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                      if (event.detail > 1) return
+                      void onToggleStar(session.id)
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      preview.closeNow()
+                    }}
+                    className={cn(
+                      'flex-shrink-0 inline-flex size-6 -my-1 items-center justify-center rounded transition-colors',
+                      session.starred
+                        ? 'text-amber-500 hover:text-amber-500'
+                        : cn('text-foreground/45 hover:bg-foreground/[0.055] hover:text-foreground/70', rowHovered ? 'opacity-100' : 'opacity-0'),
+                    )}
+                  >
+                    <Star size={13} fill={session.starred ? 'currentColor' : 'none'} />
+                  </button>
+                </SafeTooltip>
                 {workspaceName && (
                   <span className="flex-shrink-0 px-1.5 py-0 rounded-full bg-primary/10 text-[10px] leading-4 workspace-badge font-medium truncate max-w-[80px]">
                     {workspaceName}
@@ -3855,6 +3904,7 @@ interface DelegatedChildSessionItemProps {
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string, cascade: boolean) => Promise<void>
+  onToggleStar: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
 }
 
@@ -3869,6 +3919,7 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
   onRequestMove,
   onRename,
   onTogglePin,
+  onToggleStar,
   onToggleArchive,
 }: DelegatedChildSessionItemProps): React.ReactElement {
   const status = getDelegatedChildStatus(session, agentIndicatorMap)
@@ -3885,6 +3936,7 @@ const DelegatedChildSessionItem = React.memo(function DelegatedChildSessionItem(
       onRequestMove={onRequestMove}
       onRename={onRename}
       onTogglePin={onTogglePin}
+      onToggleStar={onToggleStar}
       onToggleArchive={onToggleArchive}
     />
   )
@@ -3928,6 +3980,7 @@ interface AgentProjectGroupItemProps {
   onRequestMove: (id: string) => void
   onRename: (id: string, newTitle: string) => Promise<void>
   onTogglePin: (id: string, cascade: boolean) => Promise<void>
+  onToggleStar: (id: string) => Promise<void>
   onToggleArchive: (id: string) => Promise<void>
   onToggleDelegationParent: (id: string, expanded: boolean) => void
 }
@@ -3965,6 +4018,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onRequestMove,
   onRename,
   onTogglePin,
+  onToggleStar,
   onToggleArchive,
   onToggleDelegationParent,
 }: AgentProjectGroupItemProps): React.ReactElement {
@@ -4245,6 +4299,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                       onRequestMove={onRequestMove}
                       onRename={onRename}
                       onTogglePin={onTogglePin}
+                      onToggleStar={onToggleStar}
                       onToggleArchive={onToggleArchive}
                     />
 
@@ -4263,6 +4318,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                             onRequestMove={onRequestMove}
                             onRename={onRename}
                             onTogglePin={onTogglePin}
+                            onToggleStar={onToggleStar}
                             onToggleArchive={onToggleArchive}
                           />
                         ))}

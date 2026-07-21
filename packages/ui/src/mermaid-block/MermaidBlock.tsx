@@ -231,12 +231,10 @@ export function MermaidBlock({ code }: MermaidBlockProps): React.ReactElement {
           </pre>
         ) : (
           <div className="mermaid-block-scroll bg-background overflow-auto min-h-[180px]">
-            <div
-              className="flex justify-center items-center p-4 min-h-[180px] origin-center"
-              style={{ transform: `scale(${scale})` }}
-            >
+            <div className="flex w-max min-w-full items-center justify-start p-4 min-h-[180px]">
               <div
-                className="mermaid-svg [&>svg]:max-w-full [&>svg]:h-auto"
+                className="mermaid-svg inline-block [&>svg]:block [&>svg]:h-auto"
+                style={{ zoom: scale }}
                 dangerouslySetInnerHTML={{ __html: renderedSvg }}
               />
             </div>

@@ -483,6 +483,9 @@ export interface ElectronAPI {
   /** 切换 Agent 会话置顶状态 */
   togglePinAgentSession: (id: string) => Promise<AgentSessionMeta>
 
+  /** 切换 Agent 会话星标状态 */
+  toggleStarAgentSession: (id: string) => Promise<AgentSessionMeta>
+
   /** 清除 Agent 会话完成状态（兼容清除旧版 manualWorking） */
   clearAgentCompletionState: (id: string) => Promise<AgentSessionMeta>
 
@@ -1645,6 +1648,10 @@ const electronAPI: ElectronAPI = {
 
   togglePinAgentSession: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_PIN, id)
+  },
+
+  toggleStarAgentSession: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.TOGGLE_STAR, id)
   },
 
   clearAgentCompletionState: (id: string) => {

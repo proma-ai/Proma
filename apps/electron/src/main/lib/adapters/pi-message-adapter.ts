@@ -208,6 +208,17 @@ export function convertPiMessage(
 
   if (message.role === 'assistant') {
     const assistant = message as AssistantMessage
+    // 只有 stopReason === 'error' 时才把 errorMessage 提升为终态 error 字段。
+    // - 'aborted' 属于用户/系统主动中断，不是失败，弹「服务繁忙 + 重试」在语义上完全错误。
+    // - 'stop' / 'length' / 'toolUse' 即使带 errorMessage 也只是 provider 中途抖动，
+    //   Pi SDK 认定本轮已成功，不应在渲染层误导用户。
+    // 上述非终态情况的 errorMessage 只写主进程 console，供开发排查；用户侧完全无感知。
+    const isTerminalError = assistant.stopReason === 'error'
+    if (assistant.errorMessage && !isTerminalError && final) {
+      console.warn(
+        `[pi-adapter] 忽略非终态 errorMessage（stopReason=${assistant.stopReason}）: ${assistant.errorMessage}`,
+      )
+    }
     return {
       type: 'assistant',
       message: {
@@ -234,7 +245,9 @@ export function convertPiMessage(
       session_id: sessionId,
       uuid: options.uuid ?? randomUUID(),
       ...(!final && { _partial: true }),
-      ...(assistant.errorMessage && { error: { message: assistant.errorMessage, errorType: 'provider_error' } }),
+      ...(assistant.errorMessage && isTerminalError && {
+        error: { message: assistant.errorMessage, errorType: 'provider_error' },
+      }),
       ...(channelModelId && { _channelModelId: channelModelId }),
     } as unknown as SDKMessage
   }

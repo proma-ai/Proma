@@ -43,4 +43,17 @@ describe('convertPiMessage', () => {
     })
     expect(JSON.stringify(message).length).toBeGreaterThan(content.length)
   })
+
+  test('only persists provider errors for terminal Pi failures', () => {
+    const providerError = 'stream ended before a terminal response event'
+    const partialStop = convertPiMessage({
+      role: 'assistant', content: [], stopReason: 'stop', errorMessage: providerError,
+    } as unknown as AssistantMessage, 'session-1') as { error?: unknown }
+    const terminalError = convertPiMessage({
+      role: 'assistant', content: [], stopReason: 'error', errorMessage: providerError,
+    } as unknown as AssistantMessage, 'session-1') as { error?: { message?: string } }
+
+    expect(partialStop.error).toBeUndefined()
+    expect(terminalError.error?.message).toBe(providerError)
+  })
 })
