@@ -26,6 +26,7 @@ import { listChannels, resolveChannelRuntimeApiKey } from './channel-manager'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
+import { estimatePromptTokens, retrieveDocumentContext } from './document-context'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { getEnabledTools } from './chat-tool-registry'
@@ -85,7 +86,8 @@ async function enrichMessageWithDocuments(
     try {
       const text = await extractTextFromAttachment(att.localPath)
       if (text.trim()) {
-        parts.push(`\n<file name="${att.filename}">\n${text}\n</file>`)
+        const context = retrieveDocumentContext(text, messageText)
+        parts.push(`\n<file name="${att.filename}" mode="retrieved-chunks">\n${context}\n</file>`)
       } else {
         parts.push(`\n<file name="${att.filename}">\n[文件内容为空]\n</file>`)
       }
@@ -102,7 +104,7 @@ async function enrichMessageWithDocuments(
 /**
  * 为历史消息列表注入文档附件文本
  *
- * 遍历历史消息，对包含文档附件的用户消息进行文本增强。
+ * 历史附件只保留引用，禁止每一轮重新注入整篇文档。
  * 返回新的消息数组（不修改原始消息）。
  */
 async function enrichHistoryWithDocuments(
@@ -115,8 +117,8 @@ async function enrichHistoryWithDocuments(
     if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
       const hasDocuments = msg.attachments.some((att) => isDocumentAttachment(att.mediaType))
       if (hasDocuments) {
-        const enrichedContent = await enrichMessageWithDocuments(msg.content, msg.attachments)
-        enriched.push({ ...msg, content: enrichedContent })
+        const names = msg.attachments.filter((att) => isDocumentAttachment(att.mediaType)).map((att) => att.filename)
+        enriched.push({ ...msg, content: `${msg.content}\n[历史附件引用：${names.join('、')}]` })
         continue
       }
     }
@@ -251,6 +253,19 @@ export async function sendMessage(
   const filteredHistory = filterHistory(fullHistory, contextDividers, contextLength)
   const enrichedHistory = await enrichHistoryWithDocuments(filteredHistory)
   const enrichedUserMessage = await enrichMessageWithDocuments(userMessage, attachments)
+  const estimatedPromptTokens = estimatePromptTokens([
+    systemMessage ?? '',
+    ...enrichedHistory.map((message) => message.content),
+    enrichedUserMessage,
+  ])
+  // 留出模型回复和工具调用空间。超限必须由客户端明确提示，不能让 A2 静默截断。
+  if (estimatedPromptTokens > 180_000) {
+    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+      conversationId,
+      error: `当前对话预计 ${estimatedPromptTokens.toLocaleString()} tokens，超过 Kiro 安全输入上限 180,000。请新建会话、缩小 PDF 范围或使用文档摘要。`,
+    })
+    return
+  }
 
   // 6. 创建 AbortController
   const controller = new AbortController()
