@@ -10,6 +10,7 @@ import type {
   AgentDelegationRole,
   AgentDelegationStatus,
   AgentMessage,
+  AgentRuntime,
   AgentSessionMeta,
   AgentStreamPayload,
   AskUserRequest,
@@ -44,6 +45,7 @@ interface CollaborationToolContext {
   modelId?: string
   workspaceId?: string
   permissionMode?: PromaPermissionMode
+  agentRuntime?: AgentRuntime
   triggeredBy?: 'user' | 'automation' | 'delegation'
 }
 
@@ -641,7 +643,11 @@ function startDelegation(
   const title = normalizeTitle(args.title, `协作：${task}`)
   const goal = truncateText(task, DELEGATION_GOAL_CHAR_LIMIT)
   const parentPermissionMode = getCurrentParentPermissionMode(parent, ctx.permissionMode)
-  const permissionMode = resolveDelegationPermissionMode(parentPermissionMode, args.permissionMode)
+  const permissionMode = resolveDelegationPermissionMode(
+    parentPermissionMode,
+    args.permissionMode,
+    ctx.agentRuntime ?? parent?.agentRuntime,
+  )
   const effectiveModelId = args.modelId !== undefined
     ? assertEnabledModelForChannel({
         channelId: ctx.channelId,
@@ -1084,17 +1090,11 @@ export function buildPiCollaborationTools(
     Type.Literal('custom'),
   ], { description: '子任务角色' }))
 
-  const permissionModeType = Type.Optional(Type.Union([
-    Type.Literal('plan'),
-    Type.Literal('bypassPermissions'),
-  ], { description: '子会话权限模式' }))
-
   const delegateItemType = Type.Object({
     title: Type.Optional(Type.String({ description: '子会话标题' })),
     role: roleType,
     task: Type.String({ description: '发送给子 Agent 的完整任务说明' }),
     expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-    permissionMode: permissionModeType,
     modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
   })
 
@@ -1124,7 +1124,6 @@ export function buildPiCollaborationTools(
         role: roleType,
         task: Type.String({ description: '发送给子 Agent 的完整任务说明，必须自包含必要上下文' }),
         expectedOutput: Type.Optional(Type.String({ description: '希望子 Agent 最终返回的格式或要点' })),
-        permissionMode: permissionModeType,
         modelId: Type.Optional(Type.String({ description: '可选目标模型 ID' })),
       }),
       async execute(toolCallId: string, params: unknown) {

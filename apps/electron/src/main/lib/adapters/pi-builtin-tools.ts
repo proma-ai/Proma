@@ -491,6 +491,7 @@ export async function buildPiBuiltinTools(
         modelId: ctx.modelId,
         workspaceId: ctx.workspaceId,
         permissionMode: ctx.permissionMode,
+        agentRuntime: ctx.agentRuntime,
         triggeredBy: ctx.triggeredBy,
       })
       tools.push(...collaborationTools as ToolDefinition[])
