@@ -32,6 +32,13 @@ export function writeJsonFileAtomic(filePath: string, data: object, skipBackup =
   renameSync(tmpPath, filePath)
 }
 
+/** 原子重写文本文件（用于 JSONL 会话等非单个 JSON 文档）。 */
+export function writeTextFileAtomic(filePath: string, content: string): void {
+  const tmpPath = filePath + '.tmp'
+  writeFileSync(tmpPath, content, 'utf-8')
+  renameSync(tmpPath, filePath)
+}
+
 /**
  * 安全读取 JSON 索引文件
  * 优先读主文件，损坏则尝试 .tmp / .bak，都失败返回 null

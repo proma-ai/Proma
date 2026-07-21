@@ -44,7 +44,7 @@ import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAg
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getBundledCliPath, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -816,6 +816,7 @@ export class AgentOrchestrator {
         content: [{ type: 'text', text: errorContent }],
       },
       parent_tool_use_id: null,
+      uuid: randomUUID(),
       error: { message: errorContent, errorType: EMPTY_RESPONSE_RESULT_SUBTYPE },
       _createdAt: Date.now(),
       _errorCode: 'unknown_error',
@@ -838,7 +839,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, agentRuntime: inputAgentRuntime, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext } = input
+    const { sessionId, userMessage, channelId, modelId, agentRuntime: inputAgentRuntime, workspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, automationContext, retryOfErrorUuid } = input
     const stderrChunks: string[] = []
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
@@ -861,6 +862,16 @@ export class AgentOrchestrator {
       callbacks.onError('上一条消息仍在处理中，请稍候再试')
       callbacks.onComplete([], { startedAt: streamStartedAt })
       return
+    }
+
+    // 手动重试直接删除原错误，避免它在下一轮完成后仍被历史回放。
+    // 删除失败不阻断重试（例如旧版本遗留的无 UUID 错误）。
+    if (retryOfErrorUuid) {
+      try {
+        removeSDKErrorMessage(sessionId, retryOfErrorUuid)
+      } catch (error) {
+        console.warn(`[Agent 编排] 删除重试前错误失败: ${retryOfErrorUuid}`, error)
+      }
     }
 
     try {
@@ -887,6 +898,7 @@ export class AgentOrchestrator {
           content: [{ type: 'text', text: errorContent }],
         },
         parent_tool_use_id: null,
+        uuid: randomUUID(),
         error: { message: typedError.message, errorType: typedError.code },
         _createdAt: Date.now(),
         _errorCode: typedError.code,
@@ -1976,6 +1988,7 @@ export class AgentOrchestrator {
                     content: [{ type: 'text', text: errorContent }],
                   },
                   parent_tool_use_id: null,
+                  uuid: randomUUID(),
                   _channelModelId: modelId,
                   _channelProvider: channel.provider,
                   error: { message: typedError.message, errorType: typedError.code },
@@ -2353,6 +2366,7 @@ export class AgentOrchestrator {
                 content: [{ type: 'text', text: errorContent }],
               },
               parent_tool_use_id: null,
+              uuid: randomUUID(),
               error: { message: errorContent, errorType: errorCode },
               _createdAt: Date.now(),
               _errorCode: errorCode,
@@ -2412,6 +2426,7 @@ export class AgentOrchestrator {
             content: [{ type: 'text', text: retryErrorContent }],
           },
           parent_tool_use_id: null,
+          uuid: randomUUID(),
           error: { message: retryErrorContent, errorType: 'unknown_error' },
           _createdAt: Date.now(),
           _errorCode: 'unknown_error',

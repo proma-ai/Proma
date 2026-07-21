@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
+import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
 import { join, resolve, dirname } from 'node:path'
@@ -1203,7 +1203,7 @@ function rewriteSourceToDest(content: string, sourceDir: string, destDir: string
  * 截断 Agent 会话的 SDK 消息到指定 UUID（inclusive）
  *
  * 保留 uuid 匹配消息及之前的所有消息，删除之后的消息。
- * 通过 writeFileSync 全量重写 JSONL 文件。
+ * 通过原子替换全量重写 JSONL 文件。
  *
  * @returns 截断后保留的消息列表
  */
@@ -1225,10 +1225,36 @@ export function truncateSDKMessages(id: string, upToUuidInclusive: string): SDKM
   const kept = messages.slice(0, cutIndex + 1)
 
   const content = kept.map((m) => JSON.stringify(m)).join('\n') + (kept.length > 0 ? '\n' : '')
-  writeFileSync(filePath, content, 'utf-8')
+  writeTextFileAtomic(filePath, content)
 
   console.log(`[Agent 会话] 消息已截断: sessionId=${id}, 保留 ${kept.length}/${messages.length} 条`)
   return kept
+}
+
+/**
+ * 删除指定 UUID 的持久化错误消息。
+ *
+ * 仅删除 assistant error，避免调用方误删普通回复；找不到时保持幂等。
+ */
+export function removeSDKErrorMessage(id: string, errorUuid: string): boolean {
+  const filePath = getAgentSessionMessagesPath(id)
+  if (!existsSync(filePath)) return false
+
+  const raw = readFileSync(filePath, 'utf-8')
+  const lines = raw.split('\n').filter((line) => line.trim())
+  const messages = parseJsonlStrict<unknown>(lines, `删除错误消息 (${id})`).map(normalizePersistedSDKMessage)
+  const targetIndex = messages.findIndex((message) =>
+    message.type === 'assistant'
+      && (message as { uuid?: string }).uuid === errorUuid
+      && Boolean((message as { error?: unknown }).error),
+  )
+  if (targetIndex < 0) return false
+
+  const kept = messages.filter((_, index) => index !== targetIndex)
+  const content = kept.map((message) => JSON.stringify(message)).join('\n') + (kept.length > 0 ? '\n' : '')
+  writeTextFileAtomic(filePath, content)
+  console.log(`[Agent 会话] 已删除重试前错误: sessionId=${id}, uuid=${errorUuid}`)
+  return true
 }
 
 /**
