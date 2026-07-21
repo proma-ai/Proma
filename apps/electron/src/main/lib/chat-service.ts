@@ -39,6 +39,10 @@ const activeControllers = new Map<string, AbortController>()
 /** 最大工具续接轮数（安全上限，防止极端情况下的无限循环） */
 const MAX_TOOL_ROUNDS = 999
 
+function escapeXmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 // ===== 平台相关：图片附件读取器 =====
 
 /**
@@ -87,7 +91,7 @@ async function enrichMessageWithDocuments(
       const text = await extractTextFromAttachment(att.localPath)
       if (text.trim()) {
         const context = retrieveDocumentContext(text, messageText)
-        parts.push(`\n<file name="${att.filename}" mode="retrieved-chunks">\n${context}\n</file>`)
+        parts.push(`\n<file name="${escapeXmlAttribute(att.filename)}" mode="retrieved-chunks">\n${context}\n</file>`)
       } else {
         parts.push(`\n<file name="${att.filename}">\n[文件内容为空]\n</file>`)
       }
@@ -262,7 +266,7 @@ export async function sendMessage(
   if (estimatedPromptTokens > 180_000) {
     webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
       conversationId,
-      error: `当前对话预计 ${estimatedPromptTokens.toLocaleString()} tokens，超过 Kiro 安全输入上限 180,000。请新建会话、缩小 PDF 范围或使用文档摘要。`,
+      error: `当前对话预计 ${estimatedPromptTokens.toLocaleString()} tokens，超过安全输入预算 180,000。请新建会话、缩小 PDF 范围或使用文档摘要。`,
     })
     return
   }
