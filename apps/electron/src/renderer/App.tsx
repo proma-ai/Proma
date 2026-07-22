@@ -13,12 +13,7 @@ import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
-  // [FLASH-DEBUG] 监控 App 组件重渲染（如果看到频繁日志，说明根组件被频繁重渲染）
-  const appRenderCountRef = React.useRef(0)
-  appRenderCountRef.current++
-  if (appRenderCountRef.current > 1) {
-    console.warn(`[FLASH-DEBUG] App re-render #${appRenderCountRef.current}, isLoading/showOnboarding may have changed`)
-  }
+  // 应用级初始化状态。
 
   const store = useStore()
   const [isLoading, setIsLoading] = React.useState(true)

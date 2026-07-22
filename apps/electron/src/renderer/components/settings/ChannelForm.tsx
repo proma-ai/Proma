@@ -1155,22 +1155,24 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认使用第三方中转站？</AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
-              <p>该地址并非当前供应商的官方默认 Base URL。中转站可能存在篡改对话内容和模型响应，存在中间人攻击、凭据泄露与隐私风险。</p>
-              <p>其协议适配也可能导致上下文窗口、工具调用、多模态或流式内容显示异常。请仅使用你信赖的服务，并先用非敏感内容测试。</p>
-              <p>Proma 仅作为本地 Agent 执行环境：配置、会话等本地数据均存储在你的设备上，Proma 本身不会额外构成数据风险。</p>
-              <p>
-                如你正在寻求更好的选择，欢迎使用{' '}
-                <a
-                  href="https://proma.cool/download"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
-                >
-                  Proma 商业版
-                </a>
-                ：提供安全、稳定、优惠的内置模型选择，保证更好的体验，同时保留你自由配置第三方渠道的权利。
-              </p>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>该地址并非当前供应商的官方默认 Base URL。中转站可能存在篡改对话内容和模型响应，存在中间人攻击、凭据泄露与隐私风险。</p>
+                <p>其协议适配也可能导致上下文窗口、工具调用、多模态或流式内容显示异常。请仅使用你信赖的服务，并先用非敏感内容测试。</p>
+                <p>Proma 仅作为本地 Agent 执行环境：配置、会话等本地数据均存储在你的设备上，Proma 本身不会额外构成数据风险。</p>
+                <p>
+                  如你正在寻求更好的选择，欢迎使用{' '}
+                  <a
+                    href="https://proma.cool/download"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+                  >
+                    Proma 商业版
+                  </a>
+                  ：提供安全、稳定、优惠的内置模型选择，保证更好的体验，同时保留你自由配置第三方渠道的权利。
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
