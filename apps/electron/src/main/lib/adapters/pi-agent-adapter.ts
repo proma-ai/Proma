@@ -42,7 +42,7 @@ import type {
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent'
 import type { Transport as PiAgentTransport } from '@earendil-works/pi-ai'
-import type { AgentToolResult, AgentToolUpdateCallback } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai/compat'
 import { Type, type TSchema } from 'typebox'
 import {
@@ -777,6 +777,30 @@ function createTerminatingJsonToolResult(payload: unknown): AgentToolResult<unkn
   } as AgentToolResult<unknown>
 }
 
+export function canRunCurrentSessionCompaction(toolNames: string[]): boolean {
+  return toolNames.length === 1 && toolNames[0] === 'CompactContext'
+}
+
+function installCurrentSessionCompactionHooks(session: AgentSession): void {
+  const previousBeforeToolCall = session.agent.beforeToolCall
+  session.agent.beforeToolCall = async (context, signal) => {
+    const previousResult = await previousBeforeToolCall?.(context, signal)
+    if (previousResult?.block || context.toolCall.name !== 'CompactContext') return previousResult
+
+    const toolNames = context.assistantMessage.content
+      .filter((block) => block.type === 'toolCall')
+      .map((block) => block.name)
+    if (canRunCurrentSessionCompaction(toolNames)) return previousResult
+
+    // Pi only honors terminate when every tool in a batch is terminating. Rejecting
+    // a mixed batch prevents more tool work or another model turn before compaction.
+    return {
+      block: true,
+      reason: 'CompactContext 必须单独调用。请先完成当前工具批次，在下一回合仅调用 CompactContext。',
+    }
+  }
+}
+
 /**
  * Creates a session-scoped compaction control. The callback is closed over by one
  * query invocation, so a model cannot select or compact any other user session.
@@ -1288,6 +1312,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         : sdk.SessionManager.create(cwd, input.piSessionDir)
       const { modelRuntime, model } = await buildModel(sdk, input)
       let compactContextRequested = false
+      let compactContextTerminalMessages: AgentMessage[] | undefined
       const customTools = [
         buildCurrentSessionCompactionTool(
           sdk,
@@ -1389,6 +1414,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         () => providerStreamFn(requestModel, context, options),
       )
       installRuntimeGuardHooks(session, runtimeGuard)
+      installCurrentSessionCompactionHooks(session)
       active.session = session
       resolveActiveReady(active, session)
 
@@ -1509,11 +1535,15 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
                 queue.push(terminalRetryError.sdkMessage)
               }
-              queue.push(convertResultMessage(
-                event.messages,
-                session.sessionId,
-                runtimeGuard.getResultOverride(event.messages),
-              ))
+              if (compactContextRequested) {
+                compactContextTerminalMessages = event.messages
+              } else {
+                queue.push(convertResultMessage(
+                  event.messages,
+                  session.sessionId,
+                  runtimeGuard.getResultOverride(event.messages),
+                ))
+              }
               break
             case 'auto_retry_start':
             case 'auto_retry_end':
@@ -1626,8 +1656,17 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               await session.prompt(prompt, { source: 'rpc' })
               persistPiEntryBindings()
               if (compactContextRequested) {
-                compactContextRequested = false
                 await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
+                compactContextRequested = false
+                // Do not emit the normal agent_end result before compaction: the
+                // orchestrator's result-drain safety timeout would dispose Pi and abort it.
+                const terminalMessages = compactContextTerminalMessages ?? []
+                compactContextTerminalMessages = undefined
+                queue.push(convertResultMessage(
+                  terminalMessages,
+                  session.sessionId,
+                  runtimeGuard.getResultOverride(terminalMessages),
+                ))
               }
             } finally {
               if (active.interrupting) {

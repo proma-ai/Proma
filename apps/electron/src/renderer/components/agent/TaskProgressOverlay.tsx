@@ -41,6 +41,10 @@ function compactionSignature(progress: ContextCompactionProgress): string {
   return `${progress.status}:${progress.label}:${progress.detail ?? ''}:${progress.summary ?? ''}`
 }
 
+export function shouldRestoreCompactionProgress(signature: string, dismissedSignature: string): boolean {
+  return signature !== dismissedSignature
+}
+
 function CompactionProgressDetails({ progress }: { progress: ContextCompactionProgress }): React.ReactElement {
   const isRunning = progress.status === 'running'
   const isFailed = progress.status === 'failed'
@@ -85,6 +89,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
   const [retainedSignature, setRetainedSignature] = React.useState('')
   const [retainedCompaction, setRetainedCompaction] = React.useState<ContextCompactionProgress | undefined>()
   const [retainedCompactionSignature, setRetainedCompactionSignature] = React.useState('')
+  const [dismissedCompactionSignature, setDismissedCompactionSignature] = React.useState('')
   const [visible, setVisible] = React.useState(false)
   const [fading, setFading] = React.useState(false)
   const [open, setOpen] = React.useState(false)
@@ -100,12 +105,19 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
 
   const liveCompactionSignature = contextCompaction ? compactionSignature(contextCompaction) : ''
   React.useEffect(() => {
-    if (!contextCompaction || liveCompactionSignature === retainedCompactionSignature) return
+    if (!contextCompaction) return
+    if (contextCompaction.status === 'running' && dismissedCompactionSignature) {
+      setDismissedCompactionSignature('')
+    }
+    if (
+      liveCompactionSignature === retainedCompactionSignature
+      || !shouldRestoreCompactionProgress(liveCompactionSignature, dismissedCompactionSignature)
+    ) return
     setRetainedCompaction(contextCompaction)
     setRetainedCompactionSignature(liveCompactionSignature)
     setFading(false)
     setVisible(true)
-  }, [contextCompaction, liveCompactionSignature, retainedCompactionSignature])
+  }, [contextCompaction, dismissedCompactionSignature, liveCompactionSignature, retainedCompactionSignature])
 
   React.useEffect(() => {
     if (!streaming || contextCompaction || retainedCompaction?.status !== 'failed') return
@@ -144,6 +156,9 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
       setFading(true)
     }, FINISH_RETENTION_MS - FADE_OUT_DURATION_MS)
     const hideTimer = window.setTimeout(() => {
+      if (displayCompaction) {
+        setDismissedCompactionSignature(compactionSignature(displayCompaction))
+      }
       setVisible(false)
       setOpen(false)
       setRetainedActivities([])

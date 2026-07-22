@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { SDKMessage } from '@proma/shared'
 import { getContextCompactionProgress, isCompactionControlHistoryGroup } from './AgentMessages'
+import { shouldRestoreCompactionProgress } from './TaskProgressOverlay'
 
 function systemMessage(fields: Record<string, unknown>): SDKMessage {
   return { type: 'system', ...fields } as unknown as SDKMessage
@@ -40,7 +41,13 @@ describe('context compaction progress overlay state', () => {
     })
   })
 
-  test('maps successful compaction to a continue-ready state', () => {
+  test('does not restore an already dismissed success or no-op feedback state', () => {
+    expect(shouldRestoreCompactionProgress('success:上下文已压缩::', 'success:上下文已压缩::')).toBe(false)
+    expect(shouldRestoreCompactionProgress('noop:当前上下文无需压缩::', 'noop:当前上下文无需压缩::')).toBe(false)
+    expect(shouldRestoreCompactionProgress('running:正在整理上下文::', 'noop:当前上下文无需压缩::')).toBe(true)
+  })
+
+  test('maps successful compaction to a terminal state', () => {
     expect(getContextCompactionProgress([
       systemMessage({ subtype: 'compact_boundary', summary: '已完成的工作已整理。' }),
     ], false, undefined)).toMatchObject({

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import {
   buildCurrentSessionCompactionTool,
+  canRunCurrentSessionCompaction,
   compactCurrentSessionAfterTurn,
 } from './pi-agent-adapter'
 
@@ -24,6 +25,12 @@ describe('Pi current-session context compaction tool', () => {
     expect(requests).toBe(1)
     expect(result.terminate).toBe(true)
     expect(result.details).toEqual(expect.objectContaining({ status: 'scheduled' }))
+  })
+
+  test('only permits compaction as the sole tool in its batch', () => {
+    expect(canRunCurrentSessionCompaction(['CompactContext'])).toBe(true)
+    expect(canRunCurrentSessionCompaction(['Write', 'CompactContext'])).toBe(false)
+    expect(canRunCurrentSessionCompaction(['CompactContext', 'Write'])).toBe(false)
   })
 
   test('keeps compaction requests scoped to their own tool instances', async () => {
