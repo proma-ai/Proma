@@ -768,6 +768,76 @@ function createTextToolResult(text: string, details?: unknown): AgentToolResult<
   } as AgentToolResult<unknown>
 }
 
+function createTerminatingJsonToolResult(payload: unknown): AgentToolResult<unknown> {
+  return {
+    ...createJsonToolResult(payload),
+    // Compaction must run only after the active Pi agent loop has settled. Continuing
+    // this turn would otherwise race with session.compact(), which aborts that loop.
+    terminate: true,
+  } as AgentToolResult<unknown>
+}
+
+/**
+ * Creates a session-scoped compaction control. The callback is closed over by one
+ * query invocation, so a model cannot select or compact any other user session.
+ */
+export function buildCurrentSessionCompactionTool(
+  sdk: PiSdk,
+  requestCompaction: () => void,
+  canUseTool: PiAgentQueryOptions['canUseTool'],
+): ToolDefinition {
+  const definition = sdk.defineTool({
+    name: 'CompactContext',
+    label: '压缩当前会话上下文',
+    description: 'Compact only the current Pi Agent session after this turn finishes. Before calling, persist a durable handoff or checkpoint to workspace files. This ends the current Agent turn; continue from the saved handoff in a later turn.',
+    promptSnippet: 'CompactContext: after persisting a durable handoff/checkpoint, end this turn and compact the current session context.',
+    parameters: Type.Object({}),
+    async execute() {
+      requestCompaction()
+      return createTerminatingJsonToolResult({
+        status: 'scheduled',
+        message: '将在当前 Agent 回合安全结束后压缩当前会话上下文。请在下一回合从已持久化的交接状态继续。',
+      })
+    },
+  })
+
+  return wrapToolWithPermission(
+    definition as unknown as ToolDefinition<TSchema, unknown, unknown>,
+    { canUseTool },
+  ) as ToolDefinition
+}
+
+function isCompactionNoopError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /nothing to compact|already compacted/i.test(message)
+}
+
+function createCompactionNoopMessage(sessionId: string, error: unknown): SDKMessage {
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    type: 'system',
+    subtype: 'compact_noop',
+    session_id: sessionId,
+    message: /already compacted/i.test(message)
+      ? '当前上下文已经压缩过，无需重复压缩。'
+      : '当前上下文较小，暂时无需压缩。',
+  } as unknown as SDKMessage
+}
+
+export async function compactCurrentSessionAfterTurn(
+  session: Pick<AgentSession, 'compact' | 'sessionId'>,
+  onNoop: (message: SDKMessage) => void,
+): Promise<'compacted' | 'noop'> {
+  try {
+    await session.compact()
+    return 'compacted'
+  } catch (error) {
+    if (!isCompactionNoopError(error)) throw error
+    onNoop(createCompactionNoopMessage(session.sessionId, error))
+    return 'noop'
+  }
+}
+
 function stringFromInput(input: Record<string, unknown>, keys: string[], fallback = ''): string {
   for (const key of keys) {
     const value = input[key]
@@ -1216,7 +1286,13 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         ? sdk.SessionManager.open(sessionFile, input.piSessionDir, cwd)
         : sdk.SessionManager.create(cwd, input.piSessionDir)
       const { modelRuntime, model } = await buildModel(sdk, input)
+      let compactContextRequested = false
       const customTools = [
+        buildCurrentSessionCompactionTool(
+          sdk,
+          () => { compactContextRequested = true },
+          input.canUseTool,
+        ),
         ...buildBuiltinToolDefinitions(
           sdk,
           cwd,
@@ -1497,16 +1573,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             // 「会话太小无需压缩」/「已压缩」是良性情况，不是执行错误：
             // pi 会抛 "Nothing to compact (session too small)" / "Already compacted"。
             // 这里不 fail 队列（否则前端弹通用「执行错误」），改为正常收尾并给出友好提示。
-            const message = error instanceof Error ? error.message : String(error)
-            if (/nothing to compact|already compacted/i.test(message)) {
-              queue.push({
-                type: 'system',
-                subtype: 'compact_noop',
-                session_id: session.sessionId,
-                message: /already compacted/i.test(message)
-                  ? '当前上下文已经压缩过，无需重复压缩。'
-                  : '当前上下文较小，暂时无需压缩。',
-              } as unknown as SDKMessage)
+            if (isCompactionNoopError(error)) {
+              queue.push(createCompactionNoopMessage(session.sessionId, error))
               queue.push({
                 type: 'result',
                 subtype: 'success',
@@ -1549,6 +1617,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               currentInterrupt?.resolveAccepted()
               await session.prompt(prompt, { source: 'rpc' })
               persistPiEntryBindings()
+              if (compactContextRequested) {
+                compactContextRequested = false
+                await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
+              }
             } finally {
               if (active.interrupting) {
                 session.agent.state.messages = dropTrailingAbortedAssistant(session.agent.state.messages)
