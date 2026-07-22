@@ -1538,14 +1538,21 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               } as unknown as SDKMessage)
               break
             case 'compaction_end':
-              // 压缩结束：成功则发 compact_boundary 分界线（前端持久化显示「上下文已压缩」），
-              // 失败/中止则不发分界线（compacting 指示器会在本轮 result 到达时随 isCompacting 翻 false 消失）。
+              // 所有压缩结果都必须有可识别的终态，确保 renderer 能结束底部进度追踪。
               if (!event.aborted && event.result) {
                 queue.push({
                   type: 'system',
                   subtype: 'compact_boundary',
                   session_id: session.sessionId,
                   summary: event.result.summary,
+                } as unknown as SDKMessage)
+              } else if (!event.aborted && event.errorMessage && !isCompactionNoopError(event.errorMessage)) {
+                queue.push({
+                  type: 'system',
+                  subtype: 'status',
+                  session_id: session.sessionId,
+                  compact_result: 'failed',
+                  compact_error: event.errorMessage,
                 } as unknown as SDKMessage)
               }
               break

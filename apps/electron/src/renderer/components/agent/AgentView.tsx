@@ -2196,6 +2196,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     })
   }, [sessionId, agentChannelId, agentModelId, sessionAgentRuntime, currentWorkspaceId, streaming, setStreamingStates, store, permissionMode])
 
+  const handleContinueAfterCompaction = React.useCallback((): void => {
+    if (!agentChannelId || streaming) return
+    void handleSend('继续压缩前未完成的任务。请先检查当前工作区状态和已持久化的交接信息。')
+  }, [agentChannelId, streaming, handleSend])
+
   /** 复制错误信息到剪贴板 */
   const handleCopyError = React.useCallback(async (): Promise<void> => {
     if (!agentError) return
@@ -2773,6 +2778,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onFork={handleFork}
           onRewind={handleRewindRequest}
           onCompact={handleCompact}
+          onContinueAfterCompaction={handleContinueAfterCompaction}
         />
 
         {/* 权限请求横幅 */}

@@ -32,12 +32,12 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
-import { TaskProgressOverlay } from './TaskProgressOverlay'
+import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
@@ -88,11 +88,45 @@ function getSDKMessageStableKey(message: SDKMessage): string {
   return key
 }
 
-function hasCompactStatus(messages: SDKMessage[]): boolean {
-  return messages.some((message) => {
-    if (message.type !== 'system') return false
-    return getSDKCompactStatus(message as SDKSystemMessage) != null
-  })
+export function getContextCompactionProgress(
+  messages: SDKMessage[],
+  isCompacting: boolean | undefined,
+): ContextCompactionProgress | undefined {
+  const latestStatus = [...messages].reverse().find((message) =>
+    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
+  ) as SDKSystemMessage | undefined
+  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+
+  if (status === 'success' && latestStatus) {
+    return {
+      status: 'success',
+      label: '上下文已压缩',
+      detail: '会话已整理，可以继续当前任务。',
+      summary: latestStatus.summary,
+    }
+  }
+  if (status === 'noop' && latestStatus) {
+    return {
+      status: 'noop',
+      label: '当前上下文无需压缩',
+      detail: latestStatus.message ?? '当前上下文仍可用，可以继续当前任务。',
+    }
+  }
+  if (status === 'failed' && latestStatus) {
+    return {
+      status: 'failed',
+      label: '上下文压缩失败',
+      detail: latestStatus.compact_error ?? latestStatus.message ?? '请检查模型连接后重试。',
+    }
+  }
+  if (status === 'compacting' || isCompacting) {
+    return {
+      status: 'running',
+      label: '正在整理上下文',
+      detail: '正在生成会话摘要，完成后可继续当前任务。',
+    }
+  }
+  return undefined
 }
 
 /** AgentMessages 属性接口 */
@@ -119,6 +153,7 @@ interface AgentMessagesProps {
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
   onCompact?: () => void
+  onContinueAfterCompaction?: () => void
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -403,7 +438,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact, onContinueAfterCompaction }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -553,11 +588,12 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
   // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
   // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
-  // 直到整个 stream 结束（stream state 被删除）才消失。
+  // 直到整个 stream 结束（state 被删除）才消失。
   const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
-  const compactStatusInLiveMessages = React.useMemo(() => {
-    return hasCompactStatus(liveMessages ?? [])
-  }, [liveMessages])
+  const contextCompaction = React.useMemo(
+    () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting),
+    [liveMessages, streamState?.isCompacting],
+  )
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
@@ -705,15 +741,17 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 </Message>
               )}
 
-              {/* 压缩中指示器：由 isCompacting flag 驱动的尾部元素，compact_boundary 到达时 flag 翻 false 自然消失，
-                  视觉上被流中新出现的"上下文已压缩"分隔符无缝替换 */}
-              {streamState?.isCompacting && !compactStatusInLiveMessages && <CompactingIndicator />}
-
             </>
           )}
         </ConversationContent>
         <ScrollMinimap items={minimapItems} />
-        <TaskProgressOverlay key={sessionId} activities={liveTaskActivities} streaming={streaming} />
+        <TaskProgressOverlay
+          key={sessionId}
+          activities={liveTaskActivities}
+          streaming={streaming}
+          contextCompaction={contextCompaction}
+          onContinueAfterCompaction={onContinueAfterCompaction}
+        />
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage userMessages={allUserMessagesData} />
         )}
