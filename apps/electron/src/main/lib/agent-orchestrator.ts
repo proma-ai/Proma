@@ -68,6 +68,7 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
+import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -604,7 +605,27 @@ export class AgentOrchestrator {
 
       if (channel.provider === 'openai-codex') {
         const fallbackTitle = createFallbackTitle(userMessage)
-        console.log('[Agent 标题生成] ChatGPT OAuth 渠道使用本地标题:', fallbackTitle)
+        try {
+          const [credentials, proxyUrl] = await Promise.all([
+            resolveCodexOAuthCredentials(channelId),
+            getEffectiveProxyUrl(),
+          ])
+          const generatedTitle = await generateCodexTitle({
+            modelId,
+            prompt: TITLE_PROMPT + userMessage,
+            credentials,
+            proxyUrl,
+            onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
+          })
+          const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
+          if (title) {
+            console.log(`[Agent 标题生成] ChatGPT OAuth 语义标题生成成功: "${title}"`)
+            return title
+          }
+          console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
+        } catch (error) {
+          console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
+        }
         return fallbackTitle
       }
 

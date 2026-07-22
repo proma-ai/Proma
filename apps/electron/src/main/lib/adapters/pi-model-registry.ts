@@ -55,6 +55,13 @@ type CodexRuntimeCredential = CodexOAuthCredentials & {
   [key: string]: unknown
 }
 
+/** Pi 内置 Codex provider 所需的最小模型与 OAuth 输入。 */
+export interface CodexModelInput {
+  model?: string
+  codexOAuthCredentials?: CodexOAuthCredentials
+  onCodexOAuthCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
+}
+
 function createCodexRuntimeCredentialStore(
   initial: CodexOAuthCredentials,
   onRefreshed?: PiAgentQueryOptions['onCodexOAuthCredentialsRefreshed'],
@@ -362,7 +369,7 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * 因此将 Proma 已刷新过的完整凭据放入一次性内存 OAuth credential store，
  * 按真实 expires 刷新并回写 Proma，避免读写全局 ~/.pi 认证文件。
  */
-async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
+export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   if (!input.codexOAuthCredentials) {
     throw new Error('ChatGPT (Codex) OAuth 凭据缺失，请重新登录')
   }
