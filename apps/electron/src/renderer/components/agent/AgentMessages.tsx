@@ -88,6 +88,11 @@ function getSDKMessageStableKey(message: SDKMessage): string {
   return key
 }
 
+export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
+  if (group.type === 'system') return getSDKCompactStatus(group.message) != null
+  return group.type === 'user' && (extractUserText(group.message) ?? '').trim() === '/compact'
+}
+
 export function getContextCompactionProgress(
   messages: SDKMessage[],
   isCompacting: boolean | undefined,
@@ -599,6 +604,11 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   const allGroups = React.useMemo(() => {
     return groupIntoTurns(allSDKMessages, sessionModelId)
   }, [allSDKMessages, sessionModelId])
+  // 压缩过程由底部 Progress Overlay 独立承载，不占用对话历史、迷你地图或用户锚点。
+  const visibleGroups = React.useMemo(
+    () => allGroups.filter((group) => !isCompactionControlHistoryGroup(group)),
+    [allGroups],
+  )
 
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
@@ -611,7 +621,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
   const minimapItems: MinimapItem[] = React.useMemo(
-    () => allGroups.map((group) => ({
+    () => visibleGroups.map((group) => ({
       id: getGroupId(group),
       role: group.type === 'user' ? 'user' as const
         : group.type === 'system' ? 'status' as const
@@ -620,7 +630,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
       avatar: group.type === 'user' ? userProfile.avatar : undefined,
       model: group.type === 'assistant-turn' ? group.model : undefined,
     })),
-    [allGroups, userProfile.avatar]
+    [visibleGroups, userProfile.avatar]
   )
 
   // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）
@@ -636,7 +646,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
 
   // 所有用户消息的数据 — 供 StickyUserMessage 使用
   const allUserMessagesData = React.useMemo(() => {
-    return allGroups
+    return visibleGroups
       .filter((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
       .map((g) => {
         const rawText = extractUserText(g.message) ?? ''
@@ -647,7 +657,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
           attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
         }
       })
-  }, [allGroups])
+  }, [visibleGroups])
 
   // 实时消息中是否已有可渲染的助手内容
   // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
@@ -668,7 +678,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
           ) : (
             <>
               {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
-              {allGroups.map((group, idx) => {
+              {visibleGroups.map((group, idx) => {
                 const isLive = liveGroupSet.has(group)
                 const isErrorGroup = group.type === 'assistant-turn'
                   && group.assistantMessages.some((m) => !!m.error)
@@ -676,7 +686,7 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
                 // 仅在最后一个 assistant-turn 上显示"已被用户中断" badge
                 const isLastAssistantTurn = !streaming && stoppedByUser
                   && group.type === 'assistant-turn'
-                  && idx === allGroups.findLastIndex((g) => g.type === 'assistant-turn')
+                  && idx === visibleGroups.findLastIndex((g) => g.type === 'assistant-turn')
                 return (
                   <MessageGroupRenderer
                     key={getGroupId(group)}
