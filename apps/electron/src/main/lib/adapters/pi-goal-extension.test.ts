@@ -156,6 +156,17 @@ describe('Proma goal extension', () => {
     expect(harness.sentUserMessages[0]?.content).toContain('ship the feature')
   })
 
+  test('accepts a task that starts with the word stop', async () => {
+    const harness = createHarness()
+    const command = harness.commands.get('goal')
+    if (!command) throw new Error('Missing /goal command')
+
+    await command.handler('stop procrastinating', harness.context)
+
+    expect(getState(harness)).toMatchObject({ task: 'stop procrastinating', status: 'active' })
+    expect(harness.sentUserMessages).toHaveLength(1)
+  })
+
   test('/goal stop is idempotent and prevents follow-up turns', async () => {
     const harness = createHarness()
     const command = harness.commands.get('goal')
@@ -229,11 +240,29 @@ describe('Proma goal extension', () => {
     if (!command) throw new Error('Missing /goal command')
 
     await command.handler('ship the feature', harness.context)
-    await getHandler(harness, 'agent_end')({} as AgentEndEvent, harness.context)
+    await getHandler(harness, 'agent_end')({
+      type: 'agent_end',
+      messages: [{ role: 'assistant', content: [], stopReason: 'stop' }],
+    } as unknown as AgentEndEvent, harness.context)
 
     expect(getState(harness)).toMatchObject({ status: 'active', turnCount: 1 })
     expect(harness.sentUserMessages).toHaveLength(2)
     expect(harness.sentUserMessages[1]?.options).toEqual({ deliverAs: 'followUp' })
+  })
+
+  test.each(['aborted', 'error'] as const)('does not continue after an %s assistant ending', async (stopReason) => {
+    const harness = createHarness()
+    const command = harness.commands.get('goal')
+    if (!command) throw new Error('Missing /goal command')
+
+    await command.handler('ship the feature', harness.context)
+    await getHandler(harness, 'agent_end')({
+      type: 'agent_end',
+      messages: [{ role: 'assistant', content: [], stopReason }],
+    } as unknown as AgentEndEvent, harness.context)
+
+    expect(getState(harness)).toMatchObject({ status: 'active', turnCount: 0 })
+    expect(harness.sentUserMessages).toHaveLength(1)
   })
 
   test('the limit transitions an active goal to max_turns without queuing another turn', async () => {
@@ -248,7 +277,10 @@ describe('Proma goal extension', () => {
     }
     harness.branch.push({ type: 'custom', customType: GOAL_STATE_ENTRY_TYPE, data: state })
     await getHandler(harness, 'session_start')({}, harness.context)
-    await getHandler(harness, 'agent_end')({} as AgentEndEvent, harness.context)
+    await getHandler(harness, 'agent_end')({
+      type: 'agent_end',
+      messages: [{ role: 'assistant', content: [], stopReason: 'stop' }],
+    } as unknown as AgentEndEvent, harness.context)
 
     expect(getState(harness)).toMatchObject({ status: 'max_turns', turnCount: GOAL_MAX_TURNS })
     expect(harness.sentUserMessages).toHaveLength(0)

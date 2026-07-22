@@ -194,6 +194,29 @@ export function convertPiMessage(
   const final = options.final ?? true
   if (!message || typeof message !== 'object' || !('role' in message)) return null
 
+  if (message.role === 'custom') {
+    const custom = message as unknown as { content: unknown; display: boolean }
+    if (!custom.display) return null
+
+    return {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: contentToText(custom.content) }],
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        stop_reason: 'stop',
+      },
+      parent_tool_use_id: null,
+      session_id: sessionId,
+      uuid: options.uuid ?? randomUUID(),
+      ...(channelModelId && { _channelModelId: channelModelId }),
+    } as unknown as SDKMessage
+  }
+
   if (message.role === 'user') {
     const user = message as UserMessage
     return {

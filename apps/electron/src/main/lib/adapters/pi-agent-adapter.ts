@@ -52,6 +52,7 @@ import {
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
 import { withCodexFastModeServiceTier } from './pi-codex-request-settings'
+import { waitForGoalCommandTurn } from './pi-command-lifecycle'
 import { buildPiExtensionFactories } from './pi-extension-factories'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
@@ -1667,6 +1668,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               }
               currentInterrupt?.resolveAccepted()
               await session.prompt(prompt, { source: 'rpc' })
+              await waitForGoalCommandTurn(session, prompt)
               persistPiEntryBindings()
               if (compactContextRequested) {
                 await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))

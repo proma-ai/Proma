@@ -44,6 +44,31 @@ describe('convertPiMessage', () => {
     expect(JSON.stringify(message).length).toBeGreaterThan(content.length)
   })
 
+  test('converts visible Pi custom messages for Proma rendering', () => {
+    const message = convertPiMessage({
+      role: 'custom',
+      customType: 'proma-goal-status',
+      content: 'Goal 已停止。',
+      display: true,
+      timestamp: Date.now(),
+    } as never, 'session-1') as { type?: string; message?: { content?: Array<{ text?: string }> } }
+
+    expect(message.type).toBe('assistant')
+    expect(message.message?.content?.[0]?.text).toBe('Goal 已停止。')
+  })
+
+  test('keeps hidden Pi custom context out of Proma messages', () => {
+    const message = convertPiMessage({
+      role: 'custom',
+      customType: 'proma-goal-context',
+      content: 'internal goal context',
+      display: false,
+      timestamp: Date.now(),
+    } as never, 'session-1')
+
+    expect(message).toBeNull()
+  })
+
   test('only persists errors for terminal Pi failures', () => {
     const providerError = 'stream ended before a terminal response event'
     const partialStop = convertPiMessage({

@@ -70,9 +70,11 @@ interface PromaGoalState {
 - 需要结束时调用 `goal_complete`；
 - 遇到无法安全继续的情况说明阻塞原因，不伪造完成。
 
-`agent_end` 在 Goal 仍为 `active` 且未达到安全上限时，使用 `pi.sendUserMessage(..., { deliverAs: 'followUp' })` 触发下一轮。每次续跑前递增并持久化 `turnCount`，确保 resume 后不会丢失预算。
+`agent_end` 在 Goal 仍为 `active` 且未达到安全上限时，使用 `pi.sendUserMessage(..., { deliverAs: 'followUp' })` 触发下一轮。每次续跑前递增并持久化 `turnCount`，确保 resume 后不会丢失预算。若上一轮的最终 assistant message 是 `aborted` 或 `error`，不自动续跑，避免中止、重试和失败路径被 Goal 循环放大。
 
-达到安全上限时，将状态设为 `max_turns`，追加一条可见结果说明并停止续跑。默认上限为 50 轮，并集中定义为常量，后续可在社区反馈后调整。
+Proma 直接调用 Pi `AgentSession`，没有 Pi TUI/RPC mode 替 extension command 等待嵌套 turn。因此 adapter 在完成 `/goal <任务>` command prompt 后等待该嵌套 Goal turn 的 `waitForIdle()`，保证 session 不会在首轮刚排队时被清理。
+
+达到安全上限时，将状态设为 `max_turns`，追加一条可见结果说明并停止续跑。默认上限为 50 轮，并集中定义为常量，后续可在社区反馈后调整。Pi custom message 中 `display: true` 的 Goal 状态消息会在兼容层转换为 Proma 可渲染的 assistant 状态消息；隐藏 Goal context 不进入 UI 消息流。
 
 ### 4.4 完成工具
 

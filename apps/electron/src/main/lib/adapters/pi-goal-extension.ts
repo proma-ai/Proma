@@ -130,6 +130,16 @@ function goalContextMessage(state: PromaGoalState): string {
   ].join('\n')
 }
 
+function canContinueAfterAgentEnd(event: AgentEndEvent): boolean {
+  const lastAssistant = [...event.messages].reverse().find((message) => {
+    return isRecord(message) && message.role === 'assistant'
+  })
+  if (!lastAssistant) return false
+
+  const stopReason = (lastAssistant as unknown as Record<string, unknown>).stopReason
+  return stopReason !== 'aborted' && stopReason !== 'error'
+}
+
 function completeGoal(
   pi: ExtensionAPI,
   state: PromaGoalState | undefined,
@@ -210,11 +220,6 @@ export function createPromaGoalExtension(): ExtensionFactory {
           return
         }
 
-        if (input.startsWith('stop ')) {
-          notifyUsage(pi, ctx, '用法：/goal <任务> 或 /goal stop')
-          return
-        }
-
         goalState = createState(input)
         continuationQueued = false
         appendState(pi, goalState)
@@ -240,9 +245,10 @@ export function createPromaGoalExtension(): ExtensionFactory {
       },
     })
 
-    pi.on('agent_end', (_event: AgentEndEvent, ctx) => {
+    pi.on('agent_end', (event: AgentEndEvent, ctx) => {
       const currentGoal = getState(ctx)
       if (!currentGoal || currentGoal.status !== 'active' || continuationQueued) return
+      if (!canContinueAfterAgentEnd(event)) return
 
       const nextTurnCount = currentGoal.turnCount + 1
       if (nextTurnCount >= GOAL_MAX_TURNS) {
