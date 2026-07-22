@@ -160,6 +160,11 @@ export function createPromaGoalExtension(): ExtensionFactory {
       continuationQueued = false
     }
 
+    const getState = (ctx: ExtensionContext): PromaGoalState | undefined => {
+      if (!goalState) restoreState(ctx)
+      return goalState
+    }
+
     pi.on('session_start', (_event, ctx) => {
       restoreState(ctx)
     })
@@ -172,13 +177,14 @@ export function createPromaGoalExtension(): ExtensionFactory {
       continuationQueued = false
     })
 
-    pi.on('before_agent_start', () => {
-      if (!goalState || goalState.status !== 'active') return
+    pi.on('before_agent_start', (_event, ctx) => {
+      const currentGoal = getState(ctx)
+      if (!currentGoal || currentGoal.status !== 'active') return
 
       return {
         message: {
           customType: GOAL_CONTEXT_TYPE,
-          content: goalContextMessage(goalState),
+          content: goalContextMessage(currentGoal),
           display: false,
         },
       }
@@ -194,8 +200,9 @@ export function createPromaGoalExtension(): ExtensionFactory {
         }
 
         if (input === 'stop') {
-          if (goalState?.status === 'active') {
-            goalState = withState(goalState, { status: 'stopped' })
+          const currentGoal = getState(ctx)
+          if (currentGoal?.status === 'active') {
+            goalState = withState(currentGoal, { status: 'stopped' })
             appendState(pi, goalState)
           }
           continuationQueued = false
@@ -223,8 +230,8 @@ export function createPromaGoalExtension(): ExtensionFactory {
       parameters: Type.Object({
         summary: Type.String({ description: '简要说明完成的工作和验证证据' }),
       }),
-      async execute(_toolCallId, params) {
-        const result = completeGoal(pi, goalState, params.summary)
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const result = completeGoal(pi, getState(ctx), params.summary)
         if (result.details) {
           goalState = result.details
           continuationQueued = false
@@ -233,12 +240,13 @@ export function createPromaGoalExtension(): ExtensionFactory {
       },
     })
 
-    pi.on('agent_end', (_event: AgentEndEvent) => {
-      if (!goalState || goalState.status !== 'active' || continuationQueued) return
+    pi.on('agent_end', (_event: AgentEndEvent, ctx) => {
+      const currentGoal = getState(ctx)
+      if (!currentGoal || currentGoal.status !== 'active' || continuationQueued) return
 
-      const nextTurnCount = goalState.turnCount + 1
+      const nextTurnCount = currentGoal.turnCount + 1
       if (nextTurnCount >= GOAL_MAX_TURNS) {
-        goalState = withState(goalState, { status: 'max_turns', turnCount: nextTurnCount })
+        goalState = withState(currentGoal, { status: 'max_turns', turnCount: nextTurnCount })
         appendState(pi, goalState)
         pi.sendMessage({
           customType: GOAL_STATUS_MESSAGE_TYPE,
@@ -248,10 +256,10 @@ export function createPromaGoalExtension(): ExtensionFactory {
         return
       }
 
-      goalState = withState(goalState, { turnCount: nextTurnCount })
+      goalState = withState(currentGoal, { turnCount: nextTurnCount })
       appendState(pi, goalState)
       continuationQueued = true
-      pi.sendUserMessage(goalFollowUpMessage(goalState.task), { deliverAs: 'followUp' })
+      pi.sendUserMessage(goalFollowUpMessage(currentGoal.task), { deliverAs: 'followUp' })
     })
   }
 }

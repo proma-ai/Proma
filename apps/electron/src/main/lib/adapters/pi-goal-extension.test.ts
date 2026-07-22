@@ -203,6 +203,26 @@ describe('Proma goal extension', () => {
     expect(result.message?.display).toBe(false)
   })
 
+  test('before_agent_start lazily restores a goal when the host does not emit session_start', async () => {
+    const harness = createHarness()
+    const state: PromaGoalState = {
+      id: 'goal-1',
+      task: 'resume the feature',
+      status: 'active',
+      turnCount: 3,
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T00:00:00.000Z',
+    }
+    harness.branch.push({ type: 'custom', customType: GOAL_STATE_ENTRY_TYPE, data: state })
+
+    const result = await getHandler(harness, 'before_agent_start')({}, harness.context) as {
+      message?: { content?: string; display?: boolean }
+    }
+
+    expect(result.message?.content).toContain('resume the feature')
+    expect(result.message?.display).toBe(false)
+  })
+
   test('agent_end queues follow-up only for an active goal below the limit', async () => {
     const harness = createHarness()
     const command = harness.commands.get('goal')

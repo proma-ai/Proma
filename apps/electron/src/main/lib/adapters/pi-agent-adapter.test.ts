@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildPiExtensionFactories } from './pi-agent-adapter'
+import { buildPiExtensionFactories } from './pi-extension-factories'
 
 describe('Pi extension factories', () => {
   test('always loads the Proma Goal extension', () => {
