@@ -314,7 +314,6 @@ export function ContextUsageBadge({
 
           {displayWindow ? (
             <>
-              <div className="h-px bg-border my-0.5" />
               <DetailRow
                 label="上下文"
                 value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
