@@ -10,6 +10,17 @@ describe('Pi thinking level resolver', () => {
     )).toBe('off')
   })
 
+  test.each(['openai', 'openai-responses', 'custom'] as const)(
+    'Given third-party %s When session has an OpenAI override Then uses it',
+    (provider) => {
+      expect(resolvePiThinkingLevel(
+        { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
+        { openAIThinkingLevel: 'max' },
+        provider,
+      )).toBe('max')
+    },
+  )
+
   test('Given non-OpenAI provider When session has OpenAI override Then keeps global Pi thinking level', () => {
     expect(resolvePiThinkingLevel(
       { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },

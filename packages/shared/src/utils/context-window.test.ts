@@ -1,14 +1,32 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  CODEX_GPT_54_55_CONTEXT_WINDOW,
+  CODEX_GPT_54_MINI_CONTEXT_WINDOW,
+  CODEX_GPT_56_CONTEXT_WINDOW,
   DEFAULT_CONTEXT_WINDOW,
   ONE_MILLION_CONTEXT_WINDOW,
   inferAgentSdkContextWindow,
+  inferCodexAlignedGPT5ContextWindow,
   inferContextWindow,
   resolveAgentSdkModelId,
   supports1MContext,
 } from './context-window'
 
 describe('模型上下文窗口', () => {
+  test.each([
+    ['gpt-5.4', CODEX_GPT_54_55_CONTEXT_WINDOW],
+    ['gpt-5.4-mini', CODEX_GPT_54_MINI_CONTEXT_WINDOW],
+    ['gpt-5.5', CODEX_GPT_54_55_CONTEXT_WINDOW],
+    ['gpt-5.6', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-sol', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-terra', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-luna', CODEX_GPT_56_CONTEXT_WINDOW],
+  ])('Given Codex-aligned %s When inferring window Then uses %i', (model, contextWindow) => {
+    expect(inferCodexAlignedGPT5ContextWindow(model)).toBe(contextWindow)
+    expect(inferContextWindow(model)).toBe(contextWindow)
+    expect(inferAgentSdkContextWindow(model, 'custom')).toBe(contextWindow)
+  })
+
   test('Given 当前 1M Claude 模型 When 推断窗口 Then 返回 1M', () => {
     expect(inferContextWindow('claude-opus-4-8-promo-3')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferContextWindow('claude-sonnet-4-6')).toBe(ONE_MILLION_CONTEXT_WINDOW)

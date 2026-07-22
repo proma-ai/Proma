@@ -16,6 +16,31 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000
 /** 1M 上下文窗口 */
 export const ONE_MILLION_CONTEXT_WINDOW = 1_000_000
 
+/** ChatGPT Codex 已验证的 GPT-5.x 上下文窗口；第三方同名模型沿用此展示基线。 */
+export const CODEX_GPT_54_55_CONTEXT_WINDOW = 272_000
+export const CODEX_GPT_54_MINI_CONTEXT_WINDOW = 400_000
+export const CODEX_GPT_56_CONTEXT_WINDOW = 372_000
+
+/**
+ * 为与 ChatGPT Codex 同名的 GPT-5.x 模型返回统一上下文窗口。
+ *
+ * 仅覆盖 Codex 已明确标记的模型；Pro/Nano 等未出现在 Codex 目录的变体继续交由
+ * provider catalog 决定，避免把不同 SKU 误写成同一窗口。
+ */
+export function inferCodexAlignedGPT5ContextWindow(modelId: string | undefined): number | undefined {
+  const model = modelId?.toLowerCase().replace(/\[1m\]$/i, '')
+  switch (model) {
+    case 'gpt-5.4-mini': return CODEX_GPT_54_MINI_CONTEXT_WINDOW
+    case 'gpt-5.4':
+    case 'gpt-5.5': return CODEX_GPT_54_55_CONTEXT_WINDOW
+    case 'gpt-5.6':
+    case 'gpt-5.6-sol':
+    case 'gpt-5.6-terra':
+    case 'gpt-5.6-luna': return CODEX_GPT_56_CONTEXT_WINDOW
+    default: return undefined
+  }
+}
+
 /** 已确认需要显式选择 Claude Agent SDK `[1m]` 变体的模型。 */
 const AGENT_SDK_1M_CONTEXT_RULES = {
   // Claude 系列
@@ -115,6 +140,8 @@ export function supports1MContext(modelId: string): boolean {
  */
 export function inferContextWindow(model?: string): number | undefined {
   if (!model) return undefined
+  const codexAlignedWindow = inferCodexAlignedGPT5ContextWindow(model)
+  if (codexAlignedWindow !== undefined) return codexAlignedWindow
   if (supports1MContext(model)) return ONE_MILLION_CONTEXT_WINDOW
   return DEFAULT_CONTEXT_WINDOW
 }
@@ -128,6 +155,8 @@ export function inferContextWindow(model?: string): number | undefined {
  */
 export function inferAgentSdkContextWindow(modelId: string | undefined, provider: ProviderType): number | undefined {
   if (!modelId) return undefined
+  const codexAlignedWindow = inferCodexAlignedGPT5ContextWindow(modelId)
+  if (codexAlignedWindow !== undefined) return codexAlignedWindow
   return supports1MContext(modelId)
     || resolveAgentSdkModelId(modelId, provider) !== modelId
     || /\[1m\]$/i.test(modelId)

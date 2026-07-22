@@ -1660,7 +1660,7 @@ export class AgentOrchestrator {
             persistCodexOAuthCredentials(channelId, credentials)
           },
         }),
-        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses')
+        ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses' || channel.provider === 'openai' || channel.provider === 'custom')
           && isOpenAIReasoningSupportedModel(selectedModelId) && {
             openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider),
           }),

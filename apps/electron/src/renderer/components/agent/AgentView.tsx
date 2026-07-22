@@ -114,7 +114,7 @@ import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, ModelOption, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
-import { inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel, isOpenAIReasoningSupportedModel, MAX_ATTACHMENT_SIZE } from '@proma/shared'
+import { inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel, isOpenAIReasoningMaxSupportedModel, isOpenAIReasoningSupportedModel, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
@@ -219,23 +219,29 @@ function isStaleAgentQueueError(error: unknown): boolean {
 
 // ===== 思考模式 Hover Popover =====
 
-const CODEX_THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh'] as const satisfies readonly AgentThinkingLevel[]
-type OpenAIThinkingLevel = (typeof CODEX_THINKING_LEVELS)[number]
-const CODEX_THINKING_LABELS: Record<OpenAIThinkingLevel, string> = {
+const OPENAI_THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
+const OPENAI_STANDARD_THINKING_LEVELS = OPENAI_THINKING_LEVELS.slice(0, -1)
+type OpenAIThinkingLevel = (typeof OPENAI_THINKING_LEVELS)[number]
+const OPENAI_THINKING_LABELS: Record<OpenAIThinkingLevel, string> = {
   off: '关闭',
   low: '低',
   medium: '中',
   high: '高',
   xhigh: '极高',
+  max: '最大',
 }
 
-function normalizeOpenAIThinkingLevel(level: AgentThinkingLevel | undefined): OpenAIThinkingLevel {
+function normalizeOpenAIThinkingLevel(
+  level: AgentThinkingLevel | undefined,
+  levels: readonly OpenAIThinkingLevel[],
+): OpenAIThinkingLevel {
   if (level === 'minimal') return 'low'
-  return CODEX_THINKING_LEVELS.includes(level as OpenAIThinkingLevel) ? level as OpenAIThinkingLevel : 'off'
+  return levels.includes(level as OpenAIThinkingLevel) ? level as OpenAIThinkingLevel : 'off'
 }
 
 interface CodexThinkingConfig {
   thinkingLevel: AgentThinkingLevel
+  levels: readonly OpenAIThinkingLevel[]
   disabled: boolean
   onThinkingLevelChange: (level: AgentThinkingLevel) => void
 }
@@ -251,9 +257,10 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   const [open, setOpen] = React.useState(false)
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const isCodex = Boolean(codexConfig)
-  const normalizedLevel = normalizeOpenAIThinkingLevel(codexConfig?.thinkingLevel)
+  const thinkingLevels = codexConfig?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
+  const normalizedLevel = normalizeOpenAIThinkingLevel(codexConfig?.thinkingLevel, thinkingLevels)
   const isEnabled = isCodex ? normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
-  const sliderPosition = CODEX_THINKING_LEVELS.indexOf(normalizedLevel)
+  const sliderPosition = thinkingLevels.indexOf(normalizedLevel)
 
   const handleMouseEnter = React.useCallback(() => {
     if (hoverTimeout.current) clearTimeout(hoverTimeout.current)
@@ -310,20 +317,20 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-xs font-medium text-foreground/80">思考深度</span>
                   <span className="text-xs tabular-nums text-muted-foreground">
-                    {CODEX_THINKING_LABELS[normalizedLevel]}
+                    {OPENAI_THINKING_LABELS[normalizedLevel]}
                   </span>
                 </div>
                 <Slider
                   value={[sliderPosition]}
-                  onValueChange={([position]) => codexConfig.onThinkingLevelChange(CODEX_THINKING_LEVELS[position!]!)}
+                  onValueChange={([position]) => codexConfig.onThinkingLevelChange(thinkingLevels[position!]!)}
                   min={0}
-                  max={CODEX_THINKING_LEVELS.length - 1}
+                  max={thinkingLevels.length - 1}
                   step={1}
                   disabled={codexConfig.disabled}
                   aria-label="OpenAI 思考深度"
                 />
                 <div className="flex justify-between text-[10px] text-muted-foreground">
-                  {CODEX_THINKING_LEVELS.map((level) => <span key={level}>{CODEX_THINKING_LABELS[level]}</span>)}
+                  {thinkingLevels.map((level) => <span key={level}>{OPENAI_THINKING_LABELS[level]}</span>)}
                 </div>
               </div>
             </>
@@ -657,8 +664,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const codexFastModeEnabled = isCodexFastModeAvailable && sessionMeta?.codexFastMode === true
   const isOpenAIThinkingAvailable = hasSessionMeta
     && sessionAgentRuntime === 'pi'
-    && (agentChannelProvider === 'openai-codex' || agentChannelProvider === 'openai-responses')
+    && (agentChannelProvider === 'openai-codex' || agentChannelProvider === 'openai-responses' || agentChannelProvider === 'openai' || agentChannelProvider === 'custom')
     && isOpenAIReasoningSupportedModel(agentModelId ?? undefined)
+  const openAIThinkingLevels = isOpenAIReasoningMaxSupportedModel(agentModelId ?? undefined)
+    ? OPENAI_THINKING_LEVELS
+    : OPENAI_STANDARD_THINKING_LEVELS
   const fallbackOpenAIThinkingLevel: AgentThinkingLevel = agentEffort === 'max'
     ? 'xhigh'
     : agentEffort ?? (agentThinking?.type === 'adaptive' ? 'high' : 'off')
@@ -2605,6 +2615,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           }}
           codexConfig={isOpenAIThinkingAvailable ? {
             thinkingLevel: openAIThinkingLevel,
+            levels: openAIThinkingLevels,
             disabled: streaming || backgroundWaiting,
             onThinkingLevelChange: (level) => { void updateOpenAIThinkingLevel(level) },
           } : undefined}
@@ -2682,6 +2693,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     handleCodexFastModeChange,
     isOpenAIThinkingAvailable,
     openAIThinkingLevel,
+    openAIThinkingLevels,
     updateOpenAIThinkingLevel,
     agentModelId,
     handleModelSelect,

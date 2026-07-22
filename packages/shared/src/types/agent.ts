@@ -49,7 +49,7 @@ export type ThinkingConfig =
 export type AgentEffort = 'low' | 'medium' | 'high' | 'max'
 
 /** Agent 思考等级（用于 Pi runtime；Claude runtime 继续使用 ThinkingConfig/AgentEffort） */
-export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type AgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** 是否为 Proma 可暴露 reasoning.effort 的 OpenAI 推理模型。 */
 export function isOpenAIReasoningSupportedModel(modelId: string | undefined): boolean {
@@ -58,6 +58,12 @@ export function isOpenAIReasoningSupportedModel(modelId: string | undefined): bo
   // reasoning.effort，必须在 UI 层与请求层共同排除。
   if (normalized.endsWith('-chat-latest')) return false
   return normalized.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(normalized)
+}
+
+/** GPT-5.6 系列支持 Pi/OpenAI 的 max 思考等级。 */
+export function isOpenAIReasoningMaxSupportedModel(modelId: string | undefined): boolean {
+  const normalized = modelId?.toLowerCase() ?? ''
+  return /^gpt-5\.6(?:-|$)/.test(normalized) && isOpenAIReasoningSupportedModel(modelId)
 }
 
 /** 支持 ChatGPT Codex Fast Mode（priority service tier）的模型。 */
