@@ -262,9 +262,6 @@ export function ContextUsageBadge({
 
   const ratio = displayWindow ? displayTokens / displayWindow : 0
 
-  // 纯输入 = 总上下文 - 缓存读取 - 缓存写入
-  const pureInput = displayTokens - (displayCacheRead ?? 0) - (displayCacheCreation ?? 0)
-
   const percent = displayWindow
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
@@ -311,7 +308,6 @@ export function ContextUsageBadge({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1.5">
-          {pureInput > 0 && <DetailRow label="输入" value={pureInput.toLocaleString()} />}
           {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
           {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
           {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
