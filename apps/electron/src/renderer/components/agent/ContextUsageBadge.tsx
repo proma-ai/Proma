@@ -193,8 +193,8 @@ export function ContextUsageBadge({
 
   const [open, setOpen] = React.useState(false)
   const closeTimerRef = React.useRef<number | null>(null)
+  // 保留上次成功/失败结果；悬浮刷新期间继续展示旧值，直到新结果到达后原位替换。
   const [quota, setQuota] = React.useState<ChannelPlanQuotaResult | null>(null)
-  const [quotaLoading, setQuotaLoading] = React.useState(false)
 
   const cancelClose = React.useCallback(() => {
     if (closeTimerRef.current != null) {
@@ -214,14 +214,10 @@ export function ContextUsageBadge({
     if (!open || !channelId) return
 
     let cancelled = false
-    setQuotaLoading(true)
 
     fetchChannelPlanQuota(channelId, channelUpdatedAt)
       .then((result) => {
         if (!cancelled) setQuota(result)
-      })
-      .finally(() => {
-        if (!cancelled) setQuotaLoading(false)
       })
 
     return () => {
@@ -279,12 +275,11 @@ export function ContextUsageBadge({
     setOpen(false)
   }
 
-  const shouldShowPlanQuota = quotaLoading
-    || (quota != null && (
-      quota.supported
-      || quota.windows.length > 0
-      || quota.message !== UNSUPPORTED_PLAN_QUOTA_MESSAGE
-    ))
+  const shouldShowPlanQuota = quota != null && (
+    quota.supported
+    || quota.windows.length > 0
+    || quota.message !== UNSUPPORTED_PLAN_QUOTA_MESSAGE
+  )
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -345,9 +340,7 @@ export function ContextUsageBadge({
               <div className="text-[11px] font-medium text-foreground/70">
                 订阅额度{quota?.planName ? ` · ${quota.planName}` : ''}
               </div>
-              {quotaLoading ? (
-                <div className="text-[11px] text-foreground/50">读取中...</div>
-              ) : quota?.supported && quota.windows.length > 0 ? (
+              {quota?.supported && quota.windows.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {quota.windows.map((quotaWindow) => (
                     <PlanQuotaRow key={`${quotaWindow.type}-${quotaWindow.label}`} quotaWindow={quotaWindow} />
