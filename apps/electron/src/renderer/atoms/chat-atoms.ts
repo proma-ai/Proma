@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
-import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
+import type { AgentSessionMeta, ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel } from '@proma/shared'
 
 /** 全局渠道列表缓存（启动时加载一次，设置变更时刷新） */
 export const channelsAtom = atom<Channel[]>([])
@@ -38,6 +38,19 @@ export const currentConversationIdAtom = atom<string | null>(null)
 
 /** Agent 会话右侧 Chat 面板，key 为 Agent sessionId，value 为 Chat conversationId */
 export const agentSideChatMapAtom = atom<Map<string, string>>(new Map())
+
+/** 根据右侧问答对话反查其源 Agent 会话所属工作区。 */
+export function resolveSideChatWorkspaceId(
+  conversationId: string,
+  sideChatMap: ReadonlyMap<string, string>,
+  sessions: readonly AgentSessionMeta[],
+): string | undefined {
+  for (const [sessionId, sideChatConversationId] of sideChatMap) {
+    if (sideChatConversationId !== conversationId) continue
+    return sessions.find((session) => session.id === sessionId)?.workspaceId
+  }
+  return undefined
+}
 
 /** 当前对话的消息列表 */
 export const currentMessagesAtom = atom<ChatMessage[]>([])

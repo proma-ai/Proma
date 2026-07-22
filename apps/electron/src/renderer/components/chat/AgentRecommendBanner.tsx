@@ -18,7 +18,7 @@ import { useAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
 import { Sparkles, X, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { pendingAgentRecommendationAtom } from '@/atoms/chat-atoms'
+import { agentSideChatMapAtom, pendingAgentRecommendationAtom, resolveSideChatWorkspaceId } from '@/atoms/chat-atoms'
 import {
   agentChannelIdAtom,
   agentModelIdAtom,
@@ -59,13 +59,20 @@ export function AgentRecommendBanner(): React.ReactElement | null {
     setMigrating(true)
     try {
       const workspaces = store.get(agentWorkspacesAtom)
-      const defaultWorkspaceId = workspaces[0]?.id ?? null
+      const sourceWorkspaceId = resolveSideChatWorkspaceId(
+        conversationId,
+        store.get(agentSideChatMapAtom),
+        store.get(agentSessionsAtom),
+      )
+      const targetWorkspaceId = workspaces.some((workspace) => workspace.id === sourceWorkspaceId)
+        ? sourceWorkspaceId
+        : workspaces[0]?.id ?? null
 
       // 1. 创建 Agent 会话
       const session = await window.electronAPI.createAgentSession(
         undefined,
         agentChannelId,
-        defaultWorkspaceId ?? undefined,
+        targetWorkspaceId ?? undefined,
         store.get(agentModelIdAtom) || undefined,
       )
 
@@ -76,11 +83,11 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       const sessions = await window.electronAPI.listAgentSessions()
       store.set(agentSessionsAtom, sessions)
 
-      // 4. 切换到默认工作区（确保 AgentView 能正确显示新会话）
-      if (defaultWorkspaceId) {
-        store.set(currentAgentWorkspaceIdAtom, defaultWorkspaceId)
+      // 4. 切换到目标工作区（确保 AgentView 能正确显示新会话）
+      if (targetWorkspaceId) {
+        store.set(currentAgentWorkspaceIdAtom, targetWorkspaceId)
         window.electronAPI.updateSettings({
-          agentWorkspaceId: defaultWorkspaceId,
+          agentWorkspaceId: targetWorkspaceId,
         }).catch(console.error)
       }
 
