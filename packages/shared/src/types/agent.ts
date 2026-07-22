@@ -250,6 +250,8 @@ export interface SDKResultMessage {
   modelUsage?: Record<string, { contextWindow?: number }>
   errors?: string[]
   terminal_reason?: string
+  /** Pi 手动压缩用于收束流的内部 result，不代表真实模型 usage */
+  isSyntheticCompactionResult?: boolean
   background_tasks?: SDKBackgroundTaskSummary[]
   session_crons?: SDKSessionCronSummary[]
   session_id?: string
@@ -276,6 +278,8 @@ export interface SDKSystemMessage {
   compact_result?: 'success' | 'failed' | 'noop'
   /** SDK status: 上下文压缩失败原因 */
   compact_error?: string
+  /** Pi 手动压缩后的上下文 token 预估值 */
+  compactionEstimatedTokensAfter?: number
   summary?: string
   output_file?: string
   last_tool_name?: string
@@ -539,7 +543,13 @@ export type AgentEvent =
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
   | { type: 'compacting' }
-  | { type: 'compact_complete'; status: 'success' | 'noop' | 'failed'; summary?: string; message?: string }
+  | {
+    type: 'compact_complete'
+    status: 'success' | 'noop' | 'failed'
+    summary?: string
+    message?: string
+    estimatedTokensAfter?: number
+  }
   // 权限请求
   | { type: 'permission_request'; request: PermissionRequest }
   | { type: 'permission_resolved'; requestId: string; behavior: 'allow' | 'deny' }

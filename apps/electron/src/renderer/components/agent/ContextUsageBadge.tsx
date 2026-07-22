@@ -33,6 +33,8 @@ interface ContextUsageBadgeProps {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+  /** 当前上下文 token 是否为 Pi 手动压缩后的预估值 */
+  isEstimated: boolean
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
@@ -164,6 +166,7 @@ export function ContextUsageBadge({
   cacheReadTokens,
   cacheCreationTokens,
   contextWindow,
+  isEstimated,
   isCompacting,
   isProcessing,
   onCompact,
@@ -308,26 +311,36 @@ export function ContextUsageBadge({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1.5">
-          {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
-          {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
-          {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
-
-          {displayWindow ? (
+          {isEstimated ? (
+            <DetailRow
+              label="压缩后"
+              value={`预估 ${formatTokens(displayTokens)} tokens${percent != null ? `（${percent}%）` : ''}`}
+              emphasized
+            />
+          ) : (
             <>
-              <DetailRow
-                label="上下文"
-                value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
-                emphasized
-              />
-              {percent != null && (
-                <DetailRow
-                  label="占用"
-                  value={`${percent}%`}
-                  emphasized={isWarning}
-                />
-              )}
+              {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
+              {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
+              {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
+
+              {displayWindow ? (
+                <>
+                  <DetailRow
+                    label="上下文"
+                    value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
+                    emphasized
+                  />
+                  {percent != null && (
+                    <DetailRow
+                      label="占用"
+                      value={`${percent}%`}
+                      emphasized={isWarning}
+                    />
+                  )}
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
 
           {shouldShowPlanQuota ? (
             <>

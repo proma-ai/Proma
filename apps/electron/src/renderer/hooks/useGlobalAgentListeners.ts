@@ -251,8 +251,15 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         total_cost_usd?: number
         modelUsage?: Record<string, { contextWindow?: number }>
         usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+        isSyntheticCompactionResult?: boolean
         _channelModelId?: string
         _channelProvider?: ProviderType
+      }
+      if (rMsg.isSyntheticCompactionResult) {
+        return [{
+          type: 'complete',
+          stopReason: rMsg.subtype === 'success' ? 'end_turn' : 'error',
+        }]
       }
       // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow，
       // 避免子 Agent 的小窗口覆盖主模型的大窗口、导致指示器飘忽。
@@ -300,7 +307,13 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
     case 'system': {
       const sMsg = msg as SDKSystemMessage
       if (sMsg.subtype === 'compact_boundary') {
-        return [{ type: 'compact_complete', status: 'success', summary: sMsg.summary }]
+        const estimatedTokensAfter = sMsg.compactionEstimatedTokensAfter
+        return [{
+          type: 'compact_complete',
+          status: 'success',
+          summary: sMsg.summary,
+          ...(typeof estimatedTokensAfter === 'number' && estimatedTokensAfter > 0 && { estimatedTokensAfter }),
+        }]
       }
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
       if (sMsg.subtype === 'status') {

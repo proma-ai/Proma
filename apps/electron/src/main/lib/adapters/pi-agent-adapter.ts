@@ -1574,6 +1574,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   subtype: 'compact_boundary',
                   session_id: session.sessionId,
                   summary: event.result.summary,
+                  // 仅手动压缩展示 Pi 的压缩后预估值，自动压缩保持既有行为。
+                  ...(event.reason === 'manual' && event.result.estimatedTokensAfter != null && {
+                    compactionEstimatedTokensAfter: event.result.estimatedTokensAfter,
+                  }),
                 } as unknown as SDKMessage)
               } else if (event.aborted) {
                 queue.push({
@@ -1610,6 +1614,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               subtype: 'success',
               usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
               terminal_reason: 'completed',
+              isSyntheticCompactionResult: true,
               session_id: session.sessionId,
             } as unknown as SDKMessage)
             queue.close()
@@ -1625,6 +1630,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 subtype: 'success',
                 usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
                 terminal_reason: 'completed',
+                isSyntheticCompactionResult: true,
                 session_id: session.sessionId,
               } as unknown as SDKMessage)
               queue.close()

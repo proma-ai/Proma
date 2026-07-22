@@ -547,6 +547,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     isCompacting: streamState?.isCompacting ?? false,
     inputTokens: streamState?.inputTokens,
     contextWindow: streamState?.contextWindow,
+    contextUsageIsEstimated: streamState?.contextUsageIsEstimated,
   }
   const setAgentStreamErrors = useSetAtom(agentStreamErrorsAtom)
   const streamErrors = useAtomValue(agentStreamErrorsAtom)
@@ -1094,6 +1095,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
                 cacheReadTokens: state.cacheReadTokens,
                 cacheCreationTokens: state.cacheCreationTokens,
                 contextWindow: state.contextWindow,
+                contextUsageIsEstimated: state.contextUsageIsEstimated,
                 model: state.model,
                 contextCompaction: state.contextCompaction,
               })
@@ -2685,6 +2687,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           cacheReadTokens={contextStatus.cacheReadTokens}
           cacheCreationTokens={contextStatus.cacheCreationTokens}
           contextWindow={contextStatus.contextWindow}
+          isEstimated={contextStatus.contextUsageIsEstimated === true}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
           sessionId={sessionId}
