@@ -1,7 +1,7 @@
 # Delegation Completion Notification Design
 
 Date: 2026-07-21
-Status: design approved; awaiting written-spec review
+Status: approved for implementation
 
 ## Problem
 
