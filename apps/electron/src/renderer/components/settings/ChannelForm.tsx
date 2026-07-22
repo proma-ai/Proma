@@ -44,7 +44,12 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '@proma/shared'
-import { resolveAnthropicMessagesUrl, resolveOpenAIChatCompletionsUrl, resolveOpenAIResponsesUrl } from '@proma/core'
+import {
+  normalizeBaseUrl,
+  resolveAnthropicMessagesUrl,
+  resolveOpenAIChatCompletionsUrl,
+  resolveOpenAIResponsesUrl,
+} from '@proma/core'
 import { getProviderLogo } from '@/lib/model-logo'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -134,6 +139,11 @@ function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   return resolveOpenAIChatCompletionsUrl(baseUrl, provider)
 }
 
+function isThirdPartyBaseUrl(provider: ProviderType, baseUrl: string): boolean {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+  return Boolean(normalizedBaseUrl) && normalizedBaseUrl !== normalizeBaseUrl(PROVIDER_DEFAULT_URLS[provider])
+}
+
 function getUrlInputLabel(provider: ProviderType): string {
   return provider === 'custom' || provider === 'anthropic-compatible' ? '请求地址' : 'Base URL'
 }
@@ -197,6 +207,9 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [name, setName] = React.useState(channel?.name ?? '')
   const [provider, setProvider] = React.useState<ProviderType>(channel?.provider ?? 'anthropic')
   const [baseUrl, setBaseUrl] = React.useState(channel?.baseUrl ?? PROVIDER_DEFAULT_URLS.anthropic)
+  const [acknowledgedBaseUrl, setAcknowledgedBaseUrl] = React.useState(() => (
+    normalizeBaseUrl(channel?.baseUrl ?? PROVIDER_DEFAULT_URLS[channel?.provider ?? 'anthropic'])
+  ))
   const [apiKey, setApiKey] = React.useState('')
   const [zhipuTeamSecret, setZhipuTeamSecret] = React.useState<ZhipuTeamSecretForm>(EMPTY_ZHIPU_TEAM_SECRET)
   const [showApiKey, setShowApiKey] = React.useState(false)
@@ -218,6 +231,8 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [fetchResult, setFetchResult] = React.useState<FetchModelsResult | null>(null)
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false)
   const [showExitDialog, setShowExitDialog] = React.useState(false)
+  const [showBaseUrlRiskDialog, setShowBaseUrlRiskDialog] = React.useState(false)
+  const [pendingRiskAction, setPendingRiskAction] = React.useState<'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null>(null)
   const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
@@ -253,6 +268,8 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     : isCodexProvider
       ? Boolean(codexCredentials)
       : Boolean(apiKey.trim())
+  const requiresBaseUrlRiskAcknowledgement = isThirdPartyBaseUrl(provider, baseUrl)
+    && normalizeBaseUrl(baseUrl) !== acknowledgedBaseUrl
 
   const updateZhipuTeamSecret = React.useCallback((patch: Partial<ZhipuTeamSecretForm>) => {
     setZhipuTeamSecret((prev) => {
@@ -306,8 +323,9 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     nextBaseUrl: string,
     nextApiKey: string,
     nextEnabled: boolean,
+    requiresRiskAcknowledgement: boolean,
   ) => {
-    if (!isEdit || !initializedRef.current) return
+    if (!isEdit || !initializedRef.current || requiresRiskAcknowledgement) return
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     autoSaveTimerRef.current = setTimeout(() => {
       doAutoSave(nextModels, nextName, nextProvider, nextBaseUrl, nextApiKey, nextEnabled)
@@ -328,9 +346,17 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   // 监听字段变化触发 auto-save
   React.useEffect(() => {
-    scheduleAutoSave(models, name, provider, baseUrl, effectiveApiKey, enabled)
+    scheduleAutoSave(
+      models,
+      name,
+      provider,
+      baseUrl,
+      effectiveApiKey,
+      enabled,
+      requiresBaseUrlRiskAcknowledgement,
+    )
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
-  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, scheduleAutoSave])
+  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, requiresBaseUrlRiskAcknowledgement, scheduleAutoSave])
 
   // 切换供应商时自动更新 Base URL 与名称，Anthropic 兼容渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
@@ -342,6 +368,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
+    setAcknowledgedBaseUrl(normalizeBaseUrl(PROVIDER_DEFAULT_URLS[p]))
     setTestResult(null)
     setFetchResult(null)
     if (p === 'zhipu-coding-team') {
@@ -500,8 +527,8 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
   }
 
-  /** 从供应商 API 拉取可用模型列表 */
-  const handleFetchModels = async (): Promise<void> => {
+  /** 从供应商 API 拉取可用模型列表。 */
+  const fetchAvailableModels = async (): Promise<void> => {
     // ChatGPT (Codex) 走 SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
     if (!hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())) return
 
@@ -545,8 +572,16 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
   }
 
-  /** 测试连接（直接使用表单当前值，无需先保存） */
-  const handleTest = async (): Promise<void> => {
+  const handleFetchModels = (): void => {
+    if (requiresBaseUrlRiskAcknowledgement) {
+      requestBaseUrlRiskAcknowledgement('fetch')
+      return
+    }
+    void fetchAvailableModels()
+  }
+
+  /** 测试连接（直接使用表单当前值，无需先保存）。 */
+  const testChannelConnection = async (): Promise<void> => {
     if (!hasRequiredSecret || !baseUrl.trim()) return
 
     setTesting(true)
@@ -566,6 +601,14 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     } finally {
       setTesting(false)
     }
+  }
+
+  const handleTest = (): void => {
+    if (requiresBaseUrlRiskAcknowledgement) {
+      requestBaseUrlRiskAcknowledgement('test')
+      return
+    }
+    void testChannelConnection()
   }
 
   /** 执行创建渠道 */
@@ -597,10 +640,52 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
   }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled, onAgentEligibilityChange])
 
+  /** 显示第三方 Base URL 风险确认。 */
+  const requestBaseUrlRiskAcknowledgement = (action: 'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null): void => {
+    setPendingRiskAction(action)
+    setShowBaseUrlRiskDialog(true)
+  }
+
+  /** 确认风险后，仅放行当前变更的 Base URL。 */
+  const handleBaseUrlRiskAcknowledgement = async (): Promise<void> => {
+    const action = pendingRiskAction
+    setAcknowledgedBaseUrl(normalizeBaseUrl(baseUrl))
+    setPendingRiskAction(null)
+    setShowBaseUrlRiskDialog(false)
+
+    // 确认后由 acknowledgedBaseUrl 变化触发既有的防抖 auto-save，避免重复保存。
+    if (action === 'auto-save') return
+    if (action === 'fetch') {
+      await fetchAvailableModels()
+      return
+    }
+    if (action === 'test') {
+      await testChannelConnection()
+      return
+    }
+
+    if (action !== 'create' && action !== 'save-and-close') return
+    const savedChannel = await doCreate()
+    if (!savedChannel) return
+    if (action === 'save-and-close') setShowExitDialog(false)
+    onSaved(savedChannel)
+  }
+
+  /** Base URL 失焦时，要求确认第三方中转站风险。 */
+  const handleBaseUrlBlur = (): void => {
+    if (requiresBaseUrlRiskAcknowledgement) {
+      requestBaseUrlRiskAcknowledgement(isEdit ? 'auto-save' : null)
+    }
+  }
+
   /** 创建渠道（仅新建模式） */
   const handleCreate = async (): Promise<void> => {
     if (models.length === 0) {
       toast.warning('尚未配置模型，建议先从供应商获取或手动添加', { id: 'no-models-warn' })
+      return
+    }
+    if (requiresBaseUrlRiskAcknowledgement) {
+      requestBaseUrlRiskAcknowledgement('create')
       return
     }
     const savedChannel = await doCreate()
@@ -632,6 +717,10 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 保存并关闭（从弹窗触发） */
   const handleSaveAndClose = async (): Promise<void> => {
+    if (requiresBaseUrlRiskAcknowledgement) {
+      requestBaseUrlRiskAcknowledgement('save-and-close')
+      return
+    }
     const savedChannel = await doCreate()
     if (savedChannel) {
       setShowExitDialog(false)
@@ -723,6 +812,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
               label={getUrlInputLabel(provider)}
               value={baseUrl}
               onChange={setBaseUrl}
+              onBlur={handleBaseUrlBlur}
               placeholder={getUrlInputPlaceholder(provider)}
               description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
             />
@@ -1053,6 +1143,44 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           </div>
         </SettingsCard>
       </SettingsSection>
+
+      {/* 第三方 Base URL 风险确认 */}
+      <AlertDialog
+        open={showBaseUrlRiskDialog}
+        onOpenChange={(open) => {
+          setShowBaseUrlRiskDialog(open)
+          if (!open) setPendingRiskAction(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认使用第三方中转站？</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>该地址并非当前供应商的官方默认 Base URL。中转站可能存在篡改对话内容和模型响应，存在中间人攻击、凭据泄露与隐私风险。</p>
+              <p>其协议适配也可能导致上下文窗口、工具调用、多模态或流式内容显示异常。请仅使用你信赖的服务，并先用非敏感内容测试。</p>
+              <p>Proma 仅作为本地 Agent 执行环境：配置、会话等本地数据均存储在你的设备上，Proma 本身不会额外构成数据风险。</p>
+              <p>
+                如你正在寻求更好的选择，欢迎使用{' '}
+                <a
+                  href="https://proma.cool/download"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+                >
+                  Proma 商业版
+                </a>
+                ：提供安全、稳定、优惠的内置模型选择，保证更好的体验，同时保留你自由配置第三方渠道的权利。
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBaseUrlRiskAcknowledgement}>
+              知晓并愿意承担风险
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 退出拦截弹窗 */}
       <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
