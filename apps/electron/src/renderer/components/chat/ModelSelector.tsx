@@ -18,6 +18,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   conversationsAtom,
   selectedModelAtom,
   channelsAtom,
@@ -249,27 +254,32 @@ export function ModelSelector({
   return (
     <>
       {/* 触发按钮 */}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="model-selector-trigger flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-      >
-        {displayModelInfo ? (
-          <img
-            src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
-            alt={displayModelInfo.modelName}
-            className="size-4 rounded object-cover"
-          />
-        ) : (
-          <Cpu className="size-3.5" />
-        )}
-        <span className="max-w-[200px] truncate">
-          {displayModelInfo
-            ? (showChannelInTrigger ? `${displayModelInfo.channelName} · ${displayModelInfo.modelName}` : displayModelInfo.modelName)
-            : '选择模型'}
-        </span>
-        <ChevronDown className="size-3" />
-      </button>
+      <Tooltip open={open || !displayModelInfo ? false : undefined}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="model-selector-trigger flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            {displayModelInfo ? (
+              <img
+                src={getModelLogo(displayModelInfo.modelId, displayModelInfo.provider)}
+                alt={displayModelInfo.modelName}
+                className="size-4 rounded object-cover"
+              />
+            ) : (
+              <Cpu className="size-3.5" />
+            )}
+            <span className="max-w-[200px] truncate">
+              {displayModelInfo
+                ? (showChannelInTrigger ? `${displayModelInfo.channelName} · ${displayModelInfo.modelName}` : displayModelInfo.modelName)
+                : '选择模型'}
+            </span>
+            <ChevronDown className="size-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">渠道：{displayModelInfo?.channelName}</TooltipContent>
+      </Tooltip>
 
       {/* 模型选择 Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
