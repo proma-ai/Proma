@@ -243,6 +243,7 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
   google: GeminiLogo,
   'kimi-api': KimiLogo,
   'kimi-coding': KimiLogo,
+  'opencode-go-openai': DefaultLogo,
   zhipu: ZhipuLogo,
   'zhipu-coding': ZhipuLogo,
   'zhipu-coding-team': ZhipuLogo,

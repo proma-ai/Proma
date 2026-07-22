@@ -641,12 +641,12 @@ export class AgentOrchestrator {
       const proxyUrl = await getEffectiveProxyUrl()
       const fetchFn = getFetchFn(proxyUrl)
       const title = await fetchTitle(request, providerAdapter, fetchFn)
-      if (!title) {
-        console.warn('[Agent 标题生成] API 返回空标题')
-        return null
+      const result = title ? sanitizeGeneratedTitle(title) : null
+      if (!result) {
+        console.warn('[Agent 标题生成] API 未返回可用标题')
+        // OpenCode Go 的服务端偶发返回空标题时，仍要完成重命名，避免会话长期停在默认标题。
+        return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
       }
-
-      const result = sanitizeGeneratedTitle(title)
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result

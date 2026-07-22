@@ -626,13 +626,13 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     const proxyUrl = await getEffectiveProxyUrl()
     const fetchFn = getFetchFn(proxyUrl)
     const title = await fetchTitle(request, adapter, fetchFn)
-    if (!title) {
-      console.warn('[标题生成] API 返回空标题')
-      return null
+    const result = title ? sanitizeGeneratedTitle(title) : null
+    if (!result) {
+      console.warn('[标题生成] API 未返回可用标题')
+      // OpenCode Go 的服务端偶发返回空标题时，仍要完成重命名，避免对话长期停在默认标题。
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
 
-    // 截断到最大长度并清理引号
-    const result = sanitizeGeneratedTitle(title)
     console.log('[标题生成] 成功生成标题:', result)
     return result
   } catch (error) {

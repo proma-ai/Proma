@@ -17,6 +17,7 @@ export type ProviderType =
   | 'google'
   | 'kimi-api'
   | 'kimi-coding'
+  | 'opencode-go-openai'
   | 'zhipu'
   | 'zhipu-coding'
   | 'zhipu-coding-team'
@@ -49,6 +50,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   google: 'https://generativelanguage.googleapis.com',
   'kimi-api': 'https://api.moonshot.cn/anthropic',
   'kimi-coding': 'https://api.kimi.com/coding/v1',
+  'opencode-go-openai': 'https://opencode.ai/zen/go/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
   'zhipu-coding-team': 'https://open.bigmodel.cn/api/anthropic',
@@ -78,6 +80,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   google: 'Google',
   'kimi-api': 'Kimi API (Anthropic 协议)',
   'kimi-coding': 'Kimi Coding Plan',
+  'opencode-go-openai': 'OpenCode Go (OpenAI 协议)',
   zhipu: '智谱 AI',
   'zhipu-coding': '智谱 Coding Plan',
   'zhipu-coding-team': '智谱 Coding Plan 团队版',

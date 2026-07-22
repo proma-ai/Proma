@@ -10,6 +10,10 @@ describe('Agent 渠道协议兼容性', () => {
     expect(isAgentCompatibleProvider('anthropic-compatible')).toBe(true)
   })
 
+  test('Given OpenCode Go 的 OpenAI 兼容渠道 When 判断 Claude Agent 兼容性 Then 不加入白名单', () => {
+    expect(isAgentCompatibleProvider('opencode-go-openai')).toBe(false)
+  })
+
   test.each(['openai-responses', 'openai-codex'] as const)(
     'Given %s When 判断 Claude Agent 兼容性 Then 不加入白名单',
     (provider) => {

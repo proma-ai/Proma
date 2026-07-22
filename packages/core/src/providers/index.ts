@@ -34,6 +34,7 @@ const adapterRegistry = new Map<ProviderType, ProviderAdapter>([
   ['deepseek', new AnthropicAdapter('deepseek')],   // DeepSeek 使用 Anthropic 兼容协议
   ['kimi-api', new AnthropicAdapter('kimi-api')],       // Kimi API 的 Anthropic 协议端点
   ['kimi-coding', new AnthropicAdapter('kimi-coding')], // Kimi Coding Plan 订阅制（强制 User-Agent）
+  ['opencode-go-openai', new OpenAIAdapter('opencode-go-openai')], // OpenCode Go 的 OpenAI 兼容端点
   ['zhipu', new OpenAIAdapter()],         // 智谱 AI 使用 OpenAI 兼容协议
   ['zhipu-coding', new AnthropicAdapter('zhipu-coding')], // 智谱 Coding Plan 订阅制（强制 User-Agent）
   ['zhipu-coding-team', new AnthropicAdapter('zhipu-coding-team')], // 智谱 Coding Plan 团队版

@@ -185,6 +185,7 @@ function loadPiAiCompat(): Promise<PiAiCompat> {
 function normalizePiApi(provider: ProviderType): Api {
   switch (provider) {
     case 'openai':
+    case 'opencode-go-openai':
     case 'zhipu':
     case 'doubao':
     case 'qwen':

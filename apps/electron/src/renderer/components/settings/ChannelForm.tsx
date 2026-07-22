@@ -79,12 +79,13 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
   'kimi-api': ['k3', 'kimi-k2.6'],
+  'opencode-go-openai': ['grok-4.5', 'glm-5.2', 'kimi-k3'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'xiaomi-token-plan': ['mimo-v2.5-pro', 'mimo-v2-pro', 'mimo-v2.5', 'mimo-v2-omni', 'mimo-v2-flash'],
   'qwen-token-plan': ['qwen3.8-max-preview', 'qwen3.7-max', 'qwen3.6-flash'],
@@ -395,6 +396,19 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         setModels([
           { id: 'k3', name: 'Kimi K3', enabled: true },
           { id: 'kimi-for-coding', name: 'Kimi for Coding', enabled: true },
+        ])
+      } else if (p === 'opencode-go-openai') {
+        setModels([
+          { id: 'grok-4.5', name: 'Grok 4.5', enabled: true },
+          { id: 'glm-5.2', name: 'GLM-5.2', enabled: true },
+          { id: 'glm-5.1', name: 'GLM-5.1', enabled: true },
+          { id: 'kimi-k3', name: 'Kimi K3', enabled: true },
+          { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code', enabled: true },
+          { id: 'kimi-k2.6', name: 'Kimi K2.6', enabled: true },
+          { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', enabled: true },
+          { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', enabled: true },
+          { id: 'mimo-v2.5', name: 'MiMo V2.5', enabled: true },
+          { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', enabled: true },
         ])
       } else if (p === 'zhipu' || p === 'zhipu-coding' || p === 'zhipu-coding-team') {
         setModels([
