@@ -90,7 +90,7 @@ export interface AgentStreamState {
   thinkingEstimatedTokens?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
-  /** 当前压缩操作的终态，保留到实时消息清理完成后供底部进度区展示。 */
+  /** 当前或最近一次压缩状态，保留到实时消息清理完成后供底部进度区展示。 */
   contextCompaction?: ContextCompactionState
   /**
    * 压缩流程是否进行中（含收尾窗口）。
