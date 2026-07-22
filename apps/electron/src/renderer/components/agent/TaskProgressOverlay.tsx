@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ArrowDownIcon, ArrowRightIcon, CheckCircle2, CircleAlert, ListTodo, Loader2 } from 'lucide-react'
+import { ArrowDownIcon, CheckCircle2, CircleAlert, ListTodo, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
@@ -35,23 +35,15 @@ interface TaskProgressOverlayProps {
   streaming: boolean
   /** 与 Agent 任务并列的系统级短时操作；当前用于上下文压缩。 */
   contextCompaction?: ContextCompactionProgress
-  onContinueAfterCompaction?: () => void
 }
 
 function compactionSignature(progress: ContextCompactionProgress): string {
   return `${progress.status}:${progress.label}:${progress.detail ?? ''}:${progress.summary ?? ''}`
 }
 
-function CompactionProgressDetails({
-  progress,
-  onContinue,
-}: {
-  progress: ContextCompactionProgress
-  onContinue?: () => void
-}): React.ReactElement {
+function CompactionProgressDetails({ progress }: { progress: ContextCompactionProgress }): React.ReactElement {
   const isRunning = progress.status === 'running'
   const isFailed = progress.status === 'failed'
-  const canContinue = (progress.status === 'success' || progress.status === 'noop') && onContinue
 
   return (
     <div className="space-y-3 p-1">
@@ -72,17 +64,6 @@ function CompactionProgressDetails({
           {progress.summary}
         </p>
       )}
-      {canContinue && (
-        <Button
-          className="min-h-10 w-full justify-center gap-1.5"
-          onClick={onContinue}
-          type="button"
-          variant="secondary"
-        >
-          <ArrowRightIcon className="size-3.5" />
-          继续任务
-        </Button>
-      )}
     </div>
   )
 }
@@ -91,7 +72,7 @@ function CompactionProgressDetails({
  * 取代单独的“回到最下方”按钮：任务进行时展示单行进度，点击展开完整任务卡；
  * 无任务时自动退化为原箭头按钮。
  */
-export function TaskProgressOverlay({ activities, streaming, contextCompaction, onContinueAfterCompaction }: TaskProgressOverlayProps): React.ReactElement | null {
+export function TaskProgressOverlay({ activities, streaming, contextCompaction }: TaskProgressOverlayProps): React.ReactElement | null {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext()
   const liveItems = React.useMemo(
     () => aggregateTaskItems(activities, false),
@@ -234,7 +215,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction, 
         </PopoverTrigger>
         <PopoverContent className="w-[min(420px,calc(100vw-2rem))] rounded-md border-border/60 bg-background/95 p-2 backdrop-blur-sm" side="top" align="center">
           {displayCompaction
-            ? <CompactionProgressDetails progress={displayCompaction} onContinue={streaming ? undefined : onContinueAfterCompaction} />
+            ? <CompactionProgressDetails progress={displayCompaction} />
             : <TaskProgressCard activities={displayActivities} alwaysExpanded />}
         </PopoverContent>
       </Popover>

@@ -189,7 +189,6 @@ interface AgentMessagesProps {
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
   onCompact?: () => void
-  onContinueAfterCompaction?: () => void
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
@@ -474,7 +473,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact, onContinueAfterCompaction }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -791,7 +790,6 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
           activities={liveTaskActivities}
           streaming={streaming}
           contextCompaction={contextCompaction}
-          onContinueAfterCompaction={onContinueAfterCompaction}
         />
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage userMessages={allUserMessagesData} />

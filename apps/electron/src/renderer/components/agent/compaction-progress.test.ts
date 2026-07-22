@@ -18,7 +18,7 @@ describe('context compaction progress overlay state', () => {
     } as never)).toBe(true)
     expect(isCompactionControlHistoryGroup({
       type: 'user',
-      message: { type: 'user', message: { content: [{ type: 'text', text: '继续任务' }] } },
+      message: { type: 'user', message: { content: [{ type: 'text', text: '继续处理当前任务' }] } },
     } as never)).toBe(false)
   })
 
