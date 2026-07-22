@@ -37,6 +37,7 @@ import { TRANSIENT_NETWORK_PATTERN, isMalformedResponseError } from '../error-pa
 import type {
   AgentSession,
   AgentSessionEvent,
+  InlineExtension,
   ResourceLoader,
   Skill,
   ToolDefinition,
@@ -52,6 +53,7 @@ import {
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
 import { createCodexRequestSettingsExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
+import { createPromaGoalExtension } from './pi-goal-extension'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
   convertPiMessage,
@@ -153,6 +155,28 @@ interface PendingInterruptPrompt {
   content: string
   resolveAccepted: () => void
   rejectAccepted: (error: unknown) => void
+}
+
+export interface PiExtensionFactoryOptions {
+  provider: ProviderType
+  modelReasoning: boolean
+  modelId?: string
+  codexFastMode?: boolean
+  openAIThinkingLevel?: AgentThinkingLevel
+}
+
+export function buildPiExtensionFactories(options: PiExtensionFactoryOptions): InlineExtension[] {
+  const extensionFactories: InlineExtension[] = [createPromaGoalExtension()]
+  const usesCodexResponses = options.provider === 'openai-codex' || options.provider === 'openai-responses'
+
+  if (usesCodexResponses && options.modelReasoning && isOpenAIReasoningSupportedModel(options.modelId)) {
+    extensionFactories.push(createCodexRequestSettingsExtension({
+      fastMode: options.codexFastMode,
+      thinkingLevel: options.openAIThinkingLevel,
+    }))
+  }
+
+  return extensionFactories
 }
 
 interface PromaTaskItem {
@@ -1348,13 +1372,12 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
-        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses')
-          && model.reasoning
-          && isOpenAIReasoningSupportedModel(input.model) && {
-            extensionFactories: [createCodexRequestSettingsExtension({
-            fastMode: input.codexFastMode,
-            thinkingLevel: input.openAIThinkingLevel,
-          })],
+        extensionFactories: buildPiExtensionFactories({
+          provider: input.provider,
+          modelReasoning: model.reasoning,
+          modelId: input.model,
+          codexFastMode: input.codexFastMode,
+          openAIThinkingLevel: input.openAIThinkingLevel,
         }),
         systemPromptOverride: () => input.systemPrompt,
       })
