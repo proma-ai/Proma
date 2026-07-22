@@ -816,8 +816,9 @@ function createCompactionNoopMessage(sessionId: string, error: unknown): SDKMess
   const message = error instanceof Error ? error.message : String(error)
   return {
     type: 'system',
-    subtype: 'compact_noop',
+    subtype: 'status',
     session_id: sessionId,
+    compact_result: 'noop',
     message: /already compacted/i.test(message)
       ? '当前上下文已经压缩过，无需重复压缩。'
       : '当前上下文较小，暂时无需压缩。',

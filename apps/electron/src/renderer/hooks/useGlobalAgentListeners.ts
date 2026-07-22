@@ -300,7 +300,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
       if (sMsg.subtype === 'status') {
         if (sMsg.status === 'compacting') return [{ type: 'compacting' }]
-        if (sMsg.compact_result === 'success' || sMsg.compact_result === 'failed' || typeof sMsg.compact_error === 'string') {
+        if (sMsg.compact_result === 'success' || sMsg.compact_result === 'failed' || sMsg.compact_result === 'noop' || typeof sMsg.compact_error === 'string') {
           return [{ type: 'compact_complete' }]
         }
       }

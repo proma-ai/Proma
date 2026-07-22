@@ -186,6 +186,17 @@ function CompactStatusNotice({ message, active = false }: { message: SDKSystemMe
       </div>
     )
   }
+  if (compactStatus === 'noop') {
+    return (
+      <div className="flex items-center gap-3 my-4 px-1">
+        <div className="flex-1 h-px bg-border/40" />
+        <span className="shrink-0 text-[11px] text-muted-foreground/60 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
+          {message.message ?? '当前上下文无需压缩'}
+        </span>
+        <div className="flex-1 h-px bg-border/40" />
+      </div>
+    )
+  }
   if (compactStatus === 'failed') {
     const error = typeof message.compact_error === 'string' ? message.compact_error : undefined
     return (

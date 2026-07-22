@@ -278,6 +278,7 @@ export function getGroupPreview(group: MessageGroup): string {
     if (compactStatus === 'success') return '上下文已压缩'
     if (compactStatus === 'compacting') return '正在压缩上下文...'
     if (compactStatus === 'failed') return '上下文压缩失败'
+    if (compactStatus === 'noop') return group.message.message ?? '当前上下文无需压缩'
     if (group.message.subtype === 'permission_denied') return '权限检查已拒绝操作'
     return ''
   }

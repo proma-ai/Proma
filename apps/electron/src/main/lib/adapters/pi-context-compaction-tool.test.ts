@@ -57,7 +57,7 @@ describe('Pi current-session context compaction tool', () => {
     } as unknown as Pick<AgentSession, 'compact' | 'sessionId'>
 
     await expect(compactCurrentSessionAfterTurn(session, (message) => messages.push(message))).resolves.toBe('noop')
-    expect(messages).toEqual([expect.objectContaining({ subtype: 'compact_noop', session_id: 'current-session' })])
+    expect(messages).toEqual([expect.objectContaining({ subtype: 'status', compact_result: 'noop', session_id: 'current-session' })])
   })
 
   test('surfaces unexpected compaction failures', async () => {
