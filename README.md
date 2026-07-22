@@ -100,6 +100,7 @@ Proma 的 Agent 模式提供两套可切换的内核：
 
 - **Claude Agent Runtime（默认）**：基于 `@anthropic-ai/claude-agent-sdk`，使用 Anthropic Messages API 或兼容端点。
 - **Pi Agent Runtime**：基于 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai`，将 Proma 的已启用渠道动态注册为 Pi provider；支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。
+- **Pi Goal 模式**：在 Pi Agent 会话中使用 `/goal <任务>` 持久保存目标并跨 turn 自动继续；可用 `/goal stop` 停止，完成后由 Agent 调用 `goal_complete`，并受 50 轮安全上限保护。
 
 | 渠道类型 | Chat | Claude Agent | Pi Agent |
 | --- | --- | --- | --- |
