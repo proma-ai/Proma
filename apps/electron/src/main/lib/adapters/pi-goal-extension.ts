@@ -164,6 +164,7 @@ export function createPromaGoalExtension(): ExtensionFactory {
   return (pi) => {
     let goalState: PromaGoalState | undefined
     let continuationQueued = false
+    let maxTurnsNoticePending = false
 
     const restoreState = (ctx: ExtensionContext): void => {
       goalState = getLatestGoalState(ctx.sessionManager.getBranch())
@@ -185,6 +186,17 @@ export function createPromaGoalExtension(): ExtensionFactory {
 
     pi.on('agent_start', () => {
       continuationQueued = false
+    })
+
+    pi.on('agent_settled', () => {
+      if (!maxTurnsNoticePending) return
+
+      maxTurnsNoticePending = false
+      pi.sendMessage({
+        customType: GOAL_STATUS_MESSAGE_TYPE,
+        content: `Goal 已达到 ${GOAL_MAX_TURNS} 轮安全上限，已停止自动续跑。请检查当前结果后重新发起 Goal。`,
+        display: true,
+      })
     })
 
     pi.on('before_agent_start', (_event, ctx) => {
@@ -254,11 +266,7 @@ export function createPromaGoalExtension(): ExtensionFactory {
       if (nextTurnCount >= GOAL_MAX_TURNS) {
         goalState = withState(currentGoal, { status: 'max_turns', turnCount: nextTurnCount })
         appendState(pi, goalState)
-        pi.sendMessage({
-          customType: GOAL_STATUS_MESSAGE_TYPE,
-          content: `Goal 已达到 ${GOAL_MAX_TURNS} 轮安全上限，已停止自动续跑。请检查当前结果后重新发起 Goal。`,
-          display: true,
-        })
+        maxTurnsNoticePending = true
         return
       }
 

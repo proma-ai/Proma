@@ -74,7 +74,7 @@ interface PromaGoalState {
 
 Proma 直接调用 Pi `AgentSession`，没有 Pi TUI/RPC mode 替 extension command 等待嵌套 turn。因此 adapter 在完成 `/goal <任务>` command prompt 后等待该嵌套 Goal turn 的 `waitForIdle()`，保证 session 不会在首轮刚排队时被清理。
 
-达到安全上限时，将状态设为 `max_turns`，追加一条可见结果说明并停止续跑。默认上限为 50 轮，并集中定义为常量，后续可在社区反馈后调整。Pi custom message 中 `display: true` 的 Goal 状态消息会在兼容层转换为 Proma 可渲染的 assistant 状态消息；隐藏 Goal context 不进入 UI 消息流。
+达到安全上限时，将状态设为 `max_turns`，停止续跑，并在 `agent_settled` 后追加一条可见结果说明。延迟到 settled 是为了避免在 `agent_end` 期间把状态消息当成 follow-up 队列内容，导致额外模型调用。默认上限为 50 轮，并集中定义为常量，后续可在社区反馈后调整。Pi custom message 中 `display: true` 的 Goal 状态消息会在兼容层转换为 Proma 可渲染的 assistant 状态消息；隐藏 Goal context 不进入 UI 消息流。
 
 ### 4.4 完成工具
 

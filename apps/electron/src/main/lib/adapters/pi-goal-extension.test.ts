@@ -284,6 +284,10 @@ describe('Proma goal extension', () => {
 
     expect(getState(harness)).toMatchObject({ status: 'max_turns', turnCount: GOAL_MAX_TURNS })
     expect(harness.sentUserMessages).toHaveLength(0)
+    expect(harness.sentMessages).toHaveLength(0)
+
+    await getHandler(harness, 'agent_settled')({}, harness.context)
+
     expect(harness.sentMessages).toHaveLength(1)
   })
 })

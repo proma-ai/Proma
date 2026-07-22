@@ -134,7 +134,7 @@ Implement the following behavior:
 - `before_agent_start` returns a hidden context message containing the task, ID, current turn, completion requirement, and stop condition.
 - `goal_complete` accepts only a completion summary, persists `completed`, and returns a text result with state details.
 - `agent_end` checks the final assistant stop reason, skips continuation for `aborted`/`error`, increments and persists the turn count, then sends one `followUp` while active and below 50; it does nothing for completed, stopped, or max-turn states.
-- At the limit, persist `max_turns` and emit a visible bounded-stop message through the Pi message API; the Proma Pi message adapter converts visible custom messages for renderer display.
+- At the limit, persist `max_turns`; emit the visible bounded-stop message only from `agent_settled` so the status message cannot enqueue an extra model turn; the Proma Pi message adapter converts visible custom messages for renderer display.
 - Because Proma directly hosts `AgentSession` instead of Pi's TUI/RPC mode, wait for a command-triggered Goal turn to become idle before adapter cleanup.
 
 Use a per-extension `continuationQueued` guard so one `agent_end` cannot enqueue duplicate follow-ups.
