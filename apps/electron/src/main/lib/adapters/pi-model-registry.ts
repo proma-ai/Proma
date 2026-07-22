@@ -239,7 +239,8 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
-  const isVolcengineGlm52 = input.provider === 'doubao' && input.model?.toLowerCase() === 'glm-5.2'
+  const isVolcengineGlm52 = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
+    && input.model?.toLowerCase() === 'glm-5.2'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferAgentSdkContextWindow(input.model, input.provider) ?? DEFAULT_CONTEXT_WINDOW
   return {
