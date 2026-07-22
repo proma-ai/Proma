@@ -236,6 +236,8 @@ function normalizeOpenAIThinkingLevel(
   levels: readonly OpenAIThinkingLevel[],
 ): OpenAIThinkingLevel {
   if (level === 'minimal') return 'low'
+  // max 会话设置在切到非 GPT-5.6 时由主进程降级为 xhigh；UI 同步展示有效档位。
+  if (level === 'max' && !levels.includes('max')) return 'xhigh'
   return levels.includes(level as OpenAIThinkingLevel) ? level as OpenAIThinkingLevel : 'off'
 }
 

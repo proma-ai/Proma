@@ -47,7 +47,9 @@ const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
-const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
+// Chat Completions 依赖 off → none 来显式关闭服务端默认 reasoning；Responses/Codex
+// 也可安全接收该映射，随后由其 request hook 写入嵌套 reasoning.effort。
+const CODEX_THINKING_LEVEL_MAP = { off: 'none', xhigh: 'xhigh', minimal: 'low' } as const
 const CODEX_56_THINKING_LEVEL_MAP = { ...CODEX_THINKING_LEVEL_MAP, max: 'max' } as const
 
 /**

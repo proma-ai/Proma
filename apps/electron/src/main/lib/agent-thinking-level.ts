@@ -1,4 +1,4 @@
-import type { AgentSessionMeta, AgentThinkingLevel, ProviderType } from '@proma/shared'
+import { isOpenAIReasoningMaxSupportedModel, type AgentSessionMeta, type AgentThinkingLevel, type ProviderType } from '@proma/shared'
 import type { AppSettings } from '../../types'
 
 type ThinkingSettings = Pick<AppSettings, 'agentThinking' | 'agentEffort'>
@@ -17,8 +17,14 @@ export function resolvePiThinkingLevel(
   settings: ThinkingSettings,
   sessionMeta: ThinkingSessionMeta | undefined,
   provider: ProviderType | undefined,
+  modelId?: string,
 ): AgentThinkingLevel {
   if (isOpenAIReasoningProvider(provider) && sessionMeta?.openAIThinkingLevel) {
+    // max 是 GPT-5.6 专属；会话持久化后切换到其他模型时，与 Pi 的实际请求统一
+    // 降级为 xhigh，而不让 UI 显示关闭但后台继续使用推理。
+    if (sessionMeta.openAIThinkingLevel === 'max' && modelId && !isOpenAIReasoningMaxSupportedModel(modelId)) {
+      return 'xhigh'
+    }
     return sessionMeta.openAIThinkingLevel
   }
   if (settings.agentThinking?.type === 'disabled') return 'off'
