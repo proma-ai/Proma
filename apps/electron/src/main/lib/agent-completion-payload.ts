@@ -1,3 +1,4 @@
+import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import type {
   AgentSendInput,
   AgentStreamCompletePayload,
@@ -8,8 +9,12 @@ export type AgentStreamCompletionDetails = Omit<
   'sessionId' | 'triggeredBy'
 >
 
+export interface AgentStreamCompleteTarget {
+  send(channel: string, payload: AgentStreamCompletePayload): void
+}
+
 export function buildAgentStreamCompletePayload(
-  run: Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
   details: AgentStreamCompletionDetails = {},
 ): AgentStreamCompletePayload {
   return {
@@ -17,4 +22,15 @@ export function buildAgentStreamCompletePayload(
     triggeredBy: run.triggeredBy,
     ...details,
   }
+}
+
+export function sendAgentStreamComplete(
+  target: AgentStreamCompleteTarget,
+  run: Readonly<Pick<AgentSendInput, 'sessionId' | 'triggeredBy'>>,
+  details: AgentStreamCompletionDetails = {},
+): void {
+  target.send(
+    AGENT_IPC_CHANNELS.STREAM_COMPLETE,
+    buildAgentStreamCompletePayload(run, details),
+  )
 }

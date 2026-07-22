@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   getAgentCompletionMarkers,
   isAgentSessionActiveForCompletion,
+  notifyAgentCompletion,
   shouldNotifyAgentCompletion,
 } from './agent-completion-presence'
 import type { TabItem } from '@/atoms/tab-atoms'
@@ -76,28 +77,65 @@ describe('Agent 完成归属判断', () => {
 })
 
 describe('Agent 完成通知边界', () => {
+  test('Given 顶层会话成功完成 When 执行完成通知 Then callback 恰好调用一次', () => {
+    let calls = 0
+    notifyAgentCompletion({
+      completion: { sessionId: 'parent-1', triggeredBy: 'user' },
+      hasStreamError: false,
+      notify: () => { calls += 1 },
+    })
+    expect(calls).toBe(1)
+  })
+
+  test('Given 自动任务成功完成 When 执行完成通知 Then callback 恰好调用一次', () => {
+    let calls = 0
+    notifyAgentCompletion({
+      completion: { sessionId: 'automation-1', triggeredBy: 'automation' },
+      hasStreamError: false,
+      notify: () => { calls += 1 },
+    })
+    expect(calls).toBe(1)
+  })
+
+  test('Given 委派子会话成功完成且 metadata 尚未加载 When 执行完成通知 Then callback 不调用', () => {
+    let calls = 0
+    notifyAgentCompletion({
+      completion: { sessionId: 'child-1', triggeredBy: 'delegation' },
+      hasStreamError: false,
+      notify: () => { calls += 1 },
+    })
+    expect(calls).toBe(0)
+  })
+
+  test.each([
+    ['stream error', { sessionId: 'error-1' }, true],
+    ['stoppedByUser', { sessionId: 'stopped-1', stoppedByUser: true }, false],
+    ['abnormal subtype', { sessionId: 'abnormal-1', resultSubtype: 'error_max_turns' }, false],
+    ['backgroundTasksPending', { sessionId: 'background-1', backgroundTasksPending: true }, false],
+  ] as const)('Given %s When 执行完成通知 Then callback 不调用', (_caseName, completion, hasStreamError) => {
+    let calls = 0
+    notifyAgentCompletion({
+      completion,
+      hasStreamError,
+      notify: () => { calls += 1 },
+    })
+    expect(calls).toBe(0)
+  })
+
+  test('Given 旧完成载荷缺少来源但 metadata 标记为委派 When 执行完成通知 Then callback 不调用', () => {
+    let calls = 0
+    notifyAgentCompletion({
+      completion: { sessionId: 'child-legacy' },
+      session: { sourceDelegationId: 'delegation-1' },
+      hasStreamError: false,
+      notify: () => { calls += 1 },
+    })
+    expect(calls).toBe(0)
+  })
+
   test('Given 顶层会话成功完成 When 判断通知资格 Then 允许提醒', () => {
     expect(shouldNotifyAgentCompletion({
       completion: { sessionId: 'parent-1', triggeredBy: 'user' },
-    })).toBe(true)
-  })
-
-  test('Given 委派子会话快速完成且 metadata 尚未加载 When 判断通知资格 Then 完全静默', () => {
-    expect(shouldNotifyAgentCompletion({
-      completion: { sessionId: 'child-1', triggeredBy: 'delegation' },
-    })).toBe(false)
-  })
-
-  test('Given 旧完成载荷缺少来源但 metadata 标记为委派 When 判断通知资格 Then 完全静默', () => {
-    expect(shouldNotifyAgentCompletion({
-      completion: { sessionId: 'child-legacy' },
-      session: { sourceDelegationId: 'delegation-1' },
-    })).toBe(false)
-  })
-
-  test('Given 自动任务完成 When 判断通知资格 Then 不误判为委派', () => {
-    expect(shouldNotifyAgentCompletion({
-      completion: { sessionId: 'automation-1', triggeredBy: 'automation' },
     })).toBe(true)
   })
 })

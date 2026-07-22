@@ -65,7 +65,7 @@ import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
-  shouldNotifyAgentCompletion,
+  notifyAgentCompletion,
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
@@ -972,34 +972,32 @@ export function useGlobalAgentListeners(): void {
         // 等后台任务完成时 Agent 会自动唤醒续轮。
         const backgroundTasksPending = data.backgroundTasksPending === true
         const hasStreamError = store.get(agentStreamErrorsAtom).has(data.sessionId)
-        const isSuccessfulCompletion = !data.stoppedByUser &&
-          !hasStreamError &&
-          (!data.resultSubtype || data.resultSubtype === 'success')
 
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
         const completionSession = store.get(agentSessionsAtom)
           .find((session) => session.id === data.sessionId)
-        const shouldNotifyCompletion = shouldNotifyAgentCompletion({
-          completion: data,
-          session: completionSession,
-        })
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
         const sounds = store.get(notificationSoundsAtom)
         const sessionTitle = getSessionTitle(data.sessionId)
-        if (!backgroundTasksPending && isSuccessfulCompletion && shouldNotifyCompletion) {
-          sendDesktopNotification(
-            'Agent 任务完成',
-            `[${sessionTitle}] 任务已完成`,
-            enabled,
-            {
-              playSound: enabled && soundEnabled,
-              soundType: 'taskComplete',
-              sounds,
-              onNavigate: makeNavigateToSession(data.sessionId, sessionTitle),
-            }
-          )
-        }
+        notifyAgentCompletion({
+          completion: data,
+          session: completionSession,
+          hasStreamError,
+          notify: () => {
+            sendDesktopNotification(
+              'Agent 任务完成',
+              `[${sessionTitle}] 任务已完成`,
+              enabled,
+              {
+                playSound: enabled && soundEnabled,
+                soundType: 'taskComplete',
+                sounds,
+                onNavigate: makeNavigateToSession(data.sessionId, sessionTitle),
+              }
+            )
+          },
+        })
 
         // STREAM_COMPLETE 表示后端已完全结束 — 立即标记 running: false
         // 同时将所有未完成的工具活动标记为已完成，防止 subagent spinner 继续转动
