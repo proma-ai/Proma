@@ -63,7 +63,10 @@ import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStr
 import { inferAgentSdkContextWindow, inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
-import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
+import {
+  getAgentCompletionMarkers,
+  shouldNotifyAgentCompletion,
+} from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
@@ -974,11 +977,17 @@ export function useGlobalAgentListeners(): void {
           (!data.resultSubtype || data.resultSubtype === 'success')
 
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
+        const completionSession = store.get(agentSessionsAtom)
+          .find((session) => session.id === data.sessionId)
+        const shouldNotifyCompletion = shouldNotifyAgentCompletion({
+          completion: data,
+          session: completionSession,
+        })
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
         const sounds = store.get(notificationSoundsAtom)
         const sessionTitle = getSessionTitle(data.sessionId)
-        if (!backgroundTasksPending && isSuccessfulCompletion) {
+        if (!backgroundTasksPending && isSuccessfulCompletion && shouldNotifyCompletion) {
           sendDesktopNotification(
             'Agent 任务完成',
             `[${sessionTitle}] 任务已完成`,

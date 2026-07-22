@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { getAgentCompletionMarkers, isAgentSessionActiveForCompletion } from './agent-completion-presence'
+import {
+  getAgentCompletionMarkers,
+  isAgentSessionActiveForCompletion,
+  shouldNotifyAgentCompletion,
+} from './agent-completion-presence'
 import type { TabItem } from '@/atoms/tab-atoms'
 
 describe('Agent 完成归属判断', () => {
@@ -68,5 +72,32 @@ describe('Agent 完成归属判断', () => {
     expect(getAgentCompletionMarkers(input)).toEqual({
       markUnviewedCompleted: true,
     })
+  })
+})
+
+describe('Agent 完成通知边界', () => {
+  test('Given 顶层会话成功完成 When 判断通知资格 Then 允许提醒', () => {
+    expect(shouldNotifyAgentCompletion({
+      completion: { sessionId: 'parent-1', triggeredBy: 'user' },
+    })).toBe(true)
+  })
+
+  test('Given 委派子会话快速完成且 metadata 尚未加载 When 判断通知资格 Then 完全静默', () => {
+    expect(shouldNotifyAgentCompletion({
+      completion: { sessionId: 'child-1', triggeredBy: 'delegation' },
+    })).toBe(false)
+  })
+
+  test('Given 旧完成载荷缺少来源但 metadata 标记为委派 When 判断通知资格 Then 完全静默', () => {
+    expect(shouldNotifyAgentCompletion({
+      completion: { sessionId: 'child-legacy' },
+      session: { sourceDelegationId: 'delegation-1' },
+    })).toBe(false)
+  })
+
+  test('Given 自动任务完成 When 判断通知资格 Then 不误判为委派', () => {
+    expect(shouldNotifyAgentCompletion({
+      completion: { sessionId: 'automation-1', triggeredBy: 'automation' },
+    })).toBe(true)
   })
 })
