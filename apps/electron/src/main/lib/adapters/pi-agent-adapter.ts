@@ -42,7 +42,7 @@ import type {
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent'
 import type { Transport as PiAgentTransport } from '@earendil-works/pi-ai'
-import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback } from '@earendil-works/pi-agent-core'
+import type { AgentToolResult, AgentToolUpdateCallback } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage } from '@earendil-works/pi-ai/compat'
 import { Type, type TSchema } from 'typebox'
 import {
@@ -1312,7 +1312,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         : sdk.SessionManager.create(cwd, input.piSessionDir)
       const { modelRuntime, model } = await buildModel(sdk, input)
       let compactContextRequested = false
-      let compactContextTerminalMessages: AgentMessage[] | undefined
+      let pendingTerminalResult: SDKMessage | undefined
       const customTools = [
         buildCurrentSessionCompactionTool(
           sdk,
@@ -1535,15 +1535,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
                 queue.push(terminalRetryError.sdkMessage)
               }
-              if (compactContextRequested) {
-                compactContextTerminalMessages = event.messages
-              } else {
-                queue.push(convertResultMessage(
-                  event.messages,
-                  session.sessionId,
-                  runtimeGuard.getResultOverride(event.messages),
-                ))
-              }
+              // Pi can start auto-compaction after agent_end but before session.prompt()
+              // resolves. Defer the terminal result until then, otherwise the orchestrator's
+              // result-drain timeout may dispose the session and abort compaction.
+              pendingTerminalResult = convertResultMessage(
+                event.messages,
+                session.sessionId,
+                runtimeGuard.getResultOverride(event.messages),
+              )
               break
             case 'auto_retry_start':
             case 'auto_retry_end':
@@ -1576,7 +1575,15 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   session_id: session.sessionId,
                   summary: event.result.summary,
                 } as unknown as SDKMessage)
-              } else if (!event.aborted && event.errorMessage && !isCompactionNoopError(event.errorMessage)) {
+              } else if (event.aborted) {
+                queue.push({
+                  type: 'system',
+                  subtype: 'status',
+                  session_id: session.sessionId,
+                  compact_result: 'failed',
+                  compact_error: '上下文压缩已取消。',
+                } as unknown as SDKMessage)
+              } else if (event.errorMessage && !isCompactionNoopError(event.errorMessage)) {
                 queue.push({
                   type: 'system',
                   subtype: 'status',
@@ -1658,15 +1665,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               if (compactContextRequested) {
                 await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
                 compactContextRequested = false
-                // Do not emit the normal agent_end result before compaction: the
-                // orchestrator's result-drain safety timeout would dispose Pi and abort it.
-                const terminalMessages = compactContextTerminalMessages ?? []
-                compactContextTerminalMessages = undefined
-                queue.push(convertResultMessage(
-                  terminalMessages,
-                  session.sessionId,
-                  runtimeGuard.getResultOverride(terminalMessages),
-                ))
+              }
+              if (pendingTerminalResult) {
+                queue.push(pendingTerminalResult)
+                pendingTerminalResult = undefined
               }
             } finally {
               if (active.interrupting) {
