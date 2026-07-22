@@ -533,7 +533,7 @@ export type AgentEvent =
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
   | { type: 'compacting' }
-  | { type: 'compact_complete' }
+  | { type: 'compact_complete'; status: 'success' | 'noop' | 'failed'; summary?: string; message?: string }
   // 权限请求
   | { type: 'permission_request'; request: PermissionRequest }
   | { type: 'permission_resolved'; requestId: string; behavior: 'allow' | 'deny' }

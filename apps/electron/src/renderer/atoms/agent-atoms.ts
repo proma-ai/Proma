@@ -57,6 +57,12 @@ export function finalizeStreamingActivities(
   }
 }
 
+export interface ContextCompactionState {
+  status: 'running' | 'success' | 'noop' | 'failed'
+  summary?: string
+  message?: string
+}
+
 /** Agent 会话的流式状态 */
 export interface AgentStreamState {
   running: boolean
@@ -84,6 +90,8 @@ export interface AgentStreamState {
   thinkingEstimatedTokens?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
+  /** 当前压缩操作的终态，保留到实时消息清理完成后供底部进度区展示。 */
+  contextCompaction?: ContextCompactionState
   /**
    * 压缩流程是否进行中（含收尾窗口）。
    * 从用户点击压缩 / SDK compacting 事件开始 → 到整个 stream 结束（state 被删除）前一直为 true。
@@ -801,10 +809,23 @@ export function applyAgentEvent(
       }
 
     case 'compacting':
-      return { ...prev, isCompacting: true, compactInFlight: true }
+      return {
+        ...prev,
+        isCompacting: true,
+        compactInFlight: true,
+        contextCompaction: { status: 'running' },
+      }
 
     case 'compact_complete':
-      return { ...prev, isCompacting: false }
+      return {
+        ...prev,
+        isCompacting: false,
+        contextCompaction: {
+          status: event.status,
+          summary: event.summary,
+          message: event.message,
+        },
+      }
 
     case 'model_resolved':
       // 不用 SDK 返回的实际模型名覆盖，保持用户选择的 modelId

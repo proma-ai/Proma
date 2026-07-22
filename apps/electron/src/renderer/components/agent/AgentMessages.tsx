@@ -96,7 +96,38 @@ export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
 export function getContextCompactionProgress(
   messages: SDKMessage[],
   isCompacting: boolean | undefined,
+  streamCompaction: AgentStreamState['contextCompaction'] | undefined,
 ): ContextCompactionProgress | undefined {
+  if (streamCompaction?.status === 'running') {
+    return {
+      status: 'running',
+      label: '正在整理上下文',
+      detail: '正在生成会话摘要，完成后可继续当前任务。',
+    }
+  }
+  if (streamCompaction?.status === 'success') {
+    return {
+      status: 'success',
+      label: '上下文已压缩',
+      detail: '会话已整理，可以继续当前任务。',
+      summary: streamCompaction.summary,
+    }
+  }
+  if (streamCompaction?.status === 'noop') {
+    return {
+      status: 'noop',
+      label: '当前上下文无需压缩',
+      detail: streamCompaction.message ?? '当前上下文仍可用，可以继续当前任务。',
+    }
+  }
+  if (streamCompaction?.status === 'failed') {
+    return {
+      status: 'failed',
+      label: '上下文压缩失败',
+      detail: streamCompaction.message ?? '请检查模型连接后重试。',
+    }
+  }
+
   const latestStatus = [...messages].reverse().find((message) =>
     message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
   ) as SDKSystemMessage | undefined
@@ -596,8 +627,8 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
   // 直到整个 stream 结束（state 被删除）才消失。
   const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
   const contextCompaction = React.useMemo(
-    () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting),
-    [liveMessages, streamState?.isCompacting],
+    () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting, streamState?.contextCompaction),
+    [liveMessages, streamState?.isCompacting, streamState?.contextCompaction],
   )
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置

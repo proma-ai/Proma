@@ -24,16 +24,26 @@ describe('context compaction progress overlay state', () => {
 
 
   test('shows a running state before the SDK emits a compacting message', () => {
-    expect(getContextCompactionProgress([], true)).toMatchObject({
+    expect(getContextCompactionProgress([], true, undefined)).toMatchObject({
       status: 'running',
       label: '正在整理上下文',
+    })
+  })
+
+  test('retains a no-op terminal state after live messages are cleared', () => {
+    expect(getContextCompactionProgress([], false, {
+      status: 'noop',
+      message: '当前上下文较小，暂时无需压缩。',
+    })).toMatchObject({
+      status: 'noop',
+      label: '当前上下文无需压缩',
     })
   })
 
   test('maps successful compaction to a continue-ready state', () => {
     expect(getContextCompactionProgress([
       systemMessage({ subtype: 'compact_boundary', summary: '已完成的工作已整理。' }),
-    ], false)).toMatchObject({
+    ], false, undefined)).toMatchObject({
       status: 'success',
       label: '上下文已压缩',
       summary: '已完成的工作已整理。',
@@ -47,7 +57,7 @@ describe('context compaction progress overlay state', () => {
         compact_result: 'noop',
         message: '当前上下文较小，暂时无需压缩。',
       }),
-    ], false)).toMatchObject({
+    ], false, undefined)).toMatchObject({
       status: 'noop',
       label: '当前上下文无需压缩',
     })
@@ -60,7 +70,7 @@ describe('context compaction progress overlay state', () => {
         compact_result: 'failed',
         compact_error: 'provider unavailable',
       }),
-    ], false)).toMatchObject({
+    ], false, undefined)).toMatchObject({
       status: 'failed',
       detail: 'provider unavailable',
     })
