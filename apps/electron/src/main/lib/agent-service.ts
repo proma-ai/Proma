@@ -36,6 +36,7 @@ import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath, getWorkspaceFilesDir } from './config-paths'
 import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
+import { buildAgentStreamCompletePayload } from './agent-completion-payload'
 
 // ===== 实例创建 =====
 
@@ -163,15 +164,17 @@ export async function runAgent(
       },
       onComplete: (messages, opts) => {
         if (!webContents.isDestroyed()) {
-          webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
-            sessionId: input.sessionId,
-            messages,
-            stoppedByUser: opts?.stoppedByUser ?? false,
-            startedAt: opts?.startedAt,
-            resultSubtype: opts?.resultSubtype,
-            resultErrors: opts?.resultErrors,
-            backgroundTasksPending: opts?.backgroundTasksPending,
-          })
+          webContents.send(
+            AGENT_IPC_CHANNELS.STREAM_COMPLETE,
+            buildAgentStreamCompletePayload(input, {
+              messages,
+              stoppedByUser: opts?.stoppedByUser ?? false,
+              startedAt: opts?.startedAt,
+              resultSubtype: opts?.resultSubtype,
+              resultErrors: opts?.resultErrors,
+              backgroundTasksPending: opts?.backgroundTasksPending,
+            }),
+          )
         }
       },
       onTitleUpdated: (title) => {
@@ -195,11 +198,13 @@ export async function runAgent(
         sessionId: input.sessionId,
         error: errorMessage,
       })
-      webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
-        sessionId: input.sessionId,
-        messages: [],
-        stoppedByUser: false,
-      })
+      webContents.send(
+        AGENT_IPC_CHANNELS.STREAM_COMPLETE,
+        buildAgentStreamCompletePayload(input, {
+          messages: [],
+          stoppedByUser: false,
+        }),
+      )
     }
   } finally {
     // 仅在 orchestrator 已完成此会话时清理映射
@@ -249,15 +254,17 @@ export async function runAgentHeadless(
         callbacks.onComplete(messages)
         // 同步到渲染进程
         if (wc && !wc.isDestroyed()) {
-          wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
-            sessionId: runInput.sessionId,
-            messages,
-            stoppedByUser: opts?.stoppedByUser ?? false,
-            startedAt: opts?.startedAt,
-            resultSubtype: opts?.resultSubtype,
-            resultErrors: opts?.resultErrors,
-            backgroundTasksPending: opts?.backgroundTasksPending,
-          })
+          wc.send(
+            AGENT_IPC_CHANNELS.STREAM_COMPLETE,
+            buildAgentStreamCompletePayload(runInput, {
+              messages,
+              stoppedByUser: opts?.stoppedByUser ?? false,
+              startedAt: opts?.startedAt,
+              resultSubtype: opts?.resultSubtype,
+              resultErrors: opts?.resultErrors,
+              backgroundTasksPending: opts?.backgroundTasksPending,
+            }),
+          )
         }
       },
       onTitleUpdated: (title) => {
@@ -297,7 +304,14 @@ export async function runAgentHeadless(
     callbacks.onComplete()
     if (wc && !wc.isDestroyed()) {
       wc.send(AGENT_IPC_CHANNELS.STREAM_ERROR, { sessionId: runInput.sessionId, error: errorMessage })
-      wc.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, { sessionId: runInput.sessionId, messages: [], stoppedByUser: false, startedAt })
+      wc.send(
+        AGENT_IPC_CHANNELS.STREAM_COMPLETE,
+        buildAgentStreamCompletePayload(runInput, {
+          messages: [],
+          stoppedByUser: false,
+          startedAt,
+        }),
+      )
     }
   } finally {
     if (!orchestrator.isActive(runInput.sessionId)) {

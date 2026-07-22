@@ -1105,6 +1105,8 @@ export interface AgentStreamEvent {
  */
 export interface AgentStreamCompletePayload {
   sessionId: string
+  /** 触发来源：用于区分顶层会话与父 Agent 委派的子会话完成 */
+  triggeredBy?: AgentSendInput['triggeredBy']
   /** 已持久化的完整消息列表 */
   messages?: AgentMessage[]
   /** 是否由用户手动中止 */
