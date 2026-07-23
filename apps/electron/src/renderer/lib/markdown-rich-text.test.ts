@@ -166,6 +166,23 @@ describe('Clipboard 纯文本序列化', () => {
   })
 })
 
+describe('图片 Markdown 持久化', () => {
+  test('保留合法宽度，并与后续块级内容分隔', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown('<img src="image.png" alt="截图" width="240"><p>后续内容</p>'))
+
+    expect(markdown).toBe('<img src="image.png" alt="截图" width="240">\n\n后续内容')
+    const html = markdownToHtml(markdown)
+    expect(html).toContain('width=&quot;240&quot;')
+    expect(html).toContain('<p>后续内容</p>')
+  })
+
+  test('丢弃非法图片宽度', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown('<img src="image.png" alt="截图" width="-20">'))
+
+    expect(markdown).toBe('![截图](<image.png>)')
+  })
+})
+
 describe('linkify 合成链接防护', () => {
   test('markdownToHtml 不把 SKILL.md 文件名误判为 URL 链接', () => {
     const html = markdownToHtml('请查看 SKILL.md 了解更多')

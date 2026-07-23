@@ -18,7 +18,8 @@ import { highlightCode, highlightToTokens, getDisplayName } from '@proma/core'
 import { MermaidBlock } from '@proma/ui'
 import type { HighlightTokensResult } from '@proma/core'
 import type { FileAccessOptions } from '@proma/shared'
-import { extractCodeText } from '../../lib/markdown-rich-text'
+import { copyImageSourceToClipboard } from '../../lib/image-clipboard'
+import { extractCodeText, parseImageWidth } from '../../lib/markdown-rich-text'
 import { shouldRenderMermaidCodeBlock } from '../../lib/mermaid-detection'
 
 type FileAccessRef = { current: FileAccessOptions | undefined }
@@ -76,7 +77,7 @@ function serializeMarkdownImage(state: MarkdownSerializerLike, node: ProseMirror
   const src = escapeMarkdownLinkTarget(stringAttr(node, 'src'))
   const alt = state.esc(stringAttr(node, 'alt'))
   const title = stringAttr(node, 'title').replace(/"/g, '\\"')
-  const width = node.attrs.width as number | null
+  const width = parseImageWidth(node.attrs.width)
   if (width) {
     const escapedSrc = escapeHtmlAttr(stringAttr(node, 'src'))
     const escapedAlt = escapeHtmlAttr(stringAttr(node, 'alt'))
@@ -482,6 +483,7 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
 
   const caption = document.createElement('figcaption')
   setClass(caption, 'mt-1 text-center text-xs text-muted-foreground')
+  const isScratchPad = fileAccessRef === null
 
   // Toolbar (copy / edit / delete)
   const toolbar = document.createElement('div')
@@ -497,26 +499,12 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
   }
 
   const copyBtn = createBtn('复制图片', '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>', async () => {
-    const src = img.src
-    if (!src) return
-    let dataUrl = src
-    if (!src.startsWith('data:')) {
-      try {
-        const resp = await fetch(src)
-        const blob = await resp.blob()
-        dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(blob)
-        })
-      } catch { return }
-    }
-    const result = await window.electronAPI.copyImageToClipboard(dataUrl)
+    const result = await copyImageSourceToClipboard(img.src, window.electronAPI.copyImageToClipboard)
     const { toast } = await import('sonner')
     if (result.success) {
       toast.success('已复制到剪贴板')
-    } else if (result.message) {
-      toast.error(result.message)
+    } else {
+      toast.error(result.message ?? '复制失败')
     }
   })
 
@@ -527,15 +515,17 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
     }))
   })
 
-  // 单击图片打开预览
-  img.style.cursor = 'pointer'
-  img.addEventListener('click', (e) => {
-    e.stopPropagation()
-    figure.dispatchEvent(new CustomEvent('scratch-pad-edit-image', {
-      bubbles: true,
-      detail: { src: img.src, getPos, nodeType: initialNode.type, mode: 'preview' },
-    }))
-  })
+  // 单击图片打开预览（仅 Scratch Pad 监听该事件）
+  if (isScratchPad) {
+    img.style.cursor = 'pointer'
+    img.addEventListener('click', (e) => {
+      e.stopPropagation()
+      figure.dispatchEvent(new CustomEvent('scratch-pad-edit-image', {
+        bubbles: true,
+        detail: { src: img.src, getPos, nodeType: initialNode.type, mode: 'preview' },
+      }))
+    })
+  }
 
   const deleteBtn = createBtn('删除图片', '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>', () => {
     if (typeof getPos === 'function') {
@@ -545,10 +535,12 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
     }
   })
 
-  toolbar.appendChild(copyBtn)
-  toolbar.appendChild(editBtn)
-  toolbar.appendChild(deleteBtn)
-  figure.appendChild(toolbar)
+  if (isScratchPad) {
+    toolbar.appendChild(copyBtn)
+    toolbar.appendChild(editBtn)
+    toolbar.appendChild(deleteBtn)
+    figure.appendChild(toolbar)
+  }
 
   let cleanup = () => {}
 
@@ -557,7 +549,7 @@ function createMarkdownImageView(initialNode: ProseMirrorNode, fileAccessRef: Fi
     const src = String(node.attrs.src ?? '')
     const alt = String(node.attrs.alt ?? '')
     const title = String(node.attrs.title ?? '')
-    const width = node.attrs.width as number | null
+    const width = parseImageWidth(node.attrs.width)
     img.alt = alt
     img.title = title
     if (width) {
@@ -819,13 +811,10 @@ export function createMarkdownImage(fileAccessRef: FileAccessRefOrNull): Node {
         title: { default: '' },
         width: {
           default: null,
-          parseHTML: (el) => {
-            const w = el.getAttribute('width')
-            return w ? parseInt(w, 10) || null : null
-          },
+          parseHTML: (el) => parseImageWidth(el.getAttribute('width')),
           renderHTML: (attrs) => {
-            if (!attrs.width) return {}
-            return { width: attrs.width }
+            const width = parseImageWidth(attrs.width)
+            return width ? { width } : {}
           },
         },
       }
@@ -836,12 +825,11 @@ export function createMarkdownImage(fileAccessRef: FileAccessRefOrNull): Node {
         tag: 'img[src]',
         getAttrs: (node) => {
           if (!(node instanceof HTMLElement)) return false
-          const width = node.getAttribute('width')
           return {
             src: node.getAttribute('src') || '',
             alt: node.getAttribute('alt') || '',
             title: node.getAttribute('title') || '',
-            width: width ? parseInt(width, 10) || null : null,
+            width: parseImageWidth(node.getAttribute('width')),
           }
         },
       }]

@@ -38,6 +38,12 @@ function escapeAttr(value: string): string {
     .replace(/\n/g, '&#10;')
 }
 
+export function parseImageWidth(value: unknown): number | null {
+  if (typeof value === 'string' && !/^\d+$/.test(value)) return null
+  const width = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN
+  return Number.isSafeInteger(width) && width > 0 && width <= 10_000 ? width : null
+}
+
 export function extractCodeText(codeEl: Element): string {
   const parts: string[] = []
   for (const child of Array.from(codeEl.childNodes)) {
@@ -414,7 +420,7 @@ export function htmlToMarkdown(
         const src = el.getAttribute('src') || ''
         const alt = el.getAttribute('alt') || ''
         const title = el.getAttribute('title') || ''
-        const width = el.getAttribute('width')
+        const width = parseImageWidth(el.getAttribute('width'))
         if (width) {
           return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}"${title ? ` title="${escapeAttr(title)}"` : ''}>\n\n`
         }
