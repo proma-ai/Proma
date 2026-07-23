@@ -18,6 +18,7 @@ import {
   RefreshCw,
   ExternalLink,
   FolderSearch,
+  Terminal,
   MoreHorizontal,
   FolderInput,
   Pencil,
@@ -208,6 +209,11 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
     window.electronAPI.showInFolder(entry.path).catch(console.error)
   }, [])
 
+  /** 在系统终端中打开文件夹 */
+  const handleOpenInTerminal = React.useCallback((entry: FileEntry) => {
+    window.electronAPI.openFolderInTerminal(entry.path).catch(console.error)
+  }, [])
+
   /** 开始重命名 */
   const handleStartRename = React.useCallback((entry: FileEntry) => {
     setRenamingPath(entry.path)
@@ -325,6 +331,7 @@ export function FileBrowser({ rootPath, hideToolbar, embedded, hideEmpty, onAddT
           recentlyModifiedSet={recentlyModifiedSet}
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
+          onOpenInTerminal={handleOpenInTerminal}
           onStartRename={handleStartRename}
           onCancelRename={handleCancelRename}
           onRename={handleRename}
@@ -429,6 +436,7 @@ interface FileTreeItemProps {
   recentlyModifiedSet: Set<string>
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onShowInFolder: (entry: FileEntry) => void
+  onOpenInTerminal: (entry: FileEntry) => void
   onStartRename: (entry: FileEntry) => void
   onCancelRename: () => void
   onRename: (filePath: string, newName: string) => Promise<string | null>
@@ -455,6 +463,7 @@ function FileTreeItem({
   recentlyModifiedSet,
   onSelect,
   onShowInFolder,
+  onOpenInTerminal,
   onStartRename,
   onCancelRename,
   onRename,
@@ -470,6 +479,7 @@ function FileTreeItem({
   const [childrenLoaded, setChildrenLoaded] = React.useState(false)
   const [flash, setFlash] = React.useState(false)
   const rowRef = React.useRef<HTMLDivElement>(null)
+  const supportsTerminalFolderOpen = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 
   // 当 refreshVersion 变化时，已展开的文件夹自动重新加载子项
   React.useEffect(() => {
@@ -803,6 +813,15 @@ function FileTreeItem({
                     在文件夹中显示
                   </DropdownMenuItem>
                 )}
+                {supportsTerminalFolderOpen && menuSelectedCount === 1 && entry.isDirectory && (
+                  <DropdownMenuItem
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                    onSelect={() => onOpenInTerminal(entry)}
+                  >
+                    <Terminal />
+                    在终端中打开此文件夹
+                  </DropdownMenuItem>
+                )}
                 {menuSelectedCount === 1 && !entry.isDirectory && (
                   <DefaultAppMenuItem
                     filePath={entry.path}
@@ -873,6 +892,7 @@ function FileTreeItem({
               recentlyModifiedSet={recentlyModifiedSet}
               onSelect={onSelect}
               onShowInFolder={onShowInFolder}
+              onOpenInTerminal={onOpenInTerminal}
               onStartRename={onStartRename}
               onCancelRename={onCancelRename}
               onRename={onRename}

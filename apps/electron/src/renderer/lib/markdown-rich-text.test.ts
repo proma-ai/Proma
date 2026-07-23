@@ -1,5 +1,38 @@
 import { describe, expect, test } from 'bun:test'
-import { markdownToHtml } from './markdown-rich-text'
+import { DOMParser } from '@xmldom/xmldom'
+import { htmlToClipboardText, htmlToMarkdown, markdownToHtml } from './markdown-rich-text'
+
+function withHtmlDocument<T>(run: () => T): T {
+  const originalDocument = globalThis.document
+  const originalNode = globalThis.Node
+  const parser = new DOMParser()
+
+  Object.assign(globalThis, {
+    document: {
+      createElement: () => {
+        let root: Element | null = null
+        return {
+          nodeType: 1,
+          tagName: 'DIV',
+          getAttribute: () => null,
+          set innerHTML(html: string) {
+            root = parser.parseFromString(`<div>${html}</div>`, 'text/html').documentElement
+          },
+          get childNodes() {
+            return root?.childNodes ?? []
+          },
+        }
+      },
+    },
+    Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 },
+  })
+
+  try {
+    return run()
+  } finally {
+    Object.assign(globalThis, { document: originalDocument, Node: originalNode })
+  }
+}
 
 describe('markdownToHtml rich preview blocks', () => {
   test('renders leading yaml frontmatter as a collapsible metadata block', () => {
@@ -110,6 +143,43 @@ describe('markdownToHtml rich preview blocks', () => {
     expect(html).toContain('&lt;img src=&quot;晨光.jpg&quot;&gt;')
     expect(html).toContain('### Agent 模式')
     expect(html).not.toContain('<h3>Agent 模式</h3>')
+  })
+})
+
+describe('Clipboard 纯文本序列化', () => {
+  test('不改变 Markdown 持久化使用的段落分隔', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown('<p>第一段</p><p>第二段</p>'))
+
+    expect(markdown).toBe('第一段\n\n第二段')
+  })
+
+  test('相邻段落复制为单换行，不带 Markdown 的空段落分隔', () => {
+    const text = withHtmlDocument(() => htmlToClipboardText('<p>第一段</p><p>第二段</p>'))
+
+    expect(text).toBe('第一段\n第二段')
+  })
+
+  test('显式空段落保留一个空行，Windows 换行统一为 LF', () => {
+    const text = withHtmlDocument(() => htmlToClipboardText('<p>第一行\r\n内容</p><p></p><p>第三段</p>'))
+
+    expect(text).toBe('第一行\n内容\n\n第三段')
+  })
+})
+
+describe('图片 Markdown 持久化', () => {
+  test('保留合法宽度，并与后续块级内容分隔', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown('<img src="image.png" alt="截图" width="240"><p>后续内容</p>'))
+
+    expect(markdown).toBe('<img src="image.png" alt="截图" width="240">\n\n后续内容')
+    const html = markdownToHtml(markdown)
+    expect(html).toContain('width=&quot;240&quot;')
+    expect(html).toContain('<p>后续内容</p>')
+  })
+
+  test('丢弃非法图片宽度', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown('<img src="image.png" alt="截图" width="-20">'))
+
+    expect(markdown).toBe('![截图](<image.png>)')
   })
 })
 

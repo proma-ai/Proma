@@ -33,6 +33,8 @@ interface ContextUsageBadgeProps {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+  /** 当前上下文 token 是否为 Pi 手动压缩后的预估值 */
+  isEstimated: boolean
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
@@ -164,6 +166,7 @@ export function ContextUsageBadge({
   cacheReadTokens,
   cacheCreationTokens,
   contextWindow,
+  isEstimated,
   isCompacting,
   isProcessing,
   onCompact,
@@ -193,8 +196,8 @@ export function ContextUsageBadge({
 
   const [open, setOpen] = React.useState(false)
   const closeTimerRef = React.useRef<number | null>(null)
+  // 保留上次成功/失败结果；悬浮刷新期间继续展示旧值，直到新结果到达后原位替换。
   const [quota, setQuota] = React.useState<ChannelPlanQuotaResult | null>(null)
-  const [quotaLoading, setQuotaLoading] = React.useState(false)
 
   const cancelClose = React.useCallback(() => {
     if (closeTimerRef.current != null) {
@@ -214,14 +217,10 @@ export function ContextUsageBadge({
     if (!open || !channelId) return
 
     let cancelled = false
-    setQuotaLoading(true)
 
     fetchChannelPlanQuota(channelId, channelUpdatedAt)
       .then((result) => {
         if (!cancelled) setQuota(result)
-      })
-      .finally(() => {
-        if (!cancelled) setQuotaLoading(false)
       })
 
     return () => {
@@ -266,9 +265,6 @@ export function ContextUsageBadge({
 
   const ratio = displayWindow ? displayTokens / displayWindow : 0
 
-  // 纯输入 = 总上下文 - 缓存读取 - 缓存写入
-  const pureInput = displayTokens - (displayCacheRead ?? 0) - (displayCacheCreation ?? 0)
-
   const percent = displayWindow
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
@@ -279,12 +275,11 @@ export function ContextUsageBadge({
     setOpen(false)
   }
 
-  const shouldShowPlanQuota = quotaLoading
-    || (quota != null && (
-      quota.supported
-      || quota.windows.length > 0
-      || quota.message !== UNSUPPORTED_PLAN_QUOTA_MESSAGE
-    ))
+  const shouldShowPlanQuota = quota != null && (
+    quota.supported
+    || quota.windows.length > 0
+    || quota.message !== UNSUPPORTED_PLAN_QUOTA_MESSAGE
+  )
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -316,28 +311,36 @@ export function ContextUsageBadge({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1.5">
-          {pureInput > 0 && <DetailRow label="输入" value={pureInput.toLocaleString()} />}
-          {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
-          {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
-          {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
-
-          {displayWindow ? (
+          {isEstimated ? (
+            <DetailRow
+              label="压缩后"
+              value={`预估 ${formatTokens(displayTokens)} tokens${percent != null ? `（${percent}%）` : ''}`}
+              emphasized
+            />
+          ) : (
             <>
-              <div className="h-px bg-border my-0.5" />
-              <DetailRow
-                label="上下文"
-                value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
-                emphasized
-              />
-              {percent != null && (
-                <DetailRow
-                  label="占用"
-                  value={`${percent}%`}
-                  emphasized={isWarning}
-                />
-              )}
+              {displayOutput ? <DetailRow label="输出" value={displayOutput.toLocaleString()} /> : null}
+              {displayCacheCreation ? <DetailRow label="缓存写入" value={displayCacheCreation.toLocaleString()} /> : null}
+              {displayCacheRead ? <DetailRow label="缓存读取" value={displayCacheRead.toLocaleString()} /> : null}
+
+              {displayWindow ? (
+                <>
+                  <DetailRow
+                    label="上下文"
+                    value={`${formatTokens(displayTokens)} / ${formatTokens(displayWindow)}`}
+                    emphasized
+                  />
+                  {percent != null && (
+                    <DetailRow
+                      label="占用"
+                      value={`${percent}%`}
+                      emphasized={isWarning}
+                    />
+                  )}
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
 
           {shouldShowPlanQuota ? (
             <>
@@ -345,9 +348,7 @@ export function ContextUsageBadge({
               <div className="text-[11px] font-medium text-foreground/70">
                 订阅额度{quota?.planName ? ` · ${quota.planName}` : ''}
               </div>
-              {quotaLoading ? (
-                <div className="text-[11px] text-foreground/50">读取中...</div>
-              ) : quota?.supported && quota.windows.length > 0 ? (
+              {quota?.supported && quota.windows.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {quota.windows.map((quotaWindow) => (
                     <PlanQuotaRow key={`${quotaWindow.type}-${quotaWindow.label}`} quotaWindow={quotaWindow} />

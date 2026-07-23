@@ -8,8 +8,9 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai/compat'
-import type { SDKMessage } from '@proma/shared'
+import type { SDKAssistantMessage, SDKMessage } from '@proma/shared'
 import type { RuntimeGuardResultOverride } from '../agent-runtime-guards'
+import { isTransientNetworkError } from '../error-patterns'
 
 function getPiEditItems(input: Record<string, unknown>): Array<Record<string, unknown>> {
   return Array.isArray(input.edits)
@@ -156,6 +157,29 @@ export function isAssistantPiMessage(message: AgentMessage): message is Assistan
   return !!message && typeof message === 'object' && 'role' in message && message.role === 'assistant'
 }
 
+/** Pi's terminal error and any generated assistant content are independent fields. */
+export function getPiAssistantErrorDetails(message: SDKAssistantMessage): {
+  detailedMessage: string
+  originalError: string
+} {
+  const errorMessage = message.error?.message?.trim() || 'Unknown error'
+  return { detailedMessage: errorMessage, originalError: errorMessage }
+}
+
+/** Pi can generate text before a stream failure; preserve it as normal assistant output. */
+export function hasPiAssistantTextContent(message: SDKAssistantMessage): boolean {
+  return message.message.content.some(
+    (block) => block.type === 'text' && 'text' in block && typeof block.text === 'string' && block.text.trim().length > 0,
+  )
+}
+
+/** Copy Pi's generated output without the terminal transport/provider failure. */
+export function stripPiAssistantError(message: SDKAssistantMessage): SDKAssistantMessage {
+  const contentMessage = { ...message }
+  delete contentMessage.error
+  return contentMessage
+}
+
 export function isAbortedAssistantMessage(message: AgentMessage): message is AssistantMessage {
   return isAssistantPiMessage(message) && message.stopReason === 'aborted'
 }
@@ -214,6 +238,9 @@ export function convertPiMessage(
     //   Pi SDK 认定本轮已成功，不应在渲染层误导用户。
     // 上述非终态情况的 errorMessage 只写主进程 console，供开发排查；用户侧完全无感知。
     const isTerminalError = assistant.stopReason === 'error'
+    const errorType = assistant.errorMessage && isTransientNetworkError(assistant.errorMessage)
+      ? 'network_error'
+      : 'provider_error'
     if (assistant.errorMessage && !isTerminalError && final) {
       console.warn(
         `[pi-adapter] 忽略非终态 errorMessage（stopReason=${assistant.stopReason}）: ${assistant.errorMessage}`,
@@ -246,7 +273,7 @@ export function convertPiMessage(
       uuid: options.uuid ?? randomUUID(),
       ...(!final && { _partial: true }),
       ...(assistant.errorMessage && isTerminalError && {
-        error: { message: assistant.errorMessage, errorType: 'provider_error' },
+        error: { message: assistant.errorMessage, errorType },
       }),
       ...(channelModelId && { _channelModelId: channelModelId }),
     } as unknown as SDKMessage
@@ -300,7 +327,7 @@ export function convertResultMessage(
     { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
   )
   const lastAssistant = assistants[assistants.length - 1]
-  const assistantError = lastAssistant?.errorMessage
+  const assistantError = lastAssistant?.stopReason === 'error' ? lastAssistant.errorMessage : undefined
   const terminalReason = override?.terminalReason ?? (lastAssistant?.stopReason === 'length' ? 'max_tokens' : 'completed')
   return {
     type: 'result',

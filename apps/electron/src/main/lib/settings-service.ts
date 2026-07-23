@@ -31,7 +31,9 @@ export function getSettings(): AppSettings {
       builtinMcpDisabledIds: [],
       builtinMcpEnabledIds: [],
       agentRuntime: DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
+      gitAttributionEnabled: true,
     }
   }
 
@@ -53,7 +55,10 @@ export function getSettings(): AppSettings {
       builtinMcpDisabledIds: settings.builtinMcpDisabledIds ?? [],
       builtinMcpEnabledIds: settings.builtinMcpEnabledIds ?? [],
       agentRuntime: settings.agentRuntime ?? DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: settings.windowsShellPreference ?? 'auto',
       agentThinking: settings.agentThinking ?? { type: 'adaptive' },
+      // 缺省 true：老配置文件未写该字段时保持推广默认开启
+      gitAttributionEnabled: settings.gitAttributionEnabled ?? true,
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -69,7 +74,9 @@ export function getSettings(): AppSettings {
       builtinMcpDisabledIds: [],
       builtinMcpEnabledIds: [],
       agentRuntime: DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
+      gitAttributionEnabled: true,
     }
   }
 }

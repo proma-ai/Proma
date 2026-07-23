@@ -23,6 +23,9 @@ import {
   getSdkConfigDir,
 } from './config-paths'
 import { getAgentWorkspace, getWorkspaceAutoMemoryDir } from './agent-workspace-manager'
+import { resolvePiThinkingLevel } from './agent-thinking-level'
+import { getSettings } from './settings-service'
+import { applyClaudeSdkAttributionSettings, isGitAttributionEnabled } from './agent-git-attribution'
 
 // 在模块加载时一次性设置 SDK 配置目录，避免在 forkSession 等异步调用中临时修改/恢复
 // process.env 导致的并发安全问题（异步操作的 await 间隙其他代码可能读到错误值）
@@ -173,7 +176,11 @@ function readIndex(): AgentSessionsIndex {
     }
     return data
   }
-  return { version: INDEX_VERSION, sessions: [] }
+  return {
+    version: INDEX_VERSION,
+    sessions: [],
+    openAIThinkingDefaultEnabledMigrationCompleted: true,
+  }
 }
 
 /**
@@ -219,6 +226,9 @@ export function createAgentSession(
   const index = readIndex()
   const now = Date.now()
 
+  const settings = getSettings()
+  const defaultThinkingLevel = settings.defaultOpenAIThinkingLevel
+    ?? resolvePiThinkingLevel(settings, undefined, 'openai-codex')
   const meta: AgentSessionMeta = {
     id: randomUUID(),
     title: title || '新 Agent 会话',
@@ -226,8 +236,8 @@ export function createAgentSession(
     modelId,
     workspaceId,
     agentRuntime,
-    // OpenAI 推理配置从创建起归属于会话；默认启用高思考深度。
-    openAIThinkingLevel: 'high',
+    // 新会话继承已持久化的全局思考偏好，之后仍可按会话单独调整。
+    openAIThinkingLevel: defaultThinkingLevel,
     createdAt: now,
     updatedAt: now,
   }
@@ -264,6 +274,13 @@ export function createAgentSession(
       const autoMemoryDirectory = getWorkspaceAutoMemoryDir(ws.slug)
       if (sdkSettings.autoMemoryDirectory !== autoMemoryDirectory) {
         sdkSettings.autoMemoryDirectory = autoMemoryDirectory
+        needsWrite = true
+      }
+      // Proma Git/PR 推广标识：覆盖 Claude SDK 默认 Co-Authored-By
+      if (applyClaudeSdkAttributionSettings(
+        sdkSettings,
+        isGitAttributionEnabled(getSettings().gitAttributionEnabled),
+      )) {
         needsWrite = true
       }
       if (needsWrite) {

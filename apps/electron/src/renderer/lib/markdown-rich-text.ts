@@ -38,6 +38,12 @@ function escapeAttr(value: string): string {
     .replace(/\n/g, '&#10;')
 }
 
+export function parseImageWidth(value: unknown): number | null {
+  if (typeof value === 'string' && !/^\d+$/.test(value)) return null
+  const width = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN
+  return Number.isSafeInteger(width) && width > 0 && width <= 10_000 ? width : null
+}
+
 export function extractCodeText(codeEl: Element): string {
   const parts: string[] = []
   for (const child of Array.from(codeEl.childNodes)) {
@@ -337,12 +343,23 @@ function enhanceMarkdownHtml(html: string): string {
   root.innerHTML = html
 
   for (const li of Array.from(root.querySelectorAll('li'))) {
-    const first = li.firstChild
-    const textNode = first?.nodeType === Node.TEXT_NODE
-      ? first
-      : first instanceof HTMLElement && first.tagName.toLowerCase() === 'p' && first.firstChild?.nodeType === Node.TEXT_NODE
-        ? first.firstChild
-        : null
+    let textNode: ChildNode | null = null
+    let first = li.firstChild
+    // Skip whitespace-only text nodes to find the meaningful first child
+    while (first && first.nodeType === Node.TEXT_NODE && !first.textContent?.trim()) {
+      first = first.nextSibling
+    }
+    if (first?.nodeType === Node.TEXT_NODE) {
+      textNode = first
+    } else if (first instanceof HTMLElement && first.tagName.toLowerCase() === 'p') {
+      let pChild = first.firstChild
+      while (pChild && pChild.nodeType === Node.TEXT_NODE && !pChild.textContent?.trim()) {
+        pChild = pChild.nextSibling
+      }
+      if (pChild?.nodeType === Node.TEXT_NODE) {
+        textNode = pChild
+      }
+    }
     const text = textNode?.textContent ?? ''
     const match = text.match(/^\s*\[([ xX])\]\s*/)
     if (!match || !textNode) continue
@@ -362,7 +379,10 @@ export function markdownToHtml(markdown: string): string {
 }
 
 /** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
-export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: boolean }): string {
+export function htmlToMarkdown(
+  html: string,
+  options?: { skipMarkdownEscape?: boolean; paragraphSeparator?: string },
+): string {
   if (!html || html === '<p></p>') return ''
 
   const div = document.createElement('div')
@@ -400,7 +420,11 @@ export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: bo
         const src = el.getAttribute('src') || ''
         const alt = el.getAttribute('alt') || ''
         const title = el.getAttribute('title') || ''
-        return `![${escapeMarkdownText(alt)}](${escapeMarkdownLinkTarget(src)}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})`
+        const width = parseImageWidth(el.getAttribute('width'))
+        if (width) {
+          return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}"${title ? ` title="${escapeAttr(title)}"` : ''}>\n\n`
+        }
+        return `![${escapeMarkdownText(alt)}](${escapeMarkdownLinkTarget(src)}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})\n\n`
       }
       case 'video': {
         const src = el.getAttribute('src') || el.querySelector('source')?.getAttribute('src') || ''
@@ -408,7 +432,7 @@ export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: bo
         return `<video controls src="${escapeAttr(src)}"${title ? ` title="${escapeAttr(title)}"` : ''}></video>\n`
       }
       case 'p':
-        return children + '\n\n'
+        return children + (options?.paragraphSeparator ?? '\n\n')
       case 'br':
         return '\n'
       case 'strong':
@@ -512,4 +536,18 @@ export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: bo
   }
 
   return processNode(div).trim()
+}
+
+/**
+ * 将编辑器选区导出为系统剪贴板的纯文本。
+ *
+ * Markdown 持久化需要用空行区分段落；普通剪贴板文本只需要单个换行。
+ * 这个专用出口避免把 Markdown 的段落分隔符带入其他编辑器，同时保留
+ * 选区内显式空段落和全部内联 Markdown 语义。
+ */
+export function htmlToClipboardText(html: string, options?: { skipMarkdownEscape?: boolean }): string {
+  return htmlToMarkdown(html, {
+    ...options,
+    paragraphSeparator: '\n',
+  }).replace(/\r\n?/g, '\n')
 }

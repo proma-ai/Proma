@@ -63,7 +63,10 @@ import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStr
 import { inferAgentSdkContextWindow, inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
-import { getAgentCompletionMarkers } from '@/lib/agent-completion-presence'
+import {
+  getAgentCompletionMarkers,
+  notifyAgentCompletion,
+} from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
@@ -248,8 +251,15 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         total_cost_usd?: number
         modelUsage?: Record<string, { contextWindow?: number }>
         usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+        isSyntheticCompactionResult?: boolean
         _channelModelId?: string
         _channelProvider?: ProviderType
+      }
+      if (rMsg.isSyntheticCompactionResult) {
+        return [{
+          type: 'complete',
+          stopReason: rMsg.subtype === 'success' ? 'end_turn' : 'error',
+        }]
       }
       // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow，
       // 避免子 Agent 的小窗口覆盖主模型的大窗口、导致指示器飘忽。
@@ -296,12 +306,28 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
 
     case 'system': {
       const sMsg = msg as SDKSystemMessage
-      if (sMsg.subtype === 'compact_boundary') return [{ type: 'compact_complete' }]
+      if (sMsg.subtype === 'compact_boundary') {
+        const estimatedTokensAfter = sMsg.compactionEstimatedTokensAfter
+        return [{
+          type: 'compact_complete',
+          status: 'success',
+          summary: sMsg.summary,
+          ...(typeof estimatedTokensAfter === 'number' && estimatedTokensAfter > 0 && { estimatedTokensAfter }),
+        }]
+      }
       if (sMsg.subtype === 'compacting') return [{ type: 'compacting' }]
       if (sMsg.subtype === 'status') {
         if (sMsg.status === 'compacting') return [{ type: 'compacting' }]
-        if (sMsg.compact_result === 'success' || sMsg.compact_result === 'failed' || typeof sMsg.compact_error === 'string') {
-          return [{ type: 'compact_complete' }]
+        if (sMsg.compact_result === 'success' || sMsg.compact_result === 'failed' || sMsg.compact_result === 'noop') {
+          return [{
+            type: 'compact_complete',
+            status: sMsg.compact_result,
+            summary: sMsg.summary,
+            message: sMsg.compact_error ?? sMsg.message,
+          }]
+        }
+        if (typeof sMsg.compact_error === 'string') {
+          return [{ type: 'compact_complete', status: 'failed', message: sMsg.compact_error }]
         }
       }
       if (sMsg.subtype === 'task_started' && sMsg.task_id) {
@@ -976,28 +1002,32 @@ export function useGlobalAgentListeners(): void {
         // 等后台任务完成时 Agent 会自动唤醒续轮。
         const backgroundTasksPending = data.backgroundTasksPending === true
         const hasStreamError = store.get(agentStreamErrorsAtom).has(data.sessionId)
-        const isSuccessfulCompletion = !data.stoppedByUser &&
-          !hasStreamError &&
-          (!data.resultSubtype || data.resultSubtype === 'success')
 
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
+        const completionSession = store.get(agentSessionsAtom)
+          .find((session) => session.id === data.sessionId)
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
         const sounds = store.get(notificationSoundsAtom)
         const sessionTitle = getSessionTitle(data.sessionId)
-        if (!backgroundTasksPending && isSuccessfulCompletion) {
-          sendDesktopNotification(
-            'Agent 任务完成',
-            `[${sessionTitle}] 任务已完成`,
-            enabled,
-            {
-              playSound: enabled && soundEnabled,
-              soundType: 'taskComplete',
-              sounds,
-              onNavigate: makeNavigateToSession(data.sessionId, sessionTitle),
-            }
-          )
-        }
+        notifyAgentCompletion({
+          completion: data,
+          session: completionSession,
+          hasStreamError,
+          notify: () => {
+            sendDesktopNotification(
+              'Agent 任务完成',
+              `[${sessionTitle}] 任务已完成`,
+              enabled,
+              {
+                playSound: enabled && soundEnabled,
+                soundType: 'taskComplete',
+                sounds,
+                onNavigate: makeNavigateToSession(data.sessionId, sessionTitle),
+              }
+            )
+          },
+        })
 
         // STREAM_COMPLETE 表示后端已完全结束 — 立即标记 running: false
         // 同时将所有未完成的工具活动标记为已完成，防止 subagent spinner 继续转动

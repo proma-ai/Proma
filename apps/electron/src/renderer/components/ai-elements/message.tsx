@@ -401,9 +401,9 @@ interface MessageResponseProps {
 const REMARK_PLUGINS = [remarkGfm, remarkMath]
 const REHYPE_PLUGINS = [rehypeKatex]
 
-/** 允许 mention:// 协议通过 URL 清洗（react-markdown 默认只放行 http/https） */
+/** 允许 mention:// 和本地绝对路径通过 URL 清洗 */
 function mentionUrlTransform(url: string): string {
-  if (url.startsWith('mention://')) return url
+  if (url.startsWith('mention://') || isAbsoluteFilePath(safeDecode(url))) return url
   return defaultUrlTransform(url)
 }
 
@@ -423,6 +423,11 @@ const MarkdownLink = React.memo(function MarkdownLink({
     const mentionMatch = MENTION_URL_RE.exec(href)
     if (mentionMatch) {
       return <MentionChip type={mentionMatch[1] as MentionType} value={mentionMatch[2] ?? ''} />
+    }
+
+    const filePath = safeDecode(href)
+    if (isAbsoluteFilePath(filePath)) {
+      return <FilePathChip filePath={filePath} />
     }
   }
 

@@ -151,15 +151,56 @@ describe('Agent 会话 JSONL 读取', () => {
 })
 
 describe('Agent 会话 runtime 元数据', () => {
-  test('Given 新建会话 When 指定或省略 runtime Then 持久化指定值并默认 Pi', () => {
-    const defaultRuntimeSession = manager.createAgentSession('默认内核会话')
-    const claudeRuntimeSession = manager.createAgentSession('Claude 内核会话', undefined, undefined, undefined, 'claude')
+  test('Given 已保存 OpenAI medium 默认值 When 新建 Pi 或 Claude 会话 Then 默认并持久化 medium', () => {
+    const settingsPath = join(tempHome, '.proma', 'settings.json')
+    mkdirSync(join(tempHome, '.proma'), { recursive: true })
+    writeFileSync(settingsPath, JSON.stringify({
+      agentThinking: { type: 'adaptive' },
+      agentEffort: 'max',
+      defaultOpenAIThinkingLevel: 'medium',
+    }), 'utf-8')
 
-    expect(defaultRuntimeSession.agentRuntime).toBe('pi')
-    expect(claudeRuntimeSession.agentRuntime).toBe('claude')
-    expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('pi')
-    expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.agentRuntime).toBe('claude')
-    expect(defaultRuntimeSession.openAIThinkingLevel).toBe('high')
+    try {
+      const defaultRuntimeSession = manager.createAgentSession('默认内核会话')
+      const claudeRuntimeSession = manager.createAgentSession('Claude 内核会话', undefined, undefined, undefined, 'claude')
+
+      expect(defaultRuntimeSession.agentRuntime).toBe('pi')
+      expect(claudeRuntimeSession.agentRuntime).toBe('claude')
+      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('pi')
+      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.agentRuntime).toBe('claude')
+      expect(defaultRuntimeSession.openAIThinkingLevel).toBe('medium')
+      expect(claudeRuntimeSession.openAIThinkingLevel).toBe('medium')
+      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.openAIThinkingLevel).toBe('medium')
+      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.openAIThinkingLevel).toBe('medium')
+    } finally {
+      rmSync(settingsPath, { force: true })
+    }
+  })
+
+  test('Given 新安装用户保存关闭思考 When 连续新建会话 Then 不被旧版迁移改回 high', () => {
+    const settingsPath = join(tempHome, '.proma', 'settings.json')
+    const indexPath = join(tempHome, '.proma', 'agent-sessions.json')
+    const indexBackupPath = `${indexPath}.bak`
+    mkdirSync(join(tempHome, '.proma'), { recursive: true })
+    rmSync(indexPath, { force: true })
+    rmSync(indexBackupPath, { force: true })
+    writeFileSync(settingsPath, JSON.stringify({
+      agentThinking: { type: 'adaptive' },
+      agentEffort: 'medium',
+      defaultOpenAIThinkingLevel: 'off',
+    }), 'utf-8')
+
+    try {
+      const firstSession = manager.createAgentSession('关闭思考会话一')
+      const secondSession = manager.createAgentSession('关闭思考会话二')
+
+      expect(manager.getAgentSessionMeta(firstSession.id)?.openAIThinkingLevel).toBe('off')
+      expect(manager.getAgentSessionMeta(secondSession.id)?.openAIThinkingLevel).toBe('off')
+    } finally {
+      rmSync(settingsPath, { force: true })
+      rmSync(indexPath, { force: true })
+      rmSync(indexBackupPath, { force: true })
+    }
   })
 
   test('Given Codex session settings When updating Then persists depth per session', () => {

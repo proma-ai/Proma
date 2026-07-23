@@ -205,6 +205,12 @@ describe('resolveOpenAIChatCompletionsUrl', () => {
     )
   })
 
+  test('OpenCode Go OpenAI 协议根地址补全 chat completions 端点', () => {
+    expect(resolveOpenAIChatCompletionsUrl('https://opencode.ai/zen/go/v1', 'opencode-go-openai')).toBe(
+      'https://opencode.ai/zen/go/v1/chat/completions',
+    )
+  })
+
   test('保留查询参数', () => {
     expect(resolveOpenAIChatCompletionsUrl('https://api.example.com/v1/chat/completions?api-version=2024', 'custom')).toBe(
       'https://api.example.com/v1/chat/completions?api-version=2024',

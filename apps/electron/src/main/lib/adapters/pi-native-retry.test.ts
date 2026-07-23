@@ -17,6 +17,14 @@ describe('Pi native retry classifier', () => {
     )).toBe(true)
   })
 
+  test.each([
+    'peer closed connection',
+    'incomplete chunked read',
+    'peer closed connection without sending complete message body (incomplete chunked read)',
+  ])('classifies chunked stream interruption "%s" as retryable', (errorMessage) => {
+    expect(isRetryableAssistantError(failedAssistant(errorMessage))).toBe(true)
+  })
+
   test('does not broadly retry unrelated stream-ended errors', () => {
     expect(isRetryableAssistantError(
       failedAssistant('stream ended before the model emitted a local marker'),

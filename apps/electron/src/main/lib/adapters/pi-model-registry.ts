@@ -6,8 +6,12 @@
  */
 
 import {
+  CODEX_GPT_54_55_CONTEXT_WINDOW,
+  CODEX_GPT_54_MINI_CONTEXT_WINDOW,
+  CODEX_GPT_56_CONTEXT_WINDOW,
   extractZhipuCodingTeamApiToken,
   inferAgentSdkContextWindow,
+  inferCodexAlignedGPT5ContextWindow,
   type CodexOAuthCredentials,
   type ProviderType,
 } from '@proma/shared'
@@ -30,6 +34,7 @@ type PiCatalogModelPatch = Pick<PiCatalogModel, 'id'> & Partial<PiCatalogModel>
 
 interface PiModelDefaults {
   reasoning: boolean
+  thinkingLevelMap?: PiCatalogModel['thinkingLevelMap']
   input: PiCatalogModel['input']
   cost: PiModelCost
   contextWindow: number
@@ -42,17 +47,37 @@ const DEFAULT_MAX_TOKENS = 64_000
 const VOLCENGINE_GLM_52_MAX_TOKENS = 128_000
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
 const CODEX_MAX_TOKENS = 128_000
-const CODEX_54_MINI_CONTEXT_WINDOW = 400_000
-// ChatGPT Codex OAuth 实际上下文窗口（与 1.05M API 规格不同）：
-// - GPT-5.4 / 5.5：272K
-// - GPT-5.6 系列：372K
-const CODEX_54_55_CONTEXT_WINDOW = 272_000
-const CODEX_56_CONTEXT_WINDOW = 372_000
-const CODEX_THINKING_LEVEL_MAP = { xhigh: 'xhigh', minimal: 'low' } as const
+// Chat Completions 依赖 off → none 来显式关闭服务端默认 reasoning；Responses/Codex
+// 也可安全接收该映射，随后由其 request hook 写入嵌套 reasoning.effort。
+const CODEX_THINKING_LEVEL_MAP = { off: 'none', xhigh: 'xhigh', minimal: 'low' } as const
+const CODEX_56_THINKING_LEVEL_MAP = { ...CODEX_THINKING_LEVEL_MAP, max: 'max' } as const
+
+/**
+ * 将 Codex 已标记的 GPT-5.x 能力外推到同名第三方模型。
+ *
+ * 这是一项产品级兼容策略：同名模型无论经 OpenAI、Responses 或 custom 网关访问，
+ * 均采用 Codex 的窗口和思考等级；未被 Codex 标记的 Pro/Nano SKU 仍保留 catalog 值。
+ */
+export function getCodexAlignedGPT5Capabilities(modelId: string | undefined): Pick<PiModelDefaults, 'contextWindow' | 'thinkingLevelMap'> | undefined {
+  const contextWindow = inferCodexAlignedGPT5ContextWindow(modelId)
+  if (contextWindow === undefined) return undefined
+  const isGpt56 = /^gpt-5\.6(?:-|$)/.test(modelId?.toLowerCase() ?? '')
+  return {
+    contextWindow,
+    thinkingLevelMap: isGpt56 ? CODEX_56_THINKING_LEVEL_MAP : CODEX_THINKING_LEVEL_MAP,
+  }
+}
 
 type CodexRuntimeCredential = CodexOAuthCredentials & {
   type: 'oauth'
   [key: string]: unknown
+}
+
+/** Pi 内置 Codex provider 所需的最小模型与 OAuth 输入。 */
+export interface CodexModelInput {
+  model?: string
+  codexOAuthCredentials?: CodexOAuthCredentials
+  onCodexOAuthCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
 }
 
 function createCodexRuntimeCredentialStore(
@@ -99,15 +124,15 @@ function createCodexRuntimeCredentialStore(
 const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
   {
     id: 'gpt-5.4',
-    contextWindow: CODEX_54_55_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_54_55_CONTEXT_WINDOW,
   },
   {
     id: 'gpt-5.4-mini',
-    contextWindow: CODEX_54_MINI_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   },
   {
     id: 'gpt-5.5',
-    contextWindow: CODEX_54_55_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_54_55_CONTEXT_WINDOW,
   },
   {
     id: 'gpt-5.6-sol',
@@ -116,10 +141,10 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     provider: 'openai-codex',
     baseUrl: CODEX_BASE_URL,
     reasoning: true,
-    thinkingLevelMap: CODEX_THINKING_LEVEL_MAP,
+    thinkingLevelMap: CODEX_56_THINKING_LEVEL_MAP,
     input: ['text', 'image'],
     cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-    contextWindow: CODEX_56_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_56_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
   {
@@ -129,10 +154,10 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     provider: 'openai-codex',
     baseUrl: CODEX_BASE_URL,
     reasoning: true,
-    thinkingLevelMap: CODEX_THINKING_LEVEL_MAP,
+    thinkingLevelMap: CODEX_56_THINKING_LEVEL_MAP,
     input: ['text', 'image'],
     cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
-    contextWindow: CODEX_56_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_56_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
   {
@@ -142,10 +167,10 @@ const CODEX_MODEL_PATCHES: PiCatalogModelPatch[] = [
     provider: 'openai-codex',
     baseUrl: CODEX_BASE_URL,
     reasoning: true,
-    thinkingLevelMap: CODEX_THINKING_LEVEL_MAP,
+    thinkingLevelMap: CODEX_56_THINKING_LEVEL_MAP,
     input: ['text', 'image'],
     cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 0 },
-    contextWindow: CODEX_56_CONTEXT_WINDOW,
+    contextWindow: CODEX_GPT_56_CONTEXT_WINDOW,
     maxTokens: CODEX_MAX_TOKENS,
   },
 ]
@@ -188,6 +213,7 @@ function normalizePiApi(
     case 'proma':
       return resolvePromaOfficialApi(modelId, modelApiProtocol)
     case 'openai':
+    case 'opencode-go-openai':
     case 'zhipu':
     case 'doubao':
     case 'qwen':
@@ -271,20 +297,24 @@ function positiveInteger(value: number | undefined): number | undefined {
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
-  // Proma 官方模型的规格由 Admin/后端维护，必须优先于本地 Pi catalog。
-  // catalog 只作为第三方渠道或旧服务端不下发规格时的兼容 fallback。
+  // Proma 后端下发的规格优先于本地目录和通用推断。
   const configuredContextWindow = positiveInteger(input.modelContextWindow)
   const configuredMaxTokens = positiveInteger(input.modelMaxOutputTokens)
-  const isVolcengineGlm52 = input.provider === 'doubao' && input.model?.toLowerCase() === 'glm-5.2'
+  const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
+  const isVolcengineGlm52 = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
+    && input.model?.toLowerCase() === 'glm-5.2'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const inferredContextWindow = inferAgentSdkContextWindow(input.model, input.provider) ?? DEFAULT_CONTEXT_WINDOW
   return {
     reasoning: catalogModel?.reasoning ?? true,
+    // 同名 GPT-5.x 统一采用 Codex 已验证的 effort 映射，避免第三方 catalog 缺失
+    // max/minimal 映射时 UI 与 Pi 最终 payload 出现不一致。
+    thinkingLevelMap: codexAlignedCapabilities?.thinkingLevelMap ?? catalogModel?.thinkingLevelMap,
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
-    // Provider catalogues may omit or under-report newer models; never lower verified capability.
-    contextWindow: configuredContextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
-    // 火山方舟兼容端点的 GLM-5.2 上限为 128000。
+    contextWindow: configuredContextWindow ?? codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
+    // Pi 的目录标值略高于方舟兼容端点的实际上限。
+
     maxTokens: isVolcengineGlm52
       ? VOLCENGINE_GLM_52_MAX_TOKENS
       : (configuredMaxTokens ?? catalogModel?.maxTokens ?? DEFAULT_MAX_TOKENS),
@@ -429,7 +459,7 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * 因此将 Proma 已刷新过的完整凭据放入一次性内存 OAuth credential store，
  * 按真实 expires 刷新并回写 Proma，避免读写全局 ~/.pi 认证文件。
  */
-async function buildCodexModel(sdk: PiSdk, input: PiAgentQueryOptions) {
+export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
   if (!input.codexOAuthCredentials) {
     throw new Error('ChatGPT (Codex) OAuth 凭据缺失，请重新登录')
   }
@@ -487,6 +517,7 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
       api,
       baseUrl,
       reasoning: modelDefaults.reasoning,
+      ...(modelDefaults.thinkingLevelMap ? { thinkingLevelMap: modelDefaults.thinkingLevelMap } : {}),
       input: modelDefaults.input,
       cost: modelDefaults.cost,
       contextWindow: modelDefaults.contextWindow,

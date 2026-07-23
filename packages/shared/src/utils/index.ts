@@ -13,6 +13,10 @@ export { calcTotalAvailable } from './billing'
 export {
   DEFAULT_CONTEXT_WINDOW,
   ONE_MILLION_CONTEXT_WINDOW,
+  CODEX_GPT_54_55_CONTEXT_WINDOW,
+  CODEX_GPT_54_MINI_CONTEXT_WINDOW,
+  CODEX_GPT_56_CONTEXT_WINDOW,
+  inferCodexAlignedGPT5ContextWindow,
   supports1MContext,
   inferContextWindow,
   inferAgentSdkContextWindow,

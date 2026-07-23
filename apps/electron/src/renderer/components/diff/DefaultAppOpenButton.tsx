@@ -3,13 +3,15 @@
  *
  * 通过 useDefaultAppForFile 拿到本机为该文件类型注册的默认 App（含图标），
  * 渲染一个按钮；点击调用 systemOpenFile 让系统按默认 App 打开。
- * 探测失败或图标读取失败时不渲染。
+ * 探测未完成或失败时，使用通用图标和文案保留打开入口。
  */
 
 import * as React from 'react'
+import { ExternalLink } from 'lucide-react'
 import type { FileAccessOptions } from '@proma/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDefaultAppForFile } from '@/hooks/useDefaultAppForFile'
+import { getDefaultAppOpenLabel } from '@/lib/default-app-open-label'
 import { cn } from '@/lib/utils'
 
 interface DefaultAppOpenButtonProps {
@@ -35,9 +37,8 @@ export function DefaultAppOpenButton({
     })
   }, [filePath, access])
 
-  if (!info) return null
-
   const labeled = variant === 'labeled'
+  const label = getDefaultAppOpenLabel(info)
 
   return (
     <Tooltip>
@@ -50,21 +51,25 @@ export function DefaultAppOpenButton({
             labeled ? 'gap-1 h-6 px-1.5 max-w-[140px]' : 'justify-center size-6',
             className,
           )}
-          aria-label={`用 ${info.name} 打开`}
+          aria-label={label}
         >
-          <img
-            src={info.iconDataUrl}
-            alt=""
-            className={cn('shrink-0', labeled ? 'size-4' : 'size-3.5')}
-            draggable={false}
-          />
+          {info ? (
+            <img
+              src={info.iconDataUrl}
+              alt=""
+              className={cn('shrink-0', labeled ? 'size-4' : 'size-3.5')}
+              draggable={false}
+            />
+          ) : (
+            <ExternalLink className={cn('shrink-0', labeled ? 'size-4' : 'size-3.5')} />
+          )}
           {labeled && (
-            <span className="text-[11px] leading-none truncate">{info.name}</span>
+            <span className="text-[11px] leading-none truncate">{info?.name ?? '系统默认应用'}</span>
           )}
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        <p>用 {info.name} 打开编辑</p>
+        <p>{info ? `用 ${info.name} 打开编辑` : '用系统默认应用打开'}</p>
       </TooltipContent>
     </Tooltip>
   )

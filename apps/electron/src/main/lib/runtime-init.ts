@@ -16,6 +16,7 @@ import { detectBunRuntime } from './bun-finder'
 import { detectGitRuntime, getGitRepoStatus } from './git-detector'
 import { detectGitBash } from './git-bash-detector'
 import { detectWsl } from './wsl-detector'
+import { selectWindowsShell } from './windows-shell-selection'
 
 /** 运行时状态缓存 */
 let runtimeStatusCache: RuntimeStatus | null = null
@@ -92,13 +93,7 @@ export async function initializeRuntime(options: RuntimeInitOptions = {}): Promi
       const gitBashStatus = await detectGitBash()
       const wslStatus = await detectWsl()
 
-      // 推荐策略：优先 Git Bash > WSL 2 > WSL 1
-      let recommended: 'git-bash' | 'wsl' | null = null
-      if (gitBashStatus.available) {
-        recommended = 'git-bash'
-      } else if (wslStatus.available) {
-        recommended = 'wsl'
-      }
+      const recommended = selectWindowsShell({ gitBash: gitBashStatus, wsl: wslStatus })
 
       shellEnvironmentStatus = {
         gitBash: gitBashStatus,

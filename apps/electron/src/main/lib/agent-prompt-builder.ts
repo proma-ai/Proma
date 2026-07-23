@@ -15,6 +15,8 @@ import { join } from 'node:path'
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
+import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
+import { getSettings } from './settings-service'
 
 // ===== 工具使用指南（可复用常量） =====
 
@@ -244,6 +246,10 @@ Skills 用来固化可复用的流程、决策树和 SOP（"以后遇到类似�
 | 执行计划 | → 写入 .context/plan/ 目录 |
 
 维护这些长期文件前，先按需搜索当前会话、会话级 Context、工作区级 Context、CLAUDE.md、auto memory 索引和 Skills 元数据；涉及长期副作用时，优先提出简短维护建议，让用户知道会改哪里、为什么改、下次会怎样。`)
+
+  // Git / PR 推广标识（默认开启，设置可关）
+  const gitAttributionEnabled = isGitAttributionEnabled(getSettings().gitAttributionEnabled)
+  sections.push(buildGitAttributionPromptSection(gitAttributionEnabled))
 
   // 交互规范
   sections.push(`## 交互规范

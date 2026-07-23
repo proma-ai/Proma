@@ -32,12 +32,12 @@ import { ScrollPositionManager } from '@/hooks/useScrollPositionMemory'
 import { cn } from '@/lib/utils'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, CompactingIndicator, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
+import { groupIntoTurns, MessageGroupRenderer, getGroupId, getGroupPreview, extractUserText, parseAttachedFiles as sdkParseAttachedFiles, isImageFile as sdkIsImageFile, buildTaskProgressDataForTurn, type MessageGroup } from './SDKMessageRenderer'
 import { buildLiveGroupSet } from './live-group-set'
 import { ContentBlock } from './ContentBlock'
 import { parseThinkTagsFromText } from './thinking-tag-parser'
 import { AgentHistorySelectionLayer } from './AgentHistorySelectionLayer'
-import { TaskProgressOverlay } from './TaskProgressOverlay'
+import { TaskProgressOverlay, type ContextCompactionProgress } from './TaskProgressOverlay'
 import type { AgentEventUsage, RetryAttempt, SDKMessage, SDKSystemMessage } from '@proma/shared'
 import { getSDKCompactStatus } from '@proma/shared'
 import { agentSessionChannelMapAtom, type AgentStreamState } from '@/atoms/agent-atoms'
@@ -88,11 +88,81 @@ function getSDKMessageStableKey(message: SDKMessage): string {
   return key
 }
 
-function hasCompactStatus(messages: SDKMessage[]): boolean {
-  return messages.some((message) => {
-    if (message.type !== 'system') return false
-    return getSDKCompactStatus(message as SDKSystemMessage) != null
-  })
+export function isCompactionControlHistoryGroup(group: MessageGroup): boolean {
+  if (group.type === 'system') return getSDKCompactStatus(group.message) != null
+  return group.type === 'user' && (extractUserText(group.message) ?? '').trim() === '/compact'
+}
+
+export function getContextCompactionProgress(
+  messages: SDKMessage[],
+  isCompacting: boolean | undefined,
+  streamCompaction: AgentStreamState['contextCompaction'] | undefined,
+): ContextCompactionProgress | undefined {
+  if (streamCompaction?.status === 'running') {
+    return {
+      status: 'running',
+      label: '正在整理上下文',
+      detail: '正在生成会话摘要，完成后可继续当前任务。',
+    }
+  }
+  if (streamCompaction?.status === 'success') {
+    return {
+      status: 'success',
+      label: '上下文已压缩',
+      detail: '会话已整理，可以继续当前任务。',
+      summary: streamCompaction.summary,
+    }
+  }
+  if (streamCompaction?.status === 'noop') {
+    return {
+      status: 'noop',
+      label: '当前上下文无需压缩',
+      detail: streamCompaction.message ?? '当前上下文仍可用，可以继续当前任务。',
+    }
+  }
+  if (streamCompaction?.status === 'failed') {
+    return {
+      status: 'failed',
+      label: '上下文压缩失败',
+      detail: streamCompaction.message ?? '请检查模型连接后重试。',
+    }
+  }
+
+  const latestStatus = [...messages].reverse().find((message) =>
+    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
+  ) as SDKSystemMessage | undefined
+  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+
+  if (status === 'success' && latestStatus) {
+    return {
+      status: 'success',
+      label: '上下文已压缩',
+      detail: '会话已整理，可以继续当前任务。',
+      summary: latestStatus.summary,
+    }
+  }
+  if (status === 'noop' && latestStatus) {
+    return {
+      status: 'noop',
+      label: '当前上下文无需压缩',
+      detail: latestStatus.message ?? '当前上下文仍可用，可以继续当前任务。',
+    }
+  }
+  if (status === 'failed' && latestStatus) {
+    return {
+      status: 'failed',
+      label: '上下文压缩失败',
+      detail: latestStatus.compact_error ?? latestStatus.message ?? '请检查模型连接后重试。',
+    }
+  }
+  if (status === 'compacting' || isCompacting) {
+    return {
+      status: 'running',
+      label: '正在整理上下文',
+      detail: '正在生成会话摘要，完成后可继续当前任务。',
+    }
+  }
+  return undefined
 }
 
 /** AgentMessages 属性接口 */
@@ -561,16 +631,22 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
   // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
   // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
   // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
-  // 直到整个 stream 结束（stream state 被删除）才消失。
+  // 直到整个 stream 结束（state 被删除）才消失。
   const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
-  const compactStatusInLiveMessages = React.useMemo(() => {
-    return hasCompactStatus(liveMessages ?? [])
-  }, [liveMessages])
+  const contextCompaction = React.useMemo(
+    () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting, streamState?.contextCompaction),
+    [liveMessages, streamState?.isCompacting, streamState?.contextCompaction],
+  )
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
     return groupIntoTurns(allSDKMessages, sessionModelId)
   }, [allSDKMessages, sessionModelId])
+  // 压缩过程由底部 Progress Overlay 独立承载，不占用对话历史、迷你地图或用户锚点。
+  const visibleGroups = React.useMemo(
+    () => allGroups.filter((group) => !isCompactionControlHistoryGroup(group)),
+    [allGroups],
+  )
 
   // 标记哪些 group 属于实时流式消息（用于 isStreaming / onFork 差异化渲染）
   const liveGroupSet = React.useMemo(() => {
@@ -583,7 +659,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
 
   // 迷你地图数据 — 直接使用统一的 allGroups（无需去重）
   const minimapItems: MinimapItem[] = React.useMemo(
-    () => allGroups.map((group) => ({
+    () => visibleGroups.map((group) => ({
       id: getGroupId(group),
       role: group.type === 'user' ? 'user' as const
         : group.type === 'system' ? 'status' as const
@@ -592,7 +668,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
       avatar: group.type === 'user' ? userProfile.avatar : undefined,
       model: group.type === 'assistant-turn' ? group.model : undefined,
     })),
-    [allGroups, userProfile.avatar]
+    [visibleGroups, userProfile.avatar]
   )
 
   // 同步 minimap 缓存到 Tab 级别（供 Tab hover 预览使用）
@@ -608,7 +684,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
 
   // 所有用户消息的数据 — 供 StickyUserMessage 使用
   const allUserMessagesData = React.useMemo(() => {
-    return allGroups
+    return visibleGroups
       .filter((g): g is MessageGroup & { type: 'user' } => g.type === 'user')
       .map((g) => {
         const rawText = extractUserText(g.message) ?? ''
@@ -619,7 +695,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
           attachments: files.map((f) => ({ filename: f.filename, isImage: sdkIsImageFile(f.filename) })),
         }
       })
-  }, [allGroups])
+  }, [visibleGroups])
 
   // 实时消息中是否已有可渲染的助手内容
   // 流式中：通过 liveGroupSet 精确判断（只有 streaming 时 liveGroupSet 才非空）
@@ -640,7 +716,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
           ) : (
             <>
               {/* 统一消息渲染（持久化 + 实时合并为一个列表，确保 system 消息位置正确） */}
-              {allGroups.map((group, idx) => {
+              {visibleGroups.map((group, idx) => {
                 const isLive = liveGroupSet.has(group)
                 const isErrorGroup = group.type === 'assistant-turn'
                   && group.assistantMessages.some((m) => !!m.error)
@@ -648,7 +724,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
                 // 仅在最后一个 assistant-turn 上显示"已被用户中断" badge
                 const isLastAssistantTurn = !streaming && stoppedByUser
                   && group.type === 'assistant-turn'
-                  && idx === allGroups.findLastIndex((g) => g.type === 'assistant-turn')
+                  && idx === visibleGroups.findLastIndex((g) => g.type === 'assistant-turn')
                 return (
                   <MessageGroupRenderer
                     key={getGroupId(group)}
@@ -714,15 +790,16 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
                 </Message>
               )}
 
-              {/* 压缩中指示器：由 isCompacting flag 驱动的尾部元素，compact_boundary 到达时 flag 翻 false 自然消失，
-                  视觉上被流中新出现的"上下文已压缩"分隔符无缝替换 */}
-              {streamState?.isCompacting && !compactStatusInLiveMessages && <CompactingIndicator />}
-
             </>
           )}
         </ConversationContent>
         <ScrollMinimap items={minimapItems} />
-        <TaskProgressOverlay key={sessionId} activities={liveTaskActivities} streaming={streaming} />
+        <TaskProgressOverlay
+          key={sessionId}
+          activities={liveTaskActivities}
+          streaming={streaming}
+          contextCompaction={contextCompaction}
+        />
         {allUserMessagesData.length > 0 && (
           <StickyUserMessage userMessages={allUserMessagesData} />
         )}

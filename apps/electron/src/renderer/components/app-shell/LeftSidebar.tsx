@@ -24,7 +24,6 @@ import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import {
   conversationsAtom,
   currentConversationIdAtom,
-  selectedModelAtom,
   streamingConversationIdsAtom,
   conversationModelsAtom,
   conversationContextLengthAtom,
@@ -81,8 +80,9 @@ import { searchDialogOpenAtom } from '@/atoms/search-atoms'
 import { hasUpdateAtom, updateStatusAtom, type UpdateStatus } from '@/atoms/updater'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
-import { promptConfigAtom, selectedPromptIdAtom, conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
+import { conversationPromptIdAtom } from '@/atoms/system-prompt-atoms'
 import { interfaceVariantAtom } from '@/atoms/theme'
+import { useCreateSession } from '@/hooks/useCreateSession'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useSyncActiveTabSideEffects } from '@/hooks/useSyncActiveTabSideEffects'
 import { CollapsedWorkspacePopover } from '@/components/agent/CollapsedWorkspacePopover'
@@ -748,15 +748,12 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const newProjectInputRef = React.useRef<HTMLInputElement>(null)
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
-  const selectedModel = useAtomValue(selectedModelAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
   const isMac = React.useMemo(() => detectIsMac(), [])
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const updateStatus = useAtomValue(updateStatusAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
-  const promptConfig = useAtomValue(promptConfigAtom)
-  const setSelectedPromptId = useSetAtom(selectedPromptIdAtom)
   const interfaceVariant = useAtomValue(interfaceVariantAtom)
   const isClassic = interfaceVariant === 'classic'
 
@@ -785,6 +782,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   // 会话高亮按"激活 Tab 所属会话"判定：预览 Tab 激活时其 owner 会话仍保持高亮
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
+  const { createChat } = useCreateSession()
   const openSession = useOpenSession()
   const syncActiveTabSideEffects = useSyncActiveTabSideEffects()
   const store = useStore()
@@ -798,6 +796,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [viewMode, setViewMode] = useAtom(sidebarViewModeAtom)
   const searchDialogOpen = useAtomValue(searchDialogOpenAtom)
   const setSearchDialogOpen = useSetAtom(searchDialogOpenAtom)
+  const newChatShortcutLabel = getAcceleratorDisplay(getActiveAccelerator('new-session'))
 
   const handleOpenSettings = React.useCallback((): void => {
     setSettingsOpen(true)
@@ -1065,29 +1064,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     setViewMode('active')
   }, [mode, setViewMode])
 
-  /** 创建新对话（继承当前选中的模型/渠道） */
-  const handleNewConversation = async (): Promise<void> => {
-    setActiveView('conversations')
-    try {
-      const meta = await window.electronAPI.createConversation(
-        undefined,
-        selectedModel?.modelId,
-        selectedModel?.channelId,
-      )
-      setConversations((prev) => [meta, ...prev])
-      // 打开新标签页
-      openSession('chat', meta.id, meta.title)
-      // 确保在对话视图
-      setActiveView('conversations')
-      // 根据默认提示词重置选中
-      if (promptConfig.defaultPromptId) {
-        setSelectedPromptId(promptConfig.defaultPromptId)
-      }
-    } catch (error) {
-      console.error('[侧边栏] 创建对话失败:', error)
-    }
-  }
-
   /** 选择对话（打开或聚焦标签页） */
   const handleSelectConversation = React.useCallback((id: string, title: string): void => {
     openSession('chat', id, title)
@@ -1308,12 +1284,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       console.error('[侧边栏] 创建 Agent 会话失败:', error)
     }
   }, [agentChannelId, agentModelId, currentWorkspaceId, openSession, setActiveView, setAgentSessions, setCurrentWorkspaceId, setSessionChannelMap, setSessionModelMap])
-
-  /** 创建新 Agent 会话 */
-  const handleNewAgentSession = React.useCallback(async (): Promise<void> => {
-    setActiveView('conversations')
-    await createAgentSessionInWorkspace()
-  }, [createAgentSessionInWorkspace, setActiveView])
 
   /** 切换当前项目；点击当前已选中工作区标题时则折叠/展开其会话列表 */
   const handleSelectProject = React.useCallback((workspaceId: string): void => {
@@ -2456,22 +2426,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
-                onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 sidebar-control-surface hover:text-foreground transition-[background-color,color] duration-150 titlebar-no-drag"
-              >
-                <Plus size={16} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {mode === 'agent' ? '新会话' : '新对话'}
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
                 aria-label="搜索"
                 onClick={() => setSearchDialogOpen(true)}
                 className="size-10 flex items-center justify-center rounded-[12px] text-foreground/45 sidebar-control-surface hover:text-foreground/70 transition-[background-color,color] duration-150 titlebar-no-drag"
@@ -2619,11 +2573,22 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       {/* macOS 需要避开左上角红绿灯；边栏覆盖全局标题栏拖拽层，因此留白自身也要可拖拽。 */}
       <div className={cn('w-full flex-shrink-0 titlebar-drag-region', isMac ? 'h-[30px]' : 'h-1')} />
 
-      {/* 模式切换器 + 折叠按钮 */}
+      {/* 模式切换器 + 搜索 + 折叠按钮 */}
       <div className="titlebar-drag-region flex items-start gap-1.5 px-3">
         <div className="flex-1 min-w-0">
           <ModeSwitcher />
         </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setSearchDialogOpen(true)}
+              className="mt-2 size-10 flex-shrink-0 flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 transition-[background-color,color] duration-150 titlebar-no-drag"
+            >
+              <Search size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">搜索 ({getAcceleratorDisplay(getActiveAccelerator('global-search'))})</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -2636,28 +2601,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">收起侧边栏 ({navigator.platform.includes('Mac') ? '⌘B' : 'Ctrl+B'})</TooltipContent>
-        </Tooltip>
-      </div>
-
-      {/* 新对话/新会话按钮 + 搜索按钮 */}
-      <div className="px-3 pt-2 flex items-center gap-1.5">
-        <button
-          onClick={mode === 'agent' ? handleNewAgentSession : handleNewConversation}
-          className="flex-1 flex items-center gap-2 h-10 px-3 rounded-[10px] text-[13px] font-medium text-foreground/70 sidebar-control-surface hover:text-foreground transition-[background-color,color] duration-150 titlebar-no-drag"
-        >
-          <Plus size={14} />
-          <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
-        </button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setSearchDialogOpen(true)}
-              className="flex-shrink-0 size-10 flex items-center justify-center rounded-[10px] text-foreground/40 sidebar-control-surface hover:text-foreground/60 transition-[background-color,color] duration-150 titlebar-no-drag"
-            >
-              <Search size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">搜索 ({getAcceleratorDisplay(getActiveAccelerator('global-search'))})</TooltipContent>
         </Tooltip>
       </div>
 
@@ -2687,7 +2630,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         <div className="flex-1 flex flex-col min-h-0">
           {pinnedConversations.length > 0 && (
             <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
-              <div className="px-3.5 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+              <div className="pl-[18px] pr-3.5 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
                 置顶
               </div>
               <div
@@ -2717,14 +2660,37 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </div>
           )}
 
-          <div className="px-2 pt-2 pb-1 flex-shrink-0">
-            <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">对话</span>
+          <div className="group/chat-section relative flex items-center px-2 pt-2 pb-1 flex-shrink-0">
+            <span className="ml-[4px] px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">对话</span>
+            {newChatShortcutLabel && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-medium text-foreground/35 transition-opacity group-hover/chat-section:opacity-0"
+              >
+                {newChatShortcutLabel} 新建对话
+              </span>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="新建对话"
+                  onClick={() => { void createChat() }}
+                  className="absolute right-2 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
+                >
+                  <Plus size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {`新建对话${newChatShortcutLabel ? ` (${newChatShortcutLabel})` : ''}`}
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
             {conversationGroups.map((group) => (
               <div key={group.label} className="mb-1">
-                <div className="px-1.5 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+                <div className="ml-[4px] px-1.5 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
                   {group.label}
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -2752,7 +2718,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         <div className="flex-1 flex flex-col min-h-0">
           {pinnedAgentSessions.length > 0 && (
             <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
-              <div className="px-3.5 pb-1 text-[11px] font-medium text-foreground/40 select-none">
+              <div className="pl-[18px] pr-3.5 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
                 置顶
               </div>
               <div
@@ -2828,16 +2794,16 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
           {/* 下区标题：项目历史 */}
           <div className="px-2 pt-2 pb-1 flex items-center justify-between flex-shrink-0">
-            <span className="px-1.5 text-[11px] font-medium text-foreground/40 select-none">项目</span>
+            <span className="ml-[4px] px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">项目</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={handleStartCreateProject}
-                  className="size-6 flex items-center justify-center rounded-md text-foreground/35 hover:bg-foreground/[0.06] hover:text-foreground/60 transition-colors titlebar-no-drag"
+                  className="size-6 flex items-center justify-center rounded-md text-foreground/40 hover:bg-foreground/[0.06] hover:text-foreground/60 transition-colors titlebar-no-drag"
                   aria-label="新建项目"
                 >
-                  <Plus size={13} />
+                  <Plus size={16} />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">新建项目</TooltipContent>
@@ -4023,8 +3989,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   onToggleDelegationParent,
 }: AgentProjectGroupItemProps): React.ReactElement {
   const isCurrent = group.workspace.id === currentWorkspaceId
+  const newSessionShortcutLabel = getAcceleratorDisplay(getActiveAccelerator('new-session'))
 
   const [renamingWorkspace, setRenamingWorkspace] = React.useState(false)
+  const [projectMenuOpen, setProjectMenuOpen] = React.useState(false)
   const [workspaceEditName, setWorkspaceEditName] = React.useState('')
   const workspaceEditRef = React.useRef<HTMLInputElement>(null)
   const justStartedRenamingRef = React.useRef(false)
@@ -4122,10 +4090,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
       className={cn('relative py-0.5 rounded-md transition-opacity', dragging && 'opacity-45')}
     >
       {dropPosition === 'before' && (
-        <div className="absolute -top-0.5 left-3 right-3 h-0.5 rounded-full bg-primary z-10" />
+        <div className="absolute -top-0.5 left-3 right-3 h-0.5 translate-x-[2px] rounded-full bg-primary z-10" />
       )}
 
-      <div className="group/project relative flex items-center">
+      <div className="group/project relative flex translate-x-[2px] items-center">
         <span
           draggable
           onDragStart={(e) => onDragStart(e, group.workspace.id)}
@@ -4139,7 +4107,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         {renamingWorkspace ? (
           <div
             className={cn(
-              'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11',
+              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-1 py-1 rounded-md text-left titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11',
               isCurrent
                 ? 'agent-project-item-current text-foreground'
                 : 'text-foreground/65',
@@ -4166,16 +4134,26 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               onSelectProject(group.workspace.id)
             }}
             className={cn(
-              'relative flex-1 min-w-0 flex items-center gap-1 px-1 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11 hover:bg-foreground/[0.025]',
+              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-12 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
               isCurrent
-                ? 'agent-project-item-current text-foreground'
+                ? 'agent-project-item-current pr-32 text-foreground'
                 : 'text-foreground/65 hover:text-foreground/88',
             )}
           >
-            {isAutomationGroup
-              ? <Clock size={13} className="flex-shrink-0 text-foreground/40" />
-              : <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
-            }
+            {isAutomationGroup ? (
+              <Clock size={13} className="flex-shrink-0 text-foreground/40" />
+            ) : (
+              <>
+                <FolderOpen size={13} className="flex-shrink-0 text-foreground/40 group-hover/project:hidden" />
+                <ChevronRight
+                  size={13}
+                  className={cn(
+                    'hidden flex-shrink-0 text-foreground/40 transition-transform duration-150 group-hover/project:block',
+                    collapsed ? '-rotate-90' : 'rotate-90',
+                  )}
+                />
+              </>
+            )}
             <span className="flex min-w-0 items-center">
               <span className="min-w-0 truncate text-[13px] font-medium leading-[18px]">
                 {group.workspace.name}
@@ -4185,14 +4163,25 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               )}
             </span>
             <span className="min-w-[4px] flex-1" aria-hidden="true" />
-            <ChevronRight
-              size={12}
-              className={cn(
-                'flex-shrink-0 text-foreground/30 transition-transform duration-150',
-                collapsed ? '-rotate-90' : 'rotate-90',
-              )}
-            />
+            {isAutomationGroup && (
+              <ChevronRight
+                size={12}
+                className={cn(
+                  'flex-shrink-0 text-foreground/30 transition-transform duration-150',
+                  collapsed ? '-rotate-90' : 'rotate-90',
+                )}
+              />
+            )}
           </button>
+        )}
+
+        {isCurrent && !isAutomationGroup && newSessionShortcutLabel && !projectMenuOpen && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-medium text-foreground/35 transition-opacity group-hover/project:opacity-0"
+          >
+            {newSessionShortcutLabel} 新建项目内会话
+          </span>
         )}
 
         {!isAutomationGroup && (
@@ -4205,22 +4194,24 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                 e.stopPropagation()
                 void onNewSession(group.workspace.id)
               }}
-              className="absolute right-5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 opacity-0 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 group-hover/project:opacity-100 titlebar-no-drag"
+              className="absolute right-0 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
             >
               <Plus size={13} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top">在此项目中新建会话</TooltipContent>
+          <TooltipContent side="top">
+            {`在此项目中新建会话${newSessionShortcutLabel ? ` (${newSessionShortcutLabel})` : ''}`}
+          </TooltipContent>
         </Tooltip>
         )}
 
         {!isAutomationGroup && (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={setProjectMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               aria-label="项目菜单"
-              className="absolute right-0 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 opacity-0 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/60 group-hover/project:opacity-100 data-[state=open]:opacity-100 titlebar-no-drag"
+              className="absolute right-5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 opacity-0 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/60 group-hover/project:opacity-100 data-[state=open]:opacity-100 titlebar-no-drag"
             >
               <MoreHorizontal size={13} />
             </button>

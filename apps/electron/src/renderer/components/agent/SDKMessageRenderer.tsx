@@ -156,31 +156,28 @@ function PermissionDeniedNotice({ message }: { message: SDKSystemMessage }): Rea
   )
 }
 
-// ===== system 消息：正在压缩指示器（与 CompactBoundaryDivider 同款横线样式，pill 内带 spinner） =====
+// ===== system 消息：压缩历史状态 =====
 
-export function CompactingIndicator(): React.ReactElement {
-  return (
-    <div className="flex items-center gap-3 my-4 px-1">
-      <div className="flex-1 h-px bg-border/40" />
-      <span className="shrink-0 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
-        <Loader2 className="size-3 animate-spin" />
-        正在压缩...
-      </span>
-      <div className="flex-1 h-px bg-border/40" />
-    </div>
-  )
-}
-
-function CompactStatusNotice({ message, active = false }: { message: SDKSystemMessage; active?: boolean }): React.ReactElement | null {
+function CompactStatusNotice({ message }: { message: SDKSystemMessage }): React.ReactElement | null {
   const compactStatus = getSDKCompactStatus(message)
   if (compactStatus === 'success') return <CompactBoundaryDivider />
   if (compactStatus === 'compacting') {
-    if (active) return <CompactingIndicator />
     return (
       <div className="flex items-center gap-3 my-4 px-1">
         <div className="flex-1 h-px bg-border/40" />
         <span className="shrink-0 text-[11px] text-muted-foreground/60 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
           开始压缩上下文
+        </span>
+        <div className="flex-1 h-px bg-border/40" />
+      </div>
+    )
+  }
+  if (compactStatus === 'noop') {
+    return (
+      <div className="flex items-center gap-3 my-4 px-1">
+        <div className="flex-1 h-px bg-border/40" />
+        <span className="shrink-0 text-[11px] text-muted-foreground/60 px-2 py-0.5 rounded-full border border-border/30 bg-muted/20">
+          {message.message ?? '当前上下文无需压缩'}
         </span>
         <div className="flex-1 h-px bg-border/40" />
       </div>
@@ -1115,14 +1112,9 @@ export function AssistantErrorTail({
   const setModelSelectorOpen = useSetAtom(modelSelectorOpenAtom)
   const [detailsOpen, setDetailsOpen] = React.useState(false)
 
-  // standalone 模式（纯错误消息）：把 content 里所有 text 用双换行拼起来一并渲染，保留 markdown 段落结构。
-  // tail 模式（混合消息）：正文已由上层渲染，这里只用 error.message 作为简短提示。
-  const bodyText = standalone
-    ? (message.message?.content
-        ?.filter((b) => b.type === 'text' && 'text' in b)
-        .map((b) => (b as { text: string }).text)
-        .join('\n\n') || errorText)
-    : errorText
+  // Error presentation always uses error.message. Assistant content is not error detail:
+  // Pi may have generated it before a stream failure.
+  const bodyText = errorText
   const isThinkingSignature = errorCode === THINKING_SIGNATURE_ERROR_CODE ||
     isThinkingSignatureError(bodyText, errorText)
   const displayTitle = errorTitle ?? (isThinkingSignature ? THINKING_SIGNATURE_ERROR_TITLE : undefined)
@@ -1313,11 +1305,8 @@ export function AssistantErrorTail({
 function ErrorMessage({ message, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud }: ErrorMessageProps): React.ReactElement {
   const meta = extractMeta(message as unknown as SDKMessage)
 
-  // 复用 AssistantErrorTail 的正文/详情/按钮逻辑，只在这里补上「独立错误消息」的 Message 外壳。
-  const copyText = message.message?.content
-    ?.filter((b) => b.type === 'text' && 'text' in b)
-    .map((b) => (b as { text: string }).text)
-    .join('\n\n') || (message.error?.message ?? '未知错误')
+  // Do not copy assistant content carried by an error record.
+  const copyText = message.error?.message ?? 'Unknown error'
 
   return (
     <Message from="assistant">
@@ -1430,7 +1419,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
 
   if (group.type === 'system') {
     const subtype = group.message.subtype
-    if (getSDKCompactStatus(group.message)) return <div data-message-id={groupId}><CompactStatusNotice message={group.message} active={isStreaming} /></div>
+    if (getSDKCompactStatus(group.message)) return <div data-message-id={groupId}><CompactStatusNotice message={group.message} /></div>
     if (subtype === 'permission_denied') return <div data-message-id={groupId}><PermissionDeniedNotice message={group.message} /></div>
     return null
   }

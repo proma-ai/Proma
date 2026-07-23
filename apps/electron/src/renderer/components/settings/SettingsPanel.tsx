@@ -30,6 +30,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { settingsTabAtom, channelFormDirtyAtom, settingsCloseRequestedAtom, settingsOpenAtom } from "@/atoms/settings-tab";
 import type { SettingsTab } from "@/atoms/settings-tab";
 import { appModeAtom } from "@/atoms/app-mode";
+import { activeViewAtom } from "@/atoms/active-view";
+import { automationFormAtom } from "@/atoms/automation-atoms";
 import { hasUpdateAtom } from "@/atoms/updater";
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from "@/atoms/tab-atoms";
 import { hasEnvironmentIssuesAtom } from "@/atoms/environment";
@@ -182,6 +184,8 @@ export function SettingsPanel({
   const channelFormDirty = useAtomValue(channelFormDirtyAtom);
   const [closeRequested, setCloseRequested] = useAtom(settingsCloseRequestedAtom);
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
+  const setActiveView = useSetAtom(activeViewAtom);
+  const setAutomationForm = useSetAtom(automationFormAtom);
   const appMode = useAtomValue(appModeAtom);
   const hasUpdate = useAtomValue(hasUpdateAtom);
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom);
@@ -215,6 +219,9 @@ export function SettingsPanel({
       const result = openTab(mainTabs, { type: 'tutorial', sessionId: TUTORIAL_TAB_ID, title: 'Proma 使用教程' })
       setMainTabs(result.tabs)
       setMainActiveTabId(result.activeTabId)
+      // Skills/Automations 会全屏覆盖 TabContent；打开教程时先清理表单并回到会话视图。
+      setAutomationForm({ open: false, draft: null })
+      setActiveView('conversations')
       setSettingsOpen(false)
       return
     }

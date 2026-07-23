@@ -36,7 +36,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { lowlight } from '@/lib/lowlight'
-import { htmlToMarkdown, markdownToHtml } from '@/lib/markdown-rich-text'
+import { htmlToClipboardText, htmlToMarkdown, markdownToHtml } from '@/lib/markdown-rich-text'
 import {
   MathBlock,
   MathInline,
@@ -58,6 +58,7 @@ import {
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { openScratchInSplit } from './scratch-pad-opener'
 
 const MAX_SCRATCH_PAD_QUOTED_CHARS = 2000
@@ -133,6 +134,11 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
   const captureTimerRef = React.useRef<number | null>(null)
   const openSideChatPendingRef = React.useRef(false)
 
+  // Image lightbox state for edit functionality
+  const [lightboxSrc, setLightboxSrc] = React.useState<string | null>(null)
+  const [lightboxMode, setLightboxMode] = React.useState<'preview' | 'editing'>('preview')
+  const lightboxGetPosRef = React.useRef<(() => number) | null>(null)
+
   // 用 ref 追踪最新内容，避免在 useEffect deps 里包含 content 导致循环
   const contentRef = React.useRef(content)
   contentRef.current = content
@@ -171,11 +177,63 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
   const editor = useEditor({
     extensions,
     content: content || '',
+    editorProps: {
+      handleDOMEvents: {
+        // 草稿保存为 Markdown 时段落必须以空行分隔；复制到系统剪贴板时只保留普通文本换行，
+        // 避免 Windows/外部编辑器再次将 Markdown 段落间隔渲染为额外空白。
+        copy: (_view, event) => {
+          const selection = window.getSelection()
+          if (!selection || selection.isCollapsed || !event.clipboardData) return false
+          const range = selection.getRangeAt(0)
+          const fragment = range.cloneContents()
+          const tempDiv = document.createElement('div')
+          tempDiv.appendChild(fragment)
+          const text = htmlToClipboardText(tempDiv.innerHTML) || selection.toString().replace(/\r\n?/g, '\n')
+          event.preventDefault()
+          event.clipboardData.setData('text/plain', text)
+          event.clipboardData.setData('text/html', '')
+          return true
+        },
+      },
+    },
     onUpdate: ({ editor }) => {
       setContent(editor.getHTML())
     },
     immediatelyRender: false,
   })
+
+  // ===== 图片编辑 =====
+
+  React.useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const handler = (e: Event) => {
+      const { src, getPos, mode } = (e as CustomEvent).detail
+      setLightboxSrc(src)
+      setLightboxMode(mode || 'preview')
+      lightboxGetPosRef.current = typeof getPos === 'function' ? getPos : null
+    }
+    container.addEventListener('scratch-pad-edit-image', handler)
+    return () => container.removeEventListener('scratch-pad-edit-image', handler)
+  }, [])
+
+  const handleImageEditComplete = React.useCallback((editedDataUrl: string) => {
+    const getPos = lightboxGetPosRef.current
+    if (editor && getPos) {
+      const pos = getPos()
+      editor.chain().focus()
+        .command(({ tr }) => {
+          const node = tr.doc.nodeAt(pos)
+          if (node) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: editedDataUrl, width: null })
+          }
+          return true
+        })
+        .run()
+    }
+    setLightboxSrc(null)
+    lightboxGetPosRef.current = null
+  }, [editor])
 
   // ===== 导出 =====
 
@@ -694,6 +752,13 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
           </DropdownMenuPortal>
         </DropdownMenu>
       </div>
+      <ImageLightbox
+        src={lightboxSrc}
+        open={!!lightboxSrc}
+        onOpenChange={(open) => { if (!open) setLightboxSrc(null) }}
+        onEditComplete={handleImageEditComplete}
+        initialMode={lightboxMode}
+      />
     </div>
   )
 }

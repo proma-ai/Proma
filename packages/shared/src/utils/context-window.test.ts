@@ -1,14 +1,32 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  CODEX_GPT_54_55_CONTEXT_WINDOW,
+  CODEX_GPT_54_MINI_CONTEXT_WINDOW,
+  CODEX_GPT_56_CONTEXT_WINDOW,
   DEFAULT_CONTEXT_WINDOW,
   ONE_MILLION_CONTEXT_WINDOW,
   inferAgentSdkContextWindow,
+  inferCodexAlignedGPT5ContextWindow,
   inferContextWindow,
   resolveAgentSdkModelId,
   supports1MContext,
 } from './context-window'
 
 describe('模型上下文窗口', () => {
+  test.each([
+    ['gpt-5.4', CODEX_GPT_54_55_CONTEXT_WINDOW],
+    ['gpt-5.4-mini', CODEX_GPT_54_MINI_CONTEXT_WINDOW],
+    ['gpt-5.5', CODEX_GPT_54_55_CONTEXT_WINDOW],
+    ['gpt-5.6', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-sol', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-terra', CODEX_GPT_56_CONTEXT_WINDOW],
+    ['gpt-5.6-luna', CODEX_GPT_56_CONTEXT_WINDOW],
+  ])('Given Codex-aligned %s When inferring window Then uses %i', (model, contextWindow) => {
+    expect(inferCodexAlignedGPT5ContextWindow(model)).toBe(contextWindow)
+    expect(inferContextWindow(model)).toBe(contextWindow)
+    expect(inferAgentSdkContextWindow(model, 'custom')).toBe(contextWindow)
+  })
+
   test('Given 当前 1M Claude 模型 When 推断窗口 Then 返回 1M', () => {
     expect(inferContextWindow('claude-opus-4-8-promo-3')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferContextWindow('claude-sonnet-4-6')).toBe(ONE_MILLION_CONTEXT_WINDOW)
@@ -45,11 +63,13 @@ describe('模型上下文窗口', () => {
     expect(resolveAgentSdkModelId('MiniMax-M2.7', 'minimax')).toBe('MiniMax-M2.7')
     expect(resolveAgentSdkModelId('kimi-k2.6', 'kimi-api')).toBe('kimi-k2.6')
     expect(resolveAgentSdkModelId('not-k3-compatible', 'kimi-api')).toBe('not-k3-compatible')
+    expect(resolveAgentSdkModelId('kimi-k3', 'opencode-go-openai')).toBe('kimi-k3')
     expect(resolveAgentSdkModelId('qwen3-max', 'qwen-anthropic')).toBe('qwen3-max')
     expect(resolveAgentSdkModelId('qwen3.6-max-preview', 'qwen-anthropic')).toBe('qwen3.6-max-preview')
     expect(resolveAgentSdkModelId('qwen3.5-397b-a17b', 'qwen-anthropic')).toBe('qwen3.5-397b-a17b')
     expect(resolveAgentSdkModelId('qwen3-coder-next', 'qwen-anthropic')).toBe('qwen3-coder-next')
     expect(resolveAgentSdkModelId('unknown-model', 'anthropic')).toBe('unknown-model')
+    expect(supports1MContext('not-kimi-k3-compatible')).toBe(false)
   })
 
   test('Given Qwen Anthropic 协议渠道 When 模型名命中 1M 规则 Then 保持真实模型 ID', () => {
@@ -84,5 +104,6 @@ describe('模型上下文窗口', () => {
     expect(inferAgentSdkContextWindow('claude-sonnet-5', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('k3', 'kimi-api')).toBe(ONE_MILLION_CONTEXT_WINDOW)
     expect(inferAgentSdkContextWindow('k3', 'anthropic-compatible')).toBe(ONE_MILLION_CONTEXT_WINDOW)
+    expect(inferAgentSdkContextWindow('kimi-k3', 'opencode-go-openai')).toBe(ONE_MILLION_CONTEXT_WINDOW)
   })
 })

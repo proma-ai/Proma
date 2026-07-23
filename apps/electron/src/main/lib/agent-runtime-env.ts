@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
 import { delimiter, dirname, join, win32 } from 'node:path'
-import type { RuntimeStatus } from '@proma/shared'
+import type { RuntimeStatus, WindowsShellPreference } from '@proma/shared'
 import { getBundledCliPath } from './config-paths'
+import { selectWindowsShell, type WindowsShellKind } from './windows-shell-selection'
 
-export type AgentRuntimeShellKind = 'git-bash' | 'wsl'
+export type AgentRuntimeShellKind = WindowsShellKind
 
 export interface AgentRuntimeEnv {
   env: Record<string, string>
@@ -16,6 +17,7 @@ export interface AgentRuntimeEnv {
 export interface BuildAgentRuntimeEnvOptions {
   proxyUrl?: string
   runtimeStatus?: RuntimeStatus | null
+  windowsShellPreference?: WindowsShellPreference
   bundledCliPath?: string
   processEnv?: NodeJS.ProcessEnv
   platform?: NodeJS.Platform
@@ -115,25 +117,15 @@ function getWslCommandPath(
 
 function collectWindowsShellEnv(
   runtimeStatus: RuntimeStatus | null | undefined,
+  preference: WindowsShellPreference | undefined,
   processEnv: NodeJS.ProcessEnv,
   pathExists: (path: string) => boolean,
 ): Omit<AgentRuntimeEnv, 'env'> & { env: Record<string, string> } {
   const shellStatus = runtimeStatus?.shell
   const env: Record<string, string> = {}
+  const shellKind = selectWindowsShell(shellStatus, preference)
 
-  if (shellStatus?.gitBash.available && shellStatus.gitBash.path) {
-    const shellPath = shellStatus.gitBash.path
-    env.PROMA_WINDOWS_SHELL = 'git-bash'
-    env.CLAUDE_CODE_SHELL = shellPath
-    env.SHELL = shellPath
-    return {
-      env,
-      shellKind: 'git-bash',
-      shellPath,
-    }
-  }
-
-  if (shellStatus?.wsl.available) {
+  if (shellKind === 'wsl' && shellStatus?.wsl.available) {
     const wslCommand = getWslCommandPath(processEnv, pathExists)
     env.PROMA_WINDOWS_SHELL = 'wsl'
     env.CLAUDE_CODE_SHELL = wslCommand
@@ -146,6 +138,18 @@ function collectWindowsShellEnv(
       shellKind: 'wsl',
       wslCommand,
       ...(shellStatus.wsl.defaultDistro && { wslDistro: shellStatus.wsl.defaultDistro }),
+    }
+  }
+
+  if (shellKind === 'git-bash' && shellStatus?.gitBash.path) {
+    const shellPath = shellStatus.gitBash.path
+    env.PROMA_WINDOWS_SHELL = 'git-bash'
+    env.CLAUDE_CODE_SHELL = shellPath
+    env.SHELL = shellPath
+    return {
+      env,
+      shellKind: 'git-bash',
+      shellPath,
     }
   }
 
@@ -204,7 +208,12 @@ export function buildAgentRuntimeEnv(options: BuildAgentRuntimeEnvOptions = {}):
   Object.assign(env, collectProxyEnv(options.proxyUrl, processEnv))
 
   if (platform === 'win32') {
-    const shellRuntimeEnv = collectWindowsShellEnv(options.runtimeStatus, processEnv, pathExists)
+    const shellRuntimeEnv = collectWindowsShellEnv(
+      options.runtimeStatus,
+      options.windowsShellPreference,
+      processEnv,
+      pathExists,
+    )
     Object.assign(env, shellRuntimeEnv.env)
     return {
       env,

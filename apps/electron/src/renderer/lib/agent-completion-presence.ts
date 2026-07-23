@@ -1,3 +1,4 @@
+import type { AgentSessionMeta, AgentStreamCompletePayload } from '@proma/shared'
 import type { TabItem } from '@/atoms/tab-atoms'
 
 export interface AgentCompletionPresenceInput {
@@ -11,6 +12,42 @@ export interface AgentCompletionPresenceInput {
 
 export interface AgentCompletionMarkers {
   markUnviewedCompleted: boolean
+}
+
+export interface AgentCompletionNotificationInput {
+  completion: AgentStreamCompletePayload
+  session?: Pick<AgentSessionMeta, 'sourceDelegationId'>
+}
+
+export interface NotifyAgentCompletionInput extends AgentCompletionNotificationInput {
+  hasStreamError: boolean
+  notify: () => void
+}
+
+/** 仅顶层 Agent 会话完成属于用户级任务完成提醒边界 */
+export function shouldNotifyAgentCompletion({
+  completion,
+  session,
+}: AgentCompletionNotificationInput): boolean {
+  return completion.triggeredBy !== 'delegation' && !session?.sourceDelegationId
+}
+
+/** 仅在真正成功且无需等待后台任务时调用完成通知 callback */
+export function notifyAgentCompletion({
+  completion,
+  session,
+  hasStreamError,
+  notify,
+}: NotifyAgentCompletionInput): void {
+  const isSuccessfulCompletion = !completion.stoppedByUser &&
+    !hasStreamError &&
+    (!completion.resultSubtype || completion.resultSubtype === 'success')
+
+  if (!completion.backgroundTasksPending &&
+    isSuccessfulCompletion &&
+    shouldNotifyAgentCompletion({ completion, session })) {
+    notify()
+  }
 }
 
 /** 判断 Agent 完成时用户是否仍停留在该会话入口 */

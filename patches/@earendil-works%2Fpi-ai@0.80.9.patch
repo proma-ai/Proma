@@ -2,12 +2,16 @@ diff --git a/dist/utils/retry.js b/dist/utils/retry.js
 index b3c27c8d5fb9a77c117af7ab8f789170903d5252..42b41a67c5607ef605fba6340882db6fecac0c49 100644
 --- a/dist/utils/retry.js
 +++ b/dist/utils/retry.js
-@@ -57,6 +57,8 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
+@@ -57,6 +57,12 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
      // "stream ended without ..." and "Anthropic stream ended before message_stop"
      // (#4433); Bedrock/Smithy can throw an HTTP/2 no-response error (#3594).
      "ended without",
 +    // OpenAI Responses can close an SSE stream before sending its terminal event.
 +    "stream ended before (?:a )?terminal response event",
++    // HTTP chunked/SSE transports can close before the complete body arrives.
++    // Match both phrases because proxy implementations may retain only one.
++    "peer closed connection",
++    "incomplete chunked read",
      "stream ended before message_stop",
      "http2 request did not get a response",
      // Provider-requested retry delay cap failures should flow through the outer

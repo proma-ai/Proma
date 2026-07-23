@@ -711,13 +711,12 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
       }
     }
 
-    if (!title) {
-      console.warn('[标题生成] API 返回空标题')
-      return null
+    const result = title ? sanitizeGeneratedTitle(title) : null
+    if (!result) {
+      console.warn('[标题生成] API 未返回可用标题')
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
 
-    // 截断到最大长度并清理引号
-    const result = sanitizeGeneratedTitle(title)
     console.log('[标题生成] 成功生成标题:', result)
     return result
   } catch (error) {

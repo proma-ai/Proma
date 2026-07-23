@@ -4,7 +4,7 @@ import {
   injectOpenAIThinkingLevel,
   withCodexFastModeServiceTier,
 } from './pi-codex-request-settings'
-import { isOpenAIReasoningSupportedModel } from '@proma/shared'
+import { isOpenAIReasoningMaxSupportedModel, isOpenAIReasoningSupportedModel } from '@proma/shared'
 
 describe('Pi Codex request settings', () => {
   test('Given OpenAI model IDs When checking reasoning support Then excludes non-reasoning GPT-4 models', () => {
@@ -14,6 +14,8 @@ describe('Pi Codex request settings', () => {
     expect(isOpenAIReasoningSupportedModel('gpt-4.1')).toBe(false)
     expect(isOpenAIReasoningSupportedModel('gpt-5-chat-latest')).toBe(false)
     expect(isOpenAIReasoningSupportedModel('gpt-5.3-chat-latest')).toBe(false)
+    expect(isOpenAIReasoningMaxSupportedModel('gpt-5.6-terra')).toBe(true)
+    expect(isOpenAIReasoningMaxSupportedModel('gpt-5.5')).toBe(false)
   })
 
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
@@ -53,6 +55,13 @@ describe('Pi Codex request settings', () => {
     expect(injectOpenAIThinkingLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'high' })).toEqual({
       model: 'gpt-5.5',
       reasoning: { effort: 'high' },
+    })
+  })
+
+  test('Given GPT-5.6 max thinking When injecting Then preserves max effort', () => {
+    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.6-terra' }, { thinkingLevel: 'max' })).toEqual({
+      model: 'gpt-5.6-terra',
+      reasoning: { effort: 'max' },
     })
   })
 

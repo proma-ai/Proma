@@ -86,6 +86,25 @@ describe('SDK 压缩状态分组', () => {
     })
   })
 
+  test('Given 压缩无需执行 When 分组 Then 用 no-op 终态替换进行中状态', () => {
+    const raw = jsonl([
+      { type: 'user', message: { content: [{ type: 'text', text: '/compact' }] }, parent_tool_use_id: null },
+      { type: 'system', subtype: 'compacting' },
+      { type: 'system', subtype: 'status', compact_result: 'noop', message: '当前上下文较小，暂时无需压缩。' },
+      { type: 'result', subtype: 'success' },
+    ])
+
+    const groups = groupIntoTurns(readSessionMessagesFromString(raw))
+
+    expect(groups.map((g) => g.type)).toEqual(['user', 'system'])
+    expect(getGroupPreview(groups[1]!)).toBe('当前上下文较小，暂时无需压缩。')
+    expect(groups[1]).toMatchObject({
+      type: 'system',
+      identityMessage: { subtype: 'compacting' },
+      message: { compact_result: 'noop' },
+    })
+  })
+
   test('Given 压缩产生多个成功事件 When 分组 Then 只保留一条已完成分界线', () => {
     const raw = jsonl([
       { type: 'user', message: { content: [{ type: 'text', text: '/compact' }] }, parent_tool_use_id: null },
