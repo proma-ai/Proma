@@ -1077,7 +1077,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, String.raw`'\''`)}'`
 }
 
-function windowsPathToWslPath(value: string): string {
+export function windowsPathToWslPath(value: string): string {
   const driveMatch = value.match(/^([A-Za-z]):[\\/](.*)$/)
   if (!driveMatch) return value
   const drive = driveMatch[1]!.toLowerCase()
@@ -1099,20 +1099,29 @@ function buildWslCommand(command: string, env: NodeJS.ProcessEnv | undefined): s
     : command
 }
 
+export function buildWslBashArgs(
+  runtimeEnv: Pick<AgentRuntimeEnv, 'wslDistro'>,
+  cwd: string,
+  command: string,
+  env: NodeJS.ProcessEnv | undefined,
+): string[] {
+  return [
+    ...(runtimeEnv.wslDistro ? ['--distribution', runtimeEnv.wslDistro] : []),
+    '--cd',
+    windowsPathToWslPath(cwd),
+    '--exec',
+    'bash',
+    '-lc',
+    buildWslCommand(command, env),
+  ]
+}
+
 function createWslBashOperations(runtimeEnv: AgentRuntimeEnv): BashOperations {
   return {
     exec(command, cwd, options) {
       return new Promise((resolve, reject) => {
         const mergedEnv = mergeRuntimeEnv(process.env, options.env)
-        const args = [
-          ...(runtimeEnv.wslDistro ? ['--distribution', runtimeEnv.wslDistro] : []),
-          '--cd',
-          cwd,
-          '--exec',
-          'bash',
-          '-lc',
-          buildWslCommand(command, mergedEnv),
-        ]
+        const args = buildWslBashArgs(runtimeEnv, cwd, command, mergedEnv)
         const child = spawn(runtimeEnv.wslCommand ?? 'wsl.exe', args, {
           env: mergedEnv,
           stdio: ['ignore', 'pipe', 'pipe'],

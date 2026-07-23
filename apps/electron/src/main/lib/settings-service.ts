@@ -30,6 +30,7 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
       agentRuntime: DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
     }
   }
@@ -51,6 +52,7 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: data.feishuSessionMirror ?? { mode: 'off' },
       builtinMcpDisabledIds: settings.builtinMcpDisabledIds ?? [],
       agentRuntime: settings.agentRuntime ?? DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: settings.windowsShellPreference ?? 'auto',
       agentThinking: settings.agentThinking ?? { type: 'adaptive' },
     }
   } catch (error) {
@@ -66,6 +68,7 @@ export function getSettings(): AppSettings {
       feishuSessionMirror: { mode: 'off' },
       builtinMcpDisabledIds: [],
       agentRuntime: DEFAULT_AGENT_RUNTIME,
+      windowsShellPreference: 'auto',
       agentThinking: { type: 'adaptive' },
     }
   }

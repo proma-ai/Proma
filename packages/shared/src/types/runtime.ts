@@ -257,6 +257,9 @@ export interface DefaultAppInfo {
   iconDataUrl: string
 }
 
+/** Windows Agent Shell 偏好：默认自动选择 Git Bash，用户可显式改用 WSL。 */
+export type WindowsShellPreference = 'auto' | 'git-bash' | 'wsl'
+
 /**
  * WSL 运行时状态（Windows 平台）
  */

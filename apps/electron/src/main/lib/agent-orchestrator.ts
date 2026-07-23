@@ -46,7 +46,7 @@ import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession } from './agent-session-manager'
 import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getBundledCliPath, getWorkspaceSkillsDir } from './config-paths'
+import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceFilesDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
@@ -63,7 +63,7 @@ import { injectChromeDevtoolsMcpServer } from './builtin-mcp/chrome-devtools'
 import { isBuiltinMcpUserEnabled } from './builtin-mcp/settings'
 import { buildPiBuiltinTools } from './adapters/pi-builtin-tools'
 import { buildPiMcpTools } from './adapters/pi-mcp-tools'
-import type { AgentRuntimeEnv } from './agent-runtime-env'
+import { buildAgentRuntimeEnv, mergeRuntimeEnv, type AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
@@ -104,14 +104,6 @@ function sdkPermissionModeForPromaMode(mode: PromaPermissionMode): PromaPermissi
 
 function normalizeAgentRuntime(value: unknown): AgentRuntime {
   return value === 'pi' ? 'pi' : 'claude'
-}
-
-function buildPiRuntimeEnv(env: Record<string, string | undefined>): AgentRuntimeEnv {
-  const cleanEnv: Record<string, string> = {}
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) cleanEnv[key] = value
-  }
-  return { env: cleanEnv }
 }
 
 const EMPTY_RESPONSE_RESULT_SUBTYPE = 'empty_response'
@@ -424,12 +416,13 @@ export class AgentOrchestrator {
    * 注入 API Key、Base URL、代理、Shell 配置等。
    * 对 Kimi Coding Plan / MiniMax Coding Plan：使用 Bearer 认证（ANTHROPIC_AUTH_TOKEN）。
    */
-  private async buildSdkEnv(
+  private buildSdkRuntimeEnv(
     apiKey: string,
     baseUrl: string | undefined,
     provider: ProviderType,
     modelId: string | undefined,
-  ): Promise<Record<string, string | undefined>> {
+    proxyUrl: string | undefined,
+  ): AgentRuntimeEnv {
     const DEFAULT_ANTHROPIC_URL = 'https://api.anthropic.com'
 
     // 从 process.env 继承系统变量，但清理所有 ANTHROPIC_ 前缀的变量，
@@ -450,15 +443,6 @@ export class AgentOrchestrator {
       ...cleanEnv,
       // 仅 Claude 模型显式提高输出上限；其它兼容模型不注入 max_tokens 覆盖。
       ...(maxOutputTokens ? { CLAUDE_CODE_MAX_OUTPUT_TOKENS: maxOutputTokens } : {}),
-      // 暴露打包进 App 的 proma CLI 路径，供 session-cleaner 等 skill / Agent 调用
-      // （开发模式无编译二进制，getBundledCliPath 返回 undefined，此处不注入，
-      //   skill 回退到源码运行 bun apps/cli/src/index.ts）。
-      ...(getBundledCliPath()
-        ? {
-            PROMA_CLI: getBundledCliPath(),
-            PATH: `${dirname(getBundledCliPath()!)}${process.platform === 'win32' ? ';' : ':'}${cleanEnv.PATH ?? ''}`,
-          }
-        : {}),
       // 启用 Tasks 功能
       CLAUDE_CODE_ENABLE_TASKS: 'true',
       // 禁用 SDK 内置 Workflows，避免每轮注入 workflow 相关提示词。
@@ -502,29 +486,22 @@ export class AgentOrchestrator {
       sdkEnv.ANTHROPIC_BASE_URL = normalizeAnthropicBaseUrlForSdk(baseUrl)
     }
 
-    const proxyUrl = await getEffectiveProxyUrl()
-    if (proxyUrl) {
-      sdkEnv.HTTPS_PROXY = proxyUrl
-      sdkEnv.HTTP_PROXY = proxyUrl
-    }
+    const runtimeEnv = buildAgentRuntimeEnv({
+      proxyUrl,
+      runtimeStatus: getRuntimeStatus(),
+      windowsShellPreference: getSettings().windowsShellPreference,
+      processEnv: sdkEnv,
+    })
 
-    // Windows 平台：配置 Shell 环境
     if (process.platform === 'win32') {
-      const runtimeStatus = getRuntimeStatus()
-      const shellStatus = runtimeStatus?.shell
-
-      if (shellStatus) {
-        if (shellStatus.gitBash?.available && shellStatus.gitBash.path) {
-          sdkEnv.CLAUDE_CODE_SHELL = shellStatus.gitBash.path
-          console.log(`[Agent 编排] 配置 Shell 环境: Git Bash (${shellStatus.gitBash.path})`)
-        } else if (shellStatus.wsl?.available) {
-          sdkEnv.CLAUDE_CODE_SHELL = 'wsl'
-          console.log(`[Agent 编排] 配置 Shell 环境: WSL ${shellStatus.wsl.version} (${shellStatus.wsl.defaultDistro})`)
-        } else {
-          console.warn('[Agent 编排] Windows 平台未检测到可用的 Shell 环境（Git Bash / WSL）')
-        }
-        sdkEnv.CLAUDE_BASH_NO_LOGIN = '1'
+      if (runtimeEnv.shellKind === 'wsl') {
+        console.log(`[Agent 编排] 配置 Shell 环境: WSL (${runtimeEnv.wslDistro ?? '默认发行版'})`)
+      } else if (runtimeEnv.shellKind === 'git-bash') {
+        console.log(`[Agent 编排] 配置 Shell 环境: Git Bash (${runtimeEnv.shellPath})`)
+      } else {
+        console.warn('[Agent 编排] Windows 平台未检测到可用的 Shell 环境（Git Bash / WSL）')
       }
+      sdkEnv.CLAUDE_BASH_NO_LOGIN = '1'
     }
 
     // 针对 claude-agent-sdk 0.2.111+ 的 options.env 叠加语义加固：
@@ -538,7 +515,10 @@ export class AgentOrchestrator {
       }
     }
 
-    return sdkEnv
+    return {
+      ...runtimeEnv,
+      env: mergeRuntimeEnv(sdkEnv, runtimeEnv.env),
+    }
   }
 
   /**
@@ -1110,7 +1090,14 @@ export class AgentOrchestrator {
     }
 
     const proxyUrl = await getEffectiveProxyUrl()
-    const sdkEnv = await this.buildSdkEnv(apiKey, channel.baseUrl, channel.provider, modelId || DEFAULT_MODEL_ID)
+    const runtimeEnv = this.buildSdkRuntimeEnv(
+      apiKey,
+      channel.baseUrl,
+      channel.provider,
+      modelId || DEFAULT_MODEL_ID,
+      proxyUrl,
+    )
+    const sdkEnv = runtimeEnv.env
 
     // 4. 读取已有的 SDK session ID（用于 resume）
     let existingSdkSessionId = sessionMeta?.sdkSessionId
@@ -1641,7 +1628,7 @@ export class AgentOrchestrator {
         provider: channel.provider,
         channelName: channel.name,
         proxyUrl,
-        runtimeEnv: buildPiRuntimeEnv(sdkEnv),
+        runtimeEnv,
         ...(maxTurns != null && { maxTurns }),
         permissionMode: initialPermissionMode,
         canUseTool,

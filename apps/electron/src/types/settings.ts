@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings } from '@proma/shared'
+import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
@@ -207,6 +207,8 @@ export interface AppSettings {
   agentWorkspaceId?: string
   /** 新 Agent 会话默认使用的 runtime；历史会话缺省仍按 claude 兼容。 */
   agentRuntime?: AgentRuntime
+  /** Windows 上 Agent Bash 工具的运行环境；默认自动选择 Git Bash，WSL 需用户显式启用。 */
+  windowsShellPreference?: WindowsShellPreference
   /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；可拖拽调整） */
   agentAutomationGroupOrder?: number
   /** 是否已完成 Onboarding 流程 */

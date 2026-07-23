@@ -8,11 +8,12 @@
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { RefreshCw, Loader2, CheckCircle2, AlertCircle, Info, Terminal, ChevronDown, ChevronUp, ExternalLink, RotateCw } from 'lucide-react'
-import type { EnvironmentCheckResult, RuntimeStatus } from '@proma/shared'
+import type { EnvironmentCheckResult, RuntimeStatus, WindowsShellPreference } from '@proma/shared'
 import {
   SettingsSection,
   SettingsCard,
   SettingsRow,
+  SettingsSelect,
 } from './primitives'
 import { updateStatusAtom, updaterAvailableAtom, checkForUpdates } from '@/atoms/updater'
 import {
@@ -322,13 +323,17 @@ function EnvironmentCard(): React.ReactElement {
 /** Shell 环境卡片（Windows 平台）*/
 function ShellEnvironmentCard(): React.ReactElement | null {
   const [runtimeStatus, setRuntimeStatus] = React.useState<RuntimeStatus | null>(null)
+  const [shellPreference, setShellPreference] = React.useState<WindowsShellPreference>('auto')
   const [isChecking, setIsChecking] = React.useState(false)
 
-  // 初始化时加载运行时状态
+  // 初始化时加载运行时状态与用户偏好
   React.useEffect(() => {
-    window.electronAPI.getRuntimeStatus().then((status) => {
-      setRuntimeStatus(status)
-    })
+    Promise.all([window.electronAPI.getRuntimeStatus(), window.electronAPI.getSettings()])
+      .then(([status, settings]) => {
+        setRuntimeStatus(status)
+        setShellPreference(settings.windowsShellPreference ?? 'auto')
+      })
+      .catch((error) => console.error('[Shell 环境检测] 读取设置失败:', error))
   }, [])
 
   // 重新检测
@@ -345,6 +350,13 @@ function ShellEnvironmentCard(): React.ReactElement | null {
     }
   }
 
+  const handlePreferenceChange = async (value: string): Promise<void> => {
+    if (value !== 'auto' && value !== 'git-bash' && value !== 'wsl') return
+    const preference = value as WindowsShellPreference
+    await window.electronAPI.updateSettings({ windowsShellPreference: preference })
+    setShellPreference(preference)
+  }
+
   // 非 Windows 平台不显示
   if (!runtimeStatus || !runtimeStatus.shell) {
     return null
@@ -352,6 +364,12 @@ function ShellEnvironmentCard(): React.ReactElement | null {
 
   const { shell } = runtimeStatus
   const hasShell = shell.gitBash?.available || shell.wsl?.available
+  const resolvedShell = shellPreference === 'wsl' && shell.wsl.available
+    ? 'wsl'
+    : shellPreference === 'git-bash' && shell.gitBash.available
+      ? 'git-bash'
+      : shell.recommended
+  const resolvedShellLabel = resolvedShell === 'git-bash' ? 'Git Bash' : resolvedShell === 'wsl' ? 'WSL' : '无可用 Shell'
 
   return (
     <SettingsCard>
@@ -381,6 +399,20 @@ function ShellEnvironmentCard(): React.ReactElement | null {
       </div>
 
       <div className="p-4 space-y-3">
+        <SettingsSelect
+          label="Agent Shell"
+          description="默认使用 Git Bash，确保 Windows 工作区与 Agent 工具使用同一套路径；选择 WSL 后，WSL 不可用时会回退到 Git Bash。"
+          value={shellPreference}
+          onValueChange={(value) => {
+            void handlePreferenceChange(value).catch((error) => console.error('[Shell 环境检测] 保存偏好失败:', error))
+          }}
+          options={[
+            { value: 'auto', label: '自动（推荐：Git Bash 优先）' },
+            { value: 'git-bash', label: 'Git Bash' },
+            { value: 'wsl', label: 'WSL（实验性）' },
+          ]}
+        />
+
         {/* Git Bash 检测卡片 */}
         <EnvironmentCheckCard
           name="Git Bash"
@@ -412,16 +444,14 @@ function ShellEnvironmentCard(): React.ReactElement | null {
           }
         />
 
-        {/* 推荐环境提示 */}
-        {shell.recommended && (
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription className="text-xs">
-              <strong>当前使用：</strong>
-              {shell.recommended === 'git-bash' ? 'Git Bash（推荐）' : 'WSL'}
-            </AlertDescription>
-          </Alert>
-        )}
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription className="text-xs">
+            <strong>Agent 将使用：</strong>{resolvedShellLabel}
+            {shellPreference === 'wsl' && resolvedShell !== 'wsl' && '（WSL 不可用，已回退）'}
+            {shellPreference === 'git-bash' && resolvedShell !== 'git-bash' && '（Git Bash 不可用，已回退）'}
+          </AlertDescription>
+        </Alert>
 
         {/* 无可用环境警告 */}
         {!hasShell && (
