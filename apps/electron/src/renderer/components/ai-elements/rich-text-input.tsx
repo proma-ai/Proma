@@ -26,7 +26,7 @@ import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
-import { htmlToMarkdown } from '@/lib/markdown-rich-text'
+import { htmlToClipboardText, htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
 import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion } from '@/components/agent/mention-suggestions'
@@ -390,7 +390,7 @@ export function RichTextInput({
           const fragment = range.cloneContents()
           const tempDiv = document.createElement('div')
           tempDiv.appendChild(fragment)
-          const text = htmlToMarkdown(tempDiv.innerHTML, { skipMarkdownEscape: !richTextEnabledRef.current }) || selection.toString()
+          const text = htmlToClipboardText(tempDiv.innerHTML, { skipMarkdownEscape: !richTextEnabledRef.current }) || selection.toString().replace(/\r\n?/g, '\n')
           event.preventDefault()
           event.clipboardData.setData('text/plain', text)
           event.clipboardData.setData('text/html', '')

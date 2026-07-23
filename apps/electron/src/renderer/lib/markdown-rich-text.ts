@@ -362,7 +362,10 @@ export function markdownToHtml(markdown: string): string {
 }
 
 /** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
-export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: boolean }): string {
+export function htmlToMarkdown(
+  html: string,
+  options?: { skipMarkdownEscape?: boolean; paragraphSeparator?: string },
+): string {
   if (!html || html === '<p></p>') return ''
 
   const div = document.createElement('div')
@@ -408,7 +411,7 @@ export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: bo
         return `<video controls src="${escapeAttr(src)}"${title ? ` title="${escapeAttr(title)}"` : ''}></video>\n`
       }
       case 'p':
-        return children + '\n\n'
+        return children + (options?.paragraphSeparator ?? '\n\n')
       case 'br':
         return '\n'
       case 'strong':
@@ -512,4 +515,18 @@ export function htmlToMarkdown(html: string, options?: { skipMarkdownEscape?: bo
   }
 
   return processNode(div).trim()
+}
+
+/**
+ * 将编辑器选区导出为系统剪贴板的纯文本。
+ *
+ * Markdown 持久化需要用空行区分段落；普通剪贴板文本只需要单个换行。
+ * 这个专用出口避免把 Markdown 的段落分隔符带入其他编辑器，同时保留
+ * 选区内显式空段落和全部内联 Markdown 语义。
+ */
+export function htmlToClipboardText(html: string, options?: { skipMarkdownEscape?: boolean }): string {
+  return htmlToMarkdown(html, {
+    ...options,
+    paragraphSeparator: '\n',
+  }).replace(/\r\n?/g, '\n')
 }
