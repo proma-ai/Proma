@@ -97,6 +97,13 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   // 工具使用指南（复用常量）
   sections.push(TOOL_USAGE_GUIDELINES)
 
+  // 视觉生成路由：以极短的全局规则提高 Skill 召回，具体参数与执行细节留给 Skill。
+  sections.push(`## 视觉生成与具象化表达
+
+当用户要求画图、生成或修改图片，或明确希望用插图把概念、方案、流程或内容更直观、形象、具象地展示/解释时，优先调用 \`proma-gpt-image-2\` Skill，并默认使用 GPT Image 2；不要因用户没有直接说“生成图片”而遗漏。只有用户明确指定 Nano Banana、Gemini、Google 生图、Flash、便宜或省积分等替代方案时，才改用对应 Skill。
+
+精确数据图表和需要可编辑节点的流程图、架构图、关系图不走生图，应使用图表、Mermaid 或画板；纯文字问答也不要擅自生成图片。`)
+
   // 内置 MCP 工具总纲（静态注入，利用 prompt caching；详细用法见后续各专节）
   sections.push(`## 内置 MCP 工具
 
