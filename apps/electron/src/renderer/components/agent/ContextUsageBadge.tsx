@@ -3,7 +3,7 @@
  *
  * 输入框工具栏上的一个 36×36 按钮：
  * - 内部为 16px 圆环，按 displayTokens / displayWindow 比例渲染
- * - hover / click 弹出 Popover，内含 token 明细 + 手动压缩按钮
+ * - hover 弹出 Popover，内含 token 明细 + 手动压缩按钮（长按 650ms 触发，带进度动画）
  * - 压缩中时按钮位置显示 Loader2 旋转图标
  * - 占用接近压缩阈值（窗口 × 0.775 × 80%）时圆环变琥珀色
  * - 无数据时不显示
@@ -24,6 +24,8 @@ const COMPACT_THRESHOLD_RATIO = 0.775
 const WARNING_RATIO = 0.80
 /** Popover hover 关闭延迟（ms），与 AgentThinkingPopover 一致 */
 const HOVER_CLOSE_DELAY = 150
+/** 手动压缩长按触发时长（ms） */
+const LONG_PRESS_DURATION = 650
 const UNSUPPORTED_PLAN_QUOTA_MESSAGE = '当前渠道不支持订阅 Plan 额度查询'
 
 interface ContextUsageBadgeProps {
@@ -213,6 +215,60 @@ export function ContextUsageBadge({
 
   React.useEffect(() => cancelClose, [cancelClose])
 
+  // 长按压缩相关状态
+  const [isPressing, setIsPressing] = React.useState(false)
+  const [pressProgress, setPressProgress] = React.useState(0)
+  const pressStartRef = React.useRef<number>(0)
+  const animFrameRef = React.useRef<number | null>(null)
+  const pressTriggeredRef = React.useRef(false)
+
+  const cancelPressAnim = React.useCallback(() => {
+    if (animFrameRef.current != null) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = null
+    }
+  }, [])
+
+  // 组件卸载时清理动画帧
+  React.useEffect(() => cancelPressAnim, [cancelPressAnim])
+
+  const startPress = React.useCallback(() => {
+    if (isProcessing) return
+    pressTriggeredRef.current = false
+    setIsPressing(true)
+    setPressProgress(0)
+    pressStartRef.current = performance.now()
+
+    const animate = (): void => {
+      const elapsed = performance.now() - pressStartRef.current
+      const progress = Math.min(elapsed / LONG_PRESS_DURATION, 1)
+      setPressProgress(progress)
+
+      if (progress >= 1) {
+        // 长按完成 → 触发压缩
+        pressTriggeredRef.current = true
+        setIsPressing(false)
+        setPressProgress(0)
+        cancelPressAnim()
+        onCompact()
+        setOpen(false)
+        return
+      }
+
+      animFrameRef.current = requestAnimationFrame(animate)
+    }
+
+    animFrameRef.current = requestAnimationFrame(animate)
+  }, [isProcessing, onCompact, cancelPressAnim])
+
+  const endPress = React.useCallback(() => {
+    if (!pressTriggeredRef.current) {
+      setIsPressing(false)
+      setPressProgress(0)
+    }
+    cancelPressAnim()
+  }, [cancelPressAnim])
+
   React.useEffect(() => {
     if (!open || !channelId) return
 
@@ -268,12 +324,6 @@ export function ContextUsageBadge({
   const percent = displayWindow
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
-
-  const handleCompactClick = (): void => {
-    if (isProcessing) return
-    onCompact()
-    setOpen(false)
-  }
 
   const shouldShowPlanQuota = quota != null && (
     quota.supported
@@ -368,14 +418,28 @@ export function ContextUsageBadge({
             variant={isWarning ? 'default' : 'outline'}
             size="sm"
             className={cn(
-              'h-7 text-xs gap-1.5',
+              'h-7 text-xs gap-1.5 select-none overflow-hidden',
               isWarning && 'bg-amber-500 hover:bg-amber-600 text-white',
+              isPressing && 'ring-1 ring-ring',
             )}
-            onClick={handleCompactClick}
+            style={isPressing ? {
+              backgroundImage: `linear-gradient(to right, ${isWarning ? 'hsl(45 100% 55% / 0.35)' : 'hsl(var(--primary) / 0.22)'}, ${isWarning ? 'hsl(45 100% 55% / 0.35)' : 'hsl(var(--primary) / 0.22)'})`,
+              backgroundSize: `${pressProgress * 100}% 100%`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'left center',
+            } : undefined}
+            onMouseDown={startPress}
+            onMouseUp={endPress}
+            onMouseLeave={endPress}
+            onTouchStart={startPress}
+            onTouchEnd={endPress}
+            onTouchCancel={endPress}
             disabled={isProcessing}
           >
-            <Minimize2 className="size-3.5" />
-            {isProcessing ? '对话进行中' : '手动压缩'}
+            <Minimize2 className="size-3.5 relative z-10" />
+            <span className="relative z-10">
+              {isPressing ? '按住中…' : isProcessing ? '对话进行中' : '手动压缩'}
+            </span>
           </Button>
         </div>
       </PopoverContent>
