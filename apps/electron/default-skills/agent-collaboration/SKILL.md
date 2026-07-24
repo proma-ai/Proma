@@ -2,7 +2,7 @@
 name: agent-collaboration
 description: Proma 协作子 Agent Skill。当需要并行探索多个方向（多样性探索）、对抗性审查验证已有方案、或多个长耗时独立任务需要真实可见的子会话时触发。用于判断是否以及如何调用 Proma 内置 collaboration 工具创建协作子会话。简单搜索、短调研、单文件修改、一次性代码审查由父会话直接使用普通工具完成。
 group: proma
-version: "1.1.1"
+version: "1.1.2"
 ---
 
 # Proma Agent Collaboration
@@ -20,6 +20,8 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
 - `collaboration.list_delegations`：查看当前父会话创建的子会话状态。
 - `collaboration.get_delegation_results`：按委派 ID 读取一个或多个子会话结果摘要。
 - `collaboration.stop_delegation` / `collaboration.stop_delegations`：停止一个或一批子会话。
+- `collaboration.continue_delegation`：向已结束的子会话追加指令，并等待本轮完成后返回。
+- `collaboration.continue_delegation_async`：向已结束的子会话追加指令并立即返回；后续用 `wait_for_delegations` 或 `get_delegation_results` 收敛结果。
 
 ## 先判断用哪种能力
 
@@ -121,8 +123,9 @@ Proma 已提供内置 `collaboration` MCP 工具。你必须通过这些工具�
    - 如果父会话还有独立主线可推进，先继续处理自己的工作，不要因为已经派发子会话就空等。
    - 如果需要快速校准方向，用 `mode=any` / `minCompleted` 先收敛一部分结果，再决定父会话继续做什么。
 5. 调用 `collaboration.wait_for_delegations` 收敛结果；几十个并行任务可以先用 `mode=any` 等一部分完成，再决定是否继续等待或停止剩余任务。非阻塞推进时，可以先 `list_delegations`，再用 `get_delegation_results` 按 ID 拉取结果。
-6. 整合子会话发现，明确哪些结论来自哪个子会话。
-7. 如某个子会话或一批子会话卡住、重复或方向错误，用 `collaboration.stop_delegation` / `collaboration.stop_delegations` 停止。
+6. 如需让已结束的子会话继续下一轮，阻塞等待结果时用 `continue_delegation`；父会话还有独立工作可推进时用 `continue_delegation_async`，并在稍后显式等待或读取结果。
+7. 整合子会话发现，明确哪些结论来自哪个子会话。
+8. 如某个子会话或一批子会话卡住、重复或方向错误，用 `collaboration.stop_delegation` / `collaboration.stop_delegations` 停止。
 
 ## 委派 task 写法
 

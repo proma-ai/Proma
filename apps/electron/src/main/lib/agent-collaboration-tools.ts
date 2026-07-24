@@ -85,6 +85,7 @@ const delegations = new Map<string, DelegationRecord>()
 // Pi 的 provider/retry 流可能重放同一个 tool call；委派会创建真实会话，必须幂等。
 const piDelegateAgentCalls = createToolCallIdempotencyCache<PiDelegationToolResult>()
 const piDelegateAgentsCalls = createToolCallIdempotencyCache<PiBatchDelegationResult>()
+const piContinueDelegationAsyncCalls = createToolCallIdempotencyCache<string>()
 
 // ===== 阻塞事件追踪（Level 1: Blocked Event Bubbling） =====
 
@@ -732,6 +733,65 @@ function startDelegation(
   return { record, effectivePermissionMode: permissionMode, effectiveModelId }
 }
 
+/**
+ * 在已有协作子会话上启动下一轮指令。
+ *
+ * 这里只负责恢复状态并启动 headless runner，不等待本轮结束；调用方可按需
+ * 立即返回，或继续等待 record.completion，从而让同步/异步工具共享同一语义。
+ */
+function startDelegationContinuation(
+  ctx: CollaborationToolContext,
+  delegationId: string,
+  message: string,
+): DelegationRecord {
+  const record = getDelegationRecordForContinuation(ctx, delegationId)
+  if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
+  if (record.status === 'running') {
+    throw new Error(`委派正在运行中，无法追加指令。请先等待完成或停止后再继续: ${delegationId}`)
+  }
+
+  record.status = 'running'
+  record.error = undefined
+  record.resultSummary = undefined
+  record.completedAt = undefined
+  const completionHandle = createDelegationCompletion()
+  record.completion = completionHandle.completion
+  record.resolveCompletion = completionHandle.resolveCompletion
+
+  updateAgentSessionMeta(record.childSessionId, { delegationStatus: 'running' })
+
+  runRegisteredHeadlessAgent(
+    {
+      sessionId: record.childSessionId,
+      userMessage: message,
+      channelId: record.channelId,
+      modelId: record.modelId,
+      workspaceId: ctx.workspaceId,
+      permissionModeOverride: record.permissionMode,
+      triggeredBy: 'delegation',
+      startedAt: Date.now(),
+    },
+    {
+      source: 'delegation',
+      onError: (error) => {
+        markDelegationFinished(record, 'failed', { error })
+      },
+      onComplete: (messages) => {
+        if (record.status !== 'running') return
+        const resultSummary = summarizeChildResult(record.childSessionId, messages)
+        markDelegationFinished(record, 'completed', { resultSummary })
+      },
+      onTitleUpdated: () => {},
+    },
+  ).catch((error: unknown) => {
+    markDelegationFinished(record, 'failed', {
+      error: error instanceof Error ? error.message : '未知错误',
+    })
+  })
+
+  return record
+}
+
 function buildCollaborationSchemas(z: ZodModule['z']) {
   const nonBlankString = z.string().trim().min(1)
   const role = z.enum(['explore', 'research', 'implement', 'review', 'custom'])
@@ -1005,60 +1065,28 @@ export async function injectAgentCollaborationMcpServer(
       ),
       sdk.tool(
         'continue_delegation',
-        '向已完成、已失败、已取消或已中断的协作子会话追加后续指令。子会话保留完整上下文继续执行。适合多轮协作场景：先让子 Agent 完成第一步，审查结果后继续下一步。',
+        '向已完成、已失败、已取消或已中断的协作子会话追加后续指令。子会话保留完整上下文继续执行。适合多轮协作场景：先让子 Agent 完成第一步，审查结果后继续下一步。此工具会等待本轮完成；如需立即返回，请使用 continue_delegation_async。',
         schemas.continueD,
         async (args) => {
-          const record = getDelegationRecordForContinuation(ctx, args.delegationId)
-          if (!record) throw new Error(`未找到当前会话下的委派: ${args.delegationId}`)
-          if (record.status === 'running') {
-            throw new Error(`委派正在运行中，无法追加指令。请先等待完成或停止后再继续: ${args.delegationId}`)
-          }
-
-          record.status = 'running'
-          record.error = undefined
-          record.resultSummary = undefined
-          record.completedAt = undefined
-          const completionHandle = createDelegationCompletion()
-          record.completion = completionHandle.completion
-          record.resolveCompletion = completionHandle.resolveCompletion
-
-          updateAgentSessionMeta(record.childSessionId, { delegationStatus: 'running' })
-
-          runRegisteredHeadlessAgent(
-            {
-              sessionId: record.childSessionId,
-              userMessage: args.message,
-              channelId: record.channelId,
-              modelId: record.modelId,
-              workspaceId: ctx.workspaceId,
-              permissionModeOverride: record.permissionMode,
-              triggeredBy: 'delegation',
-              startedAt: Date.now(),
-            },
-            {
-              source: 'delegation',
-              onError: (error) => {
-                markDelegationFinished(record, 'failed', { error })
-              },
-              onComplete: (messages) => {
-                if (record.status !== 'running') return
-                const resultSummary = summarizeChildResult(record.childSessionId, messages)
-                markDelegationFinished(record, 'completed', { resultSummary })
-              },
-              onTitleUpdated: () => {},
-            },
-          ).catch((error: unknown) => {
-            markDelegationFinished(record, 'failed', {
-              error: error instanceof Error ? error.message : '未知错误',
-            })
-          })
-
+          const record = startDelegationContinuation(ctx, args.delegationId, args.message)
           const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), DEFAULT_WAIT_SECONDS * 1000))
           await Promise.race([record.completion, timeout])
 
           return jsonResult({
             delegation: getDelegationSummary(record),
             note: record.status === 'running' ? '子会话仍在运行中（等待超时），可稍后用 wait_for_delegations 等待结果。' : undefined,
+          })
+        },
+      ),
+      sdk.tool(
+        'continue_delegation_async',
+        '异步向已完成、已失败、已取消或已中断的协作子会话追加后续指令。启动后立即返回，不等待子会话完成；请稍后使用 wait_for_delegations 或 get_delegation_results 获取结果。',
+        schemas.continueD,
+        async (args) => {
+          const record = startDelegationContinuation(ctx, args.delegationId, args.message)
+          return jsonResult({
+            delegation: getDelegationSummary(record),
+            note: '后续指令已异步启动。请使用 wait_for_delegations 或 get_delegation_results 获取结果。',
           })
         },
       ),
@@ -1355,64 +1383,39 @@ export function buildPiCollaborationTools(
     sdk.defineTool({
       name: 'mcp__collaboration__continue_delegation',
       label: '追加后续指令',
-      description: '向已完成、已失败、已取消或已中断的协作子会话追加后续指令。子会话保留完整上下文继续执行。',
+      description: '向已完成、已失败、已取消或已中断的协作子会话追加后续指令。子会话保留完整上下文继续执行。此工具会等待本轮完成；如需立即返回，请使用 continue_delegation_async。',
       parameters: Type.Object({
         delegationId: Type.String({ description: '要继续操作的委派 ID' }),
         message: Type.String({ description: '追加给子 Agent 的后续指令' }),
       }),
       async execute(_toolCallId: string, params: unknown) {
         const args = params as { delegationId: string; message: string }
-        const record = getDelegationRecordForContinuation(ctx, args.delegationId)
-        if (!record) throw new Error(`未找到当前会话下的委派: ${args.delegationId}`)
-        if (record.status === 'running') {
-          throw new Error(`委派正在运行中，无法追加指令: ${args.delegationId}`)
-        }
-
-        record.status = 'running'
-        record.error = undefined
-        record.resultSummary = undefined
-        record.completedAt = undefined
-        const completionHandle = createDelegationCompletion()
-        record.completion = completionHandle.completion
-        record.resolveCompletion = completionHandle.resolveCompletion
-
-        updateAgentSessionMeta(record.childSessionId, { delegationStatus: 'running' })
-
-        runRegisteredHeadlessAgent(
-          {
-            sessionId: record.childSessionId,
-            userMessage: args.message,
-            channelId: record.channelId,
-            modelId: record.modelId,
-            workspaceId: ctx.workspaceId,
-            permissionModeOverride: record.permissionMode,
-            triggeredBy: 'delegation',
-            startedAt: Date.now(),
-          },
-          {
-            source: 'delegation',
-            onError: (error) => {
-              markDelegationFinished(record, 'failed', { error })
-            },
-            onComplete: (messages) => {
-              if (record.status !== 'running') return
-              const resultSummary = summarizeChildResult(record.childSessionId, messages)
-              markDelegationFinished(record, 'completed', { resultSummary })
-            },
-            onTitleUpdated: () => {},
-          },
-        ).catch((error: unknown) => {
-          markDelegationFinished(record, 'failed', {
-            error: error instanceof Error ? error.message : '未知错误',
-          })
-        })
-
+        const record = startDelegationContinuation(ctx, args.delegationId, args.message)
         const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), DEFAULT_WAIT_SECONDS * 1000))
         await Promise.race([record.completion, timeout])
 
         return piJsonResult({
           delegation: getDelegationSummary(record),
           note: record.status === 'running' ? '子会话仍在运行中（等待超时），可稍后用 wait_for_delegations 等待结果。' : undefined,
+        })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__collaboration__continue_delegation_async',
+      label: '异步追加后续指令',
+      description: '异步向已完成、已失败、已取消或已中断的协作子会话追加后续指令。启动后立即返回，不等待子会话完成。',
+      parameters: Type.Object({
+        delegationId: Type.String({ description: '要继续操作的委派 ID' }),
+        message: Type.String({ description: '追加给子 Agent 的后续指令' }),
+      }),
+      async execute(toolCallId: string, params: unknown) {
+        const args = params as { delegationId: string; message: string }
+        const delegationId = piContinueDelegationAsyncCalls.getOrCreate(ctx.sessionId, toolCallId, () => {
+          return startDelegationContinuation(ctx, args.delegationId, args.message).delegationId
+        })
+        return piJsonResult({
+          delegation: getDelegationResult(ctx.sessionId, delegationId),
+          note: '后续指令已异步启动。请使用 wait_for_delegations 或 get_delegation_results 获取结果。',
         })
       },
     }),

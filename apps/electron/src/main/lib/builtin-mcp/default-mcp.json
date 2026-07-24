@@ -39,7 +39,10 @@
         { "name": "list_delegations", "description": "列出当前父会话创建的子会话。", "readOnly": true },
         { "name": "get_delegation_results", "description": "按委派 ID 读取子会话结果摘要。", "readOnly": true },
         { "name": "stop_delegation", "description": "停止单个协作子会话。" },
-        { "name": "stop_delegations", "description": "批量停止协作子会话。" }
+        { "name": "stop_delegations", "description": "批量停止协作子会话。" },
+        { "name": "answer_delegation_question", "description": "代答子会话的阻塞问题或权限请求。" },
+        { "name": "continue_delegation", "description": "追加后续指令并等待子会话完成。" },
+        { "name": "continue_delegation_async", "description": "异步追加后续指令，不等待子会话完成。" }
       ]
     },
     {
