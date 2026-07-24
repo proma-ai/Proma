@@ -351,6 +351,9 @@ export interface ElectronAPI {
   /** 更新用户档案 */
   updateUserProfile: (updates: Partial<UserProfile>) => Promise<UserProfile>
 
+  /** 订阅用户档案变更（跨窗口与 Cloud 同步，返回清理函数） */
+  onUserProfileChanged: (callback: (profile: UserProfile) => void) => () => void
+
   // ===== 应用设置相关 =====
 
   /** 获取应用设置 */
@@ -1481,6 +1484,12 @@ const electronAPI: ElectronAPI = {
 
   updateUserProfile: (updates: Partial<UserProfile>) => {
     return ipcRenderer.invoke(USER_PROFILE_IPC_CHANNELS.UPDATE, updates)
+  },
+
+  onUserProfileChanged: (callback: (profile: UserProfile) => void) => {
+    const listener = (_: unknown, profile: UserProfile): void => callback(profile)
+    ipcRenderer.on(USER_PROFILE_IPC_CHANNELS.CHANGED, listener)
+    return () => { ipcRenderer.removeListener(USER_PROFILE_IPC_CHANNELS.CHANGED, listener) }
   },
 
   // 应用设置

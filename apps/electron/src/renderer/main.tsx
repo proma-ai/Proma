@@ -44,6 +44,7 @@ import {
   unviewedCompletedSessionIdsAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
+import { userProfileAtom } from './atoms/user-profile'
 import { automationsAtom } from './atoms/automation-atoms'
 import {
   // Cloud 模式专属
@@ -392,6 +393,25 @@ function UpdaterInitializer(): null {
     const cleanup = initializeUpdater(setUpdateStatus)
     return cleanup
   }, [setUpdateStatus])
+
+  return null
+}
+
+/**
+ * 用户档案初始化组件
+ *
+ * 统一加载本地档案并订阅变更，避免资料状态依赖某个界面组件的挂载时机。
+ */
+function UserProfileInitializer(): null {
+  const setUserProfile = useSetAtom(userProfileAtom)
+
+  useEffect(() => {
+    window.electronAPI.getUserProfile()
+      .then(setUserProfile)
+      .catch((error) => console.error('[用户档案] 初始加载失败:', error))
+
+    return window.electronAPI.onUserProfileChanged(setUserProfile)
+  }, [setUserProfile])
 
   return null
 }
@@ -1138,6 +1158,7 @@ if (isQuickTaskWindow) {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <ThemeInitializer />
+      <UserProfileInitializer />
       <CloudAuthInitializer />
       <CloudWelcomeNoticeInitializer />
       <BillingInitializer />

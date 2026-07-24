@@ -6,8 +6,9 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { BrowserWindow } from 'electron'
 import { getUserProfilePath } from './config-paths'
-import { DEFAULT_USER_AVATAR, DEFAULT_USER_NAME } from '../../types'
+import { DEFAULT_USER_AVATAR, DEFAULT_USER_NAME, USER_PROFILE_IPC_CHANNELS } from '../../types'
 import type { UserProfile } from '../../types'
 
 /**
@@ -62,6 +63,10 @@ export function updateUserProfile(updates: Partial<UserProfile>): UserProfile {
     console.error('[用户档案] 写入失败:', error)
     throw new Error('写入用户档案失败')
   }
+
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send(USER_PROFILE_IPC_CHANNELS.CHANGED, updated)
+  })
 
   return updated
 }

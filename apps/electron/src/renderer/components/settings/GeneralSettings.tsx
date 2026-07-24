@@ -150,18 +150,29 @@ export function GeneralSettings(): React.ReactElement {
     }
   }
 
+  /** 以 Cloud 确认的资料回写本地，并立即刷新当前渲染进程状态。 */
+  const syncCloudProfileToLocal = async (
+    cloudResult: Awaited<ReturnType<typeof window.electronAPI.cloudAuth.updateProfile>>,
+  ): Promise<boolean> => {
+    if (!cloudResult.success || !cloudResult.user) {
+      console.error('[通用设置] Cloud 更新用户档案失败:', cloudResult.error)
+      return false
+    }
+
+    const updated = await window.electronAPI.updateUserProfile({
+      userName: cloudResult.user.name || userProfile.userName,
+      avatar: cloudResult.user.image || cloudResult.user.avatar || userProfile.avatar,
+    })
+    setUserProfile(updated)
+    return true
+  }
+
   /** 更新头像 */
   const handleAvatarChange = async (avatar: string): Promise<void> => {
     try {
       if (useCloudProfile) {
-        // Cloud 模式：先更新远端，同时更新本地
-        const [cloudResult] = await Promise.all([
-          window.electronAPI.cloudAuth.updateProfile({ image: avatar }),
-          window.electronAPI.updateUserProfile({ avatar }),
-        ])
-        if (!cloudResult.success) {
-          console.error('[通用设置] Cloud 更新头像失败:', cloudResult.error)
-        }
+        const cloudResult = await window.electronAPI.cloudAuth.updateProfile({ image: avatar })
+        if (!await syncCloudProfileToLocal(cloudResult)) return
       } else {
         const updated = await window.electronAPI.updateUserProfile({ avatar })
         setUserProfile(updated)
@@ -193,14 +204,8 @@ export function GeneralSettings(): React.ReactElement {
 
     try {
       if (useCloudProfile) {
-        // Cloud 模式：先更新远端，同时更新本地
-        const [cloudResult] = await Promise.all([
-          window.electronAPI.cloudAuth.updateProfile({ name: trimmed }),
-          window.electronAPI.updateUserProfile({ userName: trimmed }),
-        ])
-        if (!cloudResult.success) {
-          console.error('[通用设置] Cloud 更新用户名失败:', cloudResult.error)
-        }
+        const cloudResult = await window.electronAPI.cloudAuth.updateProfile({ name: trimmed })
+        if (!await syncCloudProfileToLocal(cloudResult)) return
       } else {
         const updated = await window.electronAPI.updateUserProfile({ userName: trimmed })
         setUserProfile(updated)

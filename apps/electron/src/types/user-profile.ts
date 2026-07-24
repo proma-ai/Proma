@@ -22,4 +22,6 @@ export interface UserProfile {
 export const USER_PROFILE_IPC_CHANNELS = {
   GET: 'user-profile:get',
   UPDATE: 'user-profile:update',
+  /** 主进程向所有渲染窗口推送最新档案 */
+  CHANGED: 'user-profile:changed',
 } as const

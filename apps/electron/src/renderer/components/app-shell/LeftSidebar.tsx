@@ -747,7 +747,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [newProjectName, setNewProjectName] = React.useState('')
   const newProjectInputRef = React.useRef<HTMLInputElement>(null)
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
-  const [userProfile, setUserProfile] = useAtom(userProfileAtom)
+  const userProfile = useAtomValue(userProfileAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
   const mode = useAtomValue(appModeAtom)
   const isMac = React.useMemo(() => detectIsMac(), [])
@@ -1000,7 +1000,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
     [agentSessions, draftSessionIds]
   )
 
-  // 初始加载对话列表 + 用户档案 + Agent 会话
+  // 初始加载对话列表与 Agent 会话；用户档案由顶层 UserProfileInitializer 统一维护。
   React.useEffect(() => {
     window.electronAPI
       .listConversations()
@@ -1009,15 +1009,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       })
       .catch(console.error)
     window.electronAPI
-      .getUserProfile()
-      .then(setUserProfile)
-      .catch(console.error)
-    window.electronAPI
       .listAgentSessions()
       .then(setAgentSessions)
       .catch(console.error)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setConversations, setUserProfile, setAgentSessions])
+  }, [setConversations, setAgentSessions])
 
   // 窗口聚焦时重新同步列表，修复长时间后前后端不一致
   React.useEffect(() => {
