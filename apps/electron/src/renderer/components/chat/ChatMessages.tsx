@@ -119,6 +119,8 @@ function ScrollTopLoader({ hasMore, loading, onLoadMore }: ScrollTopLoaderProps)
 interface ChatMessagesProps {
   /** 当前对话 ID */
   conversationId: string
+  /** 空状态是否展示全局 Chat/Agent 模式切换。 */
+  showModeSwitcher: boolean
   /** 消息列表 */
   messages: ChatMessage[]
   /** 消息是否已完成首次 IPC 加载 */
@@ -160,12 +162,13 @@ interface ChatMessagesProps {
 }
 
 /** 空状态引导 — 使用 WelcomeEmptyState */
-function EmptyState(): React.ReactElement {
-  return <WelcomeEmptyState />
+function EmptyState({ showModeSwitcher }: { showModeSwitcher: boolean }): React.ReactElement {
+  return <WelcomeEmptyState showModeSwitcher={showModeSwitcher} />
 }
 
 export function ChatMessages({
   conversationId,
+  showModeSwitcher,
   messages,
   messagesLoaded,
   streaming,
@@ -371,7 +374,7 @@ export function ChatMessages({
       />
       <ConversationContent>
         {messages.length === 0 && !streaming ? (
-          <EmptyState />
+          <EmptyState showModeSwitcher={showModeSwitcher} />
         ) : (
           <>
             {/* 已有消息 + 分隔线 */}

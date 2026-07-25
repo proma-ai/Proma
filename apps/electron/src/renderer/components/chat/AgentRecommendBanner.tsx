@@ -7,9 +7,9 @@
  *
  * 迁移流程：
  * 1. 清除推荐状态（先清再切换，避免 ChatView 副作用）
- * 2. 创建 Agent 会话（绑定默认工作区）
+ * 2. 创建 Agent 会话（绑定来源或当前工作区）
  * 3. 将 Chat 对话历史复制到新 Agent 会话
- * 4. 切换到默认工作区 + Agent 模式
+ * 4. 切换到目标工作区 + Agent 模式
  * 5. 在 Agent 输入区显示建议提示（prompt suggestion）
  */
 
@@ -18,7 +18,11 @@ import { useAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
 import { Sparkles, X, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { pendingAgentRecommendationAtom } from '@/atoms/chat-atoms'
+import {
+  agentSideChatMapAtom,
+  pendingAgentRecommendationAtom,
+  resolveChatMigrationWorkspaceId,
+} from '@/atoms/chat-atoms'
 import {
   agentChannelIdAtom,
   agentModelIdAtom,
@@ -32,12 +36,16 @@ import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
 import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 
-export function AgentRecommendBanner(): React.ReactElement | null {
+interface AgentRecommendBannerProps {
+  conversationId: string
+}
+
+export function AgentRecommendBanner({ conversationId }: AgentRecommendBannerProps): React.ReactElement | null {
   const [recommendation, setRecommendation] = useAtom(pendingAgentRecommendationAtom)
   const store = useStore()
   const [migrating, setMigrating] = React.useState(false)
 
-  if (!recommendation) return null
+  if (!recommendation || recommendation.conversationId !== conversationId) return null
 
   const handleDismiss = (): void => {
     setRecommendation(null)
@@ -53,19 +61,24 @@ export function AgentRecommendBanner(): React.ReactElement | null {
     }
 
     // 保存推荐数据后立即清除，避免模式切换时 ChatView 副作用
-    const { conversationId, suggestedPrompt } = recommendation
+    const { suggestedPrompt } = recommendation
     setRecommendation(null)
 
     setMigrating(true)
     try {
       const workspaces = store.get(agentWorkspacesAtom)
-      const defaultWorkspaceId = workspaces[0]?.id ?? null
+      const targetWorkspaceId = resolveChatMigrationWorkspaceId(
+        conversationId,
+        store.get(agentSideChatMapAtom),
+        store.get(currentAgentWorkspaceIdAtom),
+        workspaces,
+      )
 
       // 1. 创建 Agent 会话
       const session = await window.electronAPI.createAgentSession(
         undefined,
         agentChannelId,
-        defaultWorkspaceId ?? undefined,
+        targetWorkspaceId,
         store.get(agentModelIdAtom) || undefined,
       )
 
@@ -76,11 +89,11 @@ export function AgentRecommendBanner(): React.ReactElement | null {
       const sessions = await window.electronAPI.listAgentSessions()
       store.set(agentSessionsAtom, sessions)
 
-      // 4. 切换到默认工作区（确保 AgentView 能正确显示新会话）
-      if (defaultWorkspaceId) {
-        store.set(currentAgentWorkspaceIdAtom, defaultWorkspaceId)
+      // 4. 切换到目标工作区（确保 AgentView 能正确显示新会话）
+      if (targetWorkspaceId) {
+        store.set(currentAgentWorkspaceIdAtom, targetWorkspaceId)
         window.electronAPI.updateSettings({
-          agentWorkspaceId: defaultWorkspaceId,
+          agentWorkspaceId: targetWorkspaceId,
         }).catch(console.error)
       }
 

@@ -24,6 +24,7 @@ import {
 import { tabsAtom, activeTabIdAtom, openTab } from '@/atoms/tab-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
+import { agentSideChatMapAtom, resolveChatMigrationWorkspaceId } from '@/atoms/chat-atoms'
 
 interface MigrateToAgentButtonProps {
   /** 当前对话 ID */
@@ -46,13 +47,18 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
     setMigrating(true)
     try {
       const workspaces = store.get(agentWorkspacesAtom)
-      const defaultWorkspaceId = workspaces[0]?.id ?? null
+      const targetWorkspaceId = resolveChatMigrationWorkspaceId(
+        conversationId,
+        store.get(agentSideChatMapAtom),
+        store.get(currentAgentWorkspaceIdAtom),
+        workspaces,
+      )
 
       // 1. 创建 Agent 会话
       const session = await window.electronAPI.createAgentSession(
         undefined,
         agentChannelId,
-        defaultWorkspaceId ?? undefined,
+        targetWorkspaceId,
         store.get(agentModelIdAtom) || undefined,
       )
 
@@ -63,11 +69,11 @@ export function MigrateToAgentButton({ conversationId }: MigrateToAgentButtonPro
       const sessions = await window.electronAPI.listAgentSessions()
       store.set(agentSessionsAtom, sessions)
 
-      // 4. 切换到默认工作区
-      if (defaultWorkspaceId) {
-        store.set(currentAgentWorkspaceIdAtom, defaultWorkspaceId)
+      // 4. 切换到目标工作区
+      if (targetWorkspaceId) {
+        store.set(currentAgentWorkspaceIdAtom, targetWorkspaceId)
         window.electronAPI.updateSettings({
-          agentWorkspaceId: defaultWorkspaceId,
+          agentWorkspaceId: targetWorkspaceId,
         }).catch(console.error)
       }
 

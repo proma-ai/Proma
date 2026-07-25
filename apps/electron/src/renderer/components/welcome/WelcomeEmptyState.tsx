@@ -31,7 +31,12 @@ const MODE_CONFIG: Record<AppMode, { icon: React.ReactNode; label: string }> = {
   scratch: { icon: <StickyNote size={15} />, label: 'Scratch Pad' },
 }
 
-export function WelcomeEmptyState(): React.ReactElement {
+interface WelcomeEmptyStateProps {
+  /** 右侧问答固定为 Chat，不能切换全局模式。 */
+  showModeSwitcher?: boolean
+}
+
+export function WelcomeEmptyState({ showModeSwitcher = true }: WelcomeEmptyStateProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const [mode, setMode] = useAtom(appModeAtom)
   const themeStyle = useAtomValue(themeStyleAtom)
@@ -65,8 +70,8 @@ export function WelcomeEmptyState(): React.ReactElement {
         <span>{tip.text}</span>
       </div>
 
-      {/* 模式切换 Tab */}
-      <div className="relative flex rounded-xl bg-muted/60 p-1">
+      {showModeSwitcher && (
+        <div className="relative flex rounded-xl bg-muted/60 p-1">
         {/* 滑动背景指示器 */}
         <div
           className={cn(
@@ -94,7 +99,8 @@ export function WelcomeEmptyState(): React.ReactElement {
             </button>
           )
         })}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

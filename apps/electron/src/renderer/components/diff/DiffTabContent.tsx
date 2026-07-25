@@ -16,6 +16,7 @@ import {
   agentDiffPanelTabAtom,
   agentDiffViewModeAtom,
   agentDiffRefreshVersionAtom,
+  agentSessionsAtom,
   agentSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
 import { resolvedThemeAtom } from '@/atoms/theme'
@@ -328,6 +329,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
   const selectedChatModel = useAtomValue(selectedModelAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
   const setConversations = useSetAtom(conversationsAtom)
   const setConversationDrafts = useSetAtom(conversationDraftsAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
@@ -1021,7 +1023,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       })
       setSideChatMap((prev) => {
         const next = new Map(prev)
-        next.set(sessionId, conversation.id)
+        next.set(sessionId, {
+          conversationId: conversation.id,
+          sourceWorkspaceId: agentSessions.find((session) => session.id === sessionId)?.workspaceId,
+        })
         return next
       })
       setSidePanelOpen(true)
@@ -1039,6 +1044,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       openSelectionChatPendingRef.current = false
     }
   }, [
+    agentSessions,
     clearPreviewSelection,
     previewSelection,
     selectedChatModel,

@@ -16,7 +16,7 @@ import {
   selectedModelAtom,
 } from '@/atoms/chat-atoms'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
-import { agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
+import { agentDiffPanelTabAtom, agentSessionsAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 
@@ -58,6 +58,7 @@ export function AgentHistorySelectionLayer({
 }: AgentHistorySelectionLayerProps): React.ReactElement {
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
   const selectedChatModel = useAtomValue(selectedModelAtom)
+  const agentSessions = useAtomValue(agentSessionsAtom)
   const setConversations = useSetAtom(conversationsAtom)
   const setConversationDrafts = useSetAtom(conversationDraftsAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
@@ -246,7 +247,10 @@ export function AgentHistorySelectionLayer({
       })
       setSideChatMap((prev) => {
         const next = new Map(prev)
-        next.set(sessionId, conversation.id)
+        next.set(sessionId, {
+          conversationId: conversation.id,
+          sourceWorkspaceId: agentSessions.find((session) => session.id === sessionId)?.workspaceId,
+        })
         return next
       })
       setSidePanelOpen(true)
@@ -264,6 +268,7 @@ export function AgentHistorySelectionLayer({
       openChatPendingRef.current = false
     }
   }, [
+    agentSessions,
     clearSelection,
     selectedChatModel,
     selection,

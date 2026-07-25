@@ -438,7 +438,7 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
       setAppMode('agent')
       setAgentSideChatMap((prev) => {
         const next = new Map(prev)
-        next.set(sessionId, conversation.id)
+        next.set(sessionId, { conversationId: conversation.id })
         return next
       })
       setAgentSidePanelOpen(true)

@@ -36,8 +36,36 @@ export const conversationsAtom = atom<ConversationMeta[]>([])
 /** 当前对话 ID */
 export const currentConversationIdAtom = atom<string | null>(null)
 
-/** Agent 会话右侧 Chat 面板，key 为 Agent sessionId，value 为 Chat conversationId */
-export const agentSideChatMapAtom = atom<Map<string, string>>(new Map())
+/** Agent 右侧 Chat 的来源上下文。 */
+export interface AgentSideChatContext {
+  conversationId: string
+  sourceWorkspaceId?: string
+}
+
+/** Agent 会话右侧 Chat 面板，key 为 Agent sessionId。 */
+export const agentSideChatMapAtom = atom<Map<string, AgentSideChatContext>>(new Map())
+
+/**
+ * 为 Chat 迁移选择目标 Agent 工作区。
+ * 优先保留右侧问答创建时记录的来源工作区，其次使用当前工作区。
+ */
+export function resolveChatMigrationWorkspaceId(
+  conversationId: string,
+  sideChats: ReadonlyMap<string, AgentSideChatContext>,
+  currentWorkspaceId: string | null,
+  workspaces: readonly { id: string }[],
+): string | undefined {
+  const isAvailable = (workspaceId: string | null | undefined): workspaceId is string =>
+    Boolean(workspaceId && workspaces.some((workspace) => workspace.id === workspaceId))
+
+  const sourceWorkspaceId = [...sideChats.values()]
+    .find((sideChat) => sideChat.conversationId === conversationId)
+    ?.sourceWorkspaceId
+
+  if (isAvailable(sourceWorkspaceId)) return sourceWorkspaceId
+  if (isAvailable(currentWorkspaceId)) return currentWorkspaceId
+  return workspaces[0]?.id
+}
 
 /** 当前对话的消息列表 */
 export const currentMessagesAtom = atom<ChatMessage[]>([])

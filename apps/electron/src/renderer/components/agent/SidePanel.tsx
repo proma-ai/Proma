@@ -401,7 +401,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   const isClassic = interfaceVariant === 'classic'
   const sideChatMap = useAtomValue(agentSideChatMapAtom)
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
-  const sideChatConversationId = sideChatMap.get(sessionId) ?? null
+  const sideChatConversationId = sideChatMap.get(sessionId)?.conversationId ?? null
   const effectiveActiveTab: AgentSidePanelTab = activeTab === 'chat' && !sideChatConversationId
     ? 'session'
     : activeTab
@@ -449,7 +449,7 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
           {effectiveActiveTab === 'chat' ? (
             sideChatConversationId ? (
               <div className="min-h-0 flex-1 overflow-hidden">
-                <ChatView conversationId={sideChatConversationId} />
+                <ChatView conversationId={sideChatConversationId} isSideChat />
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">暂无问答会话</div>

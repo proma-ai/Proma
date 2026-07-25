@@ -863,8 +863,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       let changed = false
       const map = new Map(prev)
       if (map.delete(id)) changed = true
-      for (const [sessionId, conversationId] of map) {
-        if (conversationId === id) {
+      for (const [sessionId, sideChat] of map) {
+        if (sideChat.conversationId === id) {
           map.delete(sessionId)
           changed = true
         }

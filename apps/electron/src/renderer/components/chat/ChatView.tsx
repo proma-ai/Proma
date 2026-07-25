@@ -57,6 +57,8 @@ import type {
 
 interface ChatViewProps {
   conversationId: string
+  /** 由 Agent 右侧面板承载的固定 Chat 对话。 */
+  isSideChat?: boolean
 }
 
 function cleanupPendingAttachments(attachments: PendingAttachment[]): void {
@@ -68,15 +70,15 @@ function cleanupPendingAttachments(attachments: PendingAttachment[]): void {
   }
 }
 
-export function ChatView({ conversationId }: ChatViewProps): React.ReactElement {
+export function ChatView({ conversationId, isSideChat = false }: ChatViewProps): React.ReactElement {
   return (
     <ConversationProvider conversationId={conversationId}>
-      <ChatViewInner conversationId={conversationId} />
+      <ChatViewInner conversationId={conversationId} isSideChat={isSideChat} />
     </ConversationProvider>
   )
 }
 
-function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
+function ChatViewInner({ conversationId, isSideChat = false }: ChatViewProps): React.ReactElement {
   // ===== 本地状态（每个实例独立） =====
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [contextDividers, setContextDividers] = React.useState<string[]>([])
@@ -635,6 +637,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
           {/* 中间：消息区域 */}
           <ChatMessages
             conversationId={conversationId}
+            showModeSwitcher={!isSideChat}
             messages={messages}
             messagesLoaded={messagesLoaded}
             streaming={isStreaming}
@@ -678,7 +681,7 @@ function ChatViewInner({ conversationId }: ChatViewProps): React.ReactElement {
           )}
 
           {/* Agent 模式推荐横幅 */}
-          <AgentRecommendBanner />
+          <AgentRecommendBanner conversationId={conversationId} />
 
           {/* 底部：输入框 */}
           <ChatInput

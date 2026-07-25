@@ -107,8 +107,8 @@ export function useCloseTab(): UseCloseTabReturn {
         setSideChatMap((prev) => {
           let changed = false
           const next = new Map(prev)
-          for (const [ownerSessionId, conversationId] of next) {
-            if (conversationId === closingTab.sessionId) {
+          for (const [ownerSessionId, sideChat] of next) {
+            if (sideChat.conversationId === closingTab.sessionId) {
               next.delete(ownerSessionId)
               changed = true
             }
