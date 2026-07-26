@@ -11,6 +11,7 @@ import type {
   SpeechUsageLogResponse,
   ToolUsageLogResponse,
   AgentUsageLogResponse,
+  CombinedUsageLogResponse,
 } from '@proma/shared'
 
 /** 构建查询字符串 */
@@ -29,6 +30,12 @@ export function createUsageApi(client: CloudApiClient) {
     /** 获取模型调用日志 */
     getUsage: async (params?: UsageQueryParams): Promise<UsageLogResponse> => {
       const response = await client.get<UsageLogResponse>(`/me/usage${buildQueryString(params)}`)
+      return response.data
+    },
+
+    /** 获取合并后的模型调用与 Agent API 调用日志 */
+    getCombinedUsage: async (params?: UsageQueryParams): Promise<CombinedUsageLogResponse> => {
+      const response = await client.get<CombinedUsageLogResponse>(`/me/combined-usage${buildQueryString(params)}`)
       return response.data
     },
 

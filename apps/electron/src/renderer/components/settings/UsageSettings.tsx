@@ -1,11 +1,10 @@
 /**
  * UsageSettings - 用量日志设置页
  *
- * Cloud 模式专属功能，展示 4 类调用日志：
- * - 模型调用日志
+ * Cloud 模式专属功能，展示 3 类调用日志：
+ * - 统一调用日志（模型调用 + Agent API 调用）
  * - 工具调用日志
  * - 语音用量日志
- * - Agent API 调用日志
  *
  * 支持日期筛选、分页、统计卡片。
  */
@@ -27,16 +26,15 @@ import { SettingsSection } from './primitives'
 import type {
   DateFilter,
   UsageQueryParams,
-  UsageLogResponse,
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
-  AgentUsageLogResponse,
+  CombinedUsageLogResponse,
   BillingIpcResponse,
 } from '@proma/shared'
 
 // ===== 类型 =====
 
-type UsageTab = 'model' | 'tool' | 'speech' | 'agent'
+type UsageTab = 'model' | 'tool' | 'speech'
 
 // ===== 工具函数 =====
 
@@ -243,7 +241,7 @@ function TruncatedTooltipText({ value }: { value: string }): React.ReactElement 
   )
 }
 
-// ===== 模型调用日志表 =====
+// ===== 统一调用日志表 =====
 
 function ModelUsageTable({
   dateFilter,
@@ -252,12 +250,11 @@ function ModelUsageTable({
 }): React.ReactElement {
   const [page, setPage] = React.useState(1)
   const fetcher = React.useCallback(
-    (params: UsageQueryParams) => window.electronAPI.cloudUsage.getUsageLogs(params),
+    (params: UsageQueryParams) => window.electronAPI.cloudUsage.getCombinedUsageLogs(params),
     [],
   )
-  const { data, loading, error } = useUsageData<UsageLogResponse>(fetcher, dateFilter, page)
+  const { data, loading, error } = useUsageData<CombinedUsageLogResponse>(fetcher, dateFilter, page)
 
-  // 日期筛选变化时重置分页
   React.useEffect(() => { setPage(1) }, [dateFilter])
 
   if (loading) return <LoadingState />
@@ -266,32 +263,66 @@ function ModelUsageTable({
 
   return (
     <>
-      <div className="flex gap-3 mb-4">
+      <div className="flex gap-3 mb-4 flex-wrap">
         <StatCard label="总请求" value={String(data.stats.totalRequests)} />
         <StatCard label="输入 Token" value={formatTokens(data.stats.totalInputTokens)} />
         <StatCard label="输出 Token" value={formatTokens(data.stats.totalOutputTokens)} />
+        <StatCard label="写缓存" value={formatTokens(data.stats.totalCacheCreationTokens)} />
+        <StatCard label="读缓存" value={formatTokens(data.stats.totalCacheReadTokens)} />
         <StatCard label="总费用" value={formatCost(data.stats.totalCost)} />
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[100px]">时间</TableHead>
-            <TableHead>模型</TableHead>
-            <TableHead className="text-right">输入</TableHead>
-            <TableHead className="text-right">输出</TableHead>
-            <TableHead className="text-right">费用</TableHead>
+            <TableHead className="w-[100px] whitespace-nowrap">时间</TableHead>
+            <TableHead className="whitespace-nowrap">模型</TableHead>
+            <TableHead className="whitespace-nowrap">API Key</TableHead>
+            <TableHead className="text-right whitespace-nowrap">输入</TableHead>
+            <TableHead className="text-right whitespace-nowrap">输出</TableHead>
+            <TableHead className="text-right whitespace-nowrap">写缓存</TableHead>
+            <TableHead className="text-right whitespace-nowrap">读缓存</TableHead>
+            <TableHead className="text-right whitespace-nowrap">工具</TableHead>
+            <TableHead className="text-center whitespace-nowrap">状态</TableHead>
+            <TableHead className="text-right whitespace-nowrap">耗时</TableHead>
+            <TableHead className="text-right whitespace-nowrap">费用</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.items.map((item) => (
-            <TableRow key={item.id}>
+            <TableRow key={`${item.source}-${item.id}`}>
               <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
-              <TableCell className="font-medium text-xs max-w-[180px]">
+              <TableCell className="font-medium text-xs max-w-[160px]">
                 <TruncatedTooltipText value={item.modelName} />
+              </TableCell>
+              <TableCell className="text-xs max-w-[120px]">
+                {item.apiKeyName ? <TruncatedTooltipText value={item.apiKeyName} /> : '-'}
               </TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
               <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
-              <TableCell className="text-right text-xs">{formatCost(item.totalCost)}</TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.cacheCreationInputTokens > 0 ? formatTokens(item.cacheCreationInputTokens) : '-'}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.cacheReadInputTokens > 0 ? formatTokens(item.cacheReadInputTokens) : '-'}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {item.webSearchRequests + item.webFetchRequests > 0
+                  ? item.webSearchRequests + item.webFetchRequests
+                  : '-'}
+              </TableCell>
+              <TableCell className="text-center">
+                {item.responseStatus !== null ? (
+                  <span className={`inline-block rounded px-1.5 py-0.5 text-xs ${
+                    item.responseStatus >= 200 && item.responseStatus < 300
+                      ? 'bg-green-500/10 text-green-600'
+                      : 'bg-red-500/10 text-red-600'
+                  }`}>
+                    {item.responseStatus}
+                  </span>
+                ) : '-'}
+              </TableCell>
+              <TableCell className="text-right text-xs whitespace-nowrap">{formatMs(item.durationMs)}</TableCell>
+              <TableCell className="text-right text-xs whitespace-nowrap">{formatCost(item.totalCost)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -433,103 +464,6 @@ function SpeechUsageTable({
   )
 }
 
-// ===== Agent API 调用日志表 =====
-
-function AgentUsageTable({
-  dateFilter,
-}: {
-  dateFilter: DateFilter
-}): React.ReactElement {
-  const [page, setPage] = React.useState(1)
-  const fetcher = React.useCallback(
-    (params: UsageQueryParams) => window.electronAPI.cloudUsage.getAgentUsageLogs(params),
-    [],
-  )
-  const { data, loading, error } = useUsageData<AgentUsageLogResponse>(fetcher, dateFilter, page)
-
-  React.useEffect(() => { setPage(1) }, [dateFilter])
-
-  if (loading) return <LoadingState />
-  if (error) return <ErrorState message={error} />
-  if (!data || data.items.length === 0) return <EmptyState />
-
-  return (
-    <>
-      <div className="flex gap-3 mb-4 flex-wrap">
-        <StatCard
-          label="总请求"
-          value={String(data.stats.totalRequests)}
-          description={`↑${data.stats.successCount} · ↓${data.stats.errorCount}`}
-        />
-        <StatCard label="输入" value={formatTokens(data.stats.totalInputTokens)} />
-        <StatCard label="输出" value={formatTokens(data.stats.totalOutputTokens)} />
-        <StatCard label="写缓存" value={formatTokens(data.stats.totalCacheCreationTokens)} />
-        <StatCard label="读缓存" value={formatTokens(data.stats.totalCacheReadTokens)} />
-        <StatCard label="总费用" value={formatCost(data.stats.totalCost)} />
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[100px] whitespace-nowrap">时间</TableHead>
-            <TableHead className="whitespace-nowrap">API Key</TableHead>
-            <TableHead className="whitespace-nowrap">模型</TableHead>
-            <TableHead className="whitespace-nowrap">端点</TableHead>
-            <TableHead className="text-right whitespace-nowrap">输入</TableHead>
-            <TableHead className="text-right whitespace-nowrap">输出</TableHead>
-            <TableHead className="text-right whitespace-nowrap">写缓存</TableHead>
-            <TableHead className="text-right whitespace-nowrap">读缓存</TableHead>
-            <TableHead className="text-right whitespace-nowrap">工具</TableHead>
-            <TableHead className="text-center whitespace-nowrap">状态</TableHead>
-            <TableHead className="text-right whitespace-nowrap">耗时</TableHead>
-            <TableHead className="text-right whitespace-nowrap">费用</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.items.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell className="text-muted-foreground text-xs">{formatDateTime(item.createdAt)}</TableCell>
-              <TableCell className="font-medium text-xs truncate max-w-[100px]">{item.apiKeyName}</TableCell>
-              <TableCell className="text-xs max-w-[120px]">
-                <TruncatedTooltipText value={item.modelId ?? '-'} />
-              </TableCell>
-              <TableCell className="text-xs truncate max-w-[120px]">{item.endpoint}</TableCell>
-              <TableCell className="text-right text-xs">{formatTokens(item.inputTokens)}</TableCell>
-              <TableCell className="text-right text-xs">{formatTokens(item.outputTokens)}</TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {item.cacheCreationInputTokens > 0 ? formatTokens(item.cacheCreationInputTokens) : '-'}
-              </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {item.cacheReadInputTokens > 0 ? formatTokens(item.cacheReadInputTokens) : '-'}
-              </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {item.webSearchRequests + item.webFetchRequests > 0
-                  ? item.webSearchRequests + item.webFetchRequests
-                  : '-'}
-              </TableCell>
-              <TableCell className="text-center">
-                {item.responseStatus !== null ? (
-                  <span className={`inline-block px-1.5 py-0.5 rounded text-xs ${
-                    item.responseStatus >= 200 && item.responseStatus < 300
-                      ? 'bg-green-500/10 text-green-600'
-                      : 'bg-red-500/10 text-red-600'
-                  }`}>
-                    {item.responseStatus}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-xs">-</span>
-                )}
-              </TableCell>
-              <TableCell className="text-right text-xs whitespace-nowrap">{formatMs(item.durationMs)}</TableCell>
-              <TableCell className="text-right text-xs whitespace-nowrap">{formatCost(item.totalCost)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <Pagination page={data.page} total={data.total} pageSize={data.pageSize} onChange={setPage} />
-    </>
-  )
-}
-
 // ===== 主组件 =====
 
 export function UsageSettings(): React.ReactElement {
@@ -549,7 +483,6 @@ export function UsageSettings(): React.ReactElement {
           <TabsTrigger value="model">模型调用</TabsTrigger>
           <TabsTrigger value="tool">工具调用</TabsTrigger>
           <TabsTrigger value="speech">语音用量</TabsTrigger>
-          <TabsTrigger value="agent">Agent API</TabsTrigger>
         </TabsList>
 
         <TabsContent value="model">
@@ -560,9 +493,6 @@ export function UsageSettings(): React.ReactElement {
         </TabsContent>
         <TabsContent value="speech">
           <SpeechUsageTable dateFilter={dateFilter} />
-        </TabsContent>
-        <TabsContent value="agent">
-          <AgentUsageTable dateFilter={dateFilter} />
         </TabsContent>
       </Tabs>
     </SettingsSection>

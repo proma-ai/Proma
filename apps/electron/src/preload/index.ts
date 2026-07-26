@@ -104,6 +104,7 @@ import type {
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
   AgentUsageLogResponse,
+  CombinedUsageLogResponse,
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
@@ -973,6 +974,8 @@ export interface ElectronAPI {
   cloudUsage: {
     /** 获取模型调用日志 */
     getUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<UsageLogResponse>>
+    /** 获取合并后的模型调用与 Agent API 调用日志 */
+    getCombinedUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<CombinedUsageLogResponse>>
     /** 获取工具调用日志 */
     getToolUsageLogs: (params?: UsageQueryParams) => Promise<BillingIpcResponse<ToolUsageLogResponse>>
     /** 获取语音用量日志 */
@@ -2323,6 +2326,9 @@ const electronAPI: ElectronAPI = {
   cloudUsage: {
     getUsageLogs: (params?: UsageQueryParams) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_USAGE_LOGS, params)
+    },
+    getCombinedUsageLogs: (params?: UsageQueryParams) => {
+      return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_COMBINED_USAGE_LOGS, params)
     },
     getToolUsageLogs: (params?: UsageQueryParams) => {
       return ipcRenderer.invoke(CLOUD_IPC_CHANNELS.GET_TOOL_USAGE_LOGS, params)

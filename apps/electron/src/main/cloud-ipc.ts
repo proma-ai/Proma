@@ -58,6 +58,7 @@ import {
   getToolUsageLogs,
   getSpeechUsageLogs,
   getAgentUsageLogs,
+  getCombinedUsageLogs,
 } from './lib/cloud-usage-service'
 import type {
   ApiKeyCreateParams,
@@ -294,6 +295,13 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     CLOUD_IPC_CHANNELS.GET_USAGE_LOGS,
     async (_, params?: UsageQueryParams) => {
       return getUsageLogs(params)
+    },
+  )
+
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.GET_COMBINED_USAGE_LOGS,
+    async (_, params?: UsageQueryParams) => {
+      return getCombinedUsageLogs(params)
     },
   )
 

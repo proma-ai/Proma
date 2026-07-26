@@ -13,6 +13,7 @@ import type {
   ToolUsageLogResponse,
   SpeechUsageLogResponse,
   AgentUsageLogResponse,
+  CombinedUsageLogResponse,
   BillingIpcResponse,
 } from '@proma/shared'
 import { getApiClient } from './cloud-auth-service'
@@ -41,6 +42,16 @@ function wrapError(error: unknown): string {
 export async function getUsageLogs(params?: UsageQueryParams): Promise<BillingIpcResponse<UsageLogResponse>> {
   try {
     const data = await getUsageApi().getUsage(params)
+    return { success: true, data }
+  } catch (error) {
+    return { success: false, error: wrapError(error) }
+  }
+}
+
+/** 获取合并后的模型调用与 Agent API 调用日志 */
+export async function getCombinedUsageLogs(params?: UsageQueryParams): Promise<BillingIpcResponse<CombinedUsageLogResponse>> {
+  try {
+    const data = await getUsageApi().getCombinedUsage(params)
     return { success: true, data }
   } catch (error) {
     return { success: false, error: wrapError(error) }

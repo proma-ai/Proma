@@ -269,6 +269,7 @@ export const CLOUD_IPC_CHANNELS = {
   GET_TOOL_USAGE_LOGS: 'cloud:usage:get-tool',
   GET_SPEECH_USAGE_LOGS: 'cloud:usage:get-speech',
   GET_AGENT_USAGE_LOGS: 'cloud:usage:get-agent',
+  GET_COMBINED_USAGE_LOGS: 'cloud:usage:get-combined',
 } as const
 
 // ===== 用量日志相关类型 =====
@@ -405,6 +406,45 @@ export interface AgentUsageLogResponse {
   page: number
   pageSize: number
   stats: AgentUsageStats
+}
+
+/** 统一调用日志项：Proma 模型调用或 Agent API 调用 */
+export interface CombinedUsageLogItem {
+  id: string
+  source: 'model' | 'agent'
+  modelId: string | null
+  modelName: string
+  apiKeyName: string | null
+  endpoint: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  webSearchRequests: number
+  webFetchRequests: number
+  totalCost: number | string
+  responseStatus: number | null
+  durationMs: number | null
+  createdAt: string
+}
+
+/** 统一调用日志统计 */
+export interface CombinedUsageStats {
+  totalRequests: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCacheCreationTokens: number
+  totalCacheReadTokens: number
+  totalCost: number | string
+}
+
+/** 统一调用日志响应 */
+export interface CombinedUsageLogResponse {
+  items: CombinedUsageLogItem[]
+  total: number
+  page: number
+  pageSize: number
+  stats: CombinedUsageStats
 }
 
 // ===== 云端提示词相关类型 =====
