@@ -319,14 +319,14 @@ describe('ChatGPT Codex 模型目录补丁', () => {
 
 describe('third-party GPT-5 capability extrapolation', () => {
   test.each([
-    ['gpt-5.4', 272_000, { off: 'none', xhigh: 'xhigh', minimal: 'low' }],
-    ['gpt-5.4-mini', 400_000, { off: 'none', xhigh: 'xhigh', minimal: 'low' }],
-    ['gpt-5.5', 272_000, { off: 'none', xhigh: 'xhigh', minimal: 'low' }],
-    ['gpt-5.6-sol', 372_000, { off: 'none', xhigh: 'xhigh', minimal: 'low', max: 'max' }],
-    ['gpt-5.6-terra', 372_000, { off: 'none', xhigh: 'xhigh', minimal: 'low', max: 'max' }],
-    ['gpt-5.6-luna', 372_000, { off: 'none', xhigh: 'xhigh', minimal: 'low', max: 'max' }],
-  ])('aligns %s with the Codex capability map', (modelId, contextWindow, thinkingLevelMap) => {
-    expect(getCodexAlignedGPT5Capabilities(modelId)).toEqual({ contextWindow, thinkingLevelMap })
+    ['gpt-5.4', 272_000],
+    ['gpt-5.4-mini', 400_000],
+    ['gpt-5.5', 272_000],
+    ['gpt-5.6-sol', 372_000],
+    ['gpt-5.6-terra', 372_000],
+    ['gpt-5.6-luna', 372_000],
+  ])('aligns %s with the Codex context window', (modelId, contextWindow) => {
+    expect(getCodexAlignedGPT5Capabilities(modelId)).toEqual({ contextWindow })
   })
   test('does not extrapolate unmarked GPT-5 SKUs', () => {
     expect(getCodexAlignedGPT5Capabilities('gpt-5.4-pro')).toBeUndefined()

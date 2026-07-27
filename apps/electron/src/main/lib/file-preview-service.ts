@@ -20,7 +20,7 @@ const PDFJS_PACKAGE = 'pdfjs-dist'
 /** 文件大小限制：50MB */
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 const MAX_XLSX_SHEETS = 8
-const MAX_XLSX_ROWS = 100
+const MAX_XLSX_ROWS = 200
 const MAX_XLSX_COLUMNS = 40
 const MAX_PPTX_SLIDES = 80
 

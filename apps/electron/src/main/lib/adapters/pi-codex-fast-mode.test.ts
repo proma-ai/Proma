@@ -1,21 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import {
   injectCodexFastMode,
-  injectOpenAIThinkingLevel,
   withCodexFastModeServiceTier,
 } from './pi-codex-request-settings'
-import { isOpenAIReasoningMaxSupportedModel, isOpenAIReasoningSupportedModel } from '@proma/shared'
+import { injectOpenAIReasoningLevel } from './pi-openai-reasoning-request-settings'
+import { resolveReasoningProfile } from '@proma/shared'
 
 describe('Pi Codex request settings', () => {
-  test('Given OpenAI model IDs When checking reasoning support Then excludes non-reasoning GPT-4 models', () => {
-    expect(isOpenAIReasoningSupportedModel('gpt-5.6')).toBe(true)
-    expect(isOpenAIReasoningSupportedModel('o4-mini')).toBe(true)
-    expect(isOpenAIReasoningSupportedModel('gpt-4o')).toBe(false)
-    expect(isOpenAIReasoningSupportedModel('gpt-4.1')).toBe(false)
-    expect(isOpenAIReasoningSupportedModel('gpt-5-chat-latest')).toBe(false)
-    expect(isOpenAIReasoningSupportedModel('gpt-5.3-chat-latest')).toBe(false)
-    expect(isOpenAIReasoningMaxSupportedModel('gpt-5.6-terra')).toBe(true)
-    expect(isOpenAIReasoningMaxSupportedModel('gpt-5.5')).toBe(false)
+  test('Given OpenAI model IDs When resolving profiles Then separates standard, max, and non-reasoning models', () => {
+    expect(resolveReasoningProfile({ modelId: 'gpt-5.5', transport: 'openai-responses' })?.id).toBe('openai-reasoning-standard')
+    expect(resolveReasoningProfile({ modelId: 'gpt-5.6-terra', transport: 'openai-responses' })?.id).toBe('openai-reasoning-max')
+    expect(resolveReasoningProfile({ modelId: 'gpt-4o', transport: 'openai-responses' })).toBeUndefined()
+    expect(resolveReasoningProfile({ modelId: 'gpt-5-chat-latest', transport: 'openai-responses' })).toBeUndefined()
   })
 
   test.each(['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
@@ -45,28 +41,28 @@ describe('Pi Codex request settings', () => {
   })
 
   test('Given thinking is disabled When injecting Then explicitly sends none', () => {
-    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'off' })).toEqual({
+    expect(injectOpenAIReasoningLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'off' })).toEqual({
       model: 'gpt-5.5',
       reasoning: { effort: 'none' },
     })
   })
 
   test('Given direct Codex provider stream When injecting Then fills the selected non-off effort', () => {
-    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'high' })).toEqual({
+    expect(injectOpenAIReasoningLevel({ model: 'gpt-5.5' }, { thinkingLevel: 'high' })).toEqual({
       model: 'gpt-5.5',
       reasoning: { effort: 'high' },
     })
   })
 
   test('Given GPT-5.6 max thinking When injecting Then preserves max effort', () => {
-    expect(injectOpenAIThinkingLevel({ model: 'gpt-5.6-terra' }, { thinkingLevel: 'max' })).toEqual({
+    expect(injectOpenAIReasoningLevel({ model: 'gpt-5.6-terra' }, { thinkingLevel: 'max' })).toEqual({
       model: 'gpt-5.6-terra',
       reasoning: { effort: 'max' },
     })
   })
 
   test('Given an upstream reasoning mode When injecting Then strips mode from the request', () => {
-    expect(injectOpenAIThinkingLevel({
+    expect(injectOpenAIReasoningLevel({
       model: 'gpt-5.6',
       reasoning: { effort: 'high', mode: 'pro', summary: 'auto' },
     }, { thinkingLevel: 'high' })).toEqual({

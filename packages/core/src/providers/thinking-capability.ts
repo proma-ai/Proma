@@ -11,7 +11,7 @@
  *
  * 本模块根据模型 ID 推断思考协议，供适配器构造请求体时分支使用。
  */
-import type { ProviderType } from '@proma/shared'
+import { resolveReasoningProfile, type ProviderType } from '@proma/shared'
 
 /** 思考协议能力 */
 export type ThinkingMode =
@@ -36,6 +36,8 @@ export type ThinkingDisableStrategy =
 export interface ThinkingCapability {
   mode: ThinkingMode
   disableStrategy: ThinkingDisableStrategy
+  /** adaptive effort 模型的默认强度；仅在支持 output_config.effort 时设置。 */
+  effort?: string
 }
 
 /**
@@ -62,6 +64,20 @@ export function detectThinkingCapability(
   providerType: ProviderType,
   modelId: string,
 ): ThinkingCapability {
+  const profile = resolveReasoningProfile({
+    modelId,
+    transport: 'anthropic-messages',
+  })
+  const encoding = profile?.encodings['anthropic-messages']
+  if (encoding?.kind === 'adaptive-effort') {
+    const effort = profile && encoding.effortMap[profile.defaultLevel]
+    return {
+      mode: 'adaptive-preferred',
+      disableStrategy: 'explicit-disabled',
+      ...(typeof effort === 'string' ? { effort } : {}),
+    }
+  }
+
   // DeepSeek v4 系列（按模型 ID 识别，不依赖 providerType）：
   // effort-based-max 模式会在思考关闭时显式发 `{type:'disabled'}`，这是 DeepSeek v4 的硬要求
   if (startsWith(modelId, 'deepseek-v4')) {

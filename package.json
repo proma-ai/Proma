@@ -42,6 +42,10 @@
     "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.201",
     "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.201",
     "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.201",
+    "@earendil-works/pi-agent-core": "0.82.1",
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-tui": "0.82.1",
     "@tiptap/core": "3.19.0",
     "@tiptap/extension-blockquote": "3.19.0",
     "@tiptap/extension-bold": "3.19.0",
@@ -80,13 +84,9 @@
     "@tiptap/react": "3.19.0",
     "@tiptap/starter-kit": "3.19.0",
     "@tiptap/suggestion": "3.20.0",
-    "prosemirror-model": "1.25.9",
-    "@earendil-works/pi-agent-core": "0.80.9",
-    "@earendil-works/pi-ai": "0.80.9",
-    "@earendil-works/pi-coding-agent": "0.80.9",
-    "@earendil-works/pi-tui": "0.80.9"
+    "prosemirror-model": "1.25.9"
   },
   "patchedDependencies": {
-    "@earendil-works/pi-ai@0.80.9": "patches/@earendil-works%2Fpi-ai@0.80.9.patch"
+    "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch"
   }
 }

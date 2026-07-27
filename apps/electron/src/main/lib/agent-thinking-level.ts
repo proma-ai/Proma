@@ -1,32 +1,27 @@
-import { isOpenAIReasoningMaxSupportedModel, isPromaOfficialOpenAIReasoningModel, type AgentSessionMeta, type AgentThinkingLevel, type ProviderType } from '@proma/shared'
+import { inferReasoningTransport, isPromaOfficialOpenAIReasoningModel, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningProfile, type AgentSessionMeta, type AgentThinkingLevel, type ProviderType, type ReasoningCapability } from '@proma/shared'
 import type { AppSettings } from '../../types'
 
 type ThinkingSettings = Pick<AppSettings, 'agentThinking' | 'agentEffort'>
-type ThinkingSessionMeta = Pick<AgentSessionMeta, 'openAIThinkingLevel'>
-
-function supportsSessionOpenAIThinkingLevel(
-  provider: ProviderType | undefined,
-  modelId: string | undefined,
-): boolean {
-  return provider === 'openai-codex'
-    || provider === 'openai-responses'
-    || provider === 'openai'
-    || provider === 'custom'
-    || (provider === 'proma' && isPromaOfficialOpenAIReasoningModel(modelId))
-}
+type ThinkingSessionMeta = Pick<AgentSessionMeta, 'reasoningLevel' | 'openAIThinkingLevel'>
 
 export function resolvePiThinkingLevel(
   settings: ThinkingSettings,
   sessionMeta: ThinkingSessionMeta | undefined,
   provider: ProviderType | undefined,
   modelId?: string,
+  capability?: ReasoningCapability,
+  modelApiProtocol?: 'anthropic-messages' | 'openai-responses',
 ): AgentThinkingLevel {
-  if (supportsSessionOpenAIThinkingLevel(provider, modelId) && sessionMeta?.openAIThinkingLevel) {
-    if (sessionMeta.openAIThinkingLevel === 'max' && modelId && !isOpenAIReasoningMaxSupportedModel(modelId)) {
-      return 'xhigh'
-    }
-    return sessionMeta.openAIThinkingLevel
-  }
+  const reasoningProfile = resolveReasoningProfile({
+    modelId,
+    transport: provider === 'proma' && (isPromaOfficialOpenAIReasoningModel(modelId) || modelApiProtocol === 'openai-responses')
+      ? 'openai-responses'
+      : inferReasoningTransport(provider),
+  })
+  const persistedLevel = sessionMeta?.reasoningLevel ?? sessionMeta?.openAIThinkingLevel
+  const configuredLevel = settings.agentThinking?.type === 'disabled' ? 'off' : settings.agentEffort
+  if (reasoningProfile) return normalizeReasoningLevel(reasoningProfile, persistedLevel ?? configuredLevel)!
+  if (capability) return normalizeReasoningCapabilityLevel(capability, persistedLevel ?? configuredLevel)!
   if (settings.agentThinking?.type === 'disabled') return 'off'
   if (settings.agentEffort === 'max') return 'xhigh'
   return settings.agentEffort ?? 'high'

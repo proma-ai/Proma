@@ -116,12 +116,8 @@ import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
 import { sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
 import { useOpenPreview } from '@/components/diff/preview-opener'
-import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, ModelOption, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
-import {
-  inferAgentSdkContextWindow, inferContextWindow, isCodexFastModeSupportedModel,
-  isOpenAIReasoningMaxSupportedModel, isOpenAIReasoningSupportedModel,
-  isPromaOfficialOpenAIReasoningModel, MAX_ATTACHMENT_SIZE, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
-} from '@proma/shared'
+import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
+import { inferAgentSdkContextWindow, inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, isPromaOfficialOpenAIReasoningModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
@@ -228,9 +224,10 @@ function isStaleAgentQueueError(error: unknown): boolean {
 
 const OPENAI_THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const OPENAI_STANDARD_THINKING_LEVELS = OPENAI_THINKING_LEVELS.slice(0, -1)
-type OpenAIThinkingLevel = (typeof OPENAI_THINKING_LEVELS)[number]
+type OpenAIThinkingLevel = AgentThinkingLevel
 const OPENAI_THINKING_LABELS: Record<OpenAIThinkingLevel, string> = {
   off: '关闭',
+  minimal: '最小',
   low: '低',
   medium: '中',
   high: '高',
@@ -267,7 +264,10 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const isCodex = Boolean(codexConfig)
   const thinkingLevels = codexConfig?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
-  const normalizedLevel = normalizeOpenAIThinkingLevel(codexConfig?.thinkingLevel, thinkingLevels)
+  const normalizedLevel = normalizeOpenAIThinkingLevel(
+    codexConfig?.thinkingLevel,
+    thinkingLevels,
+  )
   const isEnabled = isCodex ? normalizedLevel !== 'off' : agentThinking?.type === 'adaptive'
   const sliderPosition = thinkingLevels.indexOf(normalizedLevel)
 
@@ -336,7 +336,7 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
                   max={thinkingLevels.length - 1}
                   step={1}
                   disabled={codexConfig.disabled}
-                  aria-label="OpenAI 思考深度"
+                  aria-label="思考深度"
                 />
                 <div className="flex justify-between text-[10px] text-muted-foreground">
                   {thinkingLevels.map((level) => <span key={level}>{OPENAI_THINKING_LABELS[level]}</span>)}
@@ -665,30 +665,62 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     ? stableChannel.id
     : null
   const planQuotaChannelUpdatedAt = planQuotaChannelId ? stableChannel?.updatedAt : undefined
-  const agentChannelProvider = React.useMemo(
-    () => globalChannels.find((c) => c.id === agentChannelId)?.provider,
+  const agentChannel = React.useMemo(
+    () => globalChannels.find((channel) => channel.id === agentChannelId),
     [globalChannels, agentChannelId],
+  )
+  const agentChannelProvider = agentChannel?.provider
+  const agentModelApiProtocol = React.useMemo(
+    () => (agentChannel?.agentModels ?? agentChannel?.models ?? []).find((model) => model.id === agentModelId)?.apiProtocol,
+    [agentChannel, agentModelId],
   )
   const isCodexFastModeAvailable = hasSessionMeta
     && sessionAgentRuntime === 'pi'
     && agentChannelProvider === 'openai-codex'
     && isCodexFastModeSupportedModel(agentModelId ?? undefined)
   const codexFastModeEnabled = isCodexFastModeAvailable && sessionMeta?.codexFastMode === true
-  const isOpenAIThinkingAvailable = hasSessionMeta
-    && sessionAgentRuntime === 'pi'
-    && (agentChannelProvider === 'openai-codex'
-      || agentChannelProvider === 'openai-responses'
-      || agentChannelProvider === 'openai'
-      || agentChannelProvider === 'custom'
-      || (agentChannelProvider === 'proma' && isPromaOfficialOpenAIReasoningModel(agentModelId ?? undefined)))
-    && isOpenAIReasoningSupportedModel(agentModelId ?? undefined)
-  const openAIThinkingLevels = isOpenAIReasoningMaxSupportedModel(agentModelId ?? undefined)
-    ? OPENAI_THINKING_LEVELS
-    : OPENAI_STANDARD_THINKING_LEVELS
+  const reasoningProfile = hasSessionMeta && sessionAgentRuntime === 'pi'
+    ? resolveReasoningProfile({
+      modelId: agentModelId ?? undefined,
+      transport: agentChannelProvider === 'proma' && (isPromaOfficialOpenAIReasoningModel(agentModelId ?? undefined) || agentModelApiProtocol === 'openai-responses')
+        ? 'openai-responses'
+        : inferReasoningTransport(agentChannelProvider),
+    })
+    : undefined
+  const reasoningCapabilityKey = `${sessionAgentRuntime}:${agentChannelId ?? ''}:${agentModelId ?? ''}:${agentModelApiProtocol ?? ''}`
+  const [piReasoningCapability, setPiReasoningCapability] = React.useState<{
+    key: string
+    capability: ReasoningCapability | undefined
+  }>({ key: '', capability: undefined })
+  React.useEffect(() => {
+    if (!hasSessionMeta || sessionAgentRuntime !== 'pi' || !agentChannelId || !agentModelId) {
+      setPiReasoningCapability({ key: reasoningCapabilityKey, capability: undefined })
+      return
+    }
+    let cancelled = false
+    void window.electronAPI.getPiReasoningCapability(agentChannelId, agentModelId)
+      .then((capability) => { if (!cancelled) setPiReasoningCapability({ key: reasoningCapabilityKey, capability }) })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[AgentView] 读取 Pi reasoning capability 失败:', error)
+          setPiReasoningCapability({ key: reasoningCapabilityKey, capability: undefined })
+        }
+      })
+    return () => { cancelled = true }
+  }, [agentChannelId, agentModelId, hasSessionMeta, reasoningCapabilityKey, sessionAgentRuntime])
+  const effectiveReasoningCapability = piReasoningCapability.key === reasoningCapabilityKey
+    ? piReasoningCapability.capability ?? resolveReasoningCapability({ profile: reasoningProfile })
+    : resolveReasoningCapability({ profile: reasoningProfile })
+  const isSessionThinkingAvailable = Boolean(effectiveReasoningCapability)
+  const openAIThinkingLevels = effectiveReasoningCapability?.levels ?? OPENAI_STANDARD_THINKING_LEVELS
   const fallbackOpenAIThinkingLevel: AgentThinkingLevel = agentEffort === 'max'
     ? 'xhigh'
     : agentEffort ?? (agentThinking?.type === 'adaptive' ? 'high' : 'off')
-  const openAIThinkingLevel = sessionMeta?.openAIThinkingLevel ?? fallbackOpenAIThinkingLevel
+  const persistedReasoningLevel = sessionMeta?.reasoningLevel ?? sessionMeta?.openAIThinkingLevel
+  const normalizedReasoningLevel = reasoningProfile
+    ? normalizeReasoningLevel(reasoningProfile, persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
+    : normalizeReasoningCapabilityLevel(effectiveReasoningCapability, persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
+  const openAIThinkingLevel = normalizedReasoningLevel ?? (persistedReasoningLevel ?? fallbackOpenAIThinkingLevel)
 
   // 检查 Agent 渠道列表中是否存在可用的模型（渠道 enabled + 模型 enabled）
   const hasAvailableModel = React.useMemo(() => {
@@ -714,13 +746,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const channel = globalChannels.find((c) => c.id === agentChannelId && c.enabled)
     if (!channel) return
 
-      // Agent 优先使用 agentModels，回退到 models
-      const modelList = channel.agentModels ?? channel.models
-      // Proma 官方渠道优先选择默认 Agent 模型
-      const preferredModel = channel.provider === 'proma'
-        ? modelList.find((m) => m.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL && m.enabled)
-        : undefined
-      const firstModel = preferredModel ?? modelList.find((m) => m.enabled)
+    // Agent 优先使用 agentModels，回退到 models；Claude runtime 不可自动选择 Pi-only 模型。
+    const modelList = (channel.agentModels ?? channel.models).filter(
+      (model) => model.enabled && (sessionAgentRuntime === 'pi' || model.agentRuntime !== 'pi'),
+    )
+    // Proma 官方渠道优先选择默认 Agent 模型。
+    const preferredModel = channel.provider === 'proma'
+      ? modelList.find((model) => model.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL)
+      : undefined
+    const firstModel = preferredModel ?? modelList[0]
       if (!firstModel) return
 
     // 更新 per-session map（带幂等守卫，避免无意义写入导致 effect 自循环）
@@ -739,7 +773,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         agentModelId: firstModel.id,
       }).catch(console.error)
     }
-  }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap, setDefaultModelId])
+  }, [agentChannelId, agentModelId, globalChannels, sessionAgentRuntime, sessionId, setSessionModelMap, setDefaultModelId])
 
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
@@ -1901,16 +1935,16 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [backgroundWaiting, codexFastModeEnabled, isCodexFastModeAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
 
-  const updateOpenAIThinkingLevel = React.useCallback(async (thinkingLevel: AgentThinkingLevel): Promise<void> => {
-    if (!isOpenAIThinkingAvailable || streaming || backgroundWaiting || !sessionMeta) return
+  const updateReasoningLevel = React.useCallback(async (thinkingLevel: AgentThinkingLevel): Promise<void> => {
+    if (!isSessionThinkingAvailable || streaming || backgroundWaiting || !sessionMeta) return
 
     const previousSessionMeta = sessionMeta
     setAgentSessions((prev) => prev.map((item) => (
-      item.id === sessionId ? { ...item, openAIThinkingLevel: thinkingLevel, updatedAt: Date.now() } : item
+      item.id === sessionId ? { ...item, reasoningLevel: thinkingLevel, updatedAt: Date.now() } : item
     )))
 
     try {
-      const updated = await window.electronAPI.updateSessionOpenAIThinkingLevel(sessionId, thinkingLevel)
+      const updated = await window.electronAPI.updateSessionReasoningLevel(sessionId, thinkingLevel)
       setAgentSessions((prev) => prev.map((item) => item.id === sessionId ? updated : item))
 
       try {
@@ -1924,7 +1958,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       setAgentSessions((prev) => prev.map((item) => item.id === sessionId ? previousSessionMeta : item))
       toast.error('思考深度切换失败', { description: getErrorMessage(error) })
     }
-  }, [backgroundWaiting, isOpenAIThinkingAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
+  }, [backgroundWaiting, isSessionThinkingAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
 
   /** 构建 externalSelectedModel 给 ModelSelector */
   const computedSelectedModel = React.useMemo(() => {
@@ -2700,11 +2734,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             setAgentThinking(next)
             window.electronAPI.updateSettings({ agentThinking: next })
           }}
-          codexConfig={isOpenAIThinkingAvailable ? {
+          codexConfig={isSessionThinkingAvailable ? {
             thinkingLevel: openAIThinkingLevel,
             levels: openAIThinkingLevels,
             disabled: streaming || backgroundWaiting,
-            onThinkingLevelChange: (level) => { void updateOpenAIThinkingLevel(level) },
+            onThinkingLevelChange: (level) => { void updateReasoningLevel(level) },
           } : undefined}
         />
       ),
@@ -2780,10 +2814,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     isCodexFastModeAvailable,
     codexFastModeEnabled,
     handleCodexFastModeChange,
-    isOpenAIThinkingAvailable,
+    isSessionThinkingAvailable,
     openAIThinkingLevel,
     openAIThinkingLevels,
-    updateOpenAIThinkingLevel,
+    updateReasoningLevel,
     agentModelId,
     handleModelSelect,
     sessionAgentRuntime,

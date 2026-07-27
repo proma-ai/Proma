@@ -6,7 +6,7 @@ productName: Proma
 copyright: Copyright © 2024-2026 Erlich Liu
 
 # Electron 版本（CI 环境 bun workspace 下无法自动检测，需显式指定）
-electronVersion: 39.5.1
+electronVersion: 43.2.0
 
 # 目录配置
 directories:
