@@ -81,6 +81,7 @@ type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
 const PI_NATIVE_MAX_RETRIES = 8
 const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
+const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
 /** Pi SDK 查询选项（扩展通用 AgentQueryInput） */
 export interface PiAgentQueryOptions extends AgentQueryInput {
@@ -777,6 +778,29 @@ function createTerminatingJsonToolResult(payload: unknown): AgentToolResult<unkn
   } as AgentToolResult<unknown>
 }
 
+export const PI_COMPACTION_CONTINUATION_PROMPT = `<proma_compaction_continuation>
+当前会话上下文已经安全压缩。请依据压缩摘要、保留的最近上下文和已持久化的交接状态，继续完成原始用户任务。
+
+- 不要重复已经完成或已提交的操作；先核验当前状态。
+- 若仍有工作，立即执行下一项具体行动。
+- 只有原始需求全部完成时才给出最终答复；若确实受阻，明确说明阻塞原因。
+</proma_compaction_continuation>`
+
+export function planPiCompactionContinuation(options: {
+  continuationCount: number
+  abortRequested: boolean
+  runtimeLimitReached: boolean
+}):
+  | { shouldContinue: true; prompt: string }
+  | { shouldContinue: false; reason: 'aborted' | 'runtime_limit' | 'continuation_limit' } {
+  if (options.abortRequested) return { shouldContinue: false, reason: 'aborted' }
+  if (options.runtimeLimitReached) return { shouldContinue: false, reason: 'runtime_limit' }
+  if (options.continuationCount >= MAX_AUTOMATIC_COMPACTION_CONTINUATIONS) {
+    return { shouldContinue: false, reason: 'continuation_limit' }
+  }
+  return { shouldContinue: true, prompt: PI_COMPACTION_CONTINUATION_PROMPT }
+}
+
 export function canRunCurrentSessionCompaction(toolNames: string[]): boolean {
   return toolNames.length === 1 && toolNames[0] === 'CompactContext'
 }
@@ -813,14 +837,14 @@ export function buildCurrentSessionCompactionTool(
   const definition = sdk.defineTool({
     name: 'CompactContext',
     label: '压缩当前会话上下文',
-    description: 'Compact only the current Pi Agent session after this turn finishes. Before calling, persist a durable handoff or checkpoint to workspace files. This ends the current Agent turn; continue from the saved handoff in a later turn.',
-    promptSnippet: 'CompactContext: after persisting a durable handoff/checkpoint, end this turn and compact the current session context.',
+    description: 'Compact only the current Pi Agent session after this turn finishes. Before calling, persist a durable handoff or checkpoint to workspace files. Proma will compact the current session, then automatically continue the original task from the compacted context.',
+    promptSnippet: 'CompactContext: after persisting a durable handoff/checkpoint, compact the current session context. Proma will automatically continue the original task after compaction.',
     parameters: Type.Object({}),
     async execute() {
       requestCompaction()
       return createTerminatingJsonToolResult({
         status: 'scheduled',
-        message: '将在当前 Agent 回合安全结束后压缩当前会话上下文。请在下一回合从已持久化的交接状态继续。',
+        message: '将在当前 Agent 回合安全结束后压缩当前会话上下文，并自动从已持久化的交接状态继续原始任务。',
       })
     },
   })
@@ -861,6 +885,16 @@ export async function compactCurrentSessionAfterTurn(
     onNoop(createCompactionNoopMessage(session.sessionId, error))
     return 'noop'
   }
+}
+
+function createCompactionContinuationLimitResult(sessionId: string): SDKMessage {
+  return {
+    type: 'result',
+    subtype: 'error_during_execution',
+    terminal_reason: 'compaction_continuation_limit',
+    errors: [`自动压缩续跑已达上限（${MAX_AUTOMATIC_COMPACTION_CONTINUATIONS} 次），任务未确认完成。请检查当前状态后继续。`],
+    session_id: sessionId,
+  } as unknown as SDKMessage
 }
 
 function stringFromInput(input: Record<string, unknown>, keys: string[], fallback = ''): string {
@@ -1321,6 +1355,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         : sdk.SessionManager.create(cwd, input.piSessionDir)
       const { modelRuntime, model } = await buildModel(sdk, input)
       let compactContextRequested = false
+      let pendingCompactionContinuation: string | undefined
+      let automaticCompactionContinuations = 0
       let pendingTerminalResult: SDKMessage | undefined
       const customTools = [
         buildCurrentSessionCompactionTool(
@@ -1650,7 +1686,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           .finally(cleanupActiveSession)
       } else {
         const runPromptChain = async (): Promise<void> => {
-          let nextPrompt: string | undefined = appendOutputFormatInstruction(input.prompt, input.outputFormat)
+          let nextPrompt: { content: string; skipSkillExpansion: boolean } | undefined = {
+            content: appendOutputFormatInstruction(input.prompt, input.outputFormat),
+            skipSkillExpansion: false,
+          }
           let nextInterrupt: PendingInterruptPrompt | undefined
           while (nextPrompt !== undefined) {
             const currentInterrupt = nextInterrupt
@@ -1660,9 +1699,12 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               rejectPendingInterruptPrompts(active, createAbortError())
               return
             }
+            const promptInput = nextPrompt
             let prompt: string
             try {
-              prompt = await preparePromptWithPromaSkills(resourceLoader, nextPrompt, input.skillMentions)
+              prompt = promptInput.skipSkillExpansion
+                ? promptInput.content
+                : await preparePromptWithPromaSkills(resourceLoader, promptInput.content, input.skillMentions)
             } catch (error) {
               currentInterrupt?.rejectAccepted(error)
               throw error
@@ -1678,8 +1720,27 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               await session.prompt(prompt, { source: 'rpc' })
               persistPiEntryBindings()
               if (compactContextRequested) {
-                await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
+                try {
+                  await compactCurrentSessionAfterTurn(session, (message) => queue.push(message))
+                } catch (error) {
+                  // 用户在压缩期间停止时，Pi 会取消 summarization；这是正常中止而不是运行错误。
+                  if (active.abortRequested) return
+                  throw error
+                }
                 compactContextRequested = false
+                const continuation = planPiCompactionContinuation({
+                  continuationCount: automaticCompactionContinuations,
+                  abortRequested: active.abortRequested,
+                  runtimeLimitReached: runtimeGuard.shouldStopBeforeNextTurn(),
+                })
+                if (continuation.shouldContinue) {
+                  automaticCompactionContinuations += 1
+                  pendingCompactionContinuation = appendOutputFormatInstruction(continuation.prompt, input.outputFormat)
+                  // 当前终态仅表示为执行压缩而结束的内部 loop，不应让上层把原任务视为完成。
+                  pendingTerminalResult = undefined
+                } else if (continuation.reason === 'continuation_limit') {
+                  pendingTerminalResult = createCompactionContinuationLimitResult(session.sessionId)
+                }
               }
               if (pendingTerminalResult) {
                 queue.push(pendingTerminalResult)
@@ -1701,7 +1762,12 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             }
             const pendingInterrupt = active.pendingInterruptPrompts.shift()
             nextInterrupt = pendingInterrupt
-            nextPrompt = pendingInterrupt?.content
+            if (pendingInterrupt) {
+              nextPrompt = { content: pendingInterrupt.content, skipSkillExpansion: false }
+            } else if (pendingCompactionContinuation) {
+              nextPrompt = { content: pendingCompactionContinuation, skipSkillExpansion: true }
+              pendingCompactionContinuation = undefined
+            }
           }
         }
 
@@ -1732,6 +1798,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     active.abortRequested = true
     rejectPendingInterruptPrompts(active, createAbortError())
     if (!active.session) rejectActiveReady(active, createAbortError())
+    active.session?.abortCompaction()
     active.session?.abort().catch(() => {})
   }
 
