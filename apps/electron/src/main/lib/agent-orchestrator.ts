@@ -1119,7 +1119,9 @@ export class AgentOrchestrator {
 
     // 5. 状态初始化
     const accumulatedMessages: SDKMessage[] = []
-    let resolvedModel = modelId || DEFAULT_MODEL_ID
+    // 委派子会话必须继承当前实际运行的模型；未显式传入时与 runtime 的默认值保持一致。
+    const selectedModelId = modelId || DEFAULT_MODEL_ID
+    let resolvedModel = selectedModelId
     let titleGenerationStarted = false
     /** 捕获到的 SDK session ID（用于 resume / recovery） */
     let capturedSdkSessionId = existingSdkSessionId
@@ -1257,7 +1259,7 @@ export class AgentOrchestrator {
           mcpServers,
           sessionId,
           channelId,
-          modelId,
+          modelId: selectedModelId,
           agentRuntime,
           workspaceId,
           workspaceSlug,
@@ -1271,7 +1273,7 @@ export class AgentOrchestrator {
           const result = await buildPiBuiltinTools(piSdk, {
             sessionId,
             channelId,
-            modelId,
+            modelId: selectedModelId,
             agentRuntime,
             workspaceId,
             workspaceSlug,
@@ -1569,7 +1571,6 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
-      const selectedModelId = modelId || DEFAULT_MODEL_ID
       const piReasoningCapability = agentRuntime === 'pi'
         ? await resolvePiReasoningCapability(channel.provider, selectedModelId)
         : undefined
@@ -1588,6 +1589,7 @@ export class AgentOrchestrator {
         sessionId,
         permissionMode: initialPermissionMode,
         collaborationAvailable,
+        currentModelId: selectedModelId,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
       const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
         // 仅在 session_id 真正变化时才持久化。SDK v2 几乎每条消息都会回调 onSessionId，

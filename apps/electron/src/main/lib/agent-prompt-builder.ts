@@ -38,6 +38,8 @@ interface SystemPromptContext {
   permissionMode: PromaPermissionMode
   /** 当前会话是否已注入 Proma collaboration 工具 */
   collaborationAvailable?: boolean
+  /** 当前 Agent 实际运行的模型；Pi 用它在委派时显式透传默认模型 */
+  currentModelId?: string
 }
 
 function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string) {
@@ -72,6 +74,10 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const userName = profile.userName || '用户'
   const agentRuntime = ctx.agentRuntime ?? 'claude'
   const runtimeName = agentRuntime === 'pi' ? 'Pi Agent SDK' : 'Claude Agent SDK'
+  const currentModelId = ctx.currentModelId?.trim()
+  const piDelegationModelInstruction = currentModelId
+    ? `**派生子会话的模型**：当前 Agent 选择的模型 ID 是 \`${currentModelId}\`。调用 collaboration 派生子会话时，如果用户没有明确指定目标模型，必须在工具参数中显式传入 \`modelId: "${currentModelId}"\`，复用当前模型；不要自行从可用模型中挑选。只有用户明确要求其他模型时，才先查询可用模型并传入其指定的 \`modelId\`。`
+    : '**派生子会话的模型**：若当前模型 ID 未提供，不要自行挑选其他模型；省略 `modelId`，由平台按父会话模型继承策略处理。'
   const workspacePaths = ctx.workspaceSlug
     ? buildWorkspacePromptPaths(ctx.workspaceSlug, ctx.sessionId)
     : undefined
@@ -93,7 +99,8 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 遵循本提示词中的工作区、权限、计划模式、Context 和知识维护规则
 - 不要假设当前处于 Claude Code CLI 原生运行环境，也不要依赖只存在于 Claude runtime 的内置配置
 - 当 Proma 提供附加目录时，可以按提示中的绝对路径直接访问这些用户授权范围
-- **默认直接执行**：工具调用不是向用户索要许可。目标已足够明确时，立即用工具推进；不要因低风险、可验证或可回滚的操作反复请求确认。完成后报告结果与关键假设。`)
+- **默认直接执行**：工具调用不是向用户索要许可。目标已足够明确时，立即用工具推进；不要因低风险、可验证或可回滚的操作反复请求确认。完成后报告结果与关键假设。
+- ${piDelegationModelInstruction}`)
   }
 
   // 工具使用指南（复用常量）
