@@ -282,6 +282,33 @@ function findCatalogModelById(models: readonly PiCatalogModel[], modelId: string
     model.id.toLowerCase() === normalized || model.name.toLowerCase() === normalized)
 }
 
+/**
+ * Extract an unambiguous Claude family/version key from common provider aliases.
+ *
+ * Catalogs vary between `claude-opus-4-6`, `Claude Opus 4.6`, and provider-scoped
+ * forms such as `anthropic.claude-opus-4-6-v1`. The fallback intentionally requires
+ * a family plus full major/minor version. Major-only matching is only allowed for
+ * Fable, catalog entries, or an explicit `-promo` alias.
+ */
+function getClaudeFamilyKey(modelRef: string, allowMajorOnly = false): string | undefined {
+  const normalized = modelRef.toLowerCase()
+  const familyFirst = normalized.match(/claude[\s._:/-]+(opus|sonnet|haiku|fable)[\s._:/-]+(\d+)(?:[\s._:/-]+(\d+))?/)
+  const versionFirst = normalized.match(/claude[\s._:/-]+(\d+)(?:[\s._:/-]+(\d+))?[\s._:/-]+(opus|sonnet|haiku)/)
+  const family = familyFirst?.[1] ?? versionFirst?.[3]
+  const major = familyFirst?.[2] ?? versionFirst?.[1]
+  const minor = familyFirst?.[3] ?? versionFirst?.[2]
+  const isPromoAlias = /[\s._:/-]promo$/.test(normalized)
+  if (!family || !major || (!minor && family !== 'fable' && !allowMajorOnly && !isPromoAlias)) return undefined
+  return `${family}-${major}${minor ? `-${minor}` : ''}`
+}
+
+function findClaudeCatalogModel(models: readonly PiCatalogModel[], modelId: string): PiCatalogModel | undefined {
+  const familyKey = getClaudeFamilyKey(modelId)
+  if (!familyKey) return undefined
+  return models.find((model) =>
+    getClaudeFamilyKey(model.id, true) === familyKey || getClaudeFamilyKey(model.name, true) === familyKey)
+}
+
 async function getCatalogModels(provider: KnownProvider): Promise<readonly PiCatalogModel[]> {
   try {
     const { getModels } = await loadPiAiCompat()
@@ -296,19 +323,37 @@ async function findPiCatalogModel(provider: ProviderType, modelId: string): Prom
     return findCatalogModelById(await getCodexCatalogModels(), modelId)
   }
 
-  const checked = new Set<string>()
-  for (const candidate of candidatePiProviders(provider)) {
-    checked.add(candidate)
-    const model = findCatalogModelById(await getCatalogModels(candidate as KnownProvider), modelId)
+  const preferredProviders = candidatePiProviders(provider)
+  const { getProviders } = await loadPiAiCompat()
+  const checked = new Set(preferredProviders)
+  const fallbackProviders = getProviders().filter((candidate) => !checked.has(candidate))
+
+  // The configured provider owns both exact and safe Claude-family matching.
+  for (const candidate of preferredProviders) {
+    const model = findCatalogModelById(await getCatalogModels(candidate), modelId)
     if (model) return model
   }
 
-  // 兼容自定义代理和 Anthropic-compatible：模型 id 常常仍是官方 id。
-  const { getProviders } = await loadPiAiCompat()
-  for (const candidate of getProviders()) {
-    if (checked.has(candidate)) continue
+  const claudeFamilyKey = getClaudeFamilyKey(modelId)
+  if (claudeFamilyKey) {
+    for (const candidate of preferredProviders) {
+      const model = findClaudeCatalogModel(await getCatalogModels(candidate), modelId)
+      if (model) return model
+    }
+  }
+
+  // Generic/custom channels can still match a provider-scoped catalog ID exactly.
+  for (const candidate of fallbackProviders) {
     const model = findCatalogModelById(await getCatalogModels(candidate), modelId)
     if (model) return model
+  }
+
+  // Only relax aliases after every exact lookup has failed.
+  if (claudeFamilyKey) {
+    for (const candidate of fallbackProviders) {
+      const model = findClaudeCatalogModel(await getCatalogModels(candidate), modelId)
+      if (model) return model
+    }
   }
   return undefined
 }
