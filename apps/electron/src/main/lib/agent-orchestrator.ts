@@ -31,6 +31,7 @@ import {
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
   inferReasoningTransport,
+  resolveAgentSdkModelId,
   resolveReasoningProfile,
   isAgentCompatibleProvider,
 } from '@proma/shared'
@@ -1694,7 +1695,8 @@ export class AgentOrchestrator {
         agentRuntime: 'claude',
         sessionId,
         prompt: finalPrompt,
-        model: modelId || DEFAULT_MODEL_ID,
+        // 仅 Claude Agent SDK 使用 `[1m]` 扩展上下文变体；Pi 分支保持原始模型 ID。
+        model: resolveAgentSdkModelId(selectedModelId, channel.provider),
         cwd: agentCwd,
         sdkCliPath: cliPath!,
         env: sdkEnv,
