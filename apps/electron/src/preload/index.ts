@@ -444,8 +444,11 @@ export interface ElectronAPI {
   /** 切换当前会话的 ChatGPT Codex Fast Mode */
   updateSessionCodexFastMode: (sessionId: string, enabled: boolean) => Promise<AgentSessionMeta>
 
-  /** 更新当前会话的 Codex 思考深度 */
-  updateSessionOpenAIThinkingLevel: (sessionId: string, thinkingLevel: AgentThinkingLevel) => Promise<AgentSessionMeta>
+  /** 查询 Pi catalog 或专属 profile 支持的会话级推理档位 */
+  getPiReasoningCapability: (channelId: string, modelId: string) => Promise<import('@proma/shared').ReasoningCapability | undefined>
+
+  /** 更新当前会话的推理深度 */
+  updateSessionReasoningLevel: (sessionId: string, thinkingLevel: AgentThinkingLevel) => Promise<AgentSessionMeta>
 
   /** 更新 Agent 会话模型选择 */
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => Promise<AgentSessionMeta>
@@ -1485,8 +1488,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_CODEX_FAST_MODE, sessionId, enabled)
   },
 
-  updateSessionOpenAIThinkingLevel: (sessionId: string, thinkingLevel: AgentThinkingLevel) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_OPENAI_REASONING, sessionId, thinkingLevel)
+  getPiReasoningCapability: (channelId: string, modelId: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PI_REASONING_CAPABILITY, channelId, modelId)
+  },
+
+  updateSessionReasoningLevel: (sessionId: string, thinkingLevel: AgentThinkingLevel) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_REASONING_LEVEL, sessionId, thinkingLevel)
   },
 
   updateAgentSessionModel: (id: string, channelId?: string, modelId?: string) => {

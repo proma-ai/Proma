@@ -14,7 +14,8 @@
  * - Opus 4.6 / Sonnet 5：推荐 adaptive
  * - DeepSeek v4 系列：`{type: 'enabled'}` + `output_config.effort = 'max'`
  * - 更老的 Claude 系列及 DeepSeek v3：manual（旧版 `{type: 'enabled', budget_tokens}`）
- * - Kimi（kimi-api / kimi-coding）：不发 thinking 字段（K2 系列非 reasoning 模型）
+ * - K3 / GLM-5.2：由 shared reasoning profile 编译为 adaptive + effort
+ * - Kimi（K2 系列）：不发 thinking 字段
  * - MiniMax：不发 thinking 字段，接收服务端返回的 thinking 块
  *
  * Kimi Coding Plan 特殊要求：
@@ -346,6 +347,9 @@ export class AnthropicAdapter implements ProviderAdapter {
         body.thinking = {
           type: 'adaptive',
           display: 'summarized',
+        }
+        if (capability.effort) {
+          body.output_config = { effort: capability.effort }
         }
       } else if (capability.mode === 'manual-only') {
         body.thinking = {

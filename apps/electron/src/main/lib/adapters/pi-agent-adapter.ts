@@ -25,7 +25,7 @@ import type {
   SDKUserMessageInput,
   TypedError,
 } from '@proma/shared'
-import { isCodexFastModeSupportedModel, isOpenAIReasoningSupportedModel } from '@proma/shared'
+import { inferReasoningTransport, isCodexFastModeSupportedModel, resolveReasoningProfile } from '@proma/shared'
 import {
   THINKING_SIGNATURE_ERROR_MESSAGE,
   THINKING_SIGNATURE_ERROR_TITLE,
@@ -51,7 +51,8 @@ import {
   type AgentRuntimeGuard,
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
-import { createCodexRequestSettingsExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
+import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
+import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
   convertPiMessage,
@@ -1349,6 +1350,23 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         retry: { enabled: true, maxRetries: PI_NATIVE_MAX_RETRIES, baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS },
         ...buildPiRemoteConnectionSettings(input),
       })
+      const openAIReasoningProfile = (input.provider === 'openai-codex' || input.provider === 'openai-responses')
+        ? resolveReasoningProfile({
+          modelId: input.model,
+          transport: inferReasoningTransport(input.provider),
+        })
+        : undefined
+      const extensionFactories = [
+        ...(openAIReasoningProfile
+          ? [createOpenAIReasoningRequestExtension({
+              profile: openAIReasoningProfile,
+              thinkingLevel: input.openAIThinkingLevel,
+            })]
+          : []),
+        ...(input.provider === 'openai-codex' && input.codexFastMode
+          ? [createCodexFastModeExtension({ fastMode: true })]
+          : []),
+      ]
       const resourceLoader = new sdk.DefaultResourceLoader({
         cwd,
         agentDir: input.piAgentDir,
@@ -1357,14 +1375,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         agentsFilesOverride: createPromaAgentsFilesOverride(),
-        ...((input.provider === 'openai-codex' || input.provider === 'openai-responses')
-          && model.reasoning
-          && isOpenAIReasoningSupportedModel(input.model) && {
-            extensionFactories: [createCodexRequestSettingsExtension({
-            fastMode: input.codexFastMode,
-            thinkingLevel: input.openAIThinkingLevel,
-          })],
-        }),
+        ...(model.reasoning && extensionFactories.length > 0 && { extensionFactories }),
         systemPromptOverride: () => input.systemPrompt,
       })
       await resourceLoader.reload()
@@ -1392,7 +1403,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
         // provider stream，确保 request body 与 usage.cost 都使用 priority tier。
-        session.agent.streamFn = async (requestModel, context, options) => {
+        session.agent.streamFunction = async (requestModel, context, options) => {
           const authResult = await modelRuntime.getAuth(requestModel)
           if (!authResult?.auth.apiKey) throw new Error('无法获取 ChatGPT (Codex) OAuth access token')
           const auth = authResult.auth
@@ -1417,8 +1428,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       }
       // 代理作用域必须只覆盖模型 provider stream：在整个 session.prompt() 链上设
       // AsyncLocalStorage 会把 MCP/产品工具等同一 Agent loop 中的 fetch 也错误地送进 Codex 代理。
-      const providerStreamFn = session.agent.streamFn
-      session.agent.streamFn = (requestModel, context, options) => runWithPiRequestProxy(
+      const providerStreamFn = session.agent.streamFunction
+      session.agent.streamFunction = (requestModel, context, options) => runWithPiRequestProxy(
         requestProxyDispatcher,
         () => providerStreamFn(requestModel, context, options),
       )

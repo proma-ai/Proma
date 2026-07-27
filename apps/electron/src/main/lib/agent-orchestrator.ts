@@ -30,7 +30,8 @@ import {
   isPersistableSDKSystemMessage,
   normalizeMcpTransportType,
   inferAgentSdkContextWindow,
-  isOpenAIReasoningSupportedModel,
+  inferReasoningTransport,
+  resolveReasoningProfile,
   isAgentCompatibleProvider,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
@@ -70,6 +71,7 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { applyAgentSdkAuthEnv } from './agent-sdk-auth-env'
 import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
+import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
@@ -1568,6 +1570,12 @@ export class AgentOrchestrator {
         ? appSettings.agentMaxTurns
         : undefined
       const selectedModelId = modelId || DEFAULT_MODEL_ID
+      const piReasoningCapability = agentRuntime === 'pi'
+        ? await resolvePiReasoningCapability(channel.provider, selectedModelId)
+        : undefined
+      const piThinkingLevel = agentRuntime === 'pi'
+        ? resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
+        : undefined
       const allAdditionalDirectories = collectAttachedDirectories({
         extraDirs: additionalDirectories,
         sessionMeta,
@@ -1657,10 +1665,13 @@ export class AgentOrchestrator {
           },
         }),
         ...((channel.provider === 'openai-codex' || channel.provider === 'openai-responses' || channel.provider === 'openai' || channel.provider === 'custom')
-          && isOpenAIReasoningSupportedModel(selectedModelId) && {
-            openAIThinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId),
+          && resolveReasoningProfile({
+            modelId: selectedModelId,
+            transport: inferReasoningTransport(channel.provider),
+          })?.id.startsWith('openai-reasoning-') && {
+            openAIThinkingLevel: piThinkingLevel!,
           }),
-        thinkingLevel: resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId),
+        thinkingLevel: piThinkingLevel!,
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),

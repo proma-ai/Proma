@@ -168,10 +168,10 @@ describe('Agent 会话 runtime 元数据', () => {
       expect(claudeRuntimeSession.agentRuntime).toBe('claude')
       expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('pi')
       expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.agentRuntime).toBe('claude')
-      expect(defaultRuntimeSession.openAIThinkingLevel).toBe('medium')
-      expect(claudeRuntimeSession.openAIThinkingLevel).toBe('medium')
-      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.openAIThinkingLevel).toBe('medium')
-      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.openAIThinkingLevel).toBe('medium')
+      expect(defaultRuntimeSession.reasoningLevel).toBe('medium')
+      expect(claudeRuntimeSession.reasoningLevel).toBe('medium')
+      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.reasoningLevel).toBe('medium')
+      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.reasoningLevel).toBe('medium')
     } finally {
       rmSync(settingsPath, { force: true })
     }
@@ -194,8 +194,8 @@ describe('Agent 会话 runtime 元数据', () => {
       const firstSession = manager.createAgentSession('关闭思考会话一')
       const secondSession = manager.createAgentSession('关闭思考会话二')
 
-      expect(manager.getAgentSessionMeta(firstSession.id)?.openAIThinkingLevel).toBe('off')
-      expect(manager.getAgentSessionMeta(secondSession.id)?.openAIThinkingLevel).toBe('off')
+      expect(manager.getAgentSessionMeta(firstSession.id)?.reasoningLevel).toBe('off')
+      expect(manager.getAgentSessionMeta(secondSession.id)?.reasoningLevel).toBe('off')
     } finally {
       rmSync(settingsPath, { force: true })
       rmSync(indexPath, { force: true })
@@ -203,13 +203,13 @@ describe('Agent 会话 runtime 元数据', () => {
     }
   })
 
-  test('Given Codex session settings When updating Then persists depth per session', () => {
+  test('Given session settings When updating Then persists reasoning depth per session', () => {
     const session = manager.createAgentSession('Codex 会话', undefined, undefined, undefined, 'pi')
 
-    const updated = manager.updateAgentSessionMeta(session.id, { openAIThinkingLevel: 'xhigh' })
+    const updated = manager.updateAgentSessionMeta(session.id, { reasoningLevel: 'xhigh' })
 
-    expect(updated.openAIThinkingLevel).toBe('xhigh')
-    expect(manager.getAgentSessionMeta(session.id)).toMatchObject({ openAIThinkingLevel: 'xhigh' })
+    expect(updated.reasoningLevel).toBe('xhigh')
+    expect(manager.getAgentSessionMeta(session.id)).toMatchObject({ reasoningLevel: 'xhigh' })
   })
 
   test('Given a session When star state is updated Then it persists without changing freshness or archive state', () => {

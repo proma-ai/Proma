@@ -129,9 +129,11 @@ import {
   testChannel,
   testChannelDirect,
   fetchModels,
+  getChannelById,
   getChannelPlanQuota,
 } from './lib/channel-manager'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
+import { resolvePiReasoningCapability } from './lib/adapters/pi-model-registry'
 import { serializeCodexCredentials } from '@proma/shared'
 import {
   listConversations,
@@ -2430,7 +2432,17 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.UPDATE_SESSION_OPENAI_REASONING,
+    AGENT_IPC_CHANNELS.GET_PI_REASONING_CAPABILITY,
+    async (_, channelId: string, modelId: string) => {
+      if (!channelId || !modelId) return undefined
+      const channel = getChannelById(channelId)
+      if (!channel) return undefined
+      return resolvePiReasoningCapability(channel.provider, modelId)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_SESSION_REASONING_LEVEL,
     async (_, sessionId: string, thinkingLevel: AgentThinkingLevel): Promise<AgentSessionMeta> => {
       const validThinkingLevels: AgentThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
       if (!validThinkingLevels.includes(thinkingLevel)) {
@@ -2442,7 +2454,7 @@ export function registerIpcHandlers(): void {
       if (isAgentSessionActive(sessionId)) {
         throw new Error('Agent 正在运行，完成后再切换思考深度')
       }
-      return updateAgentSessionMeta(sessionId, { openAIThinkingLevel: thinkingLevel })
+      return updateAgentSessionMeta(sessionId, { reasoningLevel: thinkingLevel })
     }
   )
 
