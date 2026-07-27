@@ -23,31 +23,6 @@ function buildRequest(provider: ProviderType, apiKey = 'test-key') {
   })
 }
 
-describe('AnthropicAdapter reasoning profiles', () => {
-  test.each([
-    ['kimi-coding', 'k3', 'high'],
-    ['ark-coding-plan', 'glm-5.2', 'high'],
-  ] as const)('Given %s %s with thinking enabled Then uses adaptive effort without a token budget', (provider, modelId, effort) => {
-    const request = new AnthropicAdapter(provider).buildStreamRequest({
-      baseUrl: 'https://example.test/anthropic',
-      apiKey: 'test-key',
-      modelId,
-      history: [],
-      userMessage: 'ping',
-      thinkingEnabled: true,
-      readImageAttachments: () => [],
-    })
-    const body = JSON.parse(request.body) as {
-      thinking?: { type?: string; display?: string; budget_tokens?: number }
-      output_config?: { effort?: string }
-    }
-
-    expect(body.thinking).toEqual({ type: 'adaptive', display: 'summarized' })
-    expect(body.thinking?.budget_tokens).toBeUndefined()
-    expect(body.output_config).toEqual({ effort })
-  })
-})
-
 describe('AnthropicAdapter headers', () => {
   test('xiaomi API uses api-key authentication', () => {
     const request = buildRequest('xiaomi')

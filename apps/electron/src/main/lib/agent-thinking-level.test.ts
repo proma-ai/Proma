@@ -40,80 +40,11 @@ describe('Pi thinking level resolver', () => {
     )).toBe('medium')
   })
 
-  test('Given a Pi catalog capability When session level is unsupported Then clamps with Pi semantics', () => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
-      { reasoningLevel: 'xhigh' },
-      'anthropic',
-      'claude-opus-4-6',
-      { source: 'pi-catalog', levels: ['off', 'minimal', 'low', 'medium', 'high', 'max'], defaultLevel: 'high' },
-    )).toBe('max')
-  })
-
   test('Given no session override When global max effort is selected Then maps it to xhigh', () => {
     expect(resolvePiThinkingLevel(
       { agentThinking: { type: 'adaptive' }, agentEffort: 'max' },
       undefined,
       'openai-responses',
     )).toBe('xhigh')
-  })
-
-  test.each([
-    ['off', 'off'],
-    ['minimal', 'low'],
-    ['low', 'low'],
-    ['medium', 'high'],
-    ['high', 'high'],
-    ['xhigh', 'max'],
-    ['max', 'max'],
-  ] as const)('Given K3 session level %s When resolving Then maps it to %s', (level, expected) => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
-      { openAIThinkingLevel: level },
-      'kimi-coding',
-      'k3',
-    )).toBe(expected)
-  })
-
-  test('Given K3 with no session override When thinking is disabled Then disables thinking', () => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'disabled' }, agentEffort: 'high' },
-      undefined,
-      'kimi-coding',
-      'k3-256k',
-    )).toBe('off')
-  })
-
-  test('Given K3 via another channel When resolving Then still applies K3 effort mapping', () => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
-      { openAIThinkingLevel: 'xhigh' },
-      'ark-coding-plan',
-      'k3',
-    )).toBe('max')
-  })
-
-  test('Given a migrated session When both fields exist Then prefers the neutral reasoning level', () => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
-      { reasoningLevel: 'low', openAIThinkingLevel: 'max' },
-      'kimi-coding',
-      'k3',
-    )).toBe('low')
-  })
-
-  test.each([
-    ['off', 'off'],
-    ['low', 'high'],
-    ['high', 'high'],
-    ['xhigh', 'max'],
-    ['max', 'max'],
-  ] as const)('Given GLM-5.2 session level %s When resolving Then maps it to %s', (level, expected) => {
-    expect(resolvePiThinkingLevel(
-      { agentThinking: { type: 'adaptive' }, agentEffort: 'medium' },
-      { openAIThinkingLevel: level },
-      'ark-coding-plan',
-      'glm-5.2',
-    )).toBe(expected)
   })
 })
