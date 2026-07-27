@@ -120,7 +120,7 @@
     "cmdk": "^1.1.1",
     "concurrently": "^9.2.1",
     "dingtalk-stream-sdk-nodejs": "^2.0.4",
-    "electron": "^39.5.1",
+    "electron": "^43.2.0",
     "electron-builder": "^25.1.8",
     "electron-updater": "^6.7.3",
     "electronmon": "^2.0.4",
