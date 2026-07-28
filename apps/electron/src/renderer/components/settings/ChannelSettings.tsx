@@ -228,10 +228,6 @@ export function ChannelSettings(): React.ReactElement {
             <SettingsCard>
               <OfficialChannelRow
                 channel={officialChannel}
-                onEdit={() => {
-                  setEditingChannel(officialChannel)
-                  setViewMode('edit')
-                }}
                 onToggle={() => handleToggle(officialChannel)}
                 onRefresh={loadChannels}
               />
@@ -429,12 +425,11 @@ function AgentOfficialProviderRow({ channel, enabled, onToggle, onRefresh }: Age
 
 interface OfficialChannelRowProps {
   channel: Channel
-  onEdit: () => void
   onToggle: () => void
   onRefresh: () => void
 }
 
-function OfficialChannelRow({ channel, onEdit, onToggle, onRefresh }: OfficialChannelRowProps): React.ReactElement {
+function OfficialChannelRow({ channel, onToggle, onRefresh }: OfficialChannelRowProps): React.ReactElement {
   const enabledCount = channel.models.filter((m) => m.enabled).length
   const [refreshing, setRefreshing] = React.useState(false)
 
@@ -466,13 +461,6 @@ function OfficialChannelRow({ channel, onEdit, onToggle, onRefresh }: OfficialCh
           title="刷新模型列表"
         >
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-        </button>
-        <button
-          onClick={onEdit}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
-          title="查看"
-        >
-          <Pencil size={14} />
         </button>
         <span className="p-1.5 text-muted-foreground/40" title="官方渠道不可删除">
           <Shield size={14} />

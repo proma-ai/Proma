@@ -462,6 +462,18 @@ export function createChannel(input: ChannelCreateInput): Channel {
  * @returns 更新后的渠道
  */
 export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
+  // Proma Cloud 模型和连接配置由服务端同步；用户仅可开关整个渠道。
+  if (
+    id === PROMA_OFFICIAL_CHANNEL_ID
+    && (input.name !== undefined
+      || input.provider !== undefined
+      || input.baseUrl !== undefined
+      || input.apiKey !== undefined
+      || input.models !== undefined)
+  ) {
+    throw new Error('Proma Cloud 渠道的模型和连接配置由 Proma 管理，无法编辑')
+  }
+
   const config = readConfig()
   const index = config.channels.findIndex((c) => c.id === id)
 
