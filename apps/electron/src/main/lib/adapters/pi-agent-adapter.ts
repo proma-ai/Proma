@@ -175,6 +175,26 @@ interface AssistantMessageState {
   uuid?: string
 }
 
+/**
+ * 同一 assistant 流在 Pi native retry 前后必须复用 UUID：renderer 才能用恢复后的
+ * partial/final frame 原地替换断流前的 partial，而不是把两段回答并排追加。
+ */
+export function createPiAssistantUuidTracker(createUuid: () => string = randomUUID): {
+  get: () => string
+  reset: () => void
+} {
+  let state: AssistantMessageState = {}
+
+  return {
+    get: () => {
+      if (!state.uuid) state = { uuid: createUuid() }
+      if (!state.uuid) throw new Error('Pi assistant message uuid 初始化失败')
+      return state.uuid
+    },
+    reset: () => { state = {} },
+  }
+}
+
 export interface PiRemoteConnectionSettings {
   httpProxy?: string
   transport?: PiAgentTransport
@@ -1505,13 +1525,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         model: session.model?.id ?? input.model,
       } as unknown as SDKMessage)
 
-      let activeAssistant: AssistantMessageState = {}
+      const assistantUuidTracker = createPiAssistantUuidTracker()
       let lastPartialAssistant: AssistantMessage | undefined
       // Pi 会在 native retry 前先发出 error assistant，再以 agent_end.willRetry 标记。
       // 延迟向 orchestrator 透传该 error，避免它先触发外层重试而重放整个 prompt。
       const retryTerminalGate = createPiRetryTerminalGate<{
         assistantMessage: AssistantMessage
         sdkMessage: SDKMessage
+        assistantUuid: string
       }>()
       // message_end 发生在 Pi 落盘前；保留对象身份，待 prompt 完成后从
       // SessionManager entries 精确取得 Pi entry ID，绝不按文本猜测。
@@ -1527,13 +1548,10 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         if (Object.keys(bindings).length > 0) input.onPiEntryBindings?.(bindings)
       }
 
-      const assistantUuidFor = (): string => {
-        if (!activeAssistant.uuid) {
-          activeAssistant = { uuid: randomUUID() }
-        }
-        const uuid = activeAssistant.uuid
-        if (!uuid) throw new Error('Pi assistant message uuid 初始化失败')
-        return uuid
+      const assistantUuidFor = (): string => assistantUuidTracker.get()
+      const resetAssistantStream = (): void => {
+        assistantUuidTracker.reset()
+        lastPartialAssistant = undefined
       }
 
       partialAssistantCoalescer = createPartialMessageCoalescer(({ message, uuid }) => {
@@ -1565,30 +1583,32 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   })
                   if (converted?.type === 'assistant') queue.push(converted)
                 }
-                lastPartialAssistant = undefined
-                activeAssistant = {}
+                resetAssistantStream()
                 break
               }
               const isAssistant = isAssistantPiMessage(event.message)
+              const assistantUuid = isAssistant ? assistantUuidFor() : undefined
               const converted = convertPiMessage(event.message, session.sessionId, input.model, {
                 final: true,
-                ...(isAssistant && { uuid: assistantUuidFor() }),
+                ...(assistantUuid && { uuid: assistantUuid }),
               })
               const isRetryableAssistantError = isAssistant && (event.message as AssistantMessage).stopReason === 'error'
-              if (isRetryableAssistantError && converted?.type === 'assistant') {
+              if (isRetryableAssistantError && converted?.type === 'assistant' && assistantUuid) {
                 // Native retry 会丢弃该失败 assistant；不应消耗 Proma 的 turn/budget 配额。
+                // 关键：此处不能重置 UUID。retry 后的新 partial/final 必须原地替换此前
+                // 已经展示的 partial，避免用户同时看到断流残片和恢复后的完整回答。
                 retryTerminalGate.defer({
                   assistantMessage: event.message as AssistantMessage,
                   sdkMessage: converted,
+                  assistantUuid,
                 })
               } else {
                 runtimeGuard.recordMessage(event.message)
                 if (converted && (converted.type !== 'user' || hasToolResult(converted))) queue.push(converted)
-              }
-              if (isAssistant) finalAssistantUuids.set(event.message as AssistantMessage, assistantUuidFor())
-              if (isAssistant) {
-                activeAssistant = {}
-                lastPartialAssistant = undefined
+                if (isAssistant && assistantUuid) {
+                  finalAssistantUuids.set(event.message as AssistantMessage, assistantUuid)
+                  resetAssistantStream()
+                }
               }
               break
             }
@@ -1596,15 +1616,20 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               // 无论是否正被 interrupt，都要消费本轮 deferred error，防止它泄漏进下一轮。
               const terminalRetryError = retryTerminalGate.settle(event.willRetry)
               if (active.interrupting && active.pendingInterruptPrompts.length > 0) {
+                // interrupt 会取消 Pi 已安排的 native retry；下一条用户消息必须得到新 UUID。
+                resetAssistantStream()
                 break
               }
               if (event.willRetry) {
-                // native retry 会在同一 session 中调用 continue()，不要向上游发送终态。
+                // native retry 会在同一 session 中调用 continue()，不要向上游发送终态，
+                // 并保留当前 UUID，供恢复后的输出替换此前 partial。
                 break
               }
               if (terminalRetryError) {
+                finalAssistantUuids.set(terminalRetryError.assistantMessage, terminalRetryError.assistantUuid)
                 runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
                 queue.push(terminalRetryError.sdkMessage)
+                resetAssistantStream()
               }
               // Pi can start auto-compaction after agent_end but before session.prompt()
               // resolves. Defer the terminal result until then, otherwise the orchestrator's

@@ -91,7 +91,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
      // Bash execution state
      _bashAbortController = undefined;
      _pendingBashMessages = [];
-@@ -372,22 +379,42 @@ export class AgentSession {
+@@ -372,22 +379,45 @@ export class AgentSession {
                  if (assistantMsg.stopReason !== "error") {
                      this._overflowRecoveryAttempted = false;
                  }
@@ -101,11 +101,15 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
 +                // 会持续到 _runAgentPrompt() 结束，防止工具回合间无限重新获得 retry 配额。
                  if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0) {
 +                    const settings = this.settingsManager.getRetrySettings();
++                    // 用户在实际 retry 请求期间停止时，Pi 会给出 aborted assistant；
++                    // 它不是恢复成功，必须让 renderer 保持 cancelled 生命周期。
++                    const retryCancelled = assistantMsg.stopReason === "aborted";
                      this._emit({
                          type: "auto_retry_end",
-                         success: true,
+-                        success: true,
++                        success: !retryCancelled,
 -                        attempt: this._retryAttempt,
-+                        outcome: "succeeded",
++                        outcome: retryCancelled ? "cancelled" : "succeeded",
 +                        ...this._getRetryEventDetails(this._retryAttempt, settings),
                      });
                      this._retryAttempt = 0;
@@ -138,7 +142,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
              return false;
          }
          for (let i = event.messages.length - 1; i >= 0; i--) {
-@@ -743,13 +770,26 @@ export class AgentSession {
+@@ -743,13 +773,26 @@ export class AgentSession {
      // =========================================================================
      async _runAgentPrompt(messages) {
          this._isAgentRunActive = true;
@@ -165,7 +169,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
              this._systemPromptOverride = undefined;
              this._flushPendingBashMessages();
              await this._emitAgentSettled();
-@@ -765,10 +805,12 @@ export class AgentSession {
+@@ -765,10 +808,12 @@ export class AgentSession {
              return true;
          }
          if (msg.stopReason === "error" && this._retryAttempt > 0) {
@@ -179,7 +183,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
                  finalError: msg.errorMessage,
              });
              this._retryAttempt = 0;
-@@ -2117,22 +2159,30 @@ export class AgentSession {
+@@ -2117,22 +2162,30 @@ export class AgentSession {
       */
      async _prepareRetry(message) {
          const settings = this.settingsManager.getRetrySettings();
@@ -222,7 +226,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
          });
          // Remove error message from agent state (keep in session for history)
          const messages = this.agent.state.messages;
-@@ -2146,12 +2196,12 @@ export class AgentSession {
+@@ -2146,12 +2199,12 @@ export class AgentSession {
          }
          catch {
              // Aborted during sleep - emit end event so UI can clean up
@@ -237,7 +241,7 @@ index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..c18440c12741292d412f323fa53ff8d2
                  finalError: "Retry cancelled",
              });
              return false;
-@@ -2159,6 +2209,7 @@ export class AgentSession {
+@@ -2159,6 +2212,7 @@ export class AgentSession {
          finally {
              this._retryAbortController = undefined;
          }

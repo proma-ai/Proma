@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage } from '@earendil-works/pi-ai/compat'
+import { createPiAssistantUuidTracker } from './pi-agent-adapter'
 
 interface NativeRetrySettings {
   enabled: boolean
@@ -55,6 +56,14 @@ function successfulAssistant(): AssistantMessage {
     role: 'assistant',
     content: [],
     stopReason: 'stop',
+  } as unknown as AssistantMessage
+}
+
+function abortedAssistant(): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [],
+    stopReason: 'aborted',
   } as unknown as AssistantMessage
 }
 
@@ -161,5 +170,75 @@ describe('patched Pi AgentSession retry policy', () => {
 
     expect(session._willRetryAfterAgentEnd({ messages: [failed] })).toBe(false)
     expect(await session._prepareRetry(failed)).toBe(false)
+  })
+
+  test('keeps a partial assistant UUID through native recovery and releases it after the final response', () => {
+    let nextUuid = 0
+    const tracker = createPiAssistantUuidTracker(() => `assistant-${++nextUuid}`)
+
+    const partialUuid = tracker.get()
+    // retryable message_end + agent_end.willRetry=true：adapter 保留 tracker，
+    // 所以恢复后的 message_update 会原地替换此前的 partial。
+    expect(tracker.get()).toBe(partialUuid)
+
+    // 成功的最终 assistant frame 收束这条流，下一次回答才会分配新 UUID。
+    tracker.reset()
+    expect(tracker.get()).toBe('assistant-2')
+  })
+
+  test('maps an abort during an actual retry request to cancelled instead of succeeded', async () => {
+    const prototype = AgentSession.prototype as unknown as Record<string, unknown>
+    const originalInstallToolHooks = prototype._installAgentToolHooks
+    const originalInstallNextTurnRefresh = prototype._installAgentNextTurnRefresh
+    const originalBuildRuntime = prototype._buildRuntime
+    prototype._installAgentToolHooks = () => {}
+    prototype._installAgentNextTurnRefresh = () => {}
+    prototype._buildRuntime = () => {}
+
+    try {
+      const events: NativeRetryEvent[] = []
+      const session = new AgentSession({
+        agent: {
+          state: { messages: [] },
+          subscribe: () => () => {},
+        },
+        sessionManager: { appendMessage: () => {} },
+        settingsManager: {
+          getRetrySettings: () => ({
+            enabled: true,
+            maxRetries: 8,
+            maxTotalRetries: 8,
+            baseDelayMs: 0,
+            maxTotalDelayMs: 300_000,
+            jitterRatio: 0,
+          }),
+        },
+        resourceLoader: {},
+        cwd: process.cwd(),
+        modelRuntime: {},
+      } as never) as unknown as TestAgentSession & {
+        _handleAgentEvent: (event: unknown) => Promise<void>
+        _emitExtensionEvent: (event: unknown) => Promise<void>
+      }
+
+      session._emit = (event) => { events.push(event) }
+      session._emitExtensionEvent = async () => {}
+      session._retryAttempt = 1
+      session._retryRunAttempts = 1
+
+      await session._handleAgentEvent({ type: 'message_end', message: abortedAssistant() })
+
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'auto_retry_end',
+        success: false,
+        outcome: 'cancelled',
+        attempt: 1,
+        totalAttempt: 1,
+      }))
+    } finally {
+      prototype._installAgentToolHooks = originalInstallToolHooks
+      prototype._installAgentNextTurnRefresh = originalInstallNextTurnRefresh
+      prototype._buildRuntime = originalBuildRuntime
+    }
   })
 })
