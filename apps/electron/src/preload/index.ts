@@ -490,7 +490,7 @@ export interface ElectronAPI {
   /** 搜索 Agent 会话消息内容 */
   searchAgentSessionMessages: (query: string) => Promise<AgentMessageSearchResult[]>
 
-  /** 搜索当前工作区可引用的 Agent 会话 */
+  /** 搜索可引用的 Agent 会话；省略 workspaceId 时跨工作区搜索。 */
   searchAgentSessionReferences: (input: AgentSessionReferenceSearchInput) => Promise<AgentSessionReferenceSearchResult[]>
 
   /** 迁移 Agent 会话到另一个工作区 */

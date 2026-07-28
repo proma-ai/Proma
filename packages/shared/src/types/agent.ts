@@ -749,8 +749,8 @@ export interface AgentMessageSearchResult {
  * Agent 会话引用搜索输入
  */
 export interface AgentSessionReferenceSearchInput {
-  /** 当前工作区 ID，仅搜索该工作区下的会话 */
-  workspaceId: string
+  /** 可选工作区 ID；省略时搜索全部工作区中的会话。 */
+  workspaceId?: string
   /** 搜索关键词，匹配标题或消息内容 */
   query?: string
   /** 排除当前会话，避免引用自己 */

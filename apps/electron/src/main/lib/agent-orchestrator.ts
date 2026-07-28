@@ -1311,7 +1311,7 @@ export class AgentOrchestrator {
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
-      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId, workspaceSlug)
+      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
       if (referencedSessionsBlock) {
         enrichedMessage = `${referencedSessionsBlock}\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 referenced_sessions: ${mentionedSessionIds?.length ?? 0} sessions`)
@@ -2707,7 +2707,7 @@ export class AgentOrchestrator {
       : undefined
 
     let enrichedText = text
-    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, meta?.workspaceId, workspaceSlug)
+    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
     if (referencedSessionsBlock) {
       enrichedText = `${referencedSessionsBlock}\n\n${enrichedText}`
     }

@@ -1995,7 +1995,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 搜索当前工作区可引用的 Agent 会话
+  // 搜索可引用的 Agent 会话；省略 workspaceId 时跨工作区搜索。
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_SESSION_REFERENCES,
     async (_, input: AgentSessionReferenceSearchInput) => {

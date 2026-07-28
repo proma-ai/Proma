@@ -1815,77 +1815,27 @@ async function findFirstMatchInAgentJsonl(
   }
 }
 
-function extractTextFromPersistedMessage(parsed: unknown): string {
-  if (!parsed || typeof parsed !== 'object') return ''
-  const record = parsed as {
-    content?: unknown
-    message?: { content?: Array<{ type: string; text?: string }> }
-  }
-
-  if (typeof record.content === 'string') {
-    return record.content
-  }
-
-  if (Array.isArray(record.message?.content)) {
-    return record.message.content
-      .filter((b) => b.type === 'text' && b.text)
-      .map((b) => b.text!)
-      .join('\n')
-  }
-
-  return ''
-}
-
-function createSnippet(text: string, matchIndex: number, matchLength: number): string {
-  const snippetStart = Math.max(0, matchIndex - 48)
-  const snippetEnd = Math.min(text.length, matchIndex + matchLength + 48)
-  return (snippetStart > 0 ? '...' : '') +
-    text.slice(snippetStart, snippetEnd) +
-    (snippetEnd < text.length ? '...' : '')
-}
-
-function findSessionMessageSnippet(sessionId: string, query: string): string | undefined {
+async function findSessionMessageSnippet(sessionId: string, query: string): Promise<string | undefined> {
   if (!query || query.length < 2) return undefined
 
   const filePath = getAgentSessionMessagesPath(sessionId)
   if (!existsSync(filePath)) return undefined
 
-  const queryLower = query.toLowerCase()
   try {
-    const raw = readFileSync(filePath, 'utf-8')
-    const lines = raw.split('\n').filter((line) => line.trim())
-
-    for (const line of lines) {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(line)
-      } catch (error) {
-        console.warn(`[Agent 会话] 会话引用摘要跳过无法解析的 JSONL 行 (${sessionId}):`, error)
-        continue
-      }
-      const textContent = extractTextFromPersistedMessage(parsed)
-      if (!textContent) continue
-
-      const matchIndex = textContent.toLowerCase().indexOf(queryLower)
-      if (matchIndex === -1) continue
-
-      return createSnippet(textContent, matchIndex, query.length)
-    }
+    const hit = await findFirstMatchInAgentJsonl(filePath, query.toLowerCase(), query.length)
+    return hit?.snippet
   } catch {
     return undefined
   }
-
-  return undefined
 }
 
 /**
- * 搜索当前工作区可引用的 Agent 会话。
+ * 搜索可引用的 Agent 会话。
  *
- * 仅返回当前工作区、未归档、非当前会话的结果；无关键词时返回最近更新的会话。
+ * 指定工作区时仅返回该工作区；省略工作区时跨工作区搜索。两种模式都排除已归档和当前会话；无关键词时返回最近更新的会话。
  */
-export function searchAgentSessionReferences(input: AgentSessionReferenceSearchInput): AgentSessionReferenceSearchResult[] {
+export async function searchAgentSessionReferences(input: AgentSessionReferenceSearchInput): Promise<AgentSessionReferenceSearchResult[]> {
   const workspaceId = input?.workspaceId?.trim()
-  if (!workspaceId) return []
 
   const query = (input?.query ?? '').trim()
   const queryLower = query.toLowerCase()
@@ -1893,7 +1843,7 @@ export function searchAgentSessionReferences(input: AgentSessionReferenceSearchI
   const limit = Math.min(Math.max(requestedLimit, 1), MAX_SESSION_REFERENCE_LIMIT)
 
   const candidates = listAgentSessions()
-    .filter((session) => session.workspaceId === workspaceId)
+    .filter((session) => !workspaceId || session.workspaceId === workspaceId)
     .filter((session) => !session.archived)
     .filter((session) => session.id !== input?.excludeSessionId)
 
@@ -1922,7 +1872,7 @@ export function searchAgentSessionReferences(input: AgentSessionReferenceSearchI
       continue
     }
 
-    const snippet = findSessionMessageSnippet(session.id, query)
+    const snippet = await findSessionMessageSnippet(session.id, query)
     if (snippet) {
       results.push({
         sessionId: session.id,
