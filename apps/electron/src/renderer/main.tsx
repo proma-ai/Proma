@@ -45,6 +45,7 @@ import {
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { automationsAtom } from './atoms/automation-atoms'
+import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -80,6 +81,7 @@ import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
+import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -87,10 +89,11 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow
+const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow && !isPlanningWindow
 
-// 仅主窗口禁用页面级滚动；独立浮窗各自管理自己的内容高度和滚动。
-if (isMainWindow) {
+// 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
+if (isMainWindow || isPlanningWindow) {
   document.documentElement.classList.add('proma-main-window')
 }
 
@@ -356,6 +359,59 @@ function UpdaterInitializer(): null {
  *
  * 加载全部定时任务，并订阅主进程的变更事件（运行完成/状态变化）刷新列表。
  */
+function PlanningShortcutInitializer(): null {
+  useEffect(() => {
+    initShortcutRegistry()
+    void window.electronAPI.getSettings().then((settings) => {
+      updateShortcutOverrides(settings.shortcutOverrides ?? {})
+    }).catch((error) => {
+      console.error('[任务/日程] 加载快捷键设置失败:', error)
+    })
+  }, [])
+  return null
+}
+
+function PlanningInitializer(): null {
+  const setTodos = useSetAtom(todosAtom)
+  const setCalendarEvents = useSetAtom(calendarEventsAtom)
+  const setTodoGroups = useSetAtom(todoPlanningGroupsAtom)
+  const setCalendarGroups = useSetAtom(calendarPlanningGroupsAtom)
+  const setTags = useSetAtom(planningTagsAtom)
+
+  useEffect(() => {
+    let latestRequest = 0
+    let disposed = false
+    const load = (): void => {
+      const requestId = ++latestRequest
+      void Promise.allSettled([
+        window.electronAPI.listTodos(),
+        window.electronAPI.listCalendarEvents(),
+        window.electronAPI.listPlanningGroups('todo'),
+        window.electronAPI.listPlanningGroups('calendar'),
+        window.electronAPI.listPlanningTags(),
+      ]).then(([todos, events, todoGroups, calendarGroups, tags]) => {
+        // 变更事件可能紧密连续到达；只接受最后一次完整快照，避免旧请求覆盖新数据。
+        if (disposed || requestId !== latestRequest) return
+        if (todos.status === 'fulfilled') setTodos(todos.value)
+        else console.error('[任务/日程] 加载 Todo 失败:', todos.reason)
+        if (events.status === 'fulfilled') setCalendarEvents(events.value)
+        else console.error('[任务/日程] 加载日程失败:', events.reason)
+        if (todoGroups.status === 'fulfilled') setTodoGroups(todoGroups.value)
+        else console.error('[任务/日程] 加载 Todo 分组失败:', todoGroups.reason)
+        if (calendarGroups.status === 'fulfilled') setCalendarGroups(calendarGroups.value)
+        else console.error('[任务/日程] 加载日程分组失败:', calendarGroups.reason)
+        if (tags.status === 'fulfilled') setTags(tags.value)
+        else console.error('[任务/日程] 加载标签失败:', tags.reason)
+      })
+    }
+    load()
+    const unsubscribe = window.electronAPI.onPlanningChanged(load)
+    return () => { disposed = true; unsubscribe() }
+  }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
+
+  return null
+}
+
 function AutomationInitializer(): null {
   const setAutomations = useSetAtom(automationsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
@@ -915,6 +971,20 @@ if (isQuickTaskWindow) {
       </React.StrictMode>
     )
   })
+} else if (isPlanningWindow) {
+  import('./components/planning/PlanningWindowApp').then(({ PlanningWindowApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <AgentSettingsInitializer />
+        <PlanningShortcutInitializer />
+        <AutomationInitializer />
+        <PlanningInitializer />
+        <PlanningWindowApp />
+        <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
 } else {
   // ===== 主窗口：完整渲染 =====
   ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -930,6 +1000,7 @@ if (isQuickTaskWindow) {
       <ChatToolInitializer />
       <UpdaterInitializer />
       <AutomationInitializer />
+      <PlanningInitializer />
       <FeishuInitializer />
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />

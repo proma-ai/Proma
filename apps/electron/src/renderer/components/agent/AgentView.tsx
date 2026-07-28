@@ -17,7 +17,7 @@ import * as React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, ChevronDown } from 'lucide-react'
+import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, ChevronDown, ListTodo } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
@@ -41,6 +41,8 @@ import {
   inputToolbarSendButtonClass,
 } from '@/components/ai-elements/input-toolbar-styles'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
@@ -108,6 +110,7 @@ import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
+import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
@@ -132,6 +135,12 @@ import type { AgentQueuedAttachment, AgentQueuedMessage, QueueDropPlacement } fr
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
 const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
+
+function endOfToday(): number {
+  const date = new Date()
+  date.setHours(23, 59, 59, 999)
+  return date.getTime()
+}
 
 interface OptimisticSDKUserMessage extends SDKUserMessage {
   _createdAt: number
@@ -488,6 +497,18 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const [defaultChannelId, setDefaultChannelId] = useAtom(agentChannelIdAtom)
   const [defaultModelId, setDefaultModelId] = useAtom(agentModelIdAtom)
   const sessions = useAtomValue(agentSessionsAtom)
+  const planningGroups = useAtomValue(todoPlanningGroupsAtom)
+  const [todoDialogOpen, setTodoDialogOpen] = React.useState(false)
+  const [todoDraftTitle, setTodoDraftTitle] = React.useState('')
+  const [todoSourceText, setTodoSourceText] = React.useState('')
+  const [todoGroupId, setTodoGroupId] = React.useState('__none__')
+  const [creatingTodo, setCreatingTodo] = React.useState(false)
+  React.useEffect(() => window.electronAPI.onPlanningAgentOperation((operation) => {
+    if (operation.sessionId !== sessionId) return
+    const target = operation.target === 'todo' ? 'Todo' : '日程'
+    const action = operation.action === 'created' ? '创建' : operation.action === 'updated' ? '更新' : '删除'
+    toast.success(`已${action}${target}`, { description: `「${operation.title}」` })
+  }), [sessionId])
   const sessionMeta = React.useMemo(
     () => sessions.find((s) => s.id === sessionId),
     [sessions, sessionId],
@@ -637,6 +658,56 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftHtmlMap])
+
+  const createTodoForCurrentSession = React.useCallback(async (title: string, groupId: string, sourceText?: string): Promise<boolean> => {
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) {
+      toast.error('Todo 标题不能为空')
+      return false
+    }
+    if (normalizedTitle.length > 500) {
+      toast.error('Todo 标题不能超过 500 字')
+      return false
+    }
+
+    try {
+      await window.electronAPI.createTodo({
+        title: normalizedTitle,
+        notes: sourceText?.trim() && sourceText.trim() !== normalizedTitle ? sourceText.trim() : undefined,
+        dueAt: endOfToday(),
+        groupId: groupId === '__none__' ? undefined : groupId,
+        sessionId,
+        workspaceId: currentWorkspaceId ?? undefined,
+      })
+      toast.success('已添加 Todo', { description: '已关联当前 Agent 会话' })
+      return true
+    } catch (error) {
+      console.error('[AgentView] 创建 Todo 失败:', error)
+      toast.error('创建 Todo 失败', { description: String(error) })
+      return false
+    }
+  }, [currentWorkspaceId, sessionId])
+
+  const handleOpenReplyTodoDialog = React.useCallback((text: string): void => {
+    const sourceText = text.trim()
+    const firstLine = sourceText.split('\n').map((line) => line.trim()).find(Boolean) ?? sourceText
+    setTodoSourceText(sourceText)
+    setTodoDraftTitle(firstLine.replace(/^#{1,6}\s+/, '').slice(0, 500))
+    setTodoGroupId('__none__')
+    setTodoDialogOpen(true)
+  }, [])
+
+  const handleCreateReplyTodo = React.useCallback(async (): Promise<void> => {
+    setCreatingTodo(true)
+    try {
+      if (await createTodoForCurrentSession(todoDraftTitle, todoGroupId, todoSourceText)) {
+        setTodoDialogOpen(false)
+      }
+    } finally {
+      setCreatingTodo(false)
+    }
+  }, [createTodoForCurrentSession, todoDraftTitle, todoGroupId, todoSourceText])
+
   const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
   const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const sessionPath = sessionPathMap.get(sessionId) ?? null
@@ -2843,6 +2914,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetryInNewSession={handleRetryInNewSession}
           onFork={handleFork}
           onRewind={handleRewindRequest}
+          onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
         />
 
@@ -2985,6 +3057,21 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )}
       </div>
     </AgentSessionProvider>
+
+    <Dialog open={todoDialogOpen} onOpenChange={setTodoDialogOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>标记为 Todo</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <label className="grid gap-2 text-sm font-medium">任务标题
+            <textarea value={todoDraftTitle} onChange={(event) => setTodoDraftTitle(event.target.value)} rows={3} className="min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+          </label>
+          <label className="grid gap-2 text-sm font-medium">Todo 分组
+            <Select value={todoGroupId} onValueChange={setTodoGroupId}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{planningGroups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select>
+          </label>
+        </div>
+        <DialogFooter><Button type="button" variant="ghost" onClick={() => setTodoDialogOpen(false)}>取消</Button><Button type="button" onClick={() => void handleCreateReplyTodo()} disabled={creatingTodo || !todoDraftTitle.trim()}><ListTodo size={15} />添加 Todo</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     {/* 回退确认弹窗 */}
     <AlertDialog

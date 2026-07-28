@@ -102,6 +102,7 @@ import {
   stopBridgeSelfHealing,
 } from './lib/bridge-registry'
 import { startScheduler, stopScheduler } from './lib/automation-scheduler'
+import { startPlanningReminderScheduler, stopPlanningReminderScheduler } from './lib/planning-reminder-scheduler'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
@@ -111,6 +112,7 @@ import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
+import { destroyPlanningWindow } from './lib/planning-window'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -579,6 +581,7 @@ async function bootstrap(): Promise<void> {
 
   // 启动定时任务调度器（恢复持久化的 active 任务）
   safeRun('startScheduler', startScheduler)
+  safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
 
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
@@ -674,12 +677,14 @@ app.on('before-quit', () => {
   stopAllBridges()
   // 停止定时任务调度器
   stopScheduler()
+  stopPlanningReminderScheduler()
   // 释放飞书同步防休眠
   stopFeishuSyncSleepBlocker()
   // 注销全局快捷键
   unregisterAllGlobalShortcuts()
-  // 销毁快速任务窗口
+  // 销毁辅助窗口
   destroyQuickTaskWindow()
+  destroyPlanningWindow()
   destroyVoiceDictationWindow()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})

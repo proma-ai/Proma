@@ -96,7 +96,6 @@ const VOICE_INPUT_TAB: TabItem = {
   label: "语音输入",
   icon: <Mic size={16} />,
 };
-
 /** 尾部 Tabs */
 const TAIL_TABS: TabItem[] = [
   { id: "migration", label: "数据迁移", icon: <HardDriveDownload size={16} /> },

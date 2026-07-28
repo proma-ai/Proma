@@ -31,6 +31,34 @@ import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
 import {
+  listTodos,
+  getTodo,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+  touchTodoSession,
+  listCalendarEvents,
+  getCalendarEvent,
+  createCalendarEvent,
+  updateCalendarEvent,
+  deleteCalendarEvent,
+  listPlanningGroups,
+  createPlanningGroup,
+  updatePlanningGroup,
+  deletePlanningGroup,
+  listPlanningTags,
+  createPlanningTag,
+  updatePlanningTag,
+  deletePlanningTag,
+  listActivePlanningReminders,
+  createPlanningReminder,
+  updatePlanningReminder,
+  deletePlanningReminder,
+  acknowledgePlanningReminder,
+  snoozePlanningReminder,
+} from '../planning-manager'
+import { broadcastPlanningAgentOperation, broadcastPlanningChanged } from '../planning-events'
+import {
   fetchWebPage,
   formatFetchResults,
   formatSearchResults,
@@ -83,6 +111,13 @@ function stringArray(value: unknown): string[] | undefined {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/** Agent 未明确完成时间时，Todo 默认以本地当天为计划单位。 */
+function defaultTodoDueAt(): number {
+  const date = new Date()
+  date.setHours(23, 59, 59, 999)
+  return date.getTime()
 }
 
 function buildWebTools(sdk: PiSdk): ToolDefinition[] {
@@ -431,6 +466,266 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
   ] as unknown as ToolDefinition[]
 }
 
+// ===== Pi 专属任务 / 日程工具 =====
+
+function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  const optionalPlanningFields = {
+    notes: Type.Optional(Type.String({ description: '补充说明' })),
+    workspaceId: Type.Optional(Type.String({ description: '所属工作区 ID；不传默认当前工作区' })),
+    groupId: Type.Optional(Type.String({ description: '可选分组 ID；必须来自该对象对应范围的 list_groups 查询结果' })),
+    tagIds: Type.Optional(Type.Array(Type.String(), { description: '可选标签 ID 列表；会整体替换该对象现有标签' })),
+  }
+  return [
+    sdk.defineTool({
+      name: 'mcp__planning__list_todos', label: '列出 Todo',
+      description: '列出 Proma 本地 Todo。适合在安排工作、检查今天待办、维护任务状态前使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({
+        status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])),
+        dueBefore: Type.Optional(Type.Number({ description: '仅返回此截止时间之前的 Todo，Unix 毫秒时间戳' })),
+        limit: Type.Optional(Type.Number({ description: '最多返回数量，默认 50，最大 100' })),
+      }),
+      async execute(_id: string, params: unknown) {
+        const { status, dueBefore, limit } = params as { status?: 'open' | 'completed'; dueBefore?: number; limit?: number }
+        return jsonToolResult({ todos: listTodos({ status, dueBefore, limit: limit ?? 50 }) })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__get_todo', label: '读取 Todo',
+      description: '按 ID 读取一个 Todo 的完整详情。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String({ description: 'Todo ID' }) }),
+      async execute(_id: string, params: unknown) {
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        const todo = getTodo(id)
+        if (!todo) throw new Error('Todo 不存在')
+        return jsonToolResult({ todo })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__create_todo', label: '创建 Todo',
+      description: '创建 Proma 本地 Todo。调用前必须先用 list_todos(status=open) 检查重复，并用 list_groups({ scope: todo }) 查询并优先复用 Todo 分组；用户明确提出待办，或可合理确定下一步时使用。未传 dueAt 时默认当天结束前；仅 Pi Agent 可用。',
+      parameters: Type.Object({ title: Type.String(), ...optionalPlanningFields, priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')])), dueAt: Type.Optional(Type.Number({ description: '截止时间 Unix 毫秒时间戳' })) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as Record<string, unknown>
+        const title = assertNonBlank(args.title as string, 'title')
+        const created = createTodo({ title, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: numberOrUndefined(args.dueAt) ?? defaultTodoDueAt(), groupId: args.groupId as string | undefined, tagIds: args.tagIds as string[] | undefined, workspaceId: (args.workspaceId as string | undefined) ?? ctx.workspaceId })
+        touchTodoSession(created.id, ctx.sessionId)
+        const todo = getTodo(created.id)!
+        broadcastPlanningChanged()
+        broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'created', title: todo.title })
+        return jsonToolResult({ todo })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__update_todo', label: '更新 Todo',
+      description: '更新 Todo 的标题、说明、优先级或截止时间。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')])), dueAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as Record<string, unknown>
+        const updated = updateTodo({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: args.dueAt as number | null | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, status: args.status as 'open' | 'completed' | undefined })
+        if (!updated) throw new Error('Todo 不存在')
+        touchTodoSession(updated.id, ctx.sessionId)
+        const todo = getTodo(updated.id)!
+        broadcastPlanningChanged()
+        broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'updated', title: todo.title })
+        return jsonToolResult({ todo })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__complete_todo', label: '完成 Todo',
+      description: '将指定 Todo 标记为已完成。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) {
+        const updated = updateTodo({ id: assertNonBlank((params as { id: string }).id, 'id'), status: 'completed' })
+        if (!updated) throw new Error('Todo 不存在')
+        touchTodoSession(updated.id, ctx.sessionId)
+        const todo = getTodo(updated.id)!
+        broadcastPlanningChanged()
+        broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'updated', title: todo.title })
+        return jsonToolResult({ todo })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__delete_todo', label: '删除 Todo',
+      description: '删除 Todo。只在用户明确要求删除时使用；不会删除关联草稿或日程。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) {
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        const todo = getTodo(id)
+        const deleted = deleteTodo(id)
+        if (deleted) {
+          broadcastPlanningChanged()
+          broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'todo', action: 'deleted', title: todo?.title ?? 'Todo' })
+        }
+        return jsonToolResult({ deleted })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__list_calendar_events', label: '列出日程',
+      description: '列出 Proma 本地日程。用于查看指定时间范围的安排。仅 Pi Agent 可用。',
+      parameters: Type.Object({
+        startAt: Type.Optional(Type.Number({ description: '查询范围起点，Unix 毫秒时间戳' })),
+        endAt: Type.Optional(Type.Number({ description: '查询范围终点，Unix 毫秒时间戳' })),
+        limit: Type.Optional(Type.Number({ description: '最多返回数量，默认 50，最大 100' })),
+      }),
+      async execute(_id: string, params: unknown) {
+        const { startAt, endAt, limit } = params as { startAt?: number; endAt?: number; limit?: number }
+        return jsonToolResult({ events: listCalendarEvents({ from: startAt, to: endAt, limit: limit ?? 50 }) })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__get_calendar_event', label: '读取日程',
+      description: '按 ID 读取一个日程的完整详情。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String({ description: '日程 ID' }) }),
+      async execute(_id: string, params: unknown) {
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        const event = getCalendarEvent(id)
+        if (!event) throw new Error('日程不存在')
+        return jsonToolResult({ event })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__create_calendar_event', label: '创建日程',
+      description: '创建 Proma 本地日程。分组必须来自 list_groups({ scope: calendar })；用户明确提供时间安排时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ title: Type.String(), startAt: Type.Number({ description: '开始时间 Unix 毫秒时间戳' }), endAt: Type.Optional(Type.Number()), allDay: Type.Optional(Type.Boolean()), ...optionalPlanningFields, todoId: Type.Optional(Type.String()) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as Record<string, unknown>
+        const event = createCalendarEvent({ title: assertNonBlank(args.title as string, 'title'), startAt: args.startAt as number, endAt: args.endAt as number | undefined, allDay: args.allDay as boolean | undefined, notes: args.notes as string | undefined, groupId: args.groupId as string | undefined, tagIds: args.tagIds as string[] | undefined, workspaceId: (args.workspaceId as string | undefined) ?? ctx.workspaceId, todoId: args.todoId as string | undefined })
+        broadcastPlanningChanged()
+        broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'calendar_event', action: 'created', title: event.title })
+        return jsonToolResult({ event })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__update_calendar_event', label: '更新日程',
+      description: '更新日程时间或内容。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), startAt: Type.Optional(Type.Number()), endAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), allDay: Type.Optional(Type.Boolean()), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), todoId: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as Record<string, unknown>
+        const event = updateCalendarEvent({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, startAt: args.startAt as number | undefined, endAt: args.endAt as number | null | undefined, allDay: args.allDay as boolean | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, todoId: args.todoId as string | null | undefined })
+        if (!event) throw new Error('日程不存在')
+        broadcastPlanningChanged()
+        broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'calendar_event', action: 'updated', title: event.title })
+        return jsonToolResult({ event })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__delete_calendar_event', label: '删除日程',
+      description: '删除 Proma 本地日程。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) {
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        const event = getCalendarEvent(id)
+        const deleted = deleteCalendarEvent(id)
+        if (deleted) {
+          broadcastPlanningChanged()
+            broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'calendar_event', action: 'deleted', title: event?.title ?? '日程' })
+        }
+        return jsonToolResult({ deleted })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__list_groups', label: '列出分组',
+      description: '列出指定范围的 Todo 或日程分组。创建或归入分组前优先调用，以复用该范围内的现有分组。仅 Pi Agent 可用。',
+      parameters: Type.Object({ scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]) }),
+      async execute(_id: string, params: unknown) {
+        const scope = (params as { scope: 'todo' | 'calendar' }).scope
+        return jsonToolResult({ groups: listPlanningGroups(scope) })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__create_group', label: '创建分组',
+      description: '创建 Todo 或日程范围内的独立分组。只在用户明确提出新分组或该范围内现有分组不适用时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]), name: Type.String(), color: Type.Optional(Type.String()), sortOrder: Type.Optional(Type.Number()) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as { scope: 'todo' | 'calendar'; name: string; color?: string; sortOrder?: number }
+        const group = createPlanningGroup({ scope: args.scope, name: assertNonBlank(args.name, 'name'), color: args.color, sortOrder: args.sortOrder })
+        broadcastPlanningChanged(); return jsonToolResult({ group })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__update_group', label: '更新分组',
+      description: '更新或归档指定范围内的分组，不能借此移动分组范围。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]), name: Type.Optional(Type.String()), color: Type.Optional(Type.Union([Type.String(), Type.Null()])), sortOrder: Type.Optional(Type.Number()), archivedAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as Record<string, unknown>
+        const group = updatePlanningGroup({ id: assertNonBlank(args.id as string, 'id'), scope: args.scope as 'todo' | 'calendar', name: args.name as string | undefined, color: args.color as string | null | undefined, sortOrder: args.sortOrder as number | undefined, archivedAt: args.archivedAt as number | null | undefined })
+        if (!group) throw new Error('分组不存在'); broadcastPlanningChanged(); return jsonToolResult({ group })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__delete_group', label: '删除分组',
+      description: '删除指定范围内的分组，并仅清除该范围关联对象的分组字段。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), scope: Type.Union([Type.Literal('todo'), Type.Literal('calendar')]) }),
+      async execute(_id: string, params: unknown) {
+        const args = params as { id: string; scope: 'todo' | 'calendar' }
+        const deleted = deletePlanningGroup(args.scope, assertNonBlank(args.id, 'id'))
+        if (deleted) broadcastPlanningChanged()
+        return jsonToolResult({ deleted })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__list_tags', label: '列出标签',
+      description: '列出可用于 Todo 与日程的标签。创建或归类前优先调用，以复用已有标签。仅 Pi Agent 可用。',
+      parameters: Type.Object({}),
+      async execute() { return jsonToolResult({ tags: listPlanningTags() }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__create_tag', label: '创建标签',
+      description: '创建跨 Todo 和日程复用的标签。只在用户明确给出新标签或现有标签不适用时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ name: Type.String(), color: Type.Optional(Type.String()) }),
+      async execute(_id: string, params: unknown) { const args = params as { name: string; color?: string }; const tag = createPlanningTag({ name: assertNonBlank(args.name, 'name'), color: args.color }); broadcastPlanningChanged(); return jsonToolResult({ tag }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__update_tag', label: '更新标签',
+      description: '更新标签名称或颜色。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), name: Type.Optional(Type.String()), color: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),
+      async execute(_id: string, params: unknown) { const args = params as Record<string, unknown>; const tag = updatePlanningTag({ id: assertNonBlank(args.id as string, 'id'), name: args.name as string | undefined, color: args.color as string | null | undefined }); if (!tag) throw new Error('标签不存在'); broadcastPlanningChanged(); return jsonToolResult({ tag }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__delete_tag', label: '删除标签',
+      description: '删除标签并移除其关联。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) { const deleted = deletePlanningTag(assertNonBlank((params as { id: string }).id, 'id')); if (deleted) broadcastPlanningChanged(); return jsonToolResult({ deleted }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__list_active_reminders', label: '列出到期提醒',
+      description: '列出当前已到期且未确认的常驻提醒。用于帮助用户处理提醒，不用于扫描全部历史。仅 Pi Agent 可用。',
+      parameters: Type.Object({}),
+      async execute() { return jsonToolResult({ reminders: listActivePlanningReminders() }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__create_reminder', label: '创建提醒',
+      description: '为 Todo 或日程创建指定时点的提醒。仅在用户要求提醒且时点明确时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ targetType: Type.Union([Type.Literal('todo'), Type.Literal('calendar_event')]), targetId: Type.String(), triggerAt: Type.Number({ description: '提醒触发 Unix 毫秒时间戳' }) }),
+      async execute(_id: string, params: unknown) { const args = params as { targetType: 'todo' | 'calendar_event'; targetId: string; triggerAt: number }; const reminder = createPlanningReminder({ targetType: args.targetType, targetId: assertNonBlank(args.targetId, 'targetId'), triggerAt: args.triggerAt }); broadcastPlanningChanged(); return jsonToolResult({ reminder }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__update_reminder', label: '更新提醒时间',
+      description: '修改未确认提醒的触发时间。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), triggerAt: Type.Number({ description: '新的提醒触发 Unix 毫秒时间戳' }) }),
+      async execute(_id: string, params: unknown) { const args = params as { id: string; triggerAt: number }; const reminder = updatePlanningReminder(assertNonBlank(args.id, 'id'), args.triggerAt); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(); return jsonToolResult({ reminder }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__acknowledge_reminder', label: '确认提醒',
+      description: '确认并关闭一个到期提醒，不会删除 Todo 或日程。仅在用户明确要求关闭提醒时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) { const reminder = acknowledgePlanningReminder(assertNonBlank((params as { id: string }).id, 'id')); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(); return jsonToolResult({ reminder }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__snooze_reminder', label: '推迟提醒',
+      description: '将未确认提醒推迟指定分钟数。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String(), minutes: Type.Number({ description: '推迟分钟数，1 到 10080' }) }),
+      async execute(_id: string, params: unknown) { const args = params as { id: string; minutes: number }; const reminder = snoozePlanningReminder(assertNonBlank(args.id, 'id'), args.minutes); if (!reminder) throw new Error('提醒不存在或已处理'); broadcastPlanningChanged(); return jsonToolResult({ reminder }) },
+    }),
+    sdk.defineTool({
+      name: 'mcp__planning__delete_reminder', label: '删除提醒',
+      description: '删除提醒记录。只在用户明确要求彻底删除提醒时使用。仅 Pi Agent 可用。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_id: string, params: unknown) { const deleted = deletePlanningReminder(assertNonBlank((params as { id: string }).id, 'id')); if (deleted) broadcastPlanningChanged(); return jsonToolResult({ deleted }) },
+    }),
+  ] as unknown as ToolDefinition[]
+}
+
 // ===== Collaboration 工具（占位，下阶段实现） =====
 
 // collaboration 逻辑较重（涉及子会话生命周期管理、EventBus 订阅、BlockedEvent 冒泡），
@@ -476,6 +771,13 @@ export async function buildPiBuiltinTools(
     } catch (error) {
       console.error('[Pi 桥接] 注入 automation 工具失败:', error)
     }
+  }
+
+  // 任务/日程是 Pi native customTools，Claude runtime 不经此入口，因此天然隔离。
+  try {
+    tools.push(...buildPlanningTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入任务/日程工具失败:', error)
   }
 
   // collaboration 桥接

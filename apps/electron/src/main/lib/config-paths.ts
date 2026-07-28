@@ -675,3 +675,8 @@ export function getScratchPadPath(): string {
 export function getAutomationsPath(): string {
   return join(getConfigDir(), 'automations.json')
 }
+
+/** 获取任务/日程 SQLite 数据库路径。 */
+export function getPlanningDatabasePath(): string {
+  return join(getConfigDir(), 'planning.db')
+}

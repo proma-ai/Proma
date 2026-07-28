@@ -25,7 +25,7 @@ import { useTrackSessionView } from '@/hooks/useTrackSessionView'
 import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { AutomationFormView } from '@/components/automation/AutomationFormView'
-import { AutomationsListView } from '@/components/automation/AutomationsListView'
+import { PlanningView } from '@/components/planning/PlanningView'
 import { AgentSkillsView } from '@/components/agent-skills/AgentSkillsView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
@@ -221,13 +221,12 @@ export function MainArea(): React.ReactElement {
             className={cn('flex flex-col min-w-0 h-full relative', showPreview && 'mr-0.5')}
             style={leftFlexStyle}
           >
-            {activeView === 'automations' ? (
+            {activeView === 'planning' ? (
               automationFormOpen ? (
-                // 定时任务设置页：与列表同层级替换中间区，不经过 TabBar，避免切换时闪出会话 Tab。
+                // 自动化设置页：与任务/日程同层级替换中间区，不经过 TabBar。
                 <AutomationFormView />
               ) : (
-                // Automations 列表视图：全屏取代 TabBar + TabContent
-                <AutomationsListView />
+                <PlanningView />
               )
             ) : activeView === 'agent-skills' ? (
               // Agent 技能视图：全屏取代 TabBar + TabContent

@@ -313,6 +313,16 @@ export function GeneralSettings(): React.ReactElement {
               setNotificationSounds(newSounds)
             }}
           />
+          <SoundPicker
+            label="任务/日程提醒音效"
+            type="planningReminder"
+            sounds={notificationSounds}
+            disabled={!notificationsEnabled || !notificationSoundEnabled}
+            onSoundChange={async (type, soundId) => {
+              const newSounds = await updateNotificationSound(type, soundId, notificationSounds)
+              setNotificationSounds(newSounds)
+            }}
+          />
           <SettingsRow
             label="自动归档"
             description="超过指定天数未更新的对话将自动归档（置顶对话除外）"

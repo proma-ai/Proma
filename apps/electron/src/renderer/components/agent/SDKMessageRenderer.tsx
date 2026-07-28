@@ -12,7 +12,7 @@
  */
 
 import * as React from 'react'
-import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock } from 'lucide-react'
+import { Bot, Loader2, AlertTriangle, FileText, FileImage, Download, Split, Undo2, RotateCw, Plus, Minimize2, Wrench, Settings, Cpu, ExternalLink, Quote, Clock, ListTodo } from 'lucide-react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
@@ -59,6 +59,7 @@ import { agentSessionsAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { automationsAtom, automationFormAtom, automationToDraft } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { planningTabAtom } from '@/atoms/planning-atoms'
 import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenPreview } from '@/components/diff/preview-opener'
@@ -380,6 +381,8 @@ export interface AssistantTurnRendererProps {
   onFork?: (upToMessageUuid: string) => void
   /** 回退回调（传入 assistant message uuid） */
   onRewind?: (assistantMessageUuid: string) => void
+  /** 将本轮回复标记为 Todo */
+  onCreateTodo?: (text: string) => void
   /** 错误重试回调（传入本轮开始前应删除的错误 UUID） */
   onRetry?: (errorUuid?: string) => void
   /** 在新会话中重试回调（仅当 turn 含错误消息时使用） */
@@ -394,7 +397,7 @@ export interface AssistantTurnRendererProps {
   sessionModelId?: string
 }
 
-export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
+export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onRewind, onCreateTodo, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: AssistantTurnRendererProps): React.ReactElement | null {
   const channels = useAtomValue(channelsAtom)
   // 收集所有 assistant 消息的内容块，保留 parent_tool_use_id 关联
   interface EnrichedBlock {
@@ -591,6 +594,11 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
           <MessageActions className="pl-[46px] mt-0.5 min-h-[28px] justify-start">
             {hasDuration && <DurationBadge durationMs={durationMs!} usage={usage} />}
             {textContent && <CopyButton content={textContent} />}
+            {textContent && onCreateTodo && (
+              <MessageAction tooltip="标记为 Todo" onClick={() => onCreateTodo(textContent)}>
+                <ListTodo className="size-3.5" />
+              </MessageAction>
+            )}
             {onFork && lastUuid && (
               <MessageAction tooltip="按当前模型从此处分叉" onClick={() => onFork(lastUuid)}>
                 <Split className="size-3.5" />
@@ -879,6 +887,7 @@ function ScheduledRunBadge(): React.ReactElement {
   const automations = useAtomValue(automationsAtom)
   const setForm = useSetAtom(automationFormAtom)
   const setActiveView = useSetAtom(activeViewAtom)
+  const setPlanningTab = useSetAtom(planningTabAtom)
 
   const session = sessions.find((s) => s.id === activeSessionId)
   const automation = session?.sourceAutomationId && !session.sourceDelegationId
@@ -887,7 +896,8 @@ function ScheduledRunBadge(): React.ReactElement {
 
   const handleClick = (): void => {
     if (!automation) return
-    setActiveView('automations')
+    setActiveView('planning')
+    setPlanningTab('automations')
     setForm({
       open: true,
       draft: automationToDraft(automation),
@@ -1314,6 +1324,8 @@ export interface MessageGroupRendererProps {
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
+  /** 将 assistant 回复标记为 Todo */
+  onCreateTodo?: (text: string) => void
   /** 错误重试回调（传入本轮开始前应删除的错误 UUID） */
   onRetry?: (errorUuid?: string) => void
   /** 在新会话中重试回调（仅当 turn 含错误消息时使用） */
@@ -1374,7 +1386,7 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onCreateTodo, onRetry, onRetryInNewSession, onCompact, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
@@ -1401,6 +1413,7 @@ export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onR
         basePath={basePath}
         onFork={onFork}
         onRewind={onRewind}
+        onCreateTodo={onCreateTodo}
         onRetry={onRetry}
         onRetryInNewSession={onRetryInNewSession}
         onCompact={onCompact}

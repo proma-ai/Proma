@@ -7,7 +7,7 @@
 import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
 
 /** 通知音场景类型 */
-export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode'
+export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
 
 /** 可选通知音 ID */
 export type NotificationSoundId = 'ding' | 'ding-dong' | 'discord' | 'done' | 'down-power' | 'food' | 'lite' | 'quiet' | 'none'
@@ -20,6 +20,8 @@ export interface NotificationSoundSettings {
   permissionRequest?: NotificationSoundId
   /** 计划审批 */
   exitPlanMode?: NotificationSoundId
+  /** Todo / 日程到期提醒 */
+  planningReminder?: NotificationSoundId
 }
 
 /** 语音输入供应商 */
@@ -275,6 +277,8 @@ export interface AppSettings {
   gitAttributionEnabled?: boolean
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState
+  /** 独立任务/日程窗口状态（大小、位置、是否最大化） */
+  planningWindowState?: MainWindowState
 }
 
 /** 主窗口大小、位置和最大化状态 */

@@ -1427,6 +1427,13 @@ export class AgentOrchestrator {
         'mcp__chrome_devtools__list_network_requests',
         'mcp__chrome_devtools__performance_stop_trace',
       ])
+      // Planning 是本地用户数据：计划模式只允许查询，严禁创建、更新、删除或确认/推迟提醒。
+      const PLAN_MODE_READ_ONLY_PLANNING_TOOLS = new Set([
+        'mcp__planning__list_todos', 'mcp__planning__get_todo',
+        'mcp__planning__list_calendar_events', 'mcp__planning__get_calendar_event',
+        'mcp__planning__list_groups', 'mcp__planning__list_tags',
+        'mcp__planning__list_active_reminders',
+      ])
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
       let planModeEntered = initialPermissionMode === 'plan'
@@ -1552,6 +1559,11 @@ export class AgentOrchestrator {
               return PLAN_MODE_READ_ONLY_CHROME_DEVTOOLS.has(toolName)
                 ? { behavior: 'allow' as const, updatedInput: input }
                 : { behavior: 'deny' as const, message: '计划模式下不允许执行会改变浏览器页面状态的 Chrome DevTools 操作，请在计划审批通过后再执行' }
+            }
+            if (toolName.startsWith('mcp__planning__')) {
+              return PLAN_MODE_READ_ONLY_PLANNING_TOOLS.has(toolName)
+                ? { behavior: 'allow' as const, updatedInput: input }
+                : { behavior: 'deny' as const, message: '计划模式下只能查询任务/日程，不能修改本地规划数据，请在计划审批通过后再执行' }
             }
             // 其他 MCP 工具维持既有策略：计划模式下允许调研用 MCP。
             if (toolName.startsWith('mcp__')) {
