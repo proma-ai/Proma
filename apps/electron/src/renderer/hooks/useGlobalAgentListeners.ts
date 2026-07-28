@@ -24,6 +24,7 @@ import {
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
+  clearAgentStreamError,
   liveMessagesMapAtom,
   agentSessionModelMapAtom,
   agentSessionChannelMapAtom,
@@ -756,6 +757,12 @@ export function useGlobalAgentListeners(): void {
               map.set(sessionId, next)
               return map
             })
+          }
+
+          // Pi 原生重试成功后仍会沿用同一会话；清掉该会话已失效的流式错误记录。
+          // 只响应明确的 retry_cleared，避免用普通输出掩盖真实终态失败。
+          if (event.type === 'retry_cleared') {
+            store.set(agentStreamErrorsAtom, (prev) => clearAgentStreamError(prev, sessionId))
           }
 
           // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态

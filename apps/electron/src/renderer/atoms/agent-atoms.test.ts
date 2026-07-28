@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyAgentEvent, type AgentStreamState } from './agent-atoms'
+import { applyAgentEvent, clearAgentStreamError, type AgentStreamState } from './agent-atoms'
 
 function createStreamState(overrides: Partial<AgentStreamState> = {}): AgentStreamState {
   return {
@@ -156,5 +156,24 @@ describe('Agent 上下文压缩状态', () => {
       compactInFlight: true,
       contextCompaction: { status: 'success' },
     })
+  })
+})
+
+describe('Agent 流式错误状态', () => {
+  test('given Pi 原生重试成功 when 清理会话错误 then 仅移除该会话的过期记录', () => {
+    const errors = new Map([
+      ['retried-session', '服务繁忙'],
+      ['failed-session', '认证失败'],
+    ])
+
+    expect(clearAgentStreamError(errors, 'retried-session')).toEqual(new Map([
+      ['failed-session', '认证失败'],
+    ]))
+  })
+
+  test('given 当前会话没有流式错误 when 清理 then 保持原 Map 引用', () => {
+    const errors = new Map([['failed-session', '认证失败']])
+
+    expect(clearAgentStreamError(errors, 'retried-session')).toBe(errors)
   })
 })

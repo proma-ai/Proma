@@ -13,6 +13,7 @@ describe('isTransientNetworkError', () => {
     'getaddrinfo EAI_AGAIN api.anthropic.com',
     'connect ECONNREFUSED 127.0.0.1:443',
     'TypeError: fetch failed',
+    'TypeError: Failed to fetch',
     'network error',
     'stream closed prematurely',
     'premature close',

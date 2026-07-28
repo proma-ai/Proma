@@ -993,6 +993,17 @@ export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
  */
 export const agentStreamErrorsAtom = atom<Map<string, string>>(new Map())
 
+/** 在同一会话确认恢复运行后移除过期的流式错误记录。 */
+export function clearAgentStreamError(
+  errors: Map<string, string>,
+  sessionId: string,
+): Map<string, string> {
+  if (!errors.has(sessionId)) return errors
+  const next = new Map(errors)
+  next.delete(sessionId)
+  return next
+}
+
 /**
  * Agent 消息刷新版本 Map — 以 sessionId 为 key
  * 全局监听器在流式完成/错误时递增版本号，
