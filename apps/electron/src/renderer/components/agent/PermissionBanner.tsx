@@ -193,7 +193,7 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
           拒绝
         </Button>
 
-        <Button
+        {request.allowAlways !== false && <Button
           variant="outline"
           size="sm"
           onClick={() => respond('allow', true)}
@@ -201,7 +201,7 @@ export function PermissionBanner({ sessionId }: PermissionBannerProps): React.Re
           className="h-7 px-3 text-xs"
         >
           本次会话总是允许
-        </Button>
+        </Button>}
 
         <Button
           variant="default"

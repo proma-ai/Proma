@@ -163,6 +163,33 @@ export class AgentPermissionService {
   }
 
   /**
+   * 为破坏性操作创建不可白名单化的单次确认请求。
+   * 即使会话处于 bypassPermissions，调用方也可用此入口保留最后的用户确认边界。
+   */
+  requestSingleApproval(
+    sessionId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+    options: CanUseToolOptions,
+    sendToRenderer: (request: PermissionRequest) => void,
+  ): Promise<PermissionResult> {
+    const request: PermissionRequest = {
+      ...this.buildPermissionRequest(sessionId, toolName, input, options),
+      dangerLevel: 'dangerous',
+      allowAlways: false,
+    }
+    sendToRenderer(request)
+    return new Promise<PermissionResult>((resolve) => {
+      this.pendingPermissions.set(request.requestId, { resolve, request })
+      options.signal.addEventListener('abort', () => {
+        if (!this.pendingPermissions.has(request.requestId)) return
+        this.pendingPermissions.delete(request.requestId)
+        resolve({ behavior: 'deny' as const, message: '操作已中止' })
+      }, { once: true })
+    })
+  }
+
+  /**
    * 响应权限请求（由 IPC handler 调用）
    *
    * @returns 对应的 sessionId，用于向渲染进程发送 resolved 事件；未找到请求时返回 null
@@ -174,7 +201,7 @@ export class AgentPermissionService {
     const sessionId = pending.request.sessionId
 
     // "总是允许"选项：加入会话白名单
-    if (alwaysAllow && behavior === 'allow') {
+    if (alwaysAllow && behavior === 'allow' && pending.request.allowAlways !== false) {
       this.addToWhitelist(sessionId, pending.request.toolName, pending.request.toolInput)
     }
 

@@ -169,9 +169,6 @@ export function showPlanningWindow(): void {
   planningWindow.focus()
 }
 
-export function getPlanningWindow(): BrowserWindow | null {
-  return planningWindow && !planningWindow.isDestroyed() ? planningWindow : null
-}
 
 /** 应用退出时销毁窗口，确保状态保存定时器与渲染进程一同释放。 */
 export function destroyPlanningWindow(): void {

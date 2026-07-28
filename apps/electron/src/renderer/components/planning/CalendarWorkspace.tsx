@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { CalendarDays, ChevronLeft, ChevronRight, Folder, ListTodo, Plus, Repeat2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { PLANNING_CONFLICT_ERROR } from '@proma/shared'
 import type { Automation, CalendarEvent, PlanningGroup, PlanningTag, Todo } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { automationsAtom } from '@/atoms/automation-atoms'
@@ -17,7 +18,6 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { PlanningFloatingInspector } from '@/components/planning/PlanningFloatingInspector'
 import { PlanningGroupManager } from '@/components/planning/PlanningGroupManager'
 
-const DAY_MS = 86_400_000
 const DEFAULT_EVENT_DURATION = 60 * 60 * 1000
 const DRAG_SNAP_MINUTES = 15
 const CALENDAR_GROUP_COLORS = ['#2563eb', '#7c3aed', '#db2777', '#dc2626', '#d97706', '#059669', '#0891b2']
@@ -63,6 +63,15 @@ interface EventDraft {
   todoId: string
 }
 
+type EventSaveResult =
+  | { kind: 'saved'; event: CalendarEvent }
+  | { kind: 'conflict' }
+  | { kind: 'failed' }
+
+function isPlanningConflictError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(PLANNING_CONFLICT_ERROR)
+}
+
 function startOfDay(value: number | Date): number {
   const date = new Date(value)
   date.setHours(0, 0, 0, 0)
@@ -82,6 +91,39 @@ function addDays(value: number, amount: number): number {
   return date.getTime()
 }
 
+function nextDayStart(value: number): number {
+  return addDays(startOfDay(value), 1)
+}
+
+function previousDayStart(value: number): number {
+  return addDays(startOfDay(value), -1)
+}
+
+function atLocalMinute(day: number, minute: number): number {
+  const date = new Date(day)
+  date.setMinutes(minute, 0, 0)
+  return date.getTime()
+}
+
+function useLocalDayStart(): number {
+  const [dayStart, setDayStart] = React.useState(() => startOfDay(Date.now()))
+  React.useEffect(() => {
+    const scheduleNextMidnight = (): (() => void) => {
+      const now = new Date()
+      const next = new Date(now)
+      next.setHours(24, 0, 0, 50)
+      const timer = window.setTimeout(() => {
+        setDayStart(startOfDay(Date.now()))
+        cleanup = scheduleNextMidnight()
+      }, Math.max(1_000, next.getTime() - now.getTime()))
+      return () => window.clearTimeout(timer)
+    }
+    let cleanup = scheduleNextMidnight()
+    return () => cleanup()
+  }, [])
+  return dayStart
+}
+
 function addMonths(value: number, amount: number): number {
   const date = new Date(value)
   date.setMonth(date.getMonth() + amount, 1)
@@ -97,11 +139,11 @@ function formatDay(value: number): string {
 }
 
 function eventEndAt(event: CalendarEvent): number {
-  return event.endAt ?? event.startAt + (event.allDay ? DAY_MS : 30 * 60 * 1000)
+  return event.endAt ?? (event.allDay ? nextDayStart(event.startAt) : event.startAt + 30 * 60 * 1000)
 }
 
 function eventOccursOnDay(event: CalendarEvent, day: number): boolean {
-  const dayEnd = day + DAY_MS
+  const dayEnd = nextDayStart(day)
   return event.startAt < dayEnd && eventEndAt(event) > day
 }
 
@@ -136,11 +178,17 @@ export function CalendarWorkspace(): React.ReactElement {
   const [eventPendingDeletion, setEventPendingDeletion] = React.useState<CalendarEvent | null>(null)
   const [draft, setDraft] = React.useState<EventDraft>(() => draftFromEvent())
   const [saving, setSaving] = React.useState(false)
+  const today = useLocalDayStart()
 
   const selected = events.find((event) => event.id === selectedId)
   const selectedTodo = todos.find((todo) => todo.id === selectedTodoId)
   const openTodos = todos.filter((todo) => todo.status === 'open')
   const activeAutomations = automations.filter((automation) => automation.active)
+  const calendarGroupUsageCounts = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const event of events) if (event.groupId) counts.set(event.groupId, (counts.get(event.groupId) ?? 0) + 1)
+    return counts
+  }, [events])
   const calendarCreateRequest = useAtomValue(planningCalendarCreateRequestAtom)
   const handledCreateRequest = React.useRef(calendarCreateRequest)
   const rangeStart = mode === 'week' ? startOfWeek(cursor) : new Date(new Date(cursor).getFullYear(), new Date(cursor).getMonth(), 1).getTime()
@@ -242,11 +290,11 @@ export function CalendarWorkspace(): React.ReactElement {
     }
   }
 
-  const updateEvent = async (id: string, next: EventDraft, silent = false): Promise<boolean> => {
-    if (!next.title.trim()) return false
+  const updateEvent = React.useCallback(async (id: string, next: EventDraft, expectedUpdatedAt: number, silent = false): Promise<EventSaveResult> => {
+    if (!next.title.trim()) return { kind: 'failed' }
     if (next.endAt < next.startAt) {
       if (!silent) toast.error('结束时间不能早于开始时间')
-      return false
+      return { kind: 'failed' }
     }
     try {
       const event = await window.electronAPI.updateCalendarEvent({
@@ -259,17 +307,22 @@ export function CalendarWorkspace(): React.ReactElement {
         groupId: next.groupId === '__none__' ? null : next.groupId,
         tagIds: next.tagIds,
         todoId: next.todoId === '__none__' ? null : next.todoId,
+        expectedUpdatedAt,
       })
       if (!event) throw new Error('日程不存在')
       setEvents((current) => current.map((item) => item.id === id ? event : item))
       if (!silent) toast.success('已更新日程')
-      return true
+      return { kind: 'saved', event }
     } catch (error) {
+      if (isPlanningConflictError(error)) {
+        if (!silent) toast.error('日程已在其他窗口更新，请重新加载后再试')
+        return { kind: 'conflict' }
+      }
       console.error('[日程] 更新失败:', error)
       if (!silent) toast.error('更新日程失败')
-      return false
+      return { kind: 'failed' }
     }
-  }
+  }, [setEvents])
 
   const requestDeleteEvent = async (event: CalendarEvent): Promise<void> => {
     setEventPendingDeletion(event)
@@ -316,13 +369,13 @@ export function CalendarWorkspace(): React.ReactElement {
             <Button type="button" variant={mode === 'week' ? 'secondary' : 'ghost'} size="sm" className="h-10" onClick={() => setMode('week')}>周</Button>
             <Button type="button" variant={mode === 'month' ? 'secondary' : 'ghost'} size="sm" className="h-10" onClick={() => setMode('month')}>月</Button>
           </div>
-          <PlanningGroupManager scope="calendar" groups={groups} itemLabel="日程" getUsageCount={(groupId) => events.filter((event) => event.groupId === groupId).length} onCreate={createCalendarGroup} onRename={renameCalendarGroup} onDelete={deleteCalendarGroup} trigger={<Button type="button" variant="ghost" className="h-10 gap-1.5 px-2.5 text-sm"><Folder size={16} />分组</Button>} />
+          <PlanningGroupManager scope="calendar" groups={groups} itemLabel="日程" getUsageCount={(groupId) => calendarGroupUsageCounts.get(groupId) ?? 0} onCreate={createCalendarGroup} onRename={renameCalendarGroup} onDelete={deleteCalendarGroup} trigger={<Button type="button" variant="ghost" className="h-10 gap-1.5 px-2.5 text-sm"><Folder size={16} />分组</Button>} />
         </div>
         <div className="flex items-center gap-1.5"><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="上一段时间" onClick={() => navigate(-1)}><ChevronLeft size={17} /></Button><h2 className="min-w-44 text-center text-sm font-semibold tabular-nums">{heading}</h2><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="下一段时间" onClick={() => navigate(1)}><ChevronRight size={17} /></Button></div>
       </div>
       <div className="relative grid min-h-0 flex-1 grid-cols-1">
         <div className="min-h-0 overflow-hidden">
-          {mode === 'month' ? <MonthCalendar monthStart={rangeStart} events={events} todos={openTodos} automations={activeAutomations} onSelectEvent={selectEvent} onSelectTodo={selectTodo} /> : <WeekCalendar weekStart={rangeStart} events={events} todos={openTodos} automations={activeAutomations} draftPreview={showDraftPreview && createOpen ? draft : undefined} quickCreateOpen={createOpen} onSelectEvent={selectEvent} onCreateAt={openCreate} onSelectTodo={selectTodo} />}
+          {mode === 'month' ? <MonthCalendar monthStart={rangeStart} today={today} events={events} todos={openTodos} automations={activeAutomations} onSelectEvent={selectEvent} onSelectTodo={selectTodo} /> : <WeekCalendar weekStart={rangeStart} events={events} todos={openTodos} automations={activeAutomations} draftPreview={showDraftPreview && createOpen ? draft : undefined} quickCreateOpen={createOpen} onSelectEvent={selectEvent} onCreateAt={openCreate} onSelectTodo={selectTodo} />}
         </div>
         {selected && <CalendarEventDetail event={selected} groups={groups} tags={tags} todos={openTodos} onClose={() => setSelectedId(null)} onSave={updateEvent} onDelete={requestDeleteEvent} />}
         {selectedTodo && <CalendarTodoDetail todo={selectedTodo} onClose={() => setSelectedTodoId(null)} />}
@@ -338,13 +391,37 @@ export function CalendarWorkspace(): React.ReactElement {
   )
 }
 
-function MonthCalendar({ monthStart, events, todos, automations, onSelectEvent, onSelectTodo }: { monthStart: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; onSelectEvent: (id: string) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
-  const firstWeekday = new Date(monthStart).getDay()
-  const days = new Date(new Date(monthStart).getFullYear(), new Date(monthStart).getMonth() + 1, 0).getDate()
-  const weekCount = Math.ceil((firstWeekday + days) / 7)
-  const cells = Array.from({ length: weekCount * 7 }, (_, index) => index - firstWeekday + 1)
+interface CalendarDayItems {
+  events: CalendarEvent[]
+  todos: Todo[]
+  automations: Automation[]
+}
 
-  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const timestamp = new Date(new Date(monthStart).getFullYear(), new Date(monthStart).getMonth(), day, 9).getTime(); const valid = day > 0 && day <= days; const calendarEvents = valid ? events.filter((event) => eventOccursOnDay(event, startOfDay(timestamp))) : []; const dayTodos = valid ? todos.filter((todo) => todo.dueAt && startOfDay(todo.dueAt) === startOfDay(timestamp)) : []; const dayAutomations = valid ? automations.filter((item) => startOfDay(item.nextRunAt) === startOfDay(timestamp)) : []; return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', startOfDay(timestamp) === startOfDay(Date.now()) && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{calendarEvents.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{dayTodos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{dayAutomations.map((automation) => <div key={automation.id} className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300"><Repeat2 className="size-3 shrink-0" /><span className="truncate">{automation.name}</span></div>)}</div></div> })}</div></div>
+function MonthCalendar({ monthStart, today, events, todos, automations, onSelectEvent, onSelectTodo }: { monthStart: number; today: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; onSelectEvent: (id: string) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
+  const monthDate = new Date(monthStart)
+  const firstWeekday = monthDate.getDay()
+  const days = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate()
+  const weekCount = Math.ceil((firstWeekday + days) / 7)
+  const cells = React.useMemo(() => Array.from({ length: weekCount * 7 }, (_, index) => index - firstWeekday + 1), [firstWeekday, weekCount])
+  const visibleDays = React.useMemo(() => cells.flatMap((day) => {
+    if (day <= 0 || day > days) return []
+    return [startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime())]
+  }), [cells, days, monthStart])
+  const itemsByDay = React.useMemo(() => {
+    const result = new Map<number, CalendarDayItems>()
+    for (const day of visibleDays) result.set(day, { events: [], todos: [], automations: [] })
+    for (const event of events) {
+      for (const day of visibleDays) if (eventOccursOnDay(event, day)) result.get(day)!.events.push(event)
+    }
+    for (const todo of todos) {
+      if (!todo.dueAt) continue
+      result.get(startOfDay(todo.dueAt))?.todos.push(todo)
+    }
+    for (const automation of automations) result.get(startOfDay(automation.nextRunAt))?.automations.push(automation)
+    return result
+  }, [automations, events, todos, visibleDays])
+
+  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const valid = day > 0 && day <= days; const timestamp = valid ? startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime()) : undefined; const items = timestamp === undefined ? undefined : itemsByDay.get(timestamp); return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', timestamp === today && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{items?.events.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{items?.todos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{items?.automations.map((automation) => <div key={automation.id} className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300"><Repeat2 className="size-3 shrink-0" /><span className="truncate">{automation.name}</span></div>)}</div></div> })}</div></div>
 }
 
 function TodoCalendarMarker({ todo, onSelect, className }: { todo: Todo; onSelect: () => void; className: string }): React.ReactElement {
@@ -383,12 +460,18 @@ interface TimedSegment {
   laneCount: number
 }
 
+interface WeekDayItems {
+  allDayEvents: CalendarEvent[]
+  allDayTodos: Todo[]
+  timedSegments: TimedSegment[]
+}
+
 /**
  * 对同一天内所有有时间点的项目做简单分栏：相交的项目并排，不相交的项目占满宽度。
  * Todo / 自动化采用短视觉时段，只解决可读性，不改变它们的真实截止/触发时间。
  */
 function getTimedSegments(items: TimedItem[], day: number): TimedSegment[] {
-  const dayEnd = day + DAY_MS
+  const dayEnd = nextDayStart(day)
   const raw = items
     .filter((item) => item.startAt < dayEnd && item.endAt > day)
     .sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt)
@@ -432,7 +515,10 @@ function getTimedSegments(items: TimedItem[], day: number): TimedSegment[] {
 }
 
 function minuteOffset(value: number, day: number): number {
-  return Math.max(0, Math.min(24 * 60, Math.round((value - day) / 60_000)))
+  if (value <= day) return 0
+  if (value >= nextDayStart(day)) return 24 * 60
+  const date = new Date(value)
+  return date.getHours() * 60 + date.getMinutes()
 }
 
 interface WeekTimeDrag {
@@ -450,7 +536,7 @@ interface WeekTimeSelection {
 }
 
 function WeekCalendar({ weekStart, events, todos, automations, draftPreview, quickCreateOpen, onSelectEvent, onCreateAt, onSelectTodo }: { weekStart: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; draftPreview?: CalendarDraftPreview; quickCreateOpen: boolean; onSelectEvent: (id: string) => void; onCreateAt: (startAt: number, endAt?: number, pointer?: CalendarCreatePointer) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
-  const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+  const days = React.useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart])
   const hours = Array.from({ length: 24 }, (_, hour) => hour)
   const timeScrollRef = React.useRef<HTMLDivElement>(null)
   const dragRef = React.useRef<WeekTimeDrag | null>(null)
@@ -467,7 +553,7 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
 
   const now = currentTime
   const today = startOfDay(now)
-  const isCurrentWeek = today >= weekStart && today < weekStart + 7 * DAY_MS
+  const isCurrentWeek = today >= weekStart && today < addDays(weekStart, 7)
   const currentMinute = minuteOffset(now, today)
   const totalHeight = hourHeight * 24
   const previewSelection = React.useMemo<WeekTimeSelection | undefined>(() => {
@@ -477,6 +563,34 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
     const endMinute = Math.max(startMinute + DRAG_SNAP_MINUTES, Math.min(24 * 60, minuteOffset(draftPreview.endAt, day)))
     return { day, startMinute, endMinute }
   }, [draftPreview?.allDay, draftPreview?.endAt, draftPreview?.startAt])
+  const dayItems = React.useMemo(() => {
+    const items = new Map<number, { allDayEvents: CalendarEvent[]; allDayTodos: Todo[]; timedItems: TimedItem[] }>()
+    for (const day of days) items.set(day, { allDayEvents: [], allDayTodos: [], timedItems: [] })
+    for (const event of events) {
+      for (const day of days) {
+        if (!eventOccursOnDay(event, day)) continue
+        if (event.allDay) items.get(day)!.allDayEvents.push(event)
+        else items.get(day)!.timedItems.push({ id: event.id, kind: 'event', startAt: event.startAt, endAt: eventEndAt(event), event })
+      }
+    }
+    for (const todo of todos) {
+      if (!todo.dueAt) continue
+      const day = startOfDay(todo.dueAt)
+      const item = items.get(day)
+      if (!item) continue
+      if (isTodoDateOnly(todo.dueAt)) item.allDayTodos.push(todo)
+      else item.timedItems.push({ id: todo.id, kind: 'todo', startAt: todo.dueAt, endAt: todo.dueAt + 30 * 60 * 1000, todo })
+    }
+    for (const automation of automations) {
+      const item = items.get(startOfDay(automation.nextRunAt))
+      if (item) item.timedItems.push({ id: automation.id, kind: 'automation', startAt: automation.nextRunAt, endAt: automation.nextRunAt + 30 * 60 * 1000, automation })
+    }
+    return new Map(days.map((day) => {
+      const item = items.get(day)!
+      const result: WeekDayItems = { allDayEvents: item.allDayEvents, allDayTodos: item.allDayTodos, timedSegments: getTimedSegments(item.timedItems, day) }
+      return [day, result]
+    }))
+  }, [automations, days, events, todos])
 
   React.useEffect(() => {
     if (previewSelection) setDragSelection(null)
@@ -549,7 +663,7 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
     }
     const selection = selectionFrom(day, drag.anchorMinute, minuteAtPosition(event.clientY, event.currentTarget))
     setDragSelection(selection)
-    onCreateAt(day + selection.startMinute * 60_000, day + selection.endMinute * 60_000, { clientX: event.clientX, clientY: event.clientY })
+    onCreateAt(atLocalMinute(day, selection.startMinute), atLocalMinute(day, selection.endMinute), { clientX: event.clientX, clientY: event.clientY })
   }
 
   return (
@@ -562,9 +676,8 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
         <div className="grid shrink-0 border-b border-border/60" style={{ gridTemplateColumns: '3.5rem repeat(7, minmax(8rem, 1fr))' }}>
           <div className="border-r border-border/60 px-2 py-2 text-right text-[11px] text-muted-foreground">全天</div>
           {days.map((day) => {
-            const allDayEvents = events.filter((event) => event.allDay && eventOccursOnDay(event, day))
-            const allDayTodos = todos.filter((todo) => todo.dueAt && isTodoDateOnly(todo.dueAt) && startOfDay(todo.dueAt) === day)
-            return <div key={day} className="min-h-12 border-r border-border/60 p-1.5">{allDayEvents.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="mb-1 flex w-full min-w-0 items-center gap-1 px-1.5 py-1 text-left text-[11px] shadow-sm" />)}{allDayTodos.map((todo) => <div key={todo.id} className="mb-1"><TodoCalendarMarker todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>)}</div>
+            const items = dayItems.get(day)!
+            return <div key={day} className="min-h-12 border-r border-border/60 p-1.5">{items.allDayEvents.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="mb-1 flex w-full min-w-0 items-center gap-1 px-1.5 py-1 text-left text-[11px] shadow-sm" />)}{items.allDayTodos.map((todo) => <div key={todo.id} className="mb-1"><TodoCalendarMarker todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>)}</div>
           })}
         </div>
         <div ref={timeScrollRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
@@ -573,12 +686,7 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
               {hours.map((hour) => <div key={hour} className="absolute left-0 right-0 border-t-[0.5px] border-border/40 pr-2 text-right text-[11px] text-muted-foreground" style={{ top: `${hour * hourHeight}px` }}><span className="relative -top-2.5 tabular-nums">{String(hour).padStart(2, '0')}:00</span></div>)}
             </div>
             {days.map((day) => {
-              const timedItems: TimedItem[] = [
-                ...events.filter((event) => !event.allDay).map((event) => ({ id: event.id, kind: 'event' as const, startAt: event.startAt, endAt: eventEndAt(event), event })),
-                ...todos.filter((todo) => todo.dueAt && !isTodoDateOnly(todo.dueAt) && startOfDay(todo.dueAt) === day).map((todo) => ({ id: todo.id, kind: 'todo' as const, startAt: todo.dueAt!, endAt: todo.dueAt! + 30 * 60 * 1000, todo })),
-                ...automations.filter((automation) => startOfDay(automation.nextRunAt) === day).map((automation) => ({ id: automation.id, kind: 'automation' as const, startAt: automation.nextRunAt, endAt: automation.nextRunAt + 30 * 60 * 1000, automation })),
-              ]
-              const segments = getTimedSegments(timedItems, day)
+              const segments = dayItems.get(day)!.timedSegments
               const selection = dragSelection?.day === day ? dragSelection : previewSelection?.day === day ? previewSelection : undefined
               return <div key={day} onPointerDown={(event) => handlePointerDown(event, day)} onPointerMove={(event) => handlePointerMove(event, day)} onPointerUp={(event) => finishTimeDrag(event, day)} onPointerCancel={(event) => finishTimeDrag(event, day, true)} className="relative cursor-crosshair select-none border-r border-border/60">
                 {hours.map((hour) => <div key={hour} className="absolute left-0 right-0 border-t-[0.5px] border-border/40" style={{ top: `${hour * hourHeight}px` }} />)}
@@ -594,7 +702,7 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
                   if (segment.item.kind === 'todo') return <div key={`todo-${segment.item.id}`} className="absolute z-20" style={style}><TodoCalendarMarker todo={segment.item.todo} onSelect={() => onSelectTodo(segment.item.id)} className="h-full bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>
                   return <div key={`automation-${segment.item.id}`} data-calendar-item title={segment.item.automation.name} className="absolute z-20 flex items-start gap-1 overflow-hidden bg-violet-500/20 px-1 py-0.5 text-[10px] text-violet-900 shadow-sm dark:text-violet-100" style={style}><Repeat2 className="mt-0.5 size-3 shrink-0" /><span className="truncate">{segment.item.automation.name}</span></div>
                 })}
-                {selection && <div aria-hidden="true" className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden border border-primary/70 border-l-2 bg-primary/15 px-1.5 py-1 text-[11px] text-primary shadow-sm" style={{ top: `${selection.startMinute / 60 * hourHeight}px`, height: `${(selection.endMinute - selection.startMinute) / 60 * hourHeight}px` }}>{selection.endMinute - selection.startMinute >= 30 && <span className="block truncate font-medium">新建日程 · {formatTime(day + selection.startMinute * 60_000)}–{formatTime(day + selection.endMinute * 60_000)}</span>}</div>}
+                {selection && <div aria-hidden="true" className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden border border-primary/70 border-l-2 bg-primary/15 px-1.5 py-1 text-[11px] text-primary shadow-sm" style={{ top: `${selection.startMinute / 60 * hourHeight}px`, height: `${(selection.endMinute - selection.startMinute) / 60 * hourHeight}px` }}>{selection.endMinute - selection.startMinute >= 30 && <span className="block truncate font-medium">新建日程 · {formatTime(atLocalMinute(day, selection.startMinute))}–{formatTime(atLocalMinute(day, selection.endMinute))}</span>}</div>}
                 {isCurrentWeek && startOfDay(day) === today && <div className="pointer-events-none absolute inset-x-0 z-30 flex -translate-y-1/2 items-center" style={{ top: `${currentMinute / 60 * hourHeight}px` }}><span className="ml-0.5 size-2 shrink-0 rounded-full bg-primary" /><span className="h-px flex-1 bg-primary" /></div>}
               </div>
             })}
@@ -609,22 +717,49 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
   )
 }
 
-function CalendarEventDetail({ event, groups, tags, todos, onClose, onSave, onDelete }: { event: CalendarEvent; groups: Array<{ id: string; name: string }>; tags: PlanningTag[]; todos: Todo[]; onClose: () => void; onSave: (id: string, draft: EventDraft, silent?: boolean) => Promise<boolean>; onDelete: (event: CalendarEvent) => Promise<void> }): React.ReactElement {
+function CalendarEventDetail({ event, groups, tags, todos, onClose, onSave, onDelete }: { event: CalendarEvent; groups: Array<{ id: string; name: string }>; tags: PlanningTag[]; todos: Todo[]; onClose: () => void; onSave: (id: string, draft: EventDraft, expectedUpdatedAt: number, silent?: boolean) => Promise<EventSaveResult>; onDelete: (event: CalendarEvent) => Promise<void> }): React.ReactElement {
   const [draft, setDraft] = React.useState(() => draftFromEvent(event))
-  const [saveState, setSaveState] = React.useState<'saved' | 'saving' | 'failed' | 'invalid'>('saved')
+  const [saveState, setSaveState] = React.useState<'saved' | 'saving' | 'failed' | 'invalid' | 'conflict'>('saved')
   const [saveGeneration, setSaveGeneration] = React.useState(0)
   const savedDraftRef = React.useRef(JSON.stringify(draftFromEvent(event)))
+  const draftRef = React.useRef(draft)
+  const baseUpdatedAtRef = React.useRef(event.updatedAt)
+  const eventIdRef = React.useRef(event.id)
   const savingRef = React.useRef(false)
   const failedDraftRef = React.useRef<string | null>(null)
+  const conflictRef = React.useRef(false)
   const serializedDraft = JSON.stringify(draft)
 
   React.useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
+
+  React.useEffect(() => {
     const next = draftFromEvent(event)
-    setDraft(next)
-    savedDraftRef.current = JSON.stringify(next)
+    const nextSerialized = JSON.stringify(next)
+    if (eventIdRef.current !== event.id) {
+      eventIdRef.current = event.id
+      baseUpdatedAtRef.current = event.updatedAt
+      savedDraftRef.current = nextSerialized
+      failedDraftRef.current = null
+      conflictRef.current = false
+      setDraft(next)
+      setSaveState('saved')
+      return
+    }
+    if (event.updatedAt === baseUpdatedAtRef.current || savingRef.current) return
+    if (JSON.stringify(draftRef.current) !== savedDraftRef.current) {
+      conflictRef.current = true
+      setSaveState('conflict')
+      return
+    }
+    baseUpdatedAtRef.current = event.updatedAt
+    savedDraftRef.current = nextSerialized
     failedDraftRef.current = null
+    conflictRef.current = false
+    setDraft(next)
     setSaveState('saved')
-  }, [event.id])
+  }, [event.id, event.updatedAt])
 
   // 分组被删除时，详情面板中的草稿不能继续持有已失效的分组 ID。
   React.useEffect(() => {
@@ -633,7 +768,7 @@ function CalendarEventDetail({ event, groups, tags, todos, onClose, onSave, onDe
   }, [draft.groupId, groups])
 
   React.useEffect(() => {
-    if (serializedDraft === savedDraftRef.current) return
+    if (serializedDraft === savedDraftRef.current || conflictRef.current) return
     if (!draft.title.trim() || draft.endAt < draft.startAt) {
       setSaveState('invalid')
       return
@@ -641,15 +776,19 @@ function CalendarEventDetail({ event, groups, tags, todos, onClose, onSave, onDe
     if (failedDraftRef.current === serializedDraft || savingRef.current) return
 
     const timer = window.setTimeout(async () => {
-      if (savingRef.current) return
+      if (savingRef.current || conflictRef.current) return
       savingRef.current = true
       setSaveState('saving')
       const snapshot = serializedDraft
-      const saved = await onSave(event.id, draft, true)
-      if (saved) {
+      const result = await onSave(event.id, draft, baseUpdatedAtRef.current, true)
+      if (result.kind === 'saved') {
+        baseUpdatedAtRef.current = result.event.updatedAt
         savedDraftRef.current = snapshot
         failedDraftRef.current = null
         setSaveState('saved')
+      } else if (result.kind === 'conflict') {
+        conflictRef.current = true
+        setSaveState('conflict')
       } else {
         failedDraftRef.current = snapshot
         setSaveState('failed')
@@ -660,13 +799,26 @@ function CalendarEventDetail({ event, groups, tags, todos, onClose, onSave, onDe
     return () => window.clearTimeout(timer)
   }, [draft, event.id, onSave, saveGeneration, serializedDraft])
 
+  const reloadLatest = (): void => {
+    const next = draftFromEvent(event)
+    baseUpdatedAtRef.current = event.updatedAt
+    savedDraftRef.current = JSON.stringify(next)
+    failedDraftRef.current = null
+    conflictRef.current = false
+    setDraft(next)
+    setSaveState('saved')
+  }
   const handleClose = (): void => {
     if (serializedDraft !== savedDraftRef.current && !window.confirm('有未保存的日程修改，确定关闭吗？')) return
     onClose()
   }
-  const statusLabel = saveState === 'saving' ? '正在自动保存…' : saveState === 'failed' ? '保存失败，请继续编辑后重试' : saveState === 'invalid' ? '请补全有效标题和时间' : '已自动保存'
+  const statusLabel = saveState === 'saving' ? '正在自动保存…'
+    : saveState === 'failed' ? '保存失败，请继续编辑后重试'
+      : saveState === 'invalid' ? '请补全有效标题和时间'
+        : saveState === 'conflict' ? '此日程已在其他窗口更新'
+          : '已自动保存'
 
-  return <PlanningFloatingInspector label="日程详情" onClose={handleClose}><div className="space-y-6 p-5 pr-14"><div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">日程详情</p><p className="mt-1 text-xs text-muted-foreground">{statusLabel}</p></div><CalendarEventFields draft={draft} setDraft={setDraft} groups={groups} tags={tags} todos={todos} /><div className="flex items-center justify-between border-t border-border/60 pt-4"><Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void onDelete(event)}><Trash2 size={15} />删除</Button><span className="text-xs text-muted-foreground">编辑后自动保存</span></div></div></PlanningFloatingInspector>
+  return <PlanningFloatingInspector label="日程详情" onClose={handleClose}><div className="space-y-6 p-5 pr-14"><div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">日程详情</p><div className="mt-1 flex items-center gap-2"><p className="text-xs text-muted-foreground">{statusLabel}</p>{saveState === 'conflict' && <Button type="button" variant="link" size="sm" className="h-auto px-0 text-xs" onClick={reloadLatest}>重新加载</Button>}</div></div><CalendarEventFields draft={draft} setDraft={setDraft} groups={groups} tags={tags} todos={todos} /><div className="flex items-center justify-between border-t border-border/60 pt-4"><Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void onDelete(event)}><Trash2 size={15} />删除</Button><span className="text-xs text-muted-foreground">编辑后自动保存</span></div></div></PlanningFloatingInspector>
 }
 
 function CalendarTodoDetail({ todo, onClose }: { todo: Todo; onClose: () => void }): React.ReactElement {
@@ -692,14 +844,14 @@ function CalendarQuickCreatePopover({ open, anchor, draft, setDraft, groups, sav
 
   const setAllDay = (allDay: boolean): void => setDraft((current) => {
     const startAt = allDay ? startOfDay(current.startAt) : current.startAt
-    const endAt = allDay ? Math.max(startAt + DAY_MS, startOfDay(current.endAt) + DAY_MS) : Math.max(current.endAt, startAt + 30 * 60 * 1000)
+    const endAt = allDay ? Math.max(nextDayStart(startAt), nextDayStart(current.endAt)) : Math.max(current.endAt, startAt + 30 * 60 * 1000)
     return { ...current, allDay, startAt, endAt }
   })
   const setStart = (startAt: number): void => setDraft((current) => {
     const normalizedStartAt = current.allDay ? startOfDay(startAt) : startAt
-    return { ...current, startAt: normalizedStartAt, endAt: current.endAt < normalizedStartAt ? normalizedStartAt + (current.allDay ? DAY_MS : DEFAULT_EVENT_DURATION) : current.endAt }
+    return { ...current, startAt: normalizedStartAt, endAt: current.endAt < normalizedStartAt ? (current.allDay ? nextDayStart(normalizedStartAt) : normalizedStartAt + DEFAULT_EVENT_DURATION) : current.endAt }
   })
-  const setEnd = (endAt: number): void => setDraft((current) => ({ ...current, endAt: current.allDay ? startOfDay(endAt) + DAY_MS : endAt }))
+  const setEnd = (endAt: number): void => setDraft((current) => ({ ...current, endAt: current.allDay ? nextDayStart(endAt) : endAt }))
   const createGroup = async (): Promise<void> => {
     const name = newGroupName.trim()
     if (!name || savingGroup) return
@@ -728,7 +880,7 @@ function CalendarQuickCreatePopover({ open, anchor, draft, setDraft, groups, sav
             </div>
           </div>
           {creatingGroup && <div className="flex items-center gap-2 rounded-xl bg-muted/35 p-2"><Input autoFocus value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void createGroup() }; if (event.key === 'Escape') { setCreatingGroup(false); setNewGroupName('') } }} placeholder="日程分组名称" className="h-9 border-0 bg-background px-2 text-sm shadow-none" /><Button type="button" size="sm" className="h-9" disabled={!newGroupName.trim() || savingGroup} onClick={() => void createGroup()}>{savingGroup ? '添加中…' : '添加'}</Button></div>}
-          <div className="space-y-2 rounded-xl bg-muted/35 p-3"><div className="flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">时间</span><label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={draft.allDay} onChange={(event) => setAllDay(event.target.checked)} className="size-3.5 accent-primary" />全天</label></div><div className="grid grid-cols-2 gap-2"><label className="grid gap-1"><span className="text-[11px] text-muted-foreground">开始</span><TodoDatePicker value={draft.startAt} onChange={(value) => { if (value !== undefined) setStart(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择开始日期时间" className="h-9 w-full justify-start rounded-lg border-0 bg-background px-2 text-xs text-foreground hover:bg-background" /></label><label className="grid gap-1"><span className="text-[11px] text-muted-foreground">结束</span><TodoDatePicker value={draft.allDay ? Math.max(draft.startAt, draft.endAt - DAY_MS) : draft.endAt} onChange={(value) => { if (value !== undefined) setEnd(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择结束日期时间" className="h-9 w-full justify-start rounded-lg border-0 bg-background px-2 text-xs text-foreground hover:bg-background" /></label></div></div>
+          <div className="space-y-2 rounded-xl bg-muted/35 p-3"><div className="flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">时间</span><label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={draft.allDay} onChange={(event) => setAllDay(event.target.checked)} className="size-3.5 accent-primary" />全天</label></div><div className="grid grid-cols-2 gap-2"><label className="grid gap-1"><span className="text-[11px] text-muted-foreground">开始</span><TodoDatePicker value={draft.startAt} onChange={(value) => { if (value !== undefined) setStart(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择开始日期时间" className="h-9 w-full justify-start rounded-lg border-0 bg-background px-2 text-xs text-foreground hover:bg-background" /></label><label className="grid gap-1"><span className="text-[11px] text-muted-foreground">结束</span><TodoDatePicker value={draft.allDay ? Math.max(draft.startAt, previousDayStart(draft.endAt)) : draft.endAt} onChange={(value) => { if (value !== undefined) setEnd(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择结束日期时间" className="h-9 w-full justify-start rounded-lg border-0 bg-background px-2 text-xs text-foreground hover:bg-background" /></label></div></div>
           <div className="flex items-center justify-between gap-3 px-1 pt-0.5"><span className="text-[11px] text-muted-foreground">更多信息可在创建后补充</span><div className="flex items-center gap-1"><Button type="button" variant="ghost" size="sm" className="h-9 px-2" onClick={() => onOpenChange(false)}>取消</Button><Button type="submit" size="sm" className="h-9 px-3" disabled={saving || !draft.title.trim()}>{saving ? '创建中…' : '创建'}</Button></div></div>
         </form>
       </PopoverContent>
@@ -740,13 +892,13 @@ function CalendarEventFields({ draft, setDraft, groups, tags, todos }: { draft: 
   const update = <K extends keyof EventDraft>(key: K, value: EventDraft[K]): void => setDraft((current) => ({ ...current, [key]: value }))
   const setAllDay = (allDay: boolean): void => setDraft((current) => {
     const startAt = allDay ? startOfDay(current.startAt) : current.startAt
-    const endAt = allDay ? Math.max(startAt + DAY_MS, startOfDay(current.endAt) + DAY_MS) : Math.max(current.endAt, startAt + 30 * 60 * 1000)
+    const endAt = allDay ? Math.max(nextDayStart(startAt), nextDayStart(current.endAt)) : Math.max(current.endAt, startAt + 30 * 60 * 1000)
     return { ...current, allDay, startAt, endAt }
   })
   const setStart = (startAt: number): void => setDraft((current) => {
     const normalizedStartAt = current.allDay ? startOfDay(startAt) : startAt
-    return { ...current, startAt: normalizedStartAt, endAt: current.endAt < normalizedStartAt ? normalizedStartAt + (current.allDay ? DAY_MS : DEFAULT_EVENT_DURATION) : current.endAt }
+    return { ...current, startAt: normalizedStartAt, endAt: current.endAt < normalizedStartAt ? (current.allDay ? nextDayStart(normalizedStartAt) : normalizedStartAt + DEFAULT_EVENT_DURATION) : current.endAt }
   })
-  const setEnd = (endAt: number): void => setDraft((current) => ({ ...current, endAt: current.allDay ? startOfDay(endAt) + DAY_MS : endAt }))
-  return <div className="space-y-5"><div><label className="mb-2 block text-sm font-medium" htmlFor="calendar-event-title">标题</label><Input id="calendar-event-title" autoFocus value={draft.title} onChange={(event) => update('title', event.target.value)} placeholder="例如：产品评审" className="text-base" /></div><div className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2"><div><p className="text-sm font-medium">全天</p><p className="text-xs text-muted-foreground">不占用具体小时段</p></div><input type="checkbox" checked={draft.allDay} onChange={(event) => setAllDay(event.target.checked)} className="size-4 accent-primary" /></div><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium">开始<TodoDatePicker value={draft.startAt} onChange={(value) => { if (value !== undefined) setStart(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择开始日期时间" className="h-10 w-full justify-start rounded-none border border-border/60 bg-transparent px-3 text-foreground hover:bg-muted/40" /></label><label className="grid gap-2 text-sm font-medium">结束<TodoDatePicker value={draft.allDay ? Math.max(draft.startAt, draft.endAt - DAY_MS) : draft.endAt} onChange={(value) => { if (value !== undefined) setEnd(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择结束日期时间" className="h-10 w-full justify-start rounded-none border border-border/60 bg-transparent px-3 text-foreground hover:bg-muted/40" /></label></div><div><label className="mb-2 block text-sm font-medium" htmlFor="calendar-event-notes">更多信息</label><Textarea id="calendar-event-notes" value={draft.notes} onChange={(event) => update('notes', event.target.value)} placeholder="补充地点、议程、会议链接或其他上下文；Agent 可以读取这里的内容。" className="min-h-28 resize-y" /></div><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium">日程分组<Select value={draft.groupId} onValueChange={(value) => update('groupId', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{groups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select></label><label className="grid gap-2 text-sm font-medium">关联 Todo<Select value={draft.todoId} onValueChange={(value) => update('todoId', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不关联 Todo</SelectItem>{todos.map((todo) => <SelectItem key={todo.id} value={todo.id}>{todo.title}</SelectItem>)}</SelectContent></Select></label></div><div><p className="mb-2 text-sm font-medium">标签</p><div className="flex flex-wrap gap-1.5">{tags.length ? tags.map((tag) => { const selected = draft.tagIds.includes(tag.id); return <button key={tag.id} type="button" onClick={() => update('tagIds', selected ? draft.tagIds.filter((id) => id !== tag.id) : [...draft.tagIds, tag.id])} className={cn('rounded-md px-2 py-1 text-xs transition-colors', selected ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted')}>#{tag.name}</button> }) : <span className="text-xs text-muted-foreground">暂无标签</span>}</div></div></div>
+  const setEnd = (endAt: number): void => setDraft((current) => ({ ...current, endAt: current.allDay ? nextDayStart(endAt) : endAt }))
+  return <div className="space-y-5"><div><label className="mb-2 block text-sm font-medium" htmlFor="calendar-event-title">标题</label><Input id="calendar-event-title" autoFocus value={draft.title} onChange={(event) => update('title', event.target.value)} placeholder="例如：产品评审" className="text-base" /></div><div className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2"><div><p className="text-sm font-medium">全天</p><p className="text-xs text-muted-foreground">不占用具体小时段</p></div><input type="checkbox" checked={draft.allDay} onChange={(event) => setAllDay(event.target.checked)} className="size-4 accent-primary" /></div><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium">开始<TodoDatePicker value={draft.startAt} onChange={(value) => { if (value !== undefined) setStart(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择开始日期时间" className="h-10 w-full justify-start rounded-none border border-border/60 bg-transparent px-3 text-foreground hover:bg-muted/40" /></label><label className="grid gap-2 text-sm font-medium">结束<TodoDatePicker value={draft.allDay ? Math.max(draft.startAt, previousDayStart(draft.endAt)) : draft.endAt} onChange={(value) => { if (value !== undefined) setEnd(value) }} dateOnly={draft.allDay} allowClear={false} timeRequired={!draft.allDay} label="选择结束日期时间" className="h-10 w-full justify-start rounded-none border border-border/60 bg-transparent px-3 text-foreground hover:bg-muted/40" /></label></div><div><label className="mb-2 block text-sm font-medium" htmlFor="calendar-event-notes">更多信息</label><Textarea id="calendar-event-notes" value={draft.notes} onChange={(event) => update('notes', event.target.value)} placeholder="补充地点、议程、会议链接或其他上下文；Agent 可以读取这里的内容。" className="min-h-28 resize-y" /></div><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium">日程分组<Select value={draft.groupId} onValueChange={(value) => update('groupId', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{groups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select></label><label className="grid gap-2 text-sm font-medium">关联 Todo<Select value={draft.todoId} onValueChange={(value) => update('todoId', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不关联 Todo</SelectItem>{todos.map((todo) => <SelectItem key={todo.id} value={todo.id}>{todo.title}</SelectItem>)}</SelectContent></Select></label></div><div><p className="mb-2 text-sm font-medium">标签</p><div className="flex flex-wrap gap-1.5">{tags.length ? tags.map((tag) => { const selected = draft.tagIds.includes(tag.id); return <button key={tag.id} type="button" onClick={() => update('tagIds', selected ? draft.tagIds.filter((id) => id !== tag.id) : [...draft.tagIds, tag.id])} className={cn('rounded-md px-2 py-1 text-xs transition-colors', selected ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted')}>#{tag.name}</button> }) : <span className="text-xs text-muted-foreground">暂无标签</span>}</div></div></div>
 }

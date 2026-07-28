@@ -379,33 +379,48 @@ function PlanningInitializer(): null {
   const setTags = useSetAtom(planningTagsAtom)
 
   useEffect(() => {
-    let latestRequest = 0
     let disposed = false
-    const load = (): void => {
-      const requestId = ++latestRequest
-      void Promise.allSettled([
-        window.electronAPI.listTodos(),
-        window.electronAPI.listCalendarEvents(),
-        window.electronAPI.listPlanningGroups('todo'),
-        window.electronAPI.listPlanningGroups('calendar'),
-        window.electronAPI.listPlanningTags(),
-      ]).then(([todos, events, todoGroups, calendarGroups, tags]) => {
-        // 变更事件可能紧密连续到达；只接受最后一次完整快照，避免旧请求覆盖新数据。
-        if (disposed || requestId !== latestRequest) return
-        if (todos.status === 'fulfilled') setTodos(todos.value)
-        else console.error('[任务/日程] 加载 Todo 失败:', todos.reason)
-        if (events.status === 'fulfilled') setCalendarEvents(events.value)
-        else console.error('[任务/日程] 加载日程失败:', events.reason)
-        if (todoGroups.status === 'fulfilled') setTodoGroups(todoGroups.value)
-        else console.error('[任务/日程] 加载 Todo 分组失败:', todoGroups.reason)
-        if (calendarGroups.status === 'fulfilled') setCalendarGroups(calendarGroups.value)
-        else console.error('[任务/日程] 加载日程分组失败:', calendarGroups.reason)
-        if (tags.status === 'fulfilled') setTags(tags.value)
-        else console.error('[任务/日程] 加载标签失败:', tags.reason)
-      })
+    const latestRequest = { todos: 0, calendarEvents: 0, todoGroups: 0, calendarGroups: 0, tags: 0 }
+    const loadTodos = (): void => {
+      const requestId = ++latestRequest.todos
+      void window.electronAPI.listTodos().then((todos) => {
+        if (!disposed && requestId === latestRequest.todos) setTodos(todos)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 失败:', error))
+    }
+    const loadCalendarEvents = (): void => {
+      const requestId = ++latestRequest.calendarEvents
+      void window.electronAPI.listCalendarEvents().then((events) => {
+        if (!disposed && requestId === latestRequest.calendarEvents) setCalendarEvents(events)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载日程失败:', error))
+    }
+    const loadTodoGroups = (): void => {
+      const requestId = ++latestRequest.todoGroups
+      void window.electronAPI.listPlanningGroups('todo').then((groups) => {
+        if (!disposed && requestId === latestRequest.todoGroups) setTodoGroups(groups)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 分组失败:', error))
+    }
+    const loadCalendarGroups = (): void => {
+      const requestId = ++latestRequest.calendarGroups
+      void window.electronAPI.listPlanningGroups('calendar').then((groups) => {
+        if (!disposed && requestId === latestRequest.calendarGroups) setCalendarGroups(groups)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载日程分组失败:', error))
+    }
+    const loadTags = (): void => {
+      const requestId = ++latestRequest.tags
+      void window.electronAPI.listPlanningTags().then((tags) => {
+        if (!disposed && requestId === latestRequest.tags) setTags(tags)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载标签失败:', error))
+    }
+    const load = (resources?: string[]): void => {
+      const includes = (resource: string): boolean => resources === undefined || resources.includes(resource)
+      if (includes('todos')) loadTodos()
+      if (includes('calendar_events')) loadCalendarEvents()
+      if (includes('todo_groups')) loadTodoGroups()
+      if (includes('calendar_groups')) loadCalendarGroups()
+      if (includes('tags')) loadTags()
     }
     load()
-    const unsubscribe = window.electronAPI.onPlanningChanged(load)
+    const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
 

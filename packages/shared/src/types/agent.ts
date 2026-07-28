@@ -1394,6 +1394,8 @@ export interface PermissionRequest {
   command?: string
   /** 危险等级 */
   dangerLevel: DangerLevel
+  /** 是否允许用户把批准记为当前会话白名单；破坏性操作必须逐次确认。 */
+  allowAlways?: boolean
   /** SDK 提供的原因说明 */
   decisionReason?: string
   /** SDK 提供的原因分类，如 classifier / safetyCheck / rule */

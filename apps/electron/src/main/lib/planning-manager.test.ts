@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -11,12 +11,12 @@ const electronBinary = createRequire(import.meta.url)('electron') as string
 
 /**
  * planning-manager 的数据库连接是模块级单例，而 node:sqlite 仅由 Electron 的 Node 22 提供。
- * 因此用 Bun 打包 TypeScript 验证脚本，再用独立 Electron Node 进程执行真实启动迁移，避免污染开发机的 planning.db。
+ * 因此用 Bun 打包 TypeScript 验证脚本，再用独立 Electron Node 进程执行真实 SQLite 回归。
  */
-test('Given legacy and scoped groups When groups change Then Todo and calendar associations stay isolated', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'proma-planning-groups-'))
-  const sourcePath = join(home, 'verify-planning-group-migration.ts')
-  const outputPath = join(home, 'verify-planning-group-migration.mjs')
+test('Given a fresh planning database When planning data changes Then isolation, transactions, reminders and optimistic versions stay correct', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'proma-planning-'))
+  const sourcePath = join(home, 'verify-planning-manager.ts')
+  const outputPath = join(home, 'verify-planning-manager.mjs')
   const source = `
     import assert from 'node:assert/strict'
     import { mkdirSync } from 'node:fs'
@@ -26,67 +26,76 @@ test('Given legacy and scoped groups When groups change Then Todo and calendar a
 
     const configDir = join(process.env.HOME, '.proma-dev')
     mkdirSync(configDir, { recursive: true })
-    const db = new DatabaseSync(join(configDir, 'planning.db'))
     const now = Date.now()
-    db.exec(\`
-      PRAGMA foreign_keys = ON;
-      CREATE TABLE planning_groups (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE, color TEXT,
-        sort_order INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE todos (
-        id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT, status TEXT NOT NULL, priority TEXT NOT NULL,
-        due_at INTEGER, group_id TEXT REFERENCES planning_groups(id) ON DELETE SET NULL, workspace_id TEXT, scratch_excerpt TEXT,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
-      );
-      CREATE TABLE calendar_events (
-        id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT, start_at INTEGER NOT NULL, end_at INTEGER,
-        all_day INTEGER NOT NULL DEFAULT 0, group_id TEXT REFERENCES planning_groups(id) ON DELETE SET NULL,
-        workspace_id TEXT, todo_id TEXT REFERENCES todos(id) ON DELETE SET NULL, scratch_excerpt TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-      );
-      INSERT INTO planning_groups VALUES ('shared', '共享分组', '#2563eb', 0, NULL, \${now}, \${now});
-      INSERT INTO planning_groups VALUES ('calendar-only', '仅旧日程分组', '#7c3aed', 1, NULL, \${now}, \${now});
-      INSERT INTO todos VALUES ('todo-1', '旧 Todo', NULL, 'open', 'medium', NULL, 'shared', NULL, NULL, \${now}, \${now}, NULL);
-      INSERT INTO calendar_events VALUES ('event-1', '旧日程', NULL, \${now}, NULL, 0, 'shared', NULL, NULL, NULL, \${now}, \${now});
-      INSERT INTO calendar_events VALUES ('event-2', '旧日程专用', NULL, \${now}, NULL, 0, 'calendar-only', NULL, NULL, NULL, \${now}, \${now});
-    \`)
-    db.close()
 
-    const todoGroups = manager.listPlanningGroups('todo')
-    const calendarGroups = manager.listPlanningGroups('calendar')
-    const todoGroup = todoGroups.find((group) => group.name === '共享分组')
-    const calendarGroup = calendarGroups.find((group) => group.name === '共享分组')
-    assert.ok(todoGroup)
-    assert.ok(calendarGroup)
-    assert.equal(todoGroup.scope, 'todo')
-    assert.equal(calendarGroup.scope, 'calendar')
+    // Given a fresh database, groups remain independent even when names match.
+    const todoGroup = manager.createPlanningGroup({ scope: 'todo', name: '工作' })
+    const calendarGroup = manager.createPlanningGroup({ scope: 'calendar', name: '工作' })
     assert.notEqual(todoGroup.id, calendarGroup.id)
-    assert.equal(manager.getTodo('todo-1').group.id, todoGroup.id)
-    assert.equal(manager.getCalendarEvent('event-1').group.id, calendarGroup.id)
-    assert.equal(todoGroups.some((group) => group.name === '仅旧日程分组'), false)
-    const calendarOnlyLegacyGroup = calendarGroups.find((group) => group.name === '仅旧日程分组')
-    assert.ok(calendarOnlyLegacyGroup)
-    assert.equal(manager.getCalendarEvent('event-2').group.id, calendarOnlyLegacyGroup.id)
+    assert.equal(manager.listPlanningGroups('todo').length, 1)
+    assert.equal(manager.listPlanningGroups('calendar').length, 1)
+    assert.throws(() => manager.createTodo({ title: '错误 Todo', groupId: calendarGroup.id }), /Todo 分组不存在/)
+    assert.throws(() => manager.createCalendarEvent({ title: '错误日程', startAt: now, groupId: todoGroup.id }), /日程分组不存在/)
 
-    const todoOnly = manager.createPlanningGroup({ scope: 'todo', name: '仅 Todo' })
-    const calendarOnly = manager.createPlanningGroup({ scope: 'calendar', name: '仅日程' })
-    manager.createPlanningGroup({ scope: 'todo', name: '同名分组' })
-    manager.createPlanningGroup({ scope: 'calendar', name: '同名分组' })
-    assert.throws(() => manager.createCalendarEvent({ title: '错误日程', startAt: now, groupId: todoOnly.id }), /日程分组不存在/)
-    assert.throws(() => manager.createTodo({ title: '错误 Todo', groupId: calendarOnly.id }), /Todo 分组不存在/)
+    const tagged = manager.createPlanningTag({ name: '重要' })
+    assert.throws(() => manager.createTodo({ title: '不应部分创建', tagIds: [tagged.id, 'missing-tag'] }), /标签不存在/)
+    assert.equal(manager.listTodos().some((todo) => todo.title === '不应部分创建'), false)
+    assert.throws(() => manager.createCalendarEvent({ title: '不应部分创建的日程', startAt: now, reminders: [{ triggerAt: Number.NaN }] }), /triggerAt/)
+    assert.equal(manager.listCalendarEvents().some((event) => event.title === '不应部分创建的日程'), false)
 
-    const renamedTodoGroup = manager.updatePlanningGroup({ id: todoOnly.id, scope: 'todo', name: '已重命名 Todo 分组' })
-    assert.equal(renamedTodoGroup.name, '已重命名 Todo 分组')
-    const todoUsingGroup = manager.createTodo({ title: '会解除分组的 Todo', groupId: todoOnly.id })
-    assert.equal(manager.deletePlanningGroup('todo', todoOnly.id), true)
-    assert.equal(manager.getTodo(todoUsingGroup.id).groupId, undefined)
-    const eventUsingGroup = manager.createCalendarEvent({ title: '会解除分组的日程', startAt: now, groupId: calendarOnly.id })
-    assert.equal(manager.deletePlanningGroup('calendar', calendarOnly.id), true)
-    assert.equal(manager.getCalendarEvent(eventUsingGroup.id).groupId, undefined)
+    // Given a persisted Todo, an invalid tag update leaves every prior field intact.
+    const todo = manager.createTodo({ title: '稳定 Todo', groupId: todoGroup.id, tagIds: [tagged.id] })
+    assert.throws(() => manager.updateTodo({ id: todo.id, title: '不应写入', tagIds: ['missing-tag'], expectedUpdatedAt: todo.updatedAt }), /标签不存在/)
+    const unchangedTodo = manager.getTodo(todo.id)
+    assert.equal(unchangedTodo.title, '稳定 Todo')
+    assert.deepEqual(unchangedTodo.tags.map((tag) => tag.id), [tagged.id])
 
+    // Snoozing or manually moving a default reminder makes it user-owned.
+    const dueAt = now + 2 * 60 * 60 * 1000
+    const snoozedTodo = manager.createTodo({ title: '推迟提醒', dueAt })
+    const defaultReminder = manager.getTodo(snoozedTodo.id).reminders.find((item) => item.origin === 'todo_due_at')
+    assert.ok(defaultReminder)
+    const snoozed = manager.snoozePlanningReminder(defaultReminder.id, 10)
+    assert.equal(snoozed.origin, 'manual')
+    manager.updateTodo({ id: snoozedTodo.id, dueAt: null, expectedUpdatedAt: snoozedTodo.updatedAt })
+    assert.ok(manager.getTodo(snoozedTodo.id).reminders.some((item) => item.id === defaultReminder.id))
+
+    const movedTodo = manager.createTodo({ title: '手动改期提醒', dueAt: dueAt + 60_000 })
+    const movedDefault = manager.getTodo(movedTodo.id).reminders.find((item) => item.origin === 'todo_due_at')
+    assert.ok(movedDefault)
+    const manuallyMoved = manager.updatePlanningReminder(movedDefault.id, dueAt + 90 * 60_000)
+    assert.equal(manuallyMoved.origin, 'manual')
+    manager.updateTodo({ id: movedTodo.id, dueAt: dueAt + 3 * 60 * 60 * 1000, expectedUpdatedAt: movedTodo.updatedAt })
+    assert.equal(manager.getTodo(movedTodo.id).reminders.find((item) => item.id === movedDefault.id).triggerAt, dueAt + 90 * 60_000)
+
+    // An older window cannot overwrite a newer Todo or calendar event snapshot.
+    const firstTodoUpdate = manager.updateTodo({ id: todo.id, title: 'Todo 新版本', expectedUpdatedAt: todo.updatedAt })
+    assert.equal(firstTodoUpdate.title, 'Todo 新版本')
+    assert.throws(() => manager.updateTodo({ id: todo.id, title: 'Todo 旧版本', expectedUpdatedAt: todo.updatedAt }), /其他窗口修改/)
+
+    const calendarEvent = manager.createCalendarEvent({ title: '稳定日程', startAt: now, groupId: calendarGroup.id, tagIds: [tagged.id] })
+    const firstEventUpdate = manager.updateCalendarEvent({ id: calendarEvent.id, title: '日程新版本', expectedUpdatedAt: calendarEvent.updatedAt })
+    assert.equal(firstEventUpdate.title, '日程新版本')
+    assert.throws(() => manager.updateCalendarEvent({ id: calendarEvent.id, title: '日程旧版本', expectedUpdatedAt: calendarEvent.updatedAt }), /其他窗口修改/)
+
+    // Group deletes only detach their own scope and keep foreign keys consistent.
     assert.equal(manager.deletePlanningGroup('todo', todoGroup.id), true)
-    assert.equal(manager.getCalendarEvent('event-1').group.id, calendarGroup.id)
-    assert.deepEqual(new DatabaseSync(join(configDir, 'planning.db')).prepare('PRAGMA foreign_key_check').all(), [])
+    assert.equal(manager.getTodo(todo.id).groupId, undefined)
+    assert.equal(manager.getCalendarEvent(calendarEvent.id).groupId, calendarGroup.id)
+    assert.equal(manager.deletePlanningGroup('calendar', calendarGroup.id), true)
+    assert.equal(manager.getCalendarEvent(calendarEvent.id).groupId, undefined)
+
+    // Deleting a Todo detaches linked events through the foreign key cascade.
+    const linkedEvent = manager.createCalendarEvent({ title: '关联 Todo 的日程', startAt: now, todoId: todo.id })
+    assert.equal(manager.deleteTodo(todo.id), true)
+    assert.equal(manager.getCalendarEvent(linkedEvent.id).todoId, undefined)
+
+    const db = new DatabaseSync(join(configDir, 'planning.db'))
+    const eventColumns = db.prepare('PRAGMA table_info(calendar_events)').all().map((column) => column.name)
+    assert.ok(eventColumns.includes('calendar_group_id'))
+    assert.equal(eventColumns.includes('group_id'), false)
+    assert.equal(eventColumns.includes('scratch_excerpt'), false)
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   `
   writeFileSync(sourcePath, source)
 
@@ -99,7 +108,7 @@ test('Given legacy and scoped groups When groups change Then Todo and calendar a
     })
     expect(build.success, build.logs.map((log) => log.message).join('\n')).toBe(true)
     const compiledScript = build.outputs[0]
-    if (!compiledScript) throw new Error('未生成日程分组迁移验证脚本')
+    if (!compiledScript) throw new Error('未生成 planning manager 验证脚本')
     await Bun.write(outputPath, compiledScript)
 
     const result = spawnSync(electronBinary, [outputPath], {

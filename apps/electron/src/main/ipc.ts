@@ -127,10 +127,6 @@ import type {
   UpdateCalendarEventInput,
   CreatePlanningGroupInput,
   UpdatePlanningGroupInput,
-  CreatePlanningTagInput,
-  UpdatePlanningTagInput,
-  CreatePlanningReminderRequest,
-  UpdatePlanningReminderInput,
   SnoozePlanningReminderInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
@@ -202,7 +198,6 @@ import {
   createTodo,
   updateTodo,
   deleteTodo,
-  touchTodoSession,
   listCalendarEvents,
   createCalendarEvent,
   updateCalendarEvent,
@@ -212,13 +207,7 @@ import {
   updatePlanningGroup,
   deletePlanningGroup,
   listPlanningTags,
-  createPlanningTag,
-  updatePlanningTag,
-  deletePlanningTag,
   listActivePlanningReminders,
-  createPlanningReminder,
-  updatePlanningReminder,
-  deletePlanningReminder,
   acknowledgePlanningReminder,
   snoozePlanningReminder,
 } from './lib/planning-manager'
@@ -4488,13 +4477,6 @@ export function registerIpcHandlers(): void {
   const isTodoStatus = (value: unknown): value is 'open' | 'completed' =>
     value === 'open' || value === 'completed'
 
-  const validateScratchReference = (value: unknown): void => {
-    if (value === undefined || value === null) return
-    if (!value || typeof value !== 'object' || typeof (value as { excerpt?: unknown }).excerpt !== 'string') {
-      throw new Error('scratchReference 必须包含 excerpt')
-    }
-  }
-
   ipcMain.handle(PLANNING_IPC_CHANNELS.OPEN_WINDOW, async (): Promise<void> => {
     const { showPlanningWindow } = await import('./lib/planning-window')
     showPlanningWindow()
@@ -4506,10 +4488,8 @@ export function registerIpcHandlers(): void {
     if (input.priority !== undefined && !isTodoPriority(input.priority)) throw new Error('Todo priority 非法')
     if (input.dueAt !== undefined && !isPlanningTimestamp(input.dueAt)) throw new Error('Todo dueAt 非法')
     if (input.sessionId !== undefined && (typeof input.sessionId !== 'string' || !input.sessionId.trim())) throw new Error('Todo sessionId 非法')
-    validateScratchReference(input.scratchReference)
     const todo = createTodo(input)
-    if (input.sessionId) touchTodoSession(todo.id, input.sessionId)
-    broadcastPlanningChanged()
+    broadcastPlanningChanged(['todos', 'reminders'])
     return todo
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_TODO, async (_, input: UpdateTodoInput): Promise<Todo | undefined> => {
@@ -4518,15 +4498,16 @@ export function registerIpcHandlers(): void {
     if (input.priority !== undefined && !isTodoPriority(input.priority)) throw new Error('Todo priority 非法')
     if (input.status !== undefined && !isTodoStatus(input.status)) throw new Error('Todo status 非法')
     if (input.dueAt !== undefined && input.dueAt !== null && !isPlanningTimestamp(input.dueAt)) throw new Error('Todo dueAt 非法')
-    validateScratchReference(input.scratchReference)
+    if (input.expectedUpdatedAt !== undefined && !isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('Todo expectedUpdatedAt 非法')
     const todo = updateTodo(input)
-    if (todo) broadcastPlanningChanged()
+    if (todo) broadcastPlanningChanged(['todos', 'reminders'])
     return todo
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_TODO, async (_, id: string): Promise<boolean> => {
     if (!id || typeof id !== 'string') throw new Error('Todo id 必填')
     const deleted = deleteTodo(id)
-    if (deleted) broadcastPlanningChanged()
+    // calendar_events.todo_id uses ON DELETE SET NULL, so linked events must refresh too.
+    if (deleted) broadcastPlanningChanged(['todos', 'calendar_events', 'reminders'])
     return deleted
   })
 
@@ -4534,9 +4515,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(PLANNING_IPC_CHANNELS.CREATE_CALENDAR_EVENT, async (_, input: CreateCalendarEventInput): Promise<CalendarEvent> => {
     if (!input || !isPlanningTitle(input.title) || !isPlanningTimestamp(input.startAt)) throw new Error('日程标题和 startAt 必填')
     if (input.endAt !== undefined && (!isPlanningTimestamp(input.endAt) || input.endAt < input.startAt)) throw new Error('日程 endAt 非法')
-    validateScratchReference(input.scratchReference)
     const event = createCalendarEvent(input)
-    broadcastPlanningChanged()
+    broadcastPlanningChanged(['calendar_events', 'reminders'])
     return event
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_CALENDAR_EVENT, async (_, input: UpdateCalendarEventInput): Promise<CalendarEvent | undefined> => {
@@ -4544,19 +4524,15 @@ export function registerIpcHandlers(): void {
     if (input.title !== undefined && !isPlanningTitle(input.title)) throw new Error('日程标题不能为空且不能超过 500 字')
     if (input.startAt !== undefined && !isPlanningTimestamp(input.startAt)) throw new Error('日程 startAt 非法')
     if (input.endAt !== undefined && input.endAt !== null && !isPlanningTimestamp(input.endAt)) throw new Error('日程 endAt 非法')
-    validateScratchReference(input.scratchReference)
+    if (input.expectedUpdatedAt !== undefined && !isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('日程 expectedUpdatedAt 非法')
     const event = updateCalendarEvent(input)
-    if (event) {
-      broadcastPlanningChanged()
-      }
+    if (event) broadcastPlanningChanged(['calendar_events', 'reminders'])
     return event
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_CALENDAR_EVENT, async (_, id: string): Promise<boolean> => {
     if (!id || typeof id !== 'string') throw new Error('日程 id 必填')
     const deleted = deleteCalendarEvent(id)
-    if (deleted) {
-      broadcastPlanningChanged()
-      }
+    if (deleted) broadcastPlanningChanged(['calendar_events', 'reminders'])
     return deleted
   })
 
@@ -4572,51 +4548,27 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.CREATE_GROUP, async (_, input: CreatePlanningGroupInput): Promise<PlanningGroup> => {
     if (!input || !isPlanningGroupScope(input.scope) || !isPlanningShortName(input.name) || !isOptionalColor(input.color)) throw new Error('分组参数非法')
-    const group = createPlanningGroup(input); broadcastPlanningChanged(); return group
+    const group = createPlanningGroup(input); broadcastPlanningChanged(input.scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders']); return group
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_GROUP, async (_, input: UpdatePlanningGroupInput): Promise<PlanningGroup | undefined> => {
     if (!input || !isPlanningGroupScope(input.scope) || typeof input.id !== 'string' || (input.name !== undefined && !isPlanningShortName(input.name)) || !isOptionalColor(input.color)) throw new Error('分组参数非法')
-    const group = updatePlanningGroup(input); if (group) broadcastPlanningChanged(); return group
+    const group = updatePlanningGroup(input); if (group) broadcastPlanningChanged(input.scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders']); return group
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_GROUP, async (_, scope: PlanningGroupScope, id: string): Promise<boolean> => {
     if (!isPlanningGroupScope(scope) || !id || typeof id !== 'string') throw new Error('分组参数非法')
-    const deleted = deletePlanningGroup(scope, id); if (deleted) broadcastPlanningChanged(); return deleted
+    const deleted = deletePlanningGroup(scope, id); if (deleted) broadcastPlanningChanged(scope === 'todo' ? ['todo_groups', 'todos', 'reminders'] : ['calendar_groups', 'calendar_events', 'reminders']); return deleted
   })
 
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_TAGS, async (): Promise<PlanningTag[]> => listPlanningTags())
-  ipcMain.handle(PLANNING_IPC_CHANNELS.CREATE_TAG, async (_, input: CreatePlanningTagInput): Promise<PlanningTag> => {
-    if (!input || !isPlanningShortName(input.name) || !isOptionalColor(input.color)) throw new Error('标签参数非法')
-    const tag = createPlanningTag(input); broadcastPlanningChanged(); return tag
-  })
-  ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_TAG, async (_, input: UpdatePlanningTagInput): Promise<PlanningTag | undefined> => {
-    if (!input || typeof input.id !== 'string' || (input.name !== undefined && !isPlanningShortName(input.name)) || !isOptionalColor(input.color)) throw new Error('标签参数非法')
-    const tag = updatePlanningTag(input); if (tag) broadcastPlanningChanged(); return tag
-  })
-  ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_TAG, async (_, id: string): Promise<boolean> => {
-    if (!id || typeof id !== 'string') throw new Error('标签 id 必填')
-    const deleted = deletePlanningTag(id); if (deleted) broadcastPlanningChanged(); return deleted
-  })
 
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_ACTIVE_REMINDERS, async (): Promise<ActivePlanningReminder[]> => listActivePlanningReminders())
-  ipcMain.handle(PLANNING_IPC_CHANNELS.CREATE_REMINDER, async (_, input: CreatePlanningReminderRequest): Promise<PlanningReminder> => {
-    if (!input || (input.targetType !== 'todo' && input.targetType !== 'calendar_event') || typeof input.targetId !== 'string' || !isPlanningTimestamp(input.triggerAt)) throw new Error('提醒参数非法')
-    const reminder = createPlanningReminder(input); broadcastPlanningChanged(); return reminder
-  })
-  ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_REMINDER, async (_, input: UpdatePlanningReminderInput): Promise<PlanningReminder | undefined> => {
-    if (!input || typeof input.id !== 'string' || !isPlanningTimestamp(input.triggerAt)) throw new Error('提醒参数非法')
-    const reminder = updatePlanningReminder(input.id, input.triggerAt); if (reminder) broadcastPlanningChanged(); return reminder
-  })
-  ipcMain.handle(PLANNING_IPC_CHANNELS.DELETE_REMINDER, async (_, id: string): Promise<boolean> => {
-    if (!id || typeof id !== 'string') throw new Error('提醒 id 必填')
-    const deleted = deletePlanningReminder(id); if (deleted) broadcastPlanningChanged(); return deleted
-  })
   ipcMain.handle(PLANNING_IPC_CHANNELS.ACKNOWLEDGE_REMINDER, async (_, id: string): Promise<PlanningReminder | undefined> => {
     if (!id || typeof id !== 'string') throw new Error('提醒 id 必填')
-    const reminder = acknowledgePlanningReminder(id); if (reminder) broadcastPlanningChanged(); return reminder
+    const reminder = acknowledgePlanningReminder(id); if (reminder) broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return reminder
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.SNOOZE_REMINDER, async (_, input: SnoozePlanningReminderInput): Promise<PlanningReminder | undefined> => {
     if (!input || typeof input.id !== 'string' || !Number.isInteger(input.minutes) || input.minutes < 1 || input.minutes > 10080) throw new Error('推迟分钟数非法')
-    const reminder = snoozePlanningReminder(input.id, input.minutes); if (reminder) broadcastPlanningChanged(); return reminder
+    const reminder = snoozePlanningReminder(input.id, input.minutes); if (reminder) broadcastPlanningChanged(['todos', 'calendar_events', 'reminders']); return reminder
   })
 
   // ===== 定时任务（Automation）=====

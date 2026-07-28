@@ -1,10 +1,13 @@
 import { BrowserWindow } from 'electron'
-import { PLANNING_IPC_CHANNELS, type ActivePlanningReminder, type PlanningAgentOperation } from '@proma/shared'
+import { PLANNING_IPC_CHANNELS, type ActivePlanningReminder, type PlanningAgentOperation, type PlanningChange, type PlanningChangeResource } from '@proma/shared'
 
-/** 广播 Todo 或日程变化，使 UI 与 Pi Agent 工具写入保持同步。 */
-export function broadcastPlanningChanged(): void {
+const ALL_PLANNING_CHANGE_RESOURCES: PlanningChangeResource[] = ['todos', 'calendar_events', 'todo_groups', 'calendar_groups', 'tags', 'reminders']
+
+/** 广播资源级失效通知，使各窗口只刷新受影响的规划数据。 */
+export function broadcastPlanningChanged(resources: PlanningChangeResource[] = ALL_PLANNING_CHANGE_RESOURCES): void {
+  const change: PlanningChange = { resources: [...new Set(resources)] }
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(PLANNING_IPC_CHANNELS.CHANGED)
+    if (!win.isDestroyed()) win.webContents.send(PLANNING_IPC_CHANNELS.CHANGED, change)
   }
 }
 

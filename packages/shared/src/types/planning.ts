@@ -7,11 +7,16 @@ export type PlanningGroupScope = 'todo' | 'calendar'
 export type PlanningReminderTargetType = 'todo' | 'calendar_event'
 export type PlanningReminderStatus = 'pending' | 'acknowledged' | 'completed'
 /** 标识提醒是否由目标计划时间自动生成，供改期时安全同步。 */
-export type PlanningReminderOrigin = 'manual' | 'todo_due_at' | 'event_start'
+export type PlanningReminderOrigin = 'manual' | 'todo_due_at'
 
-/** 草稿本关联仅保存稳定摘要，不依赖富文本 HTML 偏移。 */
-export interface ScratchReference {
-  excerpt: string
+/** 日程编辑基于此错误文案识别并提示跨窗口并发冲突。 */
+export const PLANNING_CONFLICT_ERROR = '日程已被其他窗口修改，请重新加载后再试'
+
+/** planning:changed 的资源级失效通知，避免所有窗口重复拉取完整快照。 */
+export type PlanningChangeResource = 'todos' | 'calendar_events' | 'todo_groups' | 'calendar_groups' | 'tags' | 'reminders'
+
+export interface PlanningChange {
+  resources: PlanningChangeResource[]
 }
 
 export interface PlanningGroup {
@@ -21,7 +26,6 @@ export interface PlanningGroup {
   name: string
   color?: string
   sortOrder: number
-  archivedAt?: number
   createdAt: number
   updatedAt: number
 }
@@ -77,7 +81,6 @@ export interface Todo {
   /** 仅由 Agent 成功创建或更新 Todo 时写入，按 Session 去重。 */
   sessionLinks: TodoSessionLink[]
   workspaceId?: string
-  scratchReference?: ScratchReference
   createdAt: number
   updatedAt: number
   completedAt?: number
@@ -96,7 +99,6 @@ export interface CalendarEvent {
   reminders: PlanningReminder[]
   workspaceId?: string
   todoId?: string
-  scratchReference?: ScratchReference
   createdAt: number
   updatedAt: number
 }
@@ -116,7 +118,6 @@ export interface CreateTodoInput {
   /** 创建来源的 Agent Session；仅应用内部创建时使用，并自动写入关联。 */
   sessionId?: string
   workspaceId?: string
-  scratchReference?: ScratchReference
 }
 
 export interface UpdateTodoInput {
@@ -128,7 +129,8 @@ export interface UpdateTodoInput {
   groupId?: string | null
   tagIds?: string[]
   workspaceId?: string | null
-  scratchReference?: ScratchReference | null
+  /** 可选版本号，用于拒绝跨窗口的旧草稿覆盖。 */
+  expectedUpdatedAt?: number
   status?: TodoStatus
 }
 
@@ -143,7 +145,6 @@ export interface CreateCalendarEventInput {
   reminders?: CreatePlanningReminderInput[]
   workspaceId?: string
   todoId?: string
-  scratchReference?: ScratchReference
 }
 
 export interface UpdateCalendarEventInput {
@@ -157,7 +158,8 @@ export interface UpdateCalendarEventInput {
   tagIds?: string[]
   workspaceId?: string | null
   todoId?: string | null
-  scratchReference?: ScratchReference | null
+  /** 详情面板保存时携带的版本号，用于拒绝跨窗口的旧草稿覆盖。 */
+  expectedUpdatedAt?: number
 }
 
 export interface CreatePlanningGroupInput {
@@ -174,7 +176,6 @@ export interface UpdatePlanningGroupInput {
   name?: string
   color?: string | null
   sortOrder?: number
-  archivedAt?: number | null
 }
 
 export interface CreatePlanningTagInput {
@@ -193,10 +194,6 @@ export interface CreatePlanningReminderRequest extends CreatePlanningReminderInp
   targetId: string
 }
 
-export interface UpdatePlanningReminderInput {
-  id: string
-  triggerAt: number
-}
 
 export interface SnoozePlanningReminderInput {
   id: string
@@ -225,13 +222,7 @@ export const PLANNING_IPC_CHANNELS = {
   UPDATE_GROUP: 'planning:update-group',
   DELETE_GROUP: 'planning:delete-group',
   LIST_TAGS: 'planning:list-tags',
-  CREATE_TAG: 'planning:create-tag',
-  UPDATE_TAG: 'planning:update-tag',
-  DELETE_TAG: 'planning:delete-tag',
   LIST_ACTIVE_REMINDERS: 'planning:list-active-reminders',
-  CREATE_REMINDER: 'planning:create-reminder',
-  UPDATE_REMINDER: 'planning:update-reminder',
-  DELETE_REMINDER: 'planning:delete-reminder',
   ACKNOWLEDGE_REMINDER: 'planning:acknowledge-reminder',
   SNOOZE_REMINDER: 'planning:snooze-reminder',
   REMINDER_DUE: 'planning:reminder-due',

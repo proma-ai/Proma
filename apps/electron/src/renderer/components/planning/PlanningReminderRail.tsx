@@ -46,14 +46,15 @@ export function PlanningReminderRail({ playSound = true }: { playSound?: boolean
         void playNotificationSoundForType('planningReminder', sounds)
       }
     })
-    const unsubscribeChanged = window.electronAPI.onPlanningChanged(() => { void load() })
+    const unsubscribeChanged = window.electronAPI.onPlanningChanged((change) => {
+      if (change.resources.includes('reminders')) void load()
+    })
     return () => { unsubscribeDue(); unsubscribeChanged() }
   }, [load, notificationsEnabled, playSound, setReminders, soundEnabled, sounds])
 
   const acknowledge = async (id: string) => {
     try {
       await window.electronAPI.acknowledgePlanningReminder(id)
-      await load()
     } catch (error) {
       console.error('[任务/日程] 确认提醒失败:', error)
       toast.error('确认提醒失败')
@@ -62,7 +63,6 @@ export function PlanningReminderRail({ playSound = true }: { playSound?: boolean
   const completeTodo = async (reminder: ActivePlanningReminder) => {
     try {
       await window.electronAPI.updateTodo({ id: reminder.targetId, status: 'completed' })
-      await load()
     } catch (error) {
       console.error('[任务/日程] 完成 Todo 失败:', error)
       toast.error('完成 Todo 失败')
@@ -76,7 +76,6 @@ export function PlanningReminderRail({ playSound = true }: { playSound?: boolean
   const snooze = async (id: string, minutes: number) => {
     try {
       await window.electronAPI.snoozePlanningReminder({ id, minutes })
-      await load()
     } catch (error) {
       console.error('[任务/日程] 推迟提醒失败:', error)
       toast.error('推迟提醒失败')

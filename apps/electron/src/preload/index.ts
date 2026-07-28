@@ -117,16 +117,13 @@ import type {
   PlanningReminder,
   ActivePlanningReminder,
   PlanningAgentOperation,
+  PlanningChange,
   CreateTodoInput,
   UpdateTodoInput,
   CreateCalendarEventInput,
   UpdateCalendarEventInput,
   CreatePlanningGroupInput,
   UpdatePlanningGroupInput,
-  CreatePlanningTagInput,
-  UpdatePlanningTagInput,
-  CreatePlanningReminderRequest,
-  UpdatePlanningReminderInput,
   SnoozePlanningReminderInput,
 } from '@proma/shared'
 import type {
@@ -1113,17 +1110,11 @@ export interface ElectronAPI {
   updatePlanningGroup: (input: UpdatePlanningGroupInput) => Promise<PlanningGroup | undefined>
   deletePlanningGroup: (scope: PlanningGroupScope, id: string) => Promise<boolean>
   listPlanningTags: () => Promise<PlanningTag[]>
-  createPlanningTag: (input: CreatePlanningTagInput) => Promise<PlanningTag>
-  updatePlanningTag: (input: UpdatePlanningTagInput) => Promise<PlanningTag | undefined>
-  deletePlanningTag: (id: string) => Promise<boolean>
   listActivePlanningReminders: () => Promise<ActivePlanningReminder[]>
-  createPlanningReminder: (input: CreatePlanningReminderRequest) => Promise<PlanningReminder>
-  updatePlanningReminder: (input: UpdatePlanningReminderInput) => Promise<PlanningReminder | undefined>
-  deletePlanningReminder: (id: string) => Promise<boolean>
   acknowledgePlanningReminder: (id: string) => Promise<PlanningReminder | undefined>
   snoozePlanningReminder: (input: SnoozePlanningReminderInput) => Promise<PlanningReminder | undefined>
   onPlanningRemindersDue: (callback: (reminders: ActivePlanningReminder[]) => void) => () => void
-  onPlanningChanged: (callback: () => void) => () => void
+  onPlanningChanged: (callback: (change: PlanningChange) => void) => () => void
   onPlanningAgentOperation: (callback: (operation: PlanningAgentOperation) => void) => () => void
 }
 
@@ -2525,13 +2516,7 @@ const electronAPI: ElectronAPI = {
   updatePlanningGroup: (input: UpdatePlanningGroupInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.UPDATE_GROUP, input),
   deletePlanningGroup: (scope: PlanningGroupScope, id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.DELETE_GROUP, scope, id),
   listPlanningTags: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_TAGS),
-  createPlanningTag: (input: CreatePlanningTagInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.CREATE_TAG, input),
-  updatePlanningTag: (input: UpdatePlanningTagInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.UPDATE_TAG, input),
-  deletePlanningTag: (id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.DELETE_TAG, id),
   listActivePlanningReminders: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_ACTIVE_REMINDERS),
-  createPlanningReminder: (input: CreatePlanningReminderRequest) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.CREATE_REMINDER, input),
-  updatePlanningReminder: (input: UpdatePlanningReminderInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.UPDATE_REMINDER, input),
-  deletePlanningReminder: (id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.DELETE_REMINDER, id),
   acknowledgePlanningReminder: (id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.ACKNOWLEDGE_REMINDER, id),
   snoozePlanningReminder: (input: SnoozePlanningReminderInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.SNOOZE_REMINDER, input),
   onPlanningRemindersDue: (callback: (reminders: ActivePlanningReminder[]) => void) => {
@@ -2539,8 +2524,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(PLANNING_IPC_CHANNELS.REMINDER_DUE, listener)
     return () => { ipcRenderer.removeListener(PLANNING_IPC_CHANNELS.REMINDER_DUE, listener) }
   },
-  onPlanningChanged: (callback: () => void) => {
-    const listener = (): void => callback()
+  onPlanningChanged: (callback: (change: PlanningChange) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, change: PlanningChange): void => callback(change)
     ipcRenderer.on(PLANNING_IPC_CHANNELS.CHANGED, listener)
     return () => { ipcRenderer.removeListener(PLANNING_IPC_CHANNELS.CHANGED, listener) }
   },

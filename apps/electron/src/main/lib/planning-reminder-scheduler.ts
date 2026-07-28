@@ -41,7 +41,7 @@ function checkDueReminders(): void {
     if (reminders.length > 0) {
       for (const reminder of reminders) showPlanningSystemNotification(reminder)
       broadcastPlanningRemindersDue(reminders)
-      broadcastPlanningChanged()
+      broadcastPlanningChanged(['reminders'])
     }
   } catch (error) {
     console.error('[任务/日程] 检查提醒失败:', error)
