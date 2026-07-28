@@ -81,7 +81,10 @@ type BashToolOptions = import('@earendil-works/pi-coding-agent').BashToolOptions
 type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
 const PI_NATIVE_MAX_RETRIES = 8
+const PI_NATIVE_MAX_TOTAL_RETRIES = 8
 const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
+const PI_NATIVE_MAX_TOTAL_DELAY_MS = 5 * 60_000
+const PI_NATIVE_RETRY_JITTER_RATIO = 0.2
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
 /** Pi SDK 查询选项（扩展通用 AgentQueryInput） */
@@ -108,6 +111,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   onModelResolved?: (model: string) => void
   onContextWindow?: (contextWindow: number) => void
   onRetry?: (update: import('./pi-retry-control').PiRetryUpdate) => void
+  /** 渲染进程创建的本轮流式开始时间，用于隔离迟到的 native retry 事件。 */
+  retryRunStartedAt?: number
   thinkingLevel?: AgentThinkingLevel
   maxBudgetUsd?: number
   outputFormat?: JsonSchemaOutputFormat
@@ -1307,6 +1312,8 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     this.activeSessions.set(input.sessionId, active)
     const queue = createAsyncQueue<SDKMessage>()
     const runtimeGuard = createAgentRuntimeGuard(input)
+    // 同一 session 的新请求可能在旧 IPC 事件之后开始；所有 retry 生命周期均携带这一轮标识。
+    const retryRunStartedAt = input.retryRunStartedAt ?? Date.now()
     active.runtimeGuard = runtimeGuard
     let unsubscribe: (() => void) | undefined
     let requestProxyDispatcher: Dispatcher | undefined
@@ -1382,8 +1389,16 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         compaction: { enabled: true },
         // Pi 原生 retry 通过 agent.continue() 在同一 transcript 中恢复，能保留已完成的
         // tool_result；不能用外层重投原始 prompt 替代，否则会重复执行副作用工具。
-        // 8 次指数退避（1+2+...+128 秒）约 255 秒，维持原 5 分钟恢复预算。
-        retry: { enabled: true, maxRetries: PI_NATIVE_MAX_RETRIES, baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS },
+        // 单段和整轮均最多 8 次；累计 backoff 最多 5 分钟。±20% jitter 避免多个
+        // 客户端在固定指数退避边界同时重试。provider retry 保持默认 0，避免嵌套计数。
+        retry: {
+          enabled: true,
+          maxRetries: PI_NATIVE_MAX_RETRIES,
+          maxTotalRetries: PI_NATIVE_MAX_TOTAL_RETRIES,
+          baseDelayMs: PI_NATIVE_RETRY_BASE_DELAY_MS,
+          maxTotalDelayMs: PI_NATIVE_MAX_TOTAL_DELAY_MS,
+          jitterRatio: PI_NATIVE_RETRY_JITTER_RATIO,
+        },
         ...buildPiRemoteConnectionSettings(input),
       })
       const openAIReasoningProfile = (input.provider === 'openai-codex' || input.provider === 'openai-responses')
@@ -1601,8 +1616,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               )
               break
             case 'auto_retry_start':
+            case 'auto_retry_attempt_start':
             case 'auto_retry_end':
-              for (const retry of mapPiNativeRetryEvent(event)) input.onRetry?.(retry)
+              for (const retry of mapPiNativeRetryEvent(event, { runStartedAt: retryRunStartedAt })) input.onRetry?.(retry)
               break
             case 'tool_execution_update':
               queue.push({

@@ -1,14 +1,40 @@
 import type { RetryAttempt } from '@proma/shared'
 
+/** 将 Pi native retry 与当前 renderer stream 绑定，拒绝迟到事件污染下一轮。 */
+export interface PiRetryEventContext {
+  runStartedAt: number
+}
+
+interface PiRetryMetadata {
+  attempt: number
+  maxAttempts: number
+  totalAttempt: number
+  maxTotalAttempts: number
+  runStartedAt: number
+}
+
 export type PiRetryUpdate =
-  | { status: 'starting'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }
-  | { status: 'attempt'; attemptData: RetryAttempt }
-  | { status: 'cleared' }
-  | { status: 'failed'; attemptData: RetryAttempt }
+  | ({ status: 'starting'; delaySeconds: number; reason: string; scheduledAt: number } & PiRetryMetadata)
+  | ({ status: 'attempt'; attemptData: RetryAttempt } & PiRetryMetadata)
+  | ({ status: 'cleared' } & PiRetryMetadata)
+  | ({ status: 'failed'; attemptData: RetryAttempt } & PiRetryMetadata)
+  | ({ status: 'cancelled'; reason: string } & PiRetryMetadata)
+
+type PiNativeRetryDetails = {
+  attempt: number
+  maxAttempts: number
+  totalAttempt?: number
+  maxTotalAttempts?: number
+  delayMs: number
+  totalDelayMs?: number
+  maxTotalDelayMs?: number
+  errorMessage?: string
+}
 
 type PiNativeRetryEvent =
-  | { type: 'auto_retry_start'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-  | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
+  | ({ type: 'auto_retry_start' } & PiNativeRetryDetails)
+  | ({ type: 'auto_retry_attempt_start' } & PiNativeRetryDetails)
+  | ({ type: 'auto_retry_end'; success: boolean; outcome?: 'succeeded' | 'exhausted' | 'cancelled'; finalError?: string } & PiNativeRetryDetails)
 
 /**
  * Pi native retry 的终态事件门控。
@@ -34,42 +60,68 @@ export function createPiRetryTerminalGate<T>(): {
   }
 }
 
-/** 将 Pi 的 native retry 生命周期转换为 Proma UI 已识别的 retry 事件。 */
+function retryMetadata(event: PiNativeRetryDetails, context: PiRetryEventContext): PiRetryMetadata {
+  return {
+    attempt: event.attempt,
+    maxAttempts: event.maxAttempts,
+    totalAttempt: event.totalAttempt ?? event.attempt,
+    maxTotalAttempts: event.maxTotalAttempts ?? event.maxAttempts,
+    runStartedAt: context.runStartedAt,
+  }
+}
+
+function retryAttempt(event: PiNativeRetryDetails, timestamp: number, errorMessage: string): RetryAttempt {
+  return {
+    attempt: event.attempt,
+    totalAttempt: event.totalAttempt ?? event.attempt,
+    maxTotalAttempts: event.maxTotalAttempts ?? event.maxAttempts,
+    timestamp,
+    reason: errorMessage,
+    errorMessage,
+    // 这里记录的是本次 retry 实际开始前已经等待的退避时间。
+    delaySeconds: event.delayMs / 1_000,
+  }
+}
+
+/** 将 Pi native retry 生命周期转换为 Proma UI 已识别的 retry 事件。 */
 export function mapPiNativeRetryEvent(
   event: PiNativeRetryEvent,
+  context: PiRetryEventContext,
   timestamp = Date.now(),
 ): PiRetryUpdate[] {
+  const metadata = retryMetadata(event, context)
+
   if (event.type === 'auto_retry_start') {
-    const delaySeconds = event.delayMs / 1_000
-    const attemptData: RetryAttempt = {
-      attempt: event.attempt,
-      timestamp,
-      reason: event.errorMessage,
-      errorMessage: event.errorMessage,
-      delaySeconds,
-    }
-    return [
-      {
-        status: 'starting',
-        attempt: event.attempt,
-        maxAttempts: event.maxAttempts,
-        delaySeconds,
-        reason: event.errorMessage,
-      },
-      { status: 'attempt', attemptData },
-    ]
+    return [{
+      status: 'starting',
+      ...metadata,
+      scheduledAt: timestamp,
+      delaySeconds: event.delayMs / 1_000,
+      reason: event.errorMessage ?? '未知错误',
+    }]
   }
 
-  if (event.success) return [{ status: 'cleared' }]
+  if (event.type === 'auto_retry_attempt_start') {
+    const errorMessage = event.errorMessage ?? '未知错误'
+    return [{
+      status: 'attempt',
+      ...metadata,
+      attemptData: retryAttempt(event, timestamp, errorMessage),
+    }]
+  }
+
+  if (event.success || event.outcome === 'succeeded') {
+    return [{ status: 'cleared', ...metadata }]
+  }
+
   const error = event.finalError ?? '未知错误'
+  if (event.outcome === 'cancelled' || error === 'Retry cancelled') {
+    return [{ status: 'cancelled', ...metadata, reason: error }]
+  }
+
   return [{
     status: 'failed',
-    attemptData: {
-      attempt: event.attempt,
-      timestamp,
-      reason: error,
-      errorMessage: error,
-      delaySeconds: 0,
-    },
+    ...metadata,
+    attemptData: retryAttempt(event, timestamp, error),
   }]
 }

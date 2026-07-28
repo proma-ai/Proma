@@ -63,6 +63,33 @@ export interface ContextCompactionState {
   message?: string
 }
 
+/** 用户可见的 retry 生命周期。 */
+export type RetryPhase = 'scheduled' | 'running' | 'succeeded' | 'exhausted' | 'cancelled'
+
+/** 单个流式 run 的 retry 状态。 */
+export interface AgentRetryState {
+  /** 用渲染进程创建的 startedAt 隔离迟到事件。 */
+  runStartedAt?: number
+  /** 当前 retry 所处阶段。 */
+  phase: RetryPhase
+  /** 当前第几次 retry（不含初始请求）。 */
+  currentAttempt: number
+  /** 当前连续失败段的 retry 上限。 */
+  maxAttempts: number
+  /** 当前顶层 run 已调度的 retry 数。 */
+  totalAttempt?: number
+  /** 当前顶层 run 的 retry 总预算。 */
+  maxTotalAttempts?: number
+  /** 已实际开始的 retry 历史，按 attempt upsert，不记录“仅安排”的次数。 */
+  history: RetryAttempt[]
+  /** retry 被安排的时间，用于 backoff 倒计时。 */
+  scheduledAt?: number
+  /** 当前安排的 backoff 时长。 */
+  delaySeconds?: number
+  /** 当前或最后一次失败原因。 */
+  reason?: string
+}
+
 /** Agent 会话的流式状态 */
 export interface AgentStreamState {
   running: boolean
@@ -102,17 +129,8 @@ export interface AgentStreamState {
   compactInFlight?: boolean
   /** 流式开始时间戳（用于思考计时持久化） */
   startedAt?: number
-  /** 重试状态（扩展版） */
-  retrying?: {
-    /** 当前第几次尝试 */
-    currentAttempt: number
-    /** 最大尝试次数 */
-    maxAttempts: number
-    /** 重试历史记录（按时间顺序） */
-    history: RetryAttempt[]
-    /** 是否已失败 */
-    failed: boolean
-  }
+  /** 重试状态 */
+  retrying?: AgentRetryState
 }
 
 /**
@@ -135,6 +153,32 @@ export function getActivityStatus(activity: ToolActivity): ActivityStatus {
   if (!activity.done) return 'running'
   if (activity.isError) return 'error'
   return 'completed'
+}
+
+interface RetryEventRunScope {
+  runStartedAt?: number
+}
+
+/**
+ * 仅接受属于当前流式 run 的 retry 事件；旧版无 run 标识的事件保留兼容。
+ * 带 run 标识的事件必须精确匹配，避免旧 IPC 事件在 state 缺失时复活已结束的流。
+ */
+export function isRetryEventForCurrentStream(
+  state: Pick<AgentStreamState, 'startedAt'>,
+  event: RetryEventRunScope,
+): boolean {
+  return event.runStartedAt == null || event.runStartedAt === state.startedAt
+}
+
+function upsertRetryAttempt(history: RetryAttempt[], attempt: RetryAttempt): RetryAttempt[] {
+  const index = history.findIndex((item) => item.attempt === attempt.attempt)
+  if (index === -1) return [...history, attempt]
+  return history.map((item, itemIndex) => (
+    itemIndex === index
+      // 终态会带着最终错误更新同一 retry；保留真正开始请求时的时间和 backoff。
+      ? { ...item, ...attempt, timestamp: item.timestamp, delaySeconds: item.delaySeconds }
+      : item
+  ))
 }
 
 /**
@@ -822,14 +866,13 @@ export function applyAgentEvent(
     }
 
     case 'typed_error':
-      // 处理类型化错误（TypedError）
-      // 停止运行，清除重试状态
-      return { ...prev, running: false, retrying: undefined }
+      // 终态 IPC 仍可能在后端清理前到达；统一由 STREAM_COMPLETE 释放运行锁，
+      // 避免用户在 active session 尚未销毁时抢先启动新 run。
+      return { ...prev, retrying: undefined }
 
     case 'error':
-      // 改进：error 事件不再清除 retrying 状态
-      // retrying 状态由专用事件控制
-      return { ...prev, running: false }
+      // 同上：保留运行锁和 retry 状态，等待专用 retry 终态或 STREAM_COMPLETE 收束。
+      return prev
 
     case 'usage_update': {
       const resumed = clearFinishedCompactionForResumedWork(prev)
@@ -887,47 +930,110 @@ export function applyAgentEvent(
       // 以确保 resolveModelDisplayName 能匹配到渠道配置的显示名
       return prev
 
-    case 'retrying':
-      // 向后兼容：保留原有的简单 retrying 事件
-      return {
-        ...prev,
-        retrying: prev.retrying ?? {
-          currentAttempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          history: [],
-          failed: false,
-        },
-      }
-
-    case 'retry_attempt': {
-      // 新增：记录详细的重试尝试
-      const currentHistory = prev.retrying?.history ?? []
+    case 'retrying': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      // 同一顶层 run 的下一段连续错误从 1 开始时，开始新的历史；同一段的 1 → 2
+      // 则保留已实际执行的记录。
+      const isNewCycle = event.attempt === 1
+        && previousRetry != null
+        && previousRetry.phase !== 'scheduled'
+        && previousRetry.phase !== 'running'
       return {
         ...prev,
         retrying: {
-          currentAttempt: event.attemptData.attempt,
-          maxAttempts: prev.retrying?.maxAttempts ?? 3,
-          history: [...currentHistory, event.attemptData],
-          failed: false,
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'scheduled',
+          currentAttempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          totalAttempt: event.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: isNewCycle ? [] : (previousRetry?.history ?? []),
+          scheduledAt: event.scheduledAt ?? Date.now(),
+          delaySeconds: event.delaySeconds,
+          reason: event.reason,
         },
       }
     }
 
-    case 'retry_cleared':
-      // 新增：重试成功，清除状态
-      return { ...prev, retrying: undefined }
-
-    case 'retry_failed': {
-      // 新增：重试失败，标记为 failed 但保留历史
-      const finalHistory = prev.retrying?.history ?? []
+    case 'retry_attempt': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      const isNewCycle = event.attemptData.attempt === 1
+        && previousRetry != null
+        && previousRetry.phase !== 'scheduled'
+        && previousRetry.phase !== 'running'
+      const history = upsertRetryAttempt(
+        isNewCycle ? [] : (previousRetry?.history ?? []),
+        event.attemptData,
+      )
       return {
         ...prev,
-        running: false,
         retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'running',
+          currentAttempt: event.attemptData.attempt,
+          maxAttempts: event.maxAttempts ?? previousRetry?.maxAttempts ?? 3,
+          totalAttempt: event.totalAttempt ?? event.attemptData.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? event.attemptData.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history,
+          reason: event.attemptData.reason,
+        },
+      }
+    }
+
+    case 'retry_cleared': {
+      if (!isRetryEventForCurrentStream(prev, event) || !prev.retrying) return prev
+      return {
+        ...prev,
+        retrying: {
+          ...prev.retrying,
+          phase: 'succeeded',
+          scheduledAt: undefined,
+          delaySeconds: undefined,
+          currentAttempt: event.attempt ?? prev.retrying.currentAttempt,
+          maxAttempts: event.maxAttempts ?? prev.retrying.maxAttempts,
+          totalAttempt: event.totalAttempt ?? prev.retrying.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? prev.retrying.maxTotalAttempts,
+          reason: undefined,
+        },
+      }
+    }
+
+    case 'retry_failed': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      return {
+        ...prev,
+        // session.prompt() 与 adapter 资源清理尚未完成；由 STREAM_COMPLETE 释放运行锁。
+        retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'exhausted',
           currentAttempt: event.finalAttempt.attempt,
-          maxAttempts: prev.retrying?.maxAttempts ?? 3,
-          history: [...finalHistory, event.finalAttempt],
-          failed: true,
+          maxAttempts: event.maxAttempts ?? previousRetry?.maxAttempts ?? 3,
+          totalAttempt: event.totalAttempt ?? event.finalAttempt.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? event.finalAttempt.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: upsertRetryAttempt(previousRetry?.history ?? [], event.finalAttempt),
+          reason: event.finalAttempt.reason,
+        },
+      }
+    }
+
+    case 'retry_cancelled': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      return {
+        ...prev,
+        // 取消 retry 不代表外围 prompt chain 已结束；由 STREAM_COMPLETE 释放运行锁。
+        retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'cancelled',
+          currentAttempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          totalAttempt: event.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: previousRetry?.history ?? [],
+          reason: event.reason ?? previousRetry?.reason,
         },
       }
     }

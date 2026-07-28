@@ -1688,6 +1688,7 @@ export class AgentOrchestrator {
         },
         onModelResolved: handleModelResolved,
         onContextWindow: handleContextWindow,
+        retryRunStartedAt: streamStartedAt,
         onRetry: (retry) => {
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', ...retry } })
         },

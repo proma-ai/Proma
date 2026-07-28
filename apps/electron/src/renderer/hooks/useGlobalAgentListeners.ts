@@ -25,6 +25,7 @@ import {
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
   clearAgentStreamError,
+  isRetryEventForCurrentStream,
   liveMessagesMapAtom,
   agentSessionModelMapAtom,
   agentSessionChannelMapAtom,
@@ -110,6 +111,16 @@ function uniqueTruthyPaths(paths: Array<string | null | undefined>): string[] {
 // Phase 2 将移除此转换，直接使用 SDKMessage 渲染
 // ============================================================================
 
+function isRunScopedRetryEvent(event: AgentEvent): event is Extract<AgentEvent, {
+  type: 'retrying' | 'retry_attempt' | 'retry_cleared' | 'retry_failed' | 'retry_cancelled'
+}> {
+  return event.type === 'retrying'
+    || event.type === 'retry_attempt'
+    || event.type === 'retry_cleared'
+    || event.type === 'retry_failed'
+    || event.type === 'retry_cancelled'
+}
+
 function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
   if (payload.kind === 'proma_event') {
     const evt = payload.event
@@ -141,17 +152,54 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         return [{ type: 'run_resumed' }]
       case 'retry': {
         const events: AgentEvent[] = []
+        const retryScope = {
+          runStartedAt: evt.runStartedAt,
+          totalAttempt: evt.totalAttempt,
+          maxTotalAttempts: evt.maxTotalAttempts,
+        }
         if (evt.status === 'starting' && evt.attempt != null && evt.maxAttempts != null) {
-          events.push({ type: 'retrying', attempt: evt.attempt, maxAttempts: evt.maxAttempts, delaySeconds: evt.delaySeconds ?? 0, reason: evt.reason ?? '' })
+          events.push({
+            type: 'retrying',
+            attempt: evt.attempt,
+            maxAttempts: evt.maxAttempts,
+            delaySeconds: evt.delaySeconds ?? 0,
+            reason: evt.reason ?? '',
+            scheduledAt: evt.scheduledAt,
+            ...retryScope,
+          })
         }
         if (evt.status === 'attempt' && evt.attemptData) {
-          events.push({ type: 'retry_attempt', attemptData: evt.attemptData })
+          events.push({
+            type: 'retry_attempt',
+            attemptData: evt.attemptData,
+            maxAttempts: evt.maxAttempts,
+            ...retryScope,
+          })
         }
         if (evt.status === 'cleared') {
-          events.push({ type: 'retry_cleared' })
+          events.push({
+            type: 'retry_cleared',
+            attempt: evt.attempt,
+            maxAttempts: evt.maxAttempts,
+            ...retryScope,
+          })
         }
         if (evt.status === 'failed' && evt.attemptData) {
-          events.push({ type: 'retry_failed', finalAttempt: evt.attemptData })
+          events.push({
+            type: 'retry_failed',
+            finalAttempt: evt.attemptData,
+            maxAttempts: evt.maxAttempts,
+            ...retryScope,
+          })
+        }
+        if (evt.status === 'cancelled' && evt.attempt != null && evt.maxAttempts != null) {
+          events.push({
+            type: 'retry_cancelled',
+            attempt: evt.attempt,
+            maxAttempts: evt.maxAttempts,
+            reason: evt.reason,
+            ...retryScope,
+          })
         }
         return events
       }
@@ -727,6 +775,15 @@ export function useGlobalAgentListeners(): void {
         const legacyEvents = payloadToLegacyEvents(payload)
 
         for (const event of legacyEvents) {
+          // 带 run 标识的 retry 事件必须在所有外围副作用前严格匹配当前流；
+          // 否则旧 IPC 事件会复活已结束的 stream，或错误清掉新 run 的完成提醒。
+          const eventStreamState = store.get(agentStreamingStatesAtom).get(sessionId)
+          if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
+            !eventStreamState || !isRetryEventForCurrentStream(eventStreamState, event)
+          )) {
+            continue
+          }
+
           // 会话首次进入 running 时，清除旧的完成提醒状态
           if (event.type !== 'prompt_suggestion') {
             const prevState = store.get(agentStreamingStatesAtom).get(sessionId)
@@ -743,13 +800,19 @@ export function useGlobalAgentListeners(): void {
           // 更新流式状态（prompt_suggestion 不影响流式状态，跳过以避免在 session 结束后用默认值 running:true 重新激活）
           if (event.type !== 'prompt_suggestion') {
             store.set(agentStreamingStatesAtom, (prev) => {
-              const current: AgentStreamState = prev.get(sessionId) ?? {
+              const existing = prev.get(sessionId)
+              // 再做一次 scope 校验，防止同一 batch 内其它回调更新流状态后旧事件落入。
+              if (isRunScopedRetryEvent(event) && event.runStartedAt != null && (
+                !existing || !isRetryEventForCurrentStream(existing, event)
+              )) {
+                return prev
+              }
+              const current: AgentStreamState = existing ?? {
                 running: true,
                 content: '',
                 toolActivities: [],
                 model: undefined,
-                // startedAt 留空：让 STREAM_COMPLETE 竞态保护跳过时间戳比较，
-                // 正常流程中 handleSend 已设置了正确的 startedAt，此 fallback 仅在极端情况下触发
+                // 无 run 标识的历史事件才允许 fallback；带标识的 retry 必须已在上方匹配。
                 startedAt: undefined,
               }
               const next = applyAgentEvent(current, event)
@@ -759,10 +822,13 @@ export function useGlobalAgentListeners(): void {
             })
           }
 
-          // Pi 原生重试成功后仍会沿用同一会话；清掉该会话已失效的流式错误记录。
-          // 只响应明确的 retry_cleared，避免用普通输出掩盖真实终态失败。
+          // Pi 原生重试成功后仍会沿用同一会话；仅在事件属于当前 stream run 时
+          // 清掉过期错误，避免迟到的旧 retry_cleared 掩盖新一轮真实失败。
           if (event.type === 'retry_cleared') {
-            store.set(agentStreamErrorsAtom, (prev) => clearAgentStreamError(prev, sessionId))
+            const current = store.get(agentStreamingStatesAtom).get(sessionId)
+            if (current && isRetryEventForCurrentStream(current, event)) {
+              store.set(agentStreamErrorsAtom, (prev) => clearAgentStreamError(prev, sessionId))
+            }
           }
 
           // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态

@@ -452,8 +452,12 @@ export interface TaskUsage {
  * 记录每次重试尝试的详细信息，用于错误诊断和 UI 展示。
  */
 export interface RetryAttempt {
-  /** 第几次尝试 (1-based) */
+  /** 第几次 retry（1-based；不含初始请求） */
   attempt: number
+  /** 顶层 Agent run 内累计已调度的 retry 次数（可选以兼容旧 runtime）。 */
+  totalAttempt?: number
+  /** 顶层 Agent run 的总 retry 预算（可选以兼容旧 runtime）。 */
+  maxTotalAttempts?: number
   /** 时间戳 */
   timestamp: number
   /** 错误原因（简短描述，如"SDK 响应超时"） */
@@ -522,10 +526,12 @@ export type AgentEvent =
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
   // 重试机制
-  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }  // 保留向后兼容
-  | { type: 'retry_attempt'; attemptData: RetryAttempt }  // 新增：记录详细尝试信息
-  | { type: 'retry_cleared' }  // 新增：重试成功，清除状态
-  | { type: 'retry_failed'; finalAttempt: RetryAttempt }  // 新增：重试失败
+  // `retrying` 表示已安排 retry（仍可能正在 backoff），`retry_attempt` 才表示实际开始请求。
+  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string; scheduledAt?: number; runStartedAt?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_attempt'; attemptData: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_cleared'; runStartedAt?: number; attempt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_failed'; finalAttempt: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_cancelled'; runStartedAt?: number; attempt: number; maxAttempts: number; totalAttempt?: number; maxTotalAttempts?: number; reason?: string }
   // Usage 更新
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
@@ -569,7 +575,7 @@ export type PromaEvent =
   | { type: 'exit_plan_mode_resolved'; requestId: string }
   | { type: 'enter_plan_mode'; sessionId: string }
   | { type: 'plan_mode_changed'; sessionId: string; active: boolean; source: AgentPlanModeChangeSource }
-  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
+  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed' | 'cancelled'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; runStartedAt?: number; scheduledAt?: number; totalAttempt?: number; maxTotalAttempts?: number; error?: TypedError }
   | { type: 'model_resolved'; model: string }
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }

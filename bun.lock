@@ -36,7 +36,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.15.14",
+      "version": "0.15.15",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.201",
         "@anthropic-ai/sdk": "^0.93.0",
@@ -186,7 +186,7 @@
     },
     "packages/shared": {
       "name": "@proma/shared",
-      "version": "0.1.43",
+      "version": "0.1.44",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
@@ -213,6 +213,7 @@
   },
   "patchedDependencies": {
     "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch",
+    "@earendil-works/pi-coding-agent@0.82.1": "patches/@earendil-works%2Fpi-coding-agent@0.82.1.patch",
   },
   "overrides": {
     "@anthropic-ai/claude-agent-sdk": "0.3.201",
