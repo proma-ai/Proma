@@ -23,6 +23,11 @@ export {
 } from './context-window'
 export { calculateContextUsageRatio } from './context-usage'
 export {
+  PI_AUTO_COMPACTION_THRESHOLD_RATIO,
+  calculatePiAutoCompactionReserveTokens,
+  calculatePiAutoCompactionThresholdTokens,
+} from './pi-compaction'
+export {
   inferMcpTransportType,
   normalizeMcpTransportType,
 } from './mcp-transport'
