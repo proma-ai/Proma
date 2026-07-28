@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import type { SDKMessage } from '@proma/shared'
 import { getContextCompactionProgress, isCompactionControlHistoryGroup } from './AgentMessages'
-import { shouldRestoreCompactionProgress } from './TaskProgressOverlay'
+import { shouldClearRetainedCompactionForResumedStream, shouldRestoreCompactionProgress } from './TaskProgressOverlay'
 
 function systemMessage(fields: Record<string, unknown>): SDKMessage {
   return { type: 'system', ...fields } as unknown as SDKMessage
+}
+
+function assistantMessage(): SDKMessage {
+  return { type: 'assistant', message: { content: [] } } as unknown as SDKMessage
 }
 
 describe('context compaction progress overlay state', () => {
@@ -47,6 +51,15 @@ describe('context compaction progress overlay state', () => {
     expect(shouldRestoreCompactionProgress('running:正在整理上下文::', 'noop:当前上下文无需压缩::')).toBe(true)
   })
 
+  test('clears retained compaction feedback when the same stream resumes normal work', () => {
+    const completed = { status: 'success' as const, label: '上下文已压缩' }
+
+    expect(shouldClearRetainedCompactionForResumedStream(true, undefined, completed)).toBe(true)
+    expect(shouldClearRetainedCompactionForResumedStream(false, undefined, completed)).toBe(false)
+    expect(shouldClearRetainedCompactionForResumedStream(true, completed, completed)).toBe(false)
+    expect(shouldClearRetainedCompactionForResumedStream(true, undefined, undefined)).toBe(false)
+  })
+
   test('maps successful compaction to a terminal state', () => {
     expect(getContextCompactionProgress([
       systemMessage({ subtype: 'compact_boundary', summary: '已完成的工作已整理。' }),
@@ -55,6 +68,19 @@ describe('context compaction progress overlay state', () => {
       label: '上下文已压缩',
       summary: '已完成的工作已整理。',
     })
+  })
+
+  test('does not revive an old compaction boundary after Pi continues with assistant or task work', () => {
+    const compactionBoundary = systemMessage({ subtype: 'compact_boundary', summary: '已完成的工作已整理。' })
+
+    expect(getContextCompactionProgress([
+      compactionBoundary,
+      assistantMessage(),
+    ], false, { status: 'success' })).toBeUndefined()
+    expect(getContextCompactionProgress([
+      compactionBoundary,
+      systemMessage({ subtype: 'task_started', task_id: 'continued-task' }),
+    ], false, { status: 'success' })).toBeUndefined()
   })
 
   test('maps a no-op result to a clear terminal state', () => {

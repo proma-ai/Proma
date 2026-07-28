@@ -123,4 +123,38 @@ describe('Agent 上下文压缩状态', () => {
     })
     expect(result.contextUsageIsEstimated).toBeUndefined()
   })
+
+  test('given 压缩成功 when 同一流开始下一项工具工作 then 清除压缩终态并恢复正常进度', () => {
+    const compacting = applyAgentEvent(createStreamState(), { type: 'compacting' })
+    const compacted = applyAgentEvent(compacting, { type: 'compact_complete', status: 'success' })
+    const resumed = applyAgentEvent(compacted, {
+      type: 'tool_start',
+      toolName: 'TaskCreate',
+      toolUseId: 'resume-task',
+      input: {},
+    })
+
+    expect(compacted).toMatchObject({
+      isCompacting: false,
+      compactInFlight: true,
+      contextCompaction: { status: 'success' },
+    })
+    expect(resumed.contextCompaction).toBeUndefined()
+    expect(resumed.compactInFlight).toBe(false)
+    expect(resumed.toolActivities).toContainEqual(expect.objectContaining({
+      toolUseId: 'resume-task',
+      done: false,
+    }))
+  })
+
+  test('given 压缩成功 when 当前流直接结束 then 保留终态反馈给短时完成提示', () => {
+    const compacting = applyAgentEvent(createStreamState(), { type: 'compacting' })
+    const compacted = applyAgentEvent(compacting, { type: 'compact_complete', status: 'success' })
+    const result = applyAgentEvent(compacted, { type: 'complete' })
+
+    expect(result).toMatchObject({
+      compactInFlight: true,
+      contextCompaction: { status: 'success' },
+    })
+  })
 })

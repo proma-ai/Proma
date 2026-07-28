@@ -45,6 +45,18 @@ export function shouldRestoreCompactionProgress(signature: string, dismissedSign
   return signature !== dismissedSignature
 }
 
+/**
+ * 压缩成功后，如果同一个 stream 已恢复正常工作，保留的终态反馈不能继续覆盖新的任务进度。
+ * 手动压缩直接结束时 streaming 会变为 false，因此仍可保留短时成功反馈。
+ */
+export function shouldClearRetainedCompactionForResumedStream(
+  streaming: boolean,
+  contextCompaction: ContextCompactionProgress | undefined,
+  retainedCompaction: ContextCompactionProgress | undefined,
+): boolean {
+  return streaming && !contextCompaction && !!retainedCompaction
+}
+
 function CompactionProgressDetails({ progress }: { progress: ContextCompactionProgress }): React.ReactElement {
   const isRunning = progress.status === 'running'
   const isFailed = progress.status === 'failed'
@@ -120,11 +132,12 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
   }, [contextCompaction, dismissedCompactionSignature, liveCompactionSignature, retainedCompactionSignature])
 
   React.useEffect(() => {
-    if (!streaming || contextCompaction || retainedCompaction?.status !== 'failed') return
+    if (!shouldClearRetainedCompactionForResumedStream(streaming, contextCompaction, retainedCompaction)) return
     setRetainedCompaction(undefined)
     setRetainedCompactionSignature('')
-    setVisible(false)
-  }, [streaming, contextCompaction, retainedCompaction?.status])
+    setFading(false)
+    setVisible(hasLiveTasks)
+  }, [streaming, contextCompaction, retainedCompaction, hasLiveTasks])
 
   const displayActivities = hasLiveTasks ? activities : retainedActivities
   const displayItems = hasLiveTasks
@@ -132,14 +145,16 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
     : aggregateTaskItems(retainedActivities, false)
   const displaySignature = hasLiveTasks ? liveSignature : retainedSignature
   const displayCompaction = contextCompaction ?? retainedCompaction
+  // 上游每次 liveMessages 更新都会重建 progress 对象；超时 effect 必须依赖稳定签名，不能依赖对象引用。
+  const displayCompactionSignature = displayCompaction ? compactionSignature(displayCompaction) : ''
   const hasDisplayTasks = displayItems.length > 0
   const compactionIsRunning = displayCompaction?.status === 'running'
   const shouldRetainFinishedProgress = displayCompaction
     ? !compactionIsRunning && displayCompaction.status !== 'failed'
     : hasDisplayTasks && (!streaming || !hasLiveActiveTask)
   const hideKey = shouldRetainFinishedProgress
-    ? displayCompaction
-      ? `${compactionSignature(displayCompaction)}:${streaming}`
+    ? displayCompactionSignature
+      ? `${displayCompactionSignature}:${streaming}`
       : `${displaySignature}:${streaming}`
     : null
 
@@ -156,8 +171,8 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
       setFading(true)
     }, FINISH_RETENTION_MS - FADE_OUT_DURATION_MS)
     const hideTimer = window.setTimeout(() => {
-      if (displayCompaction) {
-        setDismissedCompactionSignature(compactionSignature(displayCompaction))
+      if (displayCompactionSignature) {
+        setDismissedCompactionSignature(displayCompactionSignature)
       }
       setVisible(false)
       setOpen(false)
@@ -170,7 +185,7 @@ export function TaskProgressOverlay({ activities, streaming, contextCompaction }
       window.clearTimeout(fadeTimer)
       window.clearTimeout(hideTimer)
     }
-  }, [hasDisplayTasks, displayCompaction, hideKey])
+  }, [hasDisplayTasks, displayCompactionSignature, hideKey])
 
   const completedCount = displayItems.filter((item) => isTerminalTaskStatus(item.status)).length
   const currentTask = getCurrentTask(displayItems)

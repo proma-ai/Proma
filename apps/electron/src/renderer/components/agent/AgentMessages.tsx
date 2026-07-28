@@ -98,6 +98,21 @@ export function getContextCompactionProgress(
   isCompacting: boolean | undefined,
   streamCompaction: AgentStreamState['contextCompaction'] | undefined,
 ): ContextCompactionProgress | undefined {
+  const latestStatusIndex = messages.findLastIndex((message) =>
+    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
+  )
+  const latestStatus = latestStatusIndex >= 0
+    ? messages[latestStatusIndex] as SDKSystemMessage
+    : undefined
+  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+  // Pi 会在同一个 stream 内续跑压缩前的任务。压缩边界后的 assistant、user 或普通系统消息都属于新工作，
+  // 终态状态（无论来自 atom 还是 liveMessages）都不能继续抢占新的正常进度。
+  const hasResumedWork = latestStatusIndex >= 0
+    && messages.slice(latestStatusIndex + 1).some((message) => {
+      if (message.type === 'assistant' || message.type === 'user') return true
+      return message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) == null
+    })
+
   if (streamCompaction?.status === 'running') {
     return {
       status: 'running',
@@ -105,7 +120,7 @@ export function getContextCompactionProgress(
       detail: '正在生成会话摘要，完成后可继续当前任务。',
     }
   }
-  if (streamCompaction?.status === 'success') {
+  if (streamCompaction?.status === 'success' && !hasResumedWork) {
     return {
       status: 'success',
       label: '上下文已压缩',
@@ -113,7 +128,7 @@ export function getContextCompactionProgress(
       summary: streamCompaction.summary,
     }
   }
-  if (streamCompaction?.status === 'noop') {
+  if (streamCompaction?.status === 'noop' && !hasResumedWork) {
     return {
       status: 'noop',
       label: '当前上下文无需压缩',
@@ -127,11 +142,7 @@ export function getContextCompactionProgress(
       detail: streamCompaction.message ?? '请检查模型连接后重试。',
     }
   }
-
-  const latestStatus = [...messages].reverse().find((message) =>
-    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
-  ) as SDKSystemMessage | undefined
-  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+  if (hasResumedWork) return undefined
 
   if (status === 'success' && latestStatus) {
     return {
@@ -620,15 +631,16 @@ export function AgentMessages({ sessionId, sessionModelId, messagesLoaded, persi
     return currentTurn ? buildTaskProgressDataForTurn(currentTurn).taskActivities : []
   }, [liveMessages, sessionModelId])
 
-  // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
-  // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
-  // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
-  // 直到整个 stream 结束（state 被删除）才消失。
-  const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
   const contextCompaction = React.useMemo(
     () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting, streamState?.contextCompaction),
     [liveMessages, streamState?.isCompacting, streamState?.contextCompaction],
   )
+  // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
+  // → 抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
+  // Pi 同一 stream 续跑后，getContextCompactionProgress 会清除终态反馈；此时即使旧标记尚未刷新，
+  // 也必须恢复正常运行指示器。
+  const suppressAgentRunning = streamState?.isCompacting
+    || (streamState?.compactInFlight && contextCompaction != null)
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
