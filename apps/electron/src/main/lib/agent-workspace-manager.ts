@@ -22,6 +22,8 @@ import {
   getInactiveSkillsDir,
   getDefaultSkillsDir,
   parseSkillVersion,
+  RETIRED_DEFAULT_SKILL_SLUGS,
+  isRetiredDefaultSkill,
 } from './config-paths'
 import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
@@ -233,7 +235,7 @@ function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: bool
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() || isRetiredDefaultSkill(entry.name)) continue
       const source = join(defaultDir, entry.name)
       const target = join(targetDir, entry.name)
       try {
@@ -472,6 +474,28 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
 
 // ===== 默认 Skills 自动升级 =====
 
+/** 从单个工作区的 active 与 inactive 目录清理已退役的内置 Skills。 */
+function removeRetiredDefaultSkillsFromWorkspace(workspace: AgentWorkspace): void {
+  const skillDirs = [
+    { state: 'active', path: getWorkspaceSkillsDir(workspace.slug) },
+    { state: 'inactive', path: getInactiveSkillsDir(workspace.slug) },
+  ]
+
+  for (const skillDir of skillDirs) {
+    for (const slug of RETIRED_DEFAULT_SKILL_SLUGS) {
+      const targetPath = join(skillDir.path, slug)
+      if (!existsSync(targetPath)) continue
+
+      try {
+        rmSyncWithRetry(targetPath, { recursive: true, force: true })
+        console.log(`[Agent 工作区] 已移除退役默认 Skill: ${workspace.slug}/${slug} (${skillDir.state})`)
+      } catch (err) {
+        console.warn(`[Agent 工作区] 移除退役默认 Skill 失败 (${workspace.slug}/${slug}, ${skillDir.state}):`, err)
+      }
+    }
+  }
+}
+
 /**
  * 同步默认 Skills 到所有工作区。规则：
  * - 缺失：注入到 skills/（active），让升级后新增的内置 Skill 对老用户立即可用
@@ -491,7 +515,7 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
   try {
     const entries = readdirSync(defaultDir, { withFileTypes: true })
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() || isRetiredDefaultSkill(entry.name)) continue
       const sourcePath = join(defaultDir, entry.name)
       defaultSkills.set(entry.name, {
         version: parseSkillVersion(sourcePath),
@@ -502,11 +526,12 @@ export function upgradeDefaultSkillsInWorkspaces(): void {
     return
   }
 
-  if (defaultSkills.size === 0) return
-
   const index = readIndex()
 
   for (const workspace of index.workspaces) {
+    removeRetiredDefaultSkillsFromWorkspace(workspace)
+    if (defaultSkills.size === 0) continue
+
     const activeDir = getWorkspaceSkillsDir(workspace.slug)
     const inactiveDir = getInactiveSkillsDir(workspace.slug)
 

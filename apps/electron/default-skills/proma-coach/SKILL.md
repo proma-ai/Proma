@@ -1,7 +1,7 @@
 ---
 name: proma-coach
 description: Proma 使用顾问，主动把用户在 Proma/Agent/Skill/Chat 工具/项目里的摩擦、疑惑、重复解释和低效流程，转成更顺手的使用方式或合适的知识维护动作。触发要积极：用户表达不满、困惑、重复提醒、"为什么没用/不会自动/又要我说"、"算了，我自己来"、"你上次不是说..."、"你又忘了"、"以后都这样/能不能记住/少让我选/下次自动"、询问 Proma 怎么用更好、某事能不能固化、该用 Agent 还是 Chat 工具、有没有现成 Skill、Skill 为什么没触发、想优化已有 Skill description、想减少步骤/降低认知负担/让 Proma 更懂自己的偏好时，都应触发。即使用户没有明确说"创建 Skill"，只要出现可复用流程、长期偏好、模式选择、能力发现、已有能力没命中、用户体验摩擦或产品心智模型偏差，也先用本 Skill 判断。Coach 不直接替下游干活；它负责诊断真实痛点，按 CLAUDE.md / Memory / Skills / 会话级 Context / 项目级 Context 五层知识架构检查已有沉淀，主动设计最小维护方案或路由到 skill-creator/find-skills/tool-builder/automation，并在方案不合适时直接挑战用户。普通一次性任务不打断，但只要有"以后还会遇到"或"Proma 应该更懂我"的信号，就宁可触发后判断不沉淀，也不要错过。
-version: "1.0.6"
+version: "1.0.7"
 ---
 
 # Proma Coach
@@ -171,7 +171,7 @@ Proma 给用户提供的核心能力：
 
 不要为了"显得完整"而每次都做 L3 全量搜索——L1 足够覆盖大多数场景。如果 L1 确认没有任何相关沉淀，直接进入 Step 3。
 
-> **OSS 内置 Skills 参考**（不需要搜索，记住即可）：brainstorming / writing-plans / executing-plans / skill-creator / find-skills / tool-builder / guizang-ppt-skill / docx / pdf / pptx / xlsx。当用户需求是通用场景且当前项目没有对应 Skill 时，可以直接提议用内置 Skill 或 `find-skills` 搜索社区。
+> **OSS 内置 Skills 参考**（不需要搜索，记住即可）：writing-plans / executing-plans / skill-creator / find-skills / tool-builder / guizang-ppt-skill / docx / pdf / pptx / xlsx。当用户需求是通用场景且当前项目没有对应 Skill 时，可以直接提议用内置 Skill 或 `find-skills` 搜索社区。
 
 **匹配命中时的措辞**：
 
@@ -275,7 +275,7 @@ Proma 给用户提供的核心能力：
 - **不要把 proma-coach 变成 onboarding 导览**——它是急救型介入，不是入门讲座
 - **不要把所有偏好都建议做成 Skill**——轻量的一次性偏好当下照做；稳定偏好优先考虑 Memory，只有重复流程才做 Skill
 - **不要让用户自己想"那该怎么办"**——你来设计草案，他来确认
-- **不要在路由后还自己接着干**——交给 skill-creator / brainstorming 等下游 Skill，自己退出
+- **不要在路由后还自己接着干**——交给 skill-creator 等下游 Skill，自己退出
 - **不要在第一版 Skill 就堆 reference 子文件 / edge cases**——SKILL.md 单文件 + 3-5 条规则起步，迭代再扩
 - **不要把长文档塞进 CLAUDE.md 或 Memory**——当前任务中间产物放会话级 Context，跨会话长分析、证据和 checklist 放项目级 Context / 本地文档，只在高层入口里留索引
 - **不要追加冲突记忆**——如果用户纠正了旧结论，要修订或标注旧结论过时，而不是简单新增相反说法。检测冲突时：先确认新旧结论的作用域是否重叠（如"中文回复"和"英文 commit message"不重叠）；如果重叠，修订旧条目并标注"于 YYYY-MM-DD 更新为..."；如果不确定是否冲突，在维护建议中向用户说明现有相关记忆并请用户确认。
@@ -287,8 +287,6 @@ Proma 给用户提供的核心能力：
 
 每次路由都用"接力"而非"转交"的措辞，让用户感觉被托住：
 
-- 路由 brainstorming：
-  > "在做之前先帮你把需求探清楚——我启动 brainstorming，问你几个关键问题。"
 - 路由 skill-creator：
   > "方案我已经想好了（见上面草案），你点头我就用 skill-creator 直接做出来。"
 - 路由 find-skills：
