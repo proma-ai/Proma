@@ -1870,10 +1870,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
-    if (streaming || backgroundWaiting) {
-      toast.info('Agent 运行中，完成后再切换模型')
-      return
-    }
+    // 运行中的 Agent query 会继续使用启动时的模型；这里只更新会话配置，供本轮结束后的下一轮使用。
+    const modelSwitchDeferred = streaming || backgroundWaiting
 
     // 更新当前会话的 per-session 配置
     setSessionChannelMap((prev) => {
@@ -1892,14 +1890,17 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         : session
     )))
 
-    // 模型切换时：清除旧的 contextWindow，让 result 重新提供真实值
-    setStreamingStates((prev) => {
-      const state = prev.get(sessionId)
-      if (!state) return prev
-      const map = new Map(prev)
-      map.set(sessionId, { ...state, contextWindow: undefined })
-      return map
-    })
+    // 空闲切换时清除旧的 contextWindow，让下一轮 result 重新提供真实值。
+    // 运行中不能清除：当前轮仍在使用旧模型，旧模型的用量显示应保持稳定。
+    if (!modelSwitchDeferred) {
+      setStreamingStates((prev) => {
+        const state = prev.get(sessionId)
+        if (!state) return prev
+        const map = new Map(prev)
+        map.set(sessionId, { ...state, contextWindow: undefined })
+        return map
+      })
+    }
 
     // 同时更新全局默认值（新会话继承）
     setDefaultChannelId(option.channelId)
@@ -1918,6 +1919,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )))
       })
       .catch(console.error)
+
+    if (modelSwitchDeferred) {
+      toast.info('模型已切换，本轮结束后生效')
+    }
   }, [sessionId, streaming, backgroundWaiting, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, setAgentSessions])
 
   const handleAgentRuntimeChange = React.useCallback(async (runtime: AgentRuntime): Promise<void> => {
