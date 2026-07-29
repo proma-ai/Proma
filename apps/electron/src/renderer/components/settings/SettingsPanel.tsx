@@ -1,7 +1,7 @@
 /**
  * SettingsPanel - 设置面板
  *
- * 在应用主工作区中展示：顶部 Header（标题 + 关闭按钮）+ 下方（左侧导航 + 右侧 ScrollArea 内容区域）。
+ * 在应用主工作区中展示左侧导航和右侧 ScrollArea 内容区域。
  * 使用 Jotai atom 管理当前标签页状态，保持已有设置项与分组顺序。
  */
 
@@ -18,7 +18,6 @@ import {
   Wrench,
   Bot,
   GraduationCap,
-  X,
   ArrowLeft,
   Keyboard,
   Mic,
@@ -64,7 +63,6 @@ import { VoiceInputSettings } from "./VoiceInputSettings";
 import { MigrationSettings } from "./MigrationSettings";
 import { StorageSettings } from "./StorageSettings";
 import { useOpenSession } from '@/hooks/useOpenSession'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -167,7 +165,6 @@ export function SettingsPanel({
   const [mainTabs, setMainTabs] = useAtom(tabsAtom);
   const setMainActiveTabId = useSetAtom(activeTabIdAtom);
   const openSession = useOpenSession()
-  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   /** 统一的退出拦截对话框状态 */
   type PendingAction =
@@ -269,36 +266,14 @@ export function SettingsPanel({
     ];
   }, [appMode]);
 
-  // 当前 tab 标题
-  const activeTabLabel = tabs.find((t) => t.id === activeTab)?.label ?? "设置";
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-content-area text-foreground">
-      {/* 顶部 Header 栏 */}
-      <div className="relative flex h-[112px] flex-shrink-0 items-end justify-between border-b border-border/80 bg-[hsl(var(--sidebar-surface))] px-6 pb-5 dark:border-border/70">
-        <div
-          aria-hidden="true"
-          className={cn(
-            'titlebar-drag-region pointer-events-none absolute left-0 top-0 h-[50px]',
-            isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0',
-          )}
-        />
-        <h2 className="titlebar-no-drag relative z-10 text-sm font-medium text-foreground">
-          {activeTabLabel}
-        </h2>
-        {onClose && (
-          <button
-            onClick={handleClose}
-            aria-label="关闭设置"
-            title="关闭设置"
-            className="titlebar-no-drag relative z-10 rounded-md p-1.5 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X size={16} />
-          </button>
-        )}
-      </div>
+      <div
+        aria-hidden="true"
+        className="titlebar-drag-region pointer-events-none h-[35px] flex-shrink-0 bg-[hsl(var(--sidebar-surface))]"
+      />
 
-      {/* 下方主体：左导航 + 右内容 */}
+      {/* 主体：左导航 + 右内容 */}
       <div className="flex flex-1 min-h-0">
         {/* 左侧 Tab 导航 */}
         <div className="flex h-full min-h-0 w-[277px] flex-shrink-0 flex-col border-r border-border/80 bg-[hsl(var(--sidebar-surface))] dark:border-border/70">
