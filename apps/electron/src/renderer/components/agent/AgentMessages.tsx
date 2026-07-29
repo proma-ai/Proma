@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Bot, RotateCw, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react'
+import { Bot, RotateCw, AlertTriangle, CheckCircle2, Ban, ChevronDown, ChevronRight } from 'lucide-react'
 import { WelcomeEmptyState } from '@/components/welcome/WelcomeEmptyState'
 import {
   Message,
@@ -98,6 +98,21 @@ export function getContextCompactionProgress(
   isCompacting: boolean | undefined,
   streamCompaction: AgentStreamState['contextCompaction'] | undefined,
 ): ContextCompactionProgress | undefined {
+  const latestStatusIndex = messages.findLastIndex((message) =>
+    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
+  )
+  const latestStatus = latestStatusIndex >= 0
+    ? messages[latestStatusIndex] as SDKSystemMessage
+    : undefined
+  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+  // Pi 会在同一个 stream 内续跑压缩前的任务。压缩边界后的 assistant、user 或普通系统消息都属于新工作，
+  // 终态状态（无论来自 atom 还是 liveMessages）都不能继续抢占新的正常进度。
+  const hasResumedWork = latestStatusIndex >= 0
+    && messages.slice(latestStatusIndex + 1).some((message) => {
+      if (message.type === 'assistant' || message.type === 'user') return true
+      return message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) == null
+    })
+
   if (streamCompaction?.status === 'running') {
     return {
       status: 'running',
@@ -105,7 +120,7 @@ export function getContextCompactionProgress(
       detail: '正在生成会话摘要，完成后可继续当前任务。',
     }
   }
-  if (streamCompaction?.status === 'success') {
+  if (streamCompaction?.status === 'success' && !hasResumedWork) {
     return {
       status: 'success',
       label: '上下文已压缩',
@@ -113,7 +128,7 @@ export function getContextCompactionProgress(
       summary: streamCompaction.summary,
     }
   }
-  if (streamCompaction?.status === 'noop') {
+  if (streamCompaction?.status === 'noop' && !hasResumedWork) {
     return {
       status: 'noop',
       label: '当前上下文无需压缩',
@@ -127,11 +142,7 @@ export function getContextCompactionProgress(
       detail: streamCompaction.message ?? '请检查模型连接后重试。',
     }
   }
-
-  const latestStatus = [...messages].reverse().find((message) =>
-    message.type === 'system' && getSDKCompactStatus(message as SDKSystemMessage) != null,
-  ) as SDKSystemMessage | undefined
-  const status = latestStatus ? getSDKCompactStatus(latestStatus) : undefined
+  if (hasResumedWork) return undefined
 
   if (status === 'success' && latestStatus) {
     return {
@@ -190,6 +201,7 @@ interface AgentMessagesProps {
   onRetryInNewSession?: () => void
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
+  onCreateTodo?: (text: string) => void
   onCompact?: () => void
   onSwitchToPromaCloud?: () => void
 }
@@ -222,55 +234,62 @@ function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['
   const [expanded, setExpanded] = React.useState(false)
   const [countdown, setCountdown] = React.useState(0)
 
-  // 倒计时逻辑
+  // 仅 scheduled 阶段显示倒计时：此时 Pi 仍在 backoff，尚未重新发起模型请求。
   React.useEffect(() => {
-    if (retrying.failed || retrying.history.length === 0) {
+    if (retrying.phase !== 'scheduled' || retrying.scheduledAt == null || retrying.delaySeconds == null) {
       setCountdown(0)
       return
     }
 
-    const lastAttempt = retrying.history[retrying.history.length - 1]
-    if (!lastAttempt) return
-
-    // 计算倒计时
     const updateCountdown = (): void => {
-      const elapsed = (Date.now() - lastAttempt.timestamp) / 1000 // 已过去的秒数
-      const remaining = Math.max(0, lastAttempt.delaySeconds - elapsed)
-      setCountdown(Math.ceil(remaining))
-
-      if (remaining <= 0) {
-        setCountdown(0)
-      }
+      const elapsed = (Date.now() - retrying.scheduledAt!) / 1_000
+      setCountdown(Math.ceil(Math.max(0, retrying.delaySeconds! - elapsed)))
     }
 
-    // 立即更新一次
     updateCountdown()
-
-    // 每 100ms 更新一次倒计时
     const timer = setInterval(updateCountdown, 100)
     return () => clearInterval(timer)
-  }, [retrying.failed, retrying.history])
+  }, [retrying.delaySeconds, retrying.phase, retrying.scheduledAt])
+
+  const statusText = (() => {
+    const suffix = `第 ${retrying.currentAttempt}/${retrying.maxAttempts} 次继续当前回答`
+    switch (retrying.phase) {
+      case 'scheduled':
+        return countdown > 0 ? `网络暂时中断，${countdown} 秒后开始${suffix}` : `网络暂时中断，即将开始${suffix}`
+      case 'running':
+        return `正在${suffix}…`
+      case 'succeeded':
+        return `已在${suffix}时恢复`
+      case 'exhausted':
+        return retrying.totalAttempt != null && retrying.maxTotalAttempts != null
+          ? `本轮自动恢复已耗尽（${retrying.totalAttempt}/${retrying.maxTotalAttempts}）`
+          : `自动恢复已耗尽（${retrying.currentAttempt}/${retrying.maxAttempts}）`
+      case 'cancelled':
+        return '自动恢复已取消'
+    }
+  })()
+
+  const isTerminal = retrying.phase === 'exhausted' || retrying.phase === 'cancelled'
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 p-3 mb-3">
-      {/* 头部：简洁状态 */}
       <button
         type="button"
         className="flex items-center gap-2 w-full text-left hover:opacity-80 transition-opacity"
         onClick={() => setExpanded(!expanded)}
       >
-        {retrying.failed ? (
-          <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+        {retrying.phase === 'succeeded' ? (
+          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        ) : isTerminal ? (
+          retrying.phase === 'cancelled'
+            ? <Ban className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            : <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
         ) : (
           <RotateCw className="size-4 animate-spin text-amber-600 dark:text-amber-400 shrink-0" />
         )}
-        <span className="text-sm text-amber-900 dark:text-amber-100 flex-1">
-          {retrying.failed
-            ? `重试失败 (${retrying.currentAttempt}/${retrying.maxAttempts})`
-            : countdown > 0
-              ? `重试倒计时 ${countdown}秒 (${retrying.currentAttempt}/${retrying.maxAttempts})`
-              : `重试中 (${retrying.currentAttempt}/${retrying.maxAttempts})`}
-          {retrying.history.length > 0 && ` · ${retrying.history[retrying.history.length - 1]?.reason}`}
+        <span className="text-sm text-amber-900 dark:text-amber-100 flex-1 tabular-nums">
+          {statusText}
+          {retrying.reason && ` · ${retrying.reason}`}
         </span>
         {expanded ? (
           <ChevronDown className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -279,33 +298,37 @@ function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['
         )}
       </button>
 
-      {/* 展开内容：重试历史 */}
-      {expanded && retrying.history.length > 0 && (
+      {expanded && (
         <div className="mt-3 space-y-3 border-t border-amber-200 dark:border-amber-800 pt-3">
-          <div className="text-xs font-medium text-amber-900 dark:text-amber-100">
-            尝试历史：
-          </div>
-          {retrying.history.map((attempt, index) => (
-            <RetryAttemptItem
-              key={attempt.timestamp}
-              attempt={attempt}
-              isLatest={index === retrying.history.length - 1}
-              isFailed={retrying.failed && index === retrying.history.length - 1}
-            />
-          ))}
-          {!retrying.failed && (
-            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6">
-              {countdown > 0 ? (
-                <>
-                  <RotateCw className="size-3 animate-spin" />
-                  <span>等待 {countdown} 秒后开始第 {retrying.currentAttempt} 次尝试</span>
-                </>
-              ) : (
-                <>
-                  <RotateCw className="size-3 animate-spin" />
-                  <span>正在进行第 {retrying.currentAttempt} 次尝试...</span>
-                </>
-              )}
+          {retrying.maxTotalAttempts != null && (
+            <div className="text-xs text-amber-700 dark:text-amber-300 tabular-nums">
+              本轮已安排 {retrying.totalAttempt ?? 0}/{retrying.maxTotalAttempts} 次自动恢复
+            </div>
+          )}
+          {retrying.history.length > 0 && (
+            <>
+              <div className="text-xs font-medium text-amber-900 dark:text-amber-100">
+                已执行的恢复记录：
+              </div>
+              {retrying.history.map((attempt, index) => (
+                <RetryAttemptItem
+                  key={attempt.attempt}
+                  attempt={attempt}
+                  isLatest={index === retrying.history.length - 1}
+                />
+              ))}
+            </>
+          )}
+          {retrying.phase === 'scheduled' && (
+            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6 tabular-nums">
+              <RotateCw className="size-3 animate-spin" />
+              <span>{countdown > 0 ? `等待 ${countdown} 秒后开始第 ${retrying.currentAttempt} 次继续当前回答` : `即将开始第 ${retrying.currentAttempt} 次继续当前回答`}</span>
+            </div>
+          )}
+          {retrying.phase === 'running' && (
+            <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 pl-6 tabular-nums">
+              <RotateCw className="size-3 animate-spin" />
+              <span>正在执行第 {retrying.currentAttempt} 次继续当前回答…</span>
             </div>
           )}
         </div>
@@ -318,11 +341,9 @@ function RetryingNotice({ retrying }: { retrying: NonNullable<AgentStreamState['
 function RetryAttemptItem({
   attempt,
   isLatest,
-  isFailed,
 }: {
   attempt: RetryAttempt
   isLatest: boolean
-  isFailed: boolean
 }): React.ReactElement {
   const [showStderr, setShowStderr] = React.useState(false)
   const [showStack, setShowStack] = React.useState(false)
@@ -339,8 +360,8 @@ function RetryAttemptItem({
       <div className="flex items-start gap-2">
         <span className="text-destructive shrink-0">❌</span>
         <div className="flex-1 min-w-0 space-y-1">
-          <div className="text-xs text-amber-900 dark:text-amber-100">
-            第 {attempt.attempt} 次 ({time}) - {attempt.reason}
+          <div className="text-xs text-amber-900 dark:text-amber-100 tabular-nums">
+            第 {attempt.attempt} 次恢复前的错误（{time}）- {attempt.reason}
           </div>
           <div className="text-xs text-amber-700 dark:text-amber-300 font-mono break-words">
             {attempt.errorMessage}
@@ -476,7 +497,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCompact, onSwitchToPromaCloud }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCreateTodo, onCompact, onSwitchToPromaCloud }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -628,15 +649,16 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
     return currentTurn ? buildTaskProgressDataForTurn(currentTurn).taskActivities : []
   }, [liveMessages, sessionModelId])
 
-  // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
-  // → 一律抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
-  // compactInFlight 从点击压缩 / SDK compacting 事件开始为 true，
-  // 直到整个 stream 结束（state 被删除）才消失。
-  const suppressAgentRunning = streamState?.isCompacting || streamState?.compactInFlight
   const contextCompaction = React.useMemo(
     () => getContextCompactionProgress(liveMessages ?? [], streamState?.isCompacting, streamState?.contextCompaction),
     [liveMessages, streamState?.isCompacting, streamState?.contextCompaction],
   )
+  // 压缩流程进行中（含收尾窗口：compact_boundary 已到但 result 未到）
+  // → 抑制 AgentRunningIndicator，避免压缩分隔符切换期间闪烁。
+  // Pi 同一 stream 续跑后，getContextCompactionProgress 会清除终态反馈；此时即使旧标记尚未刷新，
+  // 也必须恢复正常运行指示器。
+  const suppressAgentRunning = streamState?.isCompacting
+    || (streamState?.compactInFlight && contextCompaction != null)
 
   // 统一分组：将持久化 + 实时消息合并后再分组，确保 system 消息（如压缩分割线）出现在正确位置
   const allGroups = React.useMemo(() => {
@@ -733,6 +755,7 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
                     basePath={sessionPath || undefined}
                     onFork={shouldDisableActions ? undefined : onFork}
                     onRewind={shouldDisableActions ? undefined : onRewind}
+                    onCreateTodo={shouldDisableActions ? undefined : onCreateTodo}
                     onRetry={shouldDisableActions ? undefined : onRetry}
                     onRetryInNewSession={shouldDisableActions ? undefined : onRetryInNewSession}
                     onCompact={shouldDisableActions ? undefined : onCompact}

@@ -42,7 +42,7 @@ describe('Codex OAuth 标题生成', () => {
       async complete(_model, context, options) {
         receivedPrompt = context.messages[0]?.role === 'user' ? context.messages[0].content as string : undefined
         receivedOptions = options
-        return { content: [{ type: 'text', text: 'OAuth 标题修复' }] }
+        return { content: [{ type: 'text', text: 'OAuth 标题修复' }], stopReason: 'stop' }
       },
     }
     const dispatcher = {} as Dispatcher
@@ -53,7 +53,7 @@ describe('Codex OAuth 标题生成', () => {
     expect(receivedOptions).toEqual({
       transport: 'sse',
       maxTokens: 40,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
       maxRetries: 0,
       reasoningEffort: 'none',
       reasoningSummary: 'off',

@@ -19,7 +19,7 @@ import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
 import { calcTotalAvailable, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import { billingInfoAtom } from '@/atoms/cloud-billing'
-import { Box, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, X, Copy, Check, Brain, Sparkles, ChevronDown } from 'lucide-react'
+import { Box, CornerDownLeft, Square, Settings, X, Copy, Check, Brain, Sparkles, ChevronDown, ListTodo } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
@@ -29,7 +29,6 @@ import { PermissionModeSelector } from './PermissionModeSelector'
 import { AskUserBanner } from './AskUserBanner'
 import { ExitPlanModeBanner } from './ExitPlanModeBanner'
 import { PlanModeDashedBorder } from './PlanModeDashedBorder'
-import { Badge } from '@/components/ui/badge'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
@@ -44,6 +43,8 @@ import {
   inputToolbarSendButtonClass,
 } from '@/components/ai-elements/input-toolbar-styles'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
@@ -111,6 +112,7 @@ import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
+import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
 import { draftSessionIdsAtom } from '@/atoms/draft-session-atoms'
@@ -135,6 +137,12 @@ import type { AgentQueuedAttachment, AgentQueuedMessage, QueueDropPlacement } fr
 /** 稳定的空 SDKMessage 数组引用，避免 ?? [] 每次创建新引用 */
 const EMPTY_SDK_MESSAGES: SDKMessage[] = []
 const LONG_TEXT_ATTACHMENT_THRESHOLD = 2000
+
+function endOfToday(): number {
+  const date = new Date()
+  date.setHours(23, 59, 59, 999)
+  return date.getTime()
+}
 
 interface OptimisticSDKUserMessage extends SDKUserMessage {
   _createdAt: number
@@ -368,9 +376,32 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   )
 }
 
-const AGENT_RUNTIME_OPTIONS: Array<{ value: AgentRuntime; label: string; description: string }> = [
-  { value: 'claude', label: 'Claude', description: '使用 Claude Agent SDK' },
-  { value: 'pi', label: 'Pi', description: '使用 Pi Agent SDK' },
+interface AgentRuntimeOption {
+  value: AgentRuntime
+  label: string
+  description: string
+  badge?: string
+  badgeTone?: 'recommended' | 'deprecated'
+  notice?: string
+}
+
+// Pi 为默认与推荐内核，Claude Agent SDK 计划于 2026 年 8 月中旬彻底下线
+const AGENT_RUNTIME_OPTIONS: AgentRuntimeOption[] = [
+  {
+    value: 'pi',
+    label: 'Pi',
+    description: 'Pi Agent SDK，Proma 默认内核，新功能仅在 Pi 上提供',
+    badge: '推荐',
+    badgeTone: 'recommended',
+  },
+  {
+    value: 'claude',
+    label: 'Claude',
+    description: 'Claude Agent SDK',
+    badge: '即将下线',
+    badgeTone: 'deprecated',
+    notice: '新功能已不再支持，将于 8 月中旬彻底下线，建议尽快切换到 Pi',
+  },
 ]
 
 interface AgentRuntimeSelectorProps {
@@ -414,8 +445,9 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[220px]">
+        <TooltipContent side="top" className="max-w-[240px]">
           <p className="font-medium">{current.description}</p>
+          {current.notice && <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{current.notice}</p>}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {disabled ? 'Agent 运行中，完成后可切换' : '切换当前会话下一轮使用的内核'}
           </p>
@@ -425,7 +457,7 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
         side="top"
         align="start"
         sideOffset={8}
-        className="w-[180px] p-1.5"
+        className="w-[248px] p-1.5"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1">
@@ -446,12 +478,31 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
                 <div className="flex w-full items-center gap-2">
                   <Box className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium">{option.label}</div>
-                    <div className="mt-0.5 truncate text-[11px] font-normal text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium">{option.label}</span>
+                      {option.badge && (
+                        <span
+                          className={cn(
+                            'rounded-sm px-1 py-px text-[10px] font-medium leading-tight',
+                            option.badgeTone === 'deprecated'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              : 'bg-primary/10 text-primary'
+                          )}
+                        >
+                          {option.badge}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 whitespace-normal text-[11px] font-normal leading-snug text-muted-foreground">
                       {option.description}
                     </div>
+                    {option.notice && (
+                      <div className="mt-0.5 whitespace-normal text-[11px] font-normal leading-snug text-amber-600 dark:text-amber-400">
+                        {option.notice}
+                      </div>
+                    )}
                   </div>
-                  {active && <Check className="size-3.5 shrink-0" />}
+                  {active && <Check className="size-3.5 shrink-0 self-start" />}
                 </div>
               </Button>
             )
@@ -493,6 +544,18 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const billingInfo = useAtomValue(billingInfoAtom)
   const [showPromaCloudConfirm, setShowPromaCloudConfirm] = React.useState(false)
   const sessions = useAtomValue(agentSessionsAtom)
+  const planningGroups = useAtomValue(todoPlanningGroupsAtom)
+  const [todoDialogOpen, setTodoDialogOpen] = React.useState(false)
+  const [todoDraftTitle, setTodoDraftTitle] = React.useState('')
+  const [todoSourceText, setTodoSourceText] = React.useState('')
+  const [todoGroupId, setTodoGroupId] = React.useState('__none__')
+  const [creatingTodo, setCreatingTodo] = React.useState(false)
+  React.useEffect(() => window.electronAPI.onPlanningAgentOperation((operation) => {
+    if (operation.sessionId !== sessionId) return
+    const target = operation.target === 'todo' ? 'Todo' : '日程'
+    const action = operation.action === 'created' ? '创建' : operation.action === 'updated' ? '更新' : '删除'
+    toast.success(`已${action}${target}`, { description: `「${operation.title}」` })
+  }), [sessionId])
   const sessionMeta = React.useMemo(
     () => sessions.find((s) => s.id === sessionId),
     [sessions, sessionId],
@@ -642,6 +705,56 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftHtmlMap])
+
+  const createTodoForCurrentSession = React.useCallback(async (title: string, groupId: string, sourceText?: string): Promise<boolean> => {
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) {
+      toast.error('Todo 标题不能为空')
+      return false
+    }
+    if (normalizedTitle.length > 500) {
+      toast.error('Todo 标题不能超过 500 字')
+      return false
+    }
+
+    try {
+      await window.electronAPI.createTodo({
+        title: normalizedTitle,
+        notes: sourceText?.trim() && sourceText.trim() !== normalizedTitle ? sourceText.trim() : undefined,
+        dueAt: endOfToday(),
+        groupId: groupId === '__none__' ? undefined : groupId,
+        sessionId,
+        workspaceId: currentWorkspaceId ?? undefined,
+      })
+      toast.success('已添加 Todo', { description: '已关联当前 Agent 会话' })
+      return true
+    } catch (error) {
+      console.error('[AgentView] 创建 Todo 失败:', error)
+      toast.error('创建 Todo 失败', { description: String(error) })
+      return false
+    }
+  }, [currentWorkspaceId, sessionId])
+
+  const handleOpenReplyTodoDialog = React.useCallback((text: string): void => {
+    const sourceText = text.trim()
+    const firstLine = sourceText.split('\n').map((line) => line.trim()).find(Boolean) ?? sourceText
+    setTodoSourceText(sourceText)
+    setTodoDraftTitle(firstLine.replace(/^#{1,6}\s+/, '').slice(0, 500))
+    setTodoGroupId('__none__')
+    setTodoDialogOpen(true)
+  }, [])
+
+  const handleCreateReplyTodo = React.useCallback(async (): Promise<void> => {
+    setCreatingTodo(true)
+    try {
+      if (await createTodoForCurrentSession(todoDraftTitle, todoGroupId, todoSourceText)) {
+        setTodoDialogOpen(false)
+      }
+    } finally {
+      setCreatingTodo(false)
+    }
+  }, [createTodoForCurrentSession, todoDraftTitle, todoGroupId, todoSourceText])
+
   const sessionPathMap = useAtomValue(agentSessionPathMapAtom)
   const setSessionPathMap = useSetAtom(agentSessionPathMapAtom)
   const sessionPath = sessionPathMap.get(sessionId) ?? null
@@ -1818,10 +1931,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
-    if (streaming || backgroundWaiting) {
-      toast.info('Agent 运行中，完成后再切换模型')
-      return
-    }
+    // 运行中的 Agent query 会继续使用启动时的模型；这里只更新会话配置，供本轮结束后的下一轮使用。
+    const modelSwitchDeferred = streaming || backgroundWaiting
 
     // 更新当前会话的 per-session 配置
     setSessionChannelMap((prev) => {
@@ -1840,14 +1951,17 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         : session
     )))
 
-    // 模型切换时：清除旧的 contextWindow，让 result 重新提供真实值
-    setStreamingStates((prev) => {
-      const state = prev.get(sessionId)
-      if (!state) return prev
-      const map = new Map(prev)
-      map.set(sessionId, { ...state, contextWindow: undefined })
-      return map
-    })
+    // 空闲切换时清除旧的 contextWindow，让下一轮 result 重新提供真实值。
+    // 运行中不能清除：当前轮仍在使用旧模型，旧模型的用量显示应保持稳定。
+    if (!modelSwitchDeferred) {
+      setStreamingStates((prev) => {
+        const state = prev.get(sessionId)
+        if (!state) return prev
+        const map = new Map(prev)
+        map.set(sessionId, { ...state, contextWindow: undefined })
+        return map
+      })
+    }
 
     // 同时更新全局默认值（新会话继承）
     setDefaultChannelId(option.channelId)
@@ -1866,6 +1980,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )))
       })
       .catch(console.error)
+
+    if (modelSwitchDeferred) {
+      toast.info('模型已切换，本轮结束后生效')
+    }
   }, [sessionId, streaming, backgroundWaiting, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, setAgentSessions])
 
   const handleAgentRuntimeChange = React.useCallback(async (runtime: AgentRuntime): Promise<void> => {
@@ -2673,23 +2791,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const canSend = messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => {
-    // Pi runtime 可使用所有已启用渠道；空 Claude 白名单不应隐藏其模型/运行时控件。
+    // With no eligible Claude channels, leave only the trailing model/runtime controls visible.
     if (sessionAgentRuntime === 'claude' && agentChannelIds.length === 0) return []
     return [
-    {
-      key: 'model',
-      node: (
-        <ModelSelector
-          filterChannelIds={sessionAgentRuntime === 'pi' ? undefined : agentChannelIds}
-          externalSelectedModel={externalSelectedModel}
-          onModelSelect={handleModelSelect}
-          useAgentModels
-          agentRuntime={sessionAgentRuntime}
-          useSharedOpenState
-        />
-      ),
-    },
-    ...(isCodexFastModeAvailable ? [{
+      ...(isCodexFastModeAvailable ? [{
       key: 'codex-fast-mode',
       node: (
         <Tooltip>
@@ -2711,16 +2816,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         </Tooltip>
       ),
     }] : []),
-    {
-      key: 'runtime',
-      node: (
-        <AgentRuntimeSelector
-          runtime={sessionAgentRuntime}
-          disabled={streaming || backgroundWaiting}
-          onChange={handleAgentRuntimeChange}
-        />
-      ),
-    },
     { key: 'permission-mode', node: <PermissionModeSelector sessionId={sessionId} /> },
     {
       key: 'thinking',
@@ -2745,48 +2840,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     },
     { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
     {
-      key: 'attach-file',
-      node: (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={inputToolbarButtonClass}
-              onClick={handleOpenFileDialog}
-            >
-              <Paperclip className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>添加附件</p>
-          </TooltipContent>
-        </Tooltip>
-      ),
-    },
-    {
-      key: 'attach-folder',
-      node: (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={inputToolbarButtonClass}
-              onClick={handleAttachFolder}
-            >
-              <FolderPlus className="size-5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            <p>附加文件夹</p>
-          </TooltipContent>
-        </Tooltip>
-      ),
-    },
-    {
       key: 'context-usage',
       node: (
         <ContextUsageBadge
@@ -2796,6 +2849,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           cacheCreationTokens={contextStatus.cacheCreationTokens}
           contextWindow={contextStatus.contextWindow}
           isEstimated={contextStatus.contextUsageIsEstimated === true}
+          isPiRuntime={sessionAgentRuntime === 'pi'}
           isCompacting={contextStatus.isCompacting}
           isProcessing={streaming}
           sessionId={sessionId}
@@ -2805,10 +2859,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-  ]
+    ]
   }, [
     agentChannelIds,
-    agentChannelId,
     planQuotaChannelId,
     planQuotaChannelUpdatedAt,
     isCodexFastModeAvailable,
@@ -2818,16 +2871,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     openAIThinkingLevel,
     openAIThinkingLevels,
     updateReasoningLevel,
-    agentModelId,
-    handleModelSelect,
     sessionAgentRuntime,
     backgroundWaiting,
-    handleAgentRuntimeChange,
     sessionId,
     agentThinking,
     setAgentThinking,
-    handleOpenFileDialog,
-    handleAttachFolder,
     contextStatus.inputTokens,
     contextStatus.outputTokens,
     contextStatus.cacheReadTokens,
@@ -2840,7 +2888,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     handleCompact,
   ])
 
-  const inputTrailingNode = streaming && !hasTextInput ? (
+  const sendControl = streaming && !hasTextInput ? (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
@@ -2870,6 +2918,28 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     >
       <CornerDownLeft className="size-[22px]" />
     </Button>
+  )
+
+  const inputTrailingNode = (
+    <>
+      <div className="flex min-w-0 items-center gap-1 [&_.model-selector-trigger>span]:max-w-[min(12rem,30vw)]">
+        <ModelSelector
+          filterChannelIds={sessionAgentRuntime === 'pi' ? undefined : agentChannelIds}
+          externalSelectedModel={externalSelectedModel}
+          onModelSelect={handleModelSelect}
+          showChannelInTrigger
+          useAgentModels
+          agentRuntime={sessionAgentRuntime}
+          useSharedOpenState
+        />
+        <AgentRuntimeSelector
+          runtime={sessionAgentRuntime}
+          disabled={streaming || backgroundWaiting}
+          onChange={handleAgentRuntimeChange}
+        />
+      </div>
+      {sendControl}
+    </>
   )
 
   // 同批图片附件 — 用于大图预览时左右翻页（提取到 useMemo 避免每次渲染重建）
@@ -2926,6 +2996,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetryInNewSession={handleRetryInNewSession}
           onFork={handleFork}
           onRewind={handleRewindRequest}
+          onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
           onSwitchToPromaCloud={handlePromaCloudRetryRequest}
         />
@@ -3041,8 +3112,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               placeholder={
                 agentChannelId && hasAvailableModel
                   ? sendWithCmdEnter
-                    ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
-                    : '输入消息... (Enter 发送，Shift+Enter 换行，@ 引用文件，/ 调用 Skill，# 调用 MCP，& 引用会话)'
+                    ? '输入消息... (输入 / 打开菜单，⌘/Ctrl+Enter 发送)'
+                    : '输入消息... (输入 / 打开菜单，Enter 发送)'
                   : !agentChannelId
                     ? '请先在设置中选择 Agent 供应商'
                     : '暂无可用模型，请先在设置中启用渠道'
@@ -3052,7 +3123,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               collapsible
               enableMentions
               workspacePath={sessionPath}
-              workspaceId={currentWorkspaceId}
               workspaceSlug={workspaceSlug}
               sessionId={sessionId}
               attachedDirs={workspaceMentionPaths}
@@ -3060,6 +3130,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               htmlValue={inputHtmlContent}
               onHtmlChange={setInputHtmlContent}
               sendWithCmdEnter={sendWithCmdEnter}
+              commandActions={{
+                onAttachFile: handleOpenFileDialog,
+                onAttachFolder: handleAttachFolder,
+              }}
             />
 
             {/* Footer 工具栏 — 容器变窄时尾部按钮自动折叠进「更多」Popover */}
@@ -3069,6 +3143,21 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         )}
       </div>
     </AgentSessionProvider>
+
+    <Dialog open={todoDialogOpen} onOpenChange={setTodoDialogOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>标记为 Todo</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <label className="grid gap-2 text-sm font-medium">任务标题
+            <textarea value={todoDraftTitle} onChange={(event) => setTodoDraftTitle(event.target.value)} rows={3} className="min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+          </label>
+          <label className="grid gap-2 text-sm font-medium">Todo 分组
+            <Select value={todoGroupId} onValueChange={setTodoGroupId}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__none__">不分组</SelectItem>{planningGroups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select>
+          </label>
+        </div>
+        <DialogFooter><Button type="button" variant="ghost" onClick={() => setTodoDialogOpen(false)}>取消</Button><Button type="button" onClick={() => void handleCreateReplyTodo()} disabled={creatingTodo || !todoDraftTitle.trim()}><ListTodo size={15} />添加 Todo</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     {/* 回退确认弹窗 */}
     <AlertDialog

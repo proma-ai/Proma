@@ -140,6 +140,22 @@ export function reregisterAllGlobalShortcuts(): Record<string, boolean> {
 }
 
 /**
+ * 返回已配置全局快捷键的当前注册结果。
+ *
+ * 渲染进程用于区分用户的绑定配置与系统实际接受的全局组合。
+ */
+export function getGlobalShortcutRegistrationStatus(): Record<string, boolean> {
+  const status: Record<string, boolean> = {}
+  for (const id of globalCallbacks.keys()) {
+    status[id] = false
+  }
+  for (const id of registeredAccelerators.values()) {
+    status[id] = true
+  }
+  return status
+}
+
+/**
  * 注销所有全局快捷键
  *
  * 在 app.will-quit / before-quit 时调用。

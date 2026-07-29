@@ -27,9 +27,9 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
+import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
-import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
-import { createSkillMentionSuggestion, createMcpMentionSuggestion, createSessionMentionSuggestion } from '@/components/agent/mention-suggestions'
+import { createAgentCommandSuggestion, type AgentCommandActions } from '@/components/agent/agent-command-suggestion'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
 import {
   VOICE_DICTATION_INSERT_EVENT,
@@ -118,15 +118,13 @@ interface RichTextInputProps {
   autoFocusTrigger?: string | null
   /** 是否支持手动折叠（内容较长时显示折叠按钮） */
   collapsible?: boolean
-  /** 是否启用 Mention 功能（@ 文件、/ Skill、# MCP、& 会话） */
+  /** 是否启用 / 命令菜单和引用 chip。 */
   enableMentions?: boolean
-  /** 工作区根路径（启用 @ 引用文件功能时需要） */
+  /** 工作区根路径（启用 / 文件引用功能时需要） */
   workspacePath?: string | null
-  /** 工作区 ID（启用 & 引用 Agent 会话功能时需要） */
-  workspaceId?: string | null
-  /** 工作区 slug（启用 / Skill 和 # MCP 功能时需要） */
+  /** 工作区 slug（启用 / Skill 和 MCP 功能时需要） */
   workspaceSlug?: string | null
-  /** 当前 Agent 会话 ID（启用 & 引用 Agent 会话功能时用于排除自身） */
+  /** 当前 Agent 会话 ID（用于在 / 会话引用中排除自身） */
   sessionId?: string | null
   /** 附加目录路径列表（工作区级，@ 引用时标记为工作区文件） */
   attachedDirs?: string[]
@@ -138,6 +136,8 @@ interface RichTextInputProps {
   onHtmlChange?: (html: string) => void
   /** 是否使用 Cmd/Ctrl+Enter 发送（而非 Enter） */
   sendWithCmdEnter?: boolean
+  /** / 命令菜单可调用的输入框外部动作。 */
+  commandActions?: AgentCommandActions
   className?: string
 }
 
@@ -162,7 +162,6 @@ export function RichTextInput({
   collapsible = false,
   enableMentions,
   workspacePath,
-  workspaceId,
   workspaceSlug,
   sessionId,
   attachedDirs = [],
@@ -170,6 +169,7 @@ export function RichTextInput({
   htmlValue,
   onHtmlChange,
   sendWithCmdEnter = false,
+  commandActions,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
@@ -200,31 +200,27 @@ export function RichTextInput({
   // 发送模式引用
   const sendWithCmdEnterRef = useRef(sendWithCmdEnter)
   sendWithCmdEnterRef.current = sendWithCmdEnter
-  // Mention 活跃状态（阻止 Enter 发送消息）
-  const mentionActiveRef = useRef(false)
-  // Mention 弹窗中的可选项数量（0 时 Enter 不阻塞发送）
-  const mentionItemCountRef = useRef(0)
-  // 工作区路径引用（给 Suggestion 使用）
+  // 工作区路径引用（给 / 命令菜单使用）
   const workspacePathRef = useRef<string | null>(workspacePath ?? null)
   workspacePathRef.current = workspacePath ?? null
-  // 工作区 ID 引用（给会话引用 Suggestion 使用）
-  const workspaceIdRef = useRef<string | null>(workspaceId ?? null)
-  workspaceIdRef.current = workspaceId ?? null
-  // 当前会话 ID 引用（给会话引用 Suggestion 使用）
+  // 当前会话 ID 引用（给 / 会话引用使用）
   const currentSessionIdRef = useRef<string | null>(sessionId ?? null)
   currentSessionIdRef.current = sessionId ?? null
-  // 工作区级附加目录路径引用（给 Suggestion 使用，标记为 workspace）
+  // 工作区级附加目录路径引用（给 / 文件引用使用，标记为 workspace）
   const attachedDirsRef = useRef<string[]>(attachedDirs)
   attachedDirsRef.current = attachedDirs
-  // 会话级附加目录路径引用（给 Suggestion 使用，标记为 session）
+  // 会话级附加目录路径引用（给 / 文件引用使用，标记为 session）
   const sessionAttachedDirsRef = useRef<string[]>(sessionAttachedDirs)
   sessionAttachedDirsRef.current = sessionAttachedDirs
-  // 工作区 slug 引用（给 Skill/MCP Suggestion 使用）
+  // 工作区 slug 引用（给统一命令菜单和 MCP Suggestion 使用）
   const workspaceSlugRef = useRef<string | null>(workspaceSlug ?? null)
   workspaceSlugRef.current = workspaceSlug ?? null
+  // / 菜单中的回调必须始终指向当前 Agent 会话，避免切换会话后执行旧闭包。
+  const commandActionsRef = useRef<AgentCommandActions>(commandActions ?? {})
+  commandActionsRef.current = commandActions ?? {}
 
   // 是否启用 Mention 功能：Agent 首帧可能尚未拿到路径/slug/id，但扩展必须先注册。
-  const hasMentionSupport = enableMentions ?? (workspacePath !== undefined || workspaceSlug !== undefined || workspaceId !== undefined)
+  const hasMentionSupport = enableMentions ?? (workspacePath !== undefined || workspaceSlug !== undefined)
 
   // 输入框 Markdown 渲染开关：关闭后为纯文本模式（禁用格式化扩展 + 粘贴跳过 HTML 解析），Mention 仍保留
   const richTextEnabled = useAtomValue(richTextRenderingEnabledAtom)
@@ -241,27 +237,16 @@ export function RichTextInput({
     ))
   }, [isMac])
 
-  // Mention Suggestion 配置（稳定引用，不随 workspacePath 变化重建）
-  const mentionSuggestion = useMemo(
-    () => createFileMentionSuggestion(workspacePathRef, mentionActiveRef, attachedDirsRef, mentionItemCountRef, sessionAttachedDirsRef),
-    [],
-  )
-
-  // Skill Suggestion 配置（/ 触发）
-  const skillSuggestion = useMemo(
-    () => createSkillMentionSuggestion(workspaceSlugRef, mentionActiveRef, mentionItemCountRef),
-    [],
-  )
-
-  // MCP Suggestion 配置（# 触发）
-  const mcpSuggestion = useMemo(
-    () => createMcpMentionSuggestion(workspaceSlugRef, mentionActiveRef, mentionItemCountRef),
-    [],
-  )
-
-  // Agent 会话引用 Suggestion（& 触发）
-  const sessionSuggestion = useMemo(
-    () => createSessionMentionSuggestion(workspaceIdRef, currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
+  // / 统一命令菜单配置。它复用 TipTap Suggestion 生命周期，确保 Esc、焦点和异步清理与原有 mention 一致。
+  const commandSuggestion = useMemo(
+    () => createAgentCommandSuggestion(
+      workspacePathRef,
+      currentSessionIdRef,
+      workspaceSlugRef,
+      attachedDirsRef,
+      sessionAttachedDirsRef,
+      commandActionsRef,
+    ),
     [],
   )
 
@@ -309,7 +294,7 @@ export function RichTextInput({
         emptyEditorClass: 'is-editor-empty',
       }),
       // Mention 扩展：启用时注册，路径/slug 后续通过 ref 异步更新
-      // @ 引用文件、/ 触发 Skill、# 触发 MCP
+      // Mention 节点只由 / 统一命令菜单插入；历史草稿中的旧 token 继续渲染。
       // 纯文本模式下仍然保留，确保引用功能可用
       ...(hasMentionSupport ? [
         Mention.extend({
@@ -323,12 +308,27 @@ export function RichTextInput({
                   'data-mention-suggestion-char': attrs.mentionSuggestionChar,
                 }),
               },
+              // / 命令菜单在一个 Slash suggestion 内插入多种引用，需按节点自身类型渲染 Chip。
+              commandMenuMention: {
+                default: false,
+                parseHTML: (el: HTMLElement) => el.getAttribute('data-command-menu-mention') === 'true',
+                renderHTML: (attrs: Record<string, unknown>) => attrs.commandMenuMention
+                  ? { 'data-command-menu-mention': 'true' }
+                  : {},
+              },
             }
           },
         }).configure({
           HTMLAttributes: {},
+          renderText({ node, suggestion }) {
+            const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
+            const label = node.attrs.label ?? node.attrs.id
+            return `${char}${label}`
+          },
           renderHTML({ node, suggestion }) {
-            const char = suggestion?.char ?? node.attrs.mentionSuggestionChar ?? '@'
+            // 旧草稿中的节点也会带有原始字符。不能在未匹配到旧 suggestion 时
+            // 回退到唯一注册的 `/` suggestion，否则 @/#/& 会被重写为 /skill。
+            const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
             const label = node.attrs.label ?? node.attrs.id
             let chipClass = 'mention-chip'
             if (char === '/') chipClass = 'skill-mention-chip'
@@ -341,17 +341,13 @@ export function RichTextInput({
                 'data-id': node.attrs.id,
                 'data-label': node.attrs.label,
                 'data-mention-suggestion-char': char,
+                ...(node.attrs.commandMenuMention ? { 'data-command-menu-mention': 'true' } : {}),
                 class: chipClass,
               },
               `${char === '@' ? '@' : ''}${label}`,
             ]
           },
-          suggestions: [
-            mentionSuggestion,
-            skillSuggestion,
-            mcpSuggestion,
-            sessionSuggestion,
-          ],
+          suggestions: [commandSuggestion],
         }),
       ] : []),
     ],

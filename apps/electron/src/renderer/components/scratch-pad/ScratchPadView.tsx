@@ -26,6 +26,7 @@ import {
 import { agentSideChatMapAtom, conversationsAtom, conversationDraftsAtom, selectedModelAtom } from '@/atoms/chat-atoms'
 import { appModeAtom } from '@/atoms/app-mode'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
+import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -152,6 +153,7 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
   const setAgentSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const setAppMode = useSetAtom(appModeAtom)
+  const focusAgentSessionInput = useFocusAgentSessionInput()
 
   const extensions = React.useMemo(() => [
     StarterKit.configure({
@@ -398,8 +400,8 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
     })
     window.getSelection()?.removeAllRanges()
     clearSelection()
-    toast.success('已添加到 Agent 引用')
-  }, [clearSelection, getTargetAgentSessionId, selection, setQuotedSelectionMap])
+    focusAgentSessionInput(sessionId)
+  }, [clearSelection, focusAgentSessionInput, getTargetAgentSessionId, selection, setQuotedSelectionMap])
 
   const handleOpenSideChat = React.useCallback(async (): Promise<void> => {
     if (!selection) return

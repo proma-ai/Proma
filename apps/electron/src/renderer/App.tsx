@@ -12,6 +12,8 @@ import { SettingsDialog } from './components/settings/SettingsDialog'
 import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSessionIdAtom, currentAgentWorkspaceIdAtom } from './atoms/agent-atoms'
 import { appModeAtom } from './atoms/app-mode'
 import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
+import { ShortcutGuideDialog } from './components/shortcuts/ShortcutGuideDialog'
+import { PlanningReminderRail } from './components/planning/PlanningReminderRail'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import type { AppShellContextType } from './contexts/AppShellContext'
@@ -125,9 +127,11 @@ export default function App(): React.ReactElement {
     <TooltipProvider delayDuration={200}>
       <CloudAuthGate>
         <AppShell contextValue={contextValue} />
+        <PlanningReminderRail />
         <QuotaExceededDialog />
       </CloudAuthGate>
       <SettingsDialog />
+      <ShortcutGuideDialog />
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
       <MigrationImportDialog />

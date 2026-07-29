@@ -63,6 +63,33 @@ export interface ContextCompactionState {
   message?: string
 }
 
+/** 用户可见的 retry 生命周期。 */
+export type RetryPhase = 'scheduled' | 'running' | 'succeeded' | 'exhausted' | 'cancelled'
+
+/** 单个流式 run 的 retry 状态。 */
+export interface AgentRetryState {
+  /** 用渲染进程创建的 startedAt 隔离迟到事件。 */
+  runStartedAt?: number
+  /** 当前 retry 所处阶段。 */
+  phase: RetryPhase
+  /** 当前第几次 retry（不含初始请求）。 */
+  currentAttempt: number
+  /** 当前连续失败段的 retry 上限。 */
+  maxAttempts: number
+  /** 当前顶层 run 已调度的 retry 数。 */
+  totalAttempt?: number
+  /** 当前顶层 run 的 retry 总预算。 */
+  maxTotalAttempts?: number
+  /** 已实际开始的 retry 历史，按 attempt upsert，不记录“仅安排”的次数。 */
+  history: RetryAttempt[]
+  /** retry 被安排的时间，用于 backoff 倒计时。 */
+  scheduledAt?: number
+  /** 当前安排的 backoff 时长。 */
+  delaySeconds?: number
+  /** 当前或最后一次失败原因。 */
+  reason?: string
+}
+
 /** Agent 会话的流式状态 */
 export interface AgentStreamState {
   running: boolean
@@ -92,26 +119,31 @@ export interface AgentStreamState {
   thinkingEstimatedTokens?: number
   /** 是否正在压缩上下文 */
   isCompacting?: boolean
-  /** 当前或最近一次压缩状态，保留到实时消息清理完成后供底部进度区展示。 */
+  /** 当前或最近一次压缩状态，保留到实时消息清理或同一流恢复正常工作后供底部进度区展示。 */
   contextCompaction?: ContextCompactionState
   /**
    * 压缩流程是否进行中（含收尾窗口）。
-   * 从用户点击压缩 / SDK compacting 事件开始 → 到整个 stream 结束（state 被删除）前一直为 true。
-   * 用于抑制压缩分隔符切换期间 AgentRunningIndicator 的短暂闪烁。
+   * 从用户点击压缩 / SDK compacting 事件开始；若同一流在压缩后恢复正常工作则立即清除，
+   * 否则保留到整个 stream 结束（state 被删除）。用于抑制压缩分隔符切换期间 AgentRunningIndicator 的短暂闪烁。
    */
   compactInFlight?: boolean
   /** 流式开始时间戳（用于思考计时持久化） */
   startedAt?: number
-  /** 重试状态（扩展版） */
-  retrying?: {
-    /** 当前第几次尝试 */
-    currentAttempt: number
-    /** 最大尝试次数 */
-    maxAttempts: number
-    /** 重试历史记录（按时间顺序） */
-    history: RetryAttempt[]
-    /** 是否已失败 */
-    failed: boolean
+  /** 重试状态 */
+  retrying?: AgentRetryState
+}
+
+/**
+ * 成功或无需压缩后，Pi 可能在同一个 stream 内自动续跑原任务。
+ * 一旦收到新的正常 Agent 活动，终态压缩提示不应继续抢占底部进度区。
+ */
+function clearFinishedCompactionForResumedWork(prev: AgentStreamState): AgentStreamState {
+  const status = prev.contextCompaction?.status
+  if (status !== 'success' && status !== 'noop') return prev
+  return {
+    ...prev,
+    compactInFlight: false,
+    contextCompaction: undefined,
   }
 }
 
@@ -121,6 +153,32 @@ export function getActivityStatus(activity: ToolActivity): ActivityStatus {
   if (!activity.done) return 'running'
   if (activity.isError) return 'error'
   return 'completed'
+}
+
+interface RetryEventRunScope {
+  runStartedAt?: number
+}
+
+/**
+ * 仅接受属于当前流式 run 的 retry 事件；旧版无 run 标识的事件保留兼容。
+ * 带 run 标识的事件必须精确匹配，避免旧 IPC 事件在 state 缺失时复活已结束的流。
+ */
+export function isRetryEventForCurrentStream(
+  state: Pick<AgentStreamState, 'startedAt'>,
+  event: RetryEventRunScope,
+): boolean {
+  return event.runStartedAt == null || event.runStartedAt === state.startedAt
+}
+
+function upsertRetryAttempt(history: RetryAttempt[], attempt: RetryAttempt): RetryAttempt[] {
+  const index = history.findIndex((item) => item.attempt === attempt.attempt)
+  if (index === -1) return [...history, attempt]
+  return history.map((item, itemIndex) => (
+    itemIndex === index
+      // 终态会带着最终错误更新同一 retry；保留真正开始请求时的时间和 backoff。
+      ? { ...item, ...attempt, timestamp: item.timestamp, delaySeconds: item.delaySeconds }
+      : item
+  ))
 }
 
 /**
@@ -626,20 +684,25 @@ export function applyAgentEvent(
   event: AgentEvent,
 ): AgentStreamState {
   switch (event.type) {
-    case 'text_delta':
+    case 'text_delta': {
       // 开始接收文本 - 清除重试状态（重试成功）
-      return { ...prev, content: prev.content + event.text, retrying: undefined }
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return { ...resumed, content: resumed.content + event.text, retrying: undefined }
+    }
 
-    case 'text_complete':
+    case 'text_complete': {
       // 用完整文本替换增量累积的文本（用于回放场景：只需 text_complete 即可重建文本状态）
-      return { ...prev, content: event.text }
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return { ...resumed, content: event.text }
+    }
 
     case 'tool_start': {
-      const existing = prev.toolActivities.find((t) => t.toolUseId === event.toolUseId)
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      const existing = resumed.toolActivities.find((t) => t.toolUseId === event.toolUseId)
       if (existing) {
         return {
-          ...prev,
-          toolActivities: prev.toolActivities.map((t) =>
+          ...resumed,
+          toolActivities: resumed.toolActivities.map((t) =>
             t.toolUseId === event.toolUseId
               ? { ...t, input: event.input, intent: event.intent || t.intent, displayName: event.displayName || t.displayName }
               : t
@@ -649,8 +712,8 @@ export function applyAgentEvent(
         }
       }
       return {
-        ...prev,
-        toolActivities: [...prev.toolActivities, {
+        ...resumed,
+        toolActivities: [...resumed.toolActivities, {
           toolUseId: event.toolUseId,
           toolName: event.toolName,
           input: event.input,
@@ -664,76 +727,87 @@ export function applyAgentEvent(
       }
     }
 
-    case 'tool_result':
+    case 'tool_result': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       return {
-        ...prev,
-        toolActivities: prev.toolActivities.map((t) =>
+        ...resumed,
+        toolActivities: resumed.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
             ? { ...t, result: event.result, isError: event.isError, done: true, imageAttachments: event.imageAttachments }
             : t
         ),
       }
+    }
 
-    case 'task_backgrounded':
+    case 'task_backgrounded': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       return {
-        ...prev,
-        toolActivities: prev.toolActivities.map((t) =>
+        ...resumed,
+        toolActivities: resumed.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
             ? { ...t, isBackground: true, taskId: event.taskId, done: true }
             : t
         ),
       }
+    }
 
-    case 'task_progress':
+    case 'task_progress': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       // 普通 tool 计时语义（仅当有真实 elapsedSeconds 时更新）
       if (event.elapsedSeconds != null) {
         return {
-          ...prev,
-          toolActivities: prev.toolActivities.map((t) =>
+          ...resumed,
+          toolActivities: resumed.toolActivities.map((t) =>
             t.toolUseId === event.toolUseId
               ? { ...t, elapsedSeconds: event.elapsedSeconds! }
               : t
           ),
         }
       }
-      return prev
+      return resumed
+    }
 
     case 'task_started': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       // 查找匹配 toolUseId 的 ToolActivity，更新 intent 和 taskId
-      let nextActivities = prev.toolActivities
+      let nextActivities = resumed.toolActivities
       if (event.toolUseId) {
-        if (prev.toolActivities.some((t) => t.toolUseId === event.toolUseId)) {
-          nextActivities = prev.toolActivities.map((t) =>
+        if (resumed.toolActivities.some((t) => t.toolUseId === event.toolUseId)) {
+          nextActivities = resumed.toolActivities.map((t) =>
             t.toolUseId === event.toolUseId
               ? { ...t, intent: event.description, taskId: event.taskId }
               : t
           )
         }
       }
-      return { ...prev, toolActivities: nextActivities }
+      return { ...resumed, toolActivities: nextActivities }
     }
 
-    case 'shell_backgrounded':
+    case 'shell_backgrounded': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       return {
-        ...prev,
-        toolActivities: prev.toolActivities.map((t) =>
+        ...resumed,
+        toolActivities: resumed.toolActivities.map((t) =>
           t.toolUseId === event.toolUseId
             ? { ...t, isBackground: true, shellId: event.shellId, done: true }
             : t
         ),
       }
+    }
 
     case 'shell_killed':
-      return prev
+      return clearFinishedCompactionForResumedWork(prev)
 
     case 'task_notification':
-      return prev
+      return clearFinishedCompactionForResumedWork(prev)
 
-    case 'thinking_tokens':
+    case 'thinking_tokens': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       return {
-        ...prev,
+        ...resumed,
         thinkingEstimatedTokens: event.estimatedTokens,
       }
+    }
 
     case 'tool_use_summary':
       // 工具使用摘要 — 目前不影响流式状态，仅用于 UI 展示
@@ -785,23 +859,25 @@ export function applyAgentEvent(
       }
     }
 
-    case 'run_resumed':
+    case 'run_resumed': {
       // 后台任务完成自动唤醒：从"空闲可输入"恢复到运行态（防御性，监听器已显式处理）。
-      return { ...prev, running: true, backgroundWaiting: false }
+      const resumed = clearFinishedCompactionForResumedWork(prev)
+      return { ...resumed, running: true, backgroundWaiting: false }
+    }
 
     case 'typed_error':
-      // 处理类型化错误（TypedError）
-      // 停止运行，清除重试状态
-      return { ...prev, running: false, retrying: undefined }
+      // 终态 IPC 仍可能在后端清理前到达；统一由 STREAM_COMPLETE 释放运行锁，
+      // 避免用户在 active session 尚未销毁时抢先启动新 run。
+      return { ...prev, retrying: undefined }
 
     case 'error':
-      // 改进：error 事件不再清除 retrying 状态
-      // retrying 状态由专用事件控制
-      return { ...prev, running: false }
+      // 同上：保留运行锁和 retry 状态，等待专用 retry 终态或 STREAM_COMPLETE 收束。
+      return prev
 
-    case 'usage_update':
+    case 'usage_update': {
+      const resumed = clearFinishedCompactionForResumedWork(prev)
       return {
-        ...prev,
+        ...resumed,
         ...(event.usage.inputTokens != null && {
           inputTokens: event.usage.inputTokens,
           contextUsageIsEstimated: false,
@@ -815,9 +891,10 @@ export function applyAgentEvent(
         // 模型窗口在同一会话内不会缩小，取更大值可兼顾两类端点——既不会让推断偏小的
         // 端点（如 GLM 剥掉 [1m] 后缀）挡住真实的 1M，也不会让回报偏小的端点覆盖正确的 1M。
         ...(event.usage.contextWindow && {
-          contextWindow: Math.max(prev.contextWindow ?? 0, event.usage.contextWindow),
+          contextWindow: Math.max(resumed.contextWindow ?? 0, event.usage.contextWindow),
         }),
       }
+    }
 
     case 'compacting':
       return {
@@ -853,47 +930,110 @@ export function applyAgentEvent(
       // 以确保 resolveModelDisplayName 能匹配到渠道配置的显示名
       return prev
 
-    case 'retrying':
-      // 向后兼容：保留原有的简单 retrying 事件
-      return {
-        ...prev,
-        retrying: prev.retrying ?? {
-          currentAttempt: event.attempt,
-          maxAttempts: event.maxAttempts,
-          history: [],
-          failed: false,
-        },
-      }
-
-    case 'retry_attempt': {
-      // 新增：记录详细的重试尝试
-      const currentHistory = prev.retrying?.history ?? []
+    case 'retrying': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      // 同一顶层 run 的下一段连续错误从 1 开始时，开始新的历史；同一段的 1 → 2
+      // 则保留已实际执行的记录。
+      const isNewCycle = event.attempt === 1
+        && previousRetry != null
+        && previousRetry.phase !== 'scheduled'
+        && previousRetry.phase !== 'running'
       return {
         ...prev,
         retrying: {
-          currentAttempt: event.attemptData.attempt,
-          maxAttempts: prev.retrying?.maxAttempts ?? 3,
-          history: [...currentHistory, event.attemptData],
-          failed: false,
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'scheduled',
+          currentAttempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          totalAttempt: event.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: isNewCycle ? [] : (previousRetry?.history ?? []),
+          scheduledAt: event.scheduledAt ?? Date.now(),
+          delaySeconds: event.delaySeconds,
+          reason: event.reason,
         },
       }
     }
 
-    case 'retry_cleared':
-      // 新增：重试成功，清除状态
-      return { ...prev, retrying: undefined }
-
-    case 'retry_failed': {
-      // 新增：重试失败，标记为 failed 但保留历史
-      const finalHistory = prev.retrying?.history ?? []
+    case 'retry_attempt': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      const isNewCycle = event.attemptData.attempt === 1
+        && previousRetry != null
+        && previousRetry.phase !== 'scheduled'
+        && previousRetry.phase !== 'running'
+      const history = upsertRetryAttempt(
+        isNewCycle ? [] : (previousRetry?.history ?? []),
+        event.attemptData,
+      )
       return {
         ...prev,
-        running: false,
         retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'running',
+          currentAttempt: event.attemptData.attempt,
+          maxAttempts: event.maxAttempts ?? previousRetry?.maxAttempts ?? 3,
+          totalAttempt: event.totalAttempt ?? event.attemptData.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? event.attemptData.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history,
+          reason: event.attemptData.reason,
+        },
+      }
+    }
+
+    case 'retry_cleared': {
+      if (!isRetryEventForCurrentStream(prev, event) || !prev.retrying) return prev
+      return {
+        ...prev,
+        retrying: {
+          ...prev.retrying,
+          phase: 'succeeded',
+          scheduledAt: undefined,
+          delaySeconds: undefined,
+          currentAttempt: event.attempt ?? prev.retrying.currentAttempt,
+          maxAttempts: event.maxAttempts ?? prev.retrying.maxAttempts,
+          totalAttempt: event.totalAttempt ?? prev.retrying.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? prev.retrying.maxTotalAttempts,
+          reason: undefined,
+        },
+      }
+    }
+
+    case 'retry_failed': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      return {
+        ...prev,
+        // session.prompt() 与 adapter 资源清理尚未完成；由 STREAM_COMPLETE 释放运行锁。
+        retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'exhausted',
           currentAttempt: event.finalAttempt.attempt,
-          maxAttempts: prev.retrying?.maxAttempts ?? 3,
-          history: [...finalHistory, event.finalAttempt],
-          failed: true,
+          maxAttempts: event.maxAttempts ?? previousRetry?.maxAttempts ?? 3,
+          totalAttempt: event.totalAttempt ?? event.finalAttempt.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? event.finalAttempt.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: upsertRetryAttempt(previousRetry?.history ?? [], event.finalAttempt),
+          reason: event.finalAttempt.reason,
+        },
+      }
+    }
+
+    case 'retry_cancelled': {
+      if (!isRetryEventForCurrentStream(prev, event)) return prev
+      const previousRetry = prev.retrying
+      return {
+        ...prev,
+        // 取消 retry 不代表外围 prompt chain 已结束；由 STREAM_COMPLETE 释放运行锁。
+        retrying: {
+          runStartedAt: event.runStartedAt ?? previousRetry?.runStartedAt,
+          phase: 'cancelled',
+          currentAttempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          totalAttempt: event.totalAttempt ?? previousRetry?.totalAttempt,
+          maxTotalAttempts: event.maxTotalAttempts ?? previousRetry?.maxTotalAttempts,
+          history: previousRetry?.history ?? [],
+          reason: event.reason ?? previousRetry?.reason,
         },
       }
     }
@@ -958,6 +1098,17 @@ export const agentContextStatusAtom = atom<AgentContextStatus>((get) => {
  * 错误发生时写入，下次发送或手动关闭时清除
  */
 export const agentStreamErrorsAtom = atom<Map<string, string>>(new Map())
+
+/** 在同一会话确认恢复运行后移除过期的流式错误记录。 */
+export function clearAgentStreamError(
+  errors: Map<string, string>,
+  sessionId: string,
+): Map<string, string> {
+  if (!errors.has(sessionId)) return errors
+  const next = new Map(errors)
+  next.delete(sessionId)
+  return next
+}
 
 /**
  * Agent 消息刷新版本 Map — 以 sessionId 为 key

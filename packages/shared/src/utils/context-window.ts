@@ -47,6 +47,7 @@ const AGENT_SDK_1M_CONTEXT_RULES = {
   claude: [
     'claude-sonnet-4-6',
     'claude-sonnet-5',
+    'claude-opus-5',
     'claude-opus-4-6',
     'claude-opus-4-7',
     'claude-opus-4-8',

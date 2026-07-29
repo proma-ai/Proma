@@ -5,7 +5,7 @@
  * - 内部为 16px 圆环，按 displayTokens / displayWindow 比例渲染
  * - hover / click 弹出 Popover，内含 token 明细 + 手动压缩按钮
  * - 压缩中时按钮位置显示 Loader2 旋转图标
- * - 占用接近压缩阈值（窗口 × 0.775 × 80%）时圆环变琥珀色
+ * - 占用接近当前 Agent runtime 的自动压缩阈值时圆环变琥珀色
  * - 无数据时不显示
  */
 
@@ -15,11 +15,15 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { inputToolbarButtonClass } from '@/components/ai-elements/input-toolbar-styles'
 import { cn } from '@/lib/utils'
-import type { ChannelPlanQuotaResult, ChannelPlanQuotaWindow } from '@proma/shared'
+import {
+  calculatePiAutoCompactionThresholdTokens,
+  type ChannelPlanQuotaResult,
+  type ChannelPlanQuotaWindow,
+} from '@proma/shared'
 import { fetchChannelPlanQuota } from '@/lib/channel-plan-quota'
 
-/** 压缩阈值比例（SDK 在 ~77.5% 窗口大小时自动压缩） */
-const COMPACT_THRESHOLD_RATIO = 0.775
+/** Claude Agent SDK 的自动压缩阈值比例；Pi 使用共享的 80% 策略。 */
+const CLAUDE_COMPACT_THRESHOLD_RATIO = 0.775
 /** 显示警告的阈值（压缩阈值的 80%） */
 const WARNING_RATIO = 0.80
 /** Popover hover 关闭延迟（ms），与 AgentThinkingPopover 一致 */
@@ -35,6 +39,8 @@ interface ContextUsageBadgeProps {
   contextWindow?: number
   /** 当前上下文 token 是否为 Pi 手动压缩后的预估值 */
   isEstimated: boolean
+  /** Pi runtime 使用 80% 自动压缩阈值；未传时保留 Claude 的既有提示策略。 */
+  isPiRuntime?: boolean
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
@@ -167,6 +173,7 @@ export function ContextUsageBadge({
   cacheCreationTokens,
   contextWindow,
   isEstimated,
+  isPiRuntime = false,
   isCompacting,
   isProcessing,
   onCompact,
@@ -255,9 +262,11 @@ export function ContextUsageBadge({
   // 从未有过 usage 数据 → 不显示
   if (!displayTokens || displayTokens <= 0) return null
 
-  // 警告阈值：基于压缩阈值（contextWindow × 0.775 × 80%）
+  // 警告阈值：Pi 采用窗口 × 80%，Claude 保留既有 SDK 阈值；两者均在阈值的 80% 时预警。
   const compactThreshold = displayWindow
-    ? Math.floor(displayWindow * COMPACT_THRESHOLD_RATIO)
+    ? (isPiRuntime
+        ? calculatePiAutoCompactionThresholdTokens(displayWindow)
+        : Math.floor(displayWindow * CLAUDE_COMPACT_THRESHOLD_RATIO))
     : undefined
   const isWarning = compactThreshold
     ? displayTokens / compactThreshold >= WARNING_RATIO

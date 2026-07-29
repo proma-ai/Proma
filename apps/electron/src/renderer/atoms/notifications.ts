@@ -45,6 +45,7 @@ export const DEFAULT_NOTIFICATION_SOUNDS: Required<NotificationSoundSettings> = 
   taskComplete: 'ding',
   permissionRequest: 'ding-dong',
   exitPlanMode: 'ding-dong',
+  planningReminder: 'ding-dong',
 }
 
 // ===== Jotai Atoms =====

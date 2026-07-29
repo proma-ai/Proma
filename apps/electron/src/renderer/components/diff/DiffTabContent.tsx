@@ -27,6 +27,7 @@ import {
   selectedModelAtom,
 } from '@/atoms/chat-atoms'
 import { markdownTocOpenAtom } from '@/atoms/markdown-toc'
+import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
 import { useShortcut } from '@/hooks/useShortcut'
 import { initShortcutRegistry } from '@/lib/shortcut-registry'
 import { DiffView } from './DiffView'
@@ -333,6 +334,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const setSideChatMap = useSetAtom(agentSideChatMapAtom)
   const setSidePanelOpen = useSetAtom(agentSidePanelOpenAtom)
   const setSidePanelTabMap = useSetAtom(agentDiffPanelTabAtom)
+  const focusAgentSessionInput = useFocusAgentSessionInput()
   const [previewSelection, setPreviewSelection] = React.useState<PreviewTextSelection | null>(null)
   const filePathRef = React.useRef(filePath)
   filePathRef.current = filePath
@@ -986,8 +988,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     })
     window.getSelection()?.removeAllRanges()
     clearPreviewSelection()
-    toast.success('已添加到 Agent 引用')
-  }, [clearPreviewSelection, previewSelection, sessionId, setQuotedSelectionMap])
+    focusAgentSessionInput(sessionId)
+  }, [clearPreviewSelection, focusAgentSessionInput, previewSelection, sessionId, setQuotedSelectionMap])
 
   const handleOpenSelectionChat = React.useCallback(async (): Promise<void> => {
     if (!previewSelection) return

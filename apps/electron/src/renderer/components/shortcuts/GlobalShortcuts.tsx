@@ -21,6 +21,7 @@ import {
   openTab,
 } from '@/atoms/tab-atoms'
 import { shortcutOverridesAtom, sendWithCmdEnterAtom } from '@/atoms/shortcut-atoms'
+import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 import {
   agentPendingPromptAtom,
   agentSessionDraftHtmlAtom,
@@ -61,6 +62,7 @@ export function GlobalShortcuts(): null {
   const channelFormDirty = useAtomValue(channelFormDirtyAtom)
   const setSettingsCloseRequested = useSetAtom(settingsCloseRequestedAtom)
   const [searchOpen, setSearchOpen] = useAtom(searchDialogOpenAtom)
+  const [shortcutGuideOpen, setShortcutGuideOpen] = useAtom(shortcutGuideOpenAtom)
   const [sidebarCollapsed, setSidebarCollapsed] = useAtom(sidebarCollapsedAtom)
   const setShortcutOverrides = useSetAtom(shortcutOverridesAtom)
   const shortcutOverrides = useAtomValue(shortcutOverridesAtom)
@@ -96,6 +98,10 @@ export function GlobalShortcuts(): null {
 
   const handleCloseTab = useCallback(() => {
     // 浮窗优先：有浮窗打开时 Cmd+W 先关闭浮窗而非 tab
+    if (shortcutGuideOpen) {
+      setShortcutGuideOpen(false)
+      return
+    }
     if (settingsOpen) {
       // 渠道表单有未保存内容时，通知 SettingsPanel 弹出确认对话框
       if (channelFormDirty) {
@@ -112,7 +118,7 @@ export function GlobalShortcuts(): null {
 
     if (!activeTabId) return
     requestClose(activeTabId)
-  }, [settingsOpen, setSettingsOpen, channelFormDirty, setSettingsCloseRequested, searchOpen, setSearchOpen, activeTabId, requestClose])
+  }, [shortcutGuideOpen, setShortcutGuideOpen, settingsOpen, setSettingsOpen, channelFormDirty, setSettingsCloseRequested, searchOpen, setSearchOpen, activeTabId, requestClose])
 
   // 监听菜单 IPC 事件（Cmd+W 被 Electron 菜单拦截后通过 IPC 转发）
   useEffect(() => {

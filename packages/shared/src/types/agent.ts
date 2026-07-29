@@ -464,8 +464,12 @@ export interface TaskUsage {
  * 记录每次重试尝试的详细信息，用于错误诊断和 UI 展示。
  */
 export interface RetryAttempt {
-  /** 第几次尝试 (1-based) */
+  /** 第几次 retry（1-based；不含初始请求） */
   attempt: number
+  /** 顶层 Agent run 内累计已调度的 retry 次数（可选以兼容旧 runtime）。 */
+  totalAttempt?: number
+  /** 顶层 Agent run 的总 retry 预算（可选以兼容旧 runtime）。 */
+  maxTotalAttempts?: number
   /** 时间戳 */
   timestamp: number
   /** 错误原因（简短描述，如"SDK 响应超时"） */
@@ -534,10 +538,12 @@ export type AgentEvent =
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
   // 重试机制
-  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string }  // 保留向后兼容
-  | { type: 'retry_attempt'; attemptData: RetryAttempt }  // 新增：记录详细尝试信息
-  | { type: 'retry_cleared' }  // 新增：重试成功，清除状态
-  | { type: 'retry_failed'; finalAttempt: RetryAttempt }  // 新增：重试失败
+  // `retrying` 表示已安排 retry（仍可能正在 backoff），`retry_attempt` 才表示实际开始请求。
+  | { type: 'retrying'; attempt: number; maxAttempts: number; delaySeconds: number; reason: string; scheduledAt?: number; runStartedAt?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_attempt'; attemptData: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_cleared'; runStartedAt?: number; attempt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_failed'; finalAttempt: RetryAttempt; runStartedAt?: number; maxAttempts?: number; totalAttempt?: number; maxTotalAttempts?: number }
+  | { type: 'retry_cancelled'; runStartedAt?: number; attempt: number; maxAttempts: number; totalAttempt?: number; maxTotalAttempts?: number; reason?: string }
   // Usage 更新
   | { type: 'usage_update'; usage: AgentEventUsage }
   // 上下文压缩
@@ -581,7 +587,7 @@ export type PromaEvent =
   | { type: 'exit_plan_mode_resolved'; requestId: string }
   | { type: 'enter_plan_mode'; sessionId: string }
   | { type: 'plan_mode_changed'; sessionId: string; active: boolean; source: AgentPlanModeChangeSource }
-  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; error?: TypedError }
+  | { type: 'retry'; status: 'starting' | 'attempt' | 'cleared' | 'failed' | 'cancelled'; attempt?: number; maxAttempts?: number; delaySeconds?: number; reason?: string; attemptData?: RetryAttempt; runStartedAt?: number; scheduledAt?: number; totalAttempt?: number; maxTotalAttempts?: number; error?: TypedError }
   | { type: 'model_resolved'; model: string }
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
@@ -755,8 +761,8 @@ export interface AgentMessageSearchResult {
  * Agent 会话引用搜索输入
  */
 export interface AgentSessionReferenceSearchInput {
-  /** 当前工作区 ID，仅搜索该工作区下的会话 */
-  workspaceId: string
+  /** 可选工作区 ID；省略时搜索全部工作区中的会话。 */
+  workspaceId?: string
   /** 搜索关键词，匹配标题或消息内容 */
   query?: string
   /** 排除当前会话，避免引用自己 */
@@ -773,6 +779,10 @@ export interface AgentSessionReferenceSearchResult {
   sessionId: string
   /** 会话标题 */
   title: string
+  /** 来源工作区的显示名称；遗留或已删除的工作区可为空 */
+  workspaceName?: string
+  /** 来源工作区的 URL-safe slug；用于同名工作区消歧 */
+  workspaceSlug?: string
   /** 更新时间戳 */
   updatedAt: number
   /** 命中消息片段；标题命中时可为空 */
@@ -1402,6 +1412,8 @@ export interface PermissionRequest {
   command?: string
   /** 危险等级 */
   dangerLevel: DangerLevel
+  /** 是否允许用户把批准记为当前会话白名单；破坏性操作必须逐次确认。 */
+  allowAlways?: boolean
   /** SDK 提供的原因说明 */
   decisionReason?: string
   /** SDK 提供的原因分类，如 classifier / safetyCheck / rule */

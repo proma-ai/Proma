@@ -21,13 +21,14 @@ type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type CodexModel = Model<'openai-codex-responses'>
 
 const TITLE_MAX_OUTPUT_TOKENS = 40
-const TITLE_REQUEST_TIMEOUT_MS = 15_000
+const TITLE_REQUEST_TIMEOUT_MS = 30_000
 
 export interface CodexTitleGenerationInput {
   modelId: string
   prompt: string
   credentials: CodexOAuthCredentials
   proxyUrl?: string
+  signal?: AbortSignal
   onCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
 }
 
@@ -36,7 +37,7 @@ export interface CodexTitleRuntime {
     model: CodexModel,
     context: Context,
     options: OpenAICodexResponsesOptions,
-  ) => Promise<Pick<AssistantMessage, 'content'>>
+  ) => Promise<Pick<AssistantMessage, 'content' | 'stopReason' | 'errorMessage'>>
 }
 
 export interface CodexTitleRequestEnvironment {
@@ -62,6 +63,7 @@ export async function completeCodexTitleRequest(
   model: CodexModel,
   prompt: string,
   environment: CodexTitleRequestEnvironment,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
     environment.installRequestProxyFetch()
@@ -72,6 +74,7 @@ export async function completeCodexTitleRequest(
       },
       {
         transport: 'sse',
+        ...(signal && { signal }),
         maxTokens: TITLE_MAX_OUTPUT_TOKENS,
         timeoutMs: TITLE_REQUEST_TIMEOUT_MS,
         maxRetries: 0,
@@ -81,6 +84,10 @@ export async function completeCodexTitleRequest(
         toolChoice: 'none',
       } satisfies OpenAICodexResponsesOptions,
     ))
+
+    if (response.stopReason === 'error' || response.stopReason === 'aborted') {
+      throw new Error(response.errorMessage?.trim() || 'Codex 标题请求未完成')
+    }
 
     return extractCodexResponseText(response.content).trim() || null
   } finally {
@@ -111,5 +118,6 @@ export async function generateCodexTitle(input: CodexTitleGenerationInput): Prom
       runWithRequestProxy: runWithPiRequestProxy,
       closeRequestProxyDispatcher: closePiRequestProxyDispatcher,
     },
+    input.signal,
   )
 }

@@ -219,7 +219,7 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
   return (
     <button
       type="button"
-      aria-label={`自动任务，${count} 个任务已创建`}
+      aria-label={`任务/日程/Todo，${count} 个定时任务`}
       onClick={onClick}
       className={cn(
         'group w-full flex items-center justify-between px-3 py-2 rounded-md text-[13px] transition-colors duration-100 titlebar-no-drag automation-entry',
@@ -232,7 +232,7 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
         <span className={cn('flex-shrink-0 w-[18px] h-[18px] automation-entry-icon', active ? 'text-accent-foreground' : 'text-foreground/45')}>
           <AlarmClock size={16} className="block" />
         </span>
-        <span className="truncate">自动任务</span>
+        <span className="truncate">任务/日程/Todo</span>
       </span>
       <span
         className={cn(
@@ -321,10 +321,6 @@ const PROJECT_SESSION_PREVIEW_LIMIT = 5
 const PROJECT_SESSION_RECENT_WINDOW_MS = 3 * 86_400_000
 /** 点击"显示更多"时每次额外展开的会话数量 */
 const PROJECT_SESSION_EXPAND_STEP = 10
-/** 置顶区最多占用约 6 条会话的高度，超过后在置顶区内部滚动 */
-const PINNED_SESSION_VISIBLE_LIMIT = 6
-const PINNED_SESSION_ROW_HEIGHT_PX = 32
-const PINNED_SESSION_MAX_HEIGHT = PINNED_SESSION_VISIBLE_LIMIT * PINNED_SESSION_ROW_HEIGHT_PX
 const SESSION_QUICK_SWITCH_HINT_DELAY_MS = 1000
 const SESSION_QUICK_SWITCH_LIMIT = 9
 const SESSION_QUICK_SWITCH_KEYDOWN_EVENT = 'proma:session-quick-switch-keydown'
@@ -1027,7 +1023,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
   /** 打开/关闭自动任务列表 */
   const handleOpenAutomations = React.useCallback((): void => {
-    if (activeView === 'automations') {
+    if (activeView === 'planning') {
       // 编辑页 → 关表单回列表；列表页 → 退出到对话
       if (store.get(automationFormAtom).open) {
         setAutomationForm({ open: false, draft: null })
@@ -1037,7 +1033,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       return
     }
     setAutomationForm({ open: false, draft: null })
-    setActiveView('automations')
+    setActiveView('planning')
   }, [activeView, setAutomationForm, setActiveView, store])
 
   /** 打开/关闭 Agent 技能视图 */
@@ -2436,11 +2432,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={`自动任务，${automationCount} 个任务已创建`}
+                aria-label={`任务/日程，${automationCount} 个自动化任务`}
                 onClick={handleOpenAutomations}
                 className={cn(
                   'relative size-10 flex items-center justify-center rounded-[12px] transition-colors titlebar-no-drag border',
-                  activeView === 'automations'
+                  activeView === 'planning'
                     ? 'border-primary/80 bg-primary text-primary-foreground shadow-sm'
                     : 'border-border/45 bg-foreground/[0.025] text-foreground/45 hover:border-border/70 hover:bg-foreground/[0.045] hover:text-primary',
                 )}
@@ -2450,7 +2446,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                   <span
                     className={cn(
                       'absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums',
-                      activeView === 'automations'
+                      activeView === 'planning'
                         ? 'bg-primary-foreground text-primary'
                         : 'bg-primary text-primary-foreground',
                     )}
@@ -2461,7 +2457,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              自动任务（{automationCount} 个任务已创建）
+              任务/日程（{automationCount} 个自动化任务）
             </TooltipContent>
           </Tooltip>
 
@@ -2600,11 +2596,11 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         </Tooltip>
       </div>
 
-      {/* 自动任务入口：作为任务中心入口放在置顶区上方，不参与置顶列表层级。 */}
+      {/* 任务/日程入口：作为统一规划中心入口。 */}
       <div className="px-3 pt-2 pb-0.5">
         <AutomationSidebarEntry
           count={automationCount}
-          active={activeView === 'automations'}
+          active={activeView === 'planning'}
           onClick={handleOpenAutomations}
         />
       </div>
@@ -2623,16 +2619,13 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {/* Chat 模式 active 视图：置顶 + 对话历史，结构与 Agent active 视图保持一致 */}
       {mode === 'chat' && viewMode === 'active' ? (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin titlebar-no-drag">
           {pinnedConversations.length > 0 && (
             <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
               <div className="pl-[18px] pr-3.5 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
                 置顶
               </div>
-              <div
-                className="overflow-y-auto scrollbar-thin"
-                style={{ maxHeight: PINNED_SESSION_MAX_HEIGHT }}
-              >
+              <div>
                 <div className="px-2">
                   <div className="ml-4 flex flex-col gap-0.5">
                     {pinnedConversations.map((conv) => (
@@ -2683,7 +2676,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
             </Tooltip>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
+          <div className="px-2 pb-3">
             {conversationGroups.map((group) => (
               <div key={group.label} className="mb-1">
                 <div className="ml-[4px] px-1.5 pt-2 pb-1 text-[11px] font-medium text-foreground/40 select-none">
@@ -2711,16 +2704,13 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </div>
         </div>
       ) : mode === 'agent' && viewMode === 'active' ? (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin titlebar-no-drag">
           {pinnedAgentSessions.length > 0 && (
             <div className="pt-2 pb-1 flex-shrink-0 titlebar-no-drag">
               <div className="pl-[18px] pr-3.5 pb-1 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">
                 置顶
               </div>
-              <div
-                className="overflow-y-auto scrollbar-thin"
-                style={{ maxHeight: PINNED_SESSION_MAX_HEIGHT }}
-              >
+              <div>
                 <div className="px-2">
                   <div className="ml-4 flex flex-col gap-0.5">
                     {pinnedAgentSessionTrees.map((item) => {
@@ -2807,7 +2797,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </div>
 
           {/* 下区：项目分组历史 */}
-          <div className="flex-1 overflow-y-auto px-2 pb-3 scrollbar-thin min-h-0 titlebar-no-drag">
+          <div className="px-2 pb-3">
             {creatingProject && (
               <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md bg-foreground/[0.04]">
                 <FolderOpen size={14} className="flex-shrink-0 text-foreground/40" />

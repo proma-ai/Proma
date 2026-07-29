@@ -19,7 +19,7 @@
     "dist": "bun run --filter='@proma/electron' dist",
     "build": "bun run --filter='*' build",
     "typecheck": "bun run --filter='*' typecheck",
-    "test": "bun test"
+    "test": "bun test --isolate"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -87,6 +87,7 @@
     "prosemirror-model": "1.25.9"
   },
   "patchedDependencies": {
-    "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch"
+    "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch",
+    "@earendil-works/pi-coding-agent@0.82.1": "patches/@earendil-works%2Fpi-coding-agent@0.82.1.patch"
   }
 }

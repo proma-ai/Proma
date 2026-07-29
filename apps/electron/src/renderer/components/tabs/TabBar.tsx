@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
-import { PanelRight } from 'lucide-react'
+import { Keyboard, PanelRight } from 'lucide-react'
 import {
   tabsAtom,
   activeTabIdAtom,
@@ -38,6 +38,7 @@ import { useCloseTab } from '@/hooks/useCloseTab'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT } from '@/lib/platform'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { cn } from '@/lib/utils'
+import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
 
 export function TabBar(): React.ReactElement {
   const tabs = useAtomValue(tabsAtom)
@@ -230,6 +231,7 @@ function TabBarInner({
   // 该按钮的 absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
   // 若右侧关闭按钮样式变化，这里需同步调整。
   const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
+  const setShortcutGuideOpen = useSetAtom(shortcutGuideOpenAtom)
   const activeTab = React.useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId])
   const showOpenPanelButton = !isPanelOpen && activeTab?.type === 'agent'
 
@@ -237,6 +239,10 @@ function TabBarInner({
     if (activeTab?.type !== 'agent') return
     setSidePanelOpen((v) => !v)
   }, [setSidePanelOpen, activeTab])
+
+  const openShortcutGuide = React.useCallback(() => {
+    setShortcutGuideOpen(true)
+  }, [setShortcutGuideOpen])
 
   React.useEffect(() => {
     return registerShortcut('toggle-right-panel', togglePanel)
@@ -384,9 +390,9 @@ function TabBarInner({
         ref={scrollRef}
         className={cn(
           "relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none",
-          // Windows 始终避开 WindowControls（~126px）；非 Windows 打开按钮时给 scroll 预留空间
+          // Windows 始终避开 WindowControls（~126px）；非 Windows 为快捷键地图和文件面板按钮预留空间。
           isWindows && WINDOW_CONTROLS_PADDING_RIGHT,
-          !isWindows && showOpenPanelButton && "pr-10",
+          !isWindows && (showOpenPanelButton ? "pr-20" : "pr-10"),
         )}
       >
         {tabs.map((tab) => (
@@ -415,11 +421,56 @@ function TabBarInner({
         ))}
       </div>
 
+      <ShortcutGuideButton
+        isWindows={isWindows}
+        hasPanelButton={showOpenPanelButton}
+        onOpen={openShortcutGuide}
+      />
+
       {/* 打开文件面板按钮：与文件面板打开时的 PanelRightClose 同坐标，避免开/关之间按钮位置跳变。
           Windows 上需让出右上角 WindowControls 区域（126px）。 */}
       {showOpenPanelButton && (
         <AgentPanelOpenButton isWindows={isWindows} onToggle={togglePanel} />
       )}
+    </div>
+  )
+}
+
+function ShortcutGuideButton({
+  isWindows,
+  hasPanelButton,
+  onOpen,
+}: {
+  isWindows: boolean
+  hasPanelButton: boolean
+  onOpen: () => void
+}): React.ReactElement {
+  return (
+    <div
+      className={cn(
+        "absolute flex titlebar-no-drag",
+        isWindows
+          ? cn("top-[37px] h-7 z-[52]", hasPanelButton ? "right-9" : "right-1")
+          : cn("inset-y-0 items-end pb-[3px] z-10", hasPanelButton ? "right-9" : "right-1"),
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onOpen}
+          >
+            <Keyboard className="size-3.5" />
+            <span className="sr-only">查看快捷键地图</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>查看快捷键地图</p>
+        </TooltipContent>
+      </Tooltip>
     </div>
   )
 }

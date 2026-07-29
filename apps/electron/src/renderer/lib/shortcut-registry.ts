@@ -265,21 +265,21 @@ export function getActiveAccelerator(id: string): string | null {
  */
 export function getAcceleratorDisplay(accelerator: string | null): string {
   if (!accelerator) return ''
-  if (isMac) {
-    return accelerator
-      .split('+')
-      .map((part) => {
-        const normalized = part.trim().toLowerCase()
-        if (['cmd', 'command', 'meta', 'super'].includes(normalized)) return '⌘'
-        if (['ctrl', 'control'].includes(normalized)) return '⌃'
-        if (normalized === 'shift') return '⇧'
-        if (['alt', 'option'].includes(normalized)) return '⌥'
-        if (normalized === 'backspace') return '⌫'
-        return part
-      })
-      .join('')
-  }
   return accelerator
+    .split('+')
+    .map((part) => {
+      const normalized = part.trim().toLowerCase()
+      if (normalized === 'plus') return '+'
+      if (normalized === 'minus') return '−'
+      if (!isMac) return part
+      if (['cmd', 'command', 'meta', 'super'].includes(normalized)) return '⌘'
+      if (['ctrl', 'control'].includes(normalized)) return '⌃'
+      if (normalized === 'shift') return '⇧'
+      if (['alt', 'option'].includes(normalized)) return '⌥'
+      if (normalized === 'backspace') return '⌫'
+      return part
+    })
+    .join(isMac ? '' : '+')
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   inferAgentSdkContextWindow,
   inferReasoningTransport,
   isPromaOfficialOpenAIReasoningModel,
+  resolveAgentSdkModelId,
   resolveReasoningProfile,
   isAgentCompatibleProvider,
 } from '@proma/shared'
@@ -66,6 +67,7 @@ import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
 import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
+import { resolvePlanningDeletionPermission } from './planning-permission-policy'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { removePromaAutoCompactSettings } from './agent-auto-compact-settings'
@@ -86,6 +88,7 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
+import { CodexTitleRequestCoordinator } from './codex-title-request-coordinator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -434,6 +437,7 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
+  private codexTitleRequestCoordinator = new CodexTitleRequestCoordinator()
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
@@ -648,8 +652,9 @@ export class AgentOrchestrator {
    *
    * 使用 Provider 适配器系统，支持所有渠道。任何错误返回 null。
    */
-  async generateTitle(input: AgentGenerateTitleInput): Promise<string | null> {
+  async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal): Promise<string | null> {
     const { userMessage, channelId, modelId } = input
+    if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
     try {
@@ -663,15 +668,25 @@ export class AgentOrchestrator {
       if (channel.provider === 'openai-codex') {
         const fallbackTitle = createFallbackTitle(userMessage)
         try {
-          const [credentials, proxyUrl] = await Promise.all([resolveCodexOAuthCredentials(channelId), getEffectiveProxyUrl()])
+          const [credentials, proxyUrl] = await Promise.all([
+            resolveCodexOAuthCredentials(channelId),
+            getEffectiveProxyUrl(),
+          ])
+          if (signal?.aborted) return null
           const generatedTitle = await generateCodexTitle({
-            modelId, prompt: TITLE_PROMPT + userMessage, credentials, proxyUrl,
+            modelId,
+            prompt: TITLE_PROMPT + userMessage,
+            credentials,
+            proxyUrl,
+            signal,
             onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
           })
+          if (signal?.aborted) return null
           const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
           if (title) return title
           console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
         } catch (error) {
+          if (signal?.aborted) return null
           console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
         }
         return fallbackTitle
@@ -734,18 +749,25 @@ export class AgentOrchestrator {
     channelId: string,
     modelId: string,
     callbacks: SessionCallbacks,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) return
     try {
       const meta = getAgentSessionMeta(sessionId)
       if (!meta || meta.title !== DEFAULT_SESSION_TITLE) return
 
-      const title = await this.generateTitle({ userMessage, channelId, modelId })
-      if (!title) return
+      const title = await this.generateTitle({ userMessage, channelId, modelId }, signal)
+      if (!title || signal?.aborted) return
+
+      // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
+      const latestMeta = getAgentSessionMeta(sessionId)
+      if (!latestMeta || latestMeta.title !== DEFAULT_SESSION_TITLE) return
 
       updateAgentSessionMeta(sessionId, { title })
       callbacks.onTitleUpdated(title)
       console.log(`[Agent 编排] 自动标题生成完成: "${title}"`)
     } catch (error) {
+      if (signal?.aborted) return
       console.warn('[Agent 编排] 自动标题生成失败:', error)
     }
   }
@@ -1105,14 +1127,22 @@ export class AgentOrchestrator {
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
     const runGeneration = Date.now()
     this.activeSessions.set(sessionId, runGeneration)
+    const usesCodexOAuth = channel.provider === 'openai-codex'
+    let codexForegroundRunActive = false
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
       // 主进程仍在 finally 前短暂拒绝下一条消息。
-      if (this.activeSessions.get(sessionId) !== runGeneration) return
-      this.activeSessions.delete(sessionId)
-      this.sessionPermissionModes.delete(sessionId)
-      this.queuedMessageUuids.delete(sessionId)
+      const ownsActiveRun = this.activeSessions.get(sessionId) === runGeneration
+      if (ownsActiveRun) {
+        this.activeSessions.delete(sessionId)
+        this.sessionPermissionModes.delete(sessionId)
+        this.queuedMessageUuids.delete(sessionId)
+      }
+      if (codexForegroundRunActive) {
+        codexForegroundRunActive = false
+        this.codexTitleRequestCoordinator.endForeground(channelId)
+      }
     }
     const completeRun = (
       messages?: AgentMessage[],
@@ -1236,7 +1266,9 @@ export class AgentOrchestrator {
 
     // 5. 状态初始化
     const accumulatedMessages: SDKMessage[] = []
-    let resolvedModel = modelId || DEFAULT_MODEL_ID
+    // 委派子会话必须继承当前实际运行的模型；未显式传入时与 runtime 的默认值保持一致。
+    const selectedModelId = modelId || DEFAULT_MODEL_ID
+    let resolvedModel = selectedModelId
     let titleGenerationStarted = false
     /** 捕获到的 SDK session ID（用于 resume / recovery） */
     let capturedSdkSessionId = existingSdkSessionId
@@ -1245,6 +1277,12 @@ export class AgentOrchestrator {
     let workspace: import('@proma/shared').AgentWorkspace | undefined
 
     try {
+      if (usesCodexOAuth) {
+        codexForegroundRunActive = true
+        await this.codexTitleRequestCoordinator.beginForeground(channelId)
+        if (this.activeSessions.get(sessionId) !== runGeneration) return
+      }
+
       const sdk = agentRuntime === 'claude' ? await import('@anthropic-ai/claude-agent-sdk') : undefined
       const cliPath = agentRuntime === 'claude' ? resolveSDKCliPath() : undefined
 
@@ -1376,7 +1414,7 @@ export class AgentOrchestrator {
             mcpServers,
             sessionId,
             channelId,
-            modelId,
+            modelId: selectedModelId,
             agentRuntime,
             workspaceId,
             workspaceSlug,
@@ -1391,7 +1429,7 @@ export class AgentOrchestrator {
           const result = await buildPiBuiltinTools(piSdk, {
             sessionId,
             channelId,
-            modelId,
+            modelId: selectedModelId,
             agentRuntime,
             workspaceId,
             workspaceSlug,
@@ -1434,7 +1472,7 @@ export class AgentOrchestrator {
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
-      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceId, workspaceSlug)
+      const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
       if (referencedSessionsBlock) {
         enrichedMessage = `${referencedSessionsBlock}\n\n${enrichedMessage}`
         console.log(`[Agent 编排] 注入 referenced_sessions: ${mentionedSessionIds?.length ?? 0} sessions`)
@@ -1550,6 +1588,14 @@ export class AgentOrchestrator {
         'mcp__chrome_devtools__list_network_requests',
         'mcp__chrome_devtools__performance_stop_trace',
       ])
+      // Planning 是本地用户数据：计划模式只允许查询，严禁创建、更新、删除或确认/推迟提醒。
+      const PLAN_MODE_READ_ONLY_PLANNING_TOOLS = new Set([
+        'mcp__planning__list_todos', 'mcp__planning__get_todo',
+        'mcp__planning__list_calendar_events', 'mcp__planning__get_calendar_event',
+        'mcp__planning__list_groups', 'mcp__planning__list_tags',
+        'mcp__planning__list_active_reminders',
+      ])
+      const runTriggeredBy = input.triggeredBy
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
       let planModeEntered = initialPermissionMode === 'plan'
@@ -1643,6 +1689,23 @@ export class AgentOrchestrator {
           )
         }
 
+        const planningDeletionPermission = resolvePlanningDeletionPermission(
+          toolName,
+          currentMode,
+          runTriggeredBy,
+        )
+        if (planningDeletionPermission === 'deny-unattended') {
+          return { behavior: 'deny' as const, message: '定时任务和协作子 Agent 不能删除本地规划数据，请由用户主会话发起并确认。' }
+        }
+        if (planningDeletionPermission === 'allow') {
+          return { behavior: 'allow' as const, updatedInput: input }
+        }
+        if (planningDeletionPermission === 'require-single-approval') {
+          return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
+            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
+          })
+        }
+
         // ── 普通工具的权限分派 ──
 
         switch (currentMode) {
@@ -1676,6 +1739,11 @@ export class AgentOrchestrator {
                 ? { behavior: 'allow' as const, updatedInput: input }
                 : { behavior: 'deny' as const, message: '计划模式下不允许执行会改变浏览器页面状态的 Chrome DevTools 操作，请在计划审批通过后再执行' }
             }
+            if (toolName.startsWith('mcp__planning__')) {
+              return PLAN_MODE_READ_ONLY_PLANNING_TOOLS.has(toolName)
+                ? { behavior: 'allow' as const, updatedInput: input }
+                : { behavior: 'deny' as const, message: '计划模式下只能查询任务/日程，不能修改本地规划数据，请在计划审批通过后再执行' }
+            }
             // 其他 MCP 工具维持既有策略：计划模式下允许调研用 MCP。
             if (toolName.startsWith('mcp__')) {
               return { behavior: 'allow' as const, updatedInput: input }
@@ -1695,7 +1763,6 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
-      const selectedModelId = modelId || DEFAULT_MODEL_ID
       const piReasoningCapability = agentRuntime === 'pi'
         ? await resolvePiReasoningCapability(channel.provider, selectedModelId, selectedOfficialAgentModel?.apiProtocol)
         : undefined
@@ -1714,7 +1781,22 @@ export class AgentOrchestrator {
         sessionId,
         permissionMode: initialPermissionMode,
         collaborationAvailable,
+        currentModelId: selectedModelId,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
+      const startAutoTitleGeneration = (): void => {
+        if (titleGenerationStarted) return
+        titleGenerationStarted = true
+
+        if (channel.provider === 'openai-codex') {
+          this.codexTitleRequestCoordinator.enqueue(channelId, (signal) =>
+            this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks, signal),
+          )
+          return
+        }
+
+        this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
+          .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
+      }
       const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
         // 仅在 session_id 真正变化时才持久化。SDK v2 几乎每条消息都会回调 onSessionId，
         // capturedSdkSessionId 已初始化为 existingSdkSessionId，并在 recovery 时同步重置。
@@ -1733,10 +1815,10 @@ export class AgentOrchestrator {
           }
         }
 
-        if (!titleGenerationStarted) {
-          titleGenerationStarted = true
-          this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
-            .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
+        // Codex OAuth 标题会额外占用订阅请求通道，等待主 Agent 请求结束再发起，
+        // 避免在 session.prompt() 前与主请求竞争同一通道。
+        if (channel.provider !== 'openai-codex') {
+          startAutoTitleGeneration()
         }
       }
       const handleModelResolved = (model: string): void => {
@@ -1820,6 +1902,7 @@ export class AgentOrchestrator {
         },
         onModelResolved: handleModelResolved,
         onContextWindow: handleContextWindow,
+        retryRunStartedAt: streamStartedAt,
         onRetry: (retry) => {
           this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', ...retry } })
         },
@@ -1827,7 +1910,8 @@ export class AgentOrchestrator {
         agentRuntime: 'claude',
         sessionId,
         prompt: finalPrompt,
-        model: modelId || DEFAULT_MODEL_ID,
+        // 仅 Claude Agent SDK 使用 `[1m]` 扩展上下文变体；Pi 分支保持原始模型 ID。
+        model: resolveAgentSdkModelId(selectedModelId, channel.provider),
         cwd: agentCwd,
         sdkCliPath: cliPath!,
         env: sdkEnv,
@@ -2408,6 +2492,10 @@ export class AgentOrchestrator {
           // 发送完成信号
           completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
+          if (!wasStoppedByUser && channel.provider === 'openai-codex') {
+            startAutoTitleGeneration()
+          }
+
           break  // 成功完成，退出重试循环
 
         } catch (error) {
@@ -2847,6 +2935,7 @@ export class AgentOrchestrator {
       console.log(`[Agent 编排] 正在中止所有活跃会话 (${this.activeSessions.size} 个)...`)
     }
     // 即便 activeSessions 为空，也要调 dispose 清理可能残留的 pidMap / 子进程
+    this.codexTitleRequestCoordinator.dispose()
     this.adapter.dispose()
     this.activeSessions.clear()
     this.sessionPermissionModes.clear()
@@ -2889,7 +2978,7 @@ export class AgentOrchestrator {
       : undefined
 
     let enrichedText = text
-    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, meta?.workspaceId, workspaceSlug)
+    const referencedSessionsBlock = buildReferencedSessionsPrompt(sessionId, mentionedSessionIds, workspaceSlug)
     if (referencedSessionsBlock) {
       enrichedText = `${referencedSessionsBlock}\n\n${enrichedText}`
     }

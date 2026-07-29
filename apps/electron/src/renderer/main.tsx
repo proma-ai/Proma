@@ -46,6 +46,7 @@ import {
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
 import { userProfileAtom } from './atoms/user-profile'
 import { automationsAtom } from './atoms/automation-atoms'
+import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
 import {
   // Cloud 模式专属
   cloudUserAtom,
@@ -96,6 +97,7 @@ import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
+import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
@@ -103,10 +105,11 @@ import 'katex/dist/katex.min.css'
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow
+const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow && !isPlanningWindow
 
-// 仅主窗口禁用页面级滚动；独立浮窗各自管理自己的内容高度和滚动。
-if (isMainWindow) {
+// 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
+if (isMainWindow || isPlanningWindow) {
   document.documentElement.classList.add('proma-main-window')
 }
 
@@ -594,6 +597,74 @@ function OfficialChannelInitializer(): null {
  *
  * 加载全部定时任务，并订阅主进程的变更事件（运行完成/状态变化）刷新列表。
  */
+function PlanningShortcutInitializer(): null {
+  useEffect(() => {
+    initShortcutRegistry()
+    void window.electronAPI.getSettings().then((settings) => {
+      updateShortcutOverrides(settings.shortcutOverrides ?? {})
+    }).catch((error) => {
+      console.error('[任务/日程] 加载快捷键设置失败:', error)
+    })
+  }, [])
+  return null
+}
+
+function PlanningInitializer(): null {
+  const setTodos = useSetAtom(todosAtom)
+  const setCalendarEvents = useSetAtom(calendarEventsAtom)
+  const setTodoGroups = useSetAtom(todoPlanningGroupsAtom)
+  const setCalendarGroups = useSetAtom(calendarPlanningGroupsAtom)
+  const setTags = useSetAtom(planningTagsAtom)
+
+  useEffect(() => {
+    let disposed = false
+    const latestRequest = { todos: 0, calendarEvents: 0, todoGroups: 0, calendarGroups: 0, tags: 0 }
+    const loadTodos = (): void => {
+      const requestId = ++latestRequest.todos
+      void window.electronAPI.listTodos().then((todos) => {
+        if (!disposed && requestId === latestRequest.todos) setTodos(todos)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 失败:', error))
+    }
+    const loadCalendarEvents = (): void => {
+      const requestId = ++latestRequest.calendarEvents
+      void window.electronAPI.listCalendarEvents().then((events) => {
+        if (!disposed && requestId === latestRequest.calendarEvents) setCalendarEvents(events)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载日程失败:', error))
+    }
+    const loadTodoGroups = (): void => {
+      const requestId = ++latestRequest.todoGroups
+      void window.electronAPI.listPlanningGroups('todo').then((groups) => {
+        if (!disposed && requestId === latestRequest.todoGroups) setTodoGroups(groups)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载 Todo 分组失败:', error))
+    }
+    const loadCalendarGroups = (): void => {
+      const requestId = ++latestRequest.calendarGroups
+      void window.electronAPI.listPlanningGroups('calendar').then((groups) => {
+        if (!disposed && requestId === latestRequest.calendarGroups) setCalendarGroups(groups)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载日程分组失败:', error))
+    }
+    const loadTags = (): void => {
+      const requestId = ++latestRequest.tags
+      void window.electronAPI.listPlanningTags().then((tags) => {
+        if (!disposed && requestId === latestRequest.tags) setTags(tags)
+      }).catch((error: unknown) => console.error('[任务/日程] 加载标签失败:', error))
+    }
+    const load = (resources?: string[]): void => {
+      const includes = (resource: string): boolean => resources === undefined || resources.includes(resource)
+      if (includes('todos')) loadTodos()
+      if (includes('calendar_events')) loadCalendarEvents()
+      if (includes('todo_groups')) loadTodoGroups()
+      if (includes('calendar_groups')) loadCalendarGroups()
+      if (includes('tags')) loadTags()
+    }
+    load()
+    const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
+    return () => { disposed = true; unsubscribe() }
+  }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
+
+  return null
+}
+
 function AutomationInitializer(): null {
   const setAutomations = useSetAtom(automationsAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
@@ -1153,6 +1224,20 @@ if (isQuickTaskWindow) {
       </React.StrictMode>
     )
   })
+} else if (isPlanningWindow) {
+  import('./components/planning/PlanningWindowApp').then(({ PlanningWindowApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <AgentSettingsInitializer />
+        <PlanningShortcutInitializer />
+        <AutomationInitializer />
+        <PlanningInitializer />
+        <PlanningWindowApp />
+        <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
 } else {
   // ===== 主窗口：完整渲染 =====
   ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -1174,6 +1259,7 @@ if (isQuickTaskWindow) {
       <ChatToolInitializer />
       <UpdaterInitializer />
       <AutomationInitializer />
+      <PlanningInitializer />
       <FeishuInitializer />
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />

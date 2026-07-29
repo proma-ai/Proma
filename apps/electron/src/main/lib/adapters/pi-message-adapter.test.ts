@@ -51,16 +51,20 @@ describe('convertPiMessage', () => {
     expect(JSON.stringify(message).length).toBeGreaterThan(content.length)
   })
 
-  test('only persists errors for terminal Pi failures', () => {
-    const providerError = 'stream ended before a terminal response event'
+  test('only exposes terminal Pi errors in final frames', () => {
+    const providerError = 'Connection error. Failed to fetch'
     const partialStop = convertPiMessage({
       role: 'assistant', content: [], stopReason: 'stop', errorMessage: providerError,
     } as unknown as AssistantMessage, 'session-1') as { error?: unknown }
+    const retryPreview = convertPiMessage({
+      role: 'assistant', content: [], stopReason: 'error', errorMessage: providerError,
+    } as unknown as AssistantMessage, 'session-1', undefined, { final: false }) as { error?: unknown }
     const terminalError = convertPiMessage({
       role: 'assistant', content: [], stopReason: 'error', errorMessage: providerError,
     } as unknown as AssistantMessage, 'session-1') as { error?: { message?: string; errorType?: string } }
 
     expect(partialStop.error).toBeUndefined()
+    expect(retryPreview.error).toBeUndefined()
     expect(terminalError.error).toEqual({
       message: providerError,
       errorType: 'network_error',
