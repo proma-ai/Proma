@@ -384,7 +384,7 @@ function AutomationRuntimeSelector({
   )
 }
 
-export function AutomationFormView(): React.ReactElement | null {
+export function AutomationFormView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
   const [formState, setFormState] = useAtom(automationFormAtom)
   const setAutomations = useSetAtom(automationsAtom)
@@ -717,7 +717,7 @@ export function AutomationFormView(): React.ReactElement | null {
     <div className="titlebar-no-drag absolute inset-0 z-10 bg-content-area flex animate-in fade-in duration-200">
       {/* 左栏：自然语言任务描述（主角） */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center gap-2 px-6 py-4 flex-shrink-0">
+        <div className={cn('flex items-center gap-2 px-6 flex-shrink-0', standalone ? 'titlebar-drag-region pt-8 pb-4' : 'py-4')}>
           <button
             type="button"
             onClick={close}
@@ -729,7 +729,7 @@ export function AutomationFormView(): React.ReactElement | null {
           </button>
           <Clock className="size-4 text-primary flex-shrink-0" />
           {editingName ? (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="titlebar-no-drag flex items-center gap-1.5 flex-1 min-w-0">
               <input
                 ref={nameInputRef}
                 value={form.name}
@@ -750,7 +750,7 @@ export function AutomationFormView(): React.ReactElement | null {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="titlebar-no-drag flex items-center gap-1.5 flex-1 min-w-0">
               <span className="truncate text-sm font-semibold text-foreground">
                 {form.name.trim() || (isEdit ? '未命名任务' : '新建定时任务')}
               </span>
@@ -795,7 +795,7 @@ export function AutomationFormView(): React.ReactElement | null {
 
       {/* 右栏：配置 sidebar */}
       <div className="w-[340px] flex-shrink-0 border-l border-border/50 flex flex-col bg-content-area">
-        <div className="flex items-center justify-between gap-2 px-4 py-4 flex-shrink-0">
+        <div className={cn('flex items-center justify-between gap-2 px-4 flex-shrink-0', standalone ? 'titlebar-drag-region pt-8 pb-4' : 'py-4')}>
           <span className="text-sm font-semibold text-foreground">配置</span>
           <div className="flex items-center gap-1">
             {!isWindows && (
