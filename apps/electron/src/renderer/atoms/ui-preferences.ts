@@ -17,6 +17,9 @@ export const longTextPasteAsAttachmentEnabledAtom = atom<boolean>(false)
 /** 输入框是否渲染 Markdown 富文本格式（默认关闭，纯文本模式；开启后渲染富文本，仍保留 Mention 引用） */
 export const richTextRenderingEnabledAtom = atom<boolean>(false)
 
+/** 左侧会话列表悬浮预览迷你地图（默认关闭，需手动开启） */
+export const sessionHoverPreviewEnabledAtom = atom<boolean>(false)
+
 // ===== 初始化 =====
 
 /**
@@ -25,13 +28,15 @@ export const richTextRenderingEnabledAtom = atom<boolean>(false)
 export async function initializeUiPreferences(
   setStickyUserMessageEnabled: (enabled: boolean) => void,
   setLongTextPasteAsAttachmentEnabled?: (enabled: boolean) => void,
-  setRichTextRenderingEnabled?: (enabled: boolean) => void
+  setRichTextRenderingEnabled?: (enabled: boolean) => void,
+  setSessionHoverPreviewEnabled?: (enabled: boolean) => void
 ): Promise<void> {
   try {
     const settings = await window.electronAPI.getSettings()
     setStickyUserMessageEnabled(settings.stickyUserMessageEnabled ?? true)
     setLongTextPasteAsAttachmentEnabled?.(settings.longTextPasteAsAttachmentEnabled ?? false)
     setRichTextRenderingEnabled?.(settings.richTextRenderingEnabled ?? false)
+    setSessionHoverPreviewEnabled?.(settings.sessionHoverPreviewEnabled ?? false)
   } catch (error) {
     console.error('[UI偏好] 初始化失败:', error)
   }
@@ -69,5 +74,16 @@ export async function updateRichTextRenderingEnabled(enabled: boolean): Promise<
     await window.electronAPI.updateSettings({ richTextRenderingEnabled: enabled })
   } catch (error) {
     console.error('[UI偏好] 更新输入框 Markdown 渲染设置失败:', error)
+  }
+}
+
+/**
+ * 更新左侧会话悬浮预览开关并持久化
+ */
+export async function updateSessionHoverPreviewEnabled(enabled: boolean): Promise<void> {
+  try {
+    await window.electronAPI.updateSettings({ sessionHoverPreviewEnabled: enabled })
+  } catch (error) {
+    console.error('[UI偏好] 更新会话悬浮预览设置失败:', error)
   }
 }

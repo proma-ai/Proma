@@ -20,7 +20,6 @@ import {
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
-  fileBrowserAutoRevealAtom,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
@@ -833,7 +832,7 @@ export function useGlobalAgentListeners(): void {
 
           // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态
 
-          // Agent 修改文件时，触发右侧文件浏览器自动定位（展开父目录 + 滚动 + 高亮）
+          // Agent 修改文件时，记入「最近修改」状态，用于 60s 内左侧竖条标记
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
             const input = event.input as Record<string, unknown> | undefined
             const targetPath =
@@ -843,8 +842,7 @@ export function useGlobalAgentListeners(): void {
             pendingWriteTools.set(event.toolUseId, { path: targetPath || '', sessionId })
             if (typeof targetPath === 'string' && targetPath.length > 0) {
               const now = Date.now()
-              store.set(fileBrowserAutoRevealAtom, { sessionId, path: targetPath, ts: now })
-              // 同时记入「最近修改」状态，用于 60s 内左侧竖条标记
+              // 记入「最近修改」状态，用于 60s 内左侧竖条标记
               store.set(recentlyModifiedPathsAtom, (prev) => {
                 const map = new Map(prev)
                 const inner = new Map(map.get(sessionId) ?? new Map())

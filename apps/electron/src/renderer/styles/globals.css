@@ -1556,24 +1556,6 @@
   content: none;
 }
 
-/* ===== FileBrowser 自动定位的高亮脉冲 =====
- * 末关键帧用 transparent 是故意的：Agent 自动 reveal（select=false）一行不进入选中态，
- * 动画结束后行需要恢复无背景色。如果改成 hsl(--accent) 等不透明色，那一行会一直停留
- * 在高亮色直到下次重渲染。
- *
- * 副作用：当 reveal 同时把目标置为选中态（用户搜索点击，select=true）时，
- * animation 在 1.2s 内会盖掉 .bg-accent，造成"先闪→变透明→才出现选中色"的视觉断层。
- * 因此 FileTreeItem 在 select=true 路径下跳过 .file-browser-row-flash class，
- * 直接呈现选中态，避开此冲突。详见 FileBrowser.tsx 中 reveal 分支的注释。
- */
-@keyframes file-browser-flash {
-  0%   { background-color: hsl(var(--primary) / 0.18); }
-  50%  { background-color: hsl(var(--primary) / 0.22); }
-  100% { background-color: transparent; }
-}
-.file-browser-row-flash {
-  animation: file-browser-flash 1.2s ease-out;
-}
 
 /* ===== FileBrowser 层级引导线：默认隐藏，鼠标悬浮文件树时显示（VS Code 风格） ===== */
 .file-tree-guide {

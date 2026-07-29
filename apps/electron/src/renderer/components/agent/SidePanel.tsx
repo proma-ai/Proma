@@ -361,42 +361,6 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
   // Files 将会话与项目文件放在同一视图；FileBrowser 自己处理对应根目录的自动定位。
   // RightSidePanel 完全由用户控制，不因 Agent 文件变更自动打开。
 
-  // Agent 写文件时把已打开的侧栏切回文件视图，让 FileBrowser 消费定位/高亮信号。
-  // 用户从搜索结果选择文件时不抢占当前视图，也不重新打开用户主动关闭的侧栏。
-  const autoRevealSignal = useAtomValue(fileBrowserAutoRevealAtom)
-  const consumedTabRevealTsRef = React.useRef(0)
-  React.useEffect(() => {
-    if (!isOpen || !autoRevealSignal || autoRevealSignal.select) return
-    if (autoRevealSignal.sessionId !== sessionId) return
-    if (autoRevealSignal.ts <= consumedTabRevealTsRef.current) return
-
-    const targetPath = autoRevealSignal.path
-    const belongsToSession =
-      (!!sessionPath && (targetPath === sessionPath || isPathUnderRoot(sessionPath, targetPath)))
-      || attachedDirs.some((dir) => isPathUnderRoot(dir, targetPath))
-      || attachedFiles.includes(targetPath)
-    const belongsToProject =
-      (!!workspaceFilesPath && (targetPath === workspaceFilesPath || isPathUnderRoot(workspaceFilesPath, targetPath)))
-      || wsAttachedDirs.some((dir) => isPathUnderRoot(dir, targetPath))
-      || wsAttachedFiles.includes(targetPath)
-    if (!belongsToSession && !belongsToProject) return
-
-    consumedTabRevealTsRef.current = autoRevealSignal.ts
-    if (activeTab !== 'files') onTabChange('files')
-  }, [
-    activeTab,
-    attachedDirs,
-    attachedFiles,
-    autoRevealSignal,
-    isOpen,
-    onTabChange,
-    sessionId,
-    sessionPath,
-    workspaceFilesPath,
-    wsAttachedDirs,
-    wsAttachedFiles,
-  ])
-
   // 同步 basePaths ref（供 handleFilePreview 使用，避免 hooks 声明顺序问题）
   basePathsRef.current = [sessionPath, workspaceFilesPath, ...fileAccessPathsMemo].filter(Boolean) as string[]
   const hasSessionAttachedItems = attachedDirs.length > 0 || attachedFiles.length > 0

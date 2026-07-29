@@ -247,6 +247,8 @@ export interface AppSettings {
   shortcutOverrides?: ShortcutOverrides
   /** 是否显示用户消息悬浮置顶条（默认 true） */
   stickyUserMessageEnabled?: boolean
+  /** 左侧会话列表悬浮预览迷你地图（默认 false，需手动开启） */
+  sessionHoverPreviewEnabled?: boolean
   /** 粘贴超过阈值的长文本时是否自动转为附件（默认 false） */
   longTextPasteAsAttachmentEnabled?: boolean
   /** 输入框是否渲染 Markdown 富文本格式（默认 false，关闭后为纯文本模式，仍保留 Mention 引用） */
