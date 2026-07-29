@@ -2,10 +2,12 @@ import * as React from "react";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
 import {
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   FileText,
   FolderPlus,
+  ListTodo,
   LoaderCircle,
   MessageSquareText,
   Paperclip,
@@ -26,15 +28,17 @@ import {
   positionPopup,
 } from "./mention-popup-utils";
 import {
+  buildPlanningReferenceItems,
   filterCommandMenuItems,
   formatSessionReferenceDescription,
   getCommandMenuChildQuery,
   getNextCommandMenuIndex,
   shouldOpenSlashCommandMenu,
   shouldOpenSlashCommandMenuInContext,
+  type PlanningReferenceType,
 } from "./agent-command-menu-state";
 
-type CommandPage = "root" | "skills" | "tools" | "sessions" | "files";
+type CommandPage = "root" | "skills" | "tools" | "planning" | "sessions" | "files";
 type MentionCharacter = "@" | "/" | "&" | "#";
 
 type CommandAction = "attach-file" | "attach-folder";
@@ -52,6 +56,7 @@ interface ReferenceMenuItem {
   id: string;
   label: string;
   description?: string;
+  referenceType?: PlanningReferenceType;
 }
 
 export interface AgentCommandActions {
@@ -71,6 +76,7 @@ interface AgentCommandMenuProps {
     character: MentionCharacter,
     id: string,
     label: string,
+    referenceType?: PlanningReferenceType,
   ) => void;
   onRunAction: (action: CommandAction) => void;
 }
@@ -93,6 +99,13 @@ function getRootMenuItems(): RootMenuItem[] {
       label: "调用 Skill",
       description: "选择当前工作区已启用的 Skill",
       icon: Sparkles,
+      kind: "page",
+    },
+    {
+      id: "planning",
+      label: "引用 Todo 和日程",
+      description: "选择未完成 Todo 或近期日程",
+      icon: ListTodo,
       kind: "page",
     },
     {
@@ -139,6 +152,8 @@ function menuTitle(page: CommandPage): string {
       return "Skills";
     case "tools":
       return "MCP 工具";
+    case "planning":
+      return "引用 Todo 和日程";
     case "sessions":
       return "引用会话";
     case "files":
@@ -161,6 +176,8 @@ function menuEmptyText(page: CommandPage, loading: boolean): string {
       return "没有已启用的 Skill";
     case "tools":
       return "没有可用的 MCP 工具";
+    case "planning":
+      return "没有可引用的 Todo 或日程";
     case "sessions":
       return "没有可引用的会话";
     case "files":
@@ -192,6 +209,7 @@ const AgentCommandMenu = React.forwardRef<
   const [loading, setLoading] = React.useState(false);
   const [skills, setSkills] = React.useState<ReferenceMenuItem[]>([]);
   const [tools, setTools] = React.useState<ReferenceMenuItem[]>([]);
+  const [planningReferences, setPlanningReferences] = React.useState<ReferenceMenuItem[]>([]);
   const [sessions, setSessions] = React.useState<ReferenceMenuItem[]>([]);
   const [fileResult, setFileResult] =
     React.useState<FileSearchResult>(EMPTY_FILE_RESULT);
@@ -296,6 +314,18 @@ const AgentCommandMenu = React.forwardRef<
           return;
         }
 
+        if (page === "planning") {
+          const [todos, events] = await Promise.all([
+            window.electronAPI.listTodos(),
+            window.electronAPI.listCalendarEvents(),
+          ]);
+          if (disposed) return;
+          setPlanningReferences(
+            buildPlanningReferenceItems(todos, events),
+          );
+          return;
+        }
+
         const workspacePath = workspacePathRef.current;
         if (!workspacePath) {
           // sessionPath 在冷启动时异步到达。文件菜单仍打开时以低频、可清理的
@@ -321,6 +351,7 @@ const AgentCommandMenu = React.forwardRef<
         if (!disposed) {
           setSkills([]);
           setTools([]);
+          setPlanningReferences([]);
           setSessions([]);
           setFileResult(EMPTY_FILE_RESULT);
         }
@@ -352,8 +383,9 @@ const AgentCommandMenu = React.forwardRef<
   const referenceItems = React.useMemo(() => {
     const source =
       page === "skills" ? skills : page === "tools" ? tools : sessions;
-    return filterCommandMenuItems(source, pageQuery);
-  }, [page, skills, tools, sessions, pageQuery]);
+    const resolvedSource = page === "planning" ? planningReferences : source;
+    return filterCommandMenuItems(resolvedSource, pageQuery);
+  }, [page, planningReferences, skills, tools, sessions, pageQuery]);
 
   const selectRootItem = React.useCallback(
     (item: RootMenuItem): void => {
@@ -370,6 +402,11 @@ const AgentCommandMenu = React.forwardRef<
 
   const selectReferenceItem = React.useCallback(
     (item: ReferenceMenuItem): void => {
+      if (page === "planning") {
+        if (!item.referenceType) return;
+        onInsertMention("&", item.id, item.label, item.referenceType);
+        return;
+      }
       const character: MentionCharacter =
         page === "skills" ? "/" : page === "tools" ? "#" : "&";
       onInsertMention(character, item.id, item.label);
@@ -485,7 +522,7 @@ const AgentCommandMenu = React.forwardRef<
           <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
         )}
       </div>
-      <div ref={menuScrollRef} className="h-[17rem] overflow-y-auto p-1">
+      <div ref={menuScrollRef} className="h-[22rem] max-h-[calc(100dvh-12rem)] overflow-y-auto p-1">
         {isFilePage ? (
           hasItems ? (
             <FileMentionList
@@ -506,6 +543,7 @@ const AgentCommandMenu = React.forwardRef<
             {(page === "root" ? rootItems : referenceItems).map(
               (item, index) => {
                 const rootItem = item as RootMenuItem;
+                const referenceItem = item as ReferenceMenuItem;
                 const Icon =
                   page === "root"
                     ? rootItem.icon
@@ -513,12 +551,16 @@ const AgentCommandMenu = React.forwardRef<
                       ? Sparkles
                       : page === "tools"
                         ? Wrench
-                        : MessageSquareText;
+                        : page === "planning"
+                          ? referenceItem.referenceType === "calendar_event"
+                            ? CalendarDays
+                            : ListTodo
+                          : MessageSquareText;
                 const selected = index === selectedIndex;
                 const disabled = page === "root" && rootItem.disabled;
                 return (
                   <button
-                    key={item.id}
+                    key={page === "planning" ? `${referenceItem.referenceType}:${item.id}` : item.id}
                     type="button"
                     role="option"
                     aria-selected={selected}
@@ -632,11 +674,13 @@ export function createAgentCommandSuggestion(
         character: MentionCharacter,
         id: string,
         label: string,
+        referenceType?: PlanningReferenceType,
       ): void => {
         activeProps?.command({
           id,
           label,
           mentionSuggestionChar: character,
+          ...(referenceType ? { referenceType } : {}),
           commandMenuMention: true,
         });
       };

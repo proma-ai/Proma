@@ -523,7 +523,10 @@ export function htmlToMarkdown(
         const dataType = el.getAttribute('data-type')
         const dataId = el.getAttribute('data-id') || ''
         const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
+        const referenceType = el.getAttribute('data-mention-reference-type')
         if (dataType === 'mention') {
+          if (referenceType === 'todo') return `&todo:${dataId}`
+          if (referenceType === 'calendar_event') return `&calendar_event:${dataId}`
           if (suggestionChar === '/') return `/skill:${dataId}`
           if (suggestionChar === '#') return `#mcp:${dataId}`
           if (suggestionChar === '&') return `&session:${dataId}`

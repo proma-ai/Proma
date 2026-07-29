@@ -85,6 +85,8 @@ export interface ParsedQueuedMessageMentions {
   mentionedSkills: string[]
   mentionedMcpServers: string[]
   mentionedSessionIds: string[]
+  mentionedTodoIds: string[]
+  mentionedCalendarEventIds: string[]
 }
 
 export interface QueuedMessageSendPayload {
@@ -115,18 +117,22 @@ export function queuedTextToParagraphHtml(text: string): string {
 }
 
 
-const REF_PATTERN = /\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>\S+)/g
+const REF_PATTERN = /\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>\S+)|&todo:(?<todo>[A-Za-z0-9-]+)|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)/g
 
 export function parseQueuedMessageMentions(text: string): ParsedQueuedMessageMentions {
   const mentionedSkills: string[] = []
   const mentionedMcpServers: string[] = []
   const mentionedSessionIds: string[] = []
+  const mentionedTodoIds: string[] = []
+  const mentionedCalendarEventIds: string[] = []
 
   for (const match of text.matchAll(REF_PATTERN)) {
-    const { skill, mcp, session } = match.groups ?? {}
+    const { skill, mcp, session, todo, calendarEvent } = match.groups ?? {}
     if (skill) mentionedSkills.push(skill)
     else if (mcp) mentionedMcpServers.push(mcp)
     else if (session) mentionedSessionIds.push(session)
+    else if (todo) mentionedTodoIds.push(todo)
+    else if (calendarEvent) mentionedCalendarEventIds.push(calendarEvent)
   }
 
   return {
@@ -134,6 +140,8 @@ export function parseQueuedMessageMentions(text: string): ParsedQueuedMessageMen
     mentionedSkills,
     mentionedMcpServers,
     mentionedSessionIds,
+    mentionedTodoIds,
+    mentionedCalendarEventIds,
   }
 }
 

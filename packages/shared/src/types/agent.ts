@@ -986,6 +986,10 @@ export interface AgentSendInput {
   mentionedMcpServers?: string[]
   /** 用户通过会话引用 mention 指定的 Agent 会话 ID 列表 */
   mentionedSessionIds?: string[]
+  /** 用户通过 Todo 引用 mention 指定的 Todo ID 列表 */
+  mentionedTodoIds?: string[]
+  /** 用户通过日程引用 mention 指定的日程 ID 列表 */
+  mentionedCalendarEventIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
@@ -1020,6 +1024,10 @@ export interface AgentQueueMessageInput {
   mentionedMcpServers?: string[]
   /** 用户通过 &session:xxx 引用的 Agent 会话 ID 列表 */
   mentionedSessionIds?: string[]
+  /** 用户通过 &todo:xxx 引用的 Todo ID 列表 */
+  mentionedTodoIds?: string[]
+  /** 用户通过 &calendar_event:xxx 引用的日程 ID 列表 */
+  mentionedCalendarEventIds?: string[]
 }
 
 // ===== 会话迁移输入 =====

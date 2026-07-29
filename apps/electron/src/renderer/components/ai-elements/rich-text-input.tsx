@@ -5,7 +5,7 @@
  *
  * 功能：
  * - StarterKit + Placeholder + Underline + Link + CodeBlockLowlight
- * - 可选 Mention 扩展（@ 引用文件、/ 触发 Skill、# 触发 MCP、& 引用会话）
+ * - 可选 Mention 扩展（@ 引用文件、/ 触发菜单：Skill、MCP、会话、Todo 和日程）
  * - htmlToMarkdown 转换
  * - IME composition 处理
  * - Enter 提交 / Shift+Enter 换行
@@ -308,6 +308,18 @@ export function RichTextInput({
                   'data-mention-suggestion-char': attrs.mentionSuggestionChar,
                 }),
               },
+              referenceType: {
+                default: null,
+                parseHTML: (el: HTMLElement) => {
+                  const value = el.getAttribute('data-mention-reference-type')
+                  return value === 'todo' || value === 'calendar_event' ? value : null
+                },
+                renderHTML: (attrs: Record<string, unknown>) => (
+                  attrs.referenceType === 'todo' || attrs.referenceType === 'calendar_event'
+                    ? { 'data-mention-reference-type': attrs.referenceType }
+                    : {}
+                ),
+              },
               // / 命令菜单在一个 Slash suggestion 内插入多种引用，需按节点自身类型渲染 Chip。
               commandMenuMention: {
                 default: false,
@@ -330,8 +342,11 @@ export function RichTextInput({
             // 回退到唯一注册的 `/` suggestion，否则 @/#/& 会被重写为 /skill。
             const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
             const label = node.attrs.label ?? node.attrs.id
+            const referenceType = node.attrs.referenceType
             let chipClass = 'mention-chip'
-            if (char === '/') chipClass = 'skill-mention-chip'
+            if (referenceType === 'todo') chipClass = 'todo-mention-chip'
+            else if (referenceType === 'calendar_event') chipClass = 'calendar-event-mention-chip'
+            else if (char === '/') chipClass = 'skill-mention-chip'
             else if (char === '#') chipClass = 'mcp-mention-chip'
             else if (char === '&') chipClass = 'session-mention-chip'
             return [
@@ -341,6 +356,9 @@ export function RichTextInput({
                 'data-id': node.attrs.id,
                 'data-label': node.attrs.label,
                 'data-mention-suggestion-char': char,
+                ...(referenceType === 'todo' || referenceType === 'calendar_event'
+                  ? { 'data-mention-reference-type': referenceType }
+                  : {}),
                 ...(node.attrs.commandMenuMention ? { 'data-command-menu-mention': 'true' } : {}),
                 class: chipClass,
               },
@@ -829,6 +847,43 @@ export function RichTextInput({
           mask-size: contain;
           mask-repeat: no-repeat;
           flex-shrink: 0;
+        }
+        .todo-mention-chip,
+        .calendar-event-mention-chip {
+          border-radius: 4px;
+          padding: 1px 4px 1px 2px;
+          font-size: 13px;
+          font-weight: 500;
+          white-space: nowrap;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          vertical-align: baseline;
+        }
+        .todo-mention-chip {
+          background-color: hsl(38 90% 50% / 0.16);
+          color: hsl(32 80% 38%);
+        }
+        .calendar-event-mention-chip {
+          background-color: hsl(190 75% 45% / 0.14);
+          color: hsl(190 72% 34%);
+        }
+        .todo-mention-chip::before,
+        .calendar-event-mention-chip::before {
+          content: '';
+          display: inline-block;
+          width: 12px;
+          height: 12px;
+          background-color: currentColor;
+          mask-size: contain;
+          mask-repeat: no-repeat;
+          flex-shrink: 0;
+        }
+        .todo-mention-chip::before {
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='6' height='6' x='3' y='5' rx='1'/%3E%3Cpath d='m3 17 2 2 4-4'/%3E%3Cpath d='M13 6h8'/%3E%3Cpath d='M13 12h8'/%3E%3Cpath d='M13 18h8'/%3E%3C/svg%3E");
+        }
+        .calendar-event-mention-chip::before {
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4'/%3E%3Cpath d='M16 2v4'/%3E%3Crect width='18' height='18' x='3' y='4' rx='2'/%3E%3Cpath d='M3 10h18'/%3E%3C/svg%3E");
         }
         .session-mention-chip {
           background-color: hsl(200 80% 50% / 0.14);
