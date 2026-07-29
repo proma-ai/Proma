@@ -95,6 +95,7 @@ import {
   type SessionMiniMapType,
 } from '@/components/session-preview/SessionMiniMapPopover'
 import { detectIsMac } from '@/lib/platform'
+import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   collectAgentSessionTreeIds,
@@ -235,15 +236,22 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
         </span>
         <span className="truncate">任务/日程/Todo</span>
       </span>
-      <span
-        className={cn(
-          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
-          active
-            ? 'bg-accent-foreground/[0.26] text-primary-foreground'
-            : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
-        )}
-      >
-        {formatAutomationCount(count)}
+      <span className="ml-2 flex flex-shrink-0 items-center gap-1.5">
+        <ShortcutKeycaps
+          shortcutId="open-planning"
+          keycapClassName="h-5 min-w-5 px-1 text-[11px]"
+          separatorClassName="text-[10px]"
+        />
+        <span
+          className={cn(
+            'flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
+            active
+              ? 'bg-accent-foreground/[0.26] text-primary-foreground'
+              : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+          )}
+        >
+          {formatAutomationCount(count)}
+        </span>
       </span>
     </button>
   )
@@ -2565,7 +2573,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              任务/日程（{automationCount} 个自动化任务）
+              <span className="flex items-center gap-1.5">
+                <span>{`任务/日程，${automationCount} 个自动化任务`}</span>
+                <ShortcutKeycaps shortcutId="open-planning" />
+              </span>
             </TooltipContent>
           </Tooltip>
 

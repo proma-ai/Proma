@@ -143,6 +143,16 @@ export function GlobalShortcuts(): null {
     useCallback(() => setSearchOpen(true), [setSearchOpen]),
   )
 
+  // Cmd+Shift+T / Ctrl+Shift+T → 打开或聚焦独立任务/日程窗口
+  useShortcut(
+    'open-planning',
+    useCallback(() => {
+      void window.electronAPI.openPlanningWindow().catch((error) => {
+        console.error('[任务/日程] 打开独立窗口失败:', error)
+      })
+    }, []),
+  )
+
   // Cmd+N → 新建对话/会话（根据当前模式）
   useShortcut(
     'new-session',

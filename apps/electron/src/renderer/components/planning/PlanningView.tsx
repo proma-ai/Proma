@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { TodoDatePicker, formatTodoDueDate } from '@/components/ui/todo-date-picker'
+import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 
 const TABS: Array<{ id: PlanningTab; label: string }> = [
   { id: 'todos', label: 'Todo' },
@@ -28,9 +29,15 @@ const TABS: Array<{ id: PlanningTab; label: string }> = [
   { id: 'automations', label: '定时任务' },
 ]
 
-function CreateShortcutHint(): React.ReactElement {
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-  return <span className="ml-1.5 flex items-center gap-1 text-primary-foreground/85"><kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-primary-foreground/15 px-1 text-[11px] font-semibold leading-none">{isMac ? '⌘' : 'Ctrl'}</kbd><span className="text-[10px] opacity-75">+</span><kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-primary-foreground/15 px-1 text-[11px] font-semibold leading-none">N</kbd></span>
+function CreateShortcutHint(): React.ReactElement | null {
+  return (
+    <ShortcutKeycaps
+      shortcutId="new-session"
+      className="ml-1.5"
+      keycapClassName="border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground shadow-none"
+      separatorClassName="text-primary-foreground/70"
+    />
+  )
 }
 
 export function PlanningView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
@@ -75,10 +82,45 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
           <p className="mt-1 text-sm text-muted-foreground">安排待办、日程与定时任务</p>
         </div>
         <div className="titlebar-no-drag flex items-center gap-2">
-          {!standalone && <button type="button" onClick={openPlanningWindow} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.96]"><ExternalLink size={16} /> 独立窗口</button>}
-          {tab === 'todos' && <button type="button" onClick={triggerTodoCreate} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建 Todo<CreateShortcutHint /></button>}
-          {tab === 'calendar' && <button type="button" onClick={triggerCalendarCreate} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建日程<CreateShortcutHint /></button>}
-          {tab === 'automations' && automations.length > 0 && <button type="button" onClick={createAutomation} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建定时任务<CreateShortcutHint /></button>}
+          {!standalone && (
+            <button
+              type="button"
+              onClick={openPlanningWindow}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.96]"
+            >
+              <ExternalLink size={16} /> 独立窗口
+            </button>
+          )}
+          {tab === 'todos' && (
+            <button
+              type="button"
+              onClick={triggerTodoCreate}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建 Todo<CreateShortcutHint />
+            </button>
+          )}
+          {tab === 'calendar' && (
+            <button
+              type="button"
+              onClick={triggerCalendarCreate}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建日程<CreateShortcutHint />
+            </button>
+          )}
+          {tab === 'automations' && automations.length > 0 && (
+            <button
+              type="button"
+              onClick={createAutomation}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建定时任务<CreateShortcutHint />
+            </button>
+          )}
         </div>
       </header>
       <div className={cn('titlebar-no-drag w-full', standalone ? 'px-5' : 'px-6 sm:px-8 xl:px-10')}>

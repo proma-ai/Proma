@@ -48,6 +48,7 @@ const SHORTCUT_DISPLAY_ORDER: Record<ShortcutCategory, readonly string[]> = {
   navigation: [
     'cycle-sessions',
     'quick-switch-session',
+    'open-planning',
     'file-find',
     'global-search',
     'focus-input',
