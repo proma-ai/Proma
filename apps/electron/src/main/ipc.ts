@@ -2572,9 +2572,7 @@ export function registerIpcHandlers(): void {
       if (!getAgentSessionMeta(sessionId)) {
         throw new Error(`Agent 会话不存在: ${sessionId}`)
       }
-      if (isAgentSessionActive(sessionId)) {
-        throw new Error('Agent 正在运行，完成后再切换思考深度')
-      }
+      // 当前运行已在启动时读取推理深度；此处只更新会话的下一轮配置。
       return updateAgentSessionMeta(sessionId, { reasoningLevel: thinkingLevel })
     }
   )
@@ -2590,17 +2588,18 @@ export function registerIpcHandlers(): void {
         throw new Error(`Agent 会话不存在: ${sessionId}`)
       }
 
-      if (isAgentSessionActive(sessionId)) {
-        throw new Error('Agent 正在运行，完成后再切换内核')
-      }
+      // 当前运行持有其启动时的 runtime；此处只更新会话的下一轮配置。
 
       // 历史会话缺失 runtime 时按 Claude 处理，避免将 Claude SDK 会话 ID 交给 Pi 恢复。
       const previousRuntime: AgentRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : 'claude'
-      const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId'>> = {
+      const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings'>> = {
         agentRuntime: runtime,
       }
       if (previousRuntime !== runtime) {
+        // 两套 runtime 的会话 artifact 不可互用；下一轮从 Proma 已持久化的转录恢复。
         updates.sdkSessionId = undefined
+        updates.piSessionFile = undefined
+        updates.piEntryBindings = undefined
       }
 
       return updateAgentSessionMeta(sessionId, updates)

@@ -109,7 +109,7 @@ import {
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
-import { channelsAtom, thinkingExpandedAtom } from '@/atoms/chat-atoms'
+import { channelsAtom } from '@/atoms/chat-atoms'
 import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { AgentSessionProvider } from '@/contexts/session-context'
@@ -254,7 +254,6 @@ function normalizeOpenAIThinkingLevel(
 interface CodexThinkingConfig {
   thinkingLevel: AgentThinkingLevel
   levels: readonly OpenAIThinkingLevel[]
-  disabled: boolean
   onThinkingLevelChange: (level: AgentThinkingLevel) => void
 }
 
@@ -265,7 +264,6 @@ interface AgentThinkingPopoverProps {
 }
 
 function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThinkingPopoverProps): React.ReactElement {
-  const [thinkingExpanded, setThinkingExpanded] = useAtom(thinkingExpandedAtom)
   const [open, setOpen] = React.useState(false)
   const hoverTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const isCodex = Boolean(codexConfig)
@@ -311,7 +309,6 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
           onClick={handleButtonClick}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          disabled={codexConfig?.disabled}
         >
           <Brain className="size-5" />
         </Button>
@@ -341,7 +338,6 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
                   min={0}
                   max={thinkingLevels.length - 1}
                   step={1}
-                  disabled={codexConfig.disabled}
                   aria-label="思考深度"
                 />
                 <div className="flex justify-between text-[10px] text-muted-foreground">
@@ -359,15 +355,6 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
               />
             </div>
           )}
-          <div className="h-px bg-border" />
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-foreground/70">展开思考</span>
-            <Switch
-              checked={thinkingExpanded}
-              onCheckedChange={setThinkingExpanded}
-              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
-            />
-          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -404,18 +391,12 @@ const AGENT_RUNTIME_OPTIONS: AgentRuntimeOption[] = [
 
 interface AgentRuntimeSelectorProps {
   runtime: AgentRuntime
-  disabled?: boolean
   onChange: (runtime: AgentRuntime) => void
 }
 
-function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRuntimeSelectorProps): React.ReactElement {
+function AgentRuntimeSelector({ runtime, onChange }: AgentRuntimeSelectorProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
   const current = AGENT_RUNTIME_OPTIONS.find((option) => option.value === runtime) ?? AGENT_RUNTIME_OPTIONS[0]!
-
-  const handleOpenChange = (nextOpen: boolean): void => {
-    if (disabled && nextOpen) return
-    setOpen(nextOpen)
-  }
 
   const handleSelect = (nextRuntime: AgentRuntime): void => {
     onChange(nextRuntime)
@@ -423,19 +404,15 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
   }
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
               type="button"
               variant="ghost"
-              disabled={disabled}
               aria-label={`Agent 内核：${current.label}`}
-              className={cn(
-                'model-selector-trigger flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground',
-                disabled && 'cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground'
-              )}
+              className="model-selector-trigger flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <Box className="size-3.5" />
               <span>{current.label}</span>
@@ -446,9 +423,7 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
         <TooltipContent side="top" className="max-w-[240px]">
           <p className="font-medium">{current.description}</p>
           {current.notice && <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{current.notice}</p>}
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {disabled ? 'Agent 运行中，完成后可切换' : '切换当前会话下一轮使用的内核'}
-          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">切换当前会话下一轮使用的内核</p>
         </TooltipContent>
       </Tooltip>
       <PopoverContent
@@ -1992,18 +1967,22 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-input-mode="agent"] .ProseMirror')?.focus())
       return
     }
-    if (streaming || backgroundWaiting) {
-      toast.info('Agent 运行中，完成后再切换内核')
-      return
-    }
 
+    const runtimeSwitchDeferred = streaming || backgroundWaiting
     const previousDefaultRuntime = agentRuntime
     const previousSessionMeta = sessionMeta
     setAgentRuntime(runtime)
     if (sessionMeta) {
       setAgentSessions((prev) => prev.map((item) =>
         item.id === sessionId
-          ? { ...item, agentRuntime: runtime, sdkSessionId: undefined, updatedAt: Date.now() }
+          ? {
+            ...item,
+            agentRuntime: runtime,
+            sdkSessionId: undefined,
+            piSessionFile: undefined,
+            piEntryBindings: undefined,
+            updatedAt: Date.now(),
+          }
           : item
       ))
     }
@@ -2014,6 +1993,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       window.electronAPI.updateSettings({ agentRuntime: runtime }).catch((error) => {
         console.error('[AgentView] 保存 Agent Runtime 默认值失败:', error)
       })
+      if (runtimeSwitchDeferred) {
+        toast.info('Agent 内核已切换，本轮结束后生效')
+      }
     } catch (error) {
       console.error('[AgentView] 切换 Agent Runtime 失败:', error)
       setAgentRuntime(previousDefaultRuntime)
@@ -2055,8 +2037,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [backgroundWaiting, codexFastModeEnabled, isCodexFastModeAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
 
   const updateReasoningLevel = React.useCallback(async (thinkingLevel: AgentThinkingLevel): Promise<void> => {
-    if (!isSessionThinkingAvailable || streaming || backgroundWaiting || !sessionMeta) return
+    if (!isSessionThinkingAvailable || !sessionMeta) return
 
+    const reasoningLevelSwitchDeferred = streaming || backgroundWaiting
     const previousSessionMeta = sessionMeta
     setAgentSessions((prev) => prev.map((item) => (
       item.id === sessionId ? { ...item, reasoningLevel: thinkingLevel, updatedAt: Date.now() } : item
@@ -2071,6 +2054,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       } catch (error) {
         console.error('[AgentView] 保存 OpenAI 默认思考深度失败:', error)
         toast.error('默认思考深度保存失败', { description: getErrorMessage(error) })
+      }
+      if (reasoningLevelSwitchDeferred) {
+        toast.info('思考强度已切换，本轮结束后生效', { id: `agent-reasoning-level-deferred-${sessionId}` })
       }
     } catch (error) {
       console.error('[AgentView] 更新 OpenAI 思考深度失败:', error)
@@ -2822,7 +2808,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           codexConfig={isSessionThinkingAvailable ? {
             thinkingLevel: openAIThinkingLevel,
             levels: openAIThinkingLevels,
-            disabled: streaming || backgroundWaiting,
             onThinkingLevelChange: (level) => { void updateReasoningLevel(level) },
           } : undefined}
         />
@@ -2918,7 +2903,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
         <AgentRuntimeSelector
           runtime={sessionAgentRuntime}
-          disabled={streaming || backgroundWaiting}
           onChange={handleAgentRuntimeChange}
         />
       </div>

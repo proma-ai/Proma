@@ -4,7 +4,7 @@
  * 支持三种内容块类型：
  * - text: 通过 MessageResponse 渲染 Markdown
  * - tool_use: 语义化短语行（如 "读取 foo.ts 第 10-60 行"），展开显示结构化结果
- * - thinking: 默认展开，左上角 "Thinking" 标签 + 虚线边框内容区
+ * - thinking: 默认折叠，左上角 "Thinking" 标签 + 虚线边框内容区
  */
 
 import * as React from 'react'
@@ -17,8 +17,6 @@ import {
   Brain,
   MessageSquareText,
 } from 'lucide-react'
-import { useAtomValue } from 'jotai'
-import { thinkingExpandedAtom } from '@/atoms/chat-atoms'
 import { cn } from '@/lib/utils'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { getToolIcon, extractFilePath } from './tool-utils'
@@ -553,7 +551,7 @@ function ToolUseBlock({ block, allMessages, animate = false, index = 0, dimmed =
   )
 }
 
-// ===== 思考块（默认展开，Thinking 标签 + 虚线边框） =====
+// ===== 思考块（默认折叠，Thinking 标签 + 虚线边框） =====
 
 interface ThinkingBlockProps {
   block: SDKThinkingBlock
@@ -564,8 +562,7 @@ interface ThinkingBlockProps {
 const THINKING_COLLAPSE_LINE_THRESHOLD = 4
 
 function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.ReactElement {
-  const thinkingExpanded = useAtomValue(thinkingExpandedAtom)
-  const [isExpanded, setIsExpanded] = React.useState(thinkingExpanded)
+  const [isExpanded, setIsExpanded] = React.useState(false)
   const [shouldCollapse, setShouldCollapse] = React.useState(false)
   const contentRef = React.useRef<HTMLDivElement>(null)
 
@@ -577,11 +574,6 @@ function ThinkingBlock({ block, dimmed = false }: ThinkingBlockProps): React.Rea
     const maxHeight = lineHeight * THINKING_COLLAPSE_LINE_THRESHOLD
     setShouldCollapse(el.scrollHeight > maxHeight + 10)
   }, [block.thinking])
-
-  // 当全局偏好变更时同步（仅在"应折叠"时生效）
-  React.useEffect(() => {
-    setIsExpanded(thinkingExpanded)
-  }, [thinkingExpanded])
 
   const toggleExpand = React.useCallback(() => {
     setIsExpanded((prev) => !prev)
