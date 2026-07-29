@@ -4259,9 +4259,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               onSelectProject(group.workspace.id)
             }}
             className={cn(
-              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-12 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
+              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
+              isAutomationGroup ? 'pr-1' : (isCurrent ? 'pr-32' : 'pr-12'),
               isCurrent
-                ? 'agent-project-item-current pr-32 text-foreground'
+                ? 'agent-project-item-current text-foreground'
                 : 'text-foreground/65 hover:text-foreground/88',
             )}
           >
