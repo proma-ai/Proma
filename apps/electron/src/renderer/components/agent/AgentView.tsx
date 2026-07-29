@@ -1343,6 +1343,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
       additionalDirectories: Array.from(new Set([...attachedDirs, ...attachedFileDirectories, ...(pendingPrompt.additionalDirectories ?? [])])),
+      mentionedTodoIds: pendingPrompt.mentionedTodoIds,
     }
     setPendingPrompt(null)
 
@@ -1387,6 +1388,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         permissionModeOverride: permissionMode,
         ...(snapshot.additionalDirectories && snapshot.additionalDirectories.length > 0 && {
           additionalDirectories: snapshot.additionalDirectories,
+        }),
+        ...(snapshot.mentionedTodoIds && snapshot.mentionedTodoIds.length > 0 && {
+          mentionedTodoIds: snapshot.mentionedTodoIds,
         }),
       }
       window.electronAPI.sendAgentMessage(input).catch((error) => {
