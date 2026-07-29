@@ -22,7 +22,7 @@ import {
   getAgentWorkspacePath,
   getSdkConfigDir,
 } from './config-paths'
-import { getAgentWorkspace, getWorkspaceAutoMemoryDir } from './agent-workspace-manager'
+import { getAgentWorkspace, getWorkspaceAutoMemoryDir, listAgentWorkspaces } from './agent-workspace-manager'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getSettings } from './settings-service'
 import { applyClaudeSdkAttributionSettings, isGitAttributionEnabled } from './agent-git-attribution'
@@ -72,6 +72,13 @@ const INDEX_VERSION = 1
  * 同时避免极端会话数量下向渲染进程传输过大列表。
  */
 const MAX_SESSION_REFERENCE_LIMIT = 200
+
+/**
+ * 会话引用的正文搜索是输入框补全路径，必须有独立 I/O 预算。
+ * 标题检索仍覆盖全部会话；仅正文 JSONL 检索优先服务最近会话。
+ */
+const MAX_SESSION_REFERENCE_BODY_SCANS = 50
+const MAX_SESSION_REFERENCE_BODY_BYTES_PER_FILE = 256 * 1024
 
 interface JsonlParseError {
   lineNumber: number
@@ -1755,9 +1762,13 @@ export async function searchAgentSessionMessages(query: string): Promise<AgentMe
 async function findFirstMatchInAgentJsonl(
   filePath: string,
   queryLower: string,
-  queryLength: number
+  queryLength: number,
+  maxBytes?: number,
 ): Promise<{ messageId: string; role: AgentMessageSearchResult['role']; snippet: string; matchStart: number } | null> {
-  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const stream = createReadStream(filePath, {
+    encoding: 'utf-8',
+    ...(maxBytes ? { end: maxBytes - 1 } : {}),
+  })
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
 
   try {
@@ -1815,17 +1826,40 @@ async function findFirstMatchInAgentJsonl(
   }
 }
 
-async function findSessionMessageSnippet(sessionId: string, query: string): Promise<string | undefined> {
+async function findSessionMessageSnippet(
+  sessionId: string,
+  query: string,
+  maxBytes?: number,
+): Promise<string | undefined> {
   if (!query || query.length < 2) return undefined
 
   const filePath = getAgentSessionMessagesPath(sessionId)
   if (!existsSync(filePath)) return undefined
 
   try {
-    const hit = await findFirstMatchInAgentJsonl(filePath, query.toLowerCase(), query.length)
+    const hit = await findFirstMatchInAgentJsonl(filePath, query.toLowerCase(), query.length, maxBytes)
     return hit?.snippet
   } catch {
     return undefined
+  }
+}
+
+function createSessionReferenceSearchResult(
+  session: AgentSessionMeta,
+  workspacesById: ReadonlyMap<string, { name: string; slug: string }>,
+  fields: Pick<AgentSessionReferenceSearchResult, 'matchSource' | 'snippet'>,
+): AgentSessionReferenceSearchResult {
+  const workspace = session.workspaceId ? workspacesById.get(session.workspaceId) : undefined
+
+  return {
+    sessionId: session.id,
+    title: session.title,
+    ...(workspace ? {
+      workspaceName: workspace.name,
+      workspaceSlug: workspace.slug,
+    } : {}),
+    updatedAt: session.updatedAt,
+    ...fields,
   }
 }
 
@@ -1841,6 +1875,9 @@ export async function searchAgentSessionReferences(input: AgentSessionReferenceS
   const queryLower = query.toLowerCase()
   const requestedLimit = Number.isFinite(input?.limit) ? input.limit! : 20
   const limit = Math.min(Math.max(requestedLimit, 1), MAX_SESSION_REFERENCE_LIMIT)
+  const workspacesById = new Map(
+    listAgentWorkspaces().map((workspace) => [workspace.id, workspace]),
+  )
 
   const candidates = listAgentSessions()
     .filter((session) => !workspaceId || session.workspaceId === workspaceId)
@@ -1848,39 +1885,39 @@ export async function searchAgentSessionReferences(input: AgentSessionReferenceS
     .filter((session) => session.id !== input?.excludeSessionId)
 
   const results: AgentSessionReferenceSearchResult[] = []
+  let bodyScanCount = 0
 
   for (const session of candidates) {
     if (results.length >= limit) break
 
     if (!queryLower) {
-      results.push({
-        sessionId: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
+      results.push(createSessionReferenceSearchResult(session, workspacesById, {
         matchSource: 'recent',
-      })
+      }))
       continue
     }
 
     if (session.title.toLowerCase().includes(queryLower)) {
-      results.push({
-        sessionId: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
+      results.push(createSessionReferenceSearchResult(session, workspacesById, {
         matchSource: 'title',
-      })
+      }))
       continue
     }
 
-    const snippet = await findSessionMessageSnippet(session.id, query)
+    // 即使正文预算耗尽，仍继续遍历，确保较旧但标题命中的会话不会漏掉。
+    if (bodyScanCount >= MAX_SESSION_REFERENCE_BODY_SCANS) continue
+    bodyScanCount += 1
+
+    const snippet = await findSessionMessageSnippet(
+      session.id,
+      query,
+      MAX_SESSION_REFERENCE_BODY_BYTES_PER_FILE,
+    )
     if (snippet) {
-      results.push({
-        sessionId: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
+      results.push(createSessionReferenceSearchResult(session, workspacesById, {
         snippet,
         matchSource: 'message',
-      })
+      }))
     }
   }
 

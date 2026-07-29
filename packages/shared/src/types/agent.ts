@@ -767,6 +767,10 @@ export interface AgentSessionReferenceSearchResult {
   sessionId: string
   /** 会话标题 */
   title: string
+  /** 来源工作区的显示名称；遗留或已删除的工作区可为空 */
+  workspaceName?: string
+  /** 来源工作区的 URL-safe slug；用于同名工作区消歧 */
+  workspaceSlug?: string
   /** 更新时间戳 */
   updatedAt: number
   /** 命中消息片段；标题命中时可为空 */

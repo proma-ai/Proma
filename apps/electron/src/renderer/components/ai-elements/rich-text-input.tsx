@@ -27,6 +27,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
+import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createAgentCommandSuggestion, type AgentCommandActions } from '@/components/agent/agent-command-suggestion'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
@@ -319,10 +320,15 @@ export function RichTextInput({
           },
         }).configure({
           HTMLAttributes: {},
+          renderText({ node, suggestion }) {
+            const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
+            const label = node.attrs.label ?? node.attrs.id
+            return `${char}${label}`
+          },
           renderHTML({ node, suggestion }) {
-            const char = node.attrs.commandMenuMention
-              ? node.attrs.mentionSuggestionChar ?? '@'
-              : suggestion?.char ?? node.attrs.mentionSuggestionChar ?? '@'
+            // 旧草稿中的节点也会带有原始字符。不能在未匹配到旧 suggestion 时
+            // 回退到唯一注册的 `/` suggestion，否则 @/#/& 会被重写为 /skill。
+            const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
             const label = node.attrs.label ?? node.attrs.id
             let chipClass = 'mention-chip'
             if (char === '/') chipClass = 'skill-mention-chip'

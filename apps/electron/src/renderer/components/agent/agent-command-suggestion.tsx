@@ -27,8 +27,11 @@ import {
 } from "./mention-popup-utils";
 import {
   filterCommandMenuItems,
+  formatSessionReferenceDescription,
+  getCommandMenuChildQuery,
   getNextCommandMenuIndex,
   shouldOpenSlashCommandMenu,
+  shouldOpenSlashCommandMenuInContext,
 } from "./agent-command-menu-state";
 
 type CommandPage = "root" | "skills" | "tools" | "sessions" | "files";
@@ -193,6 +196,16 @@ const AgentCommandMenu = React.forwardRef<
   const [fileResult, setFileResult] =
     React.useState<FileSearchResult>(EMPTY_FILE_RESULT);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState(query);
+  const [pageEntryQuery, setPageEntryQuery] = React.useState("");
+  const [debouncedFileSearchQuery, setDebouncedFileSearchQuery] =
+    React.useState("");
+  const pageQuery = page === "root"
+    ? query
+    : getCommandMenuChildQuery(query, pageEntryQuery);
+  const fileSearchQuery = page === "files" ? pageQuery.trim() : "";
+  const activeFileSearchQuery = page === "files" && fileSearchQuery
+    ? debouncedFileSearchQuery
+    : "";
   const fileListRef = React.useRef<FileMentionRef>(null);
   const menuScrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -204,16 +217,36 @@ const AgentCommandMenu = React.forwardRef<
     if (page !== "sessions") return;
 
     const timer = window.setTimeout(() => {
-      setSessionSearchQuery(query.trim());
+      setSessionSearchQuery(pageQuery.trim());
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [page, query]);
+  }, [page, pageQuery]);
+
+  React.useEffect(() => {
+    if (page !== "files") return;
+    if (!fileSearchQuery) {
+      setDebouncedFileSearchQuery("");
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setDebouncedFileSearchQuery(fileSearchQuery);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [page, fileSearchQuery]);
 
   React.useEffect(() => {
     let disposed = false;
+    let retryTimer: number | null = null;
+
+    if (page === "root") {
+      setLoading(false);
+      return () => {
+        disposed = true;
+      };
+    }
 
     const loadPage = async (): Promise<void> => {
-      if (page === "root") return;
       setLoading(true);
       try {
         if (page === "skills" || page === "tools") {
@@ -257,19 +290,27 @@ const AgentCommandMenu = React.forwardRef<
             result.map((session: AgentSessionReferenceSearchResult) => ({
               id: session.sessionId,
               label: session.title,
-              description: session.snippet,
+              description: formatSessionReferenceDescription(session),
             })),
           );
           return;
         }
 
         const workspacePath = workspacePathRef.current;
-        if (!workspacePath) return;
+        if (!workspacePath) {
+          // sessionPath 在冷启动时异步到达。文件菜单仍打开时以低频、可清理的
+          // 定时器等待它，避免有限重试耗尽后永久显示空列表。
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            if (!disposed) void loadPage();
+          }, 250);
+          return;
+        }
         const attachedDirs = attachedDirsRef.current ?? [];
         const sessionAttachedDirs = sessionAttachedDirsRef.current ?? [];
         const result = await window.electronAPI.searchWorkspaceFiles(
           workspacePath,
-          "",
+          activeFileSearchQuery,
           200,
           attachedDirs.length > 0 ? attachedDirs : undefined,
           sessionAttachedDirs.length > 0 ? sessionAttachedDirs : undefined,
@@ -284,17 +325,19 @@ const AgentCommandMenu = React.forwardRef<
           setFileResult(EMPTY_FILE_RESULT);
         }
       } finally {
-        if (!disposed) setLoading(false);
+        if (!disposed && retryTimer === null) setLoading(false);
       }
     };
 
     void loadPage();
     return () => {
       disposed = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [
     page,
     sessionSearchQuery,
+    activeFileSearchQuery,
     workspacePathRef,
     currentSessionIdRef,
     workspaceSlugRef,
@@ -304,24 +347,25 @@ const AgentCommandMenu = React.forwardRef<
 
   const rootItems = React.useMemo(
     () => filterCommandMenuItems(getRootMenuItems(), query),
-    [actionsRef, query],
+    [query],
   );
   const referenceItems = React.useMemo(() => {
     const source =
       page === "skills" ? skills : page === "tools" ? tools : sessions;
-    return filterCommandMenuItems(source, query);
-  }, [page, skills, tools, sessions, query]);
+    return filterCommandMenuItems(source, pageQuery);
+  }, [page, skills, tools, sessions, pageQuery]);
 
   const selectRootItem = React.useCallback(
     (item: RootMenuItem): void => {
       if (item.disabled) return;
       if (item.kind === "page") {
+        setPageEntryQuery(query);
         setPage(item.id as CommandPage);
         return;
       }
       onRunAction(item.id as CommandAction);
     },
-    [onRunAction],
+    [onRunAction, query],
   );
 
   const selectReferenceItem = React.useCallback(
@@ -338,7 +382,13 @@ const AgentCommandMenu = React.forwardRef<
     () => ({
       onKeyDown: ({ event }) => {
         if (page === "files") {
-          return fileListRef.current?.onKeyDown({ event }) ?? false;
+          const handled = fileListRef.current?.onKeyDown({ event }) ?? false;
+          if (!handled && event.key === "ArrowLeft") {
+            event.preventDefault();
+            setPage("root");
+            return true;
+          }
+          return handled;
         }
 
         const items = page === "root" ? rootItems : referenceItems;
@@ -405,19 +455,29 @@ const AgentCommandMenu = React.forwardRef<
 
   return (
     <div
-      className="w-[min(25rem,calc(100vw-2rem))] overflow-hidden rounded-lg bg-popover shadow-xl"
+      className="w-[min(21rem,calc(100vw-2rem))] overflow-hidden rounded-lg bg-popover shadow-lg"
       role="dialog"
       aria-label="Agent 命令菜单"
     >
-      <div className="flex items-center gap-2 border-b border-border/50 bg-muted/40 px-3 py-2">
+      <div className="flex items-center gap-1.5 border-b border-border/50 bg-muted/40 px-2.5 py-1.5">
         {page !== "root" && (
-          <ChevronLeft className="size-3.5 text-muted-foreground" />
+          <button
+            type="button"
+            aria-label="返回命令根菜单"
+            className="-my-2 -ml-2 flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setPage("root");
+            }}
+          >
+            <ChevronLeft className="size-3.5" />
+          </button>
         )}
-        <span className="text-xs font-semibold text-foreground">
+        <span className="text-[11px] font-semibold tracking-[0.01em] text-foreground">
           {menuTitle(page)}
         </span>
         {page === "skills" && (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[10px] text-muted-foreground">
             继续输入以搜索
           </span>
         )}
@@ -425,7 +485,7 @@ const AgentCommandMenu = React.forwardRef<
           <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
         )}
       </div>
-      <div ref={menuScrollRef} className="h-[22rem] overflow-y-auto p-1.5">
+      <div ref={menuScrollRef} className="h-[17rem] overflow-y-auto p-1">
         {isFilePage ? (
           hasItems ? (
             <FileMentionList
@@ -465,7 +525,7 @@ const AgentCommandMenu = React.forwardRef<
                     data-command-menu-index={index}
                     disabled={disabled}
                     className={cn(
-                      "flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-colors",
+                      "flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors",
                       selected && "bg-accent text-accent-foreground",
                       !selected && !disabled && "hover:bg-accent/60",
                       disabled && "cursor-not-allowed opacity-45",
@@ -477,19 +537,19 @@ const AgentCommandMenu = React.forwardRef<
                       else selectReferenceItem(item as ReferenceMenuItem);
                     }}
                   >
-                    <Icon className="size-4 shrink-0 text-primary" />
+                    <Icon className="size-3.5 shrink-0 text-primary" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
+                      <span className="block truncate text-[13px] font-medium leading-4">
                         {item.label}
                       </span>
                       {item.description && (
-                        <span className="block truncate text-xs text-muted-foreground">
+                        <span className="block truncate text-[11px] leading-4 text-muted-foreground">
                           {item.description}
                         </span>
                       )}
                     </span>
                     {page === "root" && rootItem.kind === "page" && (
-                      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                     )}
                   </button>
                 );
@@ -500,7 +560,7 @@ const AgentCommandMenu = React.forwardRef<
           <MenuEmpty text={menuEmptyText(page, loading)} />
         )}
       </div>
-      <div className="border-t border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground">
+      <div className="border-t border-border/50 px-2.5 py-1 text-[10px] text-muted-foreground">
         {menuHint(page)}
       </div>
     </div>
@@ -509,7 +569,7 @@ const AgentCommandMenu = React.forwardRef<
 
 function MenuEmpty({ text }: { text: string }): React.ReactElement {
   return (
-    <div className="px-2.5 py-5 text-center text-xs text-muted-foreground">
+    <div className="px-2 py-4 text-center text-[11px] text-muted-foreground">
       {text}
     </div>
   );
@@ -530,9 +590,21 @@ export function createAgentCommandSuggestion(
   return {
     char: "/",
     allowSpaces: false,
+    // 允许任意前缀，让之前的普通 `/`、中文无空格正文和 mention 节点
+    // 都不会阻塞当前位置的 `/`；shouldShow 会再排除路径和 URL 片段。
     allowedPrefixes: null,
-    items: () => [{ id: "agent-command-root" }],
-    allow: ({ state }) => shouldOpenSlashCommandMenu(state.doc.textContent),
+    shouldShow: ({ range, text, transaction }) => {
+      const prefix = transaction.doc.textBetween(
+        Math.max(0, range.from - 512),
+        range.from,
+        "\n",
+        "\n",
+      );
+      return shouldOpenSlashCommandMenuInContext(prefix, text);
+    },
+    items: ({ query }) => shouldOpenSlashCommandMenu(`/${query}`)
+      ? [{ id: "agent-command-root" }]
+      : [],
     command: ({ editor, range, props }) => {
       editor
         .chain()
