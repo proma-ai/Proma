@@ -22,6 +22,11 @@ export function resolveCodexTitleSource(hasPromaAuthToken: boolean): 'proma' | '
   return hasPromaAuthToken ? 'proma' : 'fallback'
 }
 
+/** 标题模型无结果时，哪些渠道应退回首条用户消息而不是保留默认会话标题。 */
+export function shouldFallbackToInputTitle(provider: string, generatedTitle: string | null): boolean {
+  return !generatedTitle && (provider === 'openai-codex' || provider === 'opencode-go-openai')
+}
+
 /**
  * 无法调用标题模型时，基于首条用户消息生成一个稳定兜底标题。
  */

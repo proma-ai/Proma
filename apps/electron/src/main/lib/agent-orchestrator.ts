@@ -88,7 +88,7 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { CodexTitleRequestCoordinator } from './codex-title-request-coordinator'
-import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, shouldFallbackToInputTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
 
@@ -742,7 +742,7 @@ export class AgentOrchestrator {
       const result = title ? sanitizeGeneratedTitle(title) : null
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
-        return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
+        return shouldFallbackToInputTitle(channel.provider, result) ? createFallbackTitle(userMessage) : null
       }
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
