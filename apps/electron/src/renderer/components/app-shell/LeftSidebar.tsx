@@ -4271,7 +4271,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
             }}
             className={cn(
               'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
-              isAutomationGroup ? 'pr-1' : (isCurrent ? 'pr-32' : 'pr-12'),
+              isAutomationGroup ? 'pr-1' : 'pr-12',
               isCurrent
                 ? 'agent-project-item-current text-foreground'
                 : 'text-foreground/65 hover:text-foreground/88',
@@ -4316,13 +4316,13 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           </button>
         )}
 
-        {isCurrent && !isAutomationGroup && newSessionShortcutLabel && !projectMenuOpen && (
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-medium text-foreground/35 transition-opacity group-hover/project:opacity-0"
-          >
-            {newSessionShortcutLabel} 新建项目内会话
-          </span>
+        {isCurrent && !isAutomationGroup && !projectMenuOpen && (
+          <ShortcutKeycaps
+            shortcutId="new-session"
+            className="pointer-events-none mr-6 !flex-nowrap flex-shrink-0 opacity-65 transition-opacity group-hover/project:opacity-0"
+            keycapClassName="h-4 min-w-4 rounded-[3px] border-border/60 px-0.5 text-[9px] shadow-none"
+            separatorClassName="text-[8px]"
+          />
         )}
 
         {!isAutomationGroup && (
