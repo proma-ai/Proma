@@ -34,6 +34,11 @@ export function buildSessionMirrorGroupName(session: Pick<AgentSessionMeta, 'id'
   return truncateGroupName(`Proma - ${title}`)
 }
 
+export function normalizeSessionMirrorUserOpenId(openId: string | null | undefined): string | undefined {
+  const normalized = openId?.trim()
+  return normalized && normalized !== 'unknown' ? normalized : undefined
+}
+
 function truncateGroupName(name: string): string {
   return name.length > 60 ? `${name.slice(0, 57)}...` : name
 }

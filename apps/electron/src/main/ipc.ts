@@ -2041,7 +2041,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.FORK_SESSION,
     async (_, input: ForkSessionInput): Promise<AgentSessionMeta> => {
-      return forkAgentSession(input)
+      const session = await forkAgentSession(input)
+      // Fork 直接在 session manager 内创建元数据，绕过 CREATE_SESSION 的镜像生命周期。
+      // 将它作为新的桌面会话处理，确保 Pi fork 也会立即获得可双向续聊的飞书群。
+      feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
+        console.error('[飞书 Session 镜像] 分叉会话建群失败:', error)
+      })
+      return session
     }
   )
 
@@ -3859,6 +3865,7 @@ export function registerIpcHandlers(): void {
     FEISHU_IPC_CHANNELS.SAVE_BOT_CONFIG,
     async (_, input: import('@proma/shared').FeishuBotConfigInput) => {
       const saved = saveFeishuBotConfig(input)
+      feishuBridgeManager.setSessionMirrorOperator(saved.id, input.operatorOpenId)
       // 配置变更后自动重启或停止（不阻塞保存结果）
       if (saved.enabled && saved.appId && saved.appSecret) {
         feishuBridgeManager.restartBot(saved.id).catch((err) => {

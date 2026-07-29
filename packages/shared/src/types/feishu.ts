@@ -74,6 +74,8 @@ export interface FeishuBotConfigInput {
   defaultChannelId?: string
   /** 默认模型 ID */
   defaultModelId?: string
+  /** 扫码创建此应用的当前组织用户 open_id，仅用于初始化 Session 镜像目标。 */
+  operatorOpenId?: string
 }
 
 // ===== Session 镜像 =====
