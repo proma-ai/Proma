@@ -89,7 +89,7 @@ import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { CodexTitleRequestCoordinator } from './codex-title-request-coordinator'
-import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
 
@@ -666,34 +666,18 @@ export class AgentOrchestrator {
       }
 
       if (channel.provider === 'openai-codex') {
-        const fallbackTitle = createFallbackTitle(userMessage)
-        try {
-          const [credentials, proxyUrl] = await Promise.all([
-            resolveCodexOAuthCredentials(channelId),
-            getEffectiveProxyUrl(),
-          ])
-          if (signal?.aborted) return null
-          const generatedTitle = await generateCodexTitle({
-            modelId,
-            prompt: TITLE_PROMPT + userMessage,
-            credentials,
-            proxyUrl,
-            signal,
-            onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
-          })
-          if (signal?.aborted) return null
-          const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
-          if (title) return title
-          console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
-        } catch (error) {
-          if (signal?.aborted) return null
-          console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
+        // 商业版：Codex OAuth 渠道标题走 Proma 轻量模型（已登录 Cloud 时），
+        // 不使用 Codex Responses 协议，避免占用订阅请求通道且不稳定的问题。
+        // 未登录 Cloud 时直接使用本地兜底标题。
+        const titleSource = resolveCodexTitleSource(!!getAuthToken())
+        if (titleSource === 'fallback') {
+          return createFallbackTitle(userMessage)
         }
-        return fallbackTitle
+        // titleSource === 'proma' → 使用下方 Proma 轻量标题模型路径
       }
 
-      // Proma 官方渠道使用独立的轻量标题模型。Codex OAuth 已在上方使用原生标题路径处理。
-      const usePromaTitleModel = channel.provider === 'proma'
+      // Proma 官方渠道和已登录 Cloud 的 Codex 渠道使用独立的轻量标题模型。
+      const usePromaTitleModel = channel.provider === 'proma' || channel.provider === 'openai-codex'
       let apiKey: string
       let baseUrl: string
       if (usePromaTitleModel) {
