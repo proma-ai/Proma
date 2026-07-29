@@ -151,7 +151,6 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
   )
   const revealTarget = revealForThisRoot?.path ?? null
   const revealTs = revealForThisRoot?.ts ?? 0
-  const revealSelect = revealForThisRoot?.select ?? false
 
   // ===== autoReveal 带 select 标记时，将目标文件加入选中态 =====
   const consumedSelectTsRef = React.useRef(0)
@@ -386,7 +385,6 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
           revealAncestors={revealAncestors}
           revealTarget={revealTarget}
           revealTs={revealTs}
-          revealSelect={revealSelect}
           recentlyModifiedSet={recentlyModifiedSet}
           onSelect={handleSelect}
           onShowInFolder={handleShowInFolder}
@@ -490,13 +488,10 @@ interface FileTreeItemProps {
   refreshVersion: number
   /** 自动定位：祖先目录路径集合（命中则自动展开） */
   revealAncestors: Set<string>
-  /** 自动定位：目标文件路径（命中则滚动 + 高亮脉冲） */
+  /** 自动定位：目标文件路径 */
   revealTarget: string | null
-  /** 自动定位脉冲时间戳，变化时重新触发 */
+  /** 自动定位时间戳，变化时重新触发 */
   revealTs: number
-  /** 本次 reveal 是否带 select 标记（来源于用户搜索点击）；为 true 时跳过 flash 高亮，避免覆盖选中色 */
-  revealSelect: boolean
-  /** 最近修改的路径集合（命中则在行左侧显示竖条标记） */
   recentlyModifiedSet: Set<string>
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
   onShowInFolder: (entry: FileEntry) => void
@@ -525,7 +520,6 @@ function FileTreeItem({
   revealAncestors,
   revealTarget,
   revealTs,
-  revealSelect,
   recentlyModifiedSet,
   onSelect,
   onShowInFolder,
@@ -556,7 +550,7 @@ function FileTreeItem({
     }
   }, [refreshVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ===== Agent 自动定位：祖先目录自动展开 + 目标行滚动到中心 + 0.8s 高亮脉冲 =====
+  // ===== 文件搜索 reveal：祖先目录自动展开 + 目标行滚动到中心 =====
   React.useEffect(() => {
     if (revealTs === 0) return
 
@@ -969,7 +963,6 @@ function FileTreeItem({
               revealAncestors={revealAncestors}
               revealTarget={revealTarget}
               revealTs={revealTs}
-              revealSelect={revealSelect}
               recentlyModifiedSet={recentlyModifiedSet}
               onSelect={onSelect}
               onShowInFolder={onShowInFolder}
