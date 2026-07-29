@@ -265,6 +265,8 @@ export interface AgentPendingPrompt {
   sessionId: string
   message: string
   additionalDirectories?: string[]
+  /** 自动发送时注入的 Todo 引用，确保 Agent 读取最新记录而非仅依赖提示文本。 */
+  mentionedTodoIds?: string[]
 }
 
 // ===== Atoms =====

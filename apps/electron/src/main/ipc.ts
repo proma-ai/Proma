@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, QUICK_TASK_IPC_CHANNELS, VOICE_DICTATION_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   QuickTaskSubmitInput,
@@ -122,6 +122,9 @@ import type {
   PlanningReminder,
   ActivePlanningReminder,
   CreateTodoInput,
+  StartTodoAgentInput,
+  StartTodoAgentResult,
+  TodoAgentSessionActivation,
   UpdateTodoInput,
   CreateCalendarEventInput,
   UpdateCalendarEventInput,
@@ -195,6 +198,7 @@ import {
 import { runAutomationNow, broadcastChanged as broadcastAutomationsChanged } from './lib/automation-scheduler'
 import {
   listTodos,
+  getTodo,
   createTodo,
   updateTodo,
   deleteTodo,
@@ -4579,6 +4583,63 @@ export function registerIpcHandlers(): void {
     const todo = createTodo(input)
     broadcastPlanningChanged(['todos', 'reminders'])
     return todo
+  })
+  // Todo 项目归属更新与 Agent 会话创建必须在一次主进程同步处理内完成，
+  // 避免多个 Planning 窗口之间在校验、更新和创建会话的间隙发生 TOCTOU。
+  ipcMain.handle(PLANNING_IPC_CHANNELS.START_TODO_AGENT, (event, input: StartTodoAgentInput): StartTodoAgentResult => {
+    if (!input || typeof input.todoId !== 'string' || !input.todoId.trim()) throw new Error('Todo id 必填')
+    if (typeof input.workspaceId !== 'string' || !input.workspaceId.trim()) throw new Error('项目 id 必填')
+    if (!isPlanningTimestamp(input.expectedUpdatedAt)) throw new Error('Todo expectedUpdatedAt 非法')
+    if (typeof input.channelId !== 'string' || !input.channelId.trim()) throw new Error('Agent 渠道必填')
+    if (input.modelId !== undefined && (typeof input.modelId !== 'string' || !input.modelId.trim())) throw new Error('Agent 模型非法')
+    if (!getAgentWorkspace(input.workspaceId)) throw new Error('所选项目已不可用，请重新选择')
+
+    const existing = getTodo(input.todoId)
+    if (!existing) throw new Error('Todo 不存在')
+    if (existing.updatedAt !== input.expectedUpdatedAt) throw new Error(PLANNING_CONFLICT_ERROR)
+
+    const todo = existing.workspaceId === input.workspaceId
+      ? existing
+      : updateTodo({
+        id: existing.id,
+        workspaceId: input.workspaceId,
+        expectedUpdatedAt: existing.updatedAt,
+      })
+    if (!todo) throw new Error('Todo 不存在')
+    if (todo !== existing) broadcastPlanningChanged(['todos', 'reminders'])
+
+    const session = createAgentSession(
+      `处理：${todo.title}`,
+      input.channelId,
+      input.workspaceId,
+      input.modelId,
+      getSettings().agentRuntime ?? 'pi',
+    )
+    // 对齐普通 Agent 会话创建入口；镜像初始化异步执行，不打断上面的原子状态转换。
+    feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
+      console.error('[飞书 Session 镜像] Todo 启动会话建群失败:', error)
+    })
+
+    // 独立规划窗口没有 AgentView，需由主窗口接手打开会话并消费自动启动提示。
+    try {
+      const sourceWindowKind = new URL(event.sender.getURL()).searchParams.get('window')
+      if (sourceWindowKind === 'planning') {
+        const mainWindow = BrowserWindow.getAllWindows().find((win) => {
+          if (win.isDestroyed() || win.webContents.id === event.sender.id) return false
+          return new URL(win.webContents.getURL()).searchParams.get('window') === null
+        })
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
+          const activation: TodoAgentSessionActivation = { todo, session }
+          mainWindow.webContents.send(PLANNING_IPC_CHANNELS.TODO_AGENT_SESSION_READY, activation)
+        }
+      }
+    } catch (error) {
+      console.error('[任务/日程] 转交 Todo Agent 会话到主窗口失败:', error)
+    }
+    return { todo, session }
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.UPDATE_TODO, async (_, input: UpdateTodoInput): Promise<Todo | undefined> => {
     if (!input || typeof input.id !== 'string' || !input.id) throw new Error('Todo id 必填')

@@ -19,6 +19,7 @@ import {
   allPendingAskUserRequestsAtom,
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
+  agentPendingPromptAtom,
   backgroundTasksAtomFamily,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
@@ -69,6 +70,7 @@ import {
   notifyAgentCompletion,
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
+import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -1278,7 +1280,28 @@ export function useGlobalAgentListeners(): void {
       }
     )
 
-    // ===== 4. 标题更新 =====
+    // ===== 4. 独立规划窗口 → 主窗口 Todo Agent 接力 =====
+    const cleanupTodoAgentSessionReady = window.electronAPI.onTodoAgentSessionReady(({ todo, session }) => {
+      unstable_batchedUpdates(() => {
+        store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, session))
+        const result = openTab(store.get(tabsAtom), { type: 'agent', sessionId: session.id, title: session.title })
+        store.set(tabsAtom, result.tabs)
+        store.set(activeTabIdAtom, result.activeTabId)
+        store.set(appModeAtom, 'agent')
+        store.set(currentAgentSessionIdAtom, session.id)
+        if (session.workspaceId) {
+          store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
+          void window.electronAPI.updateSettings({ agentWorkspaceId: session.workspaceId }).catch(console.error)
+        }
+        store.set(agentPendingPromptAtom, {
+          sessionId: session.id,
+          message: buildTodoAgentPrompt(todo.id, session.agentRuntime === 'pi'),
+          mentionedTodoIds: [todo.id],
+        })
+      })
+    })
+
+    // ===== 5. 标题更新 =====
     const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(({ sessionId, title }) => {
       // 先使用事件 payload 立即同步标签页，避免依赖会话列表旧快照比较。
       store.set(tabsAtom, (tabs) => updateTabTitle(tabs, sessionId, title))
@@ -1383,6 +1406,7 @@ export function useGlobalAgentListeners(): void {
       cleanupEvent()
       cleanupComplete()
       cleanupError()
+      cleanupTodoAgentSessionReady()
       cleanupTitleUpdated()
       clearInterval(pruneTimer)
       window.removeEventListener('focus', onWindowFocus)
