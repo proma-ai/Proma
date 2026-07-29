@@ -326,7 +326,7 @@ function AgentCoreChips({ provider }: Pick<Channel, 'provider'>): React.ReactEle
         <Badge
           variant="outline"
           className="px-1.5 py-0 text-[10px] font-medium leading-5"
-          title="Claude Agent SDK"
+          title="Claude Agent SDK（新功能不再支持，将于 8 月中旬彻底下线）"
         >
           Claude
         </Badge>
@@ -334,7 +334,7 @@ function AgentCoreChips({ provider }: Pick<Channel, 'provider'>): React.ReactEle
       <Badge
         variant="outline"
         className="px-1.5 py-0 text-[10px] font-medium leading-5"
-        title="Pi Agent SDK"
+        title="Pi Agent SDK（推荐，新功能仅在 Pi 上提供）"
       >
         Pi
       </Badge>

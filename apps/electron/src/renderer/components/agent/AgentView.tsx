@@ -374,9 +374,32 @@ function AgentThinkingPopover({ agentThinking, onToggle, codexConfig }: AgentThi
   )
 }
 
-const AGENT_RUNTIME_OPTIONS: Array<{ value: AgentRuntime; label: string; description: string }> = [
-  { value: 'claude', label: 'Claude', description: '使用 Claude Agent SDK' },
-  { value: 'pi', label: 'Pi', description: '使用 Pi Agent SDK' },
+interface AgentRuntimeOption {
+  value: AgentRuntime
+  label: string
+  description: string
+  badge?: string
+  badgeTone?: 'recommended' | 'deprecated'
+  notice?: string
+}
+
+// Pi 为默认与推荐内核，Claude Agent SDK 计划于 2026 年 8 月中旬彻底下线
+const AGENT_RUNTIME_OPTIONS: AgentRuntimeOption[] = [
+  {
+    value: 'pi',
+    label: 'Pi',
+    description: 'Pi Agent SDK，Proma 默认内核，新功能仅在 Pi 上提供',
+    badge: '推荐',
+    badgeTone: 'recommended',
+  },
+  {
+    value: 'claude',
+    label: 'Claude',
+    description: 'Claude Agent SDK',
+    badge: '即将下线',
+    badgeTone: 'deprecated',
+    notice: '新功能已不再支持，将于 8 月中旬彻底下线，建议尽快切换到 Pi',
+  },
 ]
 
 interface AgentRuntimeSelectorProps {
@@ -420,8 +443,9 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[220px]">
+        <TooltipContent side="top" className="max-w-[240px]">
           <p className="font-medium">{current.description}</p>
+          {current.notice && <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{current.notice}</p>}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {disabled ? 'Agent 运行中，完成后可切换' : '切换当前会话下一轮使用的内核'}
           </p>
@@ -431,7 +455,7 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
         side="top"
         align="start"
         sideOffset={8}
-        className="w-[180px] p-1.5"
+        className="w-[248px] p-1.5"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col gap-1">
@@ -452,12 +476,31 @@ function AgentRuntimeSelector({ runtime, disabled = false, onChange }: AgentRunt
                 <div className="flex w-full items-center gap-2">
                   <Box className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium">{option.label}</div>
-                    <div className="mt-0.5 truncate text-[11px] font-normal text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium">{option.label}</span>
+                      {option.badge && (
+                        <span
+                          className={cn(
+                            'rounded-sm px-1 py-px text-[10px] font-medium leading-tight',
+                            option.badgeTone === 'deprecated'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              : 'bg-primary/10 text-primary'
+                          )}
+                        >
+                          {option.badge}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 whitespace-normal text-[11px] font-normal leading-snug text-muted-foreground">
                       {option.description}
                     </div>
+                    {option.notice && (
+                      <div className="mt-0.5 whitespace-normal text-[11px] font-normal leading-snug text-amber-600 dark:text-amber-400">
+                        {option.notice}
+                      </div>
+                    )}
                   </div>
-                  {active && <Check className="size-3.5 shrink-0" />}
+                  {active && <Check className="size-3.5 shrink-0 self-start" />}
                 </div>
               </Button>
             )
