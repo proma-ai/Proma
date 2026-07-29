@@ -16,6 +16,8 @@ export interface HeadlessAgentRunCallbacks {
   onComplete: (messages?: AgentMessage[]) => void
   onTitleUpdated: (title: string) => void
   source?: AgentExternalRunSource
+  /** 发起此次 headless 运行的可见会话，用于将事件路由回其 renderer。 */
+  originSessionId?: string
 }
 
 export type HeadlessAgentRunner = (

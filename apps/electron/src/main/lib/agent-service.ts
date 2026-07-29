@@ -37,6 +37,7 @@ import { getAgentSessionWorkspacePath } from './config-paths'
 import { getAgentWorkspaceBySlug, getLocalProjectRootStatus, getProjectFilesPath } from './agent-workspace-manager'
 import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
+import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
 
 // ===== 实例创建 =====
@@ -223,10 +224,15 @@ export async function runAgentHeadless(
     onComplete: (messages?: AgentMessage[]) => void
     onTitleUpdated: (title: string) => void
     source?: AgentExternalRunSource
+    originSessionId?: string
   },
 ): Promise<void> {
-  // 尝试注册主窗口 webContents，让流式事件同步推送到桌面端
-  const wc = getMainRendererWebContents()
+  // 委派子会话优先回到父会话所在 renderer，外部无界面运行才回退任意主窗口。
+  const wc = getHeadlessAgentRunTarget(
+    sessionWebContents,
+    callbacks.originSessionId,
+    getMainRendererWebContents,
+  )
   const runInput: AgentSendInput = input.startedAt != null ? input : { ...input, startedAt: Date.now() }
   const startedAt = runInput.startedAt!
   if (wc) {
@@ -285,6 +291,7 @@ export async function runAgentHeadless(
             workspaceId: runInput.workspaceId ?? session?.workspaceId,
             modelId: runInput.modelId,
             startedAt: persistedStartedAt,
+            ...(session ? { session } : {}),
           },
         })
       },

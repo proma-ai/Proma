@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { AgentSessionMeta } from '@proma/shared'
-import { buildExternalAgentRunActivation } from './external-agent-run'
+import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from './external-agent-run'
 import type { ExternalAgentRunTab } from './external-agent-run'
 
 const session: AgentSessionMeta = {
@@ -77,6 +77,44 @@ describe('外部 Agent 运行激活', () => {
     expect(result.tabs[0]!.title).toBe('新 Agent 会话')
     expect(result.activeTabId).toBe('unknown-session')
     expect(result.workspaceId).toBeUndefined()
+  })
+
+  test('Given 事件携带完整会话元数据 When 本地列表尚未刷新 Then 立即使用该元数据激活流状态', () => {
+    const delegatedSession: AgentSessionMeta = {
+      ...session,
+      id: 'delegated-agent',
+      parentSessionId: 'parent-agent',
+      sourceDelegationId: 'delegation-1',
+    }
+
+    const result = buildExternalAgentRunActivation({
+      tabs: [],
+      sessions: [delegatedSession],
+      sessionId: delegatedSession.id,
+      startedAt: 350,
+    })
+
+    expect(result.title).toBe(delegatedSession.title)
+    expect(result.workspaceId).toBe(delegatedSession.workspaceId)
+    expect(result.streamState.running).toBeTrue()
+  })
+
+  test('Given the same run has already completed When a delayed start event arrives Then keep it terminal', () => {
+    expect(shouldActivateExternalAgentRun({
+      running: false,
+      content: 'completed',
+      toolActivities: [],
+      startedAt: 500,
+    }, 500)).toBeFalse()
+  })
+
+  test('Given a newer run is active When an older start event arrives Then ignore the old event', () => {
+    expect(shouldActivateExternalAgentRun({
+      running: true,
+      content: 'newer run',
+      toolActivities: [],
+      startedAt: 700,
+    }, 600)).toBeFalse()
   })
 
   test('Given 无 currentStreamState When 激活 Then streamState 使用空默认值', () => {
