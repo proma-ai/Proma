@@ -13,6 +13,7 @@ import { useAtom } from 'jotai'
 import { RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { Switch } from '@/components/ui/switch'
 import {
   Tooltip,
@@ -32,25 +33,6 @@ import {
   updateShortcutOverrides,
   isMac,
 } from '@/lib/shortcut-registry'
-
-// ===== 快捷键展示组件 =====
-
-function ShortcutKeycaps({ accelerator }: { accelerator: string }): React.ReactElement {
-  const keys = accelerator.split('+').map((key) => key.trim()).filter(Boolean)
-
-  return (
-    <span className="inline-flex flex-wrap items-center justify-end gap-1" aria-label={getAcceleratorDisplay(accelerator)}>
-      {keys.map((key, index) => (
-        <React.Fragment key={`${key}-${index}`}>
-          {index > 0 && <span aria-hidden="true" className="text-[11px] font-medium text-muted-foreground/70">+</span>}
-          <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-[4px] border border-border/70 bg-background px-1.5 font-[system-ui] text-[12px] font-medium leading-none text-foreground shadow-sm">
-            {getAcceleratorDisplay(key)}
-          </kbd>
-        </React.Fragment>
-      ))}
-    </span>
-  )
-}
 
 // ===== 快捷键录制组件 =====
 

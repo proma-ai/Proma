@@ -95,6 +95,7 @@ import {
   type SessionMiniMapType,
 } from '@/components/session-preview/SessionMiniMapPopover'
 import { detectIsMac } from '@/lib/platform'
+import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   collectAgentSessionTreeIds,
@@ -236,15 +237,22 @@ function AutomationSidebarEntry({ count, active, onClick }: AutomationSidebarEnt
         </span>
         <span className="truncate">任务/日程/Todo</span>
       </span>
-      <span
-        className={cn(
-          'ml-2 flex h-5 min-w-[22px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
-          active
-            ? 'bg-accent-foreground/[0.26] text-primary-foreground'
-            : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
-        )}
-      >
-        {formatAutomationCount(count)}
+      <span className="ml-2 flex flex-shrink-0 items-center gap-1.5">
+        <ShortcutKeycaps
+          shortcutId="open-planning"
+          keycapClassName="h-5 min-w-5 px-1 text-[11px]"
+          separatorClassName="text-[10px]"
+        />
+        <span
+          className={cn(
+            'flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums automation-entry-badge',
+            active
+              ? 'bg-accent-foreground/[0.26] text-primary-foreground'
+              : 'bg-foreground/[0.045] text-foreground/[0.42] group-hover:text-foreground/65',
+          )}
+        >
+          {formatAutomationCount(count)}
+        </span>
       </span>
     </button>
   )
@@ -2562,7 +2570,10 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              任务/日程（{automationCount} 个自动化任务）
+              <span className="flex items-center gap-1.5">
+                <span>{`任务/日程，${automationCount} 个自动化任务`}</span>
+                <ShortcutKeycaps shortcutId="open-planning" />
+              </span>
             </TooltipContent>
           </Tooltip>
 
@@ -4262,9 +4273,10 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               onSelectProject(group.workspace.id)
             }}
             className={cn(
-              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-12 py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
+              'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] py-1 rounded-md text-left transition-[padding,color,background-color] titlebar-no-drag group-hover/project:pl-4 hover:bg-foreground/[0.025]',
+              isAutomationGroup ? 'pr-1' : 'pr-12',
               isCurrent
-                ? 'agent-project-item-current pr-32 text-foreground'
+                ? 'agent-project-item-current text-foreground'
                 : 'text-foreground/65 hover:text-foreground/88',
             )}
           >
@@ -4307,13 +4319,13 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           </button>
         )}
 
-        {isCurrent && !isAutomationGroup && newSessionShortcutLabel && !projectMenuOpen && (
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-medium text-foreground/35 transition-opacity group-hover/project:opacity-0"
-          >
-            {newSessionShortcutLabel} 新建项目内会话
-          </span>
+        {isCurrent && !isAutomationGroup && !projectMenuOpen && (
+          <ShortcutKeycaps
+            shortcutId="new-session"
+            className="pointer-events-none mr-6 !flex-nowrap flex-shrink-0 opacity-65 transition-opacity group-hover/project:opacity-0"
+            keycapClassName="h-4 min-w-4 rounded-[3px] border-border/60 px-0.5 text-[9px] shadow-none"
+            separatorClassName="text-[8px]"
+          />
         )}
 
         {!isAutomationGroup && (

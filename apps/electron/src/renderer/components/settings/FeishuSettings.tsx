@@ -882,8 +882,8 @@ function CliRecommendationCard(): React.ReactElement {
 interface RegisterFeishuDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** 注册成功后回调，返回主进程拿到的 App ID/Secret；上层应在此处保存配置并启动 Bot */
-  onSuccess: (result: { appId: string; appSecret: string }) => void
+  /** 注册成功后回调，返回主进程拿到的 App ID/Secret 与扫码用户身份；上层应在此处保存配置并启动 Bot */
+  onSuccess: (result: { appId: string; appSecret: string; operatorOpenId?: string }) => void
 }
 
 /** 扫码注册飞书 Bot：弹窗内全程引导，扫码成功后自动保存配置并启动 Bot */
@@ -922,7 +922,11 @@ function RegisterFeishuDialog({ open, onOpenChange, onSuccess }: RegisterFeishuD
       .then((result) => {
         if (cancelled) return
         setPhase('success')
-        onSuccessRef.current({ appId: result.appId, appSecret: result.appSecret })
+        onSuccessRef.current({
+          appId: result.appId,
+          appSecret: result.appSecret,
+          operatorOpenId: result.operatorOpenId,
+        })
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -1179,7 +1183,7 @@ function SessionMirrorSection({ bots }: { bots: FeishuBotConfig[] }): React.Reac
             <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-3 text-xs text-amber-800 dark:text-amber-300">
               <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
               <div className="leading-relaxed">
-                当前同步 Bot 还没有绑定记录。请先在飞书里向「{selectedBot?.name ?? '该 Bot'}」发送一条消息，Proma 记录你的 open_id 后才能自动为新 Session 建群。
+                当前同步 Bot 还没有历史聊天绑定。通过 Proma「扫码创建」的 Bot 已保存扫码账号的当前组织身份，可直接为新 Session 建群；手动填写 App ID/Secret 添加的 Bot，请先在飞书里向「{selectedBot?.name ?? '该 Bot'}」发送一条消息，让 Proma 记录当前组织的 open_id。
               </div>
             </div>
           )}
@@ -1491,7 +1495,7 @@ function FeishuConfigTab(): React.ReactElement {
   const [registerOpen, setRegisterOpen] = React.useState(false)
 
   /** 扫码成功后：保存配置 + 自动启动 Bot */
-  const handleRegisterSuccess = React.useCallback(async (result: { appId: string; appSecret: string }) => {
+  const handleRegisterSuccess = React.useCallback(async (result: { appId: string; appSecret: string; operatorOpenId?: string }) => {
     try {
       const saved = await window.electronAPI.saveFeishuBotConfig({
         name: defaultBotName(bots.length),
@@ -1501,6 +1505,7 @@ function FeishuConfigTab(): React.ReactElement {
         defaultWorkspaceId: undefined,
         defaultChannelId: undefined,
         defaultModelId: undefined,
+        operatorOpenId: result.operatorOpenId,
       })
       setBots((prev) => [...prev, saved])
       toast.success(`Bot "${saved.name}" 已创建`)

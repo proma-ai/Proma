@@ -14,6 +14,8 @@ interface PlanningGroupManagerProps {
   trigger: React.ReactElement
   itemLabel: string
   getUsageCount: (groupId: string) => number
+  hasAssociatedItems?: (groupId: string) => boolean
+  showDeletionCount?: boolean
   onCreate: (name: string) => Promise<PlanningGroup | undefined>
   onRename: (group: PlanningGroup, name: string) => Promise<PlanningGroup | undefined>
   onDelete: (group: PlanningGroup) => Promise<boolean>
@@ -24,7 +26,7 @@ interface PlanningGroupManagerProps {
  * 轻量分组管理器：不单独占用页面，只在当前工作流中提供新建、重命名与删除。
  * 删除操作仅解除关联，目标 Todo 或日程本身不会被删除。
  */
-export function PlanningGroupManager({ scope, groups, trigger, itemLabel, getUsageCount, onCreate, onRename, onDelete, onCreated }: PlanningGroupManagerProps): React.ReactElement {
+export function PlanningGroupManager({ scope, groups, trigger, itemLabel, getUsageCount, hasAssociatedItems, showDeletionCount = true, onCreate, onRename, onDelete, onCreated }: PlanningGroupManagerProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [newName, setNewName] = React.useState('')
@@ -103,6 +105,7 @@ export function PlanningGroupManager({ scope, groups, trigger, itemLabel, getUsa
   }
 
   const deletionCount = pendingDeletion ? getUsageCount(pendingDeletion.id) : 0
+  const deletionHasAssociatedItems = pendingDeletion ? (hasAssociatedItems?.(pendingDeletion.id) ?? deletionCount > 0) : false
   return <>
     <Popover open={open} onOpenChange={closeManager}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
@@ -152,7 +155,7 @@ export function PlanningGroupManager({ scope, groups, trigger, itemLabel, getUsa
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>确认删除分组</AlertDialogTitle>
-          <AlertDialogDescription>{deletionCount > 0 ? `删除「${pendingDeletion?.name}」后，${deletionCount} 个${itemLabel}会变为未分组，内容不会删除。` : `删除「${pendingDeletion?.name}」后无法恢复。`}</AlertDialogDescription>
+          <AlertDialogDescription>{deletionHasAssociatedItems ? `删除「${pendingDeletion?.name}」后，${showDeletionCount ? `${deletionCount} 个` : '关联的'}${itemLabel}会变为未分组，内容不会删除。` : `删除「${pendingDeletion?.name}」后无法恢复。`}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={savingAction === 'delete'}>取消</AlertDialogCancel>

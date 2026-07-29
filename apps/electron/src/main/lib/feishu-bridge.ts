@@ -39,6 +39,7 @@ import {
 } from './agent-workspace-manager'
 import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
 import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 import {
   inferImageMediaType as inferImageMediaTypeShared,
   saveImageToSession as saveImageToSessionShared,
@@ -79,7 +80,7 @@ import {
   type RunState,
 } from './feishu/card-run-state'
 import { renderCard as renderRunCard } from './feishu/card-renderer-v2'
-import { buildSessionMirrorGroupName } from './feishu/session-mirror'
+import { buildSessionMirrorGroupName, normalizeSessionMirrorUserOpenId } from './feishu/session-mirror'
 import { resolveGroupMessageAccess } from './feishu/group-message-policy'
 import { ScopedQueue } from './feishu/scoped-queue'
 import { RunCoordinator } from './feishu/run-coordinator'
@@ -416,32 +417,30 @@ class FeishuBridge {
    */
   private loadMetadata(): void {
     const metaPath = getFeishuBotMetadataPath(this.botConfig.id)
-    if (!existsSync(metaPath)) return
-
-    try {
-      const raw = readFileSync(metaPath, 'utf-8')
-      const data = JSON.parse(raw) as { lastInteractedUserOpenId?: string }
-      if (data.lastInteractedUserOpenId && data.lastInteractedUserOpenId !== 'unknown') {
-        this.lastInteractedUserOpenId = data.lastInteractedUserOpenId
-      }
-    } catch (error) {
-      console.error('[飞书 Bridge] 加载元数据失败:', redactSensitiveLogValue(error))
-    }
+    const data = readJsonFileSafe<{ lastInteractedUserOpenId?: string }>(metaPath)
+    const userOpenId = normalizeSessionMirrorUserOpenId(data?.lastInteractedUserOpenId)
+    if (userOpenId) this.lastInteractedUserOpenId = userOpenId
   }
 
   private saveMetadata(): void {
     try {
-      const metaPath = getFeishuBotMetadataPath(this.botConfig.id)
-      const data = { lastInteractedUserOpenId: this.lastInteractedUserOpenId }
-      writeFileSync(metaPath, JSON.stringify(data, null, 2), 'utf-8')
+      writeJsonFileAtomic(getFeishuBotMetadataPath(this.botConfig.id), {
+        lastInteractedUserOpenId: this.lastInteractedUserOpenId,
+      })
     } catch (error) {
       console.error('[飞书 Bridge] 保存元数据失败:', redactSensitiveLogValue(error))
     }
   }
 
+  /** 将扫码创建该 Bot 的当前组织用户设为 Session 镜像目标。 */
+  setSessionMirrorUserOpenId(openId: string): void {
+    this.setLastInteractedUserOpenId(openId)
+  }
+
   private setLastInteractedUserOpenId(openId: string | null): void {
-    if (this.lastInteractedUserOpenId === openId) return
-    this.lastInteractedUserOpenId = openId
+    const normalized = normalizeSessionMirrorUserOpenId(openId)
+    if (!normalized || this.lastInteractedUserOpenId === normalized) return
+    this.lastInteractedUserOpenId = normalized
     this.saveMetadata()
   }
 

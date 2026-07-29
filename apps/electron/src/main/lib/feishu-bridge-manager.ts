@@ -18,10 +18,11 @@ import type {
 import { FeishuBridge } from './feishu-bridge'
 import { redactSensitiveLogValue } from './bridge-log-redaction'
 import { getFeishuMultiBotConfig, getFeishuBotById } from './feishu-config'
-import { getFeishuBotBindingsPath } from './config-paths'
+import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
+import { writeJsonFileAtomic } from './safe-file'
 import { isBindingForDeletedWorkspace } from './bridge-binding-store'
 import { getSettings } from './settings-service'
-import { resolveSessionMirrorBot } from './feishu/session-mirror'
+import { resolveSessionMirrorBot, normalizeSessionMirrorUserOpenId } from './feishu/session-mirror'
 
 class FeishuBridgeManager {
   /** botId → Bridge 实例 */
@@ -95,6 +96,24 @@ class FeishuBridgeManager {
   async restartBot(botId: string): Promise<void> {
     this.stopBot(botId)
     await this.startBot(botId)
+  }
+
+  /** 为新建或重配的 Bot 记录扫码操作人的当前组织身份，供 Session 镜像立即建群。 */
+  setSessionMirrorOperator(botId: string, operatorOpenId: string | undefined): void {
+    const userOpenId = normalizeSessionMirrorUserOpenId(operatorOpenId)
+    if (!userOpenId) return
+
+    const bridge = this.bridges.get(botId)
+    if (bridge) {
+      bridge.setSessionMirrorUserOpenId(userOpenId)
+      return
+    }
+
+    try {
+      writeJsonFileAtomic(getFeishuBotMetadataPath(botId), { lastInteractedUserOpenId: userOpenId })
+    } catch (error) {
+      console.error(`[飞书 BridgeManager] 保存 Bot ${botId} 的镜像用户身份失败:`, redactSensitiveLogValue(error))
+    }
   }
 
   // ===== 状态查询 =====

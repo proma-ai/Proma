@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { TodoDatePicker, formatTodoDueDate } from '@/components/ui/todo-date-picker'
+import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 
 const TABS: Array<{ id: PlanningTab; label: string }> = [
   { id: 'todos', label: 'Todo' },
@@ -28,9 +29,15 @@ const TABS: Array<{ id: PlanningTab; label: string }> = [
   { id: 'automations', label: '定时任务' },
 ]
 
-function CreateShortcutHint(): React.ReactElement {
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-  return <span className="ml-1.5 flex items-center gap-1 text-primary-foreground/85"><kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-primary-foreground/15 px-1 text-[11px] font-semibold leading-none">{isMac ? '⌘' : 'Ctrl'}</kbd><span className="text-[10px] opacity-75">+</span><kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-primary-foreground/15 px-1 text-[11px] font-semibold leading-none">N</kbd></span>
+function CreateShortcutHint(): React.ReactElement | null {
+  return (
+    <ShortcutKeycaps
+      shortcutId="new-session"
+      className="ml-1.5"
+      keycapClassName="border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground shadow-none"
+      separatorClassName="text-primary-foreground/70"
+    />
+  )
 }
 
 export function PlanningView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement {
@@ -75,10 +82,45 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
           <p className="mt-1 text-sm text-muted-foreground">安排待办、日程与定时任务</p>
         </div>
         <div className="titlebar-no-drag flex items-center gap-2">
-          {!standalone && <button type="button" onClick={openPlanningWindow} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.96]"><ExternalLink size={16} /> 独立窗口</button>}
-          {tab === 'todos' && <button type="button" onClick={triggerTodoCreate} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建 Todo<CreateShortcutHint /></button>}
-          {tab === 'calendar' && <button type="button" onClick={triggerCalendarCreate} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建日程<CreateShortcutHint /></button>}
-          {tab === 'automations' && automations.length > 0 && <button type="button" onClick={createAutomation} aria-keyshortcuts="Meta+N Control+N" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"><Plus size={16} /> 新建定时任务<CreateShortcutHint /></button>}
+          {!standalone && (
+            <button
+              type="button"
+              onClick={openPlanningWindow}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/60 active:scale-[0.96]"
+            >
+              <ExternalLink size={16} /> 独立窗口
+            </button>
+          )}
+          {tab === 'todos' && (
+            <button
+              type="button"
+              onClick={triggerTodoCreate}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建 Todo<CreateShortcutHint />
+            </button>
+          )}
+          {tab === 'calendar' && (
+            <button
+              type="button"
+              onClick={triggerCalendarCreate}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建日程<CreateShortcutHint />
+            </button>
+          )}
+          {tab === 'automations' && automations.length > 0 && (
+            <button
+              type="button"
+              onClick={createAutomation}
+              aria-keyshortcuts="Meta+N Control+N"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+            >
+              <Plus size={16} /> 新建定时任务<CreateShortcutHint />
+            </button>
+          )}
         </div>
       </header>
       <div className={cn('titlebar-no-drag w-full', standalone ? 'px-5' : 'px-6 sm:px-8 xl:px-10')}>
@@ -361,9 +403,10 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const openTodos = todos.filter((todo) => todo.status === 'open')
   const todoGroupUsageCounts = React.useMemo(() => {
     const counts = new Map<string, number>()
-    for (const todo of todos) if (todo.groupId) counts.set(todo.groupId, (counts.get(todo.groupId) ?? 0) + 1)
+    for (const todo of todos) if (todo.status === 'open' && todo.groupId) counts.set(todo.groupId, (counts.get(todo.groupId) ?? 0) + 1)
     return counts
   }, [todos])
+  const todoGroupHasAssociatedItems = React.useMemo(() => new Set(todos.flatMap((todo) => todo.groupId ? [todo.groupId] : [])), [todos])
   const todayEnd = React.useMemo(() => endOfToday(dayVersion), [dayVersion])
   const weekEnd = React.useMemo(() => endOfToday(addLocalDays(dayVersion, 7)), [dayVersion])
   const visibleTodos = view === 'all' ? openTodos
@@ -374,11 +417,11 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const viewTitle = view === 'all' ? '全部任务' : view === 'today' ? '今天' : view === 'upcoming' ? '未来 7 天' : view === 'completed' ? '已完成' : groups.find((group) => `group:${group.id}` === view)?.name ?? '分组'
   const count = (predicate: (todo: Todo) => boolean): number => openTodos.filter(predicate).length
 
-  const navItems: Array<{ id: TodoListView; label: string; icon: React.ReactNode; count: number }> = [
+  const navItems: Array<{ id: TodoListView; label: string; icon: React.ReactNode; count?: number }> = [
     { id: 'all', label: '全部任务', icon: <ListTodo size={15} />, count: openTodos.length },
     { id: 'today', label: '今天', icon: <CalendarDays size={15} />, count: count((todo) => todo.dueAt !== undefined && todo.dueAt <= todayEnd) },
     { id: 'upcoming', label: '未来 7 天', icon: <ChevronRight size={15} />, count: count((todo) => todo.dueAt !== undefined && todo.dueAt > todayEnd && todo.dueAt <= weekEnd) },
-    { id: 'completed', label: '已完成', icon: <Check size={15} />, count: todos.filter((todo) => todo.status === 'completed').length },
+    { id: 'completed', label: '已完成', icon: <Check size={15} /> },
   ]
 
   return (
@@ -387,14 +430,14 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
         <aside className="flex min-h-0 flex-col overflow-y-auto border-r border-border/60 bg-muted/15 p-3 scrollbar-thin">
           <div className="px-2 pb-3 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Todo</div>
           <nav className="space-y-1" aria-label="Todo 清单">
-            {navItems.map((item) => <button key={item.id} type="button" onClick={() => { setView(item.id); setSelectedId(null) }} className={cn('flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors', view === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground')}><span className="text-muted-foreground">{item.icon}</span><span className="flex-1 text-left">{item.label}</span><span className="text-xs tabular-nums text-muted-foreground">{item.count}</span></button>)}
+            {navItems.map((item) => <button key={item.id} type="button" onClick={() => { setView(item.id); setSelectedId(null) }} className={cn('flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors', view === item.id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground')}><span className="text-muted-foreground">{item.icon}</span><span className="flex-1 text-left">{item.label}</span>{item.count !== undefined && <span className="text-xs tabular-nums text-muted-foreground">{item.count}</span>}</button>)}
           </nav>
-          <div className="mt-7"><div className="flex items-center justify-between px-2 pb-2"><span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Todo 分组</span><PlanningGroupManager scope="todo" groups={groups} itemLabel="Todo" getUsageCount={(groupId) => todoGroupUsageCounts.get(groupId) ?? 0} onCreate={createTodoGroup} onRename={renameTodoGroup} onDelete={deleteTodoGroup} onCreated={(group) => { setView(`group:${group.id}`); setSelectedId(null) }} trigger={<button type="button" className="min-h-10 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground">管理</button>} /></div><div className="space-y-1">{groups.map((group) => { const id = `group:${group.id}` as TodoListView; return <button key={group.id} type="button" onClick={() => { setView(id); setSelectedId(null) }} className={cn('flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors', view === id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground')}><span className="size-2 rounded-full" style={{ backgroundColor: group.color ?? 'currentColor' }} /><span className="flex-1 truncate text-left">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{todoGroupUsageCounts.get(group.id) ?? 0}</span></button> })}</div></div>
+          <div className="mt-7"><div className="flex items-center justify-between px-2 pb-2"><span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Todo 分组</span><PlanningGroupManager scope="todo" groups={groups} itemLabel="Todo" getUsageCount={(groupId) => todoGroupUsageCounts.get(groupId) ?? 0} hasAssociatedItems={(groupId) => todoGroupHasAssociatedItems.has(groupId)} showDeletionCount={false} onCreate={createTodoGroup} onRename={renameTodoGroup} onDelete={deleteTodoGroup} onCreated={(group) => { setView(`group:${group.id}`); setSelectedId(null) }} trigger={<button type="button" className="min-h-10 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground">管理</button>} /></div><div className="space-y-1">{groups.map((group) => { const id = `group:${group.id}` as TodoListView; return <button key={group.id} type="button" onClick={() => { setView(id); setSelectedId(null) }} className={cn('flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors', view === id ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground')}><span className="size-2 rounded-full" style={{ backgroundColor: group.color ?? 'currentColor' }} /><span className="flex-1 truncate text-left">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{todoGroupUsageCounts.get(group.id) ?? 0}</span></button> })}</div></div>
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border/60">
           <div className="border-b border-border/60 px-5 py-4">
-            <div className="flex items-center justify-between"><h2 className="text-base font-semibold">{viewTitle}</h2><span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span></div>
+            <div className="flex items-center justify-between"><h2 className="text-base font-semibold">{viewTitle}</h2>{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} onSelect={() => setSelectedId(todo.id)} onToggle={() => void completeTodo(todo)} onDelete={() => setTodoPendingDeletion(todo)} />) : <div className="flex h-full min-h-56 items-center justify-center px-8 text-center text-sm text-muted-foreground">这里还没有任务。点击右上角“新建 Todo”或按 ⌘N 即可添加。</div>}</div>
         </div>

@@ -119,6 +119,14 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'navigation',
   },
   {
+    id: 'open-planning',
+    name: '打开任务/日程',
+    description: '打开或聚焦独立的 Todo、日程与定时任务窗口',
+    defaultMac: 'Cmd+Shift+T',
+    defaultWin: 'Ctrl+Shift+T',
+    category: 'navigation',
+  },
+  {
     id: 'file-find',
     name: '查找',
     description: '在对话中搜索消息，或在文件预览/Diff 面板中查找文件内容',
