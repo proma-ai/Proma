@@ -75,6 +75,7 @@ import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
+import { CodexTitleRequestCoordinator } from './codex-title-request-coordinator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -389,6 +390,7 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
+  private codexTitleRequestCoordinator = new CodexTitleRequestCoordinator()
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
@@ -577,8 +579,9 @@ export class AgentOrchestrator {
    *
    * 使用 Provider 适配器系统，支持所有渠道。任何错误返回 null。
    */
-  async generateTitle(input: AgentGenerateTitleInput): Promise<string | null> {
+  async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal): Promise<string | null> {
     const { userMessage, channelId, modelId } = input
+    if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
     try {
@@ -596,13 +599,16 @@ export class AgentOrchestrator {
             resolveCodexOAuthCredentials(channelId),
             getEffectiveProxyUrl(),
           ])
+          if (signal?.aborted) return null
           const generatedTitle = await generateCodexTitle({
             modelId,
             prompt: TITLE_PROMPT + userMessage,
             credentials,
             proxyUrl,
+            signal,
             onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
           })
+          if (signal?.aborted) return null
           const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
           if (title) {
             console.log(`[Agent 标题生成] ChatGPT OAuth 语义标题生成成功: "${title}"`)
@@ -610,6 +616,7 @@ export class AgentOrchestrator {
           }
           console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
         } catch (error) {
+          if (signal?.aborted) return null
           console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
         }
         return fallbackTitle
@@ -653,18 +660,25 @@ export class AgentOrchestrator {
     channelId: string,
     modelId: string,
     callbacks: SessionCallbacks,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) return
     try {
       const meta = getAgentSessionMeta(sessionId)
       if (!meta || meta.title !== DEFAULT_SESSION_TITLE) return
 
-      const title = await this.generateTitle({ userMessage, channelId, modelId })
-      if (!title) return
+      const title = await this.generateTitle({ userMessage, channelId, modelId }, signal)
+      if (!title || signal?.aborted) return
+
+      // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
+      const latestMeta = getAgentSessionMeta(sessionId)
+      if (!latestMeta || latestMeta.title !== DEFAULT_SESSION_TITLE) return
 
       updateAgentSessionMeta(sessionId, { title })
       callbacks.onTitleUpdated(title)
       console.log(`[Agent 编排] 自动标题生成完成: "${title}"`)
     } catch (error) {
+      if (signal?.aborted) return
       console.warn('[Agent 编排] 自动标题生成失败:', error)
     }
   }
@@ -1045,14 +1059,22 @@ export class AgentOrchestrator {
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
     const runGeneration = Date.now()
     this.activeSessions.set(sessionId, runGeneration)
+    const usesCodexOAuth = channel.provider === 'openai-codex'
+    let codexForegroundRunActive = false
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
       // 主进程仍在 finally 前短暂拒绝下一条消息。
-      if (this.activeSessions.get(sessionId) !== runGeneration) return
-      this.activeSessions.delete(sessionId)
-      this.sessionPermissionModes.delete(sessionId)
-      this.queuedMessageUuids.delete(sessionId)
+      const ownsActiveRun = this.activeSessions.get(sessionId) === runGeneration
+      if (ownsActiveRun) {
+        this.activeSessions.delete(sessionId)
+        this.sessionPermissionModes.delete(sessionId)
+        this.queuedMessageUuids.delete(sessionId)
+      }
+      if (codexForegroundRunActive) {
+        codexForegroundRunActive = false
+        this.codexTitleRequestCoordinator.endForeground(channelId)
+      }
     }
     const completeRun = (
       messages?: AgentMessage[],
@@ -1132,6 +1154,12 @@ export class AgentOrchestrator {
     let workspace: import('@proma/shared').AgentWorkspace | undefined
 
     try {
+      if (usesCodexOAuth) {
+        codexForegroundRunActive = true
+        await this.codexTitleRequestCoordinator.beginForeground(channelId)
+        if (this.activeSessions.get(sessionId) !== runGeneration) return
+      }
+
       const sdk = agentRuntime === 'claude' ? await import('@anthropic-ai/claude-agent-sdk') : undefined
       const cliPath = agentRuntime === 'claude' ? resolveSDKCliPath() : undefined
 
@@ -1623,6 +1651,20 @@ export class AgentOrchestrator {
         collaborationAvailable,
         currentModelId: selectedModelId,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
+      const startAutoTitleGeneration = (): void => {
+        if (titleGenerationStarted) return
+        titleGenerationStarted = true
+
+        if (channel.provider === 'openai-codex') {
+          this.codexTitleRequestCoordinator.enqueue(channelId, (signal) =>
+            this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks, signal),
+          )
+          return
+        }
+
+        this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
+          .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
+      }
       const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
         // 仅在 session_id 真正变化时才持久化。SDK v2 几乎每条消息都会回调 onSessionId，
         // capturedSdkSessionId 已初始化为 existingSdkSessionId，并在 recovery 时同步重置。
@@ -1641,10 +1683,10 @@ export class AgentOrchestrator {
           }
         }
 
-        if (!titleGenerationStarted) {
-          titleGenerationStarted = true
-          this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
-            .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
+        // Codex OAuth 标题会额外占用订阅请求通道，等待主 Agent 请求结束再发起，
+        // 避免在 session.prompt() 前与主请求竞争同一通道。
+        if (channel.provider !== 'openai-codex') {
+          startAutoTitleGeneration()
         }
       }
       const handleModelResolved = (model: string): void => {
@@ -2270,6 +2312,10 @@ export class AgentOrchestrator {
           // 发送完成信号
           completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
+          if (!wasStoppedByUser && channel.provider === 'openai-codex') {
+            startAutoTitleGeneration()
+          }
+
           break  // 成功完成，退出重试循环
 
         } catch (error) {
@@ -2664,6 +2710,7 @@ export class AgentOrchestrator {
       console.log(`[Agent 编排] 正在中止所有活跃会话 (${this.activeSessions.size} 个)...`)
     }
     // 即便 activeSessions 为空，也要调 dispose 清理可能残留的 pidMap / 子进程
+    this.codexTitleRequestCoordinator.dispose()
     this.adapter.dispose()
     this.activeSessions.clear()
     this.sessionPermissionModes.clear()
