@@ -2859,7 +2859,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     handleCompact,
   ])
 
-  const sendControl = streaming && !hasTextInput ? (
+  const stopControl = (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
@@ -2876,7 +2876,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <p>停止 Agent ({getAcceleratorDisplay(getActiveAccelerator('stop-generation'))})</p>
       </TooltipContent>
     </Tooltip>
-  ) : (
+  )
+
+  const sendButton = (
     <Button
       type="button"
       variant="ghost"
@@ -2890,6 +2892,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       <CornerDownLeft className="size-[22px]" />
     </Button>
   )
+
+  const sendControl = streaming ? (
+    <>
+      {hasTextInput && sendButton}
+      {stopControl}
+    </>
+  ) : sendButton
 
   const inputTrailingNode = (
     <>
