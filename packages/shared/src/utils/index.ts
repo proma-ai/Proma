@@ -41,6 +41,14 @@ export {
 } from './thinking-signature-error'
 export { normalizePathForCompare } from './normalize-path'
 export {
+  AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY,
+  getAutomationOccurrencesByDay,
+} from './automation-schedule'
+export type {
+  AutomationOccurrenceDay,
+  AutomationScheduleFields,
+} from './automation-schedule'
+export {
   getSDKCompactStatus,
   isPersistableSDKSystemMessage,
   type SDKCompactStatus,

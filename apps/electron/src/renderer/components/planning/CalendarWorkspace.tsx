@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { CalendarDays, ChevronLeft, ChevronRight, Folder, ListTodo, Plus, Repeat2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { PLANNING_CONFLICT_ERROR } from '@proma/shared'
+import { PLANNING_CONFLICT_ERROR, AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY, getAutomationOccurrencesByDay } from '@proma/shared'
 import type { Automation, CalendarEvent, PlanningGroup, PlanningTag, Todo } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { automationsAtom } from '@/atoms/automation-atoms'
@@ -162,6 +162,7 @@ function draftFromEvent(event?: CalendarEvent, startAt = Math.ceil(Date.now() / 
 
 export function CalendarWorkspace(): React.ReactElement {
   const calendarRef = React.useRef<HTMLElement>(null)
+  const calendarBodyRef = React.useRef<HTMLDivElement>(null)
   const [events, setEvents] = useAtom(calendarEventsAtom)
   const todos = useAtomValue(todosAtom)
   const automations = useAtomValue(automationsAtom)
@@ -352,6 +353,36 @@ export function CalendarWorkspace(): React.ReactElement {
   }
 
   const navigate = (amount: number): void => setCursor((current) => mode === 'week' ? addDays(current, amount * 7) : addMonths(current, amount))
+
+  // 月视图保留离散翻页；周视图由 WeekCalendar 的原生横向轨道处理连续触控板滚动。
+  React.useEffect(() => {
+    if (mode !== 'month') return
+    const element = calendarBodyRef.current
+    if (!element) return
+    const FLIP_THRESHOLD_PX = 120
+    const FLIP_COOLDOWN_MS = 700
+    let accumulatedX = 0
+    let lastFlipAt = 0
+    const handleWheel = (event: WheelEvent): void => {
+      const deltaX = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * 33 : event.deltaX
+      if (Math.abs(deltaX) <= Math.abs(event.deltaY)) return
+      event.preventDefault()
+      const now = Date.now()
+      if (now - lastFlipAt < FLIP_COOLDOWN_MS) {
+        accumulatedX = 0 // 冷却期持续清零，吸收惯性滑动的尾巴，避免连翻
+        return
+      }
+      accumulatedX += deltaX
+      if (Math.abs(accumulatedX) >= FLIP_THRESHOLD_PX) {
+        const direction = accumulatedX > 0 ? 1 : -1
+        setCursor((current) => addMonths(current, direction))
+        accumulatedX = 0
+        lastFlipAt = now
+      }
+    }
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => element.removeEventListener('wheel', handleWheel)
+  }, [mode])
   const handleCreateOpenChange = (open: boolean): void => {
     setCreateOpen(open)
     if (!open) {
@@ -374,8 +405,8 @@ export function CalendarWorkspace(): React.ReactElement {
         <div className="flex items-center gap-1.5"><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="上一段时间" onClick={() => navigate(-1)}><ChevronLeft size={17} /></Button><h2 className="min-w-44 text-center text-sm font-semibold tabular-nums">{heading}</h2><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="下一段时间" onClick={() => navigate(1)}><ChevronRight size={17} /></Button></div>
       </div>
       <div className="relative grid min-h-0 flex-1 grid-cols-1">
-        <div className="min-h-0 overflow-hidden">
-          {mode === 'month' ? <MonthCalendar monthStart={rangeStart} today={today} events={events} todos={openTodos} automations={activeAutomations} onSelectEvent={selectEvent} onSelectTodo={selectTodo} /> : <WeekCalendar weekStart={rangeStart} events={events} todos={openTodos} automations={activeAutomations} draftPreview={showDraftPreview && createOpen ? draft : undefined} quickCreateOpen={createOpen} onSelectEvent={selectEvent} onCreateAt={openCreate} onSelectTodo={selectTodo} />}
+        <div ref={calendarBodyRef} className="min-h-0 overflow-hidden">
+          {mode === 'month' ? <MonthCalendar monthStart={rangeStart} today={today} events={events} todos={openTodos} automations={activeAutomations} onSelectEvent={selectEvent} onSelectTodo={selectTodo} /> : <WeekCalendar weekStart={rangeStart} events={events} todos={openTodos} automations={activeAutomations} draftPreview={showDraftPreview && createOpen ? draft : undefined} quickCreateOpen={createOpen} onNavigate={navigate} onSelectEvent={selectEvent} onCreateAt={openCreate} onSelectTodo={selectTodo} />}
         </div>
         {selected && <CalendarEventDetail event={selected} groups={groups} tags={tags} todos={openTodos} onClose={() => setSelectedId(null)} onSave={updateEvent} onDelete={requestDeleteEvent} />}
         {selectedTodo && <CalendarTodoDetail todo={selectedTodo} onClose={() => setSelectedTodoId(null)} />}
@@ -391,10 +422,16 @@ export function CalendarWorkspace(): React.ReactElement {
   )
 }
 
+/** 月视图一天内的定时任务条目：同一任务同一天只显示一个标记，count 为当天触发次数 */
+interface AutomationDayEntry {
+  automation: Automation
+  count: number
+}
+
 interface CalendarDayItems {
   events: CalendarEvent[]
   todos: Todo[]
-  automations: Automation[]
+  automations: AutomationDayEntry[]
 }
 
 function MonthCalendar({ monthStart, today, events, todos, automations, onSelectEvent, onSelectTodo }: { monthStart: number; today: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; onSelectEvent: (id: string) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
@@ -417,11 +454,22 @@ function MonthCalendar({ monthStart, today, events, todos, automations, onSelect
       if (!todo.dueAt) continue
       result.get(startOfDay(todo.dueAt))?.todos.push(todo)
     }
-    for (const automation of automations) result.get(startOfDay(automation.nextRunAt))?.automations.push(automation)
+    // 定时任务：按调度规则展开可见范围内的全部触发日（调度器只持久化 nextRunAt 一个锚点），
+    // 同一任务同一天聚合为一个标记 + count，避免高频 interval 刷屏
+    const monthRangeStart = visibleDays[0]
+    const monthRangeEndDay = visibleDays[visibleDays.length - 1]
+    if (monthRangeStart !== undefined && monthRangeEndDay !== undefined) {
+      const monthRangeEnd = nextDayStart(monthRangeEndDay) - 1
+      for (const automation of automations) {
+        for (const occurrence of getAutomationOccurrencesByDay(automation, monthRangeStart, monthRangeEnd)) {
+          result.get(occurrence.day)?.automations.push({ automation, count: occurrence.count })
+        }
+      }
+    }
     return result
   }, [automations, events, todos, visibleDays])
 
-  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const valid = day > 0 && day <= days; const timestamp = valid ? startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime()) : undefined; const items = timestamp === undefined ? undefined : itemsByDay.get(timestamp); return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', timestamp === today && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{items?.events.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{items?.todos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{items?.automations.map((automation) => <div key={automation.id} className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300"><Repeat2 className="size-3 shrink-0" /><span className="truncate">{automation.name}</span></div>)}</div></div> })}</div></div>
+  return <div className="flex h-full min-h-0 flex-col"><div className="grid shrink-0 grid-cols-7 border-b border-border/60 text-center text-xs text-muted-foreground">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <div key={day} className="py-2.5">{day}</div>)}</div><div className="grid min-h-0 flex-1 grid-cols-7" style={{ gridTemplateRows: `repeat(${weekCount}, minmax(0, 1fr))` }}>{cells.map((day, index) => { const valid = day > 0 && day <= days; const timestamp = valid ? startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth(), day, 9).getTime()) : undefined; const items = timestamp === undefined ? undefined : itemsByDay.get(timestamp); return <div key={index} className="flex min-h-0 flex-col border-b border-r border-border/50 p-2 last:border-r-0 hover:bg-muted/20 sm:p-2.5"><time className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs tabular-nums', timestamp === today && 'bg-primary text-primary-foreground')}>{valid ? day : ''}</time><div className="mt-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto scrollbar-thin">{items?.events.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="flex w-full min-w-0 items-center gap-1 px-1.5 py-0.5 text-left text-[11px]" />)}{items?.todos.map((todo) => <TodoCalendarMarker key={todo.id} todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/15 text-amber-800 dark:text-amber-200" />)}{items?.automations.map((entry) => <AutomationCalendarMarker key={entry.automation.id} automation={entry.automation} occurrenceCount={entry.count} className="flex min-w-0 items-center gap-1 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300" />)}</div></div> })}</div></div>
 }
 
 function TodoCalendarMarker({ todo, onSelect, className }: { todo: Todo; onSelect: () => void; className: string }): React.ReactElement {
@@ -431,6 +479,36 @@ function TodoCalendarMarker({ todo, onSelect, className }: { todo: Todo; onSelec
 function TodoPreviewContent({ todo }: { todo: Todo }): React.ReactElement {
   const priority = todo.priority === 'high' ? '高优先级' : todo.priority === 'low' ? '低优先级' : '中优先级'
   return <div className="space-y-2"><div><p className="font-medium text-tooltip-foreground">{todo.title}</p>{todo.notes && <p className="mt-1 line-clamp-3 leading-relaxed text-tooltip-muted">{todo.notes}</p>}</div><div className="flex flex-wrap gap-1.5 text-[11px] text-tooltip-muted"><span>{priority}</span>{todo.dueAt && <span>计划 {new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(todo.dueAt)}</span>}{todo.group && <span>{todo.group.name}</span>}{todo.tags.map((tag) => <span key={tag.id}>#{tag.name}</span>)}</div></div>
+}
+
+function formatAutomationTimestamp(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(value)
+}
+
+function formatAutomationSchedule(automation: Automation): string {
+  const time = automation.timeOfDay ?? '09:00'
+  if (automation.scheduleType === 'interval') {
+    const minutes = Math.max(1, automation.intervalMinutes)
+    return minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`
+  }
+  if (automation.scheduleType === 'daily') return `每天 ${time}`
+  if (automation.scheduleType === 'weekly') {
+    const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][automation.dayOfWeek ?? 1] ?? '周一'
+    return `每${weekday} ${time}`
+  }
+  if (automation.scheduleType === 'monthly') return `每月 ${automation.dayOfMonth ?? 1} 日 ${time}`
+  return '单次执行'
+}
+
+function AutomationPreviewContent({ automation, occurrenceCount }: { automation: Automation; occurrenceCount: number }): React.ReactElement {
+  const nextRun = formatAutomationTimestamp(automation.nextRunAt)
+  const runBudget = automation.maxRuns === undefined ? undefined : `已运行 ${automation.runCount ?? 0}/${automation.maxRuns} 次`
+  return <div className="space-y-2"><div><p className="font-medium text-tooltip-foreground">{automation.name}</p>{automation.prompt && <p className="mt-1 line-clamp-3 leading-relaxed text-tooltip-muted">{automation.prompt}</p>}</div><div className="flex flex-wrap gap-1.5 text-[11px] text-tooltip-muted"><span>{formatAutomationSchedule(automation)}</span>{nextRun && <span>下次 {nextRun}</span>}{occurrenceCount > 1 && <span>当天计划 {occurrenceCount} 次</span>}{runBudget && <span>{runBudget}</span>}</div></div>
+}
+
+function AutomationCalendarMarker({ automation, occurrenceCount = 1, className, iconClassName, style }: { automation: Automation; occurrenceCount?: number; className: string; iconClassName?: string; style?: React.CSSProperties }): React.ReactElement {
+  return <Tooltip delayDuration={250}><TooltipTrigger asChild><div data-calendar-item className={className} style={style}><Repeat2 className={cn('size-3 shrink-0', iconClassName)} /><span className="truncate">{automation.name}</span>{occurrenceCount > 1 && <span className="shrink-0 tabular-nums opacity-70">×{occurrenceCount}</span>}</div></TooltipTrigger><TooltipContent side="right" className="w-72 rounded-none p-3"><AutomationPreviewContent automation={automation} occurrenceCount={occurrenceCount} /></TooltipContent></Tooltip>
 }
 
 
@@ -450,7 +528,7 @@ function CalendarEventPreviewContent({ event }: { event: CalendarEvent }): React
 type TimedItem =
   | { kind: 'event'; id: string; startAt: number; endAt: number; event: CalendarEvent }
   | { kind: 'todo'; id: string; startAt: number; endAt: number; todo: Todo }
-  | { kind: 'automation'; id: string; startAt: number; endAt: number; automation: Automation }
+  | { kind: 'automation'; id: string; startAt: number; endAt: number; automation: Automation; count: number }
 
 interface TimedSegment {
   item: TimedItem
@@ -535,16 +613,135 @@ interface WeekTimeSelection {
   endMinute: number
 }
 
-function WeekCalendar({ weekStart, events, todos, automations, draftPreview, quickCreateOpen, onSelectEvent, onCreateAt, onSelectTodo }: { weekStart: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; draftPreview?: CalendarDraftPreview; quickCreateOpen: boolean; onSelectEvent: (id: string) => void; onCreateAt: (startAt: number, endAt?: number, pointer?: CalendarCreatePointer) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
-  const days = React.useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart])
+interface WeekView {
+  weekStart: number
+  days: number[]
+  dayItems: Map<number, WeekDayItems>
+}
+
+function buildWeekView(weekStart: number, events: CalendarEvent[], todos: Todo[], automations: Automation[]): WeekView {
+  const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+  const items = new Map<number, { allDayEvents: CalendarEvent[]; allDayTodos: Todo[]; timedItems: TimedItem[] }>()
+  for (const day of days) items.set(day, { allDayEvents: [], allDayTodos: [], timedItems: [] })
+
+  for (const event of events) {
+    for (const day of days) {
+      if (!eventOccursOnDay(event, day)) continue
+      if (event.allDay) items.get(day)!.allDayEvents.push(event)
+      else items.get(day)!.timedItems.push({ id: event.id, kind: 'event', startAt: event.startAt, endAt: eventEndAt(event), event })
+    }
+  }
+  for (const todo of todos) {
+    if (!todo.dueAt) continue
+    const day = startOfDay(todo.dueAt)
+    const item = items.get(day)
+    if (!item) continue
+    if (isTodoDateOnly(todo.dueAt)) item.allDayTodos.push(todo)
+    else item.timedItems.push({ id: todo.id, kind: 'todo', startAt: todo.dueAt, endAt: todo.dueAt + 30 * 60 * 1000, todo })
+  }
+
+  const weekRangeEnd = nextDayStart(days[days.length - 1]!) - 1
+  for (const automation of automations) {
+    for (const occurrence of getAutomationOccurrencesByDay(automation, weekStart, weekRangeEnd)) {
+      const item = items.get(occurrence.day)
+      if (!item) continue
+      if (occurrence.count <= AUTOMATION_OCCURRENCE_SAMPLES_PER_DAY) {
+        for (const ts of occurrence.times) {
+          item.timedItems.push({ id: `${automation.id}@${ts}`, kind: 'automation', startAt: ts, endAt: ts + 30 * 60 * 1000, automation, count: 1 })
+        }
+      } else {
+        const first = occurrence.times[0]!
+        item.timedItems.push({ id: `${automation.id}@${occurrence.day}`, kind: 'automation', startAt: first, endAt: first + 30 * 60 * 1000, automation, count: occurrence.count })
+      }
+    }
+  }
+
+  return {
+    weekStart,
+    days,
+    dayItems: new Map(days.map((day) => {
+      const item = items.get(day)!
+      const result: WeekDayItems = { allDayEvents: item.allDayEvents, allDayTodos: item.allDayTodos, timedSegments: getTimedSegments(item.timedItems, day) }
+      return [day, result]
+    })),
+  }
+}
+
+function WeekHeaderPanel({ week, today, active }: { week: WeekView; today: number; active: boolean }): React.ReactElement {
+  return <div aria-hidden={!active} className="grid w-1/3 min-w-0 shrink-0 grid-cols-7 snap-start">{week.days.map((day) => <div key={day} className={cn('min-w-0 border-r border-border/60 px-2 py-2 text-center text-xs font-medium', startOfDay(day) === today && 'bg-primary/8 text-primary')}><span className="block">{new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(day)}</span><span className="mt-0.5 inline-flex size-6 items-center justify-center rounded-full tabular-nums">{new Date(day).getDate()}</span></div>)}</div>
+}
+
+function WeekAllDayPanel({ week, active, onSelectEvent, onSelectTodo }: { week: WeekView; active: boolean; onSelectEvent: (id: string) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
+  return <div aria-hidden={!active} className={cn('grid w-1/3 min-w-0 shrink-0 grid-cols-7 snap-start', !active && 'pointer-events-none')}>{week.days.map((day) => {
+    const items = week.dayItems.get(day)!
+    return <div key={day} className="min-h-12 min-w-0 border-r border-border/60 p-1.5">{items.allDayEvents.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="mb-1 flex w-full min-w-0 items-center gap-1 px-1.5 py-1 text-left text-[11px] shadow-sm" />)}{items.allDayTodos.map((todo) => <div key={todo.id} className="mb-1"><TodoCalendarMarker todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>)}</div>
+  })}</div>
+}
+
+interface WeekTimePanelProps {
+  week: WeekView
+  hours: number[]
+  hourHeight: number
+  today: number
+  currentMinute: number
+  dragSelection: WeekTimeSelection | null
+  previewSelection?: WeekTimeSelection
+  interactive: boolean
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>, day: number) => void
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>, day: number) => void
+  onPointerUp: (event: React.PointerEvent<HTMLDivElement>, day: number) => void
+  onPointerCancel: (event: React.PointerEvent<HTMLDivElement>, day: number) => void
+  onSelectEvent: (id: string) => void
+  onSelectTodo: (id: string) => void
+}
+
+function WeekTimePanel({ week, hours, hourHeight, today, currentMinute, dragSelection, previewSelection, interactive, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onSelectEvent, onSelectTodo }: WeekTimePanelProps): React.ReactElement {
+  const includesToday = today >= week.weekStart && today < addDays(week.weekStart, 7)
+  return <div aria-hidden={!interactive} className={cn('grid h-full w-1/3 min-w-0 shrink-0 grid-cols-7 snap-start', !interactive && 'pointer-events-none')}>{week.days.map((day) => {
+    const segments = week.dayItems.get(day)!.timedSegments
+    const selection = interactive ? (dragSelection?.day === day ? dragSelection : previewSelection?.day === day ? previewSelection : undefined) : undefined
+    return <div key={day} onPointerDown={interactive ? (event) => onPointerDown(event, day) : undefined} onPointerMove={interactive ? (event) => onPointerMove(event, day) : undefined} onPointerUp={interactive ? (event) => onPointerUp(event, day) : undefined} onPointerCancel={interactive ? (event) => onPointerCancel(event, day) : undefined} className={cn('relative min-w-0 border-r border-border/60', interactive && 'cursor-crosshair select-none')}>
+      {hours.map((hour) => <div key={hour} className="absolute left-0 right-0 border-t-[0.5px] border-border/40" style={{ top: `${hour * hourHeight}px` }} />)}
+      {segments.map((segment) => {
+        const top = minuteOffset(segment.startAt, day) / 60 * hourHeight
+        const height = Math.max(18, (minuteOffset(segment.endAt, day) - minuteOffset(segment.startAt, day)) / 60 * hourHeight)
+        const laneWidth = 100 / segment.laneCount
+        const style = { top: `${top}px`, height: `${height}px`, left: `calc(${segment.lane * laneWidth}% + 2px)`, width: `calc(${laneWidth}% - 4px)` }
+        if (segment.item.kind === 'event') {
+          const event = segment.item.event
+          return <CalendarEventMarker key={`event-${event.id}`} event={event} onSelect={() => onSelectEvent(event.id)} className="absolute z-10 overflow-hidden border-l-2 border-primary-foreground/50 px-1.5 py-1 text-left text-[11px] shadow-sm" style={style}><span className="block truncate font-medium">{event.title}</span>{height >= 28 && <span className="block truncate text-primary-foreground/75">{formatTime(segment.startAt)}–{formatTime(segment.endAt)}</span>}</CalendarEventMarker>
+        }
+        if (segment.item.kind === 'todo') return <div key={`todo-${segment.item.id}`} className="absolute z-20" style={style}><TodoCalendarMarker todo={segment.item.todo} onSelect={() => onSelectTodo(segment.item.id)} className="h-full bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>
+        return <AutomationCalendarMarker key={`automation-${segment.item.id}`} automation={segment.item.automation} occurrenceCount={segment.item.count} iconClassName="mt-0.5" className="absolute z-20 flex items-start gap-1 overflow-hidden bg-violet-500/20 px-1 py-0.5 text-[10px] text-violet-900 shadow-sm dark:text-violet-100" style={style} />
+      })}
+      {selection && <div aria-hidden="true" className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden border border-primary/70 border-l-2 bg-primary/15 px-1.5 py-1 text-[11px] text-primary shadow-sm" style={{ top: `${selection.startMinute / 60 * hourHeight}px`, height: `${(selection.endMinute - selection.startMinute) / 60 * hourHeight}px` }}>{selection.endMinute - selection.startMinute >= 30 && <span className="block truncate font-medium">新建日程 · {formatTime(atLocalMinute(day, selection.startMinute))}–{formatTime(atLocalMinute(day, selection.endMinute))}</span>}</div>}
+      {includesToday && startOfDay(day) === today && <div className="pointer-events-none absolute inset-x-0 z-30 flex -translate-y-1/2 items-center" style={{ top: `${currentMinute / 60 * hourHeight}px` }}><span className="ml-0.5 size-2 shrink-0 rounded-full bg-primary" /><span className="h-px flex-1 bg-primary" /></div>}
+    </div>
+  })}</div>
+}
+
+function WeekCalendar({ weekStart, events, todos, automations, draftPreview, quickCreateOpen, onNavigate, onSelectEvent, onCreateAt, onSelectTodo }: { weekStart: number; events: CalendarEvent[]; todos: Todo[]; automations: Automation[]; draftPreview?: CalendarDraftPreview; quickCreateOpen: boolean; onNavigate: (amount: number) => void; onSelectEvent: (id: string) => void; onCreateAt: (startAt: number, endAt?: number, pointer?: CalendarCreatePointer) => void; onSelectTodo: (id: string) => void }): React.ReactElement {
+  const weekViews = React.useMemo(() => [
+    buildWeekView(addDays(weekStart, -7), events, todos, automations),
+    buildWeekView(weekStart, events, todos, automations),
+    buildWeekView(addDays(weekStart, 7), events, todos, automations),
+  ], [automations, events, todos, weekStart])
   const hours = Array.from({ length: 24 }, (_, hour) => hour)
   const timeScrollRef = React.useRef<HTMLDivElement>(null)
+  const headerScrollRef = React.useRef<HTMLDivElement>(null)
+  const allDayScrollRef = React.useRef<HTMLDivElement>(null)
+  const bodyScrollRef = React.useRef<HTMLDivElement>(null)
   const dragRef = React.useRef<WeekTimeDrag | null>(null)
   const [dragSelection, setDragSelection] = React.useState<WeekTimeSelection | null>(null)
   const [currentTime, setCurrentTime] = React.useState(() => Date.now())
   const [hourHeight, setHourHeight] = React.useState(56)
   const [viewportReady, setViewportReady] = React.useState(false)
   const focusedWeekRef = React.useRef<number | null>(null)
+  const recenteringRef = React.useRef(false)
+  const navigationPendingRef = React.useRef(false)
+  const scrollSettlingRef = React.useRef(false)
+  const scrollSettleTimerRef = React.useRef<number | undefined>()
+  const scrollSettleFrameRef = React.useRef<number | undefined>()
 
   React.useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000)
@@ -563,34 +760,6 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
     const endMinute = Math.max(startMinute + DRAG_SNAP_MINUTES, Math.min(24 * 60, minuteOffset(draftPreview.endAt, day)))
     return { day, startMinute, endMinute }
   }, [draftPreview?.allDay, draftPreview?.endAt, draftPreview?.startAt])
-  const dayItems = React.useMemo(() => {
-    const items = new Map<number, { allDayEvents: CalendarEvent[]; allDayTodos: Todo[]; timedItems: TimedItem[] }>()
-    for (const day of days) items.set(day, { allDayEvents: [], allDayTodos: [], timedItems: [] })
-    for (const event of events) {
-      for (const day of days) {
-        if (!eventOccursOnDay(event, day)) continue
-        if (event.allDay) items.get(day)!.allDayEvents.push(event)
-        else items.get(day)!.timedItems.push({ id: event.id, kind: 'event', startAt: event.startAt, endAt: eventEndAt(event), event })
-      }
-    }
-    for (const todo of todos) {
-      if (!todo.dueAt) continue
-      const day = startOfDay(todo.dueAt)
-      const item = items.get(day)
-      if (!item) continue
-      if (isTodoDateOnly(todo.dueAt)) item.allDayTodos.push(todo)
-      else item.timedItems.push({ id: todo.id, kind: 'todo', startAt: todo.dueAt, endAt: todo.dueAt + 30 * 60 * 1000, todo })
-    }
-    for (const automation of automations) {
-      const item = items.get(startOfDay(automation.nextRunAt))
-      if (item) item.timedItems.push({ id: automation.id, kind: 'automation', startAt: automation.nextRunAt, endAt: automation.nextRunAt + 30 * 60 * 1000, automation })
-    }
-    return new Map(days.map((day) => {
-      const item = items.get(day)!
-      const result: WeekDayItems = { allDayEvents: item.allDayEvents, allDayTodos: item.allDayTodos, timedSegments: getTimedSegments(item.timedItems, day) }
-      return [day, result]
-    }))
-  }, [automations, days, events, todos])
 
   React.useEffect(() => {
     if (previewSelection) setDragSelection(null)
@@ -624,6 +793,81 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
     })
     return () => window.cancelAnimationFrame(frame)
   }, [currentMinute, hourHeight, isCurrentWeek, totalHeight, viewportReady, weekStart])
+
+  const getHorizontalScrollers = React.useCallback((): HTMLDivElement[] => [headerScrollRef.current, allDayScrollRef.current, bodyScrollRef.current].filter((element): element is HTMLDivElement => element !== null), [])
+  const scrollToPanel = React.useCallback((panelIndex: number, behavior: ScrollBehavior = 'auto'): void => {
+    for (const element of getHorizontalScrollers()) {
+      const left = element.clientWidth * panelIndex
+      if (behavior === 'auto') element.scrollLeft = left
+      else element.scrollTo({ left, behavior })
+    }
+  }, [getHorizontalScrollers])
+  const syncHorizontalScroll = React.useCallback((source: HTMLDivElement): void => {
+    const ratio = source.clientWidth > 0 ? source.scrollLeft / source.clientWidth : 1
+    for (const element of getHorizontalScrollers()) {
+      if (element === source) continue
+      const left = ratio * element.clientWidth
+      if (Math.abs(element.scrollLeft - left) > 0.5) element.scrollLeft = left
+    }
+  }, [getHorizontalScrollers])
+  const completeHorizontalScroll = React.useCallback((panelIndex: number): void => {
+    if (panelIndex === 1 || navigationPendingRef.current) return
+    navigationPendingRef.current = true
+    recenteringRef.current = true
+    onNavigate(panelIndex === 2 ? 1 : -1)
+  }, [onNavigate])
+  const settleHorizontalScroll = React.useCallback((): void => {
+    if (recenteringRef.current || navigationPendingRef.current || scrollSettlingRef.current) return
+    const viewport = bodyScrollRef.current
+    if (!viewport || viewport.clientWidth <= 0) return
+    const panelIndex = Math.max(0, Math.min(2, Math.round(viewport.scrollLeft / viewport.clientWidth)))
+    const targetLeft = viewport.clientWidth * panelIndex
+    const complete = (): void => {
+      scrollSettlingRef.current = false
+      completeHorizontalScroll(panelIndex)
+    }
+    if (Math.abs(viewport.scrollLeft - targetLeft) <= 1) {
+      complete()
+      return
+    }
+    scrollSettlingRef.current = true
+    scrollToPanel(panelIndex, 'smooth')
+    const startedAt = performance.now()
+    const waitForSnap = (): void => {
+      const current = bodyScrollRef.current
+      if (!current) {
+        scrollSettlingRef.current = false
+        return
+      }
+      if (Math.abs(current.scrollLeft - targetLeft) <= 1 || performance.now() - startedAt > 700) {
+        if (Math.abs(current.scrollLeft - targetLeft) > 1) scrollToPanel(panelIndex)
+        complete()
+        return
+      }
+      scrollSettleFrameRef.current = window.requestAnimationFrame(waitForSnap)
+    }
+    scrollSettleFrameRef.current = window.requestAnimationFrame(waitForSnap)
+  }, [completeHorizontalScroll, scrollToPanel])
+  const handleHorizontalScroll = React.useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+    if (recenteringRef.current || navigationPendingRef.current || scrollSettlingRef.current) return
+    syncHorizontalScroll(event.currentTarget)
+    if (scrollSettleTimerRef.current !== undefined) window.clearTimeout(scrollSettleTimerRef.current)
+    scrollSettleTimerRef.current = window.setTimeout(settleHorizontalScroll, 160)
+  }, [settleHorizontalScroll, syncHorizontalScroll])
+
+  React.useLayoutEffect(() => {
+    recenteringRef.current = true
+    scrollToPanel(1)
+    const frame = window.requestAnimationFrame(() => {
+      recenteringRef.current = false
+      navigationPendingRef.current = false
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [scrollToPanel, weekStart])
+  React.useEffect(() => () => {
+    if (scrollSettleTimerRef.current !== undefined) window.clearTimeout(scrollSettleTimerRef.current)
+    if (scrollSettleFrameRef.current !== undefined) window.cancelAnimationFrame(scrollSettleFrameRef.current)
+  }, [])
 
   const minuteAtPosition = (clientY: number, target: HTMLDivElement): number => {
     const bounds = target.getBoundingClientRect()
@@ -666,46 +910,37 @@ function WeekCalendar({ weekStart, events, todos, automations, draftPreview, qui
     onCreateAt(atLocalMinute(day, selection.startMinute), atLocalMinute(day, selection.endMinute), { clientX: event.clientX, clientY: event.clientY })
   }
 
+  const horizontalScrollStyle: React.CSSProperties = { overscrollBehaviorX: 'contain' }
+
   return (
-    <div className="relative flex h-full min-h-0 overflow-x-auto">
-      <div className="flex min-h-0 min-w-[960px] flex-1 flex-col">
-        <div className="grid shrink-0 border-b border-border/60" style={{ gridTemplateColumns: '3.5rem repeat(7, minmax(8rem, 1fr))' }}>
-          <div className="border-r border-border/60" />
-          {days.map((day) => <div key={day} className={cn('border-r border-border/60 px-2 py-2 text-center text-xs font-medium', startOfDay(day) === today && 'bg-primary/8 text-primary')}><span className="block">{new Intl.DateTimeFormat('zh-CN', { weekday: 'short' }).format(day)}</span><span className="mt-0.5 inline-flex size-6 items-center justify-center rounded-full tabular-nums">{new Date(day).getDate()}</span></div>)}
+    <div className="relative flex h-full min-h-0 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 border-b border-border/60">
+          <div className="w-14 shrink-0 border-r border-border/60" />
+          <div ref={headerScrollRef} onScroll={handleHorizontalScroll} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-none" style={horizontalScrollStyle}>
+            <div className="flex w-[300%]">
+              {weekViews.map((week, index) => <WeekHeaderPanel key={week.weekStart} week={week} today={today} active={index === 1} />)}
+            </div>
+          </div>
         </div>
-        <div className="grid shrink-0 border-b border-border/60" style={{ gridTemplateColumns: '3.5rem repeat(7, minmax(8rem, 1fr))' }}>
-          <div className="border-r border-border/60 px-2 py-2 text-right text-[11px] text-muted-foreground">全天</div>
-          {days.map((day) => {
-            const items = dayItems.get(day)!
-            return <div key={day} className="min-h-12 border-r border-border/60 p-1.5">{items.allDayEvents.map((event) => <CalendarEventMarker key={event.id} event={event} onSelect={() => onSelectEvent(event.id)} className="mb-1 flex w-full min-w-0 items-center gap-1 px-1.5 py-1 text-left text-[11px] shadow-sm" />)}{items.allDayTodos.map((todo) => <div key={todo.id} className="mb-1"><TodoCalendarMarker todo={todo} onSelect={() => onSelectTodo(todo.id)} className="bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>)}</div>
-          })}
+        <div className="flex shrink-0 border-b border-border/60">
+          <div className="w-14 shrink-0 border-r border-border/60 px-2 py-2 text-right text-[11px] text-muted-foreground">全天</div>
+          <div ref={allDayScrollRef} onScroll={handleHorizontalScroll} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-none" style={horizontalScrollStyle}>
+            <div className="flex w-[300%]">
+              {weekViews.map((week, index) => <WeekAllDayPanel key={week.weekStart} week={week} active={index === 1} onSelectEvent={onSelectEvent} onSelectTodo={onSelectTodo} />)}
+            </div>
+          </div>
         </div>
         <div ref={timeScrollRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
-          <div className="relative grid" style={{ gridTemplateColumns: '3.5rem repeat(7, minmax(8rem, 1fr))', height: `${totalHeight}px` }}>
-            <div className="relative border-r border-border/60">
+          <div className="flex min-w-0" style={{ height: `${totalHeight}px` }}>
+            <div className="relative w-14 shrink-0 border-r border-border/60">
               {hours.map((hour) => <div key={hour} className="absolute left-0 right-0 border-t-[0.5px] border-border/40 pr-2 text-right text-[11px] text-muted-foreground" style={{ top: `${hour * hourHeight}px` }}><span className="relative -top-2.5 tabular-nums">{String(hour).padStart(2, '0')}:00</span></div>)}
             </div>
-            {days.map((day) => {
-              const segments = dayItems.get(day)!.timedSegments
-              const selection = dragSelection?.day === day ? dragSelection : previewSelection?.day === day ? previewSelection : undefined
-              return <div key={day} onPointerDown={(event) => handlePointerDown(event, day)} onPointerMove={(event) => handlePointerMove(event, day)} onPointerUp={(event) => finishTimeDrag(event, day)} onPointerCancel={(event) => finishTimeDrag(event, day, true)} className="relative cursor-crosshair select-none border-r border-border/60">
-                {hours.map((hour) => <div key={hour} className="absolute left-0 right-0 border-t-[0.5px] border-border/40" style={{ top: `${hour * hourHeight}px` }} />)}
-                {segments.map((segment) => {
-                  const top = minuteOffset(segment.startAt, day) / 60 * hourHeight
-                  const height = Math.max(18, (minuteOffset(segment.endAt, day) - minuteOffset(segment.startAt, day)) / 60 * hourHeight)
-                  const laneWidth = 100 / segment.laneCount
-                  const style = { top: `${top}px`, height: `${height}px`, left: `calc(${segment.lane * laneWidth}% + 2px)`, width: `calc(${laneWidth}% - 4px)` }
-                  if (segment.item.kind === 'event') {
-                    const event = segment.item.event
-                    return <CalendarEventMarker key={`event-${event.id}`} event={event} onSelect={() => onSelectEvent(event.id)} className="absolute z-10 overflow-hidden border-l-2 border-primary-foreground/50 px-1.5 py-1 text-left text-[11px] shadow-sm" style={style}><span className="block truncate font-medium">{event.title}</span>{height >= 28 && <span className="block truncate text-primary-foreground/75">{formatTime(segment.startAt)}–{formatTime(segment.endAt)}</span>}</CalendarEventMarker>
-                  }
-                  if (segment.item.kind === 'todo') return <div key={`todo-${segment.item.id}`} className="absolute z-20" style={style}><TodoCalendarMarker todo={segment.item.todo} onSelect={() => onSelectTodo(segment.item.id)} className="h-full bg-amber-500/20 text-amber-900 dark:text-amber-100" /></div>
-                  return <div key={`automation-${segment.item.id}`} data-calendar-item title={segment.item.automation.name} className="absolute z-20 flex items-start gap-1 overflow-hidden bg-violet-500/20 px-1 py-0.5 text-[10px] text-violet-900 shadow-sm dark:text-violet-100" style={style}><Repeat2 className="mt-0.5 size-3 shrink-0" /><span className="truncate">{segment.item.automation.name}</span></div>
-                })}
-                {selection && <div aria-hidden="true" className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden border border-primary/70 border-l-2 bg-primary/15 px-1.5 py-1 text-[11px] text-primary shadow-sm" style={{ top: `${selection.startMinute / 60 * hourHeight}px`, height: `${(selection.endMinute - selection.startMinute) / 60 * hourHeight}px` }}>{selection.endMinute - selection.startMinute >= 30 && <span className="block truncate font-medium">新建日程 · {formatTime(atLocalMinute(day, selection.startMinute))}–{formatTime(atLocalMinute(day, selection.endMinute))}</span>}</div>}
-                {isCurrentWeek && startOfDay(day) === today && <div className="pointer-events-none absolute inset-x-0 z-30 flex -translate-y-1/2 items-center" style={{ top: `${currentMinute / 60 * hourHeight}px` }}><span className="ml-0.5 size-2 shrink-0 rounded-full bg-primary" /><span className="h-px flex-1 bg-primary" /></div>}
+            <div ref={bodyScrollRef} onScroll={handleHorizontalScroll} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-none" style={horizontalScrollStyle}>
+              <div className="flex h-full w-[300%]">
+                {weekViews.map((week, index) => <WeekTimePanel key={week.weekStart} week={week} hours={hours} hourHeight={hourHeight} today={today} currentMinute={currentMinute} dragSelection={dragSelection} previewSelection={previewSelection} interactive={index === 1} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={(event, day) => finishTimeDrag(event, day)} onPointerCancel={(event, day) => finishTimeDrag(event, day, true)} onSelectEvent={onSelectEvent} onSelectTodo={onSelectTodo} />)}
               </div>
-            })}
+            </div>
           </div>
         </div>
       </div>
