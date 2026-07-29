@@ -56,6 +56,7 @@ import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
 import { permissionService } from './agent-permission-service'
 import type { PermissionResult, CanUseToolOptions } from './agent-permission-service'
+import { resolvePlanningDeletionPermission } from './planning-permission-policy'
 import { askUserService } from './agent-ask-user-service'
 import { exitPlanService, type ExitPlanPermissionResult } from './agent-exit-plan-service'
 import { removePromaAutoCompactSettings } from './agent-auto-compact-settings'
@@ -1434,14 +1435,6 @@ export class AgentOrchestrator {
         'mcp__planning__list_groups', 'mcp__planning__list_tags',
         'mcp__planning__list_active_reminders',
       ])
-      // 即使会话已启用 bypassPermissions，本地规划删除仍必须每次由用户确认。
-      const DESTRUCTIVE_PLANNING_TOOLS = new Set([
-        'mcp__planning__delete_todo',
-        'mcp__planning__delete_calendar_event',
-        'mcp__planning__delete_group',
-        'mcp__planning__delete_tag',
-        'mcp__planning__delete_reminder',
-      ])
       const runTriggeredBy = input.triggeredBy
 
       /** Plan 模式是否已被 Agent 进入（初始 plan 模式时天然为 true，其他模式需 EnterPlanMode 触发） */
@@ -1536,12 +1529,18 @@ export class AgentOrchestrator {
           )
         }
 
-        // 自动任务/协作子 Agent 没有可靠的本地确认界面，不能发起删除。
-        if (DESTRUCTIVE_PLANNING_TOOLS.has(toolName) && (runTriggeredBy === 'automation' || runTriggeredBy === 'delegation')) {
+        const planningDeletionPermission = resolvePlanningDeletionPermission(
+          toolName,
+          currentMode,
+          runTriggeredBy,
+        )
+        if (planningDeletionPermission === 'deny-unattended') {
           return { behavior: 'deny' as const, message: '定时任务和协作子 Agent 不能删除本地规划数据，请由用户主会话发起并确认。' }
         }
-        // 规划删除会移除用户本地数据；不纳入 bypassPermissions 的白名单语义。
-        if (currentMode !== 'plan' && DESTRUCTIVE_PLANNING_TOOLS.has(toolName)) {
+        if (planningDeletionPermission === 'allow') {
+          return { behavior: 'allow' as const, updatedInput: input }
+        }
+        if (planningDeletionPermission === 'require-single-approval') {
           return permissionService.requestSingleApproval(sessionId, toolName, input, options, (request) => {
             this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'permission_request', request } })
           })

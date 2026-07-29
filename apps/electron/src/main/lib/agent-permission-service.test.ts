@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { AgentPermissionService, type CanUseToolOptions } from './agent-permission-service'
 
 function permissionOptions(signal: AbortSignal, toolUseID: string): CanUseToolOptions {
-  return { signal, toolUseID, displayName: '删除 Todo', description: '删除本地 Todo' }
+  return { signal, toolUseID, displayName: '删除分组', description: '删除 Todo 分组' }
 }
 
 test('Given a destructive planning request When it is approved Then approval is single-use and cannot create a session whitelist', async () => {
@@ -12,8 +12,8 @@ test('Given a destructive planning request When it is approved Then approval is 
 
   const firstResult = service.requestSingleApproval(
     'session-1',
-    'mcp__planning__delete_todo',
-    { id: 'todo-1' },
+    'mcp__planning__delete_group',
+    { id: 'group-1', scope: 'todo' },
     permissionOptions(controller.signal, 'tool-1'),
     (request) => { firstRequest = request },
   )
@@ -24,8 +24,8 @@ test('Given a destructive planning request When it is approved Then approval is 
 
   let secondRequest: { requestId: string } | undefined
   const secondResult = service.createCanUseTool('session-1', (request) => { secondRequest = request })(
-    'mcp__planning__delete_todo',
-    { id: 'todo-2' },
+    'mcp__planning__delete_group',
+    { id: 'group-2', scope: 'todo' },
     permissionOptions(controller.signal, 'tool-2'),
   )
 
