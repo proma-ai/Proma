@@ -3,7 +3,6 @@
  */
 
 export * from './SettingsPanel'
-export * from './SettingsDialog'
 export * from './ChannelSettings'
 export * from './ChannelForm'
 export * from './GeneralSettings'

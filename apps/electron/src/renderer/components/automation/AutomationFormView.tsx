@@ -40,6 +40,7 @@ import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
+import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import type {
   AutomationFeishuNotificationTarget,
   AutomationNotificationTarget,
@@ -83,7 +84,7 @@ function canPersistDraft(draft: AutomationDraft): boolean {
   return !!(draft.name.trim() && draft.prompt.trim())
 }
 
-/** 任务是否具备运行 / 启用所需的最小完整度（模型 + 工作区） */
+/** 任务是否具备运行 / 启用所需的最小完整度（模型 + 项目） */
 function isReadyToRun(draft: AutomationDraft): boolean {
   return canPersistDraft(draft) && !!draft.channelId && !!draft.workspaceId
 }
@@ -94,7 +95,7 @@ function listMissingFields(draft: AutomationDraft): string[] {
   if (!draft.name.trim()) missing.push('任务名称')
   if (!draft.prompt.trim()) missing.push('任务描述')
   if (!draft.channelId) missing.push('模型')
-  if (!draft.workspaceId) missing.push('工作区')
+  if (!draft.workspaceId) missing.push('项目')
   return missing
 }
 
@@ -215,14 +216,14 @@ function AutomationPromptEmptyGuide(): React.ReactElement {
         <div>
           <div className="text-[13px] font-semibold text-foreground">推荐：让 Proma Agent 创建</div>
           <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            在左侧会话里说清目标，并明确表示要求创建定时任务，Proma Agent 会生成任务描述，并补全周期、工作区和模型等配置，手动编辑更适合微调任务描述。
+            在左侧会话里说清目标，并明确表示要求创建定时任务，Proma Agent 会生成任务描述，并补全周期、项目和模型等配置，手动编辑更适合微调任务描述。
           </div>
         </div>
         <div className="h-px bg-border/50" />
         <div>
           <div className="text-[13px] font-medium text-foreground/85">手动编写时，只写任务本身</div>
           <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            例：检查 Proma 仓库新增 issue，主动回复问答类问题，不清楚的部分整理到工作区目录下的 .context/issue-faq.md 文档；真正的 Bug 或请求罗列后发给我，不要记录任何重复的信息。
+            例：检查 Proma 仓库新增 issue，主动回复问答类问题，不清楚的部分整理到项目级 Context 的 .context/issue-faq.md 文档；真正的 Bug 或请求罗列后发给我，不要记录任何重复的信息。
           </div>
         </div>
       </div>
@@ -384,7 +385,7 @@ function AutomationRuntimeSelector({
   )
 }
 
-export function AutomationFormView(): React.ReactElement | null {
+export function AutomationFormView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
   const [formState, setFormState] = useAtom(automationFormAtom)
   const setAutomations = useSetAtom(automationsAtom)
@@ -616,7 +617,7 @@ export function AutomationFormView(): React.ReactElement | null {
   const handleRunNow = async (): Promise<void> => {
     const latest = latestFormRef.current
     if (!latest || !isReadyToRun(latest)) {
-      const missing = latest ? listMissingFields(latest) : ['任务名称', '任务描述', '模型', '工作区']
+      const missing = latest ? listMissingFields(latest) : ['任务名称', '任务描述', '模型', '项目']
       toast.error(`请先补全：${missing.join('、')}`)
       return
     }
@@ -717,7 +718,7 @@ export function AutomationFormView(): React.ReactElement | null {
     <div className="titlebar-no-drag absolute inset-0 z-10 bg-content-area flex animate-in fade-in duration-200">
       {/* 左栏：自然语言任务描述（主角） */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center gap-2 px-6 py-4 flex-shrink-0">
+        <div className={cn('flex items-center gap-2 px-6 flex-shrink-0', standalone ? 'titlebar-drag-region pt-8 pb-4' : 'py-4')}>
           <button
             type="button"
             onClick={close}
@@ -729,7 +730,7 @@ export function AutomationFormView(): React.ReactElement | null {
           </button>
           <Clock className="size-4 text-primary flex-shrink-0" />
           {editingName ? (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="titlebar-no-drag flex items-center gap-1.5 flex-1 min-w-0">
               <input
                 ref={nameInputRef}
                 value={form.name}
@@ -750,7 +751,7 @@ export function AutomationFormView(): React.ReactElement | null {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="titlebar-no-drag flex items-center gap-1.5 flex-1 min-w-0">
               <span className="truncate text-sm font-semibold text-foreground">
                 {form.name.trim() || (isEdit ? '未命名任务' : '新建定时任务')}
               </span>
@@ -795,7 +796,7 @@ export function AutomationFormView(): React.ReactElement | null {
 
       {/* 右栏：配置 sidebar */}
       <div className="w-[340px] flex-shrink-0 border-l border-border/50 flex flex-col bg-content-area">
-        <div className="flex items-center justify-between gap-2 px-4 py-4 flex-shrink-0">
+        <div className={cn('flex items-center justify-between gap-2 px-4 flex-shrink-0', standalone ? 'titlebar-drag-region pt-8 pb-4' : 'py-4')}>
           <span className="text-sm font-semibold text-foreground">配置</span>
           <div className="flex items-center gap-1">
             {!isWindows && (
@@ -1088,13 +1089,13 @@ export function AutomationFormView(): React.ReactElement | null {
             )}
           </div>
 
-          {/* 工作区（必选，默认填入当前会话所在工作区） */}
+          {/* 项目（必选，默认填入当前会话所在项目） */}
           <div className="flex flex-col gap-2">
-            <Label>工作区</Label>
+            <Label>项目</Label>
             {workspaces.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
                 <Settings size={14} className="shrink-0" />
-                <span>尚未创建任何工作区</span>
+                <span>尚未创建任何项目</span>
                 <button
                   type="button"
                   className="ml-auto text-xs underline underline-offset-2 hover:text-foreground transition-colors"
@@ -1111,10 +1112,18 @@ export function AutomationFormView(): React.ReactElement | null {
                 value={form.workspaceId ?? ''}
                 onValueChange={(v) => update({ workspaceId: v })}
               >
-                <SelectTrigger><SelectValue placeholder="选择工作区" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="选择项目" /></SelectTrigger>
                 <SelectContent>
                   {workspaces.map((ws) => (
-                    <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
+                    <SelectItem key={ws.id} value={ws.id}>
+                      <span className="flex items-center gap-1.5">
+                        <span>{ws.name}</span>
+                        <LocalProjectBadge
+                          projectRootPath={ws.projectRootPath}
+                          projectRootStatus={ws.projectRootStatus}
+                        />
+                      </span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

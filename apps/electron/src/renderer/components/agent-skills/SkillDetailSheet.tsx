@@ -130,7 +130,7 @@ function SkillDetailBody({
     ? 'PROMA 内置'
     : skill.importSource
       ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
-      : '当前工作区'
+      : '当前项目'
 
   return (
     <div className="flex h-full flex-col min-h-0">

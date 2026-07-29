@@ -8,7 +8,6 @@ import { MigrationImportDialog } from './components/migration/MigrationImportDia
 import { TooltipProvider } from './components/ui/tooltip'
 import { CloudAuthGate } from './components/cloud-auth'
 import { QuotaExceededDialog } from './components/billing/QuotaExceededDialog'
-import { SettingsDialog } from './components/settings/SettingsDialog'
 import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSessionIdAtom, currentAgentWorkspaceIdAtom } from './atoms/agent-atoms'
 import { appModeAtom } from './atoms/app-mode'
 import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
@@ -130,7 +129,6 @@ export default function App(): React.ReactElement {
         <PlanningReminderRail />
         <QuotaExceededDialog />
       </CloudAuthGate>
-      <SettingsDialog />
       <ShortcutGuideDialog />
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />

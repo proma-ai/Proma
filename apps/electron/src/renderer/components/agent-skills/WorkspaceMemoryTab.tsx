@@ -39,33 +39,37 @@ function getMemoryHistoryRangeLabel(value: MemoryHistoryRange): string {
 
 function buildWorkspaceMemoryInitPrompt(historyRange: MemoryHistoryRange): string {
   const rangeLabel = getMemoryHistoryRangeLabel(historyRange)
-  const rangeGuidance = historyRange === 'all'
-    ? '这次处理全部可用历史；如果历史很多，请优先最新、最有代表性和用户实际完成工作的会话，避免把临时过程写入长期记忆。'
-    : `如果你认为需要覆盖超过${rangeLabel.replace('最近', '')}的历史，请先在最终回复里建议用户扩大范围；这次默认只处理${rangeLabel}。`
+  const rangeGuidance =
+    historyRange === '1m'
+      ? '本次只处理最近 1 个月。若认为必须查看更早会话，不能自行扩大范围；请在最终回复中说明理由并建议用户在界面中扩大范围后再处理。'
+      : historyRange === 'all'
+        ? '用户已在界面中明确选择“全部”历史；历史很多时仍优先最新、最有代表性且实际完成工作的会话，避免把临时过程写入长期记忆。'
+        : `用户已在界面中明确将范围扩大到${rangeLabel}；本次只在该范围内处理。若仍需要更早历史，请在最终回复中说明理由并建议用户进一步扩大范围。`
 
-  return `请帮我初始化并沉淀当前工作区的长期记忆。
+  return `请为当前项目初始化并沉淀长期记忆。这里的“项目”指系统提示中的“项目根目录”及其关联的 Agent 工作会话；不要把 Proma 工作区笼统当作项目。
 
-目标：
-1. 读取当前工作区${rangeLabel}的 Agent 工作会话，优先关注最新、最有代表性、用户实际完成工作的会话。如果证据不足，请说明而不是编造。
-2. 同时检查会话级 Context（各会话 cwd 下的 .context/）和工作区级 Context（工作区 workspace-files/.context/ 及相关本地文档），区分当前任务临时产物与跨会话长期资料。
-3. 从这些会话和 Context 中提炼工作区级别的稳定知识，包括项目结构、常用命令、架构约定、用户偏好、踩坑经验、重要决策和未来 Agent 必须知道的注意事项。
-4. 更新工作区根目录的 CLAUDE.md：只写稳定、跨会话有价值的项目指令和工作方式，避免写临时过程和聊天流水账。
-5. 更新工作区 .claude/memory/MEMORY.md，必要时创建主题文件：MEMORY.md 只放主题索引和路由，详细内容拆到主题文件；只记录 SDK auto memory 应该长期回忆的经验。
-6. 沉淀并持续迭代一份「用户画像」记忆，写入 .claude/memory/user-profile.md（并在 MEMORY.md 索引中登记）。这份画像用于让未来的 Agent 越来越懂用户，应包含：
-   - 用户的角色、技术背景与擅长领域
-   - 稳定的工作方式与协作偏好（沟通风格、语言、颗粒度、对确认/自动化的偏好等）
-   - 反复出现的关注点、常用工具链和技术栈倾向
-   - 明确表达过的好恶、约束和"下次请这样做"的要求
-   迭代原则：这是一份会被反复更新的活文档——基于已有内容做增量合并，只在有新证据时新增或修订对应条目，保留仍然成立的旧结论，不要整体推倒重写；对不确定或仅出现一次的信号，标注为"待确认"而非当成稳定画像。
-7. 写入长期记忆前先做筛选：只有明确重复出现、用户明确要求记住，或删掉后未来 Agent 明显会犯错的信息才写入；单次弱信号、临时过程和证据不足的判断不要写入，放到最终回复的待确认点里。
-8. ${rangeGuidance}
+处理范围：
+1. 默认读取当前项目最近 1 个月的 Agent 工作会话，优先近期、最有代表性且用户实际完成工作的会话。证据不足时要明确说明，不得编造。只有用户通过界面明确选择更大范围时，才可处理超过 1 个月的会话。
+2. ${rangeGuidance}
 
-要求：
-- 先查看当前工作区可用的会话和文件（包括已有的 user-profile.md），再决定如何写。
-- 写入内容要简洁、可维护、方便用户审阅；用户画像要条目化、可追溯，避免笼统空话。
-- 优先小幅增量修改，不要为了显得完整而重写已有记忆；MEMORY.md 保持短索引，避免承载长正文。
-- 不要删除用户已有的有效内容；发现过时内容时先保守修订或标注。
-- 完成后回复：读取了哪些范围、更新了哪些文件、沉淀了哪些关键主题、用户画像这次有哪些新增或修订、还有哪些建议用户确认的点。`
+路径与职责边界：
+- 系统提示中的“Proma 工作区目录”是 Proma 管理配置与隔离资料的位置，存放 MCP、Skills、Proma 管理的 CLAUDE.md 与 Auto Memory；它不是用户项目根目录。必须按系统提示给出的绝对路径操作，不得猜测或替换路径。
+- “项目根目录”是用户项目资料的边界，并不一定等于实际 cwd：新会话通常从项目根目录运行，历史会话可能仍从会话工作台运行。允许从项目级 Context 及明确关联的长期项目资料读取证据；不要自动读取、创建或修改项目根内的 \`.claude/\`、\`CLAUDE.md\`、MCP 或 Skills 配置，除非用户明确要求。
+- 系统提示中的“会话工作台目录”及其 \`.context/\` 是当前会话的 sidecar/workbench：仅承载本次任务的 todo、plan、临时笔记和中间结论，不应作为项目级长期记忆的写入位置。绝不读取、创建或修改其中的 \`.claude/settings.json\`。
+- 系统提示中的“项目级 Context”与项目级长期资料用于跨会话保留调研、架构分析和项目知识。先区分它们与会话级临时产物，再决定可作为长期记忆证据的内容。
+
+沉淀目标：
+1. 从允许读取的会话和 Context 中提炼稳定的项目知识：项目结构、常用命令、架构边界、可靠决策、踩坑经验、用户偏好，以及未来 Agent 必须注意的事项。不要把聊天流水账、单次调试过程或当前任务的临时产物当作长期知识。
+2. 只更新系统提示明确给出的“Proma 工作区 CLAUDE.md”绝对路径。这里是 Proma 管理的项目指令文件；内容仅限稳定、跨会话有效的项目规则、入口和工作方法，不得混入临时调试、聊天记录或长篇资料。
+3. 只更新系统提示明确给出的“Proma 工作区 Auto Memory 目录”中的 \`MEMORY.md\`、必要的主题文件和 \`user-profile.md\`，不要在其他目录创建记忆文件。\`MEMORY.md\` 保持简短的主题索引与路由，主题细节拆分到主题文件。
+4. \`user-profile.md\` 是持续迭代的用户画像：基于现有内容增量合并，条目化且可追溯地记录有充分证据的角色与技术背景、稳定协作偏好、反复出现的关注点、工具链倾向和明确的“下次请这样做”要求。只出现一次或证据不足的信号标为“待确认”，不要当作稳定结论。
+
+写入规则：
+1. 写入前先读取已有的 \`user-profile.md\`、\`MEMORY.md\` 与相关主题文件，并保留仍然有效的内容；不要整体重写或删除有效信息。发现过时内容时，保守修订或标注。
+2. 只有明确重复出现、用户明确指定，或删除后会导致未来 Agent 明显犯错的知识才能写入。弱信号、临时过程和证据不足的判断不写入长期记忆，留在最终回复的待确认项。
+3. 优先小幅、可审阅的增量更新：CLAUDE.md 保持精炼，MEMORY.md 不承载长正文，跨会话的长资料仍留在项目级长期资料或项目级 Context。
+
+完成后必须报告：读取的会话与 Context 范围、更新的文件、关键沉淀主题、用户画像新增或修订，以及仍需用户确认的项目。`
 }
 
 function formatBytes(bytes: number): string {
@@ -287,7 +291,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       }
     } catch (err) {
       console.error('[工作区记忆] 刷新失败:', err)
-      toast.error('刷新工作区记忆失败')
+      toast.error('刷新项目记忆失败')
     } finally {
       setLoading(false)
     }
@@ -320,7 +324,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         setIsDirty(false)
       } catch (err) {
         console.error('[工作区记忆] 加载失败:', err)
-        toast.error('加载工作区记忆失败')
+        toast.error('加载项目记忆失败')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -383,7 +387,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         sessionId,
         message: buildWorkspaceMemoryInitPrompt(historyRange),
       })
-      toast.success('已创建工作区记忆初始化会话')
+      toast.success('已创建项目记忆初始化会话')
     } catch (err) {
       console.error('[工作区记忆] 创建初始化会话失败:', err)
       toast.error(err instanceof Error ? err.message : '创建初始化会话失败')
@@ -398,7 +402,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
   )
 
   if (loading || !summary) {
-    return <div className="py-20 text-center text-sm text-muted-foreground">加载工作区记忆中...</div>
+    return <div className="py-20 text-center text-sm text-muted-foreground">加载项目记忆中...</div>
   }
 
   return (
@@ -407,7 +411,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         <MemoryStatCard
           icon={<BookOpen size={18} />}
           title="项目指令"
-          subtitle="工作区根目录 CLAUDE.md"
+          subtitle="Proma 工作区 CLAUDE.md"
           value={summary.claudeMd.exists ? formatBytes(summary.claudeMd.size) : '尚未创建'}
           detail={`更新于 ${formatTime(summary.claudeMd.updatedAt)}`}
           active={selected?.kind === 'claude'}
@@ -427,9 +431,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground">从历史会话生成工作区记忆</div>
+            <div className="text-sm font-medium text-foreground">从历史会话生成项目记忆</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              新建一个 Agent 会话，读取当前工作区{historyRangeLabel}的工作会话，沉淀并更新 CLAUDE.md 与 auto memory 文件。
+              新建一个 Agent 会话，读取当前项目{historyRangeLabel}的工作会话，沉淀并更新 Proma 工作区中的 CLAUDE.md 与 auto memory 文件。
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -451,7 +455,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
             </Select>
             <Button onClick={handleInitializeMemory} disabled={initializing}>
               <Sparkles size={14} className="mr-1.5" />
-              {initializing ? '创建中...' : '生成工作区记忆'}
+              {initializing ? '创建中...' : '生成项目记忆'}
             </Button>
           </div>
         </div>
@@ -476,7 +480,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                 active={selected?.kind === 'claude'}
                 icon={<FileText size={14} />}
                 label="CLAUDE.md"
-                meta="工作区项目指令"
+                meta="Proma 工作区项目指令"
                 onClick={() => void openClaude(summary)}
               />
               <div className="mt-3 px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">

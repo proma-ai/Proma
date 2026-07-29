@@ -10,7 +10,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage, ToolResultMessage, UserMessage } from '@earendil-works/pi-ai/compat'
 import type { SDKAssistantMessage, SDKMessage } from '@proma/shared'
 import type { RuntimeGuardResultOverride } from '../agent-runtime-guards'
-import { isTransientNetworkError } from '../error-patterns'
+import { isMalformedResponseError, isTransientNetworkError } from '../error-patterns'
 
 function getPiEditItems(input: Record<string, unknown>): Array<Record<string, unknown>> {
   return Array.isArray(input.edits)
@@ -240,9 +240,11 @@ export function convertPiMessage(
     // Pi 可能先用预览帧报告 error，随后通过同一 transcript 原生重试；
     // 在最终帧到达前不能把它展示成用户可见的终态失败。
     const isTerminalError = final && assistant.stopReason === 'error'
-    const errorType = assistant.errorMessage && isTransientNetworkError(assistant.errorMessage)
-      ? 'network_error'
-      : 'provider_error'
+    const errorType = assistant.errorMessage && isMalformedResponseError(assistant.errorMessage)
+      ? 'service_error'
+      : assistant.errorMessage && isTransientNetworkError(assistant.errorMessage)
+        ? 'network_error'
+        : 'provider_error'
     if (assistant.errorMessage && !isTerminalError && final) {
       console.warn(
         `[pi-adapter] 忽略非终态 errorMessage（stopReason=${assistant.stopReason}）: ${assistant.errorMessage}`,

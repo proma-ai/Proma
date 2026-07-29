@@ -1,7 +1,7 @@
 ---
 name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
-version: "1.0.1"
+version: "1.0.2"
 ---
 # Writing Plans
 
@@ -13,7 +13,7 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Context:** This should be run in a dedicated worktree (created by brainstorming skill).
+**Context:** This should be run in a dedicated worktree.
 
 **Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
 

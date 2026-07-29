@@ -1,8 +1,8 @@
 /**
  * FileSearchBar — 文件搜索栏
  *
- * 位于侧面板工作区文件和会话文件之间，输入关键词搜索所有文件。
- * 分别搜索会话目录和工作区文件目录，确保两边都使用相对路径。
+ * 在一个连续列表中搜索当前会话可见的项目文件和会话文件。
+ * 搜索结果使用相对路径，供 FileBrowser 自动定位。
  */
 
 import * as React from 'react'
@@ -23,6 +23,22 @@ interface FileSearchBarProps {
   /** 当前 session ID，用于文件自动定位 */
   sessionId?: string
   onFilePreview?: (filePath: string) => void
+}
+
+function sortSearchResults(entries: FileIndexEntry[], query: string): FileIndexEntry[] {
+  const normalizedQuery = query.toLowerCase()
+  return [...entries].sort((a, b) => {
+    const aStartsWith = a.name.toLowerCase().startsWith(normalizedQuery) ? 0 : 1
+    const bStartsWith = b.name.toLowerCase().startsWith(normalizedQuery) ? 0 : 1
+    if (aStartsWith !== bStartsWith) return aStartsWith - bStartsWith
+    if (a.type === 'dir' && b.type !== 'dir') return -1
+    if (a.type !== 'dir' && b.type === 'dir') return 1
+    const byPathLength = a.path.length - b.path.length
+    if (byPathLength !== 0) return byPathLength
+    const byName = a.name.localeCompare(b.name)
+    if (byName !== 0) return byName
+    return a.path.localeCompare(b.path)
+  })
 }
 
 export function FileSearchBar({
@@ -63,7 +79,7 @@ export function FileSearchBar({
     return `${base.replace(/[\\/]+$/, '')}${sep}${entry.path}`
   }, [workspaceFilesPath, sessionPath])
 
-  // 防抖搜索 — 分别搜索两个目录
+  // 防抖搜索 — 根据当前实例传入的根目录搜索对应文件区
   React.useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     abortRef.current?.abort()
@@ -96,7 +112,7 @@ export function FileSearchBar({
       try {
         const allResults: FileIndexEntry[] = []
 
-        // 分别搜索工作区文件和会话文件，确保两边都用相对路径
+        // 分别搜索项目文件和会话文件，确保两边都用相对路径
         const searches: Promise<FileIndexEntry[]>[] = []
 
         if (workspaceFilesPath) {
@@ -128,7 +144,7 @@ export function FileSearchBar({
 
         if (ac.signal.aborted) return
 
-        setResults(allResults)
+        setResults(sortSearchResults(allResults, trimmed))
         setSelectedIndex(0)
         // 只在"用户输入触发的待显示"且未被主动关闭时才打开下拉；
         // 父组件重渲染引发的 rerun 只静默更新 results，不动 isOpen。
@@ -213,8 +229,6 @@ export function FileSearchBar({
     inputRef.current?.blur()
   }, [onFilePreview, sessionId, setAutoReveal, resolveAbsolutePath])
 
-  const sessionResults = React.useMemo(() => results.filter((e) => e.source === 'session'), [results])
-  const workspaceResults = React.useMemo(() => results.filter((e) => e.source === 'workspace'), [results])
 
   if (!hasAnyRoot) return null
 
@@ -246,49 +260,15 @@ export function FileSearchBar({
       {isOpen && results.length > 0 && (
         <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border bg-popover shadow-lg overflow-hidden">
           <div className="max-h-[200px] overflow-y-auto scrollbar-thin">
-            {/* 会话文件分组 */}
-            {sessionResults.length > 0 && (
-              <>
-                <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-medium text-muted-foreground bg-muted/30">
-                  <span>会话文件</span>
-                  <span className="text-muted-foreground/40">{sessionResults.length}</span>
-                </div>
-                {sessionResults.map((entry) => {
-                  const globalIdx = results.indexOf(entry)
-                  return (
-                    <ResultItem
-                      key={entry.path}
-                      entry={entry}
-                      isSelected={globalIdx === selectedIndex}
-                      onClick={handleClick}
-                      onHover={() => setSelectedIndex(globalIdx)}
-                    />
-                  )
-                })}
-              </>
-            )}
-
-            {/* 工作区文件分组 */}
-            {workspaceResults.length > 0 && (
-              <>
-                <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-medium text-muted-foreground bg-muted/30">
-                  <span>工作区文件</span>
-                  <span className="text-muted-foreground/40">{workspaceResults.length}</span>
-                </div>
-                {workspaceResults.map((entry) => {
-                  const globalIdx = results.indexOf(entry)
-                  return (
-                    <ResultItem
-                      key={entry.path}
-                      entry={entry}
-                      isSelected={globalIdx === selectedIndex}
-                      onClick={handleClick}
-                      onHover={() => setSelectedIndex(globalIdx)}
-                    />
-                  )
-                })}
-              </>
-            )}
+            {results.map((entry, index) => (
+              <ResultItem
+                key={`${entry.source}:${entry.path}`}
+                entry={entry}
+                isSelected={index === selectedIndex}
+                onClick={handleClick}
+                onHover={() => setSelectedIndex(index)}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -336,6 +316,9 @@ function ResultItem({
           <span className="text-[11px] font-medium truncate max-w-[90px]">
             {entry.name}
           </span>
+          {entry.source === 'session' && (
+            <span className="flex-shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">会话文件</span>
+          )}
           {dirPath && (
             <span
               className="text-[10px] text-muted-foreground/55 truncate flex-1 min-w-0"

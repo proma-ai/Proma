@@ -54,6 +54,14 @@ export function filterExistingBridgeBindings(
   return bindings.filter((binding) => hasSession(binding.sessionId))
 }
 
+export function isBindingForDeletedWorkspace(
+  binding: Pick<BridgeChatBinding, 'workspaceId' | 'sessionId'>,
+  workspaceId: string,
+  deletedSessionIds: ReadonlySet<string>,
+): boolean {
+  return binding.workspaceId === workspaceId || deletedSessionIds.has(binding.sessionId)
+}
+
 function isBridgeChatBinding(value: unknown): value is BridgeChatBinding {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>

@@ -33,6 +33,29 @@ type SDKQuery = ReturnType<typeof import('@anthropic-ai/claude-agent-sdk').query
 /** SDK 用户消息类型 */
 type SDKUserMessage = import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
 
+/** Claude SDK 可读取的 settings 层级。Proma 只启用隔离的 user 层。 */
+export type ClaudeSettingSource = 'user'
+
+/**
+ * 解析 Claude SDK 的 settings 来源。
+ *
+ * 未显式指定时同样只读取 CLAUDE_CONFIG_DIR 指向的 Proma 隔离配置，
+ * 不读取项目根中的 .claude 或 CLAUDE.md。
+ */
+export function resolveClaudeSettingSources(
+  configuredSources?: readonly ClaudeSettingSource[],
+): ClaudeSettingSource[] {
+  return configuredSources ? [...configuredSources] : ['user']
+}
+
+/**
+ * 所有项目均从 Proma 隔离配置读取 Claude SDK settings。
+ * 会话 sidecar 通过 `settings` 文件显式传入，不依赖 project source。
+ */
+export function getClaudeSettingSourcesForWorkspace(): ClaudeSettingSource[] {
+  return ['user']
+}
+
 // ============================================================================
 // 长生命周期消息通道
 // ============================================================================
@@ -182,6 +205,10 @@ export interface ClaudeAgentQueryOptions extends AgentQueryInput {
   sdkSessionId?: string
   /** 附加的外部目录（SDK additionalDirectories） */
   additionalDirectories?: string[]
+  /** Proma 管理的会话级 settings.json；通过 SDK flag settings 显式加载。 */
+  settingsFilePath?: string
+  /** Claude SDK settings 来源。省略时仅读取 Proma 隔离的 user 配置。 */
+  settingSources?: readonly ClaudeSettingSource[]
 }
 
 // ============================================================================
@@ -774,8 +801,10 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         abortController: controller,
         env: options.env,
         systemPrompt: options.systemPrompt,
-        // 加载用户级和项目级 SDK settings，排除 local 级别的 .claude/settings.local.json。
-        settingSources: ['user', 'project'],
+        // 所有项目仅加载 Proma 隔离的 user 配置；会话 sidecar 由下方 settings 显式传入。
+        settingSources: resolveClaudeSettingSources(options.settingSources),
+        // 外置会话配置作为 SDK flag settings 加载，优先级高于文件系统来源。
+        ...(options.settingsFilePath && { settings: options.settingsFilePath }),
 
         // 条件字段
         ...(options.canUseTool && { canUseTool: options.canUseTool }),

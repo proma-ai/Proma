@@ -23,5 +23,5 @@ export const CARD_CLASS = 'rounded-xl overflow-hidden settings-card'
 /** 卡片内行样式 */
 export const ROW_CLASS = 'flex items-center justify-between px-4 py-3'
 
-/** 卡片内分隔线样式 */
-export const DIVIDER_CLASS = 'border-border/50'
+/** 卡片内分隔线样式：保留行间分组，同时降低连续设置项的线框感 */
+export const DIVIDER_CLASS = 'bg-border/25'

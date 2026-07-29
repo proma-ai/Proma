@@ -103,7 +103,7 @@ export function buildSessionListCard(
   }
 
   if (elements.length === 0) {
-    elements.push({ tag: 'markdown', content: '暂无工作区和会话' })
+    elements.push({ tag: 'markdown', content: '暂无项目和会话' })
   }
 
   // 用分割线隔开每个工作区
@@ -123,7 +123,7 @@ export function buildSessionListCard(
   return {
     config: { wide_screen_mode: true },
     header: {
-      title: { tag: 'plain_text', content: '工作区与会话' },
+      title: { tag: 'plain_text', content: '项目与会话' },
       template: 'blue',
     },
     elements: withDividers,
@@ -143,7 +143,7 @@ export function buildWorkspaceSwitchedCard(
 
   elements.push({
     tag: 'markdown',
-    content: `已切换到工作区: **${workspaceName}**`,
+    content: `已切换到项目: **${workspaceName}**`,
   })
 
   if (sessions.length > 0) {
@@ -171,7 +171,7 @@ export function buildWorkspaceSwitchedCard(
   return {
     config: { wide_screen_mode: true },
     header: {
-      title: { tag: 'plain_text', content: '切换工作区' },
+      title: { tag: 'plain_text', content: '切换项目' },
       template: 'green',
     },
     elements,
@@ -193,18 +193,18 @@ export function buildWorkspaceListCard(
   return {
     config: { wide_screen_mode: true },
     header: {
-      title: { tag: 'plain_text', content: '选择工作区' },
+      title: { tag: 'plain_text', content: '选择项目' },
       template: 'blue',
     },
     elements: [
       {
         tag: 'markdown',
-        content: lines.length > 0 ? lines.join('\n') : '暂无工作区',
+        content: lines.length > 0 ? lines.join('\n') : '暂无项目',
       },
       { tag: 'hr' },
       {
         tag: 'note',
-        elements: [{ tag: 'plain_text', content: '使用 /workspace <序号或名称> 切换工作区' }],
+        elements: [{ tag: 'plain_text', content: '使用 /workspace <序号或名称> 切换项目' }],
       },
     ],
   }
@@ -227,11 +227,11 @@ export function buildHelpCard(): Record<string, unknown> {
           '括号内为简写命令',
           '`/help` (`/h`) — 显示帮助',
           '`/new` (`/n`) `[标题]` — 创建新 Agent 会话',
-          '`/now` — 查看当前状态（工作区、会话、模型、MCP、Skills 等）',
+          '`/now` — 查看当前状态（项目、会话、模型、MCP、Skills 等）',
           '`/list` (`/ls`) — 列出所有会话',
           '`/stop` (`/s`) — 停止当前 Agent',
           '`/switch` (`/sw`) `<序号>` — 切换到已有会话',
-          '`/workspace` (`/ws`) `<名称>` — 设置工作区',
+          '`/workspace` (`/ws`) `<名称>` — 设置项目',
           '`/model` (`/m`) `[渠道 [模型]]` — 查看或切换渠道/模型',
           '',
           '直接发送文本会自动创建或发送到当前会话。',

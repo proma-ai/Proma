@@ -7,26 +7,29 @@
 
 import * as React from 'react'
 import { ExternalLink } from 'lucide-react'
+import type { FileAccessOptions } from '@proma/shared'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { useDefaultAppForFile } from '@/hooks/useDefaultAppForFile'
 import { getDefaultAppOpenLabel } from '@/lib/default-app-open-label'
 
 interface DefaultAppMenuItemProps {
   filePath: string
+  access?: FileAccessOptions
   className?: string
 }
 
 export function DefaultAppMenuItem({
   filePath,
+  access,
   className,
 }: DefaultAppMenuItemProps): React.ReactElement {
-  const info = useDefaultAppForFile(filePath)
+  const info = useDefaultAppForFile(filePath, access)
 
   return (
     <DropdownMenuItem
       className={className}
       onSelect={() => {
-        window.electronAPI.systemOpenFile(filePath).catch((err) => {
+        window.electronAPI.systemOpenFile(filePath, undefined, access).catch((err) => {
           console.error('[DefaultAppMenuItem] 打开文件失败:', err)
         })
       }}

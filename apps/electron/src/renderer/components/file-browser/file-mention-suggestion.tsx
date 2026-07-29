@@ -2,7 +2,7 @@
  * FileMentionSuggestion — TipTap Mention Suggestion 配置
  *
  * 工厂函数，创建用于 @ 引用文件的 TipTap Suggestion 配置。
- * 输入 @ 后异步搜索工作区文件，弹出 FileMentionList 浮动列表。
+ * 输入 @ 后异步搜索会话文件、项目文件与附加目录，弹出 FileMentionList 浮动列表。
  * 弹窗底部锚定在光标上方，展开文件夹时向上生长。
  */
 
@@ -14,6 +14,9 @@ import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry, FileSearchResult } from '@proma/shared'
 import { createMentionPopup, positionPopup, isSuggestionTriggerPresent } from '@/components/agent/mention-popup-utils'
+import { resolveFileMentionPath } from './file-mention-path'
+
+type MentionSelection = Pick<FileIndexEntry, 'name' | 'path' | 'type' | 'source'>
 
 export function createFileMentionSuggestion(
   workspacePathRef: React.RefObject<string | null>,
@@ -36,7 +39,7 @@ export function createFileMentionSuggestion(
         console.warn('[FileMention] workspacePath is null, mention disabled')
         if (!missingWorkspaceToastShown) {
           toast.warning('暂时无法引用文件', {
-            description: '当前 Agent 会话没有可用的工作区路径。请在顶部选择工作区，或新建 Agent 会话后重试。',
+            description: '当前 Agent 会话没有可用的项目路径。请在顶部选择项目，或新建 Agent 会话后重试。',
           })
           missingWorkspaceToastShown = true
         }
@@ -81,13 +84,14 @@ export function createFileMentionSuggestion(
 
       function createRenderer(props: SuggestionProps<FileIndexEntry>) {
         const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
+        const selectItem = (item: MentionSelection) => {
+          props.command({ id: resolveFileMentionPath(item, workspacePathRef.current), label: item.name })
+        }
         renderer = new ReactRenderer(FileMentionList, {
           props: {
             sessionEntries,
             workspaceEntries,
-            onSelect: (item: { name: string; path: string; type: 'file' | 'dir' }) => {
-              props.command({ id: item.path, label: item.name })
-            },
+            onSelect: selectItem,
           },
           editor: props.editor,
         })
@@ -165,12 +169,13 @@ export function createFileMentionSuggestion(
           latestClientRect = props.clientRect
 
           const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
+          const selectItem = (item: MentionSelection) => {
+            props.command({ id: resolveFileMentionPath(item, workspacePathRef.current), label: item.name })
+          }
           renderer?.updateProps({
             sessionEntries,
             workspaceEntries,
-            onSelect: (item: { name: string; path: string; type: 'file' | 'dir' }) => {
-              props.command({ id: item.path, label: item.name })
-            },
+            onSelect: selectItem,
           })
           anchorPopup()
         },

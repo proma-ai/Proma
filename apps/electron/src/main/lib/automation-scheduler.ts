@@ -258,7 +258,7 @@ export async function runAutomationNow(id: string): Promise<void> {
   if (!automation) throw new Error(`定时任务不存在: ${id}`)
   // 草稿态（缺 channelId / workspaceId）拒绝运行，兜底前端 disabled 防止 IPC 绕过
   if (!automation.channelId || !automation.workspaceId) {
-    throw new Error('请先为该任务配置模型与工作区')
+    throw new Error('请先为该任务配置模型与项目')
   }
   await runAutomation(automation, true)
 }

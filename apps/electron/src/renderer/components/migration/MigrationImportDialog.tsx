@@ -242,7 +242,7 @@ function V1ContentSummary({ preview }: { preview: { manifest: { workspaceName?: 
   return (
     <div className="rounded-lg border border-border/50 bg-muted/20 px-4 py-3 space-y-2">
       <p className="text-sm font-medium text-foreground">
-        包内容来自：{preview.manifest.workspaceName ?? '未知工作区'}（
+        包内容来自：{preview.manifest.workspaceName ?? '未知项目'}（
         {new Date(preview.manifest.exportedAt).toLocaleDateString('zh-CN')}）
       </p>
       <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground">
@@ -286,7 +286,7 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
     <div className="space-y-3">
       <div className="rounded-lg border border-border/50 bg-muted/20 px-4 py-3 space-y-2">
         <p className="text-sm font-medium text-foreground">
-          包含 {wsCount} 个工作区的配置（导出于 {new Date(preview.manifest.exportedAt).toLocaleDateString('zh-CN')}）
+          包含 {wsCount} 个项目的配置（导出于 {new Date(preview.manifest.exportedAt).toLocaleDateString('zh-CN')}）
         </p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground">
           {preview.agentSessionCount > 0 && (
@@ -305,7 +305,7 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">工作区导入方式</label>
+        <label className="text-sm font-medium text-foreground">项目导入方式</label>
         <div className="rounded-lg border border-border/50 divide-y divide-border/30">
           {(preview.workspaces ?? []).map((ws) => {
             const mapping = workspaceMappings.find((m) => m.sourceSlug === ws.workspaceSlug)
@@ -353,12 +353,12 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
                     className="text-xs border border-border rounded px-2 py-1 bg-background"
                   >
                     {ws.existsLocally && (
-                      <option value="merge">合并到已有工作区</option>
+                      <option value="merge">合并到已有项目</option>
                     )}
                     {!ws.existsLocally && localWorkspaces.length > 0 && (
-                      <option value="merge">合并到现有工作区...</option>
+                      <option value="merge">合并到现有项目...</option>
                     )}
-                    <option value="create">创建新工作区</option>
+                    <option value="create">创建新项目</option>
                     <option value="skip">跳过</option>
                   </select>
 
@@ -368,7 +368,7 @@ function V2ContentSummary({ preview, workspaceMappings, localWorkspaces, onWorks
                       onChange={(e) => onWorkspaceMapping(ws.workspaceSlug, { action: 'merge', targetWorkspaceId: e.target.value })}
                       className="text-xs border border-border rounded px-2 py-1 bg-background"
                     >
-                      <option value="">选择工作区...</option>
+                      <option value="">选择项目...</option>
                       {localWorkspaces.map((lw) => (
                         <option key={lw.id} value={lw.id}>{lw.name}</option>
                       ))}

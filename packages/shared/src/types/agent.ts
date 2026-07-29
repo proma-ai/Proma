@@ -8,6 +8,9 @@ import type { ProviderType } from './channel'
 
 // ===== Agent 工作区 =====
 
+/** 本地项目根目录的即时可用状态；仅在读取工作区列表时计算，不写入索引。 */
+export type LocalProjectRootStatus = 'available' | 'missing' | 'not_directory' | 'unavailable'
+
 /** Agent 工作区 */
 export interface AgentWorkspace {
   /** 工作区唯一标识 */
@@ -16,10 +19,31 @@ export interface AgentWorkspace {
   name: string
   /** URL-safe 目录名（创建后不可变） */
   slug: string
+  /**
+   * 用户选择的本地项目根目录。未设置时，项目文件使用 Proma 托管的
+   * workspace-files/ 目录；设置后，项目文件直接指向该原始目录。
+   */
+  projectRootPath?: string
+  /** 本地项目根目录的运行时状态；Proma 托管项目不设置此字段。 */
+  projectRootStatus?: LocalProjectRootStatus
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
   updatedAt: number
+}
+
+/** 新建项目的输入。 */
+export interface CreateAgentWorkspaceInput {
+  /** 项目显示名称 */
+  name: string
+  /** 可选的用户本地项目根目录 */
+  projectRootPath?: string
+}
+
+/** 创建项目后自动生成的首个 Agent 会话。 */
+export interface CreateAgentProjectResult {
+  workspace: AgentWorkspace
+  session: AgentSessionMeta
 }
 
 // ===== SDK 新增类型声明（0.2.52 ~ 0.2.63） =====
@@ -393,6 +417,8 @@ export type ErrorCode =
   | 'api_key_decrypt_failed'
   | 'claude_binary_not_found'
   | 'agent_runtime_not_found'
+  | 'workspace_not_found'
+  | 'local_project_root_unavailable'
   | 'session_busy'
   | 'unknown_error'
 
@@ -592,7 +618,7 @@ export type PromaEvent =
   | { type: 'context_window'; contextWindow: number }
   | { type: 'permission_mode_changed'; mode: PromaPermissionMode }
   | { type: 'title_updated'; title: string }
-  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number }
+  | { type: 'external_run_started'; source: AgentExternalRunSource; sessionId: string; title?: string; workspaceId?: string; modelId?: string; startedAt: number; session?: AgentSessionMeta }
   | { type: 'run_resumed'; sessionId: string }
   // 协作子会话阻塞事件上浮
   | { type: 'delegation_blocked'; delegationId: string; blockedEvent: unknown }
@@ -608,6 +634,14 @@ export type AgentStreamPayload =
   | { kind: 'proma_event'; event: PromaEvent }
 
 // ===== Agent 会话管理 =====
+
+/**
+ * Agent 执行时使用的文件根。
+ *
+ * 未持久化该字段的历史会话必须按 session 解释，避免升级后将历史 SDK 相对路径
+ * 错误应用到新的共享项目根。
+ */
+export type AgentCwdMode = 'session' | 'project'
 
 /**
  * Agent 会话轻量索引项
@@ -640,6 +674,11 @@ export interface AgentSessionMeta {
   openAIThinkingLevel?: AgentThinkingLevel
   /** 所属工作区 ID */
   workspaceId?: string
+  /**
+   * Agent 执行 cwd 的持久化语义。新会话使用 project；缺失字段兼容升级前的
+   * session workbench cwd。
+   */
+  agentCwdMode?: AgentCwdMode
   /** 是否置顶 */
   pinned?: boolean
   /** 是否已星标（仅用于侧栏快速识别，不影响排序或置顶） */
@@ -1000,6 +1039,10 @@ export interface AgentSendInput {
   mentionedMcpServers?: string[]
   /** 用户通过会话引用 mention 指定的 Agent 会话 ID 列表 */
   mentionedSessionIds?: string[]
+  /** 用户通过 Todo 引用 mention 指定的 Todo ID 列表 */
+  mentionedTodoIds?: string[]
+  /** 用户通过日程引用 mention 指定的日程 ID 列表 */
+  mentionedCalendarEventIds?: string[]
   /** 渲染进程生成的流式开始时间戳，主进程原样回传到 STREAM_COMPLETE，确保竞态保护比较的是同一个值 */
   startedAt?: number
   /** 用户点击错误消息的重试时，指向本轮开始前应删除的错误 UUID。 */
@@ -1034,6 +1077,10 @@ export interface AgentQueueMessageInput {
   mentionedMcpServers?: string[]
   /** 用户通过 &session:xxx 引用的 Agent 会话 ID 列表 */
   mentionedSessionIds?: string[]
+  /** 用户通过 &todo:xxx 引用的 Todo ID 列表 */
+  mentionedTodoIds?: string[]
+  /** 用户通过 &calendar_event:xxx 引用的日程 ID 列表 */
+  mentionedCalendarEventIds?: string[]
 }
 
 // ===== 会话迁移输入 =====
@@ -1481,8 +1528,14 @@ export const AGENT_IPC_CHANNELS = {
   LIST_WORKSPACES: 'agent:list-workspaces',
   /** 创建工作区 */
   CREATE_WORKSPACE: 'agent:create-workspace',
+  /** 创建项目及其首个 Agent 会话 */
+  CREATE_PROJECT: 'agent:create-project',
   /** 更新工作区 */
   UPDATE_WORKSPACE: 'agent:update-workspace',
+  /** 为本地项目重新选择已有项目根目录 */
+  RELINK_WORKSPACE_PROJECT_ROOT: 'agent:relink-workspace-project-root',
+  /** 在丢失的本地项目原路径重新创建空目录 */
+  RESTORE_WORKSPACE_PROJECT_ROOT: 'agent:restore-workspace-project-root',
   /** 删除工作区 */
   DELETE_WORKSPACE: 'agent:delete-workspace',
   /** 重排工作区顺序 */

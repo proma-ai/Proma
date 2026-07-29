@@ -1,7 +1,7 @@
 /**
  * DiffPanelTabBar — 右侧面板顶部 Tab 栏
  *
- * 切换「会话文件」「工作区文件」和「代码改动」三个视图。最右侧有关闭按钮。
+ * 切换「文件」和「代码改动」视图。文件内同时展示会话文件与项目文件。
  */
 
 import * as React from 'react'
@@ -76,12 +76,12 @@ export function DiffPanelTabBar({
       <div className="relative flex items-end flex-1 titlebar-no-drag">
         <button
           type="button"
-          onClick={() => onTabChange('session')}
+          onClick={() => onTabChange('files')}
           className={cn(
             'flex-1 px-3 h-[34px] text-xs transition-colors select-none cursor-pointer whitespace-nowrap overflow-hidden',
             isClassic ? 'rounded-t-lg' : 'rounded-none',
             'border-t border-l border-r',
-            activeTab === 'session'
+            activeTab === 'files'
               ? isClassic
                 ? 'bg-content-area text-foreground border-border/50'
                 : 'app-tab-active text-foreground border-border/80'
@@ -90,25 +90,7 @@ export function DiffPanelTabBar({
                 : 'app-tab-inactive text-muted-foreground border-transparent hover:text-foreground',
           )}
         >
-          会话文件
-        </button>
-        <button
-          type="button"
-          onClick={() => onTabChange('workspace')}
-          className={cn(
-            'flex-1 px-3 h-[34px] text-xs transition-colors select-none cursor-pointer whitespace-nowrap overflow-hidden',
-            isClassic ? 'rounded-t-lg' : 'rounded-none',
-            'border-t border-l border-r',
-            activeTab === 'workspace'
-              ? isClassic
-                ? 'bg-content-area text-foreground border-border/50'
-                : 'app-tab-active text-foreground border-border/80'
-              : isClassic
-                ? 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50'
-                : 'app-tab-inactive text-muted-foreground border-transparent hover:text-foreground',
-          )}
-        >
-          工作区文件
+          文件
         </button>
         <button
           type="button"

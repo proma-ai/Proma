@@ -300,7 +300,7 @@ function assertCanCreateDelegation(
     throw new Error('创建协作子会话需要可用的 channelId')
   }
   if (!ctx.workspaceId) {
-    throw new Error('创建协作子会话需要绑定工作区')
+    throw new Error('创建协作子会话需要绑定项目')
   }
 
   return parent
@@ -712,6 +712,7 @@ function startDelegation(
     },
     {
       source: 'delegation',
+      originSessionId: ctx.sessionId,
       onError: (error) => {
         markDelegationFinished(record, 'failed', { error })
       },
@@ -1039,6 +1040,7 @@ export async function injectAgentCollaborationMcpServer(
             },
             {
               source: 'delegation',
+              originSessionId: ctx.sessionId,
               onError: (error) => {
                 markDelegationFinished(record, 'failed', { error })
               },
@@ -1393,6 +1395,7 @@ export function buildPiCollaborationTools(
           },
           {
             source: 'delegation',
+            originSessionId: ctx.sessionId,
             onError: (error) => {
               markDelegationFinished(record, 'failed', { error })
             },

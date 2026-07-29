@@ -20,7 +20,6 @@ import {
   allPendingExitPlanRequestsAtom,
   agentPromptSuggestionsAtom,
   backgroundTasksAtomFamily,
-  fileBrowserAutoRevealAtom,
   recentlyModifiedPathsAtom,
   RECENTLY_MODIFIED_TTL_MS,
   applyAgentEvent,
@@ -63,7 +62,7 @@ import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta, ProviderType } from '@proma/shared'
 import { inferAgentSdkContextWindow, inferContextWindow } from '@proma/shared'
-import { buildExternalAgentRunActivation } from '@/lib/external-agent-run'
+import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import {
   getAgentCompletionMarkers,
@@ -480,15 +479,22 @@ export function useGlobalAgentListeners(): void {
 
     const activateExternalAgentRun = (event: Extract<PromaEvent, { type: 'external_run_started' }>): void => {
       const applyActivation = (sessions: AgentSessionMeta[]): void => {
+        const currentStreamState = store.get(agentStreamingStatesAtom).get(event.sessionId)
+        if (!shouldActivateExternalAgentRun(currentStreamState, event.startedAt)) {
+          return
+        }
+
+        const eventSession = event.session
+        const activationSessions = eventSession ? [eventSession] : sessions
         const activation = buildExternalAgentRunActivation({
           tabs: store.get(tabsAtom),
-          sessions,
+          sessions: activationSessions,
           sessionId: event.sessionId,
           title: event.title,
           workspaceId: event.workspaceId,
           modelId: event.modelId,
           startedAt: event.startedAt,
-          currentStreamState: store.get(agentStreamingStatesAtom).get(event.sessionId),
+          currentStreamState,
         })
 
         // 外部来源（飞书/钉钉/微信/bridge）唤起的 run 不抢占前台：
@@ -504,7 +510,7 @@ export function useGlobalAgentListeners(): void {
         // turn 的父会话的快照，把父会话冲掉——父会话从列表消失后，其子会话
         // 因找不到父而从树形子节点变成根节点直接显示（用户观察到的现象）。
         // 改为单条 upsert 后，每个回调只负责自己那一个会话，互不干扰。
-        const sessionMeta = sessions.find((item) => item.id === event.sessionId)
+        const sessionMeta = eventSession ?? sessions.find((item) => item.id === event.sessionId)
         const upserted: AgentSessionMeta = sessionMeta ?? {
           id: event.sessionId,
           title: activation.title,
@@ -533,6 +539,11 @@ export function useGlobalAgentListeners(): void {
           map.set(event.sessionId, activation.streamState)
           return map
         })
+      }
+
+      if (event.session) {
+        applyActivation([event.session])
+        return
       }
 
       const knownSessions = store.get(agentSessionsAtom)
@@ -840,7 +851,7 @@ export function useGlobalAgentListeners(): void {
 
           // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态
 
-          // Agent 修改文件时，触发右侧文件浏览器自动定位（展开父目录 + 滚动 + 高亮）
+          // Agent 修改文件时，记入「最近修改」状态，用于 60s 内左侧竖条标记
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
             const input = event.input as Record<string, unknown> | undefined
             const targetPath =
@@ -850,8 +861,7 @@ export function useGlobalAgentListeners(): void {
             pendingWriteTools.set(event.toolUseId, { path: targetPath || '', sessionId })
             if (typeof targetPath === 'string' && targetPath.length > 0) {
               const now = Date.now()
-              store.set(fileBrowserAutoRevealAtom, { sessionId, path: targetPath, ts: now })
-              // 同时记入「最近修改」状态，用于 60s 内左侧竖条标记
+              // 记入「最近修改」状态，用于 60s 内左侧竖条标记
               store.set(recentlyModifiedPathsAtom, (prev) => {
                 const map = new Map(prev)
                 const inner = new Map(map.get(sessionId) ?? new Map())

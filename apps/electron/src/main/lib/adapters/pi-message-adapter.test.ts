@@ -71,6 +71,15 @@ describe('convertPiMessage', () => {
     })
   })
 
+  test('classifies a malformed upstream JSON response as service_error', () => {
+    const errorMessage = 'Unexpected non-whitespace character after JSON at position 199 (line 2 column 1)'
+    const terminalError = convertPiMessage({
+      role: 'assistant', content: [], stopReason: 'error', errorMessage,
+    } as unknown as AssistantMessage, 'session-1') as { error?: { message?: string; errorType?: string } }
+
+    expect(terminalError.error).toEqual({ message: errorMessage, errorType: 'service_error' })
+  })
+
   test('keeps non-network terminal Pi errors as provider_error', () => {
     const terminalError = convertPiMessage({
       role: 'assistant', content: [], stopReason: 'error', errorMessage: '529 overloaded',

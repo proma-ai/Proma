@@ -26,6 +26,7 @@ import { agentSkillsTabAtom } from '@/atoms/active-view'
 import { settingsOpenAtom, settingsTabAtom, toolSettingsFocusAtom, type ToolSettingsFocus } from '@/atoms/settings-tab'
 import { useProjectActions } from '@/hooks/useProjectActions'
 import { useCreateSession } from '@/hooks/useCreateSession'
+import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import type { BuiltinMcpServerSummary, McpServerEntry, SkillMeta } from '@proma/shared'
 import { useAgentSkillsData } from './useAgentSkillsData'
 import { SkillCard } from './SkillCard'
@@ -50,9 +51,9 @@ function buildSkillClassificationPrompt(input: {
     })
     .join('\n')
 
-  return `请帮我整理当前工作区 Skills 的分组。
+  return `请帮我整理当前项目在 Proma 工作区中保存的 Skills 的分组。
 
-工作区：${input.workspaceName || '当前工作区'}
+项目：${input.workspaceName || '当前项目'}
 Skills 目录：${input.skillsDir}
 
 当前已安装 Skills：
@@ -94,6 +95,7 @@ export function AgentSkillsView(): React.ReactElement {
   const setToolSettingsFocus = useSetAtom(toolSettingsFocusAtom)
   const { workspaces, currentWorkspaceId, selectProject } = useProjectActions()
   const { createAgent } = useCreateSession()
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
 
   const [tab, setTab] = useAtom(agentSkillsTabAtom)
   const [search, setSearch] = React.useState('')
@@ -171,7 +173,7 @@ export function AgentSkillsView(): React.ReactElement {
   const handleClassifySkills = React.useCallback(async (): Promise<void> => {
     if (classifyingSkills) return
     if (!data.skillsDir) {
-      toast.error('无法定位当前工作区 Skills 目录')
+      toast.error('无法定位当前项目的 Proma 工作区 Skills 目录')
       return
     }
     setClassifyingSkills(true)
@@ -204,9 +206,9 @@ export function AgentSkillsView(): React.ReactElement {
         <div className="flex size-16 items-center justify-center rounded-2xl bg-foreground/[0.04]">
           <Blocks className="size-8 text-foreground/30" />
         </div>
-        <div className="text-[15px] font-medium text-foreground/80">未选择工作区</div>
+        <div className="text-[15px] font-medium text-foreground/80">未选择项目</div>
         <div className="max-w-sm text-[13px] text-foreground/50">
-          请先在 Agent 模式下选择或创建一个工作区，再来管理它的 Skills 与 MCP。
+          请先在 Agent 模式下选择或创建一个项目，再来管理它的 Skills 与 MCP。
         </div>
       </div>
     )
@@ -232,6 +234,10 @@ export function AgentSkillsView(): React.ReactElement {
             >
               <FolderOpen size={14} className="text-foreground/45" />
               <span className="max-w-[180px] truncate">{data.workspaceName}</span>
+              <LocalProjectBadge
+                projectRootPath={currentWorkspace?.projectRootPath}
+                projectRootStatus={currentWorkspace?.projectRootStatus}
+              />
               <ChevronDown size={14} className="text-foreground/45" />
             </button>
           </PopoverTrigger>
@@ -243,7 +249,7 @@ export function AgentSkillsView(): React.ReactElement {
                 onClick={() => {
                   if (w.id !== currentWorkspaceId) {
                     selectProject(w.id, { resetView: false })
-                    toast.success(`已切换到工作区「${w.name}」`)
+                    toast.success(`已切换到项目「${w.name}」`)
                   }
                   setWsPopoverOpen(false)
                 }}
@@ -254,7 +260,11 @@ export function AgentSkillsView(): React.ReactElement {
                     : 'text-foreground/80 hover:bg-accent/50',
                 )}
               >
-                <span className="truncate">{w.name}</span>
+                <span className="min-w-0 flex-1 truncate">{w.name}</span>
+                <LocalProjectBadge
+                  projectRootPath={w.projectRootPath}
+                  projectRootStatus={w.projectRootStatus}
+                />
                 {w.id === currentWorkspaceId && <Check size={14} className="shrink-0 text-primary" />}
               </button>
             ))}
@@ -501,7 +511,7 @@ function SkillsTab({
   onUpdate,
 }: SkillsTabProps): React.ReactElement {
   if (total === 0) {
-    return <EmptyState icon={<Blocks className="size-8 text-foreground/30" />} title="暂无 Skill" hint="可以在 Agent 模式下让 Proma 帮你联网查找并安装 Skill，或从其他工作区导入。" />
+    return <EmptyState icon={<Blocks className="size-8 text-foreground/30" />} title="暂无 Skill" hint="可以在 Agent 模式下让 Proma 帮你联网查找并安装 Skill，或从其他项目导入。" />
   }
   if (customSkills.length === 0 && builtinSkills.length === 0) {
     return <EmptyState icon={<Search className="size-8 text-foreground/30" />} title="没有匹配的 Skill" hint="试试更换搜索关键词。" />

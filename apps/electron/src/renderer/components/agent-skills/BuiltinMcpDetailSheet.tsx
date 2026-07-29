@@ -53,8 +53,8 @@ function getConfigInfo(server: BuiltinMcpServerSummary): BuiltinMcpConfigInfo {
   }
   if (server.id === 'collaboration') {
     return {
-      source: '当前 Agent 工作区',
-      description: '协作子 Agent 使用当前工作区、会话和权限上下文，无需填写额外凭据。',
+      source: '当前 Agent 项目',
+      description: '协作子 Agent 使用当前项目、会话和权限上下文，无需填写额外凭据。',
     }
   }
   if (server.id === 'automation') {

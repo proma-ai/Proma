@@ -193,7 +193,7 @@ bun run generate:icons    # 生成应用图标
 | 服务 | 职责 |
 |------|------|
 | `chat-tools/` | Chat 工具实现目录：内置工具函数 |
-| `workspace-watcher.ts` | 工作区文件监听：文件系统变化监控 |
+| `workspace-watcher.ts` | 项目根目录、会话文件与附加目录监听：文件系统变化监控 |
 | `chat-tools-watcher.ts` | Chat 工具监听：工具配置变化监控 |
 | `attachment-service.ts` | 附件管理：存储/读取/删除、文件对话框 |
 | `document-parser.ts` | 文档解析：PDF/Office/文本文件提取 |
@@ -254,7 +254,7 @@ bun run generate:icons    # 生成应用图标
 - **`chat/`**：聊天核心 — ChatView（消息加载/流式订阅）、ChatHeader（模型选择/上下文设置）、ChatInput（Tiptap 富文本编辑器）、ChatMessages（消息列表/自动滚动）、ParallelChatMessages（并排模式）
 - **`agent/`**：Agent 模式 — AgentView（纯展示 + 交互，IPC 监听已提升到全局）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）、PermissionBanner/AskUserBanner（权限/问答请求 UI）
 - **`settings/`**：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）、FeishuSettings（飞书集成）；含 `primitives/` 可复用表单组件
-- **`file-browser/`**：文件浏览器 — FileBrowser（工作区文件树浏览）
+- **`file-browser/`**：文件浏览器 — FileBrowser（会话文件与项目根目录文件树浏览）
 - **`ai-elements/`**：AI 展示组件 — Markdown 渲染、代码块、Mermaid 图、推理折叠、上下文分割线、富文本输入
 - **`ui/`**：Radix UI 组件（现代化设计，CSS 变量主题）
 
@@ -288,7 +288,7 @@ bun run generate:icons    # 生成应用图标
 ├── agent-workspaces/       # Agent 工作区目录
 │   └── {workspace-slug}/
 │       ├── {session-id}/   # 会话工作目录
-│       ├── workspace-files/# 工作区持久文件
+│       ├── workspace-files/# 仅空白项目使用的 Proma 托管项目根
 │       ├── mcp.json        # MCP Server 配置
 │       └── skills/         # Skills 配置目录
 ├── attachments/            # 附件文件
@@ -398,6 +398,6 @@ Proma 的 Agent 模式通过 `RuntimeRoutingAgentAdapter` 统一入口，按会�
 - **并发守卫**：同一会话防止并行请求冲突
 - **全局监听**：Agent IPC 监听器永不销毁，确保后台会话不丢失
 - **权限排队**：按 sessionId 隔离权限请求，支持多会话并行
-- **文件监听**：工作区文件、MCP 配置、Chat 工具实时监控
+- **文件监听**：项目根目录、会话文件、附加目录、MCP 配置与 Chat 工具实时监控
 - **事件流处理**：SDK 消息流式转换与累积
 - **错误映射**：SDK 错误统一转换为应用错误

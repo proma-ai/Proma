@@ -87,9 +87,9 @@ export function ImportSkillDialog({ open, onOpenChange, workspaceSlug, installed
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
         <DialogHeader className="px-6 pb-4 pt-6">
-          <DialogTitle>从其他工作区导入 Skill</DialogTitle>
+          <DialogTitle>从其他项目导入 Skill</DialogTitle>
           <DialogDescription>
-            从其他工作区中选择 Skill 导入到当前工作区。已安装的同名 Skill 会自动过滤。
+            从其他项目中选择 Skill 导入到当前项目。已安装的同名 Skill 会自动过滤。
           </DialogDescription>
         </DialogHeader>
 
@@ -97,16 +97,16 @@ export function ImportSkillDialog({ open, onOpenChange, workspaceSlug, installed
           {availableWorkspaces.length === 0 ? (
             <SettingsCard divided={false}>
               <div className="py-10 text-center text-sm text-muted-foreground">
-                没有可导入的 Skill。其他工作区暂无 Skill，或者它们都已经安装到当前工作区了。
+                没有可导入的 Skill。其他项目暂无 Skill，或者它们都已经安装到当前项目了。
               </div>
             </SettingsCard>
           ) : (
             <div className="space-y-6">
               <div className="space-y-2">
-                <div className="text-sm font-medium text-foreground">选择来源工作区</div>
+                <div className="text-sm font-medium text-foreground">选择来源项目</div>
                 <Select value={selectedWorkspaceSlug} onValueChange={setSelectedWorkspaceSlug}>
                   <SelectTrigger>
-                    <SelectValue placeholder="选择来源工作区" />
+                    <SelectValue placeholder="选择来源项目" />
                   </SelectTrigger>
                   <SelectContent>
                     {availableWorkspaces.map((w) => (

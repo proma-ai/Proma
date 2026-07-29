@@ -2,10 +2,15 @@ diff --git a/dist/utils/retry.js b/dist/utils/retry.js
 index ac5c157b..3d79cc1e 100644
 --- a/dist/utils/retry.js
 +++ b/dist/utils/retry.js
-@@ -60,6 +60,12 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
+@@ -60,6 +60,17 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
      // "stream ended without ..." and "Anthropic stream ended before message_stop"
      // (#4433); Bedrock/Smithy can throw an HTTP/2 no-response error (#3594).
      "ended without",
++    // Some OpenAI-compatible gateways omit "response" in this terminal-event error.
++    "stream ended before (?:a )?terminal(?: response)? event",
++    // A completed JSON value followed by non-whitespace indicates a corrupted or
++    // concatenated upstream response body, which is transient at the transport layer.
++    "unexpected non-whitespace character after JSON",
 +    // HTTP chunked/SSE proxies can close before the complete response body arrives.
 +    // These strings are emitted by undici and compatible proxy transports.
 +    "peer closed connection",

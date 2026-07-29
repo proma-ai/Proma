@@ -25,14 +25,16 @@ import { SettingsSection } from './primitives'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import { migrationImportDialogOpenAtom } from '@/atoms/migration-atoms'
+import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import { cn } from '@/lib/utils'
+import type { LocalProjectRootStatus } from '@proma/shared'
 
 type MigrationMode = 'personal' | 'share'
 type MigrationComponent = 'sessions' | 'skills' | 'mcp' | 'channels' | 'chattools'
 type ShareDetailMode = 'default' | 'custom'
 
 interface ShareExportWorkspacePreview {
-  workspace: { id: string; name: string; slug: string }
+  workspace: { id: string; name: string; slug: string; projectRootPath?: string; projectRootStatus?: LocalProjectRootStatus }
   skills: Array<{ slug: string; name: string; enabled: boolean }>
   mcpServers: Array<{ name: string; enabled: boolean; type: string }>
 }
@@ -235,7 +237,7 @@ export function MigrationSettings(): React.ReactElement {
       {/* ── 导出区块 ──────────────────────────────── */}
       <SettingsSection
         title="导出备份"
-        description="将当前工作区的数据导出为可移植的备份文件"
+        description="将当前项目的数据导出为可移植的备份文件"
       >
         <div className="space-y-4">
           {/* 模式选择 */}
@@ -291,7 +293,7 @@ export function MigrationSettings(): React.ReactElement {
           {/* Share 模式：多工作区选择 */}
           {exportMode === 'share' && hasSkillsOrMcp && (
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">工作区范围</label>
+              <label className="text-sm font-medium text-foreground">项目范围</label>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setShareDetailMode('default')}
@@ -302,8 +304,8 @@ export function MigrationSettings(): React.ReactElement {
                       : 'border-border/50 hover:border-border hover:bg-muted/30'
                   )}
                 >
-                  <span className="font-medium text-foreground">所有工作区</span>
-                  <p className="text-xs text-muted-foreground mt-0.5">导出全部工作区的 Skills 和 MCP</p>
+                  <span className="font-medium text-foreground">所有项目</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">导出全部项目的 Skills 和 MCP</p>
                 </button>
                 <button
                   onClick={() => setShareDetailMode('custom')}
@@ -344,6 +346,10 @@ export function MigrationSettings(): React.ReactElement {
                             >
                               {expanded ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
                               <span className="text-sm font-medium text-foreground flex-1">{ws.workspace.name}</span>
+                              <LocalProjectBadge
+                                projectRootPath={ws.workspace.projectRootPath}
+                                projectRootStatus={ws.workspace.projectRootStatus}
+                              />
                               <span className="text-xs text-muted-foreground">
                                 {selectedItems}/{totalItems} 项
                               </span>
@@ -395,7 +401,7 @@ export function MigrationSettings(): React.ReactElement {
                                   </>
                                 )}
                                 {((!shareComponents.has('skills') || ws.skills.length === 0) && (!shareComponents.has('mcp') || ws.mcpServers.length === 0)) && (
-                                  <p className="text-xs text-muted-foreground py-1">此工作区没有可导出的项目</p>
+                                  <p className="text-xs text-muted-foreground py-1">此项目没有可导出的内容</p>
                                 )}
                               </div>
                             )}

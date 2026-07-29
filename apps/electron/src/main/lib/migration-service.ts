@@ -57,6 +57,16 @@ export interface ExportResult {
   warnings?: string[]
 }
 
+/**
+ * 本地项目根是机器私有路径，不能随迁移包传播或在另一台机器上自动重绑。
+ */
+export function serializeWorkspaceMetadataForMigration(
+  workspace: AgentWorkspace,
+): Omit<AgentWorkspace, 'projectRootPath' | 'projectRootStatus'> {
+  const { projectRootPath: _projectRootPath, projectRootStatus: _projectRootStatus, ...portableMetadata } = workspace
+  return portableMetadata
+}
+
 export interface ExportPreview {
   workspace: AgentWorkspace | null
   agentSessionCount: number
@@ -265,7 +275,7 @@ export async function exportData(options: ExportOptions): Promise<ExportResult> 
   const warnings: string[] = []
 
   const workspace = getAgentWorkspace(workspaceId)
-  if (!workspace) throw new Error(`工作区不存在: ${workspaceId}`)
+  if (!workspace) throw new Error(`项目不存在: ${workspaceId}`)
 
   const manifest: MigrationManifest = {
     mode,
@@ -317,7 +327,7 @@ export async function exportDataV2(options: ExportOptionsV2): Promise<ExportResu
     targetWorkspaces = allWorkspaces.map((ws) => ({ workspace: ws }))
   }
 
-  if (targetWorkspaces.length === 0) throw new Error('没有可导出的工作区')
+  if (targetWorkspaces.length === 0) throw new Error('没有可导出的项目')
 
   const workspaceEntries: WorkspaceExportEntry[] = targetWorkspaces.map(({ workspace, skillSlugs, mcpServerNames }) => ({
     workspaceId: workspace.id,
@@ -535,7 +545,7 @@ function _addWorkspaceConfig(zip: AdmZip, workspace: AgentWorkspace) {
   if (existsSync(configPath)) {
     zip.addLocalFile(configPath, 'config', 'workspace-config.json')
   }
-  zip.addFile('config/workspace-meta.json', Buffer.from(JSON.stringify(workspace, null, 2), 'utf-8'))
+  zip.addFile('config/workspace-meta.json', Buffer.from(JSON.stringify(serializeWorkspaceMetadataForMigration(workspace), null, 2), 'utf-8'))
 }
 
 // ─── v2 导出辅助函数 ─────────────────────────────────────────────────────────
@@ -589,7 +599,7 @@ function _addWorkspaceConfigV2(zip: AdmZip, workspace: AgentWorkspace) {
     const content = readFileSync(configPath, 'utf-8')
     zip.addFile(`${prefix}/config/workspace-config.json`, Buffer.from(content, 'utf-8'))
   }
-  zip.addFile(`${prefix}/config/workspace-meta.json`, Buffer.from(JSON.stringify(workspace, null, 2), 'utf-8'))
+  zip.addFile(`${prefix}/config/workspace-meta.json`, Buffer.from(JSON.stringify(serializeWorkspaceMetadataForMigration(workspace), null, 2), 'utf-8'))
 }
 
 function _addPersonalFiles(zip: AdmZip) {
@@ -797,6 +807,7 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
     let targetWorkspace: AgentWorkspace | undefined
     if (createNewWorkspace) {
       const { createAgentWorkspace } = await import('./agent-workspace-manager')
+      // 迁移包不携带本地项目根；新项目始终从 Proma 托管根开始，避免跨机器误绑绝对路径。
       targetWorkspace = createAgentWorkspace(newWorkspaceName ?? (manifest as MigrationManifest).workspaceName)
     } else if (targetWorkspaceId) {
       targetWorkspace = getAgentWorkspace(targetWorkspaceId)
@@ -805,7 +816,7 @@ export async function confirmImport(options: ConfirmImportOptions | ConfirmImpor
       targetWorkspace = workspaces.find((w) => w.slug === (manifest as MigrationManifest).workspaceSlug) ?? workspaces[0]
     }
 
-    if (!targetWorkspace) throw new Error('无法确定目标工作区')
+    if (!targetWorkspace) throw new Error('无法确定目标项目')
 
     if (manifest.components.includes('sessions')) {
       await _importSessions(tempDir, targetWorkspace)

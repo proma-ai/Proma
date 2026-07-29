@@ -26,8 +26,17 @@ import {
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
 } from '@/atoms/agent-atoms'
+import {
+  channelFormDirtyAtom,
+  settingsOpenAtom,
+  settingsPendingSessionNavigationAtom,
+} from '@/atoms/settings-tab'
 
-type OpenSessionFn = (type: TabType, sessionId: string, title: string) => void
+interface OpenSessionOptions {
+  bypassSettingsGuard?: boolean
+}
+
+type OpenSessionFn = (type: TabType, sessionId: string, title: string, options?: OpenSessionOptions) => void
 
 export function useOpenSession(): OpenSessionFn {
   const store = useStore()
@@ -41,9 +50,20 @@ export function useOpenSession(): OpenSessionFn {
   const agentSessions = useAtomValue(agentSessionsAtom)
   const setCurrentAgentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
+  const settingsOpen = useAtomValue(settingsOpenAtom)
+  const channelFormDirty = useAtomValue(channelFormDirtyAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setPendingSessionNavigation = useSetAtom(settingsPendingSessionNavigationAtom)
 
   return React.useCallback(
-    (type: TabType, sessionId: string, title: string): void => {
+    (type: TabType, sessionId: string, title: string, options?: OpenSessionOptions): void => {
+      if (!options?.bypassSettingsGuard && settingsOpen && channelFormDirty) {
+        setPendingSessionNavigation({ type, sessionId, title })
+        return
+      }
+
+      setSettingsOpen(false)
+
       // 切回 agent 会话时，若该会话上次开着预览 Tab 则一并重建并回到上次视图
       const restore = type === 'agent'
         ? buildOpenTabRestore(
@@ -87,6 +107,6 @@ export function useOpenSession(): OpenSessionFn {
         setCurrentAgentSessionId(null)
       }
     },
-    [tabs, setTabs, setActiveTabId, setAutomationForm, setActiveView, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted],
+    [tabs, setTabs, setActiveTabId, setAutomationForm, setActiveView, setAppMode, setCurrentConversationId, setCurrentAgentSessionId, agentSessions, setCurrentAgentWorkspaceId, setUnviewedCompleted, settingsOpen, channelFormDirty, setSettingsOpen, setPendingSessionNavigation],
   )
 }

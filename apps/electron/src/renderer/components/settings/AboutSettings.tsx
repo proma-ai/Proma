@@ -408,7 +408,7 @@ function ShellEnvironmentCard(): React.ReactElement | null {
       <div className="p-4 space-y-3">
         <SettingsSelect
           label="Agent Shell"
-          description="默认使用 Git Bash，确保 Windows 工作区与 Agent 工具使用同一套路径；选择 WSL 后，WSL 不可用时会回退到 Git Bash。"
+          description="默认使用 Git Bash，确保 Windows 项目与 Agent 工具使用同一套路径；选择 WSL 后，WSL 不可用时会回退到 Git Bash。"
           value={shellPreference}
           onValueChange={(value) => {
             void handlePreferenceChange(value).catch((error) => console.error('[Shell 环境检测] 保存偏好失败:', error))

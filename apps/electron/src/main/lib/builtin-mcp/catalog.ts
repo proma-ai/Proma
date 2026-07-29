@@ -41,7 +41,7 @@ function resolveAvailability(
     return {
       enabled: true,
       available,
-      availabilityReason: available ? undefined : '需要先选择工作区',
+      availabilityReason: available ? undefined : '需要先选择项目',
     }
   }
 

@@ -49,12 +49,12 @@ describe('Agent command menu navigation', () => {
 
   test('filters entries by id, label, or supporting description', () => {
     const items = [
-      { id: 'file', label: '引用文件', description: '会话文件和工作区文件' },
+      { id: 'file', label: '引用文件', description: '会话文件和项目文件' },
       { id: 'session', label: '引用会话', description: '选择历史 Agent 会话' },
       { id: 'compact-context', label: '压缩上下文', description: '释放上下文空间' },
     ]
 
-    expect(filterCommandMenuItems(items, '工作区')).toEqual([items[0]!])
+    expect(filterCommandMenuItems(items, '项目')).toEqual([items[0]!])
     expect(filterCommandMenuItems(items, '会话')).toEqual([items[0]!, items[1]!])
     expect(filterCommandMenuItems(items, 'compact-context')).toEqual([items[2]!])
     expect(filterCommandMenuItems(items, '')).toEqual(items)
@@ -103,8 +103,8 @@ describe('Agent command menu navigation', () => {
       workspaceName: '产品研发',
       workspaceSlug: 'product-dev',
       snippet: '讨论命令菜单',
-    })).toBe('工作区：产品研发 (product-dev) · 讨论命令菜单')
-    expect(formatSessionReferenceDescription({ workspaceName: '产品研发' })).toBe('工作区：产品研发')
+    })).toBe('项目：产品研发 (product-dev) · 讨论命令菜单')
+    expect(formatSessionReferenceDescription({ workspaceName: '产品研发' })).toBe('项目：产品研发')
     expect(formatSessionReferenceDescription({})).toBeUndefined()
   })
 })

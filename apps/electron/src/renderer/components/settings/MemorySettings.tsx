@@ -58,10 +58,10 @@ function NowledgeMemSection(): React.ReactElement {
   const badge = configuredSlugs.length > 0 ? (
     <span
       className="inline-flex items-center gap-1 text-xs font-normal text-emerald-600 dark:text-emerald-400"
-      title={`已配置工作区：${configuredSlugs.join('、')}`}
+      title={`已配置项目：${configuredSlugs.join('、')}`}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-      已在 {configuredSlugs.length} 个工作区配置
+      已在 {configuredSlugs.length} 个项目配置
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">

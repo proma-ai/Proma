@@ -420,6 +420,11 @@ class WeChatBridge {
     return { ...this.state }
   }
 
+  /** 在删除项目时清理指向其会话的聊天绑定。 */
+  removeBindingsForDeletedWorkspace(workspaceId: string, sessionIds: Iterable<string>): number {
+    return this.commandHandler.removeBindingsForDeletedWorkspace(workspaceId, sessionIds)
+  }
+
   /** 开始扫码登录流程 */
   async startLogin(): Promise<void> {
     // 清理现有连接，但不推送 'disconnected' 状态，避免 UI 闪烁导致重复触发
@@ -845,7 +850,7 @@ class WeChatBridge {
     }
     const workspace = binding.workspaceId ? getAgentWorkspace(binding.workspaceId) : undefined
     if (!workspace) {
-      await this.client.sendText(chatId, '⚠️ 当前未设置工作区，无法保存附件', contextToken)
+      await this.client.sendText(chatId, '⚠️ 当前未设置项目，无法保存附件', contextToken)
       return
     }
 

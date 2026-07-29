@@ -43,6 +43,7 @@ import { SettingsCard } from './primitives/SettingsCard'
 import { SettingsInput } from './primitives/SettingsInput'
 import { SettingsSecretInput } from './primitives/SettingsSecretInput'
 import { SettingsRow } from './primitives/SettingsRow'
+import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
 import { feishuBotStatesAtom, feishuBindingsAtom } from '@/atoms/feishu-atoms'
 import { agentWorkspacesAtom, agentSessionsAtom } from '@/atoms/agent-atoms'
 import { cn } from '@/lib/utils'
@@ -331,8 +332,8 @@ const FEISHU_CLI_PROMPT = `请帮我配置飞书 CLI 开发环境，按以下步
 1. 安装飞书 CLI 到全局
 npm install -g @larksuite/cli
 
-2. 将 SKILL 配置到本工作区（默认配置本工作区，但请提醒用户是否需要额外安装到全局，会使得预置上下文增加，造成不必要的Token消耗）
-npx skills add https://github.com/larksuite/cli -y -g
+2. 将 SKILL 安装到当前项目的 Proma 工作区 Skills 目录。先下载，再按系统提示给出的 Skills 目录将下载内容移动过去；不要使用全局安装，以免在无关项目预置上下文。
+npx skills add https://github.com/larksuite/cli -y
 
 3. 初始化 CLI 配置（创建一个全新的飞书 CLI 应用，与 Proma 飞书 Bot 互不影响）
 lark-cli config init --new
@@ -365,7 +366,7 @@ function FeishuCliSection(): React.ReactElement {
     >
       <SettingsCard divided={false}>
         <div className="px-4 py-4 space-y-2 text-sm text-muted-foreground">
-          <p className="text-xs">复制配置提示词，并前往飞书Bot日常绑定的<strong>工作区</strong>，创建新的 Proma Agent 对话并发送即可让 Proma 协助完成配置。</p>
+          <p className="text-xs">复制配置提示词，并前往飞书Bot日常绑定的<strong>项目</strong>，创建新的 Proma Agent 对话并发送即可让 Proma 协助完成配置。</p>
           <button
             type="button"
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -379,8 +380,8 @@ function FeishuCliSection(): React.ReactElement {
             <div className="bg-muted/50 rounded-md p-3 font-mono text-xs space-y-1.5 animate-in fade-in-0 slide-in-from-top-1 duration-200">
               <div><span className="text-foreground/70 font-semibold">步骤 1</span> — 安装飞书 CLI 到全局</div>
               <div className="pl-3 text-foreground/60">npm install -g @larksuite/cli</div>
-              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 2</span> — 将 SKILL 配置到本工作区（默认本工作区；如需全局会增加 Token 消耗）</div>
-              <div className="pl-3 text-foreground/60">npx skills add https://github.com/larksuite/cli -y -g</div>
+              <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 2</span> — 下载并安装到当前项目的 Proma 工作区 Skills 目录</div>
+              <div className="pl-3 text-foreground/60">npx skills add https://github.com/larksuite/cli -y</div>
               <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 3</span> — 初始化 CLI（新建独立 CLI 应用，不影响 Proma 飞书 Bot）</div>
               <div className="pl-3 text-foreground/60">lark-cli config init --new</div>
               <div className="pt-1"><span className="text-foreground/70 font-semibold">步骤 4</span> — 一键申请全部领域权限（文档/表格/日历/任务/邮件/通讯录/会议等）</div>
@@ -496,9 +497,9 @@ const FeishuBindingCard = React.memo(function FeishuBindingCard({
         </div>
       </div>
 
-      {/* 工作区选择 */}
+      {/* 项目选择 */}
       <div className="grid grid-cols-[80px_1fr] gap-2 items-center text-sm">
-        <span className="text-muted-foreground">工作区</span>
+        <span className="text-muted-foreground">项目</span>
         <Select
           value={binding.workspaceId}
           open={workspaceSelectOpen}
@@ -506,13 +507,27 @@ const FeishuBindingCard = React.memo(function FeishuBindingCard({
           onValueChange={(value) => onUpdate(binding.chatId, { workspaceId: value })}
         >
           <SelectTrigger className="h-8 text-xs">
-            <SelectValue placeholder="选择工作区">
-              {currentWorkspace?.name ?? '未知工作区'}
+            <SelectValue placeholder="选择项目">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate">{currentWorkspace?.name ?? '未知项目'}</span>
+                <LocalProjectBadge
+                  projectRootPath={currentWorkspace?.projectRootPath}
+                  projectRootStatus={currentWorkspace?.projectRootStatus}
+                />
+              </span>
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {workspaceSelectOpen && workspaces.map((w) => (
-              <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              <SelectItem key={w.id} value={w.id}>
+                <span className="flex items-center gap-1.5">
+                  <span>{w.name}</span>
+                  <LocalProjectBadge
+                    projectRootPath={w.projectRootPath}
+                    projectRootStatus={w.projectRootStatus}
+                  />
+                </span>
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -848,7 +863,7 @@ function CliRecommendationCard(): React.ReactElement {
         <div className="flex-1 text-xs text-foreground/80 leading-relaxed">
           <div className="font-medium text-foreground mb-0.5">想要更完整的飞书生态体验？</div>
           补全飞书 CLI 后 Proma Agent 还可以直接读写你的文档、查日历、发邮件等。
-          复制下方提示词到任意工作区的新对话发送即可，Agent 会全程引导完成。
+          复制下方提示词到任意项目的新对话发送即可，Agent 会全程引导完成。
         </div>
       </div>
       <Button
@@ -1520,7 +1535,7 @@ function FeishuConfigTab(): React.ReactElement {
       {/* Bot 列表 */}
       <SettingsSection
         title="飞书 Bot 列表"
-        description="管理多个飞书机器人，每个 Bot 可绑定不同的工作区和模型"
+        description="管理多个飞书机器人，每个 Bot 可绑定不同的项目和模型"
         action={
           <div className="flex items-center gap-2">
             <Button size="sm" onClick={() => setRegisterOpen(true)}>

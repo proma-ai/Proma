@@ -53,7 +53,7 @@ export const TIPS: Tip[] = [
   { id: 'win-shortcut-tab-switch', text: '按 Ctrl+Tab 快速切换标签，长按 Ctrl 反复按 Tab 可在标签间循环选择', platform: 'windows' },
 
   // 通用
-  { id: 'tip-agent-file', text: 'Agent 模式下输入 @ 可以引用工作区文件', platform: 'all' },
+  { id: 'tip-agent-file', text: 'Agent 模式下输入 @ 可以引用会话文件、项目文件和已附加目录', platform: 'all' },
   { id: 'tip-agent-mcp', text: 'Agent 模式下输入 # 可以调用 MCP 工具', platform: 'all' },
   { id: 'tip-agent-skill', text: 'Agent 模式下输入 / 可以使用 Skill', platform: 'all' },
   { id: 'tip-attachment', text: '支持拖拽文件到输入框直接上传附件', platform: 'all' },

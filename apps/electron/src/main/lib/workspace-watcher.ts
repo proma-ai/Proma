@@ -11,8 +11,9 @@
  * 所有事件均做 debounce 防抖，避免高频文件操作导致渲染进程风暴。
  */
 
-import { watch, existsSync } from 'node:fs'
+import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
+import { dirname } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
@@ -35,12 +36,109 @@ function isHighNoisePath(normalizedPath: string): boolean {
 
 let watcher: FSWatcher | null = null
 
-/** 附加目录监听器：路径 → FSWatcher */
+/** 已存在的附加目录监听器：路径 → FSWatcher */
 const attachedWatchers = new Map<string, FSWatcher>()
+
+/** 最近存在的父目录监听器，多个缺失根可复用同一个监听器。 */
+interface ParentDirectoryWatcher {
+  watcher: FSWatcher
+  targetPaths: Set<string>
+}
+const parentDirectoryWatchers = new Map<string, ParentDirectoryWatcher>()
+/** 缺失/失效的目标目录 → 正在监听的最近存在父目录。 */
+const unavailableDirectoryParents = new Map<string, string>()
+
 /** 附加目录防抖定时器 */
 let attachedFilesTimer: ReturnType<typeof setTimeout> | null = null
 /** 主窗口引用（供附加目录监听器使用） */
 let mainWin: BrowserWindow | null = null
+
+function notifyWorkspaceFilesChanged(): void {
+  if (!mainWin || mainWin.isDestroyed()) return
+
+  if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
+  attachedFilesTimer = setTimeout(() => {
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
+    }
+    attachedFilesTimer = null
+  }, DEBOUNCE_MS)
+}
+
+function isExistingDirectory(dirPath: string): boolean {
+  if (!existsSync(dirPath)) return false
+  try {
+    return statSync(dirPath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function findNearestExistingDirectory(dirPath: string): string | null {
+  let candidate = dirPath
+  while (true) {
+    if (isExistingDirectory(candidate)) return candidate
+    const parent = dirname(candidate)
+    if (parent === candidate) return null
+    candidate = parent
+  }
+}
+
+function releaseUnavailableDirectoryWatcher(dirPath: string): void {
+  const parentPath = unavailableDirectoryParents.get(dirPath)
+  if (!parentPath) return
+
+  unavailableDirectoryParents.delete(dirPath)
+  const entry = parentDirectoryWatchers.get(parentPath)
+  if (!entry) return
+
+  entry.targetPaths.delete(dirPath)
+  if (entry.targetPaths.size > 0) return
+
+  try { entry.watcher.close() } catch { /* watcher may already be closed */ }
+  parentDirectoryWatchers.delete(parentPath)
+  console.log('[附加目录监听] 已停止父目录监听:', parentPath)
+}
+
+function watchUnavailableDirectoryParent(dirPath: string): void {
+  const parentPath = findNearestExistingDirectory(dirname(dirPath))
+  if (!parentPath) {
+    console.warn('[附加目录监听] 找不到可监听的父目录:', dirPath)
+    return
+  }
+
+  const currentParentPath = unavailableDirectoryParents.get(dirPath)
+  if (currentParentPath === parentPath) return
+  if (currentParentPath) releaseUnavailableDirectoryWatcher(dirPath)
+
+  let entry = parentDirectoryWatchers.get(parentPath)
+  if (!entry) {
+    try {
+      const watcher = watch(parentPath, { recursive: false }, () => {
+        // 目录恢复、替换或权限变化后，通知 renderer 重新读取即时 root status。
+        notifyWorkspaceFilesChanged()
+      })
+      entry = { watcher, targetPaths: new Set() }
+      parentDirectoryWatchers.set(parentPath, entry)
+
+      watcher.on('error', (err) => {
+        console.error('[附加目录监听] 父目录监听出错，等待下次访问重建:', parentPath, err)
+        try { watcher.close() } catch { /* watcher may already be closed */ }
+        parentDirectoryWatchers.delete(parentPath)
+        for (const targetPath of entry!.targetPaths) {
+          unavailableDirectoryParents.delete(targetPath)
+        }
+      })
+      console.log('[附加目录监听] 已启动父目录监听:', parentPath)
+    } catch (error) {
+      console.error('[附加目录监听] 启动父目录监听失败:', parentPath, error)
+      return
+    }
+  }
+
+  entry.targetPaths.add(dirPath)
+  unavailableDirectoryParents.set(dirPath, parentPath)
+}
 
 /**
  * 启动工作区文件监听
@@ -128,12 +226,20 @@ export function stopWorkspaceWatcher(): void {
     watcher = null
     console.log('[工作区监听] 已停止')
   }
-  // 同时清理所有附加目录监听器
+  // 同时清理所有附加目录及其缺失路径父目录监听器。
   for (const [dirPath, w] of attachedWatchers) {
     w.close()
     console.log('[附加目录监听] 已停止:', dirPath)
   }
   attachedWatchers.clear()
+  for (const [parentPath, entry] of parentDirectoryWatchers) {
+    try { entry.watcher.close() } catch { /* watcher may already be closed */ }
+    console.log('[附加目录监听] 已停止父目录监听:', parentPath)
+  }
+  parentDirectoryWatchers.clear()
+  unavailableDirectoryParents.clear()
+  if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
+  attachedFilesTimer = null
   mainWin = null
 }
 
@@ -142,38 +248,35 @@ export function stopWorkspaceWatcher(): void {
  * 当目录内文件变化时，推送 WORKSPACE_FILES_CHANGED 事件
  */
 export function watchAttachedDirectory(dirPath: string): void {
-  if (attachedWatchers.has(dirPath)) return
-  if (!existsSync(dirPath)) {
-    console.warn('[附加目录监听] 目录不存在，跳过:', dirPath)
+  if (!isExistingDirectory(dirPath)) {
+    // 本地项目根一开始不存在时不能直接 fs.watch；监听最近存在父目录即可在其恢复时
+    // 触发一次 renderer 状态刷新。多个同父路径的根共享一个 watcher。
+    watchUnavailableDirectoryParent(dirPath)
     return
   }
 
+  releaseUnavailableDirectoryWatcher(dirPath)
+  if (attachedWatchers.has(dirPath)) return
+
   try {
     const w = watch(dirPath, { recursive: true }, () => {
-      if (!mainWin || mainWin.isDestroyed()) return
-
-      // 统一防抖：所有附加目录变化合并为一次刷新
-      if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
-      attachedFilesTimer = setTimeout(() => {
-        if (mainWin && !mainWin.isDestroyed()) {
-          mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
-        }
-        attachedFilesTimer = null
-      }, DEBOUNCE_MS)
+      notifyWorkspaceFilesChanged()
     })
 
     // 同主 watcher：监听 'error' 防止运行时异常拖死主进程。
     // 附加目录通常是用户外接的项目目录，断电/挂载/权限变化更易触发。
     w.on('error', (err) => {
-      console.error('[附加目录监听] 运行时错误，移除监听器:', dirPath, err)
+      console.error('[附加目录监听] 运行时错误，切换为父目录监听:', dirPath, err)
       try { w.close() } catch { /* 已关闭 */ }
-      attachedWatchers.delete(dirPath)
+      if (attachedWatchers.get(dirPath) === w) attachedWatchers.delete(dirPath)
+      watchUnavailableDirectoryParent(dirPath)
     })
 
     attachedWatchers.set(dirPath, w)
     console.log('[附加目录监听] 已启动:', dirPath)
   } catch (error) {
-    console.error('[附加目录监听] 启动失败:', dirPath, error)
+    console.error('[附加目录监听] 启动失败，切换为父目录监听:', dirPath, error)
+    watchUnavailableDirectoryParent(dirPath)
   }
 }
 
@@ -183,8 +286,9 @@ export function watchAttachedDirectory(dirPath: string): void {
 export function unwatchAttachedDirectory(dirPath: string): void {
   const w = attachedWatchers.get(dirPath)
   if (w) {
-    w.close()
+    try { w.close() } catch { /* watcher may already be closed */ }
     attachedWatchers.delete(dirPath)
     console.log('[附加目录监听] 已停止:', dirPath)
   }
+  releaseUnavailableDirectoryWatcher(dirPath)
 }

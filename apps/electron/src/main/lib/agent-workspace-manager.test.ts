@@ -89,6 +89,14 @@ describe('Agent 工作区 MCP 配置', () => {
   })
 })
 
+describe('项目术语迁移', () => {
+  test('Given 新安装 When 创建默认项目 Then 使用项目名称', () => {
+    const workspace = manager.ensureDefaultWorkspace()
+
+    expect(workspace.name).toBe('默认项目')
+  })
+})
+
 describe('Agent 工作区创建', () => {
   test('Given 项目名称是 Windows 保留设备名 When 创建工作区 Then slug 避免直接使用保留名', () => {
     const workspace = manager.createAgentWorkspace('CON')

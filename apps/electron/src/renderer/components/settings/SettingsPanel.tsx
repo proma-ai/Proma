@@ -1,8 +1,8 @@
 /**
  * SettingsPanel - 设置面板
  *
- * 顶部 Header（标题 + 关闭按钮）+ 下方（左侧导航 + 右侧 ScrollArea 内容区域）。
- * 使用 Jotai atom 管理当前标签页状态。
+ * 在应用主工作区中展示：顶部 Header（标题 + 关闭按钮）+ 下方（左侧导航 + 右侧 ScrollArea 内容区域）。
+ * 使用 Jotai atom 管理当前标签页状态，保持已有设置项与分组顺序。
  */
 
 import * as React from "react";
@@ -19,6 +19,7 @@ import {
   Bot,
   GraduationCap,
   X,
+  ArrowLeft,
   Keyboard,
   Mic,
   HardDriveDownload,
@@ -27,7 +28,14 @@ import {
 // Cloud 模式专属图标
 import { CreditCard, KeyRound, ScrollText } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { settingsTabAtom, channelFormDirtyAtom, settingsCloseRequestedAtom, settingsOpenAtom } from "@/atoms/settings-tab";
+import {
+  settingsTabAtom,
+  channelFormDirtyAtom,
+  settingsCloseRequestedAtom,
+  settingsOpenAtom,
+  settingsPendingSessionNavigationAtom,
+  type SettingsSessionNavigation,
+} from "@/atoms/settings-tab";
 import type { SettingsTab } from "@/atoms/settings-tab";
 import { appModeAtom } from "@/atoms/app-mode";
 import { activeViewAtom } from "@/atoms/active-view";
@@ -62,6 +70,8 @@ import { ShortcutSettings } from "./ShortcutSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { MigrationSettings } from "./MigrationSettings";
 import { StorageSettings } from "./StorageSettings";
+import { useOpenSession } from '@/hooks/useOpenSession'
+import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 
 /** 设置 Tab 定义 */
 interface TabItem {
@@ -182,6 +192,7 @@ export function SettingsPanel({
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom);
   const channelFormDirty = useAtomValue(channelFormDirtyAtom);
   const [closeRequested, setCloseRequested] = useAtom(settingsCloseRequestedAtom);
+  const [pendingSessionNavigation, setPendingSessionNavigation] = useAtom(settingsPendingSessionNavigationAtom);
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
   const setActiveView = useSetAtom(activeViewAtom);
   const setAutomationForm = useSetAtom(automationFormAtom);
@@ -190,9 +201,15 @@ export function SettingsPanel({
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom);
   const [mainTabs, setMainTabs] = useAtom(tabsAtom);
   const setMainActiveTabId = useSetAtom(activeTabIdAtom);
+  const openSession = useOpenSession()
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   /** 统一的退出拦截对话框状态 */
-  type PendingAction = { type: 'tab'; tabId: SettingsTab } | { type: 'close' } | null
+  type PendingAction =
+    | { type: 'tab'; tabId: SettingsTab }
+    | { type: 'close' }
+    | { type: 'session'; navigation: SettingsSessionNavigation }
+    | null
   const [pendingAction, setPendingAction] = React.useState<PendingAction>(null)
   const showNavDialog = pendingAction !== null
 
@@ -201,6 +218,13 @@ export function SettingsPanel({
     if (!pendingAction) return
     if (pendingAction.type === 'tab') {
       setActiveTab(pendingAction.tabId)
+    } else if (pendingAction.type === 'session') {
+      openSession(
+        pendingAction.navigation.type,
+        pendingAction.navigation.sessionId,
+        pendingAction.navigation.title,
+        { bypassSettingsGuard: true },
+      )
     } else {
       onClose?.()
     }
@@ -241,6 +265,13 @@ export function SettingsPanel({
     onClose?.()
   }
 
+  // 左侧会话点击在渠道表单有未保存内容时，由 useOpenSession 暂存目标并交给此处确认。
+  React.useEffect(() => {
+    if (!pendingSessionNavigation) return
+    setPendingAction({ type: 'session', navigation: pendingSessionNavigation })
+    setPendingSessionNavigation(null)
+  }, [pendingSessionNavigation, setPendingSessionNavigation])
+
   // Cmd+W 等外部关闭请求：弹出确认对话框
   React.useEffect(() => {
     if (closeRequested && activeTab === 'channels') {
@@ -271,16 +302,25 @@ export function SettingsPanel({
   const activeTabLabel = tabs.find((t) => t.id === activeTab)?.label ?? "设置";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col bg-content-area text-foreground">
       {/* 顶部 Header 栏 */}
-      <div className="h-12 flex items-center justify-between px-5 border-b border-border/50 flex-shrink-0">
-        <h2 className="text-sm font-medium text-foreground">
+      <div className="relative flex h-[112px] flex-shrink-0 items-end justify-between border-b border-border/80 bg-[hsl(var(--sidebar-surface))] px-6 pb-5 dark:border-border/70">
+        <div
+          aria-hidden="true"
+          className={cn(
+            'titlebar-drag-region pointer-events-none absolute left-0 top-0 h-[50px]',
+            isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0',
+          )}
+        />
+        <h2 className="titlebar-no-drag relative z-10 text-sm font-medium text-foreground">
           {activeTabLabel}
         </h2>
         {onClose && (
           <button
             onClick={handleClose}
-            className="rounded-md p-1.5 text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="关闭设置"
+            title="关闭设置"
+            className="titlebar-no-drag relative z-10 rounded-md p-1.5 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
           >
             <X size={16} />
           </button>
@@ -290,14 +330,14 @@ export function SettingsPanel({
       {/* 下方主体：左导航 + 右内容 */}
       <div className="flex flex-1 min-h-0">
         {/* 左侧 Tab 导航 */}
-        <div className="w-[160px] border-r border-border/50 pt-3 px-2 flex-shrink-0 overflow-y-auto scrollbar-thin">
-          <nav className="flex flex-col gap-0.5">
+        <div className="flex h-full min-h-0 w-[277px] flex-shrink-0 flex-col border-r border-border/80 bg-[hsl(var(--sidebar-surface))] dark:border-border/70">
+          <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pt-5 scrollbar-thin">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                  "flex items-center gap-2 rounded-md px-3 py-2.5 text-sm transition-colors",
                   activeTab === tab.id
                     ? "bg-muted text-foreground font-medium"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
@@ -311,11 +351,22 @@ export function SettingsPanel({
               </button>
             ))}
           </nav>
+          <div className="flex-shrink-0 p-3">
+            <button
+              onClick={handleClose}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+            >
+              <ArrowLeft size={16} />
+              <span>返回</span>
+            </button>
+          </div>
         </div>
 
         {/* 右侧内容区域 */}
-        <ScrollArea className="flex-1">
-          <div className="px-6 py-4">{renderTabContent(activeTab)}</div>
+        <ScrollArea className="min-w-0 flex-1 bg-content-area">
+          <div className="mx-auto w-full max-w-[1080px] px-5 py-8 pb-12 sm:px-8">
+            {renderTabContent(activeTab)}
+          </div>
         </ScrollArea>
       </div>
 

@@ -39,6 +39,6 @@ export function showCapabilityChangeToasts(changes: CapabilityChange[]): void {
     const parts: string[] = []
     if (mcpCount > 0) parts.push(`${mcpCount} 个 MCP 服务器`)
     if (skillCount > 0) parts.push(`${skillCount} 个 Skill`)
-    toast.info(`工作区配置已更新：${parts.join('、')}`)
+    toast.info(`项目配置已更新：${parts.join('、')}`)
   }
 }

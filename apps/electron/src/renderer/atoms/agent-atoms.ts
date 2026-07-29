@@ -388,9 +388,9 @@ export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-side
 /** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 
-export type AgentSidePanelTab = 'session' | 'workspace' | 'changes' | 'chat'
+export type AgentSidePanelTab = 'files' | 'changes' | 'chat'
 
-/** 侧面板当前 Tab：会话文件 / 工作区文件 / 文件改动 / Chat（per-session Map） */
+/** 侧面板当前 Tab：Files / 文件改动 / Chat（per-session Map） */
 export const agentDiffPanelTabAtom = atom<Map<string, AgentSidePanelTab>>(new Map())
 
 /** Diff 视图模式：'split' | 'unified'，默认使用统一预览 */
@@ -428,9 +428,9 @@ export const currentSessionSidePanelOpenAtom = atom<boolean>((get) => {
 export const agentSessionPathMapAtom = atom<Map<string, string>>(new Map())
 
 /**
- * 文件浏览器自动定位信号：当 Agent 调用写入类工具（Write/Edit/MultiEdit/NotebookEdit）时，
- * 设置该 atom；FileBrowser 实例订阅后，若路径落在自身 rootPath 下则展开祖先 + 滚动 + 高亮。
- * `ts` 用于触发同路径的二次脉冲（atom 比对引用）。
+ * 文件浏览器自动定位信号：当用户通过文件搜索点击结果时设置该 atom；
+ * FileBrowser 实例订阅后，若路径落在自身 rootPath 下则展开祖先 + 滚动定位。
+ * `ts` 用于触发同路径的二次定位（atom 比对引用）。
  */
 export interface FileBrowserAutoReveal {
   sessionId: string

@@ -337,7 +337,7 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   if (input.active !== undefined && input.active !== target.active) {
     // 启用要求 channelId + workspaceId 齐全，否则拒绝（兜底前端校验，避免空配置任务进入调度）
     if (input.active && !isAutomationRunnable(target)) {
-      throw new Error('启用定时任务前必须配置模型与工作区')
+      throw new Error('启用定时任务前必须配置模型与项目')
     }
     target.active = input.active
     if (input.active) {

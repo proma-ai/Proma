@@ -581,6 +581,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const [pendingFiles, setPendingFiles] = useAtom(agentPendingFilesAtomFamily(sessionId))
   const [queuedMessages, setQueuedMessages] = useAtom(agentMessageQueueAtomFamily(sessionId))
   const workspaces = useAtomValue(agentWorkspacesAtom)
+  const setWorkspaces = useSetAtom(agentWorkspacesAtom)
+  const [restoreProjectRootDialogOpen, setRestoreProjectRootDialogOpen] = React.useState(false)
+  const [restoringProjectRoot, setRestoringProjectRoot] = React.useState(false)
   // 保持 channelId 稳定：初始化前使用上次有效值，避免工具栏抖动
   const stableChannelIdRef = React.useRef(agentChannelId)
   if (agentChannelId) stableChannelIdRef.current = agentChannelId
@@ -926,17 +929,29 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [sessionId, currentWorkspaceId, setSessionPathMap])
 
   // 获取工作区共享文件目录路径（@ 引用时需要搜索）
-  const workspaceSlug = workspaces.find((w) => w.id === currentWorkspaceId)?.slug ?? null
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
+  const workspaceSlug = currentWorkspace?.slug ?? null
+  const projectRootPath = currentWorkspace?.projectRootPath ?? null
   React.useEffect(() => {
-    if (!workspaceSlug) {
-      setWorkspaceFilesPath(null)
-      return
-    }
+    let disposed = false
+
+    // 同一项目重新关联本地根时 slug 保持不变，必须立即废弃旧路径与旧请求结果。
+    setWorkspaceFilesPath(null)
+    if (!workspaceSlug) return
+
     window.electronAPI
       .getWorkspaceFilesPath(workspaceSlug)
-      .then(setWorkspaceFilesPath)
-      .catch(() => setWorkspaceFilesPath(null))
-  }, [workspaceSlug])
+      .then((path) => {
+        if (!disposed) setWorkspaceFilesPath(path)
+      })
+      .catch(() => {
+        if (!disposed) setWorkspaceFilesPath(null)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [workspaceSlug, projectRootPath])
 
   // 获取工作区级附加文件（@ 引用和路径解析都需要）
   React.useEffect(() => {
@@ -1061,7 +1076,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     mentions: ReturnType<typeof parseQueuedMessageMentions>,
     interruptCurrentTurn: boolean,
   ): Promise<void> => {
-    // 气泡显示用原文 text（保留 /skill: #mcp: &session: 语法），
+    // 气泡显示用原文 text（保留 /skill:、#mcp:、&session:、&todo: 和 &calendar_event: 语法），
     // 让 message.tsx 的 remarkMentions 立即渲染出引用芯片；
     // 剥离后的 sdkText 仅用于传给 SDK，不作为展示文本。
     appendLiveUserMessage(createUserSDKMessage(rawText, message.id, Date.now()))
@@ -1076,6 +1091,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         ...(mentions.mentionedSkills.length > 0 && { mentionedSkills: mentions.mentionedSkills }),
         ...(mentions.mentionedMcpServers.length > 0 && { mentionedMcpServers: mentions.mentionedMcpServers }),
         ...(mentions.mentionedSessionIds.length > 0 && { mentionedSessionIds: mentions.mentionedSessionIds }),
+        ...(mentions.mentionedTodoIds.length > 0 && { mentionedTodoIds: mentions.mentionedTodoIds }),
+        ...(mentions.mentionedCalendarEventIds.length > 0 && { mentionedCalendarEventIds: mentions.mentionedCalendarEventIds }),
       })
     } catch (error) {
       removeLiveUserMessage(message.id)
@@ -1127,6 +1144,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         ...(mentions.mentionedSkills.length > 0 && { mentionedSkills: mentions.mentionedSkills }),
         ...(mentions.mentionedMcpServers.length > 0 && { mentionedMcpServers: mentions.mentionedMcpServers }),
         ...(mentions.mentionedSessionIds.length > 0 && { mentionedSessionIds: mentions.mentionedSessionIds }),
+        ...(mentions.mentionedTodoIds.length > 0 && { mentionedTodoIds: mentions.mentionedTodoIds }),
+        ...(mentions.mentionedCalendarEventIds.length > 0 && { mentionedCalendarEventIds: mentions.mentionedCalendarEventIds }),
       })
     } catch (error) {
       setStreamingStates((prev) => {
@@ -1434,7 +1453,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
     if (!workspace) {
       toast.warning('暂时无法发送附件', {
-        description: '当前 Agent 会话没有绑定有效工作区。请在顶部选择工作区，或新建 Agent 会话后重新上传。',
+        description: '当前 Agent 会话没有绑定有效项目。请在顶部选择项目，或新建 Agent 会话后重新上传。',
       })
       return null
     }
@@ -1521,7 +1540,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       } catch (error) {
         console.error('[AgentView] 保存附件到 session 失败:', error)
         toast.error('附件保存失败', {
-          description: '请确认当前工作区可用，或新建 Agent 会话后重新上传。',
+          description: '请确认当前项目可用，或新建 Agent 会话后重新上传。',
         })
         return null
       }
@@ -1529,7 +1548,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     if (allRefs.length === 0) {
       toast.error('附件没有成功加入消息', {
-        description: '请重新上传文件，或切换到有效工作区后再试。',
+        description: '请重新上传文件，或切换到有效项目后再试。',
       })
       return null
     }
@@ -2279,6 +2298,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       ...(mentions.mentionedSkills.length > 0 && { mentionedSkills: mentions.mentionedSkills }),
       ...(mentions.mentionedMcpServers.length > 0 && { mentionedMcpServers: mentions.mentionedMcpServers }),
       ...(mentions.mentionedSessionIds.length > 0 && { mentionedSessionIds: mentions.mentionedSessionIds }),
+      ...(mentions.mentionedTodoIds.length > 0 && { mentionedTodoIds: mentions.mentionedTodoIds }),
+      ...(mentions.mentionedCalendarEventIds.length > 0 && { mentionedCalendarEventIds: mentions.mentionedCalendarEventIds }),
     }
 
     // 清空输入框（仅当发送的是用户自己输入的内容，而非推荐建议时）
@@ -2412,6 +2433,36 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       console.error('[AgentView] 复制错误信息失败:', error)
     }
   }, [agentError])
+
+  const handleRelinkProjectRoot = React.useCallback(async (): Promise<void> => {
+    if (!currentWorkspaceId) return
+    try {
+      const folder = await window.electronAPI.openFolderDialog()
+      if (!folder) return
+      const updated = await window.electronAPI.relinkAgentWorkspaceProjectRoot(currentWorkspaceId, folder.path)
+      setWorkspaces((prev) => prev.map((workspace) => (workspace.id === updated.id ? updated : workspace)))
+      toast.success('本地项目根已重新关联', { description: folder.path })
+    } catch (error) {
+      console.error('[AgentView] 重新关联本地项目根失败:', error)
+      toast.error(error instanceof Error ? error.message : '重新关联项目文件夹失败')
+    }
+  }, [currentWorkspaceId, setWorkspaces])
+
+  const handleRestoreProjectRoot = React.useCallback(async (): Promise<void> => {
+    if (!currentWorkspaceId) return
+    try {
+      setRestoringProjectRoot(true)
+      const updated = await window.electronAPI.restoreAgentWorkspaceProjectRoot(currentWorkspaceId)
+      setWorkspaces((prev) => prev.map((workspace) => (workspace.id === updated.id ? updated : workspace)))
+      toast.success('已在原路径新建空项目文件夹', { description: updated.projectRootPath })
+      setRestoreProjectRootDialogOpen(false)
+    } catch (error) {
+      console.error('[AgentView] 恢复本地项目根失败:', error)
+      toast.error(error instanceof Error ? error.message : '恢复项目文件夹失败')
+    } finally {
+      setRestoringProjectRoot(false)
+    }
+  }, [currentWorkspaceId, setWorkspaces])
 
   /** 重试：在当前会话中重新发送最后一条用户消息。可显式覆盖渠道/模型，避免切换后仍捕获旧闭包配置。 */
   const handleRetry = React.useCallback((overridesOrErrorUuid?: { channelId: string; modelId: string } | string): void => {
@@ -2994,6 +3045,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           stoppedByUser={stoppedByUser}
           onRetry={handleRetry}
           onRetryInNewSession={handleRetryInNewSession}
+          onRelinkProjectRoot={handleRelinkProjectRoot}
+          onRestoreProjectRoot={() => setRestoreProjectRootDialogOpen(true)}
           onFork={handleFork}
           onRewind={handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}
@@ -3178,6 +3231,23 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             回退
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={restoreProjectRootDialogOpen} onOpenChange={setRestoreProjectRootDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>在原路径新建空文件夹？</AlertDialogTitle>
+          <AlertDialogDescription>
+            将在该本地项目原路径创建空文件夹。此操作不会恢复被删除的文件。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={restoringProjectRoot}>取消</AlertDialogCancel>
+          <AlertDialogAction disabled={restoringProjectRoot} onClick={() => void handleRestoreProjectRoot()}>
+            {restoringProjectRoot ? '创建中...' : '新建空文件夹'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

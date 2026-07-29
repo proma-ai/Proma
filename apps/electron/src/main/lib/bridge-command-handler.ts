@@ -14,11 +14,11 @@ import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './ag
 import {
   listAgentWorkspacesByUpdatedAt,
   getAgentWorkspace,
+  getProjectFilesPath,
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
 import { runAgentHeadless, agentEventBus, stopAgent, isAgentSessionActive } from './agent-service'
 import { getSettings } from './settings-service'
-import { resolveWorkspaceFilesDir } from './config-paths'
 import { buildAttachedFilesBlock, buildSessionFileTree, buildFileTree } from './bridge-attachment-utils'
 import {
   listSwitchableChannels,
@@ -125,14 +125,14 @@ export class BridgeCommandHandler {
    * 如果未配置 Agent 渠道，返回 null
    */
   ensureBinding(chatId: string): BridgeChatBinding | null {
-    const existing = this.chatBindings.get(chatId)
+    const existing = this.getValidBinding(chatId)
     if (existing) return existing
 
     const settings = getSettings()
     const channelId = settings.agentChannelId
     if (!channelId) return null
 
-    const workspaceId = this.config.getDefaultWorkspaceId?.() ?? settings.agentWorkspaceId ?? ''
+    const workspaceId = this.resolveValidWorkspaceId(settings.agentWorkspaceId)
 
     const session = createAgentSession(
       `${this.config.platformName}会话`,
@@ -159,7 +159,7 @@ export class BridgeCommandHandler {
 
   /** 检查指定 chatId 的 session 是否正在运行 */
   isSessionActive(chatId: string): boolean {
-    const binding = this.chatBindings.get(chatId)
+    const binding = this.getValidBinding(chatId)
     if (!binding) return false
     return isAgentSessionActive(binding.sessionId)
   }
@@ -179,9 +179,27 @@ export class BridgeCommandHandler {
     this.sessionBuffers.clear()
   }
 
-  /** 获取聊天绑定 */
+  /** 获取聊天绑定；已失效的会话或工作区绑定会被同步清除。 */
   getBinding(chatId: string): BridgeChatBinding | undefined {
-    return this.chatBindings.get(chatId)
+    return this.getValidBinding(chatId)
+  }
+
+  /**
+   * 在删除工作区前清理所有指向该工作区或其即将删除会话的绑定。
+   * 返回实际删除的绑定数，调用方无需分别处理内存和持久化存储。
+   */
+  removeBindingsForDeletedWorkspace(workspaceId: string, affectedSessionIds: Iterable<string>): number {
+    const sessionIds = new Set(affectedSessionIds)
+    let removedCount = 0
+
+    for (const [chatId, binding] of this.chatBindings) {
+      if (binding.workspaceId !== workspaceId && !sessionIds.has(binding.sessionId)) continue
+      this.removeBinding(chatId, binding)
+      removedCount += 1
+    }
+
+    if (removedCount > 0) this.saveBindings()
+    return removedCount
   }
 
   /** 清理所有状态 */
@@ -197,6 +215,7 @@ export class BridgeCommandHandler {
     if (!bindings || bindings.length === 0) return
 
     const existingBindings = filterExistingBridgeBindings(bindings, (sessionId) => Boolean(getAgentSessionMeta(sessionId)))
+      .filter((binding) => this.isBindingValid(binding))
     for (const binding of existingBindings) {
       this.chatBindings.set(binding.chatId, binding)
       this.sessionToChat.set(binding.sessionId, binding.chatId)
@@ -212,6 +231,40 @@ export class BridgeCommandHandler {
 
   private saveBindings(): void {
     this.config.bindingStore?.save(Array.from(this.chatBindings.values()))
+  }
+
+  private resolveValidWorkspaceId(fallbackWorkspaceId?: string): string {
+    const requestedWorkspaceId = this.config.getDefaultWorkspaceId?.() ?? fallbackWorkspaceId ?? ''
+    if (requestedWorkspaceId && getAgentWorkspace(requestedWorkspaceId)) return requestedWorkspaceId
+    return listAgentWorkspacesByUpdatedAt()[0]?.id ?? ''
+  }
+
+  private isBindingValid(binding: BridgeChatBinding): boolean {
+    const session = getAgentSessionMeta(binding.sessionId)
+    if (!session) return false
+
+    const sessionWorkspaceId = session.workspaceId ?? ''
+    if (sessionWorkspaceId !== binding.workspaceId) return false
+    return !binding.workspaceId || Boolean(getAgentWorkspace(binding.workspaceId))
+  }
+
+  private removeBinding(chatId: string, binding: BridgeChatBinding): void {
+    this.chatBindings.delete(chatId)
+    if (this.sessionToChat.get(binding.sessionId) === chatId) {
+      this.sessionToChat.delete(binding.sessionId)
+    }
+    this.sessionBuffers.delete(binding.sessionId)
+  }
+
+  private getValidBinding(chatId: string): BridgeChatBinding | undefined {
+    const binding = this.chatBindings.get(chatId)
+    if (!binding) return undefined
+    if (this.isBindingValid(binding)) return binding
+
+    this.removeBinding(chatId, binding)
+    this.saveBindings()
+    this.log(`移除已失效绑定: ${chatId.slice(0, 8)}...`)
+    return undefined
   }
 
   // ===== 命令路由 =====
@@ -295,8 +348,8 @@ export class BridgeCommandHandler {
       return
     }
 
-    // 确定工作区
-    const workspaceId = this.config.getDefaultWorkspaceId?.() ?? settings.agentWorkspaceId ?? ''
+    // 确定工作区；若设置仍指向已删除项目，回退到现存项目而不是创建孤儿会话。
+    const workspaceId = this.resolveValidWorkspaceId(settings.agentWorkspaceId)
 
     const session = createAgentSession(
       title || '新会话',
@@ -366,7 +419,7 @@ export class BridgeCommandHandler {
 
     if (orphans.length > 0) {
       lines.push('')
-      lines.push('【未分配工作区】')
+      lines.push('【未分配项目】')
       for (const s of orphans) {
         const globalIdx = sessions.indexOf(s) + 1
         const marker = binding?.sessionId === s.id ? ' ← 当前' : ''
@@ -433,16 +486,16 @@ export class BridgeCommandHandler {
     // 无参数 → 列出
     if (!arg) {
       if (workspaces.length === 0) {
-        await this.send(chatId, '暂无工作区。', contextData)
+        await this.send(chatId, '暂无项目。', contextData)
         return
       }
-      const lines = ['📋 工作区列表:']
+      const lines = ['📋 项目列表:']
       workspaces.forEach((w, i) => {
         const marker = w.id === currentWorkspaceId ? ' ← 当前' : ''
         lines.push(`  ${i + 1}. ${w.name}${marker}`)
       })
       lines.push('')
-      lines.push('使用 /workspace <序号或名称> 切换')
+      lines.push('使用 /workspace <序号或名称> 切换项目')
       await this.send(chatId, lines.join('\n'), contextData)
       return
     }
@@ -457,7 +510,7 @@ export class BridgeCommandHandler {
 
     if (!match) {
       const available = workspaces.map((w, i) => `${i + 1}. ${w.name}`).join(', ')
-      await this.send(chatId, `未找到工作区 "${arg}"。可用: ${available}`, contextData)
+      await this.send(chatId, `未找到项目 "${arg}"。可用: ${available}`, contextData)
       return
     }
 
@@ -477,7 +530,7 @@ export class BridgeCommandHandler {
       .filter((s) => s.workspaceId === match.id)
       .slice(0, 5)
 
-    const lines = [`✅ 已切换到工作区: ${match.name}`]
+    const lines = [`✅ 已切换到项目: ${match.name}`]
     if (recentSessions.length > 0) {
       lines.push('')
       lines.push('最近会话:')
@@ -488,7 +541,7 @@ export class BridgeCommandHandler {
       lines.push('')
       lines.push('使用 /switch <序号> 切换，或发送消息自动创建新会话')
     } else {
-      lines.push('该工作区暂无会话，发送消息将自动创建。')
+      lines.push('该项目暂无会话，发送消息将自动创建。')
     }
 
     await this.send(chatId, lines.join('\n'), contextData)
@@ -516,7 +569,7 @@ export class BridgeCommandHandler {
     const workspaceId = binding?.workspaceId
     const workspace = workspaceId ? getAgentWorkspace(workspaceId) : undefined
     if (workspace) {
-      lines.push(`工作区: ${workspace.name} (${workspace.slug})`)
+      lines.push(`项目: ${workspace.name} (${workspace.slug})`)
 
       // MCP Servers
       const capabilities = getWorkspaceCapabilities(workspace.slug)
@@ -539,13 +592,13 @@ export class BridgeCommandHandler {
         }
       }
 
-      // 工作区文件（递归，体现文件夹-文件层级）
+      // 项目根目录文件（递归，体现文件夹-文件层级）
       try {
-        const wsPath = resolveWorkspaceFilesDir(workspace.slug)
-        const treeLines = buildFileTree(wsPath)
+        const projectRoot = getProjectFilesPath(workspace.slug)
+        const treeLines = buildFileTree(projectRoot)
         if (treeLines.length > 0) {
           lines.push('')
-          lines.push('工作区文件:')
+          lines.push(`项目文件（项目根目录: ${projectRoot}）:`)
           for (const l of treeLines) {
             lines.push(`  ${l}`)
           }
@@ -570,7 +623,7 @@ export class BridgeCommandHandler {
         }
       }
     } else {
-      lines.push('工作区: 未设置')
+      lines.push('项目: 未设置')
     }
 
     await this.send(chatId, lines.join('\n'), contextData)
@@ -681,16 +734,10 @@ export class BridgeCommandHandler {
       return
     }
 
-    let binding = this.chatBindings.get(chatId)
-
-    // 自动创建会话（复用 ensureBinding）
+    let binding = this.ensureBinding(chatId)
     if (!binding) {
-      const result = this.ensureBinding(chatId)
-      if (!result) {
-        await this.send(chatId, '请先在 Proma 设置中选择 Agent 渠道。', contextData)
-        return
-      }
-      binding = result
+      await this.send(chatId, '请先在 Proma 设置中选择 Agent 渠道。', contextData)
+      return
     }
 
     // 并发保护：如果该会话的 Agent 仍在运行，直接拒绝，不要触碰 buffer
@@ -705,6 +752,14 @@ export class BridgeCommandHandler {
     const wsName = workspace?.name ?? '默认'
     const chatName = session?.title ?? '新会话'
     await this.send(chatId, `${wsName} → ${chatName}: ⏳ Agent 处理中...`, contextData)
+
+    // 发送确认消息期间项目可能刚被删除。再次 ensure 后才允许进入无头 Agent，
+    // 确保不会把失效 session/workspace 传给 runAgentHeadless。
+    binding = this.ensureBinding(chatId)
+    if (!binding) {
+      await this.send(chatId, '当前项目已不可用，请在 Proma 中重新选择项目后再试。', contextData)
+      return
+    }
 
     // 初始化回复缓冲
     this.sessionBuffers.set(binding.sessionId, {

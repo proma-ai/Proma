@@ -20,7 +20,9 @@ import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { interfaceVariantAtom } from '@/atoms/theme'
+import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { WindowControls } from '@/components/WindowControls'
+import { SettingsPanel } from '@/components/settings/SettingsPanel'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import type { SyncProgressEvent } from '@proma/shared'
@@ -45,10 +47,8 @@ export interface AppShellProps {
 }
 
 /**
- * 订阅启动自动同步的进度事件
- *
- * 主进程在窗口就绪后自动触发增量同步，
- * 这里只负责监听进度并在完成后刷新对话列表。
+ * 订阅启动自动同步的进度事件。
+ * 主进程在窗口就绪后自动触发增量同步；完成后刷新会话列表。
  */
 function useSyncProgressListener(): void {
   const setConversations = useSetAtom(conversationsAtom)
@@ -66,11 +66,7 @@ function useSyncProgressListener(): void {
 
       if (event.phase === 'done') {
         setIsSyncing(false)
-        // 同步完成后刷新对话列表
-        window.electronAPI
-          .listConversations()
-          .then(setConversations)
-          .catch(console.error)
+        window.electronAPI.listConversations().then(setConversations).catch(console.error)
       }
 
       if (event.phase === 'error') {
@@ -84,7 +80,7 @@ function useSyncProgressListener(): void {
 }
 
 export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
-  // 监听主进程自动同步的进度事件
+  // 保留商业版 Cloud 自动同步状态与上游 Settings workspace 视图。
   useSyncProgressListener()
 
   const appMode = useAtomValue(appModeAtom)
@@ -92,6 +88,8 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const automationForm = useAtomValue(automationFormAtom)
   const interfaceVariant = useAtomValue(interfaceVariantAtom)
+  const settingsOpen = useAtomValue(settingsOpenAtom)
+  const setSettingsOpen = useSetAtom(settingsOpenAtom)
   const isClassic = interfaceVariant === 'classic'
   // 定时任务表单打开时隐藏右侧文件面板，让中间区域扩展到全宽（表单内含自己的右栏配置）
   const activeView = useAtomValue(activeViewAtom)
@@ -220,58 +218,62 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
       {/* Windows 自定义窗口控制按钮（最小化/最大化/关闭） */}
       <WindowControls />
 
-      <div className="shell-bg h-screen w-screen flex overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
-        {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
-        {/* titlebar-drag-region：wrapper 的 p-2 间隙也须可拖拽，否则 z-[60] 会把全局 z-50 drag 层挡住 */}
-        <div className={cn(isClassic ? 'p-2 pr-0' : '', 'relative z-[60] titlebar-drag-region crt-sidebar')}>
-          <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
-          {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
-          {/* titlebar-no-drag：手柄是 titlebar-drag-region wrapper 的子元素，
-              必须显式 opt-out，否则 OS 会把手柄上的鼠标事件当窗口拖动吞掉，宽度拖拽失效 */}
-          {!sidebarCollapsed && (
-            <div
-              className={cn(
-                'titlebar-no-drag absolute right-0 top-0 bottom-0 w-4 translate-x-1/2 cursor-col-resize hover:bg-primary/5 active:bg-primary/50 transition-colors z-20'
+      <div className="shell-bg relative h-screen w-screen overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900">
+        <div className={cn('flex h-full w-full', settingsOpen && 'hidden')} aria-hidden={settingsOpen}>
+            {/* 左侧边栏：可折叠，可拖拽调整宽度 */}
+            <div className={cn(isClassic ? 'p-2 pr-0' : '', 'relative z-[60] titlebar-drag-region crt-sidebar')}>
+              <LeftSidebar width={clampedLeftSidebarWidth} noTransition={isDraggingLeftSidebar} />
+              {/* 侧边栏展开时显示拖拽手柄，折叠态隐藏 */}
+              {!sidebarCollapsed && (
+                <div
+                  className={cn(
+                    'titlebar-no-drag absolute right-0 top-0 bottom-0 w-4 translate-x-1/2 cursor-col-resize hover:bg-primary/5 active:bg-primary/50 transition-colors z-20'
+                  )}
+                  onMouseDown={handleLeftSidebarMouseDown}
+                />
               )}
-              onMouseDown={handleLeftSidebarMouseDown}
-            />
-          )}
-        </div>
-        {!isClassic && (
-          <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
-        )}
-
-        {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
-        <div className={cn('flex-1 min-w-0 relative z-[60]', isClassic && 'p-2')}>
-          {/* 主内容区域（TabBar + TabContent） */}
-          <MainArea />
-        </div>
-
-        {/* 右侧边栏：Agent 文件面板 */}
-        {showRightPanel && (
-          <div
-            className={cn(
-              'relative z-[60] flex items-stretch crt-sidebar',
-              isClassic
-                ? 'transition-[padding] duration-300 ease-in-out'
-                : '',
-              isClassic && (isPanelOpen ? 'p-2 pl-0' : 'p-0')
-            )}
-          >
+            </div>
             {!isClassic && (
-              <div aria-hidden="true" className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-px bg-border/80 dark:bg-border/70" />
+              <div aria-hidden="true" className="relative z-[61] w-px flex-shrink-0 bg-border/80 dark:bg-border/70" />
             )}
-            {/* 拖拽手柄 */}
-            {isPanelOpen && (
+
+            {/* 中间容器：relative z-[60] 使其在 z-50 拖动区域之上 */}
+            <div className={cn('flex-1 min-w-0 relative z-[60]', isClassic && 'p-2')}>
+              {/* 主内容区域（TabBar + TabContent） */}
+              <MainArea />
+            </div>
+
+            {/* 右侧边栏：Agent 文件面板 */}
+            {showRightPanel && (
               <div
                 className={cn(
-                  'absolute left-0 top-0 bottom-0 w-[8px] -translate-x-1/2 cursor-col-resize active:bg-primary/50 transition-colors',
-                  isClassic ? 'z-10' : 'z-20'
+                  'relative z-[60] flex items-stretch crt-sidebar',
+                  isClassic
+                    ? 'transition-[padding] duration-300 ease-in-out'
+                    : '',
+                  isClassic && (isPanelOpen ? 'p-2 pl-0' : 'p-0')
                 )}
-                onMouseDown={handleMouseDown}
-              />
+              >
+                {!isClassic && (
+                  <div aria-hidden="true" className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-px bg-border/80 dark:bg-border/70" />
+                )}
+                {/* 拖拽手柄 */}
+                {isPanelOpen && (
+                  <div
+                    className={cn(
+                      'absolute left-0 top-0 bottom-0 w-[8px] -translate-x-1/2 cursor-col-resize active:bg-primary/50 transition-colors',
+                      isClassic ? 'z-10' : 'z-20'
+                    )}
+                    onMouseDown={handleMouseDown}
+                  />
+                )}
+                <RightSidePanel width={clampedRightPanelWidth} />
+              </div>
             )}
-            <RightSidePanel width={clampedRightPanelWidth} />
+        </div>
+        {settingsOpen && (
+          <div className="absolute inset-0 z-[60]">
+            <SettingsPanel onClose={() => setSettingsOpen(false)} />
           </div>
         )}
       </div>

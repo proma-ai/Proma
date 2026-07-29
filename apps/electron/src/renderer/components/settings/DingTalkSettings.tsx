@@ -115,7 +115,7 @@ export function DingTalkSettings(): React.ReactElement {
       {/* Bot 列表 */}
       <SettingsSection
         title="钉钉 Bot 列表"
-        description="管理多个钉钉机器人，每个 Bot 可绑定不同的工作区和模型"
+        description="管理多个钉钉机器人，每个 Bot 可绑定不同的项目和模型"
         action={
           <Button size="sm" variant="outline" onClick={handleAddBot}>
             <Plus size={14} className="mr-1.5" />

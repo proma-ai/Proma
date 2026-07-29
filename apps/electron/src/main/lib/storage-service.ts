@@ -423,7 +423,7 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
   }
 
   return {
-    label: '工作区文件',
+    label: '项目与会话数据',
     key: 'workspaces',
     bytes, count,
     hasOrphans: orphanCount > 0,
@@ -638,7 +638,7 @@ async function cleanupOrphanWorkspaces(): Promise<CleanupResult> {
       } catch { /* skip */ }
     }
   } catch (e) {
-    errors.push(`清理孤儿工作区目录失败: ${e}`)
+    errors.push(`清理孤儿项目配置目录失败: ${e}`)
   }
 
   return { freedBytes, deletedCount, errors }

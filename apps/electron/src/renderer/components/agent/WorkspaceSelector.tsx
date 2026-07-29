@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useAtom } from 'jotai'
-import { FolderOpen, Plus, Pencil, Trash2, GripVertical } from 'lucide-react'
+import { FolderOpen, FolderInput, Plus, Pencil, Trash2, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
@@ -22,11 +22,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { projectListHeightAtom } from '@/atoms/sidebar-atoms'
 import { useProjectActions } from '@/hooks/useProjectActions'
+import { LocalProjectBadge } from './LocalProjectBadge'
 import { agentSessionsAtom, agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import type { AgentWorkspace } from '@proma/shared'
 
 export function WorkspaceSelector(): React.ReactElement {
-  const { workspaces, currentWorkspaceId, selectProject, createProject } = useProjectActions()
+  const { workspaces, currentWorkspaceId, selectProject, createProject, createProjectFromFolder } = useProjectActions()
   const [, setWorkspaces] = useAtom(agentWorkspacesAtom)
   const [, setAgentSessions] = useAtom(agentSessionsAtom)
   const [listHeight, setListHeight] = useAtom(projectListHeightAtom)
@@ -274,13 +275,22 @@ export function WorkspaceSelector(): React.ReactElement {
         {/* 头部 */}
         <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-border/40">
           <span className="text-[11px] font-medium text-foreground/50 uppercase tracking-wide">项目</span>
-          <button
-            onClick={handleStartCreate}
-            className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/35 hover:text-foreground/60 transition-colors titlebar-no-drag"
-            title="新建项目"
-          >
-            <Plus size={13} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => void createProjectFromFolder()}
+              className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/35 hover:text-foreground/60 transition-colors titlebar-no-drag"
+              title="从本地文件夹创建项目"
+            >
+              <FolderInput size={13} />
+            </button>
+            <button
+              onClick={handleStartCreate}
+              className="p-1 rounded hover:bg-foreground/[0.06] text-foreground/35 hover:text-foreground/60 transition-colors titlebar-no-drag"
+              title="新建空白项目"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
         </div>
 
         {/* 项目列表 */}
@@ -331,6 +341,10 @@ export function WorkspaceSelector(): React.ReactElement {
               ) : (
                 <>
                   <span className="flex-1 min-w-0 truncate">{ws.name}</span>
+                  <LocalProjectBadge
+                    projectRootPath={ws.projectRootPath}
+                    projectRootStatus={ws.projectRootStatus}
+                  />
 
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button

@@ -204,7 +204,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
           await onFilesAttached(largeFiles.map((f) => f.path))
           toast.success(`已作为附加文件显示在右侧文件区：${formatFileNames(largeFiles.map((f) => f.filename))}`)
         } else {
-          toast.error(`以下文件超过 100MB，未复制到工作文件夹：${formatFileNames(largeFiles.map((f) => f.filename))}`, {
+          toast.error(`以下文件超过 100MB，未复制到目标文件夹：${formatFileNames(largeFiles.map((f) => f.filename))}`, {
             description: '可在输入框中直接发送为附加文件，或使用附加文件夹。',
           })
         }
@@ -223,7 +223,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
       })
 
       if (oversized.length > 0) {
-        toast.error(`以下文件超过 100MB，未复制到工作文件夹：${formatFileNames(oversized)}`, {
+        toast.error(`以下文件超过 100MB，未复制到目标文件夹：${formatFileNames(oversized)}`, {
           description: '可在输入框中直接发送为附加文件，或使用附加文件夹。',
         })
       }
@@ -291,7 +291,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               <div
                 role="button"
                 tabIndex={0}
-                aria-label={isWorkspace ? '添加文件到工作区文件目录' : '添加文件到会话文件夹'}
+                aria-label={isWorkspace ? '添加文件到项目文件目录' : '添加文件到会话文件夹'}
                 className={zoneClass('left')}
                 onDragOver={(e) => handleDragOver(e, 'left')}
                 onDragLeave={handleDragLeave}
@@ -304,16 +304,15 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{isWorkspace ? '添加文件到工作区文件目录' : '将文件放入 Agent 工作文件夹'}</p>
+              <p>{isWorkspace ? '添加文件到项目文件目录' : '将文件放入 Agent 工作文件夹'}</p>
             </TooltipContent>
           </Tooltip>
-          {/* 附加文件夹 */}
           <Tooltip open={isDragOver === 'right' ? false : undefined}>
             <TooltipTrigger asChild>
               <div
                 role="button"
                 tabIndex={0}
-                aria-label={isWorkspace ? '附加文件夹到工作区' : '附加文件夹到会话'}
+                aria-label={isWorkspace ? '附加项目文件夹' : '附加文件夹'}
                 className={zoneClass('right')}
                 onDragOver={(e) => handleDragOver(e, 'right')}
                 onDragLeave={handleDragLeave}
@@ -326,7 +325,7 @@ export function FileDropZone({ workspaceSlug, sessionId, target = 'session', onF
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{isWorkspace ? '附加文件夹供工作区所有会话访问' : '告知 Agent 你想处理的文件夹'}</p>
+              <p>{isWorkspace ? '将外部文件夹作为项目引用；也可拖入外部文件作为引用' : '告知 Agent 你想处理的文件夹'}</p>
             </TooltipContent>
           </Tooltip>
         </>

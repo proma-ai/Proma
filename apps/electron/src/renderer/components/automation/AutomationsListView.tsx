@@ -151,7 +151,7 @@ function Section({ title, automations, onEdit, onRefresh, onDelete }: SectionPro
   const handleRunNow = async (e: React.MouseEvent, a: Automation): Promise<void> => {
     e.stopPropagation()
     if (!isRunnable(a)) {
-      toast.error('请先为该任务配置模型与工作区')
+      toast.error('请先为该任务配置模型与项目')
       onEdit(a)
       return
     }
@@ -168,9 +168,9 @@ function Section({ title, automations, onEdit, onRefresh, onDelete }: SectionPro
 
   const handleToggle = async (e: React.MouseEvent, a: Automation): Promise<void> => {
     e.stopPropagation()
-    // 启用前必须配齐模型与工作区，否则打开编辑面板让用户补全
+    // 启用前必须配齐模型与项目，否则打开编辑面板让用户补全
     if (!a.active && !isRunnable(a)) {
-      toast.error('请先为该任务配置模型与工作区')
+      toast.error('请先为该任务配置模型与项目')
       onEdit(a)
       return
     }

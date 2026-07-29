@@ -33,6 +33,25 @@ import {
   isMac,
 } from '@/lib/shortcut-registry'
 
+// ===== 快捷键展示组件 =====
+
+function ShortcutKeycaps({ accelerator }: { accelerator: string }): React.ReactElement {
+  const keys = accelerator.split('+').map((key) => key.trim()).filter(Boolean)
+
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-1" aria-label={getAcceleratorDisplay(accelerator)}>
+      {keys.map((key, index) => (
+        <React.Fragment key={`${key}-${index}`}>
+          {index > 0 && <span aria-hidden="true" className="text-[11px] font-medium text-muted-foreground/70">+</span>}
+          <kbd className="inline-flex h-6 min-w-6 items-center justify-center rounded-[4px] border border-border/70 bg-background px-1.5 font-[system-ui] text-[12px] font-medium leading-none text-foreground shadow-sm">
+            {getAcceleratorDisplay(key)}
+          </kbd>
+        </React.Fragment>
+      ))}
+    </span>
+  )
+}
+
 // ===== 快捷键录制组件 =====
 
 interface ShortcutRecorderProps {
@@ -257,11 +276,11 @@ function ShortcutRecorder({
   return (
     <button
       type="button"
-      className="text-xs px-2.5 py-1 rounded-md bg-muted hover:bg-muted/80 text-foreground/80 font-mono transition-colors"
+      className="rounded-md p-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       onClick={handleStartRecording}
       title="点击自定义快捷键"
     >
-      {getAcceleratorDisplay(currentAccelerator)}
+      <ShortcutKeycaps accelerator={currentAccelerator} />
     </button>
   )
 }
@@ -592,9 +611,7 @@ export function ShortcutSettings(): React.ReactElement {
                     </div>
                     <div className="flex items-center gap-2 ml-4">
                       {def.readonly ? (
-                        <span className="text-xs px-2.5 py-1 rounded-md bg-muted text-foreground/60 font-mono">
-                          {getAcceleratorDisplay(isMac ? def.defaultMac : def.defaultWin)}
-                        </span>
+                        <ShortcutKeycaps accelerator={isMac ? def.defaultMac : def.defaultWin} />
                       ) : (
                         <>
                           <ShortcutRecorder

@@ -199,6 +199,8 @@ interface AgentMessagesProps {
   stoppedByUser?: boolean
   onRetry?: (errorUuid?: string) => void
   onRetryInNewSession?: () => void
+  onRelinkProjectRoot?: () => void
+  onRestoreProjectRoot?: () => void
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
   onCreateTodo?: (text: string) => void
@@ -373,7 +375,7 @@ function RetryAttemptItem({
               <div>运行时: {attempt.environment.runtime}</div>
               <div>平台: {attempt.environment.platform}</div>
               <div>模型: {attempt.environment.model}</div>
-              {attempt.environment.workspace && <div>工作区: {attempt.environment.workspace}</div>}
+              {attempt.environment.workspace && <div>项目: {attempt.environment.workspace}</div>}
             </div>
           )}
 
@@ -497,7 +499,7 @@ function AgentRunningIndicator({ startedAt }: { startedAt?: number }): React.Rea
   )
 }
 
-export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onFork, onRewind, onCreateTodo, onCompact, onSwitchToPromaCloud }: AgentMessagesProps): React.ReactElement {
+export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, messagesLoaded, persistedSDKMessages, streaming, streamState, liveMessages, sessionPath, attachedDirs, stoppedByUser, onRetry, onRetryInNewSession, onRelinkProjectRoot, onRestoreProjectRoot, onFork, onRewind, onCreateTodo, onCompact, onSwitchToPromaCloud }: AgentMessagesProps): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const setMinimapCache = useSetAtom(tabMinimapCacheAtom)
   const channels = useAtomValue(channelsAtom)
@@ -758,6 +760,8 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
                     onCreateTodo={shouldDisableActions ? undefined : onCreateTodo}
                     onRetry={shouldDisableActions ? undefined : onRetry}
                     onRetryInNewSession={shouldDisableActions ? undefined : onRetryInNewSession}
+                    onRelinkProjectRoot={shouldDisableActions ? undefined : onRelinkProjectRoot}
+                    onRestoreProjectRoot={shouldDisableActions ? undefined : onRestoreProjectRoot}
                     onCompact={shouldDisableActions ? undefined : onCompact}
                     onSwitchToPromaCloud={shouldDisableActions ? undefined : onSwitchToPromaCloud}
                     isStreaming={isLive || undefined}

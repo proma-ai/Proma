@@ -8,13 +8,13 @@
  * 命中此模式的错误会走「保留 resume 的自动重试」，不会清除 sdkSessionId（#903）。
  *
  * 同时覆盖 OpenAI/Anthropic provider 的流中断错误：
- * - "stream ended before a terminal response event"（OpenAI Responses API）
+ * - "stream ended before a terminal [response] event"（OpenAI-compatible Responses API）
  * - "stream ended before message_stop"（Anthropic Messages API）
  * - "peer closed connection ... (incomplete chunked read)"（HTTP chunked/SSE 响应中断）
  * 这些都是 provider 连接被 CDN/网关切断的同类瞬时错误，与 ECONNRESET 性质一致。
  */
 export const TRANSIENT_NETWORK_PATTERN =
-  /terminated|socket hang up|ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|failed to fetch|network error|peer closed connection|connection (?:error|closed|reset)|other side closed|incomplete chunked read|AbortError|(?:operation|request) was aborted|(?:request )?timed out|stream (?:closed|ended|disconnected) prematurely|premature close|stream ended before (?:a )?(?:terminal response event|message_stop)/i
+  /terminated|socket hang up|ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|failed to fetch|network error|peer closed connection|connection (?:error|closed|reset)|other side closed|incomplete chunked read|AbortError|(?:operation|request) was aborted|(?:request )?timed out|stream (?:closed|ended|disconnected) prematurely|premature close|stream ended before (?:a )?(?:terminal(?: response)? event|message_stop)/i
 
 /** 判断错误消息/stderr 是否为瞬时网络错误 */
 export function isTransientNetworkError(message?: string, stderr?: string): boolean {
@@ -32,10 +32,11 @@ export function isTransientNetworkError(message?: string, stderr?: string): bool
  * 典型形如 "API Error: JSON Parse error: Unable to parse JSON string"。
  * 成因多为网关返回 HTML 错误页、SSE 流被截断、代理注入脏数据等瞬时异常，
  * 与瞬时网络错误同属上游抖动，重试通常即可恢复。
- * 同时覆盖 V8 引擎措辞（Unexpected end of JSON input / is not valid JSON）。
+ * 同时覆盖 V8 引擎措辞（Unexpected end of JSON input / is not valid JSON）和
+ * JavaScriptCore 在完整 JSON 后收到脏数据时的 "Unexpected non-whitespace character after JSON"。
  */
 export const MALFORMED_RESPONSE_PATTERN =
-  /JSON Parse error|Unable to parse JSON|Unexpected end of JSON input|Unexpected token.*JSON|is not valid JSON/i
+  /JSON Parse error|Unable to parse JSON|Unexpected end of JSON input|Unexpected token.*JSON|Unexpected non-whitespace character after JSON|is not valid JSON/i
 
 /** 判断错误消息/stderr 是否为上游响应体解析失败 */
 export function isMalformedResponseError(message?: string, stderr?: string): boolean {

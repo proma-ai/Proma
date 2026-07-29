@@ -17,6 +17,18 @@ describe('Pi native retry classifier', () => {
     )).toBe(true)
   })
 
+  test('classifies an OpenAI-compatible terminal-event stream interruption as retryable', () => {
+    expect(isRetryableAssistantError(
+      failedAssistant('Error Code undefined: Upstream Responses stream ended before a terminal event'),
+    )).toBe(true)
+  })
+
+  test('classifies a corrupted upstream JSON response as retryable', () => {
+    expect(isRetryableAssistantError(
+      failedAssistant('Unexpected non-whitespace character after JSON at position 199 (line 2 column 1)'),
+    )).toBe(true)
+  })
+
   test.each([
     'peer closed connection',
     'incomplete chunked read',

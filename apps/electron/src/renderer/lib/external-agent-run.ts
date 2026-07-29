@@ -28,6 +28,19 @@ export interface ExternalAgentRunActivation {
   streamState: AgentStreamState
 }
 
+/** 迟到的启动事件不得复活已结束运行，或覆盖同一会话的更新运行。 */
+export function shouldActivateExternalAgentRun(
+  currentStreamState: AgentStreamState | undefined,
+  startedAt: number,
+): boolean {
+  if (!currentStreamState || currentStreamState.startedAt == null) return true
+  if (currentStreamState.startedAt > startedAt) return false
+  if (currentStreamState.startedAt === startedAt) {
+    return currentStreamState.running && !currentStreamState.backgroundWaiting
+  }
+  return true
+}
+
 export function buildExternalAgentRunActivation(
   input: ExternalAgentRunActivationInput,
 ): ExternalAgentRunActivation {

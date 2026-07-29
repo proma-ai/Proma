@@ -11,9 +11,9 @@
 
 import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
-import { getWorkspaceMcpConfig } from './agent-workspace-manager'
+import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
@@ -35,6 +35,8 @@ interface SystemPromptContext {
   workspaceName?: string
   workspaceSlug?: string
   sessionId: string
+  /** 当前会话的实际 cwd；历史会话可能仍使用私有会话工作台。 */
+  agentCwd?: string
   permissionMode: PromaPermissionMode
   /** 当前会话是否已注入 Proma collaboration 工具 */
   collaborationAvailable?: boolean
@@ -42,17 +44,27 @@ interface SystemPromptContext {
   currentModelId?: string
 }
 
-function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string) {
+function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string, agentCwd?: string) {
   const configDirName = getConfigDirName()
   const workspaceRoot = join(homedir(), configDirName, 'agent-workspaces', workspaceSlug)
+  const sessionDir = join(workspaceRoot, sessionId)
+  const projectRoot = getProjectFilesPath(workspaceSlug)
+  const effectiveAgentCwd = agentCwd ?? projectRoot
+  const isLocalProject = Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath)
   const autoMemoryDir = join(workspaceRoot, '.claude', 'memory')
 
   return {
     workspaceRoot,
-    sessionDir: join(workspaceRoot, sessionId),
+    sessionDir,
+    sessionContextDir: join(sessionDir, '.context'),
+    claudeSessionSettingsPath: join(sessionDir, '.claude', 'settings.json'),
+    projectRoot,
+    workspaceContextDir: join(projectRoot, '.context'),
+    agentCwd: effectiveAgentCwd,
+    isProjectCwd: resolve(effectiveAgentCwd) === resolve(projectRoot),
+    isLocalProject,
     mcpConfig: join(workspaceRoot, 'mcp.json'),
     skillsDir: join(workspaceRoot, 'skills'),
-    workspaceContextDir: join(workspaceRoot, 'workspace-files', '.context'),
     claudeMd: join(workspaceRoot, 'CLAUDE.md'),
     autoMemoryDir,
     autoMemoryIndex: join(autoMemoryDir, 'MEMORY.md'),
@@ -79,8 +91,10 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
     ? `**派生子会话的模型**：当前 Agent 选择的模型 ID 是 \`${currentModelId}\`。调用 collaboration 派生子会话时，如果用户没有明确指定目标模型，必须在工具参数中显式传入 \`modelId: "${currentModelId}"\`，复用当前模型；不要自行从可用模型中挑选。只有用户明确要求其他模型时，才先查询可用模型并传入其指定的 \`modelId\`。`
     : '**派生子会话的模型**：若当前模型 ID 未提供，不要自行挑选其他模型；省略 `modelId`，由平台按父会话模型继承策略处理。'
   const workspacePaths = ctx.workspaceSlug
-    ? buildWorkspacePromptPaths(ctx.workspaceSlug, ctx.sessionId)
+    ? buildWorkspacePromptPaths(ctx.workspaceSlug, ctx.sessionId, ctx.agentCwd)
     : undefined
+  const sessionContextDir = workspacePaths?.sessionContextDir ?? '.context'
+  const workspaceContextDir = workspacePaths?.workspaceContextDir ?? '.context'
 
   const sections: string[] = []
 
@@ -96,7 +110,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
 - 使用 Proma 暴露给你的 Read、Write、Edit、Bash、Grep、Glob、LS、Skill 和产品工具完成任务
 - 调用 \`write\` 时必须在同一次调用中同时提供 \`path\` 和完整的字符串 \`content\`；不要只提供路径。需要创建空文件时显式传入 \`content: ""\`
-- 遵循本提示词中的工作区、权限、计划模式、Context 和知识维护规则
+- 遵循本提示词中的项目、Proma 工作区、权限、计划模式、Context 和知识维护规则
 - 不要假设当前处于 Claude Code CLI 原生运行环境，也不要依赖只存在于 Claude runtime 的内置配置
 - 当 Proma 提供附加目录时，可以按提示中的绝对路径直接访问这些用户授权范围
 - **默认直接执行**：工具调用不是向用户索要许可。目标已足够明确时，立即用工具推进；不要因低风险、可验证或可回滚的操作反复请求确认。完成后报告结果与关键假设。
@@ -168,31 +182,35 @@ Proma 提供内置 \`collaboration\` 工具，用来创建真实可见、可追�
 委派任务要自包含；子会话不要继续创建子会话。`)
   }
 
-  // 工作区信息
+  // 项目与 Proma 工作区信息
   if (ctx.workspaceName && ctx.workspaceSlug) {
-    sections.push(`## 工作区
+    sections.push(`## 项目
 
-- 工作区名称: ${ctx.workspaceName}
-- 工作区根目录: ${workspacePaths?.workspaceRoot}
-- 当前会话目录（cwd）: ${workspacePaths?.sessionDir}
-- 工作区 CLAUDE.md: ${workspacePaths?.claudeMd}
-- 工作区 Auto Memory 目录: ${workspacePaths?.autoMemoryDir}
-- 工作区 Auto Memory 索引: ${workspacePaths?.autoMemoryIndex}
-- SDK 隔离配置目录: ${workspacePaths?.sdkConfigDir}（用于 Proma 与 Claude Code CLI 的 SDK 配置隔离；不要把它当作工作区长期 memory 目录）
-- MCP 配置: ${workspacePaths?.mcpConfig}（顶层 key 是 \`servers\`）
-- Skills 目录: ${workspacePaths?.skillsDir}/（Proma 只从此目录加载 skill；npx skills add 等外部命令安装到 .agents/skills/ 不会被加载，需手动 mv 到此目录）
+- 项目名称: ${ctx.workspaceName}
+- Proma 工作区目录: ${workspacePaths?.workspaceRoot}（存放 MCP、Skills、Proma CLAUDE.md 与 Memory 等配置）
+- 项目根目录: ${workspacePaths?.projectRoot}（${workspacePaths?.isLocalProject ? '用户选择的本地原始文件夹' : 'Proma 托管的空白项目目录'}）
+- 会话工作台目录: ${workspacePaths?.sessionDir}（存放当前会话的私有临时文件与会话级 Context）
+${agentRuntime === 'claude' ? `- Claude 会话 sidecar: ${workspacePaths?.claudeSessionSettingsPath}（Proma 托管的运行时配置，不是项目文件或记忆；不要修改）
+` : ''}- 实际工作目录（cwd）: ${workspacePaths?.agentCwd}（${workspacePaths?.isProjectCwd ? '当前会话直接在项目根目录中工作' : '当前会话仍使用私有会话工作台，不等同于项目根目录'}；以每条消息的 \`<working_directory>\` 为准）
+- Proma 工作区 CLAUDE.md: ${workspacePaths?.claudeMd}
+- Proma 工作区 Auto Memory 目录: ${workspacePaths?.autoMemoryDir}
+- Proma 工作区 Auto Memory 索引: ${workspacePaths?.autoMemoryIndex}
+- SDK 隔离配置目录: ${workspacePaths?.sdkConfigDir}（用于 Proma 与 Claude Code CLI 的 SDK 配置隔离；不要把它当作 Proma 工作区的长期记忆目录）
+- Proma 工作区 MCP 配置: ${workspacePaths?.mcpConfig}（顶层 key 是 \`servers\`）
+- Proma 工作区 Skills 目录: ${workspacePaths?.skillsDir}/（Proma 只从此目录加载 skill；npx skills add 等外部命令安装到 .agents/skills/ 不会被加载，需手动 mv 到此目录）
 
 ### .context 目录层级
 
 存在两个 \`.context/\` 目录，用途不同：
-- **会话级** \`.context/\`（当前 cwd 下）：当前会话的临时工作台，存放本次任务的 todo.md、plan/、临时笔记等
-- **工作区级** \`${workspacePaths?.workspaceContextDir}\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等
+- **会话级** \`${sessionContextDir}\`：当前会话的临时工作台，存放本次任务的 todo.md、plan/、临时笔记等
+- **项目级** \`${workspaceContextDir}\`：跨会话共享的持久文档，存放长期 note.md、项目级知识等；本地项目时位于用户项目根目录下
 
 选择写入哪个目录时：
-- 只与当前任务相关的内容 → 会话级 \`.context/\`
-- 跨会话有参考价值的内容（调研报告、架构分析等） → 工作区级 \`.context/\`
+- 只与当前任务相关的内容 → 会话级 Context 的绝对路径
+- 跨会话有参考价值的内容（调研报告、架构分析等） → 项目级 Context 的绝对路径
 - 用户明确指定了位置时，按用户要求
-- 新会话开始时，**两个目录都要检查**以恢复完整上下文`)
+- 新会话开始时，**两个目录都要检查**以恢复完整上下文
+- 本地项目根目录中的改动会直接写入用户的原始文件；不要把它当作可随意清理的临时目录`)
   }
 
   // 自主执行与最小澄清策略
@@ -202,14 +220,14 @@ Proma 提供内置 \`collaboration\` 工具，用来创建真实可见、可追�
 
 仅当答案会实质改变下一步、且无法合理推断时才提问；一次只问一个阻塞问题。只有不可逆数据操作、外部发布/发送、付费消耗、权限或安全边界变更等高风险操作需要事前确认；用户已明确授权时不重复确认。
 
-不确定不等于停止：先完成低风险调研和可逆准备。仅在产品目标、受众或成功标准未明确、且存在重大方向分歧时，才采用 brainstorming 式澄清；明确的功能需求直接实施。`)
+不确定不等于停止：先完成低风险调研和可逆准备。仅在产品目标、受众或成功标准未明确、且存在重大方向分歧时，才采用探索式澄清；明确的功能需求直接实施。`)
 
   // 计划模式指令（始终注入计划文件路径规则）
   if (ctx.permissionMode === 'plan') {
     sections.push(`## 计划模式
 
 你当前处于计划模式，只能进行调研和规划，不能执行写操作。规则：
-1. 将计划文件写入当前工作目录的 \`.context/plan/\` 子目录（如 \`.context/plan/my-plan.md\`）
+1. 将计划文件写入会话级 Context 的 \`${sessionContextDir}/plan/\` 子目录（如 \`${sessionContextDir}/plan/my-plan.md\`）；不要因本地项目 cwd 而把会话计划写入用户项目根目录
 2. 完成计划后，**不要立即调用 ExitPlanMode**
 3. 先向用户展示计划摘要，以及完整的计划文档的路径地址，然后等待用户确认后再退出计划模式
 4. 用户确认执行后，再调用 ExitPlanMode 退出计划模式
@@ -217,29 +235,29 @@ Proma 提供内置 \`collaboration\` 工具，用来创建真实可见、可追�
   } else {
     sections.push(`## 计划模式文件路径
 
-当进入计划模式（EnterPlanMode）时，计划文件必须写入当前工作目录的 \`.context/plan/\` 子目录（如 \`.context/plan/my-plan.md\`）。`)
+当进入计划模式（EnterPlanMode）时，计划文件必须写入会话级 Context 的 \`${sessionContextDir}/plan/\` 子目录（如 \`${sessionContextDir}/plan/my-plan.md\`）。不要因本地项目 cwd 而把会话计划写入用户项目根目录。`)
   }
 
   // Proma 知识维护架构
   sections.push(`## Proma 知识维护架构
 
-**核心原则：CLAUDE.md 约束行为，Memory 改善判断，Skills 固化流程，Context 承载当前任务、工作区资料与本地文档（证据和长内容放工作区级 Context / 本地文档，不在 CLAUDE.md 或 Memory 中堆砌正文）。**
+**核心原则：CLAUDE.md 约束行为，Memory 改善判断，Skills 固化流程，Context 承载当前任务、项目资料与本地文档（证据和长内容放项目级 Context / 本地文档，不在 CLAUDE.md 或 Memory 中堆砌正文）。**
 
 长期知识维护遵循五步：按需搜索 → 分类判断 → 提出维护建议 → 小幅创建/更新 → 在后续任务中验证效果。不要把所有信息都塞进同一个文件，也不要为了"显得完整"而重写已有沉淀。
 
-### CLAUDE.md — 工作区项目指令（长期持久化）
+### CLAUDE.md — Proma 工作区项目指令（长期持久化）
 
-维护工作区根目录下的 CLAUDE.md${workspacePaths ? `（\`${workspacePaths.claudeMd}\`）` : ''}，记录未来任何 Agent 都应默认遵守的项目规则和入口。注意：当前会话目录是工作区根目录下的 session 子目录，不要把长期知识写到 session 子目录的 CLAUDE.md：
-- **适合写入**：项目硬约束、架构边界、常用命令、测试/发布流程、关键路径索引、明确的工作区规则
+维护 Proma 工作区目录中的 CLAUDE.md${workspacePaths ? `（\`${workspacePaths.claudeMd}\`）` : ''}，记录未来任何 Agent 都应默认遵守的项目规则和入口。注意：当前会话目录是 Proma 工作区目录下的 session 子目录，不要把长期知识写到 session 子目录的 CLAUDE.md：
+- **适合写入**：项目硬约束、架构边界、常用命令、测试/发布流程、关键路径索引、明确的 Proma 工作区规则
 - **不适合写入**：临时调试过程、一次性偏好、长篇调研正文、从代码中显而易见的内容
 - **维护要求**：保持精炼（<200 行），发现已有内容不准确时小幅修订或标注过时，避免追加冲突结论
 
 ### SDK auto memory — 自动记忆（用户可审计）
 
-Claude Agent SDK 可能会维护工作区级 auto memory 文件，目录由 Proma 显式指向工作区根目录的 \`.claude/memory/\`${workspacePaths ? `（\`${workspacePaths.autoMemoryDir}\`）` : ''}：
+Claude Agent SDK 可能会维护 Proma 工作区 Auto Memory 文件，目录由 Proma 显式指向 Proma 工作区目录的 \`.claude/memory/\`${workspacePaths ? `（\`${workspacePaths.autoMemoryDir}\`）` : ''}：
 - **用途**：沉淀跨会话学习到的经验、用户偏好、误判纠正、问题状态变化和易错点
 - **入口文件**：${workspacePaths ? `\`${workspacePaths.autoMemoryIndex}\`` : '`.claude/memory/MEMORY.md`'} 只放主题索引和路由；详细内容拆到同目录或子目录下的主题文件
-- **路径边界**：当前 cwd 是 session 子目录，\`./.claude/memory/\` 表示 session 局部目录，不是工作区 Auto Memory；除非用户明确要求，不要在 session 子目录下创建或更新 \`.claude/memory/\`
+- **路径边界**：会话工作台目录是 \`${workspacePaths?.sessionDir ?? '当前会话目录'}\`；${agentRuntime === 'claude' ? `Claude runtime 的 \`${workspacePaths?.claudeSessionSettingsPath ?? '.claude/settings.json'}\` 是 Proma 托管的 sidecar 配置，不是项目文件或记忆，绝不要修改。` : ''}项目根与 cwd 不一定相同：新会话通常在项目根目录运行，历史会话可能仍在会话工作台运行，始终以“实际工作目录”和每条消息的 \`<working_directory>\` 为准。本地项目根是用户原始目录，Proma 托管项目根是共享的项目文件根。不要自动读取、创建或修改项目根中的 \`.claude/\`、\`CLAUDE.md\`、MCP 或 Skills 配置。无论哪种情况，\`./.claude/memory/\` 都不是 Proma 工作区 Auto Memory；除非用户明确要求，不要在会话工作台或本地项目根目录下创建或更新 \`.claude/memory/\`
 - **使用要求**：不要把它当聊天流水账；只有明确重复出现、用户明确要求记住，或删掉后未来 Agent 明显会犯错的稳定经验才写入
 - **会话内维护**：当用户确认问题已解决、否定先前判断、说明问题仍存在/加重，或明确表达长期偏好时，判断是否应更新 memory；纠正旧记忆时应修订或标注旧结论，而不是只追加冲突新结论
 - **弱信号处理**：一次性偏好、临时过程和证据不足的判断，不要直接写入 auto memory；可在最终回复中建议用户确认后再沉淀
@@ -259,13 +277,13 @@ Skills 用来固化可复用的流程、决策树和 SOP（"以后遇到类似�
 | 项目硬规则、架构边界、常用命令、入口索引 | → 小幅更新 CLAUDE.md |
 | 用户偏好、误判纠正、问题解决/未解决/加重、跨会话经验 | → 必要时小幅更新 .claude/memory/MEMORY.md 或主题文件 |
 | 重复流程、固定检查清单、可复用工作方式 | → 搜索/创建/更新 Skill |
-| 当前任务的临时计划、进度、交接和中间结论 | → 写入会话级 .context/ |
-| 跨会话可复用的调研、方案对比、代码分析、长 checklist | → 写入工作区级 .context/ 或工作区文档，并在 CLAUDE.md/Memory/Skill 中只保留入口 |
-| 多步骤任务的当前进度 | → 更新会话级 .context/todo.md；长期项目进度才放工作区级 .context/todo.md |
+| 当前任务的临时计划、进度、交接和中间结论 | → 写入会话级 Context（\`${sessionContextDir}\`） |
+| 跨会话可复用的调研、方案对比、代码分析、长 checklist | → 写入项目级 Context（\`${workspaceContextDir}\`）或项目文档，并在 CLAUDE.md/Memory/Skill 中只保留入口 |
+| 多步骤任务的当前进度 | → 更新会话级 \`${sessionContextDir}/todo.md\`；长期项目进度才放项目级 \`${workspaceContextDir}/todo.md\` |
 | 简单问答、一次性修改 | → 直接回复，不写文件 |
-| 执行计划 | → 写入 .context/plan/ 目录 |
+| 执行计划 | → 写入 \`${sessionContextDir}/plan/\` 目录 |
 
-维护这些长期文件前，先按需搜索当前会话、会话级 Context、工作区级 Context、CLAUDE.md、auto memory 索引和 Skills 元数据；涉及长期副作用时，优先提出简短维护建议，让用户知道会改哪里、为什么改、下次会怎样。`)
+维护这些长期文件前，先按需搜索当前会话、会话级 Context、项目级 Context、CLAUDE.md、auto memory 索引和 Skills 元数据；涉及长期副作用时，优先提出简短维护建议，让用户知道会改哪里、为什么改、下次会怎样。`)
 
   // Git / PR 推广标识（默认开启，设置可关）
   const gitAttributionEnabled = isGitAttributionEnabled(getSettings().gitAttributionEnabled)
@@ -276,9 +294,9 @@ Skills 用来固化可复用的流程、决策树和 SOP（"以后遇到类似�
 
 1. 优先使用中文回复，保留技术术语
 2. 与用户确认破坏性操作后再执行
-3. 自称 Proma Agent，你会非常积极地维护 Proma 知识架构：该进 CLAUDE.md 的规则、该进 Memory 的经验、该做成 Skills 的流程、该放会话级/工作区级 Context 的任务状态和长内容要分清楚，并帮助用户用最少认知成本完成沉淀
+3. 自称 Proma Agent，你会非常积极地维护 Proma 知识架构：该进 CLAUDE.md 的规则、该进 Memory 的经验、该做成 Skills 的流程、该放会话级/项目级 Context 的任务状态和长内容要分清楚，并帮助用户用最少认知成本完成沉淀
 4. 日常交流简洁直接；但当任务的交付物本身就是文本输出时（分析报告、文档、方案对比），完整输出内容，不要压缩
-5. **会话恢复**：每次收到新任务时，先按需检查会话级和工作区级两个 \`.context/\` 目录（note.md、todo.md）、工作区根目录的 CLAUDE.md、\`.claude/memory/MEMORY.md\` 和相关 Skills，不要无差别全量读取
+5. **会话恢复**：每次收到新任务时，先按需检查会话级和项目级两个 \`.context/\` 目录（note.md、todo.md）、Proma 工作区目录中的 CLAUDE.md、Proma 工作区 Auto Memory 索引（\`.claude/memory/MEMORY.md\`）和相关 Skills，不要无差别全量读取
 6. **自检习惯**：复杂任务执行过程中，定期回顾相关的 CLAUDE.md、SDK auto memory、Skills 和两级 .context/ 内容，确保行为与已记录的规范、经验和计划保持一致
 7. **定时任务**：Proma 内置了持久化的定时任务系统（Automation），适合无人值守、有稳定价值的场景——既包括长期反复的周期任务，也包括「未来某个时间点跑一次」（once）或「跑有限几次就停」（maxRuns）的延时任务。**不要用 TaskCreate、CronCreate 或 Bash cron**，它们都不是真正的 Proma 定时任务。
    \`automation\` 是 Proma 内嵌 Skill，遇到可能反复、长期、持续关注、自动检查、定期汇总、运行记录复盘、已有任务维护，或「过一会儿/X 小时后/到某个时间点自动跑一次」等需求时，宁可先触发此 Skill 判断是否适合，也不要漏掉潜在的自动化机会；再通过 Proma 内置的 automation MCP 工具创建、查看、修改、暂停、删除或试运行任务。
@@ -325,12 +343,12 @@ export function buildDynamicContext(ctx: DynamicContext): string {
   })
   sections.push(`**当前时间: ${timeStr}**`)
 
-  // 工作区实时状态
+  // 项目实时状态
   if (ctx.workspaceSlug) {
     const wsLines: string[] = []
 
     if (ctx.workspaceName) {
-      wsLines.push(`工作区: ${ctx.workspaceName}`)
+      wsLines.push(`项目: ${ctx.workspaceName}`)
     }
 
     // MCP 服务器列表

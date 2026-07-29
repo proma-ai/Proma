@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app, clipboard, nativeImage } from 'electron'
-import { join, resolve, sep, dirname } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -232,7 +232,7 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getWorkspaceFilesDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
 import { getCachedDefaultAppInfo, saveCachedDefaultAppInfo } from './lib/default-app-cache'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -240,6 +240,8 @@ import {
   listAgentWorkspaces,
   createAgentWorkspace,
   updateAgentWorkspace,
+  relinkAgentWorkspaceProjectRoot,
+  restoreAgentWorkspaceProjectRoot,
   deleteAgentWorkspace,
   reorderAgentWorkspaces,
   ensureDefaultWorkspace,
@@ -250,6 +252,7 @@ import {
   getDefaultSkillSlugs,
   getWorkspaceCapabilities,
   getAgentWorkspace,
+  getProjectFilesPath,
   deleteWorkspaceSkill,
   importSkillFromWorkspace,
   updateSkillFromSource,
@@ -279,6 +282,7 @@ import {
   removeWorktreeRepo,
   cleanupStaleWorkspaceAttachedPaths,
 } from './lib/agent-workspace-manager'
+import { movePathSafely } from './lib/file-move-service'
 import { getAllToolInfos } from './lib/chat-tool-registry'
 import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
 import {
@@ -363,7 +367,7 @@ function getAuthorizedRoots(options?: FileAccessOptions): string[] {
   }
 
   for (const slug of workspaceSlugs) {
-    roots.push(getWorkspaceFilesDir(slug))
+    roots.push(getProjectFilesPath(slug))
     roots.push(...getWorkspaceAttachedDirectories(slug))
     roots.push(...getWorkspaceAttachedFiles(slug))
   }
@@ -373,7 +377,12 @@ function getAuthorizedRoots(options?: FileAccessOptions): string[] {
 
 function isUnderRoot(resolvedPath: string, root: string): boolean {
   const resolvedRoot = realpathOrResolve(root)
-  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep)
+  const relativePath = relative(resolvedRoot, resolvedPath)
+  return relativePath === '' || (
+    relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath)
+  )
 }
 
 function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
@@ -871,6 +880,17 @@ export function resolveAppIconPath(variantId: string): string | null {
     return join(resourcesDir, 'icon.png')
   }
   return join(resourcesDir, 'proma-logos', `proma-${variantId}.png`)
+}
+
+function releaseDirectoryWatcherIfUnreferenced(dirPath: string): void {
+  const isStillReferenced = listAgentWorkspaces().some((workspace) =>
+    workspace.projectRootPath === dirPath
+    || getWorkspaceAttachedDirectories(workspace.slug).includes(dirPath),
+  ) || listAgentSessions().some((session) =>
+    session.attachedDirectories?.includes(dirPath),
+  )
+
+  if (!isStillReferenced) unwatchAttachedDirectory(dirPath)
 }
 
 export function registerIpcHandlers(): void {
@@ -2049,15 +2069,45 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_WORKSPACES,
     async (): Promise<AgentWorkspace[]> => {
-      return listAgentWorkspaces()
+      const workspaces = listAgentWorkspaces()
+      for (const workspace of workspaces) {
+        if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
+      }
+      return workspaces
     }
   )
 
-  // 创建 Agent 工作区
+  // 创建 Agent 工作区（保留给迁移与低层管理调用；交互式项目创建应使用 CREATE_PROJECT）。
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_WORKSPACE,
-    async (_, name: string): Promise<AgentWorkspace> => {
-      return createAgentWorkspace(name)
+    async (_, input: import('@proma/shared').CreateAgentWorkspaceInput): Promise<AgentWorkspace> => {
+      const workspace = createAgentWorkspace(input)
+      if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
+      return workspace
+    }
+  )
+
+  // 创建项目时同时生成其首个 Agent 会话，避免项目以无会话状态进入界面。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CREATE_PROJECT,
+    async (_, input: import('@proma/shared').CreateAgentWorkspaceInput, channelId?: string, modelId?: string): Promise<import('@proma/shared').CreateAgentProjectResult> => {
+      const workspace = createAgentWorkspace(input)
+      if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
+
+      try {
+        const session = createAgentSession(undefined, channelId, workspace.id, modelId, getSettings().agentRuntime ?? 'pi')
+        feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
+          console.error('[飞书 Session 镜像] 项目首个会话建群失败:', error)
+        })
+        return { workspace, session }
+      } catch (error) {
+        try {
+          deleteAgentWorkspace(workspace.id)
+        } catch (rollbackError) {
+          console.error('[项目创建] 首个会话创建失败后的项目回滚失败:', rollbackError)
+        }
+        throw error
+      }
     }
   )
 
@@ -2066,6 +2116,30 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.UPDATE_WORKSPACE,
     async (_, id: string, updates: { name: string }): Promise<AgentWorkspace> => {
       return updateAgentWorkspace(id, updates)
+    }
+  )
+
+  // 重新选择本地项目根目录，保留原项目、会话和配置。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.RELINK_WORKSPACE_PROJECT_ROOT,
+    async (_, id: string, projectRootPath: string): Promise<AgentWorkspace> => {
+      const previousRoot = getAgentWorkspace(id)?.projectRootPath
+      const updated = relinkAgentWorkspaceProjectRoot(id, projectRootPath)
+      if (previousRoot && previousRoot !== updated.projectRootPath) {
+        releaseDirectoryWatcherIfUnreferenced(previousRoot)
+      }
+      if (updated.projectRootPath) watchAttachedDirectory(updated.projectRootPath)
+      return updated
+    }
+  )
+
+  // 在缺失本地项目的原路径恢复空目录。
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.RESTORE_WORKSPACE_PROJECT_ROOT,
+    async (_, id: string): Promise<AgentWorkspace> => {
+      const updated = restoreAgentWorkspaceProjectRoot(id)
+      if (updated.projectRootPath) watchAttachedDirectory(updated.projectRootPath)
+      return updated
     }
   )
 
@@ -2093,6 +2167,20 @@ export function registerIpcHandlers(): void {
       const affectedAutomationIds = listAutomations()
         .filter((automation) => automation.workspaceId === id)
         .map((automation) => automation.id)
+      const deletedProjectRoot = deletingWorkspace.projectRootPath
+      const removedDingTalkBindings = dingtalkBridgeManager.removeBindingsForDeletedWorkspace(id, affectedSessionIds)
+      const removedWeChatBindings = wechatBridge.removeBindingsForDeletedWorkspace(id, affectedSessionIds)
+      const removedFeishuBindings = feishuBridgeManager.removeBindingsForDeletedWorkspace(id, affectedSessionIds)
+
+      if (removedDingTalkBindings > 0) {
+        console.log(`[项目删除] 已移除 ${removedDingTalkBindings} 条钉钉聊天绑定`)
+      }
+      if (removedWeChatBindings > 0) {
+        console.log(`[项目删除] 已移除 ${removedWeChatBindings} 条微信聊天绑定`)
+      }
+      if (removedFeishuBindings > 0) {
+        console.log(`[项目删除] 已移除 ${removedFeishuBindings} 条飞书聊天绑定`)
+      }
 
       for (const sessionId of affectedSessionIds) {
         if (isAgentSessionActive(sessionId)) {
@@ -2107,6 +2195,8 @@ export function registerIpcHandlers(): void {
         broadcastAutomationsChanged()
       }
       deleteAgentWorkspace(id)
+
+      if (deletedProjectRoot) releaseDirectoryWatcherIfUnreferenced(deletedProjectRoot)
     }
   )
 
@@ -2733,7 +2823,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.GET_WORKSPACE_FILES_PATH,
     async (_, workspaceSlug: string): Promise<string> => {
-      return getWorkspaceFilesDir(workspaceSlug)
+      return getProjectFilesPath(workspaceSlug)
     }
   )
 
@@ -2752,7 +2842,7 @@ export function registerIpcHandlers(): void {
       if (result.canceled || result.filePaths.length === 0) return null
 
       const folderPath = result.filePaths[0]!
-      const name = folderPath.split('/').filter(Boolean).pop() || 'folder'
+      const name = basename(folderPath) || 'folder'
       return { path: folderPath, name }
     }
   )
@@ -2785,8 +2875,7 @@ export function registerIpcHandlers(): void {
       const existing = meta.attachedDirectories ?? []
       const updated = existing.filter((d) => d !== input.directoryPath)
       updateAgentSessionMeta(input.sessionId, { attachedDirectories: updated })
-      // 停止附加目录文件监听
-      unwatchAttachedDirectory(input.directoryPath)
+      releaseDirectoryWatcherIfUnreferenced(input.directoryPath)
       return updated
     }
   )
@@ -2842,7 +2931,7 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.DETACH_WORKSPACE_DIRECTORY,
     async (_, input: WorkspaceAttachDirectoryInput): Promise<string[]> => {
       const updated = detachWorkspaceDirectory(input.workspaceSlug, input.directoryPath)
-      unwatchAttachedDirectory(input.directoryPath)
+      releaseDirectoryWatcherIfUnreferenced(input.directoryPath)
       return updated
     }
   )
@@ -2923,20 +3012,17 @@ export function registerIpcHandlers(): void {
   // 列出目录内容（浅层，安全校验）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_DIRECTORY,
-    async (_, dirPath: string): Promise<FileEntry[]> => {
+    async (_, dirPath: string, access?: FileAccessOptions): Promise<FileEntry[]> => {
       const { existsSync, readdirSync, statSync } = await import('node:fs')
       const { resolve } = await import('node:path')
 
-      // 安全校验：路径必须在 agent-workspaces 目录下
       const safePath = resolve(dirPath)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
-      }
-
       // 目录可能已被删除（如删除 Agent 会话后面板仍持有旧路径），优雅返回空列表
       if (!existsSync(safePath)) {
         return []
+      }
+      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       const entries: FileEntry[] = []
@@ -2971,15 +3057,13 @@ export function registerIpcHandlers(): void {
   // 删除文件或目录
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_FILE,
-    async (_, filePath: string): Promise<void> => {
+    async (_, filePath: string, access?: FileAccessOptions): Promise<void> => {
       const { rmSync } = await import('node:fs')
       const { resolve } = await import('node:path')
 
-      // 安全校验：路径必须在 agent-workspaces 目录下
       const safePath = resolve(filePath)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       rmSync(safePath, { recursive: true, force: true })
@@ -2990,13 +3074,12 @@ export function registerIpcHandlers(): void {
   // 用系统默认应用打开文件
   ipcMain.handle(
     AGENT_IPC_CHANNELS.OPEN_FILE,
-    async (_, filePath: string): Promise<void> => {
+    async (_, filePath: string, access?: FileAccessOptions): Promise<void> => {
       const { resolve } = await import('node:path')
 
       const safePath = resolve(filePath)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       await shell.openPath(safePath)
@@ -3043,13 +3126,12 @@ export function registerIpcHandlers(): void {
   // 在系统文件管理器中显示文件
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SHOW_IN_FOLDER,
-    async (_, filePath: string): Promise<void> => {
+    async (_, filePath: string, access?: FileAccessOptions): Promise<void> => {
       const { resolve } = await import('node:path')
 
       const safePath = resolve(filePath)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       shell.showItemInFolder(safePath)
@@ -3064,7 +3146,7 @@ export function registerIpcHandlers(): void {
         throw new Error('当前仅支持在 macOS 终端中打开文件夹')
       }
       if (!isPathAllowed(folderPath)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       const safePath = realpathSync(resolve(folderPath))
@@ -3217,7 +3299,7 @@ export function registerIpcHandlers(): void {
   // 重命名文件/目录
   ipcMain.handle(
     AGENT_IPC_CHANNELS.RENAME_FILE,
-    async (_, filePath: string, newName: string): Promise<void> => {
+    async (_, filePath: string, newName: string, access?: FileAccessOptions): Promise<void> => {
       const { renameSync } = await import('node:fs')
       const { resolve, dirname, join, sep } = await import('node:path')
 
@@ -3226,9 +3308,8 @@ export function registerIpcHandlers(): void {
       }
 
       const safePath = resolve(filePath)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+      if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
       const newPath = join(dirname(safePath), newName)
@@ -3240,19 +3321,17 @@ export function registerIpcHandlers(): void {
   // 移动文件/目录到目标目录
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_FILE,
-    async (_, filePath: string, targetDir: string): Promise<void> => {
-      const { renameSync } = await import('node:fs')
-      const { resolve, basename, join } = await import('node:path')
+    async (_, filePath: string, targetDir: string, access?: FileAccessOptions): Promise<void> => {
+      const { resolve } = await import('node:path')
 
       const safePath = resolve(filePath)
       const safeTarget = resolve(targetDir)
-      const workspacesRoot = resolve(getAgentWorkspacesDir())
-      if (!safePath.startsWith(workspacesRoot) || !safeTarget.startsWith(workspacesRoot)) {
-        throw new Error('访问路径超出 Agent 工作区范围')
+      const options = normalizeFileAccessOptions(access)
+      if (!isPathAllowed(safePath, options) || !isPathAllowed(safeTarget, options)) {
+        throw new Error('访问路径超出当前会话的授权范围')
       }
 
-      const newPath = join(safeTarget, basename(safePath))
-      renameSync(safePath, newPath)
+      const newPath = movePathSafely(safePath, safeTarget)
       console.log(`[Agent 文件] 已移动: ${safePath} → ${newPath}`)
     }
   )
@@ -3330,7 +3409,7 @@ export function registerIpcHandlers(): void {
       if (workspaceSlug) {
         allowedDirs.push(...getWorkspaceAttachedDirectories(workspaceSlug))
         allowedFiles.push(...getWorkspaceAttachedFiles(workspaceSlug))
-        allowedDirs.push(getWorkspaceFilesDir(workspaceSlug))
+        allowedDirs.push(getProjectFilesPath(workspaceSlug))
       }
 
       // 还允许访问 agent-workspaces 根目录下的文件（session 文件等）
@@ -3402,8 +3481,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.MOVE_ATTACHED_FILE,
     async (_, filePath: string, targetDir: string, access?: FileAccessOptions | string[]): Promise<void> => {
-      const { renameSync } = await import('node:fs')
-      const { resolve, basename, join } = await import('node:path')
+      const { resolve } = await import('node:path')
 
       const safePath = resolve(filePath)
       const safeTarget = resolve(targetDir)
@@ -3411,8 +3489,7 @@ export function registerIpcHandlers(): void {
       if (!isPathAllowed(safePath, options) || !isPathAllowed(safeTarget, options)) {
         throw new Error('访问路径不在允许范围内')
       }
-      const newPath = join(safeTarget, basename(safePath))
-      renameSync(safePath, newPath)
+      const newPath = movePathSafely(safePath, safeTarget)
       console.log(`[附加目录] 已移动: ${safePath} → ${newPath}`)
     }
   )
@@ -3512,7 +3589,7 @@ export function registerIpcHandlers(): void {
           if (ignoreDirs.has(name)) return
 
           target.push({
-            name: name === 'workspace-files' ? '工作文件' : name,
+            name: name === 'workspace-files' ? '项目文件' : name,
             path: attachedPath,
             type: 'dir',
             source,
@@ -3540,15 +3617,19 @@ export function registerIpcHandlers(): void {
         }
       }
 
-      // 组内排序：目录优先，前缀匹配优先，路径短优先
-      function sortGroup(entries: Entry[], q: string): void {
+      // 连续排序：来源仅用于解析与 badge，不作为结果分组依据。
+      function sortEntries(entries: Entry[], q: string): void {
         entries.sort((a, b) => {
           const aStartsWith = a.name.toLowerCase().startsWith(q) ? 0 : 1
           const bStartsWith = b.name.toLowerCase().startsWith(q) ? 0 : 1
           if (aStartsWith !== bStartsWith) return aStartsWith - bStartsWith
           if (a.type === 'dir' && b.type !== 'dir') return -1
           if (a.type !== 'dir' && b.type === 'dir') return 1
-          return a.path.length - b.path.length
+          const byPathLength = a.path.length - b.path.length
+          if (byPathLength !== 0) return byPathLength
+          const byName = a.name.localeCompare(b.name)
+          if (byName !== 0) return byName
+          return a.path.localeCompare(b.path)
         })
       }
 
@@ -3585,6 +3666,7 @@ export function registerIpcHandlers(): void {
         const sessionSlice = rootEntries.slice(0, maxPerGroup)
         const workspaceSlice = workspaceEntries.slice(0, maxPerGroup)
         const combined = [...sessionSlice, ...workspaceSlice]
+        sortEntries(combined, '')
         const capped = combined.length > BROWSE_TOTAL_CAP ? combined.slice(0, BROWSE_TOTAL_CAP) : combined
         return {
           entries: capped,
@@ -3596,8 +3678,8 @@ export function registerIpcHandlers(): void {
 
       const sessionMatched = matchEntries(rootEntries, q)
       const workspaceMatched = matchEntries(workspaceEntries, q)
-      sortGroup(sessionMatched, q)
-      sortGroup(workspaceMatched, q)
+      sortEntries(sessionMatched, q)
+      sortEntries(workspaceMatched, q)
 
       const totalMatched = sessionMatched.length + workspaceMatched.length
       let sessionSlice: Entry[]
@@ -3618,8 +3700,10 @@ export function registerIpcHandlers(): void {
         workspaceSlice = workspaceMatched.slice(0, workspaceQuota)
       }
 
+      const entries = [...sessionSlice, ...workspaceSlice]
+      sortEntries(entries, q)
       return {
-        entries: [...sessionSlice, ...workspaceSlice],
+        entries,
         total: sessionMatched.length + workspaceMatched.length,
         sessionEntries: sessionSlice,
         workspaceEntries: workspaceSlice,
