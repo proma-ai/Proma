@@ -390,6 +390,27 @@ function positiveInteger(value: number | undefined): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+/**
+ * Pi 目录尚未反映 Proma 官方 DeepSeek V4 的视觉能力。
+ * 第三方 DeepSeek 渠道仍遵循目录中的 text-only 标记，避免对未知上游作能力承诺。
+ */
+function supportsOfficialDeepSeekV4Vision(provider: ProviderType, modelId: string | undefined): boolean {
+  if (provider !== 'proma') return false
+  const normalized = stripAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  const leafModelId = normalized?.split('/').pop()
+  return /^deepseek-v4(?:[-.]|$)/.test(leafModelId ?? '')
+}
+
+function resolvePiModelInput(
+  provider: ProviderType,
+  modelId: string | undefined,
+  catalogInput: PiCatalogModel['input'] | undefined,
+): PiCatalogModel['input'] {
+  const input: PiCatalogModel['input'] = catalogInput ? [...catalogInput] : ['text', 'image']
+  if (supportsOfficialDeepSeekV4Vision(provider, modelId) && !input.includes('image')) input.push('image')
+  return input
+}
+
 /** Resolve Pi session reasoning from a verified profile before catalog fallback. */
 export async function resolvePiReasoningCapability(
   provider: ProviderType,
@@ -430,7 +451,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
       ?? catalogModel?.thinkingLevelMap,
     compat: providerSpecificCapabilities?.compat,
-    input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
+    input: resolvePiModelInput(input.provider, input.model, catalogModel?.input),
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     contextWindow: configuredContextWindow ?? codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
     // Pi 的目录标值略高于方舟兼容端点的实际上限。
