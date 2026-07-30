@@ -36,15 +36,26 @@ export function createApplicationMenu(): Menu {
     {
       label: '文件',
       submenu: [
-        // Cmd+W / Ctrl+W：关闭当前标签页（而非关闭窗口）
+        // Cmd+W / Ctrl+W：主窗口关闭当前标签页；独立规划窗口关闭自身。
         {
           label: '关闭标签页',
           accelerator: 'CmdOrCtrl+W',
           click: () => {
             const win = BrowserWindow.getFocusedWindow()
-            if (win) {
-              win.webContents.send('menu:close-tab')
+            if (!win) return
+
+            let windowType: string | null = null
+            try {
+              windowType = new URL(win.webContents.getURL()).searchParams.get('window')
+            } catch {
+              // 窗口尚未加载页面时沿用主窗口的安全默认行为。
             }
+            if (windowType === 'planning') {
+              win.close()
+              return
+            }
+
+            win.webContents.send('menu:close-tab')
           },
         },
         ...(isMac ? [] : [{ type: 'separator' as const }, { role: 'quit' as const, label: '退出' }]),
