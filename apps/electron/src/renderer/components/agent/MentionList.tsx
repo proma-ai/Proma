@@ -82,7 +82,7 @@ function MentionListInner<T>(
     return (
       <div className="rounded-lg border bg-popover shadow-lg overflow-hidden w-[280px]">
         <MentionHeader label={headerLabel} />
-        <div className="p-2 text-[11px] text-muted-foreground">{emptyText}</div>
+        <div role="status" className="p-2 text-[11px] text-muted-foreground">{emptyText}</div>
       </div>
     )
   }
@@ -91,11 +91,13 @@ function MentionListInner<T>(
     <div className="rounded-lg border bg-popover shadow-lg overflow-hidden w-[280px]">
       <MentionHeader label={headerLabel} />
       {/* containerRef 只包裹列表项，键盘导航靠 children[index] 定位，head 须置于其外 */}
-      <div ref={containerRef} className="overflow-y-auto max-h-[240px]">
+      <div ref={containerRef} className="overflow-y-auto max-h-[240px]" role="listbox" aria-label={headerLabel ?? '引用选项'}>
         {items.map((item, index) => (
           <button
             key={keyExtractor(item)}
             type="button"
+            role="option"
+            aria-selected={index === localIndex}
             className={cn(
               'w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-accent transition-colors',
               index === localIndex && 'bg-accent text-accent-foreground',

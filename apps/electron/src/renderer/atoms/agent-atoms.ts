@@ -387,6 +387,15 @@ export const agentSidePanelOpenAtom = atomWithStorage<boolean>('proma-agent-side
 /** 侧面板宽度（全局共享，用户拖拽后持久化） */
 export const agentSidePanelWidthAtom = atomWithStorage<number>('proma-agent-sidepanel-width', 280)
 
+/** 文件来源选择：按会话持久化，未存储的会话默认显示会话文件。 */
+export type AgentFileSourceFilter = 'session' | 'project'
+export const agentFileSourceFilterMapAtom = atomWithStorage<Record<string, AgentFileSourceFilter>>(
+  'proma-agent-file-source-filter-map',
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
 /** @deprecated 保留以兼容旧代码，但实际所有 session 都读全局 atom */
 export const agentSidePanelOpenMapAtom = atom<Map<string, boolean>>(new Map())
 

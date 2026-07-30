@@ -1630,6 +1630,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_WORKSPACE_FILES_PATH: 'agent:get-workspace-files-path',
   /** 打开文件夹选择对话框 */
   OPEN_FOLDER_DIALOG: 'agent:open-folder-dialog',
+  /** 打开支持文件与文件夹混合选择的 Composer 对话框 */
+  OPEN_FILE_OR_FOLDER_DIALOG: 'agent:open-file-or-folder-dialog',
   /** 附加外部目录到 Agent 会话 */
   ATTACH_DIRECTORY: 'agent:attach-directory',
   /** 移除会话的附加目录 */

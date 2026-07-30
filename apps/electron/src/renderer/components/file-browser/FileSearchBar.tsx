@@ -19,6 +19,12 @@ interface FileSearchBarProps {
   sessionPath: string | null
   sessionAttachedDirs: string[]
   workspaceAttachedDirs: string[]
+  /** 限定搜索范围；默认同时搜索项目和会话文件。 */
+  sourceFilter?: 'all' | 'session' | 'project'
+  /** 混合来源时用 badge 标记会话文件。 */
+  showSessionBadge?: boolean
+  /** 显示在搜索框下方的控制区；搜索结果将自动避开该区域。 */
+  children?: React.ReactNode
   placeholder?: string
   /** 当前 session ID，用于文件自动定位 */
   sessionId?: string
@@ -46,6 +52,9 @@ export function FileSearchBar({
   sessionPath,
   sessionAttachedDirs,
   workspaceAttachedDirs,
+  sourceFilter = 'all',
+  showSessionBadge = true,
+  children,
   placeholder = '搜索文件...',
   sessionId,
   onFilePreview,
@@ -68,7 +77,8 @@ export function FileSearchBar({
 
   const setAutoReveal = useSetAtom(fileBrowserAutoRevealAtom)
 
-  const hasAnyRoot = !!workspaceFilesPath || !!sessionPath
+  const hasAnyRoot = (sourceFilter !== 'session' && !!workspaceFilesPath)
+    || (sourceFilter !== 'project' && !!sessionPath)
 
   /** 将搜索结果的相对路径转为绝对路径，供 FileBrowser 自动定位使用 */
   const resolveAbsolutePath = React.useCallback((entry: FileIndexEntry): string => {
@@ -115,7 +125,7 @@ export function FileSearchBar({
         // 分别搜索项目文件和会话文件，确保两边都用相对路径
         const searches: Promise<FileIndexEntry[]>[] = []
 
-        if (workspaceFilesPath) {
+        if (workspaceFilesPath && sourceFilter !== 'session') {
           searches.push(
             window.electronAPI.searchWorkspaceFiles(
               workspaceFilesPath,
@@ -127,7 +137,7 @@ export function FileSearchBar({
           )
         }
 
-        if (sessionPath) {
+        if (sessionPath && sourceFilter !== 'project') {
           searches.push(
             window.electronAPI.searchWorkspaceFiles(
               sessionPath,
@@ -169,7 +179,7 @@ export function FileSearchBar({
       if (debounceRef.current) clearTimeout(debounceRef.current)
       abortRef.current?.abort()
     }
-  }, [query, workspaceFilesPath, sessionPath, sessionAttachedDirs, workspaceAttachedDirs, hasAnyRoot])
+  }, [query, workspaceFilesPath, sessionPath, sessionAttachedDirs, workspaceAttachedDirs, sourceFilter, hasAnyRoot])
 
   // 点击外部关闭
   React.useEffect(() => {
@@ -230,7 +240,9 @@ export function FileSearchBar({
   }, [onFilePreview, sessionId, setAutoReveal, resolveAbsolutePath])
 
 
-  if (!hasAnyRoot) return null
+  if (!hasAnyRoot) {
+    return children ? <div className="mx-2 flex-shrink-0">{children}</div> : null
+  }
 
   return (
     <div ref={containerRef} className="relative mx-2 flex-shrink-0">
@@ -255,6 +267,7 @@ export function FileSearchBar({
           onKeyDown={handleKeyDown}
         />
       </div>
+      {children}
 
       {/* 结果浮层（绝对定位，不影响布局） */}
       {isOpen && results.length > 0 && (
@@ -265,6 +278,7 @@ export function FileSearchBar({
                 key={`${entry.source}:${entry.path}`}
                 entry={entry}
                 isSelected={index === selectedIndex}
+                showSessionBadge={showSessionBadge}
                 onClick={handleClick}
                 onHover={() => setSelectedIndex(index)}
               />
@@ -280,11 +294,13 @@ export function FileSearchBar({
 function ResultItem({
   entry,
   isSelected,
+  showSessionBadge,
   onClick,
   onHover,
 }: {
   entry: FileIndexEntry
   isSelected: boolean
+  showSessionBadge: boolean
   onClick: (entry: FileIndexEntry) => void
   onHover: () => void
 }): React.ReactElement {
@@ -316,7 +332,7 @@ function ResultItem({
           <span className="text-[11px] font-medium truncate max-w-[90px]">
             {entry.name}
           </span>
-          {entry.source === 'session' && (
+          {showSessionBadge && entry.source === 'session' && (
             <span className="flex-shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">会话文件</span>
           )}
           {dirPath && (

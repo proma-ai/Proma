@@ -995,6 +995,11 @@
   z-index: 2;
 }
 
+.file-source-tabbar .app-tab-active::after {
+  left: 12.5%;
+  right: 12.5%;
+}
+
 .main-tabbar .app-tab-inactive:hover {
   background-color: hsl(var(--tab-surface) / 0.42);
 }

@@ -273,18 +273,69 @@ function safeDecode(raw: string): string {
   }
 }
 
+/** 仅在普通文本中转换旧引用，避免改写 inline code、fenced code 和缩进代码块。 */
+function normalizeNamedReferenceDelimiters(markdown: string): string {
+  const normalizeText = (text: string): string => text.replace(
+    /(&(?:session|todo|calendar_event):[A-Za-z0-9-]+)~(\S+)/g,
+    '$1::$2'
+  )
+  const normalizeInlineCodeSafeText = (text: string): string => {
+    let normalized = ''
+    let cursor = 0
+
+    while (cursor < text.length) {
+      const openingIndex = text.indexOf('`', cursor)
+      if (openingIndex === -1) return normalized + normalizeText(text.slice(cursor))
+      const delimiter = text.slice(openingIndex).match(/^`+/)?.[0]
+      if (!delimiter) return normalized + normalizeText(text.slice(cursor))
+      const closingIndex = text.indexOf(delimiter, openingIndex + delimiter.length)
+      if (closingIndex === -1) return normalized + normalizeText(text.slice(cursor))
+
+      normalized += normalizeText(text.slice(cursor, openingIndex))
+      normalized += text.slice(openingIndex, closingIndex + delimiter.length)
+      cursor = closingIndex + delimiter.length
+    }
+
+    return normalized
+  }
+
+  const lines = markdown.split('\n')
+  let inFence: { marker: '`' | '~'; length: number } | null = null
+  return lines.map((line) => {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    const indentedCode = !inFence && /^(?: {4}|\t)/.test(line)
+    const isCode = Boolean(inFence || indentedCode || fenceMatch)
+    const result = isCode ? line : normalizeInlineCodeSafeText(line)
+
+    if (fenceMatch) {
+      const markerText = fenceMatch[1] ?? ''
+      const marker = markerText[0] as '`' | '~'
+      if (!inFence) {
+        inFence = { marker, length: markerText.length }
+      } else if (marker === inFence.marker && markerText.length >= inFence.length) {
+        inFence = null
+      }
+    }
+
+    return result
+  }).join('\n')
+}
+
 function MentionChip({ type, value }: { type: MentionType; value: string }): React.ReactElement {
   const style = MENTION_STYLES[type]
   const Icon = style.icon
   const decoded = safeDecode(value)
+  const isNamedReference = type === 'session' || type === 'todo' || type === 'calendar_event'
+  const [referenceId = '', ...labelParts] = isNamedReference ? decoded.split('::') : [decoded]
+  const label = labelParts.length > 0 ? labelParts.join('::') : undefined
   const display = type === 'file'
     ? (decoded.split('/').pop() || decoded)
     : type === 'session'
-      ? `会话 ${decoded.slice(0, 8)}`
+      ? (label || `会话 ${referenceId.slice(0, 8)}`)
       : type === 'todo'
-        ? `Todo ${decoded.slice(0, 8)}`
+        ? (label || `Todo ${referenceId.slice(0, 8)}`)
         : type === 'calendar_event'
-          ? `日程 ${decoded.slice(0, 8)}`
+          ? (label || `日程 ${referenceId.slice(0, 8)}`)
           : decoded
   return (
     <span
@@ -292,7 +343,7 @@ function MentionChip({ type, value }: { type: MentionType; value: string }): Rea
         'inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline',
         style.className
       )}
-      title={type === 'file' || type === 'session' || type === 'todo' || type === 'calendar_event' ? decoded : undefined}
+      title={type === 'file' || isNamedReference ? (label || referenceId) : undefined}
     >
       <Icon className="size-3 inline shrink-0" />
       {display}
@@ -307,7 +358,7 @@ export function remarkMentions() {
     walkMdastText(tree, (node, index, parent) => {
       const text = node.value
       // 每次调用创建独立正则实例，避免 /g 状态在并发 remark pipeline 间互相干扰
-      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)|&session:(\S+)|&todo:([A-Za-z0-9-]+)|&calendar_event:([A-Za-z0-9-]+)/g
+      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)|&session:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&todo:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&calendar_event:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?/g
       if (!mentionPattern.test(text)) return
       mentionPattern.lastIndex = 0
 
@@ -327,13 +378,15 @@ export function remarkMentions() {
               ? 'mcp'
               : m[4]
                 ? 'session'
-                : m[5]
+                : m[6]
                   ? 'todo'
                   : 'calendar_event'
-        const mValue = m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6] ?? ''
-        // 新版 htmlToMarkdown 已 encodeURIComponent，旧消息是原始路径
-        const alreadyEncoded = /%[0-9A-Fa-f]{2}/.test(mValue)
-        const safeValue = alreadyEncoded ? mValue : encodeURIComponent(mValue)
+        const referenceId = m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[6] ?? m[8] ?? ''
+        const encodedLabel = m[5] ?? m[7] ?? m[9]
+        const rawValue = encodedLabel ? `${referenceId}::${safeDecode(encodedLabel)}` : referenceId
+        // 文件/Skill/MCP 旧消息可能已经编码；带标题的 named reference 始终重新编码整个值。
+        const alreadyEncoded = !encodedLabel && /%[0-9A-Fa-f]{2}/.test(referenceId)
+        const safeValue = alreadyEncoded ? referenceId : encodeURIComponent(rawValue)
         parts.push({
           type: 'link',
           url: `mention://${mType}/${safeValue}`,
@@ -600,6 +653,11 @@ export const MessageResponse = React.memo(
       ),
     }), [basePath, basePaths])
 
+    const renderedMarkdown = (remarkPlugins?.includes(remarkMentions)
+      ? normalizeNamedReferenceDelimiters(children)
+      : children
+    ).replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim()
+
     return (
       <div
         className={cn(
@@ -616,7 +674,7 @@ export const MessageResponse = React.memo(
           urlTransform={mentionUrlTransform}
           components={components}
         >
-          {normalizeLatexDelimiters(children.replace(/<!--PROMA_AUTOMATION:[\s\S]*?-->/g, '').trim())}
+          {normalizeLatexDelimiters(renderedMarkdown)}
         </Markdown>
       </div>
     )

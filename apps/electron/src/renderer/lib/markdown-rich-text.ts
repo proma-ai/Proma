@@ -378,6 +378,10 @@ export function markdownToHtml(markdown: string): string {
   return enhanceMarkdownHtml(markdownIt.render(preprocessMarkdown(markdown)))
 }
 
+function serializeNamedMention(prefix: '&session' | '&todo' | '&calendar_event', id: string, label: string | null): string {
+  return label ? `${prefix}:${id}::${encodeURIComponent(label)}` : `${prefix}:${id}`
+}
+
 /** 将 TipTap 输出的 HTML 转换为 Markdown 格式 */
 export function htmlToMarkdown(
   html: string,
@@ -522,14 +526,15 @@ export function htmlToMarkdown(
         }
         const dataType = el.getAttribute('data-type')
         const dataId = el.getAttribute('data-id') || ''
+        const dataLabel = el.getAttribute('data-label')
         const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
         const referenceType = el.getAttribute('data-mention-reference-type')
         if (dataType === 'mention') {
-          if (referenceType === 'todo') return `&todo:${dataId}`
-          if (referenceType === 'calendar_event') return `&calendar_event:${dataId}`
+          if (referenceType === 'todo') return serializeNamedMention('&todo', dataId, dataLabel)
+          if (referenceType === 'calendar_event') return serializeNamedMention('&calendar_event', dataId, dataLabel)
           if (suggestionChar === '/') return `/skill:${dataId}`
           if (suggestionChar === '#') return `#mcp:${dataId}`
-          if (suggestionChar === '&') return `&session:${dataId}`
+          if (suggestionChar === '&') return serializeNamedMention('&session', dataId, dataLabel)
           return `@file:${dataId}`
         }
         return children

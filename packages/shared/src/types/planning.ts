@@ -103,6 +103,20 @@ export interface CalendarEvent {
   updatedAt: number
 }
 
+/** Todo 列表的可选范围；未传入时保持完整列表的既有行为。 */
+export interface TodoListQuery {
+  status?: TodoStatus
+  dueBefore?: number
+  limit?: number
+}
+
+/** 日程列表的可选时间范围；未传入时保持完整列表的既有行为。 */
+export interface CalendarEventListQuery {
+  from?: number
+  to?: number
+  limit?: number
+}
+
 export interface CreatePlanningReminderInput {
   triggerAt: number
 }

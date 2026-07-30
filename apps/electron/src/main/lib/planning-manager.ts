@@ -9,6 +9,7 @@ import { PLANNING_CONFLICT_ERROR } from '@proma/shared'
 import type {
   ActivePlanningReminder,
   CalendarEvent,
+  CalendarEventListQuery,
   CreateCalendarEventInput,
   CreatePlanningGroupInput,
   CreatePlanningReminderRequest,
@@ -21,6 +22,7 @@ import type {
   PlanningReminderTargetType,
   PlanningTag,
   Todo,
+  TodoListQuery,
   TodoSessionLink,
   UpdateCalendarEventInput,
   UpdatePlanningGroupInput,
@@ -356,8 +358,7 @@ export function deletePlanningTag(id: string): boolean {
   const result = getDatabase().prepare('DELETE FROM tags WHERE id = :id').run({ id }) as { changes?: number }; return (result.changes ?? 0) > 0
 }
 
-export interface TodoQuery { status?: Todo['status']; dueBefore?: number; limit?: number }
-export function listTodos(query: TodoQuery = {}): Todo[] {
+export function listTodos(query: TodoListQuery = {}): Todo[] {
   const where: string[] = []; const params: Record<string, unknown> = {}; const limit = normalizeLimit(query.limit)
   if (query.status) { where.push('status = :status'); params.status = query.status }
   if (query.dueBefore !== undefined) { where.push('due_at IS NOT NULL AND due_at <= :dueBefore'); params.dueBefore = query.dueBefore }
@@ -441,8 +442,7 @@ export function deleteTodo(id: string): boolean {
   })
 }
 
-export interface CalendarEventQuery { from?: number; to?: number; limit?: number }
-export function listCalendarEvents(query: CalendarEventQuery = {}): CalendarEvent[] {
+export function listCalendarEvents(query: CalendarEventListQuery = {}): CalendarEvent[] {
   const where: string[] = []; const params: Record<string, unknown> = {}; const limit = normalizeLimit(query.limit)
   if (query.from !== undefined) { where.push('COALESCE(end_at,start_at)>=:from'); params.from = query.from }
   if (query.to !== undefined) { where.push('start_at<=:to'); params.to = query.to }

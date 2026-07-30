@@ -29,7 +29,13 @@ import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
-import { createAgentCommandSuggestion, type AgentCommandActions } from '@/components/agent/agent-command-suggestion'
+import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
+import {
+  createMcpMentionSuggestion,
+  createPlanningMentionSuggestion,
+  createSessionMentionSuggestion,
+  createSkillMentionSuggestion,
+} from '@/components/agent/mention-suggestions'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
 import {
   VOICE_DICTATION_INSERT_EVENT,
@@ -118,13 +124,13 @@ interface RichTextInputProps {
   autoFocusTrigger?: string | null
   /** 是否支持手动折叠（内容较长时显示折叠按钮） */
   collapsible?: boolean
-  /** 是否启用 / 命令菜单和引用 chip。 */
+  /** 是否启用文件、Skill、MCP、会话和规划引用 chip。 */
   enableMentions?: boolean
-  /** 工作区根路径（启用 / 文件引用功能时需要） */
+  /** 工作区根路径（启用 @ 文件引用功能时需要） */
   workspacePath?: string | null
-  /** 工作区 slug（启用 / Skill 和 MCP 功能时需要） */
+  /** 工作区 slug（启用 / Skill 和 # MCP 功能时需要） */
   workspaceSlug?: string | null
-  /** 当前 Agent 会话 ID（用于在 / 会话引用中排除自身） */
+  /** 当前 Agent 会话 ID（用于 & 会话引用中排除自身） */
   sessionId?: string | null
   /** 附加目录路径列表（工作区级，@ 引用时标记为工作区文件） */
   attachedDirs?: string[]
@@ -136,8 +142,6 @@ interface RichTextInputProps {
   onHtmlChange?: (html: string) => void
   /** 是否使用 Cmd/Ctrl+Enter 发送（而非 Enter） */
   sendWithCmdEnter?: boolean
-  /** / 命令菜单可调用的输入框外部动作。 */
-  commandActions?: AgentCommandActions
   className?: string
 }
 
@@ -169,7 +173,6 @@ export function RichTextInput({
   htmlValue,
   onHtmlChange,
   sendWithCmdEnter = false,
-  commandActions,
 }: RichTextInputProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
@@ -200,24 +203,24 @@ export function RichTextInput({
   // 发送模式引用
   const sendWithCmdEnterRef = useRef(sendWithCmdEnter)
   sendWithCmdEnterRef.current = sendWithCmdEnter
-  // 工作区路径引用（给 / 命令菜单使用）
+  // 工作区路径引用（给 @ 文件引用使用）
   const workspacePathRef = useRef<string | null>(workspacePath ?? null)
   workspacePathRef.current = workspacePath ?? null
-  // 当前会话 ID 引用（给 / 会话引用使用）
+  // 当前会话 ID 引用（给 & 会话和 ~ 规划引用使用）
   const currentSessionIdRef = useRef<string | null>(sessionId ?? null)
   currentSessionIdRef.current = sessionId ?? null
-  // 工作区级附加目录路径引用（给 / 文件引用使用，标记为 workspace）
+  // 工作区级附加目录路径引用（给 @ 文件引用使用，标记为 workspace）
   const attachedDirsRef = useRef<string[]>(attachedDirs)
   attachedDirsRef.current = attachedDirs
-  // 会话级附加目录路径引用（给 / 文件引用使用，标记为 session）
+  // 会话级附加目录路径引用（给 @ 文件引用使用，标记为 session）
   const sessionAttachedDirsRef = useRef<string[]>(sessionAttachedDirs)
   sessionAttachedDirsRef.current = sessionAttachedDirs
-  // 工作区 slug 引用（给统一命令菜单和 MCP Suggestion 使用）
+  // 工作区 slug 引用（给 / Skill 和 # MCP suggestion 使用）
   const workspaceSlugRef = useRef<string | null>(workspaceSlug ?? null)
   workspaceSlugRef.current = workspaceSlug ?? null
-  // / 菜单中的回调必须始终指向当前 Agent 会话，避免切换会话后执行旧闭包。
-  const commandActionsRef = useRef<AgentCommandActions>(commandActions ?? {})
-  commandActionsRef.current = commandActions ?? {}
+  // Mention 活跃状态供各 suggestion 的异步生命周期共享。
+  const mentionActiveRef = useRef(false)
+  const mentionItemCountRef = useRef(0)
 
   // 是否启用 Mention 功能：Agent 首帧可能尚未拿到路径/slug/id，但扩展必须先注册。
   const hasMentionSupport = enableMentions ?? (workspacePath !== undefined || workspaceSlug !== undefined)
@@ -237,16 +240,33 @@ export function RichTextInput({
     ))
   }, [isMac])
 
-  // / 统一命令菜单配置。它复用 TipTap Suggestion 生命周期，确保 Esc、焦点和异步清理与原有 mention 一致。
-  const commandSuggestion = useMemo(
-    () => createAgentCommandSuggestion(
+  const fileMentionSuggestion = useMemo(
+    () => createFileMentionSuggestion(
       workspacePathRef,
-      currentSessionIdRef,
-      workspaceSlugRef,
+      mentionActiveRef,
       attachedDirsRef,
+      mentionItemCountRef,
       sessionAttachedDirsRef,
-      commandActionsRef,
     ),
+    [],
+  )
+  const skillMentionSuggestion = useMemo(
+    () => createSkillMentionSuggestion(workspaceSlugRef, mentionActiveRef, mentionItemCountRef),
+    [],
+  )
+  const mcpMentionSuggestion = useMemo(
+    () => createMcpMentionSuggestion(workspaceSlugRef, mentionActiveRef, mentionItemCountRef),
+    [],
+  )
+  const sessionMentionSuggestion = useMemo(
+    () => createSessionMentionSuggestion(currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
+    [],
+  )
+  const planningMentionSuggestions = useMemo(
+    () => [
+      createPlanningMentionSuggestion('~', currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
+      createPlanningMentionSuggestion('～', currentSessionIdRef, mentionActiveRef, mentionItemCountRef),
+    ],
     [],
   )
 
@@ -293,8 +313,8 @@ export function RichTextInput({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
-      // Mention 扩展：启用时注册，路径/slug 后续通过 ref 异步更新
-      // Mention 节点只由 / 统一命令菜单插入；历史草稿中的旧 token 继续渲染。
+      // Mention 扩展：启用时注册，路径/slug 后续通过 ref 异步更新。
+      // 旧统一命令菜单生成的节点仍按自身属性渲染，确保历史草稿兼容。
       // 纯文本模式下仍然保留，确保引用功能可用
       ...(hasMentionSupport ? [
         Mention.extend({
@@ -320,7 +340,7 @@ export function RichTextInput({
                     : {}
                 ),
               },
-              // / 命令菜单在一个 Slash suggestion 内插入多种引用，需按节点自身类型渲染 Chip。
+              // 兼容此前统一命令菜单生成的历史 draft；新节点不再写入此属性。
               commandMenuMention: {
                 default: false,
                 parseHTML: (el: HTMLElement) => el.getAttribute('data-command-menu-mention') === 'true',
@@ -365,7 +385,13 @@ export function RichTextInput({
               `${char === '@' ? '@' : ''}${label}`,
             ]
           },
-          suggestions: [commandSuggestion],
+          suggestions: [
+            fileMentionSuggestion,
+            skillMentionSuggestion,
+            mcpMentionSuggestion,
+            sessionMentionSuggestion,
+            ...planningMentionSuggestions,
+          ],
         }),
       ] : []),
     ],
@@ -770,6 +796,9 @@ export function RichTextInput({
           color: hsl(var(--muted-foreground));
           pointer-events: none;
           height: 0;
+          max-width: 100%;
+          white-space: normal;
+          overflow-wrap: anywhere;
           opacity: 0.5;
           font-style: ${suggestionActive ? 'italic' : 'normal'};
         }
