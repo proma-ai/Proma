@@ -572,11 +572,10 @@ function pushState(): void {
   const planning = buildPlanningSnapshot(now)
   const planningKeys = getImminentPlanningKeys(now)
   const state = buildState(now)
-  // Future items are still available in the planning view, but only imminent
-  // ones should displace the idle Plan + recent-Agent dashboard.
-  state.idleDashboard = state.sessions.length === 0
-    && state.recentSessions.length > 0
-    && planningKeys.length === 0
+  // The idle dashboard is a true home surface: it remains visible even for a
+  // new user without any recorded Agent session. Future items do not displace
+  // it; only live Agent work or imminent plans take priority.
+  state.idleDashboard = state.sessions.length === 0 && planningKeys.length === 0
   const enabled = serviceDeps?.enabled?.() !== false
   state.visible = enabled && isIslandVisible(state, planningKeys)
   state.presentation = state.visible ? (isExpanded() ? 'expanded' : 'compact') : 'hidden'
