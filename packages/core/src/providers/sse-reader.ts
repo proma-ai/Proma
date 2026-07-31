@@ -374,6 +374,9 @@ export async function fetchTitle(
   adapter: ProviderAdapter,
   fetchFn: typeof globalThis.fetch = fetch,
 ): Promise<string | null> {
+  // 标题请求必须有时限：OpenCode Go 等推理模型响应慢，若无限挂起，
+  // 会话会一直停在默认标题（fallback 也不会执行）。
+  const TITLE_REQUEST_TIMEOUT_MS = 30_000
   try {
     console.log('[fetchTitle] 发送请求:', {
       url: request.url,
@@ -385,6 +388,7 @@ export async function fetchTitle(
       method: 'POST',
       headers: request.headers,
       body: request.body,
+      signal: AbortSignal.timeout(TITLE_REQUEST_TIMEOUT_MS),
     })
 
     console.log('[fetchTitle] 收到响应:', {

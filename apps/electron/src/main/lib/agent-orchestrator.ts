@@ -616,44 +616,45 @@ export class AgentOrchestrator {
     if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
-    try {
-      const channels = listChannels()
-      const channel = channels.find((c) => c.id === channelId)
-      if (!channel) {
-        console.warn('[Agent 标题生成] 渠道不存在:', channelId)
-        return null
-      }
+    // 渠道信息在异常路径也要用于判断是否应用 OpenCode Go 本地兜底，因此提前解析。
+    const channels = listChannels()
+    const channel = channels.find((c) => c.id === channelId)
+    if (!channel) {
+      console.warn('[Agent 标题生成] 渠道不存在:', channelId)
+      return null
+    }
 
-      if (channel.provider === 'openai-codex') {
-        const fallbackTitle = createFallbackTitle(userMessage)
-        try {
-          const [credentials, proxyUrl] = await Promise.all([
-            resolveCodexOAuthCredentials(channelId),
-            getEffectiveProxyUrl(),
-          ])
-          if (signal?.aborted) return null
-          const generatedTitle = await generateCodexTitle({
-            modelId,
-            prompt: TITLE_PROMPT + userMessage,
-            credentials,
-            proxyUrl,
-            signal,
-            onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
-          })
-          if (signal?.aborted) return null
-          const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
-          if (title) {
-            console.log(`[Agent 标题生成] ChatGPT OAuth 语义标题生成成功: "${title}"`)
-            return title
-          }
-          console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
-        } catch (error) {
-          if (signal?.aborted) return null
-          console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
+    if (channel.provider === 'openai-codex') {
+      const fallbackTitle = createFallbackTitle(userMessage)
+      try {
+        const [credentials, proxyUrl] = await Promise.all([
+          resolveCodexOAuthCredentials(channelId),
+          getEffectiveProxyUrl(),
+        ])
+        if (signal?.aborted) return null
+        const generatedTitle = await generateCodexTitle({
+          modelId,
+          prompt: TITLE_PROMPT + userMessage,
+          credentials,
+          proxyUrl,
+          signal,
+          onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
+        })
+        if (signal?.aborted) return null
+        const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
+        if (title) {
+          console.log(`[Agent 标题生成] ChatGPT OAuth 语义标题生成成功: "${title}"`)
+          return title
         }
-        return fallbackTitle
+        console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
+      } catch (error) {
+        if (signal?.aborted) return null
+        console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
       }
+      return fallbackTitle
+    }
 
+    try {
       const apiKey = await resolveChannelRuntimeApiKey(channelId)
       const providerAdapter = getAdapter(channel.provider)
       const request = providerAdapter.buildTitleRequest({
@@ -669,7 +670,8 @@ export class AgentOrchestrator {
       const result = title ? sanitizeGeneratedTitle(title) : null
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
-        // OpenCode Go 的服务端偶发返回空标题时，仍要完成重命名，避免会话长期停在默认标题。
+        // OpenCode Go 的推理模型可能把输出预算全花在推理上返回空正文，或
+        // 内容块为数组；任何取不到可用标题的情况都回退到首行兜底，保证会话一定被重命名。
         return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
       }
 
@@ -677,7 +679,8 @@ export class AgentOrchestrator {
       return result
     } catch (error) {
       console.warn('[Agent 标题生成] 生成失败:', error)
-      return null
+      // OpenCode Go 的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
   }
 

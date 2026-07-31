@@ -611,7 +611,8 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     apiKey = await resolveChannelRuntimeApiKey(channelId)
   } catch {
     console.warn('[标题生成] 解密 API Key 失败')
-    return null
+    // OpenCode Go 无法解密也仍要完成重命名，避免对话长期停在默认标题。
+    return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
   }
 
   try {
@@ -637,6 +638,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     return result
   } catch (error) {
     console.warn('[标题生成] 请求失败:', error)
-    return null
+    // OpenCode Go 的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
+    return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
   }
 }
