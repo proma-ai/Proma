@@ -814,19 +814,6 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     }
   }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
 
-  // 始终编辑模式：预览加载完成后自动进入编辑
-  const alwaysEditTextPreview = useAtomValue(alwaysEditTextPreviewAtom)
-  const autoEditFiredRef = React.useRef(false)
-  React.useEffect(() => {
-    autoEditFiredRef.current = false
-  }, [filePath, sessionId])
-  React.useEffect(() => {
-    if (!alwaysEditTextPreview || loading || !isEditableText || markdownEditing) return
-    if (autoEditFiredRef.current) return
-    autoEditFiredRef.current = true
-    startMarkdownEdit()
-  }, [alwaysEditTextPreview, loading, isEditableText, markdownEditing, startMarkdownEdit])
-
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;
   // cached mount → restore; scroll → save.
@@ -929,6 +916,19 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setMarkdownSourceMode(false)
     setMarkdownEditing(true)
   }, [isEditableText, newContent])
+
+  // 始终编辑模式：预览加载完成后自动进入编辑
+  const alwaysEditTextPreview = useAtomValue(alwaysEditTextPreviewAtom)
+  const autoEditFiredRef = React.useRef(false)
+  React.useEffect(() => {
+    autoEditFiredRef.current = false
+  }, [filePath, sessionId])
+  React.useEffect(() => {
+    if (!alwaysEditTextPreview || loading || !isEditableText || markdownEditing) return
+    if (autoEditFiredRef.current) return
+    autoEditFiredRef.current = true
+    startMarkdownEdit()
+  }, [alwaysEditTextPreview, loading, isEditableText, markdownEditing, startMarkdownEdit])
 
   // ref 形式的 persist：避免 callback / effect 因 refreshVersion 频繁变化而重建
   const persistRef = React.useRef<(draft: string, fp: string, fa: typeof fileAccess) => Promise<boolean>>(async () => false)
