@@ -616,9 +616,15 @@ export class AgentOrchestrator {
     if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
-    // 渠道信息在异常路径也要用于判断是否应用 OpenCode Go 本地兜底，因此提前解析。
-    const channels = listChannels()
-    const channel = channels.find((c) => c.id === channelId)
+    // 渠道信息在异常路径也要用于判断是否应用 OpenCode Go 本地兜底，因此提前解析；
+    // 同时保留 listChannels 自身的错误边界：解析失败时按“无渠道”处理并返回 null。
+    let channel: import('@proma/shared').Channel | undefined
+    try {
+      channel = listChannels().find((c) => c.id === channelId)
+    } catch (error) {
+      console.warn('[Agent 标题生成] 渠道解析失败:', error)
+      return null
+    }
     if (!channel) {
       console.warn('[Agent 标题生成] 渠道不存在:', channelId)
       return null
