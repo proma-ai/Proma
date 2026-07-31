@@ -16,6 +16,7 @@ import type {
   VoiceDictationAudioChunkInput,
   VoiceDictationCommitInput,
   VoiceDictationCommitResult,
+  VoiceDictationPreviewInput,
   VoiceDictationResizeInput,
   VoiceDictationSettings,
   VoiceDictationSettingsUpdate,
@@ -4425,6 +4426,28 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.on(VOICE_DICTATION_IPC_CHANNELS.REPORT_VOLUME, (event, volume: unknown) => {
+    void Promise.all([
+      import('./index'),
+      import('./lib/voice-dictation-window'),
+    ]).then(([{ getMainWindow }, { updateVoiceDictationIndicatorVolume }]) => {
+      const mainWindow = getMainWindow()
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return
+      updateVoiceDictationIndicatorVolume(typeof volume === 'number' ? volume : 0)
+    }).catch(console.error)
+  })
+
+  ipcMain.on(VOICE_DICTATION_IPC_CHANNELS.REPORT_TRANSCRIPT, (event, text: unknown) => {
+    void Promise.all([
+      import('./index'),
+      import('./lib/voice-dictation-window'),
+    ]).then(([{ getMainWindow }, { updateVoiceDictationIndicatorTranscript }]) => {
+      const mainWindow = getMainWindow()
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return
+      updateVoiceDictationIndicatorTranscript(typeof text === 'string' ? text.slice(-4_000) : '')
+    }).catch(console.error)
+  })
+
   ipcMain.handle(
     VOICE_DICTATION_IPC_CHANNELS.STOP,
     async (_, input: VoiceDictationStopInput): Promise<void> => {
@@ -4437,7 +4460,18 @@ export function registerIpcHandlers(): void {
     VOICE_DICTATION_IPC_CHANNELS.CANCEL,
     async (_, input: VoiceDictationStopInput): Promise<void> => {
       const { cancelDoubaoAsrSession } = await import('./lib/doubao-asr-service')
+      const { clearVoiceDictationPreview } = await import('./lib/text-output-service')
+      clearVoiceDictationPreview(input.previewSessionId ?? input.sessionId)
       cancelDoubaoAsrSession(input.sessionId)
+    }
+  )
+
+  ipcMain.handle(
+    VOICE_DICTATION_IPC_CHANNELS.PREVIEW,
+    async (_, input: VoiceDictationPreviewInput): Promise<void> => {
+      const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
+      const { previewVoiceDictationText } = await import('./lib/text-output-service')
+      previewVoiceDictationText(input, getVoiceDictationSettings())
     }
   )
 
@@ -4446,7 +4480,7 @@ export function registerIpcHandlers(): void {
     async (_, input: VoiceDictationCommitInput): Promise<VoiceDictationCommitResult> => {
       const { getVoiceDictationSettings } = await import('./lib/voice-dictation-settings-service')
       const { commitVoiceDictationText } = await import('./lib/text-output-service')
-      return commitVoiceDictationText(input.text, getVoiceDictationSettings())
+      return commitVoiceDictationText(input, getVoiceDictationSettings())
     }
   )
 

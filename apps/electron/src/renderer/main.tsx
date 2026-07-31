@@ -80,6 +80,7 @@ import { diffCapabilities } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
+import { VoiceDictationApp } from './components/voice-dictation/VoiceDictationApp'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
@@ -90,11 +91,11 @@ import 'katex/dist/katex.min.css'
 
 // ===== 窗口类型检测 =====
 const isQuickTaskWindow = new URLSearchParams(window.location.search).get('window') === 'quick-task'
-const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
+const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation-indicator'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
 const isAgentIslandWindow = new URLSearchParams(window.location.search).get('window') === 'agent-island'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isAgentIslandWindow
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isAgentIslandWindow
 
 // 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
 if (isMainWindow || isPlanningWindow) {
@@ -1070,13 +1071,12 @@ if (isQuickTaskWindow) {
       </React.StrictMode>
     )
   })
-} else if (isVoiceDictationWindow) {
-  import('./components/voice-dictation/VoiceDictationApp').then(({ VoiceDictationApp }) => {
+} else if (isVoiceDictationIndicatorWindow) {
+  import('./components/voice-dictation/VoiceDictationIndicatorApp').then(({ VoiceDictationIndicatorApp }) => {
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <ThemeInitializer />
-        <VoiceDictationApp />
-        <Toaster position="bottom-right" />
+        <VoiceDictationIndicatorApp />
       </React.StrictMode>
     )
   })
@@ -1134,6 +1134,7 @@ if (isQuickTaskWindow) {
       <DingTalkInitializer />
       <TabStatePersistenceInitializer />
       <ScratchPadPersistence />
+      <VoiceDictationApp embedded />
       <GlobalShortcuts />
       <TabSwitcher />
       <App />
