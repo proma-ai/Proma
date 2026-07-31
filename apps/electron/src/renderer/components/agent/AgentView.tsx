@@ -119,7 +119,7 @@ import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
 import { inferAgentSdkContextWindow, inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
-import { getFilePanelDragData } from '@/lib/file-panel-drag'
+import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import {
@@ -2693,6 +2693,17 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
     window.addEventListener('proma:focus-input', handler)
     return () => window.removeEventListener('proma:focus-input', handler)
+  }, [])
+
+  // 监听文件面板三点菜单「引用到 Agent」事件：在输入框插入 @file 引用
+  React.useEffect(() => {
+    const handler = (event: Event): void => {
+      const items = (event as CustomEvent<FilePanelDragItem[]>).detail
+      if (!items || items.length === 0) return
+      richTextInputRef.current?.insertFileMentions(items)
+    }
+    window.addEventListener(INSERT_FILE_MENTION_EVENT, handler)
+    return () => window.removeEventListener(INSERT_FILE_MENTION_EVENT, handler)
   }, [])
 
   const allAskUserRequests = useAtomValue(allPendingAskUserRequestsAtom)

@@ -56,7 +56,7 @@ import {
   STICKY_ROW_BASE_CLASS,
   canBeSticky,
 } from './tree-row-layout'
-import { setFilePanelDragData } from '@/lib/file-panel-drag'
+import { setFilePanelDragData, dispatchInsertFileMention } from '@/lib/file-panel-drag'
 
 /** 计算目标路径相对 rootPath 的祖先目录集合（不含 rootPath 自身、含目标的所有上级） */
 export function computeRevealAncestors(rootPath: string, targetPath: string): Set<string> {
@@ -871,6 +871,20 @@ function FileTreeItem({
               </button>
             </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
+                {!entry.isDirectory && menuSelectedCount === 1 && (
+                  <DropdownMenuItem
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                    onSelect={() => dispatchInsertFileMention([{
+                      path: entry.path,
+                      name: entry.name,
+                      isDirectory: entry.isDirectory,
+                      scope: entry.scope,
+                    }])}
+                  >
+                    <MessageSquarePlus />
+                    引用到 Agent
+                  </DropdownMenuItem>
+                )}
                 {onAddToChat && !entry.isDirectory && menuSelectedCount === 1 && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"

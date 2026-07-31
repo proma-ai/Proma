@@ -10,6 +10,12 @@
 
 export const FILE_PANEL_DRAG_MIME = 'application/x-proma-file-panel'
 
+/**
+ * 三点菜单「引用到 Agent」触发的事件名。
+ * detail 携带 FilePanelDragItem[]；AgentView 监听后调用 RichTextInput.insertFileMentions。
+ */
+export const INSERT_FILE_MENTION_EVENT = 'proma:insert-file-mention'
+
 export interface FilePanelDragItem {
   /** 文件绝对路径 */
   path: string
@@ -19,6 +25,10 @@ export interface FilePanelDragItem {
   isDirectory: boolean
   /** 来源范围：项目文件 / 会话文件 */
   scope: 'project' | 'session'
+}
+
+export function dispatchInsertFileMention(items: FilePanelDragItem[]): void {
+  window.dispatchEvent(new CustomEvent(INSERT_FILE_MENTION_EVENT, { detail: items }))
 }
 
 export function setFilePanelDragData(dataTransfer: DataTransfer, items: FilePanelDragItem[]): void {
