@@ -871,7 +871,7 @@ function AttachedDirTree({ dirPath, onDetach, selectedPaths, onSelect, refreshVe
   const [children, setChildren] = React.useState<FileEntry[]>([])
   const [loaded, setLoaded] = React.useState(false)
 
-  const dirName = dirPath.split('/').filter(Boolean).pop() || dirPath
+  const dirName = dirPath.split(/[\\/]/).filter(Boolean).pop() || dirPath
 
   // 计算从 dirPath 到 revealTarget 之间的祖先目录集合（用于子项决定是否自动展开）
   const revealAncestors = React.useMemo(

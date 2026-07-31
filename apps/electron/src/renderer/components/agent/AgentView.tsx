@@ -1845,8 +1845,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [addClipboardTextDraft])
 
-  /** 将右侧文件面板拖入的目录附加到会话（保持 Agent 可访问） */
-  const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<void> => {
+  /** 将右侧文件面板拖入的目录附加到会话（保持 Agent 可访问）。返回是否成功。 */
+  const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<boolean> => {
     try {
       const updated = await window.electronAPI.attachDirectory({
         sessionId,
@@ -1857,8 +1857,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         map.set(sessionId, updated)
         return map
       })
+      return true
     } catch (error) {
       console.error('[AgentView] 面板拖拽附加目录失败:', error)
+      return false
     }
   }, [sessionId, setAttachedDirsMap])
 
@@ -1881,13 +1883,19 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setIsDragOver(false)
 
     // 优先识别右侧文件面板的自定义拖拽载荷（会话文件 / 项目文件引用）
-    // 文件与文件夹统一在输入框插入 @file 引用；文件夹同时附加到会话（Agent 可访问）
+    // 文件直接插入引用；文件夹先附加到会话（Agent 可访问），附加成功后才插入引用，
+    // 避免失败时留下 Agent 无法访问的无效引用。
     const panelItems = getFilePanelDragData(e.dataTransfer)
     if (panelItems && panelItems.length > 0) {
-      richTextInputRef.current?.insertFileMentions(panelItems)
-      for (const item of panelItems) {
-        if (item.isDirectory) {
-          await addPanelDirectory(item.path)
+      const files = panelItems.filter((item) => !item.isDirectory)
+      const dirs = panelItems.filter((item) => item.isDirectory)
+      if (files.length > 0) {
+        richTextInputRef.current?.insertFileMentions(files)
+      }
+      for (const dir of dirs) {
+        const ok = await addPanelDirectory(dir.path)
+        if (ok) {
+          richTextInputRef.current?.insertFileMentions([dir])
         }
       }
       return
@@ -1926,7 +1934,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               map.set(sessionId, updated)
               return map
             })
-            const dirName = dirPath.split('/').pop() || dirPath
+            const dirName = dirPath.split(/[\\/]/).pop() || dirPath
             // 在输入框插入文件夹引用 chip（Agent 通过附加目录可访问）
             richTextInputRef.current?.insertFileMentions([{
               path: dirPath,

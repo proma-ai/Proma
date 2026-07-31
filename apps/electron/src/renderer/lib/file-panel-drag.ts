@@ -42,9 +42,10 @@ export function getFilePanelDragData(dataTransfer: DataTransfer): FilePanelDragI
   const raw = dataTransfer.getData(FILE_PANEL_DRAG_MIME)
   if (!raw) return null
   try {
-    const parsed = JSON.parse(raw) as FilePanelDragItem[]
+    const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed) || parsed.length === 0) return null
-    return parsed.filter((item) => item && typeof item.path === 'string')
+    const items = parsed.filter(isFilePanelDragItem)
+    return items.length > 0 ? items : null
   } catch {
     return null
   }
@@ -57,4 +58,15 @@ export function getMediaTypeFromFilename(filename: string): string {
   if (!imageExts.has(ext)) return 'application/octet-stream'
   const mimeExt = ext === 'jpg' ? 'jpeg' : ext === 'svg' ? 'svg+xml' : ext
   return `image/${mimeExt}`
+}
+
+function isFilePanelDragItem(item: unknown): item is FilePanelDragItem {
+  if (!item || typeof item !== 'object') return false
+  const candidate = item as Partial<FilePanelDragItem>
+  return (
+    typeof candidate.path === 'string' && candidate.path.length > 0
+    && typeof candidate.name === 'string' && candidate.name.length > 0
+    && typeof candidate.isDirectory === 'boolean'
+    && (candidate.scope === 'project' || candidate.scope === 'session')
+  )
 }
