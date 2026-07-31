@@ -119,6 +119,7 @@ import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
 import { inferAgentSdkContextWindow, inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
+import { getFilePanelDragData, getMediaTypeFromFilename } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import {
@@ -1842,6 +1843,44 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [addClipboardTextDraft])
 
+  /** 将右侧文件面板拖入的文件添加为引用（sourcePath 直接引用原路径，等同于「添加到聊天」） */
+  const addPanelFileReferences = React.useCallback((items: Array<{ path: string; name: string }>): void => {
+    const usedNames: string[] = pendingFilesRef.current.map((f) => f.filename)
+    for (const item of items) {
+      if (pendingFilesRef.current.some((f) => f.sourcePath === item.path)) continue
+      const uniqueFilename = makeUniqueFilename(item.name, usedNames)
+      usedNames.push(uniqueFilename)
+
+      const pending: AgentPendingFile = {
+        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        filename: uniqueFilename,
+        mediaType: getMediaTypeFromFilename(item.name),
+        size: 0,
+        sourcePath: item.path,
+      }
+      setPendingFiles((prev) => [...prev, pending])
+    }
+  }, [makeUniqueFilename, setPendingFiles])
+
+  /** 将右侧文件面板拖入的目录附加到会话 */
+  const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<void> => {
+    try {
+      const updated = await window.electronAPI.attachDirectory({
+        sessionId,
+        directoryPath: dirPath,
+      })
+      setAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        map.set(sessionId, updated)
+        return map
+      })
+      const dirName = dirPath.split(/[\\/]/).pop() || dirPath
+      toast.success(`已附加目录: ${dirName}`)
+    } catch (error) {
+      console.error('[AgentView] 面板拖拽附加目录失败:', error)
+    }
+  }, [sessionId, setAttachedDirsMap])
+
   /** 拖放处理 */
   const handleDragOver = React.useCallback((e: React.DragEvent): void => {
     e.preventDefault()
@@ -1859,6 +1898,20 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
+
+    // 优先识别右侧文件面板的自定义拖拽载荷（会话文件 / 项目文件引用）
+    const panelItems = getFilePanelDragData(e.dataTransfer)
+    if (panelItems && panelItems.length > 0) {
+      const files = panelItems.filter((item) => !item.isDirectory)
+      const dirs = panelItems.filter((item) => item.isDirectory)
+      if (files.length > 0) {
+        addPanelFileReferences(files)
+      }
+      for (const dir of dirs) {
+        await addPanelDirectory(dir.path)
+      }
+      return
+    }
 
     const droppedFiles = Array.from(e.dataTransfer.files)
     if (droppedFiles.length === 0) return
@@ -1918,7 +1971,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, setAttachedDirsMap])
+  }, [sessionId, addFilesAsAttachments, addPanelFileReferences, addPanelDirectory, setAttachedDirsMap])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {

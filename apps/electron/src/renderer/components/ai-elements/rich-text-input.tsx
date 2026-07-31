@@ -30,6 +30,7 @@ import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
+import { getFilePanelDragData } from '@/lib/file-panel-drag'
 import {
   createMcpMentionSuggestion,
   createPlanningMentionSuggestion,
@@ -398,6 +399,15 @@ export function RichTextInput({
     content: value || '',
     editable: !disabled,
     editorProps: {
+      // 右侧文件面板拖拽载荷（自定义 MIME）交给外层容器 onDrop 处理，
+      // 阻止 ProseMirror 把 text/plain 路径文本当作普通文本插入。
+      handleDrop: (_view, event) => {
+        if (event.dataTransfer && getFilePanelDragData(event.dataTransfer)) {
+          event.preventDefault()
+          return true
+        }
+        return false
+      },
       attributes: {
         class: cn(
           'prose dark:prose-invert max-w-none focus:outline-none',
