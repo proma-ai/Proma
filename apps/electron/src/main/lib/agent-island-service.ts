@@ -34,6 +34,9 @@ import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from '
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
+import { getAuthToken } from './cloud-auth-service'
+import { getBilling } from './cloud-billing-service'
+import { buildPromaOfficialQuotaSnapshot } from './agent-island-quota'
 
 /** 会话快照保留的最大活动行数 */
 const MAX_ACTIVITY_LINES = 6
@@ -579,8 +582,9 @@ function pushState(): void {
   const enabled = serviceDeps?.enabled?.() !== false
   state.visible = enabled && isIslandVisible(state, planningKeys)
   state.presentation = state.visible ? (isExpanded() ? 'expanded' : 'compact') : 'hidden'
-  // Planning 独立 revision 解决“同一毫秒内 Todo 变更而 Agent state.updatedAt 恰好相同”的漏推边界。
-  const json = JSON.stringify({ state, planning, planningRevision, dismissedVisibilityKey })
+  // Planning 与额度投影都不改变 Agent state.updatedAt；将它们纳入去重键，
+  // 才能让异步刷新的 Plan / Proma 官方额度实际推送到原生灵动岛。
+  const json = JSON.stringify({ state, planning, planningRevision, planQuotas, dismissedVisibilityKey })
   // 状态无变化时跳过，避免无谓 IPC 与原生 helper 写入。
   if (json === lastStateJson) return
   lastStateJson = json
@@ -612,11 +616,21 @@ function pushPlanningStateImmediately(): void {
   pushState()
 }
 
+async function getPromaOfficialQuota(): Promise<AgentIslandPlanQuotaSnapshot | null> {
+  // 未登录时不请求 Cloud API，也不在岛上伪造“0 积分”的官方渠道条目。
+  if (!getAuthToken()) return null
+  const result = await getBilling()
+  return result.success && result.data ? buildPromaOfficialQuotaSnapshot(result.data) : null
+}
+
 async function refreshPlanQuotas(): Promise<void> {
   const supportedChannels = listChannels().filter((channel) => channel.enabled && PLAN_QUOTA_PROVIDERS.has(channel.provider))
   try {
-    const results = await Promise.all(supportedChannels.map(async (channel) => ({ channel, quota: await getChannelPlanQuota(channel.id) })))
-    const next = results.flatMap(({ channel, quota }) => {
+    const [results, promaOfficialQuota] = await Promise.all([
+      Promise.all(supportedChannels.map(async (channel) => ({ channel, quota: await getChannelPlanQuota(channel.id) }))),
+      getPromaOfficialQuota(),
+    ])
+    const channelQuotas = results.flatMap(({ channel, quota }) => {
       if (!quota.supported || quota.windows.length === 0) return []
       return [{
         channelName: channel.name,
@@ -628,6 +642,8 @@ async function refreshPlanQuotas(): Promise<void> {
         })),
       }]
     })
+    // 官方额度置顶，随后保持第三方 Plan 的既有渠道顺序。
+    const next = promaOfficialQuota ? [promaOfficialQuota, ...channelQuotas] : channelQuotas
     if (JSON.stringify(next) !== JSON.stringify(planQuotas)) {
       planQuotas = next
       schedulePush()
