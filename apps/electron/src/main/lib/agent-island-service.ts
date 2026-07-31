@@ -489,7 +489,8 @@ function buildPlanningSnapshot(now: number): AgentIslandPlanningSnapshot {
     .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
   const events = listCalendarEvents({ from: dayStart })
     // Keep an event visible while it is in progress, not only before its start.
-    .filter((event) => (event.endAt ?? event.startAt) >= now)
+    // All-day items without an explicit end remain active through their day.
+    .filter((event) => (event.allDay ? dayEnd : (event.endAt ?? event.startAt)) >= now)
     .sort((a, b) => a.startAt - b.startAt)
 
   return {
