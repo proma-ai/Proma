@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, AGENT_ISLAND_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS, SCRATCH_PAD_IPC_CHANNELS, APP_ICON_IPC_CHANNELS, DOCK_BADGE_IPC_CHANNELS, STORAGE_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -133,6 +133,7 @@ import type {
   CreatePlanningGroupInput,
   UpdatePlanningGroupInput,
   SnoozePlanningReminderInput,
+  AgentIslandState,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -1143,6 +1144,22 @@ export interface ElectronAPI {
   onPlanningRemindersDue: (callback: (reminders: ActivePlanningReminder[]) => void) => () => void
   onPlanningChanged: (callback: (change: PlanningChange) => void) => () => void
   onPlanningAgentOperation: (callback: (operation: PlanningAgentOperation) => void) => () => void
+
+  /** Agent 灵动岛桥接（主进程状态机 → 灵动岛窗口） */
+  agentIsland: {
+    /** 订阅灵动岛全量状态 */
+    onState: (callback: (state: AgentIslandState) => void) => () => void
+    /** 外部触发展开/收起切换 */
+    onToggleExpanded: (callback: () => void) => () => void
+    /** 按内容调整窗口尺寸（pill ↔ 展开卡） */
+    resize: (width: number, height: number) => Promise<void>
+    /** 拖拽移动窗口位置 */
+    move: (x: number, y: number) => Promise<void>
+    /** 打开/聚焦主窗口 */
+    openMainWindow: () => Promise<void>
+    /** 打开指定 Agent 会话（聚焦主窗口） */
+    openSession: (sessionId: string) => Promise<void>
+  }
 }
 
 interface MigrationExportResult {
@@ -2583,6 +2600,28 @@ const electronAPI: ElectronAPI = {
     const listener = (_: Electron.IpcRendererEvent, operation: PlanningAgentOperation): void => callback(operation)
     ipcRenderer.on(PLANNING_IPC_CHANNELS.AGENT_OPERATION, listener)
     return () => { ipcRenderer.removeListener(PLANNING_IPC_CHANNELS.AGENT_OPERATION, listener) }
+  },
+
+  // ===== Agent 灵动岛 =====
+  agentIsland: {
+    onState: (callback: (state: AgentIslandState) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, state: AgentIslandState): void => callback(state)
+      ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.STATE, listener)
+      return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.STATE, listener) }
+    },
+    onToggleExpanded: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener)
+      return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener) }
+    },
+    resize: (width: number, height: number) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.RESIZE, { width, height }),
+    move: (x: number, y: number) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MOVE, { x, y }),
+    openMainWindow: () =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW),
+    openSession: (sessionId: string) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, sessionId),
   },
 }
 

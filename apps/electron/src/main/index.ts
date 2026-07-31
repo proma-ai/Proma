@@ -113,6 +113,8 @@ import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
 import { destroyPlanningWindow } from './lib/planning-window'
+import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
+import { initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -560,6 +562,21 @@ async function bootstrap(): Promise<void> {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
+  // Agent 灵动岛：主进程状态机 + 常驻顶部小窗（预创建并显示）
+  safeRun('initAgentIslandService', () => {
+    initAgentIslandService({
+      showAndFocusMainWindow,
+      openAgentSession: (sessionId, title) => {
+        sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
+      },
+    })
+  })
+  safeRun('createAgentIslandWindow', () => {
+    createAgentIslandWindow()
+    showAgentIslandWindow()
+    publishAgentIslandNow()
+  })
+
   // 飞书实时同步开启时，默认阻止系统自动休眠，保证远程群内继续可用。
   safeRun('syncFeishuSyncSleepBlocker', () => syncFeishuSyncSleepBlocker(getSettings()))
 
@@ -687,6 +704,9 @@ app.on('before-quit', () => {
   destroyQuickTaskWindow()
   destroyPlanningWindow()
   destroyVoiceDictationWindow()
+  // 销毁灵动岛服务与窗口
+  disposeAgentIslandService()
+  destroyAgentIslandWindow()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})
   // Clean up system tray before quitting

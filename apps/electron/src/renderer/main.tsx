@@ -93,7 +93,8 @@ const isQuickTaskWindow = new URLSearchParams(window.location.search).get('windo
 const isVoiceDictationWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow && !isPlanningWindow
+const isAgentIslandWindow = new URLSearchParams(window.location.search).get('window') === 'agent-island'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isAgentIslandWindow
 
 // 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
 if (isMainWindow || isPlanningWindow) {
@@ -1101,6 +1102,14 @@ if (isQuickTaskWindow) {
         <PlanningInitializer />
         <PlanningWindowApp />
         <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
+} else if (isAgentIslandWindow) {
+  import('./components/agent-island/AgentIslandApp').then(({ AgentIslandApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <AgentIslandApp />
       </React.StrictMode>
     )
   })
