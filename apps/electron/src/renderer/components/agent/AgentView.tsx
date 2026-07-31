@@ -1914,7 +1914,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         // 通过主进程检测目录 vs 文件
         const { directories, files: filePaths } = await window.electronAPI.checkPathsType(paths)
 
-        // 拖拽的文件夹直接附加
+        // 拖拽的文件夹：附加到会话 + 插入可见的文件夹引用（与右侧面板拖拽体验一致）
         for (const dirPath of directories) {
           try {
             const updated = await window.electronAPI.attachDirectory({
@@ -1927,6 +1927,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               return map
             })
             const dirName = dirPath.split('/').pop() || dirPath
+            // 在输入框插入文件夹引用 chip（Agent 通过附加目录可访问）
+            richTextInputRef.current?.insertFileMentions([{
+              path: dirPath,
+              name: dirName,
+              isDirectory: true,
+              scope: 'project',
+            }])
             toast.success(`已附加目录: ${dirName}`)
           } catch (error) {
             console.error('[AgentView] 拖拽附加文件夹失败:', error)
