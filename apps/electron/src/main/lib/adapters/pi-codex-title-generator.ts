@@ -6,6 +6,7 @@
  * 相同的 ModelRuntime/credential store，且不写入 Pi 的全局认证目录。
  */
 
+import { randomUUID } from 'node:crypto'
 import type { CodexOAuthCredentials } from '@proma/shared'
 import type { AssistantMessage, Context, Model, OpenAICodexResponsesOptions } from '@earendil-works/pi-ai/compat'
 import type { Dispatcher } from 'undici'
@@ -19,6 +20,7 @@ import {
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type CodexModel = Model<'openai-codex-responses'>
+type CodexTitleTransport = 'auto' | 'sse'
 
 const TITLE_MAX_OUTPUT_TOKENS = 40
 const TITLE_REQUEST_TIMEOUT_MS = 30_000
@@ -47,6 +49,38 @@ export interface CodexTitleRequestEnvironment {
   closeRequestProxyDispatcher: (dispatcher: Dispatcher | undefined) => Promise<void>
 }
 
+export interface CodexTitleConnectionSettings {
+  proxyUrl?: string
+  noProxy?: string
+  transport: CodexTitleTransport
+}
+
+function getCaseInsensitiveEnvironmentValue(key: string): string | undefined {
+  const exact = process.env[key]
+  if (exact?.trim()) return exact.trim()
+  const matchedKey = Object.keys(process.env).find((name) => name.toLowerCase() === key.toLowerCase())
+  const value = matchedKey ? process.env[matchedKey] : undefined
+  return value?.trim() || undefined
+}
+
+/**
+ * 标题请求沿用前台 Pi Agent 的连接选择：无代理时优先 WebSocket（auto），
+ * 有 HTTP 代理时改用可携带 undici dispatcher 的 SSE。
+ */
+export function resolveCodexTitleConnectionSettings(proxyUrl?: string): CodexTitleConnectionSettings {
+  const resolvedProxyUrl = proxyUrl?.trim()
+    || getCaseInsensitiveEnvironmentValue('HTTPS_PROXY')
+    || getCaseInsensitiveEnvironmentValue('HTTP_PROXY')
+    || getCaseInsensitiveEnvironmentValue('ALL_PROXY')
+  const noProxy = getCaseInsensitiveEnvironmentValue('NO_PROXY')
+
+  return {
+    ...(resolvedProxyUrl && { proxyUrl: resolvedProxyUrl }),
+    ...(noProxy && { noProxy }),
+    transport: resolvedProxyUrl ? 'sse' : 'auto',
+  }
+}
+
 /** 从 Pi 响应中抽取可见文本，忽略 reasoning/tool content。 */
 export function extractCodexResponseText(content: Array<{ type: string; text?: string }>): string {
   return content
@@ -64,6 +98,7 @@ export async function completeCodexTitleRequest(
   prompt: string,
   environment: CodexTitleRequestEnvironment,
   signal?: AbortSignal,
+  transport: CodexTitleTransport = 'auto',
 ): Promise<string | null> {
   try {
     environment.installRequestProxyFetch()
@@ -73,13 +108,17 @@ export async function completeCodexTitleRequest(
         messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
       },
       {
-        transport: 'sse',
+        // 使用独立的 Pi session ID，确保标题请求不会加入前台 Agent 的 Responses
+        // continuation/cache，同时仍携带 Codex 后端需要的 request/session headers。
+        sessionId: randomUUID(),
+        transport,
         ...(signal && { signal }),
         maxTokens: TITLE_MAX_OUTPUT_TOKENS,
         timeoutMs: TITLE_REQUEST_TIMEOUT_MS,
         maxRetries: 0,
+        // Codex Responses 仅接受 concise/detailed/auto；省略 summary 让 Pi 使用
+        // 协议默认的 auto，避免向 ChatGPT OAuth 发送不兼容的 off。
         reasoningEffort: 'none',
-        reasoningSummary: 'off',
         textVerbosity: 'low',
         toolChoice: 'none',
       } satisfies OpenAICodexResponsesOptions,
@@ -96,8 +135,8 @@ export async function completeCodexTitleRequest(
 }
 
 /**
- * 使用已登录的 ChatGPT Codex 模型生成一个短文本。请求固定使用 SSE，避免一次标题
- * 生成额外创建 WebSocket；请求失败由调用方按产品语义决定降级方式。
+ * 使用已登录的 ChatGPT Codex 模型生成一个短文本。连接策略与前台 Pi Agent 对齐：
+ * 无代理时使用 auto（优先 WebSocket），有 HTTP 代理时使用 SSE。请求失败由调用方按产品语义决定降级方式。
  */
 export async function generateCodexTitle(input: CodexTitleGenerationInput): Promise<string | null> {
   const sdk: PiSdk = await import('@earendil-works/pi-coding-agent')
@@ -106,7 +145,12 @@ export async function generateCodexTitle(input: CodexTitleGenerationInput): Prom
     codexOAuthCredentials: input.credentials,
     onCodexOAuthCredentialsRefreshed: input.onCredentialsRefreshed,
   })
-  const dispatcher = createPiRequestProxyDispatcher({ proxyUrl: input.proxyUrl, httpIdleTimeoutMs: TITLE_REQUEST_TIMEOUT_MS })
+  const connection = resolveCodexTitleConnectionSettings(input.proxyUrl)
+  const dispatcher = createPiRequestProxyDispatcher({
+    proxyUrl: connection.proxyUrl,
+    noProxy: connection.noProxy,
+    httpIdleTimeoutMs: TITLE_REQUEST_TIMEOUT_MS,
+  })
 
   return completeCodexTitleRequest(
     modelRuntime as CodexTitleRuntime,
@@ -119,5 +163,6 @@ export async function generateCodexTitle(input: CodexTitleGenerationInput): Prom
       closeRequestProxyDispatcher: closePiRequestProxyDispatcher,
     },
     input.signal,
+    connection.transport,
   )
 }
