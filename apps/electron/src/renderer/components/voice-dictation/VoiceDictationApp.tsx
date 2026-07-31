@@ -192,10 +192,12 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     cleanupAudio(false)
     flushPendingAudio()
     flushQueuedAudio()
-    if (currentSessionId && asrReadyRef.current) {
+    if (!currentSessionId) {
+      scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
+    } else if (asrReadyRef.current) {
       window.electronAPI.stopVoiceDictation({ sessionId: currentSessionId }).catch(console.error)
+      scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
     }
-    scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
   }, [cleanupAudio, flushPendingAudio, flushQueuedAudio, scheduleCommit])
 
   const cancelAndHide = React.useCallback(() => {
