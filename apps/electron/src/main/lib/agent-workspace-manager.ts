@@ -252,6 +252,66 @@ function copyDefaultSkills(workspaceSlug: string, options: { throwOnError?: bool
   }
 }
 
+/**
+ * 新建工作区时从源工作区继承运行时配置：mcp.json、CLAUDE.md、自定义 Skills。
+ *
+ * 内置 default-skills 由 copyDefaultSkills 初始化，这里只复制源工作区中
+ * 非内置的自定义 Skill（与 default-skills 同名、已退役的跳过）。所有复制
+ * 均为「目标不存在才复制」，不会覆盖新工作区已生成的配置。
+ */
+export function copyInheritedWorkspaceConfig(sourceSlug: string, targetSlug: string): void {
+  const sourceDir = getAgentWorkspacePath(sourceSlug)
+  const targetDir = getAgentWorkspacePath(targetSlug)
+  if (!existsSync(sourceDir)) {
+    console.warn(`[Agent 工作区] 继承配置：源工作区不存在 ${sourceSlug}，跳过`)
+    return
+  }
+
+  // 1. mcp.json（源存在且目标不存在时复制）
+  const srcMcp = join(sourceDir, 'mcp.json')
+  if (existsSync(srcMcp)) {
+    const dstMcp = getWorkspaceMcpPath(targetSlug)
+    if (!existsSync(dstMcp)) {
+      cpSync(srcMcp, dstMcp)
+      console.log(`[Agent 工作区] 已继承 MCP 配置: ${sourceSlug} -> ${targetSlug}`)
+    }
+  }
+
+  // 2. CLAUDE.md
+  const srcClaude = join(sourceDir, 'CLAUDE.md')
+  if (existsSync(srcClaude)) {
+    const dstClaude = join(targetDir, 'CLAUDE.md')
+    if (!existsSync(dstClaude)) {
+      cpSync(srcClaude, dstClaude)
+      console.log(`[Agent 工作区] 已继承 CLAUDE.md: ${sourceSlug} -> ${targetSlug}`)
+    }
+  }
+
+  // 3. 自定义 Skills（跳过 default-skills 同名与已退役）
+  const sourceSkillsDir = getWorkspaceSkillsDir(sourceSlug)
+  if (!existsSync(sourceSkillsDir)) return
+  const defaultSkillNames = new Set(
+    readdirSync(getDefaultSkillsDir(), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !isRetiredDefaultSkill(e.name))
+      .map((e) => e.name),
+  )
+  const targetSkillsDir = getWorkspaceSkillsDir(targetSlug)
+  mkdirSync(targetSkillsDir, { recursive: true })
+  for (const entry of readdirSync(sourceSkillsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (defaultSkillNames.has(entry.name)) continue
+    const source = join(sourceSkillsDir, entry.name)
+    const target = join(targetSkillsDir, entry.name)
+    if (existsSync(target)) continue
+    try {
+      cpSync(source, target, { recursive: true, filter: skillCopyFilter })
+      console.log(`[Agent 工作区] 已继承自定义 Skill: ${entry.name} (${sourceSlug} -> ${targetSlug})`)
+    } catch (err) {
+      console.warn(`[Agent 工作区] 继承自定义 Skill 失败 (${entry.name}):`, err)
+    }
+  }
+}
+
 export function createAgentWorkspace(input: string | CreateAgentWorkspaceInput): AgentWorkspace {
   const { name, projectRootPath } = typeof input === 'string'
     ? { name: input, projectRootPath: undefined }
@@ -296,6 +356,19 @@ export function createAgentWorkspace(input: string | CreateAgentWorkspaceInput):
     getAgentWorkspacePath(slug)
     ensurePluginManifest(slug, name)
     copyDefaultSkills(slug, { throwOnError: true })
+    // 可选：从已有工作区继承 MCP / CLAUDE.md / 自定义 Skills（复制失败不阻塞创建）
+    if (typeof input !== 'string' && input.inheritFromWorkspaceId) {
+      const sourceWorkspace = index.workspaces.find((w) => w.id === input.inheritFromWorkspaceId)
+      if (sourceWorkspace) {
+        try {
+          copyInheritedWorkspaceConfig(sourceWorkspace.slug, slug)
+        } catch (copyError) {
+          console.warn(`[Agent 工作区] 继承配置失败 (${slug}):`, copyError)
+        }
+      } else {
+        console.warn(`[Agent 工作区] 继承配置：源工作区 id 未找到 ${input.inheritFromWorkspaceId}`)
+      }
+    }
   } catch (error) {
     const workspacesRoot = resolve(getAgentWorkspacesDir())
     const workspaceDir = resolve(join(workspacesRoot, slug))

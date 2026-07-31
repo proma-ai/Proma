@@ -756,6 +756,8 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [newProjectName, setNewProjectName] = React.useState('')
   const newProjectInputRef = React.useRef<HTMLInputElement>(null)
+  /** 新建项目时是否继承当前项目配置（MCP / Skills / CLAUDE.md） */
+  const [inheritConfigOnCreate, setInheritConfigOnCreate] = React.useState(true)
   const [relativeTimeNow, setRelativeTimeNow] = React.useState(() => Date.now())
   const [userProfile, setUserProfile] = useAtom(userProfileAtom)
   const streamingIds = useAtomValue(streamingConversationIdsAtom)
@@ -1631,7 +1633,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
     try {
       const { workspace, session } = await window.electronAPI.createAgentProject(
-        { name: trimmed },
+        { name: trimmed, inheritFromWorkspaceId: inheritConfigOnCreate ? currentWorkspaceId ?? undefined : undefined },
         agentChannelId || undefined,
         agentModelId || undefined,
       )
@@ -2931,22 +2933,33 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           {/* 下区：项目分组历史 */}
           <div className="px-2 pb-3">
             {creatingProject && (
-              <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md bg-foreground/[0.04]">
-                <FolderOpen size={14} className="flex-shrink-0 text-foreground/40" />
-                <input
-                  ref={newProjectInputRef}
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  onKeyDown={handleCreateProjectKeyDown}
-                  onBlur={() => {
-                    setCreatingProject(false)
-                    setNewProjectName('')
-                  }}
-                  placeholder="项目名称..."
-                  className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
-                  maxLength={50}
-                />
-              </div>
+              <>
+                <div className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md bg-foreground/[0.04]">
+                  <FolderOpen size={14} className="flex-shrink-0 text-foreground/40" />
+                  <input
+                    ref={newProjectInputRef}
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={handleCreateProjectKeyDown}
+                    onBlur={() => {
+                      setCreatingProject(false)
+                      setNewProjectName('')
+                    }}
+                    placeholder="项目名称..."
+                    className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
+                    maxLength={50}
+                  />
+                </div>
+                <label className="flex items-center gap-1.5 px-2 py-1 mb-1 text-[11px] text-foreground/60 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={inheritConfigOnCreate}
+                    onChange={(e) => setInheritConfigOnCreate(e.target.checked)}
+                    className="size-3 accent-primary"
+                  />
+                  复制当前项目配置（MCP / Skills / CLAUDE.md）
+                </label>
+              </>
             )}
 
             <div className="flex flex-col gap-0.5">

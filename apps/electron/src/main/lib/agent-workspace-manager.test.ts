@@ -152,3 +152,45 @@ describe('Agent 工作区 Skill 扫描', () => {
     expect(skills.map((skill) => skill.slug).sort()).toEqual(expectedSlugs)
   })
 })
+
+describe('Agent 工作区继承配置', () => {
+  test('Given 源工作区配置了 MCP/CLAUDE.md/自定义 Skill When 用 inheritFromWorkspaceId 创建新工作区 Then 复制运行时配置', () => {
+    const source = manager.createAgentWorkspace('Source Workspace')
+    const sourceDir = configPaths.getAgentWorkspacePath(source.slug)
+
+    writeFileSync(
+      join(sourceDir, 'mcp.json'),
+      JSON.stringify({ servers: { demo: { type: 'stdio', command: 'demo-mcp', enabled: true } } }, null, 2),
+      'utf-8',
+    )
+    writeFileSync(join(sourceDir, 'CLAUDE.md'), '# 源项目规则\n', 'utf-8')
+    writeWorkspaceSkill(source.slug, 'my-custom-skill', 'My Custom')
+
+    const target = manager.createAgentWorkspace({ name: 'Inherited Workspace', inheritFromWorkspaceId: source.id })
+    const targetDir = configPaths.getAgentWorkspacePath(target.slug)
+
+    expect(existsSync(join(targetDir, 'mcp.json'))).toBe(true)
+    expect(existsSync(join(targetDir, 'CLAUDE.md'))).toBe(true)
+    expect(existsSync(join(configPaths.getWorkspaceSkillsDir(target.slug), 'my-custom-skill', 'SKILL.md'))).toBe(true)
+  })
+
+  test('Given 源工作区缺少 mcp.json When 继承创建新工作区 Then 不报错并复制其余配置', () => {
+    const source = manager.createAgentWorkspace('Source No Mcp')
+    writeFileSync(join(configPaths.getAgentWorkspacePath(source.slug), 'CLAUDE.md'), '# 规则\n', 'utf-8')
+    writeWorkspaceSkill(source.slug, 'another-custom', 'Another')
+
+    const target = manager.createAgentWorkspace({ name: 'Inherited No Mcp', inheritFromWorkspaceId: source.id })
+    const targetDir = configPaths.getAgentWorkspacePath(target.slug)
+
+    expect(existsSync(join(targetDir, 'mcp.json'))).toBe(false)
+    expect(existsSync(join(targetDir, 'CLAUDE.md'))).toBe(true)
+    expect(existsSync(join(configPaths.getWorkspaceSkillsDir(target.slug), 'another-custom', 'SKILL.md'))).toBe(true)
+  })
+
+  test('Given 继承源 id 不存在 When 创建新工作区 Then 不失败且正常初始化', () => {
+    const target = manager.createAgentWorkspace({ name: 'Bad Inherit', inheritFromWorkspaceId: 'nonexistent-id' })
+
+    expect(existsSync(configPaths.getAgentWorkspacePath(target.slug))).toBe(true)
+    expect(target.slug).not.toBe('')
+  })
+})

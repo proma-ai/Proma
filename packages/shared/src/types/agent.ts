@@ -38,6 +38,8 @@ export interface CreateAgentWorkspaceInput {
   name: string
   /** 可选的用户本地项目根目录 */
   projectRootPath?: string
+  /** 可选：从已有工作区继承运行时配置（MCP 服务器、CLAUDE.md、自定义 Skills） */
+  inheritFromWorkspaceId?: string
 }
 
 /** 创建项目后自动生成的首个 Agent 会话。 */

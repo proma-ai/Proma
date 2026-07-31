@@ -78,6 +78,8 @@ export function WorkspaceSelector(): React.ReactElement {
   const [creating, setCreating] = React.useState(false)
   const [newName, setNewName] = React.useState('')
   const createInputRef = React.useRef<HTMLInputElement>(null)
+  /** 新建项目时是否继承当前项目配置（MCP / Skills / CLAUDE.md） */
+  const [inheritConfigOnCreate, setInheritConfigOnCreate] = React.useState(true)
 
   // 重命名状态
   const [editingId, setEditingId] = React.useState<string | null>(null)
@@ -108,7 +110,7 @@ export function WorkspaceSelector(): React.ReactElement {
   }
 
   const handleCreate = async (): Promise<void> => {
-    await createProject(newName)
+    await createProject(newName, { inheritFromWorkspaceId: inheritConfigOnCreate ? currentWorkspaceId ?? undefined : undefined })
     setCreating(false)
   }
 
@@ -377,19 +379,30 @@ export function WorkspaceSelector(): React.ReactElement {
 
           {/* 新建项目输入框 */}
           {creating && (
-            <div className="flex items-center gap-2 px-2 py-[5px]">
-              <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
-              <input
-                ref={createInputRef}
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={handleCreateKeyDown}
-                onBlur={() => setCreating(false)}
-                placeholder="项目名称..."
-                className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
-                maxLength={50}
-              />
-            </div>
+            <>
+              <div className="flex items-center gap-2 px-2 py-[5px]">
+                <FolderOpen size={13} className="flex-shrink-0 text-foreground/40" />
+                <input
+                  ref={createInputRef}
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={handleCreateKeyDown}
+                  onBlur={() => setCreating(false)}
+                  placeholder="项目名称..."
+                  className="flex-1 min-w-0 bg-transparent text-[13px] text-foreground border-b border-primary/50 outline-none px-0.5"
+                  maxLength={50}
+                />
+              </div>
+              <label className="flex items-center gap-1.5 px-2 py-[3px] text-[11px] text-foreground/60 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={inheritConfigOnCreate}
+                  onChange={(e) => setInheritConfigOnCreate(e.target.checked)}
+                  className="size-3 accent-primary"
+                />
+                复制当前项目配置（MCP / Skills / CLAUDE.md）
+              </label>
+            </>
           )}
         </div>
 

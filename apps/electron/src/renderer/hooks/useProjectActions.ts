@@ -25,7 +25,7 @@ interface UseProjectActionsResult {
   /** 切换到指定项目；已是当前项目时无副作用。默认切回对话视图，resetView:false 可保持当前视图（如停留在 Agent 技能） */
   selectProject: (workspaceId: string, opts?: { resetView?: boolean }) => void
   /** 创建并切到新项目；成功返回新项目，失败已 toast 并返回 null */
-  createProject: (name: string, options?: Pick<CreateAgentWorkspaceInput, 'projectRootPath'>) => Promise<AgentWorkspace | null>
+  createProject: (name: string, options?: Pick<CreateAgentWorkspaceInput, 'projectRootPath' | 'inheritFromWorkspaceId'>) => Promise<AgentWorkspace | null>
   /** 选择本地文件夹，并以它作为项目文件根创建项目。 */
   createProjectFromFolder: () => Promise<AgentWorkspace | null>
 }
@@ -51,7 +51,7 @@ export function useProjectActions(): UseProjectActionsResult {
   )
 
   const createProject = React.useCallback(
-    async (name: string, options?: Pick<CreateAgentWorkspaceInput, 'projectRootPath'>): Promise<AgentWorkspace | null> => {
+    async (name: string, options?: Pick<CreateAgentWorkspaceInput, 'projectRootPath' | 'inheritFromWorkspaceId'>): Promise<AgentWorkspace | null> => {
       const trimmed = name.trim()
       if (!trimmed) return null
       if (createInFlightRef.current) return null
