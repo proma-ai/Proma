@@ -31,9 +31,10 @@ interface UpdaterAPI {
   checkForUpdates: () => Promise<void>
   getStatus: () => Promise<UpdateStatus>
   onStatusChanged: (callback: (status: UpdateStatus) => void) => () => void
-  quitAndInstall: () => Promise<void>
   /** 在所有运行中的 Agent 结束后重启并安装更新 */
   installWhenIdle: () => Promise<boolean>
+  /** 取消尚未执行的空闲安装请求 */
+  cancelIdleInstall: () => Promise<void>
 }
 
 // 附件临时 base64 缓存（用于发送前暂存数据）

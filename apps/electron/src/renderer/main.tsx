@@ -405,7 +405,36 @@ function UpdaterInitializer(): null {
                   .then((scheduled) => {
                     if (!scheduled) {
                       toast.error('更新尚未准备好，请稍后重试')
+                      return
                     }
+
+                    toast.custom((scheduledToastId) => (
+                      <div className="w-[312px] max-w-[calc(100vw-32px)] rounded-xl bg-background/95 p-3 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.14)] ring-1 ring-black/5 backdrop-blur-xl dark:ring-white/10">
+                        <div className="flex items-center gap-2.5">
+                          <img src={PromaLogo} alt="Proma" className="size-7 rounded-md" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold tracking-tight">已安排空闲时更新</p>
+                            <p className="text-xs leading-4 text-muted-foreground">当前任务结束后会自动重启安装。</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            className="h-7 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.96]"
+                            onClick={() => {
+                              void window.electronAPI.updater?.cancelIdleInstall()
+                              toast.dismiss(scheduledToastId)
+                            }}
+                          >
+                            取消安排
+                          </button>
+                        </div>
+                      </div>
+                    ), {
+                      duration: Infinity,
+                      dismissible: false,
+                      unstyled: true,
+                    })
                   })
                   .catch(() => {
                     toast.error('无法安排空闲更新，请稍后重试')

@@ -31,6 +31,6 @@ export const UPDATER_IPC_CHANNELS = {
   CHECK_FOR_UPDATES: 'updater:check',
   GET_STATUS: 'updater:get-status',
   ON_STATUS_CHANGED: 'updater:status-changed',
-  QUIT_AND_INSTALL: 'updater:quit-and-install',
   INSTALL_WHEN_IDLE: 'updater:install-when-idle',
+  CANCEL_IDLE_INSTALL: 'updater:cancel-idle-install',
 } as const

@@ -8,10 +8,10 @@ import { ipcMain } from 'electron'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
 import type { UpdateStatus } from './updater-types'
 import {
+  cancelIdleInstall,
   checkForUpdates,
   getUpdateStatus,
   installWhenIdle,
-  quitAndInstall,
 } from './auto-updater'
 
 /** 注册更新 IPC 处理器 */
@@ -33,16 +33,16 @@ export function registerUpdaterIpc(): void {
   )
 
   ipcMain.handle(
-    UPDATER_IPC_CHANNELS.QUIT_AND_INSTALL,
-    (): void => {
-      quitAndInstall()
+    UPDATER_IPC_CHANNELS.INSTALL_WHEN_IDLE,
+    (): boolean => {
+      return installWhenIdle()
     }
   )
 
   ipcMain.handle(
-    UPDATER_IPC_CHANNELS.INSTALL_WHEN_IDLE,
-    (): boolean => {
-      return installWhenIdle()
+    UPDATER_IPC_CHANNELS.CANCEL_IDLE_INSTALL,
+    (): void => {
+      cancelIdleInstall()
     }
   )
 

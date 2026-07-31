@@ -37,6 +37,7 @@ function UpdateCard(): React.ReactElement | null {
   const available = useAtomValue(updaterAvailableAtom)
   const status = useAtomValue(updateStatusAtom)
   const [checking, setChecking] = React.useState(false)
+  const [idleInstallScheduled, setIdleInstallScheduled] = React.useState(false)
   const [showReleaseNotes, setShowReleaseNotes] = React.useState(false)
   const [release, setRelease] = React.useState<import('@proma/shared').GitHubRelease | null>(null)
 
@@ -58,11 +59,22 @@ function UpdateCard(): React.ReactElement | null {
     window.electronAPI.openExternal(url)
   }
 
-  const handleQuitAndInstall = (): void => {
-    window.electronAPI.updater?.quitAndInstall()
+  const handleInstallWhenIdle = (): void => {
+    void window.electronAPI.updater?.installWhenIdle()
+      .then((scheduled) => setIdleInstallScheduled(scheduled))
+      .catch(() => setIdleInstallScheduled(false))
+  }
+
+  const handleCancelIdleInstall = (): void => {
+    void window.electronAPI.updater?.cancelIdleInstall()
+      .then(() => setIdleInstallScheduled(false))
   }
 
   // 当检测到新版本时，获取完整的 release 信息
+  React.useEffect(() => {
+    if (status.status !== 'downloaded') setIdleInstallScheduled(false)
+  }, [status.status])
+
   React.useEffect(() => {
     if (status.status === 'available' && status.version && !release) {
       window.electronAPI
@@ -91,13 +103,22 @@ function UpdateCard(): React.ReactElement | null {
 
           {/* 操作按钮 */}
           {status.status === 'downloaded' ? (
-            <button
-              onClick={handleQuitAndInstall}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <RotateCw className="h-3.5 w-3.5" />
-              立即重启
-            </button>
+            idleInstallScheduled ? (
+              <button
+                onClick={handleCancelIdleInstall}
+                className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"
+              >
+                取消安排
+              </button>
+            ) : (
+              <button
+                onClick={handleInstallWhenIdle}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                空闲时更新
+              </button>
+            )
           ) : status.status === 'available' ? (
             <button
               onClick={handleGoToDownload}

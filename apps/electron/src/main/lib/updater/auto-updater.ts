@@ -97,20 +97,42 @@ export function installWhenIdle(): boolean {
   return true
 }
 
-/** 退出并安装已下载的更新 */
-export function quitAndInstall(): void {
+/** 取消尚未执行的空闲安装请求。 */
+export function cancelIdleInstall(): void {
+  idleInstallScheduler.cancel()
+  console.log('[更新] 已取消空闲安装请求')
+}
+
+/**
+ * 退出并安装已下载的更新。
+ *
+ * 所有安装入口最终都经过这里：即使调用方绕过空闲调度器，也不会在 Agent
+ * 运行时退出；在真正安装前再次检查一次，避免检查与退出之间启动新 Agent。
+ */
+function quitAndInstall(): void {
   if (!app.isPackaged) {
     console.warn('[更新] 开发环境不支持安装更新')
     return
   }
 
-  // 移除所有窗口的 close 监听器，避免 preventDefault 阻止退出
-  for (const w of BrowserWindow.getAllWindows()) {
-    w.removeAllListeners('close')
+  if (hasActiveAgents()) {
+    console.log('[更新] 检测到运行中的 Agent，改为等待空闲后安装')
+    installWhenIdle()
+    return
   }
 
-  // 延迟调用确保 IPC 响应已发送回渲染进程
+  // 延迟调用确保 IPC 响应已发送回渲染进程；回调内再次检查防止竞态。
   setImmediate(() => {
+    if (hasActiveAgents()) {
+      console.log('[更新] 安装前出现新的运行中 Agent，继续等待空闲')
+      installWhenIdle()
+      return
+    }
+
+    // 移除所有窗口的 close 监听器，避免 preventDefault 阻止退出。
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.removeAllListeners('close')
+    }
     autoUpdater.quitAndInstall(true, true)
   })
 }

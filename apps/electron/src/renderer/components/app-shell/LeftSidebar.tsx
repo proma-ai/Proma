@@ -814,14 +814,9 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   }, [setSettingsOpen])
 
   const handleUpdateButtonClick = React.useCallback((): void => {
-    if (updateStatus.status === 'downloaded') {
-      void window.electronAPI.updater?.quitAndInstall()
-      return
-    }
-
     setSettingsTab('about')
     setSettingsOpen(true)
-  }, [setSettingsOpen, setSettingsTab, updateStatus.status])
+  }, [setSettingsOpen, setSettingsTab])
 
   React.useEffect(() => {
     const id = window.setInterval(() => setRelativeTimeNow(Date.now()), 60_000)

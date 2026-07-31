@@ -881,9 +881,10 @@ export interface ElectronAPI {
       progress?: { percent: number; transferred: number; total: number; bytesPerSecond: number }
       error?: string
     }) => void) => () => void
-    quitAndInstall: () => Promise<void>
     /** 在所有运行中的 Agent 结束后重启并安装更新 */
     installWhenIdle: () => Promise<boolean>
+    /** 取消尚未执行的空闲安装请求 */
+    cancelIdleInstall: () => Promise<void>
   }
 
   // GitHub Release
@@ -2119,8 +2120,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('updater:status-changed', listener)
       return () => { ipcRenderer.removeListener('updater:status-changed', listener) }
     },
-    quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
     installWhenIdle: () => ipcRenderer.invoke('updater:install-when-idle'),
+    cancelIdleInstall: () => ipcRenderer.invoke('updater:cancel-idle-install'),
   },
 
   // GitHub Release
