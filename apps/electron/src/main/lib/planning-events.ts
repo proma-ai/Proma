@@ -3,9 +3,21 @@ import { PLANNING_IPC_CHANNELS, type ActivePlanningReminder, type PlanningAgentO
 
 const ALL_PLANNING_CHANGE_RESOURCES: PlanningChangeResource[] = ['todos', 'calendar_events', 'todo_groups', 'calendar_groups', 'tags', 'reminders']
 
-/** 广播资源级失效通知，使各窗口只刷新受影响的规划数据。 */
+/**
+ * 进程内订阅与 Renderer IPC 共用同一个失效出口。
+ * 原生灵动岛没有 preload IPC，需要借此刷新主进程投影；用 Set 避免重复注册。
+ */
+const planningChangeListeners = new Set<(change: PlanningChange) => void>()
+
+export function onPlanningChanged(listener: (change: PlanningChange) => void): () => void {
+  planningChangeListeners.add(listener)
+  return () => planningChangeListeners.delete(listener)
+}
+
+/** 广播资源级失效通知，使各窗口和原生 Surface 只刷新受影响的规划数据。 */
 export function broadcastPlanningChanged(resources: PlanningChangeResource[] = ALL_PLANNING_CHANGE_RESOURCES): void {
   const change: PlanningChange = { resources: [...new Set(resources)] }
+  for (const listener of planningChangeListeners) listener(change)
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(PLANNING_IPC_CHANNELS.CHANGED, change)
   }

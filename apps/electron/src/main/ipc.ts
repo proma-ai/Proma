@@ -180,6 +180,7 @@ import { extractTextFromAttachment } from './lib/document-parser'
 import { getTutorialContent, createWelcomeConversation } from './lib/tutorial-service'
 import { getUserProfile, updateUserProfile } from './lib/user-profile-service'
 import { getSettings, updateSettings } from './lib/settings-service'
+import { refreshAgentIslandConfiguration } from './lib/agent-island-service'
 import { setBuiltinMcpUserEnabled } from './lib/builtin-mcp/settings'
 import { setDockBadgeCount } from './lib/dock-badge-service'
 
@@ -1585,6 +1586,9 @@ export function registerIpcHandlers(): void {
       if (updates.feishuSessionMirror !== undefined) {
         syncFeishuSyncSleepBlocker(result)
       }
+      if (updates.agentIsland !== undefined) {
+        refreshAgentIslandConfiguration()
+      }
 
       // 主题相关设置变化时，广播给所有窗口（跨窗口同步，如 Quick Task 面板）
       if (updates.themeMode !== undefined || updates.themeStyle !== undefined || updates.interfaceVariant !== undefined) {
@@ -1613,6 +1617,9 @@ export function registerIpcHandlers(): void {
         const result = updateSettings(updates)
         if (updates.feishuSessionMirror !== undefined) {
           syncFeishuSyncSleepBlocker(result)
+        }
+        if (updates.agentIsland !== undefined) {
+          refreshAgentIslandConfiguration()
         }
         event.returnValue = true
       } catch {

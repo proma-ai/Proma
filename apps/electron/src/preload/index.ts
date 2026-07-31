@@ -1151,6 +1151,8 @@ export interface ElectronAPI {
     onState: (callback: (state: AgentIslandState) => void) => () => void
     /** 外部触发展开/收起切换 */
     onToggleExpanded: (callback: () => void) => () => void
+    /** 同步展开/收起状态到主进程（避免下一条 Agent 事件覆盖本地状态） */
+    setExpanded: (expanded: boolean) => Promise<void>
     /** 按内容调整窗口尺寸（pill ↔ 展开卡） */
     resize: (width: number, height: number) => Promise<void>
     /** 拖拽移动窗口位置 */
@@ -2614,6 +2616,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener)
       return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener) }
     },
+    setExpanded: (expanded: boolean) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.SET_EXPANDED, expanded),
     resize: (width: number, height: number) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.RESIZE, { width, height }),
     move: (x: number, y: number) =>

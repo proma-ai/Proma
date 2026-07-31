@@ -13,7 +13,7 @@ import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
-import { join, resolve, dirname, isAbsolute, relative, sep, type PlatformPath } from 'node:path'
+import { join, resolve, dirname, isAbsolute, relative, sep } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
@@ -1472,7 +1472,13 @@ function findSdkSessionJsonl(sdkSessionId: string, _projectDir?: string): string
   return undefined
 }
 
-type RewindPathApi = Pick<PlatformPath, 'isAbsolute' | 'resolve' | 'relative' | 'sep'>
+/** Node 20–25 均兼容的最小 path API；测试可注入 Windows 路径语义。 */
+type RewindPathApi = {
+  isAbsolute(path: string): boolean
+  resolve(...pathSegments: string[]): string
+  relative(from: string, to: string): string
+  sep: string
+}
 
 const nativeRewindPathApi: RewindPathApi = { isAbsolute, resolve, relative, sep }
 

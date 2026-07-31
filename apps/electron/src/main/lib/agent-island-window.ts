@@ -31,10 +31,12 @@ export function onAgentIslandWindowReady(cb: () => void): void {
 
 function resolveWindowPosition(width: number, height: number): { x: number; y: number } {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  const { workArea } = display
+  // 关键：用 display.bounds 而不是 workArea。workArea 从菜单栏下方开始，
+  // 会让“灵动岛”变成普通悬浮窗；bounds.y 才是刘海/菜单栏所在的真实屏幕顶端。
+  const { bounds } = display
   return {
-    x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.round(workArea.y + 8),
+    x: Math.round(bounds.x + (bounds.width - width) / 2),
+    y: bounds.y,
   }
 }
 
@@ -68,7 +70,10 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     },
   })
 
-  agentIslandWindow.setAlwaysOnTop(true, 'floating')
+  // macOS 的 pop-up-menu 层级高于菜单栏，黑色 Surface 才能与硬件刘海连续融合。
+  // 其他平台保持 floating，作为顶部状态条优雅降级。
+  agentIslandWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'pop-up-menu' : 'floating')
+  agentIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   const isDev = !app.isPackaged
   if (isDev) {
@@ -126,12 +131,11 @@ export function resizeAgentIslandWindow(width: number, height: number): void {
   const bounds = win.getBounds()
   // 尺寸未变化时不重复 setBounds（避免高频 agent 事件导致无谓窗口操作）
   if (bounds.width === clampedWidth && bounds.height === clampedHeight) return
-  // 保持顶部中央锚定：宽度变化时水平居中；高度变化时向下延伸
+  // 保持顶部中央锚定：宽度变化时水平居中；高度只向下延展，始终从刘海顶部开始。
   const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y })
-  const workArea = display.workArea
+  const screenBounds = display.bounds
   const newX = Math.round(bounds.x + (bounds.width - clampedWidth) / 2)
-  // 窗口顶部不超出 workArea 顶部
-  const top = Math.max(workArea.y, bounds.y)
+  const top = bounds.y <= display.workArea.y ? screenBounds.y : Math.max(screenBounds.y, bounds.y)
   win.setBounds({ x: newX, y: top, width: clampedWidth, height: clampedHeight }, false)
 }
 

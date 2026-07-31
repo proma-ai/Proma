@@ -1,457 +1,371 @@
-/* ===== Agent Island 灵动岛样式 =====
- * 独立于主窗口主题：灵动岛是系统级黑色胶囊（参考 iOS Dynamic Island / Cindy）。
- * 状态色与 Proma 语义色对齐：
- *   running = #FF6600 / needs-interaction = #00D9C5 / error = #EF4444 / completed = #22C55E
- */
+/* Proma Dynamic Island — 为 macOS 顶部刘海设计的黑色连续 Surface。 */
 
 html,
 body,
 #root {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  overflow: hidden;
-  font-family:
-    'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont,
-    'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  cursor: default;
-}
-
-.island-app {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   width: 100%;
   height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  color: #f5f5f7;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* ===== 胶囊容器 ===== */
+button { font: inherit; }
 
-.island-container {
+.pulse-root {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* 顶部不圆角：让组件与 MacBook 真实刘海成为同一块黑色。 */
+.pulse-shell {
+  --pulse-fg: #f5f5f7;
+  --pulse-muted: rgb(245 245 247 / 0.52);
+  --pulse-line: rgb(255 255 255 / 0.105);
+  --pulse-surface: rgb(255 255 255 / 0.075);
+  --pulse-hover: rgb(255 255 255 / 0.12);
+  --pulse-accent: #8aa7ff;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  background: rgba(18, 18, 20, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #000;
   box-shadow:
-    0 8px 28px rgba(0, 0, 0, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(24px) saturate(1.4);
-  overflow: hidden;
-  transition:
-    border-radius 0.22s ease,
-    box-shadow 0.22s ease;
+    0 12px 30px rgb(0 0 0 / 0.42),
+    0 2px 7px rgb(0 0 0 / 0.32),
+    inset 0 -1px 0 rgb(255 255 255 / 0.10);
 }
 
-.island-container.expanded {
-  border-radius: 20px;
+.pulse-shell::after {
+  position: absolute;
+  right: 20px;
+  bottom: 0;
+  left: 20px;
+  height: 1px;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.20), transparent);
 }
 
-/* ===== Pill（收起态） ===== */
+.pulse-shell-compact { border-radius: 0 0 19px 19px; }
+.pulse-shell-expanded { border-radius: 0 0 24px 24px; }
+.pulse-shell-compact.running { --pulse-accent: #ff8426; }
+.pulse-shell-compact.attention { --pulse-accent: #2cd7c6; }
+.pulse-shell-compact.completed { --pulse-accent: #4cdc8a; }
+.pulse-shell-compact.error { --pulse-accent: #ff6c6c; }
 
-.island-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 14px 0 8px;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
+/* ===== 收起态：把刘海两侧的闲置空间变成工作状态条 ===== */
 
-.island-pill .mascot-wrap {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-}
-
-.island-pill-info {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  flex: 1;
-}
-
-.island-pill-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.92);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 132px;
-}
-
-.island-pill-detail {
-  font-size: 9.5px;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 140px;
-}
-
-.island-pill-badges {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-}
-
-.island-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 5px;
-  border-radius: 999px;
-  font-size: 9.5px;
-  font-weight: 700;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.island-badge.warn {
-  background: #ff3b30;
-}
-
-.island-badge.interaction {
-  background: #00d9c5;
-  color: #06201d;
-}
-
-.island-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.island-dot.idle { background: rgba(255, 255, 255, 0.35); }
-.island-dot.running { background: #ff6600; box-shadow: 0 0 6px rgba(255, 102, 0, 0.7); }
-.island-dot.needs-interaction { background: #00d9c5; box-shadow: 0 0 6px rgba(0, 217, 197, 0.7); }
-.island-dot.completed { background: #22c55e; }
-.island-dot.error { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.7); }
-
-/* 展开箭头 */
-.island-pill-chevron {
-  color: rgba(255, 255, 255, 0.45);
-  display: flex;
-  align-items: center;
-  transition: transform 0.2s ease;
-}
-
-/* ===== 展开卡 ===== */
-
-.island-expanded {
-  display: flex;
-  flex-direction: column;
-  min-width: 360px;
-}
-
-.island-topbar {
-  display: flex;
+.pulse-compact {
+  display: grid;
+  box-sizing: border-box;
+  grid-template-columns: 28px minmax(0, 1fr) auto 18px;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  -webkit-app-region: no-drag;
+  width: 100%;
+  height: 48px;
+  padding: 0 15px 0 18px;
+  cursor: grab;
 }
 
-.island-topbar .mascot-wrap {
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
+.pulse-compact:active { cursor: grabbing; }
+
+.pulse-compact-copy {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: 13px 15px;
+  column-gap: 7px;
+  align-items: center;
 }
 
-.island-topbar-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.95);
-  letter-spacing: 0.2px;
-  flex: 1;
-  white-space: nowrap;
+.pulse-kicker {
   overflow: hidden;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.115em;
+  line-height: 1;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.island-topbar-actions {
+.pulse-compact-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pulse-fg);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulse-compact-detail {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pulse-muted);
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulse-compact-metrics {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.island-icon-btn {
+.pulse-metric {
   display: inline-flex;
+  height: 22px;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
+  gap: 3px;
+  padding: 0 6px;
+  border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.75);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  color: rgb(255 255 255 / 0.54);
+  background: rgb(255 255 255 / 0.07);
+  font-size: 9px;
+  line-height: 1;
 }
 
-.island-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
+.pulse-metric svg { opacity: 0.75; }
+.pulse-metric b { color: #fff; font-size: 10px; font-weight: 720; }
+.pulse-metric span { display: none; }
+.pulse-metric.attention { border-color: rgb(44 215 198 / 0.24); color: #5fe5d7; background: rgb(44 215 198 / 0.12); }
+.pulse-chevron { color: rgb(255 255 255 / 0.46); }
+
+/* ===== 轻量“宠物”退化为脉冲核心：保留生命感，不抢信息层级 ===== */
+
+.pulse-glyph {
+  position: relative;
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #8aa7ff;
 }
 
-/* 会话列表 */
-.island-sessions {
+.pulse-glyph.compact { width: 28px; height: 28px; }
+.pulse-glyph-core {
+  position: relative;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 16%, transparent);
+}
+.pulse-glyph-orbit {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
+  border-radius: 50%;
+  opacity: 0.74;
+}
+.pulse-glyph.running { color: #ff8426; }
+.pulse-glyph.attention { color: #2cd7c6; }
+.pulse-glyph.error { color: #ff6c6c; }
+.pulse-glyph.completed { color: #4cdc8a; }
+.pulse-glyph.running .pulse-glyph-orbit { animation: pulse-orbit 1.65s cubic-bezier(0.2, 0, 0, 1) infinite; }
+.pulse-glyph.attention .pulse-glyph-core,
+.pulse-glyph.error .pulse-glyph-core { animation: pulse-attention 1.2s ease-in-out infinite; }
+
+@keyframes pulse-orbit {
+  0%, 100% { transform: scale(0.8); opacity: 0.36; }
+  48% { transform: scale(1.08); opacity: 0.92; }
+}
+@keyframes pulse-attention {
+  0%, 100% { transform: scale(0.92); }
+  50% { transform: scale(1.16); }
+}
+
+/* ===== 展开态：从刘海向下长出的黑色工作面板 ===== */
+
+.pulse-header {
   display: flex;
-  flex-direction: column;
-  max-height: 260px;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.island-session {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 9px;
-  border-radius: 11px;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.island-session:hover {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.island-session .mascot-wrap {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.island-session-body {
-  min-width: 0;
-  flex: 1;
-}
-
-.island-session-head {
-  display: flex;
+  min-height: 59px;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid var(--pulse-line);
 }
-
-.island-session-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.92);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.island-session-phase {
-  font-size: 8.5px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 999px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.island-session-phase.running { background: rgba(255, 102, 0, 0.18); color: #ff9a5c; }
-.island-session-phase.needs-interaction { background: rgba(0, 217, 197, 0.16); color: #4de5d2; }
-.island-session-phase.completed { background: rgba(34, 197, 94, 0.16); color: #63dc8d; }
-.island-session-phase.error { background: rgba(239, 68, 68, 0.16); color: #f37b7b; }
-
-.island-session-detail {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
+.pulse-header-identity,
+.pulse-header-actions { display: flex; align-items: center; }
+.pulse-header-identity { gap: 10px; }
+.pulse-header h1,
+.pulse-section-heading h2,
+.pulse-section-heading p { margin: 0; }
+.pulse-header h1 {
   margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.island-activity {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.42);
-  margin-top: 3px;
-  line-height: 1.5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.island-activity .tool { color: #7fb0ff; }
-.island-activity .status { color: #f4c97e; }
-
-/* 权限/交互按钮 */
-.island-interaction {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.island-interaction-btn {
-  font-size: 9.5px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: filter 0.12s ease, transform 0.05s ease;
-}
-
-.island-interaction-btn:hover {
-  filter: brightness(1.12);
-}
-.island-interaction-btn:active {
-  transform: scale(0.96);
-}
-
-.island-interaction-btn.allow {
-  background: #00d9c5;
-  color: #06201d;
-}
-
-.island-interaction-btn.deny {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
-}
-
-/* ===== Todo / 日程区 ===== */
-
-.island-planning {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 8px 12px 10px;
-}
-
-.island-planning-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 9.5px;
+  color: var(--pulse-fg);
+  font-size: 14px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-bottom: 6px;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  text-wrap: balance;
 }
+.pulse-header-actions { gap: 2px; }
+.pulse-date { margin-right: 5px; color: var(--pulse-muted); font-size: 10px; }
 
-.island-planning-empty {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.38);
-  text-align: center;
-  padding: 6px 0 2px;
-}
-
-.island-todo-row,
-.island-event-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 2px;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.78);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.island-todo-row .check {
-  width: 13px;
-  height: 13px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  color: transparent;
-}
-
-.island-todo-row.overdue .check {
-  border-color: #ef4444;
-}
-
-.island-todo-row .todo-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.island-todo-row.overdue .todo-title {
-  color: #ff9a8a;
-}
-
-.island-todo-row .todo-due {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.45);
-  flex-shrink: 0;
-}
-
-.island-event-row .event-time {
-  font-size: 9px;
-  font-weight: 600;
-  color: #7fb0ff;
-  width: 34px;
-  flex-shrink: 0;
-}
-
-.island-event-row .event-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.island-priority-tag {
-  font-size: 8px;
-  font-weight: 700;
-  padding: 0 4px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.island-priority-tag.high { background: rgba(239, 68, 68, 0.22); color: #ff9a8a; }
-.island-priority-tag.medium { background: rgba(255, 166, 0, 0.18); color: #ffc46b; }
-.island-priority-tag.low { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6); }
-
-/* 空状态 */
-.island-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 26px 0;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.island-empty .mascot-wrap {
-  width: 48px;
-  height: 48px;
-}
-
-.island-empty-text {
-  font-size: 10px;
-}
-
-/* 滚动条 */
-.island-sessions::-webkit-scrollbar {
-  width: 4px;
-}
-.island-sessions::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 4px;
-}
-.island-sessions::-webkit-scrollbar-track {
+.pulse-icon-button {
+  position: relative;
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: rgb(255 255 255 / 0.58);
   background: transparent;
+  cursor: pointer;
+  transition-property: background-color, color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-icon-button::before { position: absolute; width: 40px; height: 40px; content: ''; }
+.pulse-icon-button:hover { color: #fff; background: var(--pulse-hover); }
+.pulse-icon-button:active,
+.pulse-attention-item:active,
+.pulse-session-item:active,
+.pulse-plan-row:active,
+.pulse-text-button:active { transform: scale(0.96); }
+
+.pulse-section { padding: 13px 14px; }
+.pulse-section + .pulse-section { border-top: 1px solid var(--pulse-line); }
+.pulse-attention-section { background: linear-gradient(115deg, rgb(44 215 198 / 0.105), transparent 48%); }
+.pulse-section-heading { display: flex; min-height: 28px; align-items: center; gap: 8px; }
+.pulse-section-icon {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(138 167 255 / 0.18);
+  border-radius: 9px;
+  color: #adc0ff;
+  background: rgb(138 167 255 / 0.12);
+}
+.pulse-section-icon.attention { border-color: rgb(44 215 198 / 0.22); color: #61e5d8; background: rgb(44 215 198 / 0.13); }
+.pulse-section-heading > div { min-width: 0; flex: 1; }
+.pulse-section-heading h2 { color: var(--pulse-fg); font-size: 11px; font-weight: 700; letter-spacing: -0.012em; line-height: 1.2; }
+.pulse-section-heading p { margin-top: 2px; overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgb(44 215 198 / 0.22);
+  border-radius: 8px;
+  color: #61e5d8;
+  background: rgb(44 215 198 / 0.13);
+  font-size: 10px;
+  font-weight: 750;
+}
+.pulse-count.neutral { border-color: rgb(255 255 255 / 0.10); color: rgb(255 255 255 / 0.65); background: rgb(255 255 255 / 0.07); }
+
+.pulse-attention-list,
+.pulse-session-list { display: grid; gap: 5px; margin-top: 9px; }
+.pulse-attention-item,
+.pulse-session-item,
+.pulse-plan-row { width: 100%; border: 0; font: inherit; text-align: left; cursor: pointer; }
+
+.pulse-attention-item {
+  display: grid;
+  min-height: 40px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 11px;
+  color: var(--pulse-fg);
+  background: rgb(255 255 255 / 0.06);
+  transition-property: background-color, border-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-attention-item:hover { border-color: rgb(44 215 198 / 0.30); background: rgb(255 255 255 / 0.105); }
+.pulse-state-dot { width: 7px; height: 7px; border-radius: 50%; background: #8aa7ff; }
+.pulse-state-dot.attention { background: #2cd7c6; box-shadow: 0 0 0 3px rgb(44 215 198 / 0.14); }
+.pulse-state-dot.error { background: #ff6c6c; box-shadow: 0 0 0 3px rgb(255 108 108 / 0.14); }
+.pulse-attention-copy,
+.pulse-session-copy { display: grid; min-width: 0; gap: 2px; }
+.pulse-attention-copy b { overflow: hidden; color: var(--pulse-fg); font-size: 10.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-attention-copy span { overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-item-action,
+.pulse-text-button { display: inline-flex; align-items: center; gap: 3px; color: #adc0ff; font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+
+.pulse-session-item {
+  display: grid;
+  min-height: 49px;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  color: var(--pulse-fg);
+  background: transparent;
+  transition-property: background-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-session-item:hover { background: var(--pulse-hover); }
+.pulse-session-title-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.pulse-session-title-row b { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-phase { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: #ffb077; background: rgb(255 132 38 / 0.13); font-size: 8px; font-weight: 700; }
+.pulse-phase.attention { color: #61e5d8; background: rgb(44 215 198 / 0.13); }
+.pulse-session-detail,
+.pulse-activity { overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-activity { color: rgb(255 255 255 / 0.39); font-size: 8.5px; }
+.pulse-activity.tool { color: #adc0ff; }
+.pulse-activity.status { color: #ffb077; }
+.pulse-session-arrow { color: rgb(255 255 255 / 0.55); opacity: 0; transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-session-item:hover .pulse-session-arrow { opacity: 0.85; transform: translate(1px, -1px); }
+.pulse-empty-state { display: flex; min-height: 45px; align-items: center; justify-content: center; gap: 6px; color: var(--pulse-muted); font-size: 10px; }
+
+/* ===== 今日规划：在展开态占满刘海下方的可用宽度 ===== */
+
+.pulse-plan-section { padding-bottom: 14px; }
+.pulse-text-button { min-height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-text-button:hover { opacity: 0.72; }
+.pulse-planning-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 10px; }
+.pulse-plan-column { min-width: 0; padding: 8px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 12px; background: rgb(255 255 255 / 0.045); }
+.pulse-plan-label { display: flex; height: 18px; align-items: center; gap: 5px; color: rgb(255 255 255 / 0.53); font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+.pulse-plan-label svg { color: #adc0ff; }
+.pulse-plan-label span { display: inline-grid; min-width: 16px; height: 16px; place-items: center; border-radius: 5px; color: #fff; background: rgb(255 255 255 / 0.09); font-size: 8px; }
+.pulse-plan-row { display: grid; min-height: 31px; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 4px 2px; border-radius: 6px; color: var(--pulse-fg); transition-property: background-color, transform; transition-duration: 130ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-plan-row:hover { background: rgb(255 255 255 / 0.085); }
+.pulse-plan-row.event { grid-template-columns: 31px minmax(0, 1fr); }
+.pulse-checkbox { width: 10px; height: 10px; box-sizing: border-box; border: 1px solid rgb(255 255 255 / 0.42); border-radius: 3px; }
+.pulse-plan-title { min-width: 0; overflow: hidden; font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-plan-time { color: rgb(255 255 255 / 0.46); font-size: 8.5px; white-space: nowrap; }
+.pulse-plan-row.event .pulse-plan-time { color: #adc0ff; font-weight: 650; }
+.pulse-plan-row.overdue .pulse-checkbox { border-color: #ff6c6c; }
+.pulse-plan-row.overdue .pulse-plan-title,
+.pulse-plan-row.overdue .pulse-plan-time { color: #ff9696; }
+.pulse-plan-empty { display: flex; min-height: 47px; align-items: center; justify-content: center; color: var(--pulse-muted); font-size: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-glyph.running .pulse-glyph-orbit,
+  .pulse-glyph.attention .pulse-glyph-core,
+  .pulse-glyph.error .pulse-glyph-core { animation: none; }
+  .pulse-icon-button,
+  .pulse-attention-item,
+  .pulse-session-item,
+  .pulse-plan-row,
+  .pulse-text-button,
+  .pulse-session-arrow { transition-duration: 0ms; }
 }

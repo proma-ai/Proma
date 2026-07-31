@@ -1109,6 +1109,7 @@ if (isQuickTaskWindow) {
   import('./components/agent-island/AgentIslandApp').then(({ AgentIslandApp }) => {
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
+        <ThemeInitializer />
         <AgentIslandApp />
       </React.StrictMode>
     )

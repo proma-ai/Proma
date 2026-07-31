@@ -54,17 +54,70 @@ export interface AgentIslandPillSnapshot {
   unreadCompletedCount: number
 }
 
+/** 灵动岛展示生命周期；主进程为唯一状态真源。 */
+export type AgentIslandPresentation = 'hidden' | 'compact' | 'expanded'
+
 /** 主进程推送给灵动岛窗口的全量状态 */
 export interface AgentIslandState {
   /** 是否显示（服务未就绪或用户关闭时为 false） */
   visible: boolean
-  /** 是否展开卡片 */
+  /** 展示生命周期，避免渲染层自行推断隐藏/收起/展开。 */
+  presentation: AgentIslandPresentation
+  /** 是否展开卡片；为现有 Electron fallback 保留的便利字段。 */
   expanded: boolean
   pill: AgentIslandPillSnapshot
   sessions: AgentIslandSessionSnapshot[]
   totalCount: number
   updatedAt: number
 }
+
+/** 原生 macOS 灵动岛需要的最小 Todo 投影（不泄露 notes/tags 等详情）。 */
+export interface AgentIslandPlanningTodoSnapshot {
+  id: string
+  title: string
+  dueAt?: number
+  priority: 'low' | 'medium' | 'high'
+  isOverdue: boolean
+}
+
+/** 原生 macOS 灵动岛需要的最小日程投影。 */
+export interface AgentIslandPlanningEventSnapshot {
+  id: string
+  title: string
+  startAt: number
+  endAt?: number
+  allDay: boolean
+}
+
+export interface AgentIslandPlanningSnapshot {
+  dayStart: number
+  dayEnd: number
+  todos: AgentIslandPlanningTodoSnapshot[]
+  events: AgentIslandPlanningEventSnapshot[]
+  overdueTodoCount: number
+}
+
+/** TypeScript 主进程 → macOS Swift helper 的 JSONL 全量状态。 */
+export interface NativeAgentIslandSnapshot {
+  type: 'snapshot'
+  protocol: 1
+  revision: number
+  state: AgentIslandState
+  planning: AgentIslandPlanningSnapshot
+}
+
+/** macOS Swift helper → TypeScript 主进程的受限交互意图。 */
+export type NativeAgentIslandEvent =
+  | { type: 'ready'; protocol: 1 }
+  | { type: 'intent'; name: 'set-expanded'; expanded: boolean }
+  /** 原生 surface 的悬停状态；主进程决定延迟展开/收起，不在 Swift 中藏产品状态。 */
+  | { type: 'intent'; name: 'set-hovered'; hovered: boolean }
+  | { type: 'intent'; name: 'open-main' }
+  | { type: 'intent'; name: 'open-session'; sessionId: string }
+  | { type: 'intent'; name: 'open-planning' }
+  /** 用户主动关闭当前提醒；主进程决定何时因新的状态再次出现。 */
+  | { type: 'intent'; name: 'dismiss' }
+  | { type: 'fatal'; message: string }
 
 export interface AgentIslandResizeRequest {
   width: number
@@ -79,6 +132,8 @@ export interface AgentIslandMoveRequest {
 export const AGENT_ISLAND_IPC_CHANNELS = {
   /** main → renderer：全量状态推送 */
   STATE: 'agent-island:state',
+  /** renderer → main：同步展开/收起真值 */
+  SET_EXPANDED: 'agent-island:set-expanded',
   /** renderer → main：按内容调整窗口尺寸 */
   RESIZE: 'agent-island:resize',
   /** renderer → main：移动窗口位置（拖拽） */
