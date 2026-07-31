@@ -13,7 +13,7 @@
  * - 自动扩高
  */
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { useAtomValue } from 'jotai'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -30,7 +30,7 @@ import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
-import { getFilePanelDragData } from '@/lib/file-panel-drag'
+import { getFilePanelDragData, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import {
   createMcpMentionSuggestion,
   createPlanningMentionSuggestion,
@@ -146,13 +146,19 @@ interface RichTextInputProps {
   className?: string
 }
 
+/** RichTextInput 对外暴露的命令接口 */
+export interface RichTextInputHandle {
+  /** 在光标处插入文件引用（右侧文件面板拖入时调用） */
+  insertFileMentions: (items: FilePanelDragItem[]) => void
+}
+
 /**
  * 富文本输入组件
  * - 基于 TipTap 的 WYSIWYG 编辑器
  * - 支持 Markdown 快捷输入
  * - 无工具栏，纯净输入体验
  */
-export function RichTextInput({
+export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>(function RichTextInput({
   value,
   onChange,
   onSubmit,
@@ -174,7 +180,7 @@ export function RichTextInput({
   htmlValue,
   onHtmlChange,
   sendWithCmdEnter = false,
-}: RichTextInputProps): React.ReactElement {
+}: RichTextInputProps, ref: React.Ref<RichTextInputHandle>): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
   // 手动折叠状态：用户主动折叠输入框
@@ -725,6 +731,29 @@ export function RichTextInput({
     }
   }, [editor, disabled, autoFocusTrigger])
 
+  // 对外暴露命令接口：右侧文件面板拖入时，在光标处插入 @file 引用 mention。
+  // mention 节点沿用 TipTap Mention 扩展的 attrs（id=路径，label=文件名），
+  // 发送时由 htmlToMarkdown 序列化为 @file:{path}，与键盘 @ 引用行为完全一致。
+  useImperativeHandle(ref, () => ({
+    insertFileMentions(items: FilePanelDragItem[]): void {
+      if (!editor || items.length === 0) return
+      let chain = editor.chain().focus()
+      for (const item of items) {
+        chain = chain
+          .insertContent({
+            type: 'mention',
+            attrs: {
+              id: item.path,
+              label: item.name,
+              mentionSuggestionChar: '@',
+            },
+          })
+          .insertContent(' ')
+      }
+      chain.run()
+    },
+  }), [editor])
+
   // 语音输入回填：优先插入到当前编辑器的光标位置。
   useEffect(() => {
     if (!editor || disabled) return
@@ -951,4 +980,4 @@ export function RichTextInput({
       `}</style>
     </div>
   )
-}
+})

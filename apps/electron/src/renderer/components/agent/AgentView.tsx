@@ -30,7 +30,7 @@ import { PlanModeDashedBorder } from './PlanModeDashedBorder'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
-import { RichTextInput } from '@/components/ai-elements/rich-text-input'
+import { RichTextInput, type RichTextInputHandle } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
 import {
@@ -119,7 +119,7 @@ import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
 import { inferAgentSdkContextWindow, inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
-import { getFilePanelDragData, getMediaTypeFromFilename } from '@/lib/file-panel-drag'
+import { getFilePanelDragData } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import {
@@ -739,6 +739,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
   const pendingFilesRef = React.useRef(pendingFiles)
+  // RichTextInput 命令接口 ref（右侧文件面板拖入时插入 @file 引用）
+  const richTextInputRef = React.useRef<RichTextInputHandle>(null)
   React.useEffect(() => {
     pendingFilesRef.current = pendingFiles
   }, [pendingFiles])
@@ -1843,25 +1845,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [addClipboardTextDraft])
 
-  /** 将右侧文件面板拖入的文件添加为引用（sourcePath 直接引用原路径，等同于「添加到聊天」） */
-  const addPanelFileReferences = React.useCallback((items: Array<{ path: string; name: string }>): void => {
-    const usedNames: string[] = pendingFilesRef.current.map((f) => f.filename)
-    for (const item of items) {
-      if (pendingFilesRef.current.some((f) => f.sourcePath === item.path)) continue
-      const uniqueFilename = makeUniqueFilename(item.name, usedNames)
-      usedNames.push(uniqueFilename)
-
-      const pending: AgentPendingFile = {
-        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        filename: uniqueFilename,
-        mediaType: getMediaTypeFromFilename(item.name),
-        size: 0,
-        sourcePath: item.path,
-      }
-      setPendingFiles((prev) => [...prev, pending])
-    }
-  }, [makeUniqueFilename, setPendingFiles])
-
   /** 将右侧文件面板拖入的目录附加到会话 */
   const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<void> => {
     try {
@@ -1905,7 +1888,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const files = panelItems.filter((item) => !item.isDirectory)
       const dirs = panelItems.filter((item) => item.isDirectory)
       if (files.length > 0) {
-        addPanelFileReferences(files)
+        // 在输入框光标处插入 @file 引用（与键盘 @ 引用行为一致，跟随输入对话内容）
+        richTextInputRef.current?.insertFileMentions(files)
       }
       for (const dir of dirs) {
         await addPanelDirectory(dir.path)
@@ -1971,7 +1955,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, addPanelFileReferences, addPanelDirectory, setAttachedDirsMap])
+  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
@@ -3153,6 +3137,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             )}
 
             <RichTextInput
+              ref={richTextInputRef}
               value={inputContent}
               onChange={setInputContent}
               onSubmit={handleSend}
