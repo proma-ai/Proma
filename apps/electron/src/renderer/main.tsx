@@ -60,6 +60,7 @@ import {
   initializeBilling,
 } from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
+import { clearPlanQuotaCache } from './lib/channel-plan-quota'
 // 通知
 import {
   notificationsEnabledAtom,
@@ -521,6 +522,9 @@ function BillingInitializer(): null {
     if (!isCloudMode() || !user) return
 
     const unsubBillingChanged = window.electronAPI.cloudBilling.onBillingChanged(() => {
+      // 账单已变动（对话扣费/充值/订阅变化），失效渠道额度缓存后再拉取最新余额，
+      // 保证上下文窗口/模型选择器里的 Proma 官方余额立即刷新。
+      clearPlanQuotaCache()
       window.electronAPI.cloudBilling.getBilling().then((result) => {
         if (result.success && result.data) {
           setBillingInfo(result.data)
