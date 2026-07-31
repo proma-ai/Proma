@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+// The content only needs to clear the lower curve by its radius plus a small
+// optical gap; this is not a large fixed blank area.
+private let expandedBottomCornerRadius: CGFloat = 32
+private let expandedBottomCornerClearance: CGFloat = 32
+
 // Proma macOS Agent Island native host.
 // JSON Lines stdin/stdout protocol: TypeScript owns product state; this process only
 // owns AppKit geometry, rendering and constrained pointer intents.
@@ -25,9 +30,11 @@ struct Pill: Codable {
 
 struct AgentState: Codable {
   let visible: Bool
+  let hovered: Bool?
   let expanded: Bool
   let pill: Pill
   let sessions: [AgentSession]
+  let recentSessions: [AgentSession]
   let totalCount: Int
   let updatedAt: Double
 }
@@ -56,15 +63,29 @@ struct Planning: Codable {
   let overdueTodoCount: Int
 }
 
+struct PlanQuotaWindow: Codable {
+  let windowLabel: String
+  let remainingPercent: Double
+  let remainingLabel: String?
+}
+
+struct PlanQuota: Codable, Identifiable {
+  let channelName: String
+  let planName: String
+  let windows: [PlanQuotaWindow]
+  var id: String { "\(channelName):\(planName)" }
+}
+
 struct SnapshotMessage: Codable {
   let type: String
   let protocolVersion: Int
   let revision: Int
   let state: AgentState
   let planning: Planning
+  let planQuotas: [PlanQuota]
 
   enum CodingKeys: String, CodingKey {
-    case type, revision, state, planning
+    case type, revision, state, planning, planQuotas
     case protocolVersion = "protocol"
   }
 }
@@ -78,10 +99,13 @@ final class AgentIslandPanel: NSPanel {
 
 final class AgentIslandHostingView: NSHostingView<IslandRootView> {
   private let model: IslandModel
+  private let onHover: (Bool) -> Void
+  private var hovering = false
   override var isOpaque: Bool { false }
 
   required init(rootView: IslandRootView) {
     self.model = rootView.model
+    self.onHover = rootView.hover
     super.init(rootView: rootView)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
@@ -92,8 +116,34 @@ final class AgentIslandHostingView: NSHostingView<IslandRootView> {
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-  // This is a defense-in-depth view-level check. IslandController performs the
-  // actual WindowServer click-through with `ignoresMouseEvents` outside this rect.
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    trackingAreas.forEach(removeTrackingArea)
+    addTrackingArea(NSTrackingArea(
+      rect: bounds,
+      options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    ))
+  }
+
+  override func mouseEntered(with event: NSEvent) { updateHover(at: event) }
+  override func mouseMoved(with event: NSEvent) { updateHover(at: event) }
+  override func mouseExited(with event: NSEvent) { setHover(false) }
+
+  private func updateHover(at event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    setHover(model.isInteractive && model.surfaceRect(in: bounds).contains(point))
+  }
+
+  private func setHover(_ next: Bool) {
+    guard hovering != next else { return }
+    hovering = next
+    onHover(next)
+  }
+
+  // The interactive NSPanel is now frame-fitted to this exact surface. Keep this
+  // check as a final safeguard for the tiny shadow/scale margin around it.
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard model.isInteractive, model.surfaceRect(in: bounds).contains(point) else { return nil }
     return super.hitTest(point)
@@ -159,26 +209,56 @@ struct NotchMetrics {
 
 struct NotchSurfaceShape: Shape {
   let radius: CGFloat
+
   func path(in rect: CGRect) -> Path {
+    let r = min(radius, rect.width / 2, rect.height)
+    // Standard circular Bézier coefficient. Unlike a quadratic approximation,
+    // this keeps both tangents continuous through the full lower transition.
+    let k: CGFloat = 0.552_284_75
     var path = Path()
     path.move(to: CGPoint(x: rect.minX, y: rect.minY))
     path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-    path.addQuadCurve(to: CGPoint(x: rect.maxX - radius, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-    path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - radius), control: CGPoint(x: rect.minX, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+    path.addCurve(
+      to: CGPoint(x: rect.maxX - r, y: rect.maxY),
+      control1: CGPoint(x: rect.maxX, y: rect.maxY - r + k * r),
+      control2: CGPoint(x: rect.maxX - r + k * r, y: rect.maxY)
+    )
+    path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+    path.addCurve(
+      to: CGPoint(x: rect.minX, y: rect.maxY - r),
+      control1: CGPoint(x: rect.minX + r - k * r, y: rect.maxY),
+      control2: CGPoint(x: rect.minX, y: rect.maxY - r + k * r)
+    )
     path.closeSubpath()
     return path
   }
 }
 
-func phaseColor(_ phase: String) -> Color {
-  switch phase {
-  case "running": return Color(red: 1, green: 0.40, blue: 0.05)
-  case "needs-interaction": return Color(red: 0, green: 0.84, blue: 0.77)
-  case "completed": return Color(red: 0.20, green: 0.80, blue: 0.48)
-  case "error": return Color(red: 1, green: 0.35, blue: 0.35)
-  default: return Color(red: 0.55, green: 0.65, blue: 1)
+/// The expanded island should visually merge into the hardware notch at its
+/// top edge. Draw only the sides and continuous lower contour, never a top line.
+struct NotchSurfaceOutline: Shape {
+  let radius: CGFloat
+
+  func path(in rect: CGRect) -> Path {
+    let r = min(radius, rect.width / 2, rect.height)
+    let k: CGFloat = 0.552_284_75
+    var path = Path()
+    path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+    path.addCurve(
+      to: CGPoint(x: rect.maxX - r, y: rect.maxY),
+      control1: CGPoint(x: rect.maxX, y: rect.maxY - r + k * r),
+      control2: CGPoint(x: rect.maxX - r + k * r, y: rect.maxY)
+    )
+    path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+    path.addCurve(
+      to: CGPoint(x: rect.minX, y: rect.maxY - r),
+      control1: CGPoint(x: rect.minX + r - k * r, y: rect.maxY),
+      control2: CGPoint(x: rect.minX, y: rect.maxY - r + k * r)
+    )
+    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+    return path
   }
 }
 
@@ -201,13 +281,59 @@ func timeText(_ value: Double?, allDay: Bool = false) -> String {
   return formatter.string(from: Date(timeIntervalSince1970: value / 1000))
 }
 
-struct StatusDot: View {
-  let phase: String
+struct PlanQuotaCarousel: View {
+  let quotas: [PlanQuota]
+  private let pageSize = 3
+
+  private func quotaText(_ quota: PlanQuota) -> String {
+    quota.windows.map { window in
+      "\(window.windowLabel) \(window.remainingLabel ?? "\(Int(window.remainingPercent.rounded()))%")"
+    }.joined(separator: " · ")
+  }
+
   var body: some View {
-    Circle()
-      .fill(phaseColor(phase))
-      .frame(width: 8, height: 8)
-      .shadow(color: phaseColor(phase).opacity(0.7), radius: 5)
+    TimelineView(.periodic(from: .now, by: 5)) { timeline in
+      if quotas.isEmpty {
+        // Reserve the notch-safe band even when no configured Plan exposes quota.
+        Color.clear
+      } else {
+        let pageCount = Int(ceil(Double(quotas.count) / Double(pageSize)))
+        let page = Int(timeline.date.timeIntervalSinceReferenceDate / 5) % pageCount
+        let start = page * pageSize
+        let visible = Array(quotas.dropFirst(start).prefix(pageSize))
+        VStack(alignment: .leading, spacing: 4) {
+          Text("剩余额度")
+            .font(.system(size: 10.5, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(.white.opacity(0.78))
+            .frame(height: 13)
+          ForEach(visible) { quota in
+            HStack(spacing: 6) {
+              Text(quota.channelName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.84))
+                .lineLimit(1)
+              if quota.planName != quota.channelName {
+                Text("· \(quota.planName)")
+                  .font(.system(size: 9.5, weight: .medium))
+                  .foregroundStyle(.white.opacity(0.44))
+                  .lineLimit(1)
+              }
+              Spacer(minLength: 8)
+              Text(quotaText(quota))
+                .font(.system(size: 9.5, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+            }
+            .frame(height: 16)
+          }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 34)
+        .transition(.opacity)
+      }
+    }
   }
 }
 
@@ -216,32 +342,56 @@ struct CompactIslandView: View {
   let height: CGFloat
   let action: (String, [String: Any]) -> Void
 
-  private var headline: String {
-    if let session = snapshot.state.sessions.first { return session.detail.isEmpty ? session.title : session.detail }
+  private var primarySession: AgentSession? { snapshot.state.sessions.first }
+
+  private var planningIndicator: (symbol: String, label: String, color: Color)? {
     let now = Date().timeIntervalSince1970 * 1000
-    if let event = snapshot.planning.events.first(where: { $0.startAt >= now }) {
-      return "即将开始 · \(event.title)"
+    let imminentEnd = now + 60 * 60 * 1000
+    let nextEvent = snapshot.planning.events.first(where: { $0.startAt >= now && $0.startAt <= imminentEnd })
+    let nextTodo = snapshot.planning.todos.first(where: { ($0.dueAt ?? 0) >= now && ($0.dueAt ?? 0) <= imminentEnd })
+    switch (nextEvent, nextTodo) {
+    case let (.some(event), .some(todo)):
+      return event.startAt <= (todo.dueAt ?? Double.greatestFiniteMagnitude)
+        ? ("calendar", "即将日程", Color(red: 0.62, green: 0.72, blue: 1))
+        : ("checklist", "即将到期", Color(red: 1, green: 0.66, blue: 0.22))
+    case (.some, .none):
+      return ("calendar", "即将日程", Color(red: 0.62, green: 0.72, blue: 1))
+    case (.none, .some):
+      return ("checklist", "即将到期", Color(red: 1, green: 0.66, blue: 0.22))
+    case (.none, .none):
+      return nil
     }
-    if let todo = snapshot.planning.todos.first(where: { ($0.dueAt ?? 0) >= now }) {
-      return "即将到期 · \(todo.title)"
+  }
+
+  private var compactLabel: String {
+    if let session = primarySession {
+      return "Proma · \(phaseText(session.phase))"
     }
-    return "工作提醒"
+    if !snapshot.state.recentSessions.isEmpty {
+      return "Proma · 最近会话"
+    }
+    return planningIndicator?.label ?? "工作提醒"
   }
 
   var body: some View {
-    let primary = snapshot.state.sessions.first
     Button(action: { action("set-expanded", ["expanded": true]) }) {
-      HStack(spacing: 7) {
-        StatusDot(phase: primary?.phase ?? "idle")
-        Text(headline)
+      HStack(spacing: 8) {
+        if primarySession == nil, let indicator = planningIndicator {
+          Image(systemName: indicator.symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(indicator.color)
+            .frame(width: 14)
+        } else if primarySession == nil {
+          Image(systemName: "bell")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.65))
+            .frame(width: 14)
+        }
+        Text(compactLabel)
           .font(.system(size: 10.5, weight: .semibold))
           .lineLimit(1)
           .foregroundStyle(.white.opacity(0.92))
         Spacer(minLength: 6)
-        Text("\(snapshot.planning.todos.count) 待办 · \(snapshot.planning.events.count) 日程")
-          .font(.system(size: 8.5, weight: .medium))
-          .monospacedDigit()
-          .foregroundStyle(.white.opacity(0.5))
         Image(systemName: "chevron.down")
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(.white.opacity(0.46))
@@ -272,51 +422,107 @@ struct ExpandedIslandView: View {
   let snapshot: SnapshotMessage
   let action: (String, [String: Any]) -> Void
 
+  private var primaryPhase: String? { snapshot.state.sessions.first?.phase }
+  private var isPersistentRecentDashboard: Bool {
+    snapshot.state.sessions.isEmpty
+      && snapshot.planning.todos.isEmpty
+      && snapshot.planning.events.isEmpty
+      && !snapshot.state.recentSessions.isEmpty
+  }
+  private var displayedSessions: [AgentSession] {
+    isPersistentRecentDashboard ? snapshot.state.recentSessions : snapshot.state.sessions
+  }
+  private var contentMode: String {
+    if !snapshot.state.sessions.isEmpty { return "live" }
+    if isPersistentRecentDashboard { return "recent" }
+    return "planning"
+  }
+
+  private var headerEyebrow: String {
+    switch primaryPhase {
+    case "needs-interaction": return "PROMA · HANDOFF"
+    case .some: return "PROMA · AGENT"
+    case .none: return "PROMA · REMINDER"
+    }
+  }
+
+  private var headerTitle: String {
+    switch primaryPhase {
+    case "running": return "正在执行"
+    case "needs-interaction": return "需要你接手"
+    case "completed": return "任务已完成"
+    case "error": return "执行需要关注"
+    case .some: return "Agent 状态更新"
+    case .none: return "即将开始"
+    }
+  }
+
   var body: some View {
     VStack(spacing: 0) {
-      ZStack {
-        // 顶部空白处本身是收起手势；覆盖层位于底部，操作按钮位于上层，不抢夺按钮点击。
-        Button(action: { action("set-expanded", ["expanded": false]) }) {
-          Color.clear.contentShape(Rectangle())
-        }.buttonStyle(.plain)
-        HStack(spacing: 10) {
-          StatusDot(phase: snapshot.state.sessions.first?.phase ?? "idle")
-          VStack(alignment: .leading, spacing: 2) {
-            Text(snapshot.state.sessions.isEmpty ? "PROMA · REMINDER" : "PROMA · HANDOFF")
-              .font(.system(size: 8, weight: .bold)).tracking(1.1).foregroundStyle(.white.opacity(0.42))
-            Text(snapshot.state.sessions.isEmpty ? "即将开始" : "需要你接手")
-              .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-          }
-          Spacer()
-          Button(action: { action("open-main", [:]) }) {
-            Image(systemName: "arrow.up.right").frame(width: 26, height: 26)
-          }.buttonStyle(IslandButtonStyle())
-          Button(action: { action("dismiss", [:]) }) {
-            Image(systemName: "xmark").frame(width: 26, height: 26)
-          }.buttonStyle(IslandButtonStyle())
-        }
-        .padding(.horizontal, 18)
-      }
-      .frame(height: 46)
-
+      // 计划是唯一内容时，直接展示可操作的信息卡；不再浪费一行
+      // “即将开始”标题。Agent 会话存在时才保留状态头与打开入口。
       if !snapshot.state.sessions.isEmpty {
+        ZStack {
+          // 顶部空白处本身是收起手势；覆盖层位于底部，操作按钮位于上层，不抢夺按钮点击。
+          Button(action: { action("set-expanded", ["expanded": false]) }) {
+            Color.clear.contentShape(Rectangle())
+          }.buttonStyle(.plain)
+          HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(headerEyebrow)
+                .font(.system(size: 9, weight: .bold)).tracking(1.1).foregroundStyle(.white.opacity(0.62))
+              Text(headerTitle)
+                .font(.system(size: 15.5, weight: .bold)).foregroundStyle(.white.opacity(0.98))
+            }
+            Spacer()
+            Button(action: { action("open-main", [:]) }) {
+              HStack(spacing: 5) {
+                Text("打开 Proma")
+                Image(systemName: "arrow.up.right")
+              }
+              .font(.system(size: 10, weight: .semibold))
+              .padding(.horizontal, 9)
+              .frame(height: 26)
+            }.buttonStyle(IslandButtonStyle())
+          }
+          .padding(.horizontal, 18)
+        }
+        .frame(height: 46)
+      } else {
+        // The compact notch is a real physical exclusion zone. Keep planning
+        // content below it and use that otherwise-empty band for Plan usage.
+        PlanQuotaCarousel(quotas: snapshot.planQuotas)
+          .frame(height: snapshot.planQuotas.isEmpty ? 56 : 108)
+      }
+
+      if !displayedSessions.isEmpty {
         Divider().overlay(.white.opacity(0.11))
-        VStack(spacing: 5) {
-          ForEach(snapshot.state.sessions.prefix(3)) { session in
+        VStack(alignment: .leading, spacing: 5) {
+          if isPersistentRecentDashboard {
+            Text("最近 Agent")
+              .font(.system(size: 11, weight: .bold))
+              .foregroundStyle(.white.opacity(0.78))
+              .padding(.horizontal, 4)
+              .padding(.bottom, 2)
+          }
+          ForEach(displayedSessions.prefix(3)) { session in
             Button(action: { action("open-session", ["sessionId": session.sessionId]) }) {
-              HStack(spacing: 9) {
-                StatusDot(phase: session.phase)
-                VStack(alignment: .leading, spacing: 3) {
-                  HStack(spacing: 5) {
-                    Text(session.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Text(phaseText(session.phase)).font(.system(size: 8, weight: .bold)).foregroundStyle(phaseColor(session.phase))
-                  }
-                  Text(session.detail.isEmpty ? "正在等待下一步" : session.detail).font(.system(size: 9.5)).lineLimit(1).foregroundStyle(.white.opacity(0.55))
+              HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                  // The island reports a human-readable phase, rather than the
+                  // rapidly changing tool stream that created it.
+                  Text(phaseText(session.phase))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.98))
+                  Text(session.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .foregroundStyle(.white.opacity(0.62))
                 }
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
               }
-              .padding(.horizontal, 10).frame(height: 43)
+              .padding(.horizontal, 11).frame(height: 46)
               .background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 10))
             }.buttonStyle(.plain)
           }
@@ -324,30 +530,54 @@ struct ExpandedIslandView: View {
       }
 
       if !snapshot.planning.todos.isEmpty || !snapshot.planning.events.isEmpty {
-        Divider().overlay(.white.opacity(0.11))
-        HStack(alignment: .top, spacing: 9) {
-        PlanningColumn(title: "今日待办", symbol: "checklist", count: snapshot.planning.todos.count) {
-          ForEach(snapshot.planning.todos.prefix(3)) { todo in
-            HStack(spacing: 5) {
-              RoundedRectangle(cornerRadius: 2).stroke(todo.isOverdue ? Color.red : Color.white.opacity(0.45), lineWidth: 1).frame(width: 9, height: 9)
-              Text(todo.title).lineLimit(1)
-              Spacer()
-              Text(timeText(todo.dueAt)).foregroundStyle(todo.isOverdue ? .red.opacity(0.9) : .white.opacity(0.45))
-            }
-          }
+        if !displayedSessions.isEmpty {
+          Divider().overlay(.white.opacity(0.11))
         }
-        PlanningColumn(title: "今日日程", symbol: "calendar", count: snapshot.planning.events.count) {
-          ForEach(snapshot.planning.events.prefix(3)) { event in
-            HStack(spacing: 5) {
-              Text(timeText(event.startAt, allDay: event.allDay)).foregroundStyle(Color(red: 0.62, green: 0.72, blue: 1)).frame(width: 30, alignment: .leading)
-              Text(event.title).lineLimit(1)
-            }
+        HStack(alignment: .top, spacing: 12) {
+          if !snapshot.planning.todos.isEmpty {
+            Button(action: { action("open-main", [:]) }) {
+              PlanningColumn(title: "今日待办", symbol: "checklist", count: snapshot.planning.todos.count) {
+                ForEach(snapshot.planning.todos.prefix(3)) { todo in
+                  HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2.5).stroke(todo.isOverdue ? Color.red : Color.white.opacity(0.5), lineWidth: 1.2).frame(width: 11, height: 11)
+                    Text(todo.title).lineLimit(1)
+                    Spacer()
+                    Text(timeText(todo.dueAt)).foregroundStyle(todo.isOverdue ? .red.opacity(0.9) : .white.opacity(0.5))
+                  }
+                  .frame(height: 20)
+                }
+              }
+            }.buttonStyle(.plain)
           }
-        }
+          if !snapshot.planning.events.isEmpty {
+            Button(action: { action("open-main", [:]) }) {
+              PlanningColumn(title: "今日日程", symbol: "calendar", count: snapshot.planning.events.count) {
+                ForEach(snapshot.planning.events.prefix(3)) { event in
+                  HStack(spacing: 6) {
+                    Text(timeText(event.startAt, allDay: event.allDay)).foregroundStyle(Color(red: 0.62, green: 0.72, blue: 1)).frame(width: 36, alignment: .leading)
+                    Text(event.title).lineLimit(1)
+                  }
+                  .frame(height: 20)
+                }
+              }
+            }.buttonStyle(.plain)
+          }
         }
         .padding(14)
       }
     }
+    // A small optical inset keeps the content from feeling attached to the
+    // hardware notch, while the lower inset protects the continuous curve.
+    .padding(.top, 8)
+    .padding(.bottom, expandedBottomCornerClearance)
+    // Replace the live Agent stack and the idle recent-session dashboard as
+    // distinct views, so a completion feels like a calm handoff, not a cut.
+    .id(contentMode)
+    .transition(.asymmetric(
+      insertion: .opacity.combined(with: .move(edge: .top)),
+      removal: .opacity.combined(with: .move(edge: .bottom))
+    ))
+    .animation(.easeInOut(duration: 0.36), value: contentMode)
   }
 }
 
@@ -366,31 +596,42 @@ struct PlanningColumn<Content: View>: View {
   @ViewBuilder let content: Content
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 4) {
-        Image(systemName: symbol).font(.system(size: 9)).foregroundStyle(Color(red: 0.62, green: 0.72, blue: 1))
-        Text(title).font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.62))
-        Text("\(count)").font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.72))
+      HStack(spacing: 5) {
+        Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(red: 0.62, green: 0.72, blue: 1))
+        Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.9))
+        Text("\(count)").font(.system(size: 10.5, weight: .bold)).foregroundStyle(.white.opacity(0.88))
       }
-      content.font(.system(size: 9.5)).foregroundStyle(.white.opacity(0.80)).frame(maxWidth: .infinity, alignment: .leading)
-      if count == 0 { Text("暂无事项").font(.system(size: 9)).foregroundStyle(.white.opacity(0.40)) }
+      content.font(.system(size: 11)).foregroundStyle(.white.opacity(0.86)).frame(maxWidth: .infinity, alignment: .leading)
+      if count == 0 { Text("暂无事项").font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.45)) }
     }
-    .padding(9).frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+    .padding(13).frame(maxWidth: .infinity, alignment: .topLeading)
+    .compositingGroup()
+    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
   }
 }
 
 struct IslandRootView: View {
   @ObservedObject var model: IslandModel
   let action: (String, [String: Any]) -> Void
+  let hover: (Bool) -> Void
 
   var body: some View {
     let expanded = model.snapshot?.state.expanded == true
-    let shape = NotchSurfaceShape(radius: expanded ? 24 : 16)
+    let hovered = model.snapshot?.state.hovered == true
+    // A deliberately generous lower radius makes the expanded island read as
+    // one continuous macOS surface, even against a black desktop wallpaper.
+    let cornerRadius = expanded ? expandedBottomCornerRadius : (hovered ? 18 : 16)
+    let shape = NotchSurfaceShape(radius: cornerRadius)
+    let outline = NotchSurfaceOutline(radius: cornerRadius)
     ZStack(alignment: .top) {
       // This is intentionally only the visible surface, not the enclosing panel.
       // The rest of the fixed panel remains transparent and click-through.
       ZStack(alignment: .top) {
-        shape.fill(Color.black)
+        shape.fill(expanded
+          ? Color(red: 0.035, green: 0.035, blue: 0.035)
+          : Color.black)
         if let snapshot = model.snapshot, snapshot.state.visible {
           if snapshot.state.expanded {
             ExpandedIslandView(snapshot: snapshot, action: action)
@@ -403,33 +644,59 @@ struct IslandRootView: View {
       }
       .compositingGroup()
       .clipShape(shape)
-      .overlay(alignment: .bottom) {
-        Rectangle().fill(.white.opacity(0.10)).frame(height: 1).padding(.horizontal, 18)
+      .overlay {
+        // Keep the expanded silhouette legible against a dark desktop so its
+        // lower continuous corners do not disappear into the background.
+        if expanded {
+          ZStack {
+            // A soft outer pass first, then a crisp inner edge: the result
+            // reads as one rounded macOS surface instead of a hard rectangle.
+            outline.stroke(.white.opacity(0.08), lineWidth: 3)
+            outline.stroke(.white.opacity(0.20), lineWidth: 1.2)
+          }
+        } else if hovered {
+          shape.stroke(.white.opacity(0.15), lineWidth: 1)
+        }
       }
+      .overlay(alignment: .bottom) {
+        // The compact notch keeps its subtle underline; the expanded surface
+        // relies on its rounded silhouette instead of ending in a hard line.
+        if !expanded {
+          Rectangle().fill(.white.opacity(hovered ? 0.16 : 0.10)).frame(height: 1).padding(.horizontal, 18)
+        }
+      }
+      .shadow(color: .black.opacity(hovered && !expanded ? 0.42 : 0.26), radius: hovered && !expanded ? 10 : 5, y: hovered && !expanded ? 3 : 1)
+      .scaleEffect(hovered && !expanded ? 1.012 : 1, anchor: .top)
       .frame(width: model.surfaceSize.width, height: model.surfaceSize.height, alignment: .top)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .animation(.easeOut(duration: 0.18), value: expanded)
+    .animation(.timingCurve(0.2, 0, 0, 1, duration: 0.16), value: hovered)
+    .animation(.timingCurve(0.2, 0, 0, 1, duration: 0.22), value: expanded)
   }
 }
 
 @MainActor
 final class IslandController {
   private static let maximumWidth: CGFloat = 620
-  private static let maximumHeight: CGFloat = 500
+  // Large enough that lower contour clearance, not an arbitrary panel cap,
+  // determines the expanded layout for current 3-session + 4+4 planning data.
+  private static let maximumHeight: CGFloat = 640
 
   private let model = IslandModel()
   private let panel: AgentIslandPanel
   private var screen: NSScreen
   private var latestMessage: SnapshotMessage?
   private var screenObserver: NSObjectProtocol?
-  private var pointerTimer: Timer?
-  private var pointerInsideSurface = false
 
   init() {
     screen = Self.preferredScreen() ?? NSScreen.main ?? NSScreen.screens[0]
-    let frame = Self.maximumFrame(for: screen)
-    panel = AgentIslandPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    let metrics = NotchMetrics(screen: screen)
+    panel = AgentIslandPanel(
+      contentRect: Self.topFrame(screen: screen, width: max(metrics.compactWidth, 1), height: max(metrics.height, 1)),
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = false
@@ -437,14 +704,13 @@ final class IslandController {
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 2)
     panel.acceptsMouseMovedEvents = true
-    // A fixed transparent window normally swallows mouse input even if hitTest
-    // returns nil. Gate it at WindowServer level and turn it on only under surface.
     panel.ignoresMouseEvents = true
-    panel.contentView = AgentIslandHostingView(rootView: IslandRootView(model: model, action: emitIntent))
-    pointerTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.updatePointerTracking() }
-    }
-    if let pointerTimer { RunLoop.main.add(pointerTimer, forMode: .common) }
+    let hosting = AgentIslandHostingView(rootView: IslandRootView(
+      model: model,
+      action: emitIntent,
+      hover: { hovered in emitIntent("set-hovered", ["hovered": hovered]) }
+    ))
+    panel.contentView = hosting
     screenObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,
@@ -456,12 +722,15 @@ final class IslandController {
 
   deinit {
     if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-    pointerTimer?.invalidate()
   }
 
   func apply(_ message: SnapshotMessage) {
+    let animateExpandedResize = latestMessage?.state.expanded == true
+      && message.state.expanded
+      && latestMessage?.state.visible == true
+      && message.state.visible
     latestMessage = message
-    layout(message, forceModelUpdate: false)
+    layout(message, forceModelUpdate: false, animateFrame: animateExpandedResize)
   }
 
   func close() { panel.orderOut(nil) }
@@ -471,76 +740,63 @@ final class IslandController {
     layout(latestMessage, forceModelUpdate: true)
   }
 
-  private func layout(_ message: SnapshotMessage, forceModelUpdate: Bool) {
+  private func layout(_ message: SnapshotMessage, forceModelUpdate: Bool, animateFrame: Bool = false) {
     screen = Self.preferredScreen() ?? NSScreen.main ?? screen
     let metrics = NotchMetrics(screen: screen)
 
-    // Default policy: external / non-notched displays never receive a fake notch
-    // overlay. This avoids covering their system menu-bar controls. A future
-    // explicit top-bar preference can opt in to a separate fallback surface.
+    // Never fake a notch on an external screen. A hidden panel also remains fully
+    // click-through, so it cannot cover system menu-bar controls.
     guard metrics.hasNotch else {
       model.apply(message, screen: screen, surfaceSize: .zero, force: forceModelUpdate)
       panel.ignoresMouseEvents = true
-      setPointerInsideSurface(false)
       panel.orderOut(nil)
       return
     }
 
-    let targetPanelFrame = Self.maximumFrame(for: screen)
-    if panel.frame != targetPanelFrame {
-      // Panel geometry changes only when displays change. Snapshot changes animate
-      // entirely inside the stable transparent panel.
-      panel.setFrame(targetPanelFrame, display: true, animate: false)
-    }
-
     let expanded = message.state.expanded
-    let surfaceWidth = expanded ? min(Self.maximumWidth, screen.frame.width - 32) : metrics.compactWidth
-    let surfaceHeight = expanded ? Self.expandedHeight(for: message) : metrics.height
-    model.apply(message, screen: screen, surfaceSize: CGSize(width: surfaceWidth, height: surfaceHeight), force: forceModelUpdate)
-    if message.state.visible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
-    updatePointerTracking()
-  }
+    let width = expanded ? min(Self.maximumWidth, screen.frame.width - 32) : metrics.compactWidth
+    let height = expanded ? Self.expandedHeight(for: message, width: width) : metrics.height
+    let surfaceSize = CGSize(width: width, height: height)
 
-  private func updatePointerTracking() {
-    guard panel.isVisible, model.isInteractive, let contentView = panel.contentView else {
-      panel.ignoresMouseEvents = true
-      setPointerInsideSurface(false)
-      return
+    // Best practice from CC Island/Open Vibe Island: fit the NSPanel to the real
+    // interactive surface. This avoids a giant transparent WindowServer hit area,
+    // so native AppKit hover and clicks stay immediate without event replays.
+    let targetFrame = Self.topFrame(screen: screen, width: width, height: height)
+    if panel.frame != targetFrame {
+      if animateFrame {
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = 0.36
+          panel.animator().setFrame(targetFrame, display: true)
+        }
+      } else {
+        panel.setFrame(targetFrame, display: true, animate: false)
+      }
     }
-    let inWindow = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
-    let inContent = contentView.convert(inWindow, from: nil)
-    let inside = model.surfaceRect(in: contentView.bounds).contains(inContent)
-    // This is the actual pass-through mechanism: the fixed transparent panel is
-    // removed from WindowServer hit testing everywhere except its visible surface.
-    panel.ignoresMouseEvents = !inside
-    setPointerInsideSurface(inside)
-  }
-
-  private func setPointerInsideSurface(_ next: Bool) {
-    guard pointerInsideSurface != next else { return }
-    pointerInsideSurface = next
-    emitIntent("set-hovered", ["hovered": next])
+    model.apply(message, screen: screen, surfaceSize: surfaceSize, force: forceModelUpdate)
+    panel.ignoresMouseEvents = !message.state.visible
+    panel.acceptsMouseMovedEvents = message.state.visible
+    if message.state.visible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
   }
 
   private static func preferredScreen() -> NSScreen? {
-    // Anchor automatic mode on a real hardware notch rather than focus/main-screen
-    // heuristics, which are unreliable for a non-activating panel on multi-display
-    // setups. This naturally falls back after hot-plug events.
     NSScreen.screens.first(where: { NotchMetrics(screen: $0).hasNotch })
   }
 
-  private static func expandedHeight(for message: SnapshotMessage) -> CGFloat {
-    let sessionRows = min(message.state.sessions.count, 3)
-    let hasPlanning = !message.planning.todos.isEmpty || !message.planning.events.isEmpty
-    let sessionHeight: CGFloat = sessionRows > 0 ? CGFloat(24 + sessionRows * 48) : 0
-    let planningHeight: CGFloat = hasPlanning ? 116 : 0
-    return min(maximumHeight, 46 + sessionHeight + planningHeight)
+  private static func expandedHeight(for message: SnapshotMessage, width: CGFloat) -> CGFloat {
+    // Measure the exact same SwiftUI tree used by the visible surface at its
+    // final width. This avoids a second resize after hover while also avoiding
+    // fragile hand-written font/padding arithmetic that can cut off the curve.
+    let measuringView = NSHostingView(rootView:
+      ExpandedIslandView(snapshot: message, action: { _, _ in })
+        .frame(width: width, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
+    )
+    let height = ceil(measuringView.fittingSize.height)
+    return min(maximumHeight, max(height, 1))
   }
 
-  private static func maximumFrame(for screen: NSScreen) -> NSRect {
-    let width = min(maximumWidth, screen.frame.width - 32)
-    let height = min(maximumHeight, screen.frame.height)
-    return NSRect(x: round(screen.frame.midX - width / 2), y: screen.frame.maxY - height, width: width, height: height)
+  private static func topFrame(screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
+    NSRect(x: round(screen.frame.midX - width / 2), y: screen.frame.maxY - height, width: width, height: height)
   }
 }
 

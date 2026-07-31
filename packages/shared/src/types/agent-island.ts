@@ -63,10 +63,15 @@ export interface AgentIslandState {
   visible: boolean
   /** 展示生命周期，避免渲染层自行推断隐藏/收起/展开。 */
   presentation: AgentIslandPresentation
+  /** 指针是否位于可交互 surface 内；用于呈现即时 hover 预热反馈。 */
+  hovered: boolean
   /** 是否展开卡片；为现有 Electron fallback 保留的便利字段。 */
   expanded: boolean
   pill: AgentIslandPillSnapshot
+  /** 正在运行、待接手或未读的 Agent 会话。 */
   sessions: AgentIslandSessionSnapshot[]
+  /** 没有活跃事项时的常驻回顾入口，最多三个最近会话。 */
+  recentSessions: AgentIslandSessionSnapshot[]
   totalCount: number
   updatedAt: number
 }
@@ -97,6 +102,20 @@ export interface AgentIslandPlanningSnapshot {
   overdueTodoCount: number
 }
 
+/** 单个订阅 Plan 限额窗口的展示投影。 */
+export interface AgentIslandPlanQuotaWindowSnapshot {
+  windowLabel: string
+  remainingPercent: number
+  remainingLabel?: string
+}
+
+/** 灵动岛展示所需的最小订阅 Plan 额度投影；按渠道聚合，绝不包含凭据。 */
+export interface AgentIslandPlanQuotaSnapshot {
+  channelName: string
+  planName: string
+  windows: AgentIslandPlanQuotaWindowSnapshot[]
+}
+
 /** TypeScript 主进程 → macOS Swift helper 的 JSONL 全量状态。 */
 export interface NativeAgentIslandSnapshot {
   type: 'snapshot'
@@ -104,6 +123,8 @@ export interface NativeAgentIslandSnapshot {
   revision: number
   state: AgentIslandState
   planning: AgentIslandPlanningSnapshot
+  /** 支持查询的启用渠道；Swift 仅负责本地轮播展示。 */
+  planQuotas: AgentIslandPlanQuotaSnapshot[]
 }
 
 /** macOS Swift helper → TypeScript 主进程的受限交互意图。 */

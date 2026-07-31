@@ -22,16 +22,18 @@ import {
   type AgentIslandSessionSnapshot,
   type AgentIslandState,
   type AgentIslandPlanningSnapshot,
+  type AgentIslandPlanQuotaSnapshot,
   type NativeAgentIslandEvent,
   type NativeAgentIslandSnapshot,
 } from '@proma/shared'
 import type { AgentStreamPayload } from '@proma/shared'
 import { agentEventBus } from './agent-service'
-import { getAgentSessionMeta } from './agent-session-manager'
+import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
 import { getAgentIslandWindow, hideAgentIslandWindow, moveAgentIslandWindow, onAgentIslandWindowReady, resizeAgentIslandWindow, showAgentIslandWindow } from './agent-island-window'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
+import { getChannelPlanQuota, listChannels } from './channel-manager'
 
 /** 会话快照保留的最大活动行数 */
 const MAX_ACTIVITY_LINES = 6
@@ -41,11 +43,16 @@ const MAX_PUSHED_ACTIVITY_LINES = 4
 const UNREAD_RETAIN_MS = 10 * 60_000
 /** 无 Agent 需接手时，仅在 Todo 截止/日程开始前这一窗口显示。 */
 const PLANNING_ATTENTION_WINDOW_MS = 60 * 60_000
-/** 推送节流间隔 */
+/** 交互、计划变更等需要即时反馈的推送节流间隔。 */
 const PUSH_THROTTLE_MS = 80
+/** 普通 Agent 流事件只需低频合并；状态页不展示 token / 工具流水。 */
+const AGENT_STREAM_PUSH_THROTTLE_MS = 2_000
+/** 订阅 Plan 额度的后台刷新间隔；轮播在 Swift 本地完成，无需频繁网络请求。 */
+const PLAN_QUOTA_REFRESH_MS = 5 * 60_000
+const PLAN_QUOTA_PROVIDERS = new Set(['openai-codex', 'deepseek', 'kimi-coding', 'minimax', 'zhipu', 'zhipu-coding', 'zhipu-coding-team'])
 /** Hover 只是一种临时展开意图，避免 Swift 渲染层自行维护状态机。 */
-const HOVER_EXPAND_DELAY_MS = 160
-const HOVER_COLLAPSE_DELAY_MS = 600
+const HOVER_EXPAND_DELAY_MS = 130
+const HOVER_COLLAPSE_DELAY_MS = 420
 
 interface InternalSessionSnapshot extends AgentIslandSessionSnapshot {
   /** 会话启动时间戳（首条事件到达时记录） */
@@ -62,15 +69,20 @@ let initialized = false
 let manuallyExpanded = false
 /** 鼠标悬停带来的临时展开状态。 */
 let hoverExpanded = false
+/** 即时 pointer 反馈，不等待展开延迟。 */
+let pointerHovered = false
 let hoverTimer: ReturnType<typeof setTimeout> | null = null
 const sessions = new Map<string, InternalSessionSnapshot>()
 let pushTimer: ReturnType<typeof setTimeout> | null = null
+let scheduledPushAt = 0
 let lastPushAt = 0
 let lastStateJson = ''
 let nativeRevision = 0
 let planningRevision = 0
 let planningRolloverTimer: ReturnType<typeof setTimeout> | null = null
 let planningAttentionTimer: ReturnType<typeof setTimeout> | null = null
+let planQuotaRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let planQuotas: AgentIslandPlanQuotaSnapshot[] = []
 /** 当前被用户主动关闭的提醒指纹；出现新的事项/Agent 状态时自动失效。 */
 let dismissedVisibilityKey: string | null = null
 let currentVisibilityKey = ''
@@ -364,9 +376,12 @@ function handleSdkMessage(sessionId: string, message: import('@proma/shared').SD
 
 // ===== pill 聚合 =====
 
-function isAttentionSession(session: InternalSessionSnapshot, now: number): boolean {
+function isIslandSession(session: InternalSessionSnapshot, now: number): boolean {
   if (now - session.lastActivityAt >= 24 * 60 * 60_000) return false
-  if (session.phase === 'needs-interaction' || session.phase === 'error') return true
+  // Running is deliberately visible: the island is also a live execution pulse,
+  // not only a handoff/error inbox. Terminal sessions retain their existing
+  // unread window to avoid becoming permanent history.
+  if (session.phase === 'running' || session.phase === 'needs-interaction' || session.phase === 'error') return true
   return session.phase === 'completed'
     && session.unread
     && session.terminalAt !== undefined
@@ -380,28 +395,35 @@ function attentionScore(session: InternalSessionSnapshot): number {
   return 0
 }
 
+function compareIslandSessions(a: InternalSessionSnapshot, b: InternalSessionSnapshot): number {
+  // Activity timestamps change on every streamed token/tool result. Sorting by
+  // them makes rows continually swap places; only semantic priority may reorder.
+  return attentionScore(b) - attentionScore(a)
+    || a.startedAt - b.startedAt
+    || a.sessionId.localeCompare(b.sessionId)
+}
+
 function buildPill(now: number): AgentIslandPillSnapshot {
-  // 普通 running 不打扰：岛只表达“请用户接手”的 Agent 信号。
-  const attention = [...sessions.values()].filter((session) => isAttentionSession(session, now))
-  const pendingInteraction = attention.filter((session) => session.phase === 'needs-interaction').length
-  const unread = attention.filter((session) => session.phase === 'completed').length
-  const prioritySession = attention
-    .sort((a, b) => attentionScore(b) - attentionScore(a) || b.lastActivityAt - a.lastActivityAt)[0]
+  const visibleSessions = [...sessions.values()].filter((session) => isIslandSession(session, now))
+  const pendingInteraction = visibleSessions.filter((session) => session.phase === 'needs-interaction').length
+  const unread = visibleSessions.filter((session) => session.phase === 'completed').length
+  const active = visibleSessions.filter((session) => session.phase === 'running' || session.phase === 'needs-interaction').length
+  const prioritySession = visibleSessions.sort(compareIslandSessions)[0]
 
   return {
     priorityStatus: prioritySession?.phase ?? 'idle',
-    sessionCount: attention.length,
-    activeSessionCount: pendingInteraction,
+    sessionCount: visibleSessions.length,
+    activeSessionCount: active,
     pendingInteractionCount: pendingInteraction,
     unreadCompletedCount: unread,
   }
 }
 
 function buildState(now: number): AgentIslandState {
-  // 常规运行不占据顶部空间；只投影“阻塞、异常、尚未查阅的完成”。
+  // 投影正在运行、阻塞、异常及尚未查阅的完成会话。
   const retained = [...sessions.values()]
-    .filter((session) => isAttentionSession(session, now))
-    .sort((a, b) => attentionScore(b) - attentionScore(a) || b.lastActivityAt - a.lastActivityAt)
+    .filter((session) => isIslandSession(session, now))
+    .sort(compareIslandSessions)
 
   const sessionsOut = retained.map((s) => {
     const out: AgentIslandSessionSnapshot = {
@@ -418,15 +440,36 @@ function buildState(now: number): AgentIslandState {
     return out
   })
 
+  // Once no live status needs attention, provide a lightweight persistent
+  // launchpad from the session index. It deliberately does not affect pill
+  // counts or Agent priority semantics.
+  const recentSessions = sessionsOut.length === 0
+    ? listAgentSessions()
+      .filter((session) => !session.archived)
+      .slice(0, 3)
+      .map((session): AgentIslandSessionSnapshot => ({
+        sessionId: session.id,
+        title: session.title.trim() || session.id.slice(0, 8),
+        phase: 'completed',
+        detail: '最近会话',
+        activityLines: [],
+        attention: false,
+        startedAt: session.createdAt,
+        lastActivityAt: session.updatedAt,
+      }))
+    : []
+
   return {
     visible: true,
     presentation: isExpanded() ? 'expanded' : 'compact',
+    hovered: pointerHovered,
     expanded: isExpanded(),
     pill: buildPill(now),
     sessions: sessionsOut,
+    recentSessions,
     totalCount: sessionsOut.length,
     // 避免 running 的高频 token 流造成隐藏岛的无效重绘。
-    updatedAt: Math.max(0, ...sessionsOut.map((session) => session.lastActivityAt)),
+    updatedAt: Math.max(0, ...sessionsOut.map((session) => session.lastActivityAt), ...recentSessions.map((session) => session.lastActivityAt)),
   }
 }
 
@@ -435,16 +478,22 @@ function buildPlanningSnapshot(now: number): AgentIslandPlanningSnapshot {
   today.setHours(0, 0, 0, 0)
   const dayStart = today.getTime()
   const dayEnd = dayStart + 24 * 60 * 60_000
-  const todos = listTodos({ status: 'open' })
+  const allTodayTodos = listTodos({ status: 'open' })
     .filter((todo) => todo.dueAt !== undefined && todo.dueAt < dayEnd)
     .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
-  const events = listCalendarEvents({ from: dayStart, to: dayEnd })
+  // Compact visibility remains an imminent (one-hour) signal, while expansion
+  // is a useful short look-ahead: show the next three future items per column.
+  const todos = listTodos({ status: 'open' })
+    .filter((todo) => todo.dueAt !== undefined && todo.dueAt >= now)
+    .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
+  const events = listCalendarEvents({ from: now })
+    .filter((event) => event.startAt >= now)
     .sort((a, b) => a.startAt - b.startAt)
 
   return {
     dayStart,
     dayEnd,
-    overdueTodoCount: todos.filter((todo) => (todo.dueAt ?? Number.POSITIVE_INFINITY) < now).length,
+    overdueTodoCount: allTodayTodos.filter((todo) => (todo.dueAt ?? Number.POSITIVE_INFINITY) < now).length,
     todos: todos.slice(0, 3).map((todo) => ({
       id: todo.id,
       title: todo.title,
@@ -488,12 +537,19 @@ function buildVisibilityKey(state: AgentIslandState, planningKeys: string[]): st
   const agentKey = state.sessions
     .map((session) => `${session.sessionId}:${session.phase}:${session.lastActivityAt}:${session.detail}`)
     .join('|')
-  return `${agentKey}#${planningKeys.join('|')}`
+  const recentKey = state.recentSessions
+    .map((session) => `${session.sessionId}:${session.lastActivityAt}`)
+    .join('|')
+  return `${agentKey}/${recentKey}#${planningKeys.join('|')}`
 }
 
-function isIslandVisible(state: AgentIslandState, planningKeys: string[]): boolean {
+function isIslandVisible(state: AgentIslandState, planningKeys: string[], planning: AgentIslandPlanningSnapshot): boolean {
   const requiresAgentHandoff = state.sessions.length > 0
-  if (!requiresAgentHandoff && planningKeys.length === 0) return false
+  const persistentDashboard = !requiresAgentHandoff
+    && state.recentSessions.length > 0
+    && planning.todos.length === 0
+    && planning.events.length === 0
+  if (!requiresAgentHandoff && planningKeys.length === 0 && !persistentDashboard) return false
 
   currentVisibilityKey = buildVisibilityKey(state, planningKeys)
   return currentVisibilityKey !== dismissedVisibilityKey
@@ -506,6 +562,7 @@ function buildNativeSnapshot(state: AgentIslandState, planning: AgentIslandPlann
     revision: ++nativeRevision,
     state,
     planning,
+    planQuotas,
   }
 }
 
@@ -516,7 +573,7 @@ function pushState(): void {
   const planning = buildPlanningSnapshot(now)
   const state = buildState(now)
   const enabled = serviceDeps?.enabled?.() !== false
-  state.visible = enabled && isIslandVisible(state, getImminentPlanningKeys(now))
+  state.visible = enabled && isIslandVisible(state, getImminentPlanningKeys(now), planning)
   state.presentation = state.visible ? (isExpanded() ? 'expanded' : 'compact') : 'hidden'
   // Planning 独立 revision 解决“同一毫秒内 Todo 变更而 Agent state.updatedAt 恰好相同”的漏推边界。
   const json = JSON.stringify({ state, planning, planningRevision, dismissedVisibilityKey })
@@ -536,6 +593,50 @@ function pushState(): void {
   if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_ISLAND_IPC_CHANNELS.STATE, state)
   if (state.visible) showAgentIslandWindow()
   else hideAgentIslandWindow()
+}
+
+/**
+ * Todo/日程操作已经在数据库提交后才广播，因此不应再等待 Agent 流的 80ms
+ * 合并窗口；直接把最新投影交给原生岛，避免完成/改期后的陈旧信息残留。
+ */
+function pushPlanningStateImmediately(): void {
+  if (pushTimer) {
+    clearTimeout(pushTimer)
+    pushTimer = null
+  }
+  lastPushAt = Date.now()
+  pushState()
+}
+
+async function refreshPlanQuotas(): Promise<void> {
+  const supportedChannels = listChannels().filter((channel) => channel.enabled && PLAN_QUOTA_PROVIDERS.has(channel.provider))
+  try {
+    const results = await Promise.all(supportedChannels.map(async (channel) => ({ channel, quota: await getChannelPlanQuota(channel.id) })))
+    const next = results.flatMap(({ channel, quota }) => {
+      if (!quota.supported || quota.windows.length === 0) return []
+      return [{
+        channelName: channel.name,
+        planName: quota.planName || channel.name,
+        windows: quota.windows.map((window) => ({
+          windowLabel: window.label,
+          remainingPercent: window.remainingPercent,
+          remainingLabel: window.remainingLabel,
+        })),
+      }]
+    })
+    if (JSON.stringify(next) !== JSON.stringify(planQuotas)) {
+      planQuotas = next
+      schedulePush()
+    }
+  } catch {
+    // Quota is supplemental island content: preserve the last known value and
+    // never allow a provider/network failure to affect reminders or Agent state.
+  } finally {
+    if (initialized) {
+      if (planQuotaRefreshTimer) clearTimeout(planQuotaRefreshTimer)
+      planQuotaRefreshTimer = setTimeout(() => void refreshPlanQuotas(), PLAN_QUOTA_REFRESH_MS)
+    }
+  }
 }
 
 function scheduleNextPlanningRollover(): void {
@@ -576,20 +677,38 @@ function scheduleNextPlanningAttention(): void {
   }, Math.max(1_000, next - now + 25))
 }
 
-function schedulePush(): void {
+function schedulePush(throttleMs = PUSH_THROTTLE_MS): void {
   const now = Date.now()
-  if (now - lastPushAt >= PUSH_THROTTLE_MS) {
+  const dueAt = lastPushAt + throttleMs
+  if (now >= dueAt) {
+    if (pushTimer) {
+      clearTimeout(pushTimer)
+      pushTimer = null
+      scheduledPushAt = 0
+    }
     lastPushAt = now
     pushState()
     return
   }
-  if (pushTimer) return
-  const remaining = PUSH_THROTTLE_MS - (now - lastPushAt)
+
+  // A newly urgent change may preempt a pending low-priority stream refresh.
+  if (pushTimer && scheduledPushAt <= dueAt) return
+  if (pushTimer) clearTimeout(pushTimer)
+  scheduledPushAt = dueAt
   pushTimer = setTimeout(() => {
     pushTimer = null
+    scheduledPushAt = 0
     lastPushAt = Date.now()
     pushState()
-  }, remaining)
+  }, dueAt - now)
+}
+
+function requiresImmediateAgentIslandPush(payload: AgentStreamPayload): boolean {
+  if (payload.kind === 'proma_event') {
+    return ['permission_request', 'ask_user_request', 'exit_plan_mode_request'].includes(payload.event.type)
+  }
+  const message = payload.message
+  return message.type === 'result' || (message.type === 'assistant' && Boolean((message as import('@proma/shared').SDKAssistantMessage).error))
 }
 
 // ===== 事件订阅与初始化 =====
@@ -617,18 +736,19 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
     if (change.resources.includes('todos') || change.resources.includes('calendar_events')) {
       planningRevision += 1
       dismissedVisibilityKey = null
-      schedulePush()
+      pushPlanningStateImmediately()
       scheduleNextPlanningAttention()
     }
   })
   scheduleNextPlanningRollover()
   scheduleNextPlanningAttention()
+  void refreshPlanQuotas()
 
   // 订阅 Agent 事件流
   disposeEventBus = agentEventBus.on((sessionId, payload) => {
     if (deps.enabled?.() === false) return
     handleAgentEvent(sessionId, payload)
-    schedulePush()
+    schedulePush(requiresImmediateAgentIslandPush(payload) ? PUSH_THROTTLE_MS : AGENT_STREAM_PUSH_THROTTLE_MS)
   })
 
   // 灵动岛窗口渲染就绪后补推一次状态
@@ -698,7 +818,12 @@ export function setAgentIslandExpanded(next: boolean): void {
 
 /** 受限的原生 hover intent：延迟处理并与用户点按的 pinned 状态合并。 */
 export function setAgentIslandHovered(hovered: boolean): void {
+  const hoverChanged = pointerHovered !== hovered
+  pointerHovered = hovered
   if (hoverTimer) clearTimeout(hoverTimer)
+  // Highlight reacts on the first pointer transition; expansion follows only
+  // after the intent delay so the island never feels jumpy while crossing it.
+  if (hoverChanged) schedulePush()
   hoverTimer = setTimeout(() => {
     hoverTimer = null
     if (hoverExpanded === hovered) return
@@ -731,6 +856,7 @@ export function dismissAgentIsland(): void {
   dismissedVisibilityKey = currentVisibilityKey
   manuallyExpanded = false
   hoverExpanded = false
+  pointerHovered = false
   if (hoverTimer) {
     clearTimeout(hoverTimer)
     hoverTimer = null
@@ -773,6 +899,8 @@ export function disposeAgentIslandService(): void {
   planningRolloverTimer = null
   if (planningAttentionTimer) clearTimeout(planningAttentionTimer)
   planningAttentionTimer = null
+  if (planQuotaRefreshTimer) clearTimeout(planQuotaRefreshTimer)
+  planQuotaRefreshTimer = null
   dismissedVisibilityKey = null
   currentVisibilityKey = ''
   serviceDeps = null
@@ -782,11 +910,13 @@ export function disposeAgentIslandService(): void {
     clearTimeout(pushTimer)
     pushTimer = null
   }
+  scheduledPushAt = 0
   if (hoverTimer) {
     clearTimeout(hoverTimer)
     hoverTimer = null
   }
   manuallyExpanded = false
   hoverExpanded = false
+  pointerHovered = false
   lastStateJson = ''
 }
