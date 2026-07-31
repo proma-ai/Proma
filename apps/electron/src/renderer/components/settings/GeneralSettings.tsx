@@ -101,6 +101,7 @@ export function GeneralSettings(): React.ReactElement {
   const [archiveAfterDays, setArchiveAfterDays] = React.useState<number>(7)
   /** Git/PR 推广标识：默认开启 */
   const [gitAttributionEnabled, setGitAttributionEnabled] = React.useState(true)
+  const [agentIslandEnabled, setAgentIslandEnabled] = React.useState(true)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   /** Cloud 模式 + 已登录 */
@@ -128,6 +129,7 @@ export function GeneralSettings(): React.ReactElement {
     window.electronAPI.getSettings().then((settings) => {
       setArchiveAfterDays(settings.archiveAfterDays ?? 7)
       setGitAttributionEnabled(settings.gitAttributionEnabled ?? true)
+      setAgentIslandEnabled(settings.agentIsland?.enabled ?? true)
     }).catch(console.error)
   }, [])
 
@@ -139,6 +141,17 @@ export function GeneralSettings(): React.ReactElement {
     } catch (error) {
       console.error('[通用设置] 更新 Git/PR 标识失败:', error)
       setGitAttributionEnabled(!checked)
+    }
+  }
+
+  /** 更新灵动岛开关 */
+  const handleAgentIslandChange = async (checked: boolean): Promise<void> => {
+    setAgentIslandEnabled(checked)
+    try {
+      await window.electronAPI.updateSettings({ agentIsland: { enabled: checked } })
+    } catch (error) {
+      console.error('[通用设置] 更新 Agent 灵动岛失败:', error)
+      setAgentIslandEnabled(!checked)
     }
   }
 
@@ -477,6 +490,14 @@ export function GeneralSettings(): React.ReactElement {
             onCheckedChange={(checked) => {
               setSessionHoverPreviewEnabled(checked)
               updateSessionHoverPreviewEnabled(checked)
+            }}
+          />
+          <SettingsToggle
+            label="Agent 灵动岛"
+            description="在 Mac 刘海屏显示需要接手的 Agent 与 1 小时内的待办/日程；外接无刘海屏默认不覆盖菜单栏"
+            checked={agentIslandEnabled}
+            onCheckedChange={(checked) => {
+              void handleAgentIslandChange(checked)
             }}
           />
           <SettingsToggle

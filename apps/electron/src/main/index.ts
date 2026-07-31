@@ -94,12 +94,12 @@ import { createTray, destroyTray, getTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
-import { stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
+import { hasActiveAgentSessions, stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
 import { migrateFlowSessions } from './lib/flow-migration'
-import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
+import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { startChatToolsWatcher, stopChatToolsWatcher } from './lib/chat-tools-watcher'
 import { getIsQuitting, setQuitting } from './lib/app-lifecycle'
@@ -126,7 +126,10 @@ import { getDingTalkMultiBotConfig } from './lib/dingtalk-config'
 import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
-import { destroyPlanningWindow } from './lib/planning-window'
+import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
+import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
+import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
+import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -141,6 +144,32 @@ const PROTOCOL_NAME = 'proma'
 
 const MIGRATION_IPC_OPEN = 'migration:open-import-file'
 
+let agentIslandElectronFallbackActive = false
+
+/** 非 macOS 或 Swift helper 不可用时的无损降级。 */
+function activateAgentIslandElectronFallback(reason?: string): void {
+  if (agentIslandElectronFallbackActive) return
+  agentIslandElectronFallbackActive = true
+  if (reason) console.warn(`[agent-island] 使用 Electron 降级窗口：${reason}`)
+  createAgentIslandWindow()
+  showAgentIslandWindow()
+  publishAgentIslandNow()
+}
+
+/** macOS 优先使用真刘海 NSPanel；其他平台保持既有 BrowserWindow 体验。 */
+function startAgentIslandSurface(): void {
+  const startedNative = startMacAgentIslandNativeHost({
+    onReady: () => {
+      console.info('[agent-island] macOS 原生 NSPanel helper 已就绪')
+      publishAgentIslandNow()
+    },
+    onEvent: handleNativeAgentIslandEvent,
+    onUnavailable: (reason) => activateAgentIslandElectronFallback(reason),
+  })
+  if (!startedNative) activateAgentIslandElectronFallback(process.platform === 'darwin' ? 'native helper unavailable' : 'non-macOS platform')
+}
+
+/** 检查文件路径是否为迁移文件，如果是则通知渲染进程打开导入流程 */
 function handleMigrationFileOpen(filePath: string): void {
   if (filePath.endsWith('.proma-backup') || filePath.endsWith('.proma-share')) {
     sendToMainWindow(MIGRATION_IPC_OPEN, { filePath })
@@ -616,8 +645,9 @@ async function bootstrap(): Promise<void> {
   // 启动 Chat 工具配置文件监听（Agent 创建工具后自动通知渲染进程）
   safeRun('startChatToolsWatcher', startChatToolsWatcher)
 
-  // 生产环境下初始化自动更新
+  // 自动更新仅在生产环境启用，并由主进程统一检测 Agent 是否空闲。
   if (app.isPackaged && mainWindow) {
+    configureUpdater(mainWindow, { hasActiveAgents: hasActiveAgentSessions })
     safeRun('initAutoUpdater', () => initAutoUpdater(mainWindow!))
   }
 
@@ -626,6 +656,19 @@ async function bootstrap(): Promise<void> {
   if (getSettings().voiceDictation?.enabled === true) {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
+
+  // Agent 灵动岛：macOS 优先 Swift/AppKit NSPanel（真刘海），其他平台回退 BrowserWindow。
+  safeRun('initAgentIslandService', () => {
+    initAgentIslandService({
+      showAndFocusMainWindow,
+      openAgentSession: (sessionId, title) => {
+        sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
+      },
+      openPlanning: showPlanningWindow,
+      enabled: () => getSettings().agentIsland?.enabled !== false,
+    })
+  })
+  safeRun('startAgentIslandSurface', startAgentIslandSurface)
 
   // 飞书实时同步开启时，默认阻止系统自动休眠，保证远程群内继续可用。
   safeRun('syncFeishuSyncSleepBlocker', () => syncFeishuSyncSleepBlocker(getSettings()))
@@ -761,6 +804,10 @@ app.on('before-quit', () => {
   destroyQuickTaskWindow()
   destroyPlanningWindow()
   destroyVoiceDictationWindow()
+  // 销毁灵动岛服务与窗口（先关闭 NSPanel helper，避免开发热重载遗留原生面板）
+  disposeMacAgentIslandNativeHost()
+  disposeAgentIslandService()
+  destroyAgentIslandWindow()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})
   // Clean up system tray before quitting

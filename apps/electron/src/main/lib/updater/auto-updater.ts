@@ -1,14 +1,15 @@
 /**
  * 自动更新核心模块
  *
- * 检测新版本 → 自动后台下载 → 用户从更新入口确认后重启安装。
- * 仅在打包后的生产环境中工作。
+ * 检测新版本 → 自动后台下载 → 用户选择立即或空闲时重启安装。
+ * 自动更新仅在打包后的生产环境中启用。
  */
 
 import { autoUpdater } from 'electron-updater'
 import { BrowserWindow, app } from 'electron'
 import type { UpdateStatus } from './updater-types'
 import { UPDATER_IPC_CHANNELS } from './updater-types'
+import { createIdleInstallScheduler } from './idle-install-scheduler'
 
 /** 当前更新状态 */
 let currentStatus: UpdateStatus = { status: 'idle' }
@@ -19,10 +20,40 @@ let win: BrowserWindow | null = null
 /** 定时检查定时器 */
 let checkInterval: ReturnType<typeof setInterval> | null = null
 
+/** 由 Agent 服务注入，覆盖所有窗口/后台 Agent 的运行状态。 */
+let hasActiveAgents = (): boolean => false
+
+/**
+ * 用户选择「空闲时更新」后，等待所有 Agent 结束再安装。
+ *
+ * 状态检查留在主进程，避免渲染进程漏掉后台运行或其他窗口中的 Agent。
+ */
+const idleInstallScheduler = createIdleInstallScheduler({
+  canInstall: () => currentStatus.status === 'downloaded' && !hasActiveAgents(),
+  install: () => {
+    console.log('[更新] 当前没有运行中的 Agent，开始安装已下载更新')
+    quitAndInstall()
+  },
+})
+
 /** 更新状态并推送给渲染进程 */
 function setStatus(status: UpdateStatus): void {
   currentStatus = status
+  if (status.status !== 'downloaded') {
+    idleInstallScheduler.cancel()
+  }
   win?.webContents?.send(UPDATER_IPC_CHANNELS.ON_STATUS_CHANGED, status)
+}
+
+/**
+ * 绑定更新器所需的主窗口与 Agent 状态。
+ */
+export function configureUpdater(
+  mainWindow: BrowserWindow,
+  options?: { hasActiveAgents?: () => boolean },
+): void {
+  hasActiveAgents = options?.hasActiveAgents ?? hasActiveAgents
+  win = mainWindow
 }
 
 /** 获取当前更新状态 */
@@ -50,15 +81,58 @@ export async function checkForUpdates(): Promise<void> {
   }
 }
 
-/** 退出并安装已下载的更新 */
-export function quitAndInstall(): void {
-  // 移除所有窗口的 close 监听器，避免 preventDefault 阻止退出
-  for (const w of BrowserWindow.getAllWindows()) {
-    w.removeAllListeners('close')
+/**
+ * 请求在没有运行中 Agent 时安装已下载的更新。
+ *
+ * @returns 是否已接受请求；仅 downloaded 状态可排队。
+ */
+export function installWhenIdle(): boolean {
+  if (currentStatus.status !== 'downloaded') {
+    console.warn('[更新] 跳过空闲安装：当前没有已下载的更新')
+    return false
   }
 
-  // 延迟调用确保 IPC 响应已发送回渲染进程
+  console.log('[更新] 已请求空闲安装，等待所有 Agent 结束')
+  idleInstallScheduler.request()
+  return true
+}
+
+/** 取消尚未执行的空闲安装请求。 */
+export function cancelIdleInstall(): void {
+  idleInstallScheduler.cancel()
+  console.log('[更新] 已取消空闲安装请求')
+}
+
+/**
+ * 退出并安装已下载的更新。
+ *
+ * 所有安装入口最终都经过这里：即使调用方绕过空闲调度器，也不会在 Agent
+ * 运行时退出；在真正安装前再次检查一次，避免检查与退出之间启动新 Agent。
+ */
+function quitAndInstall(): void {
+  if (!app.isPackaged) {
+    console.warn('[更新] 开发环境不支持安装更新')
+    return
+  }
+
+  if (hasActiveAgents()) {
+    console.log('[更新] 检测到运行中的 Agent，改为等待空闲后安装')
+    installWhenIdle()
+    return
+  }
+
+  // 延迟调用确保 IPC 响应已发送回渲染进程；回调内再次检查防止竞态。
   setImmediate(() => {
+    if (hasActiveAgents()) {
+      console.log('[更新] 安装前出现新的运行中 Agent，继续等待空闲')
+      installWhenIdle()
+      return
+    }
+
+    // 移除所有窗口的 close 监听器，避免 preventDefault 阻止退出。
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.removeAllListeners('close')
+    }
     autoUpdater.quitAndInstall(true, true)
   })
 }
@@ -69,6 +143,7 @@ export function cleanupUpdater(): void {
     clearInterval(checkInterval)
     checkInterval = null
   }
+  idleInstallScheduler.dispose()
 }
 
 /**
@@ -77,7 +152,7 @@ export function cleanupUpdater(): void {
  * @param mainWindow - 主窗口实例，用于推送更新状态
  */
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
-  win = mainWindow
+  configureUpdater(mainWindow)
 
   autoUpdater.logger = {
     info: (...args: unknown[]) => console.log('[更新-updater]', ...args),
@@ -159,8 +234,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
       clearInterval(checkInterval)
       checkInterval = null
     }
+    idleInstallScheduler.dispose()
     win = null
   })
 
-  console.log('[更新] 自动更新模块已初始化（自动下载，用户主动确认后安装）')
+  console.log('[更新] 自动更新模块已初始化（自动下载，支持空闲时安装）')
 }

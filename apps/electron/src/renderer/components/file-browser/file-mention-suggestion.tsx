@@ -12,8 +12,8 @@ import type { SuggestionOptions, SuggestionProps } from '@tiptap/suggestion'
 import { toast } from 'sonner'
 import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
-import type { FileIndexEntry, FileSearchResult } from '@proma/shared'
-import { createMentionPopup, positionPopup, isSuggestionTriggerPresent } from '@/components/agent/mention-popup-utils'
+import type { FileIndexEntry } from '@proma/shared'
+import { createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from '@/components/agent/mention-popup-utils'
 import { resolveFileMentionPath } from './file-mention-path'
 
 type MentionSelection = Pick<FileIndexEntry, 'name' | 'path' | 'type' | 'source'>
@@ -25,8 +25,14 @@ export function createFileMentionSuggestion(
   mentionItemCountRef?: React.MutableRefObject<number>,
   sessionAttachedDirsRef?: React.RefObject<string[]>,
 ): Omit<SuggestionOptions<FileIndexEntry>, 'editor'> {
-  let lastResult: FileSearchResult | null = null
   let missingWorkspaceToastShown = false
+  // Esc 抑制：记录被 Esc 关闭的触发片段文本。
+  // TipTap suggestion 按 Esc 后会 dispatchExit 置 inactive，但触发符仍在文档中，
+  // 继续输入会再次 onStart 弹窗；这里在 onStart 时对同一片段跳过建弹窗，
+  // 直到用户重新触发（片段结束或内容变化）才恢复正常。
+  // 用文本而非位置判断：删除触发符前的字符导致位置移动时，片段仍延续，继续抑制。
+  let suppressedTrigger: EscSuppressedTrigger | null = null
+  const requestGuard = createLatestSuggestionRequestGuard<FileIndexEntry>()
 
   return {
     char: '@',
@@ -34,6 +40,7 @@ export function createFileMentionSuggestion(
     allowedPrefixes: null,
 
     items: async ({ query }): Promise<FileIndexEntry[]> => {
+      const requestId = requestGuard.startRequest()
       const wsPath = workspacePathRef.current
       if (!wsPath) {
         console.warn('[FileMention] workspacePath is null, mention disabled')
@@ -43,7 +50,7 @@ export function createFileMentionSuggestion(
           })
           missingWorkspaceToastShown = true
         }
-        return []
+        return requestGuard.attachResult(requestId, [])
       }
       missingWorkspaceToastShown = false
 
@@ -58,12 +65,10 @@ export function createFileMentionSuggestion(
           additionalPaths.length > 0 ? additionalPaths : undefined,
           sessionPaths.length > 0 ? sessionPaths : undefined,
         )
-        lastResult = result
-        return result.entries
+        return requestGuard.attachResult(requestId, result.entries)
       } catch(e) {
         console.error('[FileMention] search failed:', e)
-        lastResult = null
-        return []
+        return requestGuard.attachResult(requestId, [])
       }
     },
 
@@ -75,15 +80,18 @@ export function createFileMentionSuggestion(
       let blurHandler: (() => void) | null = null
       let editorRef: SuggestionProps<FileIndexEntry>['editor'] | null = null
 
-      function splitEntries(result: FileSearchResult | null) {
+      // 用本次查询的 props.items 按 source 分组渲染弹窗，
+      // 避免共享闭包 lastResult 被并发 view.update（第一个 @ 片段延续的慢搜索）
+      // 覆盖，导致第二个 @ 弹窗显示旧/空结果（"无匹配文件"）。
+      function splitEntries(items: FileIndexEntry[]) {
         return {
-          sessionEntries: result?.sessionEntries ?? [],
-          workspaceEntries: result?.workspaceEntries ?? [],
+          sessionEntries: items.filter((item) => item.source === 'session'),
+          workspaceEntries: items.filter((item) => item.source === 'workspace'),
         }
       }
 
       function createRenderer(props: SuggestionProps<FileIndexEntry>) {
-        const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
+        const { sessionEntries, workspaceEntries } = splitEntries(props.items)
         const selectItem = (item: MentionSelection) => {
           props.command({ id: resolveFileMentionPath(item, workspacePathRef.current), label: item.name })
         }
@@ -110,7 +118,6 @@ export function createFileMentionSuggestion(
         editorRef = null
         mentionActiveRef.current = false
         if (mentionItemCountRef) mentionItemCountRef.current = 0
-        lastResult = null
         latestClientRect = null
         resizeObserver?.disconnect()
         resizeObserver = null
@@ -122,6 +129,9 @@ export function createFileMentionSuggestion(
 
       return {
         onStart(props) {
+          if (!requestGuard.isLatest(props.items)) {
+            return
+          }
           // 防御竞态：如果上一次弹窗未被正确清理，先清理残留
           if (popup || renderer) {
             cleanup()
@@ -132,6 +142,13 @@ export function createFileMentionSuggestion(
           if (!isSuggestionTriggerPresent(props.editor, props.range, '@')) {
             return
           }
+
+          // Esc 抑制：同一触发片段（位置未后移且文本延续）不再弹窗，保持抑制；
+          // 用户重新输入触发符（位置后移）、片段已结束或内容变化时清除抑制并正常弹窗。
+          if (shouldSuppressEscTrigger(suppressedTrigger, { from: props.range.from, text: props.text })) {
+            return
+          }
+          suppressedTrigger = null
 
           mentionActiveRef.current = true
           if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
@@ -165,10 +182,13 @@ export function createFileMentionSuggestion(
         },
 
         onUpdate(props) {
+          if (!requestGuard.isLatest(props.items)) {
+            return
+          }
           if (mentionItemCountRef) mentionItemCountRef.current = props.items.length
           latestClientRect = props.clientRect
 
-          const { sessionEntries, workspaceEntries } = splitEntries(lastResult)
+          const { sessionEntries, workspaceEntries } = splitEntries(props.items)
           const selectItem = (item: MentionSelection) => {
             props.command({ id: resolveFileMentionPath(item, workspacePathRef.current), label: item.name })
           }
@@ -181,13 +201,28 @@ export function createFileMentionSuggestion(
         },
 
         onKeyDown(props) {
+          // 记录 Esc 关闭时的触发片段文本与位置，onStart/onExit 据此判断同一片段
+          if (props.event.key === 'Escape') {
+            suppressedTrigger = {
+              from: props.range.from,
+              text: props.view.state.doc.textBetween(props.range.from, props.range.to, '', ''),
+            }
+          }
           if (renderer?.ref) {
             return renderer.ref.onKeyDown({ event: props.event })
           }
           return false
         },
 
-        onExit() {
+        onExit(props) {
+          // TipTap 会在 await items() 后才调用 onExit；旧请求不能清理新弹窗。
+          if (requestGuard.isStale(props.items)) {
+            return
+          }
+          // 被抑制的触发符已从文档中删除 → 清除抑制，让用户重新输入触发符时恢复正常弹窗
+          if (suppressedTrigger && shouldClearEscSuppressionOnExit(suppressedTrigger, props.editor, props.range, '@')) {
+            suppressedTrigger = null
+          }
           cleanup()
         },
       }

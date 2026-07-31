@@ -1,7 +1,7 @@
 /**
  * 自动更新相关类型定义
  *
- * 检测新版本 → 自动下载 → 用户从更新入口确认后重启安装
+ * 检测新版本 → 自动下载 → 用户选择立即或空闲时重启安装
  */
 
 /** 更新状态 */
@@ -31,5 +31,6 @@ export const UPDATER_IPC_CHANNELS = {
   CHECK_FOR_UPDATES: 'updater:check',
   GET_STATUS: 'updater:get-status',
   ON_STATUS_CHANGED: 'updater:status-changed',
-  QUIT_AND_INSTALL: 'updater:quit-and-install',
+  INSTALL_WHEN_IDLE: 'updater:install-when-idle',
+  CANCEL_IDLE_INSTALL: 'updater:cancel-idle-install',
 } as const

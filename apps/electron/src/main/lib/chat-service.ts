@@ -651,7 +651,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
   }
 
   const channels = listChannels()
-  const channel = channels.find((c) => c.id === channelId)
+  const channel = channels.find((candidate) => candidate.id === channelId)
   if (!channel) {
     console.warn('[标题生成] 渠道不存在:', channelId)
     return null
@@ -665,7 +665,6 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
 
   let apiKey: string
   let baseUrl: string
-
   if (channel.provider === 'proma') {
     const token = getAuthToken()
     if (!token) {
@@ -679,7 +678,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
       apiKey = await resolveChannelRuntimeApiKey(channelId)
     } catch {
       console.warn('[标题生成] 解密 API Key 失败')
-      return null
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
     baseUrl = channel.baseUrl
   }
@@ -688,21 +687,13 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
   const proxyUrl = await getEffectiveProxyUrl()
   const fetchFn = getFetchFn(proxyUrl)
   const titleModelId = channel.provider === 'proma' ? PROMA_TITLE_MODEL : modelId
-
   const doFetch = async (key: string): Promise<string | null> => {
-    const request = adapter.buildTitleRequest({
-      baseUrl,
-      apiKey: key,
-      modelId: titleModelId,
-      prompt: TITLE_PROMPT + userMessage,
-    })
+    const request = adapter.buildTitleRequest({ baseUrl, apiKey: key, modelId: titleModelId, prompt: TITLE_PROMPT + userMessage })
     return fetchTitle(request, adapter, fetchFn)
   }
 
   try {
     let title = await doFetch(apiKey)
-
-    // Proma 渠道：token 过期时尝试刷新后重试一次
     if (!title && channel.provider === 'proma') {
       const newToken = await tryRefreshAuthToken()
       if (newToken) {
@@ -721,6 +712,6 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string |
     return result
   } catch (error) {
     console.warn('[标题生成] 请求失败:', error)
-    return null
+    return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
   }
 }

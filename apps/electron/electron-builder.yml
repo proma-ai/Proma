@@ -85,6 +85,12 @@ extraResources:
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.icns
+  # Swift/AppKit 原生灵动岛宿主；须显式标记为需签名的额外二进制。
+  extraResources:
+    - from: resources/agent-island/macos-agent-island-helper
+      to: agent-island/macos-agent-island-helper
+  binaries:
+    - resources/agent-island/macos-agent-island-helper
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist

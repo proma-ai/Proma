@@ -87,7 +87,6 @@ import { getAgentSdkMaxOutputTokens } from './agent-sdk-output-limits'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getPromaCloudRecoveryAction } from './proma-cloud-recovery'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
-import { CodexTitleRequestCoordinator } from './codex-title-request-coordinator'
 import { createFallbackTitle, resolveCodexTitleSource, sanitizeGeneratedTitle, shouldFallbackToInputTitle, TITLE_PROMPT } from './title-generation'
 
 // ===== 类型定义 =====
@@ -465,7 +464,6 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
-  private codexTitleRequestCoordinator = new CodexTitleRequestCoordinator()
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
@@ -688,26 +686,25 @@ export class AgentOrchestrator {
     if (signal?.aborted) return null
     console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
 
+    let channel: import('@proma/shared').Channel | undefined
     try {
-      const channels = listChannels()
-      const channel = channels.find((c) => c.id === channelId)
-      if (!channel) {
-        console.warn('[Agent 标题生成] 渠道不存在:', channelId)
-        return null
-      }
+      channel = listChannels().find((candidate) => candidate.id === channelId)
+    } catch (error) {
+      console.warn('[Agent 标题生成] 渠道解析失败:', error)
+      return null
+    }
+    if (!channel) {
+      console.warn('[Agent 标题生成] 渠道不存在:', channelId)
+      return null
+    }
 
+    try {
+      // 商业版：Codex OAuth 标题走已登录的 Proma Cloud 轻量模型，避免占用 Codex 订阅请求通道。
       if (channel.provider === 'openai-codex') {
-        // 商业版：Codex OAuth 渠道标题走 Proma 轻量模型（已登录 Cloud 时），
-        // 不使用 Codex Responses 协议，避免占用订阅请求通道且不稳定的问题。
-        // 未登录 Cloud 时直接使用本地兜底标题。
         const titleSource = resolveCodexTitleSource(!!getAuthToken())
-        if (titleSource === 'fallback') {
-          return createFallbackTitle(userMessage)
-        }
-        // titleSource === 'proma' → 使用下方 Proma 轻量标题模型路径
+        if (titleSource === 'fallback') return createFallbackTitle(userMessage)
       }
 
-      // Proma 官方渠道和已登录 Cloud 的 Codex 渠道使用独立的轻量标题模型。
       const usePromaTitleModel = channel.provider === 'proma' || channel.provider === 'openai-codex'
       let apiKey: string
       let baseUrl: string
@@ -724,9 +721,7 @@ export class AgentOrchestrator {
         baseUrl = channel.baseUrl
       }
 
-      // Proma Cloud 标题模型独立于 Agent 当前使用的模型，确保低成本、稳定生成。
       const titleModelId = usePromaTitleModel ? PROMA_TITLE_MODEL : modelId
-
       const providerAdapter = getAdapter(usePromaTitleModel ? 'proma' : channel.provider)
       const proxyUrl = await getEffectiveProxyUrl()
       const fetchFn = getFetchFn(proxyUrl)
@@ -742,17 +737,19 @@ export class AgentOrchestrator {
       const result = title ? sanitizeGeneratedTitle(title) : null
       if (!result) {
         console.warn('[Agent 标题生成] API 未返回可用标题')
-        return shouldFallbackToInputTitle(channel.provider, result) ? createFallbackTitle(userMessage) : null
+        return shouldFallbackToInputTitle(channel.provider, result) || channel.provider === 'opencode-go-openai'
+          ? createFallbackTitle(userMessage)
+          : null
       }
 
       console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
       return result
     } catch (error) {
+      if (signal?.aborted) return null
       console.warn('[Agent 标题生成] 生成失败:', error)
-      return null
+      return channel.provider === 'opencode-go-openai' ? createFallbackTitle(userMessage) : null
     }
   }
-
   /**
    * 流完成后自动生成标题
    *
@@ -1187,8 +1184,6 @@ export class AgentOrchestrator {
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
     const runGeneration = Date.now()
     this.activeSessions.set(sessionId, runGeneration)
-    const usesCodexOAuth = channel.provider === 'openai-codex'
-    let codexForegroundRunActive = false
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
@@ -1198,10 +1193,6 @@ export class AgentOrchestrator {
         this.activeSessions.delete(sessionId)
         this.sessionPermissionModes.delete(sessionId)
         this.queuedMessageUuids.delete(sessionId)
-      }
-      if (codexForegroundRunActive) {
-        codexForegroundRunActive = false
-        this.codexTitleRequestCoordinator.endForeground(channelId)
       }
     }
     const completeRun = (
@@ -1337,12 +1328,6 @@ export class AgentOrchestrator {
     let workspace: import('@proma/shared').AgentWorkspace | undefined
 
     try {
-      if (usesCodexOAuth) {
-        codexForegroundRunActive = true
-        await this.codexTitleRequestCoordinator.beginForeground(channelId)
-        if (this.activeSessions.get(sessionId) !== runGeneration) return
-      }
-
       const sdk = agentRuntime === 'claude' ? await import('@anthropic-ai/claude-agent-sdk') : undefined
       const cliPath = agentRuntime === 'claude' ? resolveSDKCliPath() : undefined
 
@@ -1821,13 +1806,8 @@ export class AgentOrchestrator {
         if (titleGenerationStarted) return
         titleGenerationStarted = true
 
-        if (channel.provider === 'openai-codex') {
-          this.codexTitleRequestCoordinator.enqueue(channelId, (signal) =>
-            this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks, signal),
-          )
-          return
-        }
-
+        // 标题请求与前台 Agent run 使用独立的 Codex Responses 请求，可并发执行。
+        // 自动标题只会写入仍为默认名称的会话，因此不会覆盖用户的手动重命名。
         this.autoGenerateTitle(sessionId, userMessage, channelId, resolvedModel, callbacks)
           .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
       }
@@ -1855,11 +1835,7 @@ export class AgentOrchestrator {
           }
         }
 
-        // Codex OAuth 标题会额外占用订阅请求通道，等待主 Agent 请求结束再发起，
-        // 避免在 session.prompt() 前与主请求竞争同一通道。
-        if (channel.provider !== 'openai-codex') {
-          startAutoTitleGeneration()
-        }
+        startAutoTitleGeneration()
       }
       const handleModelResolved = (model: string): void => {
         // `[1m]` 是 SDK 内部上下文变体，不应泄漏到标题生成或用户可见的模型名。
@@ -2541,10 +2517,6 @@ export class AgentOrchestrator {
           // 发送完成信号
           completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
-          if (!wasStoppedByUser && channel.provider === 'openai-codex') {
-            startAutoTitleGeneration()
-          }
-
           break  // 成功完成，退出重试循环
 
         } catch (error) {
@@ -2865,6 +2837,11 @@ export class AgentOrchestrator {
     return this.activeSessions.has(sessionId)
   }
 
+  /** 是否存在任意运行中 Agent（含后台运行与外部触发的会话）。 */
+  hasActiveSessions(): boolean {
+    return this.activeSessions.size > 0
+  }
+
   /** 同一个真实本地项目根只能由一个运行中会话执行文件回退。 */
   private hasOtherActiveSessionForLocalProjectRoot(sessionId: string, localProjectRoot: string): boolean {
     for (const activeSessionId of this.activeSessions.keys()) {
@@ -3015,7 +2992,6 @@ export class AgentOrchestrator {
       console.log(`[Agent 编排] 正在中止所有活跃会话 (${this.activeSessions.size} 个)...`)
     }
     // 即便 activeSessions 为空，也要调 dispose 清理可能残留的 pidMap / 子进程
-    this.codexTitleRequestCoordinator.dispose()
     this.adapter.dispose()
     this.activeSessions.clear()
     this.sessionPermissionModes.clear()

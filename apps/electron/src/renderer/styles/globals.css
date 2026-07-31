@@ -1022,6 +1022,10 @@
   --radius: 0.625rem;
   --radius-xl-extra: 4px;
   --radius-2xl-extra: 8px;
+}
+
+/* 经典界面浅色：侧栏使用纯白对齐 upstream；深色下不覆盖，保持主题的深色侧栏 */
+:root.ui-classic:not(.dark) {
   --sidebar-surface: 0 0% 98%;
 }
 

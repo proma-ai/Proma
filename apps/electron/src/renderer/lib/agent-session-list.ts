@@ -55,15 +55,18 @@ export function upsertAgentSession(
  * 会话落盘，它的快照里就缺这个会话；整体覆盖会把它冲掉，且后续不再有事件
  * 把它写回——这正是父会话「从列表消失且不回来」的根因。
  *
- * 折中策略：以 `fetched` 为基底（保留删除语义），但对本地存在、fetched
- * 缺失、且本地 updatedAt 不早于本次快照里最大 updatedAt 的条目予以保留
- * （视为「比这份快照更新、尚未被 fetch 看到」的乐观条目，而非已删除）。
+ * 折中策略：以 `fetched` 为基底（保留删除语义），但会同时保留两种本地新状态：
+ * - fetched 缺失、且本地 updatedAt 不早于快照水位的条目；
+ * - fetched 同 ID 但其 updatedAt 不晚于本地的条目（例如 TITLE_UPDATED 已抵达，
+ *   但该 fetch 在标题落盘前已开始）。
+ *
  * 这样既能反映真实删除，又能抵御陈旧快照回冲。
  */
 export function mergeFetchedAgentSessions(
   prev: readonly AgentSessionMeta[],
   fetched: readonly AgentSessionMeta[],
 ): AgentSessionMeta[] {
+  const previousById = new Map(prev.map((session) => [session.id, session]))
   const fetchedIds = new Set(fetched.map((session) => session.id))
   // 本次快照所反映的“数据新鲜度水位”：快照里最大的 updatedAt。
   // 比它更新的本地条目，说明在该快照生成之后才出现/更新，不能被它判定为删除。
@@ -78,7 +81,14 @@ export function mergeFetchedAgentSessions(
       !fetchedIds.has(session.id) && session.updatedAt >= snapshotWatermark,
   )
 
-  return sortAgentSessionsByUpdatedAtDesc([...fetched, ...survivingLocalOnly])
+  // 同 ID 的旧快照不能覆盖已通过事件即时写入的本地状态。等值也保留本地，
+  // 因为 TITLE_UPDATED 事件不携带权威 updatedAt，时间戳可能尚未来得及同步。
+  const mergedFetched = fetched.map((session) => {
+    const local = previousById.get(session.id)
+    return local && local.updatedAt >= session.updatedAt ? local : session
+  })
+
+  return sortAgentSessionsByUpdatedAtDesc([...mergedFetched, ...survivingLocalOnly])
 }
 
 /** 收集可见会话树里的父/子会话 id，用于判断当前会话是否已显示在侧栏中。 */

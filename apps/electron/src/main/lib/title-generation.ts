@@ -11,9 +11,36 @@ const TITLE_PUNCTUATION = /^["'“”‘’「《]+|["'“”‘’」》]+$/g
 const MARKDOWN_PREFIX = /^(?:[#>*\-\d.)]\s*)+/
 const WHITESPACE = /\s+/g
 
-/** 清理模型返回的标题。 */
-export function sanitizeGeneratedTitle(title: string): string | null {
-  const cleaned = title.trim().replace(TITLE_PUNCTUATION, '').trim()
+/**
+ * 从模型返回的原始标题内容中提取文本。
+ *
+ * OpenAI 兼容端点（如 OpenCode Go）对推理模型可能把 `message.content` 返回为
+ * 字符串、内容块数组（`[{ type: 'text', text: '...' }]`）或空值。逐个归一为
+ * 纯文本，避免 `.trim()` 在非字符串上抛异常，导致整个标题生成在 catch 里静默丢弃。
+ */
+function extractTitleText(title: unknown): string {
+  if (typeof title === 'string') return title
+  if (Array.isArray(title)) {
+    return title
+      .map((block) => {
+        if (block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string') {
+          return (block as { text: string }).text
+        }
+        return ''
+      })
+      .join('')
+      .trim()
+  }
+  if (title && typeof title === 'object' && typeof (title as { text?: unknown }).text === 'string') {
+    return (title as { text: string }).text
+  }
+  return ''
+}
+
+/** 清理模型返回的标题。兼容字符串与内容块数组，非文本内容返回 null。 */
+export function sanitizeGeneratedTitle(title: string | unknown): string | null {
+  const text = extractTitleText(title)
+  const cleaned = text.trim().replace(TITLE_PUNCTUATION, '').trim()
   return cleaned.slice(0, MAX_TITLE_LENGTH) || null
 }
 

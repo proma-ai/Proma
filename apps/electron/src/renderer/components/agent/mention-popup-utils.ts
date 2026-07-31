@@ -34,6 +34,80 @@ export function isSuggestionTriggerPresent(
   return editor.state.doc.textBetween(from, to, '', '').startsWith(char)
 }
 
+/**
+ * Esc 抑制状态：记录被 Esc 关闭的触发片段（触发符+query）的完整文本与触发符位置。
+ */
+export interface EscSuppressedTrigger {
+  /** Esc 时触发符位置（range.from） */
+  from: number
+  /** Esc 时触发片段（触发符+query）的完整文本 */
+  text: string
+}
+
+/**
+ * onStart 时判断当前触发是否应被抑制（同一片段延续）。返回 true = 抑制，不弹窗。
+ *
+ * - 触发符位置后移（`～` → `～` 后再输入 `～`，新触发符出现在旧触发符之后）→ 用户重新触发了 → 新触发；
+ * - 位置相同或前移且文本延续（继续输入 `@qq` → `@qqx`、删除触发符前字符 `abc@qq` → `ab@qq`）
+ *   → 同一片段，继续抑制；
+ * - 其余情况（片段删除后重新输入不同内容、空格结束片段后新触发符）→ 新触发。
+ */
+export function shouldSuppressEscTrigger(
+  suppressed: EscSuppressedTrigger | null,
+  trigger: { from: number; text: string | null | undefined },
+): boolean {
+  if (!suppressed || !trigger.text) return false
+  // 触发符位置后移 = 用户重新输入了触发符（新片段）→ 不抑制
+  if (trigger.from > suppressed.from) return false
+  // 文本延续（继续输入或位置前移但片段未变）→ 同一片段，抑制
+  return trigger.text.length >= suppressed.text.length && trigger.text.startsWith(suppressed.text)
+}
+
+/**
+ * onExit 时判断被抑制的触发符是否已从文档中消失（用户删除了片段）。
+ * 返回 true = 触发符已消失，应清除抑制，之后重新输入触发符即可正常弹窗。
+ */
+export function shouldClearEscSuppressionOnExit(
+  suppressed: EscSuppressedTrigger | null,
+  editor: Editor,
+  range: { from: number; to: number },
+  char: string,
+): boolean {
+  if (!suppressed) return false
+  const { from, to } = range
+  const docSize = editor.state.doc.content.size
+  // range 越界说明触发符已被删除，文档位置失效
+  if (from < 0 || to <= from || to > docSize) return true
+  return !editor.state.doc.textBetween(from, to, '', '').startsWith(char)
+}
+
+/**
+ * TipTap 会并发等待每次 items() 的异步结果。请求编号在发起时递增，因此旧请求即使
+ * 最后返回，也无法覆盖当前触发符或当前 query 的弹窗。
+ */
+export function createLatestSuggestionRequestGuard<T>() {
+  let latestRequestId = 0
+  const requestIds = new WeakMap<T[], number>()
+
+  return {
+    startRequest(): number {
+      latestRequestId += 1
+      return latestRequestId
+    },
+    attachResult(requestId: number, items: T[]): T[] {
+      requestIds.set(items, requestId)
+      return items
+    },
+    isLatest(items: T[]): boolean {
+      return requestIds.get(items) === latestRequestId
+    },
+    isStale(items: T[]): boolean {
+      const requestId = requestIds.get(items)
+      return requestId !== undefined && requestId !== latestRequestId
+    },
+  }
+}
+
 /** 创建弹窗容器并挂载到 body */
 export function createMentionPopup(content: HTMLElement): HTMLDivElement {
   const popup = document.createElement('div')

@@ -11,7 +11,7 @@ import type { SuggestionOptions } from '@tiptap/suggestion'
 import { CalendarDays, ListTodo, MessageSquareText, Sparkles, Server } from 'lucide-react'
 import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
-import { createMentionPopup, positionPopup, isSuggestionTriggerPresent } from './mention-popup-utils'
+import { createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from './mention-popup-utils'
 import type { AgentSessionReferenceSearchResult } from '@proma/shared'
 import {
   buildPlanningReferenceItems,
@@ -48,6 +48,14 @@ function createMentionSuggestion<T>(
   mentionActiveRef: React.MutableRefObject<boolean>,
   mentionItemCountRef: React.MutableRefObject<number>,
 ): Omit<SuggestionOptions<T>, 'editor'> {
+  // Esc 抑制：记录被 Esc 关闭的触发片段文本。
+  // TipTap suggestion 按 Esc 后会 dispatchExit 置 inactive，但触发符仍在文档中，
+  // 继续输入会再次 onStart 弹窗；这里在 onStart 时对同一片段跳过建弹窗，
+  // 直到用户重新触发（片段结束或内容变化）才恢复正常。
+  // 用文本而非位置判断：删除触发符前的字符导致位置移动时，片段仍延续，继续抑制。
+  let suppressedTrigger: EscSuppressedTrigger | null = null
+  const requestGuard = createLatestSuggestionRequestGuard<T>()
+
   return {
     char: config.char,
     allowSpaces: false,
@@ -57,12 +65,16 @@ function createMentionSuggestion<T>(
     allowedPrefixes: null,
 
     items: async ({ query }): Promise<T[]> => {
+      const requestId = requestGuard.startRequest()
       const slug = workspaceSlugRef.current
-      if (config.requiresContext !== false && !slug) return []
+      if (config.requiresContext !== false && !slug) return requestGuard.attachResult(requestId, [])
       try {
-        return await config.fetchItems(slug ?? '', (query ?? '').toLowerCase())
+        return requestGuard.attachResult(
+          requestId,
+          await config.fetchItems(slug ?? '', (query ?? '').toLowerCase()),
+        )
       } catch {
-        return []
+        return requestGuard.attachResult(requestId, [])
       }
     },
 
@@ -88,6 +100,9 @@ function createMentionSuggestion<T>(
 
       return {
         onStart(props) {
+          if (!requestGuard.isLatest(props.items)) {
+            return
+          }
           if (popup || renderer) {
             cleanup()
           }
@@ -97,6 +112,13 @@ function createMentionSuggestion<T>(
           if (!isSuggestionTriggerPresent(props.editor, props.range, config.char)) {
             return
           }
+
+          // Esc 抑制：同一触发片段（位置未后移且文本延续）不再弹窗，保持抑制；
+          // 用户重新输入触发符（位置后移）、片段已结束或内容变化时清除抑制并正常弹窗。
+          if (shouldSuppressEscTrigger(suppressedTrigger, { from: props.range.from, text: props.text })) {
+            return
+          }
+          suppressedTrigger = null
 
           mentionActiveRef.current = true
           mentionItemCountRef.current = props.items.length
@@ -129,6 +151,10 @@ function createMentionSuggestion<T>(
         },
 
         onUpdate(props) {
+          // 仅允许最新异步请求更新弹窗。
+          if (!requestGuard.isLatest(props.items)) {
+            return
+          }
           mentionItemCountRef.current = props.items.length
           renderer?.updateProps({
             items: props.items,
@@ -141,10 +167,25 @@ function createMentionSuggestion<T>(
         },
 
         onKeyDown(props) {
+          // 记录 Esc 关闭时的触发片段文本与位置，onStart/onExit 据此判断同一片段
+          if (props.event.key === 'Escape') {
+            suppressedTrigger = {
+              from: props.range.from,
+              text: props.view.state.doc.textBetween(props.range.from, props.range.to, '', ''),
+            }
+          }
           return renderer?.ref?.onKeyDown({ event: props.event }) ?? false
         },
 
-        onExit() {
+        onExit(props) {
+          // TipTap 会在 await items() 后才调用 onExit；旧请求不能清理新弹窗。
+          if (requestGuard.isStale(props.items)) {
+            return
+          }
+          // 被抑制的触发符已从文档中删除 → 清除抑制，让用户重新输入触发符时恢复正常弹窗
+          if (suppressedTrigger && shouldClearEscSuppressionOnExit(suppressedTrigger, props.editor, props.range, config.char)) {
+            suppressedTrigger = null
+          }
           cleanup()
         },
       }

@@ -32,7 +32,7 @@ import { PlanModeDashedBorder } from './PlanModeDashedBorder'
 import { ModelSelector } from '@/components/chat/ModelSelector'
 import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
 import { QuotedSelectionChip } from '@/components/diff/QuotedSelectionChip'
-import { RichTextInput } from '@/components/ai-elements/rich-text-input'
+import { RichTextInput, type RichTextInputHandle } from '@/components/ai-elements/rich-text-input'
 import { SpeechButton } from '@/components/ai-elements/speech-button'
 import { InputToolbarOverflow, type ToolbarItem } from '@/components/ai-elements/InputToolbarOverflow'
 import {
@@ -121,6 +121,7 @@ import { useOpenPreview } from '@/components/diff/preview-opener'
 import type { AgentRuntime, AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLargeFile, FileDialogResult, ModelOption, ReasoningCapability, SDKMessage, SDKUserMessage, ProviderType } from '@proma/shared'
 import { inferAgentSdkContextWindow, inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, isPromaOfficialOpenAIReasoningModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
+import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import {
@@ -742,6 +743,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
   // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
   const pendingFilesRef = React.useRef(pendingFiles)
+  // RichTextInput 命令接口 ref（右侧文件面板拖入时插入 @file 引用）
+  const richTextInputRef = React.useRef<RichTextInputHandle>(null)
   React.useEffect(() => {
     pendingFilesRef.current = pendingFiles
   }, [pendingFiles])
@@ -1860,6 +1863,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [addClipboardTextDraft])
 
+  /** 将右侧文件面板拖入的目录附加到会话（保持 Agent 可访问）。返回是否成功。 */
+  const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<boolean> => {
+    try {
+      const updated = await window.electronAPI.attachDirectory({
+        sessionId,
+        directoryPath: dirPath,
+      })
+      setAttachedDirsMap((prev) => {
+        const map = new Map(prev)
+        map.set(sessionId, updated)
+        return map
+      })
+      return true
+    } catch (error) {
+      console.error('[AgentView] 面板拖拽附加目录失败:', error)
+      return false
+    }
+  }, [sessionId, setAttachedDirsMap])
+
   /** 拖放处理 */
   const handleDragOver = React.useCallback((e: React.DragEvent): void => {
     e.preventDefault()
@@ -1877,6 +1899,25 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
+
+    // 优先识别右侧文件面板的自定义拖拽载荷（会话文件 / 项目文件引用）
+    // 文件直接插入引用；文件夹先附加到会话（Agent 可访问），附加成功后才插入引用，
+    // 避免失败时留下 Agent 无法访问的无效引用。
+    const panelItems = getFilePanelDragData(e.dataTransfer)
+    if (panelItems && panelItems.length > 0) {
+      const files = panelItems.filter((item) => !item.isDirectory)
+      const dirs = panelItems.filter((item) => item.isDirectory)
+      if (files.length > 0) {
+        richTextInputRef.current?.insertFileMentions(files)
+      }
+      for (const dir of dirs) {
+        const ok = await addPanelDirectory(dir.path)
+        if (ok) {
+          richTextInputRef.current?.insertFileMentions([dir])
+        }
+      }
+      return
+    }
 
     const droppedFiles = Array.from(e.dataTransfer.files)
     if (droppedFiles.length === 0) return
@@ -1899,7 +1940,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         // 通过主进程检测目录 vs 文件
         const { directories, files: filePaths } = await window.electronAPI.checkPathsType(paths)
 
-        // 拖拽的文件夹直接附加
+        // 拖拽的文件夹：附加到会话 + 插入可见的文件夹引用（与右侧面板拖拽体验一致）
         for (const dirPath of directories) {
           try {
             const updated = await window.electronAPI.attachDirectory({
@@ -1911,7 +1952,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               map.set(sessionId, updated)
               return map
             })
-            const dirName = dirPath.split('/').pop() || dirPath
+            const dirName = dirPath.split(/[\\/]/).pop() || dirPath
+            // 在输入框插入文件夹引用 chip（Agent 通过附加目录可访问）
+            richTextInputRef.current?.insertFileMentions([{
+              path: dirPath,
+              name: dirName,
+              isDirectory: true,
+              scope: 'project',
+            }])
             toast.success(`已附加目录: ${dirName}`)
           } catch (error) {
             console.error('[AgentView] 拖拽附加文件夹失败:', error)
@@ -1936,7 +1984,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, setAttachedDirsMap])
+  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
@@ -2716,6 +2764,17 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     return () => window.removeEventListener('proma:focus-input', handler)
   }, [])
 
+  // 监听文件面板三点菜单「引用到 Agent」事件：在输入框插入 @file 引用
+  React.useEffect(() => {
+    const handler = (event: Event): void => {
+      const items = (event as CustomEvent<FilePanelDragItem[]>).detail
+      if (!items || items.length === 0) return
+      richTextInputRef.current?.insertFileMentions(items)
+    }
+    window.addEventListener(INSERT_FILE_MENTION_EVENT, handler)
+    return () => window.removeEventListener(INSERT_FILE_MENTION_EVENT, handler)
+  }, [])
+
   const allAskUserRequests = useAtomValue(allPendingAskUserRequestsAtom)
   const allPermissionRequests = useAtomValue(allPendingPermissionRequestsAtom)
   const allExitPlanRequests = useAtomValue(allPendingExitPlanRequestsAtom)
@@ -3185,6 +3244,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             )}
 
             <RichTextInput
+              ref={richTextInputRef}
               value={inputContent}
               onChange={setInputContent}
               onSubmit={handleSend}

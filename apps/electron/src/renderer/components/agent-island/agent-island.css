@@ -1,0 +1,371 @@
+/* Proma Dynamic Island — 为 macOS 顶部刘海设计的黑色连续 Surface。 */
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  color: #f5f5f7;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button { font: inherit; }
+
+.pulse-root {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* 顶部不圆角：让组件与 MacBook 真实刘海成为同一块黑色。 */
+.pulse-shell {
+  --pulse-fg: #f5f5f7;
+  --pulse-muted: rgb(245 245 247 / 0.52);
+  --pulse-line: rgb(255 255 255 / 0.105);
+  --pulse-surface: rgb(255 255 255 / 0.075);
+  --pulse-hover: rgb(255 255 255 / 0.12);
+  --pulse-accent: #8aa7ff;
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #000;
+  box-shadow:
+    0 12px 30px rgb(0 0 0 / 0.42),
+    0 2px 7px rgb(0 0 0 / 0.32),
+    inset 0 -1px 0 rgb(255 255 255 / 0.10);
+}
+
+.pulse-shell::after {
+  position: absolute;
+  right: 20px;
+  bottom: 0;
+  left: 20px;
+  height: 1px;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.20), transparent);
+}
+
+.pulse-shell-compact { border-radius: 0 0 19px 19px; }
+.pulse-shell-expanded { border-radius: 0 0 24px 24px; }
+.pulse-shell-compact.running { --pulse-accent: #ff8426; }
+.pulse-shell-compact.attention { --pulse-accent: #2cd7c6; }
+.pulse-shell-compact.completed { --pulse-accent: #4cdc8a; }
+.pulse-shell-compact.error { --pulse-accent: #ff6c6c; }
+
+/* ===== 收起态：把刘海两侧的闲置空间变成工作状态条 ===== */
+
+.pulse-compact {
+  display: grid;
+  box-sizing: border-box;
+  grid-template-columns: 28px minmax(0, 1fr) auto 18px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 15px 0 18px;
+  cursor: grab;
+}
+
+.pulse-compact:active { cursor: grabbing; }
+
+.pulse-compact-copy {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: 13px 15px;
+  column-gap: 7px;
+  align-items: center;
+}
+
+.pulse-kicker {
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.115em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulse-compact-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pulse-fg);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulse-compact-detail {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pulse-muted);
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulse-compact-metrics {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pulse-metric {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 7px;
+  color: rgb(255 255 255 / 0.54);
+  background: rgb(255 255 255 / 0.07);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.pulse-metric svg { opacity: 0.75; }
+.pulse-metric b { color: #fff; font-size: 10px; font-weight: 720; }
+.pulse-metric span { display: none; }
+.pulse-metric.attention { border-color: rgb(44 215 198 / 0.24); color: #5fe5d7; background: rgb(44 215 198 / 0.12); }
+.pulse-chevron { color: rgb(255 255 255 / 0.46); }
+
+/* ===== 轻量“宠物”退化为脉冲核心：保留生命感，不抢信息层级 ===== */
+
+.pulse-glyph {
+  position: relative;
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #8aa7ff;
+}
+
+.pulse-glyph.compact { width: 28px; height: 28px; }
+.pulse-glyph-core {
+  position: relative;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 16%, transparent);
+}
+.pulse-glyph-orbit {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
+  border-radius: 50%;
+  opacity: 0.74;
+}
+.pulse-glyph.running { color: #ff8426; }
+.pulse-glyph.attention { color: #2cd7c6; }
+.pulse-glyph.error { color: #ff6c6c; }
+.pulse-glyph.completed { color: #4cdc8a; }
+.pulse-glyph.running .pulse-glyph-orbit { animation: pulse-orbit 1.65s cubic-bezier(0.2, 0, 0, 1) infinite; }
+.pulse-glyph.attention .pulse-glyph-core,
+.pulse-glyph.error .pulse-glyph-core { animation: pulse-attention 1.2s ease-in-out infinite; }
+
+@keyframes pulse-orbit {
+  0%, 100% { transform: scale(0.8); opacity: 0.36; }
+  48% { transform: scale(1.08); opacity: 0.92; }
+}
+@keyframes pulse-attention {
+  0%, 100% { transform: scale(0.92); }
+  50% { transform: scale(1.16); }
+}
+
+/* ===== 展开态：从刘海向下长出的黑色工作面板 ===== */
+
+.pulse-header {
+  display: flex;
+  min-height: 59px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 0 18px;
+  border-bottom: 1px solid var(--pulse-line);
+}
+.pulse-header-identity,
+.pulse-header-actions { display: flex; align-items: center; }
+.pulse-header-identity { gap: 10px; }
+.pulse-header h1,
+.pulse-section-heading h2,
+.pulse-section-heading p { margin: 0; }
+.pulse-header h1 {
+  margin-top: 2px;
+  color: var(--pulse-fg);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+.pulse-header-actions { gap: 2px; }
+.pulse-date { margin-right: 5px; color: var(--pulse-muted); font-size: 10px; }
+
+.pulse-icon-button {
+  position: relative;
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: rgb(255 255 255 / 0.58);
+  background: transparent;
+  cursor: pointer;
+  transition-property: background-color, color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-icon-button::before { position: absolute; width: 40px; height: 40px; content: ''; }
+.pulse-icon-button:hover { color: #fff; background: var(--pulse-hover); }
+.pulse-icon-button:active,
+.pulse-attention-item:active,
+.pulse-session-item:active,
+.pulse-plan-row:active,
+.pulse-text-button:active { transform: scale(0.96); }
+
+.pulse-section { padding: 13px 14px; }
+.pulse-section + .pulse-section { border-top: 1px solid var(--pulse-line); }
+.pulse-attention-section { background: linear-gradient(115deg, rgb(44 215 198 / 0.105), transparent 48%); }
+.pulse-section-heading { display: flex; min-height: 28px; align-items: center; gap: 8px; }
+.pulse-section-icon {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(138 167 255 / 0.18);
+  border-radius: 9px;
+  color: #adc0ff;
+  background: rgb(138 167 255 / 0.12);
+}
+.pulse-section-icon.attention { border-color: rgb(44 215 198 / 0.22); color: #61e5d8; background: rgb(44 215 198 / 0.13); }
+.pulse-section-heading > div { min-width: 0; flex: 1; }
+.pulse-section-heading h2 { color: var(--pulse-fg); font-size: 11px; font-weight: 700; letter-spacing: -0.012em; line-height: 1.2; }
+.pulse-section-heading p { margin-top: 2px; overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgb(44 215 198 / 0.22);
+  border-radius: 8px;
+  color: #61e5d8;
+  background: rgb(44 215 198 / 0.13);
+  font-size: 10px;
+  font-weight: 750;
+}
+.pulse-count.neutral { border-color: rgb(255 255 255 / 0.10); color: rgb(255 255 255 / 0.65); background: rgb(255 255 255 / 0.07); }
+
+.pulse-attention-list,
+.pulse-session-list { display: grid; gap: 5px; margin-top: 9px; }
+.pulse-attention-item,
+.pulse-session-item,
+.pulse-plan-row { width: 100%; border: 0; font: inherit; text-align: left; cursor: pointer; }
+
+.pulse-attention-item {
+  display: grid;
+  min-height: 40px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 11px;
+  color: var(--pulse-fg);
+  background: rgb(255 255 255 / 0.06);
+  transition-property: background-color, border-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-attention-item:hover { border-color: rgb(44 215 198 / 0.30); background: rgb(255 255 255 / 0.105); }
+.pulse-state-dot { width: 7px; height: 7px; border-radius: 50%; background: #8aa7ff; }
+.pulse-state-dot.attention { background: #2cd7c6; box-shadow: 0 0 0 3px rgb(44 215 198 / 0.14); }
+.pulse-state-dot.error { background: #ff6c6c; box-shadow: 0 0 0 3px rgb(255 108 108 / 0.14); }
+.pulse-attention-copy,
+.pulse-session-copy { display: grid; min-width: 0; gap: 2px; }
+.pulse-attention-copy b { overflow: hidden; color: var(--pulse-fg); font-size: 10.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-attention-copy span { overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-item-action,
+.pulse-text-button { display: inline-flex; align-items: center; gap: 3px; color: #adc0ff; font-size: 9.5px; font-weight: 650; white-space: nowrap; }
+
+.pulse-session-item {
+  display: grid;
+  min-height: 49px;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  color: var(--pulse-fg);
+  background: transparent;
+  transition-property: background-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pulse-session-item:hover { background: var(--pulse-hover); }
+.pulse-session-title-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.pulse-session-title-row b { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-phase { flex: 0 0 auto; padding: 2px 5px; border-radius: 5px; color: #ffb077; background: rgb(255 132 38 / 0.13); font-size: 8px; font-weight: 700; }
+.pulse-phase.attention { color: #61e5d8; background: rgb(44 215 198 / 0.13); }
+.pulse-session-detail,
+.pulse-activity { overflow: hidden; color: var(--pulse-muted); font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-activity { color: rgb(255 255 255 / 0.39); font-size: 8.5px; }
+.pulse-activity.tool { color: #adc0ff; }
+.pulse-activity.status { color: #ffb077; }
+.pulse-session-arrow { color: rgb(255 255 255 / 0.55); opacity: 0; transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-session-item:hover .pulse-session-arrow { opacity: 0.85; transform: translate(1px, -1px); }
+.pulse-empty-state { display: flex; min-height: 45px; align-items: center; justify-content: center; gap: 6px; color: var(--pulse-muted); font-size: 10px; }
+
+/* ===== 今日规划：在展开态占满刘海下方的可用宽度 ===== */
+
+.pulse-plan-section { padding-bottom: 14px; }
+.pulse-text-button { min-height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; transition-property: opacity, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-text-button:hover { opacity: 0.72; }
+.pulse-planning-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 10px; }
+.pulse-plan-column { min-width: 0; padding: 8px; border: 1px solid rgb(255 255 255 / 0.08); border-radius: 12px; background: rgb(255 255 255 / 0.045); }
+.pulse-plan-label { display: flex; height: 18px; align-items: center; gap: 5px; color: rgb(255 255 255 / 0.53); font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+.pulse-plan-label svg { color: #adc0ff; }
+.pulse-plan-label span { display: inline-grid; min-width: 16px; height: 16px; place-items: center; border-radius: 5px; color: #fff; background: rgb(255 255 255 / 0.09); font-size: 8px; }
+.pulse-plan-row { display: grid; min-height: 31px; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 4px 2px; border-radius: 6px; color: var(--pulse-fg); transition-property: background-color, transform; transition-duration: 130ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+.pulse-plan-row:hover { background: rgb(255 255 255 / 0.085); }
+.pulse-plan-row.event { grid-template-columns: 31px minmax(0, 1fr); }
+.pulse-checkbox { width: 10px; height: 10px; box-sizing: border-box; border: 1px solid rgb(255 255 255 / 0.42); border-radius: 3px; }
+.pulse-plan-title { min-width: 0; overflow: hidden; font-size: 9.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.pulse-plan-time { color: rgb(255 255 255 / 0.46); font-size: 8.5px; white-space: nowrap; }
+.pulse-plan-row.event .pulse-plan-time { color: #adc0ff; font-weight: 650; }
+.pulse-plan-row.overdue .pulse-checkbox { border-color: #ff6c6c; }
+.pulse-plan-row.overdue .pulse-plan-title,
+.pulse-plan-row.overdue .pulse-plan-time { color: #ff9696; }
+.pulse-plan-empty { display: flex; min-height: 47px; align-items: center; justify-content: center; color: var(--pulse-muted); font-size: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-glyph.running .pulse-glyph-orbit,
+  .pulse-glyph.attention .pulse-glyph-core,
+  .pulse-glyph.error .pulse-glyph-core { animation: none; }
+  .pulse-icon-button,
+  .pulse-attention-item,
+  .pulse-session-item,
+  .pulse-plan-row,
+  .pulse-text-button,
+  .pulse-session-arrow { transition-duration: 0ms; }
+}

@@ -27,6 +27,7 @@ import {
 // Cloud 模式专属图标
 import { CreditCard, KeyRound, ScrollText } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ShortcutKeycaps } from "@/components/shortcuts/ShortcutKeycaps";
 import {
   settingsTabAtom,
   channelFormDirtyAtom,
@@ -254,13 +255,26 @@ export function SettingsPanel({
   }
 
   /** 关闭设置面板时检测是否有未保存内容 */
-  const handleClose = (): void => {
+  const handleClose = React.useCallback((): void => {
     if (activeTab === 'channels' && channelFormDirty) {
       setPendingAction({ type: 'close' })
       return
     }
     onClose?.()
-  }
+  }, [activeTab, channelFormDirty, onClose])
+
+  /** 按 ESC 退出设置面板：window 级监听确保焦点在设置面板内任何位置（含 body）都生效；
+   *  Radix 弹层（Select 下拉/AlertDialog/Popover 等）处理 ESC 时会 preventDefault，
+   *  此时交给弹层自行关闭，不退出设置。 */
+  React.useEffect(() => {
+    const handleWindowKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      if (e.defaultPrevented) return
+      handleClose()
+    }
+    window.addEventListener('keydown', handleWindowKeyDown)
+    return () => window.removeEventListener('keydown', handleWindowKeyDown)
+  }, [handleClose])
 
   // 左侧会话点击在渠道表单有未保存内容时，由 useOpenSession 暂存目标并交给此处确认。
   React.useEffect(() => {
@@ -329,10 +343,13 @@ export function SettingsPanel({
           <div className="flex-shrink-0 p-3">
             <button
               onClick={handleClose}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+              className="group flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
             >
               <ArrowLeft size={16} />
               <span>返回</span>
+              <span className="ml-auto hidden group-hover:inline-flex">
+                <ShortcutKeycaps accelerator="Esc" />
+              </span>
             </button>
           </div>
         </div>
