@@ -16,6 +16,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { useAtomValue } from 'jotai'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { TextSelection } from '@tiptap/pm/state'
+import type { Transaction } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
@@ -39,7 +41,9 @@ import {
 } from '@/components/agent/mention-suggestions'
 import { shouldConvertClipboardTextToAttachment } from '@/lib/clipboard-text-attachment'
 import {
+  VOICE_DICTATION_CLEAR_PREVIEW_EVENT,
   VOICE_DICTATION_INSERT_EVENT,
+  VOICE_DICTATION_PREVIEW_EVENT,
   getLastFocusedVoiceInputId,
   setLastFocusedVoiceInputId,
 } from '@/lib/voice-input-focus'
@@ -183,6 +187,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
 }: RichTextInputProps, ref: React.Ref<RichTextInputHandle>): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
   const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
+  const voicePreviewRef = useRef<{ sessionId: string; from: number; to: number } | null>(null)
   // 手动折叠状态：用户主动折叠输入框
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false)
   // 跟踪 isExpanded 最新值（对比后再 setState，避免每键无谓 setState 触发重渲染）
@@ -767,18 +772,88 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     },
   }), [editor])
 
+  // 将预览范围映射到每次用户编辑后的文档位置，避免流式更新覆盖邻近输入。
+  useEffect(() => {
+    if (!editor) return
+
+    const mapPreviewRange = ({ transaction }: { transaction: Transaction }): void => {
+      const current = voicePreviewRef.current
+      if (!current || !transaction.docChanged) return
+      const from = transaction.mapping.mapResult(current.from, 1)
+      const to = transaction.mapping.mapResult(current.to, -1)
+      if (from.deleted && to.deleted) {
+        voicePreviewRef.current = null
+        return
+      }
+      voicePreviewRef.current = {
+        sessionId: current.sessionId,
+        from: from.pos,
+        to: Math.max(from.pos, to.pos),
+      }
+    }
+
+    editor.on('transaction', mapPreviewRange)
+    return () => {
+      editor.off('transaction', mapPreviewRange)
+    }
+  }, [editor])
+
+  // 语音输入在录音期间同步 ASR 的完整结果，停止时再以最终文本替换这段组合文本。
+  useEffect(() => {
+    if (!editor || disabled) return
+
+    const updatePreview = (event: Event): void => {
+      const { sessionId, text } = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail ?? {}
+      const previewText = text?.trim()
+      if (!sessionId || !previewText) return
+
+      const current = voicePreviewRef.current
+      if (current && current.sessionId !== sessionId) return
+      if (!current && getLastFocusedVoiceInputId() !== inputIdRef.current) return
+      const from = current?.from ?? editor.state.selection.from
+      const to = current?.to ?? editor.state.selection.to
+      editor.view.dispatch(editor.state.tr.insertText(previewText, from, to))
+      voicePreviewRef.current = { sessionId, from, to: from + previewText.length }
+      event.preventDefault()
+    }
+
+    const clearPreview = (event: Event): void => {
+      const { sessionId } = (event as CustomEvent<{ sessionId?: string }>).detail ?? {}
+      const current = voicePreviewRef.current
+      if (!current || current.sessionId !== sessionId) return
+      editor.view.dispatch(editor.state.tr.delete(current.from, current.to))
+      voicePreviewRef.current = null
+      event.preventDefault()
+    }
+
+    window.addEventListener(VOICE_DICTATION_PREVIEW_EVENT, updatePreview)
+    window.addEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreview)
+    return () => {
+      window.removeEventListener(VOICE_DICTATION_PREVIEW_EVENT, updatePreview)
+      window.removeEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreview)
+    }
+  }, [editor, disabled])
+
   // 语音输入回填：优先插入到当前编辑器的光标位置。
   useEffect(() => {
     if (!editor || disabled) return
 
     const handler = (event: Event): void => {
-      if (getLastFocusedVoiceInputId() !== inputIdRef.current) return
-
-      const customEvent = event as CustomEvent<{ text?: string }>
+      const customEvent = event as CustomEvent<{ sessionId?: string; text?: string }>
       const text = customEvent.detail?.text?.trim()
       if (!text) return
 
-      editor.chain().focus().insertContent(text).run()
+      const preview = voicePreviewRef.current
+      if (preview && preview.sessionId === customEvent.detail?.sessionId) {
+        const end = preview.from + text.length
+        const transaction = editor.state.tr.insertText(text, preview.from, preview.to)
+        transaction.setSelection(TextSelection.create(transaction.doc, end))
+        editor.view.dispatch(transaction)
+        voicePreviewRef.current = null
+      } else {
+        if (getLastFocusedVoiceInputId() !== inputIdRef.current) return
+        editor.chain().focus().insertContent(text).run()
+      }
       event.preventDefault()
     }
 

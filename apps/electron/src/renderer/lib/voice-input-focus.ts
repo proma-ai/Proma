@@ -25,3 +25,12 @@ export const SCRATCH_PAD_VOICE_INPUT_ID = '__proma-scratch-pad__'
 
 /** 主进程派发到渲染进程、再由当前焦点编辑器消费的事件名 */
 export const VOICE_DICTATION_INSERT_EVENT = 'proma:insert-voice-dictation-text'
+
+/** 语音识别过程中的组合文本预览事件。 */
+export const VOICE_DICTATION_PREVIEW_EVENT = 'proma:preview-voice-dictation-text'
+
+/** 取消语音输入时撤销组合文本预览。 */
+export const VOICE_DICTATION_CLEAR_PREVIEW_EVENT = 'proma:clear-voice-dictation-preview'
+
+/** 底部输入工具栏显示的语音状态。 */
+export const VOICE_DICTATION_STATUS_EVENT = 'proma:voice-dictation-status'
