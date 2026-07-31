@@ -115,6 +115,8 @@ function WebSearchSettings(): React.ReactElement {
     return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
   }
 
+  const isConfigured = enabled && apiKey.trim().length > 0
+
   return (
     <SettingsSection
       title="联网搜索"
@@ -126,6 +128,7 @@ function WebSearchSettings(): React.ReactElement {
         />
       }
     >
+      {isConfigured && (
       <SettingsCard divided={false}>
         <div className="space-y-4 p-4">
           {/* 引导说明 */}
@@ -191,6 +194,7 @@ function WebSearchSettings(): React.ReactElement {
           )}
         </div>
       </SettingsCard>
+      )}
     </SettingsSection>
   )
 }
@@ -286,6 +290,8 @@ function NanoBananaSettings(): React.ReactElement {
     return <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
   }
 
+  const isConfigured = enabled && apiKey.trim().length > 0
+
   return (
     <SettingsSection
       title="Nano Banana"
@@ -297,6 +303,7 @@ function NanoBananaSettings(): React.ReactElement {
         />
       }
     >
+      {isConfigured && (
       <SettingsCard divided={false}>
         <div className="space-y-4 p-4">
           {/* 引导说明 */}
@@ -386,6 +393,7 @@ function NanoBananaSettings(): React.ReactElement {
           )}
         </div>
       </SettingsCard>
+      )}
     </SettingsSection>
   )
 }

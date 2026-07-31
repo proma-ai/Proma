@@ -10,6 +10,7 @@ import { useAtomValue } from 'jotai'
 import { toast } from 'sonner'
 import { ExternalLink, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { SettingsSection, SettingsCard } from './primitives'
 import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import nowledgeMemPrompt from './nowledge-mem-prompt.md?raw'
@@ -19,6 +20,26 @@ function NowledgeMemSection(): React.ReactElement {
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const [configuredSlugs, setConfiguredSlugs] = React.useState<string[]>([])
   const [copying, setCopying] = React.useState(false)
+  const [enabled, setEnabled] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+
+  // 加载开关状态
+  React.useEffect(() => {
+    window.electronAPI.getSettings()
+      .then((s) => setEnabled(s.nowledgeMemEnabled ?? false))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleToggle = React.useCallback(async (checked: boolean): Promise<void> => {
+    setEnabled(checked)
+    try {
+      await window.electronAPI.updateSettings({ nowledgeMemEnabled: checked })
+    } catch (err) {
+      console.error('[Nowledge Mem] 切换状态失败:', err)
+      setEnabled(!checked)
+    }
+  }, [])
 
   // 检测哪些工作区的 mcp.json 里已经写入了 nowledge-mem 条目
   React.useEffect(() => {
@@ -79,7 +100,14 @@ function NowledgeMemSection(): React.ReactElement {
         </span>
       }
       description="本地客户端 + Agent 集成方案，记忆完全留在你自己机器上，跨会话自动注入与回写"
+      action={
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+        />
+      }
     >
+      {enabled && (
       <SettingsCard divided={false}>
         <div className="space-y-4 p-4">
           {/* 第 1 步：下载 */}
@@ -155,6 +183,7 @@ function NowledgeMemSection(): React.ReactElement {
           </div>
         </div>
       </SettingsCard>
+      )}
     </SettingsSection>
   )
 }

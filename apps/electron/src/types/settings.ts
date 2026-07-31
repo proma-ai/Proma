@@ -257,6 +257,8 @@ export interface AppSettings {
   markdownFontSize?: MarkdownFontSize
   /** 上次是否在 Scratch Pad 页（用于重启恢复） */
   scratchPadActive?: boolean
+  /** 在 Chat 工具设置中显示 Nowledge Mem 配置详情（默认 false，需要用户主动开启） */
+  nowledgeMemEnabled?: boolean
   /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */
   appIconVariant?: string
   /** 语音输入设置（Access Token 以加密态存储，由专用服务解密后返回渲染进程） */
