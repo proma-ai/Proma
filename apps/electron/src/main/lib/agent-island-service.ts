@@ -467,6 +467,7 @@ function buildState(now: number): AgentIslandState {
     pill: buildPill(now),
     sessions: sessionsOut,
     recentSessions,
+    idleDashboard: false,
     totalCount: sessionsOut.length,
     // 避免 running 的高频 token 流造成隐藏岛的无效重绘。
     updatedAt: Math.max(0, ...sessionsOut.map((session) => session.lastActivityAt), ...recentSessions.map((session) => session.lastActivityAt)),
@@ -486,8 +487,9 @@ function buildPlanningSnapshot(now: number): AgentIslandPlanningSnapshot {
   const todos = listTodos({ status: 'open' })
     .filter((todo) => todo.dueAt !== undefined && todo.dueAt >= now)
     .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
-  const events = listCalendarEvents({ from: now })
-    .filter((event) => event.startAt >= now)
+  const events = listCalendarEvents({ from: dayStart })
+    // Keep an event visible while it is in progress, not only before its start.
+    .filter((event) => (event.endAt ?? event.startAt) >= now)
     .sort((a, b) => a.startAt - b.startAt)
 
   return {
@@ -543,13 +545,9 @@ function buildVisibilityKey(state: AgentIslandState, planningKeys: string[]): st
   return `${agentKey}/${recentKey}#${planningKeys.join('|')}`
 }
 
-function isIslandVisible(state: AgentIslandState, planningKeys: string[], planning: AgentIslandPlanningSnapshot): boolean {
+function isIslandVisible(state: AgentIslandState, planningKeys: string[]): boolean {
   const requiresAgentHandoff = state.sessions.length > 0
-  const persistentDashboard = !requiresAgentHandoff
-    && state.recentSessions.length > 0
-    && planning.todos.length === 0
-    && planning.events.length === 0
-  if (!requiresAgentHandoff && planningKeys.length === 0 && !persistentDashboard) return false
+  if (!requiresAgentHandoff && planningKeys.length === 0 && !state.idleDashboard) return false
 
   currentVisibilityKey = buildVisibilityKey(state, planningKeys)
   return currentVisibilityKey !== dismissedVisibilityKey
@@ -571,9 +569,15 @@ function buildNativeSnapshot(state: AgentIslandState, planning: AgentIslandPlann
 function pushState(): void {
   const now = Date.now()
   const planning = buildPlanningSnapshot(now)
+  const planningKeys = getImminentPlanningKeys(now)
   const state = buildState(now)
+  // Future items are still available in the planning view, but only imminent
+  // ones should displace the idle Plan + recent-Agent dashboard.
+  state.idleDashboard = state.sessions.length === 0
+    && state.recentSessions.length > 0
+    && planningKeys.length === 0
   const enabled = serviceDeps?.enabled?.() !== false
-  state.visible = enabled && isIslandVisible(state, getImminentPlanningKeys(now), planning)
+  state.visible = enabled && isIslandVisible(state, planningKeys)
   state.presentation = state.visible ? (isExpanded() ? 'expanded' : 'compact') : 'hidden'
   // Planning 独立 revision 解决“同一毫秒内 Todo 变更而 Agent state.updatedAt 恰好相同”的漏推边界。
   const json = JSON.stringify({ state, planning, planningRevision, dismissedVisibilityKey })

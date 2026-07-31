@@ -72,6 +72,8 @@ export interface AgentIslandState {
   sessions: AgentIslandSessionSnapshot[]
   /** 没有活跃事项时的常驻回顾入口，最多三个最近会话。 */
   recentSessions: AgentIslandSessionSnapshot[]
+  /** 空闲时展示 Plan 额度与最近会话；由主进程按临近事项统一判定。 */
+  idleDashboard: boolean
   totalCount: number
   updatedAt: number
 }

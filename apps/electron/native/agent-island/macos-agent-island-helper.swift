@@ -35,6 +35,7 @@ struct AgentState: Codable {
   let pill: Pill
   let sessions: [AgentSession]
   let recentSessions: [AgentSession]
+  let idleDashboard: Bool
   let totalCount: Int
   let updatedAt: Double
 }
@@ -424,10 +425,7 @@ struct ExpandedIslandView: View {
 
   private var primaryPhase: String? { snapshot.state.sessions.first?.phase }
   private var isPersistentRecentDashboard: Bool {
-    snapshot.state.sessions.isEmpty
-      && snapshot.planning.todos.isEmpty
-      && snapshot.planning.events.isEmpty
-      && !snapshot.state.recentSessions.isEmpty
+    snapshot.state.idleDashboard
   }
   private var displayedSessions: [AgentSession] {
     isPersistentRecentDashboard ? snapshot.state.recentSessions : snapshot.state.sessions
@@ -529,14 +527,14 @@ struct ExpandedIslandView: View {
         }.padding(14)
       }
 
-      if !snapshot.planning.todos.isEmpty || !snapshot.planning.events.isEmpty {
+      if !isPersistentRecentDashboard && (!snapshot.planning.todos.isEmpty || !snapshot.planning.events.isEmpty) {
         if !displayedSessions.isEmpty {
           Divider().overlay(.white.opacity(0.11))
         }
         HStack(alignment: .top, spacing: 12) {
           if !snapshot.planning.todos.isEmpty {
             Button(action: { action("open-planning", [:]) }) {
-              PlanningColumn(title: "今日待办", symbol: "checklist", count: snapshot.planning.todos.count) {
+              PlanningColumn(title: "接下来待办", symbol: "checklist", count: snapshot.planning.todos.count) {
                 ForEach(snapshot.planning.todos.prefix(3)) { todo in
                   HStack(spacing: 6) {
                     RoundedRectangle(cornerRadius: 2.5).stroke(todo.isOverdue ? Color.red : Color.white.opacity(0.5), lineWidth: 1.2).frame(width: 11, height: 11)
@@ -551,7 +549,7 @@ struct ExpandedIslandView: View {
           }
           if !snapshot.planning.events.isEmpty {
             Button(action: { action("open-planning", [:]) }) {
-              PlanningColumn(title: "今日日程", symbol: "calendar", count: snapshot.planning.events.count) {
+              PlanningColumn(title: "接下来日程", symbol: "calendar", count: snapshot.planning.events.count) {
                 ForEach(snapshot.planning.events.prefix(3)) { event in
                   HStack(spacing: 6) {
                     Text(timeText(event.startAt, allDay: event.allDay)).foregroundStyle(Color(red: 0.62, green: 0.72, blue: 1)).frame(width: 36, alignment: .leading)
