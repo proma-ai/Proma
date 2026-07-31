@@ -1845,7 +1845,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
   }, [addClipboardTextDraft])
 
-  /** 将右侧文件面板拖入的目录附加到会话 */
+  /** 将右侧文件面板拖入的目录附加到会话（保持 Agent 可访问） */
   const addPanelDirectory = React.useCallback(async (dirPath: string): Promise<void> => {
     try {
       const updated = await window.electronAPI.attachDirectory({
@@ -1857,8 +1857,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         map.set(sessionId, updated)
         return map
       })
-      const dirName = dirPath.split(/[\\/]/).pop() || dirPath
-      toast.success(`已附加目录: ${dirName}`)
     } catch (error) {
       console.error('[AgentView] 面板拖拽附加目录失败:', error)
     }
@@ -1883,16 +1881,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     setIsDragOver(false)
 
     // 优先识别右侧文件面板的自定义拖拽载荷（会话文件 / 项目文件引用）
+    // 文件与文件夹统一在输入框插入 @file 引用；文件夹同时附加到会话（Agent 可访问）
     const panelItems = getFilePanelDragData(e.dataTransfer)
     if (panelItems && panelItems.length > 0) {
-      const files = panelItems.filter((item) => !item.isDirectory)
-      const dirs = panelItems.filter((item) => item.isDirectory)
-      if (files.length > 0) {
-        // 在输入框光标处插入 @file 引用（与键盘 @ 引用行为一致，跟随输入对话内容）
-        richTextInputRef.current?.insertFileMentions(files)
-      }
-      for (const dir of dirs) {
-        await addPanelDirectory(dir.path)
+      richTextInputRef.current?.insertFileMentions(panelItems)
+      for (const item of panelItems) {
+        if (item.isDirectory) {
+          await addPanelDirectory(item.path)
+        }
       }
       return
     }

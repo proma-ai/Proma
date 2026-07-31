@@ -285,6 +285,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         // 禁用内置版本，使用下面单独配置的版本
         link: false,
         underline: false,
+        // 禁用拖拽插入位置指示器（拖入文件/文件夹时出现的横线）
+        dropcursor: false,
         // 纯文本模式：禁用所有格式化扩展，仅保留 Document/Paragraph/Text/HardBreak/History
         ...(richTextEnabled ? {} : {
           blockquote: false,
@@ -347,6 +349,14 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
                     : {}
                 ),
               },
+              // 文件夹引用（右侧文件面板拖入的目录）：渲染为文件夹样式 chip
+              isDirectory: {
+                default: false,
+                parseHTML: (el: HTMLElement) => el.getAttribute('data-mention-is-directory') === 'true',
+                renderHTML: (attrs: Record<string, unknown>) => attrs.isDirectory
+                  ? { 'data-mention-is-directory': 'true' }
+                  : {},
+              },
               // 兼容此前统一命令菜单生成的历史 draft；新节点不再写入此属性。
               commandMenuMention: {
                 default: false,
@@ -370,7 +380,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
             const char = resolveMentionSuggestionChar(node.attrs.mentionSuggestionChar, suggestion?.char)
             const label = node.attrs.label ?? node.attrs.id
             const referenceType = node.attrs.referenceType
-            let chipClass = 'mention-chip'
+            const isDirectory = node.attrs.isDirectory === true
+            let chipClass = isDirectory ? 'directory-mention-chip' : 'mention-chip'
             if (referenceType === 'todo') chipClass = 'todo-mention-chip'
             else if (referenceType === 'calendar_event') chipClass = 'calendar-event-mention-chip'
             else if (char === '/') chipClass = 'skill-mention-chip'
@@ -387,6 +398,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
                   ? { 'data-mention-reference-type': referenceType }
                   : {}),
                 ...(node.attrs.commandMenuMention ? { 'data-command-menu-mention': 'true' } : {}),
+                ...(isDirectory ? { 'data-mention-is-directory': 'true' } : {}),
                 class: chipClass,
               },
               `${char === '@' ? '@' : ''}${label}`,
@@ -746,6 +758,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
               id: item.path,
               label: item.name,
               mentionSuggestionChar: '@',
+              isDirectory: item.isDirectory ?? false,
             },
           })
           .insertContent(' ')
@@ -864,6 +877,30 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           height: 12px;
           background-color: currentColor;
           mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3C/svg%3E");
+          mask-size: contain;
+          mask-repeat: no-repeat;
+          flex-shrink: 0;
+        }
+        .directory-mention-chip {
+          background-color: hsl(var(--primary) / 0.14);
+          color: hsl(var(--primary));
+          border-radius: 4px;
+          padding: 1px 4px 1px 2px;
+          font-size: 13px;
+          font-weight: 500;
+          white-space: nowrap;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          vertical-align: baseline;
+        }
+        .directory-mention-chip::before {
+          content: '';
+          display: inline-block;
+          width: 12px;
+          height: 12px;
+          background-color: currentColor;
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
           mask-size: contain;
           mask-repeat: no-repeat;
           flex-shrink: 0;

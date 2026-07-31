@@ -538,8 +538,8 @@ export function SidePanel({ sessionId, sessionPath, activeTab, onTabChange, widt
                     </div>
                   </FileSearchBar>
                   <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin pt-1">
-                    {/* 拖拽引用提示：告知用户可拖拽文件/文件夹到 Agent 输入框 */}
-                    <div className="mx-1 mb-1.5 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground/75 rounded-md bg-muted/40 border border-border/50">
+                    {/* 拖拽引用提示：引用块样式，左侧竖线 + 缩进，与下方文件列表内容左对齐 */}
+                    <div className="mb-1.5 ml-4 border-l-2 border-primary/40 pl-2 text-[11px] leading-4 text-foreground/75">
                       支持拖拽文件或文件夹到输入框，实现引用
                     </div>
                     {showProjectFiles && wsAttachedFiles.length > 0 && (
@@ -1268,20 +1268,18 @@ function AttachedDirItem({ entry, depth, selectedPaths, onSelect, refreshVersion
               </button>
             </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-40 z-[9999] min-w-0 p-0.5">
-                {!entry.isDirectory && (
-                  <DropdownMenuItem
-                    className="text-xs py-1 [&>svg]:size-3.5"
-                    onSelect={() => dispatchInsertFileMention([{
-                      path: currentPath,
-                      name: currentName,
-                      isDirectory: entry.isDirectory,
-                      scope,
-                    }])}
-                  >
-                    <MessageSquarePlus />
-                    引用到 Agent
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={() => dispatchInsertFileMention([{
+                    path: currentPath,
+                    name: currentName,
+                    isDirectory: entry.isDirectory,
+                    scope,
+                  }])}
+                >
+                  <MessageSquarePlus />
+                  引用到 Agent
+                </DropdownMenuItem>
                 {onAddToChat && !entry.isDirectory && (
                   <DropdownMenuItem
                     className="text-xs py-1 [&>svg]:size-3.5"
