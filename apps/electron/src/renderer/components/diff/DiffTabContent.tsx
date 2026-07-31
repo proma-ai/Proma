@@ -18,6 +18,7 @@ import {
   agentDiffRefreshVersionAtom,
   agentSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
+import { alwaysEditTextPreviewAtom } from '@/atoms/ui-preferences'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { previewCodeWrapAtom, quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
@@ -42,6 +43,36 @@ import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
+/** 常见可编辑文本/代码文件（对齐主进程 document-parser.ts 的 UTF-8 文本集合） */
+const EDITABLE_TEXT_LOWERCASE_BASENAMES = new Set(['.gitignore', '.env', 'dockerfile', 'makefile', 'license', 'changelog'])
+const EDITABLE_TEXT_EXTS = new Set([
+  '.txt', '.text', '.log',
+  '.csv', '.json', '.xml', '.html', '.htm', '.xhtml',
+  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+  '.py', '.pyw',
+  '.rb',
+  '.rs',
+  '.go',
+  '.java', '.kt', '.kts',
+  '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.hxx',
+  '.swift',
+  '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+  '.sh', '.bash', '.zsh', '.bat', '.cmd', '.ps1',
+  '.css', '.scss', '.sass', '.less',
+  '.sql', '.graphql', '.gql',
+  '.env',
+  '.md', '.markdown',
+  '.vue', '.svelte',
+  '.r', '.rmd',
+  '.php',
+  '.dart',
+  '.lua',
+  '.zig',
+  '.tf', '.hcl',
+  '.proto',
+  '.lock',
+  '.svg',
+])
 const PDF_EXTS = new Set(['.pdf'])
 const DOCX_EXTS = new Set(['.docx'])
 const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
@@ -272,9 +303,10 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [tocOpen, setTocOpen] = useAtom(markdownTocOpenAtom)
 
   const ext = getExtension(filePath)
+  const base = filePath.toLowerCase().split(/[\\/]/).pop() ?? ''
   const isMarkdown = previewOnly && MD_EXTS.has(ext)
-  const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
-  const isEditableText = isMarkdown || isPlainTextEditable
+  const isPlainTextEditable = previewOnly && (EDITABLE_TEXT_EXTS.has(ext) || EDITABLE_TEXT_LOWERCASE_BASENAMES.has(base))
+  const isEditableText = !readOnly && (isMarkdown || isPlainTextEditable)
   const isPdf = previewOnly && PDF_EXTS.has(ext)
   const isDocx = previewOnly && DOCX_EXTS.has(ext)
   const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
@@ -781,6 +813,19 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       toast.warning(message)
     }
   }, [previewOnly, loading, filePath, ext, isLegacyOffice, isPdf, pdfSrc, isDocx, docxHtml, isOfficePreview, officeHtml, isImage, imageDataUrl])
+
+  // 始终编辑模式：预览加载完成后自动进入编辑
+  const alwaysEditTextPreview = useAtomValue(alwaysEditTextPreviewAtom)
+  const autoEditFiredRef = React.useRef(false)
+  React.useEffect(() => {
+    autoEditFiredRef.current = false
+  }, [filePath, sessionId])
+  React.useEffect(() => {
+    if (!alwaysEditTextPreview || loading || !isEditableText || markdownEditing) return
+    if (autoEditFiredRef.current) return
+    autoEditFiredRef.current = true
+    startMarkdownEdit()
+  }, [alwaysEditTextPreview, loading, isEditableText, markdownEditing, startMarkdownEdit])
 
   // scrollPosition persistent: module-level Map keyed by sessionId:filePath
   // content changes (refreshVersion bump) → delete stored position;
