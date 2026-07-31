@@ -28,7 +28,7 @@ import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-regi
 import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
-import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { DefaultAppOpenDropdown } from './DefaultAppOpenDropdown'
 import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
 interface PreviewPanelProps {
@@ -80,7 +80,7 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
   const renderPreviewActions = (): React.ReactElement => (
     <div className="ml-auto flex items-center gap-0.5 shrink-0">
       {currentFile && (
-        <DefaultAppOpenButton
+        <DefaultAppOpenDropdown
           filePath={defaultAppTargetPath}
           access={defaultAppAccess}
         />

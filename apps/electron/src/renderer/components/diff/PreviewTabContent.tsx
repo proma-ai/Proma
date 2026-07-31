@@ -19,7 +19,7 @@ import {
 } from '@/atoms/tab-atoms'
 import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { tearOffPreviewToSplit } from './preview-opener'
-import { DefaultAppOpenButton } from './DefaultAppOpenButton'
+import { DefaultAppOpenDropdown } from './DefaultAppOpenDropdown'
 import { DiffTabContent } from './DiffTabContent'
 import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
@@ -100,7 +100,7 @@ export function PreviewTabContent({ sessionId }: PreviewTabContentProps): React.
   const defaultAppAccess = getPreviewFileAccess(sessionId, currentFile, sessionPath)
   const toolbarActions = (
     <>
-      <DefaultAppOpenButton
+      <DefaultAppOpenDropdown
         filePath={defaultAppTargetPath}
         access={defaultAppAccess}
       />

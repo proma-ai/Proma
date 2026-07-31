@@ -332,6 +332,21 @@ const KNOWN_EDITORS = [
   'Zed', 'CotEditor', 'IntelliJ IDEA', 'Xcode', 'TextEdit',
 ]
 
+/** macOS 文件打开应用的预置清单（Finder、Terminal 已在菜单中硬编码，此处排除） */
+const KNOWN_FILE_OPEN_APPS_MAC = [
+  { id: 'visual-studio-code', name: 'Visual Studio Code', paths: ['/Applications/Visual Studio Code.app', '{home}/Applications/Visual Studio Code.app'] },
+  { id: 'xcode', name: 'Xcode', paths: ['/Applications/Xcode.app'] },
+  { id: 'android-studio', name: 'Android Studio', paths: ['/Applications/Android Studio.app', '{home}/Applications/Android Studio.app'] },
+]
+
+/** 内置文件打开应用信息（前端用） */
+interface BuiltinOpenApp {
+  id: string
+  name: string
+  path: string
+  iconDataUrl: string
+}
+
 /**
  * 检查路径是否在允许的目录范围内（解析 symlink）
  *
@@ -1087,7 +1102,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 用系统默认应用打开任意文件（appName 需在 KNOWN_EDITORS 白名单内）
+  // 用系统默认应用打开任意文件（appName 需在 KNOWN_EDITORS 白名单内，或为有效 .app 路径）
   ipcMain.handle(
     IPC_CHANNELS.SYSTEM_OPEN_FILE,
     async (_, filePath: string, appName?: string, access?: FileAccessOptions | string[]): Promise<void> => {
@@ -1101,10 +1116,13 @@ export function registerIpcHandlers(): void {
       if (process.platform === 'darwin') {
         const { spawnSync } = await import('node:child_process')
         if (appName) {
-          if (!KNOWN_EDITORS.includes(appName)) {
+          // 白名单应用名称 或 有效 .app 路径均可
+          const isValidAppPath = appName.endsWith('.app') && appName.includes('/')
+          if (!KNOWN_EDITORS.includes(appName) && !isValidAppPath) {
             console.warn('[IPC] shell:system-open-file 拒绝未知应用:', appName)
             return
           }
+          spawnSync('open', ['-a', appName, absPath], { timeout: 5000 })
           spawnSync('open', ['-a', appName, absPath], { timeout: 5000 })
         } else {
           spawnSync('open', [absPath], { timeout: 5000 })
@@ -1156,6 +1174,51 @@ export function registerIpcHandlers(): void {
         console.warn('[IPC] shell:get-default-app-for-file 失败:', err)
         return null
       }
+    }
+  )
+
+  // 列出当前平台可用的文件打开应用（内置 + 用户自定义）
+  ipcMain.handle(
+    IPC_CHANNELS.LIST_OPEN_APPS,
+    async (): Promise<BuiltinOpenApp[]> => {
+      if (process.platform !== 'darwin') return []
+      const { existsSync } = await import('node:fs')
+      const { homedir } = await import('node:os')
+      const home = homedir()
+      const results: BuiltinOpenApp[] = []
+      for (const app of KNOWN_FILE_OPEN_APPS_MAC) {
+        for (const rawPath of app.paths) {
+          const resolved = rawPath.replace('{home}', home)
+          if (existsSync(resolved)) {
+            // 复用已有图标抓取能力
+            const iconDataUrl = await getAppIconDataUrl(resolved).catch(() => '')
+            results.push({ id: app.id, name: app.name, path: resolved, iconDataUrl })
+            break
+          }
+        }
+      }
+      return results
+    }
+  )
+
+  // 打开系统原生应用选择对话框，返回选中应用的信息
+  ipcMain.handle(
+    IPC_CHANNELS.CHOOSE_OPEN_APP,
+    async (): Promise<{ name: string; path: string; iconDataUrl: string } | null> => {
+      if (process.platform !== 'darwin') return null
+      const { dialog } = await import('electron')
+      const result = await dialog.showOpenDialog({
+        title: '选择用于打开文件的应用',
+        filters: [{ name: '应用', extensions: ['app'] }],
+        properties: ['openFile'],
+      })
+      if (result.canceled || result.filePaths.length === 0) return null
+      const appPath = result.filePaths[0]
+      if (!appPath.endsWith('.app')) return null
+      const base = appPath.split('/').pop() ?? ''
+      const name = base.replace(/\.app$/, '')
+      const iconDataUrl = await getAppIconDataUrl(appPath).catch(() => '')
+      return { name, path: appPath, iconDataUrl }
     }
   )
 

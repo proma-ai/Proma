@@ -779,6 +779,12 @@ export interface ElectronAPI {
   /** 查询本机为该文件类型注册的默认打开应用（含图标 dataURL） */
   getDefaultAppForFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<import('@proma/shared').DefaultAppInfo | null>
 
+  /** 列出当前平台可用的文件打开应用（内置 + 自定义） */
+  listOpenApps: () => Promise<Array<{ id: string; name: string; path: string; iconDataUrl: string }>>
+
+  /** 打开系统原生应用选择对话框 */
+  chooseOpenApp: () => Promise<{ name: string; path: string; iconDataUrl: string } | null>
+
   /** 在系统文件管理器中显示文件 */
   showInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
@@ -1996,6 +2002,14 @@ const electronAPI: ElectronAPI = {
 
   getDefaultAppForFile: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_DEFAULT_APP_FOR_FILE, filePath, access) as Promise<import('@proma/shared').DefaultAppInfo | null>
+  },
+
+  listOpenApps: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LIST_OPEN_APPS)
+  },
+
+  chooseOpenApp: () => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHOOSE_OPEN_APP)
   },
 
   showInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => {

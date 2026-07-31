@@ -367,6 +367,10 @@ export const IPC_CHANNELS = {
   SCAN_EDITORS: 'shell:scan-editors',
   /** 查询某个文件在本机系统中的默认打开应用信息（带图标） */
   GET_DEFAULT_APP_FOR_FILE: 'shell:get-default-app-for-file',
+  /** 打开系统应用选择对话框，选择用于打开文件的应用 */
+  CHOOSE_OPEN_APP: 'shell:choose-open-app',
+  /** 列出当前平台可用的文件打开应用（内置 + 自定义） */
+  LIST_OPEN_APPS: 'shell:list-open-apps',
   /** 打开独立预览窗口 */
   OPEN_DETACHED_PREVIEW: 'preview:open-detached',
   /** 获取独立预览窗口数据 */

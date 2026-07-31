@@ -255,6 +255,8 @@ export interface AppSettings {
   richTextRenderingEnabled?: boolean
   /** Markdown 预览字号档位（默认 'medium'，对应 15px） */
   markdownFontSize?: MarkdownFontSize
+  /** 自定义文件打开应用列表（用于顶部文件浏览器打开菜单） */
+  fileOpenApps?: FileOpenAppEntry[]
   /** 上次是否在 Scratch Pad 页（用于重启恢复） */
   scratchPadActive?: boolean
   /** 应用图标变体 ID（dock + window icon），'default' 或 logo 变体 id */
@@ -281,6 +283,18 @@ export interface AppSettings {
   mainWindowState?: MainWindowState
   /** 独立任务/日程窗口状态（大小、位置、是否最大化） */
   planningWindowState?: MainWindowState
+}
+
+/** 用户自定义文件打开应用条目 */
+export interface FileOpenAppEntry {
+  /** 应用的持久化标识 */
+  id: string
+  /** 应用显示名称 */
+  name: string
+  /** 应用绝对路径（macOS: .app bundle，Windows: .exe） */
+  path: string
+  /** 应用图标的 base64 dataURL */
+  iconDataUrl: string
 }
 
 /** 主窗口大小、位置和最大化状态 */
