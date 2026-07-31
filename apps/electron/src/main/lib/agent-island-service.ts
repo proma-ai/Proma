@@ -882,7 +882,10 @@ export function handleNativeAgentIslandEvent(event: NativeAgentIslandEvent): voi
       openAgentIslandSession(event.sessionId)
       break
     case 'open-planning':
-      serviceDeps.openPlanning?.()
+      // Native islands prefer the focused Planning window, while deployments
+      // without that optional surface still retain a useful main-window route.
+      if (serviceDeps.openPlanning) serviceDeps.openPlanning()
+      else serviceDeps.showAndFocusMainWindow()
       break
     case 'dismiss':
       dismissAgentIsland()

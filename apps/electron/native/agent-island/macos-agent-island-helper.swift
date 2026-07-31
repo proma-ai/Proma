@@ -535,7 +535,7 @@ struct ExpandedIslandView: View {
         }
         HStack(alignment: .top, spacing: 12) {
           if !snapshot.planning.todos.isEmpty {
-            Button(action: { action("open-main", [:]) }) {
+            Button(action: { action("open-planning", [:]) }) {
               PlanningColumn(title: "今日待办", symbol: "checklist", count: snapshot.planning.todos.count) {
                 ForEach(snapshot.planning.todos.prefix(3)) { todo in
                   HStack(spacing: 6) {
@@ -550,7 +550,7 @@ struct ExpandedIslandView: View {
             }.buttonStyle(.plain)
           }
           if !snapshot.planning.events.isEmpty {
-            Button(action: { action("open-main", [:]) }) {
+            Button(action: { action("open-planning", [:]) }) {
               PlanningColumn(title: "今日日程", symbol: "calendar", count: snapshot.planning.events.count) {
                 ForEach(snapshot.planning.events.prefix(3)) { event in
                   HStack(spacing: 6) {
