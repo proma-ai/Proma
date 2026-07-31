@@ -8,7 +8,6 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
   const [volume, setVolume] = React.useState(0)
   const [transcript, setTranscript] = React.useState('')
   const [typedTranscript, setTypedTranscript] = React.useState('')
-  const transcriptTargetRef = React.useRef('')
 
   React.useEffect(() => {
     return window.electronAPI.onVoiceDictationIndicatorState((event) => {
@@ -19,22 +18,18 @@ export function VoiceDictationIndicatorApp(): React.ReactElement {
   }, [])
 
   React.useEffect(() => {
-    transcriptTargetRef.current = transcript
-    if (!transcript) setTypedTranscript('')
-  }, [transcript])
+    if (typedTranscript === transcript) return
 
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
+    const timer = window.setTimeout(() => {
       setTypedTranscript((current) => {
-        const target = transcriptTargetRef.current
-        if (!target || current === target) return target
+        if (current === transcript) return transcript
         // 豆包偶尔会修订前面的分词，无法安全地逐字追加时立即对齐最新结果。
-        if (!target.startsWith(current)) return target
-        return target.slice(0, Math.min(target.length, current.length + 2))
+        if (!transcript.startsWith(current)) return transcript
+        return transcript.slice(0, Math.min(transcript.length, current.length + 2))
       })
     }, 18)
-    return () => window.clearInterval(timer)
-  }, [])
+    return () => window.clearTimeout(timer)
+  }, [transcript, typedTranscript])
 
   const stopping = state === 'stopping'
   const lines = getRecentTranscriptLines(typedTranscript)

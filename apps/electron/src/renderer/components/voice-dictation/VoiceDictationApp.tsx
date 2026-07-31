@@ -375,8 +375,12 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     setMessage('请开始说话')
     const recordingAttempt = ++recordingAttemptRef.current
 
+    const isCurrentAttempt = (): boolean => (
+      recordingAttempt === recordingAttemptRef.current && !stoppingRef.current
+    )
     const cachedSettings = settingsRef.current
     const settings = cachedSettings?.enabled ? cachedSettings : await refreshSettings
+    if (!isCurrentAttempt()) return
     settingsRef.current = settings
     if (!settings.enabled) {
       setStatus('error')
@@ -387,6 +391,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     // 预检麦克风权限
     const permission = await window.electronAPI.checkMicrophonePermission()
+    if (!isCurrentAttempt()) return
     if (permission.status === 'denied') {
       setStatus('error')
       setMessage('麦克风权限已被系统阻止，请在系统设置中允许 Proma 访问麦克风')
@@ -394,6 +399,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     }
     if (permission.status === 'not-determined') {
       const requested = await window.electronAPI.requestMicrophonePermission()
+      if (!isCurrentAttempt()) return
       if (requested.status !== 'granted') {
         setStatus('error')
         setMessage('需要麦克风权限才能使用语音输入')
@@ -401,6 +407,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       }
     }
 
+    if (!isCurrentAttempt()) return
     const nextSessionId = crypto.randomUUID()
     const nextDictationId = crypto.randomUUID()
     dictationIdRef.current = nextDictationId
@@ -408,6 +415,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     sessionIdRef.current = nextSessionId
 
     const audioCapture = startAudioCapture(recordingAttempt).catch((error) => {
+      if (!isCurrentAttempt()) return
       const textMessage = getMicrophoneErrorMessage(error)
       setStatus('error')
       setMessage(textMessage)
@@ -417,7 +425,10 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     window.electronAPI.startVoiceDictation({ sessionId: nextSessionId })
       .then(() => {
-        if (sessionIdRef.current !== nextSessionId) return
+        if (!isCurrentAttempt() || sessionIdRef.current !== nextSessionId) {
+          window.electronAPI.cancelVoiceDictation({ sessionId: nextSessionId }).catch(console.error)
+          return
+        }
         asrReadyRef.current = true
         flushQueuedAudio()
         if (stoppingRef.current) {
@@ -431,6 +442,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
         setMessage('正在听写')
       })
       .catch((error) => {
+        if (!isCurrentAttempt() || sessionIdRef.current !== nextSessionId) return
         const textMessage = error instanceof Error ? error.message : '未知错误'
         setStatus('error')
         setMessage(textMessage)
