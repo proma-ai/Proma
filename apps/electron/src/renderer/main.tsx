@@ -75,6 +75,7 @@ import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
+import { ArrowUpRight } from 'lucide-react'
 import { diffCapabilities } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
@@ -82,6 +83,7 @@ import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
+import { PromaLogo } from './lib/model-logo'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
@@ -349,11 +351,78 @@ function AgentSettingsInitializer(): null {
  */
 function UpdaterInitializer(): null {
   const setUpdateStatus = useSetAtom(updateStatusAtom)
+  const updateStatus = useAtomValue(updateStatusAtom)
+  const notifiedDownloadVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
     const cleanup = initializeUpdater(setUpdateStatus)
     return cleanup
   }, [setUpdateStatus])
+
+  useEffect(() => {
+    if (updateStatus.status !== 'downloaded') return
+
+    const version = updateStatus.version || '新版本'
+    if (notifiedDownloadVersionRef.current === version) return
+    notifiedDownloadVersionRef.current = version
+    const versionLabel = version.startsWith('v') ? version : `v${version}`
+
+    toast.custom((toastId) => (
+      <div className="w-[344px] max-w-[calc(100vw-32px)] rounded-xl bg-background/95 p-3 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.14)] ring-1 ring-black/5 backdrop-blur-xl dark:ring-white/10">
+        <div className="flex items-center gap-2.5">
+          <img src={PromaLogo} alt="Proma" className="size-8 rounded-lg" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-sm leading-5">
+              <span className="font-semibold tracking-tight">Proma 更新已下载</span>
+              <span className="text-xs text-primary">{versionLabel}</span>
+            </div>
+            <p className="text-xs leading-4 text-muted-foreground">所有 Agent 完成后即可自动安装。</p>
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between">
+          <button
+            type="button"
+            className="h-7 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.96]"
+            onClick={() => toast.dismiss(toastId)}
+          >
+            取消
+          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.96]"
+              onClick={() => { void window.electronAPI.openExternal('https://proma.cool/changelog') }}
+            >
+              查看更新
+              <ArrowUpRight size={13} />
+            </button>
+            <button
+              type="button"
+              className="h-7 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.96]"
+              onClick={() => {
+                toast.dismiss(toastId)
+                void window.electronAPI.updater?.installWhenIdle()
+                  .then((scheduled) => {
+                    if (!scheduled) {
+                      toast.error('更新尚未准备好，请稍后重试')
+                    }
+                  })
+                  .catch(() => {
+                    toast.error('无法安排空闲更新，请稍后重试')
+                  })
+              }}
+            >
+              空闲时更新
+            </button>
+          </div>
+        </div>
+      </div>
+    ), {
+      duration: Infinity,
+      dismissible: false,
+      unstyled: true,
+    })
+  }, [updateStatus])
 
   return null
 }

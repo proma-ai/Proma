@@ -350,6 +350,11 @@ export function isAgentSessionActive(sessionId: string): boolean {
   return orchestrator.isActive(sessionId)
 }
 
+/** 是否存在任意运行中 Agent，供更新器等全局生命周期服务安全判断。 */
+export function hasActiveAgentSessions(): boolean {
+  return orchestrator.hasActiveSessions()
+}
+
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
 export function stopAllAgents(): void {
   orchestrator.stopAll()

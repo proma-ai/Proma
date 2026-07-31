@@ -882,6 +882,8 @@ export interface ElectronAPI {
       error?: string
     }) => void) => () => void
     quitAndInstall: () => Promise<void>
+    /** 在所有运行中的 Agent 结束后重启并安装更新 */
+    installWhenIdle: () => Promise<boolean>
   }
 
   // GitHub Release
@@ -2118,6 +2120,7 @@ const electronAPI: ElectronAPI = {
       return () => { ipcRenderer.removeListener('updater:status-changed', listener) }
     },
     quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
+    installWhenIdle: () => ipcRenderer.invoke('updater:install-when-idle'),
   },
 
   // GitHub Release
