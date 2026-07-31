@@ -186,7 +186,6 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   const stopRecording = React.useCallback(async () => {
     if (stoppingRef.current) return
     stoppingRef.current = true
-    recordingAttemptRef.current += 1
     const currentSessionId = sessionIdRef.current
     setStatus('stopping')
     setMessage('正在收尾识别...')
@@ -275,7 +274,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
   const startAudioCapture = React.useCallback(async (attempt: number) => {
     const stream = await requestMicrophoneStream()
-    if (attempt !== recordingAttemptRef.current) {
+    if (attempt !== recordingAttemptRef.current || stoppingRef.current) {
       stream.getTracks().forEach((track) => track.stop())
       return
     }
@@ -287,7 +286,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     }
 
     const audioContext = new AudioContextCtor()
-    if (attempt !== recordingAttemptRef.current) {
+    if (attempt !== recordingAttemptRef.current || stoppingRef.current) {
       stream.getTracks().forEach((track) => track.stop())
       await audioContext.close().catch(() => {})
       return
@@ -375,12 +374,11 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     setMessage('请开始说话')
     const recordingAttempt = ++recordingAttemptRef.current
 
-    const isCurrentAttempt = (): boolean => (
-      recordingAttempt === recordingAttemptRef.current && !stoppingRef.current
-    )
+    const isCurrentAttempt = (): boolean => recordingAttempt === recordingAttemptRef.current
+    const shouldBeginRecording = (): boolean => isCurrentAttempt() && !stoppingRef.current
     const cachedSettings = settingsRef.current
     const settings = cachedSettings?.enabled ? cachedSettings : await refreshSettings
-    if (!isCurrentAttempt()) return
+    if (!shouldBeginRecording()) return
     settingsRef.current = settings
     if (!settings.enabled) {
       setStatus('error')
@@ -391,7 +389,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     // 预检麦克风权限
     const permission = await window.electronAPI.checkMicrophonePermission()
-    if (!isCurrentAttempt()) return
+    if (!shouldBeginRecording()) return
     if (permission.status === 'denied') {
       setStatus('error')
       setMessage('麦克风权限已被系统阻止，请在系统设置中允许 Proma 访问麦克风')
@@ -399,7 +397,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     }
     if (permission.status === 'not-determined') {
       const requested = await window.electronAPI.requestMicrophonePermission()
-      if (!isCurrentAttempt()) return
+      if (!shouldBeginRecording()) return
       if (requested.status !== 'granted') {
         setStatus('error')
         setMessage('需要麦克风权限才能使用语音输入')
@@ -407,7 +405,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       }
     }
 
-    if (!isCurrentAttempt()) return
+    if (!shouldBeginRecording()) return
     const nextSessionId = crypto.randomUUID()
     const nextDictationId = crypto.randomUUID()
     dictationIdRef.current = nextDictationId
