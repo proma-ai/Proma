@@ -36,6 +36,7 @@ import {
 } from '@proma/shared'
 import { refreshCodexOAuth } from './codex-oauth-service'
 import { parseCodexPlanQuotaResponse } from './codex-plan-quota'
+import { getBilling } from './cloud-billing-service'
 import { listCodexModels } from './adapters/pi-model-registry'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -990,6 +991,75 @@ function createUnsupportedPlanQuota(provider: ProviderType, message: string): Ch
 }
 
 /**
+ * 将 BillingInfo 中的余额字段归一化为数值。
+ *
+ * 后端在部分场景会返回字符串（如 "12.50"），与类型定义中的 number 不一致，
+ * 这里统一兼容两种形态；无法解析时视为 0。
+ */
+function toBillingNumber(value: number | string | null | undefined): number {
+  if (value == null || value === '') return 0
+  const num = typeof value === 'string' ? parseFloat(value) : value
+  return Number.isFinite(num) ? num : 0
+}
+
+/**
+ * 查询 Proma 官方渠道的账户余额。
+ *
+ * 复用 Cloud 账单 API（/user/billing），把 BillingInfo 转为渠道额度窗口：
+ * - 预充值积分（credits）
+ * - 订阅剩余额度（subscriptionQuotaRemaining）
+ * - 企业分配额度（enterpriseAllocatedBalance）
+ *
+ * 余额不是窗口型百分比额度，因此每个窗口都用 remainingLabel 展示具体积分
+ * 并关闭进度条（showProgress: false），与 DeepSeek 余额展示风格一致。
+ */
+async function queryPromaPlanQuota(): Promise<ChannelPlanQuotaResult> {
+  const billing = await getBilling()
+  if (!billing.success || !billing.data) {
+    return createUnsupportedPlanQuota('proma', billing.error ?? 'Proma 官方渠道余额查询失败')
+  }
+
+  const info = billing.data
+  const windows: ChannelPlanQuotaWindow[] = []
+
+  const pushBalanceWindow = (label: string, rawValue: number | string | null | undefined): void => {
+    const amount = toBillingNumber(rawValue)
+    if (amount <= 0) return
+    windows.push({
+      type: 'custom',
+      label,
+      remainingPercent: 100,
+      usedPercent: 0,
+      remainingLabel: `${amount.toFixed(2)} 积分`,
+      showProgress: false,
+    })
+  }
+
+  const credits = toBillingNumber(info.credits)
+  if (info.billingMode === 'PREPAID' || credits > 0) {
+    pushBalanceWindow('预充值余额', credits)
+  }
+  if (info.hasActiveSubscription) {
+    pushBalanceWindow('订阅剩余', info.subscriptionQuotaRemaining)
+  }
+  if (info.enterprise) {
+    pushBalanceWindow('企业分配额度', info.enterpriseAllocatedBalance)
+  }
+
+  if (windows.length === 0) {
+    return createUnsupportedPlanQuota('proma', '当前账号暂无可用余额')
+  }
+
+  return {
+    supported: true,
+    provider: 'proma',
+    planName: 'Proma Cloud 账户余额',
+    windows,
+    updatedAt: Date.now(),
+  }
+}
+
+/**
  * 查询 ChatGPT (Codex) OAuth 订阅的滚动额度。
  *
  * `wham/usage` 是 Codex CLI 使用的 ChatGPT backend 接口；除 bearer token 外，
@@ -1587,6 +1657,9 @@ export async function getChannelPlanQuota(channelId: string): Promise<ChannelPla
   }
 
   try {
+    if (provider === 'proma') {
+      return await queryPromaPlanQuota()
+    }
     if (provider === 'openai-codex') {
       return await queryCodexPlanQuota(channelId, apiKey, proxyUrl)
     }

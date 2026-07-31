@@ -1,6 +1,7 @@
 import type { Channel, ChannelPlanQuotaResult, ProviderType } from '@proma/shared'
 
 const PLAN_QUOTA_PROVIDERS = new Set<ProviderType>([
+  'proma',
   'deepseek',
   'kimi-coding',
   'minimax',
@@ -27,6 +28,17 @@ interface CachedPlanQuota {
 
 const quotaCache = new Map<string, CachedPlanQuota>()
 const inflightRequests = new Map<string, Promise<ChannelPlanQuotaResult>>()
+
+/**
+ * 清除全部渠道额度缓存。
+ *
+ * 供账单变动事件（对话扣费 / 充值 / 订阅变化）后调用：
+ * 余额类额度（如 Proma 官方渠道）若仍命中 60s 缓存会展示旧值，
+ * 主动失效后下次悬浮/展开即可立即拉到最新余额。
+ */
+export function clearPlanQuotaCache(): void {
+  quotaCache.clear()
+}
 
 function getCacheTtl(result: ChannelPlanQuotaResult): number {
   return result.supported ? PLAN_QUOTA_CACHE_MS : PLAN_QUOTA_ERROR_CACHE_MS
