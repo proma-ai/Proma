@@ -573,9 +573,16 @@ function NotificationsInitializer(): null {
 function DockBadgeInitializer(): null {
   const count = useAtomValue(dockBadgeCountAtom)
   const notificationsEnabled = useAtomValue(notificationsEnabledAtom)
-  const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const tabs = useAtomValue(tabsAtom)
+  const activeTabId = useAtomValue(activeTabIdAtom)
   const setUnviewedCompleted = useSetAtom(unviewedCompletedSessionIdsAtom)
   const badgeCount = notificationsEnabled ? count : 0
+  const activeAgentSessionId = useMemo(() => {
+    const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : null
+    return activeTab?.type === 'agent' || activeTab?.type === 'preview'
+      ? activeTab.sessionId
+      : null
+  }, [activeTabId, tabs])
 
   useEffect(() => {
     window.electronAPI.setDockBadgeCount(badgeCount).catch((error) => {
@@ -584,26 +591,27 @@ function DockBadgeInitializer(): null {
   }, [badgeCount])
 
   useEffect(() => {
-    const clearCurrentSessionBadge = (): void => {
-      if (!document.hasFocus() || !currentSessionId) return
-      // 与主进程灵动岛的完成态未读同步，避免用户已在主应用查看结果后仍需去岛上再点一次。
-      void window.electronAPI.agentIsland.markSessionViewed(currentSessionId).catch(console.error)
+    const clearActiveSessionBadge = (): void => {
+      if (!document.hasFocus() || !activeAgentSessionId) return
+      // 以实际激活的 Agent/预览 Tab 为准。Scratch Pad 会保留 currentAgentSessionId，
+      // 不能仅据此把后台会话误判为已查看。
+      void window.electronAPI.agentIsland.markSessionViewed(activeAgentSessionId).catch(console.error)
       setUnviewedCompleted((prev) => {
-        if (!prev.has(currentSessionId)) return prev
+        if (!prev.has(activeAgentSessionId)) return prev
         const next = new Set(prev)
-        next.delete(currentSessionId)
+        next.delete(activeAgentSessionId)
         return next
       })
     }
 
-    clearCurrentSessionBadge()
-    window.addEventListener('focus', clearCurrentSessionBadge)
-    document.addEventListener('visibilitychange', clearCurrentSessionBadge)
+    clearActiveSessionBadge()
+    window.addEventListener('focus', clearActiveSessionBadge)
+    document.addEventListener('visibilitychange', clearActiveSessionBadge)
     return () => {
-      window.removeEventListener('focus', clearCurrentSessionBadge)
-      document.removeEventListener('visibilitychange', clearCurrentSessionBadge)
+      window.removeEventListener('focus', clearActiveSessionBadge)
+      document.removeEventListener('visibilitychange', clearActiveSessionBadge)
     }
-  }, [currentSessionId, setUnviewedCompleted])
+  }, [activeAgentSessionId, setUnviewedCompleted])
 
   return null
 }
