@@ -275,7 +275,7 @@ function safeDecode(raw: string): string {
 }
 
 /** 仅在普通文本中转换旧引用，避免改写 inline code、fenced code 和缩进代码块。 */
-function normalizeNamedReferenceDelimiters(markdown: string): string {
+export function normalizeNamedReferenceDelimiters(markdown: string): string {
   const normalizeText = (text: string): string => text.replace(
     /(&(?:session|todo|calendar_event):[A-Za-z0-9-]+)~(\S+)/g,
     '$1::$2'
