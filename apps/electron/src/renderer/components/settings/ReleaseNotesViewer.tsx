@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { ExternalLink } from 'lucide-react'
 import { CodeBlock } from '@proma/ui'
 import { cn } from '@/lib/utils'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 interface ReleaseNotesViewerProps {
   /** Release 数据 */
@@ -102,7 +103,7 @@ export function ReleaseNotesViewer({
           <Markdown
             remarkPlugins={[remarkGfm]}
             components={{
-              pre: ({ children: preChildren }) => <CodeBlock>{preChildren}</CodeBlock>,
+              pre: ({ children: preChildren }) => <CodeBlock onCopy={copyTextToClipboard}>{preChildren}</CodeBlock>,
               a: ({ href, children: linkChildren, ...linkProps }) => (
                 <a
                   {...linkProps}

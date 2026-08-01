@@ -122,6 +122,7 @@ import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-uti
 import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import {
   buildQueuedMessageSendPayload,
   createAgentQueuedMessage,
@@ -2457,7 +2458,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (!agentError) return
 
     try {
-      await navigator.clipboard.writeText(agentError)
+      await copyTextToClipboard(agentError)
       setErrorCopied(true)
       setTimeout(() => setErrorCopied(false), 2000)
     } catch (error) {

@@ -22,6 +22,8 @@ import type { DiagramColors, RenderOptions } from 'beautiful-mermaid'
 interface MermaidBlockProps {
   /** mermaid 源码 */
   code: string
+  /** 覆盖默认剪贴板实现（Electron 可注入主进程剪贴板） */
+  onCopy?: (text: string) => Promise<void>
 }
 
 /** 防抖间隔（ms） */
@@ -126,7 +128,7 @@ const zoomOutPath = (
 
 // ===== 主组件 =====
 
-export function MermaidBlock({ code }: MermaidBlockProps): React.ReactElement {
+export function MermaidBlock({ code, onCopy }: MermaidBlockProps): React.ReactElement {
   const [renderedSvg, setRenderedSvg] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
   const [scale, setScale] = React.useState<number>(INITIAL_SCALE)
@@ -186,7 +188,7 @@ export function MermaidBlock({ code }: MermaidBlockProps): React.ReactElement {
 
   const handleCopy = React.useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(code)
+      await (onCopy ? onCopy(code) : navigator.clipboard.writeText(code))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (error) {

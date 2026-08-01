@@ -1089,6 +1089,17 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 在系统剪贴板中写入纯文本
+  ipcMain.handle(
+    IPC_CHANNELS.WRITE_CLIPBOARD_TEXT,
+    async (_, text: string): Promise<void> => {
+      if (typeof text !== 'string') {
+        throw new TypeError('剪贴板文本必须是字符串')
+      }
+      clipboard.writeText(text)
+    }
+  )
+
   // 用系统默认应用打开任意文件（appName 需在 KNOWN_EDITORS 白名单内）
   ipcMain.handle(
     IPC_CHANNELS.SYSTEM_OPEN_FILE,

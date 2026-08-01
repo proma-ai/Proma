@@ -208,6 +208,8 @@ export interface ElectronAPI {
 
   /** 在系统默认浏览器中打开外部链接 */
   openExternal: (url: string) => Promise<void>
+  /** 在系统剪贴板中写入纯文本 */
+  writeClipboardText: (text: string) => Promise<void>
 
   // ===== 窗口控制（Windows 自定义标题栏）=====
 
@@ -1243,6 +1245,10 @@ const electronAPI: ElectronAPI = {
   // 通用工具
   openExternal: (url: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url)
+  },
+
+  writeClipboardText: (text: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WRITE_CLIPBOARD_TEXT, text)
   },
 
   // 窗口控制

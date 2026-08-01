@@ -39,6 +39,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { PIERRE_FILE_CSS } from '@/components/agent/tool-result-renderers/pierre-styles'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 const MD_EXTS = new Set(['.md', '.markdown'])
 const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
@@ -868,7 +869,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const handleCopy = React.useCallback(async () => {
     try {
       const copyText = markdownEditing ? markdownDraft : (isOfficePreview ? officeText : newContent)
-      await navigator.clipboard.writeText(copyText)
+      await copyTextToClipboard(copyText)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
