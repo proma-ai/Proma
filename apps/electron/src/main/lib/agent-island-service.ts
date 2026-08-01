@@ -786,19 +786,31 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return
     openAgentIslandSession(sessionId)
   })
+
+  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, (_event, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) return
+    markAgentIslandSessionViewed(sessionId)
+  })
+}
+
+/**
+ * 完成态的未读由主进程管理；主应用确认用户已经看过结果后，在此统一清除。
+ * 错误和需要交互的会话必须保留 attention，不能被普通查看动作吞掉。
+ */
+function markAgentIslandSessionViewed(sessionId: string): void {
+  const session = sessions.get(sessionId)
+  if (session?.phase !== 'completed' || !session.unread) return
+  session.unread = false
+  session.attention = false
+  schedulePush()
 }
 
 function openAgentIslandSession(sessionId: string): void {
   if (!serviceDeps) return
   const session = sessions.get(sessionId)
-  // “完成但未检查”在用户进入对应会话后即视为已检查；异常/阻塞仍保留直到状态改变。
-  if (session?.phase === 'completed' && session.unread) {
-    session.unread = false
-    session.attention = false
-  }
+  markAgentIslandSessionViewed(sessionId)
   serviceDeps.openAgentSession(sessionId, session?.title ?? getTitle(sessionId))
   serviceDeps.showAndFocusMainWindow()
-  schedulePush()
 }
 
 function isExpanded(): boolean {

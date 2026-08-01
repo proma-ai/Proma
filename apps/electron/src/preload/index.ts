@@ -1176,6 +1176,8 @@ export interface ElectronAPI {
     openMainWindow: () => Promise<void>
     /** 打开指定 Agent 会话（聚焦主窗口） */
     openSession: (sessionId: string) => Promise<void>
+    /** 用户已在主应用中主动查看完成会话，清除灵动岛未读状态 */
+    markSessionViewed: (sessionId: string) => Promise<void>
   }
 }
 
@@ -2671,6 +2673,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW),
     openSession: (sessionId: string) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, sessionId),
+    markSessionViewed: (sessionId: string) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, sessionId),
   },
 }
 

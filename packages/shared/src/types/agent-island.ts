@@ -165,6 +165,8 @@ export const AGENT_ISLAND_IPC_CHANNELS = {
   OPEN_MAIN_WINDOW: 'agent-island:open-main-window',
   /** renderer → main：请求打开指定 Agent 会话 */
   OPEN_SESSION: 'agent-island:open-session',
+  /** 主应用已主动查看指定完成会话，清除灵动岛未读状态 */
+  MARK_SESSION_VIEWED: 'agent-island:mark-session-viewed',
   /** renderer → main：内联响应权限请求 */
   RESPOND_PERMISSION: 'agent-island:respond-permission',
   /** main → renderer：切换展开（快捷键等外部入口） */

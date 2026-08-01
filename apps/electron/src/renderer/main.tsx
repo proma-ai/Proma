@@ -586,6 +586,8 @@ function DockBadgeInitializer(): null {
   useEffect(() => {
     const clearCurrentSessionBadge = (): void => {
       if (!document.hasFocus() || !currentSessionId) return
+      // 与主进程灵动岛的完成态未读同步，避免用户已在主应用查看结果后仍需去岛上再点一次。
+      void window.electronAPI.agentIsland.markSessionViewed(currentSessionId).catch(console.error)
       setUnviewedCompleted((prev) => {
         if (!prev.has(currentSessionId)) return prev
         const next = new Set(prev)

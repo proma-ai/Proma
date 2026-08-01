@@ -1149,6 +1149,9 @@ export function useGlobalAgentListeners(): void {
             next.add(data.sessionId)
             return next
           })
+        } else if (!backgroundTasksPending) {
+          // 当前聚焦会话已在主应用可见；同步确认，避免灵动岛把这次完成继续当未读。
+          void window.electronAPI.agentIsland.markSessionViewed(data.sessionId).catch(console.error)
         }
 
         // 标记用户主动打断状态
