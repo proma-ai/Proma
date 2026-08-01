@@ -21,6 +21,7 @@ import type { FileAccessOptions } from '@proma/shared'
 import { copyImageSourceToClipboard } from '../../lib/image-clipboard'
 import { extractCodeText, parseImageWidth } from '../../lib/markdown-rich-text'
 import { shouldRenderMermaidCodeBlock } from '../../lib/mermaid-detection'
+import { copyTextToClipboard } from '../../lib/clipboard'
 
 type FileAccessRef = { current: FileAccessOptions | undefined }
 /** 传 null 表示当前编辑器无会话/文件上下文（如 ScratchPad），跳过路径解析。 */
@@ -722,7 +723,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, view: EditorView
   let copyTimeout: ReturnType<typeof setTimeout> | null = null
   let currentCode = initialNode.textContent
   copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(currentCode).then(() => {
+    copyTextToClipboard(currentCode).then(() => {
       copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>已复制</span>'
       if (copyTimeout) clearTimeout(copyTimeout)
       copyTimeout = setTimeout(() => {
@@ -761,7 +762,7 @@ function createShikiCodeBlockView(initialNode: ProseMirrorNode, view: EditorView
     mermaidRenderTimer = setTimeout(() => {
       mermaidRenderTimer = null
       if (destroyed) return
-      mermaidRoot.render(nextCode === null ? null : <MermaidBlock code={nextCode} />)
+      mermaidRoot.render(nextCode === null ? null : <MermaidBlock code={nextCode} onCopy={copyTextToClipboard} />)
     }, 0)
   }
 

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { SettingsSection, SettingsCard } from './primitives'
 import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
 import nowledgeMemPrompt from './nowledge-mem-prompt.md?raw'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 /** Nowledge Mem · 本地优先记忆 + Agent 集成 */
 function NowledgeMemSection(): React.ReactElement {
@@ -45,7 +46,7 @@ function NowledgeMemSection(): React.ReactElement {
   const handleCopy = async (): Promise<void> => {
     setCopying(true)
     try {
-      await navigator.clipboard.writeText(nowledgeMemPrompt)
+      await copyTextToClipboard(nowledgeMemPrompt)
       toast.success('已复制配置提示词，请粘贴到 Agent 模式输入框执行')
     } catch (error) {
       console.error('[Nowledge Mem] 复制失败:', error)

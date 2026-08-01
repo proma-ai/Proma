@@ -1,4 +1,4 @@
-import { calcTotalAvailable } from '@proma/shared'
+import { calcTotalAvailable, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { AgentIslandPlanQuotaSnapshot, BillingInfo } from '@proma/shared'
 
 /**
@@ -9,6 +9,7 @@ import type { AgentIslandPlanQuotaSnapshot, BillingInfo } from '@proma/shared'
  */
 export function buildPromaOfficialQuotaSnapshot(billing: BillingInfo): AgentIslandPlanQuotaSnapshot {
   return {
+    channelId: PROMA_OFFICIAL_CHANNEL_ID,
     channelName: 'Proma 官方',
     planName: '官方额度',
     windows: [{

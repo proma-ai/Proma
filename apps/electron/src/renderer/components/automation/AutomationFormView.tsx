@@ -12,7 +12,7 @@ import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { AlertTriangle, ArrowLeft, Bell, Box, Check, ChevronDown, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
-import { detectIsWindows } from '@/lib/platform'
+import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -796,9 +796,10 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
 
       {/* 右栏：配置 sidebar */}
       <div className="w-[340px] flex-shrink-0 border-l border-border/50 flex flex-col bg-content-area">
-        <div className={cn('flex items-center justify-between gap-2 px-4 flex-shrink-0', standalone ? 'titlebar-drag-region pt-8 pb-4' : 'py-4')}>
-          <span className="text-sm font-semibold text-foreground">配置</span>
-          <div className="flex items-center gap-1">
+        <div className={cn('relative flex items-center justify-between gap-2 px-4 flex-shrink-0', standalone ? 'titlebar-no-drag pt-8 pb-4' : 'py-4')}>
+          {standalone && <div className={cn('absolute inset-y-0 left-0 z-0 titlebar-drag-region', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />}
+          <span className="relative z-[1] text-sm font-semibold text-foreground">配置</span>
+          <div className="relative z-[1] flex items-center gap-1">
             {!isWindows && (
             <button
               onClick={close}

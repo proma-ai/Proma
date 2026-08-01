@@ -13,12 +13,13 @@
 import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
 
-/** 默认 pill 尺寸（收起态） */
-export const AGENT_ISLAND_DEFAULT_WIDTH = 240
-export const AGENT_ISLAND_DEFAULT_HEIGHT = 52
-/** 展开态上限 */
-export const AGENT_ISLAND_MAX_WIDTH = 640
-export const AGENT_ISLAND_MAX_HEIGHT = 520
+/** Windows fallback 的收起态尺寸，和原生 Swift island 的紧凑状态一致。 */
+export const AGENT_ISLAND_DEFAULT_WIDTH = 420
+export const AGENT_ISLAND_DEFAULT_HEIGHT = 32
+/** 展开态上限，与 macOS native host 保持一致。 */
+export const AGENT_ISLAND_MAX_WIDTH = 620
+export const AGENT_ISLAND_MAX_HEIGHT = 640
+const WINDOWS_TOP_INSET = 12
 
 let agentIslandWindow: BrowserWindow | null = null
 
@@ -31,12 +32,13 @@ export function onAgentIslandWindowReady(cb: () => void): void {
 
 function resolveWindowPosition(width: number, height: number): { x: number; y: number } {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  // 关键：用 display.bounds 而不是 workArea。workArea 从菜单栏下方开始，
-  // 会让“灵动岛”变成普通悬浮窗；bounds.y 才是刘海/菜单栏所在的真实屏幕顶端。
-  const { bounds } = display
+  const { bounds, workArea } = display
+  // macOS fallback 仍贴齐刘海；Windows 没有硬件缺口，保留系统工作区内的
+  // 小间距和完整圆角 surface，避免覆盖顶部任务栏或看起来像半截窗口。
+  const y = process.platform === 'darwin' ? bounds.y : workArea.y + WINDOWS_TOP_INSET
   return {
     x: Math.round(bounds.x + (bounds.width - width) / 2),
-    y: bounds.y,
+    y,
   }
 }
 
@@ -54,6 +56,8 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     frame: false,
     transparent: true,
     alwaysOnTop: true,
+    // 无边框 ambient surface 不应因 Alt+F4 被永久关闭；设置页是其显式开关。
+    closable: process.platform !== 'win32',
     skipTaskbar: true,
     resizable: false,
     movable: false,
@@ -70,17 +74,19 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     },
   })
 
-  // macOS 的 pop-up-menu 层级高于菜单栏，黑色 Surface 才能与硬件刘海连续融合。
-  // 其他平台保持 floating，作为顶部状态条优雅降级。
-  agentIslandWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'pop-up-menu' : 'floating')
-  agentIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Windows 以 screen-saver level 常驻当前桌面和全屏应用上方；macOS 保持与刘海融合的层级。
+  // Electron 的 setVisibleOnAllWorkspaces 在 Windows 无效，避免把无效调用误解为跨虚拟桌面支持。
+  agentIslandWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'pop-up-menu' : 'screen-saver')
+  if (process.platform !== 'win32') {
+    agentIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
 
   const isDev = !app.isPackaged
   if (isDev) {
-    void agentIslandWindow.loadURL('http://127.0.0.1:5173?window=agent-island')
+    void agentIslandWindow.loadURL(`http://127.0.0.1:5173?window=agent-island&platform=${process.platform}`)
   } else {
     void agentIslandWindow.loadFile(join(__dirname, 'renderer', 'index.html'), {
-      query: { window: 'agent-island' },
+      query: { window: 'agent-island', platform: process.platform },
     })
   }
 
@@ -126,16 +132,16 @@ export function getAgentIslandWindow(): BrowserWindow | null {
 export function resizeAgentIslandWindow(width: number, height: number): void {
   const win = getAgentIslandWindow()
   if (!win) return
-  const clampedWidth = Math.max(120, Math.min(AGENT_ISLAND_MAX_WIDTH, Math.round(width)))
-  const clampedHeight = Math.max(40, Math.min(AGENT_ISLAND_MAX_HEIGHT, Math.round(height)))
+  const clampedWidth = Math.max(320, Math.min(AGENT_ISLAND_MAX_WIDTH, Math.round(width)))
+  const clampedHeight = Math.max(32, Math.min(AGENT_ISLAND_MAX_HEIGHT, Math.round(height)))
   const bounds = win.getBounds()
   // 尺寸未变化时不重复 setBounds（避免高频 agent 事件导致无谓窗口操作）
   if (bounds.width === clampedWidth && bounds.height === clampedHeight) return
-  // 保持顶部中央锚定：宽度变化时水平居中；高度只向下延展，始终从刘海顶部开始。
+  // 宽度变化保持居中；Windows 维持与顶部工作区的固定呼吸空间，macOS fallback
+  // 保持刘海顶部锚定。
   const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y })
-  const screenBounds = display.bounds
-  const newX = Math.round(bounds.x + (bounds.width - clampedWidth) / 2)
-  const top = bounds.y <= display.workArea.y ? screenBounds.y : Math.max(screenBounds.y, bounds.y)
+  const top = process.platform === 'darwin' ? display.bounds.y : display.workArea.y + WINDOWS_TOP_INSET
+  const newX = Math.round(display.bounds.x + (display.bounds.width - clampedWidth) / 2)
   win.setBounds({ x: newX, y: top, width: clampedWidth, height: clampedHeight }, false)
 }
 

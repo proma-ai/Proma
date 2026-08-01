@@ -26,6 +26,7 @@ import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sp
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import {
@@ -555,7 +556,7 @@ const MarkdownPre = React.memo(function MarkdownPre({
       // normalize Windows/legacy-Mac line endings before feeding to Mermaid parser
       const mermaidCode = extractText(codeProps.children).replace(/\r\n?/g, '\n').replace(/\n$/, '')
       if (shouldRenderMermaidCodeBlock(className, mermaidCode)) {
-        return <MermaidBlock code={mermaidCode} />
+        return <MermaidBlock code={mermaidCode} onCopy={copyTextToClipboard} />
       }
     }
 
@@ -567,12 +568,12 @@ const MarkdownPre = React.memo(function MarkdownPre({
         const patchedCode = React.cloneElement(codeChild, {
           className: `${className} language-${detected}`.trim(),
         } as Partial<React.HTMLAttributes<HTMLElement>>)
-        return <CodeBlock>{patchedCode}</CodeBlock>
+        return <CodeBlock onCopy={copyTextToClipboard}>{patchedCode}</CodeBlock>
       }
     }
   }
 
-  return <CodeBlock>{preChildren}</CodeBlock>
+  return <CodeBlock onCopy={copyTextToClipboard}>{preChildren}</CodeBlock>
 })
 
 /** 行内代码 / 文件路径渲染器 */

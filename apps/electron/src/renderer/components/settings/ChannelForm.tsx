@@ -37,6 +37,7 @@ import {
   isAgentCompatibleProvider,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
+  parseXaiCredentials,
 } from '@proma/shared'
 import type {
   Channel,
@@ -45,6 +46,7 @@ import type {
   ChannelTestResult,
   FetchModelsResult,
   ProviderType,
+  XaiOAuthDeviceCode,
 } from '@proma/shared'
 import {
   normalizeBaseUrl,
@@ -81,7 +83,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -132,9 +134,6 @@ const ANTHROPIC_PROTOCOL_PROVIDERS: ReadonlySet<ProviderType> = new Set<Provider
 function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   if (ANTHROPIC_PROTOCOL_PROVIDERS.has(provider)) {
     return resolveAnthropicMessagesUrl(baseUrl, provider)
-  }
-  if (provider === 'proma') {
-    return `${baseUrl.trim().replace(/\/+$/, '')}/chat`
   }
   if (provider === 'google') {
     return `${baseUrl.trim().replace(/\/+$/, '')}/v1beta/models/{model}:generateContent`
@@ -241,17 +240,35 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [showBaseUrlRiskDialog, setShowBaseUrlRiskDialog] = React.useState(false)
   const [pendingRiskAction, setPendingRiskAction] = React.useState<'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null>(null)
   const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
+  const [xaiLoggingIn, setXaiLoggingIn] = React.useState(false)
+  const [xaiDeviceCode, setXaiDeviceCode] = React.useState<XaiOAuthDeviceCode | null>(null)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
   const lastAgentEligibleRef = React.useRef(channel ? isAgentEligibleChannel(channel) : false)
+  const xaiLoggingInRef = React.useRef(false)
 
   React.useEffect(() => {
     lastAgentEligibleRef.current = channel ? isAgentEligibleChannel(channel) : false
   }, [channel])
 
-  // 编辑模式下加载明文 API Key（官方渠道无密钥，但仍须完成初始化以允许模型开关自动保存）
+  React.useEffect(() => {
+    xaiLoggingInRef.current = xaiLoggingIn
+  }, [xaiLoggingIn])
+
+  React.useEffect(() => {
+    return window.electronAPI.onXaiOAuthDeviceCode(setXaiDeviceCode)
+  }, [])
+
+  // 关闭或放弃表单时取消仍在轮询的 device-code 授权，避免后台孤立请求。
+  React.useEffect(() => () => {
+    if (xaiLoggingInRef.current) void window.electronAPI.xaiOAuthCancel()
+  }, [])
+
+  /** 编辑模式下加载明文 API Key */
   React.useEffect(() => {
     if (isEdit && channel && !apiKeyLoaded) {
+      // Official channel has no local credential. Mark initialization complete so
+      // model enable/disable changes may still be saved without decrypting ''.
       if (isPromaOfficial) {
         setApiKeyLoaded(true)
         return
@@ -271,14 +288,19 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
   const isCodexProvider = provider === 'openai-codex'
+  const isXaiProvider = provider === 'xai'
+  const isSubscriptionProvider = isCodexProvider || isXaiProvider
   const effectiveApiKey = isZhipuTeamProvider ? buildZhipuTeamSecret(zhipuTeamSecret) : apiKey
-  // ChatGPT (Codex)：apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
+  // 订阅渠道的 apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
   const codexCredentials = isCodexProvider ? parseCodexCredentials(apiKey) : null
+  const xaiCredentials = isXaiProvider ? parseXaiCredentials(apiKey) : null
   const hasRequiredSecret = isZhipuTeamProvider
     ? Boolean(zhipuTeamSecret.apiKey.trim())
     : isCodexProvider
       ? Boolean(codexCredentials)
-      : Boolean(apiKey.trim())
+      : isXaiProvider
+        ? Boolean(xaiCredentials)
+        : Boolean(apiKey.trim())
   const requiresBaseUrlRiskAcknowledgement = isThirdPartyBaseUrl(provider, baseUrl)
     && normalizeBaseUrl(baseUrl) !== acknowledgedBaseUrl
 
@@ -306,14 +328,16 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   ) => {
     if (!isEdit || !channel) return
     try {
-      const savedChannel = await window.electronAPI.updateChannel(channel.id, {
-        name: currentName,
-        provider: currentProvider,
-        baseUrl: currentBaseUrl,
-        apiKey: currentApiKey || undefined,
-        models: currentModels,
-        enabled: currentEnabled,
-      })
+      const savedChannel = await window.electronAPI.updateChannel(channel.id, isPromaOfficial
+        ? { models: currentModels, enabled: currentEnabled }
+        : {
+            name: currentName,
+            provider: currentProvider,
+            baseUrl: currentBaseUrl,
+            apiKey: currentApiKey || undefined,
+            models: currentModels,
+            enabled: currentEnabled,
+          })
       const eligible = isAgentEligibleChannel(savedChannel)
       if (eligible !== lastAgentEligibleRef.current) {
         lastAgentEligibleRef.current = eligible
@@ -324,7 +348,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       console.error('[模型配置表单] auto-save 失败:', error)
       toast.error('自动保存失败，请检查后手动重试', { id: 'auto-save-error' })
     }
-  }, [isEdit, channel, onAgentEligibilityChange])
+  }, [isEdit, channel, isPromaOfficial, onAgentEligibilityChange])
 
   /** 触发防抖 auto-save */
   const scheduleAutoSave = React.useCallback((
@@ -551,10 +575,84 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
   }
 
+  const handleCancelXaiLogin = (): void => {
+    void window.electronAPI.xaiOAuthCancel()
+    setXaiDeviceCode(null)
+  }
+
+  /** 发起 xAI（Grok/X 订阅）OAuth 登录：Pi 打开预填 device-code 浏览器授权页。 */
+  const handleXaiLogin = async (): Promise<void> => {
+    setXaiLoggingIn(true)
+    setXaiDeviceCode(null)
+    setTestResult(null)
+    try {
+      const result = await window.electronAPI.xaiOAuthLogin()
+      if (!result.success || !result.credentials) {
+        toast.error(result.message ?? 'xAI 登录失败，请重试')
+        return
+      }
+      const credentials = result.credentials
+      setApiKey(credentials)
+
+      let xaiModels: ChannelModel[] = []
+      try {
+        const modelsResult = await window.electronAPI.fetchModels({ provider, baseUrl, apiKey: credentials })
+        setFetchResult(modelsResult)
+        if (modelsResult.success && modelsResult.models.length > 0) {
+          xaiModels = modelsResult.models.map((model) => ({ ...model, enabled: true }))
+          setModels(xaiModels)
+        }
+      } catch (modelErr) {
+        console.error('[模型配置表单] 拉取 xAI 模型失败:', modelErr)
+      }
+
+      // OAuth 登录成功即明确保存意图。编辑模式也立即写入，不能依赖 600ms 的
+      // auto-save，避免用户立刻关闭表单而丢失 refresh token。
+      const savedModels = xaiModels.length > 0 ? xaiModels : models
+      if (isEdit && channel) {
+        const saved = await window.electronAPI.updateChannel(channel.id, {
+          name,
+          provider,
+          baseUrl,
+          apiKey: credentials,
+          models: savedModels,
+          enabled,
+        })
+        const eligible = isAgentEligibleChannel(saved)
+        if (eligible !== lastAgentEligibleRef.current) {
+          lastAgentEligibleRef.current = eligible
+          await onAgentEligibilityChange?.(saved, eligible)
+        }
+        toast.success('xAI 登录成功')
+      } else {
+        const input: ChannelCreateInput = {
+          name: name.trim() || PROVIDER_LABELS.xai,
+          provider,
+          baseUrl,
+          apiKey: credentials,
+          models: savedModels,
+          enabled,
+        }
+        const saved = await window.electronAPI.createChannel(input)
+        if (isAgentEligibleChannel(saved)) {
+          await onAgentEligibilityChange?.(saved, true)
+        }
+        toast.success('xAI 渠道已创建')
+        onSaved(saved)
+      }
+    } catch (error) {
+      console.error('[模型配置表单] xAI 登录失败:', error)
+      toast.error('xAI 登录失败，请重试')
+    } finally {
+      setXaiLoggingIn(false)
+      setXaiDeviceCode(null)
+    }
+  }
+
   /** 从供应商 API 拉取可用模型列表。 */
   const fetchAvailableModels = async (): Promise<void> => {
-    // ChatGPT (Codex) 走 SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
-    if (!hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())) return
+    // 订阅 provider 走 Pi SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
+    if (!hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())) return
 
     setFetchingModels(true)
     setFetchResult(null)
@@ -584,7 +682,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           // ChatGPT (Codex) 是 SDK 内置的少量精选模型，拉取即全部启用，
           // 与登录自动拉取路径（handleCodexLogin）保持一致，避免新模型（如 gpt-5.6 系列）
           // 默认未启用而沉到「可用模型」折叠区，被误认为"拉不到"。
-          if (isCodexProvider) return { ...m, enabled: true }
+          if (isSubscriptionProvider) return { ...m, enabled: true }
           return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
         })
         return [...manualKept, ...merged]
@@ -606,7 +704,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 测试连接（直接使用表单当前值，无需先保存）。 */
   const testChannelConnection = async (): Promise<void> => {
-    if (!hasRequiredSecret || !baseUrl.trim()) return
+    if (!hasRequiredSecret || !baseUrl.trim() || isSubscriptionProvider) return
 
     setTesting(true)
     setTestResult(null)
@@ -780,6 +878,33 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     )
   }, [models, modelFilter])
 
+  if (isPromaOfficial) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleBack}><ArrowLeft size={18} /></Button>
+          <h3 className="text-lg font-medium text-foreground flex-1">Proma Cloud</h3>
+        </div>
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/5 text-sm text-primary">
+          <Info size={15} className="flex-shrink-0" />
+          <span>Proma Cloud 由 Proma 管理模型连接、额度与云端工具。模型会自动更新；你仍可按需启用或停用单个模型。</span>
+        </div>
+        <SettingsSection title="已启用模型"><SettingsCard divided={false}>
+          {models.filter((model) => model.enabled).map((model) => (
+            <div key={model.id} className="flex items-center gap-2 px-4 py-2.5 group"><CheckCircle2 size={14} className="text-emerald-500" /><span className="text-sm flex-1">{model.name}</span><button type="button" onClick={() => handleToggleModel(model.id)} className="p-0.5 text-muted-foreground hover:text-destructive" title="取消启用"><X size={14} /></button></div>
+          ))}
+          {models.every((model) => !model.enabled) && <div className="px-4 py-3 text-sm text-muted-foreground">暂无启用模型</div>}
+        </SettingsCard></SettingsSection>
+        <SettingsSection title="可用模型"><SettingsCard divided={false}>
+          {models.filter((model) => !model.enabled).map((model) => (
+            <button key={model.id} type="button" onClick={() => handleToggleModel(model.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/50"><Plus size={14} className="text-primary" /><span className="text-sm flex-1">{model.name}</span></button>
+          ))}
+          {models.every((model) => model.enabled) && <div className="px-4 py-3 text-sm text-muted-foreground">全部模型已启用</div>}
+        </SettingsCard></SettingsSection>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* 标题栏 */}
@@ -793,10 +918,10 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           <ArrowLeft size={18} />
         </Button>
         <h3 className="text-lg font-medium text-foreground flex-1">
-          {isPromaOfficial ? 'Proma Cloud' : isEdit ? '编辑渠道' : '添加渠道'}
+          {isEdit ? '编辑模型配置' : '添加模型配置'}
         </h3>
-        {/* 新建模式：创建按钮（官方渠道无创建动作） */}
-        {!isEdit && !isPromaOfficial && (
+        {/* 新建模式：创建按钮 */}
+        {!isEdit && (
           <Button
             size="sm"
             onClick={handleCreate}
@@ -808,174 +933,125 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         )}
       </div>
 
-      {/* 官方渠道提示 */}
-      {isPromaOfficial && (
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/5 text-sm text-primary">
-          <Info size={15} className="flex-shrink-0" />
-          <span>Proma Cloud 由 Proma 管理模型连接、额度与云端工具。模型会自动更新；你仍可按需启用或停用单个模型。</span>
-        </div>
-      )}
-
-      {/* 创建第三方渠道时的非阻断对比提示 */}
-      {!isPromaOfficial && !isEdit && (
-        <div className="flex items-start gap-2 px-3 py-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
-          <Info size={15} className="mt-0.5 flex-shrink-0 text-primary" />
-          <div className="space-y-1">
-            <p>已有 API Key、Coding Plan 或中转服务？可以继续添加。</p>
-            <p>Proma Cloud 则免去模型连接配置，并已准备好 Agent 专用模型、联网与生图等云端工具，适合直接开始工作。</p>
-            <button type="button" onClick={onCancel} className="text-xs font-medium text-primary hover:underline">返回渠道列表</button>
-          </div>
-        </div>
-      )}
-
-      {/* 基本信息卡片 — 官方渠道隐藏 */}
-      {!isPromaOfficial && (
-        <SettingsSection title="基本信息">
-          <SettingsCard>
-            <SettingsSelect
-              label="供应商类型"
-              value={provider}
-              onValueChange={handleProviderChange}
-              options={PROVIDER_SELECT_OPTIONS}
-              placeholder="选择供应商"
-            />
-            {provider === 'custom' && (
-              <div className="px-4 pb-3 text-xs text-muted-foreground">
-                用于 OpenAI Chat Completions 的自定义请求地址，Chat 会按原样发送请求。用于 Agent 时请选择 Pi；若服务提供 Anthropic Messages 端点，请选择「Anthropic 兼容格式」。
-              </div>
-            )}
+      {/* 基本信息卡片 */}
+      <SettingsSection title="基本信息">
+        <SettingsCard>
+          <SettingsSelect
+            label="供应商类型"
+            value={provider}
+            onValueChange={handleProviderChange}
+            options={PROVIDER_SELECT_OPTIONS}
+            placeholder="选择供应商"
+          />
+          {provider === 'custom' && (
+            <div className="px-4 pb-3 text-xs text-muted-foreground">
+              用于 OpenAI Chat Completions 的自定义请求地址，Chat 会按原样发送请求。用于 Agent 时请选择 Pi；若服务提供 Anthropic Messages 端点，请选择「Anthropic 兼容格式」。
+            </div>
+          )}
+          <SettingsInput
+            label="供应商名称"
+            value={name}
+            onChange={setName}
+            placeholder="例如: My Anthropic"
+            required
+          />
+          {/* 订阅 provider 的请求地址由 Pi SDK 内置管理，无需用户填写 */}
+          {!isSubscriptionProvider && (
             <SettingsInput
-              label="供应商名称"
-              value={name}
-              onChange={setName}
-              placeholder="例如: My Anthropic"
-              required
+              label={getUrlInputLabel(provider)}
+              value={baseUrl}
+              onChange={setBaseUrl}
+              onBlur={handleBaseUrlBlur}
+              placeholder={getUrlInputPlaceholder(provider)}
+              description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
             />
-            {/* ChatGPT (Codex) 的请求地址由 Pi SDK 内置管理，无需用户填写 */}
-            {!isCodexProvider && (
-              <SettingsInput
-                label={getUrlInputLabel(provider)}
-                value={baseUrl}
-                onChange={setBaseUrl}
-                onBlur={handleBaseUrlBlur}
-                placeholder={getUrlInputPlaceholder(provider)}
-                description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
-              />
-            )}
-            {/* API Key + 测试连接同行 */}
-            <div className="px-4 py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-foreground">
-                  {isCodexProvider ? 'ChatGPT 登录' : isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
-                </div>
-                {!isCodexProvider && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={handleTest}
-                    disabled={testing || !hasRequiredSecret || !baseUrl.trim()}
-                    className="h-7 text-xs"
-                  >
-                    {testing ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <Zap size={12} />
-                    )}
-                    <span>测试连接</span>
+          )}
+          {/* API Key + 测试连接同行 */}
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-foreground">
+                {isCodexProvider ? 'ChatGPT 登录' : isXaiProvider ? 'xAI 登录' : isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
+              </div>
+              {/* 订阅 OAuth 无标准 API Key 测试路径，隐藏测试按钮 */}
+              {!isSubscriptionProvider && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={handleTest}
+                  disabled={testing || !hasRequiredSecret || !baseUrl.trim()}
+                  className="h-7 text-xs"
+                >
+                  {testing ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Zap size={12} />
+                  )}
+                  <span>测试连接</span>
+                </Button>
+              )}
+            </div>
+            {isCodexProvider ? (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={handleCodexLogin}
+                  disabled={codexLoggingIn}
+                  className="w-full"
+                >
+                  {codexLoggingIn ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                  <span>{codexLoggingIn ? '等待浏览器授权…' : hasRequiredSecret ? '重新登录 ChatGPT' : '用 ChatGPT 登录'}</span>
+                </Button>
+                {hasRequiredSecret ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                    <CheckCircle2 size={12} className="shrink-0" />
+                    <span>已登录 ChatGPT 订阅{codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}</span>
+                  </div>
+                ) : <div className="text-xs text-muted-foreground">使用 ChatGPT Plus/Pro 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。</div>}
+              </div>
+            ) : isXaiProvider ? (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={handleXaiLogin}
+                  disabled={xaiLoggingIn}
+                  className="w-full"
+                >
+                  {xaiLoggingIn ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                  <span>{xaiLoggingIn ? '等待浏览器授权…' : hasRequiredSecret ? '重新登录 xAI' : '用 xAI 登录'}</span>
+                </Button>
+                {xaiLoggingIn && (
+                  <Button variant="ghost" size="sm" type="button" onClick={handleCancelXaiLogin} className="w-full text-muted-foreground">
+                    取消登录
                   </Button>
                 )}
-              </div>
-              {isCodexProvider ? (
-                <div className="space-y-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={handleCodexLogin}
-                    disabled={codexLoggingIn}
-                    className="w-full"
-                  >
-                    {codexLoggingIn ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Zap size={14} />
-                    )}
-                    <span>
-                      {codexLoggingIn
-                        ? '等待浏览器授权…'
-                        : hasRequiredSecret
-                          ? '重新登录 ChatGPT'
-                          : '用 ChatGPT 登录'}
-                    </span>
-                  </Button>
-                  {hasRequiredSecret ? (
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-600">
-                      <CheckCircle2 size={12} className="shrink-0" />
-                      <span>
-                        已登录 ChatGPT 订阅
-                        {codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">
-                      使用 ChatGPT Plus/Pro 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。
-                    </div>
-                  )}
-                </div>
-              ) : isZhipuTeamProvider ? (
-                <div className="space-y-2">
-                  <div className="relative">
-                    <Input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={zhipuTeamSecret.apiKey}
-                      onChange={(e) => updateZhipuTeamSecret({ apiKey: e.target.value })}
-                      placeholder="API Token"
-                      required={!isEdit}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                      tabIndex={-1}
-                      title={showApiKey ? '隐藏凭证' : '显示凭证'}
-                    >
-                      {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Input
-                      value={zhipuTeamSecret.organization}
-                      onChange={(e) => updateZhipuTeamSecret({ organization: e.target.value })}
-                      placeholder="组织 ID（可选）"
-                    />
-                    <Input
-                      value={zhipuTeamSecret.project}
-                      onChange={(e) => updateZhipuTeamSecret({ project: e.target.value })}
-                      placeholder="项目 ID（可选）"
-                    />
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    组织 ID 和项目 ID 可在{' '}
-                    <a
-                      href="https://bigmodel.cn/usercenter/proj-mgmt/org-mgmt"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      智谱组织与项目管理
+                {xaiDeviceCode && (
+                  <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground space-y-1.5">
+                    <div>若浏览器未自动填入授权码，请输入：<span className="font-mono font-medium text-foreground">{xaiDeviceCode.userCode}</span></div>
+                    <a href={xaiDeviceCode.verificationUri} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                      打开 xAI 授权页面
                     </a>
-                    {' '}查看；不填写时使用 API Token 的默认组织与项目上下文查询。
                   </div>
-                </div>
-              ) : (
+                )}
+                {hasRequiredSecret ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                    <CheckCircle2 size={12} className="shrink-0" />
+                    <span>已登录 xAI（Grok）订阅</span>
+                  </div>
+                ) : <div className="text-xs text-muted-foreground">使用 SuperGrok 或 X Premium 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。</div>}
+              </div>
+            ) : isZhipuTeamProvider ? (
+              <div className="space-y-2">
                 <div className="relative">
                   <Input
                     type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={getApiKeyPlaceholder(provider, isEdit)}
+                    value={zhipuTeamSecret.apiKey}
+                    onChange={(e) => updateZhipuTeamSecret({ apiKey: e.target.value })}
+                    placeholder="API Token"
                     required={!isEdit}
                     className="pr-10"
                   />
@@ -984,32 +1060,76 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
                     onClick={() => setShowApiKey(!showApiKey)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                     tabIndex={-1}
+                    title={showApiKey ? '隐藏凭证' : '显示凭证'}
                   >
                     {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-              )}
-              {testResult && (
-                <div className={cn(
-                  'flex items-start gap-1.5 text-xs',
-                  testResult.success ? 'text-emerald-600' : 'text-destructive'
-                )}>
-                  {testResult.success
-                    ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" />
-                    : <XCircle size={12} className="mt-0.5 shrink-0" />}
-                  <span className="min-w-0 break-all">{testResult.message}</span>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Input
+                    value={zhipuTeamSecret.organization}
+                    onChange={(e) => updateZhipuTeamSecret({ organization: e.target.value })}
+                    placeholder="组织 ID（可选）"
+                  />
+                  <Input
+                    value={zhipuTeamSecret.project}
+                    onChange={(e) => updateZhipuTeamSecret({ project: e.target.value })}
+                    placeholder="项目 ID（可选）"
+                  />
                 </div>
-              )}
-            </div>
-            <SettingsToggle
-              label="启用此渠道"
-              description="关闭后该渠道不会在模型选择中出现"
-              checked={enabled}
-              onCheckedChange={setEnabled}
-            />
-          </SettingsCard>
-        </SettingsSection>
-      )}
+                <div className="text-xs text-muted-foreground">
+                  组织 ID 和项目 ID 可在{' '}
+                  <a
+                    href="https://bigmodel.cn/usercenter/proj-mgmt/org-mgmt"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    智谱组织与项目管理
+                  </a>
+                  {' '}查看；不填写时使用 API Token 的默认组织与项目上下文查询。
+                </div>
+              </div>
+            ) : (
+              <div className="relative">
+                <Input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={getApiKeyPlaceholder(provider, isEdit)}
+                  required={!isEdit}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                >
+                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            )}
+            {testResult && (
+              <div className={cn(
+                'flex items-start gap-1.5 text-xs',
+                testResult.success ? 'text-emerald-600' : 'text-destructive'
+              )}>
+                {testResult.success
+                  ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" />
+                  : <XCircle size={12} className="mt-0.5 shrink-0" />}
+                <span className="min-w-0 break-all">{testResult.message}</span>
+              </div>
+            )}
+          </div>
+          <SettingsToggle
+            label="启用此配置"
+            description="关闭后该配置的模型不会在选择列表中出现"
+            checked={enabled}
+            onCheckedChange={setEnabled}
+          />
+        </SettingsCard>
+      </SettingsSection>
 
       {/* 已启用模型 */}
       <SettingsSection
@@ -1054,23 +1174,21 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
       <SettingsSection
         title="可用模型"
         action={
-          !isPromaOfficial ? (
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={handleFetchModels}
-              disabled={fetchingModels || !hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())}
-              className="h-7 text-xs"
-            >
-              {fetchingModels ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <Download size={12} />
-              )}
-              <span>从供应商获取</span>
-            </Button>
-          ) : undefined
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={handleFetchModels}
+            disabled={fetchingModels || !hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())}
+            className="h-7 text-xs"
+          >
+            {fetchingModels ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Download size={12} />
+            )}
+            <span>从供应商获取</span>
+          </Button>
         }
       >
         {/* 拉取结果提示 */}
@@ -1124,16 +1242,14 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
                       <span className="text-muted-foreground ml-1">({model.id})</span>
                     )}
                   </span>
-                  {!isPromaOfficial && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleRemoveModel(model.id) }}
-                      className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                      title="删除"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleRemoveModel(model.id) }}
+                    className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                    title="删除"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               ))}
 
@@ -1153,45 +1269,43 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             </div>
           </ScrollArea>
 
-          {/* 添加新模型 — 官方渠道隐藏 */}
-          {!isPromaOfficial && (
-            <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border/50">
-              <Input
-                value={newModelId}
-                onChange={(e) => setNewModelId(e.target.value)}
-                placeholder="模型 ID（如 claude-opus-4-6）"
-                className="flex-1 h-8 text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    handleAddModel()
-                  }
-                }}
-              />
-              <Input
-                value={newModelName}
-                onChange={(e) => setNewModelName(e.target.value)}
-                placeholder="显示名称（可选）"
-                className="flex-1 h-8 text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    handleAddModel()
-                  }
-                }}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                onClick={handleAddModel}
-                disabled={!newModelId.trim()}
-                className="h-8 w-8 flex-shrink-0"
-              >
-                <Plus size={18} />
-              </Button>
-            </div>
-          )}
+          {/* 手动添加模型 */}
+          <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border/50">
+            <Input
+              value={newModelId}
+              onChange={(e) => setNewModelId(e.target.value)}
+              placeholder="模型 ID（如 claude-opus-4-6）"
+              className="flex-1 h-8 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleAddModel()
+                }
+              }}
+            />
+            <Input
+              value={newModelName}
+              onChange={(e) => setNewModelName(e.target.value)}
+              placeholder="显示名称（可选）"
+              className="flex-1 h-8 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleAddModel()
+                }
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              onClick={handleAddModel}
+              disabled={!newModelId.trim()}
+              className="h-8 w-8 flex-shrink-0"
+            >
+              <Plus size={18} />
+            </Button>
+          </div>
         </SettingsCard>
       </SettingsSection>
 

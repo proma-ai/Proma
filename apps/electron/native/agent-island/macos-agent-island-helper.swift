@@ -36,6 +36,7 @@ struct AgentState: Codable {
   let sessions: [AgentSession]
   let recentSessions: [AgentSession]
   let idleDashboard: Bool
+  let compactPlanQuota: CompactPlanQuota?
   let totalCount: Int
   let updatedAt: Double
 }
@@ -65,16 +66,25 @@ struct Planning: Codable {
 }
 
 struct PlanQuotaWindow: Codable {
+  let windowType: String?
   let windowLabel: String
   let remainingPercent: Double
   let remainingLabel: String?
 }
 
 struct PlanQuota: Codable, Identifiable {
+  let channelId: String
   let channelName: String
   let planName: String
   let windows: [PlanQuotaWindow]
-  var id: String { "\(channelName):\(planName)" }
+  var id: String { "\(channelId):\(planName)" }
+}
+
+struct CompactPlanQuota: Codable {
+  let channelName: String
+  let planName: String
+  let windows: [PlanQuotaWindow]
+  let additionalChannelCount: Int
 }
 
 struct SnapshotMessage: Codable {
@@ -314,11 +324,15 @@ struct PlanQuotaCarousel: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.84))
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 78, alignment: .leading)
               if quota.planName != quota.channelName {
                 Text("· \(quota.planName)")
                   .font(.system(size: 9.5, weight: .medium))
                   .foregroundStyle(.white.opacity(0.44))
                   .lineLimit(1)
+                  .truncationMode(.tail)
+                  .frame(maxWidth: 108, alignment: .leading)
               }
               Spacer(minLength: 8)
               Text(quotaText(quota))
@@ -326,6 +340,7 @@ struct PlanQuotaCarousel: View {
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
+                .layoutPriority(1)
             }
             .frame(height: 16)
           }
@@ -335,6 +350,42 @@ struct PlanQuotaCarousel: View {
         .transition(.opacity)
       }
     }
+  }
+}
+
+struct CompactPlanQuotaBadge: View {
+  let quota: CompactPlanQuota
+
+  private func shortLabel(_ window: PlanQuotaWindow) -> String {
+    switch window.windowType {
+    case "5h": return "5h"
+    case "weekly": return "周"
+    default: return window.windowLabel
+    }
+  }
+
+  private var detail: String {
+    quota.windows.prefix(2).map { window in
+      "\(shortLabel(window)) \(window.remainingLabel ?? "\(Int(window.remainingPercent.rounded()))%")"
+    }.joined(separator: " · ")
+  }
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Text(detail)
+        .foregroundStyle(.white.opacity(0.92))
+        .lineLimit(1)
+        .truncationMode(.tail)
+      if quota.additionalChannelCount > 0 {
+        Text("+\(quota.additionalChannelCount)")
+          .foregroundStyle(Color(red: 0.65, green: 0.73, blue: 1))
+          .fontWeight(.bold)
+      }
+    }
+    .font(.system(size: 9, weight: .semibold))
+    .monospacedDigit()
+    .lineLimit(1)
+    .frame(maxWidth: 142, alignment: .trailing)
   }
 }
 
@@ -393,6 +444,10 @@ struct CompactIslandView: View {
           .lineLimit(1)
           .foregroundStyle(.white.opacity(0.92))
         Spacer(minLength: 6)
+        if let quota = snapshot.state.compactPlanQuota {
+          CompactPlanQuotaBadge(quota: quota)
+            .layoutPriority(1)
+        }
         Image(systemName: "chevron.down")
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(.white.opacity(0.46))

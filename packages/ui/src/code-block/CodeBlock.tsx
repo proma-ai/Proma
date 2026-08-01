@@ -32,6 +32,8 @@ interface CodeElementProps {
 interface CodeBlockProps {
   /** react-markdown 传入的 <pre> 子元素（内含 <code>） */
   children: React.ReactNode
+  /** 覆盖默认剪贴板实现（Electron 可注入主进程剪贴板） */
+  onCopy?: (text: string) => Promise<void>
 }
 
 /** 节流间隔（ms）：流式输出时限制高亮更新频率 */
@@ -133,7 +135,7 @@ const CodeLine = React.memo(function CodeLine({ tokens, rawLine }: CodeLineProps
  * - 节流 80ms：流式输出时控制重计算频率
  * - 异步兜底：首次挂载高亮器未就绪时，异步初始化后触发一次更新
  */
-export function CodeBlock({ children }: CodeBlockProps): React.ReactElement {
+export function CodeBlock({ children, onCopy }: CodeBlockProps): React.ReactElement {
   const { language, code } = React.useMemo(() => extractCodeInfo(children), [children])
   const [copied, setCopied] = React.useState(false)
 
@@ -196,7 +198,7 @@ export function CodeBlock({ children }: CodeBlockProps): React.ReactElement {
   // 复制到剪贴板
   const handleCopy = React.useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(trimmedCode)
+      await (onCopy ? onCopy(trimmedCode) : navigator.clipboard.writeText(trimmedCode))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (error) {

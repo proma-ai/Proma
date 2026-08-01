@@ -154,8 +154,9 @@ import {
   getChannelPlanQuota,
 } from './lib/channel-manager'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
+import { loginXaiOAuth, cancelXaiOAuthLogin } from './lib/xai-oauth-service'
 import { resolvePiReasoningCapability } from './lib/adapters/pi-model-registry'
-import { serializeCodexCredentials } from '@proma/shared'
+import { serializeCodexCredentials, serializeXaiCredentials } from '@proma/shared'
 import {
   listConversations,
   createConversation,
@@ -1090,6 +1091,17 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  // 在系统剪贴板中写入纯文本
+  ipcMain.handle(
+    IPC_CHANNELS.WRITE_CLIPBOARD_TEXT,
+    async (_, text: string): Promise<void> => {
+      if (typeof text !== 'string') {
+        throw new TypeError('剪贴板文本必须是字符串')
+      }
+      clipboard.writeText(text)
+    }
+  )
+
   // 用系统默认应用打开任意文件（appName 需在 KNOWN_EDITORS 白名单内）
   ipcMain.handle(
     IPC_CHANNELS.SYSTEM_OPEN_FILE,
@@ -1263,6 +1275,29 @@ export function registerIpcHandlers(): void {
     CHANNEL_IPC_CHANNELS.CODEX_OAUTH_CANCEL,
     async (): Promise<void> => {
       cancelCodexOAuthLogin()
+    }
+  )
+
+  // 发起 xAI（Grok/X 订阅）OAuth device-code 登录。Pi 会通过 device-code 事件给出
+  // 预填的浏览器授权链接；成功后的凭据沿用 Channel.apiKey 加密存储。
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.XAI_OAUTH_LOGIN,
+    async (event): Promise<import('@proma/shared').XaiOAuthLoginResult> => {
+      try {
+        const credentials = await loginXaiOAuth({
+          onDeviceCode: (deviceCode) => event.sender.send(CHANNEL_IPC_CHANNELS.XAI_OAUTH_DEVICE_CODE, deviceCode),
+        })
+        return { success: true, credentials: serializeXaiCredentials(credentials) }
+      } catch (error) {
+        return { success: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.XAI_OAUTH_CANCEL,
+    async (): Promise<void> => {
+      cancelXaiOAuthLogin()
     }
   )
 

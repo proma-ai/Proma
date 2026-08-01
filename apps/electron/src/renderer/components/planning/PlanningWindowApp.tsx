@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai'
 import { AutomationFormView } from '@/components/automation/AutomationFormView'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { WindowControls } from '@/components/WindowControls'
 import { PlanningView } from './PlanningView'
 
 /** 独立窗口模式：复用规划中心，不挂载聊天与 Agent 工作区。 */
@@ -13,5 +14,5 @@ export function PlanningWindowApp(): React.ReactElement {
     document.title = 'Proma · 规划中心'
   }, [])
 
-  return <TooltipProvider delayDuration={200}><div className="h-screen overflow-hidden bg-content-area">{automationFormOpen ? <AutomationFormView standalone /> : <PlanningView standalone />}</div></TooltipProvider>
+  return <TooltipProvider delayDuration={200}><div className="relative h-screen overflow-hidden bg-content-area"><WindowControls />{automationFormOpen ? <AutomationFormView standalone /> : <PlanningView standalone />}</div></TooltipProvider>
 }

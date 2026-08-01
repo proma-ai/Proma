@@ -14,6 +14,7 @@ import type {
   AgentThinkingLevel,
   AgentProviderAdapter,
   CodexOAuthCredentials,
+  XaiOAuthCredentials,
   AgentQueryInput,
   ErrorCode,
   JsonSchemaOutputFormat,
@@ -104,6 +105,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   modelContextWindow?: number
   /** 官方 Admin 配置的最大输出 token 数，优先于 Pi catalog default。 */
   modelMaxOutputTokens?: number
+  /** OAuth credential coordination key; equals the selected Proma channel id. */
+  channelId?: string
   channelName?: string
   maxTurns?: number
   permissionMode: PromaPermissionMode
@@ -149,6 +152,10 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   codexOAuthCredentials?: CodexOAuthCredentials
   /** Pi 运行中刷新 OAuth 后，将新凭据回写到 Proma 渠道存储。 */
   onCodexOAuthCredentialsRefreshed?: (credentials: CodexOAuthCredentials) => void | Promise<void>
+  /** xAI OAuth credential store uses real expiry/refresh rather than ~/.pi. */
+  xaiOAuthCredentials?: XaiOAuthCredentials
+  /** Persist refreshed xAI OAuth credentials into Proma channel storage. */
+  onXaiOAuthCredentialsRefreshed?: (credentials: XaiOAuthCredentials) => void | Promise<void>
   /** 会话级 OpenAI（Codex OAuth / Responses API）思考深度。 */
   openAIThinkingLevel?: AgentThinkingLevel
 }
@@ -1437,6 +1444,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         ...buildPiRemoteConnectionSettings(input),
       })
       const openAIReasoningProfile = (input.provider === 'openai-codex'
+        || input.provider === 'xai'
         || input.provider === 'openai-responses'
         || (input.provider === 'proma' && (isPromaOfficialOpenAIReasoningModel(input.model) || input.modelApiProtocol === 'openai-responses')))
         ? resolveReasoningProfile({

@@ -318,7 +318,7 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   }, [])
 
   const toolbarItems = React.useMemo<ToolbarItem[]>(() => [
-    { key: 'model', node: <ModelSelector excludedProviders={['openai-codex']} useSharedOpenState /> },
+    { key: 'model', node: <ModelSelector excludedProviders={['openai-codex', 'xai']} useSharedOpenState /> },
     {
       key: 'thinking',
       node: (

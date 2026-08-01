@@ -126,6 +126,7 @@ Proma 的 Agent 模式提供两套可切换的内核：
 | OpenAI、OpenAI Responses、Google、智谱 AI、豆包、通义千问 | 支持 | 暂不支持 | 支持 |
 | OpenAI 兼容自定义端点 | 支持 | 暂不支持 | 支持 |
 | ChatGPT 订阅（Codex OAuth） | — | 支持 | 支持 |
+| xAI 订阅（Grok OAuth） | — | — | 支持 |
 
 > Pi Runtime 可在每个 Agent 会话的输入框下方直接切换；切换会开启新的底层 SDK 会话，但不会删除 Proma 中已保存的消息。Pi 会桥接工作区 Skills、用户 MCP Server，以及 Proma 内置的 Automation / Collaboration 工具；不同模型供应商对工具调用、推理和上下文长度的支持仍可能不同。
 

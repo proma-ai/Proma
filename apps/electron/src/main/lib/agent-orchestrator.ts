@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { accessSync, constants, existsSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
-import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
+import type { AgentRuntime, AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult, ProviderType } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -49,8 +49,10 @@ import {
   getChannelById,
   listChannels,
   persistCodexOAuthCredentials,
+  persistXaiOAuthCredentials,
   resolveChannelRuntimeApiKey,
   resolveCodexOAuthCredentials,
+  resolveXaiOAuthCredentials,
 } from './channel-manager'
 import { getSystemApiKey, clearSystemKeyCache } from './cloud-channel-service'
 import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
@@ -698,6 +700,12 @@ export class AgentOrchestrator {
       return null
     }
 
+    if (channel.provider === 'xai') {
+      // xAI subscription uses Pi's provider-specific OAuth transport; the generic title
+      // adapter is API-key based, so avoid spending subscription requests here.
+      return createFallbackTitle(userMessage)
+    }
+
     try {
       // 商业版：Codex OAuth 标题走已登录的 Proma Cloud 轻量模型，避免占用 Codex 订阅请求通道。
       if (channel.provider === 'openai-codex') {
@@ -1224,6 +1232,7 @@ export class AgentOrchestrator {
 
     let apiKey: string
     let codexOAuthCredentials: CodexOAuthCredentials | undefined
+    let xaiOAuthCredentials: XaiOAuthCredentials | undefined
     if (channel.provider === 'proma') {
       // Proma 官方渠道：使用系统 API Key（由 Cloud 服务管理）
       try {
@@ -1251,6 +1260,14 @@ export class AgentOrchestrator {
         apiKey = codexOAuthCredentials.access
       } catch {
         failRun('ChatGPT 登录已失效，请在设置中重新登录 ChatGPT', [], { startedAt: streamStartedAt })
+        return
+      }
+    } else if (channel.provider === 'xai') {
+      try {
+        xaiOAuthCredentials = await resolveXaiOAuthCredentials(channelId)
+        apiKey = xaiOAuthCredentials.access
+      } catch {
+        failRun('xAI 登录已失效，请在设置中重新登录 xAI', [], { startedAt: streamStartedAt })
         return
       }
     } else {
@@ -1871,6 +1888,7 @@ export class AgentOrchestrator {
         apiKey,
         baseUrl: sdkBaseUrl,
         provider: channel.provider,
+        channelId,
         ...(selectedOfficialAgentModel?.apiProtocol && { modelApiProtocol: selectedOfficialAgentModel.apiProtocol }),
         ...(selectedOfficialAgentModel?.contextWindow && { modelContextWindow: selectedOfficialAgentModel.contextWindow }),
         ...(selectedOfficialAgentModel?.maxOutputTokens && { modelMaxOutputTokens: selectedOfficialAgentModel.maxOutputTokens }),
@@ -1895,7 +1913,14 @@ export class AgentOrchestrator {
             persistCodexOAuthCredentials(channelId, credentials)
           },
         }),
+        ...(xaiOAuthCredentials && {
+          xaiOAuthCredentials,
+          onXaiOAuthCredentialsRefreshed: (credentials: XaiOAuthCredentials) => {
+            persistXaiOAuthCredentials(channelId, credentials)
+          },
+        }),
         ...((channel.provider === 'openai-codex'
+          || channel.provider === 'xai'
           || channel.provider === 'openai-responses'
           || channel.provider === 'openai'
           || channel.provider === 'custom'

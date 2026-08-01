@@ -21,6 +21,7 @@ import type {
   ChannelPlanQuotaResult,
   ChannelPlanQuotaWindow,
   CodexOAuthCredentials,
+  XaiOAuthCredentials,
   FetchModelsInput,
   FetchModelsResult,
   ProviderType,
@@ -33,11 +34,16 @@ import {
   parseCodexCredentials,
   serializeCodexCredentials,
   isCodexCredentialExpired,
+  parseXaiCredentials,
+  serializeXaiCredentials,
+  isXaiCredentialExpired,
 } from '@proma/shared'
 import { refreshCodexOAuth } from './codex-oauth-service'
+import { refreshXaiOAuth } from './xai-oauth-service'
+import { refreshXaiOAuthCredentialsSerial, rememberXaiOAuthCredentials } from './xai-oauth-credentials'
 import { parseCodexPlanQuotaResponse } from './codex-plan-quota'
 import { getBilling } from './cloud-billing-service'
-import { listCodexModels } from './adapters/pi-model-registry'
+import { listCodexModels, listXaiModels } from './adapters/pi-model-registry'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import {
@@ -469,8 +475,7 @@ export function updateChannel(id: string, input: ChannelUpdateInput): Channel {
     && (input.name !== undefined
       || input.provider !== undefined
       || input.baseUrl !== undefined
-      || input.apiKey !== undefined
-      || input.models !== undefined)
+      || input.apiKey !== undefined)
   ) {
     throw new Error('Proma Cloud 渠道的模型和连接配置由 Proma 管理，无法编辑')
   }
@@ -611,6 +616,42 @@ export async function resolveCodexAccessToken(channelId: string): Promise<string
   return (await resolveCodexOAuthCredentials(channelId)).access
 }
 
+/** 保存 Pi 或 Proma 刷新后的完整 xAI OAuth 凭据。 */
+export function persistXaiOAuthCredentials(channelId: string, credentials: XaiOAuthCredentials): void {
+  const channel = getChannelById(channelId)
+  if (!channel || channel.provider !== 'xai') {
+    throw new Error(`xAI 渠道不存在或类型不匹配: ${channelId}`)
+  }
+  updateChannel(channelId, { apiKey: serializeXaiCredentials(credentials) })
+  rememberXaiOAuthCredentials(channelId, credentials, true)
+}
+
+/** 解析 xAI（Grok/X 订阅）凭据，按 expiry 刷新并回写加密渠道存储。 */
+export async function resolveXaiOAuthCredentials(channelId: string): Promise<XaiOAuthCredentials> {
+  const config = readConfig()
+  const channel = config.channels.find((c) => c.id === channelId)
+  if (!channel || channel.provider !== 'xai') {
+    throw new Error('xAI 订阅渠道不存在或类型不匹配')
+  }
+  const credentials = parseXaiCredentials(decryptKey(channel.apiKey))
+  if (!credentials) throw new Error('xAI 登录凭据无效或缺失，请重新登录')
+  if (!isXaiCredentialExpired(credentials)) {
+    return rememberXaiOAuthCredentials(channelId, credentials)
+  }
+
+  const refreshed = await refreshXaiOAuthCredentialsSerial(
+    channelId,
+    credentials,
+    (current) => refreshXaiOAuth(current.refresh),
+  )
+  persistXaiOAuthCredentials(channelId, refreshed)
+  return refreshed
+}
+
+export async function resolveXaiAccessToken(channelId: string): Promise<string> {
+  return (await resolveXaiOAuthCredentials(channelId)).access
+}
+
 /**
  * 解析渠道运行时实际使用的认证 token。
  *
@@ -623,9 +664,9 @@ export async function resolveChannelRuntimeApiKey(channelId: string): Promise<st
     throw new Error(`渠道不存在: ${channelId}`)
   }
 
-  return channel.provider === 'openai-codex'
-    ? resolveCodexAccessToken(channelId)
-    : decryptApiKey(channelId)
+  if (channel.provider === 'openai-codex') return resolveCodexAccessToken(channelId)
+  if (channel.provider === 'xai') return resolveXaiAccessToken(channelId)
+  return decryptApiKey(channelId)
 }
 
 /**
@@ -1808,6 +1849,7 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
       case 'qwen-anthropic':
       case 'qwen-token-plan':
       case 'openai-codex':
+      case 'xai':
         if (provider === 'openai-codex') {
           // ChatGPT (Codex) 走 Pi SDK 内置模型目录，不依赖 baseUrl/apiKey。
           const codexModels = await listCodexModels()
@@ -1815,6 +1857,14 @@ export async function fetchModels(input: FetchModelsInput): Promise<FetchModelsR
             success: true,
             message: `已加载 ${codexModels.length} 个 ChatGPT (Codex) 模型`,
             models: codexModels.map((m) => ({ id: m.id, name: m.name, enabled: true, source: 'fetched' as const })),
+          }
+        }
+        if (provider === 'xai') {
+          const xaiModels = await listXaiModels()
+          return {
+            success: true,
+            message: `已加载 ${xaiModels.length} 个 xAI（Grok）模型`,
+            models: xaiModels.map((m) => ({ id: m.id, name: m.name, enabled: true, source: 'fetched' as const })),
           }
         }
         if (provider === 'deepseek') {
