@@ -135,7 +135,7 @@ import type {
   CreatePlanningGroupInput,
   UpdatePlanningGroupInput,
   SnoozePlanningReminderInput,
-  AgentIslandState,
+  AgentIslandWindowSnapshot,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -1176,17 +1176,21 @@ export interface ElectronAPI {
   /** Agent 灵动岛桥接（主进程状态机 → 灵动岛窗口） */
   agentIsland: {
     /** 订阅灵动岛全量状态 */
-    onState: (callback: (state: AgentIslandState) => void) => () => void
+    onState: (callback: (snapshot: AgentIslandWindowSnapshot) => void) => () => void
     /** 外部触发展开/收起切换 */
     onToggleExpanded: (callback: () => void) => () => void
     /** 同步展开/收起状态到主进程（避免下一条 Agent 事件覆盖本地状态） */
     setExpanded: (expanded: boolean) => Promise<void>
+    /** 发送鼠标进入/离开 island surface 的意图；主进程负责展开防抖。 */
+    setHovered: (hovered: boolean) => Promise<void>
     /** 按内容调整窗口尺寸（pill ↔ 展开卡） */
     resize: (width: number, height: number) => Promise<void>
     /** 拖拽移动窗口位置 */
     move: (x: number, y: number) => Promise<void>
     /** 打开/聚焦主窗口 */
     openMainWindow: () => Promise<void>
+    /** 打开独立 Planning 窗口。 */
+    openPlanning: () => Promise<void>
     /** 打开指定 Agent 会话（聚焦主窗口） */
     openSession: (sessionId: string) => Promise<void>
     /** 用户已在主应用中主动查看完成会话，清除灵动岛未读状态 */
@@ -2684,8 +2688,8 @@ const electronAPI: ElectronAPI = {
 
   // ===== Agent 灵动岛 =====
   agentIsland: {
-    onState: (callback: (state: AgentIslandState) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, state: AgentIslandState): void => callback(state)
+    onState: (callback: (snapshot: AgentIslandWindowSnapshot) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, snapshot: AgentIslandWindowSnapshot): void => callback(snapshot)
       ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.STATE, listener)
       return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.STATE, listener) }
     },
@@ -2696,12 +2700,16 @@ const electronAPI: ElectronAPI = {
     },
     setExpanded: (expanded: boolean) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.SET_EXPANDED, expanded),
+    setHovered: (hovered: boolean) =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.SET_HOVERED, hovered),
     resize: (width: number, height: number) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.RESIZE, { width, height }),
     move: (x: number, y: number) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MOVE, { x, y }),
     openMainWindow: () =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW),
+    openPlanning: () =>
+      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_PLANNING),
     openSession: (sessionId: string) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, sessionId),
     markSessionViewed: (sessionId: string) =>

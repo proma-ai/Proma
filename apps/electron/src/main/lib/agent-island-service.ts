@@ -23,6 +23,7 @@ import {
   type AgentIslandState,
   type AgentIslandPlanningSnapshot,
   type AgentIslandPlanQuotaSnapshot,
+  type AgentIslandWindowSnapshot,
   type NativeAgentIslandEvent,
   type NativeAgentIslandSnapshot,
 } from '@proma/shared'
@@ -580,7 +581,7 @@ function pushState(): void {
   state.visible = enabled && isIslandVisible(state, planningKeys)
   state.presentation = state.visible ? (isExpanded() ? 'expanded' : 'compact') : 'hidden'
   // Planning 独立 revision 解决“同一毫秒内 Todo 变更而 Agent state.updatedAt 恰好相同”的漏推边界。
-  const json = JSON.stringify({ state, planning, planningRevision, dismissedVisibilityKey })
+  const json = JSON.stringify({ state, planning, planQuotas, planningRevision, dismissedVisibilityKey })
   // 状态无变化时跳过，避免无谓 IPC 与原生 helper 写入。
   if (json === lastStateJson) return
   lastStateJson = json
@@ -594,7 +595,8 @@ function pushState(): void {
   // 非 macOS、helper 缺失或运行失败时，保留 Electron 版本作为降级体验。
   const win = getAgentIslandWindow()
   if (!win || win.isDestroyed()) return
-  if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_ISLAND_IPC_CHANNELS.STATE, state)
+  const rendererSnapshot: AgentIslandWindowSnapshot = { state, planning, planQuotas }
+  if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_ISLAND_IPC_CHANNELS.STATE, rendererSnapshot)
   if (state.visible) showAgentIslandWindow()
   else hideAgentIslandWindow()
 }
@@ -766,6 +768,10 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
     if (typeof next === 'boolean') setAgentIslandExpanded(next)
   })
 
+  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.SET_HOVERED, (_event, next: unknown) => {
+    if (typeof next === 'boolean') setAgentIslandHovered(next)
+  })
+
   ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.RESIZE, (_event, req: { width: number; height: number }) => {
     if (typeof req?.width === 'number' && typeof req?.height === 'number') {
       resizeAgentIslandWindow(req.width, req.height)
@@ -780,6 +786,11 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
 
   ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW, () => {
     deps.showAndFocusMainWindow()
+  })
+
+  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_PLANNING, () => {
+    if (deps.openPlanning) deps.openPlanning()
+    else deps.showAndFocusMainWindow()
   })
 
   ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, (_event, sessionId: unknown) => {

@@ -1,41 +1,42 @@
-/**
- * AgentIslandApp —— Proma 工作脉冲（Work Pulse）
- *
- * 将原本偏“独立玩具窗”的灵动岛收敛为 Proma 的可扫读工作状态条：
- * 收起态给出 Agent / Todo / 日程的即时脉冲；展开态是短 briefing，按
- * “需要你处理 → 正在进行 → 今天”组织信息。
- */
-
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  Activity,
   ArrowUpRight,
+  Bell,
   CalendarDays,
-  CheckCircle2,
   ChevronDown,
-  CircleDot,
-  Clock3,
   ListTodo,
-  Sparkles,
 } from 'lucide-react'
 import type {
-  AgentIslandActivityLine,
+  AgentIslandPhase,
+  AgentIslandPlanQuotaSnapshot,
   AgentIslandSessionSnapshot,
-  AgentIslandState,
-  CalendarEvent,
-  Todo,
+  AgentIslandWindowSnapshot,
 } from '@proma/shared'
 import './agent-island.css'
 
-function useAgentIslandState(): AgentIslandState | null {
-  const [state, setState] = useState<AgentIslandState | null>(null)
+const SURFACE_TRANSITION_MS = 180
+const COMPACT_SURFACE_HEIGHT = 32
+const SURFACE_WIDTH = 420
+
+type SurfaceMode = 'compact' | 'expanded' | 'collapsing'
+
+function useAgentIslandSnapshot(): AgentIslandWindowSnapshot | null {
+  const [snapshot, setSnapshot] = useState<AgentIslandWindowSnapshot | null>(null)
+
   useEffect(() => {
-    const unsubscribeState = window.electronAPI.agentIsland.onState(setState)
+    const unsubscribeState = window.electronAPI.agentIsland.onState(setSnapshot)
     const unsubscribeToggle = window.electronAPI.agentIsland.onToggleExpanded(() => {
-      setState((previous) => {
+      setSnapshot((previous) => {
         if (!previous) return previous
-        const expanded = !previous.expanded
-        return { ...previous, expanded, presentation: expanded ? 'expanded' : 'compact' }
+        const expanded = !previous.state.expanded
+        return {
+          ...previous,
+          state: {
+            ...previous.state,
+            expanded,
+            presentation: expanded ? 'expanded' : 'compact',
+          },
+        }
       })
     })
     return () => {
@@ -43,331 +44,237 @@ function useAgentIslandState(): AgentIslandState | null {
       unsubscribeToggle()
     }
   }, [])
-  return state
+
+  return snapshot
 }
 
-interface PlanningBundle {
-  todos: Todo[]
-  events: CalendarEvent[]
-}
-
-/** 只订阅今天及已逾期待办，避免灵动岛变成完整 Planning 页面。 */
-function usePlanningData(): PlanningBundle {
-  const [bundle, setBundle] = useState<PlanningBundle>({ todos: [], events: [] })
-
-  useEffect(() => {
-    let disposed = false
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const dayStart = today.getTime()
-    const dayEnd = dayStart + 24 * 60 * 60 * 1000
-
-    const load = (): void => {
-      void window.electronAPI.listTodos({ status: 'open' }).then((todos) => {
-        if (disposed) return
-        setBundle((previous) => ({
-          ...previous,
-          todos: todos
-            .filter((todo) => todo.dueAt !== undefined && todo.dueAt < dayEnd)
-            .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0)),
-        }))
-      }).catch(() => {})
-
-      void window.electronAPI.listCalendarEvents({ from: dayStart, to: dayEnd }).then((events) => {
-        if (!disposed) setBundle((previous) => ({ ...previous, events: events.sort((a, b) => a.startAt - b.startAt) }))
-      }).catch(() => {})
-    }
-
-    load()
-    const unsubscribe = window.electronAPI.onPlanningChanged((change) => {
-      if (change.resources.includes('todos') || change.resources.includes('calendar_events')) load()
-    })
-    return () => {
-      disposed = true
-      unsubscribe()
-    }
-  }, [])
-
-  return bundle
-}
-
-const PHASE_LABEL: Record<AgentIslandSessionSnapshot['phase'], string> = {
-  idle: '空闲',
+const PHASE_LABEL: Record<AgentIslandPhase, string> = {
+  idle: '待命',
   running: '执行中',
   'needs-interaction': '待处理',
   completed: '已完成',
   error: '需关注',
 }
 
-function getPhaseTone(phase: AgentIslandSessionSnapshot['phase']): string {
-  return phase === 'needs-interaction' ? 'attention' : phase
+function formatTime(timestamp: number | undefined, allDay = false): string {
+  if (timestamp === undefined) return ''
+  if (allDay) return '全天'
+  const date = new Date(timestamp)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-function formatDue(timestamp: number): string {
-  const target = new Date(timestamp)
-  const now = new Date()
-  const isToday = target.getFullYear() === now.getFullYear()
-    && target.getMonth() === now.getMonth()
-    && target.getDate() === now.getDate()
-  if (isToday) return `${String(target.getHours()).padStart(2, '0')}:${String(target.getMinutes()).padStart(2, '0')}`
-  return `${target.getMonth() + 1}/${target.getDate()}`
+function getHeaderCopy(phase: AgentIslandPhase | undefined): { eyebrow: string; title: string } {
+  switch (phase) {
+    case 'needs-interaction': return { eyebrow: 'PROMA · HANDOFF', title: '需要你接手' }
+    case 'running': return { eyebrow: 'PROMA · AGENT', title: '正在执行' }
+    case 'completed': return { eyebrow: 'PROMA · AGENT', title: '任务已完成' }
+    case 'error': return { eyebrow: 'PROMA · AGENT', title: '执行需要关注' }
+    default: return { eyebrow: 'PROMA · REMINDER', title: '即将开始' }
+  }
 }
 
-function formatEventTime(timestamp: number): string {
-  const value = new Date(timestamp)
-  return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+function getPlanningIndicator(snapshot: AgentIslandWindowSnapshot): { icon: React.ReactNode; label: string } | null {
+  const now = Date.now()
+  const nextEvent = snapshot.planning.events.find((event) => event.startAt >= now)
+  const nextTodo = snapshot.planning.todos.find((todo) => (todo.dueAt ?? 0) >= now)
+
+  if (!nextEvent && !nextTodo) return null
+  if (nextEvent && (!nextTodo || nextEvent.startAt <= (nextTodo.dueAt ?? Number.POSITIVE_INFINITY))) {
+    return { icon: <CalendarDays size={13} />, label: '即将日程' }
+  }
+  return { icon: <ListTodo size={13} />, label: '即将到期' }
 }
 
-function getTodayLabel(): string {
-  return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())
-}
+function PlanQuotaCarousel({ quotas }: { quotas: AgentIslandPlanQuotaSnapshot[] }): React.ReactElement | null {
+  const [page, setPage] = useState(0)
+  const pageSize = 3
+  const pageCount = Math.ceil(quotas.length / pageSize)
 
-function PulseGlyph({ phase, compact = false }: { phase: AgentIslandSessionSnapshot['phase']; compact?: boolean }): React.ReactElement {
+  useEffect(() => {
+    if (pageCount <= 1) return
+    const timer = window.setInterval(() => setPage((current) => (current + 1) % pageCount), 5_000)
+    return () => window.clearInterval(timer)
+  }, [pageCount])
+
+  useEffect(() => {
+    setPage(0)
+  }, [pageCount])
+
+  if (quotas.length === 0) return <div className="island-quota-spacer" />
+
+  const visible = quotas.slice((page % pageCount) * pageSize, (page % pageCount) * pageSize + pageSize)
   return (
-    <span className={`pulse-glyph ${getPhaseTone(phase)} ${compact ? 'compact' : ''}`} aria-hidden="true">
-      <span className="pulse-glyph-core" />
-      <span className="pulse-glyph-orbit" />
-    </span>
+    <div className="island-quotas">
+      <span className="island-quotas-title">剩余额度</span>
+      {visible.map((quota) => (
+        <div className="island-quota-row" key={`${quota.channelName}:${quota.planName}`}>
+          <span className="island-quota-name">{quota.channelName}</span>
+          {quota.planName !== quota.channelName && <span className="island-quota-plan">· {quota.planName}</span>}
+          <span className="island-quota-value">
+            {quota.windows.map((window) => `${window.windowLabel} ${window.remainingLabel ?? `${Math.round(window.remainingPercent)}%`}`).join(' · ')}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 
-function ActivityLine({ line }: { line: AgentIslandActivityLine }): React.ReactElement {
-  return (
-    <span className={`pulse-activity ${line.kind}`}>
-      {line.kind === 'tool' ? '工具' : line.kind === 'status' ? '状态' : '消息'} · {line.text}
-    </span>
-  )
-}
-
-function Metric({ icon, value, label, tone = 'neutral' }: {
-  icon: React.ReactNode
-  value: number
-  label: string
-  tone?: 'neutral' | 'attention' | 'danger'
+function SessionList({ sessions, openSession, recent }: {
+  sessions: AgentIslandSessionSnapshot[]
+  openSession: (sessionId: string) => void
+  recent: boolean
 }): React.ReactElement | null {
-  if (value <= 0) return null
+  if (sessions.length === 0) return null
+
   return (
-    <span className={`pulse-metric ${tone}`} title={`${value} ${label}`}>
-      {icon}<b>{value}</b><span>{label}</span>
-    </span>
+    <section className="island-session-section">
+      {recent && <h2 className="island-section-label">最近 Agent</h2>}
+      <div className="island-session-list">
+        {sessions.slice(0, 3).map((session) => (
+          <button className="island-session-row" key={session.sessionId} type="button" onClick={() => openSession(session.sessionId)}>
+            <span className="island-session-copy">
+              <b>{session.title}</b>
+              <span>{PHASE_LABEL[session.phase]}</span>
+            </span>
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 
 export function AgentIslandApp(): React.ReactElement {
-  const state = useAgentIslandState()
-  const { todos, events } = usePlanningData()
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const lastSizeRef = useRef<{ width: number; height: number } | null>(null)
-  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
-  const [expanded, setExpanded] = useState(false)
-  const [dragging, setDragging] = useState(false)
+  const snapshot = useAgentIslandSnapshot()
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
+  const expandedContentRef = useRef<HTMLDivElement | null>(null)
+  const collapseTimerRef = useRef<number | null>(null)
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>('compact')
+  const [expandedHeight, setExpandedHeight] = useState(COMPACT_SURFACE_HEIGHT)
+  const platform = new URLSearchParams(window.location.search).get('platform')
+  const state = snapshot?.state
+  const planning = snapshot?.planning
+  const requestedExpanded = state?.expanded ?? false
+
+  useLayoutEffect(() => {
+    const height = Math.ceil(expandedContentRef.current?.getBoundingClientRect().height ?? COMPACT_SURFACE_HEIGHT)
+    setExpandedHeight((previous) => previous === height ? previous : height)
+  }, [snapshot])
 
   useEffect(() => {
-    if (state) setExpanded(state.expanded)
-  }, [state])
+    if (requestedExpanded) {
+      if (collapseTimerRef.current !== null) {
+        window.clearTimeout(collapseTimerRef.current)
+        collapseTimerRef.current = null
+      }
+      setSurfaceMode('expanded')
+      return
+    }
+    if (surfaceMode !== 'expanded') return
+    setSurfaceMode('collapsing')
+    collapseTimerRef.current = window.setTimeout(() => {
+      collapseTimerRef.current = null
+      setSurfaceMode('compact')
+    }, SURFACE_TRANSITION_MS)
+  }, [requestedExpanded, surfaceMode])
 
-  // Content-driven window size；只在尺寸实际变化时跨进程同步。
+  useEffect(() => () => {
+    if (collapseTimerRef.current !== null) window.clearTimeout(collapseTimerRef.current)
+    void window.electronAPI.agentIsland.setHovered(false)
+  }, [])
+
   useEffect(() => {
-    const element = containerRef.current
-    if (!element) return
-    const rect = element.getBoundingClientRect()
-    const width = Math.ceil(rect.width) + (expanded ? 0 : 2)
-    const height = Math.ceil(rect.height) + (expanded ? 0 : 2)
-    const last = lastSizeRef.current
-    if (last?.width === width && last.height === height) return
-    lastSizeRef.current = { width, height }
-    void window.electronAPI.agentIsland.resize(width, height)
-  }, [expanded, state, todos, events])
+    const height = surfaceMode === 'compact' ? COMPACT_SURFACE_HEIGHT : expandedHeight
+    void window.electronAPI.agentIsland.resize(SURFACE_WIDTH, height)
+  }, [expandedHeight, surfaceMode])
 
-  const toggleExpanded = useCallback(() => {
-    setExpanded((previous) => {
-      const next = !previous
-      void window.electronAPI.agentIsland.setExpanded(next)
-      return next
-    })
+  const setExpanded = useCallback((next: boolean) => {
+    void window.electronAPI.agentIsland.setExpanded(next)
+  }, [])
+  const setHovered = useCallback((next: boolean) => {
+    void window.electronAPI.agentIsland.setHovered(next)
   }, [])
   const openMain = useCallback(() => { void window.electronAPI.agentIsland.openMainWindow() }, [])
+  const openPlanning = useCallback(() => { void window.electronAPI.agentIsland.openPlanning() }, [])
   const openSession = useCallback((sessionId: string) => { void window.electronAPI.agentIsland.openSession(sessionId) }, [])
 
-  const handlePointerDown = useCallback((event: React.MouseEvent) => {
-    dragRef.current = { x: event.screenX, y: event.screenY, moved: false }
-    setDragging(true)
-  }, [])
+  if (!snapshot || !state || !planning || !state.visible) return <div className="island-root" />
 
-  useEffect(() => {
-    if (!dragging) return
-    const onMove = (event: MouseEvent): void => {
-      const drag = dragRef.current
-      if (!drag) return
-      const dx = event.screenX - drag.x
-      const dy = event.screenY - drag.y
-      if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return
-      drag.moved = true
-      void window.electronAPI.agentIsland.move(event.screenX, event.screenY)
-      drag.x = event.screenX
-      drag.y = event.screenY
-    }
-    const onUp = (): void => {
-      const wasDragged = dragRef.current?.moved === true
-      dragRef.current = null
-      setDragging(false)
-      if (!wasDragged) toggleExpanded()
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-  }, [dragging, toggleExpanded])
-
-  const priority = state?.sessions[0]
-  const phase = priority?.phase ?? 'idle'
-  const activeCount = state?.pill.activeSessionCount ?? 0
-  const pendingCount = state?.pill.pendingInteractionCount ?? 0
-  const unreadCount = state?.pill.unreadCompletedCount ?? 0
-  const overdueTodos = todos.filter((todo) => (todo.dueAt ?? Number.POSITIVE_INFINITY) < Date.now())
-  const attentionCount = pendingCount + unreadCount + overdueTodos.length
-  const visibleTodos = todos.slice(0, 3)
-  const visibleEvents = events.slice(0, 3)
-  const todayLabel = getTodayLabel()
-
-  const compactTitle = priority?.title ?? 'Proma Agent'
-  const compactDetail = priority
-    ? priority.detail || PHASE_LABEL[priority.phase]
-    : todos.length || events.length
-      ? `今天 ${todos.length} 项待办 · ${events.length} 个日程`
-      : '所有事项已就绪'
-
-  if (state?.visible === false) return <div className="pulse-root" />
-
-  if (!expanded) {
-    return (
-      <div className="pulse-root">
-        <div ref={containerRef} className={`pulse-shell pulse-shell-compact ${getPhaseTone(phase)}`} style={{ width: 460, height: 48 }}>
-          <div className="pulse-compact" onMouseDown={handlePointerDown} title="点击展开；拖动移动">
-            <PulseGlyph phase={phase} compact />
-            <div className="pulse-compact-copy">
-              <span className="pulse-kicker">PROMA · AGENT</span>
-              <span className="pulse-compact-title">{compactTitle}</span>
-              <span className="pulse-compact-detail">{compactDetail}</span>
-            </div>
-            <div className="pulse-compact-metrics">
-              <Metric icon={<Activity size={12} />} value={activeCount} label="进行中" />
-              <Metric icon={<CircleDot size={12} />} value={attentionCount} label="待处理" tone={attentionCount ? 'attention' : 'neutral'} />
-              <Metric icon={<ListTodo size={12} />} value={todos.length} label="Todo" />
-              <Metric icon={<CalendarDays size={12} />} value={events.length} label="日程" />
-            </div>
-            <ChevronDown className="pulse-chevron" size={16} strokeWidth={1.8} />
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const primarySession = state.sessions[0]
+  const planningIndicator = getPlanningIndicator(snapshot)
+  const compactLabel = primarySession
+    ? `Proma · ${PHASE_LABEL[primarySession.phase]}`
+    : state.idleDashboard
+      ? state.recentSessions.length === 0 ? 'Proma · 额度概览' : 'Proma · 最近会话'
+      : planningIndicator?.label ?? '工作提醒'
+  const displayedSessions = state.idleDashboard ? state.recentSessions : state.sessions
+  const header = getHeaderCopy(primarySession?.phase)
+  const showPlanning = !state.idleDashboard && (planning.todos.length > 0 || planning.events.length > 0)
+  const rootClassName = `island-root${platform !== 'darwin' ? ' island-root-floating' : ''}`
+  const surfaceStyle = { '--island-expanded-height': `${expandedHeight}px` } as React.CSSProperties
 
   return (
-    <div className="pulse-root">
-      <div ref={containerRef} className="pulse-shell pulse-shell-expanded" style={{ width: 500 }}>
-        <header className="pulse-header">
-          <div className="pulse-header-identity">
-            <PulseGlyph phase={phase} />
-            <div>
-              <p className="pulse-kicker">PROMA · WORK PULSE</p>
-              <h1>工作脉冲</h1>
-            </div>
-          </div>
-          <div className="pulse-header-actions">
-            <span className="pulse-date">{todayLabel}</span>
-            <button type="button" className="pulse-icon-button" onClick={openMain} title="打开 Proma">
-              <ArrowUpRight size={15} strokeWidth={1.9} />
-            </button>
-            <button type="button" className="pulse-icon-button" onClick={toggleExpanded} title="收起">
-              <ChevronDown size={16} strokeWidth={1.9} />
-            </button>
-          </div>
-        </header>
-
-        {attentionCount > 0 && (
-          <section className="pulse-section pulse-attention-section">
-            <div className="pulse-section-heading">
-              <span className="pulse-section-icon attention"><Sparkles size={14} /></span>
-              <div><h2>需要你处理</h2><p>优先解决等待中的事项</p></div>
-              <span className="pulse-count">{attentionCount}</span>
-            </div>
-            <div className="pulse-attention-list">
-              {state?.sessions.filter((session) => session.phase === 'needs-interaction' || session.phase === 'error').slice(0, 2).map((session) => (
-                <button type="button" className="pulse-attention-item" key={session.sessionId} onClick={() => openSession(session.sessionId)}>
-                  <span className={`pulse-state-dot ${getPhaseTone(session.phase)}`} />
-                  <span className="pulse-attention-copy"><b>{session.title}</b><span>{session.detail || PHASE_LABEL[session.phase]}</span></span>
-                  <span className="pulse-item-action">去处理 <ArrowUpRight size={12} /></span>
-                </button>
-              ))}
-              {overdueTodos.slice(0, 1).map((todo) => (
-                <button type="button" className="pulse-attention-item" key={todo.id} onClick={openMain}>
-                  <span className="pulse-state-dot error" />
-                  <span className="pulse-attention-copy"><b>{todo.title}</b><span>Todo 已逾期</span></span>
-                  <span className="pulse-item-action">查看 <ArrowUpRight size={12} /></span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section className="pulse-section">
-          <div className="pulse-section-heading">
-            <span className="pulse-section-icon"><Activity size={14} /></span>
-            <div><h2>Agent 动态</h2><p>{activeCount > 0 ? `${activeCount} 个会话正在推进` : '暂时没有执行中的任务'}</p></div>
-            {activeCount > 0 && <span className="pulse-count neutral">{activeCount}</span>}
-          </div>
-          <div className="pulse-session-list">
-            {state?.sessions.filter((session) => session.phase === 'running').slice(0, 3).map((session) => (
-              <button type="button" className="pulse-session-item" key={session.sessionId} onClick={() => openSession(session.sessionId)}>
-                <PulseGlyph phase={session.phase} compact />
-                <span className="pulse-session-copy">
-                  <span className="pulse-session-title-row"><b>{session.title}</b><span className={`pulse-phase ${getPhaseTone(session.phase)}`}>{PHASE_LABEL[session.phase]}</span></span>
-                  <span className="pulse-session-detail">{session.detail || '正在推进'}</span>
-                  {session.activityLines.at(-1) && <ActivityLine line={session.activityLines.at(-1)!} />}
-                </span>
-                <ArrowUpRight className="pulse-session-arrow" size={14} />
+    <div
+      className={rootClassName}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div ref={surfaceRef} className={`island-surface island-transition-surface ${surfaceMode}`} style={surfaceStyle}>
+        <div ref={expandedContentRef} className="island-expanded-content">
+          {state.sessions.length > 0 ? (
+            <header className="island-header">
+              <button className="island-header-copy" type="button" onClick={() => setExpanded(false)} title="收起">
+                <span>{header.eyebrow}</span>
+                <strong>{header.title}</strong>
               </button>
-            ))}
-            {!state?.sessions.some((session) => session.phase === 'running') && (
-              <div className="pulse-empty-state"><CheckCircle2 size={15} /> 目前没有执行中的 Agent 任务</div>
-            )}
-          </div>
-        </section>
+              <button className="island-open-button" type="button" onClick={openMain}>
+                打开 Proma <ArrowUpRight size={13} aria-hidden="true" />
+              </button>
+            </header>
+          ) : (
+            <PlanQuotaCarousel quotas={snapshot.planQuotas} />
+          )}
 
-        <section className="pulse-section pulse-plan-section">
-          <div className="pulse-section-heading">
-            <span className="pulse-section-icon"><Clock3 size={14} /></span>
-            <div><h2>今天</h2><p>Todo 与日程一眼扫完</p></div>
-            <button type="button" className="pulse-text-button" onClick={openMain}>打开规划中心 <ArrowUpRight size={12} /></button>
-          </div>
-          <div className="pulse-planning-grid">
-            <div className="pulse-plan-column">
-              <div className="pulse-plan-label"><ListTodo size={13} /> 待办 <span>{todos.length}</span></div>
-              {visibleTodos.length > 0 ? visibleTodos.map((todo) => {
-                const overdue = (todo.dueAt ?? Number.POSITIVE_INFINITY) < Date.now()
-                return (
-                  <button type="button" className={`pulse-plan-row todo ${overdue ? 'overdue' : ''}`} key={todo.id} onClick={openMain}>
-                    <span className="pulse-checkbox" />
-                    <span className="pulse-plan-title">{todo.title}</span>
-                    {todo.dueAt && <span className="pulse-plan-time">{formatDue(todo.dueAt)}</span>}
-                  </button>
-                )
-              }) : <div className="pulse-plan-empty">今天没有待办</div>}
-            </div>
-            <div className="pulse-plan-column">
-              <div className="pulse-plan-label"><CalendarDays size={13} /> 日程 <span>{events.length}</span></div>
-              {visibleEvents.length > 0 ? visibleEvents.map((event) => (
-                <button type="button" className="pulse-plan-row event" key={event.id} onClick={openMain}>
-                  <span className="pulse-plan-time">{formatEventTime(event.startAt)}</span>
-                  <span className="pulse-plan-title">{event.title}</span>
+          <SessionList sessions={displayedSessions} openSession={openSession} recent={state.idleDashboard} />
+
+          {showPlanning && (
+            <section className="island-planning-grid">
+              {planning.todos.length > 0 && (
+                <button className="island-planning-column" type="button" onClick={openPlanning}>
+                  <span className="island-planning-title"><ListTodo size={13} /> 接下来待办 <b>{planning.todos.length}</b></span>
+                  {planning.todos.map((todo) => (
+                    <span className={`island-planning-row${todo.isOverdue ? ' overdue' : ''}`} key={todo.id}>
+                      <span className="island-checkbox" />
+                      <span>{todo.title}</span>
+                      <time>{formatTime(todo.dueAt)}</time>
+                    </span>
+                  ))}
                 </button>
-              )) : <div className="pulse-plan-empty">今天没有日程</div>}
-            </div>
-          </div>
-        </section>
+              )}
+              {planning.events.length > 0 && (
+                <button className="island-planning-column" type="button" onClick={openPlanning}>
+                  <span className="island-planning-title"><CalendarDays size={13} /> 接下来日程 <b>{planning.events.length}</b></span>
+                  {planning.events.map((event) => (
+                    <span className="island-planning-row event" key={event.id}>
+                      <time>{formatTime(event.startAt, event.allDay)}</time>
+                      <span>{event.title}</span>
+                    </span>
+                  ))}
+                </button>
+              )}
+            </section>
+          )}
+        </div>
+
+        <button className="island-compact-layer" type="button" onClick={() => setExpanded(true)} title="展开">
+          {!primarySession && (
+            <span className="island-compact-icon" aria-hidden="true">
+              {planningIndicator?.icon ?? <Bell size={12} />}
+            </span>
+          )}
+          <span className="island-compact-label">{compactLabel}</span>
+          <ChevronDown className="island-compact-chevron" size={14} aria-hidden="true" />
+        </button>
       </div>
     </div>
   )
