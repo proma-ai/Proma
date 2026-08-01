@@ -160,9 +160,7 @@ function activateAgentIslandElectronFallback(reason?: string): void {
 /** macOS 26+ 优先使用真刘海 NSPanel；旧版 macOS 默认不显示灵动岛。 */
 function startAgentIslandSurface(): void {
   if (process.platform === 'darwin' && !isMacOS26OrLater()) {
-    // 上游原生 NSPanel 仅适用于 macOS 26+；商业版仍保留 BrowserWindow
-    // fallback，确保旧版 macOS 用户可以看到 Agent 状态和 Proma 官方余额。
-    activateAgentIslandElectronFallback('macOS version <26')
+    console.info('[agent-island] 已在 macOS 26 以下禁用')
     return
   }
 
