@@ -385,9 +385,6 @@ struct CompactPlanQuotaBadge: View {
     .font(.system(size: 9, weight: .semibold))
     .monospacedDigit()
     .lineLimit(1)
-    .padding(.horizontal, 6)
-    .padding(.vertical, 4)
-    .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 6))
     .frame(maxWidth: 142, alignment: .trailing)
   }
 }

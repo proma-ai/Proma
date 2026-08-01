@@ -144,10 +144,7 @@ button {
   flex: 0 1 142px;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
-  border-radius: 6px;
   color: rgb(255 255 255 / 0.86);
-  background: rgb(255 255 255 / 0.075);
   font-size: 9px;
   font-weight: 650;
   line-height: 1;
