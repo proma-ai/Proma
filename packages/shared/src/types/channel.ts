@@ -30,6 +30,7 @@ export type ProviderType =
   | 'xiaomi'
   | 'xiaomi-token-plan'
   | 'openai-codex'
+  | 'xai'
   /**
    * OpenAI Chat Completions 的自定义请求地址。
    *
@@ -63,8 +64,9 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   'qwen-token-plan': 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
   xiaomi: 'https://api.xiaomimimo.com/anthropic',
   'xiaomi-token-plan': 'https://token-plan-cn.xiaomimimo.com/anthropic',
-  // ChatGPT 订阅登录：baseUrl 由 Pi SDK 内部管理（登录后从 OAuth token 派生），无需用户填写。
+  // 订阅登录渠道的 baseUrl 由 Pi SDK 内部管理，无需用户填写。
   'openai-codex': '',
+  xai: '',
   custom: '',
 }
 
@@ -93,6 +95,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
   'openai-codex': 'ChatGPT 订阅 (Codex)',
+  xai: 'xAI 订阅 (Grok)',
   custom: 'OpenAI Chat Completions（自定义地址）',
 }
 
@@ -238,6 +241,42 @@ export function parseCodexCredentials(secret: string): CodexOAuthCredentials | n
  * 避免边界请求打出去才发现过期。
  */
 export function isCodexCredentialExpired(credentials: CodexOAuthCredentials, skewMs = 60_000): boolean {
+  return Date.now() >= credentials.expires - skewMs
+}
+
+/**
+ * xAI（Grok/X 订阅）OAuth 凭据。
+ *
+ * 与 Codex 一样序列化后放入 Channel.apiKey，并由 Electron safeStorage 加密。
+ * Pi 的内置 xAI provider 使用 access / refresh / expires 来自动续期。
+ */
+export interface XaiOAuthCredentials {
+  access: string
+  refresh: string
+  expires: number
+}
+
+export function serializeXaiCredentials(credentials: XaiOAuthCredentials): string {
+  return JSON.stringify(credentials)
+}
+
+export function parseXaiCredentials(secret: string): XaiOAuthCredentials | null {
+  const trimmed = secret.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<XaiOAuthCredentials>
+    if (typeof parsed.access === 'string' && parsed.access
+      && typeof parsed.refresh === 'string' && parsed.refresh
+      && typeof parsed.expires === 'number') {
+      return { access: parsed.access, refresh: parsed.refresh, expires: parsed.expires }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+export function isXaiCredentialExpired(credentials: XaiOAuthCredentials, skewMs = 60_000): boolean {
   return Date.now() >= credentials.expires - skewMs
 }
 
@@ -451,6 +490,12 @@ export const CHANNEL_IPC_CHANNELS = {
   CODEX_OAUTH_LOGIN: 'channel:codex-oauth-login',
   /** 取消进行中的 ChatGPT OAuth 登录流程 */
   CODEX_OAUTH_CANCEL: 'channel:codex-oauth-cancel',
+  /** 发起 xAI（Grok/X 订阅）OAuth 登录 */
+  XAI_OAUTH_LOGIN: 'channel:xai-oauth-login',
+  /** 取消进行中的 xAI OAuth 登录流程 */
+  XAI_OAUTH_CANCEL: 'channel:xai-oauth-cancel',
+  /** xAI device-code 已就绪（主进程推送给发起登录的渲染窗口） */
+  XAI_OAUTH_DEVICE_CODE: 'channel:xai-oauth-device-code',
 } as const
 
 /**
@@ -471,4 +516,19 @@ export interface CodexOAuthLoginResult {
   accountId?: string
   /** 失败或取消时的用户可读原因 */
   message?: string
+}
+
+/** xAI（Grok/X 订阅）OAuth 登录结果。 */
+export interface XaiOAuthLoginResult {
+  success: boolean
+  /** 序列化后的 OAuth 凭据 JSON；由 channel-manager 加密写入 Channel.apiKey。 */
+  credentials?: string
+  /** 失败或取消时的用户可读原因 */
+  message?: string
+}
+
+/** Pi xAI device-code 登录流程的用户可见信息。 */
+export interface XaiOAuthDeviceCode {
+  userCode: string
+  verificationUri: string
 }

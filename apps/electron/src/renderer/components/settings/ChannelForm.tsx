@@ -35,6 +35,7 @@ import {
   isAgentCompatibleProvider,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
+  parseXaiCredentials,
 } from '@proma/shared'
 import type {
   Channel,
@@ -43,6 +44,7 @@ import type {
   ChannelTestResult,
   FetchModelsResult,
   ProviderType,
+  XaiOAuthDeviceCode,
 } from '@proma/shared'
 import {
   normalizeBaseUrl,
@@ -79,7 +81,7 @@ interface ChannelFormProps {
 }
 
 /** 所有可选供应商 */
-const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
+const PROVIDER_OPTIONS: ProviderType[] = ['anthropic', 'anthropic-compatible', 'openai', 'openai-responses', 'openai-codex', 'xai', 'deepseek', 'google', 'kimi-api', 'kimi-coding', 'opencode-go-openai', 'zhipu', 'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'minimax', 'doubao', 'qwen', 'qwen-anthropic', 'qwen-token-plan', 'xiaomi', 'xiaomi-token-plan', 'custom']
 
 /** 需要用 messages 端点测试的供应商预设模型 */
 const PROVIDER_TEST_MODEL_PRESETS: Partial<Record<ProviderType, string[]>> = {
@@ -235,13 +237,29 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [showBaseUrlRiskDialog, setShowBaseUrlRiskDialog] = React.useState(false)
   const [pendingRiskAction, setPendingRiskAction] = React.useState<'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null>(null)
   const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
+  const [xaiLoggingIn, setXaiLoggingIn] = React.useState(false)
+  const [xaiDeviceCode, setXaiDeviceCode] = React.useState<XaiOAuthDeviceCode | null>(null)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
   const lastAgentEligibleRef = React.useRef(channel ? isAgentEligibleChannel(channel) : false)
+  const xaiLoggingInRef = React.useRef(false)
 
   React.useEffect(() => {
     lastAgentEligibleRef.current = channel ? isAgentEligibleChannel(channel) : false
   }, [channel])
+
+  React.useEffect(() => {
+    xaiLoggingInRef.current = xaiLoggingIn
+  }, [xaiLoggingIn])
+
+  React.useEffect(() => {
+    return window.electronAPI.onXaiOAuthDeviceCode(setXaiDeviceCode)
+  }, [])
+
+  // 关闭或放弃表单时取消仍在轮询的 device-code 授权，避免后台孤立请求。
+  React.useEffect(() => () => {
+    if (xaiLoggingInRef.current) void window.electronAPI.xaiOAuthCancel()
+  }, [])
 
   /** 编辑模式下加载明文 API Key */
   React.useEffect(() => {
@@ -261,14 +279,19 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
   const isCodexProvider = provider === 'openai-codex'
+  const isXaiProvider = provider === 'xai'
+  const isSubscriptionProvider = isCodexProvider || isXaiProvider
   const effectiveApiKey = isZhipuTeamProvider ? buildZhipuTeamSecret(zhipuTeamSecret) : apiKey
-  // ChatGPT (Codex)：apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
+  // 订阅渠道的 apiKey state 存的是登录后拿到的凭据 JSON；能解析出有效凭据即视为已登录。
   const codexCredentials = isCodexProvider ? parseCodexCredentials(apiKey) : null
+  const xaiCredentials = isXaiProvider ? parseXaiCredentials(apiKey) : null
   const hasRequiredSecret = isZhipuTeamProvider
     ? Boolean(zhipuTeamSecret.apiKey.trim())
     : isCodexProvider
       ? Boolean(codexCredentials)
-      : Boolean(apiKey.trim())
+      : isXaiProvider
+        ? Boolean(xaiCredentials)
+        : Boolean(apiKey.trim())
   const requiresBaseUrlRiskAcknowledgement = isThirdPartyBaseUrl(provider, baseUrl)
     && normalizeBaseUrl(baseUrl) !== acknowledgedBaseUrl
 
@@ -541,10 +564,84 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     }
   }
 
+  const handleCancelXaiLogin = (): void => {
+    void window.electronAPI.xaiOAuthCancel()
+    setXaiDeviceCode(null)
+  }
+
+  /** 发起 xAI（Grok/X 订阅）OAuth 登录：Pi 打开预填 device-code 浏览器授权页。 */
+  const handleXaiLogin = async (): Promise<void> => {
+    setXaiLoggingIn(true)
+    setXaiDeviceCode(null)
+    setTestResult(null)
+    try {
+      const result = await window.electronAPI.xaiOAuthLogin()
+      if (!result.success || !result.credentials) {
+        toast.error(result.message ?? 'xAI 登录失败，请重试')
+        return
+      }
+      const credentials = result.credentials
+      setApiKey(credentials)
+
+      let xaiModels: ChannelModel[] = []
+      try {
+        const modelsResult = await window.electronAPI.fetchModels({ provider, baseUrl, apiKey: credentials })
+        setFetchResult(modelsResult)
+        if (modelsResult.success && modelsResult.models.length > 0) {
+          xaiModels = modelsResult.models.map((model) => ({ ...model, enabled: true }))
+          setModels(xaiModels)
+        }
+      } catch (modelErr) {
+        console.error('[模型配置表单] 拉取 xAI 模型失败:', modelErr)
+      }
+
+      // OAuth 登录成功即明确保存意图。编辑模式也立即写入，不能依赖 600ms 的
+      // auto-save，避免用户立刻关闭表单而丢失 refresh token。
+      const savedModels = xaiModels.length > 0 ? xaiModels : models
+      if (isEdit && channel) {
+        const saved = await window.electronAPI.updateChannel(channel.id, {
+          name,
+          provider,
+          baseUrl,
+          apiKey: credentials,
+          models: savedModels,
+          enabled,
+        })
+        const eligible = isAgentEligibleChannel(saved)
+        if (eligible !== lastAgentEligibleRef.current) {
+          lastAgentEligibleRef.current = eligible
+          await onAgentEligibilityChange?.(saved, eligible)
+        }
+        toast.success('xAI 登录成功')
+      } else {
+        const input: ChannelCreateInput = {
+          name: name.trim() || PROVIDER_LABELS.xai,
+          provider,
+          baseUrl,
+          apiKey: credentials,
+          models: savedModels,
+          enabled,
+        }
+        const saved = await window.electronAPI.createChannel(input)
+        if (isAgentEligibleChannel(saved)) {
+          await onAgentEligibilityChange?.(saved, true)
+        }
+        toast.success('xAI 渠道已创建')
+        onSaved(saved)
+      }
+    } catch (error) {
+      console.error('[模型配置表单] xAI 登录失败:', error)
+      toast.error('xAI 登录失败，请重试')
+    } finally {
+      setXaiLoggingIn(false)
+      setXaiDeviceCode(null)
+    }
+  }
+
   /** 从供应商 API 拉取可用模型列表。 */
   const fetchAvailableModels = async (): Promise<void> => {
-    // ChatGPT (Codex) 走 SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
-    if (!hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())) return
+    // 订阅 provider 走 Pi SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
+    if (!hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())) return
 
     setFetchingModels(true)
     setFetchResult(null)
@@ -574,7 +671,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           // ChatGPT (Codex) 是 SDK 内置的少量精选模型，拉取即全部启用，
           // 与登录自动拉取路径（handleCodexLogin）保持一致，避免新模型（如 gpt-5.6 系列）
           // 默认未启用而沉到「可用模型」折叠区，被误认为"拉不到"。
-          if (isCodexProvider) return { ...m, enabled: true }
+          if (isSubscriptionProvider) return { ...m, enabled: true }
           return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
         })
         return [...manualKept, ...merged]
@@ -596,7 +693,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
 
   /** 测试连接（直接使用表单当前值，无需先保存）。 */
   const testChannelConnection = async (): Promise<void> => {
-    if (!hasRequiredSecret || !baseUrl.trim()) return
+    if (!hasRequiredSecret || !baseUrl.trim() || isSubscriptionProvider) return
 
     setTesting(true)
     setTestResult(null)
@@ -820,8 +917,8 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             placeholder="例如: My Anthropic"
             required
           />
-          {/* ChatGPT (Codex) 的请求地址由 Pi SDK 内置管理，无需用户填写 */}
-          {!isCodexProvider && (
+          {/* 订阅 provider 的请求地址由 Pi SDK 内置管理，无需用户填写 */}
+          {!isSubscriptionProvider && (
             <SettingsInput
               label={getUrlInputLabel(provider)}
               value={baseUrl}
@@ -835,10 +932,10 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           <div className="px-4 py-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium text-foreground">
-                {isCodexProvider ? 'ChatGPT 登录' : isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
+                {isCodexProvider ? 'ChatGPT 登录' : isXaiProvider ? 'xAI 登录' : isZhipuTeamProvider ? '智谱团队版凭证' : 'API Key'}
               </div>
-              {/* codex 无 baseUrl/apiKey，测试连接不适用，隐藏测试按钮 */}
-              {!isCodexProvider && (
+              {/* 订阅 OAuth 无标准 API Key 测试路径，隐藏测试按钮 */}
+              {!isSubscriptionProvider && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -866,32 +963,48 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
                   disabled={codexLoggingIn}
                   className="w-full"
                 >
-                  {codexLoggingIn ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Zap size={14} />
-                  )}
-                  <span>
-                    {codexLoggingIn
-                      ? '等待浏览器授权…'
-                      : hasRequiredSecret
-                        ? '重新登录 ChatGPT'
-                        : '用 ChatGPT 登录'}
-                  </span>
+                  {codexLoggingIn ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                  <span>{codexLoggingIn ? '等待浏览器授权…' : hasRequiredSecret ? '重新登录 ChatGPT' : '用 ChatGPT 登录'}</span>
                 </Button>
                 {hasRequiredSecret ? (
                   <div className="flex items-center gap-1.5 text-xs text-emerald-600">
                     <CheckCircle2 size={12} className="shrink-0" />
-                    <span>
-                      已登录 ChatGPT 订阅
-                      {codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}
-                    </span>
+                    <span>已登录 ChatGPT 订阅{codexCredentials?.accountId ? `（账号 ${codexCredentials.accountId.slice(0, 8)}…）` : ''}</span>
                   </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    使用 ChatGPT Plus/Pro 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。
+                ) : <div className="text-xs text-muted-foreground">使用 ChatGPT Plus/Pro 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。</div>}
+              </div>
+            ) : isXaiProvider ? (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={handleXaiLogin}
+                  disabled={xaiLoggingIn}
+                  className="w-full"
+                >
+                  {xaiLoggingIn ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                  <span>{xaiLoggingIn ? '等待浏览器授权…' : hasRequiredSecret ? '重新登录 xAI' : '用 xAI 登录'}</span>
+                </Button>
+                {xaiLoggingIn && (
+                  <Button variant="ghost" size="sm" type="button" onClick={handleCancelXaiLogin} className="w-full text-muted-foreground">
+                    取消登录
+                  </Button>
+                )}
+                {xaiDeviceCode && (
+                  <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground space-y-1.5">
+                    <div>若浏览器未自动填入授权码，请输入：<span className="font-mono font-medium text-foreground">{xaiDeviceCode.userCode}</span></div>
+                    <a href={xaiDeviceCode.verificationUri} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                      打开 xAI 授权页面
+                    </a>
                   </div>
                 )}
+                {hasRequiredSecret ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                    <CheckCircle2 size={12} className="shrink-0" />
+                    <span>已登录 xAI（Grok）订阅</span>
+                  </div>
+                ) : <div className="text-xs text-muted-foreground">使用 SuperGrok 或 X Premium 订阅登录，通过 OAuth 授权，无需 API Key。授权将在系统浏览器中打开。</div>}
               </div>
             ) : isZhipuTeamProvider ? (
               <div className="space-y-2">
@@ -1028,7 +1141,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             size="sm"
             type="button"
             onClick={handleFetchModels}
-            disabled={fetchingModels || !hasRequiredSecret || (!isCodexProvider && !baseUrl.trim())}
+            disabled={fetchingModels || !hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())}
             className="h-7 text-xs"
           >
             {fetchingModels ? (

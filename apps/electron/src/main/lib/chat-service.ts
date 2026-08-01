@@ -211,13 +211,14 @@ export async function sendMessage(
     return
   }
 
-  // Codex OAuth uses the ChatGPT-specific Responses protocol, which Chat does
+  // Subscription OAuth uses Pi provider-specific transports, which Chat mode does
   // not currently implement. Keep this guard for historical conversations that
-  // still reference a formerly selectable Codex model.
-  if (channel.provider === 'openai-codex') {
+  // still reference a formerly selectable subscription model.
+  if (channel.provider === 'openai-codex' || channel.provider === 'xai') {
+    const providerName = channel.provider === 'xai' ? 'xAI（Grok OAuth）' : 'ChatGPT 订阅（Codex OAuth）'
     webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
       conversationId,
-      error: 'Chat 模式暂不支持 ChatGPT 订阅（Codex OAuth），请切换到 Agent 模式使用。',
+      error: `Chat 模式暂不支持 ${providerName}，请切换到 Agent 模式使用。`,
     })
     return
   }

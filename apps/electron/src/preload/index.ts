@@ -20,6 +20,8 @@ import type {
   FetchModelsResult,
   ChannelPlanQuotaResult,
   CodexOAuthLoginResult,
+  XaiOAuthLoginResult,
+  XaiOAuthDeviceCode,
   ConversationMeta,
   ChatMessage,
   ChatSendInput,
@@ -256,6 +258,15 @@ export interface ElectronAPI {
 
   /** 取消进行中的 ChatGPT (Codex) OAuth 登录 */
   codexOAuthCancel: () => Promise<void>
+
+  /** 发起 xAI（Grok/X 订阅）OAuth 登录 */
+  xaiOAuthLogin: () => Promise<XaiOAuthLoginResult>
+
+  /** 取消进行中的 xAI OAuth 登录 */
+  xaiOAuthCancel: () => Promise<void>
+
+  /** 订阅登录期间，接收 xAI device code 与授权链接。返回取消订阅函数。 */
+  onXaiOAuthDeviceCode: (callback: (deviceCode: XaiOAuthDeviceCode) => void) => () => void
 
   // ===== 对话管理相关 =====
 
@@ -1309,6 +1320,20 @@ const electronAPI: ElectronAPI = {
 
   codexOAuthCancel: () => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_CANCEL)
+  },
+
+  xaiOAuthLogin: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.XAI_OAUTH_LOGIN)
+  },
+
+  xaiOAuthCancel: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.XAI_OAUTH_CANCEL)
+  },
+
+  onXaiOAuthDeviceCode: (callback: (deviceCode: XaiOAuthDeviceCode) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, deviceCode: XaiOAuthDeviceCode) => callback(deviceCode)
+    ipcRenderer.on(CHANNEL_IPC_CHANNELS.XAI_OAUTH_DEVICE_CODE, listener)
+    return () => ipcRenderer.removeListener(CHANNEL_IPC_CHANNELS.XAI_OAUTH_DEVICE_CODE, listener)
   },
 
   // 对话管理

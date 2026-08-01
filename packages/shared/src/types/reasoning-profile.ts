@@ -25,6 +25,7 @@ export function inferReasoningTransport(provider: ProviderType | undefined): Rea
       return 'openai-completions'
     case 'openai-codex':
     case 'openai-responses':
+    case 'xai':
       return 'openai-responses'
     case 'google':
       return 'other'
