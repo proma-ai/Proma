@@ -116,6 +116,7 @@ import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window
 import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
+import { isMacOS26OrLater } from './lib/macos-version'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -140,8 +141,13 @@ function activateAgentIslandElectronFallback(reason?: string): void {
   publishAgentIslandNow()
 }
 
-/** macOS 优先使用真刘海 NSPanel；其他平台保持既有 BrowserWindow 体验。 */
+/** macOS 26+ 优先使用真刘海 NSPanel；旧版 macOS 默认不显示灵动岛。 */
 function startAgentIslandSurface(): void {
+  if (process.platform === 'darwin' && !isMacOS26OrLater()) {
+    console.info('[agent-island] 已在 macOS 26 以下禁用')
+    return
+  }
+
   const startedNative = startMacAgentIslandNativeHost({
     onReady: () => {
       console.info('[agent-island] macOS 原生 NSPanel helper 已就绪')
