@@ -80,11 +80,10 @@ button {
   top: 0;
   right: 0;
   left: 0;
-  display: grid;
+  display: flex;
   box-sizing: border-box;
   width: 420px;
   height: 32px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   padding: 0 12px;
@@ -128,6 +127,7 @@ button {
 
 .island-compact-label {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   font-size: 10.5px;
   font-weight: 650;
@@ -137,7 +137,41 @@ button {
   white-space: nowrap;
 }
 
+.island-compact-quota {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 142px;
+  flex: 0 1 142px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: rgb(255 255 255 / 0.86);
+  background: rgb(255 255 255 / 0.075);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.island-compact-quota-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.92);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island-compact-quota-more {
+  flex: 0 0 auto;
+  color: #a7baff;
+  font-weight: 750;
+}
+
 .island-compact-chevron {
+  flex: 0 0 auto;
   color: rgb(255 255 255 / 0.48);
 }
 
@@ -222,7 +256,7 @@ button {
   display: grid;
   min-width: 0;
   height: 16px;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 78px) minmax(0, 108px) minmax(0, 1fr);
   align-items: center;
   gap: 5px;
   color: rgb(255 255 255 / 0.85);
@@ -233,6 +267,7 @@ button {
 .island-quota-name,
 .island-quota-plan,
 .island-quota-value {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

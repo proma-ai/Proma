@@ -33,6 +33,7 @@ import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
 import { createAgentIslandWindow, getAgentIslandWindow, hideAgentIslandWindow, moveAgentIslandWindow, onAgentIslandWindowReady, resizeAgentIslandWindow, showAgentIslandWindow } from './agent-island-window'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
 import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
+import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -476,6 +477,24 @@ function buildState(now: number): AgentIslandState {
   }
 }
 
+/**
+ * 收起态优先给最需要处理的运行中会话展示额度；会话列表已按语义优先级稳定排序。
+ * 未读完成/错误会话不是“当前渠道”，不应挤占正在运行 Agent 的额度位置。
+ */
+function buildCompactPlanQuota(state: AgentIslandState): AgentIslandState['compactPlanQuota'] {
+  const activeChannelIds = state.sessions
+    .filter((session) => session.phase === 'running' || session.phase === 'needs-interaction')
+    .flatMap((session) => {
+      try {
+        const channelId = getAgentSessionMeta(session.sessionId)?.channelId
+        return channelId ? [channelId] : []
+      } catch {
+        return []
+      }
+    })
+  return selectAgentIslandCompactPlanQuota(activeChannelIds, planQuotas)
+}
+
 function buildPlanningSnapshot(now: number): AgentIslandPlanningSnapshot {
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
@@ -570,6 +589,7 @@ function pushState(): void {
   const planning = buildPlanningSnapshot(now)
   const planningKeys = getImminentPlanningKeys(now)
   const state = buildState(now)
+  state.compactPlanQuota = buildCompactPlanQuota(state)
   // The idle dashboard is a true home surface: it remains visible even for a
   // new user without any recorded Agent session. Future items do not displace
   // it; only live Agent work or imminent plans take priority.
@@ -620,9 +640,11 @@ async function refreshPlanQuotas(): Promise<void> {
     const next = results.flatMap(({ channel, quota }) => {
       if (!quota.supported || quota.windows.length === 0) return []
       return [{
+        channelId: channel.id,
         channelName: channel.name,
         planName: quota.planName || channel.name,
         windows: quota.windows.map((window) => ({
+          windowType: window.type,
           windowLabel: window.label,
           remainingPercent: window.remainingPercent,
           remainingLabel: window.remainingLabel,

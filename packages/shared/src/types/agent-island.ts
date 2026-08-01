@@ -74,6 +74,8 @@ export interface AgentIslandState {
   recentSessions: AgentIslandSessionSnapshot[]
   /** 空闲时展示 Plan 额度与最近会话；由主进程按临近事项统一判定。 */
   idleDashboard: boolean
+  /** 收起态展示的当前活跃渠道额度；多渠道时仅保留最高优先级渠道。 */
+  compactPlanQuota?: AgentIslandCompactPlanQuotaSnapshot
   totalCount: number
   updatedAt: number
 }
@@ -106,6 +108,8 @@ export interface AgentIslandPlanningSnapshot {
 
 /** 单个订阅 Plan 限额窗口的展示投影。 */
 export interface AgentIslandPlanQuotaWindowSnapshot {
+  /** 用于收起态压缩为 5h / 周等短标签。 */
+  windowType?: import('./channel').ChannelPlanQuotaWindow['type']
   windowLabel: string
   remainingPercent: number
   remainingLabel?: string
@@ -113,9 +117,16 @@ export interface AgentIslandPlanQuotaWindowSnapshot {
 
 /** 灵动岛展示所需的最小订阅 Plan 额度投影；按渠道聚合，绝不包含凭据。 */
 export interface AgentIslandPlanQuotaSnapshot {
+  /** 渠道 ID 仅用于把运行中的 Agent 会话关联到额度投影，不包含凭据。 */
+  channelId: string
   channelName: string
   planName: string
   windows: AgentIslandPlanQuotaWindowSnapshot[]
+}
+
+/** 收起态的渠道额度摘要；additionalChannelCount 只统计同样可查询额度的其他活跃渠道。 */
+export interface AgentIslandCompactPlanQuotaSnapshot extends AgentIslandPlanQuotaSnapshot {
+  additionalChannelCount: number
 }
 
 /** Electron fallback 窗口的完整投影，和原生 Swift surface 消费同一份状态数据。 */

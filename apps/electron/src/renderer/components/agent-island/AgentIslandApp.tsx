@@ -7,6 +7,7 @@ import {
   ListTodo,
 } from 'lucide-react'
 import type {
+  AgentIslandCompactPlanQuotaSnapshot,
   AgentIslandPhase,
   AgentIslandPlanQuotaSnapshot,
   AgentIslandSessionSnapshot,
@@ -83,6 +84,33 @@ function getPlanningIndicator(snapshot: AgentIslandWindowSnapshot): { icon: Reac
     return { icon: <CalendarDays size={13} />, label: '即将日程' }
   }
   return { icon: <ListTodo size={13} />, label: '即将到期' }
+}
+
+function compactQuotaWindowLabel(window: AgentIslandCompactPlanQuotaSnapshot['windows'][number]): string {
+  if (window.windowType === '5h') return '5h'
+  if (window.windowType === 'weekly') return '周'
+  return window.windowLabel
+}
+
+function formatCompactPlanQuota(quota: AgentIslandCompactPlanQuotaSnapshot): string {
+  return quota.windows
+    .slice(0, 2)
+    .map((window) => `${compactQuotaWindowLabel(window)} ${window.remainingLabel ?? `${Math.round(window.remainingPercent)}%`}`)
+    .join(' · ')
+}
+
+function CompactPlanQuota({ quota }: { quota: AgentIslandCompactPlanQuotaSnapshot }): React.ReactElement {
+  const detail = formatCompactPlanQuota(quota)
+  const title = [quota.channelName, ...quota.windows.map((window) => (
+    `${window.windowLabel} 剩余 ${window.remainingLabel ?? `${Math.round(window.remainingPercent)}%`}`
+  ))].join(' · ')
+
+  return (
+    <span className="island-compact-quota" title={title}>
+      <span className="island-compact-quota-value">{detail}</span>
+      {quota.additionalChannelCount > 0 && <span className="island-compact-quota-more">+{quota.additionalChannelCount}</span>}
+    </span>
+  )
 }
 
 function PlanQuotaCarousel({ quotas }: { quotas: AgentIslandPlanQuotaSnapshot[] }): React.ReactElement | null {
@@ -273,6 +301,7 @@ export function AgentIslandApp(): React.ReactElement {
             </span>
           )}
           <span className="island-compact-label">{compactLabel}</span>
+          {state.compactPlanQuota && <CompactPlanQuota quota={state.compactPlanQuota} />}
           <ChevronDown className="island-compact-chevron" size={14} aria-hidden="true" />
         </button>
       </div>
