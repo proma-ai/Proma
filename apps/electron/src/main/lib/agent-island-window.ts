@@ -56,6 +56,8 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     frame: false,
     transparent: true,
     alwaysOnTop: true,
+    // 无边框 ambient surface 不应因 Alt+F4 被永久关闭；设置页是其显式开关。
+    closable: process.platform !== 'win32',
     skipTaskbar: true,
     resizable: false,
     movable: false,
@@ -72,9 +74,12 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     },
   })
 
-  // Windows 以 screen-saver level 常驻桌面和全屏应用上方；macOS 保持与刘海融合的层级。
+  // Windows 以 screen-saver level 常驻当前桌面和全屏应用上方；macOS 保持与刘海融合的层级。
+  // Electron 的 setVisibleOnAllWorkspaces 在 Windows 无效，避免把无效调用误解为跨虚拟桌面支持。
   agentIslandWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'pop-up-menu' : 'screen-saver')
-  agentIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  if (process.platform !== 'win32') {
+    agentIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
 
   const isDev = !app.isPackaged
   if (isDev) {

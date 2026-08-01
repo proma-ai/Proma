@@ -30,8 +30,9 @@ import {
 import type { AgentStreamPayload } from '@proma/shared'
 import { agentEventBus } from './agent-service'
 import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
-import { getAgentIslandWindow, hideAgentIslandWindow, moveAgentIslandWindow, onAgentIslandWindowReady, resizeAgentIslandWindow, showAgentIslandWindow } from './agent-island-window'
+import { createAgentIslandWindow, getAgentIslandWindow, hideAgentIslandWindow, moveAgentIslandWindow, onAgentIslandWindowReady, resizeAgentIslandWindow, showAgentIslandWindow } from './agent-island-window'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
+import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -483,11 +484,8 @@ function buildPlanningSnapshot(now: number): AgentIslandPlanningSnapshot {
   const allTodayTodos = listTodos({ status: 'open' })
     .filter((todo) => todo.dueAt !== undefined && todo.dueAt < dayEnd)
     .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
-  // Compact visibility remains an imminent (one-hour) signal, while expansion
-  // is a useful short look-ahead: show the next three future items per column.
-  const todos = listTodos({ status: 'open' })
-    .filter((todo) => todo.dueAt !== undefined && todo.dueAt >= now)
-    .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
+  // 逾期事项必须优先于未来事项；否则 Island 会在最需要提醒时变成空面板。
+  const todos = selectAgentIslandTodos(listTodos({ status: 'open' }), now)
   const events = listCalendarEvents({ from: dayStart })
     // Keep an event visible while it is in progress, not only before its start.
     // All-day items without an explicit end remain active through their day.
@@ -527,10 +525,9 @@ function getImminentPlanningKeys(now: number): string[] {
   const dayStart = today.getTime()
   const dayEnd = dayStart + 24 * 60 * 60_000
   // 不依赖 UI 的前三条投影：多条逾期 Todo 不能遮蔽稍后临近的第四条事项。
+  // 逾期项也必须维持 Island 可见，直到用户明确关闭或完成它。
   return [
-    ...listTodos({ status: 'open' })
-      .filter((todo) => isImminent(todo.dueAt, now))
-      .map((todo) => `t:${todo.id}:${todo.dueAt}`),
+    ...getAgentIslandTodoAttentionKeys(listTodos({ status: 'open' }), now, PLANNING_ATTENTION_WINDOW_MS),
     ...listCalendarEvents({ from: dayStart, to: dayEnd })
       .filter((event) => isImminent(event.startAt, now))
       .map((event) => `e:${event.id}:${event.startAt}`),
@@ -593,7 +590,9 @@ function pushState(): void {
   }
 
   // 非 macOS、helper 缺失或运行失败时，保留 Electron 版本作为降级体验。
-  const win = getAgentIslandWindow()
+  // 用户关闭 fallback 窗口或系统回收窗口后，下一次有效状态变更仍应恢复提醒 Surface。
+  let win = getAgentIslandWindow()
+  if ((!win || win.isDestroyed()) && state.visible) win = createAgentIslandWindow()
   if (!win || win.isDestroyed()) return
   const rendererSnapshot: AgentIslandWindowSnapshot = { state, planning, planQuotas }
   if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_ISLAND_IPC_CHANNELS.STATE, rendererSnapshot)
