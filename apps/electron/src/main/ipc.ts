@@ -157,6 +157,7 @@ import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-servic
 import { loginXaiOAuth, cancelXaiOAuthLogin } from './lib/xai-oauth-service'
 import { resolvePiReasoningCapability } from './lib/adapters/pi-model-registry'
 import { serializeCodexCredentials, serializeXaiCredentials } from '@proma/shared'
+import type { CodexOAuthDeviceCode, CodexOAuthLoginMethod, XaiOAuthDeviceCode } from '@proma/shared'
 import {
   listConversations,
   createConversation,
@@ -903,6 +904,16 @@ function releaseDirectoryWatcherIfUnreferenced(dirPath: string): void {
   if (!isStillReferenced) unwatchAttachedDirectory(dirPath)
 }
 
+async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDeviceCode>(deviceCode: T): Promise<T> {
+  try {
+    const QRCode = (await import('qrcode')).default
+    return { ...deviceCode, qrCodeData: await QRCode.toDataURL(deviceCode.verificationUri, { width: 240, margin: 1 }) }
+  } catch (error) {
+    console.warn('[OAuth] 生成设备码二维码失败:', error)
+    return deviceCode
+  }
+}
+
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
 
@@ -1252,9 +1263,19 @@ export function registerIpcHandlers(): void {
   // apiKey 传给 create/update，channel-manager 加密后存储——与现有 apiKey 明文回传模式一致。
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.CODEX_OAUTH_LOGIN,
-    async (): Promise<import('@proma/shared').CodexOAuthLoginResult> => {
+    async (event, requestedMethod?: CodexOAuthLoginMethod): Promise<import('@proma/shared').CodexOAuthLoginResult> => {
+      const method: CodexOAuthLoginMethod = requestedMethod === 'device_code' ? 'device_code' : 'browser'
       try {
-        const credentials = await loginCodexOAuth()
+        const credentials = await loginCodexOAuth({
+          method,
+          onDeviceCode: (deviceCode) => {
+            void withOAuthDeviceCodeQr(deviceCode).then((payload) => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_DEVICE_CODE, payload)
+              }
+            }).catch((error) => console.warn('[OAuth] 发送 Codex device code 失败:', error))
+          },
+        })
         return {
           success: true,
           credentials: serializeCodexCredentials(credentials),
@@ -1284,7 +1305,13 @@ export function registerIpcHandlers(): void {
     async (event): Promise<import('@proma/shared').XaiOAuthLoginResult> => {
       try {
         const credentials = await loginXaiOAuth({
-          onDeviceCode: (deviceCode) => event.sender.send(CHANNEL_IPC_CHANNELS.XAI_OAUTH_DEVICE_CODE, deviceCode),
+          onDeviceCode: (deviceCode) => {
+            void withOAuthDeviceCodeQr(deviceCode).then((payload) => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(CHANNEL_IPC_CHANNELS.XAI_OAUTH_DEVICE_CODE, payload)
+              }
+            }).catch((error) => console.warn('[OAuth] 发送 xAI device code 失败:', error))
+          },
         })
         return { success: true, credentials: serializeXaiCredentials(credentials) }
       } catch (error) {

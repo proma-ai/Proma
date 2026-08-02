@@ -93,6 +93,31 @@ export function runWithPiRequestProxy<T>(dispatcher: Dispatcher | undefined, ope
   return requestDispatcherStorage.run(dispatcher, operation)
 }
 
+/**
+ * 在一个受管生命周期内执行 Pi 网络操作。
+ *
+ * OAuth 等短时 Pi 操作也必须使用此入口：内部全局 fetch 会继承当前 async scope 的
+ * dispatcher，且无论成功、取消或抛错均会释放连接池。
+ */
+export async function runWithManagedPiRequestProxy<T>(
+  dispatcher: Dispatcher | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await runWithPiRequestProxy(dispatcher, operation)
+  } finally {
+    await closePiRequestProxyDispatcher(dispatcher)
+  }
+}
+
+export async function runWithPiRequestProxyScope<T>(
+  options: PiRequestProxyOptions,
+  operation: () => Promise<T>,
+): Promise<T> {
+  installPiRequestProxyFetch()
+  return runWithManagedPiRequestProxy(createPiRequestProxyDispatcher(options), operation)
+}
+
 /** 用于测试及诊断：不会暴露或修改全局 dispatcher。 */
 export function getPiRequestProxyDispatcher(): Dispatcher | undefined {
   return requestDispatcherStorage.getStore()

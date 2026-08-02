@@ -490,6 +490,8 @@ export const CHANNEL_IPC_CHANNELS = {
   CODEX_OAUTH_LOGIN: 'channel:codex-oauth-login',
   /** 取消进行中的 ChatGPT OAuth 登录流程 */
   CODEX_OAUTH_CANCEL: 'channel:codex-oauth-cancel',
+  /** Codex device-code 已就绪（主进程推送给发起登录的渲染窗口） */
+  CODEX_OAUTH_DEVICE_CODE: 'channel:codex-oauth-device-code',
   /** 发起 xAI（Grok/X 订阅）OAuth 登录 */
   XAI_OAUTH_LOGIN: 'channel:xai-oauth-login',
   /** 取消进行中的 xAI OAuth 登录流程 */
@@ -504,6 +506,16 @@ export const CHANNEL_IPC_CHANNELS = {
  * 登录在主进程执行（Pi SDK 的 codex 流程用 Node crypto + 本地回调服务），
  * 成功后返回已加密的凭据 JSON（可直接作为 Channel.apiKey 存储）与展示信息。
  */
+export type CodexOAuthLoginMethod = 'browser' | 'device_code'
+
+/** Pi Codex device-code 登录流程的用户可见信息。 */
+export interface CodexOAuthDeviceCode {
+  userCode: string
+  verificationUri: string
+  /** 可扫码交给另一台可联网设备完成授权。 */
+  qrCodeData?: string
+}
+
 export interface CodexOAuthLoginResult {
   /** 是否登录成功 */
   success: boolean
@@ -531,4 +543,6 @@ export interface XaiOAuthLoginResult {
 export interface XaiOAuthDeviceCode {
   userCode: string
   verificationUri: string
+  /** 可扫码交给另一台可联网设备完成授权。 */
+  qrCodeData?: string
 }

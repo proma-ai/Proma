@@ -256,10 +256,13 @@ export interface ElectronAPI {
   getChannelPlanQuota: (channelId: string) => Promise<ChannelPlanQuotaResult>
 
   /** 发起 ChatGPT (Codex) OAuth 登录，返回序列化凭据（作为 apiKey 存储） */
-  codexOAuthLogin: () => Promise<CodexOAuthLoginResult>
+  codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => Promise<CodexOAuthLoginResult>
 
   /** 取消进行中的 ChatGPT (Codex) OAuth 登录 */
   codexOAuthCancel: () => Promise<void>
+
+  /** 订阅登录期间，接收 Codex device code 与授权链接。返回取消订阅函数。 */
+  onCodexOAuthDeviceCode: (callback: (deviceCode: import('@proma/shared').CodexOAuthDeviceCode) => void) => () => void
 
   /** 发起 xAI（Grok/X 订阅）OAuth 登录 */
   xaiOAuthLogin: () => Promise<XaiOAuthLoginResult>
@@ -1326,12 +1329,18 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.GET_PLAN_QUOTA, channelId)
   },
 
-  codexOAuthLogin: () => {
-    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_LOGIN)
+  codexOAuthLogin: (method?: import('@proma/shared').CodexOAuthLoginMethod) => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_LOGIN, method)
   },
 
   codexOAuthCancel: () => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_CANCEL)
+  },
+
+  onCodexOAuthDeviceCode: (callback: (deviceCode: import('@proma/shared').CodexOAuthDeviceCode) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, deviceCode: import('@proma/shared').CodexOAuthDeviceCode) => callback(deviceCode)
+    ipcRenderer.on(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_DEVICE_CODE, listener)
+    return () => ipcRenderer.removeListener(CHANNEL_IPC_CHANNELS.CODEX_OAUTH_DEVICE_CODE, listener)
   },
 
   xaiOAuthLogin: () => {

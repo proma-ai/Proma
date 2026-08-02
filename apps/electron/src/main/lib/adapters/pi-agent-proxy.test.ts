@@ -1,8 +1,9 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import type { Dispatcher } from 'undici'
 import { buildPiRemoteConnectionSettings } from './pi-agent-adapter'
 import {
   getPiRequestProxyDispatcher,
+  runWithManagedPiRequestProxy,
   runWithPiRequestProxy,
 } from './pi-request-proxy'
 
@@ -53,6 +54,30 @@ describe('Pi request proxy', () => {
     expect(firstSeen).toBe(first)
     expect(secondSeen).toBe(second)
     expect(getPiRequestProxyDispatcher()).toBeUndefined()
+  })
+
+  test('Given a managed proxy dispatcher When the operation resolves Then closes it after leaving its async scope', async () => {
+    const close = mock(() => Promise.resolve())
+    const dispatcher = { close } as unknown as Dispatcher
+
+    await expect(runWithManagedPiRequestProxy(dispatcher, async () => {
+      expect(getPiRequestProxyDispatcher()).toBe(dispatcher)
+      return 'done'
+    })).resolves.toBe('done')
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(getPiRequestProxyDispatcher()).toBeUndefined()
+  })
+
+  test('Given a managed proxy dispatcher When the operation fails Then still closes it', async () => {
+    const close = mock(() => Promise.resolve())
+    const dispatcher = { close } as unknown as Dispatcher
+
+    await expect(runWithManagedPiRequestProxy(dispatcher, async () => {
+      throw new Error('OAuth failed')
+    })).rejects.toThrow('OAuth failed')
+
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   test('Given runtime proxy environment When no explicit URL is provided Then uses it without mutating process environment', () => {
