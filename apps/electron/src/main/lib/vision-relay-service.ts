@@ -59,10 +59,15 @@ function isPathWithinRoot(filePath: string, root: string): boolean {
 
 async function hasValidImageContent(data: Buffer, mediaType: string): Promise<boolean> {
   // Sharp 使用 libvips 解码完整像素数据，避免将任意字节伪装成图片外发。
-  const metadata = await sharp(data, { animated: false, limitInputPixels: 100_000_000 }).metadata()
-  return metadata.width !== undefined && metadata.width > 0
+  const image = sharp(data, { animated: false, limitInputPixels: 20_000_000 })
+  const metadata = await image.metadata()
+  const isExpectedFormat = metadata.width !== undefined && metadata.width > 0
     && metadata.height !== undefined && metadata.height > 0
     && metadata.format === mediaType.slice('image/'.length)
+  if (!isExpectedFormat) return false
+  // raw() 强制解码像素数据，metadata() 仅读取文件头不足以阻断伪造容器。
+  await image.raw().toBuffer()
+  return true
 }
 
 interface AuthorizedImage {
