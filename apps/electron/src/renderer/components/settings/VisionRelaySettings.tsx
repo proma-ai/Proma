@@ -78,9 +78,9 @@ export function VisionRelaySettings(): React.ReactElement {
       <SettingsSection title="隐私边界" description="视觉助手遵循最小外发原则。">
         <SettingsCard>
           <SettingsRow
-            label="每次调用均需工具确认"
+            label="启用后自动使用视觉模型"
             icon={<ShieldCheck className="size-4 text-emerald-500" />}
-            description="仅允许发送当前会话或用户已附加目录中的 PNG、JPEG、GIF、WebP 图片；单张上限 10MB。视觉结果会以文本 JSON 返回给 Agent。"
+            description="启用即授权 Agent 在需要时将当前会话或用户已附加目录中的 PNG、JPEG、GIF、WebP 图片，以及最多 1000 字符的视觉问题发送给所选模型；单张上限 10MB。视觉结果只会以文本 JSON 返回给 Agent。"
           />
         </SettingsCard>
       </SettingsSection>
