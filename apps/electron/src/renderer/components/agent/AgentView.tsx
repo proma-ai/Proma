@@ -1949,15 +1949,62 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           }
         }
 
-        // 普通文件作为附件
+        // 普通文件：复制到会话私有目录后插入 @ 引用（方案 B）
+        // 引用指向会话私有工作目录内的副本路径，Agent 通过会话私有目录即可访问，
+        // 与右侧面板拖拽/键盘 @ 引用保持一致；超大文件或无项目时回退附件逻辑。
         const regularFiles = filePaths.map((p) => pathMap.get(p)!).filter(Boolean)
         if (regularFiles.length > 0) {
-          const fileSourcePaths = new Map<File, string>()
+          const sourcePaths = new Map<File, string>()
           for (const path of filePaths) {
             const file = pathMap.get(path)
-            if (file) fileSourcePaths.set(file, path)
+            if (file) sourcePaths.set(file, path)
           }
-          addFilesAsAttachments(regularFiles, fileSourcePaths)
+
+          const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
+          const canSave = Boolean(workspace?.slug)
+          const savedRefs: Array<{ path: string; name: string }> = []
+          const fallbackFiles: File[] = []
+
+          for (const file of regularFiles) {
+            if (!canSave || file.size > MAX_ATTACHMENT_SIZE) {
+              fallbackFiles.push(file)
+              continue
+            }
+            try {
+              const data = await fileToBase64(file)
+              const saved = await window.electronAPI.saveFilesToAgentSession({
+                workspaceSlug: workspace!.slug,
+                sessionId,
+                files: [{ filename: file.name, data }],
+              })
+              if (saved && saved.length > 0) {
+                const [savedFile] = saved
+                if (savedFile) {
+                  savedRefs.push({ path: savedFile.targetPath, name: savedFile.filename })
+                } else {
+                  fallbackFiles.push(file)
+                }
+              } else {
+                fallbackFiles.push(file)
+              }
+            } catch (error) {
+              console.error('[AgentView] 外部文件复制到会话目录失败:', error)
+              fallbackFiles.push(file)
+            }
+          }
+
+          if (savedRefs.length > 0) {
+            richTextInputRef.current?.insertFileMentions(savedRefs.map((r) => ({
+              path: r.path,
+              name: r.name,
+              isDirectory: false,
+              scope: 'project',
+            })))
+            toast.success(`已引用 ${savedRefs.length} 个文件`)
+          }
+          if (fallbackFiles.length > 0) {
+            addFilesAsAttachments(fallbackFiles, sourcePaths)
+          }
         }
       } catch (error) {
         console.error('[AgentView] 路径检测失败，回退处理:', error)
@@ -1967,7 +2014,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap])
+  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap, workspaces, currentWorkspaceId])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
