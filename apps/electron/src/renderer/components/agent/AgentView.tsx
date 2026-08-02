@@ -2604,7 +2604,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     window.electronAPI.sendAgentMessage({
       sessionId,
+      // Agent 侧使用解码后的文本（@file 真实路径）；持久化/展示保留编码原文，避免新历史记录被 \S+ 截断
       userMessage: lastUserMessage,
+      rawUserMessage: lastUserRawMessage,
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
       agentRuntime: sessionAgentRuntime,
