@@ -26,6 +26,7 @@ import {
 import {
   buildMemoryContextForMessage,
   searchMemoriesByKeyword,
+  searchMemoriesHybrid,
   formatRecallContext,
   DEFAULT_RECALL_LIMIT,
 } from './recall'
@@ -70,8 +71,17 @@ export function contextForMessage(userText: string, opts: { limit?: number } = {
   }
 }
 
-/** 检索记忆（工具用） */
+/** 检索记忆（工具用，同步 keyword） */
 export function search(request: MemorySearchRequest): MemorySearchResult {
+  return searchMemoriesByKeyword(request)
+}
+
+/** 检索记忆（异步 hybrid：keyword + embedding + 规则加权；embedding 不可用时降级 keyword） */
+export async function searchAsync(request: MemorySearchRequest): Promise<MemorySearchResult> {
+  const providerReady = (await import('./embedding')).getEmbeddingProvider()
+  if (providerReady) {
+    return searchMemoriesHybrid(request)
+  }
   return searchMemoriesByKeyword(request)
 }
 

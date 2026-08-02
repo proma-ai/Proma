@@ -174,6 +174,7 @@ import {
 import {
   stats as memoryStats,
   search as memorySearch,
+  searchAsync as memorySearchAsync,
   searchAsText as memorySearchAsText,
   corrections as memoryCorrections,
   confirmCorrection as memoryConfirmCorrection,
@@ -2523,7 +2524,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_MEMORY,
     async (_, query: string, limit?: number): Promise<import('@proma/shared').MemorySearchResult> => {
-      return memorySearch({ query, limit })
+      // 工具层用 hybrid（embedding + keyword + 规则加权），提升语义召回
+      return memorySearchAsync({ query, limit })
     }
   )
 

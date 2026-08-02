@@ -9,7 +9,7 @@
 
 import {
   stats,
-  search,
+  searchAsync,
   searchAsText,
   captureCandidate,
   corrections,
@@ -76,7 +76,7 @@ export async function injectMemoryMcpServer(
         async (args) => {
           const query = typeof args.query === 'string' ? args.query.trim() : ''
           if (!query) throw new Error('query 必填')
-          const result = search({
+          const result = await searchAsync({
             query,
             limit: typeof args.limit === 'number' ? args.limit : undefined,
             type: isMemoryType(args.type) ? args.type : undefined,

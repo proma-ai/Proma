@@ -12,6 +12,7 @@
 
 import type { MemoryAtom, MemorySearchHit, MemorySearchRequest, MemorySearchResult } from '@proma/shared'
 import { readAllAtoms } from './store'
+import { getEmbeddingProvider, cosineSimilarity } from './embedding'
 
 /** 召回预算默认值 */
 export const DEFAULT_RECALL_LIMIT = 5
@@ -162,7 +163,25 @@ function normalizeScore(score: number, maxScore: number): number {
 
 // ===== 检索 =====
 
-/** 关键词检索（MVP） */
+/**
+ * 规则加权（P7b）：对身份/偏好类记忆在排序中加权，缓解“我是谁”类语义问句答错。
+ * 加分项：
+ * - fact 类含用户身份关键词（我叫/我是/名字/独立开发者/从事）→ +0.15
+ * - preference 类（用户偏好）→ +0.08
+ * - 高优先级（≥70）→ +0.05
+ */
+export function ruleBoost(atom: MemoryAtom): number {
+  let boost = 0
+  if (atom.type === 'fact' && /我叫|我是|名字|姓名|独立开发者|从事|负责|做.*开发/.test(atom.content)) {
+    boost += 0.15
+  } else if (atom.type === 'preference') {
+    boost += 0.08
+  }
+  if ((atom.priority ?? 0) >= 70) boost += 0.05
+  return boost
+}
+
+/** 关键词检索（MVP，保持现有行为） */
 export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySearchResult {
   const started = Date.now()
   const query = request.query.trim()
@@ -204,7 +223,7 @@ export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySea
   const scored = allAtoms
     .map((atom) => ({ atom, ...scoreAtom(atom, terms, docFreq, totalDocs) }))
     .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score || b.atom.createdAt - a.atom.createdAt)
+    .sort((a, b) => (b.score + ruleBoost(b.atom)) - (a.score + ruleBoost(a.atom)) || b.atom.createdAt - a.atom.createdAt)
 
   // 归一化 + 阈值过滤：把分数映射到 0-1，低于阈值的弱相关/噪声不返回
   const maxScore = scored.length > 0 ? scored[0]!.score : 0
@@ -218,9 +237,11 @@ export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySea
     .slice(0, limit)
 
   // 0 命中但查询含回忆意图（“还记得我是谁吗”等语义问句）：降级返回最近记忆，避免过度沉默
-  // 排序：fact 优先（身份/事实类最可能回答“我是谁”），再按 priority 降序，再按时间
+  // 排序：规则加权（身份/偏好优先），再按 priority 降序，再按时间
   if (hits.length === 0 && hasRecallIntent(query) && allAtoms.length > 0) {
     const sorted = [...allAtoms].sort((a, b) => {
+      const boostDiff = ruleBoost(b) - ruleBoost(a)
+      if (boostDiff !== 0) return boostDiff
       const factDiff = (b.type === 'fact' ? 1 : 0) - (a.type === 'fact' ? 1 : 0)
       if (factDiff !== 0) return factDiff
       return (b.priority ?? 0) - (a.priority ?? 0) || b.createdAt - a.createdAt
@@ -263,9 +284,106 @@ export function formatRecallContext(result: MemorySearchResult): string {
 
 /** 一站式：给定用户消息文本，返回可注入的 memory 上下文块（空串表示无需注入） */
 export function buildMemoryContextForMessage(userText: string, opts: { limit?: number } = {}): string {
+  // per-message 注入保持同步低延迟：用 keyword + 规则加权（embedding 通道由 memory_search 工具异步提供）
   const result = searchMemoriesByKeyword({ query: userText, limit: opts.limit ?? DEFAULT_RECALL_LIMIT })
   if (result.hits.length === 0) return ''
   const body = formatRecallContext(result)
   if (!body) return ''
   return `<memory_context strategy="${result.strategy}" durationMs="${result.durationMs}">\n${body}\n</memory_context>`
+}
+
+// ===== 混合检索（P7：keyword + embedding + 规则加权） =====
+
+/**
+ * RRF 融合：按排名倒数加权合并多路检索结果。
+ * k=60 是 RRF 论文默认值。
+ */
+function rrfMerge(lists: Array<Array<{ atom: MemoryAtom; score: number }>>, k = 60): Map<string, { atom: MemoryAtom; score: number; sources: number }> {
+  const merged = new Map<string, { atom: MemoryAtom; score: number; sources: number }>()
+  for (const list of lists) {
+    list.forEach((item, rank) => {
+      const existing = merged.get(item.atom.id)
+      const contribution = 1 / (k + rank + 1)
+      if (existing) {
+        existing.score += contribution
+        existing.sources += 1
+      } else {
+        merged.set(item.atom.id, { atom: item.atom, score: contribution, sources: 1 })
+      }
+    })
+  }
+  return merged
+}
+
+/**
+ * 混合检索：
+ * 1. 关键词 BM25 排序（含误报阈值）
+ * 2. embedding 余弦相似度排序（语义）
+ * 3. 规则加权（身份/偏好优先）
+ * 4. RRF 融合 + 归一化
+ */
+export async function searchMemoriesHybrid(request: MemorySearchRequest): Promise<MemorySearchResult> {
+  const started = Date.now()
+  const query = request.query.trim()
+  const limit = Math.min(Math.max(request.limit ?? DEFAULT_RECALL_LIMIT, 1), MAX_RECALL_LIMIT)
+  const allAtoms = readAllAtoms({ includeUnconfirmed: request.includeUnconfirmed === true })
+
+  if (!query || allAtoms.length === 0) {
+    // 空查询：返回最近 N 条
+    const hits: MemorySearchHit[] = allAtoms.slice(0, limit).map((atom) => ({
+      atom,
+      score: 1,
+      matchedTerms: [],
+    }))
+    return { query, hits, strategy: 'latest', durationMs: Date.now() - started }
+  }
+
+  // 通道 1：关键词
+  const kwResult = searchMemoriesByKeyword({ query, limit: Math.max(limit, 10), includeUnconfirmed: request.includeUnconfirmed })
+  const kwList = kwResult.hits.map((h) => ({ atom: h.atom, score: h.score }))
+
+  // 通道 2：embedding（语义）
+  const provider = getEmbeddingProvider()
+  let embList: Array<{ atom: MemoryAtom; score: number }> = []
+  if (provider) {
+    const queryVec = await provider.embed(query)
+    if (queryVec) {
+      const batch = await provider.embedBatch(allAtoms.slice(0, 50).map((a) => a.content.slice(0, 200)))
+      const scored: Array<{ atom: MemoryAtom; score: number }> = []
+      for (let i = 0; i < batch.length; i++) {
+        const vec = batch[i]
+        if (!vec) continue
+        const sim = cosineSimilarity(queryVec, vec)
+        if (sim > 0.55) scored.push({ atom: allAtoms[i]!, score: sim })
+      }
+      embList = scored.sort((a, b) => b.score - a.score).slice(0, Math.max(limit, 10))
+    }
+  }
+
+  // 通道 3：规则加权（身份/偏好优先）
+  const ruleList = [...allAtoms]
+    .map((atom) => ({ atom, score: ruleBoost(atom) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(limit, 10))
+
+  // RRF 融合
+  const merged = rrfMerge([kwList, embList, ruleList])
+  const maxScore = merged.size > 0 ? Math.max(...[...merged.values()].map((v) => v.score)) : 0
+
+  const hits: MemorySearchHit[] = [...merged.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((item) => ({
+      atom: item.atom,
+      score: maxScore > 0 ? item.score / maxScore : 0,
+      matchedTerms: [],
+    }))
+
+  // 阈值过滤（比 keyword 略低，因为 RRF 分数普遍偏低）
+  const filtered = hits.filter((h) => h.score >= (RECALL_MIN_SCORE * 0.6))
+  if (filtered.length === 0 && kwResult.hits.length > 0) {
+    return kwResult
+  }
+  return { query, hits: filtered, strategy: 'hybrid', durationMs: Date.now() - started }
 }

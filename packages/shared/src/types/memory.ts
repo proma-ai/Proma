@@ -131,8 +131,8 @@ export interface MemorySearchHit {
 export interface MemorySearchResult {
   query: string
   hits: MemorySearchHit[]
-  /** 检索方式：keyword / latest / fallback（关键词 0 命中且查询含回忆意图时的降级召回） */
-  strategy: 'keyword' | 'latest' | 'fallback'
+  /** 检索方式：keyword / latest / fallback（关键词 0 命中且查询含回忆意图时的降级召回）/ hybrid（混合检索） */
+  strategy: 'keyword' | 'latest' | 'fallback' | 'hybrid'
   /** 耗时 ms */
   durationMs: number
 }

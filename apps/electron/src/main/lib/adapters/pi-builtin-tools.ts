@@ -61,7 +61,7 @@ import {
 import { broadcastPlanningAgentOperation, broadcastPlanningChanged } from '../planning-events'
 import {
   stats as memoryStats,
-  search as memorySearch,
+  searchAsync as memorySearchAsync,
   searchAsText as memorySearchAsText,
   captureCandidate as memoryCaptureCandidate,
   corrections as memoryCorrections,
@@ -806,7 +806,7 @@ function buildMemoryTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinitio
         const args = params as { query?: string; limit?: number; type?: string; includeUnconfirmed?: boolean }
         const query = args.query?.trim() ?? ''
         if (!query) throw new Error('query 必填')
-        const result = memorySearch({
+        const result = await memorySearchAsync({
           query,
           limit: typeof args.limit === 'number' ? args.limit : undefined,
           type: isMemoryTypeValue(args.type) ? args.type : undefined,

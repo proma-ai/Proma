@@ -87,6 +87,14 @@ apps/electron/src/main/lib/memory/
 
 **同义词扩展**：静态表解决转喻（"编程语言"→TypeScript/Rust；"名字"→Conrad）。
 
+**规则加权（P7b）**：身份/偏好类记忆在排序中加权（`ruleBoost`），缓解"我是谁"类问句答错。
+
+**混合检索（P7 hybrid）**：`searchMemoriesHybrid` 用 RRF 融合三路——关键词 BM25 + embedding 余弦相似度 + 规则加权。embedding 通道可插拔（`embedding.ts`）：
+- `PROMA_MEMORY_EMBEDDING=local`：本地 node-llama-cpp + embeddinggemma-300m（离线）
+- `PROMA_MEMORY_EMBEDDING=api`：OpenAI 兼容 API
+- 默认 off：降级 keyword + 规则（fail-open，零额外依赖）
+- per-message 注入保持同步（keyword + 规则）；`memory_search` 工具与 IPC 用异步 hybrid
+
 **注入格式**：`<memory_context>` 块，每条带 `[type|date|rel=high/mid/low]` 强度标注。
 
 ### 4.3 LLM 提取（extractor.ts）
