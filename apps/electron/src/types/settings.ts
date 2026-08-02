@@ -222,6 +222,16 @@ export interface AgentIslandSettings {
   enabled?: boolean
 }
 
+/**
+ * 给无视觉输入能力的 Agent 使用的独立视觉模型路由。
+ * 仅保存用户已有渠道和模型的 ID，凭据继续由渠道加密存储管理。
+ */
+export interface VisionRelaySettings {
+  enabled: boolean
+  channelId?: string
+  modelId?: string
+}
+
 /** 应用设置 */
 export interface AppSettings {
   /** 主题模式 */
@@ -294,6 +304,8 @@ export interface AppSettings {
   voiceDictation?: VoiceDictationPersistedSettings
   /** 飞书 Session 镜像设置：每个 Proma Session 可创建一个仅包含用户与指定 Bot 的飞书群 */
   feishuSessionMirror?: FeishuSessionMirrorSettings
+  /** 无视觉输入能力 Agent 的视觉助手路由 */
+  visionRelay?: VisionRelaySettings
   /** 用户手动关闭的 Proma 内置 MCP ID 列表（针对默认开启的内置 MCP） */
   builtinMcpDisabledIds?: string[]
   /** 用户手动开启的 Proma 内置 MCP ID 列表（针对默认关闭的内置 MCP，如 nano-banana、mem） */

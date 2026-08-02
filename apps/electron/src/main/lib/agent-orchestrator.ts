@@ -1317,7 +1317,12 @@ export class AgentOrchestrator {
       // 9.4.1 Fork session JSONL 迁移已在 forkAgentSession 中完成；fork 的 cwd 语义
       // 从源会话继承并持久化，避免历史相对路径在恢复时切换到另一文件根。
 
-
+      // 必须与 runtime 接收的附加目录保持一致；视觉助手据此限制允许外发的图片路径。
+      const allAdditionalDirectories = collectAttachedDirectories({
+        extraDirs: additionalDirectories,
+        sessionMeta,
+        workspaceSlug,
+      })
 
       // 9.6 直接信任已保存的 sdkSessionId，跳过 listSessions 预验证
       // 原因：listSessions({ dir }) 基于 cwd 路径哈希查找，但 session 级别的 cwd
@@ -1359,6 +1364,7 @@ export class AgentOrchestrator {
             agentRuntime,
             workspaceId,
             workspaceSlug,
+            allowedRoots: allAdditionalDirectories,
             permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
             triggeredBy: input.triggeredBy,
           })
@@ -1618,6 +1624,15 @@ export class AgentOrchestrator {
           )
         }
 
+        // 视觉助手由用户在全局设置中显式启用并选择外发渠道；在正常会话中直接放行，
+        // 仍由工具服务限制为当前会话/附加目录内的图片。计划模式不执行任何外发操作。
+        if (toolName === 'VisionRelay') {
+          if (currentMode === 'plan') {
+            return { behavior: 'deny' as const, message: '计划模式下不能将本地图片发送给视觉模型，请在计划获批后执行。' }
+          }
+          return { behavior: 'allow' as const }
+        }
+
         const planningDeletionPermission = resolvePlanningDeletionPermission(
           toolName,
           currentMode,
@@ -1698,11 +1713,6 @@ export class AgentOrchestrator {
       const piThinkingLevel = agentRuntime === 'pi'
         ? resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
         : undefined
-      const allAdditionalDirectories = collectAttachedDirectories({
-        extraDirs: additionalDirectories,
-        sessionMeta,
-        workspaceSlug,
-      })
       const systemPromptAppend = buildSystemPrompt({
         agentRuntime,
         workspaceName: workspace?.name,
