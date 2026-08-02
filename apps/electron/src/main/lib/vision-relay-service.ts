@@ -7,7 +7,7 @@
 
 import { basename, extname, isAbsolute, relative, resolve } from 'node:path'
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
-import { nativeImage } from 'electron'
+import sharp from 'sharp'
 import type { FileAttachment } from '@proma/shared'
 import { getAdapter, streamSSE, type ImageAttachmentData } from '@proma/core'
 import { getChannelById, resolveChannelRuntimeApiKey } from './channel-manager'
@@ -57,11 +57,12 @@ function isPathWithinRoot(filePath: string, root: string): boolean {
   return pathRelative === '' || (!!pathRelative && !pathRelative.startsWith('..') && !isAbsolute(pathRelative))
 }
 
-function hasValidImageContent(data: Buffer): boolean {
-  // Chromium 的解码器会验证完整文件，而不仅是容器签名，避免将任意字节伪装成图片外发。
-  const image = nativeImage.createFromBuffer(data)
-  const { width, height } = image.getSize()
-  return !image.isEmpty() && width > 0 && height > 0
+async function hasValidImageContent(data: Buffer, mediaType: string): Promise<boolean> {
+  // Sharp 使用 libvips 解码完整像素数据，避免将任意字节伪装成图片外发。
+  const metadata = await sharp(data, { animated: false, limitInputPixels: 100_000_000 }).metadata()
+  return metadata.width !== undefined && metadata.width > 0
+    && metadata.height !== undefined && metadata.height > 0
+    && metadata.format === mediaType.slice('image/'.length)
 }
 
 interface AuthorizedImage {
@@ -72,7 +73,7 @@ interface AuthorizedImage {
   data: Buffer
 }
 
-function resolveAuthorizedImagePath(imagePath: string, allowedRoots: string[]): AuthorizedImage | VisionRelayResult {
+async function resolveAuthorizedImagePath(imagePath: string, allowedRoots: string[]): Promise<AuthorizedImage | VisionRelayResult> {
   if (!imagePath || !imagePath.trim()) return failure('VISION_FILE_NOT_AUTHORIZED', '未提供图片路径。')
 
   let resolvedPath: string
@@ -117,7 +118,7 @@ function resolveAuthorizedImagePath(imagePath: string, allowedRoots: string[]): 
       return failure('VISION_IMAGE_TOO_LARGE', `图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB。`)
     }
     const data = readFileSync(descriptor)
-    if (data.length !== openedStats.size || !hasValidImageContent(data)) {
+    if (data.length !== openedStats.size || !await hasValidImageContent(data, mediaType)) {
       return failure('VISION_UNSUPPORTED_IMAGE', '图片文件内容与扩展名不匹配，未发送给视觉模型。')
     }
     return { path: resolvedPath, filename: basename(resolvedPath), mediaType, size: openedStats.size, data }
@@ -173,7 +174,7 @@ export async function inspectImageWithVisionRelay(input: InspectImageInput): Pro
     return failure('VISION_NOT_CONFIGURED', '视觉助手尚未配置。请在设置 → 视觉助手中选择支持图片输入的模型。')
   }
 
-  const image = resolveAuthorizedImagePath(input.imagePath, input.allowedRoots)
+  const image = await resolveAuthorizedImagePath(input.imagePath, input.allowedRoots)
   if ('ok' in image) return image
 
   const channel = getChannelById(configured.channelId)

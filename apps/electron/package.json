@@ -53,6 +53,7 @@
     "iconv-lite": "^0.6.3",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.35.3",
     "typebox": "1.1.38"
   },
   "optionalDependencies": {
