@@ -907,7 +907,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, agentRuntime: inputAgentRuntime, workspaceId: requestedWorkspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
+    const { sessionId, userMessage, rawUserMessage, channelId, modelId, agentRuntime: inputAgentRuntime, workspaceId: requestedWorkspaceId, additionalDirectories, customMcpServers, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
     const stderrChunks: string[] = []
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
@@ -915,7 +915,9 @@ export class AgentOrchestrator {
 
     const persistInitialUserMessage = (): void => {
       if (userMessagePersisted) return
-      this.persistUserMessage(sessionId, userMessage)
+      // rawUserMessage 保留展示/持久化用的原始文本（@file 编码原文，remarkMentions 解码显示）；
+      // userMessage 是传给 Agent 的 SDK 文本（@file 路径已解码为真实路径）。
+      this.persistUserMessage(sessionId, rawUserMessage ?? userMessage)
       userMessagePersisted = true
       callbacks.onRunStarted?.({ startedAt: streamStartedAt })
     }

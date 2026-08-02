@@ -1003,8 +1003,10 @@ export interface WorkspaceCapabilities {
 export interface AgentSendInput {
   /** 会话 ID */
   sessionId: string
-  /** 用户消息内容 */
+  /** 用户消息内容（传给 Agent 的 SDK 文本；@file 引用路径已解码为真实路径） */
   userMessage: string
+  /** 仅用于持久化/展示的原始用户输入（保留 @file 编码原文，省略时回退到 userMessage） */
+  rawUserMessage?: string
   /** 渠道 ID（用于获取 API Key） */
   channelId: string
   /** 模型 ID */
