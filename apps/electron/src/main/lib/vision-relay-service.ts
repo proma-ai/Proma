@@ -56,11 +56,102 @@ function isPathWithinRoot(filePath: string, root: string): boolean {
   return pathRelative === '' || (!!pathRelative && !pathRelative.startsWith('..') && !isAbsolute(pathRelative))
 }
 
-function hasExpectedImageMagic(data: Buffer, mediaType: string): boolean {
-  if (mediaType === 'image/png') return data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  if (mediaType === 'image/jpeg') return data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
-  if (mediaType === 'image/gif') return data.subarray(0, 6).toString('ascii') === 'GIF87a' || data.subarray(0, 6).toString('ascii') === 'GIF89a'
-  return data.length >= 12 && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP'
+function hasValidPng(data: Buffer): boolean {
+  if (data.length < 45 || !data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return false
+  let offset = 8
+  let sawHeader = false
+  while (offset + 12 <= data.length) {
+    const length = data.readUInt32BE(offset)
+    const type = data.subarray(offset + 4, offset + 8).toString('ascii')
+    offset += 12 + length
+    if (offset > data.length) return false
+    if (type === 'IHDR') {
+      if (sawHeader || length !== 13) return false
+      sawHeader = true
+    }
+    if (type === 'IEND') return sawHeader && length === 0 && offset === data.length
+  }
+  return false
+}
+
+function skipGifSubBlocks(data: Buffer, offset: number): number {
+  while (offset < data.length) {
+    const size = data[offset++]!
+    if (size === 0) return offset
+    offset += size
+    if (offset > data.length) return -1
+  }
+  return -1
+}
+
+function hasValidGif(data: Buffer): boolean {
+  if (data.length < 14 || !['GIF87a', 'GIF89a'].includes(data.subarray(0, 6).toString('ascii'))) return false
+  let offset = 13
+  if (data[10]! & 0x80) offset += 3 * (1 << ((data[10]! & 0x07) + 1))
+  while (offset < data.length) {
+    const marker = data[offset++]!
+    if (marker === 0x3b) return offset === data.length
+    if (marker === 0x21) { // extension: label then data sub-blocks
+      if (offset >= data.length || (offset = skipGifSubBlocks(data, offset + 1)) < 0) return false
+      continue
+    }
+    if (marker !== 0x2c || offset + 9 > data.length) return false
+    const packed = data[offset + 8]!
+    offset += 9
+    if (packed & 0x80) offset += 3 * (1 << ((packed & 0x07) + 1))
+    if (offset >= data.length || (offset = skipGifSubBlocks(data, offset + 1)) < 0) return false // LZW code size + image data
+  }
+  return false
+}
+
+function hasValidWebp(data: Buffer): boolean {
+  if (data.length < 20 || data.subarray(0, 4).toString('ascii') !== 'RIFF' || data.subarray(8, 12).toString('ascii') !== 'WEBP' || data.readUInt32LE(4) + 8 !== data.length) return false
+  let offset = 12
+  let sawImageChunk = false
+  while (offset + 8 <= data.length) {
+    const type = data.subarray(offset, offset + 4).toString('ascii')
+    const length = data.readUInt32LE(offset + 4)
+    offset += 8 + length + (length % 2)
+    if (offset > data.length) return false
+    if (type === 'VP8 ' || type === 'VP8L' || type === 'VP8X') sawImageChunk = true
+  }
+  return sawImageChunk && offset === data.length
+}
+
+function hasValidJpeg(data: Buffer): boolean {
+  if (data.length < 8 || data[0] !== 0xff || data[1] !== 0xd8) return false
+  let offset = 2
+  let sawFrame = false
+  while (offset + 1 < data.length) {
+    if (data[offset++]! !== 0xff) return false
+    while (data[offset]! === 0xff) offset++
+    const marker = data[offset++]!
+    if (marker === 0xd9) return sawFrame && offset === data.length
+    if (marker === 0x00 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7) || offset + 2 > data.length) return false
+    const length = data.readUInt16BE(offset)
+    if (length < 2 || offset + length > data.length) return false
+    if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) sawFrame = true
+    if (marker === 0xda) {
+      offset += length
+      while (offset + 1 < data.length) {
+        if (data[offset++]! !== 0xff) continue
+        while (data[offset]! === 0xff) offset++
+        const entropyMarker = data[offset++]!
+        if (entropyMarker === 0x00 || (entropyMarker >= 0xd0 && entropyMarker <= 0xd7)) continue
+        return entropyMarker === 0xd9 && sawFrame && offset === data.length
+      }
+      return false
+    }
+    offset += length
+  }
+  return false
+}
+
+function hasValidImageContent(data: Buffer, mediaType: string): boolean {
+  if (mediaType === 'image/png') return hasValidPng(data)
+  if (mediaType === 'image/jpeg') return hasValidJpeg(data)
+  if (mediaType === 'image/gif') return hasValidGif(data)
+  return hasValidWebp(data)
 }
 
 interface AuthorizedImage {
@@ -116,7 +207,7 @@ function resolveAuthorizedImagePath(imagePath: string, allowedRoots: string[]): 
       return failure('VISION_IMAGE_TOO_LARGE', `图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB。`)
     }
     const data = readFileSync(descriptor)
-    if (data.length !== openedStats.size || !hasExpectedImageMagic(data, mediaType)) {
+    if (data.length !== openedStats.size || !hasValidImageContent(data, mediaType)) {
       return failure('VISION_UNSUPPORTED_IMAGE', '图片文件内容与扩展名不匹配，未发送给视觉模型。')
     }
     return { path: resolvedPath, filename: basename(resolvedPath), mediaType, size: openedStats.size, data }
