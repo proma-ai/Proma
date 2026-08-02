@@ -4,17 +4,18 @@ import { getEffectiveProxyUrl } from './proxy-settings-service'
 // EnvHttpProxyAgent 以 URL hostname 匹配 IPv6；方括号形式才能正确匹配 http://[::1]/。
 const LOOPBACK_NO_PROXY_HOSTS = ['localhost', '127.0.0.1', '[::1]']
 
-function readNoProxyEnvironment(): string | undefined {
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.toLowerCase() === 'no_proxy' && value?.trim()) return value
-  }
-  return undefined
+export function readNoProxyEnvironment(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  // 与 EnvHttpProxyAgent 保持相同的 lowercase 优先级。
+  const noProxy = env.no_proxy ?? env.NO_PROXY
+  return noProxy?.trim() || undefined
 }
 
 /**
  * OAuth 的浏览器回调必须直接访问本地 loopback；保留用户已有的 NO_PROXY 规则并补齐它们。
  */
 export function buildOAuthNoProxy(noProxy = readNoProxyEnvironment()): string {
+  if (noProxy?.trim() === '*') return '*'
+
   const hosts = new Set(
     (noProxy ?? '')
       .split(',')
