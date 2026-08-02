@@ -1998,7 +1998,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               path: r.path,
               name: r.name,
               isDirectory: false,
-              scope: 'project',
+              scope: 'session',
             })))
             toast.success(`已引用 ${savedRefs.length} 个文件`)
           }

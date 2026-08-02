@@ -157,7 +157,17 @@ describe('Agent mention serialization', () => {
       '</p>',
     ].join('')))
 
-    expect(markdown).toBe('@file:notes/brief.md /skill:brainstorming #mcp:playwright &session:session-123')
+    expect(markdown).toBe('@file:notes%2Fbrief.md /skill:brainstorming #mcp:playwright &session:session-123')
+  })
+
+  test('encodes file mention paths containing spaces so @file: regex does not truncate them', () => {
+    const markdown = withHtmlDocument(() => htmlToMarkdown([
+      '<p>',
+      '<span data-type="mention" data-id="/Users/me/My report.pdf" data-mention-suggestion-char="@">My report.pdf</span> ',
+      '</p>',
+    ].join('')))
+
+    expect(markdown).toBe('@file:%2FUsers%2Fme%2FMy%20report.pdf')
   })
 
   test('serializes planning selections by reference type rather than the trigger character', () => {

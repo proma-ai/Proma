@@ -535,7 +535,9 @@ export function htmlToMarkdown(
           if (suggestionChar === '/') return `/skill:${dataId}`
           if (suggestionChar === '#') return `#mcp:${dataId}`
           if (suggestionChar === '&') return serializeNamedMention('&session', dataId, dataLabel)
-          return `@file:${dataId}`
+          // 路径可能包含空格等字符，必须编码后再嵌入 @file: 协议，
+          // 否则展示层 @file:(\S+) 正则会在空格处截断（remarkMentions / MentionChip / 排队消息均内置解码）。
+          return `@file:${encodeURIComponent(dataId)}`
         }
         return children
       }
