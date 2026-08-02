@@ -57,17 +57,16 @@ function isPathWithinRoot(filePath: string, root: string): boolean {
   return pathRelative === '' || (!!pathRelative && !pathRelative.startsWith('..') && !isAbsolute(pathRelative))
 }
 
-async function hasValidImageContent(data: Buffer, mediaType: string): Promise<boolean> {
+async function normalizeImageContent(data: Buffer, mediaType: string): Promise<Buffer | undefined> {
   // Sharp 使用 libvips 解码完整像素数据，避免将任意字节伪装成图片外发。
   const image = sharp(data, { animated: false, limitInputPixels: 20_000_000 })
   const metadata = await image.metadata()
   const isExpectedFormat = metadata.width !== undefined && metadata.width > 0
     && metadata.height !== undefined && metadata.height > 0
     && metadata.format === mediaType.slice('image/'.length)
-  if (!isExpectedFormat) return false
-  // raw() 强制解码像素数据，metadata() 仅读取文件头不足以阻断伪造容器。
-  await image.raw().toBuffer()
-  return true
+  if (!isExpectedFormat) return undefined
+  // 重新编码只保留解码出的像素，绝不将原始容器中的附加或截断字节外发。
+  return image.flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer()
 }
 
 interface AuthorizedImage {
@@ -122,11 +121,12 @@ async function resolveAuthorizedImagePath(imagePath: string, allowedRoots: strin
     if (openedStats.size <= 0 || openedStats.size > MAX_IMAGE_BYTES) {
       return failure('VISION_IMAGE_TOO_LARGE', `图片需小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB。`)
     }
-    const data = readFileSync(descriptor)
-    if (data.length !== openedStats.size || !await hasValidImageContent(data, mediaType)) {
-      return failure('VISION_UNSUPPORTED_IMAGE', '图片文件内容与扩展名不匹配，未发送给视觉模型。')
+    const sourceData = readFileSync(descriptor)
+    const data = sourceData.length === openedStats.size ? await normalizeImageContent(sourceData, mediaType) : undefined
+    if (!data || data.length === 0 || data.length > MAX_IMAGE_BYTES) {
+      return failure('VISION_UNSUPPORTED_IMAGE', '图片无法安全解码或重新编码，未发送给视觉模型。')
     }
-    return { path: resolvedPath, filename: basename(resolvedPath), mediaType, size: openedStats.size, data }
+    return { path: resolvedPath, filename: `${basename(resolvedPath, extname(resolvedPath))}.jpg`, mediaType: 'image/jpeg', size: data.length, data }
   } catch {
     return failure('VISION_FILE_NOT_AUTHORIZED', '无法读取图片，未发送给视觉模型。')
   } finally {
