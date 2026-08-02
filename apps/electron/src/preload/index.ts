@@ -646,6 +646,24 @@ export interface ElectronAPI {
   /** 获取工作区记忆摘要 */
   getWorkspaceMemorySummary: (workspaceSlug: string) => Promise<WorkspaceMemorySummary>
 
+  /** 获取 Proactive Memory 统计 */
+  getMemoryStats: () => Promise<import('@proma/shared').MemoryStats>
+
+  /** 搜索 Proactive Memory */
+  searchMemory: (query: string, limit?: number) => Promise<import('@proma/shared').MemorySearchResult>
+
+  /** 列出 Proactive Memory 纠正 */
+  listMemoryCorrections: (status?: string) => Promise<import('@proma/shared').MemoryCorrection[]>
+
+  /** 确认一条纠正 */
+  confirmMemoryCorrection: (id: string) => Promise<boolean>
+
+  /** 拒绝一条纠正 */
+  rejectMemoryCorrection: (id: string) => Promise<boolean>
+
+  /** 读取 Proactive Memory persona 原文 */
+  readMemoryPersona: () => Promise<string | undefined>
+
   /** 读取工作区 CLAUDE.md */
   readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
@@ -1856,6 +1874,30 @@ const electronAPI: ElectronAPI = {
 
   getWorkspaceMemorySummary: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY, workspaceSlug)
+  },
+
+  getMemoryStats: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_STATS)
+  },
+
+  searchMemory: (query: string, limit?: number) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MEMORY, query, limit)
+  },
+
+  listMemoryCorrections: (status?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS, status)
+  },
+
+  confirmMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_MEMORY_CORRECTION, id)
+  },
+
+  rejectMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION, id)
+  },
+
+  readMemoryPersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA)
   },
 
   readWorkspaceClaudeMd: (workspaceSlug: string) => {

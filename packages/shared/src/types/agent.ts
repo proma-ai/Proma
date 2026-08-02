@@ -1590,6 +1590,17 @@ export const AGENT_IPC_CHANNELS = {
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
   /** 获取工作区记忆摘要 */
   GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
+  /** 获取 Proactive Memory 统计 */
+  GET_MEMORY_STATS: 'agent:get-memory-stats',
+  /** 搜索 Proactive Memory */
+  SEARCH_MEMORY: 'agent:search-memory',
+  /** 列出 Proactive Memory 纠正 */
+  LIST_MEMORY_CORRECTIONS: 'agent:list-memory-corrections',
+  /** 确认/拒绝 Proactive Memory 纠正 */
+  CONFIRM_MEMORY_CORRECTION: 'agent:confirm-memory-correction',
+  REJECT_MEMORY_CORRECTION: 'agent:reject-memory-correction',
+  /** 读取 Proactive Memory persona */
+  READ_MEMORY_PERSONA: 'agent:read-memory-persona',
   /** 读取工作区 CLAUDE.md */
   READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
   /** 写入工作区 CLAUDE.md */

@@ -171,6 +171,15 @@ import {
   autoArchiveConversations,
   searchConversationMessages,
 } from './lib/conversation-manager'
+import {
+  stats as memoryStats,
+  search as memorySearch,
+  searchAsText as memorySearchAsText,
+  corrections as memoryCorrections,
+  confirmCorrection as memoryConfirmCorrection,
+  rejectCorrection as memoryRejectCorrection,
+  personaRaw as memoryPersonaRaw,
+} from './lib/memory/service'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
   saveAttachment,
@@ -2499,6 +2508,50 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE,
     async (_, workspaceSlug: string, relativePath: string, content: string): Promise<void> => {
       writeWorkspaceAutoMemoryFile(workspaceSlug, relativePath, content)
+    }
+  )
+
+  // ===== Proactive Memory =====
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_MEMORY_STATS,
+    async (): Promise<import('@proma/shared').MemoryStats> => {
+      return memoryStats()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SEARCH_MEMORY,
+    async (_, query: string, limit?: number): Promise<import('@proma/shared').MemorySearchResult> => {
+      return memorySearch({ query, limit })
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS,
+    async (_, status?: string): Promise<import('@proma/shared').MemoryCorrection[]> => {
+      return memoryCorrections(status as 'pending' | 'active' | 'rejected' | 'superseded' | undefined)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CONFIRM_MEMORY_CORRECTION,
+    async (_, id: string): Promise<boolean> => {
+      return memoryConfirmCorrection(id)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION,
+    async (_, id: string): Promise<boolean> => {
+      return memoryRejectCorrection(id)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA,
+    async (): Promise<string | undefined> => {
+      return memoryPersonaRaw()
     }
   )
 
