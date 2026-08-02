@@ -215,6 +215,24 @@ export function recentAtoms(limit = 20): MemoryAtom[] {
   return readAllAtoms({ includeUnconfirmed: false }).slice(0, limit)
 }
 
+/**
+ * 工作记忆摘要（参考 Nowledge Mem Working Memory）：
+ * 从最近 todo_context（任务上下文）与高优先级 preference 生成当前活跃任务快照。
+ * 用于新会话/压缩后快速恢复工作状态。
+ */
+export function workingMemory(limit = 5): { items: string[]; updatedAt?: number } {
+  const atoms = readAllAtoms({ includeUnconfirmed: false })
+  const tasks = atoms
+    .filter((a) => a.type === 'todo_context')
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || b.createdAt - a.createdAt)
+    .slice(0, limit)
+  if (tasks.length === 0) return { items: [] }
+  return {
+    items: tasks.map((t) => t.content),
+    updatedAt: tasks[0]?.createdAt,
+  }
+}
+
 export function atomById(id: string): MemoryAtom | undefined {
   return getAtomById(id)
 }

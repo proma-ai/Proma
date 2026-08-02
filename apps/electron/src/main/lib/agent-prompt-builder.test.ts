@@ -23,12 +23,6 @@ mock.module('./config-paths', () => ({
   getMemoryLogDir: () => '/tmp/proma-test-config/memory/memory_log',
 }))
 
-mock.module('./memory/service', () => ({
-  contextForMessage: () => '',
-  personaRaw: () => undefined,
-  persona: () => ({ name: undefined, summary: undefined, preferences: [], interactionRules: [], evolution: [], updatedAt: 0 }),
-}))
-
 mock.module('./agent-git-attribution', () => ({
   buildGitAttributionPromptSection: () => '',
   isGitAttributionEnabled: () => false,

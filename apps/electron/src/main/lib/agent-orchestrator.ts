@@ -846,6 +846,12 @@ export class AgentOrchestrator {
       return m.type === 'system' && (m as SDKSystemMessage).subtype === 'compact_boundary'
     })
 
+    // PreCompact 记忆捕获（参考 Nowledge Mem）：检测到 SDK 自动压缩边界时，
+    // 先沉淀当前会话记忆，防止压缩截断后关键信息丢失。
+    if (hasCompactBoundary) {
+      void captureMemoryFromRun(sessionId, undefined, getAgentSessionMessages(sessionId), false)
+    }
+
     const toPersist = accumulatedMessages.filter(
       (m) => m.type === 'assistant' || m.type === 'user' || m.type === 'result'
         || (m.type === 'system' && isPersistableSDKSystemMessage(m as SDKSystemMessage))
@@ -1467,6 +1473,12 @@ export class AgentOrchestrator {
         : existingSdkSessionId
           ? contextualMessage
           : buildContextPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
+
+      // PreCompact 记忆捕获（参考 Nowledge Mem）：手动 /compact 前先沉淀当前会话记忆，
+      // 防止上下文压缩后关键信息丢失。自动压缩由 SDK compact_boundary 事件处理。
+      if (isCompactCommand) {
+        void captureMemoryFromRun(sessionId, workspaceSlug, getAgentSessionMessages(sessionId), false)
+      }
 
       if (existingSdkSessionId) {
         console.log(`[Agent 编排] 使用 resume 模式，SDK session ID: ${existingSdkSessionId}`)

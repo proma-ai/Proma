@@ -17,7 +17,7 @@ import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig } f
 import { getConfigDirName } from './config-paths'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
-import { contextForMessage, personaRaw as getPersonaRaw, persona } from './memory/service'
+import { contextForMessage, personaRaw as getPersonaRaw, persona, workingMemory } from './memory/service'
 
 // ===== 工具使用指南（可复用常量） =====
 
@@ -173,6 +173,13 @@ Proma 统一使用 collaboration 派生子会话承载子 Agent 委派。不要�
 ${personaRawText
       ? `以下是从历史会话沉淀的用户画像（L3），帮助你在跨会话中保持一致：\n\n<persona_profile>\n${personaLines.join('\n')}\n</persona_profile>`
       : 'Proma 具备长期记忆能力：会在每条消息前自动检索相关历史记忆（若命中会以 <memory_context> 注入），并提供 memory_search 工具供主动查询。'}`)
+
+    // 工作记忆（参考 Nowledge Mem Working Memory）：当前活跃任务快照，帮助快速恢复工作状态
+    const wm = workingMemory()
+    if (wm.items.length > 0) {
+      const wmLines = wm.items.map((item) => `- ${item}`).join('\n')
+      sections.push(`<working_memory updatedAt="${wm.updatedAt ? new Date(wm.updatedAt).toISOString() : ''}">\n${wmLines}\n</working_memory>`)
+    }
   }
 
   // Proma 协作会话

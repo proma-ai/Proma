@@ -77,3 +77,24 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     expect(stats.rootDir).toBe(memRoot)
   })
 })
+
+describe('memory/service 工作记忆', () => {
+  it('workingMemory 从 todo_context 生成摘要', async () => {
+    const service = await import('../memory/service')
+    store.writeAtom({ content: '正在开发 proactive memory', type: 'todo_context', priority: 80 })
+    store.writeAtom({ content: '用户叫 Conrad', type: 'fact', priority: 60 })
+    const wm = service.workingMemory()
+    expect(wm.items.length).toBeGreaterThan(0)
+    expect(wm.items.some((i) => i.includes('proactive memory'))).toBe(true)
+    expect(wm.items.some((i) => i.includes('Conrad'))).toBe(false) // fact 不应进入工作记忆
+    expect(typeof wm.updatedAt).toBe('number')
+  })
+
+  it('workingMemory 无任务时返回空', async () => {
+    const service = await import('../memory/service')
+    // beforeEach 已清空目录；写一条 fact（非任务）
+    store.writeAtom({ content: '一条事实', type: 'fact', priority: 50 })
+    const wm = service.workingMemory()
+    expect(wm.items).toEqual([])
+  })
+})
