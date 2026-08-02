@@ -713,3 +713,47 @@ export function getAutomationsPath(): string {
 export function getPlanningDatabasePath(): string {
   return join(getConfigDir(), 'planning.db')
 }
+
+/**
+ * 获取长期记忆（Proactive Memory）根目录
+ *
+ * @returns ~/.proma/memory/
+ */
+export function getMemoryRootDir(): string {
+  return join(getConfigDir(), 'memory')
+}
+
+/** 记忆元数据索引文件路径 */
+export function getMemoryIndexPath(): string {
+  return join(getMemoryRootDir(), 'index.json')
+}
+
+/** L3 用户画像路径 */
+export function getPersonaPath(): string {
+  return join(getMemoryRootDir(), 'profile.md')
+}
+
+/** L1 原子记忆按天分文件目录 */
+export function getMemoryAtomsDir(): string {
+  return join(getMemoryRootDir(), 'atoms')
+}
+
+/** 某天的 L1 原子记忆文件路径 */
+export function getMemoryAtomsDayPath(dateKey: string): string {
+  return join(getMemoryAtomsDir(), `${dateKey}.jsonl`)
+}
+
+/** L2 场景块目录 */
+export function getMemoryScenesDir(): string {
+  return join(getMemoryRootDir(), 'scenes')
+}
+
+/** 行为纠正候选文件路径 */
+export function getCorrectionsPath(): string {
+  return join(getMemoryRootDir(), 'corrections.json')
+}
+
+/** 记忆变更日志目录 */
+export function getMemoryLogDir(): string {
+  return join(getMemoryRootDir(), 'memory_log')
+}

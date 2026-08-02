@@ -8,6 +8,7 @@
 import type { AgentRuntime, AgentSessionMeta, PromaPermissionMode } from '@proma/shared'
 import { injectAgentCollaborationMcpServer } from '../agent-collaboration-tools'
 import { injectAutomationMcpServer } from '../automation-agent-tools'
+import { injectMemoryMcpServer } from '../memory/memory-agent-tools'
 import { injectNanoBananaMcpServer } from '../chat-tools/nano-banana-mcp'
 import { isBuiltinMcpUserEnabled } from './settings'
 
@@ -52,6 +53,13 @@ export async function injectBuiltinMcpServers(ctx: BuiltinMcpInjectContext): Pro
       agentRuntime: ctx.agentRuntime,
       workspaceId: ctx.workspaceId,
       triggeredBy: ctx.triggeredBy,
+    }))
+  }
+
+  if (isBuiltinMcpUserEnabled('memory')) {
+    await injectBuiltinSafely('memory', () => injectMemoryMcpServer(ctx.sdk, ctx.mcpServers, {
+      sessionId: ctx.sessionId,
+      workspaceSlug: ctx.workspaceSlug,
     }))
   }
 

@@ -78,6 +78,35 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { extractAndCapture } from './memory/service'
+
+// ===== 记忆捕获（主动记忆钩子） =====
+
+/**
+ * 从会话消息中提取最近 user/assistant 文本，fire-and-forget 触发记忆提取。
+ * 被 completeRun / failRun 调用；提取失败不阻塞主流程。
+ */
+function captureMemoryFromRun(
+  sessionId: string,
+  workspaceSlug: string | undefined,
+  messages: AgentMessage[] | undefined,
+  stoppedByUser?: boolean,
+): Promise<void> {
+  if (stoppedByUser) return Promise.resolve()
+  if (!messages || messages.length === 0) return Promise.resolve()
+  // 取最近 20 条 user/assistant 文本
+  const recent = messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => typeof m.content === 'string' && m.content.trim().length > 0)
+    .slice(-20)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+  if (recent.length === 0) return Promise.resolve()
+  return extractAndCapture(recent, { sessionId, workspaceSlug })
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn('[Memory] 会话结束记忆捕获失败:', error instanceof Error ? error.message : error)
+    })
+}
 
 // ===== 类型定义 =====
 
@@ -1176,6 +1205,7 @@ export class AgentOrchestrator {
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
+      void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
     }
     // 轻量完成：turn 主体结束但仍有后台任务在飞行。
     // 关键区别——不调用 releaseActiveRun，保留 activeSessions/activeChannels/sessionPermissionModes，
@@ -1195,6 +1225,7 @@ export class AgentOrchestrator {
       releaseActiveRun()
       callbacks.onError(error)
       callbacks.onComplete(messages, opts)
+      void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
     }
 
     // 3. 构建环境变量
@@ -1394,6 +1425,7 @@ export class AgentOrchestrator {
         workspaceName: workspace?.name,
         workspaceSlug,
         agentCwd,
+        userText: userMessage,
       })
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
