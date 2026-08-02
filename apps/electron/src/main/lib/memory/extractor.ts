@@ -61,6 +61,9 @@ function resolveEnv(name: string): string | undefined {
 
 /** 解析 LLM 配置：优先环境变量，其次项目根 .env，其次 ~/.proma/.env */
 export function getMemoryLlmConfig(): MemoryLlmConfig | undefined {
+  // 显式禁用（测试隔离 / 用户临时关闭）
+  if (process.env.PROMA_MEMORY_LLM_DISABLED === '1') return undefined
+
   const envVars = process.env
   const projectEnv = loadDotEnv(join(process.cwd(), '.env'))
   const homeEnv = loadDotEnv(join(homedir(), '.proma', '.env'))

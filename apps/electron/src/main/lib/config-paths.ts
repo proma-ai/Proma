@@ -717,9 +717,13 @@ export function getPlanningDatabasePath(): string {
 /**
  * 获取长期记忆（Proactive Memory）根目录
  *
- * @returns ~/.proma/memory/
+ * 支持 PROMA_MEMORY_DIR 环境变量覆盖（测试隔离 / 自定义存储位置）。
+ *
+ * @returns ~/.proma/memory/（或 PROMA_MEMORY_DIR 指定目录）
  */
 export function getMemoryRootDir(): string {
+  const override = process.env.PROMA_MEMORY_DIR?.trim()
+  if (override) return override
   return join(getConfigDir(), 'memory')
 }
 

@@ -12,6 +12,21 @@ mock.module('./agent-workspace-manager', () => ({
 
 mock.module('./config-paths', () => ({
   getConfigDirName: () => '.proma',
+  getConfigDir: () => '/tmp/proma-test-config',
+  getMemoryRootDir: () => '/tmp/proma-test-config/memory',
+  getMemoryIndexPath: () => '/tmp/proma-test-config/memory/index.json',
+  getPersonaPath: () => '/tmp/proma-test-config/memory/profile.md',
+  getMemoryAtomsDir: () => '/tmp/proma-test-config/memory/atoms',
+  getMemoryAtomsDayPath: (dateKey: string) => `/tmp/proma-test-config/memory/atoms/${dateKey}.jsonl`,
+  getMemoryScenesDir: () => '/tmp/proma-test-config/memory/scenes',
+  getCorrectionsPath: () => '/tmp/proma-test-config/memory/corrections.json',
+  getMemoryLogDir: () => '/tmp/proma-test-config/memory/memory_log',
+}))
+
+mock.module('./memory/service', () => ({
+  contextForMessage: () => '',
+  personaRaw: () => undefined,
+  persona: () => ({ name: undefined, summary: undefined, preferences: [], interactionRules: [], evolution: [], updatedAt: 0 }),
 }))
 
 mock.module('./agent-git-attribution', () => ({
