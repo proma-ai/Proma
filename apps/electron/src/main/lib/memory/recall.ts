@@ -44,6 +44,10 @@ const STOP_WORDS = new Set([
   // 中文单字量词/虚词（tokenize 会同时输出单字，需单独过滤）
   '一', '两', '几', '个', '种', '些', '这', '那', '每', '各', '只', '下', '次',
   '上', '里', '中', '外', '前', '后', '边', '处', '时', '候', '起', '请', '帮', '写', '做',
+  // 时间/高频名词单字（避免“今天股票行情”靠单字叠加突破门槛）
+  '今', '日', '天', '昨', '明', '股', '票', '行', '情', '涨', '跌', '盘',
+  // 时间双字词
+  '今日', '昨天', '明天', '昨天', '股票', '行情', '股市', '大盘',
   // 英文功能词
   'the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on',
   'for', 'with', 'and', 'or', 'but', 'i', 'you', 'he', 'she', 'it', 'we',
@@ -409,14 +413,15 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
     }
   }
 
-  // 通道 3：规则加权（仅身份/偏好类进入补充通道；仅当原查询有真相关时启用，
-  // 避免无关查询被规则通道注入 preference 噪声）
+  // 通道 3：规则加权（仅身份/偏好类进入补充通道；且必须与查询有词命中——
+  // 避免“错峰运行”等 preference 在任意 kw 真相关查询下全量霸榜）
+  const ruleKwIds = new Set(kwResult.hits.map((h) => h.atom.id))
   const ruleList = kwList.length > 0
     ? [...allAtoms]
         .map((atom) => ({ atom, score: ruleBoost(atom) }))
-        .filter((r) => r.score >= 0.08)
+        .filter((r) => r.score >= 0.08 && ruleKwIds.has(r.atom.id)) // 必须与查询词命中
         .sort((a, b) => b.score - a.score)
-        .slice(0, Math.max(limit, 10))
+        .slice(0, Math.max(limit, 5))
     : []
 
   // RRF 融合（含改写查询补充通道）
@@ -461,14 +466,21 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   // 把正确答案（worker 实现）挤到第 6+。按“项目+核心词”聚类，同簇只保留最高分 1-2 条。
   if (filtered.length > 1) {
     // 提取记忆的主题键：项目名 + 内容中最高频的 2 个关键词
+    // 同主题聚类：项目名 + 内容核心实体（英文词/技术名优先）
     const clusterKey = (atom: MemoryAtom): string => {
-      const content = atom.content
-      const project = ['codelens', 'shopgo', 'docflow', 'proma', 'code']
-        .find((p) => content.toLowerCase().includes(p)) ?? ''
-      const words = content.toLowerCase().match(/[\u4e00-\u9fff]{2,4}/g) ?? []
-      // 取出现频率最高的中文词组（粗略：选最长的几个）
-      const top = words.sort((a, b) => b.length - a.length).slice(0, 2).join('|')
-      return `${project}:${top}`
+      const content = atom.content.toLowerCase()
+      const project = ['codelens', 'shopgo', 'docflow', 'proma']
+        .find((p) => content.includes(p)) ?? ''
+      // 英文技术词（worker/crdt/prosemirror/k6/redis 等）是最强主题信号
+      const enWords = content.match(/[a-z][a-z0-9_]{2,}/g) ?? []
+      // 中文业务名词：去掉常见动词/虚词后取 2 个（非全局正则避免 lastIndex 状态问题）
+      const noise = /用户|已经|完成|需要|要求|实现|使用|做了|计划|准备|今天|今日|支持|用于|增加|添加|优化|解决|处理|避免|进行|开始|正在|问题|性能|功能|项目|方案|代码|方式|方法|时候|可以|会|要|能|到|和|与|在|把|被|让|给/
+      const zhWords = (content.match(/[\u4e00-\u9fff]{2,4}/g) ?? [])
+        .filter((w) => !noise.test(w))
+        .sort((a, b) => b.length - a.length)
+        .slice(0, 2)
+      const entities = [...new Set([...enWords.slice(0, 2), ...zhWords])].join('|')
+      return `${project}:${entities}`
     }
     const seenCluster = new Map<string, number>() // cluster -> 已保留的高分
     const kept: typeof filtered = []
