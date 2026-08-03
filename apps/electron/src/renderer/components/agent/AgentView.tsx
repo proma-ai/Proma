@@ -1080,7 +1080,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [appendLiveUserMessage, removeLiveUserMessage, sessionId])
 
   const startQueuedMessageRun = React.useCallback(async (
-    text: string,
+    displayText: string,
+    sdkText: string,
     mentions: ReturnType<typeof parseQueuedMessageMentions>,
     channelId: string,
     queuedAdditionalDirectories: string[] = [],
@@ -1105,12 +1106,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
 
-    appendOptimisticPersistedMessage(createUserSDKMessage(text, undefined, streamStartedAt))
+    appendOptimisticPersistedMessage(createUserSDKMessage(displayText, undefined, streamStartedAt))
 
     try {
       await window.electronAPI.sendAgentMessage({
         sessionId,
-        userMessage: text,
+        // Agent 侧使用解码后的 SDK 文本（@file 路径还原为真实路径），
+        // 展示/持久化使用 displayText（编码原文，remarkMentions 解码显示）。
+        userMessage: sdkText,
+        rawUserMessage: displayText,
         channelId,
         modelId: agentModelId || undefined,
         agentRuntime: sessionAgentRuntime,
@@ -1177,7 +1181,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       } catch (error) {
         if (isStaleAgentQueueError(error)) {
           console.warn('[AgentView] 检测到陈旧的 Agent 追加通道，改为启动新一轮运行:', error)
-          await startQueuedMessageRun(payload.rawText, payload.mentions, agentChannelId, message.additionalDirectories)
+          await startQueuedMessageRun(payload.rawText, payload.sdkText, payload.mentions, agentChannelId, message.additionalDirectories)
           return
         }
         throw error
@@ -1185,7 +1189,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return
     }
 
-    await startQueuedMessageRun(payload.rawText, payload.mentions, agentChannelId, message.additionalDirectories)
+    await startQueuedMessageRun(payload.rawText, payload.sdkText, payload.mentions, agentChannelId, message.additionalDirectories)
   }, [
     agentChannelId,
     backgroundWaiting,
@@ -1343,6 +1347,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     // 快照当前上下文
     const snapshot = {
       message: pendingPrompt.message,
+      // Agent 侧使用解码后的 SDK 文本（@file 路径还原为真实路径），
+      // 展示/持久化保留编码原文（remarkMentions 解码显示）。
+      sdkMessage: parseQueuedMessageMentions(pendingPrompt.message).cleanedText,
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
       workspaceId: currentWorkspaceId || undefined,
@@ -1383,7 +1390,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 发送消息
       const input: AgentSendInput = {
         sessionId,
-        userMessage: snapshot.message,
+        userMessage: snapshot.sdkMessage,
+        rawUserMessage: snapshot.message,
         channelId: snapshot.channelId,
         modelId: snapshot.modelId,
         agentRuntime: sessionAgentRuntime,
@@ -1967,15 +1975,62 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           }
         }
 
-        // 普通文件作为附件
+        // 普通文件：复制到会话私有目录后插入 @ 引用（方案 B）
+        // 引用指向会话私有工作目录内的副本路径，Agent 通过会话私有目录即可访问，
+        // 与右侧面板拖拽/键盘 @ 引用保持一致；超大文件或无项目时回退附件逻辑。
         const regularFiles = filePaths.map((p) => pathMap.get(p)!).filter(Boolean)
         if (regularFiles.length > 0) {
-          const fileSourcePaths = new Map<File, string>()
+          const sourcePaths = new Map<File, string>()
           for (const path of filePaths) {
             const file = pathMap.get(path)
-            if (file) fileSourcePaths.set(file, path)
+            if (file) sourcePaths.set(file, path)
           }
-          addFilesAsAttachments(regularFiles, fileSourcePaths)
+
+          const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
+          const canSave = Boolean(workspace?.slug)
+          const savedRefs: Array<{ path: string; name: string }> = []
+          const fallbackFiles: File[] = []
+
+          for (const file of regularFiles) {
+            if (!canSave || file.size > MAX_ATTACHMENT_SIZE) {
+              fallbackFiles.push(file)
+              continue
+            }
+            try {
+              const data = await fileToBase64(file)
+              const saved = await window.electronAPI.saveFilesToAgentSession({
+                workspaceSlug: workspace!.slug,
+                sessionId,
+                files: [{ filename: file.name, data }],
+              })
+              if (saved && saved.length > 0) {
+                const [savedFile] = saved
+                if (savedFile) {
+                  savedRefs.push({ path: savedFile.targetPath, name: savedFile.filename })
+                } else {
+                  fallbackFiles.push(file)
+                }
+              } else {
+                fallbackFiles.push(file)
+              }
+            } catch (error) {
+              console.error('[AgentView] 外部文件复制到会话目录失败:', error)
+              fallbackFiles.push(file)
+            }
+          }
+
+          if (savedRefs.length > 0) {
+            richTextInputRef.current?.insertFileMentions(savedRefs.map((r) => ({
+              path: r.path,
+              name: r.name,
+              isDirectory: false,
+              scope: 'session',
+            })))
+            toast.success(`已引用 ${savedRefs.length} 个文件`)
+          }
+          if (fallbackFiles.length > 0) {
+            addFilesAsAttachments(fallbackFiles, sourcePaths)
+          }
         }
       } catch (error) {
         console.error('[AgentView] 路径检测失败，回退处理:', error)
@@ -1985,7 +2040,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       // 无路径信息：回退，所有项按普通文件处理
       addFilesAsAttachments(droppedFiles)
     }
-  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap])
+  }, [sessionId, addFilesAsAttachments, addPanelDirectory, setAttachedDirsMap, workspaces, currentWorkspaceId])
 
   /** ModelSelector 选择回调 */
   const handleModelSelect = React.useCallback((option: ModelOption): void => {
@@ -2290,6 +2345,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     // 2. 构建最终消息
     const finalMessage = fileReferences + effectiveText
     const mentions = parseQueuedMessageMentions(effectiveText)
+    // Agent 侧使用解码后的 SDK 文本（@file 路径还原为真实路径，Agent 可读取）；
+    // 气泡展示/持久化使用编码原文（remarkMentions 解码显示），与排队路径 rawText/sdkText 分离语义一致。
+    const sdkMessage = fileReferences + mentions.cleanedText
 
     // 清除打断状态（上一轮的打断标记不再显示）
     store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
@@ -2337,7 +2395,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     const input: AgentSendInput = {
       sessionId,
-      userMessage: finalMessage,
+      userMessage: sdkMessage,
+      rawUserMessage: finalMessage,
       channelId: agentChannelId,
       modelId: agentModelId || undefined,
       agentRuntime: sessionAgentRuntime,
@@ -2523,11 +2582,13 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (!retryChannelId || streaming) return
 
     // 找到最后一条用户消息
-    const lastUserMessage = [...persistedSDKMessages]
+    const lastUserRawMessage = [...persistedSDKMessages]
       .reverse()
       .map(getUserTextFromSDKMessage)
       .find((text): text is string => text !== null)
-    if (!lastUserMessage) return
+    if (!lastUserRawMessage) return
+    // 重试重发给 Agent 的消息：@file 路径还原为真实路径（持久化存的是编码原文）
+    const lastUserMessage = parseQueuedMessageMentions(lastUserRawMessage).cleanedText
 
     // 与主进程按 UUID 的原子删除同步更新当前 React 状态和 LRU cache，避免旧错误
     // 在下一轮回复开始前仍被页面渲染。旧会话没有 UUID 时保留历史，由主进程幂等处理。
@@ -2565,7 +2626,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
     window.electronAPI.sendAgentMessage({
       sessionId,
+      // Agent 侧使用解码后的文本（@file 真实路径）；持久化/展示保留编码原文，避免新历史记录被 \S+ 截断
       userMessage: lastUserMessage,
+      rawUserMessage: lastUserRawMessage,
       channelId: retryChannelId,
       modelId: retryModelId || undefined,
       agentRuntime: sessionAgentRuntime,

@@ -481,6 +481,24 @@ function resolvePiModelInput(
   return input
 }
 
+
+/**
+ * 解析模型图片输入能力。未知模型保持 unknown，由调用方决定是否保守拒绝。
+ * Vision Relay 等会发生数据外发的功能仅接受明确支持图片输入的模型。
+ */
+export async function resolvePiImageInputCapability(
+  provider: ProviderType,
+  modelId: string | undefined,
+): Promise<'supported' | 'unsupported' | 'unknown'> {
+  const resolvedModelId = stripAgentSdkContextSuffix(modelId)
+  if (!resolvedModelId) return 'unknown'
+  const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
+  if (!catalogModel && !supportsOfficialDeepSeekV4Vision(provider, resolvedModelId)) return 'unknown'
+  return resolvePiModelInput(provider, resolvedModelId, catalogModel?.input).includes('image')
+    ? 'supported'
+    : 'unsupported'
+}
+
 /** Resolve Pi session reasoning from a verified profile before catalog fallback. */
 export async function resolvePiReasoningCapability(
   provider: ProviderType,

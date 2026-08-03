@@ -224,7 +224,17 @@ export function parseQueuedMessageMentions(text: string): ParsedQueuedMessageMen
   }
 
   return {
-    cleanedText: text.replace(REF_PATTERN, '').trim(),
+    cleanedText: text
+      .replace(REF_PATTERN, '')
+      // @file: 路径在 htmlToMarkdown 序列化时已 encodeURIComponent（路径可能含空格），
+      // 这里还原为真实路径，保证 Agent 侧读取的是可访问的完整路径；
+      // 仅当含百分号编码时解码，避免破坏旧的未编码路径。
+      .replace(/@file:([^\s]+)/g, (full, encodedPath: string) =>
+        /%[0-9A-Fa-f]{2}/.test(encodedPath)
+          ? `@file:${decodeReferenceLabel(encodedPath)}`
+          : full
+      )
+      .trim(),
     mentionedSkills,
     mentionedMcpServers,
     mentionedSessionIds,

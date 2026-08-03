@@ -44,6 +44,7 @@ type PiNativeRetryEvent =
  */
 export function createPiRetryTerminalGate<T>(): {
   defer: (error: T) => void
+  peek: () => T | undefined
   settle: (willRetry: boolean) => T | undefined
 } {
   let pendingError: T | undefined
@@ -51,6 +52,9 @@ export function createPiRetryTerminalGate<T>(): {
   return {
     defer(error) {
       pendingError = error
+    },
+    peek() {
+      return pendingError
     },
     settle(willRetry) {
       const terminalError = willRetry ? undefined : pendingError

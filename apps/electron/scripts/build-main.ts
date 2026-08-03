@@ -42,6 +42,7 @@ const buildOptions: esbuild.BuildOptions = {
     '@earendil-works/pi-coding-agent',
     '@earendil-works/pi-agent-core',
     '@earendil-works/pi-ai',
+    'sharp',
   ],
   define: {
     'process.env.PROMA_API_URL': JSON.stringify(PROMA_API_URL),

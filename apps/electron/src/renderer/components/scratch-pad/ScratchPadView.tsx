@@ -699,8 +699,8 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
 
   const isPane = variant === 'pane'
   const scrollClassName = isPane
-    ? 'flex-1 overflow-auto scrollbar-thin px-4 pt-4 pb-20'
-    : 'flex-1 overflow-auto scrollbar-thin px-8 pt-6 pb-20'
+    ? 'flex-1 overflow-auto scrollbar-thin px-4 pt-4'
+    : 'flex-1 overflow-auto scrollbar-thin px-8 pt-6'
   const contentClassName = isPane ? 'h-full max-w-none' : 'max-w-3xl mx-auto h-full'
   const speechWrapperClassName = isPane
     ? 'absolute left-1/2 -translate-x-1/2 bottom-9 z-20'
@@ -750,7 +750,7 @@ function ScratchPadEditor({ variant }: ScratchPadEditorProps): React.ReactElemen
           {loaded ? (
             <EditorContent
               editor={editor}
-              className="scratch-pad-editor prose prose-sm dark:prose-invert max-w-none h-full [&_.ProseMirror]:min-h-full [&_.ProseMirror]:outline-none [&_.ProseMirror]:text-sm [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground/50 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0"
+              className="scratch-pad-editor prose prose-sm dark:prose-invert max-w-none h-full [&_.ProseMirror]:min-h-full [&_.ProseMirror]:pb-[33vh] [&_.ProseMirror]:outline-none [&_.ProseMirror]:text-sm [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground/50 [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0"
             />
           ) : (
             <div className="min-h-[200px] flex items-center justify-center">

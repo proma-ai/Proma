@@ -19,6 +19,23 @@ const DEFAULT_PROXY_CONFIG: ProxyConfig = {
   manualUrl: '',
 }
 
+/** 代理 URL 可能携带认证信息；日志中绝不能输出其用户名或密码。 */
+export function redactProxyUrl(proxyUrl: string): string {
+  try {
+    const url = new URL(proxyUrl)
+    if (!['http:', 'https:', 'socks:', 'socks4:', 'socks5:'].includes(url.protocol)) {
+      return '[invalid proxy URL]'
+    }
+    if (url.username || url.password) {
+      url.username = '***'
+      url.password = '***'
+    }
+    return url.toString()
+  } catch {
+    return '[invalid proxy URL]'
+  }
+}
+
 /**
  * 读取代理配置
  *
@@ -51,7 +68,10 @@ export async function saveProxySettings(config: ProxyConfig): Promise<void> {
 
   try {
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
-    console.log('[代理配置] 配置已保存:', config)
+    console.log('[代理配置] 配置已保存:', {
+      ...config,
+      manualUrl: config.manualUrl ? redactProxyUrl(config.manualUrl) : '',
+    })
   } catch (error) {
     console.error('[代理配置] 保存配置失败:', error)
     throw new Error('保存代理配置失败')
@@ -78,7 +98,7 @@ export async function getEffectiveProxyUrl(): Promise<string | undefined> {
   if (config.mode === 'system') {
     const result = await detectSystemProxy()
     if (result.success && result.proxyUrl) {
-      console.log('[代理配置] 使用系统代理:', result.proxyUrl)
+      console.log('[代理配置] 使用系统代理:', redactProxyUrl(result.proxyUrl))
       return result.proxyUrl
     }
     console.log('[代理配置] 系统代理检测失败:', result.message)
@@ -87,7 +107,7 @@ export async function getEffectiveProxyUrl(): Promise<string | undefined> {
 
   // 手动模式
   if (config.manualUrl.trim()) {
-    console.log('[代理配置] 使用手动配置代理:', config.manualUrl)
+    console.log('[代理配置] 使用手动配置代理:', redactProxyUrl(config.manualUrl))
     return config.manualUrl.trim()
   }
 

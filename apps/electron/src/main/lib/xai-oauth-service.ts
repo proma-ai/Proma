@@ -8,6 +8,7 @@
 
 import { shell } from 'electron'
 import type { XaiOAuthCredentials, XaiOAuthDeviceCode } from '@proma/shared'
+import { runWithOAuthProxyScope } from './oauth-proxy-scope'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type OAuthCredential = XaiOAuthCredentials & { type: 'oauth'; [key: string]: unknown }
@@ -71,32 +72,34 @@ export async function loginXaiOAuth(callbacks?: XaiLoginCallbacks): Promise<XaiO
   activeLoginAbort = abort
 
   try {
-    const runtime = await sdk.ModelRuntime.create({
-      credentials: createEphemeralCredentialStore(),
-      allowModelNetwork: false,
+    return await runWithOAuthProxyScope(async () => {
+      const runtime = await sdk.ModelRuntime.create({
+        credentials: createEphemeralCredentialStore(),
+        allowModelNetwork: false,
+      })
+      const credentials = await runtime.login('xai', 'oauth', {
+        signal: abort.signal,
+        // xAI 的内置 OAuth 直接走 device code，不会向此 callback 提问；保留拒绝路径
+        // 以便上游未来增加交互时不会无限挂起。
+        prompt: async (prompt) => new Promise<string>((_resolve, reject) => {
+          const cancel = () => reject(new Error('登录已取消'))
+          prompt.signal?.addEventListener('abort', cancel, { once: true })
+          abort.signal.addEventListener('abort', cancel, { once: true })
+        }),
+        notify: (event) => {
+          if (event.type === 'device_code') {
+            console.log(`[xAI OAuth] 请在浏览器中授权（设备码：${event.userCode}）`)
+            callbacks?.onDeviceCode?.({ userCode: event.userCode, verificationUri: event.verificationUri })
+            shell.openExternal(event.verificationUri).catch((error) => {
+              console.error('[xAI OAuth] 打开授权页面失败:', error)
+            })
+          } else if (event.type === 'progress' || event.type === 'info') {
+            console.log(`[xAI OAuth] ${event.message}`)
+          }
+        },
+      })
+      return normalizeCredentials(credentials)
     })
-    const credentials = await runtime.login('xai', 'oauth', {
-      signal: abort.signal,
-      // xAI 的内置 OAuth 直接走 device code，不会向此 callback 提问；保留拒绝路径
-      // 以便上游未来增加交互时不会无限挂起。
-      prompt: async (prompt) => new Promise<string>((_resolve, reject) => {
-        const cancel = () => reject(new Error('登录已取消'))
-        prompt.signal?.addEventListener('abort', cancel, { once: true })
-        abort.signal.addEventListener('abort', cancel, { once: true })
-      }),
-      notify: (event) => {
-        if (event.type === 'device_code') {
-          console.log(`[xAI OAuth] 请在浏览器中授权（设备码：${event.userCode}）`)
-          callbacks?.onDeviceCode?.({ userCode: event.userCode, verificationUri: event.verificationUri })
-          shell.openExternal(event.verificationUri).catch((error) => {
-            console.error('[xAI OAuth] 打开授权页面失败:', error)
-          })
-        } else if (event.type === 'progress' || event.type === 'info') {
-          console.log(`[xAI OAuth] ${event.message}`)
-        }
-      },
-    })
-    return normalizeCredentials(credentials)
   } finally {
     if (activeLoginAbort === abort) activeLoginAbort = undefined
   }
@@ -110,13 +113,15 @@ export function cancelXaiOAuthLogin(): void {
 /** 通过 Pi 内置 xAI provider 刷新 token。 */
 export async function refreshXaiOAuth(refreshToken: string): Promise<XaiOAuthCredentials> {
   const sdk = await loadPiSdk()
-  const store = createEphemeralCredentialStore({
-    type: 'oauth',
-    access: '',
-    refresh: refreshToken,
-    expires: 0,
+  return runWithOAuthProxyScope(async () => {
+    const store = createEphemeralCredentialStore({
+      type: 'oauth',
+      access: '',
+      refresh: refreshToken,
+      expires: 0,
+    })
+    const runtime = await sdk.ModelRuntime.create({ credentials: store, allowModelNetwork: false })
+    await runtime.getAuth('xai')
+    return normalizeCredentials(await store.read('xai'))
   })
-  const runtime = await sdk.ModelRuntime.create({ credentials: store, allowModelNetwork: false })
-  await runtime.getAuth('xai')
-  return normalizeCredentials(await store.read('xai'))
 }
