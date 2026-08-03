@@ -338,25 +338,30 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
     return { query, hits, strategy: 'latest', durationMs: Date.now() - started }
   }
 
-  // 通道 1：关键词
+  // 通道 1：关键词（精确匹配优先，权重高）
   const kwResult = searchMemoriesByKeyword({ query, limit: Math.max(limit, 10), includeUnconfirmed: request.includeUnconfirmed })
   const kwList = kwResult.hits.map((h) => ({ atom: h.atom, score: h.score }))
 
-  // 通道 2：embedding（语义）
+  // 通道 2：embedding（语义，仅补充 keyword 未覆盖的）
+  const kwIds = new Set(kwList.map((r) => r.atom.id))
   const provider = getEmbeddingProvider()
   let embList: Array<{ atom: MemoryAtom; score: number }> = []
   if (provider) {
     const queryVec = await provider.embed(query)
     if (queryVec) {
-      const batch = await provider.embedBatch(allAtoms.slice(0, 50).map((a) => a.content.slice(0, 200)))
+      const batch = await provider.embedBatch(allAtoms.slice(0, 80).map((a) => a.content.slice(0, 200)))
       const scored: Array<{ atom: MemoryAtom; score: number }> = []
       for (let i = 0; i < batch.length; i++) {
         const vec = batch[i]
         if (!vec) continue
         const sim = cosineSimilarity(queryVec, vec)
-        if (sim > 0.55) scored.push({ atom: allAtoms[i]!, score: sim })
+        if (sim > 0.6) scored.push({ atom: allAtoms[i]!, score: sim })
       }
-      embList = scored.sort((a, b) => b.score - a.score).slice(0, Math.max(limit, 10))
+      // 只保留 keyword 未命中的（避免 embedding 干扰精确匹配）
+      embList = scored
+        .filter((r) => !kwIds.has(r.atom.id))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(limit, 10))
     }
   }
 
@@ -371,8 +376,15 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   const merged = rrfMerge([kwList, embList, ruleList])
   const maxScore = merged.size > 0 ? Math.max(...[...merged.values()].map((v) => v.score)) : 0
 
+  // keyword 优先：keyword 精确命中的记忆强制排前（精确匹配可信度最高，embedding 只做补充）
+  const kwHitIds = new Set(kwResult.hits.map((h) => h.atom.id))
   const hits: MemorySearchHit[] = [...merged.values()]
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      const aKw = kwHitIds.has(a.atom.id) ? 1 : 0
+      const bKw = kwHitIds.has(b.atom.id) ? 1 : 0
+      if (aKw !== bKw) return bKw - aKw
+      return b.score - a.score
+    })
     .slice(0, limit)
     .map((item) => ({
       atom: item.atom,
