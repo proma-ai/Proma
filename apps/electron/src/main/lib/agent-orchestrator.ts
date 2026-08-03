@@ -48,7 +48,7 @@ import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAg
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession, ensureClaudeSessionSettings, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession, ensureClaudeSessionSettings, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
 import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getConfigDir, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -80,6 +80,7 @@ import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 import { extractAndCapture } from './memory/service'
 import { evaluateSessionSuggestions } from './suggest/service'
+import { extractRecentConversationText } from './suggest/sdk-messages'
 
 // ===== 记忆捕获（主动记忆钩子） =====
 
@@ -90,17 +91,13 @@ import { evaluateSessionSuggestions } from './suggest/service'
 function captureMemoryFromRun(
   sessionId: string,
   workspaceSlug: string | undefined,
-  messages: AgentMessage[] | undefined,
+  _messages: AgentMessage[] | undefined,
   stoppedByUser?: boolean,
 ): Promise<void> {
   if (stoppedByUser) return Promise.resolve()
-  if (!messages || messages.length === 0) return Promise.resolve()
-  // 取最近 20 条 user/assistant 文本
-  const recent = messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .filter((m) => typeof m.content === 'string' && m.content.trim().length > 0)
-    .slice(-20)
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+  // 从 SDK 格式会话中提取最近的 user/assistant 文本（修复：getAgentSessionMessages 返回 SDK 结构，role/content 平铺字段不存在）
+  const sdkMessages = getAgentSessionSDKMessages(sessionId)
+  const recent = extractRecentConversationText(sdkMessages, 20)
   if (recent.length === 0) return Promise.resolve()
   return extractAndCapture(recent, { sessionId, workspaceSlug })
     .then(() => undefined)
@@ -115,14 +112,11 @@ function captureMemoryFromRun(
  */
 function evaluateSuggestionsFromRun(
   sessionId: string,
-  messages: AgentMessage[] | undefined,
+  _messages: AgentMessage[] | undefined,
 ): Promise<void> {
-  if (!messages || messages.length === 0) return Promise.resolve()
-  const recent = messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .filter((m) => typeof m.content === 'string' && m.content.trim().length > 0)
-    .slice(-30)
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+  // 从 SDK 格式会话中提取最近的 user/assistant 文本
+  const sdkMessages = getAgentSessionSDKMessages(sessionId)
+  const recent = extractRecentConversationText(sdkMessages, 30)
   if (recent.length === 0) return Promise.resolve()
   return evaluateSessionSuggestions(recent, { sessionId })
     .then(() => undefined)
