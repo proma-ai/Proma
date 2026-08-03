@@ -181,6 +181,11 @@ import {
   rejectCorrection as memoryRejectCorrection,
   personaRaw as memoryPersonaRaw,
 } from './lib/memory/service'
+import {
+  listSuggestionsForUI,
+  handleSuggestionFeedback,
+  getSuggestionStats,
+} from './lib/suggest/service'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
   saveAttachment,
@@ -2554,6 +2559,29 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA,
     async (): Promise<string | undefined> => {
       return memoryPersonaRaw()
+    }
+  )
+
+  // ===== Proactive Suggestion（主动建议） =====
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_SUGGESTIONS,
+    async (_, status?: string): Promise<import('@proma/shared').SuggestionRecord[]> => {
+      return listSuggestionsForUI(status as 'suggested' | 'accepted' | 'ignored' | 'never' | undefined)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION,
+    async (_, id: string, feedback: 'accepted' | 'ignored' | 'never'): Promise<{ ok: boolean; error?: string }> => {
+      return handleSuggestionFeedback(id, feedback)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS,
+    async (): Promise<import('@proma/shared').SuggestionStats> => {
+      return getSuggestionStats()
     }
   )
 

@@ -79,6 +79,7 @@ import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
 import { extractAndCapture } from './memory/service'
+import { evaluateSessionSuggestions } from './suggest/service'
 
 // ===== 记忆捕获（主动记忆钩子） =====
 
@@ -105,6 +106,28 @@ function captureMemoryFromRun(
     .then(() => undefined)
     .catch((error) => {
       console.warn('[Memory] 会话结束记忆捕获失败:', error instanceof Error ? error.message : error)
+    })
+}
+
+/**
+ * 会话结束后评估主动建议（fire-and-forget，不阻塞会话完成）。
+ * 建议由引擎持久化到 suggestions.json，UI 通过 IPC 拉取展示。
+ */
+function evaluateSuggestionsFromRun(
+  sessionId: string,
+  messages: AgentMessage[] | undefined,
+): Promise<void> {
+  if (!messages || messages.length === 0) return Promise.resolve()
+  const recent = messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => typeof m.content === 'string' && m.content.trim().length > 0)
+    .slice(-30)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+  if (recent.length === 0) return Promise.resolve()
+  return evaluateSessionSuggestions(recent, { sessionId })
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn('[Suggestion] 会话建议评估失败:', error instanceof Error ? error.message : error)
     })
 }
 
@@ -1212,6 +1235,7 @@ export class AgentOrchestrator {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
       void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
     // 轻量完成：turn 主体结束但仍有后台任务在飞行。
     // 关键区别——不调用 releaseActiveRun，保留 activeSessions/activeChannels/sessionPermissionModes，
@@ -1232,6 +1256,7 @@ export class AgentOrchestrator {
       callbacks.onError(error)
       callbacks.onComplete(messages, opts)
       void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
 
     // 3. 构建环境变量

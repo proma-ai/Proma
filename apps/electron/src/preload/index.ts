@@ -664,6 +664,15 @@ export interface ElectronAPI {
   /** 读取 Proactive Memory persona 原文 */
   readMemoryPersona: () => Promise<string | undefined>
 
+  /** 列出主动建议 */
+  listSuggestions: (status?: string) => Promise<import('@proma/shared').SuggestionRecord[]>
+
+  /** 对主动建议执行反馈 */
+  actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => Promise<{ ok: boolean; error?: string }>
+
+  /** 获取主动建议统计 */
+  getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
+
   /** 读取工作区 CLAUDE.md */
   readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
@@ -1898,6 +1907,18 @@ const electronAPI: ElectronAPI = {
 
   readMemoryPersona: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA)
+  },
+
+  listSuggestions: (status?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SUGGESTIONS, status)
+  },
+
+  actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION, id, feedback)
+  },
+
+  getSuggestionStats: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS)
   },
 
   readWorkspaceClaudeMd: (workspaceSlug: string) => {

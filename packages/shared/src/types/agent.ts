@@ -1601,6 +1601,12 @@ export const AGENT_IPC_CHANNELS = {
   REJECT_MEMORY_CORRECTION: 'agent:reject-memory-correction',
   /** 读取 Proactive Memory persona */
   READ_MEMORY_PERSONA: 'agent:read-memory-persona',
+  /** 列出主动建议（主动建议引擎） */
+  LIST_SUGGESTIONS: 'agent:list-suggestions',
+  /** 对主动建议执行反馈（accepted/ignored/never） */
+  ACT_ON_SUGGESTION: 'agent:act-on-suggestion',
+  /** 获取主动建议统计 */
+  GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
   /** 读取工作区 CLAUDE.md */
   READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
   /** 写入工作区 CLAUDE.md */

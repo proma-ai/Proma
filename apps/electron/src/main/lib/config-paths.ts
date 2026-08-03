@@ -761,3 +761,8 @@ export function getCorrectionsPath(): string {
 export function getMemoryLogDir(): string {
   return join(getMemoryRootDir(), 'memory_log')
 }
+
+/** 主动建议索引文件路径 */
+export function getSuggestionsPath(): string {
+  return join(getConfigDir(), 'suggestions.json')
+}
