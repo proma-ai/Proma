@@ -133,15 +133,36 @@ export function parseAnalystResponse(raw: string): AnalystRawCandidate[] {
   }
 }
 
+/** 安全字符串化：LLM 可能返回非字符串字段（数组/对象/数字），统一转字符串；无法转为有效字符串返回 null */
+function safeStr(v: unknown): string | null {
+  if (typeof v === 'string') {
+    const s = v.trim()
+    return s.length > 0 ? s : null
+  }
+  if (typeof v === 'number' || typeof v === 'boolean') {
+    const s = String(v).trim()
+    return s.length > 0 ? s : null
+  }
+  if (Array.isArray(v)) {
+    // 数组 → 取首个字符串元素（LLM 可能把 evidence 输出成数组）
+    for (const item of v) {
+      const s = safeStr(item)
+      if (s) return s
+    }
+    return null
+  }
+  return null
+}
+
 /** schema 校验单条候选：字段完整、类型合法、动作匹配 */
 export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCandidate | null {
   if (!raw || typeof raw !== 'object') return null
   const kind = raw.kind
-  if (!kind || !ALLOWED_KINDS.includes(kind as SuggestionKind)) return null
-  const title = raw.title?.trim()
-  const reason = raw.reason?.trim()
-  const evidence = raw.evidence?.trim()
-  const duplicateKey = raw.duplicateKey?.trim()
+  if (typeof kind !== 'string' || !ALLOWED_KINDS.includes(kind as SuggestionKind)) return null
+  const title = safeStr(raw.title)
+  const reason = safeStr(raw.reason)
+  const evidence = safeStr(raw.evidence)
+  const duplicateKey = safeStr(raw.duplicateKey)
   if (!title || !reason || !evidence || !duplicateKey) return null
   if (title.length > 40 || reason.length > 200 || evidence.length > 200) return null
 
@@ -151,8 +172,8 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
   if (!actionType) return null
   if (kind === 'automation') {
     if (actionType !== 'open_automation_create') return null
-    const automationTitle = action.automationTitle?.trim()
-    const suggestedPrompt = action.suggestedPrompt?.trim()
+    const automationTitle = safeStr(action.automationTitle)
+    const suggestedPrompt = safeStr(action.suggestedPrompt)
     if (!automationTitle || !suggestedPrompt) return null
     return {
       kind,
@@ -166,7 +187,7 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
   }
   if (kind === 'skill') {
     if (actionType !== 'open_skill_creator') return null
-    const topic = action.topic?.trim()
+    const topic = safeStr(action.topic)
     if (!topic) return null
     return {
       kind,

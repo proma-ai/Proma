@@ -131,4 +131,41 @@ describe('suggest/analyst: 候选过滤', () => {
     expect(result[0]?.duplicateKey).toBe('dup')
     expect(result.filter((c) => c.kind === 'skill').length).toBe(2)
   })
+
+  test('非字符串字段容错（数组/数字不崩溃）', () => {
+    // evidence 是数组（LLM 常见输出）、title 是数字——都不应崩溃
+    const raw = [
+      {
+        kind: 'automation',
+        title: '每周发版检查',
+        reason: '你经常手动检查发版',
+        evidence: ['记忆中有多次发版记录', '每次发版都手动确认'],
+        duplicateKey: 'automation:每周发版检查',
+        action: { type: 'open_automation_create', automationTitle: '每周发版检查', suggestedPrompt: '每周检查发版状态' },
+      },
+      { kind: 'skill', title: 42, reason: '数字 title 测试', evidence: ['证据数组'], duplicateKey: 'skill:x', action: { type: 'open_skill_creator', topic: '测试' } },
+      { kind: 'skill', title: '对象字段', reason: { text: '对象字段' }, evidence: ['证据数组'], duplicateKey: 'skill:y', action: { type: 'open_skill_creator', topic: '测试' } },
+    ]
+    const result = validateAnalystCandidates(raw as never)
+    // 第一个应通过（evidence 数组取首个字符串）
+    expect(result.length).toBeGreaterThanOrEqual(2)
+    expect(result[0]?.kind).toBe('automation')
+    expect(result[0]?.evidence).toBe('记忆中有多次发版记录')
+    // 第二个 title 是数字 → 字符串化 42 → 应通过
+    expect(result.some((c) => c.kind === 'skill' && c.title === '42')).toBe(true)
+    // 第三个 reason 是对象（无法字符串化）→ 被拒绝
+    expect(result.some((c) => c.kind === 'skill' && c.title === '对象字段')).toBe(false)
+  })
+
+  test('evidence 为无法字符串化的对象时该条被拒绝', () => {
+    const c = validateAnalystCandidate({
+      kind: 'automation',
+      title: 'x',
+      reason: 'y',
+      evidence: { nested: { deep: true } } as unknown as string, // 对象且不含字符串
+      duplicateKey: 'k',
+      action: { type: 'open_automation_create', automationTitle: 't', suggestedPrompt: 'p' },
+    })
+    expect(c).toBeNull()
+  })
 })
