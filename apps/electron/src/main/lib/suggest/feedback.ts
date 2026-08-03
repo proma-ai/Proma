@@ -24,6 +24,9 @@ import { defaultTypeWeights } from './engine'
 
 const INDEX_VERSION = 1
 
+/** 建议记录容量上限（防止文件无限膨胀/性能 DoS） */
+const MAX_RECORDS = 500
+
 /** 连续忽略达到该次数后，类型自动静默（跳过评估） */
 export const SILENCE_AFTER_IGNORES = 3
 
@@ -40,11 +43,36 @@ function readIndex(): SuggestionsIndex {
     return cachedIndex
   }
   // 兼容旧格式：补齐缺省字段
-  if (!data.typeWeights) data.typeWeights = defaultTypeWeights()
+  if (!data.typeWeights || typeof data.typeWeights !== 'object') data.typeWeights = defaultTypeWeights()
   if (typeof data.enabled !== 'boolean') data.enabled = true
   if (!Array.isArray(data.records)) data.records = []
+  // schema 校验：过滤非法记录，截断超长字段，限制数量上限
+  data.records = data.records.filter(isValidSuggestionRecord).map(sanitizeSuggestionRecord).slice(0, MAX_RECORDS)
   cachedIndex = data
   return cachedIndex
+}
+
+/** 合法建议记录：必须有 id、createdAt、title，status 为已知枚举 */
+function isValidSuggestionRecord(r: unknown): r is SuggestionRecord {
+  if (!r || typeof r !== 'object') return false
+  const rec = r as Record<string, unknown>
+  return (
+    typeof rec.id === 'string' && rec.id.length > 0 &&
+    typeof rec.createdAt === 'number' &&
+    typeof rec.title === 'string' &&
+    (rec.status === 'suggested' || rec.status === 'accepted' || rec.status === 'ignored' || rec.status === 'never')
+  )
+}
+
+/** 截断超长字段，防膨胀 */
+function sanitizeSuggestionRecord(r: SuggestionRecord): SuggestionRecord {
+  return {
+    ...r,
+    title: r.title.slice(0, 200),
+    reason: r.reason?.slice(0, 500),
+    evidence: r.evidence?.slice(0, 500),
+    duplicateKey: r.duplicateKey?.slice(0, 200),
+  }
 }
 
 function writeIndex(): void {
@@ -93,12 +121,18 @@ export function persistSuggestion(candidate: SuggestionCandidate, sessionId?: st
     createdAt: Date.now(),
   }
   index.records.unshift(record)
+  // 容量上限：超出裁剪最旧记录（保留最近 MAX_RECORDS 条）
+  if (index.records.length > MAX_RECORDS) {
+    index.records.length = MAX_RECORDS
+  }
   writeIndex()
   return record
 }
 
 /** 记录用户反馈，更新类型权重 */
 export function recordFeedback(suggestionId: string, feedback: SuggestionFeedback): SuggestionRecord | undefined {
+  // 入口白名单：防止非法枚举污染 status
+  if (feedback !== 'accepted' && feedback !== 'ignored' && feedback !== 'never') return undefined
   const index = readIndex()
   const record = index.records.find((r) => r.id === suggestionId)
   if (!record) return undefined

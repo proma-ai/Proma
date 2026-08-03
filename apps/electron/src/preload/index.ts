@@ -667,6 +667,9 @@ export interface ElectronAPI {
   /** 拒绝一条纠正 */
   rejectMemoryCorrection: (id: string) => Promise<boolean>
 
+  /** 撤销一条已生效的纠正 */
+  undoMemoryCorrection: (id: string) => Promise<{ ok: boolean; error?: string }>
+
   /** 列出待确认的自动提取记忆 */
   listMemoryPendingAtoms: () => Promise<import('@proma/shared').MemoryAtom[]>
 
@@ -1951,6 +1954,10 @@ const electronAPI: ElectronAPI = {
 
   rejectMemoryCorrection: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION, id)
+  },
+
+  undoMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UNDO_MEMORY_CORRECTION, id)
   },
 
   listMemoryPendingAtoms: () => {

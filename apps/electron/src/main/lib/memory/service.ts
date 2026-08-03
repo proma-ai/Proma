@@ -193,7 +193,13 @@ export function captureCandidates(
 /** 新增纠正候选（默认 pending，需用户确认） */
 export function proposeCorrection(input: { raw: string; rule: string; sessionId?: string }) {
   if (!isMemoryEnabled()) throw new Error('记忆功能已关闭')
-  const correction = addCorrection(input)
+  // P2-2 白名单：规则必须有实质内容且长度受控，防投毒/膨胀
+  const rule = (input.rule ?? '').trim()
+  if (!rule || rule.length < 2 || rule.length > 500) {
+    console.warn('[Memory] 拒绝非法纠正规则（长度异常）:', rule.slice(0, 40))
+    throw new Error('纠正规则内容不合法')
+  }
+  const correction = addCorrection({ raw: (input.raw ?? '').trim().slice(0, 1000), rule, sessionId: input.sessionId })
   appendMemoryLog(`新增行为纠正候选: ${correction.rule.slice(0, 60)}`)
   return correction
 }
@@ -223,6 +229,27 @@ export function confirmCorrection(id: string): boolean {
 
 export function rejectCorrection(id: string): boolean {
   return !!updateCorrectionStatus(id, 'rejected')
+}
+
+/**
+ * 撤销一条已生效的纠正（P2-2 用户控制）：
+ * - 状态从 active 回退为 rejected
+ * - 删除 confirmCorrection 时沉淀的 correction 类型 atom
+ * - 异步重生成 persona（去掉已回滚规则）
+ * 返回是否成功。
+ */
+export function undoCorrection(id: string): boolean {
+  const correction = updateCorrectionStatus(id, 'rejected')
+  if (!correction) return false
+  appendMemoryLog(`撤销行为纠正: ${correction.rule.slice(0, 60)}`)
+  // 删除确认时沉淀的 atom（metadata.correctionId === id 的 correction 类型条目）
+  const atom = readAllAtoms({ includeUnconfirmed: true }).find(
+    (a) => a.type === 'correction' && a.metadata?.correctionId === id,
+  )
+  if (atom) deleteAtom(atom.id)
+  // 反馈回流：重生成 persona（移除该规则）
+  void ensurePersona().catch(() => undefined)
+  return true
 }
 
 // ===== 待确认记忆（自动提取，需用户确认） =====

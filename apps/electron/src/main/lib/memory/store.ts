@@ -471,6 +471,9 @@ interface CorrectionsIndex {
 
 const CORRECTIONS_VERSION = 1
 
+/** 纠正记录容量上限（防无限膨胀） */
+const MAX_CORRECTIONS = 300
+
 let cachedCorrections: CorrectionsIndex | null = null
 
 function readCorrections(): CorrectionsIndex {
@@ -480,8 +483,21 @@ function readCorrections(): CorrectionsIndex {
     cachedCorrections = { version: CORRECTIONS_VERSION, corrections: [] }
     return cachedCorrections
   }
+  // schema 校验：过滤非法纠正记录，限制数量上限
+  data.corrections = data.corrections.filter(isValidCorrection).slice(0, MAX_CORRECTIONS)
   cachedCorrections = data
   return cachedCorrections
+}
+
+/** 合法纠正记录：必须有 id、rule、status，状态为已知枚举 */
+function isValidCorrection(r: unknown): r is MemoryCorrection {
+  if (!r || typeof r !== 'object') return false
+  const rec = r as Record<string, unknown>
+  return (
+    typeof rec.id === 'string' && rec.id.length > 0 &&
+    typeof rec.rule === 'string' &&
+    (rec.status === 'pending' || rec.status === 'active' || rec.status === 'rejected' || rec.status === 'superseded')
+  )
 }
 
 function writeCorrections(index: CorrectionsIndex): void {

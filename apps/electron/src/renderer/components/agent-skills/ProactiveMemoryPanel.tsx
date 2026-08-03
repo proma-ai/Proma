@@ -29,6 +29,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const [stats, setStats] = React.useState<MemoryStats | null>(null)
   const [persona, setPersona] = React.useState<string | null>(null)
   const [corrections, setCorrections] = React.useState<MemoryCorrection[]>([])
+  const [activeCorrections, setActiveCorrections] = React.useState<MemoryCorrection[]>([])
   const [pendingAtoms, setPendingAtoms] = React.useState<MemoryAtom[]>([])
   const [extractionMode, setExtractionMode] = React.useState<'llm' | 'rule' | 'off'>('llm')
   const [personaInjection, setPersonaInjection] = React.useState(true)
@@ -43,16 +44,18 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection] = await Promise.all([
+      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection, nextActive] = await Promise.all([
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.readMemoryPersona(),
         window.electronAPI.listMemoryPendingAtoms(),
         window.electronAPI.getMemoryExtractionMode(),
         window.electronAPI.getPersonaInjectionEnabled(),
+        window.electronAPI.listMemoryCorrections('active'),
       ])
       setStats(nextStats)
       setCorrections(nextCorrections)
+      setActiveCorrections(nextActive)
       setPersona(nextPersona ?? null)
       setPendingAtoms(nextPendingAtoms)
       setExtractionMode(nextMode)
@@ -101,6 +104,22 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
       await refresh()
     } catch (error) {
       console.error('[主动记忆] 拒绝失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleUndo = async (id: string): Promise<void> => {
+    if (!window.confirm('撤销该纠正将删除对应记忆并从画像中移除，确定？')) return
+    try {
+      const r = await window.electronAPI.undoMemoryCorrection(id)
+      if (!r.ok) {
+        toast.error(r.error ?? '撤销失败')
+        return
+      }
+      toast.success('已撤销该纠正')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 撤销失败:', error)
       toast.error('操作失败')
     }
   }
@@ -389,6 +408,31 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
                     <X size={14} />
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 已生效纠正（可撤销） */}
+        {activeCorrections.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-foreground/75">已生效的行为纠正</div>
+            {activeCorrections.slice(0, 5).map((correction) => (
+              <div key={correction.id} className="flex items-start justify-between gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[13px] text-foreground/90">{correction.rule}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    生效于 {formatTime(correction.createdAt)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleUndo(correction.id)}
+                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-red-500 transition-colors hover:bg-red-500/10"
+                  title="撤销该纠正（删除记忆并从画像移除）"
+                >
+                  <X size={12} /> 撤销
+                </button>
               </div>
             ))}
           </div>

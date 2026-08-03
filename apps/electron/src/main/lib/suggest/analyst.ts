@@ -165,6 +165,8 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
   const duplicateKey = safeStr(raw.duplicateKey)
   if (!title || !reason || !evidence || !duplicateKey) return null
   if (title.length > 40 || reason.length > 200 || evidence.length > 200) return null
+  // P2-3：duplicateKey 也限长（防存储膨胀/注入）
+  if (duplicateKey.length > 200) return null
 
   // 动作校验
   const action = raw.action
@@ -175,6 +177,8 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
     const automationTitle = safeStr(action.automationTitle)
     const suggestedPrompt = safeStr(action.suggestedPrompt)
     if (!automationTitle || !suggestedPrompt) return null
+    // P2-3：动作字段长度上限（超长直接丢弃候选）
+    if (automationTitle.length > 100 || suggestedPrompt.length > 1000) return null
     return {
       kind,
       title,
@@ -189,6 +193,8 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
     if (actionType !== 'open_skill_creator') return null
     const topic = safeStr(action.topic)
     if (!topic) return null
+    // P2-3：topic 长度上限
+    if (topic.length > 100) return null
     return {
       kind,
       title,

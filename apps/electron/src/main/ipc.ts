@@ -179,6 +179,7 @@ import {
   corrections as memoryCorrections,
   confirmCorrection as memoryConfirmCorrection,
   rejectCorrection as memoryRejectCorrection,
+  undoCorrection as memoryUndoCorrection,
   pendingAtoms as memoryPendingAtoms,
   confirmAtomById as memoryConfirmAtomById,
   rejectAtomById as memoryRejectAtomById,
@@ -1267,10 +1268,11 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  // 解密 API Key（仅在用户查看时调用）
+  // 解密 API Key（仅在用户查看时调用；加 sender 校验防任意窗口读取明文 key）
   ipcMain.handle(
     CHANNEL_IPC_CHANNELS.DECRYPT_KEY,
-    async (_, channelId: string): Promise<string> => {
+    async (event, channelId: string): Promise<string> => {
+      if (!(await validateMainWindowSender(event))) return ''
       return decryptApiKey(channelId)
     }
   )
@@ -2606,6 +2608,16 @@ export function registerIpcHandlers(): void {
     async (event, id: string): Promise<boolean> => {
       if (!(await validateMainWindowSender(event))) return false
       return memoryRejectCorrection(id)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UNDO_MEMORY_CORRECTION,
+    async (event, id: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (typeof id !== 'string' || !id) return { ok: false, error: '无效 ID' }
+      const ok = memoryUndoCorrection(id)
+      return ok ? { ok: true } : { ok: false, error: '纠正不存在或已删除' }
     }
   )
 
