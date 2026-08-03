@@ -673,6 +673,9 @@ export interface ElectronAPI {
   /** 获取主动建议统计 */
   getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
 
+  /** 订阅主动建议变更事件（会话结束后新建议生成时触发） */
+  onSuggestionsChanged: (callback: () => void) => () => void
+
   /** 读取工作区 CLAUDE.md */
   readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
@@ -1919,6 +1922,12 @@ const electronAPI: ElectronAPI = {
 
   getSuggestionStats: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS)
+  },
+
+  onSuggestionsChanged: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(AGENT_IPC_CHANNELS.SUGGESTIONS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.SUGGESTIONS_CHANGED, listener) }
   },
 
   readWorkspaceClaudeMd: (workspaceSlug: string) => {

@@ -29,14 +29,11 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
   const [actioning, setActioning] = React.useState(false)
 
   // 会话变化时拉取该会话的待展示建议（仅当前会话，避免跨话题打扰）
-  React.useEffect(() => {
-    let cancelled = false
+  const loadSuggestions = React.useCallback((): void => {
     setLoading(true)
-    setSuggestion(null)
     window.electronAPI
       .listSuggestions('suggested')
       .then((records) => {
-        if (cancelled) return
         const now = Date.now()
         // 仅展示当前会话的建议，且未过期
         const mine = records.find((r) => r.sessionId === sessionId && now - r.createdAt < SUGGESTION_EXPIRY_MS)
@@ -46,12 +43,21 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
         console.warn('[SuggestionBanner] 拉取建议失败:', error)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
   }, [sessionId])
+
+  React.useEffect(() => {
+    setSuggestion(null)
+    loadSuggestions()
+    // P1 修复：订阅建议变更事件，会话结束后新建议生成时实时刷新（不再等重新挂载）
+    const unsubscribe = window.electronAPI.onSuggestionsChanged?.(() => {
+      loadSuggestions()
+    })
+    return () => {
+      unsubscribe?.()
+    }
+  }, [sessionId, loadSuggestions])
 
   if (loading || !suggestion) return null
 

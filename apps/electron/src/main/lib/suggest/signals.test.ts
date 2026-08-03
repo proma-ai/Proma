@@ -79,9 +79,16 @@ describe('suggest/signals: 重复意图', () => {
 })
 
 describe('suggest/signals: 工具函数', () => {
-  test('normalizeRule 去除引导词', () => {
-    expect(normalizeRule('以后不要用 setTimeout')).toBe('用 setTimeout')
+  test('normalizeRule 去除引导词但保留否定词（P0 语义反转修复）', () => {
+    // 否定词是规则核心语义，必须保留
+    expect(normalizeRule('以后不要用 setTimeout')).toBe('不要用 setTimeout')
     expect(normalizeRule('记住先查文档。')).toBe('先查文档')
+  })
+
+  test('normalizeRule 保留否定词（回归："以后不要用 var" 不能变成 "用 var"）', () => {
+    expect(normalizeRule('以后不要用 var 声明变量')).toBe('不要用 var 声明变量')
+    expect(normalizeRule('下次别再用 var')).toBe('别再用 var')
+    expect(normalizeRule('以后不要再写死路径')).toBe('不要再写死路径')
   })
 
   test('hasStrongSignal 检测强信号', () => {

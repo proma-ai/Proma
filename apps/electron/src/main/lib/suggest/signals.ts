@@ -245,7 +245,9 @@ function detectRepeatIntents(userMessages: string[]): RepeatSignal[] {
 /** 规范化纠正规则：去掉句首引导词，提炼为可执行的规则文本 */
 export function normalizeRule(raw: string): string {
   let rule = raw
-  // 连续去掉句首引导词（支持多层，如"以后不要"）
+  // 连续去掉句首引导词（支持多层，如"以后不要再"）。
+  // 注意：否定词（不要/别再/别）是规则的核心语义，绝不能删——
+  // "以后不要用 var" 提炼后必须是 "不要用 var"，而不是 "用 var"（语义反转 bug）。
   const LEADERS = [
     /^请记住/,
     /^我希望你/,
@@ -255,9 +257,7 @@ export function normalizeRule(raw: string): string {
     /^以后/,
     /^下次/,
     /^记住/,
-    /^不要/,
-    /^别再/,
-    /^别/,
+    /^麻烦(?:你)?/,
   ]
   let changed = true
   while (changed) {

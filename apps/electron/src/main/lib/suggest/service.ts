@@ -24,7 +24,7 @@ import {
 } from './feedback'
 import { evaluateSuggestions, DEFAULT_SUGGEST_OPTIONS } from './engine'
 import { listAutomations } from '../automation-manager'
-import { corrections as memoryCorrections, recentAtoms, proposeCorrection } from '../memory/service'
+import { corrections as memoryCorrections, recentAtoms, proposeCorrection, confirmCorrection } from '../memory/service'
 import type {
   SuggestionRecord,
   SuggestionStats,
@@ -77,6 +77,8 @@ export async function evaluateSessionSuggestions(
     if (isTypeSilenced(candidate.kind)) return []
 
     const record = persistSuggestion(candidate, ctx.sessionId)
+    // 新建议生成后广播事件，让当前会话的 SuggestionBanner 实时刷新（不再等重新挂载）
+    notifySuggestionsChanged()
     return [record]
   } catch (error) {
     console.warn('[Suggestion] 会话建议评估失败:', error instanceof Error ? error.message : error)
@@ -103,10 +105,14 @@ export function handleSuggestionFeedback(id: string, feedback: SuggestionFeedbac
   const record = getSuggestion(id)
   if (!record) return { ok: false, error: '建议不存在' }
 
-  // 接受 correction 动作：写入 memory 纠正候选（pending，用户可在记忆看板确认）
+  // 接受 correction 动作：直接创建并立即生效（P0 修复：不再两步确认）。
+  // 用户点"接受"= 明确认可这条规则，直接写入并回流 persona。
   if (feedback === 'accepted' && record.action.type === 'memory_correction') {
     try {
-      proposeCorrection({ raw: record.action.raw, rule: record.action.rule, sessionId: record.sessionId })
+      const correction = proposeCorrection({ raw: record.action.raw, rule: record.action.rule, sessionId: record.sessionId })
+      if (correction?.id) {
+        confirmCorrection(correction.id)
+      }
     } catch (error) {
       console.warn('[Suggestion] 写入纠正候选失败:', error instanceof Error ? error.message : error)
     }
@@ -149,6 +155,25 @@ function loadSopCandidateCount(): number {
     return recentAtoms(100).filter((a) => a.type === 'sop').length
   } catch {
     return 0
+  }
+}
+
+/**
+ * 广播建议变更事件（main → renderer）。
+ * 让当前会话的 SuggestionBanner 实时刷新（P1 修复：不再等组件重新挂载）。
+ * 使用动态 import 避免 BrowserWindow 依赖在纯逻辑层（测试）引发加载问题。
+ */
+function notifySuggestionsChanged(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { BrowserWindow } = require('electron') as typeof import('electron')
+    const { AGENT_IPC_CHANNELS } = require('@proma/shared') as typeof import('@proma/shared')
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      win.webContents.send(AGENT_IPC_CHANNELS.SUGGESTIONS_CHANGED)
+    }
+  } catch {
+    // 非 Electron 环境（测试）忽略
   }
 }
 
