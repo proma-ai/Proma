@@ -24,14 +24,22 @@ Proma 现有的 Auto Memory（`.claude/memory/MEMORY.md`）依赖 Agent 在 prom
 | **memory-daily Skill** | 指导每日记忆整理 + 建议创建 daily automation |
 | **LLM 配置** | 本地 `.env`（`MEMORY_LLM_API_KEY/BASE_URL/MODEL`），key 永不进对话/仓库 |
 
+### 召回质量（三轮独立审查迭代）
+
+召回系统经 3 轮 collaboration 子代理独立审查迭代打磨：
+- 多源融合：keyword 精确 + LLM 查询改写 + embedding 语义 + 规则加权
+- 绝对分阈值（防归一化放大弱命中）、同主题聚类降权、无关查询 gate
+- 时间词停用词、ruleList 相关性过滤
+- 验证：12 问矩阵 12/12；无关查询（股票行情/排序算法）0 命中；worker/分段锁/CRDT 稳定 top-1
+
 ### 验证
 
 - 全量 typecheck 6 包全绿
-- 全量测试 534 pass / 3 fail（3 fail 为既有 Electron 环境问题，与本次无关；新增 37 个 memory 测试）
+- 全量测试 554 pass / 3 fail（3 fail 为既有 Electron 环境问题，与本次无关；新增 37+ memory 测试）
 - 真实 LLM 提取 + 跨会话召回 + persona 生成 + 反馈回流均已端到端验证
 - UI 实测通过（统计/审批/搜索/画像）
 
-### 文件概览（31 个文件，+3273 行）
+### 文件概览（32 个文件，+3500 行）
 
 - `packages/shared/src/types/memory.ts`：记忆类型
 - `apps/electron/src/main/lib/memory/`：store / recall / extractor / persona / service / agent-tools + 测试
