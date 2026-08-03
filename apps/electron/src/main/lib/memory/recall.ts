@@ -11,7 +11,7 @@
  */
 
 import type { MemoryAtom, MemorySearchHit, MemorySearchRequest, MemorySearchResult } from '@proma/shared'
-import { readAllAtoms } from './store'
+import { readAllAtoms, isDuplicate } from './store'
 import { getEmbeddingProvider, cosineSimilarity } from './embedding'
 import { rewriteQuery } from './query-rewriter'
 
@@ -232,6 +232,7 @@ export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySea
     .map((r) => ({
       atom: r.atom,
       score: normalizeScore(r.score, maxScore),
+      rawScore: r.score, // 保留绝对分供 hybrid 真相关判断
       matchedTerms: r.matched,
     }))
     .filter((h) => h.score >= effectiveMinScore)
@@ -344,25 +345,31 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   const kwIds = new Set(kwResult.hits.map((r) => r.atom.id))
   // 只保留高分 kw（≥0.6 精确匹配）；低分弱词匹配（0.2-0.5 噪声）不占 RRF 名额，
   // 避免 kw 命中过多挤掉 rw/embedding 的正确答案（子代理审查发现）
-  const kwList = kwResult.hits.filter((h) => h.score >= 0.6).map((h) => ({ atom: h.atom, score: h.score }))
+  // 只保留高分 kw（绝对分 ≥1.0 真相关）；低分弱词匹配不占 RRF 名额。
+  // 用绝对分（rawScore）而非归一化分，避免“查询与库整体弱相关时弱命中被抬成满分”绕过过滤
+  const kwList = kwResult.hits.filter((h) => (h.rawScore ?? h.score) >= 1.0).map((h) => ({ atom: h.atom, score: h.score }))
 
   // 通道 1.5：LLM 查询改写（近义词/同义表达补充召回）
-  // 关键：rw 命中的记忆即使 kw 也命中（低分位），也要标记多源（让来源加权提升它），
-  // 避免正确答案因 kw 低分位被漏掉。
+  // 仅当原查询有真相关（kwList 非空）时才启用改写——否则无关查询（如“帮我写排序算法”
+  // 与库无关）会被 LLM 改写发散成“并行/worker”注入无关记忆。改写是“扩展”，不是“凭空召回”。
   const rwHitIdsAll = new Set<string>()
+  const rwRealIds = new Set<string>() // 绝对分 ≥1.0 的真相关 rw 命中（用于权重判断）
   let rwList: Array<{ atom: MemoryAtom; score: number }> = []
   try {
-    const rewritten = await rewriteQuery(query)
-    if (rewritten.length > 1) {
-      const rwSeen = new Set<string>()
-      for (const rw of rewritten) {
+    // 只有原查询有真相关时才改写扩展（gate：kwList 非空），否则跳过改写避免发散注入
+    if (kwList.length > 0) {
+      const rewritten = await rewriteQuery(query)
+      if (rewritten.length > 1) {
+        const rwSeen = new Set<string>()
+        for (const rw of rewritten) {
         if (rw === query || rwSeen.has(rw)) continue
         rwSeen.add(rw)
         const rwResult = searchMemoriesByKeyword({ query: rw, limit: Math.max(limit, 8), includeUnconfirmed: request.includeUnconfirmed })
         for (const h of rwResult.hits) {
-          rwHitIdsAll.add(h.atom.id) // 所有 rw 命中都标记
-          // 让 rw 命中的记忆都进 rwList（包括 kw 也命中的），保证“分段锁”这类
-          // LLM 改写同义词即使 kw/embedding 未命中也能参与 RRF
+          rwHitIdsAll.add(h.atom.id) // 所有 rw 命中都标记（用于观察）
+          if ((h.rawScore ?? h.score) >= 1.0) rwRealIds.add(h.atom.id) // 只有绝对分≥1.0 才算真相关
+          // 进 rwList 需要绝对分门槛（≥1.0），避免弱改写命中放大噪声
+          if ((h.rawScore ?? h.score) < 1.0) continue
           rwList.push({ atom: h.atom, score: h.score * 0.8 })
         }
       }
@@ -371,16 +378,18 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
       rwList = rwList.filter((r) => { if (seen.has(r.atom.id)) return false; seen.add(r.atom.id); return true })
         .sort((a, b) => b.score - a.score)
         .slice(0, Math.max(limit, 8))
-    }
+      } // end if (rewritten.length > 1)
+    } // end if (kwList.length > 0)
   } catch (error) {
     console.warn('[Memory] 查询改写失败，跳过补充召回:', error instanceof Error ? error.message : error)
   }
   const kwPlusRwIds = new Set([...kwIds, ...rwList.map((r) => r.atom.id)])
 
   // 通道 2：embedding（语义，仅补充 keyword/改写未覆盖的）
+  // 只有原查询有真相关（kwList 非空）时才启用 embedding——避免无关查询被语义噪声注入
   const provider = getEmbeddingProvider()
   let embList: Array<{ atom: MemoryAtom; score: number }> = []
-  if (provider) {
+  if (provider && kwList.length > 0) {
     const queryVec = await provider.embed(query)
     if (queryVec) {
       const batch = await provider.embedBatch(allAtoms.slice(0, 80).map((a) => a.content.slice(0, 200)))
@@ -400,12 +409,15 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
     }
   }
 
-  // 通道 3：规则加权（仅身份/偏好类进入补充通道；priority 加成在排序时体现，不膨胀通道）
-  const ruleList = [...allAtoms]
-    .map((atom) => ({ atom, score: ruleBoost(atom) }))
-    .filter((r) => r.score >= 0.08)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(limit, 10))
+  // 通道 3：规则加权（仅身份/偏好类进入补充通道；仅当原查询有真相关时启用，
+  // 避免无关查询被规则通道注入 preference 噪声）
+  const ruleList = kwList.length > 0
+    ? [...allAtoms]
+        .map((atom) => ({ atom, score: ruleBoost(atom) }))
+        .filter((r) => r.score >= 0.08)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(limit, 10))
+    : []
 
   // RRF 融合（含改写查询补充通道）
   const merged = rrfMerge([kwList, rwList, embList, ruleList])
@@ -413,7 +425,7 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
 
   // 精确匹配优先：原 keyword 高分命中 > 改写命中 > embedding 语义命中 > 其他规则补充
   const kwHitIds = new Set(kwList.map((r) => r.atom.id)) // 只算高分 kw（≥0.6）
-  const rwHitIds = rwHitIdsAll // 所有改写命中的（含 kw 也命中的低分位），用于多源加权提升
+  const rwHitIds = rwRealIds // 只有绝对分 ≥1.0 的真相关改写命中，用于多源加权提升
   const embHitIds = new Set(embList.map((r) => r.atom.id))
 
   // 多源一致性融合：每个候选按“最高命中来源”加权（kw 最可信 > rw > emb > rule）
@@ -421,7 +433,7 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   for (const item of merged.values()) {
     let w = 0
     if (kwHitIds.has(item.atom.id)) w = Math.max(w, 1.0)
-    if (rwHitIds.has(item.atom.id)) w = Math.max(w, 1.0) // rw 是 LLM 精确改写，可信度与 kw 相同
+    if (rwHitIds.has(item.atom.id)) w = Math.max(w, 1.15) // rw 是 LLM 精确改写，可信度略高于 kw 弱命中
     if (embHitIds.has(item.atom.id)) w = Math.max(w, 0.4)
     if (ruleBoost(item.atom) > 0) w = Math.max(w, 0.2)
     sourceWeight.set(item.atom.id, w)
@@ -442,10 +454,44 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 
-  // 阈值过滤：加法融合后分数 = 源权重 + RRF 微调；
-  // 保留 kw(≥1.0)/rw(≥0.85)/emb(≥0.4) 命中，过滤纯 rule(0.2) 噪声
-  const filtered = hits.filter((h) => h.score >= 0.35)
-  if (filtered.length === 0 && kwResult.hits.length > 0) {
+  // 阈值过滤：加法融合后分数 = 源权重 + RRF 微调
+  let filtered = hits.filter((h) => h.score >= 0.35)
+
+  // 同主题冗余降权（P0）：多条内容同主题的记忆（如 4 条“批量审查模式”）霸占 top-N，
+  // 把正确答案（worker 实现）挤到第 6+。按“项目+核心词”聚类，同簇只保留最高分 1-2 条。
+  if (filtered.length > 1) {
+    // 提取记忆的主题键：项目名 + 内容中最高频的 2 个关键词
+    const clusterKey = (atom: MemoryAtom): string => {
+      const content = atom.content
+      const project = ['codelens', 'shopgo', 'docflow', 'proma', 'code']
+        .find((p) => content.toLowerCase().includes(p)) ?? ''
+      const words = content.toLowerCase().match(/[\u4e00-\u9fff]{2,4}/g) ?? []
+      // 取出现频率最高的中文词组（粗略：选最长的几个）
+      const top = words.sort((a, b) => b.length - a.length).slice(0, 2).join('|')
+      return `${project}:${top}`
+    }
+    const seenCluster = new Map<string, number>() // cluster -> 已保留的高分
+    const kept: typeof filtered = []
+    for (const h of filtered) {
+      const key = clusterKey(h.atom)
+      const existing = seenCluster.get(key)
+      if (existing !== undefined && existing >= 2) {
+        // 该主题簇已有 2 条高分，其余降权
+        h.score = 0.1
+      } else if (existing !== undefined) {
+        seenCluster.set(key, existing + 1)
+        kept.push(h)
+      } else {
+        seenCluster.set(key, 1)
+        kept.push(h)
+      }
+    }
+    filtered = kept.filter((h) => h.score >= 0.35).sort((a, b) => b.score - a.score).slice(0, limit)
+  }
+
+  // 只有当 kw 有真相关（绝对分 ≥1.0）时才 fallback 到 kw；否则返回空（无相关，不注入噪声）
+  const hasRealKw = kwResult.hits.some((h) => (h.rawScore ?? h.score) >= 1.0)
+  if (filtered.length === 0 && hasRealKw) {
     return kwResult
   }
   return { query, hits: filtered, strategy: 'hybrid', durationMs: Date.now() - started }

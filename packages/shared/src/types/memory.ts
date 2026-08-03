@@ -121,8 +121,10 @@ export interface MemorySearchRequest {
 /** 记忆检索命中 */
 export interface MemorySearchHit {
   atom: MemoryAtom
-  /** 相似度分数 0-1 */
+  /** 相似度分数 0-1（归一化） */
   score: number
+  /** 原始 BM25 绝对分（未归一化；用于真相关判断，避免弱命中被归一化放大） */
+  rawScore?: number
   /** 命中的关键词 */
   matchedTerms: string[]
 }
