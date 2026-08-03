@@ -1607,6 +1607,8 @@ export const AGENT_IPC_CHANNELS = {
   ACT_ON_SUGGESTION: 'agent:act-on-suggestion',
   /** 获取主动建议统计 */
   GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
+  /** 运行工作模式分析（手动触发） */
+  RUN_SUGGESTION_ANALYSIS: 'agent:run-suggestion-analysis',
   /** 建议变更事件（main → renderer，会话结束后新建议生成时推送） */
   SUGGESTIONS_CHANGED: 'agent:suggestions-changed',
   /** 读取工作区 CLAUDE.md */

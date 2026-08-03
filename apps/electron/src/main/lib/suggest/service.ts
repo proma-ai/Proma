@@ -132,6 +132,38 @@ export function getTypeWeights() {
   return typeWeights()
 }
 
+// ===== 工作模式分析（Phase B 方向 2） =====
+
+/**
+ * 运行工作模式分析并把合法候选持久化为待展示建议。
+ * 返回新增的建议数量（可为 0 = 无候选/LLM 不可用）。
+ * 供 automation 定时任务 / 手动触发调用。
+ */
+export async function runAnalysisAndPersist(): Promise<number> {
+  if (!suggestionsEnabled()) return 0
+  try {
+    const { runWorkPatternAnalysis } = await import('./analyst')
+    const candidates = await runWorkPatternAnalysis()
+    if (candidates.length === 0) return 0
+    // 去重：已有 suggested/never 的 duplicateKey 跳过
+    const existing = listSuggestions()
+    const existingKeys = new Set(existing.map((r) => r.duplicateKey))
+    let added = 0
+    for (const candidate of candidates) {
+      if (existingKeys.has(candidate.duplicateKey)) continue
+      persistSuggestion(candidate, undefined)
+      existingKeys.add(candidate.duplicateKey)
+      added += 1
+    }
+    if (added > 0) notifySuggestionsChanged()
+    console.log(`[Analyst] 工作模式分析完成: ${candidates.length} 候选, 新增 ${added} 条建议`)
+    return added
+  } catch (error) {
+    console.warn('[Analyst] 分析持久化失败:', error instanceof Error ? error.message : error)
+    return 0
+  }
+}
+
 // ===== 内部：加载去重来源 =====
 
 function loadAutomationTitles(): string[] {

@@ -673,6 +673,9 @@ export interface ElectronAPI {
   /** 获取主动建议统计 */
   getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
 
+  /** 运行工作模式分析（手动触发，返回新增建议数） */
+  runSuggestionAnalysis: () => Promise<{ ok: boolean; added: number; error?: string }>
+
   /** 订阅主动建议变更事件（会话结束后新建议生成时触发） */
   onSuggestionsChanged: (callback: () => void) => () => void
 
@@ -1922,6 +1925,10 @@ const electronAPI: ElectronAPI = {
 
   getSuggestionStats: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS)
+  },
+
+  runSuggestionAnalysis: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS)
   },
 
   onSuggestionsChanged: (callback: () => void) => {

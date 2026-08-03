@@ -185,6 +185,7 @@ import {
   listSuggestionsForUI,
   handleSuggestionFeedback,
   getSuggestionStats,
+  runAnalysisAndPersist,
 } from './lib/suggest/service'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -2582,6 +2583,18 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS,
     async (): Promise<import('@proma/shared').SuggestionStats> => {
       return getSuggestionStats()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS,
+    async (): Promise<{ ok: boolean; added: number; error?: string }> => {
+      try {
+        const added = await runAnalysisAndPersist()
+        return { ok: true, added }
+      } catch (error) {
+        return { ok: false, added: 0, error: error instanceof Error ? error.message : '分析失败' }
+      }
     }
   )
 

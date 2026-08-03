@@ -14,7 +14,7 @@
 
 import * as React from 'react'
 import { toast } from 'sonner'
-import { Bot, Brain, Check, Clock, RefreshCw, Sparkles, X } from 'lucide-react'
+import { Bot, Brain, Check, Clock, RefreshCw, Sparkles, X, Wand2 } from 'lucide-react'
 import type { Automation, MemoryCorrection, MemoryStats, SuggestionRecord, SuggestionStats } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -56,6 +56,7 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   const [memoryStats, setMemoryStats] = React.useState<MemoryStats | null>(null)
   const [pendingCorrections, setPendingCorrections] = React.useState<MemoryCorrection[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [analyzing, setAnalyzing] = React.useState(false)
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -103,6 +104,27 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
     }
   }
 
+  const handleRunAnalysis = async (): Promise<void> => {
+    if (analyzing) return
+    setAnalyzing(true)
+    try {
+      const result = await window.electronAPI.runSuggestionAnalysis()
+      if (!result.ok) {
+        toast.error(result.error ?? '分析失败')
+      } else if (result.added > 0) {
+        toast.success(`分析完成，发现 ${result.added} 条可沉淀的工作模式`)
+        await refresh()
+      } else {
+        toast.info('分析完成，暂未发现新的可沉淀模式')
+      }
+    } catch (error) {
+      console.warn('[Proactive Today] 分析失败:', error)
+      toast.error('分析失败')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   const handleCorrection = async (id: string, action: 'confirm' | 'reject'): Promise<void> => {
     try {
       if (action === 'confirm') {
@@ -136,13 +158,26 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   return (
     <div className={cn('flex h-full flex-col gap-5 overflow-y-auto', standalone ? '' : 'pb-8')}>
       {/* 顶部：今日概览 */}
-      <header>
-        <h2 className="text-xl font-semibold text-foreground">主动中心</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {activeCount > 0 || memoryCount > 0
-            ? `Proma 正在主动关注 ${activeCount} 件事，另有 ${suggestions.length} 条建议待你决定`
-            : 'Proma 还没有主动任务。使用对话时，Proma 会在合适的时机给出建议。'}
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">主动中心</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {activeCount > 0 || memoryCount > 0
+              ? `Proma 正在主动关注 ${activeCount} 件事，另有 ${suggestions.length} 条建议待你决定`
+              : 'Proma 还没有主动任务。使用对话时，Proma 会在合适的时机给出建议。'}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 gap-1.5 text-xs"
+          onClick={handleRunAnalysis}
+          disabled={analyzing}
+          title="分析近期记忆与工作模式，发现值得沉淀/自动化的规律"
+        >
+          <Wand2 className="size-3.5" />
+          {analyzing ? '分析中…' : '分析工作模式'}
+        </Button>
       </header>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

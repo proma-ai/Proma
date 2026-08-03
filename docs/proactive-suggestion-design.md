@@ -121,7 +121,31 @@ never    → 该 duplicateKey 永久屏蔽 + weight × 0.5
 - typecheck 6 包全绿、renderer 构建成功、全量测试无回归
 - 子代理真实 UI 实测（见下）
 
-## 8. 参考
+## 8. Phase B 成果二（2026-08-03）：工作模式分析器（headless LLM）
+
+### 实现
+- **`suggest/analyst.ts`**：低频 LLM 分析器（蓝图 §7.4 第二阶段）
+  - 输入：近期记忆（recentAtoms）+ persona + 已生效纠正 + 已有定时任务名（去重）
+  - LLM 分析：识别隐含工作模式（周期任务 / SOP / 待固化偏好）
+  - schema 严格校验：类型白名单（automation/skill/todo）、字段完整性、动作匹配、长度限制、duplicateKey 去重、单次上限 3
+  - LLM 不能直接创建任务——只产出候选，用户在主动中心确认
+- **接线**：
+  - `runAnalysisAndPersist`：分析 + 持久化为建议（复用三态反馈）
+  - IPC `RUN_SUGGESTION_ANALYSIS` + preload `runSuggestionAnalysis` + Today 页「分析工作模式」按钮
+  - Pi/Claude 双 runtime 暴露 `suggestion_analyze` 内置工具（定时任务可调）
+  - `default-skills/suggestion-daily`：指导 Agent 建每日分析定时任务
+
+### 真实验证（DeepSeek v4 Flash）
+注入 4 条记忆（发版 SOP ×2 + 每周五周报 + 发版前跑测试偏好）→ 分析产出：
+- 「每周五自动写周报」（automation）— 从"每周五写周报"记忆发现周期工作
+- 「发版流程 SOP 沉淀」（skill）— 从多条发版记忆发现可沉淀流程
+
+规则引擎发现不了这些（用户从未明说"定时"），LLM 从记忆推断——这正是方向 2 的价值。
+
+### 踩坑
+reasoning 模型（deepseek-v4-flash）maxTokens 1024 时思考占满 token 输出为空；改 4096 后正常（与 memory 提取一致）。
+
+## 9. 参考
 
 - ProactiveAgent（ICLR 2025）：误报控制、统一接受率目标、P9 时机学习、P12 轻量三态交互
 - Proactive Center 蓝图 §7（Recommendation 结构 / duplicateKey / 降噪机制）

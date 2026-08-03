@@ -68,6 +68,7 @@ import {
   confirmCorrection as memoryConfirmCorrection,
   rejectCorrection as memoryRejectCorrection,
 } from '../memory/service'
+import { runAnalysisAndPersist } from '../suggest/service'
 import type { MemoryAtomType } from '@proma/shared'
 import {
   fetchWebPage,
@@ -910,6 +911,16 @@ function buildMemoryTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinitio
         const ok = memoryRejectCorrection(id)
         if (!ok) throw new Error(`纠正不存在: ${id}`)
         return jsonToolResult({ rejected: true })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__suggestion_analyze',
+      label: '分析工作模式',
+      description: '用 LLM 分析近期记忆，发现重复出现的工作模式（周期任务/SOP/待沉淀偏好），生成主动建议候选。适用于定时任务中定期运行、或用户主动要求"分析我的工作模式"时调用。',
+      parameters: Type.Object({}),
+      async execute() {
+        const added = await runAnalysisAndPersist()
+        return jsonToolResult({ added })
       },
     }),
   ] as unknown as ToolDefinition[]

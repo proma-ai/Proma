@@ -16,6 +16,7 @@ import {
   confirmCorrection,
   rejectCorrection,
 } from './service'
+import { runAnalysisAndPersist } from '../suggest/service'
 import type { MemoryAtomType } from '@proma/shared'
 
 interface MemoryAgentToolContext {
@@ -157,6 +158,15 @@ export async function injectMemoryMcpServer(
           const ok = rejectCorrection(id)
           if (!ok) throw new Error(`纠正不存在: ${id}`)
           return { content: [{ type: 'text' as const, text: '纠正已拒绝。' }] }
+        },
+      ),
+      sdk.tool(
+        'suggestion_analyze',
+        '分析工作模式：用 LLM 分析近期记忆，发现重复出现的工作模式（周期任务/SOP/待沉淀偏好），生成主动建议候选。适用于定时任务中定期运行，或用户主动要求分析工作模式时调用。',
+        {},
+        async () => {
+          const added = await runAnalysisAndPersist()
+          return { content: [{ type: 'text' as const, text: `工作模式分析完成，新增 ${added} 条建议。` }] }
         },
       ),
     ],
