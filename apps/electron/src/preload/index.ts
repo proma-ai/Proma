@@ -115,6 +115,13 @@ import type {
   SpeechUsageLogResponse,
   AgentUsageLogResponse,
   CombinedUsageLogResponse,
+  EnterpriseSkill,
+  EnterpriseSkillDetail,
+  EnterpriseSkillVersion,
+  EnterpriseSkillListResponse,
+  EnterpriseSkillPublishInput,
+  EnterpriseSkillInstallResult,
+  EnterpriseSkillCheckUpdatesResponse,
   ChatToolInfo,
   ChatToolState,
   ChatToolMeta,
@@ -651,6 +658,16 @@ export interface ElectronAPI {
 
   /** 从源工作区同步更新已导入的 Skill */
   updateSkillFromSource: (targetSlug: string, skillSlug: string) => Promise<SkillMeta>
+
+  /** 企业 Skills 库：Renderer 仅通过此受限接口访问远端技能。 */
+  enterpriseSkills: {
+    list: () => Promise<EnterpriseSkillListResponse>
+    get: (skillId: string) => Promise<EnterpriseSkillDetail>
+    publish: (workspaceSlug: string, input: EnterpriseSkillPublishInput) => Promise<EnterpriseSkillDetail>
+    publishVersion: (workspaceSlug: string, skillId: string, input: EnterpriseSkillPublishInput) => Promise<EnterpriseSkillVersion>
+    install: (workspaceSlug: string, skill: EnterpriseSkill) => Promise<EnterpriseSkillInstallResult>
+    checkUpdates: (workspaceSlug: string, skills: SkillMeta[]) => Promise<EnterpriseSkillCheckUpdatesResponse>
+  }
 
   /** 读取 SKILL.md 全文内容 */
   readSkillContent: (workspaceSlug: string, skillSlug: string) => Promise<string>
@@ -1974,6 +1991,15 @@ const electronAPI: ElectronAPI = {
       targetSlug,
       skillSlug,
     )
+  },
+
+  enterpriseSkills: {
+    list: () => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_LIST),
+    get: (skillId: string) => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_GET, skillId),
+    publish: (workspaceSlug: string, input: EnterpriseSkillPublishInput) => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH, workspaceSlug, input),
+    publishVersion: (workspaceSlug: string, skillId: string, input: EnterpriseSkillPublishInput) => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH_VERSION, workspaceSlug, skillId, input),
+    install: (workspaceSlug: string, skill: EnterpriseSkill) => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_INSTALL, workspaceSlug, skill),
+    checkUpdates: (workspaceSlug: string, skills: SkillMeta[]) => ipcRenderer.invoke(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_CHECK_UPDATES, workspaceSlug, skills),
   },
 
   readSkillContent: (workspaceSlug: string, skillSlug: string) => {

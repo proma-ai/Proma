@@ -72,8 +72,16 @@ export function useAgentSkillsData(): AgentSkillsData {
         window.electronAPI.getDefaultSkillSlugs(),
         window.electronAPI.getWorkspaceCapabilities(workspaceSlug),
       ])
+      // 只有已安装企业来源 Skill 时才请求远端更新信息；网络失败时主进程返回空结果。
+      const enterpriseSources = skillList.filter((skill) => skill.enterpriseSource)
+      const updateResponse = enterpriseSources.length > 0
+        ? await window.electronAPI.enterpriseSkills.checkUpdates(workspaceSlug, enterpriseSources)
+        : { updates: [] }
+      const updateBySkillId = new Map(updateResponse.updates.map((update) => [update.skillId, update.available]))
       setMcpConfig(config)
-      setSkills(skillList)
+      setSkills(skillList.map((skill) => skill.enterpriseSource
+        ? { ...skill, hasUpdate: updateBySkillId.get(skill.enterpriseSource.skillId) ?? false }
+        : skill))
       setSkillsDir(dir)
       setDefaultSkillSlugs(new Set(defaultSlugs))
       setCapabilities(capabilities)
@@ -120,10 +128,25 @@ export function useAgentSkillsData(): AgentSkillsData {
     if (!workspaceSlug || updatingSkill) return
     setUpdatingSkill(slug)
     try {
-      const updated = await window.electronAPI.updateSkillFromSource(workspaceSlug, slug)
-      setSkills((prev) => prev.map((s) => (s.slug === slug ? updated : s)))
+      const current = skills.find((skill) => skill.slug === slug)
+      if (current?.enterpriseSource) {
+        const catalog = await window.electronAPI.enterpriseSkills.list()
+        const remote = catalog.items.find((skill) => skill.id === current.enterpriseSource?.skillId)
+        if (!remote) throw new Error('企业库中找不到此 Skill，可能已下架')
+        const installed = await window.electronAPI.enterpriseSkills.install(workspaceSlug, remote)
+        setSkills((prev) => prev.map((skill) => skill.slug === slug ? {
+          ...skill,
+          version: installed.installedVersion,
+          enterpriseSource: installed.source,
+          hasUpdate: false,
+        } : skill))
+        toast.success(`已手动更新 Skill：${current.name}`)
+      } else {
+        const updated = await window.electronAPI.updateSkillFromSource(workspaceSlug, slug)
+        setSkills((prev) => prev.map((s) => (s.slug === slug ? updated : s)))
+        toast.success(`已同步更新 Skill：${updated.name}`)
+      }
       bumpCapabilitiesVersion((v) => v + 1)
-      toast.success(`已同步更新 Skill：${updated.name}`)
     } catch (error) {
       console.error('[Agent 技能] 更新 Skill 失败:', error)
       const message = error instanceof Error ? error.message : '未知错误'
@@ -131,7 +154,7 @@ export function useAgentSkillsData(): AgentSkillsData {
     } finally {
       setUpdatingSkill(null)
     }
-  }, [workspaceSlug, updatingSkill, bumpCapabilitiesVersion])
+  }, [workspaceSlug, updatingSkill, skills, bumpCapabilitiesVersion])
 
   const toggleMcp = React.useCallback(async (name: string, enabled: boolean) => {
     try {

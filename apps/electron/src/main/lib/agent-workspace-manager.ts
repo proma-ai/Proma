@@ -29,7 +29,7 @@ import { findAllGitRoots, normalizeGitRoot } from './git-diff-service'
 import { listBuiltinMcpServers } from './builtin-mcp/catalog'
 import { RESERVED_BUILTIN_KEYS } from './builtin-mcp/baseline'
 import { inferMcpTransportType, normalizeMcpTransportType } from '@proma/shared'
-import type { AgentWorkspace, CreateAgentWorkspaceInput, LocalProjectRootStatus, WorkspaceMcpConfig, SkillMeta, SkillImportSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, WorkspaceMemorySummary } from '@proma/shared'
+import type { AgentWorkspace, CreateAgentWorkspaceInput, LocalProjectRootStatus, WorkspaceMcpConfig, SkillMeta, SkillImportSource, SkillSource, OtherWorkspaceSkillsGroup, WorkspaceCapabilities, SkillFileNode, SkillFileContent, WorkspaceMemorySummary } from '@proma/shared'
 
 interface AgentWorkspacesIndex {
   version: number
@@ -845,14 +845,16 @@ function scanSkillsInDir(dir: string, enabled: boolean): SkillMeta[] {
         const content = readFileSync(skillMdPath, 'utf-8')
         const meta = parseSkillFrontmatter(content, entry.name, enabled)
 
-        // 如果是导入的 Skill，读取来源信息并检测更新
-        const importSource = readSkillImportSource(join(dir, entry.name))
-        if (importSource) {
-          meta.importSource = importSource
-          const sourceSkillDir = resolveSkillDir(importSource.sourceWorkspaceSlug, entry.name)
+        // 兼容旧的工作区导入来源，以及 schemaVersion=2 的企业库来源。
+        const source = readSkillImportSource(join(dir, entry.name))
+        if (isEnterpriseSkillSource(source)) {
+          meta.enterpriseSource = source
+        } else if (isSkillImportSource(source)) {
+          meta.importSource = source
+          const sourceSkillDir = resolveSkillDir(source.sourceWorkspaceSlug, entry.name)
           if (sourceSkillDir) {
             const currentSourceVersion = parseSkillVersion(sourceSkillDir)
-            meta.hasUpdate = isNewerVersion(currentSourceVersion, importSource.sourceVersion)
+            meta.hasUpdate = isNewerVersion(currentSourceVersion, source.sourceVersion)
           }
         }
 
@@ -1008,7 +1010,7 @@ export function updateSkillFromSource(
   }
 
   const existingSource = readSkillImportSource(targetPath)
-  if (!existingSource) {
+  if (!isSkillImportSource(existingSource)) {
     throw new Error(`Skill ${skillSlug} 不是从其他项目导入的，无法从源更新`)
   }
 
@@ -1058,11 +1060,27 @@ export function updateSkillFromSource(
 
 const SOURCE_META_FILE = '.source.json'
 
-function readSkillImportSource(skillDir: string): SkillImportSource | undefined {
+function isEnterpriseSkillSource(source: SkillSource | undefined): source is import('@proma/shared').EnterpriseSkillSource {
+  return !!source && 'type' in source && source.type === 'enterprise-library'
+}
+
+function isSkillImportSource(source: SkillSource | undefined): source is SkillImportSource {
+  return !!source && !isEnterpriseSkillSource(source)
+}
+
+function readSkillImportSource(skillDir: string): SkillSource | undefined {
   const p = join(skillDir, SOURCE_META_FILE)
   if (!existsSync(p)) return undefined
   try {
-    return JSON.parse(readFileSync(p, 'utf-8')) as SkillImportSource
+    const source = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>
+    // schemaVersion/type 缺失的历史 .source.json 一律按工作区导入解释。
+    if (source.type === 'enterprise-library' && source.schemaVersion === 2 && typeof source.skillId === 'string' && typeof source.versionId === 'string') {
+      return source as unknown as import('@proma/shared').EnterpriseSkillSource
+    }
+    if (typeof source.sourceWorkspaceSlug === 'string' && typeof source.sourceWorkspaceName === 'string') {
+      return source as unknown as SkillImportSource
+    }
+    return undefined
   } catch {
     return undefined
   }

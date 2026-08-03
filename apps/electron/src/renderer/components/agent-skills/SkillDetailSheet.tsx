@@ -128,9 +128,11 @@ function SkillDetailBody({
 
   const sourceLabel = isBuiltin
     ? 'PROMA 内置'
-    : skill.importSource
-      ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
-      : '当前项目'
+    : skill.enterpriseSource
+      ? `企业 Skills 库 · v${skill.enterpriseSource.installedVersion}`
+      : skill.importSource
+        ? `从 ${skill.importSource.sourceWorkspaceName} 导入`
+        : '当前项目'
 
   return (
     <div className="flex h-full flex-col min-h-0">

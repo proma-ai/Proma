@@ -5,14 +5,14 @@
  *
  * 结构：
  * - 顶部：标题 + 工作区切换下拉
- * - 工具条：Skills / MCP 切换 + 搜索 + 社区市场（占位）+ 新增入口
+ * - 工具条：Skills / 企业库 / MCP / 记忆切换 + 搜索 + 上下文操作入口
  * - 内容：能力卡片网格（商店风），点击卡片打开右侧详情抽屉
  */
 
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { Blocks, ChevronDown, ChevronRight, Search, Plus, Store, FolderOpen, Check, Sparkles, Loader2 } from 'lucide-react'
+import { Blocks, ChevronDown, ChevronRight, Search, Plus, FolderOpen, Check, Sparkles, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -35,6 +35,8 @@ import { SkillDetailSheet } from './SkillDetailSheet'
 import { McpDetailSheet } from './McpDetailSheet'
 import { BuiltinMcpDetailSheet } from './BuiltinMcpDetailSheet'
 import { ImportSkillDialog } from './ImportSkillDialog'
+import { EnterpriseSkillsTab } from './EnterpriseSkillsTab'
+import { PublishEnterpriseSkillDialog } from './PublishEnterpriseSkillDialog'
 import { WorkspaceMemoryTab } from './WorkspaceMemoryTab'
 import { groupSkills } from './skillGrouping'
 
@@ -104,6 +106,9 @@ export function AgentSkillsView(): React.ReactElement {
   const [editingMcp, setEditingMcp] = React.useState<{ name: string; entry: McpServerEntry } | null>(null)
   const [selectedBuiltinMcp, setSelectedBuiltinMcp] = React.useState<BuiltinMcpServerSummary | null>(null)
   const [showImport, setShowImport] = React.useState(false)
+  const [enterpriseSkillsEnabled, setEnterpriseSkillsEnabled] = React.useState(false)
+  const [enterpriseCanPublish, setEnterpriseCanPublish] = React.useState(false)
+  const [skillToPublish, setSkillToPublish] = React.useState<SkillMeta | null>(null)
   const [wsPopoverOpen, setWsPopoverOpen] = React.useState(false)
   const [pendingDeleteSkill, setPendingDeleteSkill] = React.useState<SkillMeta | null>(null)
   const [pendingDeleteMcpName, setPendingDeleteMcpName] = React.useState<string | null>(null)
@@ -152,6 +157,27 @@ export function AgentSkillsView(): React.ReactElement {
 
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false
+
+  // 企业库入口和发布入口均以服务端资格为准；主进程与 API 仍会二次鉴权。
+  React.useEffect(() => {
+    let cancelled = false
+    setEnterpriseSkillsEnabled(false)
+    setEnterpriseCanPublish(false)
+    if (!data.workspaceSlug) return undefined
+    void window.electronAPI.enterpriseSkills.list()
+      .then((result) => {
+        if (cancelled) return
+        const enabled = result.availability?.enabled === true
+        setEnterpriseSkillsEnabled(enabled)
+        setEnterpriseCanPublish(enabled && result.availability?.canPublish === true)
+      })
+      .catch((error) => console.warn('[企业 Skills 库] 获取企业资格失败:', error))
+    return () => { cancelled = true }
+  }, [data.workspaceSlug])
+
+  React.useEffect(() => {
+    if (!enterpriseSkillsEnabled && tab === 'enterprise') setTab('skills')
+  }, [enterpriseSkillsEnabled, setTab, tab])
 
   const openSkillFolder = (slug: string): void => {
     if (data.skillsDir) window.electronAPI.openFile(`${data.skillsDir}/${slug}`)
@@ -274,18 +300,21 @@ export function AgentSkillsView(): React.ReactElement {
 
       {/* 工具条 */}
       <div className="titlebar-no-drag mx-auto flex w-full max-w-6xl shrink-0 items-center gap-3 px-8 pb-4">
-        {/* Skills / MCP / 记忆切换 */}
-        <div className="relative flex h-8 items-stretch rounded-xl bg-muted p-0.5">
+        {/* Skills / 企业库 / MCP / 记忆切换：企业库仅对已启用的企业成员显示 */}
+        <div className={cn('relative grid h-8 shrink-0 items-stretch rounded-xl bg-muted p-0.5', enterpriseSkillsEnabled ? 'w-[480px] grid-cols-4' : 'w-[360px] grid-cols-3')}>
           <div
             className={cn(
-              'absolute bottom-0.5 top-0.5 w-[calc(33.333%-3px)] rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
+              'absolute bottom-0.5 top-0.5 rounded-lg bg-background shadow-sm transition-transform duration-300 ease-in-out',
+              enterpriseSkillsEnabled ? 'w-[calc(25%-3px)]' : 'w-[calc(33.333%-3px)]',
               tab === 'skills' && 'translate-x-0',
-              tab === 'mcp' && 'translate-x-full',
-              tab === 'memory' && 'translate-x-[200%]',
+              enterpriseSkillsEnabled && tab === 'enterprise' && 'translate-x-full',
+              tab === 'mcp' && (enterpriseSkillsEnabled ? 'translate-x-[200%]' : 'translate-x-full'),
+              tab === 'memory' && (enterpriseSkillsEnabled ? 'translate-x-[300%]' : 'translate-x-[200%]'),
             )}
           />
           {([
             { value: 'skills' as const, label: 'Skills', count: data.skills.length },
+            ...(enterpriseSkillsEnabled ? [{ value: 'enterprise' as const, label: '企业 Skills 库' }] : []),
             { value: 'mcp' as const, label: 'MCP', count: mcpCount },
             { value: 'memory' as const, label: '记忆', count: memoryCount },
           ]).map(({ value, label, count }) => (
@@ -293,12 +322,12 @@ export function AgentSkillsView(): React.ReactElement {
               key={value}
               onClick={() => setTab(value)}
               className={cn(
-                'relative z-[1] flex min-w-[96px] items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors duration-200',
+                'relative z-[1] flex w-full items-center justify-center gap-1 rounded-lg px-2 text-sm font-medium transition-colors duration-200',
                 tab === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {label}
-              <span className="text-[11px] tabular-nums text-muted-foreground">{count}</span>
+              {count !== undefined && <span className="text-[11px] tabular-nums text-muted-foreground">{count}</span>}
             </button>
           ))}
         </div>
@@ -309,27 +338,10 @@ export function AgentSkillsView(): React.ReactElement {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={tab === 'skills' ? '搜索 Skills...' : tab === 'mcp' ? '搜索 MCP 服务器...' : '搜索记忆文件...'}
+            placeholder={tab === 'skills' ? '搜索 Skills...' : tab === 'enterprise' ? '搜索企业 Skills...' : tab === 'mcp' ? '搜索 MCP 服务器...' : '搜索记忆文件...'}
             className="w-full bg-transparent text-[13px] text-foreground placeholder:text-foreground/35 focus:outline-none"
           />
         </div>
-
-        {/* 社区市场（占位） */}
-        {tab === 'skills' && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                disabled
-                className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border/60 px-3 text-[13px] font-medium text-foreground/35"
-              >
-                <Store size={14} />
-                <span>社区市场</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">即将上线：一键浏览、安装与更新社区 Skills</TooltipContent>
-          </Tooltip>
-        )}
 
         {/* Skills：从其他工作区导入 */}
         {tab === 'skills' && (
@@ -384,10 +396,19 @@ export function AgentSkillsView(): React.ReactElement {
               total={data.skills.length}
               updateCount={updateCount}
               updatingSkill={data.updatingSkill}
+              canPublishToEnterprise={enterpriseCanPublish}
               isBuiltin={(slug) => data.defaultSkillSlugs.has(slug)}
               onOpen={setSelectedSkillSlug}
               onToggle={data.toggleSkill}
               onUpdate={data.updateSkill}
+              onPublishToEnterprise={setSkillToPublish}
+            />
+          ) : enterpriseSkillsEnabled && tab === 'enterprise' ? (
+            <EnterpriseSkillsTab
+              workspaceSlug={data.workspaceSlug}
+              search={search}
+              installedSkills={data.skills}
+              onInstalled={() => bumpCapabilities((v) => v + 1)}
             />
           ) : tab === 'mcp' ? (
             <McpTab
@@ -481,6 +502,13 @@ export function AgentSkillsView(): React.ReactElement {
         installedSkills={data.skills}
         onImported={() => bumpCapabilities((v) => v + 1)}
       />
+
+      <PublishEnterpriseSkillDialog
+        skill={skillToPublish}
+        workspaceSlug={data.workspaceSlug}
+        onOpenChange={(open) => { if (!open) setSkillToPublish(null) }}
+        onPublished={() => bumpCapabilities((v) => v + 1)}
+      />
     </div>
   )
 }
@@ -493,10 +521,12 @@ interface SkillsTabProps {
   total: number
   updateCount: number
   updatingSkill: string | null
+  canPublishToEnterprise: boolean
   isBuiltin: (slug: string) => boolean
   onOpen: (slug: string) => void
   onToggle: (slug: string, enabled: boolean) => void
   onUpdate: (slug: string) => void
+  onPublishToEnterprise: (skill: SkillMeta) => void
 }
 
 function SkillsTab({
@@ -505,10 +535,12 @@ function SkillsTab({
   total,
   updateCount,
   updatingSkill,
+  canPublishToEnterprise,
   isBuiltin,
   onOpen,
   onToggle,
   onUpdate,
+  onPublishToEnterprise,
 }: SkillsTabProps): React.ReactElement {
   if (total === 0) {
     return <EmptyState icon={<Blocks className="size-8 text-foreground/30" />} title="暂无 Skill" hint="可以在 Agent 模式下让 Proma 帮你联网查找并安装 Skill，或从其他项目导入。" />
@@ -525,10 +557,10 @@ function SkillsTab({
         </div>
       )}
       {customSkills.length > 0 && (
-        <SkillSection title="我的 Skills" skills={customSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} />
+        <SkillSection title="我的 Skills" skills={customSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} canPublishToEnterprise={canPublishToEnterprise} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} onPublishToEnterprise={onPublishToEnterprise} />
       )}
       {builtinSkills.length > 0 && (
-        <SkillSection title="PROMA 内置" skills={builtinSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} />
+        <SkillSection title="PROMA 内置" skills={builtinSkills} isBuiltin={isBuiltin} updatingSkill={updatingSkill} canPublishToEnterprise={false} onOpen={onOpen} onToggle={onToggle} onUpdate={onUpdate} onPublishToEnterprise={onPublishToEnterprise} />
       )}
     </div>
   )
@@ -539,12 +571,14 @@ interface SkillSectionProps {
   skills: SkillMeta[]
   isBuiltin: (slug: string) => boolean
   updatingSkill: string | null
+  canPublishToEnterprise: boolean
   onOpen: (slug: string) => void
   onToggle: (slug: string, enabled: boolean) => void
   onUpdate: (slug: string) => void
+  onPublishToEnterprise: (skill: SkillMeta) => void
 }
 
-function SkillSection({ title, skills, isBuiltin, updatingSkill, onOpen, onToggle, onUpdate }: SkillSectionProps): React.ReactElement {
+function SkillSection({ title, skills, isBuiltin, updatingSkill, canPublishToEnterprise, onOpen, onToggle, onUpdate, onPublishToEnterprise }: SkillSectionProps): React.ReactElement {
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(new Set())
   const groups = React.useMemo(() => groupSkills(skills), [skills])
 
@@ -585,9 +619,11 @@ function SkillSection({ title, skills, isBuiltin, updatingSkill, onOpen, onToggl
                       skill={skill}
                       isBuiltin={isBuiltin(skill.slug)}
                       updating={updatingSkill === skill.slug}
+                      canPublishToEnterprise={canPublishToEnterprise}
                       onOpen={() => onOpen(skill.slug)}
                       onToggle={(enabled) => onToggle(skill.slug, enabled)}
                       onUpdate={() => onUpdate(skill.slug)}
+                      onPublishToEnterprise={() => onPublishToEnterprise(skill)}
                     />
                   ))}
                 </div>

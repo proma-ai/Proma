@@ -270,6 +270,13 @@ export const CLOUD_IPC_CHANNELS = {
   GET_SPEECH_USAGE_LOGS: 'cloud:usage:get-speech',
   GET_AGENT_USAGE_LOGS: 'cloud:usage:get-agent',
   GET_COMBINED_USAGE_LOGS: 'cloud:usage:get-combined',
+  // 企业 Skills 库（远端请求与本地制品处理都由主进程负责）
+  ENTERPRISE_SKILLS_LIST: 'cloud:enterprise-skills:list',
+  ENTERPRISE_SKILLS_GET: 'cloud:enterprise-skills:get',
+  ENTERPRISE_SKILLS_PUBLISH: 'cloud:enterprise-skills:publish',
+  ENTERPRISE_SKILLS_PUBLISH_VERSION: 'cloud:enterprise-skills:publish-version',
+  ENTERPRISE_SKILLS_INSTALL: 'cloud:enterprise-skills:install',
+  ENTERPRISE_SKILLS_CHECK_UPDATES: 'cloud:enterprise-skills:check-updates',
 } as const
 
 // ===== 用量日志相关类型 =====

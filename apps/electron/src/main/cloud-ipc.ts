@@ -60,10 +60,21 @@ import {
   getAgentUsageLogs,
   getCombinedUsageLogs,
 } from './lib/cloud-usage-service'
+import {
+  checkEnterpriseSkillUpdates,
+  getEnterpriseSkill,
+  getEnterpriseSkills,
+  installEnterpriseSkill,
+  publishEnterpriseSkill,
+  publishEnterpriseSkillVersion,
+} from './lib/enterprise-skills-service'
 import type {
   ApiKeyCreateParams,
   ApiKeyUpdateParams,
   UsageQueryParams,
+  EnterpriseSkill,
+  EnterpriseSkillPublishInput,
+  SkillMeta,
 } from '@proma/shared'
 
 /**
@@ -326,5 +337,25 @@ export async function registerCloudIpcHandlers(): Promise<void> {
     },
   )
 
-  console.log('[Cloud IPC] 已注册 Cloud 认证 + 账单 + 官方渠道 + API Key + 订阅 + 提示词下载 + 健康检查 + 用量日志 + 模型轮询 处理器')
+  // ===== 企业 Skills 库 =====
+  ipcMain.handle(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_LIST, async () => getEnterpriseSkills())
+  ipcMain.handle(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_GET, async (_, skillId: string) => getEnterpriseSkill(skillId))
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH,
+    async (_, workspaceSlug: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkill(workspaceSlug, input),
+  )
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH_VERSION,
+    async (_, workspaceSlug: string, skillId: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkillVersion(workspaceSlug, skillId, input),
+  )
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_INSTALL,
+    async (_, workspaceSlug: string, skill: EnterpriseSkill) => installEnterpriseSkill(workspaceSlug, skill),
+  )
+  ipcMain.handle(
+    CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_CHECK_UPDATES,
+    async (_, workspaceSlug: string, skills: SkillMeta[]) => checkEnterpriseSkillUpdates(workspaceSlug, skills),
+  )
+
+  console.log('[Cloud IPC] 已注册 Cloud 认证、账单、渠道、用量与企业 Skills 库处理器')
 }

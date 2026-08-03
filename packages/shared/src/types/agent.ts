@@ -912,12 +912,99 @@ export interface WorkspaceMcpConfig {
 
 // ===== Skill 元数据 =====
 
-/** 从其他工作区导入的 Skill 来源元数据 */
+/** 从其他工作区导入的 Skill 来源元数据（schemaVersion 缺失时按此旧结构兼容）。 */
 export interface SkillImportSource {
   sourceWorkspaceSlug: string
   sourceWorkspaceName: string
   importedAt: string        // ISO 8601
   sourceVersion: string     // 导入时源 Skill 的 version，无则 '0.0.0'
+}
+
+/** 企业 Skills 库安装来源。 */
+export interface EnterpriseSkillSource {
+  schemaVersion: 2
+  type: 'enterprise-library'
+  enterpriseId: string
+  skillId: string
+  versionId: string
+  installedVersion: string
+  artifactSha256: string
+  baseManifestSha256: string
+  installedAt: string
+}
+
+/** 本地 Skill 来源元数据的兼容联合类型。 */
+export type SkillSource = SkillImportSource | EnterpriseSkillSource
+
+export interface EnterpriseSkillVersion {
+  id: string
+  version: string
+  changelog?: string
+  publishedAt?: string
+  artifactSha256?: string
+  sizeBytes?: number
+}
+
+export interface EnterpriseSkill {
+  id: string
+  enterpriseId?: string
+  slug: string
+  name: string
+  description?: string
+  group?: string
+  icon?: string
+  authorName?: string
+  status?: 'PUBLISHED' | 'UNLISTED' | 'REVOKED'
+  latestVersion: EnterpriseSkillVersion
+  updatedAt?: string
+}
+
+export interface EnterpriseSkillDetail extends EnterpriseSkill {
+  versions?: EnterpriseSkillVersion[]
+  skillMdContent?: string
+  policy?: EnterpriseSkillsAvailability
+}
+
+/** 企业库资格由服务端认证上下文决定，仅用于 Renderer 的展示预判。 */
+export interface EnterpriseSkillsAvailability {
+  enabled: boolean
+  enterpriseId?: string
+  enterpriseName?: string
+  canPublish?: boolean
+  publisherMode?: 'ENTERPRISE_ADMINS_ONLY'
+  reason?: string
+}
+
+export interface EnterpriseSkillListResponse {
+  items: EnterpriseSkill[]
+  availability?: EnterpriseSkillsAvailability
+}
+
+export interface EnterpriseSkillDownload {
+  url: string
+  artifactSha256: string
+  fileName: string
+  /** 仅主进程下载后使用，绝不经 IPC 暴露。 */
+  artifact?: Buffer
+}
+
+export interface EnterpriseSkillPublishInput {
+  skillSlug: string
+  version: string
+  changelog?: string
+  name?: string
+  description?: string
+}
+
+export interface EnterpriseSkillInstallResult {
+  skillId: string
+  versionId: string
+  installedVersion: string
+  source: EnterpriseSkillSource
+}
+
+export interface EnterpriseSkillCheckUpdatesResponse {
+  updates: Array<{ skillId: string; versionId: string; version: string; available: boolean; latestVersion?: EnterpriseSkillVersion }>
 }
 
 /** 工作区 Skill 元数据 */
@@ -930,9 +1017,10 @@ export interface SkillMeta {
   icon?: string
   version?: string
   enabled: boolean
-  /** 如果此 Skill 是从其他工作区导入的，则携带来源信息 */
+  /** 如果此 Skill 是从其他工作区或企业库导入的，则携带来源信息 */
   importSource?: SkillImportSource
-  /** 是否有可用更新（源 Skill 版本 > importSource.sourceVersion） */
+  enterpriseSource?: EnterpriseSkillSource
+  /** 是否有可用更新（来源版本小于已知最新版本） */
   hasUpdate?: boolean
 }
 
