@@ -44,9 +44,19 @@ export function getConfigDirName(): string {
  * 获取配置目录路径
  *
  * 开发模式返回 ~/.proma-dev/，正式版本返回 ~/.proma/。
+ * 支持 PROMA_CONFIG_DIR 环境变量覆盖（测试隔离 / 自定义配置位置），
+ * 与 PROMA_MEMORY_DIR 机制一致。
  * 如果目录不存在则自动创建。
  */
 export function getConfigDir(): string {
+  const override = process.env.PROMA_CONFIG_DIR?.trim()
+  if (override) {
+    if (!existsSync(override)) {
+      mkdirSync(override, { recursive: true })
+    }
+    return override
+  }
+
   const configDir = join(homedir(), getConfigDirName())
 
   if (!existsSync(configDir)) {

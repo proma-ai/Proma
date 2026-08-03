@@ -13,7 +13,7 @@
 
 import type { RuleContext, RuleMatch } from './types'
 import type { SuggestionCandidate } from '@proma/shared'
-import { extractSignals, normalizeRule, type Signal } from './signals'
+import { extractSignals, normalizeRule, isMeaningfulRule, type Signal } from './signals'
 
 /** SOP 候选数量阈值：达到后建议沉淀为 Skill */
 export const SOP_CANDIDATE_THRESHOLD = 3
@@ -39,6 +39,8 @@ function signalToCandidate(signal: Signal, ctx: RuleContext): RuleMatch | undefi
   switch (signal.kind) {
     case 'correction': {
       const rule = normalizeRule(signal.raw)
+      // 无意义规则（"这样"/"再说"）不产生建议
+      if (!isMeaningfulRule(rule)) return undefined
       // 去重：已有相同/相似 pending correction 不再建议
       const existing = ctx.existingCorrectionRules.some(
         (r) => r === rule || r.includes(rule) || rule.includes(r),

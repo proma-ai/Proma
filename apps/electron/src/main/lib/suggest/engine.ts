@@ -36,14 +36,14 @@ export const DEFAULT_SUGGEST_OPTIONS: SuggestEngineOptions = {
   maxPerSession: 2,
 }
 
-/** 默认类型权重（初始 1.0） */
+/** 默认类型权重（初始） */
 export function defaultTypeWeights(): SuggestionTypeWeights {
   return {
     correction: 1.0,
     followup: 1.0,
     automation: 1.0,
     skill: 0.8, // Skill 建议偏打扰，初始略低
-    todo: 0.7, // Todo 建议初始最低
+    todo: 0.9, // Todo 建议初始略低（但必须 ≥ 0.72×0.9=0.648 > 0.6 阈值，避免死锁）
   }
 }
 

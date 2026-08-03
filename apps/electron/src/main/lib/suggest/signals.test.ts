@@ -96,3 +96,40 @@ describe('suggest/signals: 工具函数', () => {
     expect(TODO_PATTERNS.length).toBeGreaterThan(0)
   })
 })
+
+describe('suggest/signals: 子代理审查边界回归', () => {
+  test('"以后再说吧" 不误判为纠正（延后≠纠正）', () => {
+    const signals = extractSignals(['这个问题以后再说吧'])
+    expect(signals.some((s) => s.kind === 'correction')).toBe(false)
+  })
+
+  test('"以后" 太短不触发（断片防护）', () => {
+    const signals = extractSignals(['以后不要'])
+    expect(signals.some((s) => s.kind === 'correction')).toBe(false)
+  })
+
+  test('"不要这样" 无意义内容不触发', () => {
+    const signals = extractSignals(['不要这样'])
+    expect(signals.some((s) => s.kind === 'correction')).toBe(false)
+  })
+
+  test('"明天再说吧" 不触发 followup（推迟讨论不是任务）', () => {
+    const signals = extractSignals(['明天再说吧'])
+    expect(signals.some((s) => s.kind === 'followup')).toBe(false)
+  })
+
+  test('含拒绝词但主体是纠正的消息仍提取纠正信号', () => {
+    const signals = extractSignals(['不用管那个 bug，以后写代码注意点'])
+    expect(signals.some((s) => s.kind === 'correction')).toBe(true)
+  })
+
+  test('弱意图 "帮我看看X"+"帮我看看Y" 不误判重复', () => {
+    const signals = extractSignals(['帮我看看这个文件', '帮我看看那个配置'])
+    expect(signals.some((s) => s.kind === 'repeat')).toBe(false)
+  })
+
+  test('"还没" 断片不触发 todo', () => {
+    const signals = extractSignals(['还没'])
+    expect(signals.some((s) => s.kind === 'todo')).toBe(false)
+  })
+})

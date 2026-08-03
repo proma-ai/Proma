@@ -82,6 +82,18 @@ describe('suggest/engine: 决策与预算', () => {
     // correction 置信度更高，应优先 correction；skill 作为低频补充不抢占
     expect(result.candidates.length).toBeGreaterThanOrEqual(1)
   })
+
+  test('todo 类型不死锁（权重 0.9 × raw 0.72 ≥ 阈值）', () => {
+    const index = makeIndex()
+    const result = evaluateSuggestions(makeInput(['这个功能还没做完']), index)
+    expect(result.candidates.some((c) => c.kind === 'todo')).toBe(true)
+  })
+
+  test('"以后再说吧" 不产生建议（延后≠纠正）', () => {
+    const index = makeIndex()
+    const result = evaluateSuggestions(makeInput(['这个问题以后再说吧']), index)
+    expect(result.candidates.length).toBe(0)
+  })
 })
 
 describe('suggest/engine: 频率加权', () => {

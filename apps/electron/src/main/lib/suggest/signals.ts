@@ -39,6 +39,14 @@ export const NEGATIVE_PATTERNS = [
   /(?:不用|不需要|别管|算了|不用了|没事|就这样|到此为止)/,
 ] as const
 
+/** 延后结束语：用户只是推迟/结束话题，不是纠正或跟进任务 */
+export const POSTPONE_PHRASES = [
+  /(?:再说|再聊|再看|再讨论|改天|回头再说|以后再说|以后聊|以后看|晚点再说|等会再说)/,
+] as const
+
+/** 弱意图词（repeat 检测跳过）："帮我看看 X"+"帮我看看 Y" 不应视为重复操作 */
+export const WEAK_INTENT_KEYS: readonly string[] = ['看看', '一下', '这个', '那个', '帮我', '给我', '帮我搞', '弄下']
+
 // ===== 信号结构 =====
 
 export interface CorrectionSignal {
@@ -104,8 +112,11 @@ export function extractSignals(userMessages: string[]): Signal[] {
   for (let i = 0; i < userMessages.length; i++) {
     const text = userMessages[i] ?? ''
 
-    // 明确拒绝信号：直接跳过整条消息（避免在用户不耐烦时建议）
-    if (NEGATIVE_PATTERNS.some((re) => re.test(text))) {
+    // 明确拒绝信号：仅当整条消息就是拒绝（短句）时跳过，避免"不用管那个bug，以后写代码注意点"
+    // 这类含拒绝词但主体是纠正的消息被过度抑制。engine 层的"最后一条含拒绝词"门已兜底。
+    const cleanText = text.replace(/[，。！？\s]/g, '')
+    const isPureRejection = cleanText.length <= 12 && NEGATIVE_PATTERNS.some((re) => re.test(text))
+    if (isPureRejection) {
       continue
     }
 
@@ -114,7 +125,9 @@ export function extractSignals(userMessages: string[]): Signal[] {
       const match = text.match(re)
       if (match) {
         const raw = match[0].trim()
-        if (raw.length < 4) continue
+        if (raw.length < 6) continue // 至少要有"以后不要X"级别的信息量（防"以后不要"断片）
+        // 延后结束语不是纠正（"以后再说吧"→ 不是"记住不要再说"）
+        if (POSTPONE_PHRASES.some((p) => p.test(raw))) continue
         signals.push({
           kind: 'correction',
           raw,
@@ -144,9 +157,12 @@ export function extractSignals(userMessages: string[]): Signal[] {
     for (const re of FOLLOWUP_PATTERNS) {
       const match = text.match(re)
       if (match) {
+        const raw = match[0].trim()
+        // 推迟讨论（"明天再说吧"）不是需要提醒的跟进任务
+        if (POSTPONE_PHRASES.some((p) => p.test(raw))) continue
         signals.push({
           kind: 'followup',
-          raw: match[0].trim(),
+          raw,
           messageIndex: i,
           confidence: 0.8,
         })
@@ -158,9 +174,11 @@ export function extractSignals(userMessages: string[]): Signal[] {
     for (const re of TODO_PATTERNS) {
       const match = text.match(re)
       if (match) {
+        const raw = match[0].trim()
+        if (raw.length < 4) continue // 防"还没"断片
         signals.push({
           kind: 'todo',
-          raw: match[0].trim(),
+          raw,
           messageIndex: i,
           confidence: 0.72,
         })
@@ -195,6 +213,8 @@ function detectRepeatIntents(userMessages: string[]): RepeatSignal[] {
     // 归一化意图键：取前 2 字（中文意图核心动词通常在前），
     // 使"总结今天的工作"与"总结一下进展"归为同一意图"总结"
     const intentKey = intent.slice(0, 2)
+    // 弱意图词（看看/一下/这个/那个）不构成可自动化操作的重复行为
+    if (WEAK_INTENT_KEYS.includes(intentKey)) continue
     if (/^(一下|这个|那个|帮我)$/.test(intentKey)) continue
 
     const existing = intentCounts.get(intentKey)
@@ -253,6 +273,15 @@ export function normalizeRule(raw: string): string {
   // 去尾标点
   rule = rule.replace(/[。！？]+$/, '')
   return rule
+}
+
+/** 规则是否有效（有实际可执行内容，不是无意义残留） */
+export function isMeaningfulRule(rule: string): boolean {
+  const trimmed = rule.trim()
+  if (trimmed.length < 2) return false
+  // 无意义残留词
+  if (/^(这样|那样|再说|再聊|再说吧|而已|罢了|好了|算了|没事|这个|那个|一下)$/.test(trimmed)) return false
+  return true
 }
 
 /** 是否为明确触发词（供 orchestrator 快速判断是否需要评估） */

@@ -20,12 +20,15 @@ interface SuggestionBannerProps {
   sessionId: string
 }
 
+/** 待展示建议的过期时间：24h 内未处理的建议不再展示 */
+const SUGGESTION_EXPIRY_MS = 24 * 60 * 60 * 1000
+
 export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.ReactElement | null {
   const [suggestion, setSuggestion] = React.useState<SuggestionRecord | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [actioning, setActioning] = React.useState(false)
 
-  // 会话变化时拉取该会话的待展示建议
+  // 会话变化时拉取该会话的待展示建议（仅当前会话，避免跨话题打扰）
   React.useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -34,11 +37,10 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
       .listSuggestions('suggested')
       .then((records) => {
         if (cancelled) return
-        // 优先展示当前会话的建议；无则展示最近一条其他会话的建议
-        const mine = records.find((r) => r.sessionId === sessionId)
-        const fallback = records[0]
-        const target = mine ?? fallback ?? null
-        setSuggestion(target)
+        const now = Date.now()
+        // 仅展示当前会话的建议，且未过期
+        const mine = records.find((r) => r.sessionId === sessionId && now - r.createdAt < SUGGESTION_EXPIRY_MS)
+        setSuggestion(mine ?? null)
       })
       .catch((error) => {
         console.warn('[SuggestionBanner] 拉取建议失败:', error)
