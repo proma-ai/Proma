@@ -8,7 +8,7 @@
 import * as React from 'react'
 import { toast } from 'sonner'
 import { Brain, Check, Loader2, RefreshCw, Search, Sparkles, X } from 'lucide-react'
-import type { MemoryCorrection, MemorySearchResult, MemoryStats } from '@proma/shared'
+import type { MemoryAtom, MemoryCorrection, MemorySearchResult, MemoryStats } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { SettingsCard } from '@/components/settings/primitives'
 
@@ -29,6 +29,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const [stats, setStats] = React.useState<MemoryStats | null>(null)
   const [persona, setPersona] = React.useState<string | null>(null)
   const [corrections, setCorrections] = React.useState<MemoryCorrection[]>([])
+  const [pendingAtoms, setPendingAtoms] = React.useState<MemoryAtom[]>([])
   const [searchQuery, setSearchQuery] = React.useState('')
   const [searchResult, setSearchResult] = React.useState<MemorySearchResult | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -38,14 +39,16 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [nextStats, nextCorrections, nextPersona] = await Promise.all([
+      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms] = await Promise.all([
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.readMemoryPersona(),
+        window.electronAPI.listMemoryPendingAtoms(),
       ])
       setStats(nextStats)
       setCorrections(nextCorrections)
       setPersona(nextPersona ?? null)
+      setPendingAtoms(nextPendingAtoms)
     } catch (error) {
       console.error('[主动记忆] 加载失败:', error)
     } finally {
@@ -94,6 +97,28 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
     }
   }
 
+  const handleConfirmAtom = async (id: string): Promise<void> => {
+    try {
+      await window.electronAPI.confirmMemoryAtom(id)
+      toast.success('记忆已确认并进入召回')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 确认记忆失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleRejectAtom = async (id: string): Promise<void> => {
+    try {
+      await window.electronAPI.rejectMemoryAtom(id)
+      toast.success('已删除该记忆')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 删除记忆失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
   const byType = stats?.byType ?? { fact: 0, preference: 0, correction: 0, sop: 0, todo_context: 0 }
 
   return (
@@ -137,6 +162,47 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
               <div className="text-xl font-semibold tabular-nums text-foreground">{stats.personaExists ? '✓' : '—'}</div>
               <div className="text-[11px] text-muted-foreground">用户画像</div>
             </div>
+          </div>
+        )}
+
+        {/* 待确认的记忆（自动提取，需用户确认才注入） */}
+        {pendingAtoms.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-foreground/75">待确认的自动提取记忆</div>
+              <div className="text-[10px] text-muted-foreground">确认后才参与跨会话回忆</div>
+            </div>
+            {pendingAtoms.slice(0, 10).map((atom) => (
+              <div key={atom.id} className="flex items-start justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                      {atom.type}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{formatTime(atom.createdAt)}</span>
+                  </div>
+                  <div className="mt-1 text-[13px] leading-snug text-foreground/90">{atom.content}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirmAtom(atom.id)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-500/10"
+                    title="确认生效"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRejectAtom(atom.id)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06]"
+                    title="拒绝并删除"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

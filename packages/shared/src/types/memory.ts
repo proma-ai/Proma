@@ -99,6 +99,8 @@ export interface MemoryStats {
   sceneCount: number
   /** 待审批纠正数 */
   pendingCorrections: number
+  /** 待确认自动提取记忆数（LLM/规则提取，需用户确认后才注入） */
+  pendingAtoms: number
   /** persona 是否存在 */
   personaExists: boolean
   /** 记忆根目录 */

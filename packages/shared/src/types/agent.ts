@@ -1599,6 +1599,11 @@ export const AGENT_IPC_CHANNELS = {
   /** 确认/拒绝 Proactive Memory 纠正 */
   CONFIRM_MEMORY_CORRECTION: 'agent:confirm-memory-correction',
   REJECT_MEMORY_CORRECTION: 'agent:reject-memory-correction',
+  /** 列出待确认的自动提取记忆（pending atoms） */
+  LIST_MEMORY_PENDING_ATOMS: 'agent:list-memory-pending-atoms',
+  /** 确认/拒绝待确认记忆 */
+  CONFIRM_MEMORY_ATOM: 'agent:confirm-memory-atom',
+  REJECT_MEMORY_ATOM: 'agent:reject-memory-atom',
   /** 读取 Proactive Memory persona */
   READ_MEMORY_PERSONA: 'agent:read-memory-persona',
   /** 列出主动建议（主动建议引擎） */

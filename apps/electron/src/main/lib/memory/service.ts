@@ -20,6 +20,9 @@ import {
   writePersona,
   readAllScenes,
   getAtomById,
+  listPendingAtoms,
+  confirmAtom,
+  deleteAtom,
   appendMemoryLog,
   markExtractionCompleted,
 } from './store'
@@ -98,7 +101,11 @@ export function searchAsText(request: MemorySearchRequest): string {
  * 直接写入一条记忆（memory_capture 工具路径）。
  * 返回是否实际新增（false = 与已有记忆重复，已合并更新）。
  */
-export function captureCandidate(candidate: MemoryCandidate, ctx: { sessionId?: string; workspaceSlug?: string } = {}): { stored: boolean; deduplicated: boolean; atom: MemoryAtom } {
+export function captureCandidate(
+  candidate: MemoryCandidate,
+  ctx: { sessionId?: string; workspaceSlug?: string } = {},
+  opts: { confirmed?: boolean } = {},
+): { stored: boolean; deduplicated: boolean; atom: MemoryAtom } {
   if (!isMemoryEnabled()) throw new Error('记忆功能已关闭')
   const result = writeAtomWithDedup({
     content: candidate.content.trim(),
@@ -106,15 +113,22 @@ export function captureCandidate(candidate: MemoryCandidate, ctx: { sessionId?: 
     priority: candidate.priority ?? 50,
     sessionId: ctx.sessionId,
     workspaceSlug: ctx.workspaceSlug,
+    confirmed: opts.confirmed ?? true,
   })
-  appendMemoryLog(`手动沉淀: [${result.atom.type}] ${result.atom.content.slice(0, 60)}${result.deduplicated ? '（合并已有）' : ''}`)
+  appendMemoryLog(`手动沉淀: [${result.atom.type}] ${result.atom.content.slice(0, 60)}${result.deduplicated ? '（合并已有）' : ''}${result.atom.confirmed ? '' : '（待确认）'}`)
   return { stored: !result.deduplicated, deduplicated: result.deduplicated, atom: result.atom }
 }
 
-/** 批量写入候选（供 LLM 提取管道调用） */
+/**
+ * 批量写入候选（供 LLM 提取管道调用）
+ *
+ * @param opts.confirmed 提取的记忆是否立即生效。LLM 自动提取应传 false（默认 pending，需用户确认），
+ *                       显式 memory_capture 工具传 true（用户明确要求记住，即时生效）。
+ */
 export function captureCandidates(
   candidates: MemoryCandidate[],
   ctx: { sessionId?: string; workspaceSlug?: string } = {},
+  opts: { confirmed?: boolean } = {},
 ): { storedCount: number; deduplicatedCount: number; atoms: MemoryAtom[] } {
   let storedCount = 0
   let deduplicatedCount = 0
@@ -122,7 +136,7 @@ export function captureCandidates(
   for (const candidate of candidates) {
     if (!candidate.content?.trim()) continue
     try {
-      const result = captureCandidate(candidate, ctx)
+      const result = captureCandidate(candidate, ctx, opts)
       atoms.push(result.atom)
       if (result.stored) storedCount += 1
       else deduplicatedCount += 1
@@ -168,6 +182,33 @@ export function confirmCorrection(id: string): boolean {
 
 export function rejectCorrection(id: string): boolean {
   return !!updateCorrectionStatus(id, 'rejected')
+}
+
+// ===== 待确认记忆（自动提取，需用户确认） =====
+
+/** 列出待确认的自动提取记忆 */
+export function pendingAtoms() {
+  return listPendingAtoms()
+}
+
+/** 确认一条待确认记忆（生效并进入召回） */
+export function confirmAtomById(id: string): MemoryAtom | undefined {
+  const atom = confirmAtom(id)
+  if (atom) {
+    appendMemoryLog(`确认记忆: [${atom.type}] ${atom.content.slice(0, 60)}`)
+    // 确认的行为规则类记忆应同步进 persona
+    if (atom.type === 'correction' || atom.type === 'preference' || atom.type === 'sop') {
+      void ensurePersona().catch(() => undefined)
+    }
+  }
+  return atom
+}
+
+/** 拒绝并删除一条待确认记忆 */
+export function rejectAtomById(id: string): boolean {
+  const ok = deleteAtom(id)
+  if (ok) appendMemoryLog(`拒绝记忆: ${id}`)
+  return ok
 }
 
 // ===== L3 Persona =====
@@ -311,7 +352,8 @@ export async function extractFromConversation(input: MemoryCaptureInput): Promis
     }
   }
 
-  const result = captureCandidates(candidates, { sessionId: input.sessionId, workspaceSlug: input.workspaceSlug })
+  // LLM/规则提取的记忆为自动生成，默认 pending（需用户确认后才注入上下文），阻断投毒链
+  const result = captureCandidates(candidates, { sessionId: input.sessionId, workspaceSlug: input.workspaceSlug }, { confirmed: false })
   if (result.storedCount > 0 || correctionCount > 0) {
     markExtractionCompleted()
     // 有新增记忆时，异步刷新 persona（不阻塞提取返回）

@@ -179,6 +179,9 @@ import {
   corrections as memoryCorrections,
   confirmCorrection as memoryConfirmCorrection,
   rejectCorrection as memoryRejectCorrection,
+  pendingAtoms as memoryPendingAtoms,
+  confirmAtomById as memoryConfirmAtomById,
+  rejectAtomById as memoryRejectAtomById,
   personaRaw as memoryPersonaRaw,
 } from './lib/memory/service'
 import {
@@ -929,6 +932,27 @@ async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDe
     return deviceCode
   }
 }
+
+/**
+ * 校验 IPC 调用方是否来自主窗口（写类/付费类 channel 的 sender 门卫）。
+ * 防止任意渲染进程（灵动岛/独立窗口/被 XSS 的 webContents）无节制调用敏感能力。
+ */
+async function validateMainWindowSender(event: Electron.IpcMainInvokeEvent): Promise<boolean> {
+  try {
+    const { getMainWindow } = await import('./index')
+    const mainWin = getMainWindow()
+    if (!mainWin || mainWin.isDestroyed()) return false
+    return mainWin.webContents.id === event.sender.id
+  } catch {
+    return false
+  }
+}
+
+/** 手动触发工作模式分析的冷却（毫秒）与单日配额 */
+const MANUAL_ANALYSIS_COOLDOWN_MS = 60_000
+const MANUAL_ANALYSIS_DAILY_LIMIT = 10
+let lastManualAnalysisAt = 0
+const manualAnalysisCountByDay: Record<string, number> = {}
 
 export function registerIpcHandlers(): void {
   console.log('[IPC] 正在注册 IPC 处理器...')
@@ -2544,15 +2568,41 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CONFIRM_MEMORY_CORRECTION,
-    async (_, id: string): Promise<boolean> => {
+    async (event, id: string): Promise<boolean> => {
+      if (!(await validateMainWindowSender(event))) return false
       return memoryConfirmCorrection(id)
     }
   )
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION,
-    async (_, id: string): Promise<boolean> => {
+    async (event, id: string): Promise<boolean> => {
+      if (!(await validateMainWindowSender(event))) return false
       return memoryRejectCorrection(id)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_MEMORY_PENDING_ATOMS,
+    async (event): Promise<import('@proma/shared').MemoryAtom[]> => {
+      if (!(await validateMainWindowSender(event))) return []
+      return memoryPendingAtoms()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CONFIRM_MEMORY_ATOM,
+    async (event, id: string): Promise<import('@proma/shared').MemoryAtom | undefined> => {
+      if (!(await validateMainWindowSender(event))) return undefined
+      return memoryConfirmAtomById(id)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REJECT_MEMORY_ATOM,
+    async (event, id: string): Promise<boolean> => {
+      if (!(await validateMainWindowSender(event))) return false
+      return memoryRejectAtomById(id)
     }
   )
 
@@ -2574,7 +2624,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION,
-    async (_, id: string, feedback: 'accepted' | 'ignored' | 'never'): Promise<{ ok: boolean; error?: string }> => {
+    async (event, id: string, feedback: 'accepted' | 'ignored' | 'never'): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) {
+        return { ok: false, error: '非授权窗口' }
+      }
       return handleSuggestionFeedback(id, feedback)
     }
   )
@@ -2588,7 +2641,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS,
-    async (): Promise<{ ok: boolean; added: number; error?: string }> => {
+    async (event): Promise<{ ok: boolean; added: number; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) {
+        return { ok: false, added: 0, error: '非授权窗口' }
+      }
+      // 手动触发限频：60s 冷却 + 单日 10 次，防止任意脚本无节制消耗外部 LLM 配额
+      const now = Date.now()
+      if (now - lastManualAnalysisAt < MANUAL_ANALYSIS_COOLDOWN_MS) {
+        const remaining = Math.ceil((MANUAL_ANALYSIS_COOLDOWN_MS - (now - lastManualAnalysisAt)) / 1000)
+        return { ok: false, added: 0, error: `分析过于频繁，请 ${remaining}s 后再试` }
+      }
+      const dayKey = new Date(now).toISOString().slice(0, 10)
+      if (manualAnalysisCountByDay[dayKey] !== undefined && manualAnalysisCountByDay[dayKey] >= MANUAL_ANALYSIS_DAILY_LIMIT) {
+        return { ok: false, added: 0, error: '今日手动分析次数已达上限' }
+      }
+      lastManualAnalysisAt = now
+      manualAnalysisCountByDay[dayKey] = (manualAnalysisCountByDay[dayKey] ?? 0) + 1
       try {
         const added = await runAnalysisAndPersist()
         return { ok: true, added }

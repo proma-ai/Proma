@@ -15,7 +15,7 @@
 import * as React from 'react'
 import { toast } from 'sonner'
 import { Bot, Brain, Check, Clock, RefreshCw, Sparkles, X, Wand2 } from 'lucide-react'
-import type { Automation, MemoryCorrection, MemoryStats, SuggestionRecord, SuggestionStats } from '@proma/shared'
+import type { Automation, MemoryAtom, MemoryCorrection, MemoryStats, SuggestionRecord, SuggestionStats } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -55,24 +55,27 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   const [automations, setAutomations] = React.useState<Automation[]>([])
   const [memoryStats, setMemoryStats] = React.useState<MemoryStats | null>(null)
   const [pendingCorrections, setPendingCorrections] = React.useState<MemoryCorrection[]>([])
+  const [pendingAtoms, setPendingAtoms] = React.useState<MemoryAtom[]>([])
   const [loading, setLoading] = React.useState(true)
   const [analyzing, setAnalyzing] = React.useState(false)
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [sug, sugStats, auto, mem, corrections] = await Promise.all([
+      const [sug, sugStats, auto, mem, corrections, atoms] = await Promise.all([
         window.electronAPI.listSuggestions('suggested'),
         window.electronAPI.getSuggestionStats(),
         window.electronAPI.listAutomations(),
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
+        window.electronAPI.listMemoryPendingAtoms(),
       ])
       setSuggestions(sug)
       setStats(sugStats)
       setAutomations(auto.filter((a) => a.active))
       setMemoryStats(mem)
       setPendingCorrections(corrections)
+      setPendingAtoms(atoms)
     } catch (error) {
       console.error('[Proactive Today] 加载失败:', error)
     } finally {
@@ -137,6 +140,22 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
       await refresh()
     } catch (error) {
       console.warn('[Proactive Today] 纠正处理失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleAtom = async (id: string, action: 'confirm' | 'reject'): Promise<void> => {
+    try {
+      if (action === 'confirm') {
+        await window.electronAPI.confirmMemoryAtom(id)
+        toast.success('记忆已确认，将参与跨会话回忆')
+      } else {
+        await window.electronAPI.rejectMemoryAtom(id)
+        toast.success('已删除该记忆')
+      }
+      await refresh()
+    } catch (error) {
+      console.warn('[Proactive Today] 记忆处理失败:', error)
       toast.error('操作失败')
     }
   }
@@ -253,13 +272,30 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
           )}
         </section>
 
-        {/* 待确认：pending corrections + persona 状态 */}
+        {/* 待确认：pending atoms + pending corrections + persona 状态 */}
         <section>
-          <SectionTitle title="需要确认" count={pendingCorrections.length} />
-          {pendingCorrections.length === 0 ? (
-            <EmptyHint text="没有待确认的行为纠正。" />
+          <SectionTitle title="需要确认" count={pendingAtoms.length + pendingCorrections.length} />
+          {pendingAtoms.length === 0 && pendingCorrections.length === 0 ? (
+            <EmptyHint text="没有待确认的记忆或行为纠正。" />
           ) : (
             <div className="space-y-2">
+              {pendingAtoms.map((a) => (
+                <div key={a.id} className="rounded-xl border border-amber-500/20 bg-amber-500/[0.03] p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">{a.type}</span>
+                    <span className="text-[11px] text-muted-foreground">自动提取 · 待确认</span>
+                  </div>
+                  <p className="mt-1 text-sm text-foreground">{a.content}</p>
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleAtom(a.id, 'reject')}>
+                      <X className="size-3 mr-1" /> 删除
+                    </Button>
+                    <Button variant="default" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleAtom(a.id, 'confirm')}>
+                      <Check className="size-3 mr-1" /> 确认
+                    </Button>
+                  </div>
+                </div>
+              ))}
               {pendingCorrections.map((c) => (
                 <div key={c.id} className="rounded-xl border border-border/60 bg-card p-3">
                   <p className="text-sm text-foreground">{c.rule}</p>

@@ -74,7 +74,25 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     const stats = store.getMemoryStats()
     expect(stats.atomCount).toBeGreaterThan(0)
     expect(typeof stats.pendingCorrections).toBe('number')
+    expect(typeof stats.pendingAtoms).toBe('number')
     expect(stats.rootDir).toBe(memRoot)
+  })
+
+  it('pending atom 流转：提取默认 pending → 确认生效 / 拒绝删除', () => {
+    const atom = store.writeAtom({ content: '自动提取记忆', type: 'fact', priority: 50, confirmed: false })
+    // 默认不被读入 confirmed
+    expect(store.readAllAtoms().some((a) => a.id === atom.id)).toBe(false)
+    expect(store.readAllAtoms({ includeUnconfirmed: true }).some((a) => a.id === atom.id)).toBe(true)
+    // 出现在待确认列表
+    expect(store.listPendingAtoms().some((a) => a.id === atom.id)).toBe(true)
+    // 确认后生效
+    const confirmed = store.confirmAtom(atom.id)
+    expect(confirmed?.confirmed).toBe(true)
+    expect(store.readAllAtoms().some((a) => a.id === atom.id)).toBe(true)
+    // 拒绝删除
+    const atom2 = store.writeAtom({ content: '要被拒绝的记忆', type: 'preference', priority: 50, confirmed: false })
+    expect(store.deleteAtom(atom2.id)).toBe(true)
+    expect(store.getAtomById(atom2.id)).toBeUndefined()
   })
 })
 

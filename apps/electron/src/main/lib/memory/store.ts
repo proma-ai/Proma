@@ -255,6 +255,47 @@ export function writeAtomWithDedup(atom: Omit<MemoryAtom, 'id' | 'createdAt' | '
 }
 
 /** 替换某条 atom（按 id；找不到则追加） */
+/** 列出待确认的自动提取记忆（pending atoms） */
+export function listPendingAtoms(): MemoryAtom[] {
+  return readAllAtoms({ includeUnconfirmed: true })
+    .filter((a) => !a.confirmed)
+    .sort((a, b) => b.createdAt - a.createdAt)
+}
+
+/** 确认一条待确认记忆（用户认可后注入） */
+export function confirmAtom(id: string): MemoryAtom | undefined {
+  const atom = getAtomById(id)
+  if (!atom) return undefined
+  const updated: MemoryAtom = { ...atom, confirmed: true, updatedAt: Date.now() }
+  updateAtomById(id, updated)
+  return updated
+}
+
+/** 拒绝并删除一条待确认记忆 */
+export function deleteAtom(id: string): boolean {
+  const files = existsSync(getMemoryAtomsDir()) ? readdirSync(getMemoryAtomsDir()).filter((f) => f.endsWith('.jsonl')) : []
+  for (const file of files) {
+    const filePath = join(getMemoryAtomsDir(), file)
+    const lines = readFileSync(filePath, 'utf-8').split('\n')
+    const kept = lines.filter((line) => {
+      if (!line?.trim()) return false
+      try {
+        const parsed = JSON.parse(line) as MemoryAtom
+        return parsed.id !== id
+      } catch {
+        return true
+      }
+    })
+    if (kept.length !== lines.length) {
+      const tmpPath = filePath + '.tmp'
+      writeFileSync(tmpPath, kept.join('\n'), 'utf-8')
+      renameSync(tmpPath, filePath)
+      return true
+    }
+  }
+  return false
+}
+
 export function updateAtomById(id: string, atom: MemoryAtom): MemoryAtom {
   ensureMemoryDirs()
   // 找到该 atom 所在文件
@@ -472,6 +513,7 @@ export function getMemoryStats(): MemoryStats {
     byType,
     sceneCount: readAllScenes().length,
     pendingCorrections: listCorrections('pending').length,
+    pendingAtoms: atoms.filter((a) => !a.confirmed).length,
     personaExists: !!readPersonaRaw(),
     rootDir: getMemoryRootDir(),
     lastExtractionAt: getLastExtractionAt(),

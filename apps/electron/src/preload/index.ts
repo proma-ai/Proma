@@ -661,6 +661,15 @@ export interface ElectronAPI {
   /** 拒绝一条纠正 */
   rejectMemoryCorrection: (id: string) => Promise<boolean>
 
+  /** 列出待确认的自动提取记忆 */
+  listMemoryPendingAtoms: () => Promise<import('@proma/shared').MemoryAtom[]>
+
+  /** 确认一条待确认记忆 */
+  confirmMemoryAtom: (id: string) => Promise<import('@proma/shared').MemoryAtom | undefined>
+
+  /** 拒绝并删除一条待确认记忆 */
+  rejectMemoryAtom: (id: string) => Promise<boolean>
+
   /** 读取 Proactive Memory persona 原文 */
   readMemoryPersona: () => Promise<string | undefined>
 
@@ -1909,6 +1918,18 @@ const electronAPI: ElectronAPI = {
 
   rejectMemoryCorrection: (id: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION, id)
+  },
+
+  listMemoryPendingAtoms: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_PENDING_ATOMS)
+  },
+
+  confirmMemoryAtom: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_MEMORY_ATOM, id)
+  },
+
+  rejectMemoryAtom: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_ATOM, id)
   },
 
   readMemoryPersona: () => {

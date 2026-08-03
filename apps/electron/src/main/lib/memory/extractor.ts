@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
+import { getConfigDir } from '../config-paths'
 import type { MemoryCandidate } from '@proma/shared'
 
 // ===== 配置 =====
@@ -75,22 +76,67 @@ export function findDotEnvUpwards(startDir: string): Record<string, string> {
   return {}
 }
 
-/** 解析 LLM 配置：优先环境变量，其次 .env（沿 cwd 向上查找），其次 ~/.proma/.env */
+/**
+ * 解析 LLM 配置（同源原则）：
+ * - 信任源优先级：环境变量 → 项目 .env（沿 cwd 向上查找）→ 配置目录 .env（~/.proma 或 PROMA_CONFIG_DIR）
+ * - apiKey 决定主信任源；baseUrl/model 只从主信任源取，绝不跨源混搭
+ *   （防止攻击者在启动目录放置仅含 MEMORY_LLM_BASE_URL 的 .env，
+ *    与来自 env/home 的真实 apiKey 组合导致 key 外泄）
+ * - project 源只有同时提供 apiKey 才整体生效；单独提供 baseUrl 被忽略
+ * - baseUrl 仅允许 https（localhost 本地代理例外），异常 URL 视为未配置
+ */
 export function getMemoryLlmConfig(): MemoryLlmConfig | undefined {
   // 显式禁用（测试隔离 / 用户临时关闭）
   if (process.env.PROMA_MEMORY_LLM_DISABLED === '1') return undefined
 
   const envVars = process.env
   const projectEnv = findDotEnvUpwards(process.cwd())
-  const homeEnv = loadDotEnv(join(homedir(), '.proma', '.env'))
+  const homeEnv = loadDotEnv(join(getConfigDir(), '.env'))
 
-  const apiKey = envVars[CONFIG_KEYS.apiKey] ?? projectEnv[CONFIG_KEYS.apiKey] ?? homeEnv[CONFIG_KEYS.apiKey]
-  if (!apiKey || apiKey.trim() === '' || apiKey.includes('在此填入')) return undefined
+  const sources: Array<{ name: 'env' | 'project' | 'home'; vars: Record<string, string | undefined> }> = [
+    { name: 'env', vars: envVars },
+    { name: 'project', vars: projectEnv },
+    { name: 'home', vars: homeEnv },
+  ]
+  return resolveMemoryLlmConfig(sources)
+}
 
-  const baseUrl = envVars[CONFIG_KEYS.baseUrl] ?? projectEnv[CONFIG_KEYS.baseUrl] ?? homeEnv[CONFIG_KEYS.baseUrl] ?? 'https://api.deepseek.com/v1'
-  const model = envVars[CONFIG_KEYS.model] ?? projectEnv[CONFIG_KEYS.model] ?? homeEnv[CONFIG_KEYS.model] ?? 'deepseek-chat'
+/** 同源解析纯函数（可独立测试，不受全局 env 竞态影响） */
+export function resolveMemoryLlmConfig(
+  sources: Array<{ name: 'env' | 'project' | 'home'; vars: Record<string, string | undefined> }>,
+): MemoryLlmConfig | undefined {
+  const primary = sources.find((s) => {
+    const key = s.vars[CONFIG_KEYS.apiKey]
+    return !!key && key.trim() !== '' && !key.includes('在此填入')
+  })
+  if (!primary) return undefined
 
-  return { apiKey: apiKey.trim(), baseUrl: baseUrl.trim(), model: model.trim() }
+  const apiKey = (primary.vars[CONFIG_KEYS.apiKey] ?? '').trim()
+  const baseUrlRaw = primary.vars[CONFIG_KEYS.baseUrl]?.trim() || 'https://api.deepseek.com/v1'
+  const model = primary.vars[CONFIG_KEYS.model]?.trim() || 'deepseek-chat'
+
+  // baseUrl 安全校验：仅 https，localhost/127.0.0.1 本地代理放行；拒绝用户信息/控制字符/解析失败
+  if (!isSafeBaseUrl(baseUrlRaw)) return undefined
+
+  return { apiKey, baseUrl: baseUrlRaw, model }
+}
+
+/** baseUrl 安全校验：强制 https；localhost/127.0.0.1/::1 本地代理例外 */
+export function isSafeBaseUrl(url: string): boolean {
+  if (/[\u0000-\u001f\u007f]/.test(url)) return false
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:') {
+    const host = parsed.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return false
+  }
+  // 拒绝 URL 中带用户信息（user:pass@host）——防止伪装目标
+  if (parsed.username || parsed.password) return false
+  return true
 }
 
 /** 是否已配置 LLM（供 UI/工具提示） */
