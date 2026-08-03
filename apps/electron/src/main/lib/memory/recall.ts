@@ -341,10 +341,15 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
 
   // 通道 1：关键词（精确匹配优先，权重高）
   const kwResult = searchMemoriesByKeyword({ query, limit: Math.max(limit, 10), includeUnconfirmed: request.includeUnconfirmed })
-  const kwList = kwResult.hits.map((h) => ({ atom: h.atom, score: h.score }))
-  const kwIds = new Set(kwList.map((r) => r.atom.id))
+  const kwIds = new Set(kwResult.hits.map((r) => r.atom.id))
+  // 只保留高分 kw（≥0.6 精确匹配）；低分弱词匹配（0.2-0.5 噪声）不占 RRF 名额，
+  // 避免 kw 命中过多挤掉 rw/embedding 的正确答案（子代理审查发现）
+  const kwList = kwResult.hits.filter((h) => h.score >= 0.6).map((h) => ({ atom: h.atom, score: h.score }))
 
-  // 通道 1.5：LLM 查询改写（近义词/同义表达补充召回，解决小模型区分度不足）
+  // 通道 1.5：LLM 查询改写（近义词/同义表达补充召回）
+  // 关键：rw 命中的记忆即使 kw 也命中（低分位），也要标记多源（让来源加权提升它），
+  // 避免正确答案因 kw 低分位被漏掉。
+  const rwHitIdsAll = new Set<string>()
   let rwList: Array<{ atom: MemoryAtom; score: number }> = []
   try {
     const rewritten = await rewriteQuery(query)
@@ -355,8 +360,10 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
         rwSeen.add(rw)
         const rwResult = searchMemoriesByKeyword({ query: rw, limit: Math.max(limit, 8), includeUnconfirmed: request.includeUnconfirmed })
         for (const h of rwResult.hits) {
-          if (kwIds.has(h.atom.id)) continue // 原 keyword 已命中，不重复
-          rwList.push({ atom: h.atom, score: h.score * 0.8 }) // 改写命中权重略低于原查询
+          rwHitIdsAll.add(h.atom.id) // 所有 rw 命中都标记
+          // 让 rw 命中的记忆都进 rwList（包括 kw 也命中的），保证“分段锁”这类
+          // LLM 改写同义词即使 kw/embedding 未命中也能参与 RRF
+          rwList.push({ atom: h.atom, score: h.score * 0.8 })
         }
       }
       // 去重 + 排序
@@ -382,7 +389,8 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
         const vec = batch[i]
         if (!vec) continue
         const sim = cosineSimilarity(queryVec, vec)
-        if (sim > 0.6) scored.push({ atom: allAtoms[i]!, score: sim })
+        // 阈值 0.68：抑制 embedding 误配（如“批量审查做并行” vs “压测错峰运行” sim=0.64）抢占名额
+        if (sim > 0.68) scored.push({ atom: allAtoms[i]!, score: sim })
       }
       // 只保留 keyword/改写未命中的（避免 embedding 干扰精确匹配）
       embList = scored
@@ -403,41 +411,40 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   const merged = rrfMerge([kwList, rwList, embList, ruleList])
   const maxScore = merged.size > 0 ? Math.max(...[...merged.values()].map((v) => v.score)) : 0
 
-  // 精确匹配优先：原 keyword 命中 > 改写命中 > embedding 语义命中 > 其他规则补充
-  // embedding 命中的（kw/rw 未覆盖的语义相关）全部作为高价值候选，避免被 RRF 稀释
-  const kwHitIds = new Set(kwResult.hits.map((h) => h.atom.id))
-  const rwHitIds = new Set(rwList.map((r) => r.atom.id))
+  // 精确匹配优先：原 keyword 高分命中 > 改写命中 > embedding 语义命中 > 其他规则补充
+  const kwHitIds = new Set(kwList.map((r) => r.atom.id)) // 只算高分 kw（≥0.6）
+  const rwHitIds = rwHitIdsAll // 所有改写命中的（含 kw 也命中的低分位），用于多源加权提升
   const embHitIds = new Set(embList.map((r) => r.atom.id))
-  const sortedMerged = [...merged.values()]
-    .sort((a, b) => {
-      const rankOf = (item: { atom: MemoryAtom }): number =>
-        kwHitIds.has(item.atom.id) ? 0
-          : rwHitIds.has(item.atom.id) ? 1
-            : embHitIds.has(item.atom.id) ? 2
-              : 3
-      const aRank = rankOf(a)
-      const bRank = rankOf(b)
-      if (aRank !== bRank) return aRank - bRank
-      return b.score - a.score
+
+  // 多源一致性融合：每个候选按“最高命中来源”加权（kw 最可信 > rw > emb > rule）
+  const sourceWeight = new Map<string, number>()
+  for (const item of merged.values()) {
+    let w = 0
+    if (kwHitIds.has(item.atom.id)) w = Math.max(w, 1.0)
+    if (rwHitIds.has(item.atom.id)) w = Math.max(w, 1.0) // rw 是 LLM 精确改写，可信度与 kw 相同
+    if (embHitIds.has(item.atom.id)) w = Math.max(w, 0.4)
+    if (ruleBoost(item.atom) > 0) w = Math.max(w, 0.2)
+    sourceWeight.set(item.atom.id, w)
+  }
+
+  const hits: MemorySearchHit[] = [...merged.values()]
+    .map((item) => {
+      const w = sourceWeight.get(item.atom.id) ?? 0
+      const rrfNorm = maxScore > 0 ? item.score / maxScore : 0
+      // 加法融合：源权重主导（kw/rw 命中者显著领先），RRF 做同权重内的微调
+      const finalScore = w + rrfNorm * 0.3
+      return {
+        atom: item.atom,
+        score: finalScore,
+        matchedTerms: [],
+      }
     })
-
-  // 精确优先但不过度：keyword 命中过多时会挤掉改写/embedding 补充。
-  // 策略：先取 kw 前 (limit-2)，再补 rw/emb 前 2（保证语义补充有机会进）
-  const kwItems = sortedMerged.filter((item) => kwHitIds.has(item.atom.id))
-  const supplementItems = sortedMerged.filter((item) => !kwHitIds.has(item.atom.id))
-  const pooled = [...kwItems.slice(0, Math.max(0, limit - 2)), ...supplementItems.slice(0, 2)]
     .sort((a, b) => b.score - a.score)
-
-  const hits: MemorySearchHit[] = pooled
     .slice(0, limit)
-    .map((item) => ({
-      atom: item.atom,
-      score: maxScore > 0 ? item.score / maxScore : 0,
-      matchedTerms: [],
-    }))
 
-  // 阈值过滤（比 keyword 略低，因为 RRF 分数普遍偏低）
-  const filtered = hits.filter((h) => h.score >= (RECALL_MIN_SCORE * 0.6))
+  // 阈值过滤：加法融合后分数 = 源权重 + RRF 微调；
+  // 保留 kw(≥1.0)/rw(≥0.85)/emb(≥0.4) 命中，过滤纯 rule(0.2) 噪声
+  const filtered = hits.filter((h) => h.score >= 0.35)
   if (filtered.length === 0 && kwResult.hits.length > 0) {
     return kwResult
   }
