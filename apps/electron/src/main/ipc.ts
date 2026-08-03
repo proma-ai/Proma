@@ -182,13 +182,22 @@ import {
   pendingAtoms as memoryPendingAtoms,
   confirmAtomById as memoryConfirmAtomById,
   rejectAtomById as memoryRejectAtomById,
+  extractionMode as memoryExtractionMode,
+  setExtractionModeState as memorySetExtractionMode,
+  clearAllMemoryState as memoryClearAll,
   personaRaw as memoryPersonaRaw,
+  savePersona as memorySavePersona,
+  removePersona as memoryRemovePersona,
+  personaInjectionEnabled as memoryPersonaInjectionEnabled,
+  setPersonaInjectionEnabledState as memorySetPersonaInjectionEnabled,
 } from './lib/memory/service'
 import {
   listSuggestionsForUI,
   handleSuggestionFeedback,
   getSuggestionStats,
   runAnalysisAndPersist,
+  removeSuggestion,
+  clearAllSuggestions,
 } from './lib/suggest/service'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -2552,6 +2561,24 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_MEMORY_EXTRACTION_MODE,
+    async (event): Promise<'llm' | 'rule' | 'off'> => {
+      if (!(await validateMainWindowSender(event))) return 'off'
+      return memoryExtractionMode()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_MEMORY_EXTRACTION_MODE,
+    async (event, mode: 'llm' | 'rule' | 'off'): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (mode !== 'llm' && mode !== 'rule' && mode !== 'off') return { ok: false, error: '无效模式' }
+      memorySetExtractionMode(mode)
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.SEARCH_MEMORY,
     async (_, query: string, limit?: number): Promise<import('@proma/shared').MemorySearchResult> => {
       // 工具层用 hybrid（embedding + keyword + 规则加权），提升语义召回
@@ -2608,8 +2635,44 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA,
-    async (): Promise<string | undefined> => {
+    async (event): Promise<string | undefined> => {
+      if (!(await validateMainWindowSender(event))) return undefined
       return memoryPersonaRaw()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.UPDATE_MEMORY_PERSONA,
+    async (event, markdown: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (typeof markdown !== 'string' || markdown.length > 20_000) return { ok: false, error: '无效内容' }
+      memorySavePersona(markdown)
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DELETE_MEMORY_PERSONA,
+    async (event): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      return { ok: memoryRemovePersona() }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_PERSONA_INJECTION_ENABLED,
+    async (event): Promise<boolean> => {
+      if (!(await validateMainWindowSender(event))) return false
+      return memoryPersonaInjectionEnabled()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_PERSONA_INJECTION_ENABLED,
+    async (event, enabled: boolean): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      memorySetPersonaInjectionEnabled(!!enabled)
+      return { ok: true }
     }
   )
 
@@ -2663,6 +2726,34 @@ export function registerIpcHandlers(): void {
       } catch (error) {
         return { ok: false, added: 0, error: error instanceof Error ? error.message : '分析失败' }
       }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.DELETE_SUGGESTION,
+    async (event, id: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (typeof id !== 'string' || !id) return { ok: false, error: '无效 ID' }
+      const ok = removeSuggestion(id)
+      return ok ? { ok: true } : { ok: false, error: '建议不存在' }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CLEAR_SUGGESTIONS,
+    async (event): Promise<{ ok: boolean }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false }
+      clearAllSuggestions()
+      return { ok: true }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CLEAR_ALL_MEMORY,
+    async (event): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      memoryClearAll()
+      return { ok: true }
     }
   )
 

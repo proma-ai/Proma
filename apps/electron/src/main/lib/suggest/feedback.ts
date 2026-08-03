@@ -132,6 +132,22 @@ export function listSuggestions(status?: 'suggested' | 'accepted' | 'ignored' | 
   return index.records.filter((r) => r.status === status)
 }
 
+/** 删除一条建议记录（用户控制/清理） */
+export function deleteSuggestion(id: string): boolean {
+  const index = readIndex()
+  const before = index.records.length
+  index.records = index.records.filter((r) => r.id !== id)
+  writeIndex()
+  return index.records.length < before
+}
+
+/** 清空全部建议记录（保留类型权重与启用状态） */
+export function clearSuggestions(): void {
+  const index = readIndex()
+  index.records = []
+  writeIndex()
+}
+
 /** 按 ID 读取建议 */
 export function getSuggestion(id: string): SuggestionRecord | undefined {
   return readIndex().records.find((r) => r.id === id)

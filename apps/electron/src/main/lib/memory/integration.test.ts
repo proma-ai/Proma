@@ -94,6 +94,32 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     expect(store.deleteAtom(atom2.id)).toBe(true)
     expect(store.getAtomById(atom2.id)).toBeUndefined()
   })
+
+  it('提取模式与 persona 注入开关持久化', () => {
+    expect(store.getExtractionMode()).toBe('llm')
+    store.setExtractionMode('rule')
+    expect(store.getExtractionMode()).toBe('rule')
+    store.setExtractionMode('off')
+    expect(store.getExtractionMode()).toBe('off')
+
+    expect(store.isPersonaInjectionEnabled()).toBe(true)
+    store.setPersonaInjectionEnabled(false)
+    expect(store.isPersonaInjectionEnabled()).toBe(false)
+    store.setPersonaInjectionEnabled(true)
+    expect(store.isPersonaInjectionEnabled()).toBe(true)
+  })
+
+  it('清空全部记忆（clearAllMemory）', () => {
+    store.writeAtom({ content: '要被清空的记忆', type: 'fact', priority: 50, confirmed: true })
+    store.addCorrection({ raw: '纠正', rule: '规则' })
+    store.writePersona('# 用户画像\n\n## 用户\nTest')
+    expect(store.getMemoryStats().atomCount).toBeGreaterThan(0)
+    store.clearAllMemory()
+    const stats = store.getMemoryStats()
+    expect(stats.atomCount).toBe(0)
+    expect(stats.pendingCorrections).toBe(0)
+    expect(stats.personaExists).toBe(false)
+  })
 })
 
 describe('memory/service 工作记忆', () => {

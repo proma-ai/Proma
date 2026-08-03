@@ -1592,6 +1592,9 @@ export const AGENT_IPC_CHANNELS = {
   GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
   /** 获取 Proactive Memory 统计 */
   GET_MEMORY_STATS: 'agent:get-memory-stats',
+  /** 获取/设置记忆提取模式（llm/rule/off） */
+  GET_MEMORY_EXTRACTION_MODE: 'agent:get-memory-extraction-mode',
+  SET_MEMORY_EXTRACTION_MODE: 'agent:set-memory-extraction-mode',
   /** 搜索 Proactive Memory */
   SEARCH_MEMORY: 'agent:search-memory',
   /** 列出 Proactive Memory 纠正 */
@@ -1606,10 +1609,20 @@ export const AGENT_IPC_CHANNELS = {
   REJECT_MEMORY_ATOM: 'agent:reject-memory-atom',
   /** 读取 Proactive Memory persona */
   READ_MEMORY_PERSONA: 'agent:read-memory-persona',
+  /** 更新/删除 persona + 画像注入开关（用户控制） */
+  UPDATE_MEMORY_PERSONA: 'agent:update-memory-persona',
+  DELETE_MEMORY_PERSONA: 'agent:delete-memory-persona',
+  GET_PERSONA_INJECTION_ENABLED: 'agent:get-persona-injection-enabled',
+  SET_PERSONA_INJECTION_ENABLED: 'agent:set-persona-injection-enabled',
   /** 列出主动建议（主动建议引擎） */
   LIST_SUGGESTIONS: 'agent:list-suggestions',
   /** 对主动建议执行反馈（accepted/ignored/never） */
   ACT_ON_SUGGESTION: 'agent:act-on-suggestion',
+  /** 删除一条建议 / 清空全部建议（用户控制） */
+  DELETE_SUGGESTION: 'agent:delete-suggestion',
+  CLEAR_SUGGESTIONS: 'agent:clear-suggestions',
+  /** 清空全部记忆（用户控制） */
+  CLEAR_ALL_MEMORY: 'agent:clear-all-memory',
   /** 获取主动建议统计 */
   GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
   /** 运行工作模式分析（手动触发） */

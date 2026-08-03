@@ -21,6 +21,8 @@ import {
   isTypeSilenced,
   typeWeights,
   readSuggestionsIndex,
+  deleteSuggestion,
+  clearSuggestions,
 } from './feedback'
 import { evaluateSuggestions, DEFAULT_SUGGEST_OPTIONS } from './engine'
 import { listAutomations } from '../automation-manager'
@@ -125,6 +127,17 @@ export function handleSuggestionFeedback(id: string, feedback: SuggestionFeedbac
 /** 查询统计（UI） */
 export function getSuggestionStats(): SuggestionStats {
   return suggestionStats()
+}
+
+/** 删除一条建议（用户控制） */
+export function removeSuggestion(id: string): boolean {
+  return deleteSuggestion(id)
+}
+
+/** 清空全部建议记录（用户控制） */
+export function clearAllSuggestions(): void {
+  clearSuggestions()
+  notifySuggestionsChanged()
 }
 
 /** 当前类型权重（调试/UI） */

@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { toast } from 'sonner'
-import { Brain, Check, Loader2, RefreshCw, Search, Sparkles, X } from 'lucide-react'
+import { Brain, Check, Loader2, RefreshCw, Search, Sparkles, X, ShieldAlert } from 'lucide-react'
 import type { MemoryAtom, MemoryCorrection, MemorySearchResult, MemoryStats } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { SettingsCard } from '@/components/settings/primitives'
@@ -30,6 +30,10 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const [persona, setPersona] = React.useState<string | null>(null)
   const [corrections, setCorrections] = React.useState<MemoryCorrection[]>([])
   const [pendingAtoms, setPendingAtoms] = React.useState<MemoryAtom[]>([])
+  const [extractionMode, setExtractionMode] = React.useState<'llm' | 'rule' | 'off'>('llm')
+  const [personaInjection, setPersonaInjection] = React.useState(true)
+  const [personaDraft, setPersonaDraft] = React.useState('')
+  const [editingPersona, setEditingPersona] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
   const [searchResult, setSearchResult] = React.useState<MemorySearchResult | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -39,16 +43,20 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms] = await Promise.all([
+      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection] = await Promise.all([
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.readMemoryPersona(),
         window.electronAPI.listMemoryPendingAtoms(),
+        window.electronAPI.getMemoryExtractionMode(),
+        window.electronAPI.getPersonaInjectionEnabled(),
       ])
       setStats(nextStats)
       setCorrections(nextCorrections)
       setPersona(nextPersona ?? null)
       setPendingAtoms(nextPendingAtoms)
+      setExtractionMode(nextMode)
+      setPersonaInjection(nextInjection)
     } catch (error) {
       console.error('[主动记忆] 加载失败:', error)
     } finally {
@@ -119,6 +127,105 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
     }
   }
 
+  const handleSetMode = async (mode: 'llm' | 'rule' | 'off'): Promise<void> => {
+    try {
+      const r = await window.electronAPI.setMemoryExtractionMode(mode)
+      if (!r.ok) {
+        toast.error(r.error ?? '设置失败')
+        return
+      }
+      setExtractionMode(mode)
+      if (mode === 'llm') {
+        toast.success('已开启 LLM 提取。提示：会话内容将发送至配置的 LLM 提供商用于记忆提取')
+      } else if (mode === 'rule') {
+        toast.success('已切换到仅规则版提取（零外发，不发任何会话内容）')
+      } else {
+        toast.success('已关闭自动记忆提取')
+      }
+    } catch (error) {
+      console.error('[主动记忆] 设置提取模式失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleDeleteAtom = async (id: string): Promise<void> => {
+    try {
+      const ok = await window.electronAPI.rejectMemoryAtom(id)
+      if (ok) toast.success('已删除该记忆')
+      else toast.error('删除失败')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 删除失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleClearAll = async (): Promise<void> => {
+    if (!window.confirm('确定清空全部主动记忆（含画像与纠正）？此操作不可撤销。')) return
+    try {
+      const r = await window.electronAPI.clearAllMemory()
+      if (r.ok) toast.success('已清空全部记忆')
+      else toast.error(r.error ?? '清空失败')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 清空失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleTogglePersonaInjection = async (): Promise<void> => {
+    try {
+      const next = !personaInjection
+      const r = await window.electronAPI.setPersonaInjectionEnabled(next)
+      if (!r.ok) {
+        toast.error(r.error ?? '操作失败')
+        return
+      }
+      setPersonaInjection(next)
+      toast.success(next ? '已开启画像注入' : '已关闭画像注入（不再随系统提示发送画像）')
+    } catch (error) {
+      console.error('[主动记忆] 切换画像注入失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleStartEditPersona = (): void => {
+    setPersonaDraft(persona ?? '')
+    setEditingPersona(true)
+  }
+
+  const handleSavePersona = async (): Promise<void> => {
+    try {
+      const r = await window.electronAPI.updateMemoryPersona(personaDraft)
+      if (!r.ok) {
+        toast.error(r.error ?? '保存失败')
+        return
+      }
+      setEditingPersona(false)
+      toast.success('画像已更新')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 保存画像失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
+  const handleDeletePersona = async (): Promise<void> => {
+    if (!window.confirm('确定删除用户画像？下次会话将重新生成。')) return
+    try {
+      const r = await window.electronAPI.deleteMemoryPersona()
+      if (!r.ok) {
+        toast.error(r.error ?? '删除失败')
+        return
+      }
+      toast.success('画像已删除')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 删除画像失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
   const byType = stats?.byType ?? { fact: 0, preference: 0, correction: 0, sop: 0, todo_context: 0 }
 
   return (
@@ -155,8 +262,8 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
               <div className="text-[11px] text-muted-foreground">事实+偏好</div>
             </div>
             <div className="rounded-lg border border-border/50 bg-content-area p-3">
-              <div className="text-xl font-semibold tabular-nums text-foreground">{formatCount(stats.pendingCorrections)}</div>
-              <div className="text-[11px] text-muted-foreground">待确认纠正</div>
+              <div className="text-xl font-semibold tabular-nums text-foreground">{formatCount(stats.pendingCorrections + stats.pendingAtoms)}</div>
+              <div className="text-[11px] text-muted-foreground">待确认</div>
             </div>
             <div className="rounded-lg border border-border/50 bg-content-area p-3">
               <div className="text-xl font-semibold tabular-nums text-foreground">{stats.personaExists ? '✓' : '—'}</div>
@@ -164,6 +271,52 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
             </div>
           </div>
         )}
+
+        {/* 数据控制 */}
+        {stats && stats.atomCount > 0 && (
+          <div className="flex items-center justify-between rounded-lg border border-border/40 bg-content-area px-3 py-2">
+            <div className="text-[11px] text-muted-foreground">数据控制</div>
+            <button
+              type="button"
+              onClick={() => void handleClearAll()}
+              className="flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-red-500 transition-colors hover:bg-red-500/10"
+            >
+              <X size={11} /> 清空全部记忆
+            </button>
+          </div>
+        )}
+
+        {/* 提取模式（外发披露） */}
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border/40 bg-content-area p-3">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+            <ShieldAlert size={13} className="text-amber-500" />
+            记忆提取方式
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span>选择会话内容如何被用于记忆提取：</span>
+            <span className="font-medium text-amber-600">「LLM 提取」会把最近对话发送至外部 LLM 提供商</span>
+          </div>
+          <div className="flex gap-1.5 pt-0.5">
+            {([
+              ['llm', 'LLM 提取（外发）'],
+              ['rule', '仅规则版（零外发）'],
+              ['off', '关闭'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => void handleSetMode(mode)}
+                className={`flex-1 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                  extractionMode === mode
+                    ? 'border-primary/50 bg-primary/10 font-medium text-primary'
+                    : 'border-border/60 text-muted-foreground hover:bg-foreground/[0.04]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* 待确认的记忆（自动提取，需用户确认才注入） */}
         {pendingAtoms.length > 0 && (
@@ -275,6 +428,14 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
                       <span className="text-[10px] text-muted-foreground">
                         rel={hit.score >= 0.6 ? 'high' : hit.score >= 0.3 ? 'mid' : 'low'}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteAtom(hit.atom.id)}
+                        className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+                        title="删除这条记忆"
+                      >
+                        <X size={11} />
+                      </button>
                     </div>
                     <div className="mt-1 text-[13px] leading-snug text-foreground/85">{hit.atom.content}</div>
                   </div>
@@ -287,18 +448,63 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
         {/* Persona 摘要 */}
         {persona && (
           <div className="flex flex-col gap-1.5">
-            <button
-              type="button"
-              onClick={() => setShowPersona((v) => !v)}
-              className="flex items-center gap-1 text-xs font-medium text-foreground/75"
-            >
-              <Sparkles size={12} />
-              用户画像（{showPersona ? '收起' : '展开'}）· 更新于 {formatTime(stats?.lastExtractionAt)}
-            </button>
-            {showPersona && (
-              <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-content-area p-3 text-[12px] leading-relaxed text-foreground/80 scrollbar-thin">
-                {persona}
-              </pre>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowPersona((v) => !v)}
+                className="flex items-center gap-1 text-xs font-medium text-foreground/75"
+              >
+                <Sparkles size={12} />
+                用户画像（{showPersona ? '收起' : '展开'}）· 更新于 {formatTime(stats?.lastExtractionAt)}
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleTogglePersonaInjection()}
+                  className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] transition-colors ${
+                    personaInjection
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+                      : 'border-border/60 text-muted-foreground'
+                  }`}
+                  title="是否把画像随系统提示发送给 LLM"
+                >
+                  画像注入：{personaInjection ? '开' : '关'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleStartEditPersona()}
+                  className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDeletePersona()}
+                  className="text-[10px] text-muted-foreground transition-colors hover:text-red-500"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+            {editingPersona ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={personaDraft}
+                  onChange={(e) => setPersonaDraft(e.target.value)}
+                  rows={8}
+                  className="h-40 w-full rounded-lg border border-border/60 bg-content-area p-3 text-[12px] leading-relaxed text-foreground/85 outline-none scrollbar-thin focus:border-primary/50"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditingPersona(false)}>取消</Button>
+                  <Button size="sm" onClick={() => void handleSavePersona()}>保存</Button>
+                </div>
+              </div>
+            ) : (
+              showPersona && (
+                <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-content-area p-3 text-[12px] leading-relaxed text-foreground/80 scrollbar-thin">
+                  {persona}
+                </pre>
+              )
             )}
           </div>
         )}

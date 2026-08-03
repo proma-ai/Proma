@@ -25,6 +25,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -56,6 +57,10 @@ interface MemoryIndex {
   lastExtractionAt: number
   /** 记忆启用状态 */
   enabled: boolean
+  /** 提取模式：llm=LLM 提取（外发）、rule=仅规则版（零外发）、off=关闭提取 */
+  extractionMode?: 'llm' | 'rule' | 'off'
+  /** 是否把 persona 画像注入系统提示（默认 true；用户可关闭） */
+  personaInjectionEnabled?: boolean
 }
 
 const INDEX_VERSION = 1
@@ -117,19 +122,26 @@ function readIndex(): MemoryIndex {
   if (cachedIndex) return cachedIndex
   const data = readJsonFileSafe<MemoryIndex>(getMemoryIndexPath())
   if (!data || typeof data.version !== 'number') {
-    cachedIndex = { version: INDEX_VERSION, lastExtractionAt: 0, enabled: true }
+    cachedIndex = { version: INDEX_VERSION, lastExtractionAt: 0, enabled: true, extractionMode: 'llm', personaInjectionEnabled: true }
     return cachedIndex
   }
   if (data.version > INDEX_VERSION) {
     cachedIndex = data
     return cachedIndex
   }
-  cachedIndex = { version: INDEX_VERSION, lastExtractionAt: data.lastExtractionAt ?? 0, enabled: data.enabled ?? true }
+  cachedIndex = {
+    version: INDEX_VERSION,
+    lastExtractionAt: data.lastExtractionAt ?? 0,
+    enabled: data.enabled ?? true,
+    extractionMode: data.extractionMode ?? 'llm',
+    personaInjectionEnabled: data.personaInjectionEnabled ?? true,
+  }
   return cachedIndex
 }
 
 function writeIndex(index: MemoryIndex): void {
   try {
+    ensureMemoryDirs()
     cachedIndex = index
     writeJsonFileAtomic(getMemoryIndexPath(), index)
   } catch (error) {
@@ -148,6 +160,30 @@ export function isMemoryEnabled(): boolean {
 export function setMemoryEnabled(enabled: boolean): void {
   const index = readIndex()
   index.enabled = enabled
+  writeIndex(index)
+}
+
+/** 当前提取模式 */
+export function getExtractionMode(): 'llm' | 'rule' | 'off' {
+  return readIndex().extractionMode ?? 'llm'
+}
+
+/** 设置提取模式 */
+export function setExtractionMode(mode: 'llm' | 'rule' | 'off'): void {
+  const index = readIndex()
+  index.extractionMode = mode
+  writeIndex(index)
+}
+
+/** persona 画像是否注入系统提示 */
+export function isPersonaInjectionEnabled(): boolean {
+  return readIndex().personaInjectionEnabled ?? true
+}
+
+/** 开关 persona 注入 */
+export function setPersonaInjectionEnabled(enabled: boolean): void {
+  const index = readIndex()
+  index.personaInjectionEnabled = enabled
   writeIndex(index)
 }
 
@@ -373,6 +409,18 @@ export function writePersona(markdown: string): void {
   writeTextFileAtomic(getPersonaPath(), markdown)
 }
 
+/** 删除 persona（用户控制：不再注入画像） */
+export function deletePersona(): boolean {
+  const filePath = getPersonaPath()
+  if (!existsSync(filePath)) return false
+  try {
+    unlinkSync(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * 从 persona markdown 解析结构化摘要（供注入/展示）
  * 简易解析：一级标题 + 列表项；不追求完美，解析失败时返回空 profile。
@@ -489,6 +537,33 @@ export function deleteCorrection(id: string): boolean {
   if (index.corrections.length === before) return false
   writeCorrections(index)
   return true
+}
+
+/** 清空全部记忆（atoms + corrections + persona，保留 index 与配置） */
+export function clearAllMemory(): void {
+  // 清空 atoms 按天文件
+  if (existsSync(getMemoryAtomsDir())) {
+    for (const file of readdirSync(getMemoryAtomsDir())) {
+      if (file.endsWith('.jsonl')) {
+        try {
+          unlinkSync(join(getMemoryAtomsDir(), file))
+        } catch {
+          // 忽略单文件删除失败
+        }
+      }
+    }
+  }
+  // 清空 corrections
+  writeCorrections({ version: 1, corrections: [] })
+  // 删除 persona（可重新生成）
+  const profilePath = join(getMemoryRootDir(), 'profile.md')
+  if (existsSync(profilePath)) {
+    try {
+      unlinkSync(profilePath)
+    } catch {
+      // 忽略
+    }
+  }
 }
 
 // ===== Stats / 清理 =====

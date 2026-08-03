@@ -23,6 +23,12 @@ import {
   listPendingAtoms,
   confirmAtom,
   deleteAtom,
+  getExtractionMode,
+  setExtractionMode,
+  isPersonaInjectionEnabled,
+  setPersonaInjectionEnabled,
+  deletePersona,
+  clearAllMemory,
   appendMemoryLog,
   markExtractionCompleted,
 } from './store'
@@ -50,6 +56,41 @@ import type {
 
 export function memoryEnabled(): boolean {
   return isMemoryEnabled()
+}
+
+/** 当前提取模式 */
+export function extractionMode(): 'llm' | 'rule' | 'off' {
+  return getExtractionMode()
+}
+
+/** 设置提取模式 */
+export function setExtractionModeState(mode: 'llm' | 'rule' | 'off'): void {
+  setExtractionMode(mode)
+  appendMemoryLog(`提取模式切换为: ${mode}`)
+}
+
+/** persona 注入开关状态 */
+export function personaInjectionEnabled(): boolean {
+  return isPersonaInjectionEnabled()
+}
+
+/** 设置 persona 注入开关 */
+export function setPersonaInjectionEnabledState(enabled: boolean): void {
+  setPersonaInjectionEnabled(enabled)
+  appendMemoryLog(enabled ? '开启 persona 画像注入' : '关闭 persona 画像注入（不再随系统提示发送）')
+}
+
+/** 删除 persona 画像（用户控制） */
+export function removePersona(): boolean {
+  const ok = deletePersona()
+  if (ok) appendMemoryLog('用户删除 persona 画像')
+  return ok
+}
+
+/** 清空全部记忆（用户控制） */
+export function clearAllMemoryState(): void {
+  clearAllMemory()
+  appendMemoryLog('用户清空全部记忆')
 }
 
 export function setEnabled(enabled: boolean): void {
@@ -227,6 +268,12 @@ export function updatePersona(markdown: string): void {
   appendMemoryLog('用户画像已更新')
 }
 
+/** 用户手动编辑 persona（与 LLM 自动生成 updatePersona 区分） */
+export function savePersona(markdown: string): void {
+  writePersona(markdown)
+  appendMemoryLog('用户手动编辑 persona 画像')
+}
+
 /**
  * 确保 persona 存在/更新：
  * - 无 persona 且 LLM 可用 → LLM 生成
@@ -308,6 +355,12 @@ export async function extractFromConversation(input: MemoryCaptureInput): Promis
   const candidates: MemoryCandidate[] = []
   let correctionCount = 0
 
+  // 提取模式：off 直接跳过；rule 仅规则版（零外发）；llm 全量
+  const mode_ = getExtractionMode()
+  if (mode_ === 'off') {
+    return { storedCount: 0, deduplicatedCount: 0, atoms: [], corrections: 0, mode: 'none' }
+  }
+
   const messages = (input.messages ?? []).filter(
     (m) => m && typeof m.content === 'string' && m.content.trim().length > 0,
   )
@@ -317,8 +370,8 @@ export async function extractFromConversation(input: MemoryCaptureInput): Promis
 
   let mode: 'llm' | 'rule' | 'none' = 'none'
 
-  // 1) LLM 提取
-  if (isMemoryLlmConfigured()) {
+  // 1) LLM 提取（仅 llm 模式；rule 模式零外发）
+  if (mode_ === 'llm' && isMemoryLlmConfigured()) {
     try {
       const llmCandidates = await extractFromMessages(messages)
       if (llmCandidates.length > 0) {
@@ -330,8 +383,8 @@ export async function extractFromConversation(input: MemoryCaptureInput): Promis
     }
   }
 
-  // 2) 规则版兜底（LLM 未配置或未提取到内容时）
-  if (candidates.length === 0) {
+  // 2) 规则版兜底（LLM 未配置/未提取到内容，或 rule 模式始终走规则版）
+  if (mode_ === 'rule' || candidates.length === 0) {
     for (const msg of messages) {
       if (msg.role !== 'user') continue
       const text = msg.content.trim()

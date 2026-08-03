@@ -8,6 +8,8 @@ import {
   listSuggestions,
   getSuggestion,
   suggestionStats,
+  deleteSuggestion,
+  clearSuggestions,
   isTypeSilenced,
   SILENCE_AFTER_IGNORES,
 } from './feedback'
@@ -77,6 +79,25 @@ describe('suggest/feedback: 持久化', () => {
   test('recordFeedback 不存在 ID 返回 undefined', () => {
     setSuggestionsIndexForTest(makeIndex())
     expect(recordFeedback('no-such-id', 'ignored')).toBeUndefined()
+  })
+
+  test('deleteSuggestion 删除单条', () => {
+    setSuggestionsIndexForTest(makeIndex())
+    const a = persistSuggestion(makeCandidate())
+    const b = persistSuggestion(makeCandidate({ duplicateKey: 'other:1' }))
+    expect(listSuggestions().length).toBe(2)
+    expect(deleteSuggestion(a.id)).toBe(true)
+    expect(listSuggestions().length).toBe(1)
+    expect(getSuggestion(a.id)).toBeUndefined()
+    expect(getSuggestion(b.id)).toBeTruthy()
+  })
+
+  test('clearSuggestions 清空全部（保留权重）', () => {
+    setSuggestionsIndexForTest(makeIndex())
+    persistSuggestion(makeCandidate())
+    persistSuggestion(makeCandidate({ duplicateKey: 'other:1' }))
+    clearSuggestions()
+    expect(listSuggestions().length).toBe(0)
   })
 })
 

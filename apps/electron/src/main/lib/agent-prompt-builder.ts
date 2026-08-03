@@ -17,7 +17,7 @@ import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig } f
 import { getConfigDirName } from './config-paths'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
-import { contextForMessage, personaRaw as getPersonaRaw, persona, workingMemory } from './memory/service'
+import { contextForMessage, personaRaw as getPersonaRaw, persona, workingMemory, personaInjectionEnabled } from './memory/service'
 
 // ===== 工具使用指南（可复用常量） =====
 
@@ -157,22 +157,35 @@ Proma 统一使用 collaboration 派生子会话承载子 Agent 委派。不要�
   {
     const personaRawText = getPersonaRaw()
     const personaProfile = persona()
-    const personaLines: string[] = []
-    if (personaProfile.name) personaLines.push(`- 称呼: ${personaProfile.name}`)
-    if (personaProfile.summary) personaLines.push(`- 一句话定位: ${personaProfile.summary}`)
-    if (personaProfile.preferences.length > 0) {
-      personaLines.push('- 长期偏好:')
-      for (const p of personaProfile.preferences.slice(0, 8)) personaLines.push(`  - ${p}`)
-    }
-    if (personaProfile.interactionRules.length > 0) {
-      personaLines.push('- 交互协议:')
-      for (const r of personaProfile.interactionRules.slice(0, 5)) personaLines.push(`  - ${r}`)
-    }
-    sections.push(`## 长期记忆（Proactive Memory）
+    const personaInjectionOn = personaInjectionEnabled()
+    // 隐私控制：关闭时只保留能力说明，不注入任何画像内容；注入时剥离姓名等强识别字段
+    if (personaInjectionOn) {
+      const personaLines: string[] = []
+      if (personaProfile.summary) personaLines.push(`- 一句话定位: ${personaProfile.summary}`)
+      if (personaProfile.preferences.length > 0) {
+        personaLines.push('- 长期偏好:')
+        for (const p of personaProfile.preferences.slice(0, 8)) personaLines.push(`  - ${p}`)
+      }
+      if (personaProfile.interactionRules.length > 0) {
+        personaLines.push('- 交互协议:')
+        for (const r of personaProfile.interactionRules.slice(0, 5)) personaLines.push(`  - ${r}`)
+      }
+      if (personaLines.length > 0) {
+        sections.push(`## 长期记忆（Proactive Memory）
 
-${personaRawText
-      ? `以下是从历史会话沉淀的用户画像（L3），帮助你在跨会话中保持一致：\n\n<persona_profile>\n${personaLines.join('\n')}\n</persona_profile>`
-      : 'Proma 具备长期记忆能力：会在每条消息前自动检索相关历史记忆（若命中会以 <memory_context> 注入），并提供 memory_search 工具供主动查询。'}`)
+以下是从历史会话沉淀的用户画像（L3，已剥离姓名等强识别字段），帮助你在跨会话中保持一致：\n\n<persona_profile>\n${personaLines.join('\n')}\n</persona_profile>`)
+      } else {
+        sections.push(`## 长期记忆（Proactive Memory）
+
+Proma 具备长期记忆能力：会在每条消息前自动检索相关历史记忆（若命中会以 <memory_context> 注入），并提供 memory_search 工具供主动查询。`)
+      }
+    } else {
+      sections.push(`## 长期记忆（Proactive Memory）
+
+Proma 具备长期记忆能力：会在每条消息前自动检索相关历史记忆（若命中会以 <memory_context> 注入），并提供 memory_search 工具供主动查询。
+
+（用户已关闭用户画像注入：不随系统提示发送任何画像内容）`)
+    }
 
     // 工作记忆（参考 Nowledge Mem Working Memory）：当前活跃任务快照，帮助快速恢复工作状态
     const wm = workingMemory()

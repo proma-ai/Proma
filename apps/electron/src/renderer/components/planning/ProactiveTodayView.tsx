@@ -107,6 +107,21 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
     }
   }
 
+  const handleDeleteSuggestion = async (id: string): Promise<void> => {
+    try {
+      const result = await window.electronAPI.deleteSuggestion(id)
+      if (!result.ok) {
+        toast.error(result.error ?? '删除失败')
+        return
+      }
+      toast.success('已删除该建议')
+      await refresh()
+    } catch (error) {
+      console.warn('[Proactive Today] 删除失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
   const handleRunAnalysis = async (): Promise<void> => {
     if (analyzing) return
     setAnalyzing(true)
@@ -222,13 +237,23 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
                       {SUGGESTION_KIND_LABEL[s.kind] ?? s.kind}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() => void handleSuggestionFeedback(s.id, 'never')}
-                  >
-                    不再建议这类
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => void handleSuggestionFeedback(s.id, 'never')}
+                    >
+                      不再建议这类
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+                      title="删除这条建议"
+                      onClick={() => void handleDeleteSuggestion(s.id)}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-2 text-sm text-foreground">{s.title}</p>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{s.reason}</p>

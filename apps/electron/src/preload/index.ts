@@ -649,6 +649,12 @@ export interface ElectronAPI {
   /** 获取 Proactive Memory 统计 */
   getMemoryStats: () => Promise<import('@proma/shared').MemoryStats>
 
+  /** 获取记忆提取模式 */
+  getMemoryExtractionMode: () => Promise<'llm' | 'rule' | 'off'>
+
+  /** 设置记忆提取模式 */
+  setMemoryExtractionMode: (mode: 'llm' | 'rule' | 'off') => Promise<{ ok: boolean; error?: string }>
+
   /** 搜索 Proactive Memory */
   searchMemory: (query: string, limit?: number) => Promise<import('@proma/shared').MemorySearchResult>
 
@@ -673,11 +679,30 @@ export interface ElectronAPI {
   /** 读取 Proactive Memory persona 原文 */
   readMemoryPersona: () => Promise<string | undefined>
 
+  /** 更新 persona 画像 */
+  updateMemoryPersona: (markdown: string) => Promise<{ ok: boolean; error?: string }>
+
+  /** 删除 persona 画像 */
+  deleteMemoryPersona: () => Promise<{ ok: boolean; error?: string }>
+
+  /** 读取/设置 persona 注入开关 */
+  getPersonaInjectionEnabled: () => Promise<boolean>
+  setPersonaInjectionEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+
   /** 列出主动建议 */
   listSuggestions: (status?: string) => Promise<import('@proma/shared').SuggestionRecord[]>
 
   /** 对主动建议执行反馈 */
   actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => Promise<{ ok: boolean; error?: string }>
+
+  /** 删除一条建议 */
+  deleteSuggestion: (id: string) => Promise<{ ok: boolean; error?: string }>
+
+  /** 清空全部建议 */
+  clearSuggestions: () => Promise<{ ok: boolean }>
+
+  /** 清空全部记忆 */
+  clearAllMemory: () => Promise<{ ok: boolean; error?: string }>
 
   /** 获取主动建议统计 */
   getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
@@ -1904,6 +1929,14 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_STATS)
   },
 
+  getMemoryExtractionMode: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_EXTRACTION_MODE)
+  },
+
+  setMemoryExtractionMode: (mode: 'llm' | 'rule' | 'off') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_MEMORY_EXTRACTION_MODE, mode)
+  },
+
   searchMemory: (query: string, limit?: number) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MEMORY, query, limit)
   },
@@ -1936,12 +1969,40 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA)
   },
 
+  updateMemoryPersona: (markdown: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_MEMORY_PERSONA, markdown)
+  },
+
+  deleteMemoryPersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_MEMORY_PERSONA)
+  },
+
+  getPersonaInjectionEnabled: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERSONA_INJECTION_ENABLED)
+  },
+
+  setPersonaInjectionEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERSONA_INJECTION_ENABLED, enabled)
+  },
+
   listSuggestions: (status?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SUGGESTIONS, status)
   },
 
   actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION, id, feedback)
+  },
+
+  deleteSuggestion: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_SUGGESTION, id)
+  },
+
+  clearSuggestions: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CLEAR_SUGGESTIONS)
+  },
+
+  clearAllMemory: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CLEAR_ALL_MEMORY)
   },
 
   getSuggestionStats: () => {
