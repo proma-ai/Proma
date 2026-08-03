@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { automationsAtom, automationFormAtom, createEmptyDraft } from '@/atoms/automation-atoms'
 import { AutomationsListView } from '@/components/automation/AutomationsListView'
 import { CalendarWorkspace } from '@/components/planning/CalendarWorkspace'
+import { ProactiveTodayView } from '@/components/planning/ProactiveTodayView'
 import { PlanningFloatingInspector } from '@/components/planning/PlanningFloatingInspector'
 import { PlanningGroupManager } from '@/components/planning/PlanningGroupManager'
 import { agentChannelIdAtom, agentModelIdAtom, agentPendingPromptAtom, agentSessionsAtom, agentWorkspacesAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
@@ -27,6 +28,7 @@ import { ShortcutKeycaps } from '@/components/shortcuts/ShortcutKeycaps'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 
 const TABS: Array<{ id: PlanningTab; label: string }> = [
+  { id: 'proactive', label: '主动' },
   { id: 'todos', label: 'Todo' },
   { id: 'calendar', label: '日程' },
   { id: 'automations', label: '定时任务' },
@@ -135,6 +137,7 @@ export function PlanningView({ standalone = false }: { standalone?: boolean } = 
       </div>
       <main className={cn('min-h-0 flex-1 titlebar-no-drag', standalone ? 'px-5 pb-5 pt-4' : 'px-6 pb-8 pt-6 sm:px-8 xl:px-10', tab === 'calendar' || tab === 'todos' ? 'overflow-hidden' : 'overflow-y-auto')}>
         <div className={cn('w-full', (tab === 'calendar' || tab === 'todos') && 'h-full')}>
+          {tab === 'proactive' && <ProactiveTodayView standalone={standalone} />}
           {tab === 'todos' && <TodoWorkspace standalone={standalone} />}
           {tab === 'calendar' && <CalendarWorkspace />}
           {tab === 'automations' && <AutomationsListView />}

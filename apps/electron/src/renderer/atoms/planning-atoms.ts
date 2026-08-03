@@ -1,7 +1,7 @@
 import { atom } from 'jotai'
 import type { ActivePlanningReminder, CalendarEvent, PlanningGroup, PlanningTag, Todo } from '@proma/shared'
 
-export type PlanningTab = 'todos' | 'calendar' | 'automations'
+export type PlanningTab = 'todos' | 'calendar' | 'automations' | 'proactive'
 
 export const todosAtom = atom<Todo[]>([])
 export const calendarEventsAtom = atom<CalendarEvent[]>([])

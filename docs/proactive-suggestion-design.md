@@ -105,7 +105,23 @@ never    → 该 duplicateKey 永久屏蔽 + weight × 0.5
 - 建议类型与 persona 交互协议联动（用户拒绝的建议类型 → "不要主动推荐定时任务"）
 - followup 建议一键转成真实 automation（当前为打开创建确认）
 
-## 7. 参考
+## 7. Phase B 成果（2026-08-03）：Proactive Today 主动中心
+
+### 实现
+- **`ProactiveTodayView.tsx`**：PlanningView 新增「主动」tab（蓝图 §5.1 Today 首页）
+  - 顶部概览：4 个统计卡（主动任务 / 待定建议 / 长期记忆 / 今日采纳率）
+  - **Proma 建议**：待展示建议卡（接受 / 忽略 / 不再建议这类 三态）
+  - **正在关注**：启用中的定时任务列表（调度文案 + prompt 摘要）
+  - **需要确认**：pending corrections 审批（确认→生效并回流 persona / 拒绝）
+  - **用户画像**：persona 状态卡（已生成 / 未生成 + 说明）
+- 数据源聚合：全部复用已有 IPC（listSuggestions / actOnSuggestion / getSuggestionStats / listAutomations / getMemoryStats / listMemoryCorrections / confirmMemoryCorrection），无新增 IPC
+- `PlanningTab` 类型扩展 `'proactive'`，作为默认第一个 tab
+
+### 验证
+- typecheck 6 包全绿、renderer 构建成功、全量测试无回归
+- 子代理真实 UI 实测（见下）
+
+## 8. 参考
 
 - ProactiveAgent（ICLR 2025）：误报控制、统一接受率目标、P9 时机学习、P12 轻量三态交互
 - Proactive Center 蓝图 §7（Recommendation 结构 / duplicateKey / 降噪机制）
