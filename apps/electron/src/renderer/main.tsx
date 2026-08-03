@@ -204,6 +204,7 @@ function AgentSettingsInitializer(): null {
   const setAgentSettingsReady = useSetAtom(agentSettingsReadyAtom)
   const setChannels = useSetAtom(channelsAtom)
   const setChannelsLoaded = useSetAtom(channelsLoadedAtom)
+  const cloudUser = useAtomValue(cloudUserAtom)
   const store = useStore()
 
   // 读取当前工作区信息（用于能力变化 diff）
@@ -214,13 +215,22 @@ function AgentSettingsInitializer(): null {
   const prevCapabilitiesRef = useRef<WorkspaceCapabilities | null>(null)
   // 初次加载标记 — 应用启动或切换工作区时不显示 toast
   const suppressToastRef = useRef(true)
+  // Cloud 登录会让官方渠道在主进程落盘；忽略此前未登录状态发起的旧读取，
+  // 避免其在网络较慢时反向覆盖刚同步完成的渠道和默认 Agent 设置。
+  const settingsLoadVersionRef = useRef(0)
 
   useEffect(() => {
-    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性
+    const loadVersion = ++settingsLoadVersionRef.current
+    const isLatestLoad = (): boolean => settingsLoadVersionRef.current === loadVersion
+
+    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性。
+    // cloudUser 变化时必须重新运行：首次登录前的读取没有 Proma 官方渠道。
     Promise.all([
       window.electronAPI.listChannels(),
       window.electronAPI.getSettings(),
     ]).then(([channels, settings]) => {
+      if (!isLatestLoad()) return
+
       // 缓存渠道列表
       setChannels(channels)
       setChannelsLoaded(true)
@@ -318,6 +328,8 @@ function AgentSettingsInitializer(): null {
 
       // 加载工作区列表并恢复上次选中的工作区
       window.electronAPI.listAgentWorkspaces().then((workspaces) => {
+        if (!isLatestLoad()) return
+
         setAgentWorkspaces(workspaces)
         if (settings.agentWorkspaceId) {
           // 验证工作区仍然存在
@@ -328,14 +340,16 @@ function AgentSettingsInitializer(): null {
         }
         setAgentSettingsReady(true)
       }).catch((err) => {
+        if (!isLatestLoad()) return
         console.error(err)
         setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
       })
     }).catch((err) => {
+      if (!isLatestLoad()) return
       console.error(err)
       setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
     })
-  }, [setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentRuntime, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
+  }, [cloudUser?.id, setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentRuntime, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
 
   // 工作区切换时重置能力缓存，预加载基线
   useEffect(() => {

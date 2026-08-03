@@ -158,6 +158,24 @@ function broadcastAuthStateChanged(): void {
   })
 }
 
+/**
+ * 首次登录时先写入官方渠道，再通知渲染进程切换到主界面。
+ *
+ * 新账号本地尚不存在 `proma-official`。若先广播认证成功，渲染进程会立即挂载
+ * AppShell，而官方渠道与默认模型仍在异步同步；重启时主进程会在创建窗口前完成
+ * 相同同步，因此问题只出现在首次登录。渠道同步失败不能阻断登录，后续的渲染端
+ * 重试和定时轮询仍会恢复它。
+ */
+async function initializeOfficialChannelForLogin(): Promise<void> {
+  try {
+    // 动态导入避免 cloud-channel-service 与本模块形成初始化期循环依赖。
+    const { initOfficialChannel } = await import('./cloud-channel-service')
+    await initOfficialChannel()
+  } catch (error) {
+    console.warn('[Cloud Auth] 登录后初始化官方渠道失败，将在后续同步中重试:', error)
+  }
+}
+
 // ===== CloudUser → CloudUserInfo 转换 =====
 
 function toUserInfo(user: CloudUser): CloudUserInfo {
@@ -320,6 +338,9 @@ export async function login(data: LoginRequest): Promise<CloudAuthIpcResponse> {
     cachedUser = toUserInfo(result.user)
     syncCloudUserToLocalProfile(cachedUser)
 
+    // 必须在认证状态广播前完成首次官方渠道同步，避免新用户的 AppShell
+    // 在渠道/默认模型尚不存在时挂载，导致首次登录黑屏。
+    await initializeOfficialChannelForLogin()
     broadcastAuthStateChanged()
 
     return { success: true, user: cachedUser }
