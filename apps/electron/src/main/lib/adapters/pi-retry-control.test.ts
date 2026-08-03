@@ -27,7 +27,9 @@ describe('Pi native retry terminal gate', () => {
     const gate = createPiRetryTerminalGate<string>()
     gate.defer('persistent 529')
 
+    expect(gate.peek()).toBe('persistent 529')
     expect(gate.settle(false)).toBe('persistent 529')
+    expect(gate.peek()).toBeUndefined()
   })
 
   test('clears a deferred error when an interrupt discards its terminal event', () => {

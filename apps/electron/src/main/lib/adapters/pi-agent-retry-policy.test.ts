@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage } from '@earendil-works/pi-ai/compat'
-import { createPiAssistantUuidTracker } from './pi-agent-adapter'
+import {
+  createPiAssistantUuidTracker,
+  shouldDeferPiOverflowTerminalError,
+  shouldDeferPiOverflowTerminalMessage,
+} from './pi-agent-adapter'
 
 interface NativeRetrySettings {
   enabled: boolean
@@ -184,6 +188,28 @@ describe('patched Pi AgentSession retry policy', () => {
     // 成功的最终 assistant frame 收束这条流，下一次回答才会分配新 UUID。
     tracker.reset()
     expect(tracker.get()).toBe('assistant-2')
+  })
+
+  test('holds an OpenAI context overflow until Pi finishes its compaction decision', () => {
+    const overflow = failedAssistant('Your input exceeds the context window of this model. Please adjust your input and try again.')
+
+    expect(shouldDeferPiOverflowTerminalError(overflow, 100, false, false)).toBe(true)
+    expect(shouldDeferPiOverflowTerminalError(overflow, 100, true, false)).toBe(false)
+    expect(shouldDeferPiOverflowTerminalError(overflow, 100, false, true)).toBe(false)
+    expect(shouldDeferPiOverflowTerminalError(failedAssistant('429 rate limit exceeded'), 100, false, false)).toBe(false)
+  })
+
+  test('holds a length-stop overflow until Pi compacts and continues', () => {
+    const lengthOverflow = {
+      role: 'assistant',
+      content: [],
+      stopReason: 'length',
+      usage: { input: 99, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 99, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    } as unknown as AssistantMessage
+
+    expect(shouldDeferPiOverflowTerminalMessage(lengthOverflow, 100)).toBe(true)
+    expect(shouldDeferPiOverflowTerminalMessage(lengthOverflow, 101)).toBe(false)
+    expect(shouldDeferPiOverflowTerminalMessage({ ...lengthOverflow, usage: { ...lengthOverflow.usage, output: 1 } }, 100)).toBe(false)
   })
 
   test('maps an abort during an actual retry request to cancelled instead of succeeded', async () => {

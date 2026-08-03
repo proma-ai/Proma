@@ -843,6 +843,39 @@ export function canRunCurrentSessionCompaction(toolNames: string[]): boolean {
   return toolNames.length === 1 && toolNames[0] === 'CompactContext'
 }
 
+/**
+ * Pi emits `agent_end` before it decides whether an error needs overflow
+ * compaction. Keep this one error class local until the matching compaction
+ * lifecycle reaches a terminal state, otherwise the outer orchestrator can
+ * dispose the session before Pi calls `agent.continue()`.
+ */
+function isPiContextOverflow(message: AssistantMessage, contextWindow: number | undefined): boolean {
+  if (message.stopReason === 'error' && isPromptTooLongError(message.errorMessage)) return true
+
+  if (contextWindow && message.stopReason === 'length' && message.usage?.output === 0) {
+    const inputTokens = (message.usage.input ?? 0) + (message.usage.cacheRead ?? 0)
+    return inputTokens >= contextWindow * 0.99
+  }
+
+  return false
+}
+
+export function shouldDeferPiOverflowTerminalMessage(
+  message: AssistantMessage,
+  contextWindow: number | undefined,
+): boolean {
+  return message.stopReason !== 'stop' && isPiContextOverflow(message, contextWindow)
+}
+
+export function shouldDeferPiOverflowTerminalError(
+  message: AssistantMessage | undefined,
+  contextWindow: number | undefined,
+  willRetry: boolean,
+  abortRequested: boolean,
+): boolean {
+  return !willRetry && !abortRequested && !!message && shouldDeferPiOverflowTerminalMessage(message, contextWindow)
+}
+
 function installCurrentSessionCompactionHooks(session: AgentSession): void {
   const previousBeforeToolCall = session.agent.beforeToolCall
   session.agent.beforeToolCall = async (context, signal) => {
@@ -1549,6 +1582,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         sdkMessage: SDKMessage
         assistantUuid: string
       }>()
+      let pendingNativeOverflowRecovery = false
       // message_end 发生在 Pi 落盘前；保留对象身份，待 prompt 完成后从
       // SessionManager entries 精确取得 Pi entry ID，绝不按文本猜测。
       const finalAssistantUuids = new Map<AssistantMessage, string>()
@@ -1567,6 +1601,17 @@ export class PiAgentAdapter implements AgentProviderAdapter {
       const resetAssistantStream = (): void => {
         assistantUuidTracker.reset()
         lastPartialAssistant = undefined
+      }
+
+      const emitTerminalRetryError = (terminalRetryError: {
+        assistantMessage: AssistantMessage
+        sdkMessage: SDKMessage
+        assistantUuid: string
+      }): void => {
+        finalAssistantUuids.set(terminalRetryError.assistantMessage, terminalRetryError.assistantUuid)
+        runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
+        queue.push(terminalRetryError.sdkMessage)
+        resetAssistantStream()
       }
 
       partialAssistantCoalescer = createPartialMessageCoalescer(({ message, uuid }) => {
@@ -1607,8 +1652,12 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                 final: true,
                 ...(assistantUuid && { uuid: assistantUuid }),
               })
-              const isRetryableAssistantError = isAssistant && (event.message as AssistantMessage).stopReason === 'error'
-              if (isRetryableAssistantError && converted?.type === 'assistant' && assistantUuid) {
+              const shouldDeferNativeOverflow = isAssistant
+                && shouldDeferPiOverflowTerminalMessage(event.message as AssistantMessage, model.contextWindow)
+              const shouldDeferAssistantTerminal = isAssistant && (
+                (event.message as AssistantMessage).stopReason === 'error' || shouldDeferNativeOverflow
+              )
+              if (shouldDeferAssistantTerminal && converted?.type === 'assistant' && assistantUuid) {
                 // Native retry 会丢弃该失败 assistant；不应消耗 Proma 的 turn/budget 配额。
                 // 关键：此处不能重置 UUID。retry 后的新 partial/final 必须原地替换此前
                 // 已经展示的 partial，避免用户同时看到断流残片和恢复后的完整回答。
@@ -1628,23 +1677,34 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               break
             }
             case 'agent_end':
-              // 无论是否正被 interrupt，都要消费本轮 deferred error，防止它泄漏进下一轮。
-              const terminalRetryError = retryTerminalGate.settle(event.willRetry)
-              if (active.interrupting && active.pendingInterruptPrompts.length > 0) {
-                // interrupt 会取消 Pi 已安排的 native retry；下一条用户消息必须得到新 UUID。
+              if (active.abortRequested || (active.interrupting && active.pendingInterruptPrompts.length > 0)) {
+                // 用户停止或插入新 prompt 时，当前 loop 的错误与 result 都不得泄漏到下一轮。
+                retryTerminalGate.settle(true)
+                pendingNativeOverflowRecovery = false
+                pendingTerminalResult = undefined
                 resetAssistantStream()
                 break
               }
+              const deferredRetryError = retryTerminalGate.peek()
+              const waitsForNativeOverflowRecovery = shouldDeferPiOverflowTerminalError(
+                deferredRetryError?.assistantMessage,
+                model.contextWindow,
+                event.willRetry,
+                active.abortRequested,
+              )
+              // Pi 在 agent_end 后才会检测 overflow 并压缩。此时若先将错误交给
+              // orchestrator，会触发外层恢复或清理，打断同 transcript 的 continue。
+              const terminalRetryError = waitsForNativeOverflowRecovery
+                ? undefined
+                : retryTerminalGate.settle(event.willRetry)
+              if (waitsForNativeOverflowRecovery) pendingNativeOverflowRecovery = true
               if (event.willRetry) {
                 // native retry 会在同一 session 中调用 continue()，不要向上游发送终态，
                 // 并保留当前 UUID，供恢复后的输出替换此前 partial。
                 break
               }
               if (terminalRetryError) {
-                finalAssistantUuids.set(terminalRetryError.assistantMessage, terminalRetryError.assistantUuid)
-                runtimeGuard.recordMessage(terminalRetryError.assistantMessage)
-                queue.push(terminalRetryError.sdkMessage)
-                resetAssistantStream()
+                emitTerminalRetryError(terminalRetryError)
               }
               // Pi can start auto-compaction after agent_end but before session.prompt()
               // resolves. Defer the terminal result until then, otherwise the orchestrator's
@@ -1679,6 +1739,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
               } as unknown as SDKMessage)
               break
             case 'compaction_end':
+              if (pendingNativeOverflowRecovery && event.reason === 'overflow') {
+                pendingNativeOverflowRecovery = false
+                const recovered = !event.aborted && event.result !== undefined && event.willRetry
+                const terminalRetryError = retryTerminalGate.settle(
+                  recovered || active.abortRequested || active.interrupting,
+                )
+                if (terminalRetryError) emitTerminalRetryError(terminalRetryError)
+              }
               // 所有压缩结果都必须有可识别的终态，确保 renderer 能结束底部进度追踪。
               if (!event.aborted && event.result) {
                 queue.push({
@@ -1707,6 +1775,14 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   compact_result: 'failed',
                   compact_error: event.errorMessage,
                 } as unknown as SDKMessage)
+              }
+              break
+            case 'agent_settled':
+              // 防御上游缺少 compaction_end 的异常事件序列，不能无限吞掉已 deferred 的错误。
+              if (pendingNativeOverflowRecovery) {
+                pendingNativeOverflowRecovery = false
+                const terminalRetryError = retryTerminalGate.settle(active.abortRequested || active.interrupting)
+                if (terminalRetryError) emitTerminalRetryError(terminalRetryError)
               }
               break
           }
@@ -1809,7 +1885,13 @@ export class PiAgentAdapter implements AgentProviderAdapter {
                   pendingTerminalResult = createCompactionContinuationLimitResult(session.sessionId)
                 }
               }
-              if (pendingTerminalResult) {
+              if (active.abortRequested || active.interrupting) {
+                // Cancellation can arrive while Pi is compacting, after its first agent_end.
+                // Do not render that stale terminal result before the next interrupt prompt starts.
+                retryTerminalGate.settle(true)
+                pendingNativeOverflowRecovery = false
+                pendingTerminalResult = undefined
+              } else if (pendingTerminalResult) {
                 queue.push(pendingTerminalResult)
                 pendingTerminalResult = undefined
               }
