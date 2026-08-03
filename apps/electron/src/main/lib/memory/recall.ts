@@ -13,6 +13,7 @@
 import type { MemoryAtom, MemorySearchHit, MemorySearchRequest, MemorySearchResult } from '@proma/shared'
 import { readAllAtoms } from './store'
 import { getEmbeddingProvider, cosineSimilarity } from './embedding'
+import { rewriteQuery } from './query-rewriter'
 
 /** 召回预算默认值 */
 export const DEFAULT_RECALL_LIMIT = 5
@@ -341,9 +342,35 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
   // 通道 1：关键词（精确匹配优先，权重高）
   const kwResult = searchMemoriesByKeyword({ query, limit: Math.max(limit, 10), includeUnconfirmed: request.includeUnconfirmed })
   const kwList = kwResult.hits.map((h) => ({ atom: h.atom, score: h.score }))
-
-  // 通道 2：embedding（语义，仅补充 keyword 未覆盖的）
   const kwIds = new Set(kwList.map((r) => r.atom.id))
+
+  // 通道 1.5：LLM 查询改写（近义词/同义表达补充召回，解决小模型区分度不足）
+  let rwList: Array<{ atom: MemoryAtom; score: number }> = []
+  try {
+    const rewritten = await rewriteQuery(query)
+    if (rewritten.length > 1) {
+      const rwSeen = new Set<string>()
+      for (const rw of rewritten) {
+        if (rw === query || rwSeen.has(rw)) continue
+        rwSeen.add(rw)
+        const rwResult = searchMemoriesByKeyword({ query: rw, limit: Math.max(limit, 8), includeUnconfirmed: request.includeUnconfirmed })
+        for (const h of rwResult.hits) {
+          if (kwIds.has(h.atom.id)) continue // 原 keyword 已命中，不重复
+          rwList.push({ atom: h.atom, score: h.score * 0.8 }) // 改写命中权重略低于原查询
+        }
+      }
+      // 去重 + 排序
+      const seen = new Set<string>()
+      rwList = rwList.filter((r) => { if (seen.has(r.atom.id)) return false; seen.add(r.atom.id); return true })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(limit, 8))
+    }
+  } catch (error) {
+    console.warn('[Memory] 查询改写失败，跳过补充召回:', error instanceof Error ? error.message : error)
+  }
+  const kwPlusRwIds = new Set([...kwIds, ...rwList.map((r) => r.atom.id)])
+
+  // 通道 2：embedding（语义，仅补充 keyword/改写未覆盖的）
   const provider = getEmbeddingProvider()
   let embList: Array<{ atom: MemoryAtom; score: number }> = []
   if (provider) {
@@ -357,34 +384,51 @@ export async function searchMemoriesHybrid(request: MemorySearchRequest): Promis
         const sim = cosineSimilarity(queryVec, vec)
         if (sim > 0.6) scored.push({ atom: allAtoms[i]!, score: sim })
       }
-      // 只保留 keyword 未命中的（避免 embedding 干扰精确匹配）
+      // 只保留 keyword/改写未命中的（避免 embedding 干扰精确匹配）
       embList = scored
-        .filter((r) => !kwIds.has(r.atom.id))
+        .filter((r) => !kwPlusRwIds.has(r.atom.id))
         .sort((a, b) => b.score - a.score)
-        .slice(0, Math.max(limit, 10))
+        .slice(0, Math.max(limit, 15)) // 保留更多语义候选（embTop 保底取前 3）
     }
   }
 
-  // 通道 3：规则加权（身份/偏好优先）
+  // 通道 3：规则加权（仅身份/偏好类进入补充通道；priority 加成在排序时体现，不膨胀通道）
   const ruleList = [...allAtoms]
     .map((atom) => ({ atom, score: ruleBoost(atom) }))
-    .filter((r) => r.score > 0)
+    .filter((r) => r.score >= 0.08)
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(limit, 10))
 
-  // RRF 融合
-  const merged = rrfMerge([kwList, embList, ruleList])
+  // RRF 融合（含改写查询补充通道）
+  const merged = rrfMerge([kwList, rwList, embList, ruleList])
   const maxScore = merged.size > 0 ? Math.max(...[...merged.values()].map((v) => v.score)) : 0
 
-  // keyword 优先：keyword 精确命中的记忆强制排前（精确匹配可信度最高，embedding 只做补充）
+  // 精确匹配优先：原 keyword 命中 > 改写命中 > embedding 语义命中 > 其他规则补充
+  // embedding 命中的（kw/rw 未覆盖的语义相关）全部作为高价值候选，避免被 RRF 稀释
   const kwHitIds = new Set(kwResult.hits.map((h) => h.atom.id))
-  const hits: MemorySearchHit[] = [...merged.values()]
+  const rwHitIds = new Set(rwList.map((r) => r.atom.id))
+  const embHitIds = new Set(embList.map((r) => r.atom.id))
+  const sortedMerged = [...merged.values()]
     .sort((a, b) => {
-      const aKw = kwHitIds.has(a.atom.id) ? 1 : 0
-      const bKw = kwHitIds.has(b.atom.id) ? 1 : 0
-      if (aKw !== bKw) return bKw - aKw
+      const rankOf = (item: { atom: MemoryAtom }): number =>
+        kwHitIds.has(item.atom.id) ? 0
+          : rwHitIds.has(item.atom.id) ? 1
+            : embHitIds.has(item.atom.id) ? 2
+              : 3
+      const aRank = rankOf(a)
+      const bRank = rankOf(b)
+      if (aRank !== bRank) return aRank - bRank
       return b.score - a.score
     })
+
+  // 精确优先但不过度：keyword 命中过多时会挤掉改写/embedding 补充。
+  // 策略：先取 kw 前 (limit-2)，再补 rw/emb 前 2（保证语义补充有机会进）
+  const kwItems = sortedMerged.filter((item) => kwHitIds.has(item.atom.id))
+  const supplementItems = sortedMerged.filter((item) => !kwHitIds.has(item.atom.id))
+  const pooled = [...kwItems.slice(0, Math.max(0, limit - 2)), ...supplementItems.slice(0, 2)]
+    .sort((a, b) => b.score - a.score)
+
+  const hits: MemorySearchHit[] = pooled
     .slice(0, limit)
     .map((item) => ({
       atom: item.atom,
