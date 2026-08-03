@@ -12,7 +12,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import type { MemoryCandidate } from '@proma/shared'
 
@@ -59,13 +59,29 @@ function resolveEnv(name: string): string | undefined {
   return process.env[name] ?? undefined
 }
 
-/** 解析 LLM 配置：优先环境变量，其次项目根 .env，其次 ~/.proma/.env */
+/**
+ * 沿 cwd 向上查找 .env（最多 MAX_LOOKUP_DEPTH 层）。
+ * 覆盖 dev 模式 cwd=apps/electron 但仓库根 .env 在 ProMa/.env 的场景。
+ */
+export function findDotEnvUpwards(startDir: string): Record<string, string> {
+  let dir = startDir
+  for (let depth = 0; depth < 5; depth++) {
+    const env = loadDotEnv(join(dir, '.env'))
+    if (Object.keys(env).length > 0) return env
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return {}
+}
+
+/** 解析 LLM 配置：优先环境变量，其次 .env（沿 cwd 向上查找），其次 ~/.proma/.env */
 export function getMemoryLlmConfig(): MemoryLlmConfig | undefined {
   // 显式禁用（测试隔离 / 用户临时关闭）
   if (process.env.PROMA_MEMORY_LLM_DISABLED === '1') return undefined
 
   const envVars = process.env
-  const projectEnv = loadDotEnv(join(process.cwd(), '.env'))
+  const projectEnv = findDotEnvUpwards(process.cwd())
   const homeEnv = loadDotEnv(join(homedir(), '.proma', '.env'))
 
   const apiKey = envVars[CONFIG_KEYS.apiKey] ?? projectEnv[CONFIG_KEYS.apiKey] ?? homeEnv[CONFIG_KEYS.apiKey]
