@@ -728,6 +728,12 @@ export interface ElectronAPI {
   /** 运行工作模式分析（手动触发，返回新增建议数） */
   runSuggestionAnalysis: () => Promise<{ ok: boolean; added: number; error?: string }>
 
+  /** 读取免打扰时段（DND）配置 */
+  getSuggestionDnd: () => Promise<{ enabled: boolean; startMin: number; endMin: number }>
+
+  /** 更新免打扰时段（DND）配置 */
+  setSuggestionDnd: (cfg: { enabled?: boolean; startMin?: number; endMin?: number }) => Promise<{ ok: boolean; error?: string }>
+
   /** 订阅主动建议变更事件（会话结束后新建议生成时触发） */
   onSuggestionsChanged: (callback: () => void) => () => void
 
@@ -2054,6 +2060,14 @@ const electronAPI: ElectronAPI = {
 
   runSuggestionAnalysis: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS)
+  },
+
+  getSuggestionDnd: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_DND)
+  },
+
+  setSuggestionDnd: (cfg: { enabled?: boolean; startMin?: number; endMin?: number }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_SUGGESTION_DND, cfg)
   },
 
   onSuggestionsChanged: (callback: () => void) => {

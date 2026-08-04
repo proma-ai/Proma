@@ -26,6 +26,14 @@ describe('memory/recall 纯函数', () => {
     expect(terms.includes('算法')).toBe(true)
   })
 
+  it('queryTerms 闲聊意图词“天气”被过滤，项目名仍可召回', () => {
+    // “今天天气怎么样”是闲聊：天气进入停用词，避免命中“天气小程序”项目记忆
+    expect(queryTerms('今天天气怎么样').includes('天气')).toBe(false)
+    // 但“天气小程序还在维护吗”仍保留小程序/程序/维护等实体词
+    const terms = queryTerms('天气小程序还在维护吗')
+    expect(terms.includes('小程序') || terms.includes('程序') || terms.includes('维护')).toBe(true)
+  })
+
   it('expandedQueryTerms 同义词扩展', () => {
     const terms = expandedQueryTerms('用什么编程语言')
     expect(terms.some((t) => ['typescript', 'rust', '技术栈'].includes(t))).toBe(true)
@@ -67,5 +75,17 @@ describe('memory/recall 纯函数', () => {
     // 规则类不衰减
     expect(timeDecay(oldCorrection, now)).toBe(1.0)
     expect(timeDecay(oldSop, now)).toBe(1.0)
+  })
+
+  it('timeDecay：event 用更短半衰期（14 天减半，衰减快于普通事实）', () => {
+    const now = Date.now()
+    const dayMs = 86_400_000
+    const oldEvent = { content: '旧事件', type: 'event' as const, priority: 50, createdAt: now - 14 * dayMs, updatedAt: now, confirmed: true, id: 'e1' }
+    const oldFact = { content: '旧事实', type: 'fact' as const, priority: 50, createdAt: now - 14 * dayMs, updatedAt: now, confirmed: true, id: 'f14' }
+
+    // 14 天 event ≈ 0.5（比同天数的 fact ≈ 0.72 更低）
+    expect(timeDecay(oldEvent, now)).toBeLessThanOrEqual(0.55)
+    expect(timeDecay(oldEvent, now)).toBeGreaterThanOrEqual(0.45)
+    expect(timeDecay(oldEvent, now)).toBeLessThan(timeDecay(oldFact, now))
   })
 })

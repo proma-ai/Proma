@@ -26,6 +26,24 @@ export interface SuggestionsIndex {
   typeWeights: SuggestionTypeWeights
   /** 全局启用状态 */
   enabled: boolean
+  /** 免打扰时段（DND）：该时段内不产生新建议，避免打扰 */
+  dnd?: SuggestionDndConfig
+}
+
+/** 免打扰时段配置（DND，MineContext 缺口的补全） */
+export interface SuggestionDndConfig {
+  enabled: boolean
+  /** 开始时间（分钟，0-1439，如 22:30 → 1350） */
+  startMin: number
+  /** 结束时间（分钟，0-1439；支持跨午夜：start>end 表示 [start, 1440) ∪ [0, end)） */
+  endMin: number
+}
+
+/** 默认 DND：关闭 */
+export const DEFAULT_DND_CONFIG: SuggestionDndConfig = {
+  enabled: false,
+  startMin: 22 * 60 + 30,
+  endMin: 8 * 60,
 }
 
 /** 引擎决策参数（可调，默认值见 DEFAULT_SUGGEST_OPTIONS） */

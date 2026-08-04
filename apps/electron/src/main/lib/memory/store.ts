@@ -632,6 +632,7 @@ export function getMemoryStats(): MemoryStats {
     correction: 0,
     sop: 0,
     todo_context: 0,
+    event: 0,
   }
   for (const a of confirmed) {
     if (byType[a.type] !== undefined) byType[a.type] += 1

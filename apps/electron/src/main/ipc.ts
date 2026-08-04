@@ -203,6 +203,8 @@ import {
   runAnalysisAndPersist,
   removeSuggestion,
   clearAllSuggestions,
+  getDnd,
+  updateDnd,
 } from './lib/suggest/service'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
 import {
@@ -2782,6 +2784,28 @@ export function registerIpcHandlers(): void {
       } catch (error) {
         return { ok: false, added: 0, error: error instanceof Error ? error.message : '分析失败' }
       }
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SUGGESTION_DND,
+    async (): Promise<{ enabled: boolean; startMin: number; endMin: number }> => {
+      return getDnd()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_SUGGESTION_DND,
+    async (event, cfg: { enabled?: boolean; startMin?: number; endMin?: number }): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      const current = getDnd()
+      const next = {
+        enabled: typeof cfg?.enabled === 'boolean' ? cfg.enabled : current.enabled,
+        startMin: typeof cfg?.startMin === 'number' ? cfg.startMin : current.startMin,
+        endMin: typeof cfg?.endMin === 'number' ? cfg.endMin : current.endMin,
+      }
+      updateDnd(next)
+      return { ok: true }
     }
   )
 

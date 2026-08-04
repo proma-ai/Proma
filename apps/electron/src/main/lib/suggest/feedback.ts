@@ -13,7 +13,8 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { readJsonFileSafe, writeJsonFileAtomic } from '../safe-file'
 import { getSuggestionsPath } from '../config-paths'
-import type { SuggestionsIndex, SuggestionTypeWeights } from './types'
+import type { SuggestionsIndex, SuggestionTypeWeights, SuggestionDndConfig } from './types'
+import { DEFAULT_DND_CONFIG } from './types'
 import type {
   SuggestionCandidate,
   SuggestionFeedback,
@@ -46,6 +47,8 @@ function readIndex(): SuggestionsIndex {
   if (!data.typeWeights || typeof data.typeWeights !== 'object') data.typeWeights = defaultTypeWeights()
   if (typeof data.enabled !== 'boolean') data.enabled = true
   if (!Array.isArray(data.records)) data.records = []
+  // DND 缺省：关闭
+  if (!data.dnd || typeof data.dnd !== 'object') data.dnd = { ...DEFAULT_DND_CONFIG }
   // schema 校验：过滤非法记录，截断超长字段，限制数量上限
   data.records = data.records.filter(isValidSuggestionRecord).map(sanitizeSuggestionRecord).slice(0, MAX_RECORDS)
   cachedIndex = data
@@ -197,9 +200,80 @@ export function isTypeSilenced(kind: SuggestionKind): boolean {
   return recent.every((r) => r.status === 'ignored')
 }
 
+/**
+ * 统计被用户高频忽略/屏蔽的建议去重键（供记忆场景热度抑制使用）。
+ *
+ * 反馈回流闭环的一部分（P0-1）：
+ * - 用户对某类建议（duplicateKey）多次 ignore / never → 说明该方向当前不受欢迎
+ * - 记忆场景热度计算时可据此降低相关场景热度，避免“越关注越打扰”
+ *
+ * @param minHits 至少被忽略/屏蔽的次数阈值（默认 2：出现两次即视为高频）
+ */
+export function getHighIgnoreDuplicateKeys(minHits = 2): string[] {
+  const index = readIndex()
+  const counts = new Map<string, number>()
+  for (const r of index.records) {
+    if (r.status !== 'ignored' && r.status !== 'never') continue
+    if (!r.duplicateKey) continue
+    counts.set(r.duplicateKey, (counts.get(r.duplicateKey) ?? 0) + 1)
+  }
+  const result: string[] = []
+  for (const [key, count] of counts) {
+    if (count >= minHits) result.push(key)
+  }
+  return result
+}
+
 /** 获取当前类型权重 */
 export function typeWeights(): SuggestionTypeWeights {
   return { ...readIndex().typeWeights }
+}
+
+// ===== 免打扰时段（DND） =====
+
+/** 读取 DND 配置（缺省关闭） */
+export function getDndConfig(): SuggestionDndConfig {
+  const cfg = readIndex().dnd
+  if (!cfg || typeof cfg !== 'object') return { ...DEFAULT_DND_CONFIG }
+  return {
+    enabled: !!cfg.enabled,
+    startMin: typeof cfg.startMin === 'number' ? clampMinute(cfg.startMin) : DEFAULT_DND_CONFIG.startMin,
+    endMin: typeof cfg.endMin === 'number' ? clampMinute(cfg.endMin) : DEFAULT_DND_CONFIG.endMin,
+  }
+}
+
+/** 更新 DND 配置 */
+export function setDndConfig(cfg: SuggestionDndConfig): void {
+  const index = readIndex()
+  index.dnd = {
+    enabled: !!cfg.enabled,
+    startMin: clampMinute(cfg.startMin),
+    endMin: clampMinute(cfg.endMin),
+  }
+  writeIndex()
+}
+
+function clampMinute(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.min(1439, Math.max(0, Math.round(v)))
+}
+
+/**
+ * 当前时间是否处于免打扰时段（支持跨午夜）。
+ * 例如 start=22:30 end=08:00 → [1350, 1440) ∪ [0, 480) 为 DND。
+ */
+export function isInDnd(now: number = Date.now(), cfg?: SuggestionDndConfig): boolean {
+  const config = cfg ?? getDndConfig()
+  if (!config.enabled) return false
+  const d = new Date(now)
+  const curMin = d.getHours() * 60 + d.getMinutes()
+  if (config.startMin < config.endMin) {
+    return curMin >= config.startMin && curMin < config.endMin
+  }
+  if (config.startMin > config.endMin) {
+    return curMin >= config.startMin || curMin < config.endMin
+  }
+  return false // start === end → 无有效时段
 }
 
 /** 统计（UI 展示） */

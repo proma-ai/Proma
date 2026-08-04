@@ -527,7 +527,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
             )}
           </div>
           <div className="flex flex-wrap gap-1">
-            {(['all', 'fact', 'preference', 'correction', 'sop', 'todo_context'] as const).map((t) => (
+            {(['all', 'fact', 'preference', 'correction', 'sop', 'todo_context', 'event'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -538,7 +538,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
                     : 'border-border/60 text-muted-foreground hover:bg-foreground/[0.04]'
                 }`}
               >
-                {{ all: '全部', fact: '事实', preference: '偏好', correction: '纠正', sop: '流程', todo_context: '任务' }[t]}
+                {{ all: '全部', fact: '事实', preference: '偏好', correction: '纠正', sop: '流程', todo_context: '任务', event: '事件' }[t]}
               </button>
             ))}
           </div>

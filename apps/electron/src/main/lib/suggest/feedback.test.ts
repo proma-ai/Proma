@@ -12,6 +12,9 @@ import {
   clearSuggestions,
   isTypeSilenced,
   SILENCE_AFTER_IGNORES,
+  getDndConfig,
+  setDndConfig,
+  isInDnd,
 } from './feedback'
 import { defaultTypeWeights } from './engine'
 import type { SuggestionsIndex } from './types'
@@ -171,5 +174,37 @@ describe('suggest/feedback: 统计', () => {
     const stats = suggestionStats()
     expect(stats.suggestedCount).toBe(1)
     expect(stats.typeWeights.correction).toBe(1.0)
+  })
+})
+
+describe('suggest/feedback: 免打扰时段（DND）', () => {
+  beforeEach(() => {
+    resetSuggestionsCache()
+    setDndConfig({ enabled: false, startMin: 1350, endMin: 480 })
+  })
+
+  test('DND 默认关闭 → 不拦截', () => {
+    const at = new Date(2026, 7, 4, 23, 0).getTime() // 23:00
+    expect(isInDnd(at)).toBe(false)
+  })
+
+  test('非跨午夜时段：开始≤结束', () => {
+    setDndConfig({ enabled: true, startMin: 13 * 60 + 30, endMin: 15 * 60 }) // 13:30-15:00
+    expect(isInDnd(new Date(2026, 7, 4, 13, 45).getTime())).toBe(true)
+    expect(isInDnd(new Date(2026, 7, 4, 15, 0).getTime())).toBe(false) // 结束不包含
+    expect(isInDnd(new Date(2026, 7, 4, 12, 0).getTime())).toBe(false)
+  })
+
+  test('跨午夜时段：22:30-08:00 内拦截，其余放行', () => {
+    setDndConfig({ enabled: true, startMin: 22 * 60 + 30, endMin: 8 * 60 })
+    expect(isInDnd(new Date(2026, 7, 4, 23, 0).getTime())).toBe(true) // 深夜
+    expect(isInDnd(new Date(2026, 7, 4, 3, 0).getTime())).toBe(true) // 凌晨
+    expect(isInDnd(new Date(2026, 7, 4, 9, 0).getTime())).toBe(false) // 上午
+    expect(isInDnd(new Date(2026, 7, 4, 21, 0).getTime())).toBe(false) // 晚上前
+  })
+
+  test('开始=结束 → 视为无有效时段', () => {
+    setDndConfig({ enabled: true, startMin: 600, endMin: 600 })
+    expect(isInDnd(new Date(2026, 7, 4, 10, 0).getTime())).toBe(false)
   })
 })

@@ -34,6 +34,7 @@ import {
   appendMemoryLog,
   markExtractionCompleted,
 } from './store'
+import { hotScenes as computeHotScenes } from './scene'
 import {
   buildMemoryContextForMessage,
   searchMemoriesByKeyword,
@@ -395,6 +396,26 @@ export function atomById(id: string): MemoryAtom | undefined {
 
 export function scenes() {
   return readAllScenes()
+}
+
+// ===== L2 场景（主动性的时机信号） =====
+
+/** 最近热点场景（实时聚类，按热度降序） */
+export function getHotScenes(opts: { windowDays?: number; limit?: number } = {}) {
+  return computeHotScenes(opts)
+}
+
+/** 最近热点场景摘要（纯文本，供注入/分析） */
+export function hotScenesSummary(limit = 3): string {
+  try {
+    const scenes = getHotScenes({ limit })
+    if (scenes.length === 0) return ''
+    return scenes
+      .map((s) => `- [${s.title}] heat=${s.heat} atoms=${s.atomIds.length}`)
+      .join('\n')
+  } catch {
+    return ''
+  }
 }
 
 // ===== 提取管道入口（Phase 3） =====

@@ -157,6 +157,7 @@ const EXTRACT_SYSTEM_PROMPT = `你是长期记忆提取器。从对话中提取�
    - correction: 行为纠正（用户指出 Agent 的错误或改进要求）
    - sop: 可复用流程（重复出现的步骤、约定）
    - todo_context: 任务上下文（正在进行或计划的工作）
+   - event: 结构化事件（“X 时间做了 Y / 项目进入 Z 状态 / 发布了某版本”，有时间性，尽量带上时间与主体）
 4. 重要度 priority 0-100：影响后续工作的关键约束给 80+，普通背景 50，琐碎 30 以下。
 5. 一条消息最多输出 3 条记忆；无值得记忆的内容时输出空数组。
 6. 输出必须是合法 JSON 数组，格式：[{"content": "...", "type": "fact", "priority": 60}]
@@ -191,7 +192,7 @@ export function parseExtractionResponse(raw: string): MemoryCandidate[] {
       if (!item || typeof item !== 'object') continue
       const content = typeof item.content === 'string' ? item.content.trim() : ''
       if (!content) continue
-      const type = ['fact', 'preference', 'correction', 'sop', 'todo_context'].includes(item.type)
+      const type = ['fact', 'preference', 'correction', 'sop', 'todo_context', 'event'].includes(item.type)
         ? item.type as MemoryCandidate['type']
         : 'fact'
       const priority = typeof item.priority === 'number' && Number.isFinite(item.priority)

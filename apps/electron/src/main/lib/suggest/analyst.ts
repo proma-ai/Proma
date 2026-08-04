@@ -14,7 +14,7 @@
  */
 
 import { callLlm, isMemoryLlmConfigured } from '../memory/extractor'
-import { recentAtoms, persona, corrections as memoryCorrections } from '../memory/service'
+import { recentAtoms, persona, corrections as memoryCorrections, hotScenesSummary } from '../memory/service'
 import { listAutomations } from '../automation-manager'
 import type { SuggestionCandidate, SuggestionKind } from '@proma/shared'
 
@@ -94,6 +94,13 @@ function buildAnalysisInput(): string {
     sections.push('\n用户画像：')
     if (p.summary) sections.push(`- 定位: ${p.summary}`)
     for (const pref of p.preferences.slice(0, 8)) sections.push(`- 偏好: ${pref}`)
+  }
+
+  // L2 场景：近期关注主题（主动性的时机信号，帮助识别重复工作模式）
+  const scenes = hotScenesSummary(3)
+  if (scenes) {
+    sections.push('\n近期热点场景（主题+热度）：')
+    sections.push(scenes)
   }
 
   const activeCorrections = memoryCorrections('active')

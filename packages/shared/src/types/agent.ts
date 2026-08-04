@@ -1636,6 +1636,9 @@ export const AGENT_IPC_CHANNELS = {
   GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
   /** 运行工作模式分析（手动触发） */
   RUN_SUGGESTION_ANALYSIS: 'agent:run-suggestion-analysis',
+  /** 读取/更新免打扰时段（DND） */
+  GET_SUGGESTION_DND: 'agent:get-suggestion-dnd',
+  SET_SUGGESTION_DND: 'agent:set-suggestion-dnd',
   /** 建议变更事件（main → renderer，会话结束后新建议生成时推送） */
   SUGGESTIONS_CHANGED: 'agent:suggestions-changed',
   /** 读取工作区 CLAUDE.md */

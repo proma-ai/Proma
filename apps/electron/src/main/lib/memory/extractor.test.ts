@@ -30,13 +30,16 @@ describe('memory/extractor 解析', () => {
       { content: '', type: 'fact', priority: 50 },
       { content: '有效记忆', type: 'hack', priority: 100 },
       { content: '正确类型', type: 'sop', priority: 80 },
+      { content: '项目发布了 v1.0', type: 'event', priority: 60 },
     ])
     const result = parseExtractionResponse(raw)
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(3)
     expect(result[0]?.type).toBe('fact') // 非法 hack 降级为 fact
     expect(result[0]?.priority).toBe(100)
     expect(result[1]?.type).toBe('sop')
     expect(result[1]?.priority).toBe(80)
+    expect(result[2]?.type).toBe('event') // 新增 event 类型被接受
+    expect(result[2]?.priority).toBe(60)
   })
 
   it('priority 越界时钳制到 0-100', () => {

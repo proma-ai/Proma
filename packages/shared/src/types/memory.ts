@@ -19,6 +19,7 @@ export type MemoryAtomType =
   | 'correction'  // 行为纠正：用户指出 Agent 的错误/改进
   | 'sop'         // 可复用流程：重复出现的操作步骤
   | 'todo_context' // 任务上下文：正在进行/计划的任务背景
+  | 'event'       // 结构化事件：时间/项目/状态（高时效，短保留）
 
 /** L1 原子记忆条目（一行 JSONL） */
 export interface MemoryAtom {
@@ -52,6 +53,8 @@ export interface SceneBlock {
   title: string
   /** 关联的 atom id 列表 */
   atomIds: string[]
+  /** 场景热度（0-100，基于 atom 数 × 时间衰减 × 抑制因子） */
+  heat: number
   /** 创建时间 */
   createdAt: number
   /** 更新时间 */

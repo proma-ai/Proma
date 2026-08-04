@@ -48,6 +48,8 @@ const STOP_WORDS = new Set([
   '今', '日', '天', '昨', '明', '股', '票', '行', '情', '涨', '跌', '盘',
   // 时间双字词
   '今日', '昨天', '明天', '昨天', '股票', '行情', '股市', '大盘',
+  // 闲聊意图词（“今天天气怎么样”不该命中“天气小程序”项目记忆；项目名仍有小程序/程序等词可召回）
+  '天气',
   // 英文功能词
   'the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on',
   'for', 'with', 'and', 'or', 'but', 'i', 'you', 'he', 'she', 'it', 'we',
@@ -191,18 +193,26 @@ export function ruleBoost(atom: MemoryAtom): number {
 /** 半衰期天数：超过该天数，事实/偏好/任务类记忆权重减半 */
 export const MEMORY_HALF_LIFE_DAYS = 30
 
+/** 事件类记忆半衰期天数：高时效，衰减更快（默认 14 天） */
+export const EVENT_HALF_LIFE_DAYS = 14
+
 /** 行为规则类（correction/sop）不衰减：规则要稳定，不能因为时间而忘记 */
 const STABLE_TYPES = new Set(['correction', 'sop'])
 
 /**
  * 时间衰减因子：0.5^(天数 / 半衰期)。
- * 稳定类型（correction/sop）恒为 1.0（不衰减）；其余类型按半衰期衰减。
- * 支持 MEMORY_HALF_LIFE_DAYS 环境变量覆盖（测试/配置）。
+ * 稳定类型（correction/sop）恒为 1.0（不衰减）；事件类（event）用更短半衰期；
+ * 其余类型按默认半衰期衰减。
+ * 支持 MEMORY_HALF_LIFE_DAYS / EVENT_HALF_LIFE_DAYS 环境变量覆盖（测试/配置）。
  */
 export function timeDecay(atom: MemoryAtom, now = Date.now()): number {
   if (STABLE_TYPES.has(atom.type)) return 1.0
-  const halfLife = Number(process.env.MEMORY_HALF_LIFE_DAYS) > 0 ? Number(process.env.MEMORY_HALF_LIFE_DAYS) : MEMORY_HALF_LIFE_DAYS
   const days = Math.max(0, (now - atom.createdAt) / 86_400_000)
+  if (atom.type === 'event') {
+    const eventHalfLife = Number(process.env.EVENT_HALF_LIFE_DAYS) > 0 ? Number(process.env.EVENT_HALF_LIFE_DAYS) : EVENT_HALF_LIFE_DAYS
+    return Math.pow(0.5, days / eventHalfLife)
+  }
+  const halfLife = Number(process.env.MEMORY_HALF_LIFE_DAYS) > 0 ? Number(process.env.MEMORY_HALF_LIFE_DAYS) : MEMORY_HALF_LIFE_DAYS
   return Math.pow(0.5, days / halfLife)
 }
 
@@ -255,12 +265,19 @@ export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySea
   // 归一化 + 阈值过滤：把分数映射到 0-1，低于阈值的弱相关/噪声不返回
   const maxScore = scored.length > 0 ? scored[0]!.score : 0
   let hits: MemorySearchHit[] = scored
-    .map((r) => ({
-      atom: r.atom,
-      score: normalizeScore(r.score, maxScore),
-      rawScore: r.score, // 保留绝对分供 hybrid 真相关判断
-      matchedTerms: r.matched,
-    }))
+    .map((r) => {
+      const hasStrongTerm = r.matched.some((t) => t.length >= 2) // 是否有 bigram/单词强命中
+      let score = normalizeScore(r.score, maxScore)
+      // 只有单字弱命中（无任何强词）：归一化会把“唯一弱命中”放大成 1.0，
+      // 此处对纯单字命中大幅降权，避免“帮我写排序算法”因单字“序”误伤天气/流程类记忆。
+      if (!hasStrongTerm) score *= 0.1
+      return {
+        atom: r.atom,
+        score,
+        rawScore: r.score, // 保留绝对分供 hybrid 真相关判断
+        matchedTerms: r.matched,
+      }
+    })
     .filter((h) => h.score >= effectiveMinScore)
     .slice(0, limit)
 

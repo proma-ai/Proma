@@ -32,6 +32,25 @@ const SUGGESTION_KIND_LABEL: Record<string, string> = {
   todo: '待办记录',
 }
 
+/** 建议类型展示顺序（与主进程 groupSuggestionsByKind 一致） */
+const SUGGESTION_KIND_ORDER: SuggestionRecord['kind'][] = ['correction', 'followup', 'automation', 'skill', 'todo']
+
+/** 按类型分组待展示建议（多候选 pred@k：给用户选择权，而非单一打断） */
+function groupSuggestionsByKind(records: SuggestionRecord[]): Array<{ kind: SuggestionRecord['kind']; items: SuggestionRecord[] }> {
+  const groups = new Map<SuggestionRecord['kind'], SuggestionRecord[]>()
+  for (const r of records) {
+    const list = groups.get(r.kind) ?? []
+    list.push(r)
+    groups.set(r.kind, list)
+  }
+  const result: Array<{ kind: SuggestionRecord['kind']; items: SuggestionRecord[] }> = []
+  for (const kind of SUGGESTION_KIND_ORDER) {
+    const items = groups.get(kind)
+    if (items && items.length > 0) result.push({ kind, items })
+  }
+  return result
+}
+
 /** 调度类型 → 可读文案 */
 function formatSchedule(a: Automation): string {
   if (a.scheduleType === 'once') {
@@ -56,19 +75,21 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   const [memoryStats, setMemoryStats] = React.useState<MemoryStats | null>(null)
   const [pendingCorrections, setPendingCorrections] = React.useState<MemoryCorrection[]>([])
   const [pendingAtoms, setPendingAtoms] = React.useState<MemoryAtom[]>([])
+  const [dnd, setDnd] = React.useState<{ enabled: boolean; startMin: number; endMin: number }>({ enabled: false, startMin: 1350, endMin: 480 })
   const [loading, setLoading] = React.useState(true)
   const [analyzing, setAnalyzing] = React.useState(false)
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [sug, sugStats, auto, mem, corrections, atoms] = await Promise.all([
+      const [sug, sugStats, auto, mem, corrections, atoms, dndCfg] = await Promise.all([
         window.electronAPI.listSuggestions('suggested'),
         window.electronAPI.getSuggestionStats(),
         window.electronAPI.listAutomations(),
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.listMemoryPendingAtoms(),
+        window.electronAPI.getSuggestionDnd(),
       ])
       setSuggestions(sug)
       setStats(sugStats)
@@ -76,6 +97,7 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
       setMemoryStats(mem)
       setPendingCorrections(corrections)
       setPendingAtoms(atoms)
+      setDnd(dndCfg)
     } catch (error) {
       console.error('[Proactive Today] 加载失败:', error)
     } finally {
@@ -175,6 +197,21 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
     }
   }
 
+  const handleDndToggle = async (enabled: boolean): Promise<void> => {
+    try {
+      const result = await window.electronAPI.setSuggestionDnd({ enabled })
+      if (!result.ok) {
+        toast.error(result.error ?? '更新失败')
+        return
+      }
+      setDnd((prev) => ({ ...prev, enabled }))
+      toast.success(enabled ? '免打扰时段已开启（该时段内不弹建议）' : '免打扰时段已关闭')
+    } catch (error) {
+      console.warn('[Proactive Today] DND 更新失败:', error)
+      toast.error('操作失败')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center text-muted-foreground">
@@ -221,59 +258,100 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
         <StatCard icon={<Check className="size-4" />} label="今日采纳" value={`${todayAccepted} 采纳 / ${todayIgnored} 忽略`} />
       </div>
 
-      {/* 推荐区：建议引擎生成的待展示建议 */}
+      {/* 推荐区：建议引擎生成的待展示建议（按类型分组 = 多候选 pred@k） */}
       <section>
         <SectionTitle title="Proma 建议" count={suggestions.length} />
         {suggestions.length === 0 ? (
           <EmptyHint text="暂无待处理建议。会话中出现纠正、跟进或重复行为时，Proma 会在这里生成建议。" />
         ) : (
-          <div className="space-y-2">
-            {suggestions.map((s) => (
-              <div key={s.id} className="rounded-xl border border-border/60 bg-card p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="size-4 text-primary" />
-                    <span className="text-sm font-medium text-foreground">
-                      {SUGGESTION_KIND_LABEL[s.kind] ?? s.kind}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => void handleSuggestionFeedback(s.id, 'never')}
-                    >
-                      不再建议这类
-                    </button>
-                    <button
-                      type="button"
-                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
-                      title="删除这条建议"
-                      onClick={() => void handleDeleteSuggestion(s.id)}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </div>
+          <div className="space-y-3">
+            {groupSuggestionsByKind(suggestions).map((group) => (
+              <div key={group.kind} className="rounded-xl border border-border/40 bg-background/40 p-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-3.5 text-primary" />
+                  <h4 className="text-xs font-medium text-foreground">{SUGGESTION_KIND_LABEL[group.kind] ?? group.kind}</h4>
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{group.items.length}</span>
                 </div>
-                <p className="mt-2 text-sm text-foreground">{s.title}</p>
-                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{s.reason}</p>
-                {s.evidence && (
-                  <p className="mt-1.5 text-[11px] text-muted-foreground/80 border-l-2 border-border pl-2">
-                    依据：{s.evidence}
-                  </p>
-                )}
-                <div className="mt-3 flex items-center justify-end gap-2">
-                  <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'ignored')}>
-                    忽略
-                  </Button>
-                  <Button variant="default" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'accepted')}>
-                    <Check className="size-3 mr-1" /> 接受
-                  </Button>
+                <div className="mt-2 space-y-2">
+                  {group.items.map((s) => (
+                    <div key={s.id} className="rounded-xl border border-border/60 bg-card p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">
+                            {s.title}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            onClick={() => void handleSuggestionFeedback(s.id, 'never')}
+                          >
+                            不再建议这类
+                          </button>
+                          <button
+                            type="button"
+                            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+                            title="删除这条建议"
+                            onClick={() => void handleDeleteSuggestion(s.id)}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-foreground">{s.reason}</p>
+                      {s.evidence && (
+                        <p className="mt-1.5 text-[11px] text-muted-foreground/80 border-l-2 border-border pl-2">
+                          依据：{s.evidence}
+                        </p>
+                      )}
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'ignored')}>
+                          忽略
+                        </Button>
+                        <Button variant="default" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'accepted')}>
+                          <Check className="size-3 mr-1" /> 接受
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
           </div>
         )}
+      </section>
+
+      {/* 免打扰时段（DND）：该时段内不弹建议（Proactive Today 列表不受影响） */}
+      <section className="rounded-xl border border-border/60 bg-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">免打扰时段</span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={dnd.enabled}
+            onClick={() => void handleDndToggle(!dnd.enabled)}
+            className={cn(
+              'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+              dnd.enabled ? 'bg-primary' : 'bg-muted',
+            )}
+          >
+            <span
+              className={cn(
+                'inline-block size-4 transform rounded-full bg-background shadow transition-transform',
+                dnd.enabled ? 'translate-x-[18px]' : 'translate-x-0.5',
+              )}
+            />
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {dnd.enabled
+            ? `已开启：${formatMinute(dnd.startMin)}–${formatMinute(dnd.endMin)} 内不会在会话中弹建议（主动中心列表照常）。`
+            : '默认关闭。开启后，指定时段内不会在会话中弹建议。'}
+        </p>
       </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -382,4 +460,11 @@ function SectionTitle({ title, count }: { title: string; count: number }): React
 
 function EmptyHint({ text }: { text: string }): React.ReactElement {
   return <p className="rounded-xl border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">{text}</p>
+}
+
+/** 分钟数（0-1439）→ "HH:MM" */
+function formatMinute(min: number): string {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }

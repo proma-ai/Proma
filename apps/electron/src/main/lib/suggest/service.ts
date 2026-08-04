@@ -23,6 +23,10 @@ import {
   readSuggestionsIndex,
   deleteSuggestion,
   clearSuggestions,
+  getHighIgnoreDuplicateKeys,
+  getDndConfig,
+  setDndConfig,
+  isInDnd,
 } from './feedback'
 import { evaluateSuggestions, DEFAULT_SUGGEST_OPTIONS } from './engine'
 import { listAutomations } from '../automation-manager'
@@ -43,6 +47,23 @@ export function setEnabledState(enabled: boolean): void {
   setSuggestionsEnabled(enabled)
 }
 
+// ===== 免打扰时段（DND） =====
+
+/** 读取免打扰配置 */
+export function getDnd(): ReturnType<typeof getDndConfig> {
+  return getDndConfig()
+}
+
+/** 更新免打扰配置 */
+export function updateDnd(cfg: Parameters<typeof setDndConfig>[0]): void {
+  setDndConfig(cfg)
+}
+
+/** 当前是否处于免打扰时段（供 IPC/设置页展示） */
+export function dndActive(now?: number): boolean {
+  return isInDnd(now)
+}
+
 // ===== 会话结束评估（orchestrator 钩子入口） =====
 
 /**
@@ -55,6 +76,8 @@ export async function evaluateSessionSuggestions(
   ctx: { sessionId?: string } = {},
 ): Promise<SuggestionRecord[]> {
   if (!suggestionsEnabled()) return []
+  // 免打扰时段：不产生新建议（避免横幅打扰）。Proactive Today 列表不受影响。
+  if (isInDnd()) return []
   try {
     const existing = listSuggestions('suggested')
     const existingForSession = existing.filter((r) => r.sessionId === ctx.sessionId)
@@ -114,14 +137,44 @@ export function handleSuggestionFeedback(id: string, feedback: SuggestionFeedbac
       const correction = proposeCorrection({ raw: record.action.raw, rule: record.action.rule, sessionId: record.sessionId })
       if (correction?.id) {
         confirmCorrection(correction.id)
+        // 闭环确认：correction atom 已写入，persona 异步刷新已触发（confirmCorrection 内部 ensurePersona）
+        console.log('[Suggestion] 反馈回流闭环: correction 建议已接受 → atom 写入 + persona 刷新')
       }
     } catch (error) {
       console.warn('[Suggestion] 写入纠正候选失败:', error instanceof Error ? error.message : error)
     }
   }
 
+  // 反馈回流补充：高频 ignore/never 的 duplicateKey 将抑制对应记忆场景热度（供 P0-2 scene 计算读取）
+  // 此处只需记录反馈（recordFeedback 已更新状态与类型权重），不需要额外写入。
   recordFeedback(id, feedback)
   return { ok: true }
+}
+
+/**
+ * 按类型分组的候选池（Proactive Today 多候选展示）。
+ *
+ * 借鉴 ProactiveAgent P8 pred@k：给用户“选择权”比单一打断更友好。
+ * 会话内引擎保持 maxPerEvaluation=1（不打扰），这里把待展示建议按类型分组，
+ * 便于用户在 Today 页扫读并选择接受哪一类。
+ */
+export function groupSuggestionsByKind(records: SuggestionRecord[]): Array<{
+  kind: SuggestionRecord['kind']
+  items: SuggestionRecord[]
+}> {
+  const order: SuggestionRecord['kind'][] = ['correction', 'followup', 'automation', 'skill', 'todo']
+  const groups = new Map<SuggestionRecord['kind'], SuggestionRecord[]>()
+  for (const r of records) {
+    const list = groups.get(r.kind) ?? []
+    list.push(r)
+    groups.set(r.kind, list)
+  }
+  const result: Array<{ kind: SuggestionRecord['kind']; items: SuggestionRecord[] }> = []
+  for (const kind of order) {
+    const items = groups.get(kind)
+    if (items && items.length > 0) result.push({ kind, items })
+  }
+  return result
 }
 
 /** 查询统计（UI） */
@@ -143,6 +196,14 @@ export function clearAllSuggestions(): void {
 /** 当前类型权重（调试/UI） */
 export function getTypeWeights() {
   return typeWeights()
+}
+
+/**
+ * 反馈回流：被用户高频忽略/屏蔽的建议去重键。
+ * 供记忆场景热度（scene.ts）抑制对应场景，避免"越关注越打扰"。
+ */
+export function getSuppressedSuggestionKeys(): string[] {
+  return getHighIgnoreDuplicateKeys(2)
 }
 
 // ===== 工作模式分析（Phase B 方向 2） =====
