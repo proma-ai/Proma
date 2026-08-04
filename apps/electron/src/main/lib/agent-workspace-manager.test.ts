@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 
@@ -150,5 +150,114 @@ describe('Agent 工作区 Skill 扫描', () => {
     const skills = manager.getWorkspaceSkills(workspaceSlug)
 
     expect(skills.map((skill) => skill.slug).sort()).toEqual(expectedSlugs)
+  })
+})
+
+describe('Agent 工作区 Skill 批量导入', () => {
+  test('Given 来源有多个 Skill When 批量导入 Then 成功复制并记录来源，重复项跳过', async () => {
+    writeWorkspaceSkill('source', 'alpha', 'Alpha')
+    writeWorkspaceSkill('source', 'beta', 'Beta')
+
+    const imported = await manager.batchImportSkillsFromWorkspaces('target', [
+      { sourceSlug: 'source', skillSlug: 'alpha' },
+      { sourceSlug: 'source', skillSlug: 'beta' },
+    ])
+
+    expect(imported.imported).toBe(2)
+    expect(imported.skipped).toBe(0)
+    expect(imported.failed).toBe(0)
+    expect(existsSync(join(configPaths.getWorkspaceSkillsDir('target'), 'alpha', 'SKILL.md'))).toBe(true)
+    expect(JSON.parse(readFileSync(join(configPaths.getWorkspaceSkillsDir('target'), 'alpha', '.source.json'), 'utf-8'))).toMatchObject({
+      sourceWorkspaceSlug: 'source',
+    })
+
+    const duplicate = await manager.batchImportSkillsFromWorkspaces('target', [
+      { sourceSlug: 'source', skillSlug: 'alpha' },
+    ])
+    expect(duplicate.imported).toBe(0)
+    expect(duplicate.skipped).toBe(1)
+    expect(duplicate.failed).toBe(0)
+  })
+
+  test('Given 目标 inactive 目录已有同名 Skill When 批量导入 Then 跳过且不覆盖', async () => {
+    writeWorkspaceSkill('source', 'inactive-skill', 'Source Skill')
+    const inactivePath = join(configPaths.getInactiveSkillsDir('target'), 'inactive-skill')
+    mkdirSync(inactivePath, { recursive: true })
+    writeFileSync(join(inactivePath, 'SKILL.md'), '---\nname: Existing Skill\n---\n', 'utf-8')
+
+    const result = await manager.batchImportSkillsFromWorkspaces('target', [
+      { sourceSlug: 'source', skillSlug: 'inactive-skill' },
+    ])
+
+    expect(result.skipped).toBe(1)
+    expect(result.failed).toBe(0)
+    expect(readFileSync(join(inactivePath, 'SKILL.md'), 'utf-8')).toContain('Existing Skill')
+  })
+
+  test('Given 两个来源并发导入同名 Skill When 批量导入 Then 只保留第一个完成项且另一个跳过', async () => {
+    writeWorkspaceSkill('source-a', 'shared-skill', 'Source A')
+    writeWorkspaceSkill('source-b', 'shared-skill', 'Source B')
+
+    const [fromA, fromB] = await Promise.all([
+      manager.batchImportSkillsFromWorkspaces('target', [{ sourceSlug: 'source-a', skillSlug: 'shared-skill' }]),
+      manager.batchImportSkillsFromWorkspaces('target', [{ sourceSlug: 'source-b', skillSlug: 'shared-skill' }]),
+    ])
+
+    expect(fromA.imported + fromB.imported).toBe(1)
+    expect(fromA.skipped + fromB.skipped).toBe(1)
+    expect(fromA.failed + fromB.failed).toBe(0)
+    const importedContent = readFileSync(join(configPaths.getWorkspaceSkillsDir('target'), 'shared-skill', 'SKILL.md'), 'utf-8')
+    expect(['Source A', 'Source B'].some((name) => importedContent.includes(name))).toBe(true)
+  })
+
+  test('Given 来源缺失或导入中元数据写入失败 When 批量导入 Then 返回失败且不留下目标残片', async () => {
+    const missing = await manager.batchImportSkillsFromWorkspaces('target', [
+      // 旧实现会因错误文案包含“已存在”而误判为 skipped。
+      { sourceSlug: 'source', skillSlug: '已存在' },
+    ])
+    expect(missing.failed).toBe(1)
+    expect(missing.skipped).toBe(0)
+
+    const malformedSource = join(configPaths.getWorkspaceSkillsDir('source'), 'malformed')
+    mkdirSync(malformedSource, { recursive: true })
+    writeFileSync(join(malformedSource, 'SKILL.md'), '---\nname: Malformed\n---\n', 'utf-8')
+    // cpSync 会复制该目录；随后写入 .source.json 必须失败，验证临时目录回滚。
+    mkdirSync(join(malformedSource, '.source.json'))
+
+    const result = await manager.batchImportSkillsFromWorkspaces('target', [
+      { sourceSlug: 'source', skillSlug: 'malformed' },
+    ])
+    const targetSkillsDir = configPaths.getWorkspaceSkillsDir('target')
+
+    expect(result.failed).toBe(1)
+    expect(result.skipped).toBe(0)
+    expect(existsSync(join(targetSkillsDir, 'malformed'))).toBe(false)
+    expect(readdirSync(targetSkillsDir).some((name) => name.startsWith('.malformed.importing-'))).toBe(false)
+  })
+
+  test('Given 来源是企业库 Skill When 批量导入 Then 拒绝复制且保留企业来源保护', async () => {
+    writeWorkspaceSkill('source', 'enterprise-skill', 'Enterprise Skill')
+    const sourcePath = join(configPaths.getWorkspaceSkillsDir('source'), 'enterprise-skill')
+    writeFileSync(join(sourcePath, '.source.json'), JSON.stringify({
+      schemaVersion: 2,
+      type: 'enterprise-library',
+      enterpriseId: 'enterprise-1',
+      skillId: 'skill-1',
+      versionId: 'version-1',
+      installedVersion: '1.0.0',
+      artifactSha256: 'a'.repeat(64),
+      baseManifestSha256: 'b'.repeat(64),
+      installedAt: '2026-08-05T00:00:00.000Z',
+    }), 'utf-8')
+
+    const result = await manager.batchImportSkillsFromWorkspaces('target', [
+      { sourceSlug: 'source', skillSlug: 'enterprise-skill' },
+    ])
+
+    expect(result.imported).toBe(0)
+    expect(result.skipped).toBe(0)
+    expect(result.failed).toBe(1)
+    expect(result.items[0]?.reason).toContain('企业库 Skill 不支持')
+    expect(existsSync(join(configPaths.getWorkspaceSkillsDir('target'), 'enterprise-skill'))).toBe(false)
   })
 })

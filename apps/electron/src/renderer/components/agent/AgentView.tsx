@@ -746,6 +746,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const pendingFilesRef = React.useRef(pendingFiles)
   // RichTextInput 命令接口 ref（右侧文件面板拖入时插入 @file 引用）
   const richTextInputRef = React.useRef<RichTextInputHandle>(null)
+  // 父组件同步生成的 ID，同时提供给 RichTextInput 与 SpeechButton，避免工具栏 memo 捕获空值。
+  const agentVoiceInputId = React.useId()
   React.useEffect(() => {
     pendingFilesRef.current = pendingFiles
   }, [pendingFiles])
@@ -3012,7 +3014,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         />
       ),
     },
-    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} /> },
+    { key: 'speech', node: <SpeechButton className={inputToolbarButtonClass} voiceInputId={agentVoiceInputId} /> },
     {
       key: 'attach-content',
       node: (
@@ -3081,6 +3083,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     stoppedByUser,
     handleAttachContent,
     handleCompact,
+    agentVoiceInputId,
   ])
 
   const stopControl = (
@@ -3314,6 +3317,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
               onPasteLongText={handlePasteLongText}
+              voiceInputId={agentVoiceInputId}
               longTextPasteThreshold={longTextPasteAsAttachmentEnabled ? LONG_TEXT_ATTACHMENT_THRESHOLD : undefined}
               placeholder={
                 agentChannelId && hasAvailableModel

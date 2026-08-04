@@ -43,6 +43,34 @@ button {
   border-radius: 0;
 }
 
+/* Windows exposes a small native drag region instead of making controls
+   accidentally draggable. It remains available in compact and expanded views. */
+.island-drag-handle {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  left: 0;
+  width: 38px;
+  height: 32px;
+  -webkit-app-region: drag;
+  cursor: move;
+}
+
+.island-drag-handle::after {
+  position: absolute;
+  top: 13px;
+  left: 15px;
+  width: 9px;
+  height: 6px;
+  border-top: 2px dotted rgb(245 245 247 / 0.42);
+  border-bottom: 2px dotted rgb(245 245 247 / 0.42);
+  content: '';
+}
+
+.island-root-floating button {
+  -webkit-app-region: no-drag;
+}
+
 .island-transition-surface {
   position: relative;
   width: 420px;

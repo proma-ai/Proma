@@ -729,8 +729,13 @@ export function AgentMessages({ sessionId, sessionModelId, sessionChannelId, mes
     ? allGroups.some((g) => g.type === 'assistant-turn' && liveGroupSet.has(g))
     : (liveMessages != null && liveMessages.some((m) => (m as { type: string }).type === 'assistant'))
 
+  const messageBasePaths = React.useMemo(
+    () => [sessionPath, ...(attachedDirs ?? [])].filter((path): path is string => Boolean(path)),
+    [sessionPath, attachedDirs],
+  )
+
   return (
-    <BasePathsProvider basePaths={attachedDirs}>
+    <BasePathsProvider basePaths={messageBasePaths}>
     <div ref={historySelectionRootRef} className="relative flex min-h-0 flex-1 flex-col">
       <Conversation resize={ready && !transitioning ? 'smooth' : 'instant'} className={ready ? (skipFadeIn ? 'opacity-100' : 'opacity-100 transition-opacity duration-200') : 'opacity-0'}>
         <ScrollPositionManager id={sessionId} ready={ready} />

@@ -105,7 +105,7 @@ export function WorktreeSelector({
 
   const allWorktrees = repoWorktrees.flatMap((rw) => rw.worktrees)
   const selectedWorktree = allWorktrees.find((wt) => wt.path === selectedPath)
-  const displayLabel = selectedWorktree ? selectedWorktree.branch : '会话改动'
+  const displayLabel = selectedWorktree ? selectedWorktree.branch : 'Worktrees'
   const hasMultipleRepos = repoWorktrees.length > 1
 
   if (allWorktrees.length === 0) return <></>

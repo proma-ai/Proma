@@ -29,6 +29,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
+import { useOpenPreview } from '@/components/diff/preview-opener'
+import { isImageFilePath } from './file-path-chip'
 import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
@@ -45,8 +47,13 @@ import {
   VOICE_DICTATION_INSERT_EVENT,
   VOICE_DICTATION_PREVIEW_EVENT,
   getLastFocusedVoiceInputId,
+  isVoiceDictationTargetInput,
   setLastFocusedVoiceInputId,
 } from '@/lib/voice-input-focus'
+import {
+  isVoiceDictationPreviewRangeCurrent,
+  type VoiceDictationPreviewRange,
+} from '@/lib/voice-dictation-preview'
 
 // ===== 行数计算 =====
 
@@ -119,6 +126,8 @@ interface RichTextInputProps {
   onPasteLongText?: (text: string) => void
   /** 触发超长文本粘贴回调的字符数阈值 */
   longTextPasteThreshold?: number
+  /** 当前实例的语音输入 ID；同工具栏的 SpeechButton 必须使用相同 ID。 */
+  voiceInputId?: string
   /** 占位文字 */
   placeholder?: string
   /** 是否显示建议样式（斜体占位符） */
@@ -169,6 +178,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   onPasteFiles,
   onPasteLongText,
   longTextPasteThreshold,
+  voiceInputId,
   placeholder = '有什么可以帮助到你的呢？',
   suggestionActive = false,
   className,
@@ -186,8 +196,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   sendWithCmdEnter = false,
 }: RichTextInputProps, ref: React.Ref<RichTextInputHandle>): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(false)
-  const inputIdRef = useRef(`rich-text-input-${Math.random().toString(36).slice(2)}`)
-  const voicePreviewRef = useRef<{ sessionId: string; from: number; to: number } | null>(null)
+  const inputIdRef = useRef(voiceInputId ?? `rich-text-input-${Math.random().toString(36).slice(2)}`)
+  const voicePreviewRef = useRef<VoiceDictationPreviewRange | null>(null)
   // 手动折叠状态：用户主动折叠输入框
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false)
   // 跟踪 isExpanded 最新值（对比后再 setState，避免每键无谓 setState 触发重渲染）
@@ -242,6 +252,34 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const richTextEnabledRef = useRef(richTextEnabled)
   richTextEnabledRef.current = richTextEnabled
   const isMac = useMemo(() => isMacPlatform(), [])
+  const openPreview = useOpenPreview()
+  const mentionPreviewBasePaths = useMemo(
+    () => Array.from(new Set([workspacePath, ...attachedDirs, ...sessionAttachedDirs].filter(Boolean))) as string[],
+    [workspacePath, attachedDirs, sessionAttachedDirs],
+  )
+  // useEditor 只会在 richTextEnabled 变化时重建，事件处理器必须经 ref 读取异步加载的最新路径。
+  const mentionPreviewBasePathsRef = useRef<string[]>(mentionPreviewBasePaths)
+  mentionPreviewBasePathsRef.current = mentionPreviewBasePaths
+
+  const handleImageMentionClick = useCallback((event: MouseEvent): boolean => {
+    const target = event.target
+    const activeSessionId = currentSessionIdRef.current
+    if (!(target instanceof Element) || !activeSessionId) return false
+
+    const mention = target.closest<HTMLElement>('[data-type="mention"][data-mention-previewable="true"]')
+    const filePath = mention?.dataset.id
+    if (!filePath) return false
+
+    event.preventDefault()
+    const basePaths = mentionPreviewBasePathsRef.current
+    openPreview(activeSessionId, {
+      filePath,
+      previewOnly: true,
+      readOnly: true,
+      basePaths: basePaths.length > 0 ? basePaths : undefined,
+    })
+    return true
+  }, [openPreview])
 
   const forwardSessionQuickSwitchKeyEvent = useCallback((event: React.KeyboardEvent<HTMLDivElement>, type: 'keydown' | 'keyup'): void => {
     const nativeEvent = event.nativeEvent
@@ -404,6 +442,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
                   : {}),
                 ...(node.attrs.commandMenuMention ? { 'data-command-menu-mention': 'true' } : {}),
                 ...(isDirectory ? { 'data-mention-is-directory': 'true' } : {}),
+                ...(char === '@' && !isDirectory && isImageFilePath(String(node.attrs.id))
+                  ? { 'data-mention-previewable': 'true' }
+                  : {}),
                 class: chipClass,
               },
               `${char === '@' ? '@' : ''}${label}`,
@@ -431,6 +472,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         }
         return false
       },
+      // TipTap mention 节点由 ProseMirror 直接输出 DOM，不能在这里挂 React onClick。
+      // 仅拦截图片 @ 引用，其余 chip 保持编辑器的原有选择行为。
+      handleClick: (_view, _pos, event) => handleImageMentionClick(event),
       attributes: {
         class: cn(
           'prose dark:prose-invert max-w-none focus:outline-none',
@@ -496,7 +540,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
             return true
           }
           event.preventDefault()
-          view.dispatch(view.state.tr.insertText(plainText))
+          view.dispatch(view.state.tr.insertText(plainText).setMeta('uiEvent', 'paste'))
           return true
         }
 
@@ -789,6 +833,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         sessionId: current.sessionId,
         from: from.pos,
         to: Math.max(from.pos, to.pos),
+        text: current.text,
       }
     }
 
@@ -803,32 +848,44 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     if (!editor || disabled) return
 
     const updatePreview = (event: Event): void => {
-      const { sessionId, text } = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail ?? {}
+      const { sessionId, text, targetInputId } = (event as CustomEvent<{ sessionId?: string; text?: string; targetInputId?: string | null }>).detail ?? {}
       const previewText = text?.trim()
       if (!sessionId || !previewText) return
 
       const current = voicePreviewRef.current
       if (current && current.sessionId !== sessionId) return
-      if (!current && getLastFocusedVoiceInputId() !== inputIdRef.current) return
+      if (!current && !isVoiceDictationTargetInput(inputIdRef.current, targetInputId)) return
       const from = current?.from ?? editor.state.selection.from
       const to = current?.to ?? editor.state.selection.to
       editor.view.dispatch(editor.state.tr.insertText(previewText, from, to))
-      voicePreviewRef.current = { sessionId, from, to: from + previewText.length }
+      voicePreviewRef.current = { sessionId, from, to: from + previewText.length, text: previewText }
       event.preventDefault()
+    }
+
+    const clearPreviewRange = (): void => {
+      const current = voicePreviewRef.current
+      if (!current) return
+      if (!editor.view.isDestroyed && isVoiceDictationPreviewRangeCurrent(
+        current,
+        (from, to) => editor.state.doc.textBetween(from, to, '\n', '\n'),
+      )) {
+        editor.view.dispatch(editor.state.tr.delete(current.from, current.to))
+      }
+      voicePreviewRef.current = null
     }
 
     const clearPreview = (event: Event): void => {
       const { sessionId } = (event as CustomEvent<{ sessionId?: string }>).detail ?? {}
       const current = voicePreviewRef.current
       if (!current || current.sessionId !== sessionId) return
-      editor.view.dispatch(editor.state.tr.delete(current.from, current.to))
-      voicePreviewRef.current = null
+      clearPreviewRange()
       event.preventDefault()
     }
 
     window.addEventListener(VOICE_DICTATION_PREVIEW_EVENT, updatePreview)
     window.addEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreview)
     return () => {
+      clearPreviewRange()
       window.removeEventListener(VOICE_DICTATION_PREVIEW_EVENT, updatePreview)
       window.removeEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreview)
     }
@@ -839,7 +896,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     if (!editor || disabled) return
 
     const handler = (event: Event): void => {
-      const customEvent = event as CustomEvent<{ sessionId?: string; text?: string }>
+      const customEvent = event as CustomEvent<{ sessionId?: string; text?: string; targetInputId?: string | null }>
       const text = customEvent.detail?.text?.trim()
       if (!text) return
 
@@ -851,7 +908,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         editor.view.dispatch(transaction)
         voicePreviewRef.current = null
       } else {
-        if (getLastFocusedVoiceInputId() !== inputIdRef.current) return
+        if (!isVoiceDictationTargetInput(inputIdRef.current, customEvent.detail?.targetInputId)) return
         editor.chain().focus().insertContent(text).run()
       }
       event.preventDefault()
@@ -955,6 +1012,12 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
           mask-size: contain;
           mask-repeat: no-repeat;
           flex-shrink: 0;
+        }
+        .mention-chip[data-mention-previewable="true"] {
+          cursor: pointer;
+        }
+        .mention-chip[data-mention-previewable="true"]:hover {
+          background-color: hsl(var(--primary) / 0.16);
         }
         .directory-mention-chip {
           background-color: hsl(var(--primary) / 0.14);

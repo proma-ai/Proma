@@ -6,10 +6,15 @@
  */
 
 import { app, BrowserWindow, screen, type BrowserWindowConstructorOptions } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { VOICE_DICTATION_IPC_CHANNELS } from '../../types'
+import { VOICE_DICTATION_IPC_CHANNELS, type VoiceDictationOutputMode, type VoiceDictationShownEvent } from '../../types'
 import { getSettings } from './settings-service'
-import { captureVoiceDictationTarget } from './text-output-service'
+import {
+  beginVoiceDictationOutputContext,
+  captureVoiceDictationTarget,
+  releaseVoiceDictationOutputContext,
+} from './text-output-service'
 import { getMainWindow } from '../index'
 
 const INDICATOR_WIDTH = 360
@@ -21,10 +26,12 @@ let usesExternalIndicator = false
 let indicatorState: 'recording' | 'stopping' = 'recording'
 let indicatorVolume = 0
 let indicatorTranscript = ''
+let activeOutputContextId: string | null = null
 let voiceIndicatorWindow: BrowserWindow | null = null
 
 interface VoiceDictationToggleOptions {
   targetIsProma?: boolean
+  sourceInputId?: string
 }
 
 /**
@@ -53,14 +60,24 @@ export function toggleVoiceDictationWindow(options: VoiceDictationToggleOptions 
     return
   }
 
-  captureVoiceDictationTarget(options.targetIsProma)
+  const targetIsProma = captureVoiceDictationTarget(options.targetIsProma)
+  const outputMode = getSettings().voiceDictation?.outputMode ?? 'auto'
+  const routeToPromaInput = shouldRouteVoiceDictationToPromaInput(targetIsProma, outputMode)
+  const outputContextId = randomUUID()
+  beginVoiceDictationOutputContext(outputContextId, { routeToPromaInput, outputMode })
+  activeOutputContextId = outputContextId
   voiceDictationActive = true
-  usesExternalIndicator = options.targetIsProma !== true
+  usesExternalIndicator = !targetIsProma
   indicatorState = 'recording'
   indicatorVolume = 0
   indicatorTranscript = ''
   if (usesExternalIndicator) showVoiceIndicator()
-  mainWindow.webContents.send(VOICE_DICTATION_IPC_CHANNELS.SHOWN)
+  const shownEvent: VoiceDictationShownEvent = {
+    routeToPromaInput,
+    outputContextId,
+    sourceInputId: options.sourceInputId,
+  }
+  mainWindow.webContents.send(VOICE_DICTATION_IPC_CHANNELS.SHOWN, shownEvent)
 }
 
 /** 听写完成、取消或失败后关闭所有可见状态。 */
@@ -69,6 +86,8 @@ export function hideVoiceDictationWindow(): void {
   usesExternalIndicator = false
   indicatorVolume = 0
   indicatorTranscript = ''
+  releaseVoiceDictationOutputContext(activeOutputContextId ?? undefined)
+  activeOutputContextId = null
   if (voiceIndicatorWindow && !voiceIndicatorWindow.isDestroyed()) {
     voiceIndicatorWindow.hide()
   }
@@ -106,6 +125,13 @@ export function updateVoiceDictationIndicatorTranscript(text: string): void {
 
 function isVoiceDictationEnabled(): boolean {
   return getSettings().voiceDictation?.enabled === true
+}
+
+function shouldRouteVoiceDictationToPromaInput(
+  targetIsProma: boolean,
+  outputMode: VoiceDictationOutputMode,
+): boolean {
+  return outputMode === 'proma-input' || (outputMode === 'auto' && targetIsProma)
 }
 
 function showVoiceIndicator(): void {

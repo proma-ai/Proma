@@ -7,6 +7,7 @@ import { Markdown } from 'tiptap-markdown'
 import type { MarkdownStorage } from 'tiptap-markdown'
 import { TextSelection } from '@tiptap/pm/state'
 import type { FileAccessOptions } from '@proma/shared'
+import type { MarkdownEditorSelection, MarkdownScrollPosition } from '@/lib/markdown-editor-state'
 import { cn } from '@/lib/utils'
 import { MARKDOWN_RENDERER_VERSION, markdownToHtml } from '@/lib/markdown-rich-text'
 import {
@@ -34,6 +35,10 @@ interface MarkdownRichEditorProps {
   disabled?: boolean
   fileAccess?: FileAccessOptions
   shikiTheme?: string
+  initialScrollPosition?: MarkdownScrollPosition
+  onScrollPositionChange?: (position: MarkdownScrollPosition) => void
+  initialSelection?: MarkdownEditorSelection | null
+  onSelectionChange?: (selection: MarkdownEditorSelection) => void
 }
 
 export function MarkdownRichEditor({
@@ -46,6 +51,10 @@ export function MarkdownRichEditor({
   disabled,
   fileAccess,
   shikiTheme = 'github-dark',
+  initialScrollPosition,
+  onScrollPositionChange,
+  initialSelection,
+  onSelectionChange,
 }: MarkdownRichEditorProps): React.ReactElement {
   const isEditable = editing && !disabled
   const markdownRendererVersion = MARKDOWN_RENDERER_VERSION
@@ -60,6 +69,16 @@ export function MarkdownRichEditor({
   const localMarkdownRef = React.useRef(value)
   const rendererVersionRef = React.useRef(markdownRendererVersion)
   const pendingFocusPosRef = React.useRef<number | null>(null)
+  const editorContentRef = React.useRef<HTMLDivElement>(null)
+  const restoredScrollKeyRef = React.useRef<string | null>(null)
+  const initialScrollPositionRef = React.useRef(initialScrollPosition)
+  const initialSelectionRef = React.useRef(initialSelection)
+  const onScrollPositionChangeRef = React.useRef(onScrollPositionChange)
+  const onSelectionChangeRef = React.useRef(onSelectionChange)
+  initialScrollPositionRef.current = initialScrollPosition
+  initialSelectionRef.current = initialSelection
+  onScrollPositionChangeRef.current = onScrollPositionChange
+  onSelectionChangeRef.current = onSelectionChange
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onCancelRef.current = onCancel
@@ -160,12 +179,118 @@ export function MarkdownRichEditor({
 
   React.useEffect(() => {
     if (!editor) return
+    const handleSelectionUpdate = (): void => {
+      if (!isEditableRef.current) return
+      onSelectionChangeRef.current?.({
+        from: editor.state.selection.from,
+        to: editor.state.selection.to,
+      })
+    }
+    editor.on('selectionUpdate', handleSelectionUpdate)
+    return () => {
+      editor.off('selectionUpdate', handleSelectionUpdate)
+    }
+  }, [editor])
+
+  React.useLayoutEffect(() => {
+    const selection = initialSelectionRef.current
+    if (!editor || !isEditable || !selection) return
+    const timer = window.setTimeout(() => {
+      const maxPosition = editor.state.doc.content.size
+      const from = Math.max(0, Math.min(selection.from, maxPosition))
+      const to = Math.max(from, Math.min(selection.to, maxPosition))
+      editor.commands.setTextSelection({ from, to })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [editor, isEditable])
+
+  React.useLayoutEffect(() => {
+    const scrollPosition = initialScrollPositionRef.current
+    if (!editor || !isEditable || !scrollPosition) return
+    const container = editorContentRef.current
+    if (!container) return
+
+    const restoreKey = `${scrollPosition.top}:${scrollPosition.left}`
+    if (restoredScrollKeyRef.current === restoreKey) return
+
+    let frameId = 0
+    let previousHeight = container.scrollHeight
+    let stableFrames = 0
+    const restore = (): void => {
+      const currentHeight = container.scrollHeight
+      if (currentHeight === previousHeight) {
+        stableFrames++
+      } else {
+        stableFrames = 0
+        previousHeight = currentHeight
+      }
+      if (stableFrames >= 3) {
+        container.scrollTop = Math.max(0, Math.min(scrollPosition.top, container.scrollHeight - container.clientHeight))
+        container.scrollLeft = Math.max(0, Math.min(scrollPosition.left, container.scrollWidth - container.clientWidth))
+        restoredScrollKeyRef.current = restoreKey
+        frameId = 0
+        return
+      }
+      frameId = requestAnimationFrame(restore)
+    }
+    frameId = requestAnimationFrame(restore)
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId)
+    }
+  }, [editor, isEditable])
+
+  React.useEffect(() => {
+    return () => {
+      const container = editorContentRef.current
+      if (container) {
+        onScrollPositionChangeRef.current?.({
+          top: container.scrollTop,
+          left: container.scrollLeft,
+        })
+      }
+      if (editor && isEditableRef.current) {
+        onSelectionChangeRef.current?.({
+          from: editor.state.selection.from,
+          to: editor.state.selection.to,
+        })
+      }
+    }
+  }, [editor])
+
+  React.useEffect(() => {
+    if (!editor) return
     const rendererChanged = rendererVersionRef.current !== markdownRendererVersion
     if (!rendererChanged && value === localMarkdownRef.current) return
     const html = markdownToHtml(value)
     localMarkdownRef.current = value
     rendererVersionRef.current = markdownRendererVersion
+    const container = editorContentRef.current
+    const previousScroll = container
+      ? { top: container.scrollTop, left: container.scrollLeft }
+      : null
+    const previousSelection = editor.state.selection
     editor.commands.setContent(html, { emitUpdate: false })
+    const restoreSelection = (): void => {
+      const maxPosition = editor.state.doc.content.size
+      const from = Math.max(0, Math.min(previousSelection.from, maxPosition))
+      const to = Math.max(from, Math.min(previousSelection.to, maxPosition))
+      try {
+        editor.commands.setTextSelection({ from, to })
+      } catch {
+        // 外部内容变短时，无法恢复的选区交给 ProseMirror 当前默认选区。
+      }
+    }
+    restoreSelection()
+    if (!container || !previousScroll) return
+    const restoreView = (): void => {
+      restoreSelection()
+      container.scrollTop = previousScroll.top
+      container.scrollLeft = previousScroll.left
+    }
+    restoreView()
+    const frameId = requestAnimationFrame(restoreView)
+    return () => cancelAnimationFrame(frameId)
   }, [editor, value, markdownRendererVersion])
 
   React.useEffect(() => {
@@ -198,8 +323,15 @@ export function MarkdownRichEditor({
     <div className={cn('flex flex-col', editing ? 'h-full' : 'min-h-full')}>
       {editing && editor && <MarkdownEditorToolbar editor={editor} />}
       <EditorContent
+        ref={editorContentRef}
         editor={editor}
         onMouseDown={focusEditorFromBlankArea}
+        onScroll={(event) => {
+          onScrollPositionChangeRef.current?.({
+            top: event.currentTarget.scrollTop,
+            left: event.currentTarget.scrollLeft,
+          })
+        }}
         className={cn(
           editing ? 'min-h-0 flex-1 overflow-auto scrollbar-thin' : 'h-full min-h-full flex-1',
           isEditable

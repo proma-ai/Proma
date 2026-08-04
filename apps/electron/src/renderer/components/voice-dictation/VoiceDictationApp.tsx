@@ -3,6 +3,7 @@
  */
 
 import * as React from 'react'
+import { toast } from 'sonner'
 import { Check, Clipboard, Loader2, Mic, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { VoiceDictationCommitResult, VoiceDictationSettings, VoiceDictationStateEvent, VoiceDictationTranscriptEvent } from '../../../types'
@@ -10,7 +11,11 @@ import { CHUNK_BYTES, concatAudioBuffers, floatTo16BitPcm, splitChunk } from './
 import { mergeVoiceDictationTranscript } from './voice-transcript-merge'
 import type { VoiceDictationTranscriptMergeState } from './voice-transcript-merge'
 import { useVoiceWindowLayout } from './use-voice-window-layout'
-import { VOICE_DICTATION_STATUS_EVENT } from '@/lib/voice-input-focus'
+import {
+  VOICE_DICTATION_STATUS_EVENT,
+  resolveVoiceDictationSessionInputIds,
+  setLastFocusedVoiceInputId,
+} from '@/lib/voice-input-focus'
 
 const MAX_QUEUED_CHUNKS = 60
 const STOP_COMMIT_TIMEOUT_MS = 1400
@@ -23,6 +28,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   const [transcript, setTranscript] = React.useState('')
   const [commitResult, setCommitResult] = React.useState<VoiceDictationCommitResult | null>(null)
   const [volume, setVolume] = React.useState(0)
+  const [dictationSourceId, setDictationSourceId] = React.useState<string | null>(null)
 
   const sessionIdRef = React.useRef<string | null>(null)
   const transcriptRef = React.useRef('')
@@ -46,6 +52,33 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   const dictationIdRef = React.useRef<string | null>(null)
   const recordingAttemptRef = React.useRef(0)
   const lastReportedVolumeAtRef = React.useRef(0)
+  /** 本次听写会话归属的输入框 ID，仅用于同步内嵌按钮状态。 */
+  const dictationSourceRef = React.useRef<string | null>(null)
+  /** 本次听写会话冻结的文本回填目标；复制到剪贴板时明确为 null。 */
+  const dictationTargetRef = React.useRef<string | null>(null)
+  /** 主进程生成的输出上下文 ID，确保录音期间修改设置不会改变输出去向。 */
+  const dictationOutputContextRef = React.useRef<string | null>(null)
+  /** 取消或提交后拒绝同一 ASR 会话的迟到 transcript/state 事件。 */
+  const discardTranscriptRef = React.useRef(false)
+
+  const setDictationSource = React.useCallback((sourceId: string | null) => {
+    dictationSourceRef.current = sourceId
+    setDictationSourceId(sourceId)
+  }, [])
+
+  const setDictationTarget = React.useCallback((targetInputId: string | null) => {
+    dictationTargetRef.current = targetInputId
+  }, [])
+
+  const setDictationOutputContext = React.useCallback((outputContextId: string | null) => {
+    dictationOutputContextRef.current = outputContextId
+  }, [])
+
+  const discardCurrentTranscript = React.useCallback(() => {
+    discardTranscriptRef.current = true
+    sessionIdRef.current = null
+    dictationIdRef.current = null
+  }, [])
 
   const {
     rootRef,
@@ -81,9 +114,9 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   React.useEffect(() => {
     if (!embedded) return
     window.dispatchEvent(new CustomEvent(VOICE_DICTATION_STATUS_EVENT, {
-      detail: { status, message, volume },
+      detail: { status, message, volume, sourceId: dictationSourceId },
     }))
-  }, [embedded, message, status, volume])
+  }, [dictationSourceId, embedded, message, status, volume])
 
   const cleanupAudio = React.useCallback((clearBufferedAudio = true) => {
     processorRef.current?.disconnect()
@@ -145,10 +178,26 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       commitTimerRef.current = null
     }
     const text = transcriptRef.current.trim()
+    const asrSessionId = sessionIdRef.current
+    const dictationSessionId = dictationIdRef.current
+    const targetInputId = dictationTargetRef.current
+    const outputContextId = dictationOutputContextRef.current
+    discardCurrentTranscript()
     if (!text) {
       setStatus('idle')
       setMessage('没有识别到语音内容')
+      setDictationSource(null)
+      setDictationTarget(null)
+      setDictationOutputContext(null)
       cleanupAudio()
+      if (asrSessionId) {
+        window.electronAPI.cancelVoiceDictation({
+          sessionId: asrSessionId,
+          previewSessionId: dictationSessionId ?? undefined,
+          targetInputId,
+          outputContextId: outputContextId ?? undefined,
+        }).catch(console.error)
+      }
       setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 180)
       return
     }
@@ -157,12 +206,21 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     setMessage('正在输出文本...')
     try {
       const result = await window.electronAPI.commitVoiceDictation({
-        sessionId: dictationIdRef.current ?? sessionIdRef.current ?? '',
+        sessionId: dictationSessionId ?? asrSessionId ?? '',
         text,
+        targetInputId,
+        outputContextId: outputContextId ?? undefined,
       })
       setCommitResult(result)
       setStatus('completed')
       setMessage(result.message)
+      if (embedded && targetInputId && result.mode === 'clipboard') {
+        const notify = result.success ? toast.warning : toast.error
+        notify(result.message)
+      }
+      setDictationSource(null)
+      setDictationTarget(null)
+      setDictationOutputContext(null)
       cleanupAudio()
       setTimeout(() => window.electronAPI.hideVoiceDictation().catch(console.error), 280)
     } catch (error) {
@@ -171,7 +229,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       setStatus('error')
       setMessage(`输出失败: ${textMessage}`)
     }
-  }, [cleanupAudio])
+  }, [cleanupAudio, discardCurrentTranscript, setDictationOutputContext, setDictationSource, setDictationTarget])
 
   const scheduleCommit = React.useCallback((delay: number) => {
     if (commitInFlightRef.current) return
@@ -192,31 +250,41 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     cleanupAudio(false)
     flushPendingAudio()
     flushQueuedAudio()
-    if (!currentSessionId) {
-      scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
-    } else if (asrReadyRef.current) {
+    if (currentSessionId) {
       window.electronAPI.stopVoiceDictation({ sessionId: currentSessionId }).catch(console.error)
-      scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
     }
+    scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
   }, [cleanupAudio, flushPendingAudio, flushQueuedAudio, scheduleCommit])
 
   const cancelAndHide = React.useCallback(() => {
+    if (commitInFlightRef.current) return
     recordingAttemptRef.current += 1
     stoppingRef.current = true
     const currentSessionId = sessionIdRef.current
+    const dictationSessionId = dictationIdRef.current
+    const targetInputId = dictationTargetRef.current
+    const outputContextId = dictationOutputContextRef.current
+    discardCurrentTranscript()
     if (commitTimerRef.current) {
       clearTimeout(commitTimerRef.current)
       commitTimerRef.current = null
     }
+    setStatus('idle')
+    setMessage('已取消语音输入')
+    setDictationSource(null)
+    setDictationTarget(null)
+    setDictationOutputContext(null)
     window.electronAPI.hideVoiceDictation().catch(console.error)
     cleanupAudio()
     if (currentSessionId) {
       window.electronAPI.cancelVoiceDictation({
         sessionId: currentSessionId,
-        previewSessionId: dictationIdRef.current ?? undefined,
+        previewSessionId: dictationSessionId ?? undefined,
+        targetInputId,
+        outputContextId: outputContextId ?? undefined,
       }).catch(console.error)
     }
-  }, [cleanupAudio])
+  }, [cleanupAudio, discardCurrentTranscript, setDictationOutputContext, setDictationSource, setDictationTarget])
 
   React.useEffect(() => {
     if (status !== 'connecting' && status !== 'recording' && status !== 'stopping') return
@@ -233,19 +301,28 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     recordingAttemptRef.current += 1
     stoppingRef.current = true
     const currentSessionId = sessionIdRef.current
+    const dictationSessionId = dictationIdRef.current
+    const targetInputId = dictationTargetRef.current
+    const outputContextId = dictationOutputContextRef.current
+    discardCurrentTranscript()
     if (commitTimerRef.current) {
       clearTimeout(commitTimerRef.current)
       commitTimerRef.current = null
     }
     cleanupAudio()
+    setDictationSource(null)
+    setDictationTarget(null)
+    setDictationOutputContext(null)
     if (currentSessionId) {
       window.electronAPI.cancelVoiceDictation({
         sessionId: currentSessionId,
-        previewSessionId: dictationIdRef.current ?? undefined,
+        previewSessionId: dictationSessionId ?? undefined,
+        targetInputId,
+        outputContextId: outputContextId ?? undefined,
       }).catch(console.error)
     }
     window.electronAPI.hideVoiceDictation().catch(console.error)
-  }, [cleanupAudio])
+  }, [cleanupAudio, discardCurrentTranscript, setDictationOutputContext, setDictationSource, setDictationTarget])
 
   React.useEffect(() => {
     if (status !== 'error') return
@@ -354,6 +431,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       })
 
     stoppingRef.current = false
+    discardTranscriptRef.current = false
     commitInFlightRef.current = false
     if (commitTimerRef.current) {
       clearTimeout(commitTimerRef.current)
@@ -442,7 +520,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
         setMessage('正在听写')
       })
       .catch((error) => {
-        if (!isCurrentAttempt() || sessionIdRef.current !== nextSessionId) return
+        if (!isCurrentAttempt() || sessionIdRef.current !== nextSessionId || stoppingRef.current) return
         const textMessage = error instanceof Error ? error.message : '未知错误'
         setStatus('error')
         setMessage(textMessage)
@@ -453,7 +531,17 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
   }, [abortCurrentSession, cleanupAudio, flushPendingAudio, flushQueuedAudio, scheduleCommit, startAudioCapture])
 
   React.useEffect(() => {
-    const cleanupShown = window.electronAPI.onVoiceDictationShown(() => {
+    const cleanupShown = window.electronAPI.onVoiceDictationShown((event) => {
+      // 主进程已冻结本次输出是否路由到 Proma；点击按钮的来源仍应保留给 UI，
+      // 即使用户选择复制到剪贴板。快捷键仅在需要写入 Proma 时回退到最后聚焦输入框。
+      const { sourceInputId, targetInputId } = resolveVoiceDictationSessionInputIds(
+        event.routeToPromaInput,
+        event.sourceInputId,
+      )
+      if (sourceInputId) setLastFocusedVoiceInputId(sourceInputId)
+      setDictationSource(sourceInputId)
+      setDictationTarget(targetInputId)
+      setDictationOutputContext(event.outputContextId)
       startRecording().catch((error) => {
         const textMessage = getMicrophoneErrorMessage(error)
         setStatus('error')
@@ -467,7 +555,7 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
     })
 
     const cleanupTranscript = window.electronAPI.onVoiceDictationTranscript((event: VoiceDictationTranscriptEvent) => {
-      if (event.sessionId !== sessionIdRef.current) return
+      if (discardTranscriptRef.current || event.sessionId !== sessionIdRef.current) return
       const mergedTranscript = mergeVoiceDictationTranscript(
         transcriptMergeStateRef.current,
         event.text,
@@ -483,6 +571,8 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
         window.electronAPI.previewVoiceDictation({
           sessionId: dictationIdRef.current ?? event.sessionId,
           text: mergedTranscript.text,
+          targetInputId: dictationTargetRef.current,
+          outputContextId: dictationOutputContextRef.current ?? undefined,
         }).catch(console.error)
       }
       if (stoppingRef.current && event.isFinal) {
@@ -492,25 +582,39 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
 
     const cleanupState = window.electronAPI.onVoiceDictationState((event: VoiceDictationStateEvent) => {
       if (event.sessionId && event.sessionId !== sessionIdRef.current) return
+      if (stoppingRef.current && event.status === 'error') return
       if (event.status === 'connecting') {
         setStatus('recording')
         return
       }
       if (event.status === 'idle' && event.message === 'asr_session_ended') {
         if (stoppingRef.current) return
-        // ASR 连接被服务端关闭（VAD 静音超时），如果仍在录音则自动重连
+        // ASR 连接被服务端关闭（VAD 静音超时），如果仍在录音则自动重连。
+        // 捕获当前 attempt，避免 Escape、停止或卸载后的异步握手重新激活已取消会话。
+        const reconnectAttempt = recordingAttemptRef.current
         const nextSessionId = crypto.randomUUID()
+        const isCurrentReconnect = (): boolean =>
+          recordingAttemptRef.current === reconnectAttempt &&
+          sessionIdRef.current === nextSessionId
         setSessionId(nextSessionId)
         sessionIdRef.current = nextSessionId
         asrReadyRef.current = false
         queuedAudioRef.current = []
         window.electronAPI.startVoiceDictation({ sessionId: nextSessionId })
           .then(() => {
-            if (sessionIdRef.current !== nextSessionId) return
+            if (!isCurrentReconnect()) {
+              window.electronAPI.cancelVoiceDictation({ sessionId: nextSessionId }).catch(console.error)
+              return
+            }
             asrReadyRef.current = true
             flushQueuedAudio()
+            if (stoppingRef.current) {
+              window.electronAPI.stopVoiceDictation({ sessionId: nextSessionId }).catch(console.error)
+              scheduleCommit(STOP_COMMIT_TIMEOUT_MS)
+            }
           })
           .catch((error) => {
+            if (!isCurrentReconnect() || stoppingRef.current) return
             const textMessage = error instanceof Error ? error.message : '未知错误'
             setStatus('error')
             setMessage(textMessage)
@@ -528,16 +632,26 @@ export function VoiceDictationApp({ embedded = false }: { embedded?: boolean }):
       cleanupState()
       recordingAttemptRef.current += 1
       const currentSessionId = sessionIdRef.current
+      const dictationSessionId = dictationIdRef.current
+      const targetInputId = dictationTargetRef.current
+      const outputContextId = dictationOutputContextRef.current
+      discardCurrentTranscript()
       if (currentSessionId) {
         window.electronAPI.cancelVoiceDictation({
           sessionId: currentSessionId,
-          previewSessionId: dictationIdRef.current ?? undefined,
+          previewSessionId: dictationSessionId ?? undefined,
+          targetInputId,
+          outputContextId: outputContextId ?? undefined,
         }).catch(console.error)
       }
+      setDictationSource(null)
+      setDictationTarget(null)
+      setDictationOutputContext(null)
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
       cleanupAudio()
+      window.electronAPI.hideVoiceDictation().catch(console.error)
     }
-  }, [cleanupAudio, flushQueuedAudio, scheduleCommit, startRecording, stopRecording])
+  }, [cleanupAudio, discardCurrentTranscript, flushQueuedAudio, scheduleCommit, setDictationOutputContext, setDictationSource, setDictationTarget, startRecording, stopRecording])
 
   const busy = status === 'connecting' || status === 'recording' || status === 'stopping'
   if (embedded) return <span className="hidden" aria-hidden="true" />

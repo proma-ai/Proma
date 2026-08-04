@@ -28,7 +28,7 @@ function existsCacheKey(filePath: string, bases: string[]): string {
 }
 
 /** 图片扩展名 */
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 /** 视频扩展名 */
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov'])
 /**
@@ -64,6 +64,11 @@ const TRAILING_SEP_RE = /[\\/]+$/
 
 /** Windows 盘符绝对路径前缀（如 C:\ D:/ e:\） */
 const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
+
+/** 判断路径是否指向可在内置预览中显示的图片。 */
+export function isImageFilePath(filePath: string): boolean {
+  return IMAGE_EXTS.has(getExtension(filePath.trim()))
+}
 
 /** 从路径提取文件名（同时支持 / 和 \） */
 function getFileName(filePath: string): string {

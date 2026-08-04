@@ -460,15 +460,28 @@ export async function startDoubaoAsrSession(
       mode: useCloud ? 'cloud' : 'direct',
     }
     activeSessions.set(sessionId, active)
+    let connected = false
+    let settled = false
+    let socketErrored = false
+    const fail = (error: Error): void => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
 
     const timer = setTimeout(() => {
-      ws.terminate()
+      const error = new Error('连接豆包 ASR 超时')
       activeSessions.delete(sessionId)
-      reject(new Error('连接豆包 ASR 超时'))
+      sendState(win, { sessionId, status: 'error', message: error.message })
+      fail(error)
+      ws.terminate()
     }, 10000)
 
     ws.once('open', () => {
+      if (settled) return
       clearTimeout(timer)
+      connected = true
+      settled = true
       if (!useCloud) {
         ws.send(buildClientRequest(settings))
       }
@@ -501,16 +514,29 @@ export async function startDoubaoAsrSession(
     })
 
     ws.on('close', () => {
+      clearTimeout(timer)
       active.closed = true
       activeSessions.delete(sessionId)
+      if (!connected) {
+        if (!settled) {
+          const error = new Error('连接豆包 ASR 在建立前已关闭')
+          sendState(win, { sessionId, status: 'error', message: error.message })
+          fail(error)
+        }
+        return
+      }
+      // WebSocket transport error already notified the renderer; do not reclassify it
+      // as a normal/VAD close, which would trigger the automatic reconnect path.
+      if (socketErrored) return
       sendState(win, { sessionId, status: 'idle', message: 'asr_session_ended' })
     })
 
     ws.once('error', (error: Error) => {
+      socketErrored = true
       clearTimeout(timer)
       activeSessions.delete(sessionId)
       sendState(win, { sessionId, status: 'error', message: error.message })
-      reject(error)
+      fail(error)
     })
   })
 }

@@ -12,6 +12,7 @@
 
 import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
+import { getSettings, updateSettings } from './settings-service'
 
 /** Windows fallback 的收起态尺寸，和原生 Swift island 的紧凑状态一致。 */
 export const AGENT_ISLAND_DEFAULT_WIDTH = 420
@@ -22,6 +23,7 @@ export const AGENT_ISLAND_MAX_HEIGHT = 640
 const WINDOWS_TOP_INSET = 12
 
 let agentIslandWindow: BrowserWindow | null = null
+let suppressWindowsPositionPersistence = false
 
 /** 灵动岛窗口渲染就绪回调（service 注册后用于补推状态） */
 let onWindowReady: (() => void) | null = null
@@ -30,9 +32,32 @@ export function onAgentIslandWindowReady(cb: () => void): void {
   onWindowReady = cb
 }
 
+function clampToWorkArea(x: number, y: number, width: number, height: number, workArea: Electron.Rectangle): { x: number; y: number } {
+  return {
+    x: Math.max(workArea.x, Math.min(workArea.x + Math.max(0, workArea.width - width), Math.round(x))),
+    y: Math.max(workArea.y, Math.min(workArea.y + Math.max(0, workArea.height - height), Math.round(y))),
+  }
+}
+
+function getSavedWindowsPosition(): { x: number; y: number } | null {
+  const position = getSettings().agentIsland?.windowsPosition
+  if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return null
+  return { x: position.x, y: position.y }
+}
+
 function resolveWindowPosition(width: number, height: number): { x: number; y: number } {
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  const { bounds, workArea } = display
+  const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  if (process.platform === 'win32') {
+    const saved = getSavedWindowsPosition()
+    // Persisted coordinates are global desktop coordinates. Resolve their own
+    // display so a saved position on a secondary display is not clamped to the
+    // display currently containing the cursor on the next launch.
+    if (saved) {
+      const savedDisplay = screen.getDisplayNearestPoint(saved)
+      return clampToWorkArea(saved.x, saved.y, width, height, savedDisplay.workArea)
+    }
+  }
+  const { bounds, workArea } = cursorDisplay
   // macOS fallback 仍贴齐刘海；Windows 没有硬件缺口，保留系统工作区内的
   // 小间距和完整圆角 surface，避免覆盖顶部任务栏或看起来像半截窗口。
   const y = process.platform === 'darwin' ? bounds.y : workArea.y + WINDOWS_TOP_INSET
@@ -40,6 +65,24 @@ function resolveWindowPosition(width: number, height: number): { x: number; y: n
     x: Math.round(bounds.x + (bounds.width - width) / 2),
     y,
   }
+}
+
+function persistWindowsPosition(position: { x: number; y: number }): void {
+  if (process.platform !== 'win32') return
+  const current = getSavedWindowsPosition()
+  if (current?.x === position.x && current.y === position.y) return
+  try {
+    updateSettings({ agentIsland: { windowsPosition: position } })
+  } catch (error) {
+    console.error('[agent-island] 保存 Windows 位置失败:', error)
+  }
+}
+
+function setWindowsBoundsWithoutPersisting(win: BrowserWindow, bounds: Electron.Rectangle): void {
+  suppressWindowsPositionPersistence = true
+  win.setBounds(bounds, false)
+  // Electron may emit `move` on the next native turn rather than synchronously.
+  setTimeout(() => { suppressWindowsPositionPersistence = false }, 0)
 }
 
 export function createAgentIslandWindow(): BrowserWindow | null {
@@ -60,7 +103,9 @@ export function createAgentIslandWindow(): BrowserWindow | null {
     closable: process.platform !== 'win32',
     skipTaskbar: true,
     resizable: false,
-    movable: false,
+    // The Windows fallback is a regular floating surface, so users can move it
+    // away from application controls. macOS uses its fixed native notch panel.
+    movable: process.platform === 'win32',
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -91,6 +136,27 @@ export function createAgentIslandWindow(): BrowserWindow | null {
   }
 
   // 灵动岛常驻：失焦不隐藏（与 quick-task 不同）
+  let persistPositionTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingWindowsPosition: { x: number; y: number } | null = null
+  agentIslandWindow.on('move', () => {
+    if (process.platform !== 'win32' || suppressWindowsPositionPersistence) return
+    const { x, y } = agentIslandWindow?.getBounds() ?? {}
+    if (typeof x !== 'number' || typeof y !== 'number') return
+    pendingWindowsPosition = { x, y }
+    if (persistPositionTimer) clearTimeout(persistPositionTimer)
+    persistPositionTimer = setTimeout(() => {
+      persistPositionTimer = null
+      if (pendingWindowsPosition) persistWindowsPosition(pendingWindowsPosition)
+      pendingWindowsPosition = null
+    }, 180)
+  })
+  agentIslandWindow.on('close', () => {
+    // Flush a just-finished native drag instead of losing it when the app exits
+    // before the debounce timer expires.
+    if (persistPositionTimer) clearTimeout(persistPositionTimer)
+    if (pendingWindowsPosition) persistWindowsPosition(pendingWindowsPosition)
+    pendingWindowsPosition = null
+  })
   agentIslandWindow.on('closed', () => {
     agentIslandWindow = null
   })
@@ -137,12 +203,20 @@ export function resizeAgentIslandWindow(width: number, height: number): void {
   const bounds = win.getBounds()
   // 尺寸未变化时不重复 setBounds（避免高频 agent 事件导致无谓窗口操作）
   if (bounds.width === clampedWidth && bounds.height === clampedHeight) return
-  // 宽度变化保持居中；Windows 维持与顶部工作区的固定呼吸空间，macOS fallback
-  // 保持刘海顶部锚定。
   const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y })
-  const top = process.platform === 'darwin' ? display.bounds.y : display.workArea.y + WINDOWS_TOP_INSET
+  if (process.platform === 'win32') {
+    // A user-selected Windows position must survive compact/expanded resizes.
+    // Keep the saved compact position as the user's intent. A larger expanded
+    // surface may need a temporary clamp, then returns to this position on
+    // collapse rather than permanently drifting away from it.
+    const intended = getSavedWindowsPosition() ?? { x: bounds.x, y: bounds.y }
+    const position = clampToWorkArea(intended.x, intended.y, clampedWidth, clampedHeight, display.workArea)
+    setWindowsBoundsWithoutPersisting(win, { ...position, width: clampedWidth, height: clampedHeight })
+    return
+  }
+  // macOS fallback remains anchored to the notch/top edge.
   const newX = Math.round(display.bounds.x + (display.bounds.width - clampedWidth) / 2)
-  win.setBounds({ x: newX, y: top, width: clampedWidth, height: clampedHeight }, false)
+  win.setBounds({ x: newX, y: display.bounds.y, width: clampedWidth, height: clampedHeight }, false)
 }
 
 /** 渲染进程拖拽移动窗口位置 */
@@ -151,8 +225,7 @@ export function moveAgentIslandWindow(x: number, y: number): void {
   if (!win) return
   const bounds = win.getBounds()
   const display = screen.getDisplayNearestPoint({ x, y })
-  const workArea = display.workArea
-  const clampedX = Math.max(workArea.x - bounds.width / 2, Math.min(workArea.x + workArea.width - bounds.width / 2, Math.round(x)))
-  const clampedY = Math.max(workArea.y, Math.min(workArea.y + workArea.height - 24, Math.round(y)))
-  win.setPosition(clampedX, clampedY, false)
+  const position = clampToWorkArea(x, y, bounds.width, bounds.height, display.workArea)
+  win.setPosition(position.x, position.y, false)
+  persistWindowsPosition(position)
 }

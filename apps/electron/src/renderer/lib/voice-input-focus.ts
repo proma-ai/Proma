@@ -20,6 +20,52 @@ export function getLastFocusedVoiceInputId(): string | null {
   return lastFocusedVoiceInputId
 }
 
+/**
+ * 在听写会话开始时冻结状态归属和文本回填目标。
+ *
+ * 按钮来源始终用于显示录音状态；只有本次输出应写回 Proma 时，它才同时成为文本目标。
+ * 这样“复制到剪贴板”模式仍会在发起按钮上显示录音状态，却不会向编辑器派发预览或最终文本。
+ */
+export function resolveVoiceDictationSessionInputIds(
+  routeToPromaInput: boolean,
+  sourceInputId?: string,
+): { sourceInputId: string | null; targetInputId: string | null } {
+  const targetInputId = routeToPromaInput
+    ? sourceInputId ?? lastFocusedVoiceInputId
+    : null
+
+  return {
+    sourceInputId: sourceInputId ?? targetInputId,
+    targetInputId,
+  }
+}
+
+/**
+ * 只有旧事件未提供目标，或本次会话明确选择全局回退时，才可写入当前活动 Tab。
+ * 显式字符串目标失效（例如原输入框已卸载）时必须丢弃，不能误写到其他会话。
+ */
+export function shouldFallbackVoiceDictationToActiveTab(
+  targetInputId: string | null | undefined,
+): boolean {
+  return targetInputId === null || targetInputId === undefined
+}
+
+/**
+ * 判断一条听写事件是否属于指定输入框。
+ *
+ * 新事件带有会话开始时冻结的 targetInputId，必须优先使用它，避免录音期间焦点变化导致文本写入别处。
+ * 仅兼容旧事件省略该字段的情况才回退到最后聚焦的输入框；显式 null 表示不要路由到任何内部输入框。
+ */
+export function isVoiceDictationTargetInput(
+  inputId: string,
+  targetInputId: string | null | undefined,
+): boolean {
+  const resolvedTargetInputId = targetInputId === undefined
+    ? lastFocusedVoiceInputId
+    : targetInputId
+  return resolvedTargetInputId === inputId
+}
+
 /** Scratch Pad 编辑器的语音输入目标 ID */
 export const SCRATCH_PAD_VOICE_INPUT_ID = '__proma-scratch-pad__'
 

@@ -45,6 +45,10 @@ import {
   unviewedCompletedSessionIdsAtom,
   agentSessionPathMapAtom,
   agentDiffRefreshVersionAtom,
+  agentDiffPanelTabAtom,
+  agentNonGitFileChangesAtom,
+  agentFileChangesCurrentRunAtom,
+  agentSidePanelOpenAtom,
   askUserDraftsAtom,
 } from '@/atoms/agent-atoms'
 import {
@@ -71,6 +75,7 @@ import {
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
+import { getSessionFileChangeKind, upsertSessionFileChange } from '@/lib/session-file-changes'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -453,8 +458,16 @@ export function useGlobalAgentListeners(): void {
   const store = useStore()
 
   useEffect(() => {
-    /** 正在执行的写工具：toolUseId → { path, sessionId } */
-    const pendingWriteTools = new Map<string, { path: string; sessionId: string }>()
+    /** 正在执行的写工具；写入前的文件存在性用于区分新建和编辑。 */
+    const pendingWriteTools = new Map<string, {
+      path: string
+      sessionId: string
+      toolName: string
+      existedBefore?: boolean
+      runId: string
+    }>()
+    /** 每轮只自动打开一次文件改动面板，避免连续写入打断用户。 */
+    const autoActivatedChangeTurns = new Map<string, string>()
     /** 正在执行的 git 突变 Bash 命令：toolUseId → sessionId（完成后触发 diff 刷新） */
     const pendingGitMutateTools = new Map<string, string>()
 
@@ -842,6 +855,17 @@ export function useGlobalAgentListeners(): void {
             })
           }
 
+          const activeRunStartedAt = store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt
+          if (activeRunStartedAt != null) {
+            const activeRunId = String(activeRunStartedAt)
+            store.set(agentFileChangesCurrentRunAtom, (prev) => {
+              if (prev.get(sessionId) === activeRunId) return prev
+              const map = new Map(prev)
+              map.set(sessionId, activeRunId)
+              return map
+            })
+          }
+
           // Pi 原生重试成功后仍会沿用同一会话；仅在事件属于当前 stream run 时
           // 清掉过期错误，避免迟到的旧 retry_cleared 掩盖新一轮真实失败。
           if (event.type === 'retry_cleared') {
@@ -851,7 +875,7 @@ export function useGlobalAgentListeners(): void {
             }
           }
 
-          // RightSidePanel 由用户完全控制，Agent 行为不影响其开关状态
+          // 非 Git 文件写入时自动打开“文件改动”；Git Diff 的面板状态仍由用户控制。
 
           // Agent 修改文件时，记入「最近修改」状态，用于 60s 内左侧竖条标记
           if (event.type === 'tool_start' && WRITE_TOOLS.has(event.toolName)) {
@@ -860,7 +884,25 @@ export function useGlobalAgentListeners(): void {
               (input?.file_path as string | undefined)
               ?? (input?.path as string | undefined)
               ?? (input?.notebook_path as string | undefined)
-            pendingWriteTools.set(event.toolUseId, { path: targetPath || '', sessionId })
+            const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
+              ?? String(store.get(agentStreamingStatesAtom).get(sessionId)?.startedAt ?? event.turnId ?? Date.now())
+            const entry = {
+              path: targetPath || '',
+              sessionId,
+              toolName: event.toolName,
+              runId,
+            }
+            pendingWriteTools.set(event.toolUseId, entry)
+            if (typeof targetPath === 'string' && targetPath.length > 0) {
+              void window.electronAPI.resolveAndReadFile(targetPath, { sessionId })
+                .then((file) => {
+                  const pending = pendingWriteTools.get(event.toolUseId)
+                  if (pending) pending.existedBefore = file !== null
+                })
+                .catch(() => {
+                  // 文件不存在和暂时无法读取都按未知处理，避免阻断写入反馈。
+                })
+            }
             if (typeof targetPath === 'string' && targetPath.length > 0) {
               const now = Date.now()
               // 记入「最近修改」状态，用于 60s 内左侧竖条标记
@@ -921,17 +963,18 @@ export function useGlobalAgentListeners(): void {
             store.set(backgroundTasksAtomFamily(sessionId), (prev) =>
               prev.filter((t) => t.toolUseId !== event.toolUseId)
             )
-            // Agent 写类工具完成时，递增 diff 刷新版本号并标记未查看改动
+            // Agent 写类工具成功时刷新 Git diff；非 Git 目录记录为本会话文件变更。
             if (pendingWriteTools.has(event.toolUseId)) {
               const entry = pendingWriteTools.get(event.toolUseId)!
               const writtenPath = entry.path
               pendingWriteTools.delete(event.toolUseId)
+              if (event.isError) continue
               store.set(agentDiffRefreshVersionAtom, (prev) => {
                 const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
               })
               if (writtenPath) {
                 buildWrittenFilePreviewInfo(sessionId, writtenPath).then((previewFile) => {
-                  if (!previewFile || previewFile.previewOnly || !previewFile.inDiffScope) return
+                  if (!previewFile || !previewFile.inDiffScope) return
 
                   store.set(agentDiffUnseenChangesAtom, (prev) => {
                     const m = new Map(prev); m.set(sessionId, true); return m
@@ -943,6 +986,33 @@ export function useGlobalAgentListeners(): void {
                     m.set(sessionId, s)
                     return m
                   })
+
+                  if (previewFile.previewOnly) {
+                    store.set(agentNonGitFileChangesAtom, (prev) => {
+                      const m = new Map(prev)
+                      const current = m.get(sessionId) ?? []
+                      m.set(sessionId, upsertSessionFileChange(current, {
+                        path: writtenPath,
+                        kind: getSessionFileChangeKind(entry.toolName, entry.existedBefore),
+                        runId: entry.runId,
+                        updatedAt: Date.now(),
+                      }))
+                      return m
+                    })
+
+                    if (
+                      store.get(currentAgentSessionIdAtom) === sessionId
+                      && autoActivatedChangeTurns.get(sessionId) !== entry.runId
+                    ) {
+                      autoActivatedChangeTurns.set(sessionId, entry.runId)
+                      store.set(agentSidePanelOpenAtom, true)
+                      store.set(agentDiffPanelTabAtom, (prev) => {
+                        const m = new Map(prev)
+                        m.set(sessionId, 'changes')
+                        return m
+                      })
+                    }
+                  }
 
                 }).catch(() => { /* 改动提示不应影响流式输出 */ })
               }

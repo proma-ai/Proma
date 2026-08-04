@@ -11,6 +11,7 @@ import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, Re
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
+import type { SessionFileChange } from '@/lib/session-file-changes'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -418,6 +419,15 @@ export const agentDiffUnseenChangesAtom = atom(new Map<string, boolean>())
 
 /** Agent 本轮刚修改但用户尚未查看的文件路径 — 按 session 隔离，Map<sessionId, Set<filePath>> */
 export const agentDiffUnseenFilesAtom = atom(new Map<string, Set<string>>())
+
+/**
+ * 非 Git 目录中由 Agent 成功写入的文件变更，按会话保存。
+ * 这些文件不能生成 Git diff，但应和 Git 改动共享“文件改动”入口。
+ */
+export const agentNonGitFileChangesAtom = atom<Map<string, SessionFileChange[]>>(new Map())
+
+/** 当前 session 的 Agent run ID（即渲染进程生成并传给主进程的 startedAt）。 */
+export const agentFileChangesCurrentRunAtom = atom<Map<string, string>>(new Map())
 
 /**
  * Diff 数据缓存 — 按 session 隔离，存放上一次 IPC 拉取到的未暂存改动结果。

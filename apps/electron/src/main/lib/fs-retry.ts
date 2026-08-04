@@ -118,3 +118,35 @@ export function renameWithRetry(srcPath: string, destPath: string): void {
     }
   }
 }
+
+/**
+ * 将目录移动到尚不存在的目标路径。
+ *
+ * 与 renameWithRetry 不同，此函数绝不删除或替换已存在的目标目录。它仅重试
+ * 由文件监听句柄造成的短暂占用；调用方仍需用同一目标路径的锁协调并发操作。
+ *
+ * @returns 目标目录已存在时返回 false；移动成功时返回 true。
+ */
+export function renameIfDestinationAbsentWithRetry(
+  srcPath: string,
+  destPath: string,
+  maxAttempts = 5,
+): boolean {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (existsSync(destPath)) return false
+
+    try {
+      renameSync(srcPath, destPath)
+      return true
+    } catch (err) {
+      lastErr = err
+      if (existsSync(destPath)) return false
+
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (!code || !RETRYABLE_FS_CODES.has(code) || attempt === maxAttempts) break
+      sleepSync(50 * Math.pow(2, attempt - 1))
+    }
+  }
+  throw lastErr
+}

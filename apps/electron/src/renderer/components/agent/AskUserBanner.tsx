@@ -17,6 +17,7 @@ import {
   VOICE_DICTATION_INSERT_EVENT,
   VOICE_DICTATION_PREVIEW_EVENT,
   getLastFocusedVoiceInputId,
+  isVoiceDictationTargetInput,
   setLastFocusedVoiceInputId,
 } from '@/lib/voice-input-focus'
 import {
@@ -450,8 +451,18 @@ function QuestionCard({
       })
     }
 
-    const replacePreview = (sessionId: string, text: string): boolean => {
-      if (getLastFocusedVoiceInputId() !== voiceInputIdRef.current) return false
+    const discardPreview = (): void => {
+      const preview = previewRef.current
+      if (!preview) return
+      const currentText = customTextRef.current
+      if (currentText.slice(preview.start, preview.start + preview.text.length) === preview.text) {
+        onCustomTextChangeRef.current(`${currentText.slice(0, preview.start)}${currentText.slice(preview.start + preview.text.length)}`)
+      }
+      previewRef.current = null
+    }
+
+    const replacePreview = (sessionId: string, text: string, targetInputId: string | null | undefined): boolean => {
+      if (!isVoiceDictationTargetInput(voiceInputIdRef.current, targetInputId)) return false
       const input = customInputRef.current
       const currentText = customTextRef.current
       const previous = previewRef.current
@@ -468,26 +479,26 @@ function QuestionCard({
     }
 
     const previewHandler = (event: Event): void => {
-      const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail
+      const detail = (event as CustomEvent<{ sessionId?: string; text?: string; targetInputId?: string | null }>).detail
       if (!detail?.sessionId) return
-      if (replacePreview(detail.sessionId, detail.text ?? '')) {
+      if (replacePreview(detail.sessionId, detail.text ?? '', detail.targetInputId)) {
         event.preventDefault()
       }
     }
 
     const clearPreviewHandler = (event: Event): void => {
-      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
+      const detail = (event as CustomEvent<{ sessionId?: string; targetInputId?: string | null }>).detail
+      const sessionId = detail?.sessionId
       const preview = previewRef.current
       if (!sessionId || preview?.sessionId !== sessionId) return
-      if (replacePreview(sessionId, '')) {
+      if (replacePreview(sessionId, '', detail?.targetInputId)) {
         previewRef.current = null
         event.preventDefault()
       }
     }
 
     const insertHandler = (event: Event): void => {
-      if (getLastFocusedVoiceInputId() !== voiceInputIdRef.current) return
-      const detail = (event as CustomEvent<{ sessionId?: string; text?: string }>).detail
+      const detail = (event as CustomEvent<{ sessionId?: string; text?: string; targetInputId?: string | null }>).detail
       const text = detail?.text?.trim()
       if (!text) return
 
@@ -496,6 +507,7 @@ function QuestionCard({
       const preview = previewRef.current
       const canReplacePreview = !!detail?.sessionId && preview?.sessionId === detail.sessionId &&
         currentText.slice(preview.start, preview.start + preview.text.length) === preview.text
+      if (!canReplacePreview && !isVoiceDictationTargetInput(voiceInputIdRef.current, detail?.targetInputId)) return
       const start = canReplacePreview ? preview.start : (input?.selectionStart ?? currentText.length)
       const end = canReplacePreview ? start + (preview?.text.length ?? 0) : (input?.selectionEnd ?? start)
       const nextText = `${currentText.slice(0, start)}${text}${currentText.slice(end)}`
@@ -511,6 +523,7 @@ function QuestionCard({
     window.addEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreviewHandler)
     window.addEventListener(VOICE_DICTATION_INSERT_EVENT, insertHandler)
     return () => {
+      discardPreview()
       window.removeEventListener(VOICE_DICTATION_PREVIEW_EVENT, previewHandler)
       window.removeEventListener(VOICE_DICTATION_CLEAR_PREVIEW_EVENT, clearPreviewHandler)
       window.removeEventListener(VOICE_DICTATION_INSERT_EVENT, insertHandler)
@@ -601,7 +614,7 @@ function QuestionCard({
             }}
             autoFocus
           />
-          <SpeechButton className="absolute right-1 top-1/2 -translate-y-1/2 size-6 rounded-full" />
+          <SpeechButton className="absolute right-1 top-1/2 -translate-y-1/2 size-6 rounded-full" voiceInputId={voiceInputIdRef.current} />
         </div>
       )}
 
