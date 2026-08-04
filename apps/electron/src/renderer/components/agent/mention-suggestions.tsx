@@ -13,6 +13,7 @@ import { MentionList } from './MentionList'
 import type { MentionListRef } from './MentionList'
 import { createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from './mention-popup-utils'
 import type { AgentSessionReferenceSearchResult } from '@proma/shared'
+import { shouldAllowMentionTrigger, shouldShowMentionSuggestion } from '@/components/ai-elements/mention-utils'
 import {
   buildPlanningReferenceItems,
   filterPlanningReferenceItems,
@@ -63,6 +64,22 @@ function createMentionSuggestion<T>(
     // 注意：设为 [' '] 不能阻止"空输入框触发"——TipTap 在块开头的前缀为空串，
     // 始终通过校验；却会让中文/单词后紧跟触发符无法触发，属回归。
     allowedPrefixes: null,
+    shouldShow: ({ transaction }) => shouldShowMentionSuggestion(transaction.getMeta('uiEvent')),
+    allow: ({ state, range }) => {
+      const $trigger = state.doc.resolve(range.from)
+      const paragraphStart = $trigger.start()
+      const paragraphEnd = $trigger.end()
+      const paragraphText = state.doc.textBetween(paragraphStart, paragraphEnd, '\n', '\n')
+      const isCodeContext = $trigger.parent.type.name === 'codeBlock'
+        || $trigger.marks().some((mark) => mark.type.name === 'code')
+
+      return shouldAllowMentionTrigger({
+        paragraphText,
+        triggerOffset: range.from - paragraphStart,
+        trigger: config.char,
+        isCodeContext,
+      })
+    },
 
     items: async ({ query }): Promise<T[]> => {
       const requestId = requestGuard.startRequest()

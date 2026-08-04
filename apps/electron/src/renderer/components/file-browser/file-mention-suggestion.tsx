@@ -14,6 +14,7 @@ import { FileMentionList } from './FileMentionList'
 import type { FileMentionRef } from './FileMentionList'
 import type { FileIndexEntry } from '@proma/shared'
 import { createLatestSuggestionRequestGuard, createMentionPopup, positionPopup, isSuggestionTriggerPresent, shouldSuppressEscTrigger, shouldClearEscSuppressionOnExit, type EscSuppressedTrigger } from '@/components/agent/mention-popup-utils'
+import { shouldAllowMentionTrigger, shouldShowMentionSuggestion } from '@/components/ai-elements/mention-utils'
 import { resolveFileMentionPath } from './file-mention-path'
 
 type MentionSelection = Pick<FileIndexEntry, 'name' | 'path' | 'type' | 'source'>
@@ -38,6 +39,22 @@ export function createFileMentionSuggestion(
     char: '@',
     allowSpaces: false,
     allowedPrefixes: null,
+    shouldShow: ({ transaction }) => shouldShowMentionSuggestion(transaction.getMeta('uiEvent')),
+    allow: ({ state, range }) => {
+      const $trigger = state.doc.resolve(range.from)
+      const paragraphStart = $trigger.start()
+      const paragraphEnd = $trigger.end()
+      const paragraphText = state.doc.textBetween(paragraphStart, paragraphEnd, '\n', '\n')
+      const isCodeContext = $trigger.parent.type.name === 'codeBlock'
+        || $trigger.marks().some((mark) => mark.type.name === 'code')
+
+      return shouldAllowMentionTrigger({
+        paragraphText,
+        triggerOffset: range.from - paragraphStart,
+        trigger: '@',
+        isCodeContext,
+      })
+    },
 
     items: async ({ query }): Promise<FileIndexEntry[]> => {
       const requestId = requestGuard.startRequest()
