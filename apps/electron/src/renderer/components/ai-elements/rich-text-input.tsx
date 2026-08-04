@@ -496,7 +496,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
             return true
           }
           event.preventDefault()
-          view.dispatch(view.state.tr.insertText(plainText))
+          view.dispatch(view.state.tr.insertText(plainText).setMeta('uiEvent', 'paste'))
           return true
         }
 

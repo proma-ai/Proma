@@ -39,9 +39,12 @@ export function isMentionTriggerInsideUrl(paragraphText: string, triggerOffset: 
   const token = getMentionToken(paragraphText, triggerOffset)
   if (!token) return false
 
-  const urlStart = token.text.search(/https?:\/{1,2}/i)
-  if (urlStart === -1) return false
-  return urlStart === 0 || !/[\p{L}\p{N}_-]/u.test(token.text[urlStart - 1] ?? '')
+  // 覆盖 HTTP(S)、SSH、Git、FTP、file 等带 scheme 的 URL，以及 Git 常见的 SCP 风格地址。
+  const urlStart = token.text.search(/[A-Za-z][A-Za-z\d+.-]*:\/\//)
+  if (urlStart !== -1) {
+    return urlStart === 0 || !/[\p{L}\p{N}_-]/u.test(token.text[urlStart - 1] ?? '')
+  }
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+:[^\s]*$/.test(token.text)
 }
 
 /** 粘贴或拖入是内容输入，不应把其中的普通文本解释成 Mention 快捷输入。 */
@@ -76,12 +79,14 @@ export function shouldAllowMentionTrigger({
       return !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]*$/.test(token.text)
         && !/^@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]*$/.test(token.text)
     case '/':
-      // 常见绝对/相对路径，以及 Windows 路径，不应触发 Skill。
+      // 单段 `/skill` 保持可用；仅抑制明确的相对、home、驱动器、UNC 或多段绝对路径。
       return !(
-        /^~\//.test(token.text)
+        /^[~～][\\/]/.test(token.text)
         || /^\.\.?\//.test(token.text)
         || /^[A-Za-z]:[\\/]/.test(token.text)
-        || /^\/(?:Applications|Library|System|Users|Volumes|bin|dev|etc|home|opt|private|tmp|usr|var)(?:\/|$)/.test(token.text)
+        || /^\/\//.test(token.text)
+        || /^\/(?:Applications|Library|System|Users|Volumes|bin|boot|data|dev|etc|home|media|mnt|opt|private|proc|root|run|srv|sys|tmp|usr|var)(?:\/|$)/.test(token.text)
+        || /^\/[^/\s]+\//.test(token.text)
       )
     case '#':
       // Markdown 标题会在输入空格后自动失活；已完整的标题、Issue 和色值直接抑制。
@@ -89,7 +94,8 @@ export function shouldAllowMentionTrigger({
     case '&':
       return !(token.text.includes('&&') || /^&(?:amp|apos|gt|lt|nbsp|quot|#\d+|#x[\da-f]+);$/i.test(token.text))
     case '~':
-      return !/^~[\\/]/.test(token.text)
+    case '～':
+      return !/^[~～][\\/]/.test(token.text)
     default:
       return true
   }
