@@ -36,7 +36,7 @@ afterAll(() => {
 })
 
 import { resetSuggestionsCache, setSuggestionsEnabled, setDndConfig } from './feedback'
-import { evaluateSessionSuggestions, handleSuggestionFeedback, listSuggestionsForUI, getSuppressedSuggestionKeys, groupSuggestionsByKind } from './service'
+import { evaluateSessionSuggestions, handleSuggestionFeedback, listSuggestionsForUI, getSuppressedSuggestionKeys, groupSuggestionsByKind, runAnalysisAndPersistDetailed } from './service'
 import { corrections as memoryCorrections, recentAtoms } from '../memory/service'
 
 describe('suggest/service: P0 两步确认修复', () => {
@@ -198,5 +198,19 @@ describe('suggest/service: P0 两步确认修复', () => {
       { sessionId: 'svc-test-dnd-2' },
     )
     expect(after.length).toBeLessThanOrEqual(1)
+  })
+
+  test('关闭建议时的分析结果不会永久占用 analysisInFlight', async () => {
+    resetSuggestionsCache()
+    setSuggestionsEnabled(false)
+
+    const disabled = await runAnalysisAndPersistDetailed()
+    expect(disabled.status).toBe('unavailable')
+    expect(disabled.message).toBe('主动建议已关闭')
+
+    setSuggestionsEnabled(true)
+    const enabled = await runAnalysisAndPersistDetailed()
+    expect(enabled).not.toBe(disabled)
+    expect(enabled.message).not.toBe('主动建议已关闭')
   })
 })

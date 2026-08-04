@@ -664,7 +664,11 @@ export interface ElectronAPI {
     pageSize?: number
     type?: import('@proma/shared').MemoryAtomType | 'all'
     sort?: 'newest' | 'priority'
+    confirmed?: boolean
   }) => Promise<{ atoms: import('@proma/shared').MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number }>
+
+  /** 获取最近热点场景 */
+  getMemoryHotScenes: () => Promise<import('@proma/shared').SceneBlock[]>
 
   /** 列出 Proactive Memory 纠正 */
   listMemoryCorrections: (status?: string) => Promise<import('@proma/shared').MemoryCorrection[]>
@@ -725,8 +729,11 @@ export interface ElectronAPI {
   /** 获取主动建议统计 */
   getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
 
+  /** 读取最近一次工作模式分析状态 */
+  getSuggestionAnalysisState: () => Promise<{ status: 'idle' | 'running' | 'succeeded' | 'empty' | 'unavailable' | 'failed'; startedAt?: number; completedAt?: number; added?: number; message?: string }>
+
   /** 运行工作模式分析（手动触发，返回新增建议数） */
-  runSuggestionAnalysis: () => Promise<{ ok: boolean; added: number; error?: string }>
+  runSuggestionAnalysis: () => Promise<{ ok: boolean; added: number; status?: 'succeeded' | 'empty' | 'unavailable' | 'failed'; error?: string }>
 
   /** 读取免打扰时段（DND）配置 */
   getSuggestionDnd: () => Promise<{ enabled: boolean; startMin: number; endMin: number }>
@@ -1974,6 +1981,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_ATOMS, opts ?? {})
   },
 
+  getMemoryHotScenes: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_HOT_SCENES)
+  },
+
   listMemoryCorrections: (status?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS, status)
   },
@@ -2056,6 +2067,10 @@ const electronAPI: ElectronAPI = {
 
   getSuggestionStats: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS)
+  },
+
+  getSuggestionAnalysisState: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_ANALYSIS_STATE)
   },
 
   runSuggestionAnalysis: () => {

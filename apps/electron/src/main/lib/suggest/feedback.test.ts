@@ -15,6 +15,8 @@ import {
   getDndConfig,
   setDndConfig,
   isInDnd,
+  getAnalysisState,
+  setAnalysisState,
 } from './feedback'
 import { defaultTypeWeights } from './engine'
 import type { SuggestionsIndex } from './types'
@@ -101,6 +103,24 @@ describe('suggest/feedback: 持久化', () => {
     persistSuggestion(makeCandidate({ duplicateKey: 'other:1' }))
     clearSuggestions()
     expect(listSuggestions().length).toBe(0)
+  })
+})
+
+describe('suggest/feedback: 分析状态', () => {
+  beforeEach(() => {
+    resetSuggestionsCache()
+  })
+
+  test('崩溃遗留的 running 状态会恢复为可重试失败', () => {
+    setSuggestionsIndexForTest(makeIndex({ analysis: { status: 'running', startedAt: Date.now() - 121_000 } }))
+    expect(getAnalysisState().status).toBe('failed')
+    expect(getAnalysisState().message).toBe('上次分析未完成，请重新运行')
+  })
+
+  test('持久化最近一次分析的结果', () => {
+    setSuggestionsIndexForTest(makeIndex())
+    setAnalysisState({ status: 'succeeded', startedAt: 100, completedAt: 200, added: 2 })
+    expect(getAnalysisState()).toEqual({ status: 'succeeded', startedAt: 100, completedAt: 200, added: 2 })
   })
 })
 

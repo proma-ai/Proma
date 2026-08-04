@@ -48,10 +48,12 @@ const ANALYST_PROMPT = `你是一位工作模式分析助手。请分析用户�
     "evidence": "证据（基于哪些记忆条目）",
     "duplicateKey": "去重键（如 automation:每周发版检查）",
     "action": {
-      "type": "open_automation_create" | "open_skill_creator" | "open_memory_board",
+      "type": "open_automation_create" | "open_skill_creator" | "open_todo_create",
       "automationTitle": "（automation 类型）建议的定时任务标题",
       "suggestedPrompt": "（automation 类型）定时任务执行提示词",
-      "topic": "（skill 类型）Skill 主题"
+      "topic": "（skill 类型）Skill 主题",
+      "todoTitle": "（todo 类型）建议创建的 Todo 标题",
+      "todoNotes": "（todo 类型，可选）补充说明"
     }
   }
 ]
@@ -59,7 +61,7 @@ const ANALYST_PROMPT = `你是一位工作模式分析助手。请分析用户�
 约束：
 - 只输出确有证据的模式，不确定就输出 []
 - 不要重复已有定时任务（见输入）
-- kind=automation 时 action.type=open_automation_create；kind=skill 时 open_skill_creator；kind=todo 时 open_memory_board
+- kind=automation 时 action.type=open_automation_create；kind=skill 时 open_skill_creator；kind=todo 时 open_todo_create
 - 每个候选必须能回答"为什么现在值得做"
 `
 
@@ -75,7 +77,15 @@ interface AnalystRawCandidate {
     automationTitle?: string
     suggestedPrompt?: string
     topic?: string
+    todoTitle?: string
+    todoNotes?: string
   }
+}
+
+export interface WorkPatternAnalysisResult {
+  status: 'succeeded' | 'empty' | 'unavailable' | 'failed'
+  candidates: SuggestionCandidate[]
+  error?: string
 }
 
 /** 构建分析输入摘要 */
@@ -213,7 +223,10 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
     }
   }
   if (kind === 'todo') {
-    if (actionType !== 'open_memory_board') return null
+    if (actionType !== 'open_todo_create') return null
+    const todoTitle = safeStr(action.todoTitle)
+    const todoNotes = safeStr(action.todoNotes)
+    if (!todoTitle || todoTitle.length > 200 || (todoNotes?.length ?? 0) > 500) return null
     return {
       kind,
       title,
@@ -221,7 +234,7 @@ export function validateAnalystCandidate(raw: AnalystRawCandidate): SuggestionCa
       evidence,
       duplicateKey,
       rawConfidence: 0.6,
-      action: { type: 'open_memory_board' },
+      action: { type: 'open_todo_create', title: todoTitle, ...(todoNotes ? { notes: todoNotes } : {}) },
     }
   }
   return null
@@ -243,24 +256,38 @@ export function validateAnalystCandidates(raw: AnalystRawCandidate[]): Suggestio
   return result
 }
 
-/** 运行工作模式分析（LLM），返回合法候选（无 LLM/失败返回空） */
-export async function runWorkPatternAnalysis(): Promise<SuggestionCandidate[]> {
-  if (!isMemoryLlmConfigured()) return []
+/**
+ * 运行工作模式分析并保留可供 UI 解释的结果。
+ * 不返回底层 provider 的原始错误，避免把配置或网络细节暴露给渲染层。
+ */
+export async function runWorkPatternAnalysisDetailed(): Promise<WorkPatternAnalysisResult> {
+  if (!isMemoryLlmConfigured()) return { status: 'unavailable', candidates: [], error: '尚未配置用于分析的 LLM' }
+  const input = buildAnalysisInput()
+  if (input === '（暂无记忆）') return { status: 'empty', candidates: [], error: '还没有足够的已确认记忆可供分析' }
   try {
-    const input = buildAnalysisInput()
-    if (input === '（暂无记忆）') return []
     const response = await callLlm(
       ANALYST_PROMPT,
       input,
       { temperature: 0.2, maxTokens: 4096, timeoutMs: 60_000 },
     )
-    if (!response) return []
-    const parsed = parseAnalystResponse(response)
-    return validateAnalystCandidates(parsed)
+    if (!response) return { status: 'empty', candidates: [] }
+    const candidates = validateAnalystCandidates(parseAnalystResponse(response))
+    return candidates.length > 0
+      ? { status: 'succeeded', candidates }
+      : { status: 'empty', candidates: [] }
   } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : ''
+    const errorLabel = message.includes('timeout') || message.includes('timed out')
+      ? '分析请求超时，请稍后重试'
+      : '分析服务暂时不可用，请稍后重试'
     console.warn('[Analyst] 工作模式分析失败:', error instanceof Error ? error.message : error)
-    return []
+    return { status: 'failed', candidates: [], error: errorLabel }
   }
+}
+
+/** 兼容现有 Agent / Automation 工具调用，只返回候选数组。 */
+export async function runWorkPatternAnalysis(): Promise<SuggestionCandidate[]> {
+  return (await runWorkPatternAnalysisDetailed()).candidates
 }
 
 /** LLM 是否已配置（供 UI/入口判断） */

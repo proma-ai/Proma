@@ -13,11 +13,14 @@
  */
 
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { Bot, Brain, Check, Clock, RefreshCw, Sparkles, X, Wand2 } from 'lucide-react'
-import type { Automation, MemoryAtom, MemoryCorrection, MemoryStats, SuggestionRecord, SuggestionStats } from '@proma/shared'
+import type { Automation, MemoryAtom, MemoryCorrection, MemoryStats, SceneBlock, SuggestionRecord, SuggestionStats } from '@proma/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
+import { suggestionActionLabel, useSuggestionAction } from '@/components/planning/useSuggestionAction'
 
 interface ProactiveTodayViewProps {
   standalone?: boolean
@@ -78,11 +81,17 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   const [dnd, setDnd] = React.useState<{ enabled: boolean; startMin: number; endMin: number }>({ enabled: false, startMin: 1350, endMin: 480 })
   const [loading, setLoading] = React.useState(true)
   const [analyzing, setAnalyzing] = React.useState(false)
+  const [recentAtoms, setRecentAtoms] = React.useState<MemoryAtom[]>([])
+  const [hotScenes, setHotScenes] = React.useState<SceneBlock[]>([])
+  const [analysisState, setAnalysisState] = React.useState<{ status: 'idle' | 'running' | 'succeeded' | 'empty' | 'unavailable' | 'failed'; startedAt?: number; completedAt?: number; added?: number; message?: string }>({ status: 'idle' })
+  const setActiveView = useSetAtom(activeViewAtom)
+  const setAgentSkillsTab = useSetAtom(agentSkillsTabAtom)
+  const executeSuggestionAction = useSuggestionAction(standalone)
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [sug, sugStats, auto, mem, corrections, atoms, dndCfg] = await Promise.all([
+      const [sug, sugStats, auto, mem, corrections, atoms, dndCfg, recent, scenes, analysis] = await Promise.all([
         window.electronAPI.listSuggestions('suggested'),
         window.electronAPI.getSuggestionStats(),
         window.electronAPI.listAutomations(),
@@ -90,6 +99,9 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.listMemoryPendingAtoms(),
         window.electronAPI.getSuggestionDnd(),
+        window.electronAPI.listMemoryAtoms({ page: 1, pageSize: 3, sort: 'newest', confirmed: true }),
+        window.electronAPI.getMemoryHotScenes(),
+        window.electronAPI.getSuggestionAnalysisState(),
       ])
       setSuggestions(sug)
       setStats(sugStats)
@@ -98,6 +110,9 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
       setPendingCorrections(corrections)
       setPendingAtoms(atoms)
       setDnd(dndCfg)
+      setRecentAtoms(recent.atoms)
+      setHotScenes(scenes)
+      setAnalysisState(analysis)
     } catch (error) {
       console.error('[Proactive Today] 加载失败:', error)
     } finally {
@@ -129,6 +144,19 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
     }
   }
 
+  const handleSuggestionAccept = async (suggestion: SuggestionRecord): Promise<void> => {
+    const actionResult = await executeSuggestionAction(suggestion)
+    if (actionResult === 'failed') {
+      toast.error('无法打开建议的下一步，请检查当前 Agent 配置')
+      return
+    }
+    if (actionResult === 'handoff') {
+      toast.info('已打开主窗口，请在那里完成此建议')
+      return
+    }
+    await handleSuggestionFeedback(suggestion.id, 'accepted')
+  }
+
   const handleDeleteSuggestion = async (id: string): Promise<void> => {
     try {
       const result = await window.electronAPI.deleteSuggestion(id)
@@ -147,19 +175,21 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
   const handleRunAnalysis = async (): Promise<void> => {
     if (analyzing) return
     setAnalyzing(true)
+    setAnalysisState((prev) => ({ ...prev, status: 'running', startedAt: Date.now() }))
     try {
       const result = await window.electronAPI.runSuggestionAnalysis()
       if (!result.ok) {
         toast.error(result.error ?? '分析失败')
       } else if (result.added > 0) {
         toast.success(`分析完成，发现 ${result.added} 条可沉淀的工作模式`)
-        await refresh()
       } else {
         toast.info('分析完成，暂未发现新的可沉淀模式')
       }
+      await refresh()
     } catch (error) {
       console.warn('[Proactive Today] 分析失败:', error)
-      toast.error('分析失败')
+      setAnalysisState({ status: 'failed', completedAt: Date.now(), message: '分析服务暂时不可用，请稍后重试' })
+      toast.error('分析服务暂时不可用，请稍后重试')
     } finally {
       setAnalyzing(false)
     }
@@ -212,6 +242,33 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
     }
   }
 
+  const handleDndTimeChange = async (field: 'startMin' | 'endMin', value: string): Promise<void> => {
+    const minute = parseTimeInput(value)
+    if (minute === null) return
+    try {
+      const result = await window.electronAPI.setSuggestionDnd({ [field]: minute })
+      if (!result.ok) {
+        toast.error(result.error ?? '更新失败')
+        return
+      }
+      setDnd((prev) => ({ ...prev, [field]: minute }))
+    } catch (error) {
+      console.warn('[Proactive Today] DND 时间更新失败:', error)
+      toast.error('更新失败')
+    }
+  }
+
+  const openMemoryBoard = (): void => {
+    if (standalone) {
+      void window.electronAPI.agentIsland.openMainWindow()
+        .then(() => toast.info('已打开主窗口，可在 Agent/Memory 中继续查看'))
+        .catch(() => toast.error('打开主窗口失败'))
+      return
+    }
+    setActiveView('agent-skills')
+    setAgentSkillsTab('memory')
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center text-muted-foreground">
@@ -256,6 +313,50 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
         <StatCard icon={<Sparkles className="size-4" />} label="待定建议" value={String(suggestions.length)} />
         <StatCard icon={<Brain className="size-4" />} label="长期记忆" value={String(memoryCount)} />
         <StatCard icon={<Check className="size-4" />} label="今日采纳" value={`${todayAccepted} 采纳 / ${todayIgnored} 忽略`} />
+      </div>
+
+      {analysisState.status !== 'idle' && (
+        <AnalysisStatus state={analysisState} />
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section>
+          <SectionTitle title="最近学到的内容" count={recentAtoms.length} />
+          {recentAtoms.length === 0 ? (
+            <EmptyHint text="尚未沉淀已确认记忆。完成几次对话后，Proma 会把稳定信息放在这里供你确认。" />
+          ) : (
+            <div className="space-y-2">
+              {recentAtoms.map((atom) => (
+                <button key={atom.id} type="button" onClick={openMemoryBoard} className="w-full rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:bg-muted/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[11px] text-muted-foreground">{atom.type}</span>
+                    <span className="text-[11px] text-muted-foreground">{formatRelativeDate(atom.createdAt)}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-sm text-foreground">{atom.content}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <SectionTitle title="当前关注" count={hotScenes.length} />
+          {hotScenes.length === 0 ? (
+            <EmptyHint text="暂未形成近期热点场景。持续对话后，Proma 会在这里聚合你正在推进的主题。" />
+          ) : (
+            <div className="space-y-2">
+              {hotScenes.map((scene) => (
+                <button key={scene.id} type="button" onClick={openMemoryBoard} className="w-full rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:bg-muted/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-sm font-medium text-foreground">{scene.title}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">热度 {scene.heat}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">关联 {scene.atomIds.length} 条已确认记忆</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
 
       {/* 推荐区：建议引擎生成的待展示建议（按类型分组 = 多候选 pred@k） */}
@@ -309,8 +410,8 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
                         <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'ignored')}>
                           忽略
                         </Button>
-                        <Button variant="default" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionFeedback(s.id, 'accepted')}>
-                          <Check className="size-3 mr-1" /> 接受
+                        <Button variant="default" size="sm" className="h-7 px-3 text-xs" onClick={() => void handleSuggestionAccept(s)}>
+                          <Check className="size-3 mr-1" /> {suggestionActionLabel(s, standalone)}
                         </Button>
                       </div>
                     </div>
@@ -347,10 +448,18 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
             />
           </button>
         </div>
+        <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5">开始
+            <input type="time" value={formatMinute(dnd.startMin)} onChange={(event) => void handleDndTimeChange('startMin', event.target.value)} className="h-7 rounded border border-border bg-background px-1.5 text-xs text-foreground" />
+          </label>
+          <label className="flex items-center gap-1.5">结束
+            <input type="time" value={formatMinute(dnd.endMin)} onChange={(event) => void handleDndTimeChange('endMin', event.target.value)} className="h-7 rounded border border-border bg-background px-1.5 text-xs text-foreground" />
+          </label>
+        </div>
         <p className="mt-2 text-xs text-muted-foreground">
           {dnd.enabled
             ? `已开启：${formatMinute(dnd.startMin)}–${formatMinute(dnd.endMin)} 内不会在会话中弹建议（主动中心列表照常）。`
-            : '默认关闭。开启后，指定时段内不会在会话中弹建议。'}
+            : '默认关闭。可先调整时段，再开启免打扰。'}
         </p>
       </section>
 
@@ -417,7 +526,7 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
           )}
 
           {/* Persona 状态 */}
-          <div className="mt-3 rounded-xl border border-border/60 bg-card p-3">
+          <button type="button" onClick={openMemoryBoard} className="mt-3 w-full rounded-xl border border-border/60 bg-card p-3 text-left transition-colors hover:bg-muted/40">
             <div className="flex items-center gap-2">
               <Bot className="size-4 text-primary" />
               <span className="text-sm font-medium text-foreground">用户画像</span>
@@ -427,10 +536,10 @@ export function ProactiveTodayView({ standalone }: ProactiveTodayViewProps): Rea
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
               {personaExists
-                ? 'Proma 已从历史会话沉淀你的偏好与交互协议，并在新会话中自动保持一致。'
+                ? '查看画像、来源证据与注入开关。'
                 : '随着对话积累，Proma 会自动生成你的画像，让长期协作更顺畅。'}
             </p>
-          </div>
+          </button>
         </section>
       </div>
     </div>
@@ -460,6 +569,45 @@ function SectionTitle({ title, count }: { title: string; count: number }): React
 
 function EmptyHint({ text }: { text: string }): React.ReactElement {
   return <p className="rounded-xl border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">{text}</p>
+}
+
+function AnalysisStatus({ state }: { state: { status: 'idle' | 'running' | 'succeeded' | 'empty' | 'unavailable' | 'failed'; startedAt?: number; completedAt?: number; added?: number; message?: string } }): React.ReactElement {
+  const label = state.status === 'running'
+    ? '正在分析近期记忆与工作模式…'
+    : state.status === 'succeeded'
+      ? `上次分析发现 ${state.added ?? 0} 条建议`
+      : state.status === 'empty'
+        ? '上次分析未发现新的可沉淀模式'
+        : state.status === 'unavailable'
+          ? '工作模式分析暂不可用'
+          : '工作模式分析未完成'
+  const tone = state.status === 'failed' || state.status === 'unavailable' ? 'border-amber-500/30 bg-amber-500/[0.04]' : 'border-border/60 bg-card'
+  const time = state.completedAt ?? state.startedAt
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-xs ${tone}`}>
+      <p className="font-medium text-foreground">{label}</p>
+      {state.message && <p className="mt-0.5 text-muted-foreground">{state.message}</p>}
+      {time && <p className="mt-0.5 text-muted-foreground">{formatRelativeDate(time)}</p>}
+    </div>
+  )
+}
+
+function formatRelativeDate(timestamp: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000))
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
+
+function parseTimeInput(value: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour > 23 || minute > 59) return null
+  return hour * 60 + minute
 }
 
 /** 分钟数（0-1439）→ "HH:MM" */

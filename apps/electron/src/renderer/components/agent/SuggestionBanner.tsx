@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { Sparkles, X, Check, Ban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { SuggestionRecord } from '@proma/shared'
+import { suggestionActionLabel, useSuggestionAction } from '@/components/planning/useSuggestionAction'
 
 interface SuggestionBannerProps {
   sessionId: string
@@ -27,6 +28,7 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
   const [suggestion, setSuggestion] = React.useState<SuggestionRecord | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [actioning, setActioning] = React.useState(false)
+  const executeSuggestionAction = useSuggestionAction()
 
   // 会话变化时拉取该会话的待展示建议（仅当前会话，避免跨话题打扰）
   const loadSuggestions = React.useCallback((): void => {
@@ -65,6 +67,17 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
     if (actioning) return
     setActioning(true)
     try {
+      if (feedback === 'accepted') {
+        const actionResult = await executeSuggestionAction(suggestion)
+        if (actionResult === 'failed') {
+          toast.error('无法打开建议的下一步，请检查当前 Agent 配置')
+          return
+        }
+        if (actionResult === 'handoff') {
+          toast.info('已打开主窗口，请在那里完成此建议')
+          return
+        }
+      }
       const result = await window.electronAPI.actOnSuggestion(suggestion.id, feedback)
       if (!result.ok) {
         toast.error(result.error ?? '操作失败')
@@ -156,7 +169,7 @@ export function SuggestionBanner({ sessionId }: SuggestionBannerProps): React.Re
             disabled={actioning}
           >
             <Check className="size-3 mr-1" />
-            {actioning ? '处理中...' : '接受'}
+            {actioning ? '处理中...' : suggestionActionLabel(suggestion)}
           </Button>
         </div>
       </div>

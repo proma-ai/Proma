@@ -307,11 +307,14 @@ export function listAtomsPaged(opts: {
   pageSize?: number
   type?: MemoryAtomType | 'all'
   sort?: 'newest' | 'priority'
+  /** undefined=全部，true=仅已确认，false=仅待确认 */
+  confirmed?: boolean
 } = {}): { atoms: MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number } {
-  const { page = 1, pageSize = 20, type = 'all', sort = 'newest' } = opts
+  const { page = 1, pageSize = 20, type = 'all', sort = 'newest', confirmed } = opts
   const safePage = Math.max(1, Math.floor(page))
   const safeSize = Math.min(Math.max(1, Math.floor(pageSize)), 100)
   let atoms = readAllAtoms({ includeUnconfirmed: true })
+  if (confirmed !== undefined) atoms = atoms.filter((a) => a.confirmed === confirmed)
   if (type !== 'all') atoms = atoms.filter((a) => a.type === type)
   atoms = [...atoms].sort((a, b) =>
     sort === 'priority'

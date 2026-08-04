@@ -123,6 +123,18 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     expect(p2.atoms[0]!.id).not.toBe(p1.atoms[0]!.id)
   })
 
+  it('listAtomsPaged 可按确认状态过滤', () => {
+    const confirmed = store.writeAtom({ content: '已确认记忆', type: 'fact', priority: 60, confirmed: true })
+    const pending = store.writeAtom({ content: '待确认记忆', type: 'fact', priority: 50, confirmed: false })
+
+    const activeOnly = store.listAtomsPaged({ confirmed: true })
+    expect(activeOnly.atoms.map((atom) => atom.id)).toContain(confirmed.id)
+    expect(activeOnly.atoms.map((atom) => atom.id)).not.toContain(pending.id)
+
+    const pendingOnly = store.listAtomsPaged({ confirmed: false })
+    expect(pendingOnly.atoms.map((atom) => atom.id)).toEqual([pending.id])
+  })
+
   it('提取模式与 persona 注入开关持久化', () => {
     expect(store.getExtractionMode()).toBe('llm')
     store.setExtractionMode('rule')

@@ -12,7 +12,7 @@ import { ProactiveTodayView } from '@/components/planning/ProactiveTodayView'
 import { PlanningFloatingInspector } from '@/components/planning/PlanningFloatingInspector'
 import { PlanningGroupManager } from '@/components/planning/PlanningGroupManager'
 import { agentChannelIdAtom, agentModelIdAtom, agentPendingPromptAtom, agentSessionsAtom, agentWorkspacesAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
-import { planningCalendarCreateRequestAtom, planningSelectedTodoIdAtom, planningTabAtom, planningTagsAtom, planningTodoCreateRequestAtom, todoPlanningGroupsAtom, todosAtom, type PlanningTab } from '@/atoms/planning-atoms'
+import { planningCalendarCreateRequestAtom, planningSelectedTodoIdAtom, planningTabAtom, planningTagsAtom, planningTodoCreateRequestAtom, planningTodoSuggestionDraftAtom, todoPlanningGroupsAtom, todosAtom, type PlanningTab } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { useShortcut } from '@/hooks/useShortcut'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
@@ -196,6 +196,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const groups = useAtomValue(todoPlanningGroupsAtom)
   const tags = useAtomValue(planningTagsAtom)
   const todoCreateRequest = useAtomValue(planningTodoCreateRequestAtom)
+  const [suggestedTodoDraft, setSuggestedTodoDraft] = useAtom(planningTodoSuggestionDraftAtom)
   const agentSessions = useAtomValue(agentSessionsAtom)
   const agentWorkspaces = useAtomValue(agentWorkspacesAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
@@ -210,6 +211,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
   const [selectedId, setSelectedId] = useAtom(planningSelectedTodoIdAtom)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [quickTitle, setQuickTitle] = React.useState('')
+  const [quickNotes, setQuickNotes] = React.useState('')
   const [quickPriority, setQuickPriority] = React.useState<Todo['priority']>('medium')
   const [quickGroupId, setQuickGroupId] = React.useState<string>('__none__')
   const [quickDueAt, setQuickDueAt] = React.useState<number | undefined>(endOfToday)
@@ -405,6 +407,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
 
   const openCreateDialog = React.useCallback((): void => {
     setQuickTitle('')
+    setQuickNotes('')
     setQuickPriority('medium')
     setQuickGroupId(view.startsWith('group:') ? view.slice('group:'.length) : '__none__')
     setQuickDueAt(endOfToday())
@@ -417,6 +420,17 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
     openCreateDialog()
   }, [openCreateDialog, todoCreateRequest])
 
+  React.useEffect(() => {
+    if (!suggestedTodoDraft) return
+    setQuickTitle(suggestedTodoDraft.title)
+    setQuickNotes(suggestedTodoDraft.notes ?? '')
+    setQuickPriority('medium')
+    setQuickGroupId(view.startsWith('group:') ? view.slice('group:'.length) : '__none__')
+    setQuickDueAt(endOfToday())
+    setCreateOpen(true)
+    setSuggestedTodoDraft(null)
+  }, [setSuggestedTodoDraft, suggestedTodoDraft, view])
+
   const createTodo = async (): Promise<void> => {
     const title = quickTitle.trim()
     if (!title || creatingTodoRef.current) return
@@ -426,6 +440,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
     try {
       const todo = await window.electronAPI.createTodo({
         title,
+        notes: quickNotes.trim() || undefined,
         priority: quickPriority,
         groupId: quickGroupId === '__none__' ? undefined : quickGroupId,
         dueAt,
@@ -436,6 +451,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
       setSelectedId(null)
       setView(quickGroupId === '__none__' ? (dueAt ? 'today' : 'all') : `group:${quickGroupId}`)
       setQuickTitle('')
+      setQuickNotes('')
       setQuickPriority('medium')
       setQuickDueAt(endOfToday())
       setCreateOpen(false)
@@ -635,6 +651,8 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
           <form onSubmit={(event) => { event.preventDefault(); void createTodo() }} className="overflow-hidden rounded-none border border-border/60 bg-background focus-within:ring-1 focus-within:ring-ring/40">
             <label className="sr-only" htmlFor="create-todo-title">任务内容</label>
             <Textarea id="create-todo-title" autoFocus value={quickTitle} onChange={(event) => setQuickTitle(event.target.value)} onKeyDown={(event) => { if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return; event.preventDefault(); void createTodo() }} placeholder="输入任务内容，Enter 创建，Shift+Enter 换行" className="min-h-28 resize-y rounded-none border-0 bg-transparent px-3 py-3 text-lg shadow-none focus-visible:ring-0" />
+            <label className="sr-only" htmlFor="create-todo-notes">Todo 描述</label>
+            <Textarea id="create-todo-notes" value={quickNotes} onChange={(event) => setQuickNotes(event.target.value)} placeholder="可选描述" className="min-h-16 resize-y rounded-none border-0 border-t border-border/40 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:ring-0" />
             <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/60 bg-muted/20 px-1.5 py-1.5">
               <TodoDatePicker value={quickDueAt} onChange={setQuickDueAt} className="h-9 max-w-52" />
               <Select value={quickPriority} onValueChange={(value) => setQuickPriority(value as Todo['priority'])}><SelectTrigger className={cn('h-9 w-auto gap-1.5 border-0 bg-transparent px-2 text-sm shadow-none hover:bg-muted/70', quickPriority === 'high' && 'text-rose-600 dark:text-rose-400')}><Flag size={18} /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="high">高优先级</SelectItem><SelectItem value="medium">中优先级</SelectItem><SelectItem value="low">低优先级</SelectItem></SelectContent></Select>

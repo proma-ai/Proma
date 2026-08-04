@@ -268,6 +268,7 @@ export function atomsPaged(opts: {
   pageSize?: number
   type?: import('@proma/shared').MemoryAtomType | 'all'
   sort?: 'newest' | 'priority'
+  confirmed?: boolean
 } = {}) {
   return listAtomsPaged(opts)
 }

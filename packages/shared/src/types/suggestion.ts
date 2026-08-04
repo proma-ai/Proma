@@ -21,6 +21,7 @@ export type SuggestionKind =
 export type SuggestionAction =
   | { type: 'memory_correction'; raw: string; rule: string }
   | { type: 'open_automation_create'; automationTitle: string; suggestedPrompt: string }
+  | { type: 'open_todo_create'; title: string; notes?: string }
   | { type: 'open_memory_board' }
   | { type: 'open_skill_creator'; topic: string }
 

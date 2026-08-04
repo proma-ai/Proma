@@ -182,6 +182,7 @@ import {
   undoCorrection as memoryUndoCorrection,
   pendingAtoms as memoryPendingAtoms,
   atomsPaged as memoryAtomsPaged,
+  getHotScenes as memoryHotScenes,
   confirmAtomById as memoryConfirmAtomById,
   rejectAtomById as memoryRejectAtomById,
   extractionMode as memoryExtractionMode,
@@ -200,7 +201,8 @@ import {
   listSuggestionsForUI,
   handleSuggestionFeedback,
   getSuggestionStats,
-  runAnalysisAndPersist,
+  runAnalysisAndPersistDetailed,
+  getSuggestionAnalysisState,
   removeSuggestion,
   clearAllSuggestions,
   getDnd,
@@ -959,6 +961,17 @@ async function validateMainWindowSender(event: Electron.IpcMainInvokeEvent): Pro
     const mainWin = getMainWindow()
     if (!mainWin || mainWin.isDestroyed()) return false
     return mainWin.webContents.id === event.sender.id
+  } catch {
+    return false
+  }
+}
+
+/** 主窗口与独立 Planning 窗口均可调用主动中心所需的窄范围能力。 */
+async function validateProactiveWindowSender(event: Electron.IpcMainInvokeEvent): Promise<boolean> {
+  if (await validateMainWindowSender(event)) return true
+  try {
+    const { isPlanningWindowSender } = await import('./lib/planning-window')
+    return isPlanningWindowSender(event.sender.id)
   } catch {
     return false
   }
@@ -2601,11 +2614,20 @@ export function registerIpcHandlers(): void {
       pageSize?: number
       type?: import('@proma/shared').MemoryAtomType | 'all'
       sort?: 'newest' | 'priority'
+      confirmed?: boolean
     }): Promise<{ atoms: import('@proma/shared').MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number }> => {
-      if (!(await validateMainWindowSender(event))) {
+      if (!(await validateProactiveWindowSender(event))) {
         return { atoms: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }
       }
       return memoryAtomsPaged(opts ?? {})
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_MEMORY_HOT_SCENES,
+    async (event): Promise<import('@proma/shared').SceneBlock[]> => {
+      if (!(await validateProactiveWindowSender(event))) return []
+      return memoryHotScenes({ limit: 3 })
     }
   )
 
@@ -2619,7 +2641,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CONFIRM_MEMORY_CORRECTION,
     async (event, id: string): Promise<boolean> => {
-      if (!(await validateMainWindowSender(event))) return false
+      if (!(await validateProactiveWindowSender(event))) return false
       return memoryConfirmCorrection(id)
     }
   )
@@ -2627,7 +2649,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION,
     async (event, id: string): Promise<boolean> => {
-      if (!(await validateMainWindowSender(event))) return false
+      if (!(await validateProactiveWindowSender(event))) return false
       return memoryRejectCorrection(id)
     }
   )
@@ -2645,7 +2667,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_MEMORY_PENDING_ATOMS,
     async (event): Promise<import('@proma/shared').MemoryAtom[]> => {
-      if (!(await validateMainWindowSender(event))) return []
+      if (!(await validateProactiveWindowSender(event))) return []
       return memoryPendingAtoms()
     }
   )
@@ -2653,7 +2675,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CONFIRM_MEMORY_ATOM,
     async (event, id: string): Promise<import('@proma/shared').MemoryAtom | undefined> => {
-      if (!(await validateMainWindowSender(event))) return undefined
+      if (!(await validateProactiveWindowSender(event))) return undefined
       return memoryConfirmAtomById(id)
     }
   )
@@ -2661,7 +2683,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.REJECT_MEMORY_ATOM,
     async (event, id: string): Promise<boolean> => {
-      if (!(await validateMainWindowSender(event))) return false
+      if (!(await validateProactiveWindowSender(event))) return false
       return memoryRejectAtomById(id)
     }
   )
@@ -2746,7 +2768,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION,
     async (event, id: string, feedback: 'accepted' | 'ignored' | 'never'): Promise<{ ok: boolean; error?: string }> => {
-      if (!(await validateMainWindowSender(event))) {
+      if (!(await validateProactiveWindowSender(event))) {
         return { ok: false, error: '非授权窗口' }
       }
       return handleSuggestionFeedback(id, feedback)
@@ -2761,9 +2783,14 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SUGGESTION_ANALYSIS_STATE,
+    async () => getSuggestionAnalysisState(),
+  )
+
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS,
-    async (event): Promise<{ ok: boolean; added: number; error?: string }> => {
-      if (!(await validateMainWindowSender(event))) {
+    async (event): Promise<{ ok: boolean; added: number; status?: 'succeeded' | 'empty' | 'unavailable' | 'failed'; error?: string }> => {
+      if (!(await validateProactiveWindowSender(event))) {
         return { ok: false, added: 0, error: '非授权窗口' }
       }
       // 手动触发限频：60s 冷却 + 单日 10 次，防止任意脚本无节制消耗外部 LLM 配额
@@ -2779,8 +2806,8 @@ export function registerIpcHandlers(): void {
       lastManualAnalysisAt = now
       manualAnalysisCountByDay[dayKey] = (manualAnalysisCountByDay[dayKey] ?? 0) + 1
       try {
-        const added = await runAnalysisAndPersist()
-        return { ok: true, added }
+        const result = await runAnalysisAndPersistDetailed()
+        return { ok: result.status !== 'failed' && result.status !== 'unavailable', added: result.added, status: result.status, error: result.message }
       } catch (error) {
         return { ok: false, added: 0, error: error instanceof Error ? error.message : '分析失败' }
       }
@@ -2797,7 +2824,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SET_SUGGESTION_DND,
     async (event, cfg: { enabled?: boolean; startMin?: number; endMin?: number }): Promise<{ ok: boolean; error?: string }> => {
-      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (!(await validateProactiveWindowSender(event))) return { ok: false, error: '非授权窗口' }
       const current = getDnd()
       const next = {
         enabled: typeof cfg?.enabled === 'boolean' ? cfg.enabled : current.enabled,
@@ -2812,7 +2839,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_SUGGESTION,
     async (event, id: string): Promise<{ ok: boolean; error?: string }> => {
-      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      if (!(await validateProactiveWindowSender(event))) return { ok: false, error: '非授权窗口' }
       if (typeof id !== 'string' || !id) return { ok: false, error: '无效 ID' }
       const ok = removeSuggestion(id)
       return ok ? { ok: true } : { ok: false, error: '建议不存在' }

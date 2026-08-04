@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { readJsonFileSafe, writeJsonFileAtomic } from '../safe-file'
 import { getSuggestionsPath } from '../config-paths'
-import type { SuggestionsIndex, SuggestionTypeWeights, SuggestionDndConfig } from './types'
+import type { SuggestionsIndex, SuggestionTypeWeights, SuggestionDndConfig, SuggestionAnalysisState } from './types'
 import { DEFAULT_DND_CONFIG } from './types'
 import type {
   SuggestionCandidate,
@@ -49,6 +49,8 @@ function readIndex(): SuggestionsIndex {
   if (!Array.isArray(data.records)) data.records = []
   // DND 缺省：关闭
   if (!data.dnd || typeof data.dnd !== 'object') data.dnd = { ...DEFAULT_DND_CONFIG }
+  // 分析状态缺省：尚未运行；读取时只保留白名单状态与有限字段。
+  data.analysis = sanitizeAnalysisState(data.analysis)
   // schema 校验：过滤非法记录，截断超长字段，限制数量上限
   data.records = data.records.filter(isValidSuggestionRecord).map(sanitizeSuggestionRecord).slice(0, MAX_RECORDS)
   cachedIndex = data
@@ -75,6 +77,22 @@ function sanitizeSuggestionRecord(r: SuggestionRecord): SuggestionRecord {
     reason: r.reason?.slice(0, 500),
     evidence: r.evidence?.slice(0, 500),
     duplicateKey: r.duplicateKey?.slice(0, 200),
+  }
+}
+
+function sanitizeAnalysisState(value: unknown): SuggestionAnalysisState {
+  if (!value || typeof value !== 'object') return { status: 'idle' }
+  const raw = value as Record<string, unknown>
+  const validStatuses = new Set<SuggestionAnalysisState['status']>(['idle', 'running', 'succeeded', 'empty', 'unavailable', 'failed'])
+  const status = typeof raw.status === 'string' && validStatuses.has(raw.status as SuggestionAnalysisState['status'])
+    ? raw.status as SuggestionAnalysisState['status']
+    : 'idle'
+  return {
+    status,
+    ...(typeof raw.startedAt === 'number' && Number.isFinite(raw.startedAt) ? { startedAt: raw.startedAt } : {}),
+    ...(typeof raw.completedAt === 'number' && Number.isFinite(raw.completedAt) ? { completedAt: raw.completedAt } : {}),
+    ...(typeof raw.added === 'number' && Number.isInteger(raw.added) && raw.added >= 0 && raw.added <= 3 ? { added: raw.added } : {}),
+    ...(typeof raw.message === 'string' && raw.message.length <= 200 ? { message: raw.message } : {}),
   }
 }
 
@@ -110,6 +128,29 @@ export function suggestionsEnabled(): boolean {
 export function setSuggestionsEnabled(enabled: boolean): void {
   const index = readIndex()
   index.enabled = enabled
+  writeIndex()
+}
+
+/** 读取最近一次工作模式分析状态；崩溃遗留的 running 状态自动标为未完成。 */
+export function getAnalysisState(): SuggestionAnalysisState {
+  const state = { ...(readIndex().analysis ?? { status: 'idle' }) }
+  if (state.status === 'running' && (!state.startedAt || Date.now() - state.startedAt > 120_000)) {
+    const recovered: SuggestionAnalysisState = {
+      status: 'failed',
+      startedAt: state.startedAt,
+      completedAt: Date.now(),
+      message: '上次分析未完成，请重新运行',
+    }
+    setAnalysisState(recovered)
+    return recovered
+  }
+  return state
+}
+
+/** 持久化分析状态，供用户在离开主动中心后仍能追溯结果。 */
+export function setAnalysisState(state: SuggestionAnalysisState): void {
+  const index = readIndex()
+  index.analysis = { ...state }
   writeIndex()
 }
 

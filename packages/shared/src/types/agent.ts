@@ -1599,6 +1599,8 @@ export const AGENT_IPC_CHANNELS = {
   SEARCH_MEMORY: 'agent:search-memory',
   /** 分页浏览全部记忆（记忆看板） */
   LIST_MEMORY_ATOMS: 'agent:list-memory-atoms',
+  /** 获取最近热点场景（主动中心） */
+  GET_MEMORY_HOT_SCENES: 'agent:get-memory-hot-scenes',
   /** 列出 Proactive Memory 纠正 */
   LIST_MEMORY_CORRECTIONS: 'agent:list-memory-corrections',
   /** 确认/拒绝 Proactive Memory 纠正 */
@@ -1634,6 +1636,8 @@ export const AGENT_IPC_CHANNELS = {
   CLEAR_ALL_MEMORY: 'agent:clear-all-memory',
   /** 获取主动建议统计 */
   GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
+  /** 读取最近一次工作模式分析状态 */
+  GET_SUGGESTION_ANALYSIS_STATE: 'agent:get-suggestion-analysis-state',
   /** 运行工作模式分析（手动触发） */
   RUN_SUGGESTION_ANALYSIS: 'agent:run-suggestion-analysis',
   /** 读取/更新免打扰时段（DND） */

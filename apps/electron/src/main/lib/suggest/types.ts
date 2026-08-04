@@ -28,6 +28,8 @@ export interface SuggestionsIndex {
   enabled: boolean
   /** 免打扰时段（DND）：该时段内不产生新建议，避免打扰 */
   dnd?: SuggestionDndConfig
+  /** 最近一次工作模式分析的状态（旧索引缺省为 idle） */
+  analysis?: SuggestionAnalysisState
 }
 
 /** 免打扰时段配置（DND，MineContext 缺口的补全） */
@@ -37,6 +39,15 @@ export interface SuggestionDndConfig {
   startMin: number
   /** 结束时间（分钟，0-1439；支持跨午夜：start>end 表示 [start, 1440) ∪ [0, end)） */
   endMin: number
+}
+
+/** 最近一次工作模式分析的可审计状态，供主动中心解释结果与失败原因。 */
+export interface SuggestionAnalysisState {
+  status: 'idle' | 'running' | 'succeeded' | 'empty' | 'unavailable' | 'failed'
+  startedAt?: number
+  completedAt?: number
+  added?: number
+  message?: string
 }
 
 /** 默认 DND：关闭 */

@@ -60,6 +60,18 @@ describe('suggest/analyst: schema 校验', () => {
     expect(c?.kind).toBe('skill')
   })
 
+  test('合法 todo 候选通过并保留预填内容', () => {
+    const c = validateAnalystCandidate({
+      kind: 'todo',
+      title: '补齐发布说明',
+      reason: '近期多次提到尚未完成发布说明',
+      evidence: '两条待办上下文都提到发布说明',
+      duplicateKey: 'todo:发布说明',
+      action: { type: 'open_todo_create', todoTitle: '补齐发布说明', todoNotes: '检查发布说明后再提交。' },
+    })
+    expect(c?.action).toEqual({ type: 'open_todo_create', title: '补齐发布说明', notes: '检查发布说明后再提交。' })
+  })
+
   test('非法类型被拒绝', () => {
     const c = validateAnalystCandidate({
       kind: 'correction', // analyst 不允许产出 correction

@@ -44,6 +44,12 @@ describe('suggest/rules: 跟进与自动化规则', () => {
     expect(m?.candidate.action.type).toBe('open_automation_create')
   })
 
+  test('未完成信号打开预填 Todo 表单', () => {
+    const matches = applyRules(makeCtx(['这个功能还没做完']))
+    const m = matches.find((x) => x.candidate.kind === 'todo')
+    expect(m?.candidate.action).toMatchObject({ type: 'open_todo_create', title: '还没做完' })
+  })
+
   test('已有同类 automation 不重复建议', () => {
     const matches = applyRules(
       makeCtx(['每天自动帮我总结当天工作'], { existingAutomationTitles: ['总结当天工作'] }),

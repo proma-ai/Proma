@@ -6,7 +6,7 @@
  * - followup：时间表达 → 创建跟进提醒（动作：打开 automation 创建）
  * - automation：重复行为/周期需求 → 建议开启定时任务
  * - skill：SOP 候选积累 → 建议沉淀为 Skill
- * - todo：明确未完成任务 → 建议创建 Todo（MVP：提示，动作由 UI/Agent 处理）
+ * - todo：明确未完成任务 → 打开预填的 Todo 创建表单
  *
  * 全部只读本地确定性信号，不依赖 LLM。
  */
@@ -142,7 +142,9 @@ function signalToCandidate(signal: Signal, ctx: RuleContext): RuleMatch | undefi
           evidence: signal.raw,
           rawConfidence: signal.confidence,
           action: {
-            type: 'open_memory_board',
+            type: 'open_todo_create',
+            title: signal.raw.slice(0, 120),
+            notes: '由 Proma 主动建议创建；请确认内容和截止时间。',
           },
         },
       }
