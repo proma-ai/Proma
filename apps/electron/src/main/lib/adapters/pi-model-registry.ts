@@ -461,10 +461,10 @@ function positiveInteger(value: number | undefined): number | undefined {
 }
 
 /**
- * Pi 目录尚未反映 Proma 官方 DeepSeek V4 的视觉能力。
- * 第三方 DeepSeek 渠道仍遵循目录中的 text-only 标记，避免对未知上游作能力承诺。
+ * Proma 官方 DeepSeek V4 当前上游只接受文本 content；不得把图片直接传给它。
+ * 保持显式判断，避免 Pi catalog 缺失该模型时默认的 image fallback 重新放开能力。
  */
-function supportsOfficialDeepSeekV4Vision(provider: ProviderType, modelId: string | undefined): boolean {
+function isOfficialDeepSeekV4TextOnly(provider: ProviderType, modelId: string | undefined): boolean {
   if (provider !== 'proma') return false
   const normalized = stripAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
   const leafModelId = normalized?.split('/').pop()
@@ -477,8 +477,9 @@ function resolvePiModelInput(
   catalogInput: PiCatalogModel['input'] | undefined,
 ): PiCatalogModel['input'] {
   const input: PiCatalogModel['input'] = catalogInput ? [...catalogInput] : ['text', 'image']
-  if (supportsOfficialDeepSeekV4Vision(provider, modelId) && !input.includes('image')) input.push('image')
-  return input
+  return isOfficialDeepSeekV4TextOnly(provider, modelId)
+    ? input.filter((kind) => kind !== 'image')
+    : input
 }
 
 
@@ -492,9 +493,10 @@ export async function resolvePiImageInputCapability(
 ): Promise<'supported' | 'unsupported' | 'unknown'> {
   const resolvedModelId = stripAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return 'unknown'
+  if (isOfficialDeepSeekV4TextOnly(provider, resolvedModelId)) return 'unsupported'
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
-  if (!catalogModel && !supportsOfficialDeepSeekV4Vision(provider, resolvedModelId)) return 'unknown'
-  return resolvePiModelInput(provider, resolvedModelId, catalogModel?.input).includes('image')
+  if (!catalogModel) return 'unknown'
+  return resolvePiModelInput(provider, resolvedModelId, catalogModel.input).includes('image')
     ? 'supported'
     : 'unsupported'
 }

@@ -8,9 +8,11 @@
 import { basename, extname, isAbsolute, relative, resolve } from 'node:path'
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs'
 import sharp from 'sharp'
-import type { FileAttachment } from '@proma/shared'
+import type { Channel, FileAttachment } from '@proma/shared'
 import { getAdapter, streamSSE, type ImageAttachmentData } from '@proma/core'
 import { getChannelById, resolveChannelRuntimeApiKey } from './channel-manager'
+import { getAuthToken } from './cloud-auth-service'
+import { getCloudApiConfig } from '@proma/cloud'
 import { getSettings } from './settings-service'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
@@ -173,6 +175,30 @@ export function getVisionRelayRouteLabel(): string | undefined {
   return channel ? `${channel.name} · ${configured.modelId}` : configured.modelId
 }
 
+type VisionRelayChannelRuntime = Pick<Channel, 'id' | 'provider' | 'baseUrl'>
+
+/**
+ * Resolve the non-persistent connection values used by VisionRelay.
+ *
+ * Proma's official channel deliberately stores empty API credentials and base
+ * URL in channels.json. It must reuse the active Cloud login at call time,
+ * exactly as normal Chat does; otherwise PromaAdapter would construct `/chat`.
+ */
+export async function resolveVisionRelayRuntime(
+  channel: VisionRelayChannelRuntime,
+): Promise<{ apiKey: string; baseUrl: string }> {
+  if (channel.provider === 'proma') {
+    const apiKey = getAuthToken()
+    if (!apiKey) throw new Error('未登录 Proma Cloud 账户')
+    return { apiKey, baseUrl: getCloudApiConfig().baseUrl }
+  }
+
+  return {
+    apiKey: await resolveChannelRuntimeApiKey(channel.id),
+    baseUrl: channel.baseUrl,
+  }
+}
+
 export async function inspectImageWithVisionRelay(input: InspectImageInput): Promise<VisionRelayResult> {
   const configured = getSettings().visionRelay
   if (!configured?.enabled || !configured.channelId || !configured.modelId) {
@@ -198,11 +224,17 @@ export async function inspectImageWithVisionRelay(input: InspectImageInput): Pro
     return failure('VISION_ROUTE_UNAVAILABLE', '所选模型未被确认支持图片输入，请选择一个已知的视觉模型。')
   }
 
-  let apiKey: string
+  let runtime: { apiKey: string; baseUrl: string }
   try {
-    apiKey = await resolveChannelRuntimeApiKey(channel.id)
-  } catch {
-    return failure('VISION_ROUTE_UNAVAILABLE', '无法获取视觉渠道的凭据，请重新保存该渠道配置。')
+    runtime = await resolveVisionRelayRuntime(channel)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    return failure(
+      'VISION_ROUTE_UNAVAILABLE',
+      message === '未登录 Proma Cloud 账户'
+        ? '未登录 Proma Cloud 账户，无法调用官方视觉模型。'
+        : '无法获取视觉渠道的凭据，请重新保存该渠道配置。',
+    )
   }
 
   try {
@@ -219,8 +251,8 @@ export async function inspectImageWithVisionRelay(input: InspectImageInput): Pro
     }]
     const adapter = getAdapter(channel.provider)
     const request = adapter.buildStreamRequest({
-      baseUrl: channel.baseUrl,
-      apiKey,
+      baseUrl: runtime.baseUrl,
+      apiKey: runtime.apiKey,
       modelId: configured.modelId,
       history: [],
       // 视觉模型只接收任务所需的最小提示，不转发完整 Agent 上下文。
