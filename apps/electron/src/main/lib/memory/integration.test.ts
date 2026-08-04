@@ -95,6 +95,31 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     expect(store.getAtomById(atom2.id)).toBeUndefined()
   })
 
+  it('listAtomsPaged 分页 + 类型过滤 + 排序', () => {
+    for (let i = 0; i < 5; i++) store.writeAtom({ content: `事实 ${i}`, type: 'fact', priority: 50 + i, confirmed: true })
+    store.writeAtom({ content: '一个偏好', type: 'preference', priority: 80, confirmed: true })
+
+    // 全部，每页 3
+    const p1 = store.listAtomsPaged({ page: 1, pageSize: 3 })
+    expect(p1.atoms.length).toBe(3)
+    expect(p1.total).toBe(6)
+    expect(p1.totalPages).toBe(2)
+    // 类型过滤
+    const facts = store.listAtomsPaged({ type: 'fact', pageSize: 20 })
+    expect(facts.total).toBe(5)
+    expect(facts.atoms.every((a) => a.type === 'fact')).toBe(true)
+    // 按优先级排序
+    const byPri = store.listAtomsPaged({ sort: 'priority', pageSize: 20 })
+    expect(byPri.atoms.length).toBeGreaterThanOrEqual(2)
+    const first = byPri.atoms[0]!
+    const second = byPri.atoms[1]!
+    expect(first.priority ?? 0).toBeGreaterThanOrEqual(second.priority ?? 0)
+    // 第二页
+    const p2 = store.listAtomsPaged({ page: 2, pageSize: 3 })
+    expect(p2.atoms.length).toBe(3)
+    expect(p2.atoms[0]!.id).not.toBe(p1.atoms[0]!.id)
+  })
+
   it('提取模式与 persona 注入开关持久化', () => {
     expect(store.getExtractionMode()).toBe('llm')
     store.setExtractionMode('rule')

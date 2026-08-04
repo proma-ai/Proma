@@ -658,6 +658,14 @@ export interface ElectronAPI {
   /** 搜索 Proactive Memory */
   searchMemory: (query: string, limit?: number) => Promise<import('@proma/shared').MemorySearchResult>
 
+  /** 分页浏览全部记忆 */
+  listMemoryAtoms: (opts?: {
+    page?: number
+    pageSize?: number
+    type?: import('@proma/shared').MemoryAtomType | 'all'
+    sort?: 'newest' | 'priority'
+  }) => Promise<{ atoms: import('@proma/shared').MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number }>
+
   /** 列出 Proactive Memory 纠正 */
   listMemoryCorrections: (status?: string) => Promise<import('@proma/shared').MemoryCorrection[]>
 
@@ -681,6 +689,9 @@ export interface ElectronAPI {
 
   /** 读取 Proactive Memory persona 原文 */
   readMemoryPersona: () => Promise<string | undefined>
+
+  /** persona 证据溯源 */
+  readMemoryPersonaSources: () => Promise<Array<{ text: string; sources: string[] }>>
 
   /** 更新 persona 画像 */
   updateMemoryPersona: (markdown: string) => Promise<{ ok: boolean; error?: string }>
@@ -1944,6 +1955,15 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MEMORY, query, limit)
   },
 
+  listMemoryAtoms: (opts?: {
+    page?: number
+    pageSize?: number
+    type?: import('@proma/shared').MemoryAtomType | 'all'
+    sort?: 'newest' | 'priority'
+  }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_ATOMS, opts ?? {})
+  },
+
   listMemoryCorrections: (status?: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS, status)
   },
@@ -1974,6 +1994,10 @@ const electronAPI: ElectronAPI = {
 
   readMemoryPersona: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA)
+  },
+
+  readMemoryPersonaSources: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA_SOURCES)
   },
 
   updateMemoryPersona: (markdown: string) => {

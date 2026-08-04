@@ -40,11 +40,15 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const [loading, setLoading] = React.useState(true)
   const [searching, setSearching] = React.useState(false)
   const [showPersona, setShowPersona] = React.useState(false)
+  const [personaSrc, setPersonaSrc] = React.useState<Array<{ text: string; sources: string[] }>>([])
+  const [browseType, setBrowseType] = React.useState<MemoryAtom['type'] | 'all'>('all')
+  const [browsePage, setBrowsePage] = React.useState(1)
+  const [browseResult, setBrowseResult] = React.useState<{ atoms: MemoryAtom[]; total: number; totalPages: number } | null>(null)
 
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection, nextActive] = await Promise.all([
+      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection, nextActive, nextSrc] = await Promise.all([
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.readMemoryPersona(),
@@ -52,6 +56,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
         window.electronAPI.getMemoryExtractionMode(),
         window.electronAPI.getPersonaInjectionEnabled(),
         window.electronAPI.listMemoryCorrections('active'),
+        window.electronAPI.readMemoryPersonaSources(),
       ])
       setStats(nextStats)
       setCorrections(nextCorrections)
@@ -60,6 +65,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
       setPendingAtoms(nextPendingAtoms)
       setExtractionMode(nextMode)
       setPersonaInjection(nextInjection)
+      setPersonaSrc(nextSrc)
     } catch (error) {
       console.error('[主动记忆] 加载失败:', error)
     } finally {
@@ -244,6 +250,46 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
       toast.error('操作失败')
     }
   }
+
+  /** 画像溯源：用画像条目文本搜索对应记忆 */
+  const handleTracePersona = async (sources: string[], fallbackText: string): Promise<void> => {
+    try {
+      // 优先用源 atom 的 content 片段搜索；取第一条源文本前 12 字作为关键词
+      const keyword = (fallbackText || '').replace(/（src:.*）$/, '').trim().slice(0, 12)
+      if (!keyword) return
+      setSearchQuery(keyword)
+      setSearching(true)
+      const result = await window.electronAPI.searchMemory(keyword, 6)
+      setSearchResult(result)
+      if (result.hits.length === 0) toast.info('未找到该画像条目对应的记忆')
+      else toast.success(`找到 ${result.hits.length} 条相关记忆`)
+    } catch (error) {
+      console.error('[主动记忆] 溯源失败:', error)
+      toast.error('溯源失败')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  /** 加载分页浏览列表 */
+  const loadBrowse = React.useCallback(async (type: MemoryAtom['type'] | 'all', page: number): Promise<void> => {
+    try {
+      const r = await window.electronAPI.listMemoryAtoms({ type, page, pageSize: 20, sort: 'newest' })
+      setBrowseResult({ atoms: r.atoms, total: r.total, totalPages: r.totalPages })
+    } catch (error) {
+      console.error('[主动记忆] 浏览加载失败:', error)
+    }
+  }, [])
+
+  const handleBrowseType = (type: MemoryAtom['type'] | 'all'): void => {
+    setBrowseType(type)
+    setBrowsePage(1)
+    void loadBrowse(type, 1)
+  }
+
+  React.useEffect(() => {
+    void loadBrowse('all', 1)
+  }, [loadBrowse])
 
   const byType = stats?.byType ?? { fact: 0, preference: 0, correction: 0, sop: 0, todo_context: 0 }
 
@@ -438,6 +484,70 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
           </div>
         )}
 
+        {/* 全部记忆浏览（分页） */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-foreground/75">全部记忆</div>
+            {browseResult && (
+              <div className="text-[10px] text-muted-foreground">
+                共 {browseResult.total} 条 · 第 {browsePage}/{browseResult.totalPages} 页
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(['all', 'fact', 'preference', 'correction', 'sop', 'todo_context'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => handleBrowseType(t)}
+                className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                  browseType === t
+                    ? 'border-primary/50 bg-primary/10 font-medium text-primary'
+                    : 'border-border/60 text-muted-foreground hover:bg-foreground/[0.04]'
+                }`}
+              >
+                {{ all: '全部', fact: '事实', preference: '偏好', correction: '纠正', sop: '流程', todo_context: '任务' }[t]}
+              </button>
+            ))}
+          </div>
+          <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto scrollbar-thin">
+            {!browseResult || browseResult.atoms.length === 0 ? (
+              <div className="text-xs text-muted-foreground">暂无记忆。</div>
+            ) : (
+              browseResult.atoms.map((a) => (
+                <div key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-border/40 bg-content-area px-3 py-1.5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{a.type}</span>
+                      <span className="text-[10px] text-muted-foreground">{new Date(a.createdAt).toISOString().slice(0, 10)}</span>
+                      {!a.confirmed && <span className="text-[10px] text-amber-500">待确认</span>}
+                    </div>
+                    <div className="mt-0.5 text-[12px] leading-snug text-foreground/85">{a.content}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteAtom(a.id)}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+                    title="删除这条记忆"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          {browseResult && browseResult.totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" disabled={browsePage <= 1} onClick={() => { const p = Math.max(1, browsePage - 1); setBrowsePage(p); void loadBrowse(browseType, p) }}>
+                上一页
+              </Button>
+              <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" disabled={browsePage >= browseResult.totalPages} onClick={() => { const p = browsePage + 1; setBrowsePage(p); void loadBrowse(browseType, p) }}>
+                下一页
+              </Button>
+            </div>
+          )}
+        </div>
+
         {/* 记忆搜索 */}
         <div className="flex flex-col gap-2">
           <div className="text-xs font-medium text-foreground/75">搜索记忆</div>
@@ -545,9 +655,34 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
               </div>
             ) : (
               showPersona && (
-                <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-content-area p-3 text-[12px] leading-relaxed text-foreground/80 scrollbar-thin">
-                  {persona}
-                </pre>
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-border/40 bg-content-area p-3 scrollbar-thin">
+                  {/* 溯源条目（有 src 标注的画像条目） */}
+                  {personaSrc.length > 0 && (
+                    <div className="mb-2 flex flex-col gap-1">
+                      <div className="text-[10px] text-muted-foreground">画像条目（点击溯源到记忆）</div>
+                      {personaSrc.slice(0, 8).map((entry, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => void handleTracePersona(entry.sources, entry.text)}
+                          className="flex items-start gap-1.5 rounded-md px-1.5 py-1 text-left text-[12px] text-foreground/85 transition-colors hover:bg-primary/10"
+                          title={`溯源到 ${entry.sources.length > 0 ? entry.sources.join(', ') : '未知来源'}`}
+                        >
+                          <span className="mt-0.5 shrink-0 text-[10px] text-primary">🔗</span>
+                          <span className="min-w-0 flex-1">
+                            {entry.text}
+                            {entry.sources.length > 0 && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                （{entry.sources.length} 条来源）
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <pre className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/80">{persona}</pre>
+                </div>
               )
             )}
           </div>

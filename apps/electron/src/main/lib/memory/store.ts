@@ -298,6 +298,32 @@ export function listPendingAtoms(): MemoryAtom[] {
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
+/**
+ * 分页浏览全部记忆（记忆看板视图）。
+ * 支持按类型过滤、按时间/优先级排序。
+ */
+export function listAtomsPaged(opts: {
+  page?: number
+  pageSize?: number
+  type?: MemoryAtomType | 'all'
+  sort?: 'newest' | 'priority'
+} = {}): { atoms: MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number } {
+  const { page = 1, pageSize = 20, type = 'all', sort = 'newest' } = opts
+  const safePage = Math.max(1, Math.floor(page))
+  const safeSize = Math.min(Math.max(1, Math.floor(pageSize)), 100)
+  let atoms = readAllAtoms({ includeUnconfirmed: true })
+  if (type !== 'all') atoms = atoms.filter((a) => a.type === type)
+  atoms = [...atoms].sort((a, b) =>
+    sort === 'priority'
+      ? (b.priority ?? 0) - (a.priority ?? 0) || b.createdAt - a.createdAt
+      : b.createdAt - a.createdAt,
+  )
+  const total = atoms.length
+  const totalPages = Math.max(1, Math.ceil(total / safeSize))
+  const start = (safePage - 1) * safeSize
+  return { atoms: atoms.slice(start, start + safeSize), total, page: safePage, pageSize: safeSize, totalPages }
+}
+
 /** 确认一条待确认记忆（用户认可后注入） */
 export function confirmAtom(id: string): MemoryAtom | undefined {
   const atom = getAtomById(id)

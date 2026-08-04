@@ -21,6 +21,7 @@ import {
   readAllScenes,
   getAtomById,
   listPendingAtoms,
+  listAtomsPaged,
   confirmAtom,
   deleteAtom,
   getExtractionMode,
@@ -40,7 +41,7 @@ import {
   DEFAULT_RECALL_LIMIT,
 } from './recall'
 import { extractFromMessages, isMemoryLlmConfigured, callLlm } from './extractor'
-import { generatePersona, buildPersonaFromRules } from './persona'
+import { generatePersona, buildPersonaFromRules, extractPersonaSources } from './persona'
 import type {
   MemoryAtom,
   MemoryAtomType,
@@ -259,6 +260,16 @@ export function pendingAtoms() {
   return listPendingAtoms()
 }
 
+/** 分页浏览全部记忆（记忆看板视图） */
+export function atomsPaged(opts: {
+  page?: number
+  pageSize?: number
+  type?: import('@proma/shared').MemoryAtomType | 'all'
+  sort?: 'newest' | 'priority'
+} = {}) {
+  return listAtomsPaged(opts)
+}
+
 /** 确认一条待确认记忆（生效并进入召回） */
 export function confirmAtomById(id: string): MemoryAtom | undefined {
   const atom = confirmAtom(id)
@@ -283,6 +294,13 @@ export function rejectAtomById(id: string): boolean {
 
 export function personaRaw(): string | undefined {
   return readPersonaRaw()
+}
+
+/** persona 证据溯源：返回每条画像条目的来源 atom id（供 UI 展示溯源入口） */
+export function personaSources(): Array<{ text: string; sources: string[] }> {
+  const raw = readPersonaRaw()
+  if (!raw) return []
+  return extractPersonaSources(raw)
 }
 
 export function persona(): PersonaProfile {

@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { ruleBoost, formatRecallContext, queryTerms, expandedQueryTerms } from '../memory/recall'
+import { ruleBoost, formatRecallContext, queryTerms, expandedQueryTerms, timeDecay } from '../memory/recall'
 
 describe('memory/recall 纯函数', () => {
   it('ruleBoost 身份/偏好加权', () => {
@@ -50,5 +50,22 @@ describe('memory/recall 纯函数', () => {
     const block = formatRecallContext(result)
     expect(block).toContain('rel=high')
     expect(block).toContain('测试记忆内容')
+  })
+
+  it('timeDecay：30 天后事实/偏好类权重减半，correction/sop 不衰减', () => {
+    const now = Date.now()
+    const dayMs = 86_400_000
+    const freshFact = { content: '新事实', type: 'fact' as const, priority: 50, createdAt: now - dayMs, updatedAt: now, confirmed: true, id: 'f1' }
+    const oldFact = { content: '旧事实', type: 'fact' as const, priority: 50, createdAt: now - 30 * dayMs, updatedAt: now, confirmed: true, id: 'f2' }
+    const oldCorrection = { content: '旧规则', type: 'correction' as const, priority: 80, createdAt: now - 30 * dayMs, updatedAt: now, confirmed: true, id: 'c1' }
+    const oldSop = { content: '旧流程', type: 'sop' as const, priority: 80, createdAt: now - 30 * dayMs, updatedAt: now, confirmed: true, id: 's1' }
+
+    // 30 天事实：约 0.5；1 天事实：接近 1
+    expect(timeDecay(oldFact, now)).toBeLessThanOrEqual(0.55)
+    expect(timeDecay(oldFact, now)).toBeGreaterThanOrEqual(0.45)
+    expect(timeDecay(freshFact, now)).toBeGreaterThan(0.9)
+    // 规则类不衰减
+    expect(timeDecay(oldCorrection, now)).toBe(1.0)
+    expect(timeDecay(oldSop, now)).toBe(1.0)
   })
 })

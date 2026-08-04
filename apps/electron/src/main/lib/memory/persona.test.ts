@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { cleanPersonaMarkdown, extractName, buildPersonaFromRules } from '../memory/persona'
+import { cleanPersonaMarkdown, extractName, buildPersonaFromRules, extractPersonaSources } from '../memory/persona'
 import { parsePersonaProfile } from '../memory/store'
 
 describe('memory/persona 纯函数', () => {
@@ -65,5 +65,21 @@ Conrad
     expect(p.preferences).toContain('喜欢 TypeScript')
     expect(p.interactionRules).toContain('涉及密钥时用 .env')
     expect(p.evolution).toContain('2026-08：开始做 proactive memory')
+  })
+
+  it('extractPersonaSources 提取带 src 标注的画像条目来源', () => {
+    const raw = `# 用户画像
+
+## 长期偏好
+- 喜欢 TypeScript（src: atom_aaa,atom_bbb）
+- 先调研再动手（src: atom_ccc）
+- 无来源条目`
+    const entries = extractPersonaSources(raw)
+    const ts = entries.find((e) => e.text.includes('喜欢 TypeScript'))
+    expect(ts?.sources).toEqual(['atom_aaa', 'atom_bbb'])
+    const noSrc = entries.find((e) => e.text.includes('无来源条目'))
+    expect(noSrc?.sources).toEqual([])
+    // text 应剔除 src 标注
+    expect(ts?.text).not.toContain('src:')
   })
 })

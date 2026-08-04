@@ -186,6 +186,26 @@ export function ruleBoost(atom: MemoryAtom): number {
   return boost
 }
 
+// ===== 时间衰减（数据生命周期） =====
+
+/** 半衰期天数：超过该天数，事实/偏好/任务类记忆权重减半 */
+export const MEMORY_HALF_LIFE_DAYS = 30
+
+/** 行为规则类（correction/sop）不衰减：规则要稳定，不能因为时间而忘记 */
+const STABLE_TYPES = new Set(['correction', 'sop'])
+
+/**
+ * 时间衰减因子：0.5^(天数 / 半衰期)。
+ * 稳定类型（correction/sop）恒为 1.0（不衰减）；其余类型按半衰期衰减。
+ * 支持 MEMORY_HALF_LIFE_DAYS 环境变量覆盖（测试/配置）。
+ */
+export function timeDecay(atom: MemoryAtom, now = Date.now()): number {
+  if (STABLE_TYPES.has(atom.type)) return 1.0
+  const halfLife = Number(process.env.MEMORY_HALF_LIFE_DAYS) > 0 ? Number(process.env.MEMORY_HALF_LIFE_DAYS) : MEMORY_HALF_LIFE_DAYS
+  const days = Math.max(0, (now - atom.createdAt) / 86_400_000)
+  return Math.pow(0.5, days / halfLife)
+}
+
 /** 关键词检索（MVP，保持现有行为） */
 export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySearchResult {
   const started = Date.now()
@@ -228,7 +248,9 @@ export function searchMemoriesByKeyword(request: MemorySearchRequest): MemorySea
   const scored = allAtoms
     .map((atom) => ({ atom, ...scoreAtom(atom, terms, docFreq, totalDocs) }))
     .filter((r) => r.score > 0)
-    .sort((a, b) => (b.score + ruleBoost(b.atom)) - (a.score + ruleBoost(a.atom)) || b.atom.createdAt - a.atom.createdAt)
+    .sort((a, b) =>
+      (b.score * timeDecay(b.atom) + ruleBoost(b.atom)) - (a.score * timeDecay(a.atom) + ruleBoost(a.atom))
+      || b.atom.createdAt - a.atom.createdAt)
 
   // 归一化 + 阈值过滤：把分数映射到 0-1，低于阈值的弱相关/噪声不返回
   const maxScore = scored.length > 0 ? scored[0]!.score : 0

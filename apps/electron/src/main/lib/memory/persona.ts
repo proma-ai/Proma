@@ -44,12 +44,15 @@ const PERSONA_SYSTEM_PROMPT = `你是用户画像构建器。基于「长期记�
 
 3. 偏好/协议每条 10-40 字，直接可执行，不要模棱两可。
 4. 如果提供已有 persona，合并时保留稳定内容，只更新有证据支撑的变化。
-5. 只输出 Markdown 本身，不要额外解释。`
+5. **证据溯源（必须）**：每条偏好/协议/定位/演进条目末尾追加「（src: atom_xxx,atom_yyy）」,
+   src 必须是输入记忆条目标号（如 [1] 对应 id: atom_xxx）。如果某条结论无法对应任何输入条目，标注「（src: 未知）」。
+   不要把 src 当成画像内容本身，它是用于溯源的行内标注。
+6. 只输出 Markdown 本身，不要额外解释。`
 
 /** 从 atoms 构造 persona 生成的输入文本 */
 function formatAtomsForPersona(atoms: MemoryAtom[], maxAtoms = 40): string {
   const lines = atoms.slice(0, maxAtoms).map((a, i) => {
-    return `${i + 1}. [${a.type}|pri=${a.priority}] ${a.content}（来源: ${new Date(a.createdAt).toISOString().slice(0, 10)}）`
+    return `${i + 1}. [${a.type}|pri=${a.priority}] ${a.content}（来源: ${new Date(a.createdAt).toISOString().slice(0, 10)}，id: ${a.id}）`
   })
   return lines.join('\n')
 }
@@ -108,11 +111,11 @@ export function buildPersonaFromRules(): string | undefined {
   lines.push(fact ? fact.content.slice(0, 40) : '（待 LLM 生成）')
   lines.push('', '## 长期偏好', '')
   const prefs = atoms.filter((a) => a.type === 'preference').slice(0, 5)
-  if (prefs.length > 0) for (const p of prefs) lines.push(`- ${p.content.slice(0, 50)}`)
+  if (prefs.length > 0) for (const p of prefs) lines.push(`- ${p.content.slice(0, 50)}（src: ${p.id}）`)
   else lines.push('- （暂无明确偏好）')
   lines.push('', '## 交互协议', '')
   const corrections = atoms.filter((a) => a.type === 'correction').slice(0, 3)
-  if (corrections.length > 0) for (const c of corrections) lines.push(`- ${c.content.slice(0, 60)}`)
+  if (corrections.length > 0) for (const c of corrections) lines.push(`- ${c.content.slice(0, 60)}（src: ${c.id}）`)
   else lines.push('- （暂无明确交互协议）')
   lines.push('', '## 演进轨迹', '', '- （暂无）')
   return lines.join('\n')
@@ -123,4 +126,26 @@ export function extractName(content: string): string {
   const match = content.match(/(?:叫|姓名是|名字是|我是)\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9_]{0,20})/)
   if (match?.[1]) return match[1]
   return content.slice(0, 20)
+}
+
+/**
+ * 从 persona markdown 中提取每条画像条目的来源标注（证据溯源）。
+ * 返回 { text, sources: atomId[] } 列表；无标注时 sources 为空数组。
+ */
+export function extractPersonaSources(markdown: string): Array<{ text: string; sources: string[] }> {
+  const lines = markdown.split('\n')
+  const result: Array<{ text: string; sources: string[] }> = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('- ')) continue
+    const srcMatch = trimmed.match(/（src:\s*([^）]+)）\s*$/)
+    let text = trimmed.replace(/^- /, '').trim()
+    const sources: string[] = []
+    if (srcMatch && srcMatch[1]) {
+      text = trimmed.slice(0, srcMatch.index ?? trimmed.length).replace(/^- /, '').trim()
+      sources.push(...srcMatch[1].split(',').map((s) => s.trim()).filter((s) => s.startsWith('atom_')))
+    }
+    result.push({ text, sources })
+  }
+  return result
 }

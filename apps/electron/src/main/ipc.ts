@@ -181,12 +181,14 @@ import {
   rejectCorrection as memoryRejectCorrection,
   undoCorrection as memoryUndoCorrection,
   pendingAtoms as memoryPendingAtoms,
+  atomsPaged as memoryAtomsPaged,
   confirmAtomById as memoryConfirmAtomById,
   rejectAtomById as memoryRejectAtomById,
   extractionMode as memoryExtractionMode,
   setExtractionModeState as memorySetExtractionMode,
   clearAllMemoryState as memoryClearAll,
   personaRaw as memoryPersonaRaw,
+  personaSources as memoryPersonaSources,
   savePersona as memorySavePersona,
   removePersona as memoryRemovePersona,
   personaInjectionEnabled as memoryPersonaInjectionEnabled,
@@ -2589,6 +2591,21 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.LIST_MEMORY_ATOMS,
+    async (event, opts?: {
+      page?: number
+      pageSize?: number
+      type?: import('@proma/shared').MemoryAtomType | 'all'
+      sort?: 'newest' | 'priority'
+    }): Promise<{ atoms: import('@proma/shared').MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number }> => {
+      if (!(await validateMainWindowSender(event))) {
+        return { atoms: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }
+      }
+      return memoryAtomsPaged(opts ?? {})
+    }
+  )
+
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS,
     async (_, status?: string): Promise<import('@proma/shared').MemoryCorrection[]> => {
       return memoryCorrections(status as 'pending' | 'active' | 'rejected' | 'superseded' | undefined)
@@ -2650,6 +2667,14 @@ export function registerIpcHandlers(): void {
     async (event): Promise<string | undefined> => {
       if (!(await validateMainWindowSender(event))) return undefined
       return memoryPersonaRaw()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA_SOURCES,
+    async (event): Promise<Array<{ text: string; sources: string[] }>> => {
+      if (!(await validateMainWindowSender(event))) return []
+      return memoryPersonaSources()
     }
   )
 

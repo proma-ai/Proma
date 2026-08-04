@@ -109,11 +109,25 @@ function captureMemoryFromRun(
 /**
  * 会话结束后评估主动建议（fire-and-forget，不阻塞会话完成）。
  * 建议由引擎持久化到 suggestions.json，UI 通过 IPC 拉取展示。
+ *
+ * 触发时机扩展（P4）：
+ * - completeRun/failRun（原有）
+ * - idleComplete（turn 主体结束，新增）：让建议在对话中途也能浮现
+ * 节流：同一会话 5 分钟内不重复评估（避免连环打扰）；引擎内部仍有 maxPerSession=2 预算兜底。
  */
+const SUGGESTION_EVAL_THROTTLE_MS = 5 * 60_000
+const lastSuggestionEvalAt = new Map<string, number>()
+
 function evaluateSuggestionsFromRun(
   sessionId: string,
   _messages: AgentMessage[] | undefined,
 ): Promise<void> {
+  // 节流：同会话 5 分钟内只评估一次
+  const now = Date.now()
+  const last = lastSuggestionEvalAt.get(sessionId) ?? 0
+  if (now - last < SUGGESTION_EVAL_THROTTLE_MS) return Promise.resolve()
+  lastSuggestionEvalAt.set(sessionId, now)
+
   // 从 SDK 格式会话中提取最近的 user/assistant 文本
   const sdkMessages = getAgentSessionSDKMessages(sessionId)
   const recent = extractRecentConversationText(sdkMessages, 30)
@@ -1240,6 +1254,8 @@ export class AgentOrchestrator {
       opts?: { startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
+      // 触发时机扩展：turn 主体结束后也评估建议（受节流 + 同会话预算双重约束）
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
     const failRun = (
       error: string,

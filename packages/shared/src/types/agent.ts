@@ -1597,6 +1597,8 @@ export const AGENT_IPC_CHANNELS = {
   SET_MEMORY_EXTRACTION_MODE: 'agent:set-memory-extraction-mode',
   /** 搜索 Proactive Memory */
   SEARCH_MEMORY: 'agent:search-memory',
+  /** 分页浏览全部记忆（记忆看板） */
+  LIST_MEMORY_ATOMS: 'agent:list-memory-atoms',
   /** 列出 Proactive Memory 纠正 */
   LIST_MEMORY_CORRECTIONS: 'agent:list-memory-corrections',
   /** 确认/拒绝 Proactive Memory 纠正 */
@@ -1611,6 +1613,8 @@ export const AGENT_IPC_CHANNELS = {
   REJECT_MEMORY_ATOM: 'agent:reject-memory-atom',
   /** 读取 Proactive Memory persona */
   READ_MEMORY_PERSONA: 'agent:read-memory-persona',
+  /** persona 证据溯源（每条画像条目的来源 atom） */
+  READ_MEMORY_PERSONA_SOURCES: 'agent:read-memory-persona-sources',
   /** 更新/删除 persona + 画像注入开关（用户控制） */
   UPDATE_MEMORY_PERSONA: 'agent:update-memory-persona',
   DELETE_MEMORY_PERSONA: 'agent:delete-memory-persona',
