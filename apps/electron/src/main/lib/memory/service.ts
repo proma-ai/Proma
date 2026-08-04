@@ -16,6 +16,7 @@ import {
   listCorrections,
   updateCorrectionStatus,
   readPersonaRaw,
+  isPersonaTraceable,
   parsePersonaProfile,
   writePersona,
   readAllScenes,
@@ -303,6 +304,16 @@ export function personaSources(): Array<{ text: string; sources: string[] }> {
   return extractPersonaSources(raw)
 }
 
+/** persona 是否溯源版本（旧版需重生成） */
+export function personaTraceable(): boolean {
+  return isPersonaTraceable()
+}
+
+/** 手动重新生成 persona（用户控制，B3） */
+export async function regeneratePersona(): Promise<boolean> {
+  return ensurePersona()
+}
+
 export function persona(): PersonaProfile {
   return parsePersonaProfile(readPersonaRaw())
 }
@@ -328,20 +339,22 @@ export function savePersona(markdown: string): void {
  */
 export async function ensurePersona(): Promise<boolean> {
   const existing = readPersonaRaw()
+  // B3：旧版 persona（无溯源版本标记）强制重生成，让 src 溯源标注落地
+  const forceRegenerate = existing ? !isPersonaTraceable() : false
   try {
     if (isMemoryLlmConfigured()) {
       const markdown = await generatePersona({ existing })
       if (markdown) {
         writePersona(markdown)
-        appendMemoryLog(existing ? '用户画像已增量更新' : '用户画像已生成')
+        appendMemoryLog(forceRegenerate ? '用户画像已重生成（溯源版本）' : existing ? '用户画像已增量更新' : '用户画像已生成')
         return true
       }
     }
-    if (!existing) {
+    if (!existing || forceRegenerate) {
       const fallback = buildPersonaFromRules()
       if (fallback) {
         writePersona(fallback)
-        appendMemoryLog('用户画像已生成（规则版兜底）')
+        appendMemoryLog(forceRegenerate ? '用户画像已重生成（规则版兜底，溯源版本）' : '用户画像已生成（规则版兜底）')
         return true
       }
     }

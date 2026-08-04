@@ -693,6 +693,10 @@ export interface ElectronAPI {
   /** persona 证据溯源 */
   readMemoryPersonaSources: () => Promise<Array<{ text: string; sources: string[] }>>
 
+  /** persona 是否溯源版本 / 手动重新生成 */
+  getPersonaTraceable: () => Promise<boolean>
+  regeneratePersona: () => Promise<{ ok: boolean; error?: string }>
+
   /** 更新 persona 画像 */
   updateMemoryPersona: (markdown: string) => Promise<{ ok: boolean; error?: string }>
 
@@ -1998,6 +2002,14 @@ const electronAPI: ElectronAPI = {
 
   readMemoryPersonaSources: () => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA_SOURCES)
+  },
+
+  getPersonaTraceable: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERSONA_TRACEABLE)
+  },
+
+  regeneratePersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REGENERATE_PERSONA)
   },
 
   updateMemoryPersona: (markdown: string) => {

@@ -41,6 +41,8 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const [searching, setSearching] = React.useState(false)
   const [showPersona, setShowPersona] = React.useState(false)
   const [personaSrc, setPersonaSrc] = React.useState<Array<{ text: string; sources: string[] }>>([])
+  const [personaTraceable, setPersonaTraceable] = React.useState(true)
+  const [regenerating, setRegenerating] = React.useState(false)
   const [browseType, setBrowseType] = React.useState<MemoryAtom['type'] | 'all'>('all')
   const [browsePage, setBrowsePage] = React.useState(1)
   const [browseResult, setBrowseResult] = React.useState<{ atoms: MemoryAtom[]; total: number; totalPages: number } | null>(null)
@@ -48,7 +50,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   const refresh = React.useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection, nextActive, nextSrc] = await Promise.all([
+      const [nextStats, nextCorrections, nextPersona, nextPendingAtoms, nextMode, nextInjection, nextActive, nextSrc, nextTraceable] = await Promise.all([
         window.electronAPI.getMemoryStats(),
         window.electronAPI.listMemoryCorrections('pending'),
         window.electronAPI.readMemoryPersona(),
@@ -57,6 +59,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
         window.electronAPI.getPersonaInjectionEnabled(),
         window.electronAPI.listMemoryCorrections('active'),
         window.electronAPI.readMemoryPersonaSources(),
+        window.electronAPI.getPersonaTraceable(),
       ])
       setStats(nextStats)
       setCorrections(nextCorrections)
@@ -66,6 +69,7 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
       setExtractionMode(nextMode)
       setPersonaInjection(nextInjection)
       setPersonaSrc(nextSrc)
+      setPersonaTraceable(nextTraceable)
     } catch (error) {
       console.error('[主动记忆] 加载失败:', error)
     } finally {
@@ -142,10 +146,14 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   }
 
   const handleRejectAtom = async (id: string): Promise<void> => {
+    // B2：破坏性操作加确认
+    if (!window.confirm('确定删除这条记忆？此操作不可撤销。')) return
     try {
       await window.electronAPI.rejectMemoryAtom(id)
       toast.success('已删除该记忆')
       await refresh()
+      // 同步刷新分页浏览列表（改进2：删除后 browse 区需实时更新）
+      void loadBrowse(browseType, browsePage)
     } catch (error) {
       console.error('[主动记忆] 删除记忆失败:', error)
       toast.error('操作失败')
@@ -174,11 +182,15 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
   }
 
   const handleDeleteAtom = async (id: string): Promise<void> => {
+    // B2：破坏性操作加确认
+    if (!window.confirm('确定删除这条记忆？此操作不可撤销。')) return
     try {
       const ok = await window.electronAPI.rejectMemoryAtom(id)
       if (ok) toast.success('已删除该记忆')
       else toast.error('删除失败')
       await refresh()
+      // 同步刷新分页浏览列表；若当前页因删除而越界则回退一页
+      void loadBrowse(browseType, Math.max(1, browsePage - (browseResult && browsePage > 1 && browseResult.atoms.length === 1 ? 1 : 0)))
     } catch (error) {
       console.error('[主动记忆] 删除失败:', error)
       toast.error('操作失败')
@@ -248,6 +260,26 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
     } catch (error) {
       console.error('[主动记忆] 删除画像失败:', error)
       toast.error('操作失败')
+    }
+  }
+
+  /** B3：手动重新生成画像（让旧数据获得 src 溯源标注） */
+  const handleRegeneratePersona = async (): Promise<void> => {
+    if (!window.confirm('重新生成用户画像？将根据当前记忆重新构建（含来源标注）。')) return
+    setRegenerating(true)
+    try {
+      const r = await window.electronAPI.regeneratePersona()
+      if (!r.ok) {
+        toast.error(r.error ?? '生成失败')
+        return
+      }
+      toast.success('画像已重新生成（含来源标注）')
+      await refresh()
+    } catch (error) {
+      console.error('[主动记忆] 重生成画像失败:', error)
+      toast.error('操作失败')
+    } finally {
+      setRegenerating(false)
     }
   }
 
@@ -610,6 +642,9 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
               >
                 <Sparkles size={12} />
                 用户画像（{showPersona ? '收起' : '展开'}）· 更新于 {formatTime(stats?.lastExtractionAt)}
+                {persona && !personaTraceable && (
+                  <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-600">旧版·可重新生成</span>
+                )}
               </button>
               <div className="flex items-center gap-2">
                 <button
@@ -630,6 +665,14 @@ export function ProactiveMemoryPanel({ workspaceSlug }: ProactiveMemoryPanelProp
                   className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
                 >
                   编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRegeneratePersona()}
+                  disabled={regenerating}
+                  className="text-[10px] text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                >
+                  {regenerating ? '生成中…' : '重新生成'}
                 </button>
                 <button
                   type="button"

@@ -189,6 +189,8 @@ import {
   clearAllMemoryState as memoryClearAll,
   personaRaw as memoryPersonaRaw,
   personaSources as memoryPersonaSources,
+  personaTraceable as memoryPersonaTraceable,
+  regeneratePersona as memoryRegeneratePersona,
   savePersona as memorySavePersona,
   removePersona as memoryRemovePersona,
   personaInjectionEnabled as memoryPersonaInjectionEnabled,
@@ -2675,6 +2677,23 @@ export function registerIpcHandlers(): void {
     async (event): Promise<Array<{ text: string; sources: string[] }>> => {
       if (!(await validateMainWindowSender(event))) return []
       return memoryPersonaSources()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_PERSONA_TRACEABLE,
+    async (event): Promise<boolean> => {
+      if (!(await validateMainWindowSender(event))) return false
+      return memoryPersonaTraceable()
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REGENERATE_PERSONA,
+    async (event): Promise<{ ok: boolean; error?: string }> => {
+      if (!(await validateMainWindowSender(event))) return { ok: false, error: '非授权窗口' }
+      const ok = await memoryRegeneratePersona()
+      return ok ? { ok: true } : { ok: false, error: '画像生成失败（可能是 LLM 不可用或无记忆）' }
     }
   )
 

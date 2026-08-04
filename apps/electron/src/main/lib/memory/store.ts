@@ -429,10 +429,21 @@ export function readPersonaRaw(): string | undefined {
   }
 }
 
-/** 写入 persona（全文替换） */
+/** 写入 persona（全文替换）。自动带溯源版本标记，用于检测旧版画像需要重生成 */
 export function writePersona(markdown: string): void {
   ensureMemoryDirs()
-  writeTextFileAtomic(getPersonaPath(), markdown)
+  const body = markdown.trim()
+  const header = `<!-- persona-version: 2 (src traceability) -->\n\n`
+  // 避免重复加版本头
+  const content = body.startsWith('<!-- persona-version:') ? body : header + body
+  writeTextFileAtomic(getPersonaPath(), content)
+}
+
+/** 检测 persona 是否为溯源版本（带 persona-version: 2 标记）。旧版返回 false 表示需要重生成。 */
+export function isPersonaTraceable(): boolean {
+  const raw = readPersonaRaw()
+  if (!raw) return false
+  return /persona-version:\s*2/.test(raw)
 }
 
 /** 删除 persona（用户控制：不再注入画像） */

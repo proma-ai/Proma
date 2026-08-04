@@ -64,6 +64,9 @@ describe('memory/store 磁盘集成（隔离目录）', () => {
     store.writePersona('# 用户画像\n\n## 用户\nConrad\n\n## 长期偏好\n- 喜欢 TypeScript')
     const raw = store.readPersonaRaw()
     expect(raw).toContain('Conrad')
+    // 溯源版本标记自动注入
+    expect(raw).toContain('persona-version: 2')
+    expect(store.isPersonaTraceable()).toBe(true)
     const profile = store.parsePersonaProfile(raw)
     expect(profile.name).toBe('Conrad')
     expect(profile.preferences).toContain('喜欢 TypeScript')

@@ -1615,6 +1615,9 @@ export const AGENT_IPC_CHANNELS = {
   READ_MEMORY_PERSONA: 'agent:read-memory-persona',
   /** persona 证据溯源（每条画像条目的来源 atom） */
   READ_MEMORY_PERSONA_SOURCES: 'agent:read-memory-persona-sources',
+  /** persona 是否溯源版本 / 手动重新生成（B3） */
+  GET_PERSONA_TRACEABLE: 'agent:get-persona-traceable',
+  REGENERATE_PERSONA: 'agent:regenerate-persona',
   /** 更新/删除 persona + 画像注入开关（用户控制） */
   UPDATE_MEMORY_PERSONA: 'agent:update-memory-persona',
   DELETE_MEMORY_PERSONA: 'agent:delete-memory-persona',
