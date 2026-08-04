@@ -54,7 +54,9 @@ const AGENT_STREAM_PUSH_THROTTLE_MS = 2_000
 const PLAN_QUOTA_REFRESH_MS = 5 * 60_000
 const PLAN_QUOTA_PROVIDERS = new Set(['openai-codex', 'deepseek', 'kimi-coding', 'minimax', 'zhipu', 'zhipu-coding', 'zhipu-coding-team'])
 /** Hover 只是一种临时展开意图，避免 Swift 渲染层自行维护状态机。 */
-const HOVER_EXPAND_DELAY_MS = 130
+// macOS's notch lies directly in a common pointer travel path; a longer dwell
+// time prevents accidental expansion while still leaving deliberate hover quick.
+const HOVER_EXPAND_DELAY_MS = process.platform === 'darwin' ? 300 : 130
 const HOVER_COLLAPSE_DELAY_MS = 420
 
 interface InternalSessionSnapshot extends AgentIslandSessionSnapshot {

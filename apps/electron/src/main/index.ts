@@ -116,7 +116,7 @@ import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window
 import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
-import { isMacOS26OrLater } from './lib/macos-version'
+import { isAgentIslandSupported } from './lib/macos-version'
 import {
   createVoiceDictationWindow,
   toggleVoiceDictationWindow,
@@ -143,7 +143,7 @@ function activateAgentIslandElectronFallback(reason?: string): void {
 
 /** macOS 26+ 优先使用真刘海 NSPanel；旧版 macOS 默认不显示灵动岛。 */
 function startAgentIslandSurface(): void {
-  if (process.platform === 'darwin' && !isMacOS26OrLater()) {
+  if (!isAgentIslandSupported()) {
     console.info('[agent-island] 已在 macOS 26 以下禁用')
     return
   }
@@ -602,7 +602,9 @@ async function bootstrap(): Promise<void> {
         sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
       },
       openPlanning: showPlanningWindow,
-      enabled: () => getSettings().agentIsland?.enabled !== false,
+      // The service itself can otherwise create its Electron fallback before
+      // startAgentIslandSurface reaches the platform gate.
+      enabled: () => isAgentIslandSupported() && getSettings().agentIsland?.enabled !== false,
     })
   })
   safeRun('startAgentIslandSurface', startAgentIslandSurface)

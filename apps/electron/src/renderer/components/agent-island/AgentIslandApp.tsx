@@ -248,6 +248,7 @@ export function AgentIslandApp(): React.ReactElement {
       onMouseLeave={() => setHovered(false)}
     >
       <div ref={surfaceRef} className={`island-surface island-transition-surface ${surfaceMode}`} style={surfaceStyle}>
+        {platform === 'win32' && <div className="island-drag-handle" title="拖动以移动灵动岛" />}
         <div ref={expandedContentRef} className="island-expanded-content">
           {state.sessions.length > 0 ? (
             <header className="island-header">

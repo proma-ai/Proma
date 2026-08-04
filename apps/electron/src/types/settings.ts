@@ -220,6 +220,8 @@ export const DEFAULT_MARKDOWN_FONT_SIZE: MarkdownFontSize = 'medium'
 export interface AgentIslandSettings {
   /** 是否启用 Agent / 近期 Todo 日程的灵动岛提醒，默认 true。 */
   enabled?: boolean
+  /** Windows 浮动灵动岛的位置；启动时会自动校正到可见工作区内。 */
+  windowsPosition?: { x: number; y: number }
 }
 
 /**
