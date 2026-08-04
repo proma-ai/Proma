@@ -23,6 +23,10 @@ import { VerifyEmailPage } from './VerifyEmailPage'
 import { ForgotPasswordPage } from './ForgotPasswordPage'
 import { ResetPasswordPage } from './ResetPasswordPage'
 import { PendingPage } from './PendingPage'
+import { AuthSplitLayout } from './AuthSplitLayout'
+import { WindowControls } from '@/components/WindowControls'
+import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
+import { cn } from '@/lib/utils'
 
 interface CloudAuthGateProps {
   children: React.ReactNode
@@ -47,11 +51,18 @@ const AUTH_VIEWS: Record<CloudAuthView, React.ComponentType> = {
   'pending': PendingPage,
 }
 
+/** 在认证门控与 Onboarding 终页中复用同一组认证业务视图。 */
+export function CloudAuthScreen(): React.ReactElement {
+  const view = useAtomValue(cloudAuthViewAtom)
+  const AuthPage = AUTH_VIEWS[view] || LoginPage
+  return <AuthPage />
+}
+
 /** 内部组件：仅在 cloud 模式下渲染，避免 local 模式订阅不必要的 atoms */
 function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
   const user = useAtomValue(cloudUserAtom)
   const loading = useAtomValue(cloudAuthLoadingAtom)
-  const view = useAtomValue(cloudAuthViewAtom)
+  const isWindows = React.useMemo(() => detectIsWindows(), [])
 
   // 加载中
   if (loading) {
@@ -67,14 +78,14 @@ function CloudAuthGuard({ children }: CloudAuthGateProps): React.ReactElement {
 
   // 未认证 → 显示对应认证页面
   if (!user) {
-    const AuthPage = AUTH_VIEWS[view] || LoginPage
     return (
-      <div className="flex min-h-full flex-col bg-background">
-        {/* Electron 窗口拖动区域 */}
-        <div className="h-8 app-drag-region shrink-0" />
-        <div className="flex flex-1 items-center justify-center px-4">
-          <AuthPage />
-        </div>
+      <div className="relative min-h-full">
+        {/* Windows 上避开原生窗口控制区，防止点击被 OS 判作标题栏拖拽。 */}
+        <div className={cn('app-drag-region absolute left-0 top-0 z-10 h-8', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
+        <WindowControls />
+        <AuthSplitLayout>
+          <CloudAuthScreen />
+        </AuthSplitLayout>
       </div>
     )
   }

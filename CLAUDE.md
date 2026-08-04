@@ -3,6 +3,7 @@
 This file provides guidance to AI coding agents working with this repository.
 
 **重要提示：**
+
 - 当功能发生变化时，请保持此文件和 `README.md` 同步更新。请更新文档以反映当前状态，但是需要经过我的允许后再修改。
 - 所有的注释和日志优先采用中文，保留必要的专业术语部分。
 - 所有的依赖包的安装都要先进行搜索，综合判断依赖采用的版本，而不是默认采用某个版本。
@@ -41,22 +42,26 @@ proma-v2/
 ### 包职责详解
 
 #### @proma/shared (v0.1.42)
+
 - **导出模块**：`./types`、`./config`、`./utils`、`./constants/permission-rules`
 - **关键类型**：`AgentMessage`、`ChatMessage`、`Channel`、`PermissionRequest`、`FeishuConfig`
 - **依赖**：无运行时依赖（仅 TypeScript）
 
 #### @proma/core (v0.2.15)
+
 - **导出模块**：`./providers`、`./highlight`、`./types`、`./utils`
 - **关键功能**：Provider 适配器注册表、代码高亮（Shiki）
 - **依赖**：`@proma/shared`、`shiki`
 - **Peer 依赖**：`@anthropic-ai/claude-agent-sdk`、`@anthropic-ai/sdk`、`@modelcontextprotocol/sdk`
 
 #### @proma/ui (v0.1.9)
+
 - **关键组件**：共享 React UI 组件库
 - **依赖**：`@proma/core`、`beautiful-mermaid`、`shiki`、Radix UI
 - **Peer 依赖**：`react@^18.3.0`、`react-dom@^18.3.0`
 
 #### @proma/electron (v0.15.0)
+
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
   - `@anthropic-ai/claude-agent-sdk@0.3.201` - Claude Agent Runtime
@@ -115,12 +120,12 @@ bun run generate:icons    # 生成应用图标
 - `bun install` 安装依赖，`bun run <script>` 运行脚本
 - `bun test` 运行测试（内置测试运行器，`import { test, expect } from "bun:test"`）
 - Bun 自动加载 .env 文件（无需 dotenv）
-- 优先使用 Bun 原生 API：`Bun.file` > `node:fs`，`Bun.$\`command\`` > `execa`
+- 优先使用 Bun 原生 API：`Bun.file` &gt; `node:fs`，`Bun.$\`command\``>`execa\`
 
 ## 技术栈
 
 | 层级 | 技术 | 版本 |
-|------|------|------|
+| --- | --- | --- |
 | **运行时** | Bun | 1.2.5+ |
 | **语言** | TypeScript | 5.0.0+ |
 | **桌面框架** | Electron | 43.2.0 |
@@ -170,7 +175,7 @@ bun run generate:icons    # 生成应用图标
 #### 核心服务
 
 | 服务 | 职责 |
-|------|------|
+| --- | --- |
 | `agent-orchestrator.ts` | Agent 核心编排层（71KB）：并发守卫、渠道查找、环境变量构建、SDK 路径解析、消息持久化、事件流处理、错误处理、自动标题生成 |
 | `agent-session-manager.ts` | Agent 会话管理：SDK 消息持久化、会话元数据 CRUD、JSONL 存储 |
 | `agent-prompt-builder.ts` | Agent 系统提示词构建（18KB）：动态上下文构建、内置 Agent 构建、工作区上下文注入 |
@@ -185,13 +190,13 @@ bun run generate:icons    # 生成应用图标
 #### 集成服务
 
 | 服务 | 职责 |
-|------|------|
+| --- | --- |
 | `feishu-bridge.ts` | 飞书集成（68KB）：消息同步、任务通知、OAuth 认证 |
 
 #### 工具与文件
 
 | 服务 | 职责 |
-|------|------|
+| --- | --- |
 | `chat-tools/` | Chat 工具实现目录：内置工具函数 |
 | `workspace-watcher.ts` | 项目根目录、会话文件与附加目录监听：文件系统变化监控 |
 | `chat-tools-watcher.ts` | Chat 工具监听：工具配置变化监控 |
@@ -201,7 +206,7 @@ bun run generate:icons    # 生成应用图标
 #### 系统服务
 
 | 服务 | 职责 |
-|------|------|
+| --- | --- |
 | `runtime-init.ts` | 运行时初始化：Shell 环境、Bun、Git 检测（`bun-finder.ts`、`git-detector.ts`、`shell-env.ts`） |
 | `config-paths.ts` | 配置路径管理：`~/.proma/` 目录结构 |
 | `user-profile-service.ts` | 用户档案持久化 |
@@ -213,6 +218,7 @@ bun run generate:icons    # 生成应用图标
 基于适配器模式的多 Provider 支持，通过注册表统一管理：
 
 #### 核心架构
+
 - `ProviderAdapter` 接口：定义统一的 `sendMessage()` 流式方法
 - `provider-registry.ts`：Provider 注册表，按 `providerId` 查找适配器
 - `sse-reader.ts`：通用 SSE 流读取器（fetch + ReadableStream）
@@ -220,7 +226,7 @@ bun run generate:icons    # 生成应用图标
 #### 支持的 Provider
 
 | Provider | 适配器 | API 协议 | 特性 |
-|----------|--------|----------|------|
+| --- | --- | --- | --- |
 | **Anthropic** | `anthropic-adapter.ts` | Messages API | extended_thinking、多模态 |
 | **OpenAI** | `openai-adapter.ts` | Chat Completions | 标准 OpenAI 协议 |
 | **DeepSeek** | `anthropic-adapter.ts` | Messages API | Anthropic 兼容 |
@@ -232,13 +238,14 @@ bun run generate:icons    # 生成应用图标
 | **Custom** | `openai-adapter.ts` | Chat Completions | 自定义 OpenAI 兼容端点 |
 
 #### 多模态支持
+
 - **图片**：各 Provider 格式不同，适配器自动转换
 - **文档**：提取文本后注入 `<file>` XML 标签
 
 ### Jotai 状态管理（`renderer/atoms/`）
 
 | Atom 文件 | 管理的状态 |
-|-----------|-----------|
+| --- | --- |
 | `chat-atoms.ts` | 对话列表、当前消息、流式状态（Map 结构支持多对话并行）、模型选择、上下文设置、并排模式、思考模式、待上传附件 |
 | `agent-atoms.ts` | Agent 会话列表、当前会话、流式状态（`AgentStreamState`）、工作区选择、渠道选择、权限/AskUser 请求队列（按 sessionId Map） |
 | `active-view.ts` | 主面板视图切换（'conversations' / 'settings'） |
@@ -250,25 +257,25 @@ bun run generate:icons    # 生成应用图标
 
 ### 渲染进程组件架构（`renderer/components/`）
 
-- **`app-shell/`**：三面板布局（LeftSidebar | NavigatorPanel | MainContentPanel），侧边栏含模式切换、置顶对话、日期分组列表、流式指示器
-- **`chat/`**：聊天核心 — ChatView（消息加载/流式订阅）、ChatHeader（模型选择/上下文设置）、ChatInput（Tiptap 富文本编辑器）、ChatMessages（消息列表/自动滚动）、ParallelChatMessages（并排模式）
-- **`agent/`**：Agent 模式 — AgentView（纯展示 + 交互，IPC 监听已提升到全局）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）、PermissionBanner/AskUserBanner（权限/问答请求 UI）
-- **`settings/`**：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）、FeishuSettings（飞书集成）；含 `primitives/` 可复用表单组件
-- **`file-browser/`**：文件浏览器 — FileBrowser（会话文件与项目根目录文件树浏览）
-- **`ai-elements/`**：AI 展示组件 — Markdown 渲染、代码块、Mermaid 图、推理折叠、上下文分割线、富文本输入
-- **`ui/`**：Radix UI 组件（现代化设计，CSS 变量主题）
+- `app-shell/`：三面板布局（LeftSidebar | NavigatorPanel | MainContentPanel），侧边栏含模式切换、置顶对话、日期分组列表、流式指示器
+- `chat/`：聊天核心 — ChatView（消息加载/流式订阅）、ChatHeader（模型选择/上下文设置）、ChatInput（Tiptap 富文本编辑器）、ChatMessages（消息列表/自动滚动）、ParallelChatMessages（并排模式）
+- `agent/`：Agent 模式 — AgentView（纯展示 + 交互，IPC 监听已提升到全局）、AgentHeader（渠道/模型选择）、AgentMessages（消息列表 + 工具活动）、ToolActivityItem（工具调用展示）、WorkspaceSelector（工作区切换）、PermissionBanner/AskUserBanner（权限/问答请求 UI）
+- `settings/`：设置面板 — GeneralSettings（用户档案）、AppearanceSettings（主题）、ChannelSettings（渠道管理）、ChannelForm（Provider 配置）、AgentSettings（Agent 渠道/工作区/MCP）、McpServerForm（MCP 服务器配置）、AboutSettings（版本/更新）、FeishuSettings（飞书集成）；含 `primitives/` 可复用表单组件
+- `file-browser/`：文件浏览器 — FileBrowser（会话文件与项目根目录文件树浏览）
+- `ai-elements/`：AI 展示组件 — Markdown 渲染、代码块、Mermaid 图、推理折叠、上下文分割线、富文本输入
+- `ui/`：Radix UI 组件（现代化设计，CSS 变量主题）
 
 ### 全局 Hooks（`renderer/hooks/`）
 
 | Hook | 职责 |
-|------|------|
+| --- | --- |
 | `useGlobalAgentListeners` | 全局 Agent IPC 监听器，在 `main.tsx` 顶层挂载，使用 `useStore()` 直接操作 atoms。处理流式事件、完成/错误、标题更新、权限请求、AskUser 请求，永不随组件卸载销毁 |
 | `useBackgroundTasks` | 后台任务管理（Agent/Shell 任务的增删改查），按 sessionId 隔离 |
 
 ### 渲染进程初始化组件（`renderer/main.tsx`）
 
 | 组件 | 职责 |
-|------|------|
+| --- | --- |
 | `ThemeInitializer` | 从主进程加载主题设置、监听系统主题变化、同步到 DOM |
 | `AgentSettingsInitializer` | 加载 Agent 渠道/模型/工作区设置、订阅 MCP/文件变化事件 |
 | `AgentListenersInitializer` | 挂载 `useGlobalAgentListeners`，全局 Agent IPC 监听 |
@@ -301,6 +308,7 @@ bun run generate:icons    # 生成应用图标
 ```
 
 **关键设计**：
+
 - JSON 配置 + JSONL 追加日志，无本地数据库，文件可移植
 - Agent 工作区按 slug 隔离，每个会话独立目录
 - MCP 配置和 Skills 按工作区管理
@@ -317,7 +325,7 @@ bun run generate:icons    # 生成应用图标
 
 Proma 的 Agent 模式通过 `RuntimeRoutingAgentAdapter` 统一入口，按会话的 `agentRuntime` 路由到两套适配器：
 
-```text
+```
 用户输入 → AgentOrchestrator
   → RuntimeRoutingAgentAdapter
     ├→ ClaudeAgentAdapter → Claude Agent SDK
@@ -359,7 +367,7 @@ Proma 的 Agent 模式通过 `RuntimeRoutingAgentAdapter` 统一入口，按会�
 
 ### 默认 Skills 版本契约（`apps/electron/default-skills/`）
 
-修改任何 `default-skills/<skill>/` 内容时，**必须同步递增该 Skill `SKILL.md` frontmatter 的 `version` 字段**（patch +1）。
+修改任何 `default-skills/<skill>/` 内容时，**必须同步递增该 Skill** `SKILL.md` **frontmatter 的** `version` **字段**（patch +1）。
 
 **为什么**：`seedDefaultSkills()` 与 `upgradeDefaultSkillsInWorkspaces()` 通过 semver 比较决定是否将 bundle 中的 Skill 同步到老用户的 `~/.proma/default-skills/` 与各工作区。**version 不变 = 老用户拿不到新内容**。
 

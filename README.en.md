@@ -36,6 +36,7 @@ The open-source version can be used independently with self-configured AI provid
 | Web-connected and built-in AI capabilities | Configure search, image generation, and their API keys as needed | Get a more complete Proma Cloud web-connected and built-in experience, including WebSearch plus GPT Image 2 image generation and editing |
 | Public API and services | Primarily use the provider APIs that you configure yourself | Create dedicated, quota-limited Proma Cloud API keys to bring LLM, tool, and multimodal capabilities into your own apps or services |
 | Team credit management | Build your own member, credit-allocation, and usage-management processes | Team admins can allocate or reclaim shared team credits for members, automate monthly allocation, and review member usage and credit transactions |
+| Skills distribution & collaboration | Skills are workspace-local; distribution and sharing across your team need to be self-organized | The enterprise version adds org-level Skills distribution and team collaboration: admins can push team-built Skills to members in one click, members use them without manual installation, and versions, updates, and usage scope are managed centrally |
 | Subscription and usage | Manage provider accounts, balances, and usage yourself | Manage subscriptions and balance in the app, with detailed model, Agent, and tool usage |
 | Switching from open source | — | Install over the existing app and continue using your local Proma data |
 
@@ -43,7 +44,7 @@ The open-source version can be used independently with self-configured AI provid
 
 ### Enterprise licensing
 
-If your organization plans to deploy Proma for hundreds or thousands of employees, enterprise licenses are available. We can also provide scoped, lightweight customization around your deployment needs. Contact us on WeChat: `geekthings`.
+If your organization plans to deploy Proma for hundreds or thousands of employees, enterprise licenses are available. We can also provide scoped, lightweight customization around your deployment needs. The enterprise version offers org-level Skills distribution and team collaboration, so best practices your team builds can be pushed to members in one click and maintained centrally. Contact us on WeChat: `geekthings`.
 
 ### First Setup
 

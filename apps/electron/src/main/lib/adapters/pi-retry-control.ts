@@ -1,5 +1,8 @@
 import type { RetryAttempt } from '@proma/shared'
 
+/** 前 N 次 Pi native retry 不通知 UI，与 Claude runtime 的自动恢复体验保持一致。 */
+export const PI_RETRY_VISIBILITY_THRESHOLD = 5
+
 /** 将 Pi native retry 与当前 renderer stream 绑定，拒绝迟到事件污染下一轮。 */
 export interface PiRetryEventContext {
   runStartedAt: number
@@ -87,12 +90,25 @@ function retryAttempt(event: PiNativeRetryDetails, timestamp: number, errorMessa
   }
 }
 
-/** 将 Pi native retry 生命周期转换为 Proma UI 已识别的 retry 事件。 */
+/**
+ * Pi 的连续错误计数会在一段成功回答后归零，totalAttempt 才是单次顶层 run 的累计次数。
+ * 因此可见性必须基于 totalAttempt，避免多工具回合时反复静默超过五次。
+ */
+function shouldExposePiRetry(event: PiNativeRetryDetails): boolean {
+  return (event.totalAttempt ?? event.attempt) > PI_RETRY_VISIBILITY_THRESHOLD
+}
+
+/**
+ * 将 Pi native retry 生命周期转换为 Proma UI 已识别的 retry 事件。
+ * 前五次恢复的完整生命周期都会被过滤；若最终未恢复，终态 assistant error 仍会正常展示。
+ */
 export function mapPiNativeRetryEvent(
   event: PiNativeRetryEvent,
   context: PiRetryEventContext,
   timestamp = Date.now(),
 ): PiRetryUpdate[] {
+  if (!shouldExposePiRetry(event)) return []
+
   const metadata = retryMetadata(event, context)
 
   if (event.type === 'auto_retry_start') {

@@ -169,8 +169,16 @@ export function disposeMacAgentIslandNativeHost(): void {
     stdoutBuffer = ''
     return
   }
-  try { current.stdin.write('{"type":"shutdown"}\n') } catch { /* child may already be closing */ }
-  current.stdin.end()
+  // 退出竞态：helper 可能已先退出导致 stdin 管道断裂，write 会异步触发 EPIPE。
+  // 必须注册 noop error 监听（try/catch 拦不住异步 error 事件），并检查流是否仍可写。
+  const stdin = current.stdin
+  if (stdin && !stdin.destroyed) {
+    stdin.on('error', () => { /* helper already closing; ignore EPIPE */ })
+    try {
+      if (stdin.writable) stdin.write('{"type":"shutdown"}\n')
+    } catch { /* child may already be closing */ }
+    stdin.end()
+  }
   child = null
   ready = false
   stdoutBuffer = ''

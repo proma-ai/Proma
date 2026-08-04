@@ -501,6 +501,11 @@ export async function handleOAuthCallback(token: string, refreshToken?: string):
     const user = await getAuthApi().getMe()
     cachedUser = toUserInfo(user)
     syncCloudUserToLocalProfile(cachedUser)
+
+    // OAuth 登录与密码登录必须共享相同的“渠道就绪后再进入主界面”时序。
+    // Onboarding 会在认证成功后立即创建欢迎 Agent 会话；若先广播，首次
+    // Google 登录可能在 proma-official 渠道/默认模型落盘前抢先发送首条消息。
+    await initializeOfficialChannelForLogin()
     broadcastAuthStateChanged()
 
     return { success: true, user: cachedUser }

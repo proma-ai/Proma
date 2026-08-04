@@ -24,6 +24,10 @@ mock.module('electron', () => ({
   shell: {
     openExternal: async () => undefined,
   },
+  // channel-manager 依赖的 billing service 会导入 BrowserWindow；本测试不触发广播。
+  BrowserWindow: {
+    getAllWindows: () => [],
+  },
 }))
 
 mock.module('node:os', () => ({

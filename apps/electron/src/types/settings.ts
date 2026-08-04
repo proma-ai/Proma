@@ -260,6 +260,8 @@ export interface AppSettings {
   agentAutomationGroupOrder?: number
   /** 是否已完成 Onboarding 流程 */
   onboardingCompleted?: boolean
+  /** 已完成的 Onboarding 版本；低于当前版本时会再次展示引导。 */
+  onboardingVersion?: number
   /** 是否跳过了环境检测 */
   environmentCheckSkipped?: boolean
   /** 最后一次环境检测结果（缓存） */
@@ -330,6 +332,17 @@ export interface AppSettings {
   mainWindowState?: MainWindowState
   /** 独立任务/日程窗口状态（大小、位置、是否最大化） */
   planningWindowState?: MainWindowState
+}
+
+/** 当前发布的 Onboarding 内容版本。提升该值可让所有用户重新完成新版引导。 */
+export const CURRENT_ONBOARDING_VERSION = 2
+
+/** 仅当用户完成过当前版本的引导时，才不再展示 Onboarding。 */
+export function hasCompletedCurrentOnboarding(
+  settings: Pick<AppSettings, 'onboardingCompleted' | 'onboardingVersion'>,
+): boolean {
+  return settings.onboardingCompleted === true
+    && (settings.onboardingVersion ?? 0) >= CURRENT_ONBOARDING_VERSION
 }
 
 /** 主窗口大小、位置和最大化状态 */

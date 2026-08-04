@@ -518,7 +518,8 @@ if (app.isPackaged) {
  * 格式：proma://oauth/callback?token=xxx&refresh_token=yyy
  */
 function handleDeepLink(url: string): void {
-  console.log('[Deep Link] 收到:', url)
+  // 回调 URL 含 access / refresh token，绝不能写入本地日志。
+  console.log('[Deep Link] 收到 OAuth 回调')
 
   try {
     const parsed = new URL(url)

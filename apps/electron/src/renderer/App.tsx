@@ -12,9 +12,11 @@ import { agentChannelIdAtom, agentModelIdAtom, agentSessionsAtom, currentAgentSe
 import { appModeAtom } from './atoms/app-mode'
 import { PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import { ShortcutGuideDialog } from './components/shortcuts/ShortcutGuideDialog'
+import { FaqDialog } from './components/shortcuts/FaqDialog'
 import { PlanningReminderRail } from './components/planning/PlanningReminderRail'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
+import { hasCompletedCurrentOnboarding } from '../types'
 import type { AppShellContextType } from './contexts/AppShellContext'
 
 export default function App(): React.ReactElement {
@@ -36,7 +38,7 @@ export default function App(): React.ReactElement {
     const initialize = async () => {
       try {
         const settings = await window.electronAPI.getSettings()
-        if (!settings.onboardingCompleted) {
+        if (!hasCompletedCurrentOnboarding(settings)) {
           setShowOnboarding(true)
         }
       } catch (error) {
@@ -130,6 +132,7 @@ export default function App(): React.ReactElement {
         <QuotaExceededDialog />
       </CloudAuthGate>
       <ShortcutGuideDialog />
+      <FaqDialog />
       <TutorialBanner />
       <GlobalEnvironmentCheckDialog />
       <MigrationImportDialog />
