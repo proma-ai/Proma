@@ -7,10 +7,7 @@ static EKEventStore *store = nil;
 static EKEventStore *eventStore() { if (!store) store = [[EKEventStore alloc] init]; return store; }
 
 static NSString *statusName(EKAuthorizationStatus status) {
-  if (@available(macOS 14.0, *)) {
-    switch (status) { case EKAuthorizationStatusFullAccess: return @"full-access"; case EKAuthorizationStatusWriteOnly: return @"write-only"; case EKAuthorizationStatusNotDetermined: return @"not-determined"; case EKAuthorizationStatusDenied: return @"denied"; case EKAuthorizationStatusRestricted: return @"restricted"; }
-  }
-  switch (status) { case EKAuthorizationStatusAuthorized: return @"full-access"; case EKAuthorizationStatusNotDetermined: return @"not-determined"; case EKAuthorizationStatusDenied: return @"denied"; case EKAuthorizationStatusRestricted: return @"restricted"; default: return @"restricted"; }
+  switch (status) { case EKAuthorizationStatusFullAccess: return @"full-access"; case EKAuthorizationStatusWriteOnly: return @"write-only"; case EKAuthorizationStatusNotDetermined: return @"not-determined"; case EKAuthorizationStatusDenied: return @"denied"; case EKAuthorizationStatusRestricted: return @"restricted"; }
 }
 static EKEntityType typeFor(NSString *entity) { return [entity isEqualToString:@"calendar"] ? EKEntityTypeEvent : EKEntityTypeReminder; }
 static NSString *sourceType(EKSourceType type) { switch (type) { case EKSourceTypeCalDAV: return @"caldav"; case EKSourceTypeExchange: return @"exchange"; case EKSourceTypeLocal: return @"local"; case EKSourceTypeBirthdays: return @"birthdays"; case EKSourceTypeMobileMe: return @"mobileme"; case EKSourceTypeSubscribed: return @"subscribed"; default: return @"unknown"; } }
@@ -69,6 +66,7 @@ static void upsert(NSString *entity, NSDictionary *payload, CommandContext *ctx,
 
 static void execute(NSString *command, NSString *entity, NSDictionary *payload, CommandContext *ctx) {
   @autoreleasepool {
+    if (!@available(macOS 14.0, *)) { ctx->resolve(json(@{ @"entity": entity, @"status": @"unsupported" })); return; }
     NSLog(@"[PromaEventKit] executing %@ for %@ (status=%@)", command, entity, statusName([EKEventStore authorizationStatusForEntityType:typeFor(entity)]));
     EKEntityType entityType = typeFor(entity);
     if ([command isEqualToString:@"authorizationStatus"]) { ctx->resolve(json(@{ @"entity": entity, @"status": statusName([EKEventStore authorizationStatusForEntityType:entityType]) })); return; }
@@ -76,10 +74,8 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
       // Electron main 可能不是前台应用；显式激活其 NSApplication，确保 TCC sheet 可呈现。
       NSLog(@"[PromaEventKit] requesting TCC with NSApp=%@ active=%d", NSApp, NSApp.isActive);
       [NSApp activateIgnoringOtherApps:YES];
-      if (@available(macOS 14.0, *)) {
-        void (^completion)(BOOL, NSError *) = ^(BOOL granted, NSError *error) { dispatch_async(dispatch_get_main_queue(), ^{ ctx->resolve(json(@{ @"entity": entity, @"status": statusName([EKEventStore authorizationStatusForEntityType:entityType]), @"granted": @(granted), @"error": error.localizedDescription ?: @"" })); }); };
-        if ([entity isEqualToString:@"calendar"]) [eventStore() requestFullAccessToEventsWithCompletion:completion]; else [eventStore() requestFullAccessToRemindersWithCompletion:completion];
-      } else [eventStore() requestAccessToEntityType:entityType completion:^(BOOL granted, NSError *error) { dispatch_async(dispatch_get_main_queue(), ^{ ctx->resolve(json(@{ @"entity": entity, @"status": statusName([EKEventStore authorizationStatusForEntityType:entityType]), @"granted": @(granted), @"error": error.localizedDescription ?: @"" })); }); }];
+      void (^completion)(BOOL, NSError *) = ^(BOOL granted, NSError *error) { dispatch_async(dispatch_get_main_queue(), ^{ ctx->resolve(json(@{ @"entity": entity, @"status": statusName([EKEventStore authorizationStatusForEntityType:entityType]), @"granted": @(granted), @"error": error.localizedDescription ?: @"" })); }); };
+      if ([entity isEqualToString:@"calendar"]) [eventStore() requestFullAccessToEventsWithCompletion:completion]; else [eventStore() requestFullAccessToRemindersWithCompletion:completion];
       return;
     }
     if ([command isEqualToString:@"listWritableTargets"]) {

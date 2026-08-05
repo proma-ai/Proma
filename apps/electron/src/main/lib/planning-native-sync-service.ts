@@ -13,12 +13,18 @@ type NativePermissionResponse = {
   error?: string
 }
 
+function eventKitSupported(): boolean {
+  if (process.platform !== 'darwin') return false
+  const major = Number.parseInt(process.getSystemVersion().split('.')[0] ?? '', 10)
+  return Number.isFinite(major) && major >= 14
+}
+
 function unsupportedPermission(entity: PlanningNativeSyncEntity): NativePermissionResponse {
   return { entity, status: 'unsupported' }
 }
 
 async function getPermission(entity: PlanningNativeSyncEntity): Promise<NativePermissionResponse> {
-  if (process.platform !== 'darwin') return unsupportedPermission(entity)
+  if (!eventKitSupported()) return unsupportedPermission(entity)
   try {
     return await callMacEventKitNativeAddon<NativePermissionResponse>('authorizationStatus', entity)
   } catch (error) {
@@ -32,11 +38,9 @@ async function getPermission(entity: PlanningNativeSyncEntity): Promise<NativePe
 
 /** 供设置页展示；不可用时不抛出，避免非 macOS 用户看到 IPC 错误。 */
 export async function getPlanningNativeSyncStatus(): Promise<PlanningNativeSyncStatus> {
-  if (process.platform !== 'darwin') {
-    return { supported: false, calendar: unsupportedPermission('calendar'), reminder: unsupportedPermission('reminder') }
-  }
+  if (!eventKitSupported()) return { supported: false, calendar: unsupportedPermission('calendar'), reminder: unsupportedPermission('reminder') }
   const [calendar, reminder] = await Promise.all([getPermission('calendar'), getPermission('reminder')])
-  return { supported: calendar.status !== 'unavailable' || reminder.status !== 'unavailable', calendar, reminder }
+  return { supported: true, calendar, reminder }
 }
 
 async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
@@ -52,7 +56,7 @@ async function withTimeout<T>(promise: Promise<T>, milliseconds: number, message
 }
 
 export async function requestPlanningNativeSyncAccess(entity: PlanningNativeSyncEntity): Promise<NativePermissionResponse> {
-  if (process.platform !== 'darwin') return unsupportedPermission(entity)
+  if (!eventKitSupported()) return unsupportedPermission(entity)
   try {
     // EventKit/TCC 在少数 macOS 版本中会既不展示 sheet 也不调用 completion；绝不能让 UI 无限 loading。
     return await withTimeout(
@@ -71,7 +75,7 @@ export async function requestPlanningNativeSyncAccess(entity: PlanningNativeSync
 
 /** 仅在已完整授权时返回可写目标；此处不自动触发系统授权弹窗。 */
 export async function listPlanningNativeSyncTargets(entity: PlanningNativeSyncEntity): Promise<PlanningNativeSyncTarget[]> {
-  if (process.platform !== 'darwin') return []
+  if (!eventKitSupported()) return []
   const permission = await getPermission(entity)
   if (permission.status !== 'full-access') return []
   try {
@@ -104,10 +108,11 @@ export interface PlanningNativeSyncIdentifiers {
 }
 
 export async function upsertPlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: PlanningNativeSyncItem): Promise<PlanningNativeSyncIdentifiers> {
+  if (!eventKitSupported()) throw new Error('macOS 14 或更高版本才支持系统日历与提醒事项同步')
   return callMacEventKitNativeAddon<PlanningNativeSyncIdentifiers>('upsert', entity, item)
 }
 
 export async function removePlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: Pick<PlanningNativeSyncItem, 'calendarItemIdentifier'>): Promise<void> {
-  if (!item.calendarItemIdentifier) return
+  if (!eventKitSupported() || !item.calendarItemIdentifier) return
   await callMacEventKitNativeAddon<Record<string, never>>('remove', entity, item)
 }

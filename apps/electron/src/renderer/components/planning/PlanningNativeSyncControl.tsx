@@ -114,9 +114,10 @@ export function PlanningNativeSyncControl({ entity }: { entity: PlanningNativeSy
       </Button>
     </PopoverTrigger>
     <PopoverContent align="start" className="w-80 space-y-3 p-3">
-      <div className="flex gap-2.5">
-        <div className="rounded-md bg-primary/10 p-2 text-primary"><Icon className="size-4" /></div>
-        <div className="min-w-0"><p className="text-sm font-medium">{COPY[entity].label}同步</p><p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Proma 仅会发布到你选择的一个目标；系统账户会负责 iCloud 跨设备同步。</p></div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{COPY[entity].label}同步</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Proma 仅会发布到你选择的一个目标；系统账户会负责 iCloud 跨设备同步。</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">建议先在系统中创建一个名为「Proma」的{entity === 'calendar' ? '日历' : '提醒事项列表'}，再将它设为同步目标，避免与个人项目混杂。</p>
       </div>
       {loading || !permission ? <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />正在检查授权…</div>
         : permission.status === 'full-access' ? <div className="space-y-2"><Select value={profile?.targetId ?? ''} onValueChange={(id) => void saveTarget(id)} disabled={saving || targets.length === 0}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder={targets.length ? `选择一个 ${COPY[entity].targetLabel}` : '未找到可写目标'} /></SelectTrigger><SelectContent>{targets.map((target) => <SelectItem key={target.id} value={target.id}>{target.sourceTitle ? `${target.sourceTitle} · ` : ''}{target.title}{target.isCloudBacked ? ' · 云端账户' : ''}</SelectItem>)}</SelectContent></Select>{profile && <p className="text-[11px] leading-relaxed text-muted-foreground">当前：{profile.sourceTitle ? `${profile.sourceTitle} · ` : ''}{profile.targetTitle}。系统端修改暂不会回流。</p>}{!profile && <p className="text-[11px] leading-relaxed text-muted-foreground">选择后会开始单向发布现有 Proma 项目，不会导入或修改其他系统项目。</p>}</div>
