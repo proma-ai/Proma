@@ -86,10 +86,22 @@ const DISPLAY_NAMES: Record<string, string> = {
   plaintext: 'Text', text: 'Text',
 }
 
-/** 获取语言显示名称，未匹配的自动首字母大写 */
+/** 显式文本类语言别名（应显示为 'Text' 而非 'Code'） */
+const TEXT_LANGUAGE_ALIASES = new Set(['text', 'plaintext', 'txt', 'plain'])
+
+/**
+ * 获取语言显示名称，非法/未知标识归一化为 'Code'，显式文本类显示 'Text'
+ *
+ * 非法标识（含引号/空格等特殊字符，或 Shiki 无法识别的语言名）统一回退为 'Code'，
+ * 避免把原始串原样首字母大写后显示为乱码。
+ */
 export function getDisplayName(lang: string): string {
   if (!lang) return 'Code'
-  const key = lang.toLowerCase()
+  const key = lang.toLowerCase().trim()
+  // 非 Shiki 可识别语言（含非法字符或不存在于语言集）→ 归一化为 Code；显式文本别名 → Text
+  if (resolveLanguage(lang) === 'text') {
+    return TEXT_LANGUAGE_ALIASES.has(key) ? 'Text' : 'Code'
+  }
   return DISPLAY_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
 }
 
