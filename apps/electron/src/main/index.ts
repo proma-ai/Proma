@@ -47,6 +47,10 @@ function registerProtocolsAndHandlers(): void {
 
   // Windows 文件关联：当用户双击文件时，新实例的参数会通过 second-instance 传给已有实例
   app.on('second-instance', (_event, argv) => {
+    if (hasOpenPlanningArgument(argv)) {
+      showPlanningWindow()
+      return
+    }
     showAndFocusMainWindow()
     const fileArg = argv.find((arg) => arg.endsWith('.proma-backup') || arg.endsWith('.proma-share'))
     if (fileArg) {
@@ -113,6 +117,8 @@ import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
 import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
+import { configurePlanningQuickEntries } from './lib/planning-quick-entry'
+import { hasOpenPlanningArgument } from './lib/planning-quick-entry-model'
 import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
@@ -560,9 +566,19 @@ async function bootstrap(): Promise<void> {
   // Create main window (will be shown when ready)
   createWindow()
 
+  // 为 Dock、任务栏右键菜单与首次启动参数提供任务/日程的直接入口。
+  safeRun('configurePlanningQuickEntries', () => {
+    configurePlanningQuickEntries({
+      showMainWindow: showAndFocusMainWindow,
+      showPlanningWindow,
+    })
+  })
+  if (hasOpenPlanningArgument(process.argv)) showPlanningWindow()
+
   // Create system tray icon
   createTray({
     showMainWindow: showAndFocusMainWindow,
+    showPlanningWindow,
     openAgentSession: (sessionId, title) => {
       sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
     },
@@ -618,6 +634,9 @@ async function bootstrap(): Promise<void> {
   )
   safeRun('registerGlobalShortcut:show-main-window', () =>
     registerGlobalShortcut('show-main-window', showAndFocusMainWindow),
+  )
+  safeRun('registerGlobalShortcut:open-planning', () =>
+    registerGlobalShortcut('open-planning', showPlanningWindow),
   )
   safeRun('registerGlobalShortcut:voice-dictation', () =>
     registerGlobalShortcut('voice-dictation', () => {

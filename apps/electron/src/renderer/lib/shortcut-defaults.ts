@@ -124,7 +124,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     description: '打开或聚焦独立的 Todo、日程与定时任务窗口',
     defaultMac: 'Cmd+Shift+T',
     defaultWin: 'Ctrl+Shift+T',
-    category: 'navigation',
+    category: 'global',
+    global: true,
   },
   {
     id: 'file-find',
