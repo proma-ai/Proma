@@ -4928,7 +4928,8 @@ export function registerIpcHandlers(): void {
     const target = (await listPlanningNativeConnectionTargets(input.entity)).find((item) => item.id === input.target.id)
     if (!target) throw new Error('系统集合不存在或尚未授权')
     const connection = connectPlanningNativeConnection({ entity: input.entity, target })
-    void runPlanningNativeSync()
+    // 用户刚确认连接时必须立刻回流，不能被全局定期同步 cooldown 延后。
+    void runPlanningNativeSync(true)
     return connection
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.DISCONNECT_NATIVE_CONNECTION, async (_, id: unknown): Promise<boolean> => {

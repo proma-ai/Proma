@@ -487,7 +487,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
   return [
     sdk.defineTool({
       name: 'mcp__planning__list_todos', label: '列出 Todo',
-      description: '列出 Proma 本地 Todo。适合在安排工作、检查今天待办、维护任务状态前使用。仅 Pi Agent 可用。',
+      description: '列出 Proma Todo（包含用户明确连接的系统提醒事项投影）。返回项的 nativeOrigin 表示编辑会写回系统；对该类项单项编辑/完成先征得用户确认，批量修改和删除必须明确确认。仅 Pi Agent 可用。',
       parameters: Type.Object({
         status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])),
         dueBefore: Type.Optional(Type.Number({ description: '仅返回此截止时间之前的 Todo，Unix 毫秒时间戳' })),
@@ -526,7 +526,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__update_todo', label: '更新 Todo',
-      description: '更新 Todo 的标题、说明、优先级或截止时间。仅 Pi Agent 可用。',
+      description: '更新 Todo 的标题、说明、优先级或截止时间。若 Todo 含 nativeOrigin，此操作会写回用户已连接的系统提醒事项：单项编辑/完成先征得用户确认；批量修改必须明确确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')])), dueAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
@@ -541,7 +541,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__complete_todo', label: '完成 Todo',
-      description: '将指定 Todo 标记为已完成。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
+      description: '将指定 Todo 标记为已完成。若含 nativeOrigin 会同时完成用户已连接的系统提醒事项；必须先说明该外部副作用并取得用户确认。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         const updated = updateTodo({ id: assertNonBlank((params as { id: string }).id, 'id'), status: 'completed' })
@@ -555,7 +555,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_todo', label: '删除 Todo',
-      description: '删除 Todo。只在用户明确要求删除时使用；不会删除关联草稿或日程。仅 Pi Agent 可用。',
+      description: '删除 Todo。只在用户明确要求删除时使用；对于含 nativeOrigin 的连接系统提醒事项，此操作仅从 Proma 隐藏，不删除系统原项，仍须向用户说明。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)
@@ -571,7 +571,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__list_calendar_events', label: '列出日程',
-      description: '列出 Proma 本地日程。用于查看指定时间范围的安排。仅 Pi Agent 可用。',
+      description: '列出 Proma 日程（包含用户明确连接的系统日历投影）。nativeOrigin 表示编辑会写回系统；Agent 修改前必须先取得用户确认。仅 Pi Agent 可用。',
       parameters: Type.Object({
         startAt: Type.Optional(Type.Number({ description: '查询范围起点，Unix 毫秒时间戳' })),
         endAt: Type.Optional(Type.Number({ description: '查询范围终点，Unix 毫秒时间戳' })),
@@ -607,7 +607,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__update_calendar_event', label: '更新日程',
-      description: '更新日程时间或内容。仅 Pi Agent 可用。',
+      description: '更新日程时间或内容。若日程含 nativeOrigin，会写回用户已连接的系统日历；单项修改先确认，批量修改必须明确确认，只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), startAt: Type.Optional(Type.Number()), endAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), allDay: Type.Optional(Type.Boolean()), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), todoId: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
@@ -620,7 +620,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_calendar_event', label: '删除日程',
-      description: '删除 Proma 本地日程。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
+      description: '删除日程。只在用户明确要求删除时使用；含 nativeOrigin 的日程只会从 Proma 隐藏，不删除系统原项，仍应告知用户。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)

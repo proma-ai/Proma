@@ -33,8 +33,8 @@ static NSDictionary *itemResponse(EKCalendarItem *item) { return @{ @"calendarIt
 static NSNumber *milliseconds(NSDate *value) { return value ? @((long long)llround(value.timeIntervalSince1970 * 1000.0)) : nil; }
 static NSDictionary *itemDTO(NSString *entity, EKCalendarItem *item) {
   NSMutableDictionary *result = [@{ @"calendarItemIdentifier": item.calendarItemIdentifier ?: @"", @"calendarItemExternalIdentifier": item.calendarItemExternalIdentifier ?: @"", @"title": item.title ?: @"", @"notes": item.notes ?: @"", @"lastModifiedAt": milliseconds(item.lastModifiedDate) ?: @0 } mutableCopy];
-  if ([entity isEqualToString:@"calendar"]) { EKEvent *event = (EKEvent *)item; result[@"startAt"] = milliseconds(event.startDate) ?: @0; result[@"endAt"] = milliseconds(event.endDate) ?: @0; result[@"allDay"] = @(event.allDay); }
-  else { EKReminder *reminder = (EKReminder *)item; NSDate *due = reminder.dueDateComponents ? [[NSCalendar currentCalendar] dateFromComponents:reminder.dueDateComponents] : nil; if (due) result[@"dueAt"] = milliseconds(due); result[@"priority"] = reminder.priority <= 4 ? @"high" : reminder.priority >= 6 ? @"low" : @"medium"; result[@"completed"] = @(reminder.completed); if (reminder.completionDate) result[@"completedAt"] = milliseconds(reminder.completionDate); }
+  if ([entity isEqualToString:@"calendar"]) { EKEvent *event = (EKEvent *)item; result[@"startAt"] = milliseconds(event.startDate) ?: @0; result[@"endAt"] = milliseconds(event.endDate) ?: @0; result[@"allDay"] = @(event.allDay); result[@"isRecurring"] = @(event.recurrenceRules.count > 0); }
+  else { EKReminder *reminder = (EKReminder *)item; NSDate *due = reminder.dueDateComponents ? [[NSCalendar currentCalendar] dateFromComponents:reminder.dueDateComponents] : nil; if (due) result[@"dueAt"] = milliseconds(due); result[@"dueDateOnly"] = @(reminder.dueDateComponents && reminder.dueDateComponents.hour == NSDateComponentUndefined); result[@"priority"] = reminder.priority <= 4 ? @"high" : reminder.priority >= 6 ? @"low" : @"medium"; result[@"completed"] = @(reminder.completed); if (reminder.completionDate) result[@"completedAt"] = milliseconds(reminder.completionDate); }
   return result;
 }
 
@@ -59,14 +59,14 @@ static void upsert(NSString *entity, NSDictionary *payload, CommandContext *ctx,
   NSString *identifier = string(payload, @"calendarItemIdentifier"); EKCalendarItem *recovered = identifier ? nil : ([entity isEqualToString:@"reminder"] ? ([recoveredReminders firstObject]) : recoveredItem(entity, target, payload));
   NSError *error = nil;
   if ([entity isEqualToString:@"calendar"]) {
-    EKEvent *event = identifier ? (EKEvent *)[eventStore() calendarItemWithIdentifier:identifier] : nil; if (!event) event = (EKEvent *)recovered; if (!event) event = [EKEvent eventWithEventStore:eventStore()];
+    EKEvent *event = identifier ? (EKEvent *)[eventStore() calendarItemWithIdentifier:identifier] : nil; if (event && ![event.calendar.calendarIdentifier isEqualToString:target.calendarIdentifier]) { ctx->reject(@"系统项目已移出连接集合"); return; } if (!event) event = (EKEvent *)recovered; if (!event) event = [EKEvent eventWithEventStore:eventStore()];
     NSNumber *startAt = number(payload, @"startAt"); if (!startAt) { ctx->reject(@"日程缺少开始时间"); return; }
     event.calendar = target; event.title = title; event.notes = string(payload, @"notes"); if (!event.URL) event.URL = identityURL(entity, string(payload, @"identity"));
     event.startDate = date(startAt); event.endDate = date(number(payload, @"endAt") ?: @(startAt.doubleValue + 3600000)); event.allDay = [number(payload, @"allDay") boolValue];
     if (![eventStore() saveEvent:event span:EKSpanThisEvent commit:YES error:&error]) { ctx->reject(error.localizedDescription); return; }
     ctx->resolve(json(itemResponse(event))); return;
   }
-  EKReminder *reminder = identifier ? (EKReminder *)[eventStore() calendarItemWithIdentifier:identifier] : nil; if (!reminder) reminder = (EKReminder *)recovered; if (!reminder) reminder = [EKReminder reminderWithEventStore:eventStore()];
+  EKReminder *reminder = identifier ? (EKReminder *)[eventStore() calendarItemWithIdentifier:identifier] : nil; if (reminder && ![reminder.calendar.calendarIdentifier isEqualToString:target.calendarIdentifier]) { ctx->reject(@"系统项目已移出连接集合"); return; } if (!reminder) reminder = (EKReminder *)recovered; if (!reminder) reminder = [EKReminder reminderWithEventStore:eventStore()];
   reminder.calendar = target; reminder.title = title; reminder.notes = string(payload, @"notes"); if (!reminder.URL) reminder.URL = identityURL(entity, string(payload, @"identity"));
   NSNumber *dueAt = number(payload, @"dueAt"); if (dueAt) { NSDate *due = date(dueAt); NSCalendarUnit units = [number(payload, @"dueDateOnly") boolValue] ? (NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay) : (NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitHour|NSCalendarUnitMinute|NSCalendarUnitSecond); NSDateComponents *components = [[NSCalendar currentCalendar] components:units fromDate:due]; components.timeZone = NSTimeZone.localTimeZone; reminder.dueDateComponents = components; } else reminder.dueDateComponents = nil;
   NSString *priority = string(payload, @"priority") ?: @"medium"; reminder.priority = [priority isEqualToString:@"high"] ? 1 : [priority isEqualToString:@"low"] ? 9 : 5;

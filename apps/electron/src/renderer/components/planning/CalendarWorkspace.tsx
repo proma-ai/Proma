@@ -524,7 +524,7 @@ function CalendarEventPreviewContent({ event }: { event: CalendarEvent }): React
   const time = event.allDay
     ? '全天'
     : `${new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(event.startAt)} – ${formatTime(eventEndAt(event))}`
-  return <div className="space-y-2"><div><p className="font-medium text-tooltip-foreground">{event.title}</p>{event.notes && <p className="mt-1 line-clamp-3 leading-relaxed text-tooltip-muted">{event.notes}</p>}</div><div className="flex flex-wrap gap-1.5 text-[11px] text-tooltip-muted"><span>{time}</span>{event.group && <span>{event.group.name}</span>}{event.tags.map((tag) => <span key={tag.id}>#{tag.name}</span>)}</div></div>
+  return <div className="space-y-2"><div><p className="font-medium text-tooltip-foreground">{event.title}</p>{event.notes && <p className="mt-1 line-clamp-3 leading-relaxed text-tooltip-muted">{event.notes}</p>}</div><div className="flex flex-wrap gap-1.5 text-[11px] text-tooltip-muted"><span>{time}</span>{event.nativeOrigin && <span>{event.nativeOrigin.sourceTitle ? `${event.nativeOrigin.sourceTitle} · 系统` : '已连接系统'}</span>}{event.group && <span>{event.group.name}</span>}{event.tags.map((tag) => <span key={tag.id}>#{tag.name}</span>)}</div></div>
 }
 
 type TimedItem =

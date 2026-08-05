@@ -32,14 +32,14 @@ async function syncNativeItem(item: PlanningNativeOutboxItem): Promise<void> {
   } else {
     const todo = getTodo(item.promaEntityId)
     if (!todo) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
-    await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
+    await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: item.dueDateOnly ?? isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
   }
   completePlanningNativeOutbox(item)
 }
 
-async function reconcileExternalConnections(): Promise<void> {
+async function reconcileExternalConnections(force = false): Promise<void> {
   const now = Date.now()
-  if (now - lastExternalReconcileAt < EXTERNAL_RECONCILE_INTERVAL_MS) return
+  if (!force && now - lastExternalReconcileAt < EXTERNAL_RECONCILE_INTERVAL_MS) return
   lastExternalReconcileAt = now
   for (const connection of listPlanningNativeConnections()) {
     try {
@@ -99,13 +99,13 @@ async function syncItem(item: PlanningSyncOutboxItem): Promise<void> {
   completePlanningSyncOutbox(item, identifiers)
 }
 
-export async function runPlanningNativeSync(): Promise<void> {
+export async function runPlanningNativeSync(forceExternalReconcile = false): Promise<void> {
   if (syncing || process.platform !== 'darwin') return
   syncing = true
   try {
     const status = await getPlanningNativeSyncStatus()
     if (!status.supported) return
-    await reconcileExternalConnections()
+    await reconcileExternalConnections(forceExternalReconcile)
     for (const item of listDuePlanningSyncCleanup()) {
       if ((item.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
       try {
