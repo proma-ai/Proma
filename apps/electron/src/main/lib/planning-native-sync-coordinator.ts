@@ -1,6 +1,6 @@
-import { applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listPlanningNativeConnections, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
+import { applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, hideMissingPlanningNativeConnectionItems, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listPlanningNativeBindingIdentifiers, listPlanningNativeConnections, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
 import { broadcastPlanningChanged, onPlanningChanged } from './planning-events'
-import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, removePlanningNativeSyncItem, subscribePlanningNativeSyncChanges, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
+import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, listPlanningNativeConnectionItemsByIdentifier, removePlanningNativeSyncItem, subscribePlanningNativeSyncChanges, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
 
 const POLL_INTERVAL_MS = 30_000
 let timer: ReturnType<typeof setInterval> | null = null
@@ -48,7 +48,14 @@ async function reconcileExternalConnections(force = false): Promise<void> {
       // 有界窗口控制首次连接和定期扫描的主进程成本；范围外项目不会被隐式导入。
       const range = connection.entity === 'calendar' ? { from: now - 30 * 24 * 60 * 60 * 1_000, to: now + 12 * 30 * 24 * 60 * 60 * 1_000 } : undefined
       const items = await listPlanningNativeConnectionItems(connection.entity, connection.targetId, range)
-      applyPlanningNativeConnectionItems(connection.id, items)
+      // 日历 range 是有界的新项目导入；已绑定项目用 identifier 精确检查存在性，防止窗口外误隐藏。
+      applyPlanningNativeConnectionItems(connection.id, items, { fullSnapshot: connection.entity === 'reminder' })
+      if (connection.entity === 'calendar') {
+        const boundIds = listPlanningNativeBindingIdentifiers(connection.id)
+        const boundItems = await listPlanningNativeConnectionItemsByIdentifier(connection.entity, connection.targetId, boundIds)
+        applyPlanningNativeConnectionItems(connection.id, boundItems, { fullSnapshot: false })
+        hideMissingPlanningNativeConnectionItems(connection.id, boundItems.map((item) => item.calendarItemIdentifier))
+      }
       broadcastPlanningChanged([connection.entity === 'calendar' ? 'calendar_events' : 'todos'])
     } catch (error) { console.warn(`[计划同步] 外部 ${connection.entity} 回流失败:`, error) }
   }

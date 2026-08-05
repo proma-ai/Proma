@@ -110,6 +110,8 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
     if ([command isEqualToString:@"listItems"]) {
       EKCalendar *target = [eventStore() calendarWithIdentifier:string(payload, @"targetId")];
       if (!target) { ctx->reject(@"未找到已连接的系统集合"); return; }
+      NSArray *identifiers = [payload[@"calendarItemIdentifiers"] isKindOfClass:[NSArray class]] ? payload[@"calendarItemIdentifiers"] : nil;
+      if (identifiers) { NSMutableArray *items = [NSMutableArray array]; for (id identifierValue in identifiers) { if (![identifierValue isKindOfClass:[NSString class]]) continue; EKCalendarItem *item = [eventStore() calendarItemWithIdentifier:identifierValue]; if (item && [item.calendar.calendarIdentifier isEqualToString:target.calendarIdentifier]) [items addObject:itemDTO(entity, item)]; } ctx->resolve(json(items)); return; }
       if ([entity isEqualToString:@"calendar"]) { NSNumber *fromValue = number(payload, @"from"), *toValue = number(payload, @"to"); if (!fromValue || !toValue) { ctx->reject(@"日程读取缺少时间范围"); return; } NSPredicate *predicate = [eventStore() predicateForEventsWithStartDate:date(fromValue) endDate:date(toValue) calendars:@[target]]; NSMutableArray *items = [NSMutableArray array]; for (EKEvent *event in [eventStore() eventsMatchingPredicate:predicate]) [items addObject:itemDTO(entity, event)]; ctx->resolve(json(items)); return; }
       NSPredicate *predicate = [eventStore() predicateForRemindersInCalendars:@[target]]; [eventStore() fetchRemindersMatchingPredicate:predicate completion:^(NSArray<EKReminder *> *reminders) { dispatch_async(dispatch_get_main_queue(), ^{ NSMutableArray *items = [NSMutableArray array]; for (EKReminder *reminder in reminders) [items addObject:itemDTO(entity, reminder)]; ctx->resolve(json(items)); }); }]; return;
     }
@@ -134,12 +136,17 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
   }
 }
 
+static void cleanupChanges() {
+  if (eventStoreChangeObserver) { [[NSNotificationCenter defaultCenter] removeObserver:eventStoreChangeObserver]; eventStoreChangeObserver = nil; }
+  if (eventStoreChangeListener) { eventStoreChangeListener->Release(); eventStoreChangeListener.reset(); }
+}
+
 static Napi::Value subscribeChanges(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
   if (info.Length() < 1 || !info[0].IsFunction()) { Napi::TypeError::New(env, "change listener callback is required").ThrowAsJavaScriptException(); return env.Undefined(); }
   if (eventStoreChangeObserver) [[NSNotificationCenter defaultCenter] removeObserver:eventStoreChangeObserver];
   if (eventStoreChangeListener) eventStoreChangeListener->Release();
-  eventStoreChangeListener = std::make_unique<Napi::ThreadSafeFunction>(Napi::ThreadSafeFunction::New(env, info[0].As<Napi::Function>(), "PromaEventKitChanges", 0, 1));
+  eventStoreChangeListener = std::make_unique<Napi::ThreadSafeFunction>(Napi::ThreadSafeFunction::New(env, info[0].As<Napi::Function>(), "PromaEventKitChanges", 1, 1));
   eventStoreChangeObserver = [[NSNotificationCenter defaultCenter] addObserverForName:EKEventStoreChangedNotification object:eventStore() queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *) {
     if (!eventStoreChangeListener) return;
     eventStoreChangeListener->NonBlockingCall([](Napi::Env callbackEnv, Napi::Function callback) { callback.Call({}); });
@@ -153,5 +160,5 @@ static Napi::Value command(const Napi::CallbackInfo &info) {
   NSError *error = nil; NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:[payloadText dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error]; if (!payload || ![payload isKindOfClass:[NSDictionary class]]) payload = @{};
   auto *ctx = new CommandContext(env); NSLog(@"[PromaEventKit] scheduling %@ for %@ on main queue", name, entity); dispatch_async(dispatch_get_main_queue(), ^{ execute(name, entity, payload, ctx); }); return ctx->deferred->Promise();
 }
-Napi::Object Init(Napi::Env env, Napi::Object exports) { NSLog(@"[PromaEventKit] N-API addon loaded"); exports.Set("command", Napi::Function::New(env, command)); exports.Set("subscribeChanges", Napi::Function::New(env, subscribeChanges)); return exports; }
+Napi::Object Init(Napi::Env env, Napi::Object exports) { NSLog(@"[PromaEventKit] N-API addon loaded"); env.AddCleanupHook(cleanupChanges); exports.Set("command", Napi::Function::New(env, command)); exports.Set("subscribeChanges", Napi::Function::New(env, subscribeChanges)); return exports; }
 NODE_API_MODULE(proma_eventkit, Init)

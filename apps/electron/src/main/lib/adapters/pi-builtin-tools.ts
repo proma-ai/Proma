@@ -121,6 +121,12 @@ function assertPlanningDeleteAllowed(ctx: PiBuiltinToolsContext): void {
     throw new Error('定时任务和协作子 Agent 不能删除本地规划数据，请由用户主会话发起并确认。')
   }
 }
+/** 系统来源项会触发 EventKit 外部副作用；后台来源无法取得实时确认，必须拒绝。 */
+function assertExternalPlanningWriteAllowed(ctx: PiBuiltinToolsContext, isExternal: boolean): void {
+  if (isExternal && (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation')) {
+    throw new Error('定时任务和协作子 Agent 不能修改已连接的系统项目；请由用户主会话说明变更并确认。')
+  }
+}
 
 /** Agent 未明确完成时间时，Todo 默认以本地当天为计划单位。 */
 function defaultTodoDueAt(): number {
@@ -530,7 +536,9 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')])), dueAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
-        const updated = updateTodo({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: args.dueAt as number | null | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, status: args.status as 'open' | 'completed' | undefined })
+        const id = assertNonBlank(args.id as string, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getTodo(id)?.nativeOrigin))
+        const updated = updateTodo({ id, title: args.title as string | undefined, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: args.dueAt as number | null | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, status: args.status as 'open' | 'completed' | undefined })
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
@@ -544,7 +552,9 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
       description: '将指定 Todo 标记为已完成。若含 nativeOrigin 会同时完成用户已连接的系统提醒事项；必须先说明该外部副作用并取得用户确认。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
-        const updated = updateTodo({ id: assertNonBlank((params as { id: string }).id, 'id'), status: 'completed' })
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getTodo(id)?.nativeOrigin))
+        const updated = updateTodo({ id, status: 'completed' })
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
@@ -611,7 +621,9 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), startAt: Type.Optional(Type.Number()), endAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), allDay: Type.Optional(Type.Boolean()), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), todoId: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
-        const event = updateCalendarEvent({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, startAt: args.startAt as number | undefined, endAt: args.endAt as number | null | undefined, allDay: args.allDay as boolean | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, todoId: args.todoId as string | null | undefined })
+        const id = assertNonBlank(args.id as string, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getCalendarEvent(id)?.nativeOrigin))
+        const event = updateCalendarEvent({ id, title: args.title as string | undefined, notes: args.notes as string | undefined, startAt: args.startAt as number | undefined, endAt: args.endAt as number | null | undefined, allDay: args.allDay as boolean | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, todoId: args.todoId as string | null | undefined })
         if (!event) throw new Error('日程不存在')
         broadcastPlanningChanged(['calendar_events', 'reminders'])
         broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'calendar_event', action: 'updated', title: event.title })

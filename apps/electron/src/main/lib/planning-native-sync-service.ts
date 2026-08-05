@@ -139,6 +139,14 @@ export async function listPlanningNativeConnectionItems(entity: PlanningNativeSy
   return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, ...range })
 }
 
+/** 按 Proma 已保存 locator 精确确认删除，不把有界 Calendar 查询误判成完整快照。 */
+export async function listPlanningNativeConnectionItemsByIdentifier(entity: PlanningNativeSyncEntity, targetId: string, calendarItemIdentifiers: string[]): Promise<PlanningNativeExternalItem[]> {
+  if (calendarItemIdentifiers.length === 0 || !eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, calendarItemIdentifiers })
+}
+
 /** EventKit 全局变更只触发协调器重新读取已连接目标，绝不借此扫描其它系统集合。 */
 export function subscribePlanningNativeSyncChanges(listener: () => void): boolean {
   if (!eventKitSupported()) return false
