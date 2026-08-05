@@ -92,6 +92,18 @@ export interface PlanningNativeOrigin {
   canWrite: boolean
 }
 
+/** 同一已连接系统项被 Proma 与系统并发修改时，必须由用户选择保留哪一侧。 */
+export interface PlanningNativeSyncConflict {
+  id: string
+  connectionId: string
+  entity: PlanningNativeSyncEntity
+  promaEntityId: string
+  title: string
+  kind: 'changed' | 'deleted'
+  detectedAt: number
+}
+export type ResolvePlanningNativeSyncConflictInput = { id: string; resolution: 'keep_proma' | 'keep_system' }
+
 export interface PlanningGroup {
   id: string
   /** 分组归属；Todo 与日程不能互相引用。 */
@@ -355,6 +367,8 @@ export const PLANNING_IPC_CHANNELS = {
   LIST_NATIVE_CONNECTIONS: 'planning:list-native-connections',
   CONNECT_NATIVE_CONNECTION: 'planning:connect-native-connection',
   DISCONNECT_NATIVE_CONNECTION: 'planning:disconnect-native-connection',
+  LIST_NATIVE_SYNC_CONFLICTS: 'planning:list-native-sync-conflicts',
+  RESOLVE_NATIVE_SYNC_CONFLICT: 'planning:resolve-native-sync-conflict',
   LIST_SYNC_PROFILES: 'planning:list-sync-profiles',
   SAVE_SYNC_PROFILE: 'planning:save-sync-profile',
 } as const

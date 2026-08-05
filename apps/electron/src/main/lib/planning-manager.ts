@@ -18,7 +18,9 @@ import type {
   PlanningGroup,
   PlanningGroupScope,
   PlanningNativeConnection,
+  PlanningNativeSyncConflict,
   PlanningNativeSyncEntity,
+  ResolvePlanningNativeSyncConflictInput,
   PlanningReminder,
   PlanningReminderOrigin,
   PlanningReminderTargetType,
@@ -68,6 +70,7 @@ type SyncCleanupRow = { id: string; entity: 'calendar' | 'reminder'; target_id: 
 type NativeConnectionRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; target_title: string; source_title: string; source_type: PlanningNativeConnection['sourceType']; can_write: number; connected_at: number; updated_at: number }
 type NativeBindingRow = { connection_id: string; proma_entity_id: string; calendar_item_identifier: string; due_date_only: number; last_native_hash: string | null; last_synced_at: number | null }
 type NativeOutboxRow = { id: string; connection_id: string; operation: 'upsert' | 'hide'; proma_entity_id: string; attempts: number; next_attempt_at: number; revision: number }
+type NativeConflictRow = { id: string; connection_id: string; entity: 'calendar' | 'reminder'; proma_entity_id: string; kind: 'changed' | 'deleted'; native_item_json: string | null; detected_at: number; resolved_at: number | null }
 
 export interface PlanningSyncOutboxItem {
   id: string
@@ -134,7 +137,7 @@ function withPlanningTransaction<T>(work: () => T): T {
   }
 }
 
-const PLANNING_SCHEMA_VERSION = 6
+const PLANNING_SCHEMA_VERSION = 7
 
 /**
  * Planning 在 v0.16.9 前没有 user_version；因此 migration 1 必须幂等地重建既有 schema，
@@ -322,6 +325,24 @@ function migrateDatabase(db: SqliteDatabase): void {
     }
     if (version < 6) {
       db.exec('ALTER TABLE planning_native_bindings ADD COLUMN due_date_only INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 6')
+      version = 6
+    }
+    if (version < 7) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS planning_native_sync_conflicts (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL REFERENCES planning_native_connections(id) ON DELETE CASCADE,
+          entity TEXT NOT NULL CHECK(entity IN ('calendar', 'reminder')),
+          proma_entity_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('changed', 'deleted')),
+          native_item_json TEXT,
+          detected_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          UNIQUE(connection_id, proma_entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS planning_native_sync_conflicts_open_idx ON planning_native_sync_conflicts(resolved_at, detected_at);
+        PRAGMA user_version = 7;
+      `)
     }
     db.exec('COMMIT')
   } catch (error) {
@@ -605,6 +626,40 @@ export function connectPlanningNativeConnection(input: ConnectPlanningNativeConn
 }
 
 /** 断开只移除 Proma 投影与映射，绝不删除用户的系统原始事项。 */
+function nativeConflictFromRow(row: NativeConflictRow): PlanningNativeSyncConflict {
+  const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id: row.connection_id }) as NativeConnectionRow | undefined
+  const table = row.entity === 'reminder' ? 'todos' : 'calendar_events'
+  const local = getDatabase().prepare(`SELECT title FROM ${table} WHERE id=:id`).get({ id: row.proma_entity_id }) as { title?: string } | undefined
+  return { id: row.id, connectionId: row.connection_id, entity: row.entity, promaEntityId: row.proma_entity_id, title: local?.title ?? connection?.target_title ?? '系统事项', kind: row.kind, detectedAt: row.detected_at }
+}
+
+export function listPlanningNativeSyncConflicts(): PlanningNativeSyncConflict[] {
+  return (getDatabase().prepare('SELECT * FROM planning_native_sync_conflicts WHERE resolved_at IS NULL ORDER BY detected_at DESC').all() as NativeConflictRow[]).map(nativeConflictFromRow)
+}
+
+/** 冲突必须显式选择；保留系统会在下次/当前回流直接覆盖投影，保留 Proma 则继续现有 outbox 写入。 */
+export function resolvePlanningNativeSyncConflict(input: ResolvePlanningNativeSyncConflictInput): boolean {
+  const conflict = getDatabase().prepare('SELECT * FROM planning_native_sync_conflicts WHERE id=:id AND resolved_at IS NULL').get({ id: input.id }) as NativeConflictRow | undefined
+  if (!conflict) return false
+  const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id: conflict.connection_id }) as NativeConnectionRow | undefined
+  if (!connection) return false
+  withPlanningTransaction(() => {
+    if (input.resolution === 'keep_system') {
+      getDatabase().prepare('DELETE FROM planning_native_outbox WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').run({ connectionId: conflict.connection_id, promaEntityId: conflict.proma_entity_id })
+      if (conflict.kind === 'deleted') {
+        const table = connection.entity === 'reminder' ? 'todos' : 'calendar_events'
+        getDatabase().prepare(`DELETE FROM ${table} WHERE id=:id AND native_connection_id=:connectionId`).run({ id: conflict.proma_entity_id, connectionId: conflict.connection_id })
+        getDatabase().prepare('DELETE FROM planning_native_bindings WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').run({ connectionId: conflict.connection_id, promaEntityId: conflict.proma_entity_id })
+      }
+    }
+    getDatabase().prepare('DELETE FROM planning_native_sync_conflicts WHERE id=:id').run({ id: conflict.id })
+  })
+  if (input.resolution === 'keep_system' && conflict.kind === 'changed' && conflict.native_item_json) {
+    try { applyPlanningNativeConnectionItems(conflict.connection_id, [JSON.parse(conflict.native_item_json) as PlanningNativeExternalItem]) } catch (error) { console.warn('[计划同步] 应用系统冲突版本失败:', error) }
+  }
+  return true
+}
+
 export function disconnectPlanningNativeConnection(id: string): boolean {
   const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id }) as NativeConnectionRow | undefined
   if (!connection) return false
@@ -809,7 +864,11 @@ export function applyPlanningNativeConnectionItems(connectionId: string, items: 
       const localId = binding?.proma_entity_id ?? randomUUID()
       // 本地写入尚未写回时，让 outbox 优先，避免覆盖用户刚在 Proma 中完成的编辑。
       const pending = binding && getDatabase().prepare('SELECT id FROM planning_native_outbox WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').get({ connectionId, promaEntityId: localId })
-      if (pending) continue
+      if (pending) {
+        // 两侧都在基于同一 binding 修改：停止自动覆盖，留给用户明确选择。
+        getDatabase().prepare(`INSERT INTO planning_native_sync_conflicts (id,connection_id,entity,proma_entity_id,kind,native_item_json,detected_at) VALUES (:id,:connectionId,:entity,:promaEntityId,'changed',:nativeItemJson,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET kind='changed',native_item_json=excluded.native_item_json,detected_at=excluded.detected_at,resolved_at=NULL`).run({ id: randomUUID(), connectionId, entity: connection.entity, promaEntityId: localId, nativeItemJson: JSON.stringify(item), now })
+        continue
+      }
       if (entityType === 'todo') {
         const status = item.completed ? 'completed' : 'open'; const completedAt = item.completed ? (item.completedAt ?? now) : null
         if (binding) getDatabase().prepare('UPDATE todos SET title=:title,notes=:notes,status=:status,priority=:priority,due_at=:dueAt,completed_at=:completedAt,updated_at=:updatedAt WHERE id=:id').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, status, priority: item.priority ?? 'medium', dueAt: item.dueAt ?? null, completedAt, updatedAt: Math.max(now, item.lastModifiedAt || now) })
@@ -826,7 +885,10 @@ export function applyPlanningNativeConnectionItems(connectionId: string, items: 
     for (const binding of bindings) {
       if (seen.has(binding.calendar_item_identifier)) continue
       const pending = getDatabase().prepare('SELECT id FROM planning_native_outbox WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').get({ connectionId, promaEntityId: binding.proma_entity_id })
-      if (pending) continue
+      if (pending) {
+        getDatabase().prepare(`INSERT INTO planning_native_sync_conflicts (id,connection_id,entity,proma_entity_id,kind,native_item_json,detected_at) VALUES (:id,:connectionId,:entity,:promaEntityId,'deleted',NULL,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET kind='deleted',native_item_json=NULL,detected_at=excluded.detected_at,resolved_at=NULL`).run({ id: randomUUID(), connectionId, entity: connection.entity, promaEntityId: binding.proma_entity_id, now })
+        continue
+      }
       const table = connection.entity === 'reminder' ? 'todos' : 'calendar_events'
       getDatabase().prepare(`DELETE FROM ${table} WHERE id=:id AND native_connection_id=:connectionId`).run({ id: binding.proma_entity_id, connectionId })
       getDatabase().prepare('DELETE FROM planning_native_bindings WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').run({ connectionId, promaEntityId: binding.proma_entity_id })

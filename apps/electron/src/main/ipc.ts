@@ -145,7 +145,9 @@ import type {
   PlanningNativeSyncPermissionResult,
   PlanningNativeSyncTarget,
   PlanningNativeConnection,
+  PlanningNativeSyncConflict,
   ConnectPlanningNativeConnectionInput,
+  ResolvePlanningNativeSyncConflictInput,
   PlanningSyncProfile,
   SavePlanningSyncProfileInput,
 } from '@proma/shared'
@@ -239,6 +241,8 @@ import {
   listPlanningNativeConnections,
   connectPlanningNativeConnection,
   disconnectPlanningNativeConnection,
+  listPlanningNativeSyncConflicts,
+  resolvePlanningNativeSyncConflict,
   savePlanningSyncProfile,
 } from './lib/planning-manager'
 import { broadcastPlanningChanged } from './lib/planning-events'
@@ -4937,6 +4941,13 @@ export function registerIpcHandlers(): void {
     const disconnected = disconnectPlanningNativeConnection(id)
     if (disconnected) broadcastPlanningChanged(['todos', 'calendar_events'])
     return disconnected
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_CONFLICTS, async (): Promise<PlanningNativeSyncConflict[]> => listPlanningNativeSyncConflicts())
+  ipcMain.handle(PLANNING_IPC_CHANNELS.RESOLVE_NATIVE_SYNC_CONFLICT, async (_, input: ResolvePlanningNativeSyncConflictInput): Promise<boolean> => {
+    if (!input || typeof input.id !== 'string' || !['keep_proma', 'keep_system'].includes(input.resolution)) throw new Error('冲突解决参数非法')
+    const resolved = resolvePlanningNativeSyncConflict(input)
+    if (resolved) { broadcastPlanningChanged(['todos', 'calendar_events']); void runPlanningNativeSync(true) }
+    return resolved
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_SYNC_PROFILES, async (): Promise<PlanningSyncProfile[]> => listPlanningSyncProfiles())
   ipcMain.handle(PLANNING_IPC_CHANNELS.SAVE_SYNC_PROFILE, async (_, input: SavePlanningSyncProfileInput): Promise<PlanningSyncProfile> => {

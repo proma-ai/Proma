@@ -8,7 +8,8 @@ let disposePlanningListener: (() => void) | null = null
 let syncing = false
 let queued = false
 let lastExternalReconcileAt = 0
-const EXTERNAL_RECONCILE_INTERVAL_MS = 5 * 60_000
+// EventKit 不提供可靠的跨账户变更增量 token；仅轮询用户明确连接的集合。
+const EXTERNAL_RECONCILE_INTERVAL_MS = POLL_INTERVAL_MS
 
 /** Todo 日期选择器把“仅日期”持久化为当地 23:59；同步时恢复为 EventKit 的无时分 DateComponents。 */
 function isTodoDueDateOnly(dueAt: number | undefined): boolean {
@@ -43,7 +44,8 @@ async function reconcileExternalConnections(force = false): Promise<void> {
   lastExternalReconcileAt = now
   for (const connection of listPlanningNativeConnections()) {
     try {
-      const range = connection.entity === 'calendar' ? { from: now - 90 * 24 * 60 * 60 * 1_000, to: now + 18 * 30 * 24 * 60 * 60 * 1_000 } : undefined
+      // 有界窗口控制首次连接和定期扫描的主进程成本；范围外项目不会被隐式导入。
+      const range = connection.entity === 'calendar' ? { from: now - 30 * 24 * 60 * 60 * 1_000, to: now + 12 * 30 * 24 * 60 * 60 * 1_000 } : undefined
       const items = await listPlanningNativeConnectionItems(connection.entity, connection.targetId, range)
       applyPlanningNativeConnectionItems(connection.id, items)
       broadcastPlanningChanged([connection.entity === 'calendar' ? 'calendar_events' : 'todos'])
