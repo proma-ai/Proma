@@ -306,7 +306,8 @@ function createStartupSplashWindow(): void {
   splash.setMenuBarVisibility(false)
   splash.once('ready-to-show', () => {
     if (splash.isDestroyed()) return
-    if (savedState?.isMaximized) splash.maximize()
+    // 与主窗口使用相同的默认策略，首次启动时也不会出现窗口尺寸跳变。
+    if (savedState?.isMaximized ?? true) splash.maximize()
     splash.show()
   })
   splash.once('closed', () => {
@@ -469,6 +470,19 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'))
   }
+
+  // 主 Renderer 无法加载时，不能让启动页无限停留；切换为轻量错误页告知用户。
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3 || !mainWindow || mainWindow.isDestroyed()) return
+
+    console.error(`[启动] 主 Renderer 加载失败 (${errorCode}): ${errorDescription} (${validatedURL})`)
+    dismissStartupSplash()
+    const message = encodeURIComponent(`Proma 无法加载主界面\n\n${errorDescription}\n\n请重试；若问题持续，请检查应用安装文件。`)
+    mainWindow.loadURL(`data:text/plain;charset=utf-8,${message}`).catch((error) => {
+      console.error('[启动] 降级错误页加载失败:', error)
+      mainWindow?.show()
+    })
+  })
 
   // 窗口就绪后，按保存的状态决定是否最大化
   mainWindow.once('ready-to-show', () => {
