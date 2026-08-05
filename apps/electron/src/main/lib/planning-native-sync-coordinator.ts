@@ -30,13 +30,15 @@ async function syncNativeItem(item: PlanningNativeOutboxItem): Promise<void> {
   if (item.connection.entity === 'calendar') {
     const event = getCalendarEvent(item.promaEntityId)
     if (!event) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
-    await upsertPlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: event.title, notes: event.notes, startAt: event.startAt, endAt: event.endAt, allDay: event.allDay })
+    const identifiers = await upsertPlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: event.title, notes: event.notes, startAt: event.startAt, endAt: event.endAt, allDay: event.allDay })
+    completePlanningNativeOutbox(item, identifiers)
+    return
   } else {
     const todo = getTodo(item.promaEntityId)
     if (!todo) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
-    await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: item.dueDateOnly ?? isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
+    const identifiers = await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: item.dueDateOnly ?? isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
+    completePlanningNativeOutbox(item, identifiers)
   }
-  completePlanningNativeOutbox(item)
 }
 
 async function reconcileExternalConnections(force = false): Promise<void> {
