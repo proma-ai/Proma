@@ -1,4 +1,4 @@
-import { getCalendarEvent, getTodo, completePlanningSyncOutbox, failPlanningSyncOutbox, listDuePlanningSyncOutbox, type PlanningSyncOutboxItem } from './planning-manager'
+import { getCalendarEvent, getTodo, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getPlanningNativeSyncStatus, removePlanningNativeSyncItem, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
 
@@ -15,10 +15,15 @@ function isTodoDueDateOnly(dueAt: number | undefined): boolean {
   return date.getHours() === 23 && date.getMinutes() === 59
 }
 
+async function cleanupItem(item: PlanningSyncCleanupItem): Promise<void> {
+  await removePlanningNativeSyncItem(item.entity, { targetId: item.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, startAt: item.nativeStartAt })
+  completePlanningSyncCleanup(item)
+}
+
 async function syncItem(item: PlanningSyncOutboxItem): Promise<void> {
   const entity = item.profile.entity
   if (item.operation === 'delete') {
-    await removePlanningNativeSyncItem(entity, { calendarItemIdentifier: item.calendarItemIdentifier })
+    await removePlanningNativeSyncItem(entity, { targetId: item.profile.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, startAt: item.nativeStartAt })
     completePlanningSyncOutbox(item)
     return
   }
@@ -69,6 +74,16 @@ export async function runPlanningNativeSync(): Promise<void> {
   try {
     const status = await getPlanningNativeSyncStatus()
     if (!status.supported) return
+    for (const item of listDuePlanningSyncCleanup()) {
+      if ((item.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
+      try {
+        await cleanupItem(item)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[计划同步] ${item.entity}/cleanup 失败: ${message}`)
+        failPlanningSyncCleanup(item, message)
+      }
+    }
     for (const item of listDuePlanningSyncOutbox()) {
       if ((item.profile.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
       try {

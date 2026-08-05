@@ -33,9 +33,12 @@ static NSDictionary *itemResponse(EKCalendarItem *item) { return @{ @"calendarIt
 static EKCalendarItem *recoveredItem(NSString *entity, EKCalendar *target, NSDictionary *payload) {
   NSString *identity = string(payload, @"identity"); NSURL *marker = identityURL(entity, identity); if (!marker) return nil;
   if ([entity isEqualToString:@"calendar"]) {
-    NSDate *anchor = date(number(payload, @"startAt") ?: @([NSDate date].timeIntervalSince1970 * 1000));
-    NSDate *start = [[NSCalendar currentCalendar] dateByAddingUnit:NSCalendarUnitDay value:-1 toDate:anchor options:0];
-    NSDate *end = [[NSCalendar currentCalendar] dateByAddingUnit:NSCalendarUnitDay value:2 toDate:anchor options:0];
+    // 删除后本地日程快照可能已不存在。带 anchor 时精确查找；仅 crash-recovery 时退化为较宽窗口。
+    NSNumber *anchorValue = number(payload, @"startAt");
+    NSDate *anchor = date(anchorValue ?: @([NSDate date].timeIntervalSince1970 * 1000));
+    NSInteger before = anchorValue ? -1 : -3650, after = anchorValue ? 2 : 3650;
+    NSDate *start = [[NSCalendar currentCalendar] dateByAddingUnit:NSCalendarUnitDay value:before toDate:anchor options:0];
+    NSDate *end = [[NSCalendar currentCalendar] dateByAddingUnit:NSCalendarUnitDay value:after toDate:anchor options:0];
     NSPredicate *predicate = [eventStore() predicateForEventsWithStartDate:start endDate:end calendars:@[target]];
     for (EKEvent *event in [eventStore() eventsMatchingPredicate:predicate]) if ([event.URL isEqual:marker]) return event;
   }
@@ -64,6 +67,15 @@ static void upsert(NSString *entity, NSDictionary *payload, CommandContext *ctx,
   ctx->resolve(json(itemResponse(reminder)));
 }
 
+static void removeItem(NSString *entity, EKCalendarItem *item, CommandContext *ctx) {
+  NSError *error = nil;
+  if (item) {
+    BOOL ok = [entity isEqualToString:@"calendar"] ? [eventStore() removeEvent:(EKEvent *)item span:EKSpanThisEvent commit:YES error:&error] : [eventStore() removeReminder:(EKReminder *)item commit:YES error:&error];
+    if (!ok) { ctx->reject(error.localizedDescription); return; }
+  }
+  ctx->resolve(@"{}");
+}
+
 static void execute(NSString *command, NSString *entity, NSDictionary *payload, CommandContext *ctx) {
   @autoreleasepool {
     if (!@available(macOS 14.0, *)) { ctx->resolve(json(@{ @"entity": entity, @"status": @"unsupported" })); return; }
@@ -84,7 +96,19 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
       for (EKCalendar *calendar in [eventStore() calendarsForEntityType:entityType]) if (calendar.allowsContentModifications && !calendar.isSubscribed) [targets addObject:@{ @"id": calendar.calendarIdentifier ?: @"", @"title": calendar.title ?: @"", @"sourceTitle": calendar.source.title ?: @"", @"sourceType": sourceType(calendar.source.sourceType), @"isCloudBacked": @((calendar.source.sourceType == EKSourceTypeCalDAV) || (calendar.source.sourceType == EKSourceTypeExchange) || (calendar.source.sourceType == EKSourceTypeMobileMe)) }];
       [targets sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [[NSString stringWithFormat:@"%@%@", a[@"sourceTitle"], a[@"title"]] localizedStandardCompare:[NSString stringWithFormat:@"%@%@", b[@"sourceTitle"], b[@"title"]]]; }]; ctx->resolve(json(targets)); return;
     }
-    if ([command isEqualToString:@"remove"]) { EKCalendarItem *item = [eventStore() calendarItemWithIdentifier:string(payload, @"calendarItemIdentifier")]; NSError *error = nil; if (item) { BOOL ok = [entity isEqualToString:@"calendar"] ? [eventStore() removeEvent:(EKEvent *)item span:EKSpanThisEvent commit:YES error:&error] : [eventStore() removeReminder:(EKReminder *)item commit:YES error:&error]; if (!ok) { ctx->reject(error.localizedDescription); return; } } ctx->resolve(@"{}"); return; }
+    if ([command isEqualToString:@"remove"]) {
+      EKCalendarItem *item = [eventStore() calendarItemWithIdentifier:string(payload, @"calendarItemIdentifier")];
+      EKCalendar *target = [eventStore() calendarWithIdentifier:string(payload, @"targetId")];
+      if (item || !target || !string(payload, @"identity")) { removeItem(entity, item, ctx); return; }
+      if ([entity isEqualToString:@"calendar"]) { removeItem(entity, recoveredItem(entity, target, payload), ctx); return; }
+      NSPredicate *predicate = [eventStore() predicateForRemindersInCalendars:@[target]];
+      [eventStore() fetchRemindersMatchingPredicate:predicate completion:^(NSArray<EKReminder *> *reminders) { dispatch_async(dispatch_get_main_queue(), ^{
+        NSURL *marker = identityURL(entity, string(payload, @"identity")); EKReminder *match = nil;
+        for (EKReminder *reminder in reminders) if ([reminder.URL isEqual:marker]) { match = reminder; break; }
+        removeItem(entity, match, ctx);
+      }); }];
+      return;
+    }
     if ([command isEqualToString:@"upsert"] && [entity isEqualToString:@"reminder"] && !string(payload, @"calendarItemIdentifier") && string(payload, @"identity")) { EKCalendar *target = [eventStore() calendarWithIdentifier:string(payload, @"targetId")]; NSPredicate *predicate = target ? [eventStore() predicateForRemindersInCalendars:@[target]] : nil; [eventStore() fetchRemindersMatchingPredicate:predicate completion:^(NSArray<EKReminder *> *reminders) { dispatch_async(dispatch_get_main_queue(), ^{ NSURL *marker = identityURL(entity, string(payload, @"identity")); NSMutableArray *matches = [NSMutableArray array]; for (EKReminder *reminder in reminders) if ([reminder.URL isEqual:marker]) [matches addObject:reminder]; upsert(entity, payload, ctx, matches); }); }]; return; }
     if ([command isEqualToString:@"upsert"]) { upsert(entity, payload, ctx, @[]); return; }
     ctx->reject(@"unsupported command");

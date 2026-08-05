@@ -112,7 +112,8 @@ export async function upsertPlanningNativeSyncItem(entity: PlanningNativeSyncEnt
   return callMacEventKitNativeAddon<PlanningNativeSyncIdentifiers>('upsert', entity, item)
 }
 
-export async function removePlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: Pick<PlanningNativeSyncItem, 'calendarItemIdentifier'>): Promise<void> {
-  if (!eventKitSupported() || !item.calendarItemIdentifier) return
+/** 删除必须带受管目标和 Proma marker；locator 缺失时 native addon 可恢复定位，避免崩溃留下孤儿项。 */
+export async function removePlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: Pick<PlanningNativeSyncItem, 'targetId' | 'identity' | 'calendarItemIdentifier' | 'startAt'>): Promise<void> {
+  if (!eventKitSupported()) return
   await callMacEventKitNativeAddon<Record<string, never>>('remove', entity, item)
 }

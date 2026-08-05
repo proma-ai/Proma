@@ -59,8 +59,9 @@ type ReminderRow = {
 }
 type TodoSessionLinkRow = { todo_id: string; session_id: string; first_touched_at: number; last_touched_at: number }
 type SyncProfileRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; target_title: string; source_title: string; enabled: number; created_at: number; updated_at: number }
-type SyncOutboxRow = { id: string; profile_id: string; operation: 'upsert' | 'delete'; proma_entity_id: string; attempts: number; next_attempt_at: number; last_error: string | null; revision: number; created_at: number; updated_at: number }
-type SyncBindingRow = { profile_id: string; proma_entity_id: string; calendar_item_identifier: string | null; calendar_item_external_identifier: string | null; last_synced_hash: string | null; last_synced_at: number | null }
+type SyncOutboxRow = { id: string; profile_id: string; target_id: string | null; operation: 'upsert' | 'delete'; proma_entity_id: string; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; revision: number; created_at: number; updated_at: number }
+type SyncBindingRow = { profile_id: string; target_id: string | null; proma_entity_id: string; calendar_item_identifier: string | null; calendar_item_external_identifier: string | null; last_synced_hash: string | null; last_synced_at: number | null }
+type SyncCleanupRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; proma_entity_id: string; calendar_item_identifier: string | null; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; created_at: number; updated_at: number }
 
 export interface PlanningSyncOutboxItem {
   id: string
@@ -71,6 +72,18 @@ export interface PlanningSyncOutboxItem {
   /** 防止执行中的旧操作确认/重试覆盖随后写入的本地变更。 */
   revision: number
   calendarItemIdentifier?: string
+  /** Calendar 删除的 crash-recovery 查找锚点。 */
+  nativeStartAt?: number
+}
+
+export interface PlanningSyncCleanupItem {
+  id: string
+  entity: 'calendar' | 'reminder'
+  targetId: string
+  promaEntityId: string
+  calendarItemIdentifier?: string
+  nativeStartAt?: number
+  attempts: number
 }
 
 let database: SqliteDatabase | null = null
@@ -88,7 +101,7 @@ function withPlanningTransaction<T>(work: () => T): T {
   }
 }
 
-const PLANNING_SCHEMA_VERSION = 3
+const PLANNING_SCHEMA_VERSION = 4
 
 /**
  * Planning 在 v0.16.9 前没有 user_version；因此 migration 1 必须幂等地重建既有 schema，
@@ -200,6 +213,33 @@ function migrateDatabase(db: SqliteDatabase): void {
     if (version < 3) {
       db.exec('ALTER TABLE planning_sync_outbox ADD COLUMN revision INTEGER NOT NULL DEFAULT 1')
       db.exec('PRAGMA user_version = 3')
+      version = 3
+    }
+    if (version < 4) {
+      // 目标切换期间 profile 会指向新目标，因此执行和 binding 都必须持久化旧目标快照。
+      db.exec(`
+        ALTER TABLE planning_sync_outbox ADD COLUMN target_id TEXT;
+        ALTER TABLE planning_sync_outbox ADD COLUMN native_start_at INTEGER;
+        ALTER TABLE planning_sync_bindings ADD COLUMN target_id TEXT;
+        UPDATE planning_sync_outbox SET target_id=(SELECT target_id FROM planning_sync_profiles WHERE id=planning_sync_outbox.profile_id) WHERE target_id IS NULL;
+        UPDATE planning_sync_bindings SET target_id=(SELECT target_id FROM planning_sync_profiles WHERE id=planning_sync_bindings.profile_id) WHERE target_id IS NULL;
+        CREATE TABLE IF NOT EXISTS planning_sync_cleanup (
+          id TEXT PRIMARY KEY,
+          entity TEXT NOT NULL CHECK(entity IN ('calendar', 'reminder')),
+          target_id TEXT NOT NULL,
+          proma_entity_id TEXT NOT NULL,
+          calendar_item_identifier TEXT,
+          native_start_at INTEGER,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at INTEGER NOT NULL,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(entity, target_id, proma_entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS planning_sync_cleanup_due_idx ON planning_sync_cleanup(next_attempt_at, created_at);
+      `)
+      db.exec('PRAGMA user_version = 4')
     }
     db.exec('COMMIT')
   } catch (error) {
@@ -461,18 +501,31 @@ function syncEntityForPlanningTarget(targetType: PlanningReminderTargetType): 'c
 }
 
 /** 业务数据与待同步操作在同一事务写入，保证崩溃后仍可恢复发布。 */
-function enqueuePlanningSync(targetType: PlanningReminderTargetType, promaEntityId: string, operation: 'upsert' | 'delete', now = Date.now()): void {
+function enqueuePlanningSync(targetType: PlanningReminderTargetType, promaEntityId: string, operation: 'upsert' | 'delete', now = Date.now(), nativeStartAt?: number): void {
   const entity = syncEntityForPlanningTarget(targetType)
   const profiles = getDatabase().prepare(`SELECT * FROM planning_sync_profiles WHERE entity=:entity AND enabled=1`).all({ entity }) as SyncProfileRow[]
   for (const profile of profiles) {
     getDatabase().prepare(`
-      INSERT INTO planning_sync_outbox (id, profile_id, operation, proma_entity_id, attempts, next_attempt_at, created_at, updated_at)
-      VALUES (:id, :profileId, :operation, :promaEntityId, 0, :now, :now, :now)
+      INSERT INTO planning_sync_outbox (id, profile_id, target_id, operation, proma_entity_id, native_start_at, attempts, next_attempt_at, created_at, updated_at)
+      VALUES (:id, :profileId, :targetId, :operation, :promaEntityId, :nativeStartAt, 0, :now, :now, :now)
       ON CONFLICT(profile_id, proma_entity_id) DO UPDATE SET
-        operation=excluded.operation, attempts=0, next_attempt_at=excluded.next_attempt_at, last_error=NULL,
+        target_id=excluded.target_id, operation=excluded.operation, native_start_at=excluded.native_start_at,
+        attempts=0, next_attempt_at=excluded.next_attempt_at, last_error=NULL,
         revision=planning_sync_outbox.revision+1, updated_at=excluded.updated_at
-    `).run({ id: randomUUID(), profileId: profile.id, operation, promaEntityId, now })
+    `).run({ id: randomUUID(), profileId: profile.id, targetId: profile.target_id, operation, promaEntityId, nativeStartAt: nativeStartAt ?? null, now })
   }
+}
+
+/** 清理任务独立于 outbox，保证切换受管目标时可同时“删旧、写新”。 */
+function enqueuePlanningSyncCleanup(input: Pick<PlanningSyncCleanupItem, 'entity' | 'targetId' | 'promaEntityId' | 'calendarItemIdentifier' | 'nativeStartAt'>, now = Date.now()): void {
+  getDatabase().prepare(`
+    INSERT INTO planning_sync_cleanup (id, entity, target_id, proma_entity_id, calendar_item_identifier, native_start_at, attempts, next_attempt_at, created_at, updated_at)
+    VALUES (:id, :entity, :targetId, :promaEntityId, :calendarItemIdentifier, :nativeStartAt, 0, :now, :now, :now)
+    ON CONFLICT(entity, target_id, proma_entity_id) DO UPDATE SET
+      calendar_item_identifier=COALESCE(excluded.calendar_item_identifier, planning_sync_cleanup.calendar_item_identifier),
+      native_start_at=COALESCE(excluded.native_start_at, planning_sync_cleanup.native_start_at),
+      next_attempt_at=excluded.next_attempt_at, last_error=NULL, updated_at=excluded.updated_at
+  `).run({ id: randomUUID(), ...input, calendarItemIdentifier: input.calendarItemIdentifier ?? null, nativeStartAt: input.nativeStartAt ?? null, now })
 }
 
 function enqueueAllPlanningItems(profile: PlanningSyncProfile): void {
@@ -495,6 +548,19 @@ export function savePlanningSyncProfile(input: SavePlanningSyncProfileInput): Pl
     enabled: input.enabled ?? (existing ? existing.enabled === 1 : true), createdAt: existing?.created_at ?? now, updatedAt: now,
   }
   withPlanningTransaction(() => {
+    const targetChanged = Boolean(existing && existing.target_id !== targetId)
+    if (targetChanged && existing) {
+      // 先冻结旧队列并为每个 locator 建独立 cleanup，再切换 profile；旧项绝不会被遗留。
+      const bindings = getDatabase().prepare('SELECT * FROM planning_sync_bindings WHERE profile_id=:profileId').all({ profileId: profile.id }) as SyncBindingRow[]
+      for (const binding of bindings) enqueuePlanningSyncCleanup({
+        entity: existing.entity,
+        targetId: binding.target_id ?? existing.target_id,
+        promaEntityId: binding.proma_entity_id,
+        calendarItemIdentifier: binding.calendar_item_identifier ?? undefined,
+      }, now)
+      getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE profile_id=:profileId').run({ profileId: profile.id })
+      getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId').run({ profileId: profile.id })
+    }
     getDatabase().prepare(`
       INSERT INTO planning_sync_profiles (id, entity, target_id, target_title, source_title, enabled, created_at, updated_at)
       VALUES (:id, :entity, :targetId, :targetTitle, :sourceTitle, :enabled, :createdAt, :updatedAt)
@@ -502,51 +568,66 @@ export function savePlanningSyncProfile(input: SavePlanningSyncProfileInput): Pl
         target_id=excluded.target_id, target_title=excluded.target_title, source_title=excluded.source_title,
         enabled=excluded.enabled, updated_at=excluded.updated_at
     `).run({ ...profile, targetId: profile.targetId, targetTitle: profile.targetTitle, sourceTitle: profile.sourceTitle, enabled: profile.enabled ? 1 : 0, createdAt: profile.createdAt, updatedAt: profile.updatedAt })
-    // 更换受管目标时不能复用旧 Calendar/List 的 locator；重新发布所有本地项目。
-    if (existing && existing.target_id !== targetId) getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId').run({ profileId: profile.id })
-    if (profile.enabled && (!existing || existing.target_id !== targetId || existing.enabled !== 1)) enqueueAllPlanningItems(profile)
+    if (profile.enabled && (!existing || targetChanged || existing.enabled !== 1)) enqueueAllPlanningItems(profile)
   })
   return profile
 }
 
 export function listDuePlanningSyncOutbox(now = Date.now(), limit = 25): PlanningSyncOutboxItem[] {
   const rows = getDatabase().prepare(`
-    SELECT outbox.*, profiles.entity, profiles.target_id, profiles.target_title, profiles.source_title, profiles.enabled, profiles.created_at AS profile_created_at, profiles.updated_at AS profile_updated_at,
+    SELECT outbox.*, profiles.entity, COALESCE(outbox.target_id, profiles.target_id) AS execution_target_id, profiles.target_title, profiles.source_title, profiles.enabled, profiles.created_at AS profile_created_at, profiles.updated_at AS profile_updated_at,
       bindings.calendar_item_identifier
     FROM planning_sync_outbox AS outbox
     JOIN planning_sync_profiles AS profiles ON profiles.id=outbox.profile_id
-    LEFT JOIN planning_sync_bindings AS bindings ON bindings.profile_id=outbox.profile_id AND bindings.proma_entity_id=outbox.proma_entity_id
+    LEFT JOIN planning_sync_bindings AS bindings ON bindings.profile_id=outbox.profile_id AND bindings.proma_entity_id=outbox.proma_entity_id AND bindings.target_id=COALESCE(outbox.target_id, profiles.target_id)
     WHERE profiles.enabled=1 AND outbox.next_attempt_at<=:now
     ORDER BY outbox.created_at
     LIMIT :limit
-  `).all({ now, limit }) as Array<SyncOutboxRow & SyncProfileRow & { profile_created_at: number; profile_updated_at: number; calendar_item_identifier: string | null }>
+  `).all({ now, limit }) as Array<SyncOutboxRow & SyncProfileRow & { execution_target_id: string; profile_created_at: number; profile_updated_at: number; calendar_item_identifier: string | null }>
   return rows.map((row) => ({
     id: row.id,
-    profile: { id: row.profile_id, entity: row.entity, targetId: row.target_id, targetTitle: row.target_title, sourceTitle: row.source_title, enabled: row.enabled === 1, createdAt: row.profile_created_at, updatedAt: row.profile_updated_at },
+    profile: { id: row.profile_id, entity: row.entity, targetId: row.execution_target_id, targetTitle: row.target_title, sourceTitle: row.source_title, enabled: row.enabled === 1, createdAt: row.profile_created_at, updatedAt: row.profile_updated_at },
     operation: row.operation,
     promaEntityId: row.proma_entity_id,
     attempts: row.attempts,
     revision: row.revision,
     calendarItemIdentifier: row.calendar_item_identifier ?? undefined,
+    nativeStartAt: row.native_start_at ?? undefined,
   }))
+}
+
+export function listDuePlanningSyncCleanup(now = Date.now(), limit = 25): PlanningSyncCleanupItem[] {
+  const rows = getDatabase().prepare('SELECT * FROM planning_sync_cleanup WHERE next_attempt_at<=:now ORDER BY created_at LIMIT :limit').all({ now, limit }) as SyncCleanupRow[]
+  return rows.map((row) => ({ id: row.id, entity: row.entity, targetId: row.target_id, promaEntityId: row.proma_entity_id, calendarItemIdentifier: row.calendar_item_identifier ?? undefined, nativeStartAt: row.native_start_at ?? undefined, attempts: row.attempts }))
+}
+
+export function completePlanningSyncCleanup(item: PlanningSyncCleanupItem): void {
+  getDatabase().prepare('DELETE FROM planning_sync_cleanup WHERE id=:id').run({ id: item.id })
+}
+
+export function failPlanningSyncCleanup(item: PlanningSyncCleanupItem, error: string): void {
+  const attempts = item.attempts + 1; const now = Date.now(); const nextAttemptAt = now + Math.min(60 * 60 * 1_000, 5_000 * 2 ** Math.min(attempts - 1, 10))
+  getDatabase().prepare('UPDATE planning_sync_cleanup SET attempts=:attempts,next_attempt_at=:nextAttemptAt,last_error=:error,updated_at=:now WHERE id=:id').run({ id: item.id, attempts, nextAttemptAt, error: error.slice(0, 1_000), now })
 }
 
 export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeIdentifiers?: { calendarItemIdentifier?: string; calendarItemExternalIdentifier?: string }): void {
   withPlanningTransaction(() => {
     const now = Date.now()
     const currentProfile = getDatabase().prepare('SELECT target_id FROM planning_sync_profiles WHERE id=:profileId').get({ profileId: item.profile.id }) as { target_id: string } | undefined
-    if (item.operation === 'delete' && currentProfile?.target_id === item.profile.targetId) {
-      getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: item.profile.id, promaEntityId: item.promaEntityId })
-    // 执行中恰好切换目标时，旧 EventKit 写入的 locator 绝不能重新绑定到新目标。
-    } else if (nativeIdentifiers?.calendarItemIdentifier && currentProfile?.target_id === item.profile.targetId) {
+    const isCurrentTarget = currentProfile?.target_id === item.profile.targetId
+    if (item.operation === 'delete' && isCurrentTarget) {
+      getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND proma_entity_id=:promaEntityId').run({ profileId: item.profile.id, targetId: item.profile.targetId, promaEntityId: item.promaEntityId })
+    } else if (nativeIdentifiers?.calendarItemIdentifier && isCurrentTarget) {
       getDatabase().prepare(`
-        INSERT INTO planning_sync_bindings (profile_id, proma_entity_id, calendar_item_identifier, calendar_item_external_identifier, last_synced_at)
-        VALUES (:profileId, :promaEntityId, :calendarItemIdentifier, :calendarItemExternalIdentifier, :now)
+        INSERT INTO planning_sync_bindings (profile_id, target_id, proma_entity_id, calendar_item_identifier, calendar_item_external_identifier, last_synced_at)
+        VALUES (:profileId, :targetId, :promaEntityId, :calendarItemIdentifier, :calendarItemExternalIdentifier, :now)
         ON CONFLICT(profile_id, proma_entity_id) DO UPDATE SET
-          calendar_item_identifier=excluded.calendar_item_identifier,
-          calendar_item_external_identifier=excluded.calendar_item_external_identifier,
-          last_synced_at=excluded.last_synced_at
-      `).run({ profileId: item.profile.id, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, calendarItemExternalIdentifier: nativeIdentifiers.calendarItemExternalIdentifier ?? null, now })
+          target_id=excluded.target_id, calendar_item_identifier=excluded.calendar_item_identifier,
+          calendar_item_external_identifier=excluded.calendar_item_external_identifier, last_synced_at=excluded.last_synced_at
+      `).run({ profileId: item.profile.id, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, calendarItemExternalIdentifier: nativeIdentifiers.calendarItemExternalIdentifier ?? null, now })
+    } else if (nativeIdentifiers?.calendarItemIdentifier) {
+      // 目标切换与 native 写入并发时，将刚创建的旧项移入独立清理队列，不能任其孤儿化。
+      enqueuePlanningSyncCleanup({ entity: item.profile.entity, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, nativeStartAt: item.nativeStartAt }, now)
     }
     getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE id=:id AND revision=:revision').run({ id: item.id, revision: item.revision })
   })
@@ -709,10 +790,11 @@ export function updateCalendarEvent(input: UpdateCalendarEventInput): CalendarEv
   return getCalendarEvent(old.id)
 }
 export function deleteCalendarEvent(id: string): boolean {
-  if (!getCalendarEvent(id)) return false
+  const event = getCalendarEvent(id)
+  if (!event) return false
   return withPlanningTransaction(() => {
     const db = getDatabase()
-    enqueuePlanningSync('calendar_event', id, 'delete')
+    enqueuePlanningSync('calendar_event', id, 'delete', Date.now(), event.startAt)
     db.prepare(`DELETE FROM planning_reminders WHERE target_type='calendar_event' AND target_id=:id`).run({ id })
     const result = db.prepare('DELETE FROM calendar_events WHERE id=:id').run({ id }) as { changes?: number }
     return (result.changes ?? 0) > 0
