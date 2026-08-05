@@ -85,6 +85,14 @@ export async function listPlanningNativeSyncTargets(entity: PlanningNativeSyncEn
   }
 }
 
+/** 用户可以显式连接只读集合以浏览；写入能力随 EventKit 目标一并返回。 */
+export async function listPlanningNativeConnectionTargets(entity: PlanningNativeSyncEntity): Promise<PlanningNativeSyncTarget[]> {
+  if (!eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  try { return await callMacEventKitNativeAddon<PlanningNativeSyncTarget[]>('listTargets', entity) } catch { return [] }
+}
+
 export interface PlanningNativeSyncItem {
   targetId: string
   /** Proma UUID；仅用于新建项目的 crash-recovery marker，不覆盖用户已有 URL。 */
@@ -102,9 +110,31 @@ export interface PlanningNativeSyncItem {
   completedAt?: number
 }
 
+export interface PlanningNativeExternalItem {
+  calendarItemIdentifier: string
+  calendarItemExternalIdentifier?: string
+  title: string
+  notes?: string
+  startAt?: number
+  endAt?: number
+  allDay?: boolean
+  dueAt?: number
+  priority?: 'low' | 'medium' | 'high'
+  completed?: boolean
+  completedAt?: number
+  lastModifiedAt: number
+}
+
 export interface PlanningNativeSyncIdentifiers {
   calendarItemIdentifier?: string
   calendarItemExternalIdentifier?: string
+}
+
+export async function listPlanningNativeConnectionItems(entity: PlanningNativeSyncEntity, targetId: string, range?: { from: number; to: number }): Promise<PlanningNativeExternalItem[]> {
+  if (!eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, ...range })
 }
 
 export async function upsertPlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: PlanningNativeSyncItem): Promise<PlanningNativeSyncIdentifiers> {

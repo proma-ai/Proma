@@ -144,6 +144,8 @@ import type {
   PlanningNativeSyncStatus,
   PlanningNativeSyncPermissionResult,
   PlanningNativeSyncTarget,
+  PlanningNativeConnection,
+  ConnectPlanningNativeConnectionInput,
   PlanningSyncProfile,
   SavePlanningSyncProfileInput,
 } from '@proma/shared'
@@ -234,12 +236,16 @@ import {
   acknowledgePlanningReminder,
   snoozePlanningReminder,
   listPlanningSyncProfiles,
+  listPlanningNativeConnections,
+  connectPlanningNativeConnection,
+  disconnectPlanningNativeConnection,
   savePlanningSyncProfile,
 } from './lib/planning-manager'
 import { broadcastPlanningChanged } from './lib/planning-events'
 import {
   getPlanningNativeSyncStatus,
   listPlanningNativeSyncTargets,
+  listPlanningNativeConnectionTargets,
   requestPlanningNativeSyncAccess,
 } from './lib/planning-native-sync-service'
 import { runPlanningNativeSync } from './lib/planning-native-sync-coordinator'
@@ -4907,6 +4913,29 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_TARGETS, async (_, entity: unknown): Promise<PlanningNativeSyncTarget[]> => {
     if (!isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
     return listPlanningNativeSyncTargets(entity)
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTION_TARGETS, async (_, entity: unknown): Promise<PlanningNativeSyncTarget[]> => {
+    if (!isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
+    return listPlanningNativeConnectionTargets(entity)
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTIONS, async (_, entity?: unknown): Promise<PlanningNativeConnection[]> => {
+    if (entity !== undefined && !isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
+    return listPlanningNativeConnections(entity)
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.CONNECT_NATIVE_CONNECTION, async (_, input: ConnectPlanningNativeConnectionInput): Promise<PlanningNativeConnection> => {
+    if (!input || !isPlanningNativeSyncEntity(input.entity) || !input.target || typeof input.target.id !== 'string') throw new Error('连接参数非法')
+    // renderer 不可信：用 EventKit 当前返回的完整目标覆盖传入元数据。
+    const target = (await listPlanningNativeConnectionTargets(input.entity)).find((item) => item.id === input.target.id)
+    if (!target) throw new Error('系统集合不存在或尚未授权')
+    const connection = connectPlanningNativeConnection({ entity: input.entity, target })
+    void runPlanningNativeSync()
+    return connection
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.DISCONNECT_NATIVE_CONNECTION, async (_, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || !id) throw new Error('连接 id 非法')
+    const disconnected = disconnectPlanningNativeConnection(id)
+    if (disconnected) broadcastPlanningChanged(['todos', 'calendar_events'])
+    return disconnected
   })
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_SYNC_PROFILES, async (): Promise<PlanningSyncProfile[]> => listPlanningSyncProfiles())
   ipcMain.handle(PLANNING_IPC_CHANNELS.SAVE_SYNC_PROFILE, async (_, input: SavePlanningSyncProfileInput): Promise<PlanningSyncProfile> => {

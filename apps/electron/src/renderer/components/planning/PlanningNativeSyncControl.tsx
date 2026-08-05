@@ -6,6 +6,7 @@ import type {
   PlanningNativeSyncPermissionResult,
   PlanningNativeSyncStatus,
   PlanningNativeSyncTarget,
+  PlanningNativeConnection,
   PlanningSyncProfile,
 } from '@proma/shared'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,8 @@ export function PlanningNativeSyncControl({ entity }: { entity: PlanningNativeSy
   const [status, setStatus] = React.useState<PlanningNativeSyncStatus | null>(null)
   const [profiles, setProfiles] = React.useState<PlanningSyncProfile[]>([])
   const [targets, setTargets] = React.useState<PlanningNativeSyncTarget[]>([])
+  const [connectionTargets, setConnectionTargets] = React.useState<PlanningNativeSyncTarget[]>([])
+  const [connections, setConnections] = React.useState<PlanningNativeConnection[]>([])
   const [loading, setLoading] = React.useState(false)
   const [requesting, setRequesting] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -49,9 +52,14 @@ export function PlanningNativeSyncControl({ entity }: { entity: PlanningNativeSy
       ])
       setStatus(nextStatus)
       setProfiles(nextProfiles)
-      setTargets(nextStatus[entity].status === 'full-access'
-        ? await window.electronAPI.listPlanningNativeSyncTargets(entity)
-        : [])
+      if (nextStatus[entity].status === 'full-access') {
+        const [nextTargets, nextConnectionTargets, nextConnections] = await Promise.all([
+          window.electronAPI.listPlanningNativeSyncTargets(entity),
+          window.electronAPI.listPlanningNativeConnectionTargets(entity),
+          window.electronAPI.listPlanningNativeConnections(entity),
+        ])
+        setTargets(nextTargets); setConnectionTargets(nextConnectionTargets); setConnections(nextConnections)
+      } else { setTargets([]); setConnectionTargets([]); setConnections([]) }
     } catch (error) {
       console.error('[Planning 同步] 读取设置失败:', error)
       toast.error('读取同步设置失败')
@@ -100,6 +108,21 @@ export function PlanningNativeSyncControl({ entity }: { entity: PlanningNativeSy
     }
   }
 
+  const connectExisting = async (id: string): Promise<void> => {
+    const target = connectionTargets.find((item) => item.id === id)
+    if (!target) return
+    setSaving(true)
+    try { await window.electronAPI.connectPlanningNativeConnection({ entity, target }); await refresh(); toast.success(`已连接 ${target.title}`) }
+    catch (error) { console.error('[Planning 同步] 连接失败:', error); toast.error('连接系统集合失败') }
+    finally { setSaving(false) }
+  }
+  const disconnect = async (id: string): Promise<void> => {
+    setSaving(true)
+    try { await window.electronAPI.disconnectPlanningNativeConnection(id); await refresh(); toast.success('已从 Proma 隐藏该系统集合') }
+    catch (error) { console.error('[Planning 同步] 断开失败:', error); toast.error('断开系统集合失败') }
+    finally { setSaving(false) }
+  }
+
   const permission = status?.[entity]
   const profile = profiles.find((item) => item.entity === entity)
   const Icon = COPY[entity].icon
@@ -120,7 +143,8 @@ export function PlanningNativeSyncControl({ entity }: { entity: PlanningNativeSy
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">建议先在系统中创建一个名为「Proma」的{entity === 'calendar' ? '日历' : '提醒事项列表'}，再将它设为同步目标，避免与个人项目混杂。</p>
       </div>
       {loading || !permission ? <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />正在检查授权…</div>
-        : permission.status === 'full-access' ? <div className="space-y-2"><Select value={profile?.targetId ?? ''} onValueChange={(id) => void saveTarget(id)} disabled={saving || targets.length === 0}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder={targets.length ? `选择一个 ${COPY[entity].targetLabel}` : '未找到可写目标'} /></SelectTrigger><SelectContent>{targets.map((target) => <SelectItem key={target.id} value={target.id}>{target.sourceTitle ? `${target.sourceTitle} · ` : ''}{target.title}{target.sourceType === 'local' ? ' · 仅此 Mac' : target.isCloudBacked ? ' · 云端账户' : ''}</SelectItem>)}</SelectContent></Select>{profile && <p className="text-[11px] leading-relaxed text-muted-foreground">当前受管目标：{profile.sourceTitle ? `${profile.sourceTitle} · ` : ''}{profile.targetTitle}。系统端修改暂不会回流。</p>}{!profile && <p className="text-[11px] leading-relaxed text-muted-foreground">选择后会开始单向发布现有 Proma 项目，不会导入或修改其他系统项目。</p>}</div>
+        : permission.status === 'full-access' ? <div className="space-y-2"><Select value={profile?.targetId ?? ''} onValueChange={(id) => void saveTarget(id)} disabled={saving || targets.length === 0}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder={targets.length ? `选择一个 ${COPY[entity].targetLabel}` : '未找到可写目标'} /></SelectTrigger><SelectContent>{targets.map((target) => <SelectItem key={target.id} value={target.id}>{target.sourceTitle ? `${target.sourceTitle} · ` : ''}{target.title}{target.sourceType === 'local' ? ' · 仅此 Mac' : target.isCloudBacked ? ' · 云端账户' : ''}</SelectItem>)}</SelectContent></Select>{profile && <p className="text-[11px] leading-relaxed text-muted-foreground">当前受管目标：{profile.sourceTitle ? `${profile.sourceTitle} · ` : ''}{profile.targetTitle}。</p>}{!profile && <p className="text-[11px] leading-relaxed text-muted-foreground">选择后会开始发布现有 Proma 项目。</p>}
+          <div className="border-t pt-2"><p className="mb-1 text-xs font-medium">连接已有系统集合</p><p className="mb-1.5 text-[11px] leading-relaxed text-muted-foreground">仅导入你明确选择的集合；在 Proma 修改可写集合会回写系统。</p><Select value="" onValueChange={(id) => void connectExisting(id)} disabled={saving || connectionTargets.length === 0}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择要连接的日历或列表" /></SelectTrigger><SelectContent>{connectionTargets.filter((target) => !connections.some((connection) => connection.targetId === target.id)).map((target) => <SelectItem key={target.id} value={target.id}>{target.sourceTitle ? `${target.sourceTitle} · ` : ''}{target.title}{target.canWrite ? '' : ' · 只读'}</SelectItem>)}</SelectContent></Select>{connections.map((connection) => <div key={connection.id} className="mt-1.5 flex items-center justify-between gap-2 text-[11px]"><span className="truncate text-muted-foreground">{connection.sourceTitle ? `${connection.sourceTitle} · ` : ''}{connection.targetTitle}{connection.canWrite ? '' : ' · 只读'}</span><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={saving} onClick={() => void disconnect(connection.id)}>断开</Button></div>)}</div></div>
         : <div className="space-y-2.5 rounded-md bg-muted/55 p-2.5"><div className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground"><CircleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-500" />{permissionMessage(permission)}</div>{permission.status === 'not-determined' && <Button type="button" size="sm" className="w-full" disabled={requesting} onClick={() => void requestAccess()}>{requesting ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}授权并选择目标</Button>}{(permission.status === 'write-only' || permission.status === 'denied') && <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => void window.electronAPI.openPlanningNativeSyncPrivacySettings(entity)}><ExternalLink className="size-3.5" />前往系统设置授予完整访问权限</Button>}</div>}
       {permission?.status === 'full-access' && <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="size-3.5" />已获得完整访问权限</div>}
     </PopoverContent>

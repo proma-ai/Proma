@@ -708,6 +708,7 @@ function TodoListItem({
           {todo.dueAt && <TodoMetaBadge tone={todo.dueAt < Date.now() && todo.status === 'open' ? 'overdue' : todo.dueAt <= todayEnd ? 'today' : 'neutral'}>{todo.dueAt < Date.now() && todo.status === 'open' ? `已逾期 · ${dateTimeLabel(todo.dueAt)}` : `计划 ${dateTimeLabel(todo.dueAt)}`}</TodoMetaBadge>}
           <TodoMetaBadge tone={todo.priority === 'high' ? 'high' : todo.priority === 'low' ? 'low' : 'medium'}>{priorityLabel}</TodoMetaBadge>
           {todo.group && <TodoMetaBadge>{todo.group.name}</TodoMetaBadge>}
+          {todo.nativeOrigin && <TodoMetaBadge>{todo.nativeOrigin.sourceTitle ? `${todo.nativeOrigin.sourceTitle} · 系统` : '已连接系统'}</TodoMetaBadge>}
           {todo.tags.map((tag) => <TodoMetaBadge key={tag.id}>#{tag.name}</TodoMetaBadge>)}
           {pendingReminders > 0 && <TodoMetaBadge>提醒 {pendingReminders}</TodoMetaBadge>}
           {todo.sessionLinks.length > 0 && <TodoMetaBadge>会话 {todo.sessionLinks.length}</TodoMetaBadge>}

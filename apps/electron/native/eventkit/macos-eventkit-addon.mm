@@ -1,4 +1,5 @@
 #include <napi.h>
+#include <cmath>
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #import <EventKit/EventKit.h>
@@ -29,6 +30,13 @@ static NSString *string(NSDictionary *payload, NSString *key) { id value = paylo
 static NSDate *date(NSNumber *milliseconds) { return [NSDate dateWithTimeIntervalSince1970:milliseconds.doubleValue / 1000.0]; }
 static NSURL *identityURL(NSString *entity, NSString *identity) { return identity ? [NSURL URLWithString:[NSString stringWithFormat:@"proma://planning/%@/%@", entity, identity]] : nil; }
 static NSDictionary *itemResponse(EKCalendarItem *item) { return @{ @"calendarItemIdentifier": item.calendarItemIdentifier ?: @"", @"calendarItemExternalIdentifier": item.calendarItemExternalIdentifier ?: @"" }; }
+static NSNumber *milliseconds(NSDate *value) { return value ? @((long long)llround(value.timeIntervalSince1970 * 1000.0)) : nil; }
+static NSDictionary *itemDTO(NSString *entity, EKCalendarItem *item) {
+  NSMutableDictionary *result = [@{ @"calendarItemIdentifier": item.calendarItemIdentifier ?: @"", @"calendarItemExternalIdentifier": item.calendarItemExternalIdentifier ?: @"", @"title": item.title ?: @"", @"notes": item.notes ?: @"", @"lastModifiedAt": milliseconds(item.lastModifiedDate) ?: @0 } mutableCopy];
+  if ([entity isEqualToString:@"calendar"]) { EKEvent *event = (EKEvent *)item; result[@"startAt"] = milliseconds(event.startDate) ?: @0; result[@"endAt"] = milliseconds(event.endDate) ?: @0; result[@"allDay"] = @(event.allDay); }
+  else { EKReminder *reminder = (EKReminder *)item; NSDate *due = reminder.dueDateComponents ? [[NSCalendar currentCalendar] dateFromComponents:reminder.dueDateComponents] : nil; if (due) result[@"dueAt"] = milliseconds(due); result[@"priority"] = reminder.priority <= 4 ? @"high" : reminder.priority >= 6 ? @"low" : @"medium"; result[@"completed"] = @(reminder.completed); if (reminder.completionDate) result[@"completedAt"] = milliseconds(reminder.completionDate); }
+  return result;
+}
 
 static EKCalendarItem *recoveredItem(NSString *entity, EKCalendar *target, NSDictionary *payload) {
   NSString *identity = string(payload, @"identity"); NSURL *marker = identityURL(entity, identity); if (!marker) return nil;
@@ -90,11 +98,17 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
       if ([entity isEqualToString:@"calendar"]) [eventStore() requestFullAccessToEventsWithCompletion:completion]; else [eventStore() requestFullAccessToRemindersWithCompletion:completion];
       return;
     }
-    if ([command isEqualToString:@"listWritableTargets"]) {
+    if ([command isEqualToString:@"listWritableTargets"] || [command isEqualToString:@"listTargets"]) {
       if (![statusName([EKEventStore authorizationStatusForEntityType:entityType]) isEqualToString:@"full-access"]) { ctx->resolve(@"[]"); return; }
-      NSMutableArray *targets = [NSMutableArray array];
-      for (EKCalendar *calendar in [eventStore() calendarsForEntityType:entityType]) if (calendar.allowsContentModifications && !calendar.isSubscribed) [targets addObject:@{ @"id": calendar.calendarIdentifier ?: @"", @"title": calendar.title ?: @"", @"sourceTitle": calendar.source.title ?: @"", @"sourceType": sourceType(calendar.source.sourceType), @"isCloudBacked": @((calendar.source.sourceType == EKSourceTypeCalDAV) || (calendar.source.sourceType == EKSourceTypeExchange) || (calendar.source.sourceType == EKSourceTypeMobileMe)) }];
+      BOOL writableOnly = [command isEqualToString:@"listWritableTargets"]; NSMutableArray *targets = [NSMutableArray array];
+      for (EKCalendar *calendar in [eventStore() calendarsForEntityType:entityType]) if ((!writableOnly || calendar.allowsContentModifications) && !calendar.isSubscribed) [targets addObject:@{ @"id": calendar.calendarIdentifier ?: @"", @"title": calendar.title ?: @"", @"sourceTitle": calendar.source.title ?: @"", @"sourceType": sourceType(calendar.source.sourceType), @"canWrite": @(calendar.allowsContentModifications), @"isCloudBacked": @((calendar.source.sourceType == EKSourceTypeCalDAV) || (calendar.source.sourceType == EKSourceTypeExchange) || (calendar.source.sourceType == EKSourceTypeMobileMe)) }];
       [targets sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [[NSString stringWithFormat:@"%@%@", a[@"sourceTitle"], a[@"title"]] localizedStandardCompare:[NSString stringWithFormat:@"%@%@", b[@"sourceTitle"], b[@"title"]]]; }]; ctx->resolve(json(targets)); return;
+    }
+    if ([command isEqualToString:@"listItems"]) {
+      EKCalendar *target = [eventStore() calendarWithIdentifier:string(payload, @"targetId")];
+      if (!target) { ctx->reject(@"未找到已连接的系统集合"); return; }
+      if ([entity isEqualToString:@"calendar"]) { NSNumber *fromValue = number(payload, @"from"), *toValue = number(payload, @"to"); if (!fromValue || !toValue) { ctx->reject(@"日程读取缺少时间范围"); return; } NSPredicate *predicate = [eventStore() predicateForEventsWithStartDate:date(fromValue) endDate:date(toValue) calendars:@[target]]; NSMutableArray *items = [NSMutableArray array]; for (EKEvent *event in [eventStore() eventsMatchingPredicate:predicate]) [items addObject:itemDTO(entity, event)]; ctx->resolve(json(items)); return; }
+      NSPredicate *predicate = [eventStore() predicateForRemindersInCalendars:@[target]]; [eventStore() fetchRemindersMatchingPredicate:predicate completion:^(NSArray<EKReminder *> *reminders) { dispatch_async(dispatch_get_main_queue(), ^{ NSMutableArray *items = [NSMutableArray array]; for (EKReminder *reminder in reminders) [items addObject:itemDTO(entity, reminder)]; ctx->resolve(json(items)); }); }]; return;
     }
     if ([command isEqualToString:@"remove"]) {
       EKCalendarItem *item = [eventStore() calendarItemWithIdentifier:string(payload, @"calendarItemIdentifier")];

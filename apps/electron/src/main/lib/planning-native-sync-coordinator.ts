@@ -1,12 +1,14 @@
-import { getCalendarEvent, getTodo, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
-import { onPlanningChanged } from './planning-events'
-import { getPlanningNativeSyncStatus, removePlanningNativeSyncItem, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
+import { applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listPlanningNativeConnections, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
+import { broadcastPlanningChanged, onPlanningChanged } from './planning-events'
+import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, removePlanningNativeSyncItem, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
 
 const POLL_INTERVAL_MS = 30_000
 let timer: ReturnType<typeof setInterval> | null = null
 let disposePlanningListener: (() => void) | null = null
 let syncing = false
 let queued = false
+let lastExternalReconcileAt = 0
+const EXTERNAL_RECONCILE_INTERVAL_MS = 5 * 60_000
 
 /** Todo 日期选择器把“仅日期”持久化为当地 23:59；同步时恢复为 EventKit 的无时分 DateComponents。 */
 function isTodoDueDateOnly(dueAt: number | undefined): boolean {
@@ -18,6 +20,35 @@ function isTodoDueDateOnly(dueAt: number | undefined): boolean {
 async function cleanupItem(item: PlanningSyncCleanupItem): Promise<void> {
   await removePlanningNativeSyncItem(item.entity, { targetId: item.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, startAt: item.nativeStartAt })
   completePlanningSyncCleanup(item)
+}
+
+async function syncNativeItem(item: PlanningNativeOutboxItem): Promise<void> {
+  if (item.operation === 'hide') { completePlanningNativeOutbox(item); return }
+  if (!item.connection.canWrite) throw new Error('该系统集合为只读，不能写入')
+  if (item.connection.entity === 'calendar') {
+    const event = getCalendarEvent(item.promaEntityId)
+    if (!event) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
+    await upsertPlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: event.title, notes: event.notes, startAt: event.startAt, endAt: event.endAt, allDay: event.allDay })
+  } else {
+    const todo = getTodo(item.promaEntityId)
+    if (!todo) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
+    await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
+  }
+  completePlanningNativeOutbox(item)
+}
+
+async function reconcileExternalConnections(): Promise<void> {
+  const now = Date.now()
+  if (now - lastExternalReconcileAt < EXTERNAL_RECONCILE_INTERVAL_MS) return
+  lastExternalReconcileAt = now
+  for (const connection of listPlanningNativeConnections()) {
+    try {
+      const range = connection.entity === 'calendar' ? { from: now - 90 * 24 * 60 * 60 * 1_000, to: now + 18 * 30 * 24 * 60 * 60 * 1_000 } : undefined
+      const items = await listPlanningNativeConnectionItems(connection.entity, connection.targetId, range)
+      applyPlanningNativeConnectionItems(connection.id, items)
+      broadcastPlanningChanged([connection.entity === 'calendar' ? 'calendar_events' : 'todos'])
+    } catch (error) { console.warn(`[计划同步] 外部 ${connection.entity} 回流失败:`, error) }
+  }
 }
 
 async function syncItem(item: PlanningSyncOutboxItem): Promise<void> {
@@ -74,6 +105,7 @@ export async function runPlanningNativeSync(): Promise<void> {
   try {
     const status = await getPlanningNativeSyncStatus()
     if (!status.supported) return
+    await reconcileExternalConnections()
     for (const item of listDuePlanningSyncCleanup()) {
       if ((item.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
       try {
@@ -83,6 +115,10 @@ export async function runPlanningNativeSync(): Promise<void> {
         console.warn(`[计划同步] ${item.entity}/cleanup 失败: ${message}`)
         failPlanningSyncCleanup(item, message)
       }
+    }
+    for (const item of listDuePlanningNativeOutbox()) {
+      if ((item.connection.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
+      try { await syncNativeItem(item) } catch (error) { const message = error instanceof Error ? error.message : String(error); console.warn(`[计划同步] external/${item.operation} 失败: ${message}`); failPlanningNativeOutbox(item, message) }
     }
     for (const item of listDuePlanningSyncOutbox()) {
       if ((item.profile.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue

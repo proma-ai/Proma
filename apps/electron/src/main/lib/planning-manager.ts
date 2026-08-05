@@ -17,11 +17,14 @@ import type {
   CreateTodoInput,
   PlanningGroup,
   PlanningGroupScope,
+  PlanningNativeConnection,
+  PlanningNativeSyncEntity,
   PlanningReminder,
   PlanningReminderOrigin,
   PlanningReminderTargetType,
   PlanningTag,
   PlanningSyncProfile,
+  ConnectPlanningNativeConnectionInput,
   SavePlanningSyncProfileInput,
   Todo,
   TodoListQuery,
@@ -43,12 +46,12 @@ interface SqliteModule { DatabaseSync: new (path: string) => SqliteDatabase }
 
 type TodoRow = {
   id: string; title: string; notes: string | null; status: 'open' | 'completed'; priority: 'low' | 'medium' | 'high'
-  due_at: number | null; group_id: string | null; workspace_id: string | null
+  due_at: number | null; group_id: string | null; workspace_id: string | null; native_connection_id: string | null
   created_at: number; updated_at: number; completed_at: number | null
 }
 type CalendarEventRow = {
   id: string; title: string; notes: string | null; start_at: number; end_at: number | null; all_day: number
-  calendar_group_id: string | null; workspace_id: string | null; todo_id: string | null
+  calendar_group_id: string | null; workspace_id: string | null; todo_id: string | null; native_connection_id: string | null
   created_at: number; updated_at: number
 }
 type GroupRow = { id: string; name: string; color: string | null; sort_order: number; created_at: number; updated_at: number }
@@ -62,6 +65,9 @@ type SyncProfileRow = { id: string; entity: 'calendar' | 'reminder'; target_id: 
 type SyncOutboxRow = { id: string; profile_id: string; target_id: string | null; operation: 'upsert' | 'delete'; proma_entity_id: string; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; revision: number; created_at: number; updated_at: number }
 type SyncBindingRow = { profile_id: string; target_id: string | null; proma_entity_id: string; calendar_item_identifier: string | null; calendar_item_external_identifier: string | null; last_synced_hash: string | null; last_synced_at: number | null }
 type SyncCleanupRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; proma_entity_id: string; calendar_item_identifier: string | null; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; created_at: number; updated_at: number }
+type NativeConnectionRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; target_title: string; source_title: string; source_type: PlanningNativeConnection['sourceType']; can_write: number; connected_at: number; updated_at: number }
+type NativeBindingRow = { connection_id: string; proma_entity_id: string; calendar_item_identifier: string; last_native_hash: string | null; last_synced_at: number | null }
+type NativeOutboxRow = { id: string; connection_id: string; operation: 'upsert' | 'hide'; proma_entity_id: string; attempts: number; next_attempt_at: number; revision: number }
 
 export interface PlanningSyncOutboxItem {
   id: string
@@ -74,6 +80,30 @@ export interface PlanningSyncOutboxItem {
   calendarItemIdentifier?: string
   /** Calendar 删除的 crash-recovery 查找锚点。 */
   nativeStartAt?: number
+}
+
+export interface PlanningNativeExternalItem {
+  calendarItemIdentifier: string
+  title: string
+  notes?: string
+  startAt?: number
+  endAt?: number
+  allDay?: boolean
+  dueAt?: number
+  priority?: 'low' | 'medium' | 'high'
+  completed?: boolean
+  completedAt?: number
+  lastModifiedAt: number
+}
+
+export interface PlanningNativeOutboxItem {
+  id: string
+  connection: PlanningNativeConnection
+  operation: 'upsert' | 'hide'
+  promaEntityId: string
+  calendarItemIdentifier: string
+  attempts: number
+  revision: number
 }
 
 export interface PlanningSyncCleanupItem {
@@ -101,7 +131,7 @@ function withPlanningTransaction<T>(work: () => T): T {
   }
 }
 
-const PLANNING_SCHEMA_VERSION = 4
+const PLANNING_SCHEMA_VERSION = 5
 
 /**
  * Planning 在 v0.16.9 前没有 user_version；因此 migration 1 必须幂等地重建既有 schema，
@@ -240,6 +270,51 @@ function migrateDatabase(db: SqliteDatabase): void {
         CREATE INDEX IF NOT EXISTS planning_sync_cleanup_due_idx ON planning_sync_cleanup(next_attempt_at, created_at);
       `)
       db.exec('PRAGMA user_version = 4')
+      version = 4
+    }
+    if (version < 5) {
+      db.exec(`
+        ALTER TABLE todos ADD COLUMN native_connection_id TEXT;
+        ALTER TABLE calendar_events ADD COLUMN native_connection_id TEXT;
+        CREATE TABLE IF NOT EXISTS planning_native_connections (
+          id TEXT PRIMARY KEY,
+          entity TEXT NOT NULL CHECK(entity IN ('calendar', 'reminder')),
+          target_id TEXT NOT NULL,
+          target_title TEXT NOT NULL,
+          source_title TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          can_write INTEGER NOT NULL DEFAULT 0 CHECK(can_write IN (0, 1)),
+          connected_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(entity, target_id)
+        );
+        CREATE TABLE IF NOT EXISTS planning_native_bindings (
+          connection_id TEXT NOT NULL REFERENCES planning_native_connections(id) ON DELETE CASCADE,
+          proma_entity_id TEXT NOT NULL,
+          calendar_item_identifier TEXT NOT NULL,
+          last_native_hash TEXT,
+          last_synced_at INTEGER,
+          PRIMARY KEY(connection_id, proma_entity_id),
+          UNIQUE(connection_id, calendar_item_identifier)
+        );
+        CREATE TABLE IF NOT EXISTS planning_native_outbox (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL REFERENCES planning_native_connections(id) ON DELETE CASCADE,
+          operation TEXT NOT NULL CHECK(operation IN ('upsert', 'hide')),
+          proma_entity_id TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at INTEGER NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(connection_id, proma_entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS planning_native_outbox_due_idx ON planning_native_outbox(next_attempt_at, created_at);
+        CREATE INDEX IF NOT EXISTS todos_native_connection_idx ON todos(native_connection_id);
+        CREATE INDEX IF NOT EXISTS calendar_events_native_connection_idx ON calendar_events(native_connection_id);
+      `)
+      db.exec('PRAGMA user_version = 5')
     }
     db.exec('COMMIT')
   } catch (error) {
@@ -377,6 +452,12 @@ function hydrateTodos(rows: TodoRow[]): Todo[] {
   }))
 }
 
+function nativeOrigin(connectionId: string | null): Todo['nativeOrigin'] {
+  if (!connectionId) return undefined
+  const row = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id: connectionId }) as NativeConnectionRow | undefined
+  return row ? { connectionId: row.id, targetTitle: row.target_title, sourceTitle: row.source_title, canWrite: row.can_write === 1 } : undefined
+}
+
 function hydrateCalendarEvents(rows: CalendarEventRow[]): CalendarEvent[] {
   const ids = rows.map((row) => row.id)
   const groups = groupsById(rows.map((row) => row.calendar_group_id), 'calendar')
@@ -386,14 +467,14 @@ function hydrateCalendarEvents(rows: CalendarEventRow[]): CalendarEvent[] {
     id: row.id, title: row.title, notes: row.notes ?? undefined, startAt: row.start_at, endAt: row.end_at ?? undefined,
     allDay: row.all_day === 1, groupId: row.calendar_group_id ?? undefined, group: row.calendar_group_id ? groups.get(row.calendar_group_id) : undefined,
     tags: tags.get(row.id) ?? [], reminders: reminders.get(row.id) ?? [], workspaceId: row.workspace_id ?? undefined,
-    todoId: row.todo_id ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at,
+    todoId: row.todo_id ?? undefined, nativeOrigin: nativeOrigin(row.native_connection_id), createdAt: row.created_at, updatedAt: row.updated_at,
   }))
 }
 function todoFromRow(row: TodoRow): Todo {
-  return { id: row.id, title: row.title, notes: row.notes ?? undefined, status: row.status, priority: row.priority, dueAt: row.due_at ?? undefined, groupId: row.group_id ?? undefined, group: getPlanningGroup(row.group_id, 'todo'), tags: getTags('todo', row.id), reminders: getReminders('todo', row.id), sessionLinks: getTodoSessionLinks(row.id), workspaceId: row.workspace_id ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }
+  return { id: row.id, title: row.title, notes: row.notes ?? undefined, status: row.status, priority: row.priority, dueAt: row.due_at ?? undefined, groupId: row.group_id ?? undefined, group: getPlanningGroup(row.group_id, 'todo'), tags: getTags('todo', row.id), reminders: getReminders('todo', row.id), sessionLinks: getTodoSessionLinks(row.id), workspaceId: row.workspace_id ?? undefined, nativeOrigin: nativeOrigin(row.native_connection_id), createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }
 }
 function calendarEventFromRow(row: CalendarEventRow): CalendarEvent {
-  return { id: row.id, title: row.title, notes: row.notes ?? undefined, startAt: row.start_at, endAt: row.end_at ?? undefined, allDay: row.all_day === 1, groupId: row.calendar_group_id ?? undefined, group: getPlanningGroup(row.calendar_group_id, 'calendar'), tags: getTags('calendar_event', row.id), reminders: getReminders('calendar_event', row.id), workspaceId: row.workspace_id ?? undefined, todoId: row.todo_id ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }
+  return { id: row.id, title: row.title, notes: row.notes ?? undefined, startAt: row.start_at, endAt: row.end_at ?? undefined, allDay: row.all_day === 1, groupId: row.calendar_group_id ?? undefined, group: getPlanningGroup(row.calendar_group_id, 'calendar'), tags: getTags('calendar_event', row.id), reminders: getReminders('calendar_event', row.id), workspaceId: row.workspace_id ?? undefined, todoId: row.todo_id ?? undefined, nativeOrigin: nativeOrigin(row.native_connection_id), createdAt: row.created_at, updatedAt: row.updated_at }
 }
 function assertTagIdsExist(tagIds: string[]): string[] {
   const unique = [...new Set(tagIds)]
@@ -496,6 +577,38 @@ export function listPlanningSyncProfiles(): PlanningSyncProfile[] {
   return rows.map(syncProfileFromRow)
 }
 
+function nativeConnectionFromRow(row: NativeConnectionRow): PlanningNativeConnection {
+  return { id: row.id, entity: row.entity, targetId: row.target_id, targetTitle: row.target_title, sourceTitle: row.source_title, sourceType: row.source_type, canWrite: row.can_write === 1, connectedAt: row.connected_at, updatedAt: row.updated_at }
+}
+
+export function listPlanningNativeConnections(entity?: PlanningNativeSyncEntity): PlanningNativeConnection[] {
+  const rows = getDatabase().prepare(`SELECT * FROM planning_native_connections ${entity ? 'WHERE entity=:entity' : ''} ORDER BY entity, source_title, target_title`).all(entity ? { entity } : {}) as NativeConnectionRow[]
+  return rows.map(nativeConnectionFromRow)
+}
+
+/** 仅保存用户明确勾选的外部集合；保存本身不读取系统项目。 */
+export function connectPlanningNativeConnection(input: ConnectPlanningNativeConnectionInput): PlanningNativeConnection {
+  const now = Date.now(); const target = input.target
+  if (!target.id || !target.title) throw new Error('系统集合无效')
+  const old = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE entity=:entity AND target_id=:targetId').get({ entity: input.entity, targetId: target.id }) as NativeConnectionRow | undefined
+  const row: NativeConnectionRow = { id: old?.id ?? randomUUID(), entity: input.entity, target_id: target.id, target_title: target.title.slice(0, 500), source_title: target.sourceTitle.slice(0, 500), source_type: target.sourceType, can_write: target.canWrite ? 1 : 0, connected_at: old?.connected_at ?? now, updated_at: now }
+  getDatabase().prepare(`INSERT INTO planning_native_connections (id,entity,target_id,target_title,source_title,source_type,can_write,connected_at,updated_at) VALUES (:id,:entity,:target_id,:target_title,:source_title,:source_type,:can_write,:connected_at,:updated_at) ON CONFLICT(entity,target_id) DO UPDATE SET target_title=excluded.target_title,source_title=excluded.source_title,source_type=excluded.source_type,can_write=excluded.can_write,updated_at=excluded.updated_at`).run(row)
+  return nativeConnectionFromRow(row)
+}
+
+/** 断开只移除 Proma 投影与映射，绝不删除用户的系统原始事项。 */
+export function disconnectPlanningNativeConnection(id: string): boolean {
+  const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id }) as NativeConnectionRow | undefined
+  if (!connection) return false
+  return withPlanningTransaction(() => {
+    const table = connection.entity === 'reminder' ? 'todos' : 'calendar_events'
+    getDatabase().prepare(`DELETE FROM planning_native_outbox WHERE connection_id=:id`).run({ id })
+    getDatabase().prepare(`DELETE FROM ${table} WHERE native_connection_id=:id`).run({ id })
+    const result = getDatabase().prepare('DELETE FROM planning_native_connections WHERE id=:id').run({ id }) as { changes?: number }
+    return (result.changes ?? 0) > 0
+  })
+}
+
 function syncEntityForPlanningTarget(targetType: PlanningReminderTargetType): 'calendar' | 'reminder' {
   return targetType === 'todo' ? 'reminder' : 'calendar'
 }
@@ -503,6 +616,13 @@ function syncEntityForPlanningTarget(targetType: PlanningReminderTargetType): 'c
 /** 业务数据与待同步操作在同一事务写入，保证崩溃后仍可恢复发布。 */
 function enqueuePlanningSync(targetType: PlanningReminderTargetType, promaEntityId: string, operation: 'upsert' | 'delete', now = Date.now(), nativeStartAt?: number): void {
   const entity = syncEntityForPlanningTarget(targetType)
+  const external = getDatabase().prepare('SELECT bindings.connection_id FROM planning_native_bindings AS bindings JOIN planning_native_connections AS connections ON connections.id=bindings.connection_id WHERE bindings.proma_entity_id=:promaEntityId AND connections.entity=:entity').get({ promaEntityId, entity }) as { connection_id: string } | undefined
+  if (external) {
+    // 外部项目的“删除”默认只是从 Proma 隐藏；绝不反向删除用户系统原项。
+    const externalOperation = operation === 'delete' ? 'hide' : 'upsert'
+    getDatabase().prepare(`INSERT INTO planning_native_outbox (id,connection_id,operation,proma_entity_id,attempts,next_attempt_at,created_at,updated_at) VALUES (:id,:connectionId,:operation,:promaEntityId,0,:now,:now,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET operation=excluded.operation,attempts=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,revision=planning_native_outbox.revision+1,updated_at=excluded.updated_at`).run({ id: randomUUID(), connectionId: external.connection_id, operation: externalOperation, promaEntityId, now })
+    return
+  }
   const profiles = getDatabase().prepare(`SELECT * FROM planning_sync_profiles WHERE entity=:entity AND enabled=1`).all({ entity }) as SyncProfileRow[]
   for (const profile of profiles) {
     getDatabase().prepare(`
@@ -638,6 +758,55 @@ export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeI
       enqueuePlanningSyncCleanup({ entity: item.profile.entity, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, nativeStartAt: item.nativeStartAt }, now)
     }
     getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE id=:id AND revision=:revision').run({ id: item.id, revision: item.revision })
+  })
+}
+
+export function listDuePlanningNativeOutbox(now = Date.now(), limit = 25): PlanningNativeOutboxItem[] {
+  const rows = getDatabase().prepare(`SELECT outbox.*, connections.entity,connections.target_id,connections.target_title,connections.source_title,connections.source_type,connections.can_write,connections.connected_at,connections.updated_at AS connection_updated_at,bindings.calendar_item_identifier FROM planning_native_outbox AS outbox JOIN planning_native_connections AS connections ON connections.id=outbox.connection_id JOIN planning_native_bindings AS bindings ON bindings.connection_id=outbox.connection_id AND bindings.proma_entity_id=outbox.proma_entity_id WHERE outbox.next_attempt_at<=:now ORDER BY outbox.created_at LIMIT :limit`).all({ now, limit }) as Array<NativeOutboxRow & NativeConnectionRow & { connection_updated_at: number; calendar_item_identifier: string }>
+  return rows.map((row) => ({ id: row.id, connection: nativeConnectionFromRow({ ...row, updated_at: row.connection_updated_at }), operation: row.operation, promaEntityId: row.proma_entity_id, calendarItemIdentifier: row.calendar_item_identifier, attempts: row.attempts, revision: row.revision }))
+}
+
+export function completePlanningNativeOutbox(item: PlanningNativeOutboxItem): void {
+  withPlanningTransaction(() => {
+    if (item.operation === 'hide') {
+      const table = item.connection.entity === 'reminder' ? 'todos' : 'calendar_events'
+      getDatabase().prepare(`DELETE FROM ${table} WHERE id=:id AND native_connection_id=:connectionId`).run({ id: item.promaEntityId, connectionId: item.connection.id })
+      getDatabase().prepare('DELETE FROM planning_native_bindings WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').run({ connectionId: item.connection.id, promaEntityId: item.promaEntityId })
+    }
+    getDatabase().prepare('DELETE FROM planning_native_outbox WHERE id=:id AND revision=:revision').run({ id: item.id, revision: item.revision })
+  })
+}
+
+export function failPlanningNativeOutbox(item: PlanningNativeOutboxItem, error: string): void {
+  const attempts = item.attempts + 1; const now = Date.now(); const nextAttemptAt = now + Math.min(60 * 60 * 1_000, 5_000 * 2 ** Math.min(attempts - 1, 10))
+  getDatabase().prepare('UPDATE planning_native_outbox SET attempts=:attempts,next_attempt_at=:nextAttemptAt,last_error=:error,updated_at=:now WHERE id=:id AND revision=:revision').run({ id: item.id, revision: item.revision, attempts, nextAttemptAt, error: error.slice(0, 1_000), now })
+}
+
+/** EventKit 回流专用写入路径：绝不经由正常 update/enqueue，防止回声循环。 */
+export function applyPlanningNativeConnectionItems(connectionId: string, items: PlanningNativeExternalItem[]): void {
+  const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id: connectionId }) as NativeConnectionRow | undefined
+  if (!connection) return
+  const entityType: PlanningReminderTargetType = connection.entity === 'reminder' ? 'todo' : 'calendar_event'
+  withPlanningTransaction(() => {
+    const now = Date.now()
+    for (const item of items) {
+      if (!item.calendarItemIdentifier || !item.title) continue
+      const binding = getDatabase().prepare('SELECT * FROM planning_native_bindings WHERE connection_id=:connectionId AND calendar_item_identifier=:calendarItemIdentifier').get({ connectionId, calendarItemIdentifier: item.calendarItemIdentifier }) as NativeBindingRow | undefined
+      const localId = binding?.proma_entity_id ?? randomUUID()
+      // 本地写入尚未写回时，让 outbox 优先，避免覆盖用户刚在 Proma 中完成的编辑。
+      const pending = binding && getDatabase().prepare('SELECT id FROM planning_native_outbox WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').get({ connectionId, promaEntityId: localId })
+      if (pending) continue
+      if (entityType === 'todo') {
+        const status = item.completed ? 'completed' : 'open'; const completedAt = item.completed ? (item.completedAt ?? now) : null
+        if (binding) getDatabase().prepare('UPDATE todos SET title=:title,notes=:notes,status=:status,priority=:priority,due_at=:dueAt,completed_at=:completedAt,updated_at=:updatedAt WHERE id=:id').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, status, priority: item.priority ?? 'medium', dueAt: item.dueAt ?? null, completedAt, updatedAt: Math.max(now, item.lastModifiedAt || now) })
+        else getDatabase().prepare('INSERT INTO todos (id,title,notes,status,priority,due_at,workspace_id,native_connection_id,created_at,updated_at,completed_at) VALUES (:id,:title,:notes,:status,:priority,:dueAt,NULL,:connectionId,:now,:updatedAt,:completedAt)').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, status, priority: item.priority ?? 'medium', dueAt: item.dueAt ?? null, connectionId, now, updatedAt: Math.max(now, item.lastModifiedAt || now), completedAt })
+      } else {
+        if (!item.startAt) continue
+        if (binding) getDatabase().prepare('UPDATE calendar_events SET title=:title,notes=:notes,start_at=:startAt,end_at=:endAt,all_day=:allDay,updated_at=:updatedAt WHERE id=:id').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, startAt: item.startAt, endAt: item.endAt ?? null, allDay: item.allDay ? 1 : 0, updatedAt: Math.max(now, item.lastModifiedAt || now) })
+        else getDatabase().prepare('INSERT INTO calendar_events (id,title,notes,start_at,end_at,all_day,workspace_id,native_connection_id,created_at,updated_at) VALUES (:id,:title,:notes,:startAt,:endAt,:allDay,NULL,:connectionId,:now,:updatedAt)').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, startAt: item.startAt, endAt: item.endAt ?? null, allDay: item.allDay ? 1 : 0, connectionId, now, updatedAt: Math.max(now, item.lastModifiedAt || now) })
+      }
+      getDatabase().prepare('INSERT INTO planning_native_bindings (connection_id,proma_entity_id,calendar_item_identifier,last_native_hash,last_synced_at) VALUES (:connectionId,:promaEntityId,:calendarItemIdentifier,:hash,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET calendar_item_identifier=excluded.calendar_item_identifier,last_native_hash=excluded.last_native_hash,last_synced_at=excluded.last_synced_at').run({ connectionId, promaEntityId: localId, calendarItemIdentifier: item.calendarItemIdentifier, hash: JSON.stringify(item), now })
+    }
   })
 }
 

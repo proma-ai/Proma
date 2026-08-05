@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 
 export type EventKitEntity = 'calendar' | 'reminder'
-type EventKitCommand = 'authorizationStatus' | 'requestAccess' | 'listWritableTargets' | 'upsert' | 'remove'
+type EventKitCommand = 'authorizationStatus' | 'requestAccess' | 'listWritableTargets' | 'listTargets' | 'listItems' | 'upsert' | 'remove'
 type Addon = { command: (command: EventKitCommand, entity: EventKitEntity, payloadJson: string) => Promise<string> }
 
 // 主进程由 esbuild 输出为 CJS，使用 __filename 保持开发和打包路径一致。
