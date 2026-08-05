@@ -65,6 +65,7 @@ export async function injectBuiltinMcpServers(ctx: BuiltinMcpInjectContext): Pro
       sessionId: ctx.sessionId,
       channelId: ctx.channelId,
       modelId: ctx.modelId,
+      agentRuntime: ctx.agentRuntime,
       workspaceId: ctx.workspaceId,
       permissionMode: ctx.permissionMode,
       triggeredBy: ctx.triggeredBy,
