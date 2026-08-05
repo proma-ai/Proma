@@ -1158,6 +1158,12 @@ export function useGlobalAgentListeners(): void {
         const backgroundTasksPending = data.backgroundTasksPending === true
         const hasStreamError = store.get(agentStreamErrorsAtom).has(data.sessionId)
 
+        // 主进程随完成事件携带刚落盘的单条 meta；不要为此重新拉取整个会话索引。
+        // 后台任务的轻量完成并未更新会话新鲜度，保留现有列表顺序。
+        if (data.session && !backgroundTasksPending) {
+          store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, data.session!))
+        }
+
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
         const completionSession = store.get(agentSessionsAtom)
           .find((session) => session.id === data.sessionId)
@@ -1231,14 +1237,21 @@ export function useGlobalAgentListeners(): void {
           void window.electronAPI.agentIsland.markSessionViewed(data.sessionId).catch(console.error)
         }
 
-        // 标记用户主动打断状态
-        if (data.stoppedByUser) {
-          store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
+        // 对齐本次会话的主动打断状态，无需借助全量列表刷新重建整个 Set。
+        store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
+          const wasStopped = prev.has(data.sessionId)
+          if (data.stoppedByUser === true && !wasStopped) {
             const next = new Set(prev)
             next.add(data.sessionId)
             return next
-          })
-        }
+          }
+          if (data.stoppedByUser !== true && wasStopped) {
+            const next = new Set(prev)
+            next.delete(data.sessionId)
+            return next
+          }
+          return prev
+        })
 
         // 非正常结束时显示截断提示
         if (data.resultSubtype && data.resultSubtype !== 'success' && !data.stoppedByUser) {
@@ -1307,19 +1320,8 @@ export function useGlobalAgentListeners(): void {
           // 注意：liveMessages 的清理已移至 AgentView 消息加载完成后执行，
           // 与 streamingState 清理同步，避免「实时消息已清 → 持久化消息未到」的空档闪烁
 
-          // 刷新会话列表并同步 stoppedByUser 状态
-          window.electronAPI
-            .listAgentSessions()
-            .then((sessions) => {
-              // 合并而非整体覆盖：避免与并发的 external_run_started 回调互相用
-              // 陈旧快照冲掉对方刚写入的会话（如刚结束 turn 的父会话）。
-              store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))
-              // 从持久化 meta 对齐 stoppedByUser 状态
-              store.set(stoppedByUserSessionsAtom, new Set<string>(
-                sessions.filter((s) => s.stoppedByUser).map((s) => s.id)
-              ))
-            })
-            .catch(console.error)
+          // 完成事件已携带当前会话 meta，顶部已增量更新列表；全量会话同步仅保留给启动、
+          // 窗口重新聚焦和未知会话等恢复路径，避免完成一个 Agent 就传输整个会话索引。
 
           // 注意：流式状态的完全清除由 AgentView 在消息加载完成后执行，
           // 确保不会出现「气泡消失 → 持久化消息尚未加载」的空档闪烁
@@ -1385,15 +1387,21 @@ export function useGlobalAgentListeners(): void {
     const cleanupTitleUpdated = window.electronAPI.onAgentTitleUpdated(({ sessionId, title }) => {
       // 先使用事件 payload 立即同步标签页，避免依赖会话列表旧快照比较。
       store.set(tabsAtom, (tabs) => updateTabTitle(tabs, sessionId, title))
-      store.set(agentSessionsAtom, (prev) =>
-        prev.map((s) => (s.id === sessionId ? { ...s, title } : s))
-      )
-      // 保留全量刷新语义：外部桥接会复用该事件通知新会话/绑定变化。
+      const existing = store.get(agentSessionsAtom).find((session) => session.id === sessionId)
+      if (existing) {
+        // 标题写入会更新 updatedAt；本地以当前时刻维持与后端一致的“最近会话”排序，
+        // 不再为一行标题变化传输整个会话索引。
+        store.set(agentSessionsAtom, (prev) => upsertAgentSession(prev, {
+          ...existing,
+          title,
+          updatedAt: Date.now(),
+        }))
+        return
+      }
+      // 外部桥接可能先发标题、后发 run-start；仅在本地未知该会话时走恢复性全量同步。
       window.electronAPI
         .listAgentSessions()
-        .then((sessions) => {
-          store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions))
-        })
+        .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
         .catch(console.error)
     })
 

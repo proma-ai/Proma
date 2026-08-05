@@ -17,6 +17,7 @@ import { dirname } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
+import { listAgentSessions } from './agent-session-manager'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
@@ -100,6 +101,14 @@ function releaseUnavailableDirectoryWatcher(dirPath: string): void {
   console.log('[附加目录监听] 已停止父目录监听:', parentPath)
 }
 
+function restoreAgentSessionAttachedDirectoryWatchers(): void {
+  for (const session of listAgentSessions()) {
+    for (const dirPath of session.attachedDirectories ?? []) {
+      watchAttachedDirectory(dirPath)
+    }
+  }
+}
+
 function watchUnavailableDirectoryParent(dirPath: string): void {
   const parentPath = findNearestExistingDirectory(dirname(dirPath))
   if (!parentPath) {
@@ -147,6 +156,9 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
  */
 export function startWorkspaceWatcher(win: BrowserWindow): void {
   mainWin = win
+  // 会话附加目录只需在启动/监听器重启时恢复一次；LIST_SESSIONS 是高频读取路径，
+  // 不能随每次列表 IPC 再遍历全部会话并触发同步 stat。
+  restoreAgentSessionAttachedDirectoryWatchers()
   const watchDir = getAgentWorkspacesDir()
 
   if (!existsSync(watchDir)) {

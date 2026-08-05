@@ -7,8 +7,9 @@
  * 在场 = 不需要发飞书通知；离开 = 需要发飞书通知。
  */
 
-import { BrowserWindow, powerMonitor } from 'electron'
+import { powerMonitor } from 'electron'
 import type { FeishuPresenceReport } from '@proma/shared'
+import { getMainWindow } from './main-window-store'
 
 /** 内部在场状态 */
 interface PresenceState {
@@ -45,7 +46,7 @@ class PresenceService {
    * - 当前查看的不是这个会话（后台会话）
    */
   isUserPresent(sessionId: string): boolean {
-    const win = BrowserWindow.getAllWindows()[0]
+    const win = getMainWindow()
     if (!win || win.isDestroyed()) return false
 
     // 窗口最小化 → 不在场

@@ -48,7 +48,6 @@ const SHORTCUT_DISPLAY_ORDER: Record<ShortcutCategory, readonly string[]> = {
   navigation: [
     'cycle-sessions',
     'quick-switch-session',
-    'open-planning',
     'file-find',
     'global-search',
     'focus-input',
@@ -62,7 +61,7 @@ const SHORTCUT_DISPLAY_ORDER: Record<ShortcutCategory, readonly string[]> = {
     'editor-bold',
     'editor-strikethrough',
   ],
-  global: ['quick-task', 'show-main-window', 'voice-dictation'],
+  global: ['quick-task', 'show-main-window', 'open-planning', 'voice-dictation'],
 }
 
 const CATEGORY_ICONS: Record<ShortcutCategory, React.ComponentType<{ className?: string }>> = {

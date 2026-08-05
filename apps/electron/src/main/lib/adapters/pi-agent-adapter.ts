@@ -59,6 +59,7 @@ import {
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
 import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
+import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning-request-settings'
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
@@ -1489,11 +1490,23 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             : inferReasoningTransport(input.provider),
         })
         : undefined
+      const deepSeekReasoningProfile = input.provider === 'deepseek'
+        ? resolveReasoningProfile({
+          modelId: input.model,
+          transport: 'anthropic-messages',
+        })
+        : undefined
       const extensionFactories = [
         ...(openAIReasoningProfile
           ? [createOpenAIReasoningRequestExtension({
               profile: openAIReasoningProfile,
               thinkingLevel: input.openAIThinkingLevel,
+            })]
+          : []),
+        ...(deepSeekReasoningProfile?.encodings['anthropic-messages']?.kind === 'deepseek-output-effort'
+          ? [createDeepSeekReasoningRequestExtension({
+              profile: deepSeekReasoningProfile,
+              thinkingLevel: input.thinkingLevel,
             })]
           : []),
         ...(input.provider === 'openai-codex' && input.codexFastMode

@@ -10,6 +10,7 @@ let tray: Tray | null = null
 
 export interface TrayActions {
   showMainWindow: () => void
+  showPlanningWindow: () => void
   openAgentSession: (sessionId: string, title: string) => void
   createChatSession: () => void
   createAgentSession: () => void
@@ -43,6 +44,7 @@ function showMainWindow(): void {
 function getDefaultTrayActions(): TrayActions {
   return {
     showMainWindow,
+    showPlanningWindow: showMainWindow,
     openAgentSession: () => showMainWindow(),
     createChatSession: () => showMainWindow(),
     createAgentSession: () => showMainWindow(),
@@ -73,6 +75,11 @@ function buildTrayMenu(actions: TrayActions): Menu {
   const moreItems = model.moreSessions.map((item) => createRecentSessionMenuItem(item, actions))
 
   const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: '任务/日程',
+      click: () => actions.showPlanningWindow(),
+    },
+    { type: 'separator' },
     ...(runningItems.length > 0
       ? [
           { label: '运行中', enabled: false },

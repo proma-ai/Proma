@@ -9,7 +9,7 @@
  * - Session 镜像：桌面发起的会话可同步为飞书群内流式卡片
  */
 
-import { BrowserWindow } from 'electron'
+import { getMainWindow } from './main-window-store'
 import type {
   AgentStreamPayload,
   AgentSendInput,
@@ -1125,9 +1125,9 @@ class FeishuBridge {
     this.saveBindings()
 
     // 通知渲染进程刷新会话列表（复用 TITLE_UPDATED 通道触发列表刷新）
-    const windows = BrowserWindow.getAllWindows()
-    if (windows.length > 0 && !windows[0]!.isDestroyed()) {
-      windows[0]!.webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
+    const mainWindow = getMainWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, {
         sessionId: session.id,
         title: session.title,
       })
@@ -2584,9 +2584,9 @@ class FeishuBridge {
     this.status = { ...this.status, ...partial }
 
     // 广播到渲染进程（包含 botId 和 botName）
-    const windows = BrowserWindow.getAllWindows()
-    if (windows.length > 0 && !windows[0]!.isDestroyed()) {
-      windows[0]!.webContents.send(FEISHU_IPC_CHANNELS.STATUS_CHANGED, {
+    const mainWindow = getMainWindow()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(FEISHU_IPC_CHANNELS.STATUS_CHANGED, {
         ...this.status,
         botId: this.botConfig.id,
         botName: this.botConfig.name,

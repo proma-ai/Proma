@@ -37,6 +37,7 @@ export function inferReasoningTransport(provider: ProviderType | undefined): Rea
 /** 编译器据此生成 runtime 专属请求参数。 */
 export type ReasoningEncodingKind =
   | 'adaptive-effort'
+  | 'deepseek-output-effort'
   | 'openai-reasoning-effort'
   | 'zai-thinking-effort'
 
@@ -49,7 +50,7 @@ export interface ReasoningEncoding {
 }
 
 export interface ReasoningProfile {
-  id: 'kimi-k3' | 'glm-5.2' | 'openai-reasoning-standard' | 'openai-reasoning-max'
+  id: 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'kimi-k3' | 'glm-5.2' | 'openai-reasoning-standard' | 'openai-reasoning-max'
   levels: readonly AgentThinkingLevel[]
   defaultLevel: AgentThinkingLevel
   normalize(level: AgentThinkingLevel | undefined): AgentThinkingLevel
@@ -83,10 +84,31 @@ export interface ResolveReasoningProfileInput {
   transport: ReasoningTransport
 }
 
+const DEEPSEEK_V4_LEVELS = ['off', 'low', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const K3_LEVELS = ['off', 'low', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const GLM_52_LEVELS = ['off', 'high', 'max'] as const satisfies readonly AgentThinkingLevel[]
 const OPENAI_STANDARD_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh'] as const satisfies readonly AgentThinkingLevel[]
 const OPENAI_MAX_LEVELS = [...OPENAI_STANDARD_LEVELS, 'max'] as const satisfies readonly AgentThinkingLevel[]
+
+// DeepSeek Anthropic compatibility only honors output_config.effort. The official
+// V4 Flash and Pro mappings differ at low and xhigh; off is handled by emitting
+// `thinking: { type: 'disabled' }` rather than an effort value.
+const DEEPSEEK_V4_FLASH_EFFORT_MAP: ReasoningEffortMap = {
+  minimal: null,
+  low: 'low',
+  medium: null,
+  high: 'high',
+  xhigh: 'high',
+  max: 'max',
+}
+const DEEPSEEK_V4_PRO_EFFORT_MAP: ReasoningEffortMap = {
+  minimal: null,
+  low: 'high',
+  medium: null,
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
+}
 
 const K3_EFFORT_MAP: ReasoningEffortMap = {
   minimal: 'low',
@@ -127,6 +149,25 @@ const OPENAI_MAX_EFFORT_MAP: ReasoningEffortMap = {
   max: 'max',
 }
 
+function normalizeDeepSeekV4Level(level: AgentThinkingLevel | undefined): AgentThinkingLevel {
+  switch (level) {
+    case 'off':
+      return 'off'
+    case 'minimal':
+    case 'low':
+      return 'low'
+    case 'medium':
+    case 'high':
+      return 'high'
+    case 'xhigh':
+      return 'xhigh'
+    case 'max':
+      return 'max'
+    default:
+      return 'high'
+  }
+}
+
 function normalizeK3Level(level: AgentThinkingLevel | undefined): AgentThinkingLevel {
   switch (level) {
     case 'off':
@@ -160,6 +201,26 @@ function normalizeOpenAIStandardLevel(level: AgentThinkingLevel | undefined): Ag
 function normalizeOpenAIMaxLevel(level: AgentThinkingLevel | undefined): AgentThinkingLevel {
   if (level === 'minimal') return 'low'
   return level ?? 'high'
+}
+
+const DEEPSEEK_V4_FLASH_PROFILE: ReasoningProfile = {
+  id: 'deepseek-v4-flash',
+  levels: DEEPSEEK_V4_LEVELS,
+  defaultLevel: 'high',
+  normalize: normalizeDeepSeekV4Level,
+  encodings: {
+    'anthropic-messages': { kind: 'deepseek-output-effort', effortMap: DEEPSEEK_V4_FLASH_EFFORT_MAP },
+  },
+}
+
+const DEEPSEEK_V4_PRO_PROFILE: ReasoningProfile = {
+  id: 'deepseek-v4-pro',
+  levels: DEEPSEEK_V4_LEVELS,
+  defaultLevel: 'high',
+  normalize: normalizeDeepSeekV4Level,
+  encodings: {
+    'anthropic-messages': { kind: 'deepseek-output-effort', effortMap: DEEPSEEK_V4_PRO_EFFORT_MAP },
+  },
 }
 
 const K3_PROFILE: ReasoningProfile = {
@@ -207,6 +268,8 @@ const OPENAI_MAX_PROFILE: ReasoningProfile = {
 }
 
 export const REASONING_PROFILES: readonly ReasoningProfile[] = [
+  DEEPSEEK_V4_FLASH_PROFILE,
+  DEEPSEEK_V4_PRO_PROFILE,
   K3_PROFILE,
   GLM_52_PROFILE,
   OPENAI_STANDARD_PROFILE,
@@ -221,13 +284,17 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
   const isOpenAITransport = input.transport === 'openai-completions' || input.transport === 'openai-responses'
   const isOpenAIReasoningModel = !modelId.endsWith('-chat-latest')
     && (modelId.startsWith('gpt-5') || /^(o1|o3|o4)(?:-|$)/.test(modelId))
-  const profile = /^(?:k3(?:-256k)?|kimi-k3)$/.test(modelId)
-    ? K3_PROFILE
-    : modelId === 'glm-5.2'
-      ? GLM_52_PROFILE
-      : isOpenAITransport && isOpenAIReasoningModel
-        ? /^gpt-5\.6(?:-|$)/.test(modelId) ? OPENAI_MAX_PROFILE : OPENAI_STANDARD_PROFILE
-        : undefined
+  const profile = /^deepseek-v4-flash(?:-|$)/.test(modelId)
+    ? DEEPSEEK_V4_FLASH_PROFILE
+    : /^deepseek-v4-pro(?:-|$)/.test(modelId)
+      ? DEEPSEEK_V4_PRO_PROFILE
+      : /^(?:k3(?:-256k)?|kimi-k3)$/.test(modelId)
+        ? K3_PROFILE
+        : modelId === 'glm-5.2'
+          ? GLM_52_PROFILE
+          : isOpenAITransport && isOpenAIReasoningModel
+            ? /^gpt-5\.6(?:-|$)/.test(modelId) ? OPENAI_MAX_PROFILE : OPENAI_STANDARD_PROFILE
+            : undefined
 
   return profile?.encodings[input.transport] ? profile : undefined
 }

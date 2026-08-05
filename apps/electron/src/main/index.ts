@@ -47,12 +47,19 @@ function registerProtocolsAndHandlers(): void {
 
   // Windows/macOS 文件关联 + OAuth deep-link：当第二个实例启动时，参数会通过 second-instance 传给已有实例
   app.on('second-instance', (_event, argv) => {
-    // 优先检查 OAuth deep-link（商业版 Cloud 登录回调）
+    // OAuth 回调含有令牌，必须优先交给 Cloud 登录链路处理。
     const url = argv.find((arg) => arg.startsWith(`${PROTOCOL_NAME}://`))
     if (url) {
       handleDeepLink(url)
+      return
     }
-    // 检查文件关联
+
+    // 原生 Planning 快捷入口无需先显示主窗口。
+    if (hasOpenPlanningArgument(argv)) {
+      showPlanningWindow()
+      return
+    }
+
     const fileArg = argv.find((arg) => arg.endsWith('.proma-backup') || arg.endsWith('.proma-share'))
     if (fileArg) {
       handleMigrationFileOpen(fileArg)
@@ -108,6 +115,7 @@ import { registerCloudIpcHandlers } from './cloud-ipc'
 import { registerSyncIpcHandlers } from './sync-ipc'
 import { scheduleAutoSync } from './lib/sync-service'
 import { handleOAuthCallback } from './lib/cloud-auth-service'
+import { getMainWindow as getStoredMainWindow, setMainWindow as setStoredMainWindow } from './lib/main-window-store'
 import {
   registerBridge,
   startAllBridges,
@@ -127,6 +135,8 @@ import { wechatBridge } from './lib/wechat-bridge'
 import { getWeChatConfig } from './lib/wechat-config'
 import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } from './lib/quick-task-window'
 import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
+import { configurePlanningQuickEntries } from './lib/planning-quick-entry'
+import { hasOpenPlanningArgument } from './lib/planning-quick-entry-model'
 import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
 import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
@@ -272,10 +282,66 @@ async function recoverEnabledDingTalkBots(): Promise<void> {
 }
 
 let mainWindow: BrowserWindow | null = null
+let startupSplashWindow: BrowserWindow | null = null
+
+/**
+ * 原生启动页不依赖 Renderer bundle 或运行时检测，避免冷启动期间出现空白窗口。
+ * dev 由 build:resources 复制到 dist/resources；打包版由 electron-builder extraResources 提供。
+ */
+function getStartupSplashPath(): string {
+  const resourcesDir = app.isPackaged ? process.resourcesPath : join(__dirname, 'resources')
+  return join(resourcesDir, 'startup-splash', 'index.html')
+}
+
+function dismissStartupSplash(): void {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
+    startupSplashWindow.destroy()
+  }
+  startupSplashWindow = null
+}
+
+function createStartupSplashWindow(): void {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
+
+  const savedState = getSettings().mainWindowState
+  const initialBounds = savedState
+    ? { width: savedState.width, height: savedState.height, x: savedState.x, y: savedState.y }
+    : { width: 1400, height: 900 }
+
+  startupSplashWindow = new BrowserWindow({
+    ...initialBounds,
+    show: false,
+    frame: false,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: '#1b3f2d',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+
+  const splash = startupSplashWindow
+  splash.setMenuBarVisibility(false)
+  splash.once('ready-to-show', () => {
+    if (splash.isDestroyed()) return
+    // 与主窗口使用相同的默认策略，首次启动时也不会出现窗口尺寸跳变。
+    if (savedState?.isMaximized ?? true) splash.maximize()
+    splash.show()
+  })
+  splash.once('closed', () => {
+    if (startupSplashWindow === splash) startupSplashWindow = null
+  })
+  splash.loadFile(getStartupSplashPath()).catch((error) => {
+    console.warn('[启动] 原生启动页加载失败，将继续启动主窗口:', error)
+    dismissStartupSplash()
+  })
+}
 
 /** 获取主窗口实例（供其他模块使用） */
 export function getMainWindow(): BrowserWindow | null {
-  return mainWindow
+  return getStoredMainWindow()
 }
 
 function installWindowsZoomInFallback(win: BrowserWindow): void {
@@ -414,6 +480,7 @@ function createWindow(): void {
     },
     ...titleBarOptions,
   })
+  setStoredMainWindow(mainWindow)
   installWindowsZoomInFallback(mainWindow)
 
   // Load the renderer
@@ -425,6 +492,34 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'))
   }
 
+  // 主 Renderer 无法加载或崩溃时，不能让启动页无限停留；切换为轻量错误页告知用户。
+  let hasShownRendererFailure = false
+  const showRendererFailure = (reason: string): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+
+    dismissStartupSplash()
+    if (hasShownRendererFailure) {
+      mainWindow.show()
+      return
+    }
+
+    hasShownRendererFailure = true
+    const message = encodeURIComponent(`Proma 无法加载主界面\n\n${reason}\n\n请重试；若问题持续，请检查应用安装文件。`)
+    mainWindow.loadURL(`data:text/plain;charset=utf-8,${message}`).catch((error) => {
+      console.error('[启动] 降级错误页加载失败:', error)
+      mainWindow?.show()
+    })
+  }
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+    console.error(`[启动] 主 Renderer 加载失败 (${errorCode}): ${errorDescription} (${validatedURL})`)
+    showRendererFailure(errorDescription)
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[启动] 主 Renderer 进程异常退出: ${details.reason}`)
+    showRendererFailure(`Renderer 进程异常退出：${details.reason}`)
+  })
+
   // 窗口就绪后，按保存的状态决定是否最大化
   mainWindow.once('ready-to-show', () => {
     if (savedState?.isMaximized ?? true) {
@@ -433,6 +528,8 @@ function createWindow(): void {
     if (process.platform === 'darwin' && app.dock) {
       app.dock.show()
     }
+    // 仅在主窗口首帧已完成合成后移除原生启动页，避免冷启动时的空白与闪屏。
+    dismissStartupSplash()
     mainWindow?.show()
   })
 
@@ -502,6 +599,7 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    setStoredMainWindow(null)
     mainWindow = null
   })
 }
@@ -579,6 +677,9 @@ async function bootstrap(): Promise<void> {
   // 初始化 Proma 版本号（供 User-Agent 等全局标识使用）
   setPromaVersion(app.getVersion())
 
+  // 先显示不依赖 Renderer 的静态启动页；运行时检测耗时不会再变成用户可见的空白。
+  createStartupSplashWindow()
+
   // 注册自定义协议 proma-file:// 用于内联预览本地文件。
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
   protocol.handle('proma-file', handlePromaFileRequest)
@@ -630,9 +731,19 @@ async function bootstrap(): Promise<void> {
   // Create main window (will be shown when ready)
   createWindow()
 
+  // 为 Dock、任务栏右键菜单与首次启动参数提供任务/日程的直接入口。
+  safeRun('configurePlanningQuickEntries', () => {
+    configurePlanningQuickEntries({
+      showMainWindow: showAndFocusMainWindow,
+      showPlanningWindow,
+    })
+  })
+  if (hasOpenPlanningArgument(process.argv)) showPlanningWindow()
+
   // Create system tray icon
   createTray({
     showMainWindow: showAndFocusMainWindow,
+    showPlanningWindow,
     openAgentSession: (sessionId, title) => {
       sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
     },
@@ -688,6 +799,9 @@ async function bootstrap(): Promise<void> {
   )
   safeRun('registerGlobalShortcut:show-main-window', () =>
     registerGlobalShortcut('show-main-window', showAndFocusMainWindow),
+  )
+  safeRun('registerGlobalShortcut:open-planning', () =>
+    registerGlobalShortcut('open-planning', showPlanningWindow),
   )
   safeRun('registerGlobalShortcut:voice-dictation', () =>
     registerGlobalShortcut('voice-dictation', () => {

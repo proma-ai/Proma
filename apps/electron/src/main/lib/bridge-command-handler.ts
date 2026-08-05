@@ -7,8 +7,8 @@
  * 飞书 Bridge 使用独立的卡片消息格式，暂不接入此模块。
  */
 
-import { BrowserWindow } from 'electron'
 import type { AgentStreamPayload } from '@proma/shared'
+import { getMainWindow } from './main-window-store'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
 import {
@@ -846,7 +846,7 @@ export class BridgeCommandHandler {
   }
 
   private notifySessionCreated(sessionId: string, title: string): void {
-    const win = BrowserWindow.getAllWindows()[0]
+    const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, { sessionId, title })
     }

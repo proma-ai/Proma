@@ -1951,18 +1951,7 @@ export function registerIpcHandlers(): void {
   // 获取 Agent 会话列表
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_SESSIONS,
-    async (): Promise<AgentSessionMeta[]> => {
-      const sessions = listAgentSessions()
-      // 启动所有已有附加目录的文件监听
-      for (const session of sessions) {
-        if (session.attachedDirectories) {
-          for (const dir of session.attachedDirectories) {
-            watchAttachedDirectory(dir)
-          }
-        }
-      }
-      return sessions
-    }
+    async (): Promise<AgentSessionMeta[]> => listAgentSessions()
   )
 
   // 创建 Agent 会话

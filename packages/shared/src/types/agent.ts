@@ -1315,6 +1315,8 @@ export interface AgentStreamCompletePayload {
   resultErrors?: string[]
   /** 本轮主体结束但仍有后台任务/定时任务在飞行：UI 进入"空闲可输入"态，等待任务完成自动唤醒 */
   backgroundTasksPending?: boolean
+  /** 完成时的最新会话元数据，供 renderer 增量更新列表，避免重新传输全量会话索引。 */
+  session?: AgentSessionMeta
 }
 
 // ===== 文件浏览器 =====
