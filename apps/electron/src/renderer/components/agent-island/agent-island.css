@@ -40,7 +40,19 @@ button {
 
 .island-root-floating .island-surface {
   border-top: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 0;
+  border-radius: 18px;
+}
+
+/* Windows 透明 BrowserWindow 中，border-radius 外侧像素仍会透出桌面。
+   给根容器与 surface 相同的背景色和圆角，把四角填实。
+   注意：根容器高度必须贴合 surface（覆盖 .island-root 的 height:100%），
+   否则透明窗口的实际高度比 surface 略大时，窗口底部会被实色背景填满，
+   看起来像“下方叠了一层 UI”（收起态下的双重 UI 重叠）。 */
+.island-root-floating {
+  height: auto;
+  background: #09090a;
+  border-radius: 18px;
+  overflow: hidden;
 }
 
 /* Windows exposes a small native drag region instead of making controls
@@ -159,7 +171,8 @@ button {
   overflow: hidden;
   font-size: 10.5px;
   font-weight: 650;
-  line-height: 1;
+  line-height: 1.2;
+  padding-top: 1px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -175,7 +188,7 @@ button {
   color: rgb(255 255 255 / 0.86);
   font-size: 9px;
   font-weight: 650;
-  line-height: 1;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
 
@@ -225,7 +238,7 @@ button {
   color: rgb(255 255 255 / 0.62);
   font-size: 9px;
   font-weight: 750;
-  line-height: 1;
+  line-height: 1.2;
 }
 
 .island-header-copy strong {
