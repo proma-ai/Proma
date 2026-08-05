@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Proma</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        background: #1b3f2d;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .artwork, .shade { position: fixed; inset: 0; }
+      .artwork {
+        width: 100%; height: 100%; object-fit: cover; object-position: center;
+        transform: scale(1.01);
+      }
+      .shade { background: linear-gradient(45deg, rgba(0,0,0,.70), rgba(0,0,0,.35) 55%, rgba(0,0,0,.15)); }
+      .content {
+        position: relative; z-index: 1; width: 100%; height: 100%;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 32px; text-align: center;
+      }
+      .brand { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 300; letter-spacing: .04em; }
+      .brand img { width: 36px; height: 36px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+      .slogan { max-width: 320px; margin: 24px 0 0; font-size: 17px; font-weight: 300; line-height: 1.5; letter-spacing: .04em; color: rgba(255,255,255,.95); }
+      .progress { width: 96px; height: 1px; margin-top: 28px; overflow: hidden; background: rgba(255,255,255,.35); }
+      .progress::after { content: ""; display: block; width: 40%; height: 100%; background: rgba(255,255,255,.9); animation: pulse 1.6s ease-in-out infinite; }
+      .title { margin: 16px 0 0; font-size: 14px; font-weight: 600; letter-spacing: .08em; }
+      .subtitle { margin: 8px 0 0; font-size: 12px; letter-spacing: .12em; color: rgba(255,255,255,.7); }
+      .tagline { position: absolute; bottom: 32px; margin: 0; font-size: 11px; letter-spacing: .3em; color: rgba(255,255,255,.65); }
+      @keyframes pulse { 50% { opacity: .45; } }
+      @media (prefers-reduced-motion: reduce) { .progress::after { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <img class="artwork" src="artwork.jpg" alt="" />
+    <div class="shade"></div>
+    <main class="content" aria-busy="true" aria-live="polite">
+      <div class="brand"><img src="proma-mark-white.svg" alt="" />Proma</div>
+      <p class="slogan">让协作自然发生，让想法流动成形</p>
+      <div class="progress"></div>
+      <p class="title">正在启动 Proma</p>
+      <p class="subtitle">正在初始化你的工作空间</p>
+      <p class="tagline">LOCAL-FIRST AI AGENT</p>
+    </main>
+  </body>
+</html>

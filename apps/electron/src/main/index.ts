@@ -262,6 +262,61 @@ async function recoverEnabledDingTalkBots(): Promise<void> {
 }
 
 let mainWindow: BrowserWindow | null = null
+let startupSplashWindow: BrowserWindow | null = null
+
+/**
+ * 原生启动页不依赖 Renderer bundle 或运行时检测，避免冷启动期间出现空白窗口。
+ * dev 由 build:resources 复制到 dist/resources；打包版由 electron-builder extraResources 提供。
+ */
+function getStartupSplashPath(): string {
+  const resourcesDir = app.isPackaged ? process.resourcesPath : join(__dirname, 'resources')
+  return join(resourcesDir, 'startup-splash', 'index.html')
+}
+
+function dismissStartupSplash(): void {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
+    startupSplashWindow.destroy()
+  }
+  startupSplashWindow = null
+}
+
+function createStartupSplashWindow(): void {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
+
+  const savedState = getSettings().mainWindowState
+  const initialBounds = savedState
+    ? { width: savedState.width, height: savedState.height, x: savedState.x, y: savedState.y }
+    : { width: 1400, height: 900 }
+
+  startupSplashWindow = new BrowserWindow({
+    ...initialBounds,
+    show: false,
+    frame: false,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: '#1b3f2d',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+
+  const splash = startupSplashWindow
+  splash.setMenuBarVisibility(false)
+  splash.once('ready-to-show', () => {
+    if (splash.isDestroyed()) return
+    if (savedState?.isMaximized) splash.maximize()
+    splash.show()
+  })
+  splash.once('closed', () => {
+    if (startupSplashWindow === splash) startupSplashWindow = null
+  })
+  splash.loadFile(getStartupSplashPath()).catch((error) => {
+    console.warn('[启动] 原生启动页加载失败，将继续启动主窗口:', error)
+    dismissStartupSplash()
+  })
+}
 
 /** 获取主窗口实例（供其他模块使用） */
 export function getMainWindow(): BrowserWindow | null {
@@ -423,6 +478,8 @@ function createWindow(): void {
     if (process.platform === 'darwin' && app.dock) {
       app.dock.show()
     }
+    // 仅在主窗口首帧已完成合成后移除原生启动页，避免冷启动时的空白与闪屏。
+    dismissStartupSplash()
     mainWindow?.show()
   })
 
@@ -524,6 +581,9 @@ app.whenReady().then(bootstrap).catch(handleBootstrapFailure)
 async function bootstrap(): Promise<void> {
   // 初始化 Proma 版本号（供 User-Agent 等全局标识使用）
   setPromaVersion(app.getVersion())
+
+  // 先显示不依赖 Renderer 的静态启动页；运行时检测耗时不会再变成用户可见的空白。
+  createStartupSplashWindow()
 
   // 注册自定义协议 proma-file:// 用于内联预览本地文件。
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
