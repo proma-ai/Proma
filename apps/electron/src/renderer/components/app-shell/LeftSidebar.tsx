@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw, Copy, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -2455,7 +2455,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
         ref={sidebarRootRef}
         data-session-switch-hints={quickSwitchHintsVisible ? 'true' : undefined}
         className={cn(
-          'relative h-full flex flex-col items-center px-2',
+          'left-sidebar relative h-full flex flex-col items-center px-2',
           !noTransition && 'transition-[width] duration-300',
           isClassic
             ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
@@ -2672,7 +2672,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       ref={sidebarRootRef}
       data-session-switch-hints={quickSwitchHintsVisible ? 'true' : undefined}
       className={cn(
-        'relative h-full flex flex-col',
+        'left-sidebar relative h-full flex flex-col',
         !noTransition && 'transition-[width] duration-300',
         isClassic
           ? 'bg-background rounded-2xl shadow-xl dark:shadow-md'
@@ -4129,7 +4129,6 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   )
 
   const [renamingWorkspace, setRenamingWorkspace] = React.useState(false)
-  const [projectMenuOpen, setProjectMenuOpen] = React.useState(false)
   const [workspaceEditName, setWorkspaceEditName] = React.useState('')
   const workspaceEditRef = React.useRef<HTMLInputElement>(null)
   const justStartedRenamingRef = React.useRef(false)
@@ -4230,18 +4229,17 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         <div className="absolute -top-0.5 left-3 right-3 h-0.5 translate-x-[2px] rounded-full bg-primary z-10" />
       )}
 
-      <div className="group/project relative flex translate-x-[2px] items-center">
-        <span
-          draggable
-          onDragStart={(e) => onDragStart(e, group.workspace.id)}
-          title="拖拽排序"
-          className="absolute -left-0.5 top-1/2 z-10 flex size-[18px] -translate-y-1/2 cursor-grab items-center justify-center text-foreground/20 opacity-0 transition-opacity group-hover/project:opacity-100 active:cursor-grabbing"
-          aria-hidden="true"
-        >
-          <GripVertical size={12} />
-        </span>
-
-        {renamingWorkspace ? (
+      {renamingWorkspace ? (
+        <div className="group/project relative flex translate-x-[2px] items-center">
+          <span
+            draggable
+            onDragStart={(e) => onDragStart(e, group.workspace.id)}
+            title="拖拽排序"
+            className="absolute -left-0.5 top-1/2 z-10 flex size-[18px] -translate-y-1/2 cursor-grab items-center justify-center text-foreground/20 opacity-0 transition-opacity group-hover/project:opacity-100 active:cursor-grabbing"
+            aria-hidden="true"
+          >
+            <GripVertical size={12} />
+          </span>
           <div
             className={cn(
               'relative flex-1 min-w-0 flex items-center gap-1 pl-[9px] pr-1 py-1 rounded-md text-left titlebar-no-drag group-hover/project:pl-4 group-hover/project:pr-11',
@@ -4261,7 +4259,22 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               maxLength={50}
             />
           </div>
-        ) : (
+        </div>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className="group/project relative flex translate-x-[2px] items-center titlebar-no-drag"
+            >
+              <span
+                draggable
+                onDragStart={(e) => onDragStart(e, group.workspace.id)}
+                title="拖拽排序"
+                className="absolute -left-0.5 top-1/2 z-10 flex size-[18px] -translate-y-1/2 cursor-grab items-center justify-center text-foreground/20 opacity-0 transition-opacity group-hover/project:opacity-100 active:cursor-grabbing"
+                aria-hidden="true"
+              >
+                <GripVertical size={12} />
+              </span>
           <button
             type="button"
             aria-expanded={!collapsed}
@@ -4315,108 +4328,224 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
               />
             )}
           </button>
-        )}
 
-        {isCurrent && !isAutomationGroup && !projectMenuOpen && (
-          <ShortcutKeycaps
-            shortcutId="new-session"
-            className="pointer-events-none mr-6 !flex-nowrap flex-shrink-0 opacity-65 transition-opacity group-hover/project:opacity-0"
-            keycapClassName="h-4 min-w-4 rounded-[3px] border-border/60 px-0.5 text-[9px] shadow-none"
-            separatorClassName="text-[8px]"
-          />
-        )}
+          {isCurrent && !isAutomationGroup && (
+            <ShortcutKeycaps
+              shortcutId="new-session"
+              className="pointer-events-none mr-6 !flex-nowrap flex-shrink-0 opacity-65 transition-opacity group-hover/project:opacity-0"
+              keycapClassName="h-4 min-w-4 rounded-[3px] border-border/60 px-0.5 text-[9px] shadow-none"
+              separatorClassName="text-[8px]"
+            />
+          )}
 
-        {!isAutomationGroup && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label={`在「${group.workspace.name}」中新建会话`}
-              onClick={(e) => {
-                e.stopPropagation()
-                void onNewSession(group.workspace.id)
-              }}
-              className="absolute right-0 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
-            >
-              <Plus size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {`在此项目中新建会话${newSessionShortcutLabel ? ` (${newSessionShortcutLabel})` : ''}`}
-          </TooltipContent>
-        </Tooltip>
-        )}
+          {!isAutomationGroup && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`在「${group.workspace.name}」中新建会话`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void onNewSession(group.workspace.id)
+                  }}
+                  className="absolute right-0 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/65 titlebar-no-drag"
+                >
+                  <Plus size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {`在此项目中新建会话${newSessionShortcutLabel ? ` (${newSessionShortcutLabel})` : ''}`}
+              </TooltipContent>
+            </Tooltip>
+          )}
 
-        {!isAutomationGroup && (
-        <DropdownMenu onOpenChange={setProjectMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="项目菜单"
-              className="absolute right-5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 opacity-0 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/60 group-hover/project:opacity-100 data-[state=open]:opacity-100 titlebar-no-drag"
-            >
-              <MoreHorizontal size={13} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44 z-[9999] min-w-0 p-0.5">
-            <DropdownMenuItem
-              className="text-xs py-1 [&>svg]:size-3.5"
-              onSelect={() => onSelectProject(group.workspace.id)}
-            >
-              <FolderOpen size={14} />
-              设为当前项目
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-xs py-1 [&>svg]:size-3.5"
-              onSelect={handleStartWorkspaceRename}
-            >
-              <Pencil size={14} />
-              重命名
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-xs py-1 [&>svg]:size-3.5"
-              onSelect={() => onConfigureProject(group.workspace.id)}
-            >
-              <Settings size={14} />
-              配置 MCP 与 Skills
-            </DropdownMenuItem>
-            {hasUnavailableProjectRoot && (
-              <>
+          {!isAutomationGroup && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="项目菜单"
+                  className="absolute right-5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-foreground/30 opacity-0 transition-colors hover:bg-foreground/[0.055] hover:text-foreground/60 group-hover/project:opacity-100 data-[state=open]:opacity-100 titlebar-no-drag"
+                >
+                  <MoreHorizontal size={13} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44 z-[9999] min-w-0 p-0.5">
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={() => onSelectProject(group.workspace.id)}
+                >
+                  <FolderOpen size={14} />
+                  设为当前项目
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={handleStartWorkspaceRename}
+                >
+                  <Pencil size={14} />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={() => onConfigureProject(group.workspace.id)}
+                >
+                  <Settings size={14} />
+                  配置 MCP 与 Skills
+                </DropdownMenuItem>
                 <DropdownMenuSeparator className="my-0.5" />
                 <DropdownMenuItem
                   className="text-xs py-1 [&>svg]:size-3.5"
-                  onSelect={() => void onRelinkProjectRoot(group.workspace.id)}
+                  onSelect={async () => {
+                    const path = group.workspace.projectRootPath
+                      ?? await window.electronAPI.getWorkspaceFilesPath(group.workspace.slug)
+                    if (path) {
+                      await navigator.clipboard.writeText(path)
+                      toast.success('已复制项目路径')
+                    }
+                  }}
                 >
-                  <FolderInput size={14} />
-                  重新选择文件夹
+                  <Copy size={14} />
+                  复制项目路径
                 </DropdownMenuItem>
-                {group.workspace.projectRootStatus === 'missing' && (
-                  <DropdownMenuItem
-                    className="text-xs py-1 [&>svg]:size-3.5"
-                    onSelect={() => onRequestRestoreProjectRoot(group.workspace.id)}
-                  >
-                    <FolderPlus size={14} />
-                    在原路径新建空文件夹
-                  </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-xs py-1 [&>svg]:size-3.5"
+                  onSelect={async () => {
+                    const path = group.workspace.projectRootPath
+                      ?? await window.electronAPI.getWorkspaceFilesPath(group.workspace.slug)
+                    if (path) {
+                      window.electronAPI.showItemInFolder(path)
+                    }
+                  }}
+                >
+                  <ExternalLink size={14} />
+                  在文件管理器中打开
+                </DropdownMenuItem>
+                {hasUnavailableProjectRoot && (
+                  <>
+                    <DropdownMenuSeparator className="my-0.5" />
+                    <DropdownMenuItem
+                      className="text-xs py-1 [&>svg]:size-3.5"
+                      onSelect={() => void onRelinkProjectRoot(group.workspace.id)}
+                    >
+                      <FolderInput size={14} />
+                      重新选择文件夹
+                    </DropdownMenuItem>
+                    {group.workspace.projectRootStatus === 'missing' && (
+                      <DropdownMenuItem
+                        className="text-xs py-1 [&>svg]:size-3.5"
+                        onSelect={() => onRequestRestoreProjectRoot(group.workspace.id)}
+                      >
+                        <FolderPlus size={14} />
+                        在原路径新建空文件夹
+                      </DropdownMenuItem>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-            <DropdownMenuSeparator className="my-0.5" />
-            <DropdownMenuItem
-              disabled={!canDeleteWorkspace}
-              className={cn(
-                'text-xs py-1 [&>svg]:size-3.5',
-                canDeleteWorkspace && 'text-destructive focus:text-destructive',
+                <DropdownMenuSeparator className="my-0.5" />
+                <DropdownMenuItem
+                  disabled={!canDeleteWorkspace}
+                  className={cn(
+                    'text-xs py-1 [&>svg]:size-3.5',
+                    canDeleteWorkspace && 'text-destructive focus:text-destructive',
+                  )}
+                  onSelect={() => onRequestDeleteWorkspace(group.workspace.id)}
+                >
+                  <Trash2 size={14} />
+                  删除项目
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+            </div>
+          </ContextMenuTrigger>
+          {!isAutomationGroup && (
+            <ContextMenuContent className="w-44 z-[9999] min-w-0 p-0.5">
+              <ContextMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={() => onSelectProject(group.workspace.id)}
+              >
+                <FolderOpen size={14} />
+                设为当前项目
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={handleStartWorkspaceRename}
+              >
+                <Pencil size={14} />
+                重命名
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={() => onConfigureProject(group.workspace.id)}
+              >
+                <Settings size={14} />
+                配置 MCP 与 Skills
+              </ContextMenuItem>
+              <ContextMenuSeparator className="my-0.5" />
+              <ContextMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={async () => {
+                  const path = group.workspace.projectRootPath
+                    ?? await window.electronAPI.getWorkspaceFilesPath(group.workspace.slug)
+                  if (path) {
+                    await navigator.clipboard.writeText(path)
+                    toast.success('已复制项目路径')
+                  }
+                }}
+              >
+                <Copy size={14} />
+                复制项目路径
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="text-xs py-1 [&>svg]:size-3.5"
+                onSelect={async () => {
+                  const path = group.workspace.projectRootPath
+                    ?? await window.electronAPI.getWorkspaceFilesPath(group.workspace.slug)
+                  if (path) {
+                    window.electronAPI.showItemInFolder(path)
+                  }
+                }}
+              >
+                <ExternalLink size={14} />
+                在文件管理器中打开
+              </ContextMenuItem>
+              {hasUnavailableProjectRoot && (
+                <>
+                  <ContextMenuSeparator className="my-0.5" />
+                  <ContextMenuItem
+                    className="text-xs py-1 [&>svg]:size-3.5"
+                    onSelect={() => void onRelinkProjectRoot(group.workspace.id)}
+                  >
+                    <FolderInput size={14} />
+                    重新选择文件夹
+                  </ContextMenuItem>
+                  {group.workspace.projectRootStatus === 'missing' && (
+                    <ContextMenuItem
+                      className="text-xs py-1 [&>svg]:size-3.5"
+                      onSelect={() => onRequestRestoreProjectRoot(group.workspace.id)}
+                    >
+                      <FolderPlus size={14} />
+                      在原路径新建空文件夹
+                    </ContextMenuItem>
+                  )}
+                </>
               )}
-              onSelect={() => onRequestDeleteWorkspace(group.workspace.id)}
-            >
-              <Trash2 size={14} />
-              删除项目
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        )}
-      </div>
+              <ContextMenuSeparator className="my-0.5" />
+              <ContextMenuItem
+                disabled={!canDeleteWorkspace}
+                className={cn(
+                  'text-xs py-1 [&>svg]:size-3.5',
+                  canDeleteWorkspace && 'text-destructive focus:text-destructive',
+                )}
+                onSelect={() => onRequestDeleteWorkspace(group.workspace.id)}
+              >
+                <Trash2 size={14} />
+                删除项目
+              </ContextMenuItem>
+            </ContextMenuContent>
+          )}
+        </ContextMenu>
+      )}
 
       <div id={`project-sessions-${group.workspace.id}`} className="ml-4 mt-px">
         {!collapsed ? (

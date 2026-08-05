@@ -2438,3 +2438,17 @@
 .ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
 }
+
+/* ===== 左侧栏字号放大 =====
+ * 侧边栏内大量使用 text-[10px] ~ text-[13px] 等绝对像素值，
+ * 整体偏小。以下规则统一放大 +2px，提升可读性。
+ */
+.left-sidebar {
+  font-size: 14px;
+}
+.left-sidebar .text-\[10px\] { font-size: 12px !important; }
+.left-sidebar .text-\[11px\] { font-size: 13px !important; }
+.left-sidebar .text-\[12px\] { font-size: 14px !important; }
+.left-sidebar .text-\[13px\] { font-size: 15px !important; }
+.left-sidebar .text-xs { font-size: 13px !important; }
+.left-sidebar .text-sm { font-size: 15px !important; }
