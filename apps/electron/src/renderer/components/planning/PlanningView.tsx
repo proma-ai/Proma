@@ -10,6 +10,7 @@ import { AutomationsListView } from '@/components/automation/AutomationsListView
 import { CalendarWorkspace } from '@/components/planning/CalendarWorkspace'
 import { PlanningFloatingInspector } from '@/components/planning/PlanningFloatingInspector'
 import { PlanningGroupManager } from '@/components/planning/PlanningGroupManager'
+import { PlanningNativeSyncControl } from '@/components/planning/PlanningNativeSyncControl'
 import { agentChannelIdAtom, agentModelIdAtom, agentPendingPromptAtom, agentSessionsAtom, agentWorkspacesAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
 import { planningCalendarCreateRequestAtom, planningSelectedTodoIdAtom, planningTabAtom, planningTagsAtom, planningTodoCreateRequestAtom, todoPlanningGroupsAtom, todosAtom, type PlanningTab } from '@/atoms/planning-atoms'
 import { useOpenSession } from '@/hooks/useOpenSession'
@@ -633,7 +634,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border/60">
           <div className="border-b border-border/60 px-5 py-4">
-            <div className="flex items-center justify-between"><h2 className="text-base font-semibold">{viewTitle}</h2>{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div>
+            <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold">{viewTitle}</h2><div className="flex items-center gap-3"><PlanningNativeSyncControl entity="reminder" />{view !== 'completed' && <span className="text-xs tabular-nums text-muted-foreground">{visibleTodos.length} 项</span>}</div></div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">{visibleTodos.length ? visibleTodos.map((todo) => <TodoListItem key={todo.id} todo={todo} selected={selectedId === todo.id} todayEnd={todayEnd} onSelect={() => setSelectedId(todo.id)} onToggle={() => void completeTodo(todo)} onDelete={() => setTodoPendingDeletion(todo)} />) : <div className="flex h-full min-h-56 items-center justify-center px-8 text-center text-sm text-muted-foreground">这里还没有任务。点击右上角“新建 Todo”或按 ⌘N 即可添加。</div>}</div>
         </div>

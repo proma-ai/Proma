@@ -91,14 +91,20 @@ mac:
   extraResources:
     - from: resources/agent-island/macos-agent-island-helper
       to: agent-island/macos-agent-island-helper
+    # EventKit N-API bridge 在 Electron main 进程内执行，确保 TCC 归属 Proma.app。
+    - from: resources/eventkit/macos-eventkit.node
+      to: eventkit/macos-eventkit.node
   binaries:
     - resources/agent-island/macos-agent-island-helper
+    - resources/eventkit/macos-eventkit.node
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: "Proma 需要访问麦克风，用于将你的语音实时转写为文本。"
+    NSCalendarsFullAccessUsageDescription: "Proma 需要访问你的日历，以显示、创建和同步你选择的日程。"
+    NSRemindersFullAccessUsageDescription: "Proma 需要访问你的提醒事项，以同步 Todo 和你选择的列表。"
   fileAssociations:
     - ext: proma-backup
       name: Proma Personal Backup

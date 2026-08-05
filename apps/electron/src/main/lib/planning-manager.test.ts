@@ -85,9 +85,27 @@ test('Given a fresh planning database When planning data changes Then isolation,
     assert.equal(manager.deletePlanningGroup('calendar', calendarGroup.id), true)
     assert.equal(manager.getCalendarEvent(calendarEvent.id).groupId, undefined)
 
-    // Deleting a Todo detaches linked events through the foreign key cascade.
+    // Selecting an explicit system target creates durable, coalesced outbox work without changing existing Planning entities.
+    const reminderProfile = manager.savePlanningSyncProfile({ entity: 'reminder', target: { id: 'reminders-list', title: 'Proma', sourceTitle: 'iCloud' } })
+    const calendarProfile = manager.savePlanningSyncProfile({ entity: 'calendar', target: { id: 'calendar-list', title: 'Proma', sourceTitle: 'iCloud' } })
+    const outbox = manager.listDuePlanningSyncOutbox()
+    assert.ok(outbox.some((item) => item.profile.id === reminderProfile.id && item.operation === 'upsert'))
+    assert.ok(outbox.some((item) => item.profile.id === calendarProfile.id && item.operation === 'upsert'))
+
+    // A stale native completion cannot acknowledge an outbox operation replaced by a newer local write.
+    const racingTodo = manager.createTodo({ title: '同步竞态 Todo' })
+    const firstOperation = manager.listDuePlanningSyncOutbox().find((item) => item.profile.id === reminderProfile.id && item.promaEntityId === racingTodo.id)
+    assert.ok(firstOperation)
+    manager.updateTodo({ id: racingTodo.id, title: '同步竞态 Todo（更新）', expectedUpdatedAt: racingTodo.updatedAt })
+    manager.completePlanningSyncOutbox(firstOperation, { calendarItemIdentifier: 'native-race-id' })
+    const replacementOperation = manager.listDuePlanningSyncOutbox().find((item) => item.profile.id === reminderProfile.id && item.promaEntityId === racingTodo.id)
+    assert.ok(replacementOperation)
+    assert.ok(replacementOperation.revision > firstOperation.revision)
+
+    // Deleting a Todo detaches linked events through the foreign key cascade and coalesces its pending native operation to delete.
     const linkedEvent = manager.createCalendarEvent({ title: '关联 Todo 的日程', startAt: now, todoId: todo.id })
     assert.equal(manager.deleteTodo(todo.id), true)
+    assert.equal(manager.listDuePlanningSyncOutbox().some((item) => item.profile.id === reminderProfile.id && item.promaEntityId === todo.id && item.operation === 'delete'), true)
     assert.equal(manager.getCalendarEvent(linkedEvent.id).todoId, undefined)
 
     const db = new DatabaseSync(join(configDir, 'planning.db'))
@@ -95,6 +113,8 @@ test('Given a fresh planning database When planning data changes Then isolation,
     assert.ok(eventColumns.includes('calendar_group_id'))
     assert.equal(eventColumns.includes('group_id'), false)
     assert.equal(eventColumns.includes('scratch_excerpt'), false)
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3)
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='planning_sync_outbox'").get().name, 'planning_sync_outbox')
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   `
   writeFileSync(sourcePath, source)

@@ -135,6 +135,12 @@ import type {
   CreatePlanningGroupInput,
   UpdatePlanningGroupInput,
   SnoozePlanningReminderInput,
+  PlanningNativeSyncEntity,
+  PlanningNativeSyncStatus,
+  PlanningNativeSyncPermissionResult,
+  PlanningNativeSyncTarget,
+  PlanningSyncProfile,
+  SavePlanningSyncProfileInput,
   AgentIslandWindowSnapshot,
 } from '@proma/shared'
 import type {
@@ -1183,6 +1189,13 @@ export interface ElectronAPI {
   onPlanningRemindersDue: (callback: (reminders: ActivePlanningReminder[]) => void) => () => void
   onPlanningChanged: (callback: (change: PlanningChange) => void) => () => void
   onPlanningAgentOperation: (callback: (operation: PlanningAgentOperation) => void) => () => void
+  /** macOS EventKit 同步设置；非 macOS 返回 unsupported 或空集合。 */
+  getPlanningNativeSyncStatus: () => Promise<PlanningNativeSyncStatus>
+  requestPlanningNativeSyncAccess: (entity: PlanningNativeSyncEntity) => Promise<PlanningNativeSyncPermissionResult>
+  openPlanningNativeSyncPrivacySettings: (entity: PlanningNativeSyncEntity) => Promise<void>
+  listPlanningNativeSyncTargets: (entity: PlanningNativeSyncEntity) => Promise<PlanningNativeSyncTarget[]>
+  listPlanningSyncProfiles: () => Promise<PlanningSyncProfile[]>
+  savePlanningSyncProfile: (input: SavePlanningSyncProfileInput) => Promise<PlanningSyncProfile>
 
   /** Agent 灵动岛桥接（主进程状态机 → 灵动岛窗口） */
   agentIsland: {
@@ -2714,6 +2727,12 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(PLANNING_IPC_CHANNELS.AGENT_OPERATION, listener)
     return () => { ipcRenderer.removeListener(PLANNING_IPC_CHANNELS.AGENT_OPERATION, listener) }
   },
+  getPlanningNativeSyncStatus: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.GET_NATIVE_SYNC_STATUS),
+  requestPlanningNativeSyncAccess: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.REQUEST_NATIVE_SYNC_ACCESS, entity),
+  openPlanningNativeSyncPrivacySettings: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.OPEN_NATIVE_SYNC_PRIVACY_SETTINGS, entity),
+  listPlanningNativeSyncTargets: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_TARGETS, entity),
+  listPlanningSyncProfiles: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_SYNC_PROFILES),
+  savePlanningSyncProfile: (input: SavePlanningSyncProfileInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.SAVE_SYNC_PROFILE, input),
 
   // ===== Agent 灵动岛 =====
   agentIsland: {

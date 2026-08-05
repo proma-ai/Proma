@@ -8,6 +8,9 @@ export type PlanningReminderTargetType = 'todo' | 'calendar_event'
 export type PlanningReminderStatus = 'pending' | 'acknowledged' | 'completed'
 /** 标识提醒是否由目标计划时间自动生成，供改期时安全同步。 */
 export type PlanningReminderOrigin = 'manual' | 'todo_due_at'
+/** macOS EventKit 对应的两类受管目标。 */
+export type PlanningNativeSyncEntity = 'calendar' | 'reminder'
+export type PlanningNativeSyncPermission = 'full-access' | 'write-only' | 'denied' | 'restricted' | 'not-determined' | 'unsupported' | 'unavailable'
 
 /** 日程编辑基于此错误文案识别并提示跨窗口并发冲突。 */
 export const PLANNING_CONFLICT_ERROR = '日程已被其他窗口修改，请重新加载后再试'
@@ -17,6 +20,47 @@ export type PlanningChangeResource = 'todos' | 'calendar_events' | 'todo_groups'
 
 export interface PlanningChange {
   resources: PlanningChangeResource[]
+}
+
+/** macOS 中用户可选、且当前允许 Proma 写入的 Calendar / Reminders List。 */
+export interface PlanningNativeSyncTarget {
+  id: string
+  title: string
+  sourceTitle: string
+  sourceType: 'caldav' | 'exchange' | 'local' | 'birthdays' | 'mobileme' | 'subscribed' | 'unknown'
+  /** EventKit 仅能识别账户来源，不能承诺其服务端已完成同步。 */
+  isCloudBacked: boolean
+}
+
+export interface PlanningNativeSyncPermissionResult {
+  entity: PlanningNativeSyncEntity
+  status: PlanningNativeSyncPermission
+  granted?: boolean
+  error?: string
+}
+
+export interface PlanningNativeSyncStatus {
+  supported: boolean
+  calendar: PlanningNativeSyncPermissionResult
+  reminder: PlanningNativeSyncPermissionResult
+}
+
+/** 每类实体在 P0 只允许一个显式选择的受管目标。 */
+export interface PlanningSyncProfile {
+  id: string
+  entity: PlanningNativeSyncEntity
+  targetId: string
+  targetTitle: string
+  sourceTitle: string
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SavePlanningSyncProfileInput {
+  entity: PlanningNativeSyncEntity
+  target: Pick<PlanningNativeSyncTarget, 'id' | 'title' | 'sourceTitle'>
+  enabled?: boolean
 }
 
 export interface PlanningGroup {
@@ -268,4 +312,12 @@ export const PLANNING_IPC_CHANNELS = {
   OPEN_WINDOW: 'planning:open-window',
   CHANGED: 'planning:changed',
   AGENT_OPERATION: 'planning:agent-operation',
+  /** macOS Calendar / Reminders 连接设置（仅主进程可访问 EventKit）。 */
+  GET_NATIVE_SYNC_STATUS: 'planning:get-native-sync-status',
+  REQUEST_NATIVE_SYNC_ACCESS: 'planning:request-native-sync-access',
+  /** 在授权被拒绝或仅写入时，跳转 macOS Calendar / Reminders 隐私设置。 */
+  OPEN_NATIVE_SYNC_PRIVACY_SETTINGS: 'planning:open-native-sync-privacy-settings',
+  LIST_NATIVE_SYNC_TARGETS: 'planning:list-native-sync-targets',
+  LIST_SYNC_PROFILES: 'planning:list-sync-profiles',
+  SAVE_SYNC_PROFILE: 'planning:save-sync-profile',
 } as const

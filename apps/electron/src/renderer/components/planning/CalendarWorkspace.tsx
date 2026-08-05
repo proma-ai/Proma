@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { PlanningFloatingInspector } from '@/components/planning/PlanningFloatingInspector'
 import { PlanningGroupManager } from '@/components/planning/PlanningGroupManager'
+import { PlanningNativeSyncControl } from '@/components/planning/PlanningNativeSyncControl'
 
 const DEFAULT_EVENT_DURATION = 60 * 60 * 1000
 const DRAG_SNAP_MINUTES = 15
@@ -401,6 +402,7 @@ export function CalendarWorkspace(): React.ReactElement {
             <Button type="button" variant={mode === 'month' ? 'secondary' : 'ghost'} size="sm" className="h-10" onClick={() => setMode('month')}>月</Button>
           </div>
           <PlanningGroupManager scope="calendar" groups={groups} itemLabel="日程" getUsageCount={(groupId) => calendarGroupUsageCounts.get(groupId) ?? 0} onCreate={createCalendarGroup} onRename={renameCalendarGroup} onDelete={deleteCalendarGroup} trigger={<Button type="button" variant="ghost" className="h-10 gap-1.5 px-2.5 text-sm"><Folder size={16} />分组</Button>} />
+          <PlanningNativeSyncControl entity="calendar" />
         </div>
         <div className="flex items-center gap-1.5"><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="上一段时间" onClick={() => navigate(-1)}><ChevronLeft size={17} /></Button><h2 className="min-w-44 text-center text-sm font-semibold tabular-nums">{heading}</h2><Button type="button" variant="ghost" size="icon" className="size-10" aria-label="下一段时间" onClick={() => navigate(1)}><ChevronRight size={17} /></Button></div>
       </div>

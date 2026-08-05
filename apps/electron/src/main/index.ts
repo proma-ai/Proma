@@ -5,7 +5,10 @@ import { existsSync } from 'fs'
 // Dev 与正式版使用独立的 userData 目录，避免共享 Chromium SingletonLock 导致 dev 启动被静默退出
 // 必须在任何会读取 userData 路径的模块加载之前执行
 if (!app.isPackaged) {
-  app.setPath('userData', join(app.getPath('appData'), '@proma/electron-dev'))
+  // 多个 worktree 可显式隔离开发实例，避免其中一个分支抢走另一分支的 Chromium SingletonLock。
+  const instance = process.env.PROMA_DEV_INSTANCE?.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (instance) app.setName(`Proma-${instance}`)
+  app.setPath('userData', join(app.getPath('appData'), instance ? `@proma/electron-dev-${instance}` : '@proma/electron-dev'))
 }
 
 // 单实例锁：防止重复启动同一个版本（dev/prod 因 userData 已隔离，互不影响）
@@ -107,6 +110,7 @@ import {
 } from './lib/bridge-registry'
 import { startScheduler, stopScheduler } from './lib/automation-scheduler'
 import { startPlanningReminderScheduler, stopPlanningReminderScheduler } from './lib/planning-reminder-scheduler'
+import { startPlanningNativeSyncCoordinator, stopPlanningNativeSyncCoordinator } from './lib/planning-native-sync-coordinator'
 import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { getFeishuMultiBotConfig } from './lib/feishu-config'
 import { stopFeishuSyncSleepBlocker, syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
@@ -651,6 +655,7 @@ async function bootstrap(): Promise<void> {
   // 启动定时任务调度器（恢复持久化的 active 任务）
   safeRun('startScheduler', startScheduler)
   safeRun('startPlanningReminderScheduler', startPlanningReminderScheduler)
+  safeRun('startPlanningNativeSyncCoordinator', startPlanningNativeSyncCoordinator)
 
   app.on('activate', () => {
     if (shouldSuppressVoiceDictationActivate()) {
@@ -747,6 +752,7 @@ app.on('before-quit', () => {
   // 停止定时任务调度器
   stopScheduler()
   stopPlanningReminderScheduler()
+  stopPlanningNativeSyncCoordinator()
   // 释放飞书同步防休眠
   stopFeishuSyncSleepBlocker()
   // 注销全局快捷键
