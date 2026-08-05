@@ -1,6 +1,6 @@
 import { applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listPlanningNativeConnections, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
 import { broadcastPlanningChanged, onPlanningChanged } from './planning-events'
-import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, removePlanningNativeSyncItem, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
+import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, removePlanningNativeSyncItem, subscribePlanningNativeSyncChanges, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
 
 const POLL_INTERVAL_MS = 30_000
 let timer: ReturnType<typeof setInterval> | null = null
@@ -8,6 +8,7 @@ let disposePlanningListener: (() => void) | null = null
 let syncing = false
 let queued = false
 let lastExternalReconcileAt = 0
+let nativeChangeDebounce: ReturnType<typeof setTimeout> | null = null
 // EventKit 不提供可靠的跨账户变更增量 token；仅轮询用户明确连接的集合。
 const EXTERNAL_RECONCILE_INTERVAL_MS = POLL_INTERVAL_MS
 
@@ -148,6 +149,11 @@ export function startPlanningNativeSyncCoordinator(): void {
     if (syncing) queued = true
     else void runPlanningNativeSync()
   })
+  // EventKit 只通知“存储发生变化”，不暴露可安全使用的变化项；防抖后仍只 reconcile 用户已连接的集合。
+  subscribePlanningNativeSyncChanges(() => {
+    if (nativeChangeDebounce) clearTimeout(nativeChangeDebounce)
+    nativeChangeDebounce = setTimeout(() => { nativeChangeDebounce = null; void runPlanningNativeSync(true) }, 800)
+  })
   void runPlanningNativeSync()
   timer = setInterval(() => { void runPlanningNativeSync() }, POLL_INTERVAL_MS)
 }
@@ -157,4 +163,6 @@ export function stopPlanningNativeSyncCoordinator(): void {
   timer = null
   disposePlanningListener?.()
   disposePlanningListener = null
+  if (nativeChangeDebounce) clearTimeout(nativeChangeDebounce)
+  nativeChangeDebounce = null
 }

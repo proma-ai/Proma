@@ -4,7 +4,7 @@ import type {
   PlanningNativeSyncStatus,
   PlanningNativeSyncTarget,
 } from '@proma/shared'
-import { callMacEventKitNativeAddon } from './mac-eventkit-native-addon'
+import { callMacEventKitNativeAddon, subscribeMacEventKitNativeChanges } from './mac-eventkit-native-addon'
 
 type NativePermissionResponse = {
   entity: PlanningNativeSyncEntity
@@ -122,6 +122,8 @@ export interface PlanningNativeExternalItem {
   priority?: 'low' | 'medium' | 'high'
   completed?: boolean
   completedAt?: number
+  dueDateOnly?: boolean
+  isRecurring?: boolean
   lastModifiedAt: number
 }
 
@@ -135,6 +137,12 @@ export async function listPlanningNativeConnectionItems(entity: PlanningNativeSy
   const permission = await getPermission(entity)
   if (permission.status !== 'full-access') return []
   return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, ...range })
+}
+
+/** EventKit 全局变更只触发协调器重新读取已连接目标，绝不借此扫描其它系统集合。 */
+export function subscribePlanningNativeSyncChanges(listener: () => void): boolean {
+  if (!eventKitSupported()) return false
+  try { return subscribeMacEventKitNativeChanges(listener) } catch { return false }
 }
 
 export async function upsertPlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: PlanningNativeSyncItem): Promise<PlanningNativeSyncIdentifiers> {

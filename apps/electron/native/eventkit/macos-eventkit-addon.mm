@@ -6,6 +6,9 @@
 
 static EKEventStore *store = nil;
 static EKEventStore *eventStore() { if (!store) store = [[EKEventStore alloc] init]; return store; }
+// 独立的全局变更通知仅唤醒 JS 协调器；它不携带项目数据，实际读取仍严格限定在用户已连接的集合。
+static id eventStoreChangeObserver = nil;
+static std::unique_ptr<Napi::ThreadSafeFunction> eventStoreChangeListener;
 
 static NSString *statusName(EKAuthorizationStatus status) {
   switch (status) { case EKAuthorizationStatusFullAccess: return @"full-access"; case EKAuthorizationStatusWriteOnly: return @"write-only"; case EKAuthorizationStatusNotDetermined: return @"not-determined"; case EKAuthorizationStatusDenied: return @"denied"; case EKAuthorizationStatusRestricted: return @"restricted"; }
@@ -131,11 +134,24 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
   }
 }
 
+static Napi::Value subscribeChanges(const Napi::CallbackInfo &info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsFunction()) { Napi::TypeError::New(env, "change listener callback is required").ThrowAsJavaScriptException(); return env.Undefined(); }
+  if (eventStoreChangeObserver) [[NSNotificationCenter defaultCenter] removeObserver:eventStoreChangeObserver];
+  if (eventStoreChangeListener) eventStoreChangeListener->Release();
+  eventStoreChangeListener = std::make_unique<Napi::ThreadSafeFunction>(Napi::ThreadSafeFunction::New(env, info[0].As<Napi::Function>(), "PromaEventKitChanges", 0, 1));
+  eventStoreChangeObserver = [[NSNotificationCenter defaultCenter] addObserverForName:EKEventStoreChangedNotification object:eventStore() queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *) {
+    if (!eventStoreChangeListener) return;
+    eventStoreChangeListener->NonBlockingCall([](Napi::Env callbackEnv, Napi::Function callback) { callback.Call({}); });
+  }];
+  return env.Undefined();
+}
+
 static Napi::Value command(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env(); if (info.Length() < 3 || !info[0].IsString() || !info[1].IsString() || !info[2].IsString()) { Napi::TypeError::New(env, "command, entity and payload JSON are required").ThrowAsJavaScriptException(); return env.Undefined(); }
   NSString *name = [NSString stringWithUTF8String:info[0].As<Napi::String>().Utf8Value().c_str()]; NSString *entity = [NSString stringWithUTF8String:info[1].As<Napi::String>().Utf8Value().c_str()]; NSString *payloadText = [NSString stringWithUTF8String:info[2].As<Napi::String>().Utf8Value().c_str()];
   NSError *error = nil; NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:[payloadText dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error]; if (!payload || ![payload isKindOfClass:[NSDictionary class]]) payload = @{};
   auto *ctx = new CommandContext(env); NSLog(@"[PromaEventKit] scheduling %@ for %@ on main queue", name, entity); dispatch_async(dispatch_get_main_queue(), ^{ execute(name, entity, payload, ctx); }); return ctx->deferred->Promise();
 }
-Napi::Object Init(Napi::Env env, Napi::Object exports) { NSLog(@"[PromaEventKit] N-API addon loaded"); exports.Set("command", Napi::Function::New(env, command)); return exports; }
+Napi::Object Init(Napi::Env env, Napi::Object exports) { NSLog(@"[PromaEventKit] N-API addon loaded"); exports.Set("command", Napi::Function::New(env, command)); exports.Set("subscribeChanges", Napi::Function::New(env, subscribeChanges)); return exports; }
 NODE_API_MODULE(proma_eventkit, Init)
