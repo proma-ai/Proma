@@ -25,6 +25,7 @@ import { ContextUsageBadge } from './ContextUsageBadge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
 import { AskUserBanner } from './AskUserBanner'
+import { SuggestionBanner } from './SuggestionBanner'
 import { ExitPlanModeBanner } from './ExitPlanModeBanner'
 import { PlanModeDashedBorder } from './PlanModeDashedBorder'
 import { ModelSelector } from '@/components/chat/ModelSelector'
@@ -3129,6 +3130,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
 
         {/* AskUserQuestion 交互式问答横幅 */}
         <AskUserBanner sessionId={sessionId} />
+
+        {/* 主动建议横幅（会话结束后由 Suggest 引擎生成） */}
+        <SuggestionBanner sessionId={sessionId} />
 
 
         {/* ExitPlanMode 计划审批横幅 */}

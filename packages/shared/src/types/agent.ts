@@ -1622,6 +1622,61 @@ export const AGENT_IPC_CHANNELS = {
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
   /** 获取工作区记忆摘要 */
   GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
+  /** 获取 Proactive Memory 统计 */
+  GET_MEMORY_STATS: 'agent:get-memory-stats',
+  /** 获取/设置记忆提取模式（llm/rule/off） */
+  GET_MEMORY_EXTRACTION_MODE: 'agent:get-memory-extraction-mode',
+  SET_MEMORY_EXTRACTION_MODE: 'agent:set-memory-extraction-mode',
+  /** 搜索 Proactive Memory */
+  SEARCH_MEMORY: 'agent:search-memory',
+  /** 分页浏览全部记忆（记忆看板） */
+  LIST_MEMORY_ATOMS: 'agent:list-memory-atoms',
+  /** 获取最近热点场景（主动中心） */
+  GET_MEMORY_HOT_SCENES: 'agent:get-memory-hot-scenes',
+  /** 列出 Proactive Memory 纠正 */
+  LIST_MEMORY_CORRECTIONS: 'agent:list-memory-corrections',
+  /** 确认/拒绝 Proactive Memory 纠正 */
+  CONFIRM_MEMORY_CORRECTION: 'agent:confirm-memory-correction',
+  REJECT_MEMORY_CORRECTION: 'agent:reject-memory-correction',
+  /** 撤销一条已生效的纠正（删除 atom + 回退状态 + 重生成 persona） */
+  UNDO_MEMORY_CORRECTION: 'agent:undo-memory-correction',
+  /** 列出待确认的自动提取记忆（pending atoms） */
+  LIST_MEMORY_PENDING_ATOMS: 'agent:list-memory-pending-atoms',
+  /** 确认/拒绝待确认记忆 */
+  CONFIRM_MEMORY_ATOM: 'agent:confirm-memory-atom',
+  REJECT_MEMORY_ATOM: 'agent:reject-memory-atom',
+  /** 读取 Proactive Memory persona */
+  READ_MEMORY_PERSONA: 'agent:read-memory-persona',
+  /** persona 证据溯源（每条画像条目的来源 atom） */
+  READ_MEMORY_PERSONA_SOURCES: 'agent:read-memory-persona-sources',
+  /** persona 是否溯源版本 / 手动重新生成（B3） */
+  GET_PERSONA_TRACEABLE: 'agent:get-persona-traceable',
+  REGENERATE_PERSONA: 'agent:regenerate-persona',
+  /** 更新/删除 persona + 画像注入开关（用户控制） */
+  UPDATE_MEMORY_PERSONA: 'agent:update-memory-persona',
+  DELETE_MEMORY_PERSONA: 'agent:delete-memory-persona',
+  GET_PERSONA_INJECTION_ENABLED: 'agent:get-persona-injection-enabled',
+  SET_PERSONA_INJECTION_ENABLED: 'agent:set-persona-injection-enabled',
+  /** 列出主动建议（主动建议引擎） */
+  LIST_SUGGESTIONS: 'agent:list-suggestions',
+  /** 对主动建议执行反馈（accepted/ignored/never） */
+  ACT_ON_SUGGESTION: 'agent:act-on-suggestion',
+  /** 删除一条建议 / 清空全部建议（用户控制） */
+  DELETE_SUGGESTION: 'agent:delete-suggestion',
+  CLEAR_SUGGESTIONS: 'agent:clear-suggestions',
+  /** 清空全部记忆（用户控制） */
+  CLEAR_ALL_MEMORY: 'agent:clear-all-memory',
+  /** 获取主动建议统计 */
+  GET_SUGGESTION_STATS: 'agent:get-suggestion-stats',
+  /** 读取最近一次工作模式分析状态 */
+  GET_SUGGESTION_ANALYSIS_STATE: 'agent:get-suggestion-analysis-state',
+  /** 运行工作模式分析（手动触发） */
+  RUN_SUGGESTION_ANALYSIS: 'agent:run-suggestion-analysis',
+  /** 读取/更新免打扰时段（DND） */
+  GET_SUGGESTION_DND: 'agent:get-suggestion-dnd',
+  SET_SUGGESTION_DND: 'agent:set-suggestion-dnd',
+  /** 建议变更事件（main → renderer，会话结束后新建议生成时推送） */
+  SUGGESTIONS_CHANGED: 'agent:suggestions-changed',
   /** 读取工作区 CLAUDE.md */
   READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
   /** 写入工作区 CLAUDE.md */

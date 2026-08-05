@@ -652,6 +652,104 @@ export interface ElectronAPI {
   /** 获取工作区记忆摘要 */
   getWorkspaceMemorySummary: (workspaceSlug: string) => Promise<WorkspaceMemorySummary>
 
+  /** 获取 Proactive Memory 统计 */
+  getMemoryStats: () => Promise<import('@proma/shared').MemoryStats>
+
+  /** 获取记忆提取模式 */
+  getMemoryExtractionMode: () => Promise<'llm' | 'rule' | 'off'>
+
+  /** 设置记忆提取模式 */
+  setMemoryExtractionMode: (mode: 'llm' | 'rule' | 'off') => Promise<{ ok: boolean; error?: string }>
+
+  /** 搜索 Proactive Memory */
+  searchMemory: (query: string, limit?: number) => Promise<import('@proma/shared').MemorySearchResult>
+
+  /** 分页浏览全部记忆 */
+  listMemoryAtoms: (opts?: {
+    page?: number
+    pageSize?: number
+    type?: import('@proma/shared').MemoryAtomType | 'all'
+    sort?: 'newest' | 'priority'
+    confirmed?: boolean
+  }) => Promise<{ atoms: import('@proma/shared').MemoryAtom[]; total: number; page: number; pageSize: number; totalPages: number }>
+
+  /** 获取最近热点场景 */
+  getMemoryHotScenes: () => Promise<import('@proma/shared').SceneBlock[]>
+
+  /** 列出 Proactive Memory 纠正 */
+  listMemoryCorrections: (status?: string) => Promise<import('@proma/shared').MemoryCorrection[]>
+
+  /** 确认一条纠正 */
+  confirmMemoryCorrection: (id: string) => Promise<boolean>
+
+  /** 拒绝一条纠正 */
+  rejectMemoryCorrection: (id: string) => Promise<boolean>
+
+  /** 撤销一条已生效的纠正 */
+  undoMemoryCorrection: (id: string) => Promise<{ ok: boolean; error?: string }>
+
+  /** 列出待确认的自动提取记忆 */
+  listMemoryPendingAtoms: () => Promise<import('@proma/shared').MemoryAtom[]>
+
+  /** 确认一条待确认记忆 */
+  confirmMemoryAtom: (id: string) => Promise<import('@proma/shared').MemoryAtom | undefined>
+
+  /** 拒绝并删除一条待确认记忆 */
+  rejectMemoryAtom: (id: string) => Promise<boolean>
+
+  /** 读取 Proactive Memory persona 原文 */
+  readMemoryPersona: () => Promise<string | undefined>
+
+  /** persona 证据溯源 */
+  readMemoryPersonaSources: () => Promise<Array<{ text: string; sources: string[] }>>
+
+  /** persona 是否溯源版本 / 手动重新生成 */
+  getPersonaTraceable: () => Promise<boolean>
+  regeneratePersona: () => Promise<{ ok: boolean; error?: string }>
+
+  /** 更新 persona 画像 */
+  updateMemoryPersona: (markdown: string) => Promise<{ ok: boolean; error?: string }>
+
+  /** 删除 persona 画像 */
+  deleteMemoryPersona: () => Promise<{ ok: boolean; error?: string }>
+
+  /** 读取/设置 persona 注入开关 */
+  getPersonaInjectionEnabled: () => Promise<boolean>
+  setPersonaInjectionEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+
+  /** 列出主动建议 */
+  listSuggestions: (status?: string) => Promise<import('@proma/shared').SuggestionRecord[]>
+
+  /** 对主动建议执行反馈 */
+  actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => Promise<{ ok: boolean; error?: string }>
+
+  /** 删除一条建议 */
+  deleteSuggestion: (id: string) => Promise<{ ok: boolean; error?: string }>
+
+  /** 清空全部建议 */
+  clearSuggestions: () => Promise<{ ok: boolean }>
+
+  /** 清空全部记忆 */
+  clearAllMemory: () => Promise<{ ok: boolean; error?: string }>
+
+  /** 获取主动建议统计 */
+  getSuggestionStats: () => Promise<import('@proma/shared').SuggestionStats>
+
+  /** 读取最近一次工作模式分析状态 */
+  getSuggestionAnalysisState: () => Promise<{ status: 'idle' | 'running' | 'succeeded' | 'empty' | 'unavailable' | 'failed'; startedAt?: number; completedAt?: number; added?: number; message?: string }>
+
+  /** 运行工作模式分析（手动触发，返回新增建议数） */
+  runSuggestionAnalysis: () => Promise<{ ok: boolean; added: number; status?: 'succeeded' | 'empty' | 'unavailable' | 'failed'; error?: string }>
+
+  /** 读取免打扰时段（DND）配置 */
+  getSuggestionDnd: () => Promise<{ enabled: boolean; startMin: number; endMin: number }>
+
+  /** 更新免打扰时段（DND）配置 */
+  setSuggestionDnd: (cfg: { enabled?: boolean; startMin?: number; endMin?: number }) => Promise<{ ok: boolean; error?: string }>
+
+  /** 订阅主动建议变更事件（会话结束后新建议生成时触发） */
+  onSuggestionsChanged: (callback: () => void) => () => void
+
   /** 读取工作区 CLAUDE.md */
   readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
@@ -1872,6 +1970,141 @@ const electronAPI: ElectronAPI = {
 
   getWorkspaceMemorySummary: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY, workspaceSlug)
+  },
+
+  getMemoryStats: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_STATS)
+  },
+
+  getMemoryExtractionMode: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_EXTRACTION_MODE)
+  },
+
+  setMemoryExtractionMode: (mode: 'llm' | 'rule' | 'off') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_MEMORY_EXTRACTION_MODE, mode)
+  },
+
+  searchMemory: (query: string, limit?: number) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_MEMORY, query, limit)
+  },
+
+  listMemoryAtoms: (opts?: {
+    page?: number
+    pageSize?: number
+    type?: import('@proma/shared').MemoryAtomType | 'all'
+    sort?: 'newest' | 'priority'
+  }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_ATOMS, opts ?? {})
+  },
+
+  getMemoryHotScenes: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_MEMORY_HOT_SCENES)
+  },
+
+  listMemoryCorrections: (status?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_CORRECTIONS, status)
+  },
+
+  confirmMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_MEMORY_CORRECTION, id)
+  },
+
+  rejectMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_CORRECTION, id)
+  },
+
+  undoMemoryCorrection: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UNDO_MEMORY_CORRECTION, id)
+  },
+
+  listMemoryPendingAtoms: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_MEMORY_PENDING_ATOMS)
+  },
+
+  confirmMemoryAtom: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_MEMORY_ATOM, id)
+  },
+
+  rejectMemoryAtom: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REJECT_MEMORY_ATOM, id)
+  },
+
+  readMemoryPersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA)
+  },
+
+  readMemoryPersonaSources: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_MEMORY_PERSONA_SOURCES)
+  },
+
+  getPersonaTraceable: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERSONA_TRACEABLE)
+  },
+
+  regeneratePersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REGENERATE_PERSONA)
+  },
+
+  updateMemoryPersona: (markdown: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_MEMORY_PERSONA, markdown)
+  },
+
+  deleteMemoryPersona: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_MEMORY_PERSONA)
+  },
+
+  getPersonaInjectionEnabled: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERSONA_INJECTION_ENABLED)
+  },
+
+  setPersonaInjectionEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERSONA_INJECTION_ENABLED, enabled)
+  },
+
+  listSuggestions: (status?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_SUGGESTIONS, status)
+  },
+
+  actOnSuggestion: (id: string, feedback: 'accepted' | 'ignored' | 'never') => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.ACT_ON_SUGGESTION, id, feedback)
+  },
+
+  deleteSuggestion: (id: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_SUGGESTION, id)
+  },
+
+  clearSuggestions: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CLEAR_SUGGESTIONS)
+  },
+
+  clearAllMemory: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CLEAR_ALL_MEMORY)
+  },
+
+  getSuggestionStats: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_STATS)
+  },
+
+  getSuggestionAnalysisState: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_ANALYSIS_STATE)
+  },
+
+  runSuggestionAnalysis: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.RUN_SUGGESTION_ANALYSIS)
+  },
+
+  getSuggestionDnd: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SUGGESTION_DND)
+  },
+
+  setSuggestionDnd: (cfg: { enabled?: boolean; startMin?: number; endMin?: number }) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_SUGGESTION_DND, cfg)
+  },
+
+  onSuggestionsChanged: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(AGENT_IPC_CHANNELS.SUGGESTIONS_CHANGED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.SUGGESTIONS_CHANGED, listener) }
   },
 
   readWorkspaceClaudeMd: (workspaceSlug: string) => {

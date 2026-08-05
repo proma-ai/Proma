@@ -60,6 +60,17 @@ import {
 } from '../planning-manager'
 import { broadcastPlanningAgentOperation, broadcastPlanningChanged } from '../planning-events'
 import {
+  stats as memoryStats,
+  searchAsync as memorySearchAsync,
+  searchAsText as memorySearchAsText,
+  captureCandidate as memoryCaptureCandidate,
+  corrections as memoryCorrections,
+  confirmCorrection as memoryConfirmCorrection,
+  rejectCorrection as memoryRejectCorrection,
+} from '../memory/service'
+import { runAnalysisAndPersist } from '../suggest/service'
+import type { MemoryAtomType } from '@proma/shared'
+import {
   fetchWebPage,
   formatFetchResults,
   formatSearchResults,
@@ -770,6 +781,151 @@ function buildVisionRelayTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefi
   ] as unknown as ToolDefinition[]
 }
 
+// ===== Memory 工具（Proactive Memory） =====
+
+const MEMORY_TYPE_VALUES = ['fact', 'preference', 'correction', 'sop', 'todo_context'] as const
+
+type PiMemoryType = (typeof MEMORY_TYPE_VALUES)[number]
+
+function isMemoryTypeValue(v: unknown): v is MemoryAtomType {
+  return typeof v === 'string' && (MEMORY_TYPE_VALUES as readonly string[]).includes(v)
+}
+
+function buildMemoryTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  return [
+    sdk.defineTool({
+      name: 'mcp__memory__memory_search',
+      label: '检索长期记忆',
+      description: '检索 Proma 长期记忆。适用于回忆用户偏好、历史事实、行为纠正、可复用流程等关键信息；当上方注入的 memory_context 不足时主动调用。',
+      parameters: Type.Object({
+        query: Type.String({ description: '检索关键词：用户的自然语言问题或关键主题' }),
+        limit: Type.Optional(Type.Number({ description: '返回条数上限，默认 5' })),
+        type: Type.Optional(Type.Union(MEMORY_TYPE_VALUES.map((v) => Type.Literal(v)), { description: '按类型过滤' })),
+        includeUnconfirmed: Type.Optional(Type.Boolean({ description: '是否包含未确认条目，默认 false' })),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { query?: string; limit?: number; type?: string; includeUnconfirmed?: boolean }
+        const query = args.query?.trim() ?? ''
+        if (!query) throw new Error('query 必填')
+        const result = await memorySearchAsync({
+          query,
+          limit: typeof args.limit === 'number' ? args.limit : undefined,
+          type: isMemoryTypeValue(args.type) ? args.type : undefined,
+          includeUnconfirmed: args.includeUnconfirmed === true,
+        })
+        return jsonToolResult({
+          text: memorySearchAsText({
+            query,
+            limit: typeof args.limit === 'number' ? args.limit : undefined,
+            includeUnconfirmed: args.includeUnconfirmed === true,
+          }),
+          hits: result.hits.map((h) => ({
+            content: h.atom.content,
+            type: h.atom.type,
+            priority: h.atom.priority,
+            createdAt: h.atom.createdAt,
+            score: h.score,
+          })),
+          strategy: result.strategy,
+          durationMs: result.durationMs,
+        })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__memory_capture',
+      label: '沉淀记忆',
+      description: '主动沉淀当前对话上下文为一条长期记忆。适用于用户明确要求记住、提到长期偏好/纠正、或你判断该信息跨会话有用时。',
+      parameters: Type.Object({
+        content: Type.String({ description: '要记忆的内容（简洁、自包含、可独立理解的一句话）' }),
+        type: Type.Optional(Type.Union(MEMORY_TYPE_VALUES.map((v) => Type.Literal(v)), { description: '记忆类型，默认 fact' })),
+        priority: Type.Optional(Type.Number({ description: '重要度 0-100，默认 50' })),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { content?: string; type?: string; priority?: number }
+        const content = args.content?.trim() ?? ''
+        if (!content) throw new Error('content 必填')
+        const result = memoryCaptureCandidate(
+          {
+            content,
+            type: isMemoryTypeValue(args.type) ? args.type : 'fact',
+            priority: typeof args.priority === 'number' ? args.priority : 50,
+          },
+          { sessionId: ctx.sessionId, workspaceSlug: ctx.workspaceSlug },
+        )
+        return jsonToolResult({
+          stored: result.stored,
+          message: result.deduplicated ? '记忆已与已有条目合并更新。' : '记忆已保存。',
+          atom: result.atom,
+        })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__memory_stats',
+      label: '查看记忆统计',
+      description: '查看 Proma 长期记忆统计：记忆数量、类型分布、场景数、待确认纠正。',
+      parameters: Type.Object({}),
+      async execute() {
+        return jsonToolResult(memoryStats())
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__memory_corrections',
+      label: '查看行为纠正',
+      description: '查看行为纠正候选列表（用户对 Agent 的改进要求）。',
+      parameters: Type.Object({
+        status: Type.Optional(Type.Union([
+          Type.Literal('pending'),
+          Type.Literal('active'),
+          Type.Literal('rejected'),
+          Type.Literal('superseded'),
+        ], { description: '按状态过滤纠正' })),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const args = params as { status?: string }
+        const status = args.status as 'pending' | 'active' | 'rejected' | 'superseded' | undefined
+        const items = memoryCorrections(status)
+        return jsonToolResult({ corrections: items })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__memory_confirm_correction',
+      label: '确认行为纠正',
+      description: '确认一条行为纠正候选生效（会同步沉淀为长期记忆）。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_toolCallId: string, params: unknown) {
+        const id = (params as { id?: string }).id?.trim() ?? ''
+        if (!id) throw new Error('id 必填')
+        const ok = memoryConfirmCorrection(id)
+        if (!ok) throw new Error(`纠正不存在: ${id}`)
+        return jsonToolResult({ confirmed: true })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__memory_reject_correction',
+      label: '拒绝行为纠正',
+      description: '拒绝一条行为纠正候选（不写入记忆）。',
+      parameters: Type.Object({ id: Type.String() }),
+      async execute(_toolCallId: string, params: unknown) {
+        const id = (params as { id?: string }).id?.trim() ?? ''
+        if (!id) throw new Error('id 必填')
+        const ok = memoryRejectCorrection(id)
+        if (!ok) throw new Error(`纠正不存在: ${id}`)
+        return jsonToolResult({ rejected: true })
+      },
+    }),
+    sdk.defineTool({
+      name: 'mcp__memory__suggestion_analyze',
+      label: '分析工作模式',
+      description: '用 LLM 分析近期记忆，发现重复出现的工作模式（周期任务/SOP/待沉淀偏好），生成主动建议候选。适用于定时任务中定期运行、或用户主动要求"分析我的工作模式"时调用。',
+      parameters: Type.Object({}),
+      async execute() {
+        const added = await runAnalysisAndPersist()
+        return jsonToolResult({ added })
+      },
+    }),
+  ] as unknown as ToolDefinition[]
+}
+
 // ===== Collaboration 工具（占位，下阶段实现） =====
 
 // collaboration 逻辑较重（涉及子会话生命周期管理、EventBus 订阅、BlockedEvent 冒泡），
@@ -814,6 +970,15 @@ export async function buildPiBuiltinTools(
       tools.push(...buildAutomationTools(sdk, ctx))
     } catch (error) {
       console.error('[Pi 桥接] 注入 automation 工具失败:', error)
+    }
+  }
+
+  // 长期记忆（Proactive Memory）
+  if (isBuiltinMcpUserEnabled('memory')) {
+    try {
+      tools.push(...buildMemoryTools(sdk, ctx))
+    } catch (error) {
+      console.error('[Pi 桥接] 注入 memory 工具失败:', error)
     }
   }
 

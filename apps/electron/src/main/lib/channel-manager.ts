@@ -297,30 +297,77 @@ function decryptKey(encryptedKey: string): string {
 export function listChannels(): Channel[] {
   const config = readConfig()
 
+  // 迁移：已有 DeepSeek 渠道 apiKey 为空（历史预设）但 .env 有可用凭证时自动补填
+  migrateEmptyDeepSeekKey(config)
+
   // 首次使用：如果没有 DeepSeek 渠道，自动创建预设
   const hasDeepSeek = config.channels.some(
     (c) => c.provider === 'deepseek' || c.baseUrl.includes('api.deepseek.com'),
   )
   if (!hasDeepSeek) {
     const now = Date.now()
+    // 预设渠道自动填充已有 DeepSeek 凭证（.env 的 MEMORY_LLM_API_KEY），开箱即用；
+    // 无可用 key 时保持空（用户可在设置中手动填写）。
+    const presetApiKey = resolveDeepSeekFallbackKey()
     const presetChannel: Channel = {
       id: randomUUID(),
       name: 'DeepSeek',
       provider: 'deepseek',
       baseUrl: PROVIDER_DEFAULT_URLS.deepseek,
-      apiKey: encryptApiKey(''),
+      apiKey: encryptApiKey(presetApiKey),
       models: cloneModels(DEEPSEEK_PRESET_MODELS),
-      enabled: false,
+      enabled: presetApiKey ? true : false,
       createdAt: now,
       updatedAt: now,
     }
     config.channels.push(presetChannel)
     writeConfig(config)
-    console.log('[渠道管理] 已自动创建 DeepSeek 预设渠道')
+    console.log(`[渠道管理] 已自动创建 DeepSeek 预设渠道${presetApiKey ? '（已填充 .env 凭证）' : ''}`)
     return config.channels
   }
 
   return config.channels
+}
+
+/**
+ * 迁移：历史预设的 DeepSeek 渠道 apiKey 可能为空（自动创建时未填）。
+ * 若 .env 中有 MEMORY_LLM_API_KEY 且渠道 key 为空，自动补填并持久化。
+ */
+function migrateEmptyDeepSeekKey(config: ChannelsConfig): void {
+  const fallbackKey = resolveDeepSeekFallbackKey()
+  if (!fallbackKey) return
+
+  let changed = false
+  for (const channel of config.channels) {
+    const isDeepSeek = channel.provider === 'deepseek' || channel.baseUrl.includes('api.deepseek.com')
+    if (!isDeepSeek) continue
+    // apiKey 为空才补填（用户已填的不动）
+    if (!channel.apiKey || channel.apiKey === '') {
+      channel.apiKey = encryptApiKey(fallbackKey)
+      changed = true
+      console.log('[渠道管理] 已为 DeepSeek 渠道自动填充 .env 凭证')
+    }
+  }
+  if (changed) {
+    writeConfig(config)
+  }
+}
+
+/**
+ * 解析 DeepSeek 预设渠道的备用凭证：优先 .env 的 MEMORY_LLM_API_KEY。
+ * 复用 memory/extractor 的配置读取（项目根 .env → ~/.proma/.env → 环境变量）。
+ */
+function resolveDeepSeekFallbackKey(): string {
+  try {
+    const { getMemoryLlmConfig } = require('./memory/extractor') as typeof import('./memory/extractor')
+    const config = getMemoryLlmConfig()
+    if (config?.apiKey && config.apiKey.trim() !== '' && !config.apiKey.includes('在此填入')) {
+      return config.apiKey.trim()
+    }
+  } catch {
+    // 读取失败保持空
+  }
+  return ''
 }
 
 /**

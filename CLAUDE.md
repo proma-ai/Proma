@@ -193,6 +193,24 @@ bun run generate:icons    # 生成应用图标
 | --- | --- |
 | `feishu-bridge.ts` | 飞书集成（68KB）：消息同步、任务通知、OAuth 认证 |
 
+#### Proactive Agent 服务层（主动记忆 + 主动建议）
+
+| 服务 | 职责 |
+|------|------|
+| `memory/store.ts` | L1 atoms 持久化（JSONL 按天）+ L3 persona + corrections + 场景（`scenes/`）+ 统计 |
+| `memory/recall.ts` | 召回引擎：keyword BM25 + 时间衰减（correction/sop 稳定、event 14 天、其余 30 天）+ 误报控制（单字弱命中降权 + 停用词） |
+| `memory/extractor.ts` | LLM 提取（OpenAI 兼容端点，reasoning 模型兼容）；类型 fact/preference/correction/sop/todo_context/event |
+| `memory/persona.ts` | L3 用户画像：LLM 生成/增量更新 + 规则版兜底 + `(src: atom_xxx)` 溯源 |
+| `memory/scene.ts` | L2 场景聚合：主题聚类 + 热度（atom 数 × 时间衰减 × 高频忽略抑制） |
+| `memory/service.ts` | 编排：capture/recall/persona/corrections/场景对外 API |
+| `suggest/engine.ts` | 建议决策：5 类规则 + 置信度阈值 + 预算（单次≤1、同会话≤2） |
+| `suggest/feedback.ts` | 频率学习 + 免打扰时段（DND，跨午夜） + 高频忽略抑制列表 |
+| `suggest/analyst.ts` | 工作模式分析器：LLM 低频分析记忆 + 场景，schema 严格校验（只产出候选） |
+| `suggest/service.ts` | 编排：会话钩子 + IPC + 候选池分组（pred@k） |
+| `memory/memory-agent-tools.ts` | Claude runtime 内置 MCP 工具（memory_search/capture/...） |
+
+> 入口索引：设计见 `docs/proactive-memory-design.md` / `docs/proactive-suggestion-design.md`；评测脚本 `scripts/bench-recall.ts`（口径见 `docs/proactive-memory-bench.md`）；关键踩坑见工作区 auto memory（归一化放大、停用词取舍）。
+
 #### 工具与文件
 
 | 服务 | 职责 |

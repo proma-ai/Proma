@@ -12,6 +12,7 @@ import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { cn } from '@/lib/utils'
+import { ProactiveMemoryPanel } from './ProactiveMemoryPanel'
 
 type SelectedMemoryFile =
   | { kind: 'claude'; relativePath: 'CLAUDE.md'; title: string; absolutePath: string }
@@ -407,6 +408,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
 
   return (
     <div className="flex flex-col gap-5">
+      <ProactiveMemoryPanel workspaceSlug={workspaceSlug} />
+
       <div className="grid gap-3 lg:grid-cols-2">
         <MemoryStatCard
           icon={<BookOpen size={18} />}

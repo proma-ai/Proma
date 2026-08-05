@@ -57,5 +57,11 @@ export * from './automation'
 // 本地任务与日程（Planning）相关类型
 export * from './planning'
 
+// 长期记忆（Proactive Memory）相关类型
+export * from './memory'
+
+// 主动建议（Proactive Suggestion）相关类型
+export * from './suggestion'
+
 // Agent 灵动岛相关类型
 export * from './agent-island'

@@ -44,9 +44,19 @@ export function getConfigDirName(): string {
  * 获取配置目录路径
  *
  * 开发模式返回 ~/.proma-dev/，正式版本返回 ~/.proma/。
+ * 支持 PROMA_CONFIG_DIR 环境变量覆盖（测试隔离 / 自定义配置位置），
+ * 与 PROMA_MEMORY_DIR 机制一致。
  * 如果目录不存在则自动创建。
  */
 export function getConfigDir(): string {
+  const override = process.env.PROMA_CONFIG_DIR?.trim()
+  if (override) {
+    if (!existsSync(override)) {
+      mkdirSync(override, { recursive: true })
+    }
+    return override
+  }
+
   const configDir = join(homedir(), getConfigDirName())
 
   if (!existsSync(configDir)) {
@@ -712,4 +722,57 @@ export function getAutomationsPath(): string {
 /** 获取任务/日程 SQLite 数据库路径。 */
 export function getPlanningDatabasePath(): string {
   return join(getConfigDir(), 'planning.db')
+}
+
+/**
+ * 获取长期记忆（Proactive Memory）根目录
+ *
+ * 支持 PROMA_MEMORY_DIR 环境变量覆盖（测试隔离 / 自定义存储位置）。
+ *
+ * @returns ~/.proma/memory/（或 PROMA_MEMORY_DIR 指定目录）
+ */
+export function getMemoryRootDir(): string {
+  const override = process.env.PROMA_MEMORY_DIR?.trim()
+  if (override) return override
+  return join(getConfigDir(), 'memory')
+}
+
+/** 记忆元数据索引文件路径 */
+export function getMemoryIndexPath(): string {
+  return join(getMemoryRootDir(), 'index.json')
+}
+
+/** L3 用户画像路径 */
+export function getPersonaPath(): string {
+  return join(getMemoryRootDir(), 'profile.md')
+}
+
+/** L1 原子记忆按天分文件目录 */
+export function getMemoryAtomsDir(): string {
+  return join(getMemoryRootDir(), 'atoms')
+}
+
+/** 某天的 L1 原子记忆文件路径 */
+export function getMemoryAtomsDayPath(dateKey: string): string {
+  return join(getMemoryAtomsDir(), `${dateKey}.jsonl`)
+}
+
+/** L2 场景块目录 */
+export function getMemoryScenesDir(): string {
+  return join(getMemoryRootDir(), 'scenes')
+}
+
+/** 行为纠正候选文件路径 */
+export function getCorrectionsPath(): string {
+  return join(getMemoryRootDir(), 'corrections.json')
+}
+
+/** 记忆变更日志目录 */
+export function getMemoryLogDir(): string {
+  return join(getMemoryRootDir(), 'memory_log')
+}
+
+/** 主动建议索引文件路径 */
+export function getSuggestionsPath(): string {
+  return join(getConfigDir(), 'suggestions.json')
 }

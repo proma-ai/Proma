@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Proma</title>
+    <!-- CSP：限制脚本/连接来源，防 XSS 放大面。dev 模式 vite 需 ws: 与 127.0.0.1:5173；inline 主题脚本保留 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' http://127.0.0.1:5173; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http://127.0.0.1:5173; object-src 'none'; frame-src 'self'"
+    />
     <script>
       // 主题初始化脚本（在 React 加载前执行，避免闪烁）
       // 从 localStorage 缓存读取主题模式和特殊风格，立即应用类名

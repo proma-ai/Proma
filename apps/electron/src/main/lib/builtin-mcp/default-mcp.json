@@ -78,6 +78,22 @@
         { "name": "performance_start_trace", "description": "开始性能追踪。" },
         { "name": "performance_stop_trace", "description": "停止性能追踪并返回结果。", "readOnly": true }
       ]
+    },
+    {
+      "id": "memory",
+      "name": "memory",
+      "displayName": "长期记忆",
+      "description": "主动记忆与回忆：搜索历史沉淀的记忆、主动捕获当前上下文为记忆、查看统计与待确认纠正。",
+      "category": "memory",
+      "kind": "internal",
+      "deletable": false,
+      "defaultEnabled": true,
+      "toggleable": true,
+      "tools": [
+        { "name": "memory_search", "description": "检索长期记忆（L1 atoms / corrections / persona）。", "readOnly": true },
+        { "name": "memory_capture", "description": "主动沉淀当前对话上下文为一条记忆。" },
+        { "name": "memory_stats", "description": "查看长期记忆统计与待确认纠正。", "readOnly": true }
+      ]
     }
   ]
 }

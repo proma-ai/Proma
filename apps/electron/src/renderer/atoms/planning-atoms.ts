@@ -1,7 +1,7 @@
 import { atom } from 'jotai'
 import type { ActivePlanningReminder, CalendarEvent, PlanningGroup, PlanningTag, Todo } from '@proma/shared'
 
-export type PlanningTab = 'todos' | 'calendar' | 'automations'
+export type PlanningTab = 'todos' | 'calendar' | 'automations' | 'proactive'
 
 export const todosAtom = atom<Todo[]>([])
 export const calendarEventsAtom = atom<CalendarEvent[]>([])
@@ -15,5 +15,7 @@ export const planningTabAtom = atom<PlanningTab>('todos')
 export const planningSelectedTodoIdAtom = atom<string | null>(null)
 /** 页头等外部入口递增该值，Todo 工作区收到后打开创建 Popup。 */
 export const planningTodoCreateRequestAtom = atom(0)
+/** 主动建议等外部入口可预填 Todo 创建表单；表单打开后立即消费。 */
+export const planningTodoSuggestionDraftAtom = atom<{ title: string; notes?: string } | null>(null)
 /** 页头和快捷键递增该值，日程工作区收到后打开创建表单。 */
 export const planningCalendarCreateRequestAtom = atom(0)

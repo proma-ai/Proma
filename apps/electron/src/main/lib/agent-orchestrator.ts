@@ -48,7 +48,7 @@ import { getAdapter, fetchTitle, normalizeAnthropicBaseUrlForSdk, getPromaUserAg
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession, ensureClaudeSessionSettings, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, truncateSDKMessages, removeSDKErrorMessage, resolveUserUuidFromSDK, rewindFilesFromSnapshot, rewindPiAgentSession, ensureClaudeSessionSettings, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
 import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getConfigDir, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
@@ -78,6 +78,66 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { extractAndCapture } from './memory/service'
+import { evaluateSessionSuggestions } from './suggest/service'
+import { extractRecentConversationText } from './suggest/sdk-messages'
+
+// ===== 记忆捕获（主动记忆钩子） =====
+
+/**
+ * 从会话消息中提取最近 user/assistant 文本，fire-and-forget 触发记忆提取。
+ * 被 completeRun / failRun 调用；提取失败不阻塞主流程。
+ */
+function captureMemoryFromRun(
+  sessionId: string,
+  workspaceSlug: string | undefined,
+  _messages: AgentMessage[] | undefined,
+  stoppedByUser?: boolean,
+): Promise<void> {
+  if (stoppedByUser) return Promise.resolve()
+  // 从 SDK 格式会话中提取最近的 user/assistant 文本（修复：getAgentSessionMessages 返回 SDK 结构，role/content 平铺字段不存在）
+  const sdkMessages = getAgentSessionSDKMessages(sessionId)
+  const recent = extractRecentConversationText(sdkMessages, 20)
+  if (recent.length === 0) return Promise.resolve()
+  return extractAndCapture(recent, { sessionId, workspaceSlug })
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn('[Memory] 会话结束记忆捕获失败:', error instanceof Error ? error.message : error)
+    })
+}
+
+/**
+ * 会话结束后评估主动建议（fire-and-forget，不阻塞会话完成）。
+ * 建议由引擎持久化到 suggestions.json，UI 通过 IPC 拉取展示。
+ *
+ * 触发时机扩展（P4）：
+ * - completeRun/failRun（原有）
+ * - idleComplete（turn 主体结束，新增）：让建议在对话中途也能浮现
+ * 节流：同一会话 5 分钟内不重复评估（避免连环打扰）；引擎内部仍有 maxPerSession=2 预算兜底。
+ */
+const SUGGESTION_EVAL_THROTTLE_MS = 5 * 60_000
+const lastSuggestionEvalAt = new Map<string, number>()
+
+function evaluateSuggestionsFromRun(
+  sessionId: string,
+  _messages: AgentMessage[] | undefined,
+): Promise<void> {
+  // 节流：同会话 5 分钟内只评估一次
+  const now = Date.now()
+  const last = lastSuggestionEvalAt.get(sessionId) ?? 0
+  if (now - last < SUGGESTION_EVAL_THROTTLE_MS) return Promise.resolve()
+  lastSuggestionEvalAt.set(sessionId, now)
+
+  // 从 SDK 格式会话中提取最近的 user/assistant 文本
+  const sdkMessages = getAgentSessionSDKMessages(sessionId)
+  const recent = extractRecentConversationText(sdkMessages, 30)
+  if (recent.length === 0) return Promise.resolve()
+  return evaluateSessionSuggestions(recent, { sessionId })
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn('[Suggestion] 会话建议评估失败:', error instanceof Error ? error.message : error)
+    })
+}
 
 // ===== 类型定义 =====
 
@@ -817,6 +877,12 @@ export class AgentOrchestrator {
       return m.type === 'system' && (m as SDKSystemMessage).subtype === 'compact_boundary'
     })
 
+    // PreCompact 记忆捕获（参考 Nowledge Mem）：检测到 SDK 自动压缩边界时，
+    // 先沉淀当前会话记忆，防止压缩截断后关键信息丢失。
+    if (hasCompactBoundary) {
+      void captureMemoryFromRun(sessionId, undefined, getAgentSessionMessages(sessionId), false)
+    }
+
     const toPersist = accumulatedMessages.filter(
       (m) => m.type === 'assistant' || m.type === 'user' || m.type === 'result'
         || (m.type === 'system' && isPersistableSDKSystemMessage(m as SDKSystemMessage))
@@ -1176,6 +1242,8 @@ export class AgentOrchestrator {
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
+      void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
     // 轻量完成：turn 主体结束但仍有后台任务在飞行。
     // 关键区别——不调用 releaseActiveRun，保留 activeSessions/activeChannels/sessionPermissionModes，
@@ -1186,6 +1254,8 @@ export class AgentOrchestrator {
       opts?: { startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
     ): void => {
       callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
+      // 触发时机扩展：turn 主体结束后也评估建议（受节流 + 同会话预算双重约束）
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
     const failRun = (
       error: string,
@@ -1195,6 +1265,8 @@ export class AgentOrchestrator {
       releaseActiveRun()
       callbacks.onError(error)
       callbacks.onComplete(messages, opts)
+      void captureMemoryFromRun(sessionId, workspaceSlug, messages, opts?.stoppedByUser)
+      void evaluateSuggestionsFromRun(sessionId, messages)
     }
 
     // 3. 构建环境变量
@@ -1394,6 +1466,7 @@ export class AgentOrchestrator {
         workspaceName: workspace?.name,
         workspaceSlug,
         agentCwd,
+        userText: userMessage,
       })
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
@@ -1435,6 +1508,12 @@ export class AgentOrchestrator {
         : existingSdkSessionId
           ? contextualMessage
           : buildContextPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
+
+      // PreCompact 记忆捕获（参考 Nowledge Mem）：手动 /compact 前先沉淀当前会话记忆，
+      // 防止上下文压缩后关键信息丢失。自动压缩由 SDK compact_boundary 事件处理。
+      if (isCompactCommand) {
+        void captureMemoryFromRun(sessionId, workspaceSlug, getAgentSessionMessages(sessionId), false)
+      }
 
       if (existingSdkSessionId) {
         console.log(`[Agent 编排] 使用 resume 模式，SDK session ID: ${existingSdkSessionId}`)

@@ -169,6 +169,13 @@ export function showPlanningWindow(): void {
   planningWindow.focus()
 }
 
+/** 仅用于给 Planning 自身需要的 IPC 能力建立精确 sender 白名单。 */
+export function isPlanningWindowSender(webContentsId: number): boolean {
+  return !!planningWindow
+    && !planningWindow.isDestroyed()
+    && planningWindow.webContents.id === webContentsId
+}
+
 
 /** 应用退出时销毁窗口，确保状态保存定时器与渲染进程一同释放。 */
 export function destroyPlanningWindow(): void {
