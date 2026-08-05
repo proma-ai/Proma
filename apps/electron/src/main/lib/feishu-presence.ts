@@ -9,7 +9,7 @@
 
 import { powerMonitor } from 'electron'
 import type { FeishuPresenceReport } from '@proma/shared'
-import { getMainWindow } from '../index'
+import { getMainWindow } from './main-window-store'
 
 /** 内部在场状态 */
 interface PresenceState {

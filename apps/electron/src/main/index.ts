@@ -98,6 +98,7 @@ import { configureUpdater, initAutoUpdater, cleanupUpdater } from './lib/updater
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { startChatToolsWatcher, stopChatToolsWatcher } from './lib/chat-tools-watcher'
 import { getIsQuitting, setQuitting } from './lib/app-lifecycle'
+import { getMainWindow as getStoredMainWindow, setMainWindow as setStoredMainWindow } from './lib/main-window-store'
 import {
   registerBridge,
   startAllBridges,
@@ -321,7 +322,7 @@ function createStartupSplashWindow(): void {
 
 /** 获取主窗口实例（供其他模块使用） */
 export function getMainWindow(): BrowserWindow | null {
-  return mainWindow
+  return getStoredMainWindow()
 }
 
 function installWindowsZoomInFallback(win: BrowserWindow): void {
@@ -460,6 +461,7 @@ function createWindow(): void {
     },
     ...titleBarOptions,
   })
+  setStoredMainWindow(mainWindow)
   installWindowsZoomInFallback(mainWindow)
 
   // Load the renderer
@@ -471,17 +473,32 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, 'renderer', 'index.html'))
   }
 
-  // 主 Renderer 无法加载时，不能让启动页无限停留；切换为轻量错误页告知用户。
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3 || !mainWindow || mainWindow.isDestroyed()) return
+  // 主 Renderer 无法加载或崩溃时，不能让启动页无限停留；切换为轻量错误页告知用户。
+  let hasShownRendererFailure = false
+  const showRendererFailure = (reason: string): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
 
-    console.error(`[启动] 主 Renderer 加载失败 (${errorCode}): ${errorDescription} (${validatedURL})`)
     dismissStartupSplash()
-    const message = encodeURIComponent(`Proma 无法加载主界面\n\n${errorDescription}\n\n请重试；若问题持续，请检查应用安装文件。`)
+    if (hasShownRendererFailure) {
+      mainWindow.show()
+      return
+    }
+
+    hasShownRendererFailure = true
+    const message = encodeURIComponent(`Proma 无法加载主界面\n\n${reason}\n\n请重试；若问题持续，请检查应用安装文件。`)
     mainWindow.loadURL(`data:text/plain;charset=utf-8,${message}`).catch((error) => {
       console.error('[启动] 降级错误页加载失败:', error)
       mainWindow?.show()
     })
+  }
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+    console.error(`[启动] 主 Renderer 加载失败 (${errorCode}): ${errorDescription} (${validatedURL})`)
+    showRendererFailure(errorDescription)
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[启动] 主 Renderer 进程异常退出: ${details.reason}`)
+    showRendererFailure(`Renderer 进程异常退出：${details.reason}`)
   })
 
   // 窗口就绪后，按保存的状态决定是否最大化
@@ -563,6 +580,7 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    setStoredMainWindow(null)
     mainWindow = null
   })
 }

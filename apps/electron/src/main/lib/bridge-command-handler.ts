@@ -8,7 +8,7 @@
  */
 
 import type { AgentStreamPayload } from '@proma/shared'
-import { getMainWindow } from '../index'
+import { getMainWindow } from './main-window-store'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { createAgentSession, listAgentSessions, getAgentSessionMeta } from './agent-session-manager'
 import {

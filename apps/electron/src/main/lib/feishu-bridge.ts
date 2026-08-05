@@ -9,7 +9,7 @@
  * - Session 镜像：桌面发起的会话可同步为飞书群内流式卡片
  */
 
-import { getMainWindow } from '../index'
+import { getMainWindow } from './main-window-store'
 import type {
   AgentStreamPayload,
   AgentSendInput,
