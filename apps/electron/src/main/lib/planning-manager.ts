@@ -558,6 +558,14 @@ export function savePlanningSyncProfile(input: SavePlanningSyncProfileInput): Pl
         promaEntityId: binding.proma_entity_id,
         calendarItemIdentifier: binding.calendar_item_identifier ?? undefined,
       }, now)
+      // binding 尚未落库前进程可能已在 EventKit 成功写入；旧 outbox 中的 marker 是仅存恢复证据。
+      const pendingUpserts = getDatabase().prepare("SELECT * FROM planning_sync_outbox WHERE profile_id=:profileId AND operation='upsert'").all({ profileId: profile.id }) as SyncOutboxRow[]
+      for (const pending of pendingUpserts) enqueuePlanningSyncCleanup({
+        entity: existing.entity,
+        targetId: pending.target_id ?? existing.target_id,
+        promaEntityId: pending.proma_entity_id,
+        nativeStartAt: pending.native_start_at ?? undefined,
+      }, now)
       getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE profile_id=:profileId').run({ profileId: profile.id })
       getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId').run({ profileId: profile.id })
     }

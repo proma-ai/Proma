@@ -99,6 +99,8 @@ static void execute(NSString *command, NSString *entity, NSDictionary *payload, 
     if ([command isEqualToString:@"remove"]) {
       EKCalendarItem *item = [eventStore() calendarItemWithIdentifier:string(payload, @"calendarItemIdentifier")];
       EKCalendar *target = [eventStore() calendarWithIdentifier:string(payload, @"targetId")];
+      // calendarItemIdentifier 可在用户移动项目后继续解析；绝不能越过受管目标删除该项目。
+      if (item && target && ![item.calendar.calendarIdentifier isEqualToString:target.calendarIdentifier]) item = nil;
       if (item || !target || !string(payload, @"identity")) { removeItem(entity, item, ctx); return; }
       if ([entity isEqualToString:@"calendar"]) { removeItem(entity, recoveredItem(entity, target, payload), ctx); return; }
       NSPredicate *predicate = [eventStore() predicateForRemindersInCalendars:@[target]];
