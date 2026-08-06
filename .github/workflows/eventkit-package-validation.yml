@@ -1,0 +1,90 @@
+name: EventKit Package Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventkit-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-macos-arm64:
+    name: Package signed macOS arm64 test build
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Import Developer ID certificate
+        env:
+          MAC_CERTS: ${{ secrets.MAC_CERTS }}
+          MAC_CERTS_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+        run: |
+          test -n "$MAC_CERTS" || { echo "MAC_CERTS secret is required for an EventKit TCC test build"; exit 1; }
+          test -n "$MAC_CERTS_PASSWORD" || { echo "MAC_CERTS_PASSWORD secret is required for an EventKit TCC test build"; exit 1; }
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/eventkit-test.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$MAC_CERTS" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -P "$MAC_CERTS_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+
+      - name: Build and package without publishing
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "true"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        working-directory: apps/electron
+        run: |
+          bun run build
+          bun run sync:runtime-deps
+          npx electron-builder --mac --arm64 --publish never
+
+      - name: Verify signed application
+        working-directory: apps/electron
+        run: |
+          set -euo pipefail
+          APP_ARCHIVE="$(find release -maxdepth 1 -type f -name '*arm64-mac.zip' -print -quit)"
+          test -n "$APP_ARCHIVE"
+          mkdir -p "$RUNNER_TEMP/eventkit-package"
+          ditto -x -k "$APP_ARCHIVE" "$RUNNER_TEMP/eventkit-package"
+          APP_PATH="$(find "$RUNNER_TEMP/eventkit-package" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dvv "$APP_PATH" 2>&1 | tee "$RUNNER_TEMP/codesign-info.txt"
+
+      - name: Upload signed test build
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proma-eventkit-p2-macos-arm64-${{ github.run_number }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            apps/electron/release/*.dmg
+            apps/electron/release/*arm64-mac.zip
+            ${{ runner.temp }}/codesign-info.txt
