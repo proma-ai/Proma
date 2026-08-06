@@ -1,10 +1,15 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowUpRight,
-  Bell,
+  BarChart3,
   CalendarDays,
   ChevronDown,
+  CircleCheck,
+  CirclePlay,
+  Hand,
+  History,
   ListTodo,
+  TriangleAlert,
 } from 'lucide-react'
 import type {
   AgentIslandCompactPlanQuotaSnapshot,
@@ -20,6 +25,14 @@ const COMPACT_SURFACE_HEIGHT = 32
 const SURFACE_WIDTH = 420
 
 type SurfaceMode = 'compact' | 'expanded' | 'collapsing'
+
+const PHASE_LABEL: Record<AgentIslandPhase, string> = {
+  idle: '待命',
+  running: '执行中',
+  'needs-interaction': '待处理',
+  completed: '已完成',
+  error: '需关注',
+}
 
 function useAgentIslandSnapshot(): AgentIslandWindowSnapshot | null {
   const [snapshot, setSnapshot] = useState<AgentIslandWindowSnapshot | null>(null)
@@ -49,12 +62,24 @@ function useAgentIslandSnapshot(): AgentIslandWindowSnapshot | null {
   return snapshot
 }
 
-const PHASE_LABEL: Record<AgentIslandPhase, string> = {
-  idle: '待命',
-  running: '执行中',
-  'needs-interaction': '待处理',
-  completed: '已完成',
-  error: '需关注',
+function getCompactIcon(
+  primarySession: AgentIslandSessionSnapshot | undefined,
+  state: AgentIslandWindowSnapshot['state'],
+  planningIndicator: ReturnType<typeof getPlanningIndicator>,
+): React.ReactNode | null {
+  if (primarySession) {
+    switch (primarySession.phase) {
+      case 'running': return <CirclePlay size={13} />
+      case 'needs-interaction': return <Hand size={13} />
+      case 'completed': return <CircleCheck size={13} />
+      case 'error': return <TriangleAlert size={13} />
+      default: return <CirclePlay size={13} />
+    }
+  }
+  if (state.idleDashboard) {
+    return state.recentSessions.length === 0 ? <BarChart3 size={13} /> : <History size={13} />
+  }
+  return planningIndicator?.icon ?? null
 }
 
 function formatTime(timestamp: number | undefined, allDay = false): string {
@@ -86,16 +111,11 @@ function getPlanningIndicator(snapshot: AgentIslandWindowSnapshot): { icon: Reac
   return { icon: <ListTodo size={13} />, label: '即将到期' }
 }
 
-function compactQuotaWindowLabel(window: AgentIslandCompactPlanQuotaSnapshot['windows'][number]): string {
-  if (window.windowType === '5h') return '5h'
-  if (window.windowType === 'weekly') return '周'
-  return window.windowLabel
-}
 
 function formatCompactPlanQuota(quota: AgentIslandCompactPlanQuotaSnapshot): string {
   return quota.windows
     .slice(0, 2)
-    .map((window) => `${compactQuotaWindowLabel(window)} ${window.remainingLabel ?? `${Math.round(window.remainingPercent)}%`}`)
+    .map((window) => window.remainingLabel ?? `${Math.round(window.remainingPercent)}%`)
     .join(' · ')
 }
 
@@ -108,7 +128,6 @@ function CompactPlanQuota({ quota }: { quota: AgentIslandCompactPlanQuotaSnapsho
   return (
     <span className="island-compact-quota" title={title}>
       <span className="island-compact-quota-value">{detail}</span>
-      {quota.additionalChannelCount > 0 && <span className="island-compact-quota-more">+{quota.additionalChannelCount}</span>}
     </span>
   )
 }
@@ -230,11 +249,7 @@ export function AgentIslandApp(): React.ReactElement {
 
   const primarySession = state.sessions[0]
   const planningIndicator = getPlanningIndicator(snapshot)
-  const compactLabel = primarySession
-    ? `Proma · ${PHASE_LABEL[primarySession.phase]}`
-    : state.idleDashboard
-      ? state.recentSessions.length === 0 ? 'Proma · 额度概览' : 'Proma · 最近会话'
-      : planningIndicator?.label ?? '工作提醒'
+  const compactIcon = getCompactIcon(primarySession, state, planningIndicator)
   const displayedSessions = state.idleDashboard ? state.recentSessions : state.sessions
   const header = getHeaderCopy(primarySession?.phase)
   const showPlanning = !state.idleDashboard && (planning.todos.length > 0 || planning.events.length > 0)
@@ -296,12 +311,7 @@ export function AgentIslandApp(): React.ReactElement {
         </div>
 
         <button className="island-compact-layer" type="button" onClick={() => setExpanded(true)} title="展开">
-          {!primarySession && (
-            <span className="island-compact-icon" aria-hidden="true">
-              {planningIndicator?.icon ?? <Bell size={12} />}
-            </span>
-          )}
-          <span className="island-compact-label">{compactLabel}</span>
+          {compactIcon && <span className="island-compact-icon" aria-hidden="true">{compactIcon}</span>}
           {state.compactPlanQuota && <CompactPlanQuota quota={state.compactPlanQuota} />}
           <ChevronDown className="island-compact-chevron" size={14} aria-hidden="true" />
         </button>
