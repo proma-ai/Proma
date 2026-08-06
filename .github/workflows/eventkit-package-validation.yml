@@ -2,6 +2,10 @@ name: EventKit Package Validation
 
 on:
   workflow_dispatch:
+  # GitHub 仅允许 default branch 上的 workflow_dispatch；合并前用精确分支触发一次测试。
+  push:
+    branches:
+      - feat-eventkit-two-way-sync
 
 permissions:
   contents: read
