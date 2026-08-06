@@ -72,7 +72,7 @@ jobs:
         working-directory: apps/electron
         run: |
           set -euo pipefail
-          APP_ARCHIVE="$(find release -maxdepth 1 -type f -name '*arm64-mac.zip' -print -quit)"
+          APP_ARCHIVE="$(find out -maxdepth 1 -type f -name '*arm64-mac.zip' -print -quit)"
           test -n "$APP_ARCHIVE"
           mkdir -p "$RUNNER_TEMP/eventkit-package"
           ditto -x -k "$APP_ARCHIVE" "$RUNNER_TEMP/eventkit-package"
@@ -89,6 +89,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           path: |
-            apps/electron/release/*.dmg
-            apps/electron/release/*arm64-mac.zip
+            apps/electron/out/*.dmg
+            apps/electron/out/*arm64-mac.zip
             ${{ runner.temp }}/codesign-info.txt
