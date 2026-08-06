@@ -215,12 +215,44 @@ function handlePromaEvent(sessionId: string, event: import('@proma/shared').Prom
       }
       break
     }
-    case 'external_run_started':
+    case 'external_run_started': {
+      const session = ensureSession(sessionId)
+      session.startedAt = event.startedAt
+      session.phase = 'running'
+      session.attention = false
+      session.lastActivityAt = Date.now()
+      break
+    }
+    case 'run_started': {
+      const session = ensureSession(sessionId)
+      session.startedAt = event.startedAt
+      session.phase = 'running'
+      session.attention = false
+      session.lastActivityAt = Date.now()
+      break
+    }
     case 'run_resumed': {
       const session = ensureSession(sessionId)
       session.phase = 'running'
       session.attention = false
       session.lastActivityAt = Date.now()
+      break
+    }
+    case 'run_stopped': {
+      const session = sessions.get(sessionId)
+      // A delayed completion from an older run must never clear a newer one.
+      if (!session || (event.startedAt != null && session.startedAt !== event.startedAt)) break
+      // A user cancellation is terminal for the current run, but it is not an
+      // error or a completed result that needs attention. Keep it out of the
+      // island immediately instead of leaving the previous running snapshot.
+      session.phase = 'completed'
+      session.detail = '已中断'
+      session.interactionKind = undefined
+      session.attention = false
+      session.unread = false
+      session.terminalAt = Date.now()
+      session.lastActivityAt = Date.now()
+      pushActivity(session, 'status', '任务已中断')
       break
     }
     case 'retry': {
@@ -734,7 +766,7 @@ function schedulePush(throttleMs = PUSH_THROTTLE_MS): void {
 
 function requiresImmediateAgentIslandPush(payload: AgentStreamPayload): boolean {
   if (payload.kind === 'proma_event') {
-    return ['permission_request', 'ask_user_request', 'exit_plan_mode_request'].includes(payload.event.type)
+    return ['permission_request', 'ask_user_request', 'exit_plan_mode_request', 'run_stopped'].includes(payload.event.type)
   }
   const message = payload.message
   return message.type === 'result' || (message.type === 'assistant' && Boolean((message as import('@proma/shared').SDKAssistantMessage).error))

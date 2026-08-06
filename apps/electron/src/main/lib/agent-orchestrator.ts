@@ -420,12 +420,13 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
+  private nextRunGeneration = 0
 
   /** 队列消息本地记录（sessionId → UUID 集合，用于防重） */
   private queuedMessageUuids = new Map<string, Set<string>>()
 
-  /** 被用户手动中止的会话集合（在 stop 中标记，catch block 中消费） */
-  private stoppedBySessions = new Set<string>()
+  /** 被用户手动中止的运行代际（在 stop 中标记，在对应运行的终态路径消费）。 */
+  private stoppedBySessions = new Map<string, number>()
 
   /** 运行中会话的当前权限模式（支持运行时动态切换） */
   private sessionPermissionModes = new Map<string, PromaPermissionMode>()
@@ -441,10 +442,10 @@ export class AgentOrchestrator {
    * SDK 在 query.close() 后不一定走异常路径：某些版本会先正常 yield result 再结束迭代。
    * 因此停止标记必须在所有终态路径统一消费，而不能只依赖 catch 块。
    */
-  private consumeStoppedByUser(sessionId: string): boolean {
-    const stoppedByUser = this.stoppedBySessions.has(sessionId)
+  private consumeStoppedByUser(sessionId: string, runGeneration: number): boolean {
+    if (this.stoppedBySessions.get(sessionId) !== runGeneration) return false
     this.stoppedBySessions.delete(sessionId)
-    return stoppedByUser
+    return true
   }
 
   /**
@@ -919,7 +920,6 @@ export class AgentOrchestrator {
       // userMessage 是传给 Agent 的 SDK 文本（@file 路径已解码为真实路径）。
       this.persistUserMessage(sessionId, rawUserMessage ?? userMessage)
       userMessagePersisted = true
-      callbacks.onRunStarted?.({ startedAt: streamStartedAt })
     }
 
     // 0. 并发保护
@@ -1157,8 +1157,9 @@ export class AgentOrchestrator {
     // 2.1 立即抢占会话槽位（在所有同步检查通过后、第一个 await 之前）
     // 防止 buildSdkEnv 等 await 期间并发调用绕过上方的检查，导致多条重复消息写入 JSONL
     // finally 块会通过 generation 匹配来安全清理，不影响正常流程
-    const runGeneration = Date.now()
+    const runGeneration = ++this.nextRunGeneration
     this.activeSessions.set(sessionId, runGeneration)
+    callbacks.onRunStarted?.({ startedAt: streamStartedAt })
 
     const releaseActiveRun = (): void => {
       // 在发送 STREAM_COMPLETE 前释放 active slot，避免渲染进程已进入空闲态、
@@ -1976,7 +1977,7 @@ export class AgentOrchestrator {
 
             // 等待期间如果会话被中止，退出
             if (!this.activeSessions.has(sessionId)) {
-              const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
+              const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
               completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
@@ -2361,7 +2362,7 @@ export class AgentOrchestrator {
             continue
           }
 
-          const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
+          const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
 
           // 正常完成 — 如果之前有可见重试，发送 retry_cleared
           if (!wasStoppedByUser && retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD) {
@@ -2411,7 +2412,7 @@ export class AgentOrchestrator {
 
           // 用户主动中止
           if (!this.activeSessions.has(sessionId)) {
-            const wasStoppedByUser = this.consumeStoppedByUser(sessionId)
+            const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
             console.log(`[Agent 编排] 会话 ${sessionId} 已被用户中止`)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
             // 持久化中断状态到会话 meta
@@ -2659,9 +2660,10 @@ export class AgentOrchestrator {
    * 再调用 adapter.abort() 中止底层 SDK 进程。
    */
   stop(sessionId: string): void {
+    const runGeneration = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
-    this.stoppedBySessions.add(sessionId)
+    if (runGeneration != null) this.stoppedBySessions.set(sessionId, runGeneration)
     this.queuedMessageUuids.delete(sessionId)
     this.adapter.abort(sessionId)
     console.log(`[Agent 编排] 已中止会话: ${sessionId}`)
