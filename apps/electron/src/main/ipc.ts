@@ -4956,7 +4956,8 @@ export function registerIpcHandlers(): void {
     const target = (await listPlanningNativeSyncTargets(input.entity)).find((item) => item.id === input.target.id)
     if (!target) throw new Error('同步目标不存在、不可写或尚未授权')
     const profile = savePlanningSyncProfile({ ...input, target })
-    void runPlanningNativeSync()
+    // 受管 Calendar 的系统存量也必须立即回流；不能被 30 秒 reconcile 冷却窗口延后。
+    void runPlanningNativeSync(true)
     return profile
   })
 

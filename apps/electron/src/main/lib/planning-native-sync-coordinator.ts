@@ -1,4 +1,4 @@
-import { applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, hideMissingPlanningNativeConnectionItems, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listPlanningNativeBindingIdentifiers, listPlanningNativeConnections, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
+import { applyManagedCalendarProfileItems, applyPlanningNativeConnectionItems, getCalendarEvent, getTodo, completePlanningNativeOutbox, completePlanningSyncCleanup, completePlanningSyncOutbox, failPlanningNativeOutbox, failPlanningSyncCleanup, failPlanningSyncOutbox, hideMissingManagedCalendarProfileItems, hideMissingPlanningNativeConnectionItems, listDuePlanningNativeOutbox, listDuePlanningSyncCleanup, listDuePlanningSyncOutbox, listEnabledManagedCalendarProfiles, listPlanningNativeBindingIdentifiers, listPlanningNativeConnections, listPlanningSyncBindingIdentifiers, planningNativeCalendarHash, type PlanningNativeOutboxItem, type PlanningSyncCleanupItem, type PlanningSyncOutboxItem } from './planning-manager'
 import { broadcastPlanningChanged, onPlanningChanged } from './planning-events'
 import { getPlanningNativeSyncStatus, listPlanningNativeConnectionItems, listPlanningNativeConnectionItemsByIdentifier, removePlanningNativeSyncItem, subscribePlanningNativeSyncChanges, upsertPlanningNativeSyncItem } from './planning-native-sync-service'
 
@@ -7,7 +7,9 @@ let timer: ReturnType<typeof setInterval> | null = null
 let disposePlanningListener: (() => void) | null = null
 let syncing = false
 let queued = false
+let queuedForceReconcile = false
 let lastExternalReconcileAt = 0
+let lastManagedCalendarReconcileAt = 0
 let nativeChangeDebounce: ReturnType<typeof setTimeout> | null = null
 // EventKit 不提供可靠的跨账户变更增量 token；仅轮询用户明确连接的集合。
 const EXTERNAL_RECONCILE_INTERVAL_MS = POLL_INTERVAL_MS
@@ -25,18 +27,24 @@ async function cleanupItem(item: PlanningSyncCleanupItem): Promise<void> {
 }
 
 async function syncNativeItem(item: PlanningNativeOutboxItem): Promise<void> {
-  if (item.operation === 'hide') { completePlanningNativeOutbox(item); return }
+  if (item.operation === 'hide') {
+    // 连接的 Reminder 仍是隐藏投影；连接的 Calendar 则按用户要求真实删除 EventKit 项。
+    // 升级前只读 Calendar 可能残留 hide outbox；该历史项只能继续本地隐藏，不能借升级越权删除。
+    if (item.connection.entity === 'calendar' && item.connection.canWrite) await removePlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier })
+    completePlanningNativeOutbox(item)
+    return
+  }
   if (!item.connection.canWrite) throw new Error('该系统集合为只读，不能写入')
   if (item.connection.entity === 'calendar') {
     const event = getCalendarEvent(item.promaEntityId)
     if (!event) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
-    const identifiers = await upsertPlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: event.title, notes: event.notes, startAt: event.startAt, endAt: event.endAt, allDay: event.allDay })
+    const identifiers = await upsertPlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, allowRecreate: item.recreatePending, title: event.title, notes: event.notes, startAt: event.startAt, endAt: event.endAt, allDay: event.allDay })
     completePlanningNativeOutbox(item, identifiers)
     return
   } else {
     const todo = getTodo(item.promaEntityId)
     if (!todo) { completePlanningNativeOutbox({ ...item, operation: 'hide' }); return }
-    const identifiers = await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: item.dueDateOnly ?? isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
+    const identifiers = await upsertPlanningNativeSyncItem('reminder', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier, allowRecreate: item.recreatePending, title: todo.title, notes: todo.notes, dueAt: todo.dueAt, dueDateOnly: item.dueDateOnly ?? isTodoDueDateOnly(todo.dueAt), priority: todo.priority, completed: todo.status === 'completed', completedAt: todo.completedAt })
     completePlanningNativeOutbox(item, identifiers)
   }
 }
@@ -60,6 +68,25 @@ async function reconcileExternalConnections(force = false): Promise<void> {
       }
       broadcastPlanningChanged([connection.entity === 'calendar' ? 'calendar_events' : 'todos'])
     } catch (error) { console.warn(`[计划同步] 外部 ${connection.entity} 回流失败:`, error) }
+  }
+}
+
+async function reconcileManagedCalendarProfiles(force = false): Promise<void> {
+  const now = Date.now()
+  if (!force && now - lastManagedCalendarReconcileAt < EXTERNAL_RECONCILE_INTERVAL_MS) return
+  lastManagedCalendarReconcileAt = now
+  for (const profile of listEnabledManagedCalendarProfiles()) {
+    try {
+      const range = { from: now - 30 * 24 * 60 * 60 * 1_000, to: now + 12 * 30 * 24 * 60 * 60 * 1_000 }
+      const items = await listPlanningNativeConnectionItems('calendar', profile.targetId, range)
+      applyManagedCalendarProfileItems(profile.id, items)
+      // 主查询仅用于枚举可导入项目；已 binding 的系统删除必须 locator 精确确认。
+      const boundIds = listPlanningSyncBindingIdentifiers(profile.id, profile.targetId)
+      const boundItems = await listPlanningNativeConnectionItemsByIdentifier('calendar', profile.targetId, boundIds)
+      applyManagedCalendarProfileItems(profile.id, boundItems)
+      hideMissingManagedCalendarProfileItems(profile.id, profile.targetId, boundItems.map((item) => item.calendarItemIdentifier))
+      broadcastPlanningChanged(['calendar_events', 'reminders'])
+    } catch (error) { console.warn('[计划同步] 受管 calendar 回流失败:', error) }
   }
 }
 
@@ -87,7 +114,7 @@ async function syncItem(item: PlanningSyncOutboxItem): Promise<void> {
       endAt: event.endAt,
       allDay: event.allDay,
     })
-    completePlanningSyncOutbox(item, identifiers)
+    completePlanningSyncOutbox(item, identifiers, planningNativeCalendarHash(event))
     return
   }
 
@@ -112,12 +139,18 @@ async function syncItem(item: PlanningSyncOutboxItem): Promise<void> {
 }
 
 export async function runPlanningNativeSync(forceExternalReconcile = false): Promise<void> {
-  if (syncing || process.platform !== 'darwin') return
+  if (process.platform !== 'darwin') return
+  if (syncing) {
+    queued = true
+    queuedForceReconcile ||= forceExternalReconcile
+    return
+  }
   syncing = true
   try {
     const status = await getPlanningNativeSyncStatus()
     if (!status.supported) return
     await reconcileExternalConnections(forceExternalReconcile)
+    await reconcileManagedCalendarProfiles(forceExternalReconcile)
     for (const item of listDuePlanningSyncCleanup()) {
       if ((item.entity === 'calendar' ? status.calendar : status.reminder).status !== 'full-access') continue
       try {
@@ -145,8 +178,10 @@ export async function runPlanningNativeSync(forceExternalReconcile = false): Pro
   } finally {
     syncing = false
     if (queued) {
+      const force = queuedForceReconcile
       queued = false
-      void runPlanningNativeSync()
+      queuedForceReconcile = false
+      void runPlanningNativeSync(force)
     }
   }
 }

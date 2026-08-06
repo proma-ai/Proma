@@ -66,6 +66,7 @@ type TodoSessionLinkRow = { todo_id: string; session_id: string; first_touched_a
 type SyncProfileRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; target_title: string; source_title: string; enabled: number; created_at: number; updated_at: number }
 type SyncOutboxRow = { id: string; profile_id: string; target_id: string | null; operation: 'upsert' | 'delete'; proma_entity_id: string; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; revision: number; created_at: number; updated_at: number }
 type SyncBindingRow = { profile_id: string; target_id: string | null; proma_entity_id: string; calendar_item_identifier: string | null; calendar_item_external_identifier: string | null; last_synced_hash: string | null; last_synced_at: number | null }
+type SyncProfileConflictRow = { id: string; profile_id: string; proma_entity_id: string; kind: 'changed' | 'deleted'; native_item_json: string | null; detected_at: number }
 type SyncCleanupRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; proma_entity_id: string; calendar_item_identifier: string | null; native_start_at: number | null; attempts: number; next_attempt_at: number; last_error: string | null; created_at: number; updated_at: number }
 type NativeConnectionRow = { id: string; entity: 'calendar' | 'reminder'; target_id: string; target_title: string; source_title: string; source_type: PlanningNativeConnection['sourceType']; can_write: number; connected_at: number; updated_at: number }
 type NativeBindingRow = { connection_id: string; proma_entity_id: string; calendar_item_identifier: string; due_date_only: number; recreate_pending: number; last_native_hash: string | null; last_synced_at: number | null }
@@ -87,6 +88,9 @@ export interface PlanningSyncOutboxItem {
 
 export interface PlanningNativeExternalItem {
   calendarItemIdentifier: string
+  calendarItemExternalIdentifier?: string
+  /** 仅由 addon 从 Proma 自己写入的 URL marker 解析，绝不透出任意用户 URL。 */
+  promaIdentity?: string
   title: string
   notes?: string
   startAt?: number
@@ -108,6 +112,7 @@ export interface PlanningNativeOutboxItem {
   promaEntityId: string
   calendarItemIdentifier: string
   dueDateOnly?: boolean
+  recreatePending?: boolean
   attempts: number
   revision: number
 }
@@ -137,7 +142,12 @@ function withPlanningTransaction<T>(work: () => T): T {
   }
 }
 
-const PLANNING_SCHEMA_VERSION = 8
+const PLANNING_SCHEMA_VERSION = 9
+
+/** EventKit 的内部 locator、marker 与 lastModifiedDate 不属于用户可编辑内容，不能参与双向基线。 */
+export function planningNativeCalendarHash(item: Pick<PlanningNativeExternalItem, 'title' | 'notes' | 'startAt' | 'endAt' | 'allDay'>): string {
+  return JSON.stringify({ title: item.title, notes: item.notes ?? null, startAt: item.startAt ?? null, endAt: item.endAt ?? null, allDay: Boolean(item.allDay) })
+}
 
 /**
  * Planning 在 v0.16.9 前没有 user_version；因此 migration 1 必须幂等地重建既有 schema，
@@ -347,6 +357,25 @@ function migrateDatabase(db: SqliteDatabase): void {
     }
     if (version < 8) {
       db.exec('ALTER TABLE planning_native_bindings ADD COLUMN recreate_pending INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 8')
+      version = 8
+    }
+    if (version < 9) {
+      // 受管 Calendar 与外部连接是两套模型；冲突账本不能复用 connection_id 外键。
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS planning_sync_profile_conflicts (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES planning_sync_profiles(id) ON DELETE CASCADE,
+          proma_entity_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('changed', 'deleted')),
+          native_item_json TEXT,
+          detected_at INTEGER NOT NULL,
+          UNIQUE(profile_id, proma_entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS planning_sync_profile_conflicts_open_idx
+          ON planning_sync_profile_conflicts(profile_id, detected_at);
+        PRAGMA user_version = 9;
+      `)
+      version = 9
     }
     db.exec('COMMIT')
   } catch (error) {
@@ -609,6 +638,16 @@ export function listPlanningSyncProfiles(): PlanningSyncProfile[] {
   return rows.map(syncProfileFromRow)
 }
 
+/** 仅 Calendar 受管目标允许系统端项目回流；Reminder 仍保持其既有单向模型。 */
+export function listEnabledManagedCalendarProfiles(): PlanningSyncProfile[] {
+  return (getDatabase().prepare("SELECT * FROM planning_sync_profiles WHERE entity='calendar' AND enabled=1").all() as SyncProfileRow[]).map(syncProfileFromRow)
+}
+
+/** 受管目标以 locator 精确验证删除，不能把时间窗口外的项目误判为已删。 */
+export function listPlanningSyncBindingIdentifiers(profileId: string, targetId: string): string[] {
+  return (getDatabase().prepare('SELECT calendar_item_identifier FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND calendar_item_identifier IS NOT NULL').all({ profileId, targetId }) as Array<{ calendar_item_identifier: string }>).map((row) => row.calendar_item_identifier)
+}
+
 function nativeConnectionFromRow(row: NativeConnectionRow): PlanningNativeConnection {
   return { id: row.id, entity: row.entity, targetId: row.target_id, targetTitle: row.target_title, sourceTitle: row.source_title, sourceType: row.source_type, canWrite: row.can_write === 1, connectedAt: row.connected_at, updatedAt: row.updated_at }
 }
@@ -637,14 +676,22 @@ function nativeConflictFromRow(row: NativeConflictRow): PlanningNativeSyncConfli
   return { id: row.id, connectionId: row.connection_id, entity: row.entity, promaEntityId: row.proma_entity_id, title: local?.title ?? connection?.target_title ?? '系统事项', kind: row.kind, detectedAt: row.detected_at }
 }
 
-export function listPlanningNativeSyncConflicts(): PlanningNativeSyncConflict[] {
-  return (getDatabase().prepare('SELECT * FROM planning_native_sync_conflicts WHERE resolved_at IS NULL ORDER BY detected_at DESC').all() as NativeConflictRow[]).map(nativeConflictFromRow)
+function managedProfileConflictFromRow(row: SyncProfileConflictRow): PlanningNativeSyncConflict {
+  const profile = getDatabase().prepare('SELECT * FROM planning_sync_profiles WHERE id=:id').get({ id: row.profile_id }) as SyncProfileRow | undefined
+  const local = getDatabase().prepare('SELECT title FROM calendar_events WHERE id=:id').get({ id: row.proma_entity_id }) as { title?: string } | undefined
+  return { id: row.id, profileId: row.profile_id, entity: 'calendar', promaEntityId: row.proma_entity_id, title: local?.title ?? profile?.target_title ?? 'Proma 日程', kind: row.kind, detectedAt: row.detected_at }
 }
 
-/** 冲突必须显式选择；保留系统会在下次/当前回流直接覆盖投影，保留 Proma 则继续现有 outbox 写入。 */
+export function listPlanningNativeSyncConflicts(): PlanningNativeSyncConflict[] {
+  const external = (getDatabase().prepare('SELECT * FROM planning_native_sync_conflicts WHERE resolved_at IS NULL').all() as NativeConflictRow[]).map(nativeConflictFromRow)
+  const managed = (getDatabase().prepare('SELECT * FROM planning_sync_profile_conflicts ORDER BY detected_at DESC').all() as SyncProfileConflictRow[]).map(managedProfileConflictFromRow)
+  return [...external, ...managed].sort((a, b) => b.detectedAt - a.detectedAt)
+}
+
+/** 冲突必须显式选择；保留系统会回流，保留 Proma 才会继续/重建其出站版本。 */
 export function resolvePlanningNativeSyncConflict(input: ResolvePlanningNativeSyncConflictInput): boolean {
   const conflict = getDatabase().prepare('SELECT * FROM planning_native_sync_conflicts WHERE id=:id AND resolved_at IS NULL').get({ id: input.id }) as NativeConflictRow | undefined
-  if (!conflict) return false
+  if (!conflict) return resolveManagedCalendarProfileConflict(input)
   const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id: conflict.connection_id }) as NativeConnectionRow | undefined
   if (!connection) return false
   withPlanningTransaction(() => {
@@ -673,6 +720,49 @@ export function resolvePlanningNativeSyncConflict(input: ResolvePlanningNativeSy
   return true
 }
 
+function resolveManagedCalendarProfileConflict(input: ResolvePlanningNativeSyncConflictInput): boolean {
+  const conflict = getDatabase().prepare('SELECT * FROM planning_sync_profile_conflicts WHERE id=:id').get({ id: input.id }) as SyncProfileConflictRow | undefined
+  if (!conflict) return false
+  const profile = getDatabase().prepare("SELECT * FROM planning_sync_profiles WHERE id=:id AND entity='calendar'").get({ id: conflict.profile_id }) as SyncProfileRow | undefined
+  if (!profile) return false
+  withPlanningTransaction(() => {
+    if (input.resolution === 'keep_proma') {
+      if (conflict.kind === 'changed' && conflict.native_item_json) {
+        const native = JSON.parse(conflict.native_item_json) as PlanningNativeExternalItem
+        const currentBinding = getDatabase().prepare('SELECT calendar_item_identifier FROM planning_sync_bindings WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').get({ profileId: profile.id, promaEntityId: conflict.proma_entity_id }) as { calendar_item_identifier?: string | null } | undefined
+        if (currentBinding?.calendar_item_identifier === native.calendarItemIdentifier) {
+          getDatabase().prepare('UPDATE planning_sync_bindings SET last_synced_hash=:hash,last_synced_at=:now WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ hash: planningNativeCalendarHash(native), now: Date.now(), profileId: profile.id, promaEntityId: conflict.proma_entity_id })
+        } else {
+          // 这是 locator recovery 冲突：不能将新系统 locator 自动认领；用户选 Proma 后按新项目发布。
+          getDatabase().prepare('UPDATE planning_sync_bindings SET calendar_item_identifier=NULL,last_synced_hash=NULL WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: profile.id, promaEntityId: conflict.proma_entity_id })
+        }
+        enqueuePlanningSync('calendar_event', conflict.proma_entity_id, 'upsert')
+      } else {
+        // locator 已失效；用户已选择保留 Proma，重置 locator 并确保下一轮有明确的出站操作。
+        getDatabase().prepare('UPDATE planning_sync_bindings SET calendar_item_identifier=NULL,last_synced_hash=NULL WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: profile.id, promaEntityId: conflict.proma_entity_id })
+        enqueuePlanningSync('calendar_event', conflict.proma_entity_id, 'upsert')
+      }
+    } else {
+      getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: profile.id, promaEntityId: conflict.proma_entity_id })
+      if (conflict.kind === 'changed' && conflict.native_item_json) {
+        const native = JSON.parse(conflict.native_item_json) as PlanningNativeExternalItem
+        // 用户明确保留系统版本后才接受新的 locator；随后回流会更新日程内容和 stable hash。
+        getDatabase().prepare('UPDATE planning_sync_bindings SET calendar_item_identifier=:calendarItemIdentifier,calendar_item_external_identifier=:calendarItemExternalIdentifier WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: profile.id, promaEntityId: conflict.proma_entity_id, calendarItemIdentifier: native.calendarItemIdentifier, calendarItemExternalIdentifier: native.calendarItemExternalIdentifier ?? null })
+      }
+      if (conflict.kind === 'deleted') {
+        getDatabase().prepare("DELETE FROM planning_reminders WHERE target_type='calendar_event' AND target_id=:id").run({ id: conflict.proma_entity_id })
+        getDatabase().prepare('DELETE FROM calendar_events WHERE id=:id').run({ id: conflict.proma_entity_id })
+        getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId: profile.id, promaEntityId: conflict.proma_entity_id })
+      }
+    }
+    getDatabase().prepare('DELETE FROM planning_sync_profile_conflicts WHERE id=:id').run({ id: conflict.id })
+  })
+  if (input.resolution === 'keep_system' && conflict.kind === 'changed' && conflict.native_item_json) {
+    try { applyManagedCalendarProfileItems(profile.id, [JSON.parse(conflict.native_item_json) as PlanningNativeExternalItem]) } catch (error) { console.warn('[计划同步] 应用受管日历系统冲突版本失败:', error) }
+  }
+  return true
+}
+
 export function disconnectPlanningNativeConnection(id: string): boolean {
   const connection = getDatabase().prepare('SELECT * FROM planning_native_connections WHERE id=:id').get({ id }) as NativeConnectionRow | undefined
   if (!connection) return false
@@ -694,9 +784,10 @@ function enqueuePlanningSync(targetType: PlanningReminderTargetType, promaEntity
   const entity = syncEntityForPlanningTarget(targetType)
   const external = getDatabase().prepare('SELECT bindings.connection_id, connections.can_write FROM planning_native_bindings AS bindings JOIN planning_native_connections AS connections ON connections.id=bindings.connection_id WHERE bindings.proma_entity_id=:promaEntityId AND connections.entity=:entity').get({ promaEntityId, entity }) as { connection_id: string; can_write: number } | undefined
   if (external) {
-    // “删除”外部投影只是在 Proma 隐藏，完全不写系统，因此只读集合也允许该操作。
-    if (external.can_write !== 1 && operation !== 'delete') throw new Error('该系统集合为只读，不能在 Proma 中修改')
-    // 外部项目的“删除”默认只是从 Proma 隐藏；绝不反向删除用户系统原项。
+    // Reminder 投影的删除始终只隐藏；但用户明确要求 Calendar 在 Proma 删除时写穿 EventKit。
+    // 对只读 Calendar 拒绝本地事务，不能形成“本地删了、系统仍在”的错误成功状态。
+    if (external.can_write !== 1 && (operation !== 'delete' || entity === 'calendar')) throw new Error('该系统集合为只读，不能在 Proma 中修改或删除')
+    // native outbox 用 hide 表示“本地投影已删除”；coordinator 根据实体执行 Calendar remove 或 Reminder hide。
     const externalOperation = operation === 'delete' ? 'hide' : 'upsert'
     getDatabase().prepare(`INSERT INTO planning_native_outbox (id,connection_id,operation,proma_entity_id,attempts,next_attempt_at,created_at,updated_at) VALUES (:id,:connectionId,:operation,:promaEntityId,0,:now,:now,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET operation=excluded.operation,attempts=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,revision=planning_native_outbox.revision+1,updated_at=excluded.updated_at`).run({ id: randomUUID(), connectionId: external.connection_id, operation: externalOperation, promaEntityId, now })
     return
@@ -766,6 +857,8 @@ export function savePlanningSyncProfile(input: SavePlanningSyncProfileInput): Pl
       }, now)
       getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE profile_id=:profileId').run({ profileId: profile.id })
       getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId').run({ profileId: profile.id })
+      // 冲突快照属于已废弃目标；不可阻塞新目标，也不可把旧系统版本误应用到新目标。
+      getDatabase().prepare('DELETE FROM planning_sync_profile_conflicts WHERE profile_id=:profileId').run({ profileId: profile.id })
     }
     getDatabase().prepare(`
       INSERT INTO planning_sync_profiles (id, entity, target_id, target_title, source_title, enabled, created_at, updated_at)
@@ -786,7 +879,8 @@ export function listDuePlanningSyncOutbox(now = Date.now(), limit = 25): Plannin
     FROM planning_sync_outbox AS outbox
     JOIN planning_sync_profiles AS profiles ON profiles.id=outbox.profile_id
     LEFT JOIN planning_sync_bindings AS bindings ON bindings.profile_id=outbox.profile_id AND bindings.proma_entity_id=outbox.proma_entity_id AND bindings.target_id=COALESCE(outbox.target_id, profiles.target_id)
-    WHERE profiles.enabled=1 AND outbox.next_attempt_at<=:now
+    LEFT JOIN planning_sync_profile_conflicts AS conflicts ON conflicts.profile_id=outbox.profile_id AND conflicts.proma_entity_id=outbox.proma_entity_id
+    WHERE profiles.enabled=1 AND outbox.next_attempt_at<=:now AND conflicts.id IS NULL
     ORDER BY outbox.created_at
     LIMIT :limit
   `).all({ now, limit }) as Array<SyncOutboxRow & SyncProfileRow & { execution_target_id: string; profile_created_at: number; profile_updated_at: number; calendar_item_identifier: string | null }>
@@ -816,8 +910,11 @@ export function failPlanningSyncCleanup(item: PlanningSyncCleanupItem, error: st
   getDatabase().prepare('UPDATE planning_sync_cleanup SET attempts=:attempts,next_attempt_at=:nextAttemptAt,last_error=:error,updated_at=:now WHERE id=:id').run({ id: item.id, attempts, nextAttemptAt, error: error.slice(0, 1_000), now })
 }
 
-export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeIdentifiers?: { calendarItemIdentifier?: string; calendarItemExternalIdentifier?: string }): void {
+export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeIdentifiers?: { calendarItemIdentifier?: string; calendarItemExternalIdentifier?: string }, nativeHash?: string): void {
   withPlanningTransaction(() => {
+    // EventKit 回调可能比随后一次本地编辑慢。旧 revision 绝不能污染新 locator / 双向基线。
+    const current = getDatabase().prepare('SELECT id FROM planning_sync_outbox WHERE id=:id AND revision=:revision').get({ id: item.id, revision: item.revision })
+    if (!current) return
     const now = Date.now()
     const currentProfile = getDatabase().prepare('SELECT target_id FROM planning_sync_profiles WHERE id=:profileId').get({ profileId: item.profile.id }) as { target_id: string } | undefined
     const isCurrentTarget = currentProfile?.target_id === item.profile.targetId
@@ -825,12 +922,12 @@ export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeI
       getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND proma_entity_id=:promaEntityId').run({ profileId: item.profile.id, targetId: item.profile.targetId, promaEntityId: item.promaEntityId })
     } else if (nativeIdentifiers?.calendarItemIdentifier && isCurrentTarget) {
       getDatabase().prepare(`
-        INSERT INTO planning_sync_bindings (profile_id, target_id, proma_entity_id, calendar_item_identifier, calendar_item_external_identifier, last_synced_at)
-        VALUES (:profileId, :targetId, :promaEntityId, :calendarItemIdentifier, :calendarItemExternalIdentifier, :now)
+        INSERT INTO planning_sync_bindings (profile_id, target_id, proma_entity_id, calendar_item_identifier, calendar_item_external_identifier, last_synced_hash, last_synced_at)
+        VALUES (:profileId, :targetId, :promaEntityId, :calendarItemIdentifier, :calendarItemExternalIdentifier, :nativeHash, :now)
         ON CONFLICT(profile_id, proma_entity_id) DO UPDATE SET
           target_id=excluded.target_id, calendar_item_identifier=excluded.calendar_item_identifier,
-          calendar_item_external_identifier=excluded.calendar_item_external_identifier, last_synced_at=excluded.last_synced_at
-      `).run({ profileId: item.profile.id, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, calendarItemExternalIdentifier: nativeIdentifiers.calendarItemExternalIdentifier ?? null, now })
+          calendar_item_external_identifier=excluded.calendar_item_external_identifier,last_synced_hash=excluded.last_synced_hash,last_synced_at=excluded.last_synced_at
+      `).run({ profileId: item.profile.id, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, calendarItemExternalIdentifier: nativeIdentifiers.calendarItemExternalIdentifier ?? null, nativeHash: nativeHash ?? null, now })
     } else if (nativeIdentifiers?.calendarItemIdentifier) {
       // 目标切换与 native 写入并发时，将刚创建的旧项移入独立清理队列，不能任其孤儿化。
       enqueuePlanningSyncCleanup({ entity: item.profile.entity, targetId: item.profile.targetId, promaEntityId: item.promaEntityId, calendarItemIdentifier: nativeIdentifiers.calendarItemIdentifier, nativeStartAt: item.nativeStartAt }, now)
@@ -842,7 +939,7 @@ export function completePlanningSyncOutbox(item: PlanningSyncOutboxItem, nativeI
 export function listDuePlanningNativeOutbox(now = Date.now(), limit = 25): PlanningNativeOutboxItem[] {
   // 冲突未决时绝不能自动把 Proma 一侧覆盖到系统。
   const rows = getDatabase().prepare(`SELECT outbox.*, connections.entity,connections.target_id,connections.target_title,connections.source_title,connections.source_type,connections.can_write,connections.connected_at,connections.updated_at AS connection_updated_at,bindings.calendar_item_identifier,bindings.due_date_only,bindings.recreate_pending FROM planning_native_outbox AS outbox JOIN planning_native_connections AS connections ON connections.id=outbox.connection_id JOIN planning_native_bindings AS bindings ON bindings.connection_id=outbox.connection_id AND bindings.proma_entity_id=outbox.proma_entity_id LEFT JOIN planning_native_sync_conflicts AS conflicts ON conflicts.connection_id=outbox.connection_id AND conflicts.proma_entity_id=outbox.proma_entity_id AND conflicts.resolved_at IS NULL WHERE outbox.next_attempt_at<=:now AND conflicts.id IS NULL ORDER BY outbox.created_at LIMIT :limit`).all({ now, limit }) as Array<NativeOutboxRow & NativeConnectionRow & { connection_updated_at: number; calendar_item_identifier: string; due_date_only: number; recreate_pending: number }>
-  return rows.map((row) => ({ id: row.id, connection: nativeConnectionFromRow({ ...row, updated_at: row.connection_updated_at }), operation: row.operation, promaEntityId: row.proma_entity_id, calendarItemIdentifier: row.calendar_item_identifier, dueDateOnly: row.due_date_only === 1, attempts: row.attempts, revision: row.revision }))
+  return rows.map((row) => ({ id: row.id, connection: nativeConnectionFromRow({ ...row, updated_at: row.connection_updated_at }), operation: row.operation, promaEntityId: row.proma_entity_id, calendarItemIdentifier: row.calendar_item_identifier, dueDateOnly: row.due_date_only === 1, recreatePending: row.recreate_pending === 1, attempts: row.attempts, revision: row.revision }))
 }
 
 export function completePlanningNativeOutbox(item: PlanningNativeOutboxItem, nativeIdentifiers?: { calendarItemIdentifier?: string }): void {
@@ -947,6 +1044,103 @@ export function applyPlanningNativeConnectionItems(connectionId: string, items: 
       const table = connection.entity === 'reminder' ? 'todos' : 'calendar_events'
       getDatabase().prepare(`DELETE FROM ${table} WHERE id=:id AND native_connection_id=:connectionId`).run({ id: binding.proma_entity_id, connectionId })
       getDatabase().prepare('DELETE FROM planning_native_bindings WHERE connection_id=:connectionId AND proma_entity_id=:promaEntityId').run({ connectionId, promaEntityId: binding.proma_entity_id })
+    }
+  })
+}
+
+/**
+ * Proma 受管 Calendar 的回流路径。直接写 SQLite，绝不调用正常 update/enqueue，
+ * 因而 EventKit 通知不会制造新的 outbox 回声。
+ */
+export function applyManagedCalendarProfileItems(profileId: string, items: PlanningNativeExternalItem[]): void {
+  const profile = getDatabase().prepare("SELECT * FROM planning_sync_profiles WHERE id=:id AND entity='calendar' AND enabled=1").get({ id: profileId }) as SyncProfileRow | undefined
+  if (!profile) return
+  withPlanningTransaction(() => {
+    const now = Date.now()
+    for (const item of items) {
+      if (!item.calendarItemIdentifier || !item.title || !item.startAt) continue
+      let binding = getDatabase().prepare('SELECT * FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND calendar_item_identifier=:calendarItemIdentifier').get({ profileId, targetId: profile.target_id, calendarItemIdentifier: item.calendarItemIdentifier }) as SyncBindingRow | undefined
+      if (!binding) {
+        const candidates = new Map<string, SyncBindingRow>()
+        if (item.calendarItemExternalIdentifier) {
+          for (const candidate of getDatabase().prepare('SELECT * FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND calendar_item_external_identifier=:externalIdentifier').all({ profileId, targetId: profile.target_id, externalIdentifier: item.calendarItemExternalIdentifier }) as SyncBindingRow[]) candidates.set(candidate.proma_entity_id, candidate)
+        }
+        const markerCandidate = item.promaIdentity ? getDatabase().prepare('SELECT * FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId AND proma_entity_id=:promaEntityId').get({ profileId, targetId: profile.target_id, promaEntityId: item.promaIdentity }) as SyncBindingRow | undefined : undefined
+        if (markerCandidate) candidates.set(markerCandidate.proma_entity_id, markerCandidate)
+        // 仅“Proma marker + 与既有 binding 相同的 external identifier”可自动认回；单个 external id 或复制 UUID marker 都不足以安全认领。
+        if (candidates.size === 1 && markerCandidate && item.calendarItemExternalIdentifier && markerCandidate.calendar_item_external_identifier === item.calendarItemExternalIdentifier) binding = markerCandidate
+        else if (candidates.size > 0) {
+          // locator recovery 需要用户选择。随后 missing-check 会识别冲突并保留旧投影，绝不误删其 tags/reminders。
+          for (const candidate of candidates.values()) getDatabase().prepare(`INSERT INTO planning_sync_profile_conflicts (id,profile_id,proma_entity_id,kind,native_item_json,detected_at)
+            VALUES (:id,:profileId,:promaEntityId,'changed',:nativeItemJson,:now)
+            ON CONFLICT(profile_id,proma_entity_id) DO UPDATE SET kind='changed',native_item_json=excluded.native_item_json,detected_at=excluded.detected_at`).run({ id: randomUUID(), profileId, promaEntityId: candidate.proma_entity_id, nativeItemJson: JSON.stringify(item), now })
+          continue
+        }
+      }
+      if (item.isRecurring) {
+        // 不把 recurrence series/exception 误降维为单次 Proma event。
+        if (binding) {
+          getDatabase().prepare('DELETE FROM planning_sync_outbox WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId, promaEntityId: binding.proma_entity_id })
+          getDatabase().prepare("DELETE FROM planning_reminders WHERE target_type='calendar_event' AND target_id=:id").run({ id: binding.proma_entity_id })
+          getDatabase().prepare('DELETE FROM calendar_events WHERE id=:id').run({ id: binding.proma_entity_id })
+          getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId, promaEntityId: binding.proma_entity_id })
+        }
+        continue
+      }
+      if (binding && binding.calendar_item_identifier !== item.calendarItemIdentifier) {
+        // 先持久化新 locator，再比较内容基线；否则内容相同的 locator 迁移会被误判为“无变化”。
+        getDatabase().prepare('UPDATE planning_sync_bindings SET calendar_item_identifier=:calendarItemIdentifier,calendar_item_external_identifier=:calendarItemExternalIdentifier,last_synced_at=:now WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId, promaEntityId: binding.proma_entity_id, calendarItemIdentifier: item.calendarItemIdentifier, calendarItemExternalIdentifier: item.calendarItemExternalIdentifier ?? binding.calendar_item_external_identifier ?? null, now })
+        binding = { ...binding, calendar_item_identifier: item.calendarItemIdentifier, calendar_item_external_identifier: item.calendarItemExternalIdentifier ?? binding.calendar_item_external_identifier }
+      }
+      const hash = planningNativeCalendarHash(item)
+      if (binding?.last_synced_hash === hash) continue
+      // EventKit save 成功、SQLite binding 尚未确认时若进程崩溃，marker 只能在仍有该本地 outbox 时恢复；
+      // 不信任任何没有对应 pending outbox 的 marker，避免用户 URL 伪造关联本地日程。
+      const recoveredPending = !binding && item.promaIdentity && getDatabase().prepare(`SELECT outbox.id FROM planning_sync_outbox AS outbox
+        JOIN calendar_events AS events ON events.id=outbox.proma_entity_id
+        WHERE outbox.profile_id=:profileId AND outbox.proma_entity_id=:promaEntityId AND outbox.operation='upsert'`).get({ profileId, promaEntityId: item.promaIdentity })
+      const localId = binding?.proma_entity_id ?? (recoveredPending ? item.promaIdentity! : randomUUID())
+      const pending = (binding || recoveredPending) && getDatabase().prepare('SELECT id FROM planning_sync_outbox WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').get({ profileId, promaEntityId: localId })
+      if (pending && !recoveredPending) {
+        // 双端在同一基线编辑时，宁可暂停出站，也不能静默后写覆盖系统版本。
+        getDatabase().prepare(`INSERT INTO planning_sync_profile_conflicts (id,profile_id,proma_entity_id,kind,native_item_json,detected_at)
+          VALUES (:id,:profileId,:promaEntityId,'changed',:nativeItemJson,:now)
+          ON CONFLICT(profile_id,proma_entity_id) DO UPDATE SET kind='changed',native_item_json=excluded.native_item_json,detected_at=excluded.detected_at`).run({ id: randomUUID(), profileId, promaEntityId: localId, nativeItemJson: JSON.stringify(item), now })
+        continue
+      }
+      const updatedAt = Math.max(now, item.lastModifiedAt || now)
+      if (binding || recoveredPending) {
+        getDatabase().prepare('UPDATE calendar_events SET title=:title,notes=:notes,start_at=:startAt,end_at=:endAt,all_day=:allDay,updated_at=:updatedAt WHERE id=:id').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, startAt: item.startAt, endAt: item.endAt ?? null, allDay: item.allDay ? 1 : 0, updatedAt })
+      } else {
+        getDatabase().prepare('INSERT INTO calendar_events (id,title,notes,start_at,end_at,all_day,workspace_id,created_at,updated_at) VALUES (:id,:title,:notes,:startAt,:endAt,:allDay,NULL,:now,:updatedAt)').run({ id: localId, title: item.title.slice(0, 500), notes: item.notes ?? null, startAt: item.startAt, endAt: item.endAt ?? null, allDay: item.allDay ? 1 : 0, now, updatedAt })
+      }
+      getDatabase().prepare(`INSERT INTO planning_sync_bindings (profile_id,target_id,proma_entity_id,calendar_item_identifier,calendar_item_external_identifier,last_synced_hash,last_synced_at)
+        VALUES (:profileId,:targetId,:promaEntityId,:calendarItemIdentifier,:calendarItemExternalIdentifier,:hash,:now)
+        ON CONFLICT(profile_id,proma_entity_id) DO UPDATE SET target_id=excluded.target_id,calendar_item_identifier=excluded.calendar_item_identifier,calendar_item_external_identifier=excluded.calendar_item_external_identifier,last_synced_hash=excluded.last_synced_hash,last_synced_at=excluded.last_synced_at`).run({ profileId, targetId: profile.target_id, promaEntityId: localId, calendarItemIdentifier: item.calendarItemIdentifier, calendarItemExternalIdentifier: item.calendarItemExternalIdentifier ?? null, hash, now })
+    }
+  })
+}
+
+/** 只有由 locator 精确读取确认缺失的受管 Calendar 项才能视为系统端删除。 */
+export function hideMissingManagedCalendarProfileItems(profileId: string, targetId: string, existingIdentifiers: string[]): void {
+  const profile = getDatabase().prepare("SELECT * FROM planning_sync_profiles WHERE id=:id AND entity='calendar' AND enabled=1 AND target_id=:targetId").get({ id: profileId, targetId }) as SyncProfileRow | undefined
+  if (!profile) return
+  const existing = new Set(existingIdentifiers)
+  withPlanningTransaction(() => {
+    const bindings = getDatabase().prepare('SELECT * FROM planning_sync_bindings WHERE profile_id=:profileId AND target_id=:targetId').all({ profileId, targetId }) as SyncBindingRow[]
+    for (const binding of bindings) {
+      if (!binding.calendar_item_identifier || existing.has(binding.calendar_item_identifier)) continue
+      const pending = getDatabase().prepare('SELECT id FROM planning_sync_outbox WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').get({ profileId, promaEntityId: binding.proma_entity_id })
+      const recoveryConflict = getDatabase().prepare('SELECT id FROM planning_sync_profile_conflicts WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').get({ profileId, promaEntityId: binding.proma_entity_id })
+      if (pending && !recoveryConflict) {
+        getDatabase().prepare(`INSERT INTO planning_sync_profile_conflicts (id,profile_id,proma_entity_id,kind,native_item_json,detected_at)
+          VALUES (:id,:profileId,:promaEntityId,'deleted',NULL,:now)
+          ON CONFLICT(profile_id,proma_entity_id) DO UPDATE SET kind='deleted',native_item_json=NULL,detected_at=excluded.detected_at`).run({ id: randomUUID(), profileId, promaEntityId: binding.proma_entity_id, now: Date.now() })
+      }
+      if (pending || recoveryConflict) continue
+      getDatabase().prepare("DELETE FROM planning_reminders WHERE target_type='calendar_event' AND target_id=:id").run({ id: binding.proma_entity_id })
+      getDatabase().prepare('DELETE FROM calendar_events WHERE id=:id').run({ id: binding.proma_entity_id })
+      getDatabase().prepare('DELETE FROM planning_sync_bindings WHERE profile_id=:profileId AND proma_entity_id=:promaEntityId').run({ profileId, promaEntityId: binding.proma_entity_id })
     }
   })
 }

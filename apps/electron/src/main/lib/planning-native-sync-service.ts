@@ -98,6 +98,8 @@ export interface PlanningNativeSyncItem {
   /** Proma UUID；仅用于新建项目的 crash-recovery marker，不覆盖用户已有 URL。 */
   identity: string
   calendarItemIdentifier?: string
+  /** 仅用户在冲突中明确选择“保留 Proma”后才允许 locator 缺失时重建。 */
+  allowRecreate?: boolean
   title: string
   notes?: string
   startAt?: number

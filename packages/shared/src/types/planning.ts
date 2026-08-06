@@ -95,7 +95,9 @@ export interface PlanningNativeOrigin {
 /** 同一已连接系统项被 Proma 与系统并发修改时，必须由用户选择保留哪一侧。 */
 export interface PlanningNativeSyncConflict {
   id: string
-  connectionId: string
+  /** 已连接集合冲突；受管 Proma Calendar 冲突则为 profileId。 */
+  connectionId?: string
+  profileId?: string
   entity: PlanningNativeSyncEntity
   promaEntityId: string
   title: string

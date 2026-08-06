@@ -632,7 +632,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_calendar_event', label: '删除日程',
-      description: '删除日程。只在用户明确要求删除时使用；含 nativeOrigin 的日程只会从 Proma 隐藏，不删除系统原项，仍应告知用户。仅 Pi Agent 可用。',
+      description: '删除日程。只在用户明确要求删除时使用；含 nativeOrigin 且来源为可写已连接系统日历时，会真实删除对应 macOS Calendar 日程，必须先说明该外部副作用并取得用户确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)
