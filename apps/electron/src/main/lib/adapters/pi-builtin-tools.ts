@@ -565,7 +565,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_todo', label: '删除 Todo',
-      description: '删除 Todo。只在用户明确要求删除时使用；对于含 nativeOrigin 的连接系统提醒事项，此操作仅从 Proma 隐藏，不删除系统原项，仍须向用户说明。仅 Pi Agent 可用。',
+      description: '删除 Todo。只在用户明确要求删除时使用；含 nativeOrigin 且来源为可写已连接系统提醒事项列表时，会真实删除对应 macOS Reminder，必须先说明该外部副作用并取得用户确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)

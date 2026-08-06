@@ -784,10 +784,9 @@ function enqueuePlanningSync(targetType: PlanningReminderTargetType, promaEntity
   const entity = syncEntityForPlanningTarget(targetType)
   const external = getDatabase().prepare('SELECT bindings.connection_id, connections.can_write FROM planning_native_bindings AS bindings JOIN planning_native_connections AS connections ON connections.id=bindings.connection_id WHERE bindings.proma_entity_id=:promaEntityId AND connections.entity=:entity').get({ promaEntityId, entity }) as { connection_id: string; can_write: number } | undefined
   if (external) {
-    // Reminder 投影的删除始终只隐藏；但用户明确要求 Calendar 在 Proma 删除时写穿 EventKit。
-    // 对只读 Calendar 拒绝本地事务，不能形成“本地删了、系统仍在”的错误成功状态。
-    if (external.can_write !== 1 && (operation !== 'delete' || entity === 'calendar')) throw new Error('该系统集合为只读，不能在 Proma 中修改或删除')
-    // native outbox 用 hide 表示“本地投影已删除”；coordinator 根据实体执行 Calendar remove 或 Reminder hide。
+    // 用户明确连接的可写 Calendar / Reminder 在 Proma 删除时都写穿 EventKit；只读集合一律不能本地假成功。
+    if (external.can_write !== 1) throw new Error('该系统集合为只读，不能在 Proma 中修改或删除')
+    // native outbox 用 hide 表示“本地投影已删除”；coordinator 根据实体执行受限 EventKit remove。
     const externalOperation = operation === 'delete' ? 'hide' : 'upsert'
     getDatabase().prepare(`INSERT INTO planning_native_outbox (id,connection_id,operation,proma_entity_id,attempts,next_attempt_at,created_at,updated_at) VALUES (:id,:connectionId,:operation,:promaEntityId,0,:now,:now,:now) ON CONFLICT(connection_id,proma_entity_id) DO UPDATE SET operation=excluded.operation,attempts=0,next_attempt_at=excluded.next_attempt_at,last_error=NULL,revision=planning_native_outbox.revision+1,updated_at=excluded.updated_at`).run({ id: randomUUID(), connectionId: external.connection_id, operation: externalOperation, promaEntityId, now })
     return

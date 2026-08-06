@@ -28,9 +28,9 @@ async function cleanupItem(item: PlanningSyncCleanupItem): Promise<void> {
 
 async function syncNativeItem(item: PlanningNativeOutboxItem): Promise<void> {
   if (item.operation === 'hide') {
-    // 连接的 Reminder 仍是隐藏投影；连接的 Calendar 则按用户要求真实删除 EventKit 项。
-    // 升级前只读 Calendar 可能残留 hide outbox；该历史项只能继续本地隐藏，不能借升级越权删除。
-    if (item.connection.entity === 'calendar' && item.connection.canWrite) await removePlanningNativeSyncItem('calendar', { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier })
+    // 连接的可写 Calendar / Reminder 均按用户选择真实删除 EventKit 项。
+    // 升级前只读集合可能残留 hide outbox；该历史项只能继续本地隐藏，不能借升级越权删除。
+    if (item.connection.canWrite) await removePlanningNativeSyncItem(item.connection.entity, { targetId: item.connection.targetId, identity: item.promaEntityId, calendarItemIdentifier: item.calendarItemIdentifier })
     completePlanningNativeOutbox(item)
     return
   }
