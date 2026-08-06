@@ -192,8 +192,8 @@ final class IslandModel: ObservableObject {
 
 private enum IslandLayout {
   static let horizontalScreenInset: CGFloat = 16
-  static let compactMinimumWidth: CGFloat = 352
-  static let compactNotchSideReserve: CGFloat = 152
+  static let compactMinimumWidth: CGFloat = 368
+  static let compactNotchSideReserve: CGFloat = 168
   static let expandedMinimumWidth: CGFloat = 500
   static let expandedMaximumWidth: CGFloat = 580
   static let expandedScreenWidthRatio: CGFloat = 0.425
