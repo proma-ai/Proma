@@ -76,6 +76,19 @@ export default {
           'system-ui',
           'sans-serif',
         ],
+        // 等宽栈：macOS 经 ui-monospace 命中 SF Mono，Windows 命中 Cascadia Code（Win11 自带）或回退 Consolas。
+        // 与 globals.css 的 --font-mono 保持同一份，避免双真源漂移。
+        mono: [
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'Monaco',
+          'Cascadia Code',
+          'Consolas',
+          '"Liberation Mono"',
+          '"Courier New"',
+          'monospace',
+        ],
       },
       // ===== 圆角：覆写 shadcn 标准三档，全部由 --radius 派生 =====
       // 改一处 --radius 即可整站统一调圆角节奏，无需 grep 替换 300+ 处 rounded-*

@@ -11,6 +11,10 @@
     'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont,
     'SF Pro Text', 'PingFang SC', 'Segoe UI', 'Microsoft YaHei',
     system-ui, sans-serif;
+  /* 等宽栈：与 tailwind.config.js 的 fontFamily.mono 保持同一份（单一真源），
+   * 供 Tailwind preflight 与下方各处手写 font-family 统一引用。
+   * macOS 经 ui-monospace 命中 SF Mono，Windows 命中 Cascadia Code（Win11 自带）或回退 Consolas。 */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Code', Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-feature-settings: 'cv11', 'ss01', 'ss03', 'tnum';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -1223,7 +1227,7 @@
 
 .code-block-wrapper pre.shiki {
   /* 与 Tailwind font-mono / @pierre/diffs 默认保持一致，跨平台命中系统等宽字体 */
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+  font-family: var(--font-mono);
   background-color: hsl(var(--code-bg)) !important;
 }
 
@@ -1345,7 +1349,7 @@
   background: hsl(var(--primary) / 0.10);
   color: hsl(var(--primary) / 0.92);
   box-shadow: 0 2px 6px hsl(var(--primary) / 0.10);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 400;
   white-space: nowrap;
   pointer-events: none;
@@ -1833,7 +1837,7 @@
 .ProseMirror pre.markdown-code-block {
   background: hsl(var(--muted) / 0.45) !important;
   color: hsl(var(--foreground)) !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-family: var(--font-mono) !important;
   font-size: 13px;
   line-height: 1.6;
   tab-size: 2;
@@ -1990,7 +1994,7 @@
 
 .ProseMirror .markdown-code-edit-layer {
   background: transparent !important;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-family: var(--font-mono) !important;
   font-size: 13px !important;
   font-variant-ligatures: none;
   font-kerning: none;

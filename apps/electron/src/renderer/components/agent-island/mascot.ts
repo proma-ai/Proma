@@ -238,7 +238,7 @@ function drawIdle(ctx: CanvasRenderingContext2D, v: V, cfg: MascotConfig, t: num
       const fontSize = Math.max(5, v.s * (2.6 + p * 1.6))
       const opacity = p < 0.8 ? 0.7 - i * 0.1 : (1 - p) * 3 * (0.7 - i * 0.1)
       ctx.fillStyle = `rgba(255,255,255,${Math.max(0, opacity)})`
-      ctx.font = `900 ${fontSize}px ui-monospace, monospace`
+      ctx.font = `900 ${fontSize}px ui-monospace, 'Cascadia Code', Consolas, monospace`
       ctx.fillText('z', v.x(11.2 + i * 0.8) + Math.sin(p * Math.PI * 2) * v.s * 0.5, v.y(7 - p * 3.2))
     }
   }
