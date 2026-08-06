@@ -228,9 +228,11 @@ function TabBarInner({
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
-  // 文件面板切换（全局共享）：活动 Tab 是 Agent 且面板关闭时，在 TabBar 右上角展示"打开"按钮。
-  // 该按钮的 absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
+  // 文件面板切换（全局共享）：活动 Tab 是 Agent 且面板关闭时，在 TabBar 右上角展示“打开”按钮。
+  // 非 Windows：absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
   // 若右侧关闭按钮样式变化，这里需同步调整。
+  // Windows：右上角被 WindowControls（126px）占用，按钮收进 TabBar 带内右缘 right-[126px]，
+  // 与面板内关闭按钮（right-4px）位置不同，属有意的平台差异。
   const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
   const setShortcutGuideOpen = useSetAtom(shortcutGuideOpenAtom)
   const setFaqDialogOpen = useSetAtom(faqDialogOpenAtom)
@@ -397,6 +399,8 @@ function TabBarInner({
         className={cn(
           "relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none",
           // Windows 始终避开 WindowControls（~126px）；非 Windows 为快捷键地图和文件面板按钮预留空间。
+          // 已知限制：Windows 下多标签溢出并滚动到底时，最右标签右端可能被带内按钮（z-10）遮挡，
+          // 与非 Windows 既有模式同源；如需彻底避免需将按钮改为文档流布局（flex 兄弟），暂不处理。
           isWindows && WINDOW_CONTROLS_PADDING_RIGHT,
           !isWindows && (showOpenPanelButton ? "pr-20" : "pr-10"),
         )}
@@ -457,10 +461,11 @@ function ShortcutGuideButton({
   return (
     <div
       className={cn(
-        "absolute flex items-center gap-1 titlebar-no-drag",
+        "absolute flex items-center gap-1 titlebar-no-drag inset-y-0 items-end pb-[3px] z-10",
+        // Windows 上避开 WindowControls（right-[126px]）；面板按钮显示时再向左让位（126 + 面板按钮 28px + 4px 间距 = 158px）
         isWindows
-          ? cn("top-[37px] h-7 z-[52]", hasPanelButton ? "right-9" : "right-1")
-          : cn("inset-y-0 items-end pb-[3px] z-10", hasPanelButton ? "right-9" : "right-1"),
+          ? (hasPanelButton ? "right-[158px]" : WINDOW_CONTROLS_INSET_RIGHT)
+          : (hasPanelButton ? "right-9" : "right-1"),
       )}
     >
       {/* FAQ 快捷按钮（在快捷键地图左边） */}
@@ -505,7 +510,8 @@ function ShortcutGuideButton({
 
 /** 打开 Agent 文件面板按钮。
  *  非 Windows：inset-y-0 撑满 TabBar，贴右边缘 right-1。
- *  Windows：溢出到 TabBar 下方（top-[37px]），避开 WindowControls，贴右边缘与关闭按钮对齐。 */
+ *  Windows：与非 Windows 一致在 TabBar 带内（inset-y-0 items-end pb-[3px]），
+ *  仅水平位置让出右上角 WindowControls 区域（right-[126px]），不再悬浮遮挡内容区。 */
 function AgentPanelOpenButton({
   isWindows,
   onToggle,
@@ -516,10 +522,8 @@ function AgentPanelOpenButton({
   return (
     <div
       className={cn(
-        "absolute flex titlebar-no-drag",
-        isWindows
-          ? "top-[37px] right-1 h-7 z-[52]"
-          : "inset-y-0 right-1 items-end pb-[3px] z-10",
+        "absolute flex titlebar-no-drag inset-y-0 items-end pb-[3px] z-10",
+        isWindows ? WINDOW_CONTROLS_INSET_RIGHT : "right-1",
       )}
     >
       <Tooltip>
