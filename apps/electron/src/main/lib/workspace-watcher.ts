@@ -271,7 +271,9 @@ export function watchAttachedDirectory(dirPath: string): void {
   if (attachedWatchers.has(dirPath)) return
 
   try {
-    const w = watch(dirPath, { recursive: true }, () => {
+    const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
+      const normalizedFilename = typeof filename === 'string' ? filename.replace(/\\/g, '/') : ''
+      if (normalizedFilename && isHighNoisePath(normalizedFilename)) return
       notifyWorkspaceFilesChanged()
     })
 
