@@ -339,6 +339,8 @@ export interface AppSettings {
   longTextPasteAsAttachmentEnabled?: boolean
   /** 输入框是否渲染 Markdown 富文本格式（默认 false，关闭后为纯文本模式，仍保留 Mention 引用） */
   richTextRenderingEnabled?: boolean
+  /** 打开可编辑文本预览时是否直接进入编辑模式（默认 false） */
+  alwaysEditTextPreview?: boolean
   /** Markdown 预览字号档位（默认 'medium'，对应 15px） */
   markdownFontSize?: MarkdownFontSize
   /** 上次是否在 Scratch Pad 页（用于重启恢复） */

@@ -42,10 +42,12 @@ import {
   richTextRenderingEnabledAtom,
   stickyUserMessageEnabledAtom,
   sessionHoverPreviewEnabledAtom,
+  alwaysEditTextPreviewAtom,
   updateLongTextPasteAsAttachmentEnabled,
   updateRichTextRenderingEnabled,
   updateStickyUserMessageEnabled,
   updateSessionHoverPreviewEnabled,
+  updateAlwaysEditTextPreview,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
 import { Button } from '../ui/button'
@@ -70,6 +72,7 @@ export function GeneralSettings(): React.ReactElement {
   const [longTextPasteAsAttachmentEnabled, setLongTextPasteAsAttachmentEnabled] = useAtom(longTextPasteAsAttachmentEnabledAtom)
   const [richTextRenderingEnabled, setRichTextRenderingEnabled] = useAtom(richTextRenderingEnabledAtom)
   const [sessionHoverPreviewEnabled, setSessionHoverPreviewEnabled] = useAtom(sessionHoverPreviewEnabledAtom)
+  const [alwaysEditTextPreview, setAlwaysEditTextPreview] = useAtom(alwaysEditTextPreviewAtom)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [nameInput, setNameInput] = React.useState(userProfile.userName)
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false)
@@ -390,6 +393,15 @@ export function GeneralSettings(): React.ReactElement {
             onCheckedChange={(checked) => {
               setSessionHoverPreviewEnabled(checked)
               updateSessionHoverPreviewEnabled(checked)
+            }}
+          />
+          <SettingsToggle
+            label="始终编辑模式"
+            description="打开代码和配置等文本文件时直接进入编辑模式；图片、只读文件和超大文件仍保持预览"
+            checked={alwaysEditTextPreview}
+            onCheckedChange={(checked) => {
+              setAlwaysEditTextPreview(checked)
+              void updateAlwaysEditTextPreview(checked)
             }}
           />
           <SettingsToggle

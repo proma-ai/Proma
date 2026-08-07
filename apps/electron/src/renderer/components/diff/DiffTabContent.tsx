@@ -18,6 +18,7 @@ import {
   agentDiffRefreshVersionAtom,
   agentSidePanelOpenAtom,
 } from '@/atoms/agent-atoms'
+import { alwaysEditTextPreviewAtom } from '@/atoms/ui-preferences'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { previewCodeWrapAtom, quotedSelectionMapAtom } from '@/atoms/preview-atoms'
 import {
@@ -41,6 +42,12 @@ import { SelectionActionPopover } from '@/components/selection/SelectionActionPo
 import { SELECTION_ACTION_POPOVER_SELECTOR } from '@/lib/quoted-selection'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import {
+  MAX_AUTO_EDIT_CHARS,
+  classifyPreviewFile,
+  isEditablePreviewText,
+  shouldAutoEnterTextEdit,
+} from '@/lib/preview-file-classification'
+import {
   clearMarkdownEditorStateForSession,
   createMarkdownEditorCacheKey,
   createMarkdownEditorViewState,
@@ -55,13 +62,6 @@ import {
   type MarkdownScrollPosition,
 } from '@/lib/markdown-editor-state'
 
-const MD_EXTS = new Set(['.md', '.markdown'])
-const PLAIN_TEXT_EDIT_EXTS = new Set(['.txt', '.text', '.log'])
-const PDF_EXTS = new Set(['.pdf'])
-const DOCX_EXTS = new Set(['.docx'])
-const OFFICE_PREVIEW_EXTS = new Set(['.xlsx', '.pptx'])
-const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls', '.ppt'])
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const FILE_FIND_SHORTCUT_OPTIONS = { exclusive: true }
 
 /**
@@ -100,7 +100,7 @@ const CACHE_MAX = 50
 const contentCache = new Map<string, CacheEntry>()
 
 /** 超过此字符数的文本文件将跳过 PierreFile 高亮，直接以纯文本展示，避免大文件卡顿 */
-const MAX_PREVIEW_CHARS = 500_000
+const MAX_PREVIEW_CHARS = MAX_AUTO_EDIT_CHARS
 
 /** 选中文本最大字符数（与 Bozeman DOM 模式一致） */
 const MAX_QUOTED_CHARS = 2000
@@ -145,11 +145,6 @@ function cacheSet(key: string, value: CacheEntry): void {
     const oldestKey = contentCache.keys().next().value
     if (oldestKey !== undefined) contentCache.delete(oldestKey)
   }
-}
-
-function getExtension(filePath: string): string {
-  const dot = filePath.lastIndexOf('.')
-  return dot >= 0 ? filePath.slice(dot).toLowerCase() : ''
 }
 
 /** 判断选区是否在容器内（穿透 Shadow DOM 边界） */
@@ -251,15 +246,16 @@ interface DiffTabContentProps {
 }
 
 export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewOnly, readOnly, basePaths, onEmptyDiff, toolbarActions, baseRef }: DiffTabContentProps): React.ReactElement {
-  const ext = getExtension(filePath)
-  const isMarkdown = previewOnly && MD_EXTS.has(ext)
-  const isPlainTextEditable = previewOnly && PLAIN_TEXT_EDIT_EXTS.has(ext)
-  const isEditableText = isMarkdown || isPlainTextEditable
-  const isPdf = previewOnly && PDF_EXTS.has(ext)
-  const isDocx = previewOnly && DOCX_EXTS.has(ext)
-  const isOfficePreview = previewOnly && OFFICE_PREVIEW_EXTS.has(ext)
-  const isLegacyOffice = previewOnly && LEGACY_OFFICE_EXTS.has(ext)
-  const isImage = previewOnly && IMAGE_EXTS.has(ext)
+  const previewFile = classifyPreviewFile(filePath)
+  const ext = previewFile.extension
+  const isMarkdown = previewOnly && previewFile.kind === 'markdown'
+  const isPlainTextEditable = previewOnly && previewFile.kind === 'text'
+  const isEditableText = previewOnly && isEditablePreviewText(previewFile.kind)
+  const isPdf = previewOnly && previewFile.kind === 'pdf'
+  const isDocx = previewOnly && previewFile.kind === 'docx'
+  const isOfficePreview = previewOnly && previewFile.kind === 'office'
+  const isLegacyOffice = previewOnly && previewFile.kind === 'legacy-office'
+  const isImage = previewOnly && previewFile.kind === 'image'
   const markdownEditorCacheKey = React.useMemo(
     () => createMarkdownEditorCacheKey({ filePath, dirPath, gitRoot, basePaths }),
     [basePaths, dirPath, filePath, gitRoot],
@@ -269,10 +265,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     return getMarkdownEditorViewState(sessionId, markdownEditorCacheKey)
   }, [isEditableText, markdownEditorCacheKey, readOnly, sessionId])
   const markdownEditorScrollScope = `${markdownEditorCacheKey}:${readOnly ? 'readonly' : 'editable'}`
+  const autoEditTargetKey = `${sessionId}:${markdownEditorCacheKey}`
+  const alwaysEditTextPreview = useAtomValue(alwaysEditTextPreviewAtom)
 
   const [viewMode, setViewMode] = useAtom(agentDiffViewModeAtom)
   const [oldContent, setOldContent] = React.useState('')
   const [newContent, setNewContent] = React.useState('')
+  const [loadedTextPreview, setLoadedTextPreview] = React.useState<{ targetKey: string; content: string } | null>(null)
   const [markdownEditing, setMarkdownEditing] = React.useState(
     () => Boolean(initialMarkdownEditorState?.editing),
   )
@@ -604,6 +603,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
     setOldContent('')
     setNewContent('')
+    setLoadedTextPreview(null)
     setDocxHtml('')
     setOfficeHtml('')
     setOfficeText('')
@@ -766,6 +766,9 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       lastOldContentRef.current = cached.oldContent
       setOldContent(cached.oldContent)
       setNewContent(cached.newContent)
+      if (previewOnly && isEditableText) {
+        setLoadedTextPreview({ targetKey: autoEditTargetKey, content: cached.newContent })
+      }
       setDocxHtml(cached.docxHtml ?? '')
       setOfficeHtml(cached.officeHtml ?? '')
       setOfficeText(cached.officeText ?? '')
@@ -872,11 +875,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           lastOldContentRef.current = old
           setOldContent(old)
           setNewContent(content)
+          if (previewOnly && isEditableText) {
+            setLoadedTextPreview({ targetKey: autoEditTargetKey, content })
+          }
 
           if (cacheKey) cacheSet(cacheKey, { oldContent: old, newContent: content })
         }
 
-        if (previewOnly && !MD_EXTS.has(ext) && content) {
+        if (previewOnly && !isMarkdown && content) {
           if (!cancelled) setLoading(false)
         }
       } catch {
@@ -1078,12 +1084,13 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   }, [activeMarkdownEditing, isOfficePreview, markdownDraft, newContent, officeText])
 
 
-  const startMarkdownEdit = React.useCallback(() => {
+  const startMarkdownEdit = React.useCallback((loadedContent?: string) => {
     if (!isEditableText || readOnly) return
     const currentEditorState = getMarkdownEditorViewState(sessionId, markdownEditorCacheKey) ?? markdownEditorStateRef.current
     const hasPendingDraft = currentEditorState.draft !== currentEditorState.lastSavedDraft
-    const draft = hasPendingDraft ? currentEditorState.draft : newContent
-    const lastSavedDraft = hasPendingDraft ? currentEditorState.lastSavedDraft : newContent
+    const content = loadedContent ?? newContent
+    const draft = hasPendingDraft ? currentEditorState.draft : content
+    const lastSavedDraft = hasPendingDraft ? currentEditorState.lastSavedDraft : content
     const previewScroll = scrollContainerRef.current
       ? { top: scrollContainerRef.current.scrollTop, left: scrollContainerRef.current.scrollLeft }
       : currentEditorState.previewScroll
@@ -1107,6 +1114,22 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
     setMarkdownDraft(draft)
     setMarkdownEditing(true)
   }, [isEditableText, markdownEditorCacheKey, newContent, persistMarkdownEditorViewState, readOnly, sessionId])
+
+  const autoEditFiredTargetRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!loadedTextPreview || loadedTextPreview.targetKey !== autoEditTargetKey) return
+    if (autoEditFiredTargetRef.current === autoEditTargetKey || markdownEditingRef.current) return
+    if (!shouldAutoEnterTextEdit({
+      enabled: alwaysEditTextPreview,
+      readOnly: Boolean(readOnly),
+      editable: Boolean(isEditableText),
+      contentLength: loadedTextPreview.content.length,
+    })) return
+
+    // 使用本次加载结果而非 newContent state，避免切换文件时读到上一个文件的闭包值。
+    autoEditFiredTargetRef.current = autoEditTargetKey
+    startMarkdownEdit(loadedTextPreview.content)
+  }, [alwaysEditTextPreview, autoEditTargetKey, isEditableText, loadedTextPreview, readOnly, startMarkdownEdit])
 
   // ref 形式的 persist：避免 callback / effect 因 refreshVersion 频繁变化而重建
   const persistRef = React.useRef<(draft: string, fp: string, fa: typeof fileAccess, cacheKey: string) => Promise<boolean>>(async () => false)
@@ -1520,7 +1543,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           ) : (
             <button
               type="button"
-              onClick={startMarkdownEdit}
+              onClick={() => startMarkdownEdit()}
               className="ml-auto p-1 rounded hover:bg-foreground/[0.06] text-foreground/40 hover:text-foreground/60 shrink-0"
               title={isMarkdown ? '编辑 Markdown' : '编辑文本'}
             >
