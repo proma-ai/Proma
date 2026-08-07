@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { ChevronRight, ChevronLeft, ChevronsRight, Check } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronsRight, ArrowDown, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
 import { isShellEnvironmentOkAtom } from '@/atoms/environment'
@@ -47,6 +47,8 @@ type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' |
 
 interface OnboardingViewProps {
   onComplete: (openTutorial?: boolean) => void
+  /** 从设置重放时可跳过欢迎页。 */
+  initialStep?: OnboardingStep
 }
 
 /** 图片内归一化锚点（0-1） */
@@ -370,29 +372,61 @@ function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onN
 
 type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation'>
 
-function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children }: {
+function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScrollHint = false }: {
   intro: GuideExamplesIntroProps
   nextLabel: string
   onNext: () => void
   onBack: () => void
   children: React.ReactNode
+  /** 首个讲解页显示向下滚动提示，避免底部进度地图被误解为横向翻页。 */
+  showScrollHint?: boolean
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const firstPageRef = useRef<HTMLDivElement>(null)
+  const [showHint, setShowHint] = useState(showScrollHint)
+
+  useEffect(() => {
+    if (!showScrollHint) return
+    const container = scrollRef.current
+    const firstPage = firstPageRef.current
+    if (!container || !firstPage) return
+
+    const handleScroll = () => {
+      // 轻微滚动仍保留提示，直到第二页内容真正进入视口。
+      const secondPageStart = firstPage.offsetTop + firstPage.offsetHeight
+      if (container.scrollTop >= secondPageStart - 24) setShowHint(false)
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [showScrollHint])
+
   return (
-    <div className="h-full w-full overflow-y-auto">
-      <div className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
-        <GuideFeatureStep
-          {...intro}
-          nextLabel={nextLabel}
-          onNext={onNext}
-          onBack={onBack}
-          showNavigation={false}
-        />
+    <div className="relative h-full w-full">
+      <div ref={scrollRef} className="h-full w-full overflow-y-auto">
+        <div ref={firstPageRef} className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
+          <GuideFeatureStep
+            {...intro}
+            nextLabel={nextLabel}
+            onNext={onNext}
+            onBack={onBack}
+            showNavigation={false}
+          />
+        </div>
+
+        <div className="mx-auto w-full max-w-[calc(58vw+504px)] px-6 pb-28 pt-6 md:px-10">
+          {children}
+          <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
+        </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[calc(58vw+504px)] px-6 pb-28 pt-6 md:px-10">
-        {children}
-        <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
-      </div>
+      {showHint && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-[180px] right-8 z-30 flex h-24 w-24 items-center justify-center rounded-none text-[#1b3f2d] md:right-10"
+        >
+          <ArrowDown className="h-20 w-20" strokeWidth={2.5} />
+        </div>
+      )}
     </div>
   )
 }
@@ -401,6 +435,7 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children }: {
 function AgentChatGuidePage({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   return (
     <GuideExamplesPage
+      showScrollHint
       intro={{
         anchor: { x: 0.073, y: 0.049 },
         arrowMode: 'magnifier',
@@ -697,8 +732,8 @@ function OnboardingAccountStep({ onComplete }: { onComplete: () => Promise<void>
   )
 }
 
-export function OnboardingView({ onComplete }: OnboardingViewProps) {
-  const [step, setStep] = useState<OnboardingStep>('welcome')
+export function OnboardingView({ onComplete, initialStep = 'welcome' }: OnboardingViewProps) {
+  const [step, setStep] = useState<OnboardingStep>(initialStep)
   const [flash, setFlash] = useState(false)
   const [fading, setFading] = useState(false)
   const [faqBackStep, setFaqBackStep] = useState<'subagent' | 'sideanswer'>('sideanswer')
@@ -1070,7 +1105,6 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         )}
       </div>
 
-      {/* ===== 底部进度地图（欢迎页不显示） ===== */}
       {step !== 'welcome' && step !== 'environment' && <ProgressMap current={step} />}
 
       {step === 'subagent' && (

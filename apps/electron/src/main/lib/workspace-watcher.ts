@@ -13,11 +13,12 @@
 
 import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 import { listAgentSessions } from './agent-session-manager'
+import { isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
@@ -25,15 +26,19 @@ const DEBOUNCE_MS = 300
 /** watcher 'error' 事件后的自愈重启延迟（ms），避免对持续故障状态紧密重试 */
 const WATCHER_RESTART_DELAY_MS = 5000
 
-// 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴
-const HIGH_NOISE_SEGMENTS = new Set([
-  'node_modules', '.next', '.nuxt', '.git', 'dist', 'build',
-  '.cache', '__pycache__', '.turbo', '.parcel-cache', '.svelte-kit',
-])
+/** 主监听或父目录监听的延迟重启定时器，停止时统一清理。 */
+const watcherRestartTimers = new Set<ReturnType<typeof setTimeout>>()
+let workspaceWatcherActive = false
 
-function isHighNoisePath(normalizedPath: string): boolean {
-  return normalizedPath.split('/').some((seg) => HIGH_NOISE_SEGMENTS.has(seg))
+function scheduleWatcherRestart(callback: () => void): void {
+  const timer = setTimeout(() => {
+    watcherRestartTimers.delete(timer)
+    if (workspaceWatcherActive) callback()
+  }, WATCHER_RESTART_DELAY_MS)
+  watcherRestartTimers.add(timer)
 }
+
+// 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴
 
 let watcher: FSWatcher | null = null
 
@@ -123,20 +128,43 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
   let entry = parentDirectoryWatchers.get(parentPath)
   if (!entry) {
     try {
-      const watcher = watch(parentPath, { recursive: false }, () => {
+      const targetPaths = new Set<string>()
+      const watcher = watch(parentPath, { recursive: false }, (_eventType, filename) => {
         // 目录恢复、替换或权限变化后，通知 renderer 重新读取即时 root status。
+        const normalizedFilename = normalizeWatchFilename(filename)
+        if (normalizedFilename === null) {
+          // filename 不可用时，仅在目标目录已经恢复时通知，避免未知噪声绕过过滤。
+          if ([...targetPaths].some((targetPath) => isExistingDirectory(targetPath))) {
+            notifyWorkspaceFilesChanged()
+          }
+          return
+        }
+
+        const changedPath = resolve(parentPath, normalizedFilename)
+        const isTargetRecovery = [...targetPaths].some(
+          (targetPath) => resolve(targetPath) === changedPath,
+        )
+        if (!isTargetRecovery && isHighNoisePath(normalizedFilename)) return
         notifyWorkspaceFilesChanged()
       })
-      entry = { watcher, targetPaths: new Set() }
+      entry = { watcher, targetPaths }
       parentDirectoryWatchers.set(parentPath, entry)
 
       watcher.on('error', (err) => {
         console.error('[附加目录监听] 父目录监听出错，等待下次访问重建:', parentPath, err)
         try { watcher.close() } catch { /* watcher may already be closed */ }
         parentDirectoryWatchers.delete(parentPath)
-        for (const targetPath of entry!.targetPaths) {
+        const pathsToRestore = [...entry!.targetPaths]
+        for (const targetPath of pathsToRestore) {
           unavailableDirectoryParents.delete(targetPath)
         }
+        scheduleWatcherRestart(() => {
+          for (const targetPath of pathsToRestore) {
+            if (!attachedWatchers.has(targetPath) && !unavailableDirectoryParents.has(targetPath)) {
+              watchAttachedDirectory(targetPath)
+            }
+          }
+        })
       })
       console.log('[附加目录监听] 已启动父目录监听:', parentPath)
     } catch (error) {
@@ -155,6 +183,7 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
  * @param win 主窗口引用，用于向渲染进程推送事件
  */
 export function startWorkspaceWatcher(win: BrowserWindow): void {
+  workspaceWatcherActive = true
   mainWin = win
   // 会话附加目录只需在启动/监听器重启时恢复一次；LIST_SESSIONS 是高频读取路径，
   // 不能随每次列表 IPC 再遍历全部会话并触发同步 stat。
@@ -218,9 +247,9 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
       console.error('[工作区监听] 运行时错误，将尝试自愈重启:', err)
       try { watcher?.close() } catch { /* watcher 可能已自动关闭 */ }
       watcher = null
-      setTimeout(() => {
+      scheduleWatcherRestart(() => {
         if (!win.isDestroyed() && !watcher) startWorkspaceWatcher(win)
-      }, WATCHER_RESTART_DELAY_MS)
+      })
     })
 
     console.log('[工作区监听] 已启动文件监听:', watchDir)
@@ -233,6 +262,9 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
  * 停止工作区文件监听
  */
 export function stopWorkspaceWatcher(): void {
+  workspaceWatcherActive = false
+  for (const timer of watcherRestartTimers) clearTimeout(timer)
+  watcherRestartTimers.clear()
   if (watcher) {
     watcher.close()
     watcher = null
@@ -271,7 +303,8 @@ export function watchAttachedDirectory(dirPath: string): void {
   if (attachedWatchers.has(dirPath)) return
 
   try {
-    const w = watch(dirPath, { recursive: true }, () => {
+    const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
+      if (!shouldNotifyForWatchFilename(filename)) return
       notifyWorkspaceFilesChanged()
     })
 

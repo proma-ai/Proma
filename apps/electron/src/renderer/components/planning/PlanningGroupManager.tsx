@@ -109,8 +109,8 @@ export function PlanningGroupManager({ scope, groups, trigger, itemLabel, getUsa
   return <>
     <Popover open={open} onOpenChange={closeManager}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent align="end" className="w-80 rounded-none border-border/60 p-3 shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border/60 pb-3">
+      <PopoverContent align="end" className="w-80 rounded-none border-foreground/20 p-3 shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-foreground/20 pb-3">
           <div>
             <p className="text-sm font-semibold">{title}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">新建、重命名或删除分组</p>

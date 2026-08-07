@@ -31,6 +31,7 @@ import { lowlight } from '@/lib/lowlight'
 import { htmlToMarkdown } from '@/lib/markdown-rich-text'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { isImageFilePath } from './file-path-chip'
+import { consumeLocalDraftEcho, recordLocalDraftEcho } from '@/lib/input-draft-echo'
 import { resolveMentionSuggestionChar } from './mention-utils'
 import { richTextRenderingEnabledAtom } from '@/atoms/ui-preferences'
 import { createFileMentionSuggestion } from '@/components/file-browser/file-mention-suggestion'
@@ -146,6 +147,10 @@ interface RichTextInputProps {
   workspaceSlug?: string | null
   /** 当前 Agent 会话 ID（用于 & 会话引用中排除自身） */
   sessionId?: string | null
+  /** 草稿所属范围；切换范围时强制同步，避免跨会话误认本地回写。 */
+  draftScopeKey?: string | null
+  /** 调用方明确要求用受控值覆盖编辑器时递增；普通本地 echo 不应递增。 */
+  draftSyncVersion?: number
   /** 附加目录路径列表（工作区级，@ 引用时标记为工作区文件） */
   attachedDirs?: string[]
   /** 会话级附加目录路径列表（@ 引用时标记为会话文件） */
@@ -189,6 +194,8 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   workspacePath,
   workspaceSlug,
   sessionId,
+  draftScopeKey,
+  draftSyncVersion = 0,
   attachedDirs = [],
   sessionAttachedDirs = [],
   htmlValue,
@@ -206,6 +213,9 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
   const lineCheckHandleRef = useRef<number | null>(null)
   // 跟踪编辑器自己设置的值，用于区分外部设置和内部更新
   const lastEditorValueRef = useRef<string>('')
+  // 记录尚未由 props 确认的本地草稿。长文本连续编辑时，React 可能先提交较旧的
+  // value；不能把它当作外部更新而整篇 setContent，否则 selection 会被重映射。
+  const pendingLocalDraftEchoesRef = useRef<string[]>([])
   // 跟踪 IME 输入状态（中文输入法等）
   const isComposingRef = useRef(false)
   // 保持 onSubmit 引用最新
@@ -685,6 +695,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       const html = ed.getHTML()
       if (html === '<p></p>') {
         lastEditorValueRef.current = ''
+        pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, '')
         onChange('')
         onHtmlChangeRef.current?.('')
         if (isExpandedRef.current) {
@@ -697,6 +708,7 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         // 纯文本模式下跳过 markdown 特殊字符转义，保持用户所见即所得
         const markdown = htmlToMarkdown(html, { skipMarkdownEscape: !richTextEnabled })
         lastEditorValueRef.current = markdown
+        pendingLocalDraftEchoesRef.current = recordLocalDraftEcho(pendingLocalDraftEchoesRef.current, markdown)
         onChange(markdown)
         onHtmlChangeRef.current?.(html)
 
@@ -727,40 +739,66 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     }
   }, [])
 
-  // 追踪编辑器实例，重建时强制同步（避免 htmlValue 草稿丢失）
+  // 追踪编辑器实例、草稿范围和显式外部同步版本，重建/切换时强制同步。
   const editorInstanceRef = useRef(editor)
-  // 同步外部 value 变化（清空时）
+  const editorDraftScopeKeyRef = useRef(draftScopeKey)
+  const editorDraftSyncVersionRef = useRef(draftSyncVersion)
+  // 同步真正的外部 value 变化。用户编辑生成的受控 value 回写可能延迟且乱序到达；
+  // 这些本地 echo 必须直接忽略，不能整篇 setContent 后让 ProseMirror 重映射光标。
   useEffect(() => {
-    if (editor) {
-      const controllerValue = value
-      const isEditorRecreated = editor !== editorInstanceRef.current
-      editorInstanceRef.current = editor
-      // 如果值是编辑器自己设置的，跳过同步
-      // 但编辑器重建后必须强制同步（即使 value 未变，htmlValue 草稿可能不同）
-      if (!isEditorRecreated && controllerValue === lastEditorValueRef.current) {
+    if (!editor) return
+
+    const controllerValue = value
+    const isEditorRecreated = editor !== editorInstanceRef.current
+    const isDraftScopeChanged = draftScopeKey !== editorDraftScopeKeyRef.current
+    const isExplicitExternalSync = draftSyncVersion !== editorDraftSyncVersionRef.current
+    editorInstanceRef.current = editor
+    editorDraftScopeKeyRef.current = draftScopeKey
+    editorDraftSyncVersionRef.current = draftSyncVersion
+
+    if (isDraftScopeChanged || isExplicitExternalSync) {
+      pendingLocalDraftEchoesRef.current = []
+    } else if (!isEditorRecreated) {
+      const remainingEchoes = consumeLocalDraftEcho(pendingLocalDraftEchoesRef.current, controllerValue)
+      if (remainingEchoes) {
+        // 仅消费一个确定是本地的 echo。即使其文本恰好等于最新草稿，也不能清空队列：
+        // a → ab → a 这样的重复值序列仍可能有旧 ab 在路上。
+        pendingLocalDraftEchoesRef.current = remainingEchoes
         return
       }
 
-      if (controllerValue === '') {
-        editor.commands.clearContent()
-        lastEditorValueRef.current = ''
-        isExpandedRef.current = false
-        setIsExpanded(false)
-        setIsManuallyCollapsed(false)
-      } else if (htmlValue) {
-        // 优先使用 HTML 草稿恢复（保留 mention 等富文本节点）
-        editor.commands.setContent(htmlValue)
-        lastEditorValueRef.current = controllerValue
-      } else {
-        const html = controllerValue
-          .split(/\n\n+/)
-          .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
-          .join('')
-        editor.commands.setContent(html)
-        lastEditorValueRef.current = controllerValue
+      if (pendingLocalDraftEchoesRef.current.length > 0) {
+        // 有本地更新尚未回写时，受控层不带版本的陌生值无法区分来源；调用方必须通过
+        // draftSyncVersion 标记真实外部更新，避免旧值覆盖正在编辑的文档。
+        return
       }
+
+      if (controllerValue === lastEditorValueRef.current) return
     }
-  }, [editor, value])
+
+    // 草稿范围切换、发送清空、队列回填等真正外部更新取代了当前本地编辑，
+    // 旧 echo 已不再有意义，避免日后误匹配。
+    pendingLocalDraftEchoesRef.current = []
+
+    if (controllerValue === '') {
+      editor.commands.clearContent(false)
+      lastEditorValueRef.current = ''
+      isExpandedRef.current = false
+      setIsExpanded(false)
+      setIsManuallyCollapsed(false)
+    } else if (htmlValue) {
+      // 优先使用 HTML 草稿恢复（保留 mention 等富文本节点）。外部同步不应再次触发草稿写回。
+      editor.commands.setContent(htmlValue, { emitUpdate: false })
+      lastEditorValueRef.current = controllerValue
+    } else {
+      const html = controllerValue
+        .split(/\n\n+/)
+        .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+        .join('')
+      editor.commands.setContent(html, { emitUpdate: false })
+      lastEditorValueRef.current = controllerValue
+    }
+  }, [draftScopeKey, draftSyncVersion, editor, value])
 
   // 同步 disabled 状态
   useEffect(() => {

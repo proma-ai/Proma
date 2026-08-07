@@ -40,6 +40,8 @@ import {
 import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-registry'
 import {
   conversationDraftsAtom,
+  conversationDraftSyncVersionsAtom,
+  conversationDraftSyncVersionAtomFamily,
 } from '@/atoms/chat-atoms'
 import type { PendingAttachment } from '@/atoms/chat-atoms'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
@@ -79,7 +81,9 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
   const currentQuotedSelection = quotedSelectionMap.get(conversationId) ?? null
   const content = draftsMap.get(conversationId) ?? ''
-  const setContent = React.useCallback((value: string) => {
+  const draftSyncVersion = useAtomValue(conversationDraftSyncVersionAtomFamily(conversationId))
+  const setDraftSyncVersions = useSetAtom(conversationDraftSyncVersionsAtom)
+  const setContentFromEditor = React.useCallback((value: string) => {
     setDraftsMap((prev) => {
       const map = new Map(prev)
       if (value.trim() === '') {
@@ -90,6 +94,14 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
       return map
     })
   }, [conversationId, setDraftsMap])
+  const setContent = React.useCallback((value: string) => {
+    setDraftSyncVersions((prev) => {
+      const map = new Map(prev)
+      map.set(conversationId, (map.get(conversationId) ?? 0) + 1)
+      return map
+    })
+    setContentFromEditor(value)
+  }, [conversationId, setContentFromEditor, setDraftSyncVersions])
 
   const [selectedModel] = useConversationModel()
   const [thinkingEnabled, setThinkingEnabled] = useConversationThinkingEnabled()
@@ -459,12 +471,14 @@ export function ChatInput({ conversationId, streaming, pendingAttachments, onSet
           {/* TipTap 富文本编辑器 */}
           <RichTextInput
             value={content}
-            onChange={setContent}
+            onChange={setContentFromEditor}
             onSubmit={handleSend}
             onPasteFiles={handlePasteFiles}
             voiceInputId={chatVoiceInputId}
             placeholder={sendWithCmdEnter ? '输入消息... (⌘/Ctrl+Enter 发送，Enter 换行)' : '输入消息... (Enter 发送，Shift+Enter 换行)'}
             autoFocusTrigger={conversationId}
+            draftScopeKey={conversationId}
+            draftSyncVersion={draftSyncVersion}
             sendWithCmdEnter={sendWithCmdEnter}
           />
 

@@ -15,6 +15,8 @@ import { ShortcutGuideDialog } from './components/shortcuts/ShortcutGuideDialog'
 import { FaqDialog } from './components/shortcuts/FaqDialog'
 import { PlanningReminderRail } from './components/planning/PlanningReminderRail'
 import { environmentCheckDialogOpenAtom } from './atoms/environment'
+import { onboardingReplayRequestedAtom } from './atoms/onboarding'
+import { settingsOpenAtom, settingsTabAtom } from './atoms/settings-tab'
 import { tabsAtom, activeTabIdAtom, openTab, TUTORIAL_TAB_ID } from './atoms/tab-atoms'
 import { hasCompletedCurrentOnboarding } from '../types'
 import hopperSeasideWhiteHouse from './assets/onboarding/hopper-seaside-white-house.png'
@@ -32,6 +34,8 @@ export default function App(): React.ReactElement {
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const [isLoading, setIsLoading] = React.useState(true)
   const [showOnboarding, setShowOnboarding] = React.useState(false)
+  const [onboardingReplayRequested, setOnboardingReplayRequested] = useAtom(onboardingReplayRequestedAtom)
+  const [isReplayingOnboarding, setIsReplayingOnboarding] = React.useState(false)
 
   // 初始化：检查是否需要显示 Onboarding
   // macOS/Linux 上 SDK 自带 claude native binary 不依赖宿主 Node/Git；
@@ -53,9 +57,26 @@ export default function App(): React.ReactElement {
     initialize()
   }, [])
 
+  // 设置页请求重放时跳过欢迎页，但保留完整的后续 Onboarding 流程。
+  React.useEffect(() => {
+    if (!onboardingReplayRequested || isLoading) return
+
+    setIsReplayingOnboarding(true)
+    setShowOnboarding(true)
+    setOnboardingReplayRequested(false)
+  }, [isLoading, onboardingReplayRequested, setOnboardingReplayRequested])
+
   // 完成 onboarding 回调：创建引用模式的 Agent 欢迎会话，可选打开教程 Tab
   const handleOnboardingComplete = async (openTutorial?: boolean) => {
+    const replayingOnboarding = isReplayingOnboarding
     setShowOnboarding(false)
+    setIsReplayingOnboarding(false)
+
+    if (replayingOnboarding) {
+      store.set(settingsTabAtom, 'onboarding')
+      store.set(settingsOpenAtom, true)
+      return
+    }
 
     if (openTutorial) {
       const tabs = store.get(tabsAtom)
@@ -109,7 +130,10 @@ export default function App(): React.ReactElement {
   if (showOnboarding) {
     return (
       <TooltipProvider delayDuration={200}>
-        <OnboardingView onComplete={handleOnboardingComplete} />
+        <OnboardingView
+          initialStep={isReplayingOnboarding ? 'guide' : 'welcome'}
+          onComplete={handleOnboardingComplete}
+        />
         <MigrationImportDialog />
       </TooltipProvider>
     )

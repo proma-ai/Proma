@@ -178,6 +178,38 @@ function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean 
   })
 }
 
+const WORKTREE_FETCH_TTL_MS = 30_000
+interface WorktreeFetchState {
+  lastAttemptAt: number
+  inFlight?: Promise<void>
+}
+const worktreeFetchStates = new Map<string, WorktreeFetchState>()
+
+/** 远端同步只允许单飞，并在短时间内复用结果，避免刷新风暴放大 Git/网络进程。 */
+async function refreshWorktreeRemote(fetchKey: string, cwd: string): Promise<void> {
+  const now = Date.now()
+  const current = worktreeFetchStates.get(fetchKey)
+  if (current?.inFlight) {
+    await current.inFlight
+    return
+  }
+  if (current && now - current.lastAttemptAt < WORKTREE_FETCH_TTL_MS) return
+
+  const inFlight = runGitCommand(
+    ['fetch', 'origin', 'main', '--quiet'],
+    cwd,
+    { quiet: true },
+  ).then(() => undefined)
+  worktreeFetchStates.set(fetchKey, { lastAttemptAt: now, inFlight })
+
+  try {
+    await inFlight
+  } finally {
+    const latest = worktreeFetchStates.get(fetchKey)
+    if (latest?.inFlight === inFlight) latest.inFlight = undefined
+  }
+}
+
 /**
  * 计算文件的来源标识
  *
@@ -545,6 +577,15 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
   }
 }
 
+async function getGitCommonDir(somePath: string): Promise<string | null> {
+  const commonDir = await runGitCommand(
+    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+    somePath,
+    { quiet: true },
+  )
+  return commonDir ? normalizeGitRoot(commonDir) : null
+}
+
 /**
  * 解析给定路径所属 git 仓库的「主仓库根目录」。
  *
@@ -556,11 +597,7 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
  */
 export async function getMainRepoRoot(somePath: string): Promise<string | null> {
   if (!existsSync(somePath)) return null
-  const commonDir = await runGitCommand(
-    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-    somePath,
-    { quiet: true },
-  )
+  const commonDir = await getGitCommonDir(somePath)
   if (!commonDir) return null
   // commonDir 形如 /path/to/main-repo/.git，取其父目录
   return normalizeGitRoot(dirname(commonDir))
@@ -627,16 +664,17 @@ export async function getWorktreeChanges(
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
-  // 尝试 fetch 远端 main 以确保 baseBranch 最新
-  await runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
-
-  // 确认是 git 仓库
-  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)
+  // 先确认是 git 仓库，非 Git 路径不得启动 fetch 子进程。
+  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath, { quiet: true })
   if (!toplevel) {
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
   const gitRoot = normalizeGitRoot(toplevel)
+  // Linked worktree 共享同一 git common directory，按它去重 fetch 以避免争抢共享 refs 锁。
+  const fetchKey = await getGitCommonDir(gitRoot) ?? gitRoot
+  await refreshWorktreeRemote(fetchKey, gitRoot)
+
   const allFiles: import('@proma/shared').ChangedFileEntry[] = []
   const fileMap = new Map<string, import('@proma/shared').ChangedFileEntry>()
 

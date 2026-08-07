@@ -1184,6 +1184,14 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
  */
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
 
+/** 明确外部草稿写入的版本号；RichTextInput 用它区分本地回写与强制覆盖。 */
+export const agentSessionDraftSyncVersionsAtom = atom<Map<string, number>>(new Map())
+
+/** 单个 session 的外部草稿同步版本派生 atom。 */
+export const agentSessionDraftSyncVersionAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(agentSessionDraftSyncVersionsAtom).get(sessionId) ?? 0),
+)
+
 /** 单个 session 的 markdown 草稿派生 atom — 按 sessionId 切片订阅 */
 export const agentSessionDraftAtomFamily = atomFamily((sessionId: string) =>
   atom((get) => get(agentSessionDraftsAtom).get(sessionId) ?? ''),
