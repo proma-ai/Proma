@@ -8,7 +8,13 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
 import { DEFAULT_AGENT_RUNTIME, DEFAULT_INTERFACE_VARIANT, DEFAULT_THEME_MODE } from '../../types'
-import type { AppSettings } from '../../types'
+import type { AgentIslandSettings, AppSettings } from '../../types'
+
+function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const raw = input as { enabled?: unknown }
+  return typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : undefined
+}
 
 /**
  * 获取应用设置
@@ -59,6 +65,8 @@ export function getSettings(): AppSettings {
       agentThinking: settings.agentThinking ?? { type: 'adaptive' },
       // 缺省 true：老配置文件未写该字段时保持推广默认开启
       gitAttributionEnabled: settings.gitAttributionEnabled ?? true,
+      // 仅保留 macOS 原生 Island 开关；清理旧非原生 surface 的持久化残留字段。
+      agentIsland: sanitizeAgentIslandSettings(data.agentIsland),
     }
   } catch (error) {
     console.error('[设置] 读取失败:', error)
@@ -91,10 +99,10 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const updated: AppSettings = {
     ...current,
     ...updates,
-    // Preserve the native macOS Island preference when the settings toggle only updates `enabled`.
+    // 仅保留 macOS 原生 Island 开关，避免旧非原生 surface 字段被继续回写。
     agentIsland: updates.agentIsland === undefined
-      ? current.agentIsland
-      : { ...current.agentIsland, ...updates.agentIsland },
+      ? sanitizeAgentIslandSettings(current.agentIsland)
+      : sanitizeAgentIslandSettings({ ...current.agentIsland, ...updates.agentIsland }),
   }
   const filePath = getSettingsPath()
 
