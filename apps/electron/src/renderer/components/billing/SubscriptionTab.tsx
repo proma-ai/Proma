@@ -13,11 +13,11 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import {
   Zap, Crown, Rocket, Flame, Clock,
-  ChevronDown, ChevronUp, Check, Info,
+  ChevronDown, ChevronUp, Check, X,
 } from 'lucide-react'
 import { WechatPayArea } from './WechatPayArea'
 import type { WechatPayStatus } from './WechatPayArea'
-import { DeveloperLetterDialog } from './DeveloperLetterDialog'
+// 开发者信封弹窗暂时停用；购买按钮直接发起微信支付。
 import { TeamPromoBanner } from './TeamPromoBanner'
 import { subscriptionTiersAtom, subscriptionStatusAtom } from '@/atoms/cloud-billing'
 import type { SubscriptionTier } from '@proma/shared'
@@ -135,6 +135,39 @@ const TIER_DESC: Record<string, string> = {
 
 const RECOMMENDED_TIER = 'standard'
 
+const OFFICIAL_COMPARISON = [
+  {
+    label: '透明计费',
+    official: '按模型、Agent 与工具展示用量和扣费明细',
+    alternative: '价格、扣费规则或明细难以核验',
+    alternativePositive: false,
+  },
+  {
+    label: '模型质量',
+    official: '精选官方模型并持续验证实际模型能力与协议兼容性',
+    alternative: '可能存在模型掺水或实际能力与宣传不符的问题',
+    alternativePositive: false,
+  },
+  {
+    label: '数据安全',
+    official: '官方托管链路提供统一安全保障，减少第三方中转的不确定性',
+    alternative: '数据流向与留存规则不透明，难以排除二次使用或倒卖风险',
+    alternativePositive: false,
+  },
+  {
+    label: '高峰稳定性',
+    official: '持续监控模型健康状态并维护故障恢复能力',
+    alternative: '高峰期可能降速，稳定性与故障恢复能力难以保障',
+    alternativePositive: false,
+  },
+  {
+    label: '价格优势',
+    official: '以官方参考价为基础计算折扣，精选模型提供专属优惠',
+    alternative: '可能具备更低价格，但价格来源和优惠依据不够透明',
+    alternativePositive: true,
+  },
+] as const
+
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -155,7 +188,6 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
   const [loading, setLoading] = React.useState(false)
   const [wechatPay, setWechatPay] = React.useState<WechatPayState | null>(null)
   const [showUsedUp, setShowUsedUp] = React.useState(false)
-  const [showLetterDialog, setShowLetterDialog] = React.useState(false)
 
   const refreshSubscription = React.useCallback(async () => {
     const result = await window.electronAPI.cloudSubscription.getCurrent()
@@ -168,10 +200,9 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
     refreshSubscription()
   }, [refreshSubscription])
 
-  const handleSubscribe = async (): Promise<void> => {
-    if (!selectedTier) return
+  const handleSubscribe = async (tierId: string): Promise<void> => {
     setLoading(true)
-    const result = await window.electronAPI.cloudSubscription.createWechatPayment(selectedTier)
+    const result = await window.electronAPI.cloudSubscription.createWechatPayment(tierId)
     setLoading(false)
     if (result.success && result.data) {
       setWechatPay({
@@ -321,28 +352,10 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
       {/* 订阅计划卡片 */}
       <div className="space-y-4">
         <div className="space-y-1">
-          <h3 className="text-base font-semibold">选择适合你的 Proma Cloud 使用额度</h3>
-          <p className="text-xs text-muted-foreground">
-            品质、稳定与价格优势兼顾；额度可用于官方模型调用、Proma Agent 与云端工具，按实际模型和任务规模消耗。
-          </p>
+          <h3 className="text-base font-semibold">购买 Proma 商业版额度</h3>
           <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
             一次性购买，不自动续费或自动扣款；建议按需少量多次叠加。
           </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
-            <p className="text-xs font-semibold text-foreground">部分模型专属优惠</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">精选高质量模型，部分模型享 Proma Cloud 专属优惠，最高可低至官方参考价 2 折。</p>
-          </div>
-          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
-            <p className="text-xs font-semibold text-foreground">为 Agent 真实任务而维护</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">持续验证多轮工具调用、长上下文与流式任务，让模型不只停留在一次 API 调用。</p>
-          </div>
-          <div className="rounded-xl border border-primary/15 bg-primary/[0.035] px-3.5 py-3">
-            <p className="text-xs font-semibold text-foreground">稳定状态实时可见</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">官方渠道提供模型健康状态、统一额度和故障恢复，不必自行排查多个 Key 与上游。</p>
-          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-3">
@@ -413,7 +426,8 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
                     onClick={(e) => {
                       e.stopPropagation()
                       setSelectedTier(tier.id)
-                      setShowLetterDialog(true)
+                      // 跳过 DeveloperLetterDialog，直接创建微信支付订单。
+                      void handleSubscribe(tier.id)
                     }}
                   >
                     一次性购买 · ¥{actualCny}
@@ -442,30 +456,61 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
         <TeamPromoBanner />
       </div>
 
-      {/* 积分计费说明 */}
-      <div className="rounded-2xl bg-stone-50/80 dark:bg-stone-900/40 backdrop-blur-sm border border-stone-200/60 dark:border-stone-700/40 px-4 py-3">
-        <div className="flex items-start gap-2">
-          <Info size={14} className="text-stone-500 dark:text-stone-400 mt-0.5 shrink-0" />
-          <div className="text-xs text-stone-500 dark:text-stone-400 space-y-0.5">
-            <p>Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</p>
-            <p>各额度包按档位独立有效 31 或 90 天，到期后未使用额度清零（团队采用单独计费层）。</p>
-            <p>每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。</p>
-            <p>支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。</p>
-          </div>
+      {/* 为什么选择 Proma 官方 */}
+      <section className="overflow-hidden rounded-2xl border border-stone-200/60 bg-stone-50/80 backdrop-blur-sm dark:border-stone-700/40 dark:bg-stone-900/40">
+        <div className="px-5 pb-3 pt-4">
+          <h3 className="text-balance text-sm font-semibold text-foreground">为什么选择 Proma 官方？</h3>
+          <p className="mt-1 text-pretty text-xs leading-relaxed text-muted-foreground">
+            Proma Cloud 以可核验的计费明细、官方托管的安全链路和具有竞争力的模型折扣，让商业版额度的使用更清楚、更安心。
+          </p>
         </div>
-      </div>
 
-      {/* 开发者信封弹窗 */}
-      <DeveloperLetterDialog
-        open={showLetterDialog}
-        onOpenChange={setShowLetterDialog}
-        onConfirm={() => {
-          setShowLetterDialog(false)
-          handleSubscribe()
-        }}
-        selectedTierName={tiers.find((t: SubscriptionTier) => t.id === selectedTier)?.name ?? ''}
-        loading={loading}
-      />
+        <div className="overflow-x-auto border-t border-stone-200/60 dark:border-stone-700/40">
+          <table className="w-full min-w-[620px] text-left text-xs">
+            <thead className="bg-stone-100/70 text-[11px] text-muted-foreground dark:bg-stone-800/40">
+              <tr>
+                <th className="px-5 py-2.5 font-medium">对比项</th>
+                <th className="px-5 py-2.5 font-semibold text-foreground">Proma 官方</th>
+                <th className="px-5 py-2.5 font-medium">非官方 / 不透明中转</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-200/60 dark:divide-stone-700/40">
+              {OFFICIAL_COMPARISON.map((item) => (
+                <tr key={item.label}>
+                  <th className="whitespace-nowrap px-5 py-3 font-medium text-foreground">{item.label}</th>
+                  <td className="px-5 py-3 text-muted-foreground">
+                    <span className="flex items-start gap-2">
+                      <Check size={15} strokeWidth={2.5} className="mt-px shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>{item.official}</span>
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-muted-foreground">
+                    <span className="flex items-start gap-2">
+                      {item.alternativePositive ? (
+                        <Check size={15} strokeWidth={2.5} className="mt-px shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <X size={15} strokeWidth={2.5} className="mt-px shrink-0 text-rose-500 dark:text-rose-400" />
+                      )}
+                      <span>{item.alternative}</span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="border-t border-stone-200/60 px-5 py-4 dark:border-stone-700/40">
+          <h4 className="text-xs font-semibold text-foreground">计费说明</h4>
+          <ul className="mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground">
+            <li>所有模型均按照官方价格的基础进行折扣计算；Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</li>
+            <li>各额度包按档位独立有效 31 或 90 天，到期后未使用额度清零（团队采用单独计费层）。</li>
+            <li>每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。</li>
+            <li>支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。</li>
+          </ul>
+        </div>
+      </section>
+
     </div>
   )
 }
