@@ -11,10 +11,11 @@
  * - "stream ended before a terminal [response] event"（OpenAI-compatible Responses API）
  * - "stream ended before message_stop"（Anthropic Messages API）
  * - "peer closed connection ... (incomplete chunked read)"（HTTP chunked/SSE 响应中断）
+ * - "stream_read_error"（Pi 读取上游流式响应失败）
  * 这些都是 provider 连接被 CDN/网关切断的同类瞬时错误，与 ECONNRESET 性质一致。
  */
 export const TRANSIENT_NETWORK_PATTERN =
-  /terminated|socket hang up|ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|failed to fetch|network error|peer closed connection|connection (?:error|closed|reset)|other side closed|incomplete chunked read|AbortError|(?:operation|request) was aborted|(?:request )?timed out|stream (?:closed|ended|disconnected) prematurely|premature close|stream ended before (?:a )?(?:terminal(?: response)? event|message_stop)/i
+  /terminated|socket hang up|ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|failed to fetch|network error|peer closed connection|connection (?:error|closed|reset)|other side closed|incomplete chunked read|AbortError|(?:operation|request) was aborted|(?:request )?timed out|stream (?:closed|ended|disconnected) prematurely|premature close|stream ended before (?:a )?(?:terminal(?: response)? event|message_stop)|\bstream_read_error\b/i
 
 /** 判断错误消息/stderr 是否为瞬时网络错误 */
 export function isTransientNetworkError(message?: string, stderr?: string): boolean {
