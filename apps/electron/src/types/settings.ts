@@ -257,12 +257,10 @@ export type MarkdownFontSize = 'small' | 'medium' | 'large'
 /** 默认 Markdown 字号档位 */
 export const DEFAULT_MARKDOWN_FONT_SIZE: MarkdownFontSize = 'medium'
 
-/** Agent 灵动岛偏好。外接/无刘海屏默认不绘制顶部覆盖层。 */
+/** macOS 原生 Agent 灵动岛偏好。 */
 export interface AgentIslandSettings {
   /** 是否启用 Agent / 近期 Todo 日程的灵动岛提醒，默认 true。 */
   enabled?: boolean
-  /** Windows 浮动灵动岛的位置；启动时会自动校正到可见工作区内。 */
-  windowsPosition?: { x: number; y: number }
 }
 
 /**
@@ -365,7 +363,7 @@ export interface AppSettings {
    * 关闭后不注入任何 Proma 归因，并覆盖 Claude SDK 默认 Co-Authored-By。
    */
   gitAttributionEnabled?: boolean
-  /** Agent 灵动岛偏好（macOS 刘海屏优先，其他平台使用 Electron 降级体验）。 */
+  /** macOS 原生 Agent 灵动岛偏好。 */
   agentIsland?: AgentIslandSettings
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState

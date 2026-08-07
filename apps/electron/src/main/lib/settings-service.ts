@@ -91,9 +91,7 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const updated: AppSettings = {
     ...current,
     ...updates,
-    // Agent Island has independently persisted presentation preferences (for
-    // example the Windows position). Preserve them when the settings toggle
-    // only updates `enabled`.
+    // Preserve the native macOS Island preference when the settings toggle only updates `enabled`.
     agentIsland: updates.agentIsland === undefined
       ? current.agentIsland
       : { ...current.agentIsland, ...updates.agentIsland },

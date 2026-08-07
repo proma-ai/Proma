@@ -124,9 +124,8 @@ import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } 
 import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
 import { configurePlanningQuickEntries } from './lib/planning-quick-entry'
 import { hasOpenPlanningArgument } from './lib/planning-quick-entry-model'
-import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
-import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
+import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost, isMacAgentIslandNativeHostReady } from './lib/mac-agent-island-native-host'
 import { isAgentIslandSupported } from './lib/macos-version'
 import {
   createVoiceDictationWindow,
@@ -140,22 +139,10 @@ import { TRAY_IPC_CHANNELS } from '../types'
 
 const MIGRATION_IPC_OPEN = 'migration:open-import-file'
 
-let agentIslandElectronFallbackActive = false
-
-/** 非 macOS 或 Swift helper 不可用时的无损降级。 */
-function activateAgentIslandElectronFallback(reason?: string): void {
-  if (agentIslandElectronFallbackActive) return
-  agentIslandElectronFallbackActive = true
-  if (reason) console.warn(`[agent-island] 使用 Electron 降级窗口：${reason}`)
-  createAgentIslandWindow()
-  showAgentIslandWindow()
-  publishAgentIslandNow()
-}
-
-/** macOS 26+ 优先使用真刘海 NSPanel；旧版 macOS 默认不显示灵动岛。 */
+/** macOS 26+ 使用 Swift/AppKit NSPanel；其他平台不创建 Agent Island surface。 */
 function startAgentIslandSurface(): void {
   if (!isAgentIslandSupported()) {
-    console.info('[agent-island] 已在 macOS 26 以下禁用')
+    console.info('[agent-island] 当前平台或 macOS 版本不支持，已禁用')
     return
   }
 
@@ -165,9 +152,13 @@ function startAgentIslandSurface(): void {
       publishAgentIslandNow()
     },
     onEvent: handleNativeAgentIslandEvent,
-    onUnavailable: (reason) => activateAgentIslandElectronFallback(reason),
+    onUnavailable: (reason) => {
+      console.warn(`[agent-island] macOS 原生 helper 不可用，已禁用：${reason}`)
+    },
   })
-  if (!startedNative) activateAgentIslandElectronFallback(process.platform === 'darwin' ? 'native helper unavailable' : 'non-macOS platform')
+  if (!startedNative) {
+    console.warn('[agent-island] macOS 原生 helper 启动失败，已禁用')
+  }
 }
 
 /** 检查文件路径是否为迁移文件，如果是则通知渲染进程打开导入流程 */
@@ -706,20 +697,20 @@ async function bootstrap(): Promise<void> {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
-  // Agent 灵动岛：macOS 优先 Swift/AppKit NSPanel（真刘海），其他平台回退 BrowserWindow。
-  safeRun('initAgentIslandService', () => {
-    initAgentIslandService({
-      showAndFocusMainWindow,
-      openAgentSession: (sessionId, title) => {
-        sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
-      },
-      openPlanning: showPlanningWindow,
-      // The service itself can otherwise create its Electron fallback before
-      // startAgentIslandSurface reaches the platform gate.
-      enabled: () => isAgentIslandSupported() && getSettings().agentIsland?.enabled !== false,
+  // Agent Island 仅在 macOS 26+ 原生 surface 上初始化；Windows/Linux 不注册服务、窗口或事件监听。
+  if (isAgentIslandSupported()) {
+    safeRun('initAgentIslandService', () => {
+      initAgentIslandService({
+        showAndFocusMainWindow,
+        openAgentSession: (sessionId, title) => {
+          sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
+        },
+        openPlanning: showPlanningWindow,
+        enabled: () => isMacAgentIslandNativeHostReady() && getSettings().agentIsland?.enabled !== false,
+      })
     })
-  })
-  safeRun('startAgentIslandSurface', startAgentIslandSurface)
+    safeRun('startAgentIslandSurface', startAgentIslandSurface)
+  }
 
   // 飞书实时同步开启时，默认阻止系统自动休眠，保证远程群内继续可用。
   safeRun('syncFeishuSyncSleepBlocker', () => syncFeishuSyncSleepBlocker(getSettings()))
@@ -853,10 +844,9 @@ app.on('before-quit', () => {
   destroyQuickTaskWindow()
   destroyPlanningWindow()
   destroyVoiceDictationWindow()
-  // 销毁灵动岛服务与窗口（先关闭 NSPanel helper，避免开发热重载遗留原生面板）
+  // 销毁原生 macOS 灵动岛服务（其他平台从未创建 surface）
   disposeMacAgentIslandNativeHost()
   disposeAgentIslandService()
-  destroyAgentIslandWindow()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})
   // Clean up system tray before quitting

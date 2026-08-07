@@ -48,6 +48,7 @@ import {
   updateSessionHoverPreviewEnabled,
 } from '@/atoms/ui-preferences'
 import { cn } from '@/lib/utils'
+import { detectIsMac } from '@/lib/platform'
 import { Button } from '../ui/button'
 import type { NotificationSoundId, NotificationSoundType, NotificationSoundSettings } from '@/types/settings'
 
@@ -77,6 +78,7 @@ export function GeneralSettings(): React.ReactElement {
   /** Git/PR 推广标识：默认开启 */
   const [gitAttributionEnabled, setGitAttributionEnabled] = React.useState(true)
   const [agentIslandEnabled, setAgentIslandEnabled] = React.useState(true)
+  const isMac = React.useMemo(() => detectIsMac(), [])
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // 加载归档天数与 Git/PR 标识设置
@@ -392,14 +394,16 @@ export function GeneralSettings(): React.ReactElement {
               updateSessionHoverPreviewEnabled(checked)
             }}
           />
-          <SettingsToggle
-            label="Agent 灵动岛"
-            description="在 Mac 刘海屏显示需要接手的 Agent 与 1 小时内的待办/日程；外接无刘海屏默认不覆盖菜单栏"
-            checked={agentIslandEnabled}
-            onCheckedChange={(checked) => {
-              void handleAgentIslandChange(checked)
-            }}
-          />
+          {isMac && (
+            <SettingsToggle
+              label="Agent 灵动岛"
+              description="在 macOS 刘海屏显示需要接手的 Agent 与 1 小时内的待办/日程"
+              checked={agentIslandEnabled}
+              onCheckedChange={(checked) => {
+                void handleAgentIslandChange(checked)
+              }}
+            />
+          )}
           <SettingsToggle
             label="Git/PR 标识"
             description="Agent 代你提交 commit 或创建 PR 时，附加 Made-with: Proma 与官网链接，便于推广；可随时关闭"

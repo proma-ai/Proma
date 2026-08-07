@@ -2,8 +2,7 @@
  * Agent Island 灵动岛服务（主进程状态机）
  *
  * 订阅 AgentEventBus，把每个 Agent 会话的流式事件折叠成灵动岛会话快照
- * （phase / detail / activityLines / attention），聚合 pill 摘要后通过
- * AGENT_ISLAND_IPC_CHANNELS.STATE 推送到灵动岛窗口。
+ * （phase / detail / activityLines / attention），聚合 pill 摘要后投影给 macOS 原生 helper。
  *
  * 设计参考 Cindy (makecindy/cindy) 的 AgentIslandService：
  * - TypeScript 主进程拥有产品状态（事件 → 状态机），渲染层只负责绘制
@@ -23,14 +22,12 @@ import {
   type AgentIslandState,
   type AgentIslandPlanningSnapshot,
   type AgentIslandPlanQuotaSnapshot,
-  type AgentIslandWindowSnapshot,
   type NativeAgentIslandEvent,
   type NativeAgentIslandSnapshot,
 } from '@proma/shared'
 import type { AgentStreamPayload } from '@proma/shared'
 import { agentEventBus } from './agent-service'
 import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
-import { createAgentIslandWindow, getAgentIslandWindow, hideAgentIslandWindow, moveAgentIslandWindow, onAgentIslandWindowReady, resizeAgentIslandWindow, showAgentIslandWindow } from './agent-island-window'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
 import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
@@ -637,21 +634,9 @@ function pushState(): void {
   if (json === lastStateJson) return
   lastStateJson = json
 
-  // macOS 原生 helper 准备就绪后是唯一 surface；它读取由主进程投影的 Todo/日程。
-  if (isMacAgentIslandNativeHostReady()) {
-    publishMacAgentIslandSnapshot(buildNativeSnapshot(state, planning))
-    return
-  }
-
-  // 非 macOS、helper 缺失或运行失败时，保留 Electron 版本作为降级体验。
-  // 用户关闭 fallback 窗口或系统回收窗口后，下一次有效状态变更仍应恢复提醒 Surface。
-  let win = getAgentIslandWindow()
-  if ((!win || win.isDestroyed()) && state.visible) win = createAgentIslandWindow()
-  if (!win || win.isDestroyed()) return
-  const rendererSnapshot: AgentIslandWindowSnapshot = { state, planning, planQuotas }
-  if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_ISLAND_IPC_CHANNELS.STATE, rendererSnapshot)
-  if (state.visible) showAgentIslandWindow()
-  else hideAgentIslandWindow()
+  // macOS 原生 helper 是唯一的 Island surface；helper 不可用时直接停止投影。
+  if (!isMacAgentIslandNativeHostReady()) return
+  publishMacAgentIslandSnapshot(buildNativeSnapshot(state, planning))
 }
 
 /**
@@ -812,47 +797,7 @@ export function initAgentIslandService(deps: AgentIslandServiceDeps): void {
     schedulePush(requiresImmediateAgentIslandPush(payload) ? PUSH_THROTTLE_MS : AGENT_STREAM_PUSH_THROTTLE_MS)
   })
 
-  // 灵动岛窗口渲染就绪后补推一次状态
-  onAgentIslandWindowReady(() => {
-    lastStateJson = ''
-    pushState()
-  })
-
-  // 灵动岛窗口 IPC
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.SET_EXPANDED, (_event, next: unknown) => {
-    if (typeof next === 'boolean') setAgentIslandExpanded(next)
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.SET_HOVERED, (_event, next: unknown) => {
-    if (typeof next === 'boolean') setAgentIslandHovered(next)
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.RESIZE, (_event, req: { width: number; height: number }) => {
-    if (typeof req?.width === 'number' && typeof req?.height === 'number') {
-      resizeAgentIslandWindow(req.width, req.height)
-    }
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.MOVE, (_event, req: { x: number; y: number }) => {
-    if (typeof req?.x === 'number' && typeof req?.y === 'number') {
-      moveAgentIslandWindow(req.x, req.y)
-    }
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW, () => {
-    deps.showAndFocusMainWindow()
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_PLANNING, () => {
-    if (deps.openPlanning) deps.openPlanning()
-    else deps.showAndFocusMainWindow()
-  })
-
-  ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, (_event, sessionId: unknown) => {
-    if (typeof sessionId !== 'string' || sessionId.length === 0) return
-    openAgentIslandSession(sessionId)
-  })
-
+  // 仅保留主应用用于确认“完成会话已查看”的 IPC。
   ipcMain.handle(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, (_event, sessionId: unknown) => {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return
     markAgentIslandSessionViewed(sessionId)
@@ -916,6 +861,7 @@ export function setAgentIslandHovered(hovered: boolean): void {
 
 /** 立即推送一次当前状态（窗口创建/重新显示后调用） */
 export function publishAgentIslandNow(): void {
+  if (!initialized) return
   lastStateJson = ''
   lastPushAt = 0
   pushState()
@@ -923,6 +869,7 @@ export function publishAgentIslandNow(): void {
 
 /** 设置更新后立即投影，避免等待下一条 Agent 或 Planning 事件。 */
 export function refreshAgentIslandConfiguration(): void {
+  if (!initialized) return
   lastStateJson = ''
   lastPushAt = 0
   pushState()

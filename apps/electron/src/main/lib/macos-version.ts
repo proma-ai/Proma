@@ -8,10 +8,7 @@ export function isMacOS26OrLater(darwinRelease = release()): boolean {
   return Number.isFinite(darwinMajor) && darwinMajor >= MACOS_26_DARWIN_MAJOR
 }
 
-/**
- * Agent Island uses macOS 26's Liquid Glass-era menu-bar treatment. Earlier
- * macOS versions must not create either the native panel or Electron fallback.
- */
+/** Agent Island 仅在 macOS 26+ 使用原生 Swift/AppKit surface。 */
 export function isAgentIslandSupported(platform = process.platform, darwinRelease = release()): boolean {
-  return platform !== 'darwin' || isMacOS26OrLater(darwinRelease)
+  return platform === 'darwin' && isMacOS26OrLater(darwinRelease)
 }
