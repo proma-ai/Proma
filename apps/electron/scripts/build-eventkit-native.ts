@@ -11,7 +11,8 @@ const scriptDir = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(scriptDir, '..')
 const source = resolve(appDir, 'native/eventkit/macos-eventkit-addon.mm')
 const output = resolve(appDir, 'resources/eventkit/macos-eventkit.node')
-const napiHeaders = resolve(appDir, '../../node_modules/node-addon-api')
+// Bun installs this workspace dependency under apps/electron/node_modules (not the monorepo root).
+const napiHeaders = resolve(appDir, 'node_modules/node-addon-api')
 // Electron uses stable Node-API; use the locally installed Node headers only for declarations.
 const nodeVersion = execFileSync('node', ['-p', 'process.versions.node'], { encoding: 'utf8' }).trim()
 const nodeApiHeaders = resolve(homedir(), 'Library/Caches/node-gyp', nodeVersion, 'include/node')
