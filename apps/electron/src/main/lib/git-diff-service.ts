@@ -627,8 +627,8 @@ export async function getWorktreeChanges(
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
-  // Diff 查询保持只读：远端分支同步应由显式 Git 操作完成，不能在每次 UI 刷新时 fetch。
-  // git fetch 会修改 .git/FETCH_HEAD 和远端引用，若项目目录被 watcher 监听，会重新触发本次查询。
+  // 保持远端基准新鲜，但只在用户请求 Worktree diff 时同步；附加目录 watcher 会过滤由此产生的 .git 事件。
+  await runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
 
   // 确认是 git 仓库
   const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)

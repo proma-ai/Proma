@@ -18,6 +18,7 @@ import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 import { listAgentSessions } from './agent-session-manager'
+import { isHighNoisePath, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
@@ -26,14 +27,6 @@ const DEBOUNCE_MS = 300
 const WATCHER_RESTART_DELAY_MS = 5000
 
 // 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴
-const HIGH_NOISE_SEGMENTS = new Set([
-  'node_modules', '.next', '.nuxt', '.git', 'dist', 'build',
-  '.cache', '__pycache__', '.turbo', '.parcel-cache', '.svelte-kit',
-])
-
-function isHighNoisePath(normalizedPath: string): boolean {
-  return normalizedPath.split('/').some((seg) => HIGH_NOISE_SEGMENTS.has(seg))
-}
 
 let watcher: FSWatcher | null = null
 
@@ -123,8 +116,9 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
   let entry = parentDirectoryWatchers.get(parentPath)
   if (!entry) {
     try {
-      const watcher = watch(parentPath, { recursive: false }, () => {
+      const watcher = watch(parentPath, { recursive: false }, (_eventType, filename) => {
         // 目录恢复、替换或权限变化后，通知 renderer 重新读取即时 root status。
+        if (!shouldNotifyForWatchFilename(filename)) return
         notifyWorkspaceFilesChanged()
       })
       entry = { watcher, targetPaths: new Set() }
@@ -272,8 +266,7 @@ export function watchAttachedDirectory(dirPath: string): void {
 
   try {
     const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
-      const normalizedFilename = typeof filename === 'string' ? filename.replace(/\\/g, '/') : ''
-      if (normalizedFilename && isHighNoisePath(normalizedFilename)) return
+      if (!shouldNotifyForWatchFilename(filename)) return
       notifyWorkspaceFilesChanged()
     })
 
