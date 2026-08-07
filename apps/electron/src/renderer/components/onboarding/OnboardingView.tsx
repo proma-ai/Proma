@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { ChevronRight, ChevronLeft, ChevronsRight, ArrowDown, Check } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronsRight, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
 import { isShellEnvironmentOkAtom } from '@/atoms/environment'
@@ -81,6 +81,8 @@ interface GuideFeatureStepProps {
   magnifierScale?: number
   /** 是否在本讲解区显示上一页/下一页导航 */
   showNavigation?: boolean
+  /** 无导航时在正文下方显示的向下滚动提示；点击可滚到示例区 */
+  onScrollHint?: () => void
 }
 
 interface MagnifierProps {
@@ -216,7 +218,7 @@ function GuideNavigation({ nextLabel, onNext, onBack }: { nextLabel: string; onN
 /**
  * 引导科普页：左侧显示界面截图，从锚点画绿色指针指向右侧讲解区。
  */
-function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onNext, onBack, imageSrc = guideVisual, arrowMode = 'none', magnifierOffsetX = 0, magnifierImageOffset = {}, imageRightCrop = 0, magnifierScale = 1, showNavigation = true }: GuideFeatureStepProps) {
+function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onNext, onBack, imageSrc = guideVisual, arrowMode = 'none', magnifierOffsetX = 0, magnifierImageOffset = {}, imageRightCrop = 0, magnifierScale = 1, showNavigation = true, onScrollHint }: GuideFeatureStepProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [imgRect, setImgRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -361,12 +363,25 @@ function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onN
             <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
           </div>
         )}
+
+        {/* 无导航的首屏：用一行文字承接阅读动线，说明下方还有内容。 */}
+        {!showNavigation && onScrollHint && (
+          <div className="mt-12 w-full max-w-lg border-t border-[#1b3f2d]/20 pt-5">
+            <button
+              type="button"
+              onClick={onScrollHint}
+              className="text-left text-sm leading-6 text-neutral-500 transition-colors hover:text-[#1b3f2d]"
+            >
+              继续向下滚动，查看这一步的真实示例
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation'>
+type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation' | 'onScrollHint'>
 
 function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScrollHint = false }: {
   intro: GuideExamplesIntroProps
@@ -374,38 +389,29 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScr
   onNext: () => void
   onBack: () => void
   children: React.ReactNode
-  /** 首个讲解页显示向下滚动提示，避免底部进度地图被误解为横向翻页。 */
+  /** 首个讲解页在正文下方提示继续向下滚动，避免底部进度地图被误解为横向翻页。 */
   showScrollHint?: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const firstPageRef = useRef<HTMLDivElement>(null)
-  const [showHint, setShowHint] = useState(showScrollHint)
 
-  useEffect(() => {
-    if (!showScrollHint) return
+  /** 点击提示推进约一屏，避免与首屏高度、示例区负 margin 耦合。 */
+  const handleScrollHint = () => {
     const container = scrollRef.current
-    const firstPage = firstPageRef.current
-    if (!container || !firstPage) return
-
-    const handleScroll = () => {
-      // 轻微滚动仍保留提示，直到第二页内容真正进入视口。
-      const secondPageStart = firstPage.offsetTop + firstPage.offsetHeight
-      if (container.scrollTop >= secondPageStart - 24) setShowHint(false)
-    }
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [showScrollHint])
+    if (!container) return
+    container.scrollBy({ top: container.clientHeight * 0.82, behavior: 'smooth' })
+  }
 
   return (
     <div className="relative h-full w-full">
       <div ref={scrollRef} className="h-full w-full overflow-y-auto">
-        <div ref={firstPageRef} className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
+        <div className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
           <GuideFeatureStep
             {...intro}
             nextLabel={nextLabel}
             onNext={onNext}
             onBack={onBack}
             showNavigation={false}
+            onScrollHint={showScrollHint ? handleScrollHint : undefined}
           />
         </div>
 
@@ -414,15 +420,6 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScr
           <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
         </div>
       </div>
-
-      {showHint && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute bottom-[180px] right-8 z-30 flex h-24 w-24 items-center justify-center rounded-none text-[#1b3f2d] md:right-10"
-        >
-          <ArrowDown className="h-20 w-20" strokeWidth={2.5} />
-        </div>
-      )}
     </div>
   )
 }
