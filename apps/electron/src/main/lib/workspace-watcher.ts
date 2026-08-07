@@ -26,6 +26,18 @@ const DEBOUNCE_MS = 300
 /** watcher 'error' 事件后的自愈重启延迟（ms），避免对持续故障状态紧密重试 */
 const WATCHER_RESTART_DELAY_MS = 5000
 
+/** 主监听或父目录监听的延迟重启定时器，停止时统一清理。 */
+const watcherRestartTimers = new Set<ReturnType<typeof setTimeout>>()
+let workspaceWatcherActive = false
+
+function scheduleWatcherRestart(callback: () => void): void {
+  const timer = setTimeout(() => {
+    watcherRestartTimers.delete(timer)
+    if (workspaceWatcherActive) callback()
+  }, WATCHER_RESTART_DELAY_MS)
+  watcherRestartTimers.add(timer)
+}
+
 // 高频变动目录：跳过其中的变更事件，防止 node_modules / .next 等产生 IPC 事件风暴
 
 let watcher: FSWatcher | null = null
@@ -146,13 +158,13 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
         for (const targetPath of pathsToRestore) {
           unavailableDirectoryParents.delete(targetPath)
         }
-        setTimeout(() => {
+        scheduleWatcherRestart(() => {
           for (const targetPath of pathsToRestore) {
             if (!attachedWatchers.has(targetPath) && !unavailableDirectoryParents.has(targetPath)) {
               watchAttachedDirectory(targetPath)
             }
           }
-        }, WATCHER_RESTART_DELAY_MS)
+        })
       })
       console.log('[附加目录监听] 已启动父目录监听:', parentPath)
     } catch (error) {
@@ -171,6 +183,7 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
  * @param win 主窗口引用，用于向渲染进程推送事件
  */
 export function startWorkspaceWatcher(win: BrowserWindow): void {
+  workspaceWatcherActive = true
   mainWin = win
   // 会话附加目录只需在启动/监听器重启时恢复一次；LIST_SESSIONS 是高频读取路径，
   // 不能随每次列表 IPC 再遍历全部会话并触发同步 stat。
@@ -234,9 +247,9 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
       console.error('[工作区监听] 运行时错误，将尝试自愈重启:', err)
       try { watcher?.close() } catch { /* watcher 可能已自动关闭 */ }
       watcher = null
-      setTimeout(() => {
+      scheduleWatcherRestart(() => {
         if (!win.isDestroyed() && !watcher) startWorkspaceWatcher(win)
-      }, WATCHER_RESTART_DELAY_MS)
+      })
     })
 
     console.log('[工作区监听] 已启动文件监听:', watchDir)
@@ -249,6 +262,9 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
  * 停止工作区文件监听
  */
 export function stopWorkspaceWatcher(): void {
+  workspaceWatcherActive = false
+  for (const timer of watcherRestartTimers) clearTimeout(timer)
+  watcherRestartTimers.clear()
   if (watcher) {
     watcher.close()
     watcher = null
