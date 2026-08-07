@@ -79,6 +79,8 @@ import {
   agentWorkspacesAtom,
   agentStreamErrorsAtom,
   agentSessionDraftsAtom,
+  agentSessionDraftSyncVersionsAtom,
+  agentSessionDraftSyncVersionAtomFamily,
   agentSessionDraftAtomFamily,
   agentSessionDraftHtmlAtom,
   agentSessionDraftHtmlAtomFamily,
@@ -656,8 +658,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 按 sessionId 切片订阅 drafts/draftHtml：仅本 session 草稿变化才让 AgentView 重渲染。
   // 输入框每次按键都会写整 Map atom，若直接订阅整 Map，AgentView 跟着每键重渲染。
   const inputContent = useAtomValue(agentSessionDraftAtomFamily(sessionId))
+  const draftSyncVersion = useAtomValue(agentSessionDraftSyncVersionAtomFamily(sessionId))
   const setDraftsMap = useSetAtom(agentSessionDraftsAtom)
-  const setInputContent = React.useCallback((value: string) => {
+  const setDraftSyncVersions = useSetAtom(agentSessionDraftSyncVersionsAtom)
+  const setInputContentFromEditor = React.useCallback((value: string) => {
     setDraftsMap((prev) => {
       const map = new Map(prev)
       if (value.trim() === '') {
@@ -668,6 +672,15 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       return map
     })
   }, [sessionId, setDraftsMap])
+  // 仅非编辑器自身的写入才要求 RichTextInput 用受控内容覆盖文档。
+  const setInputContent = React.useCallback((value: string) => {
+    setDraftSyncVersions((prev) => {
+      const map = new Map(prev)
+      map.set(sessionId, (map.get(sessionId) ?? 0) + 1)
+      return map
+    })
+    setInputContentFromEditor(value)
+  }, [sessionId, setDraftSyncVersions, setInputContentFromEditor])
   const inputHtmlContent = useAtomValue(agentSessionDraftHtmlAtomFamily(sessionId))
   const setDraftHtmlMap = useSetAtom(agentSessionDraftHtmlAtom)
   const setInputHtmlContent = React.useCallback((html: string) => {
@@ -3228,7 +3241,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             <RichTextInput
               ref={richTextInputRef}
               value={inputContent}
-              onChange={setInputContent}
+              onChange={setInputContentFromEditor}
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
               onPasteLongText={handlePasteLongText}
@@ -3245,6 +3258,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               }
               disabled={!agentChannelId || !hasAvailableModel}
               autoFocusTrigger={sessionId}
+              draftScopeKey={sessionId}
+              draftSyncVersion={draftSyncVersion}
               collapsible
               enableMentions
               workspacePath={sessionPath}
