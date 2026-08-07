@@ -59,7 +59,7 @@ import {
 } from '../agent-runtime-guards'
 import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
 import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
-import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning-request-settings'
+import { createDeepSeekReasoningRequestExtension, resolveDeepSeekReasoningProfile } from './pi-deepseek-reasoning-request-settings'
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
 import { mergeRuntimeEnv, type AgentRuntimeEnv } from '../agent-runtime-env'
 import {
@@ -1490,12 +1490,9 @@ export class PiAgentAdapter implements AgentProviderAdapter {
             : inferReasoningTransport(input.provider),
         })
         : undefined
-      const deepSeekReasoningProfile = input.provider === 'deepseek'
-        ? resolveReasoningProfile({
-          modelId: input.model,
-          transport: 'anthropic-messages',
-        })
-        : undefined
+      // 官方渠道的 provider 为 proma，但 DeepSeek V4 仍走 Anthropic Messages；
+      // 必须改写 Pi 的通用 extended-thinking 字段为 DeepSeek output_config.effort。
+      const deepSeekReasoningProfile = resolveDeepSeekReasoningProfile(input.provider, input.model)
       const extensionFactories = [
         ...(openAIReasoningProfile
           ? [createOpenAIReasoningRequestExtension({

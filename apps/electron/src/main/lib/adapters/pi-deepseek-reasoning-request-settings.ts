@@ -3,6 +3,7 @@ import {
   normalizeReasoningLevel,
   resolveReasoningProfile,
   type AgentThinkingLevel,
+  type ProviderType,
   type ReasoningProfile,
 } from '@proma/shared'
 
@@ -15,6 +16,22 @@ export interface DeepSeekReasoningRequestSettings {
 
 function isProviderPayload(payload: unknown): payload is ProviderPayload {
   return typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+}
+
+/**
+ * Proma 官方 DeepSeek V4 与用户自配的 DeepSeek 都走 Anthropic Messages 协议。
+ * 仅接受有明确 DeepSeek effort encoding 的 profile，防止官方 Claude/GLM 误装扩展。
+ */
+export function resolveDeepSeekReasoningProfile(
+  provider: ProviderType,
+  modelId: string | undefined,
+): ReasoningProfile | undefined {
+  if (provider !== 'deepseek' && provider !== 'proma') return undefined
+
+  const profile = resolveReasoningProfile({ modelId, transport: 'anthropic-messages' })
+  return profile?.encodings['anthropic-messages']?.kind === 'deepseek-output-effort'
+    ? profile
+    : undefined
 }
 
 /**
