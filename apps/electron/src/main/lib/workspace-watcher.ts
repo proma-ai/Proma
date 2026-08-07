@@ -13,12 +13,12 @@
 
 import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 import { listAgentSessions } from './agent-session-manager'
-import { isHighNoisePath, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
+import { isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 300
@@ -116,21 +116,43 @@ function watchUnavailableDirectoryParent(dirPath: string): void {
   let entry = parentDirectoryWatchers.get(parentPath)
   if (!entry) {
     try {
+      const targetPaths = new Set<string>()
       const watcher = watch(parentPath, { recursive: false }, (_eventType, filename) => {
         // 目录恢复、替换或权限变化后，通知 renderer 重新读取即时 root status。
-        if (!shouldNotifyForWatchFilename(filename)) return
+        const normalizedFilename = normalizeWatchFilename(filename)
+        if (normalizedFilename === null) {
+          // filename 不可用时，仅在目标目录已经恢复时通知，避免未知噪声绕过过滤。
+          if ([...targetPaths].some((targetPath) => isExistingDirectory(targetPath))) {
+            notifyWorkspaceFilesChanged()
+          }
+          return
+        }
+
+        const changedPath = resolve(parentPath, normalizedFilename)
+        const isTargetRecovery = [...targetPaths].some(
+          (targetPath) => resolve(targetPath) === changedPath,
+        )
+        if (!isTargetRecovery && isHighNoisePath(normalizedFilename)) return
         notifyWorkspaceFilesChanged()
       })
-      entry = { watcher, targetPaths: new Set() }
+      entry = { watcher, targetPaths }
       parentDirectoryWatchers.set(parentPath, entry)
 
       watcher.on('error', (err) => {
         console.error('[附加目录监听] 父目录监听出错，等待下次访问重建:', parentPath, err)
         try { watcher.close() } catch { /* watcher may already be closed */ }
         parentDirectoryWatchers.delete(parentPath)
-        for (const targetPath of entry!.targetPaths) {
+        const pathsToRestore = [...entry!.targetPaths]
+        for (const targetPath of pathsToRestore) {
           unavailableDirectoryParents.delete(targetPath)
         }
+        setTimeout(() => {
+          for (const targetPath of pathsToRestore) {
+            if (!attachedWatchers.has(targetPath) && !unavailableDirectoryParents.has(targetPath)) {
+              watchAttachedDirectory(targetPath)
+            }
+          }
+        }, WATCHER_RESTART_DELAY_MS)
       })
       console.log('[附加目录监听] 已启动父目录监听:', parentPath)
     } catch (error) {

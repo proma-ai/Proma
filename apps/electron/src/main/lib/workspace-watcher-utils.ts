@@ -9,7 +9,7 @@ export function isHighNoisePath(normalizedPath: string): boolean {
 }
 
 /** fs.watch 在部分平台/事件上可能返回 Buffer 或 null。未知路径不触发刷新，避免绕过噪声过滤。 */
-function normalizeWatchFilename(filename: string | Buffer | null): string | null {
+export function normalizeWatchFilename(filename: string | Buffer | null): string | null {
   if (typeof filename === 'string') return filename.replace(/\\/g, '/')
   if (Buffer.isBuffer(filename)) return filename.toString('utf8').replace(/\\/g, '/')
   return null

@@ -178,6 +178,38 @@ function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean 
   })
 }
 
+const WORKTREE_FETCH_TTL_MS = 30_000
+interface WorktreeFetchState {
+  lastAttemptAt: number
+  inFlight?: Promise<void>
+}
+const worktreeFetchStates = new Map<string, WorktreeFetchState>()
+
+/** 远端同步只允许单飞，并在短时间内复用结果，避免刷新风暴放大 Git/网络进程。 */
+async function refreshWorktreeRemote(gitRoot: string): Promise<void> {
+  const now = Date.now()
+  const current = worktreeFetchStates.get(gitRoot)
+  if (current?.inFlight) {
+    await current.inFlight
+    return
+  }
+  if (current && now - current.lastAttemptAt < WORKTREE_FETCH_TTL_MS) return
+
+  const inFlight = runGitCommand(
+    ['fetch', 'origin', 'main', '--quiet'],
+    gitRoot,
+    { quiet: true },
+  ).then(() => undefined)
+  worktreeFetchStates.set(gitRoot, { lastAttemptAt: now, inFlight })
+
+  try {
+    await inFlight
+  } finally {
+    const latest = worktreeFetchStates.get(gitRoot)
+    if (latest?.inFlight === inFlight) latest.inFlight = undefined
+  }
+}
+
 /**
  * 计算文件的来源标识
  *
@@ -627,16 +659,15 @@ export async function getWorktreeChanges(
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
-  // 保持远端基准新鲜，但只在用户请求 Worktree diff 时同步；附加目录 watcher 会过滤由此产生的 .git 事件。
-  await runGitCommand(['fetch', 'origin', 'main', '--quiet'], worktreePath)
-
-  // 确认是 git 仓库
-  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath)
+  // 先确认是 git 仓库，非 Git 路径不得启动 fetch 子进程。
+  const toplevel = await runGitCommand(['rev-parse', '--show-toplevel'], worktreePath, { quiet: true })
   if (!toplevel) {
     return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
   }
 
   const gitRoot = normalizeGitRoot(toplevel)
+  await refreshWorktreeRemote(gitRoot)
+
   const allFiles: import('@proma/shared').ChangedFileEntry[] = []
   const fileMap = new Map<string, import('@proma/shared').ChangedFileEntry>()
 
