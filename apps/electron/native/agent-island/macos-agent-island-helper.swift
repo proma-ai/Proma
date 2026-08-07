@@ -190,6 +190,17 @@ final class IslandModel: ObservableObject {
   }
 }
 
+private enum IslandLayout {
+  static let horizontalScreenInset: CGFloat = 16
+  static let compactMinimumWidth: CGFloat = 368
+  static let compactNotchSideReserve: CGFloat = 168
+  static let expandedMinimumWidth: CGFloat = 500
+  static let expandedMaximumWidth: CGFloat = 580
+  static let expandedScreenWidthRatio: CGFloat = 0.425
+  static let stackedPlanningWidth: CGFloat = 550
+  static let expandedMaximumHeight: CGFloat = 420
+}
+
 struct NotchMetrics {
   let hasNotch: Bool
   let width: CGFloat
@@ -207,8 +218,10 @@ struct NotchMetrics {
       // On a notched Mac this is the physical safe-area height, not a visual
       // approximation. It keeps the compact island contiguous with the cutout.
       height = topInset
-      // Black "ears" make the native panel physically bridge the hardware notch.
-      compactWidth = min(screen.frame.width - 32, max(420, notch + 276))
+      // Keep the physical notch as the visual anchor, but reserve only the
+      // space needed by Proma's compact status and quota badge on small Macs.
+      let availableWidth = max(1, screen.frame.width - IslandLayout.horizontalScreenInset * 2)
+      compactWidth = min(availableWidth, max(IslandLayout.compactMinimumWidth, notch + IslandLayout.compactNotchSideReserve))
     } else {
       hasNotch = false
       width = 0
@@ -356,17 +369,10 @@ struct PlanQuotaCarousel: View {
 struct CompactPlanQuotaBadge: View {
   let quota: CompactPlanQuota
 
-  private func shortLabel(_ window: PlanQuotaWindow) -> String {
-    switch window.windowType {
-    case "5h": return "5h"
-    case "weekly": return "周"
-    default: return window.windowLabel
-    }
-  }
 
   private var detail: String {
     quota.windows.prefix(2).map { window in
-      "\(shortLabel(window)) \(window.remainingLabel ?? "\(Int(window.remainingPercent.rounded()))%")"
+      window.remainingLabel ?? "\(Int(window.remainingPercent.rounded()))%"
     }.joined(separator: " · ")
   }
 
@@ -376,11 +382,6 @@ struct CompactPlanQuotaBadge: View {
         .foregroundStyle(.white.opacity(0.92))
         .lineLimit(1)
         .truncationMode(.tail)
-      if quota.additionalChannelCount > 0 {
-        Text("+\(quota.additionalChannelCount)")
-          .foregroundStyle(Color(red: 0.65, green: 0.73, blue: 1))
-          .fontWeight(.bold)
-      }
     }
     .font(.system(size: 9, weight: .semibold))
     .monospacedDigit()
@@ -415,34 +416,33 @@ struct CompactIslandView: View {
     }
   }
 
-  private var compactLabel: String {
+  private var compactIndicator: (symbol: String, color: Color)? {
     if let session = primarySession {
-      return "Proma · \(phaseText(session.phase))"
+      switch session.phase {
+      case "running": return ("play.circle.fill", Color(red: 0.62, green: 0.72, blue: 1))
+      case "needs-interaction": return ("hand.raised.fill", Color(red: 1, green: 0.66, blue: 0.22))
+      case "completed": return ("checkmark.circle.fill", Color.green.opacity(0.9))
+      case "error": return ("exclamationmark.triangle.fill", Color.red.opacity(0.9))
+      default: return ("circle", Color.white.opacity(0.62))
+      }
     }
     if snapshot.state.idleDashboard {
-      return snapshot.state.recentSessions.isEmpty ? "Proma · 额度概览" : "Proma · 最近会话"
+      return snapshot.state.recentSessions.isEmpty
+        ? ("chart.bar.fill", Color.white.opacity(0.72))
+        : ("clock.arrow.circlepath", Color.white.opacity(0.72))
     }
-    return planningIndicator?.label ?? "工作提醒"
+    return planningIndicator.map { ($0.symbol, $0.color) }
   }
 
   var body: some View {
     Button(action: { action("set-expanded", ["expanded": true]) }) {
       HStack(spacing: 8) {
-        if primarySession == nil, let indicator = planningIndicator {
+        if let indicator = compactIndicator {
           Image(systemName: indicator.symbol)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(indicator.color)
             .frame(width: 14)
-        } else if primarySession == nil {
-          Image(systemName: "bell")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.65))
-            .frame(width: 14)
         }
-        Text(compactLabel)
-          .font(.system(size: 10.5, weight: .semibold))
-          .lineLimit(1)
-          .foregroundStyle(.white.opacity(0.92))
         Spacer(minLength: 6)
         if let quota = snapshot.state.compactPlanQuota {
           CompactPlanQuotaBadge(quota: quota)
@@ -476,6 +476,8 @@ struct Metric: View {
 
 struct ExpandedIslandView: View {
   let snapshot: SnapshotMessage
+  let contentWidth: CGFloat
+  let isMeasuring: Bool
   let action: (String, [String: Any]) -> Void
 
   private var primaryPhase: String? { snapshot.state.sessions.first?.phase }
@@ -510,7 +512,11 @@ struct ExpandedIslandView: View {
     }
   }
 
-  var body: some View {
+  private var usesStackedPlanning: Bool {
+    contentWidth < IslandLayout.stackedPlanningWidth
+  }
+
+  private var islandContent: some View {
     VStack(spacing: 0) {
       // 计划是唯一内容时，直接展示可操作的信息卡；不再浪费一行
       // “即将开始”标题。Agent 会话存在时才保留状态头与打开入口。
@@ -586,7 +592,10 @@ struct ExpandedIslandView: View {
         if !displayedSessions.isEmpty {
           Divider().overlay(.white.opacity(0.11))
         }
-        HStack(alignment: .top, spacing: 12) {
+        let planningLayout: AnyLayout = usesStackedPlanning
+          ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+          : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        planningLayout {
           if !snapshot.planning.todos.isEmpty {
             Button(action: { action("open-planning", [:]) }) {
               PlanningColumn(title: "接下来待办", symbol: "checklist", count: snapshot.planning.todos.count) {
@@ -631,6 +640,18 @@ struct ExpandedIslandView: View {
       removal: .opacity.combined(with: .move(edge: .bottom))
     ))
     .animation(.easeInOut(duration: 0.36), value: contentMode)
+  }
+
+  var body: some View {
+    if isMeasuring {
+      islandContent
+    } else {
+      ScrollView(.vertical) {
+        islandContent
+      }
+      .scrollIndicators(.hidden)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
   }
 }
 
@@ -687,7 +708,12 @@ struct IslandRootView: View {
           : Color.black)
         if let snapshot = model.snapshot, snapshot.state.visible {
           if snapshot.state.expanded {
-            ExpandedIslandView(snapshot: snapshot, action: action)
+            ExpandedIslandView(
+              snapshot: snapshot,
+              contentWidth: model.surfaceSize.width,
+              isMeasuring: false,
+              action: action
+            )
               .transition(.opacity.combined(with: .move(edge: .top)))
           } else {
             CompactIslandView(snapshot: snapshot, height: model.compactHeight, action: action)
@@ -730,15 +756,14 @@ struct IslandRootView: View {
 
 @MainActor
 final class IslandController {
-  private static let maximumWidth: CGFloat = 620
-  // Large enough that lower contour clearance, not an arbitrary panel cap,
-  // determines the expanded layout for current 3-session + 4+4 planning data.
-  private static let maximumHeight: CGFloat = 640
-
   private let model = IslandModel()
   private let panel: AgentIslandPanel
   private var screen: NSScreen
   private var latestMessage: SnapshotMessage?
+  // An open island keeps its measured outer height until it closes. New data
+  // remains reachable through the internal scroll view instead of repeatedly
+  // growing/shrinking the panel as Agent state streams in.
+  private var pinnedExpandedHeight: CGFloat?
   private var screenObserver: NSObjectProtocol?
 
   init() {
@@ -782,11 +807,15 @@ final class IslandController {
       && message.state.expanded
       && latestMessage?.state.visible == true
       && message.state.visible
+    if !message.state.visible || !message.state.expanded { pinnedExpandedHeight = nil }
     latestMessage = message
     layout(message, forceModelUpdate: false, animateFrame: animateExpandedResize)
   }
 
-  func close() { panel.orderOut(nil) }
+  func close() {
+    pinnedExpandedHeight = nil
+    panel.orderOut(nil)
+  }
 
   private func refreshForDisplayChange() {
     guard let latestMessage else { return }
@@ -807,8 +836,19 @@ final class IslandController {
     }
 
     let expanded = message.state.expanded
-    let width = expanded ? min(Self.maximumWidth, screen.frame.width - 32) : metrics.compactWidth
-    let height = expanded ? Self.expandedHeight(for: message, width: width) : metrics.height
+    let width = expanded ? Self.expandedWidth(for: screen) : metrics.compactWidth
+    let height: CGFloat
+    if expanded {
+      if let pinnedExpandedHeight, !forceModelUpdate {
+        height = pinnedExpandedHeight
+      } else {
+        let measuredHeight = Self.expandedHeight(for: message, width: width)
+        pinnedExpandedHeight = measuredHeight
+        height = measuredHeight
+      }
+    } else {
+      height = metrics.height
+    }
     let surfaceSize = CGSize(width: width, height: height)
 
     // Best practice from CC Island/Open Vibe Island: fit the NSPanel to the real
@@ -835,17 +875,31 @@ final class IslandController {
     NSScreen.screens.first(where: { NotchMetrics(screen: $0).hasNotch })
   }
 
+  private static func expandedWidth(for screen: NSScreen) -> CGFloat {
+    let availableWidth = max(1, screen.frame.width - IslandLayout.horizontalScreenInset * 2)
+    let preferredWidth = min(
+      IslandLayout.expandedMaximumWidth,
+      screen.frame.width * IslandLayout.expandedScreenWidthRatio
+    )
+    return min(availableWidth, max(IslandLayout.expandedMinimumWidth, preferredWidth))
+  }
+
   private static func expandedHeight(for message: SnapshotMessage, width: CGFloat) -> CGFloat {
-    // Measure the exact same SwiftUI tree used by the visible surface at its
-    // final width. This avoids a second resize after hover while also avoiding
-    // fragile hand-written font/padding arithmetic that can cut off the curve.
+    // Measure the same content tree once when opening (or after a display
+    // change). The rendered version scrolls inside this budget if new items
+    // arrive later, keeping the outer panel stable.
     let measuringView = NSHostingView(rootView:
-      ExpandedIslandView(snapshot: message, action: { _, _ in })
-        .frame(width: width, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
+      ExpandedIslandView(
+        snapshot: message,
+        contentWidth: width,
+        isMeasuring: true,
+        action: { _, _ in }
+      )
+      .frame(width: width, alignment: .topLeading)
+      .fixedSize(horizontal: false, vertical: true)
     )
     let height = ceil(measuringView.fittingSize.height)
-    return min(maximumHeight, max(height, 1))
+    return min(IslandLayout.expandedMaximumHeight, max(height, 1))
   }
 
   private static func topFrame(screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
