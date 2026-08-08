@@ -1,20 +1,32 @@
-import { basename } from 'node:path'
-
-interface AgentsFilesResult {
-  agentsFiles: Array<{ path: string; content: string }>
+/**
+ * Proma-managed Pi mode deliberately opts out of Pi's ambient local resources.
+ *
+ * Proma supplies the system prompt, Skills and product tools explicitly. Do not
+ * let a user project's ancestor context files, extensions, or APPEND_SYSTEM.md
+ * silently alter that managed runtime. Inline extension factories remain
+ * available: Pi loads them independently of `noExtensions`.
+ */
+export interface PromaProjectInstructionFile {
+  path: string
+  content: string
 }
 
-// Proma injects its own system prompt. Do not inherit instruction files from a
-// user-selected local project or any of its ancestors.
-const LEGACY_AGENT_CONTEXT_FILE_NAMES = new Set([
-  'CLAUDE.md',
-  'CLAUDE.MD',
-  'AGENTS.md',
-  'AGENTS.MD',
-])
+export function createPromaManagedResourceLoaderOptions() {
+  return {
+    noContextFiles: true,
+    noExtensions: true,
+    noSkills: true,
+    // An explicit empty source prevents Pi from discovering APPEND_SYSTEM.md.
+    appendSystemPrompt: [],
+  }
+}
 
-export function createPromaAgentsFilesOverride(): (base: AgentsFilesResult) => AgentsFilesResult {
-  return (base) => ({
-    agentsFiles: base.agentsFiles.filter((file) => !LEGACY_AGENT_CONTEXT_FILE_NAMES.has(basename(file.path))),
-  })
+/**
+ * Pi still owns the final <project_context> formatting. Proma supplies this
+ * override only after validating the file paths against the selected project
+ * root, so no ambient context-file discovery is re-enabled.
+ */
+export function createPromaProjectInstructionFilesOverride(files: PromaProjectInstructionFile[]) {
+  const agentsFiles = files.map(({ path, content }) => ({ path, content }))
+  return () => ({ agentsFiles })
 }

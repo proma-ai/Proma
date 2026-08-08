@@ -48,7 +48,13 @@ import {
   createAgentRuntimeGuard,
   type AgentRuntimeGuard,
 } from '../agent-runtime-guards'
-import { createPromaAgentsFilesOverride } from './pi-resource-loader-overrides'
+import {
+  createPromaManagedResourceLoaderOptions,
+  createPromaProjectInstructionFilesOverride,
+  type PromaProjectInstructionFile,
+} from './pi-resource-loader-overrides'
+import { ProjectInstructionScopeController } from './pi-project-instruction-scope'
+import type { ProjectInstructionSource } from '../project-instruction-resolver'
 import { createCodexFastModeExtension, withCodexFastModeServiceTier } from './pi-codex-request-settings'
 import { createDeepSeekReasoningRequestExtension } from './pi-deepseek-reasoning-request-settings'
 import { createOpenAIReasoningRequestExtension } from './pi-openai-reasoning-request-settings'
@@ -108,6 +114,13 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
     options: CanUseToolOptions,
   ) => Promise<PermissionResult>
   systemPrompt: string
+  /** Proma 已验证的项目根 instruction files；不触发 Pi 的磁盘自动发现。 */
+  projectInstructionFiles?: PromaProjectInstructionFile[]
+  /** 用于 typed 文件工具的会话级子目录指令激活；不会解析 Bash。 */
+  projectInstructionScope?: {
+    projectRoot: string
+    initialSources: ProjectInstructionSource[]
+  }
   resumeSessionId?: string
   piAgentDir: string
   piSessionDir: string
@@ -1265,7 +1278,15 @@ export class PiAgentAdapter implements AgentProviderAdapter {
           transport: 'anthropic-messages',
         })
         : undefined
+      const projectInstructionScope = input.projectInstructionScope
+        ? new ProjectInstructionScopeController({
+            projectRoot: input.projectInstructionScope.projectRoot,
+            cwd,
+            initialSources: input.projectInstructionScope.initialSources,
+          })
+        : undefined
       const extensionFactories = [
+        ...(projectInstructionScope ? [projectInstructionScope.createExtension()] : []),
         ...(openAIReasoningProfile
           ? [createOpenAIReasoningRequestExtension({
               profile: openAIReasoningProfile,
@@ -1286,11 +1307,11 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         cwd,
         agentDir: input.piAgentDir,
         settingsManager,
-        noSkills: true,
+        ...createPromaManagedResourceLoaderOptions(),
+        agentsFilesOverride: createPromaProjectInstructionFilesOverride(input.projectInstructionFiles ?? []),
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
-        agentsFilesOverride: createPromaAgentsFilesOverride(),
-        ...(model.reasoning && extensionFactories.length > 0 && { extensionFactories }),
+        ...(extensionFactories.length > 0 && { extensionFactories }),
         systemPromptOverride: () => input.systemPrompt,
       })
       await resourceLoader.reload()
@@ -1315,6 +1336,19 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         customTools,
       })
       session.agent.toolExecution = 'sequential'
+      if (projectInstructionScope) {
+        const previousPrepareNextTurnWithContext = session.agent.prepareNextTurnWithContext
+        session.agent.prepareNextTurnWithContext = async (context, signal) => {
+          const previousSnapshot = await previousPrepareNextTurnWithContext?.(context, signal)
+          const nextContext = previousSnapshot?.context ?? context.context
+          const systemPrompt = projectInstructionScope.appendPendingInstructions(nextContext.systemPrompt)
+          if (systemPrompt === nextContext.systemPrompt) return previousSnapshot
+          return {
+            ...previousSnapshot,
+            context: { ...nextContext, systemPrompt },
+          }
+        }
+      }
       if (piAi && input.codexFastMode && input.provider === 'openai-codex' && isCodexFastModeSupportedModel(input.model)) {
         // Pi 的通用 streamSimple 会丢弃 provider 专属 serviceTier；这里直接走
         // provider stream，确保 request body 与 usage.cost 都使用 priority tier。

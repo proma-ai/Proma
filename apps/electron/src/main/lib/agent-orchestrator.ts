@@ -54,6 +54,7 @@ import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, g
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
+import { resolveProjectInstructions } from './project-instruction-resolver'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
 import { buildReferencedPlanningPrompt } from './planning-reference-context'
 import { permissionService } from './agent-permission-service'
@@ -1314,6 +1315,20 @@ export class AgentOrchestrator {
         : undefined
       const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
       const piThinkingLevel = resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
+      const projectInstructions = workspaceSlug
+        ? (() => {
+            try {
+              const manifest = resolveProjectInstructions({ projectRoot: getProjectFilesPath(workspaceSlug) })
+              for (const diagnostic of manifest.diagnostics) {
+                console.warn(`[项目指令] ${diagnostic.path}: ${diagnostic.message}`)
+              }
+              return manifest
+            } catch (error) {
+              console.warn('[项目指令] 解析失败，已跳过本轮项目指令注入:', error)
+              return undefined
+            }
+          })()
+        : undefined
       const systemPromptAppend = buildSystemPrompt({
         workspaceName: workspace?.name,
         workspaceSlug,
@@ -1322,6 +1337,7 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         collaborationAvailable,
         currentModelId: selectedModelId,
+        legacyProjectInstructions: projectInstructions?.sources,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
       const startAutoTitleGeneration = (): void => {
         if (titleGenerationStarted) return
@@ -1400,6 +1416,15 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         canUseTool,
         systemPrompt: systemPromptAppend + buildPiAdditionalDirectoriesPrompt(allAdditionalDirectories),
+        ...(projectInstructions?.sources.length && {
+          projectInstructionFiles: projectInstructions.sources.map(({ path, content }) => ({ path, content })),
+        }),
+        ...(projectInstructions && {
+          projectInstructionScope: {
+            projectRoot: projectInstructions.projectRoot,
+            initialSources: projectInstructions.sources,
+          },
+        }),
         resumeSessionId: existingSdkSessionId,
         piAgentDir: getSdkConfigDir(),
         piSessionDir: join(getSdkConfigDir(), 'sessions'),
