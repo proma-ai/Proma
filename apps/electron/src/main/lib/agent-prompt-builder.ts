@@ -12,6 +12,7 @@ import { getConfigDirName } from './config-paths'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
 import type { ProjectInstructionSource } from './project-instruction-resolver'
+import { buildLegacyProjectMigrationPrompt as buildLegacyProjectMigrationRequirement } from './project-instruction-migration'
 
 const WORKFLOW_PROMPT = `## 工作流
 - 需要多个步骤、多个文件或并行/委派时，先用 TaskCreate 建立 3–7 个可见进度项；仅用 TaskUpdate 追加更新，完成后收束状态。
@@ -31,32 +32,28 @@ interface SystemPromptContext {
 function buildWorkspacePaths(workspaceSlug: string, sessionId: string, agentCwd?: string) {
   const configDirName = getConfigDirName()
   const workspaceRoot = join(homedir(), configDirName, 'agent-workspaces', workspaceSlug)
+  const sessionDir = join(workspaceRoot, sessionId)
   const projectRoot = getProjectFilesPath(workspaceSlug)
   const effectiveAgentCwd = agentCwd ?? projectRoot
+  const isLocalProject = Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath)
+  const autoMemoryDir = join(workspaceRoot, '.claude', 'memory')
 
   return {
     workspaceRoot,
+    sessionDir,
+    sessionContextDir: join(sessionDir, '.context'),
     projectRoot,
-    sessionDir: join(workspaceRoot, sessionId),
-    sessionContextDir: join(workspaceRoot, sessionId, '.context'),
     workspaceContextDir: join(projectRoot, '.context'),
     agentCwd: effectiveAgentCwd,
     isProjectCwd: resolve(effectiveAgentCwd) === resolve(projectRoot),
-    isLocalProject: Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath),
-    agentsMd: join(workspaceRoot, 'AGENTS.md'),
-    autoMemoryIndex: join(workspaceRoot, '.claude', 'memory', 'MEMORY.md'),
+    isLocalProject,
     mcpConfig: join(workspaceRoot, 'mcp.json'),
     skillsDir: join(workspaceRoot, 'skills'),
+    agentsMd: join(workspaceRoot, 'AGENTS.md'),
+    autoMemoryDir,
+    autoMemoryIndex: join(autoMemoryDir, 'MEMORY.md'),
+    sdkConfigDir: join(homedir(), configDirName, 'sdk-config'),
   }
-}
-
-function buildLegacyProjectMigrationPrompt(sources: ProjectInstructionSource[] | undefined): string | undefined {
-  const legacySources = sources?.filter((source) => source.kind === 'claude') ?? []
-  if (legacySources.length === 0) return undefined
-
-  const entries = legacySources.map((source) => `\`${source.relativePath}\`（scope: \`${source.scopeRoot}\`）`).join('、')
-  return `## Legacy 项目指令迁移
-已加载 legacy \`CLAUDE.md\`：${entries}。先基于证据在同目录创建或最小更新 \`AGENTS.md\`，保留 legacy 文件；不得覆盖既有 AGENTS.md、重命名或删除 legacy 文件。`
 }
 
 /** 构建 Pi Agent 的静态系统提示词。 */
@@ -89,7 +86,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - Proma 工作区规则：\`${workspace.agentsMd}\`；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
 - 新任务按相关性读取两级 Context 的 note/todo、工作区 AGENTS、记忆索引和 Skill 元数据，避免无差别全量读取。`
       : undefined,
-    buildLegacyProjectMigrationPrompt(ctx.legacyProjectInstructions),
+    buildLegacyProjectMigrationRequirement({ sources: ctx.legacyProjectInstructions ?? [] }),
     `## 知识维护
 Proma 工作区 AGENTS 记录稳定工作区规则；用户项目 AGENTS 记录经验证的跨 Agent 项目规则；Memory 保存稳定偏好、决策和经验；Skill 保存重复 SOP；Context 保存任务资料。只做小幅、基于证据的更新；不要把临时过程、未验证推断或长正文写入 AGENTS/Memory。仅自动更新 Proma 工作区 Memory，不写项目或会话目录的 \`.claude/memory\`。`,
     ctx.permissionMode === 'plan'

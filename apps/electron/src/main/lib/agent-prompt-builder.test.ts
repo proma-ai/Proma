@@ -103,8 +103,8 @@ describe('Pi Agent 系统提示词', () => {
     })
 
     expect(prompt).toContain('## Legacy 项目指令迁移')
-    expect(prompt).toContain('不得覆盖既有 AGENTS.md')
-    expect(prompt).toContain('重命名或删除 legacy 文件')
+    expect(prompt).toContain('不整体覆盖已有内容')
+    expect(prompt).toContain('不得重命名或删除')
   })
 })
 
@@ -117,4 +117,28 @@ test('Given 项目动态上下文 When 构建消息前缀 Then 使用项目标�
 
   expect(context).toContain('项目: 示例项目')
   expect(context).not.toContain('工作区: 示例项目')
+})
+
+test('Given legacy 项目指令 When 构建提示词 Then 注入证据驱动的 AGENTS.md 迁移要求', () => {
+  const prompt = buildPrompt({
+    legacyProjectInstructions: [{
+      path: '/tmp/sample-project/CLAUDE.md',
+      relativePath: 'CLAUDE.md',
+      scopeRoot: '.',
+      kind: 'claude',
+      content: '# legacy rules',
+      contentHash: 'legacy-hash',
+    }],
+  })
+
+  expect(prompt).toContain('Legacy 项目指令迁移任务')
+  expect(prompt).toContain('实际项目证据')
+  expect(prompt).toContain('AGENTS.md 最佳实践')
+})
+
+test('Given Proma 工作区 When 构建提示词 Then 指向受管 AGENTS.md 而非旧规则文件', () => {
+  const prompt = buildPrompt()
+
+  expect(prompt).toContain('/AGENTS.md`')
+  expect(prompt).not.toContain('Proma 工作区 CLAUDE.md')
 })
