@@ -549,7 +549,7 @@ function shouldUseRuntimeApiKey(provider: ProviderType): boolean {
  * 智谱团队版（zhipu-coding-team）的凭据是复合串（形如
  * `apiKey=xxx; bigmodel_organization=yyy; bigmodel_project=zzz`），
  * 必须先提取其中的 apiKey，否则整串会被塞进 `Authorization: Bearer` 头导致 401。
- * 与 Claude runtime 的 applyAgentSdkAuthEnv 保持一致。
+ * 与渠道认证解析保持一致。
  */
 export function resolvePiApiKey(provider: ProviderType, apiKey: string): string {
   return provider === 'zhipu-coding-team' ? extractZhipuCodingTeamApiToken(apiKey) : apiKey
