@@ -88,7 +88,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 项目根：\`${workspace.projectRoot}\`（${workspace.isLocalProject ? '用户本地原始文件' : 'Proma 托管项目文件'}）；cwd：\`${workspace.agentCwd}\`（${workspace.isProjectCwd ? '当前直接在项目根工作' : '会话工作台，不等同项目根'}）。
 - 会话工作台：\`${sessionContextDir}\`，用于本次任务、计划和交接；新会话直接使用 workbench 根，历史会话兼容 \`.context/\`。项目级 Context：\`${projectContextDir}\` 用于跨会话资料。用户指定位置优先；不要随意清理本地项目。
 - Proma 工作区规则：\`${workspace.agentsMd}\`；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
-- Proma 会按当前请求受预算地注入 \`<local_recall>\`；需要原文或更多细节时再读取两级 Context、记忆索引或 Skill 元数据，禁止无差别全量扫描。`
+- 需要原文或更多细节时，再按当前任务读取两级 Context、记忆索引或 Skill 元数据；禁止无差别全量扫描。`
       : undefined,
     buildLegacyProjectMigrationRequirement({ sources: ctx.legacyProjectInstructions ?? [] }),
     `## 知识维护
