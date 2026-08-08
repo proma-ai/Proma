@@ -21,7 +21,6 @@ import {
   XCircle,
   Zap,
   Download,
-  Info,
   Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -34,7 +33,6 @@ import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
   PROMA_OFFICIAL_CHANNEL_ID,
-  isAgentCompatibleProvider,
   parseZhipuTeamCredentials,
   parseCodexCredentials,
   parseXaiCredentials,
@@ -79,7 +77,6 @@ interface ChannelFormProps {
   /** 编辑模式下传入已有渠道，创建模式传 null */
   channel: Channel | null
   onSaved: (channel?: Channel) => void
-  onAgentEligibilityChange?: (channel: Channel, eligible: boolean) => void | Promise<void>
   onCancel: () => void
 }
 
@@ -202,11 +199,7 @@ function buildZhipuTeamSecret(secret: ZhipuTeamSecretForm): string {
 /** auto-save 防抖延迟 */
 const AUTO_SAVE_DELAY = 600
 
-function isAgentEligibleChannel(channel: Pick<Channel, 'provider' | 'enabled'>): boolean {
-  return channel.enabled && isAgentCompatibleProvider(channel.provider)
-}
-
-export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCancel }: ChannelFormProps): React.ReactElement {
+export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): React.ReactElement {
   const isEdit = channel !== null
   const isPromaOfficial = channel?.id === PROMA_OFFICIAL_CHANNEL_ID
 
@@ -246,13 +239,8 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   const [xaiDeviceCode, setXaiDeviceCode] = React.useState<XaiOAuthDeviceCode | null>(null)
 
   const setChannelFormDirty = useSetAtom(channelFormDirtyAtom)
-  const lastAgentEligibleRef = React.useRef(channel ? isAgentEligibleChannel(channel) : false)
   const codexLoggingInRef = React.useRef(false)
   const xaiLoggingInRef = React.useRef(false)
-
-  React.useEffect(() => {
-    lastAgentEligibleRef.current = channel ? isAgentEligibleChannel(channel) : false
-  }, [channel])
 
   React.useEffect(() => {
     codexLoggingInRef.current = codexLoggingIn
@@ -279,8 +267,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
   /** 编辑模式下加载明文 API Key */
   React.useEffect(() => {
     if (isEdit && channel && !apiKeyLoaded) {
-      // Official channel has no local credential. Mark initialization complete so
-      // model enable/disable changes may still be saved without decrypting ''.
+      // 官方渠道没有本地加密 API key；凭据仅由主进程 Cloud service 管理。
       if (isPromaOfficial) {
         setApiKeyLoaded(true)
         return
@@ -350,17 +337,12 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
             models: currentModels,
             enabled: currentEnabled,
           })
-      const eligible = isAgentEligibleChannel(savedChannel)
-      if (eligible !== lastAgentEligibleRef.current) {
-        lastAgentEligibleRef.current = eligible
-        await onAgentEligibilityChange?.(savedChannel, eligible)
-      }
       toast.success('已保存', { id: 'auto-save-success' })
     } catch (error) {
       console.error('[模型配置表单] auto-save 失败:', error)
       toast.error('自动保存失败，请检查后手动重试', { id: 'auto-save-error' })
     }
-  }, [isEdit, channel, isPromaOfficial, onAgentEligibilityChange])
+  }, [isEdit, channel, isPromaOfficial])
 
   /** 触发防抖 auto-save */
   const scheduleAutoSave = React.useCallback((
@@ -581,9 +563,6 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           enabled,
         }
         const saved = await window.electronAPI.createChannel(input)
-        if (isAgentEligibleChannel(saved)) {
-          await onAgentEligibilityChange?.(saved, true)
-        }
         toast.success('ChatGPT 渠道已创建')
         onSaved(saved)
       }
@@ -641,11 +620,6 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           models: savedModels,
           enabled,
         })
-        const eligible = isAgentEligibleChannel(saved)
-        if (eligible !== lastAgentEligibleRef.current) {
-          lastAgentEligibleRef.current = eligible
-          await onAgentEligibilityChange?.(saved, eligible)
-        }
         toast.success('xAI 登录成功')
       } else {
         const input: ChannelCreateInput = {
@@ -657,9 +631,6 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
           enabled,
         }
         const saved = await window.electronAPI.createChannel(input)
-        if (isAgentEligibleChannel(saved)) {
-          await onAgentEligibilityChange?.(saved, true)
-        }
         toast.success('xAI 渠道已创建')
         onSaved(saved)
       }
@@ -772,9 +743,6 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
         enabled,
       }
       const savedChannel = await window.electronAPI.createChannel(input)
-      if (isAgentEligibleChannel(savedChannel)) {
-        await onAgentEligibilityChange?.(savedChannel, true)
-      }
       toast.success('渠道创建成功')
       return savedChannel
     } catch (error) {
@@ -784,7 +752,7 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     } finally {
       setSaving(false)
     }
-  }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled, onAgentEligibilityChange])
+  }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled])
 
   /** 显示第三方 Base URL 风险确认。 */
   const requestBaseUrlRiskAcknowledgement = (action: 'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null): void => {
@@ -906,25 +874,18 @@ export function ChannelForm({ channel, onSaved, onAgentEligibilityChange, onCanc
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleBack}><ArrowLeft size={18} /></Button>
-          <h3 className="text-lg font-medium text-foreground flex-1">Proma Cloud</h3>
+          <Button variant="ghost" size="sm" onClick={handleBack}>返回</Button>
+          <h3 className="text-lg font-medium">Proma Cloud</h3>
         </div>
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-primary/5 text-sm text-primary">
-          <Info size={15} className="flex-shrink-0" />
-          <span>Proma Cloud 由 Proma 管理模型连接、额度与云端工具。模型会自动更新；你仍可按需启用或停用单个模型。</span>
+        <p className="text-sm text-muted-foreground">Proma Cloud 的连接与凭据由系统安全管理；你可以选择启用的模型。</p>
+        <div className="space-y-2">
+          {models.map((model) => (
+            <label key={model.id} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
+              <span>{model.name}</span>
+              <input type="checkbox" checked={model.enabled} onChange={() => handleToggleModel(model.id)} />
+            </label>
+          ))}
         </div>
-        <SettingsSection title="已启用模型"><SettingsCard divided={false}>
-          {models.filter((model) => model.enabled).map((model) => (
-            <div key={model.id} className="flex items-center gap-2 px-4 py-2.5 group"><CheckCircle2 size={14} className="text-emerald-500" /><span className="text-sm flex-1">{model.name}</span><button type="button" onClick={() => handleToggleModel(model.id)} className="p-0.5 text-muted-foreground hover:text-destructive" title="取消启用"><X size={14} /></button></div>
-          ))}
-          {models.every((model) => !model.enabled) && <div className="px-4 py-3 text-sm text-muted-foreground">暂无启用模型</div>}
-        </SettingsCard></SettingsSection>
-        <SettingsSection title="可用模型"><SettingsCard divided={false}>
-          {models.filter((model) => !model.enabled).map((model) => (
-            <button key={model.id} type="button" onClick={() => handleToggleModel(model.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/50"><Plus size={14} className="text-primary" /><span className="text-sm flex-1">{model.name}</span></button>
-          ))}
-          {models.every((model) => model.enabled) && <div className="px-4 py-3 text-sm text-muted-foreground">全部模型已启用</div>}
-        </SettingsCard></SettingsSection>
       </div>
     )
   }

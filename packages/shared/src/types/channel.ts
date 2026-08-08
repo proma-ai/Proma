@@ -108,37 +108,6 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   custom: 'OpenAI Chat Completions（自定义地址）',
 }
 
-/**
- * 支持 Claude Agent Core 的供应商类型
- *
- * Claude Agent SDK 通过 Anthropic 兼容协议调用 `/v1/messages` 端点。
- * Pi runtime 可额外使用 OpenAI Responses 与 Codex Responses；官方 Proma 渠道
- * 由服务端模型协议决定，但对 Claude Core 仍保持 Anthropic 兼容。
- */
-export const AGENT_COMPATIBLE_PROVIDERS: ReadonlySet<ProviderType> = new Set<ProviderType>([
-  'proma',
-  'anthropic',
-  'anthropic-compatible',
-  'deepseek',
-  'kimi-api',
-  'kimi-coding',
-  'zhipu-coding',
-  'zhipu-coding-team',
-  'ark-coding-plan',
-  'minimax',
-  'xiaomi',
-  'xiaomi-token-plan',
-  'qwen-anthropic',
-  'qwen-token-plan',
-])
-
-/**
- * 判断供应商是否兼容 Claude Agent Core
- */
-export function isAgentCompatibleProvider(provider: ProviderType): boolean {
-  return AGENT_COMPATIBLE_PROVIDERS.has(provider)
-}
-
 export interface ZhipuTeamCredentials {
   apiKey: string
   organization?: string
@@ -303,8 +272,6 @@ export interface ChannelModel {
   enabled: boolean
   /** 官方 Agent 模型的请求协议；未下发时兼容历史客户端的本地推断。 */
   apiProtocol?: 'anthropic-messages' | 'openai-responses'
-  /** 官方 Agent 模型可使用的 runtime；`pi` 表示 Claude runtime 不可选。 */
-  agentRuntime?: 'both' | 'pi'
   /** 官方 Agent 模型由 Admin 下发的上下文窗口；优先于本地模型 catalog。 */
   contextWindow?: number
   /** 官方 Agent 模型由 Admin 下发的最大输入 token 数。 */

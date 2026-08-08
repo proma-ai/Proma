@@ -53,6 +53,7 @@ import {
 } from './lib/cloud-api-keys-service'
 import { downloadCloudPrompts } from './lib/cloud-prompts-service'
 import { getModelHealth, startHealthPolling, stopHealthPolling } from './lib/cloud-health-service'
+import { getAgentWorkspaceBySlug } from './lib/agent-workspace-manager'
 import {
   getUsageLogs,
   getToolUsageLogs,
@@ -338,23 +339,30 @@ export async function registerCloudIpcHandlers(): Promise<void> {
   )
 
   // ===== 企业 Skills 库 =====
+  // Renderer 传入的 slug 不可信：只允许已注册的工作区，阻止 ../ 等路径穿越进入配置目录。
+  const requireRegisteredWorkspaceSlug = (workspaceSlug: string): string => {
+    if (!/^[a-z0-9-]+$/i.test(workspaceSlug) || !getAgentWorkspaceBySlug(workspaceSlug)) {
+      throw new Error('无效或不存在的 Agent 工作区')
+    }
+    return workspaceSlug
+  }
   ipcMain.handle(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_LIST, async () => getEnterpriseSkills())
   ipcMain.handle(CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_GET, async (_, skillId: string) => getEnterpriseSkill(skillId))
   ipcMain.handle(
     CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH,
-    async (_, workspaceSlug: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkill(workspaceSlug, input),
+    async (_, workspaceSlug: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkill(requireRegisteredWorkspaceSlug(workspaceSlug), input),
   )
   ipcMain.handle(
     CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_PUBLISH_VERSION,
-    async (_, workspaceSlug: string, skillId: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkillVersion(workspaceSlug, skillId, input),
+    async (_, workspaceSlug: string, skillId: string, input: EnterpriseSkillPublishInput) => publishEnterpriseSkillVersion(requireRegisteredWorkspaceSlug(workspaceSlug), skillId, input),
   )
   ipcMain.handle(
     CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_INSTALL,
-    async (_, workspaceSlug: string, skill: EnterpriseSkill) => installEnterpriseSkill(workspaceSlug, skill),
+    async (_, workspaceSlug: string, skill: EnterpriseSkill) => installEnterpriseSkill(requireRegisteredWorkspaceSlug(workspaceSlug), skill),
   )
   ipcMain.handle(
     CLOUD_IPC_CHANNELS.ENTERPRISE_SKILLS_CHECK_UPDATES,
-    async (_, workspaceSlug: string, skills: SkillMeta[]) => checkEnterpriseSkillUpdates(workspaceSlug, skills),
+    async (_, workspaceSlug: string, skills: SkillMeta[]) => checkEnterpriseSkillUpdates(requireRegisteredWorkspaceSlug(workspaceSlug), skills),
   )
 
   console.log('[Cloud IPC] 已注册 Cloud 认证、账单、渠道、用量与企业 Skills 库处理器')

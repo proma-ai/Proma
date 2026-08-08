@@ -52,7 +52,7 @@ proma-v2/
 - **导出模块**：`./providers`、`./highlight`、`./types`、`./utils`
 - **关键功能**：Provider 适配器注册表、代码高亮（Shiki）
 - **依赖**：`@proma/shared`、`shiki`
-- **Peer 依赖**：`@anthropic-ai/claude-agent-sdk`、`@anthropic-ai/sdk`、`@modelcontextprotocol/sdk`
+- **Peer 依赖**：`@anthropic-ai/sdk`、`@modelcontextprotocol/sdk`
 
 #### @proma/ui (v0.1.9)
 
@@ -64,7 +64,6 @@ proma-v2/
 
 - **职责**：Electron 桌面应用主体，集成所有包
 - **关键依赖**：
-  - `@anthropic-ai/claude-agent-sdk@0.3.201` - Claude Agent Runtime
   - `@earendil-works/pi-coding-agent` / `pi-agent-core` / `pi-ai@0.80.3` - Pi Agent Runtime
   - `@larksuiteoapi/node-sdk` - 飞书集成
   - Radix UI、TipTap、Tailwind CSS
@@ -316,36 +315,30 @@ bun run generate:icons    # 生成应用图标
 ## 构建与打包
 
 - 主进程/Preload 使用 esbuild；渲染进程使用 Vite；发布使用 electron-builder。
-- Claude 与 Pi runtime 都必须保留为主进程 external：`@anthropic-ai/claude-agent-sdk`、`@earendil-works/pi-coding-agent`、`pi-agent-core`、`pi-ai`。
+- Pi runtime 必须保留为主进程 external：`@earendil-works/pi-coding-agent`、`pi-agent-core`、`pi-ai`。
 - 打包前必须运行 `bun run sync:runtime-deps`（`dist*` 脚本已包含），由 `apps/electron/scripts/sync-runtime-deps.ts` 将 external 依赖闭包复制到 `apps/electron/node_modules`。
-- `apps/electron/electron-builder.yml` 的 `asarUnpack` 需保留 Claude SDK native binary 和 Pi native addon 规则。不要把这两套 runtime 改回 esbuild bundle。
+- `apps/electron/electron-builder.yml` 的 `asarUnpack` 需保留 Pi native addon 规则；不要把 Pi runtime 改回 esbuild bundle。
 - 改动 runtime 依赖、external 清单或打包规则后，至少运行 `bun run electron:build`；涉及分发时用 `cd apps/electron && bun run dist:fast` 验证目标平台产物。
 
 ## Agent Runtime 架构
 
-Proma 的 Agent 模式通过 `RuntimeRoutingAgentAdapter` 统一入口，按会话的 `agentRuntime` 路由到两套适配器：
+Proma 的 Agent 模式统一通过 `PiAgentAdapter` 运行：
 
-```
-用户输入 → AgentOrchestrator
-  → RuntimeRoutingAgentAdapter
-    ├→ ClaudeAgentAdapter → Claude Agent SDK
-    └→ PiAgentAdapter     → Pi Agent SDK
-  → SDKMessage 兼容消息流 → EventBus / IPC → Jotai / React
+```text
+用户输入 → AgentOrchestrator → PiAgentAdapter → SDKMessage 兼容消息流 → EventBus / IPC → Jotai / React
 ```
 
-- **Claude Runtime（默认）**：`ClaudeAgentAdapter` 使用 `@anthropic-ai/claude-agent-sdk`。它要求渠道位于 `AGENT_COMPATIBLE_PROVIDERS`，即 Anthropic Messages API 或兼容端点。
-- **Pi Runtime**：在 Agent 输入框下方可直接切换；`PiAgentAdapter` 通过 `pi-model-registry.ts` 将任意已启用的 Proma 渠道注册为运行时 provider，覆盖 OpenAI Chat Completions / Responses、Google Generative AI 与 Anthropic Messages 协议。
-- **会话语义**：会话元数据持久化 `agentRuntime` 与 `sdkSessionId`。切换 runtime 时必须清除旧的 `sdkSessionId`，以免跨 SDK resume；Proma 的 JSONL 消息仍保留并作为历史上下文回填。
-- **共享能力**：两套 runtime 均复用工作区、权限服务、AgentEventBus、SDKMessage 持久化、Skills 与 Proma 内置 Automation / Collaboration 工具。Pi 的用户 MCP Server 需经 `adapters/pi-mcp-tools.ts` 连接并转换为 Pi custom tools，不能假设 Pi SDK 接受 Claude 的 `mcpServers` 参数。
-- **运行时资源**：Pi runtime 需要在会话结束/取消时清理资源；不要绕开 `PiAgentAdapter` 或 `cleanupPiRuntimeResources()`。
+- **Pi Runtime**：`PiAgentAdapter` 通过 `pi-model-registry.ts` 将任意已启用的 Proma 渠道注册为运行时 provider，覆盖 OpenAI Chat Completions / Responses、Google Generative AI 与 Anthropic Messages 协议。
+- **历史会话**：退役 Claude transcript 保持可读，但不能 resume/fork/rewind；应新建 Pi 会话，并通过会话引用带入历史上下文。
+- **工具能力**：用户 MCP 经 `adapters/pi-mcp-tools.ts` 连接并转换为 Pi custom tools；内置能力使用 `defineTool()`。
+- **运行时资源**：Pi runtime 需要在会话结束/取消时清理资源；不要绕开 `PiAgentAdapter` 或 `cleanupAgentRuntimeResources()`。
 
 ### 修改 Agent 行为时的检查清单
 
-1. 在 Claude 与 Pi runtime 下分别确认该行为是否应一致；不要把 Claude SDK 专有选项传给 Pi。
-2. 新增或修改工具时，检查 Claude 的 MCP 注入路径和 Pi 的 `defineTool()` / custom-tool 桥接是否都已覆盖。
-3. 新增模型渠道时，同时检查 `packages/shared/src/types/channel.ts` 的 Claude 兼容白名单与 `pi-model-registry.ts` 的协议、鉴权头、Base URL 映射。
-4. 修改 IPC 时同步更新 shared 类型、main handler、preload bridge、renderer 调用。
-5. 修改打包依赖时运行 build，必要时用分发产物验证两种 runtime。
+1. 新增或修改工具时，使用 Pi `defineTool()` / custom-tool 桥接并补充权限处理。
+2. 新增模型渠道时，检查 `pi-model-registry.ts` 的协议、鉴权头与 Base URL 映射。
+3. 修改 IPC 时同步更新 shared 类型、main handler、preload bridge、renderer 调用。
+4. 修改打包依赖时运行 build，必要时用分发产物验证 Pi runtime。
 
 ## 代码风格
 

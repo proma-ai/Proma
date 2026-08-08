@@ -38,7 +38,6 @@ const buildOptions: esbuild.BuildOptions = {
   outfile: 'dist/main.cjs',
   external: [
     'electron',
-    '@anthropic-ai/claude-agent-sdk',
     '@earendil-works/pi-coding-agent',
     '@earendil-works/pi-agent-core',
     '@earendil-works/pi-ai',

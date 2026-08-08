@@ -579,7 +579,7 @@ function TodoWorkspace({ standalone = false }: { standalone?: boolean } = {}): R
         openSession('agent', session.id, session.title)
         setPendingPrompt({
           sessionId: session.id,
-          message: buildTodoAgentPrompt(updatedTodo.id, session.agentRuntime === 'pi'),
+          message: buildTodoAgentPrompt(updatedTodo.id, true),
           mentionedTodoIds: [updatedTodo.id],
         })
       }

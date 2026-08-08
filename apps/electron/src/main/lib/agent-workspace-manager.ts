@@ -295,7 +295,6 @@ export function createAgentWorkspace(input: string | CreateAgentWorkspaceInput):
 
   try {
     getAgentWorkspacePath(slug)
-    ensurePluginManifest(slug, name)
     copyDefaultSkills(slug, { throwOnError: true })
   } catch (error) {
     const workspacesRoot = resolve(getAgentWorkspacesDir())
@@ -458,16 +457,12 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     }
 
     getAgentWorkspacePath('default')
-    ensurePluginManifest('default', '默认项目')
     copyDefaultSkills('default')
 
     index.workspaces.push(defaultWs)
     writeIndex(index)
 
     console.log('[Agent 工作区] 已创建默认项目')
-  } else {
-    // 迁移兼容：确保已有默认工作区包含 plugin manifest
-    ensurePluginManifest(defaultWs.slug, defaultWs.name)
   }
 
   return defaultWs
@@ -630,29 +625,6 @@ function compareSemver(a: string, b: string): number {
     if (diff !== 0) return diff
   }
   return 0
-}
-
-// ===== Plugin Manifest（SDK 插件发现） =====
-
-/** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills */
-export function ensurePluginManifest(workspaceSlug: string, workspaceName: string): void {
-  const wsPath = getAgentWorkspacePath(workspaceSlug)
-  const pluginDir = join(wsPath, '.claude-plugin')
-  const manifestPath = join(pluginDir, 'plugin.json')
-
-  if (existsSync(manifestPath)) return
-
-  if (!existsSync(pluginDir)) {
-    mkdirSync(pluginDir, { recursive: true })
-  }
-
-  const manifest = {
-    name: `proma-workspace-${workspaceSlug}`,
-    version: '1.0.0',
-  }
-
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
-  console.log(`[Agent 工作区] 已创建 plugin manifest: ${workspaceSlug}`)
 }
 
 // ===== MCP 配置管理 =====

@@ -2,15 +2,17 @@
  * Nano Banana MCP Server（Agent 模式）
  *
  * 基于 Gemini Image Generation API 的内置 MCP 服务器。
- * 通过 sdk.createSdkMcpServer() 创建，注入到每个 Agent 会话。
+ * 通过 Pi custom tool 注入到启用 Nano Banana 的 Agent 会话。
  * 支持文生图、多轮连续修改。凭据复用 chat-tools.json 配置。
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
-import { extname, resolve, isAbsolute, join } from 'node:path'
+import { readFileSync, existsSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { extname, resolve, isAbsolute, join, relative } from 'node:path'
 import { getToolState, getToolCredentials } from '../chat-tool-config'
-import { getBuiltinMcpName } from '../builtin-mcp/baseline'
+import { Type } from 'typebox'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
+import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { saveAttachment, isImageAttachment } from '../attachment-service'
 
 // ===== Gemini API 类型（REST API 使用 camelCase） =====
@@ -97,15 +99,30 @@ const EXT_TO_MIME: Record<string, string> = {
  * 支持绝对路径和相对路径（相对于 cwd 解析）。
  * 跳过不存在、非图片、读取失败的文件。
  */
-function readReferenceImages(paths: string[], cwd?: string): GeminiPart[] {
+function readReferenceImages(paths: string[], cwd?: string, allowedRoots: string[] = []): GeminiPart[] {
+  const roots = [cwd, ...allowedRoots]
+    .filter((root): root is string => typeof root === 'string' && root.length > 0)
+    .map((root) => {
+      const resolved = resolve(root)
+      try { return realpathSync(resolved) } catch { return resolved }
+    })
   const parts: GeminiPart[] = []
   for (const rawPath of paths) {
     try {
-      // 相对路径 → 基于 cwd 解析为绝对路径
-      const filePath = isAbsolute(rawPath) ? rawPath : resolve(cwd ?? process.cwd(), rawPath)
-
-      if (!existsSync(filePath)) {
-        console.warn(`[Nano Banana MCP] 参考图不存在: ${filePath}`)
+      const requestedPath = isAbsolute(rawPath) ? rawPath : resolve(cwd ?? process.cwd(), rawPath)
+      if (!existsSync(requestedPath)) {
+        console.warn(`[Nano Banana MCP] 参考图不存在: ${requestedPath}`)
+        continue
+      }
+      // Resolve symlinks before checking containment; an attached symlink must not escape
+      // the directories explicitly authorized for this Agent run.
+      const filePath = realpathSync(requestedPath)
+      const authorized = roots.some((root) => {
+        const rel = relative(root, filePath)
+        return rel === '' || (!rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && rel !== '..' && !isAbsolute(rel))
+      })
+      if (!authorized) {
+        console.warn(`[Nano Banana MCP] 拒绝读取授权目录外的参考图: ${filePath}`)
         continue
       }
       const ext = extname(filePath).toLowerCase()
@@ -188,7 +205,7 @@ function buildGeminiRequest(
 async function callGeminiAndBuildResult(
   prompt: string,
   sessionId: string,
-  options: { aspectRatio?: string; imageSize?: string; referenceImagePaths?: string[]; cwd?: string; numberOfImages?: number },
+  options: { aspectRatio?: string; imageSize?: string; referenceImagePaths?: string[]; cwd?: string; allowedRoots?: string[]; numberOfImages?: number },
 ): Promise<McpToolResult> {
   const credentials = getToolCredentials('nano-banana')
   const baseUrl = credentials.baseUrl?.trim() || DEFAULT_BASE_URL
@@ -199,7 +216,7 @@ async function callGeminiAndBuildResult(
 
   // 读取参考图
   const referenceImageParts = options.referenceImagePaths?.length
-    ? readReferenceImages(options.referenceImagePaths, options.cwd)
+    ? readReferenceImages(options.referenceImagePaths, options.cwd, options.allowedRoots)
     : []
   if (referenceImageParts.length > 0) {
     console.log(`[Nano Banana MCP] 加载了 ${referenceImageParts.length} 张参考图`)
@@ -318,62 +335,76 @@ async function callGeminiAndBuildResult(
   return { content: mcpContent }
 }
 
-// ===== MCP Server 注入 =====
+// ===== Pi 工具注入 =====
+
+type PiSdk = typeof import('@earendil-works/pi-coding-agent')
+
+export interface PiNanoBananaToolsContext {
+  sessionId: string
+  agentCwd?: string
+  allowedRoots?: string[]
+}
+
+function toPiToolResult(result: McpToolResult): AgentToolResult<unknown> {
+  // 图片已在生成时保存为 Proma attachment，并在文本里携带渲染标记。Pi 的普通 tool
+  // result 保持文本形态即可：避免把 Gemini base64 图片重复写入 Pi transcript。
+  const text = result.content
+    .filter((item): item is McpTextContent => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n')
+  return {
+    content: [{ type: 'text', text: text || '图片已生成。' }],
+    details: { generated: result.content.some((item) => item.type === 'image') },
+  } as AgentToolResult<unknown>
+}
 
 /**
- * 注入 Nano Banana MCP Server 到 Agent 会话
- *
- * 检查配置后创建 SDK MCP Server，由内置 MCP registry 统一注入。
+ * 构建 Pi custom tool。会话历史仍按 Proma sessionId 隔离，因此连续编辑与 Claude
+ * runtime 时代保持相同行为；参考图只从用户已授权的工作目录读取。
  */
-export async function injectNanoBananaMcpServer(
-  sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
-  mcpServers: Record<string, Record<string, unknown>>,
-  sessionId: string,
-  agentCwd?: string,
-): Promise<void> {
-  // 检查工具是否启用且有凭据
+export function buildPiNanoBananaTools(
+  sdk: PiSdk,
+  ctx: PiNanoBananaToolsContext,
+): ToolDefinition[] {
   const toolState = getToolState('nano-banana')
   const credentials = getToolCredentials('nano-banana')
-  if (!toolState.enabled || !credentials.apiKey) return
+  if (!toolState.enabled || !credentials.apiKey) return []
 
-  const { z } = await import('zod')
-  const serverName = getBuiltinMcpName('nano-banana')
-
-  const server = sdk.createSdkMcpServer({
-    name: serverName,
-    version: '1.0.0',
-    tools: [
-      sdk.tool(
-        'generate_image',
-        'Generate or edit images using AI (Gemini Image Generation). Supports text-to-image, reference image editing, and iterative multi-turn editing. Use English prompts for best results. Previous generations are automatically used as context for subsequent calls. When the user uploads images (listed in <attached_files>) or mentions image files via @file:{path}, pass their absolute file paths via referenceImagePaths to use them as reference for editing.',
-        {
-          prompt: z.string().describe('Detailed description of the image to generate or the edits to make. English descriptions work best.'),
-          referenceImagePaths: z.array(z.string()).optional().describe('File paths of reference images for editing. Can be absolute paths or relative paths (resolved from cwd). Extract from <attached_files> entries or @file:{path} mentions when the user wants to edit uploaded/referenced images.'),
-          aspectRatio: z.enum(['1:1', '16:9', '4:3', '9:16', '3:4']).optional().describe('Aspect ratio (default 1:1)'),
-          imageSize: z.enum(['auto', '1K', '2K', '4K']).optional().describe('Resolution (default auto)'),
-          numberOfImages: z.number().int().min(1).max(4).optional().describe('Number of images to generate (1-4, default 1)'),
-        },
-        async (args) => {
-          try {
-            return await callGeminiAndBuildResult(args.prompt, sessionId, {
-              aspectRatio: args.aspectRatio,
-              imageSize: args.imageSize,
-              referenceImagePaths: args.referenceImagePaths,
-              cwd: agentCwd,
-              numberOfImages: args.numberOfImages,
-            })
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error)
-            console.error(`[Nano Banana MCP] 执行失败:`, error)
-            return { content: [{ type: 'text' as const, text: `图片生成失败: ${msg}` }] }
-          }
-        },
-      ),
-    ],
-  })
-
-  mcpServers[serverName] = server as unknown as Record<string, unknown>
-  console.log(`[Nano Banana MCP] 已注入内置生图工具 (${serverName})`)
+  return [sdk.defineTool({
+    name: 'mcp__nano_banana__generate_image',
+    label: '生成或编辑图片',
+    description: 'Generate or edit images using Gemini Image Generation. Supports text-to-image, reference image editing, and iterative multi-turn editing. Use English prompts for best results. Previous generations are automatically used as context. When the user uploads images (listed in <attached_files>) or mentions image files via @file:{path}, pass their paths through referenceImagePaths.',
+    promptSnippet: 'Nano Banana: generate or edit images. Pass user-authorized reference image paths when editing an existing image.',
+    parameters: Type.Object({
+      prompt: Type.String({ description: 'Detailed description of the image to generate or edit. English descriptions work best.' }),
+      referenceImagePaths: Type.Optional(Type.Array(Type.String({ description: 'Absolute or cwd-relative reference image path.' }))),
+      aspectRatio: Type.Optional(Type.Union([Type.Literal('1:1'), Type.Literal('16:9'), Type.Literal('4:3'), Type.Literal('9:16'), Type.Literal('3:4')])),
+      imageSize: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('1K'), Type.Literal('2K'), Type.Literal('4K')])),
+      numberOfImages: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
+    }),
+    async execute(_toolCallId, args) {
+      try {
+        const result = await callGeminiAndBuildResult(String(args.prompt), ctx.sessionId, {
+          aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : undefined,
+          imageSize: typeof args.imageSize === 'string' ? args.imageSize : undefined,
+          referenceImagePaths: Array.isArray(args.referenceImagePaths)
+            ? args.referenceImagePaths.filter((path): path is string => typeof path === 'string')
+            : undefined,
+          cwd: ctx.agentCwd,
+          allowedRoots: ctx.allowedRoots,
+          numberOfImages: typeof args.numberOfImages === 'number' ? args.numberOfImages : undefined,
+        })
+        return toPiToolResult(result)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('[Nano Banana Pi 工具] 执行失败:', error)
+        return {
+          content: [{ type: 'text', text: `图片生成失败: ${message}` }],
+          details: { generated: false },
+        } as AgentToolResult<unknown>
+      }
+    },
+  })]
 }
 
 // ===== 清理 =====

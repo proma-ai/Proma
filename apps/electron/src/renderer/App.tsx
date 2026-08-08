@@ -113,7 +113,6 @@ export default function App(): React.ReactElement {
         channelId: meta.channelId ?? agentChannelId ?? PROMA_OFFICIAL_CHANNEL_ID,
         modelId: meta.modelId ?? agentModelId ?? PROMA_OFFICIAL_DEFAULT_AGENT_MODEL,
         workspaceId: meta.workspaceId ?? currentWorkspaceId ?? undefined,
-        agentRuntime: 'pi',
         userMessage: '你好，我刚完成 Proma 的首次设置。请作为我的上手引导助手：先用简洁友好的方式欢迎我，说明你可以如何协助我完成真实工作；然后只问我一个最关键的问题，帮助你了解我现在想完成的第一件事。请不要一次性罗列大量功能，也不要执行任何工具或修改文件，等我回复后再继续。',
       })
     } catch (error) {

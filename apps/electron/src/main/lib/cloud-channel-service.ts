@@ -159,7 +159,6 @@ export async function fetchAndSyncAgentModels(): Promise<void> {
       name: item.display_name || item.id,
       enabled: true,
       ...(item.apiProtocol ? { apiProtocol: item.apiProtocol } : {}),
-      ...(item.runtime ? { agentRuntime: item.runtime } : {}),
       ...(item.contextWindow ? { contextWindow: item.contextWindow } : {}),
       ...(item.maxInputTokens ? { maxInputTokens: item.maxInputTokens } : {}),
       ...(item.maxOutputTokens ? { maxOutputTokens: item.maxOutputTokens } : {}),

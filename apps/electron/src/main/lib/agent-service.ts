@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:p
 import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { AGENT_IPC_CHANNELS, CLOUD_IPC_CHANNELS, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import type {
   AgentSendInput,
@@ -28,15 +29,13 @@ import type {
   AgentExternalRunSource,
   AgentMessage,
 } from '@proma/shared'
-import { ClaudeAgentAdapter, scanAndKillOrphanedClaudeSubprocesses } from './adapters/claude-agent-adapter'
 import { PiAgentAdapter, cleanupPiRuntimeResources } from './adapters/pi-agent-adapter'
-import { RuntimeRoutingAgentAdapter } from './adapters/runtime-routing-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
-import { getChannelById } from './channel-manager'
 import { getAgentWorkspaceBySlug, getLocalProjectRootStatus, getProjectFilesPath } from './agent-workspace-manager'
 import { getAgentSessionMeta, updateAgentSessionMeta } from './agent-session-manager'
+import { getChannelById } from './channel-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
 import { getHeadlessAgentRunTarget } from './agent-headless-run-target'
 import { sendAgentStreamComplete } from './agent-completion-payload'
@@ -44,10 +43,7 @@ import { sendAgentStreamComplete } from './agent-completion-payload'
 // ===== 实例创建 =====
 
 const eventBus = new AgentEventBus()
-const adapter = new RuntimeRoutingAgentAdapter({
-  claude: new ClaudeAgentAdapter(),
-  pi: new PiAgentAdapter(),
-})
+const adapter = new PiAgentAdapter()
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
 
 /** 导出 EventBus 供飞书 Bridge 等外部服务订阅事件 */
@@ -151,11 +147,16 @@ eventBus.use((sessionId, payload, next) => {
 
 // ===== IPC 薄包装函数 =====
 
-/** 向所有窗口广播余额变动事件（Agent 对话完成后触发） */
+/** 仅主进程内部使用的单次运行扩展，绝不经 IPC 序列化。 */
+/** Agent 官方渠道调用结束后通知所有窗口刷新余额。 */
 function broadcastBillingChanged(): void {
-  BrowserWindow.getAllWindows().forEach((win) => {
-    win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
-  })
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.webContents.isDestroyed()) win.webContents.send(CLOUD_IPC_CHANNELS.BILLING_CHANGED)
+  }
+}
+
+export interface AgentRunExtensions {
+  piCustomTools?: ToolDefinition[]
 }
 
 /**
@@ -169,10 +170,6 @@ export async function runAgent(
 ): Promise<void> {
   // 更新 webContents 映射（允许覆盖 — 由 orchestrator.activeSessions 处理真正的并发保护）
   registerWebContents(input.sessionId, webContents)
-
-  // 提前查询渠道类型，用于完成后的 Cloud 余额广播
-  const channel = input.channelId ? getChannelById(input.channelId) : undefined
-
   // 开始新一轮执行时清除"完成未确认"标记
   try {
     updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
@@ -204,6 +201,7 @@ export async function runAgent(
       },
       onComplete: (messages, opts) => {
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
+        if (getChannelById(input.channelId)?.provider === 'proma') broadcastBillingChanged()
         if (!webContents.isDestroyed()) {
           sendAgentStreamComplete(webContents, input, {
             messages,
@@ -215,10 +213,6 @@ export async function runAgent(
             // 只读取刚完成的轻量 meta，renderer 可据此增量更新列表，避免再取 5,000+ 条全量会话。
             session: getSessionMetaForRenderer(input.sessionId),
           })
-        }
-        // Proma 官方渠道：对话完成后通知渲染进程刷新余额
-        if (channel?.provider === 'proma') {
-          broadcastBillingChanged()
         }
       },
       onRunStarted: ({ startedAt }) => {
@@ -277,6 +271,7 @@ export async function runAgentHeadless(
     source?: AgentExternalRunSource
     originSessionId?: string
   },
+  extensions?: AgentRunExtensions,
 ): Promise<void> {
   // 委派子会话优先回到父会话所在 renderer，外部无界面运行才回退任意主窗口。
   const wc = getHeadlessAgentRunTarget(
@@ -349,7 +344,7 @@ export async function runAgentHeadless(
           },
         })
       },
-    })
+    }, extensions)
   } catch (err) {
     console.error('[Agent 服务] runAgentHeadless 未处理异常:', err)
     const errorMessage = err instanceof Error ? err.message : '未知错误'
@@ -414,14 +409,8 @@ export function stopAllAgents(): void {
   orchestrator.stopAll()
 }
 
-/**
- * 退出前最后兜底：扫描并强杀所有孤儿 claude-agent-sdk 子进程
- *
- * 必须在 stopAllAgents() 之后调用。针对 pidMap 未覆盖、dispose 漏杀等极端场景。
- * 同步执行，不 await，确保 before-quit 能在 Electron 超时前完成。
- */
-export function killOrphanedClaudeSubprocesses(): void {
-  scanAndKillOrphanedClaudeSubprocesses()
+/** 退出前释放 Pi runtime 资源与 MCP 子进程。 */
+export function cleanupAgentRuntimeResources(): void {
   cleanupPiRuntimeResources()
 }
 

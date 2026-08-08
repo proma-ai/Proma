@@ -45,7 +45,6 @@
     "build:native-helpers": "bun run build:agent-island-native && bun run build:eventkit-native"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.201",
     "@anthropic-ai/sdk": "^0.93.0",
     "@earendil-works/pi-agent-core": "0.82.1",
     "@earendil-works/pi-ai": "0.82.1",
@@ -62,12 +61,7 @@
     "sharp": "^0.35.3",
     "typebox": "1.1.38"
   },
-  "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "0.3.201",
-    "@anthropic-ai/claude-agent-sdk-darwin-x64": "0.3.201",
-    "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.201",
-    "@anthropic-ai/claude-agent-sdk-win32-arm64": "0.3.201"
-  },
+  "optionalDependencies": {},
   "devDependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",

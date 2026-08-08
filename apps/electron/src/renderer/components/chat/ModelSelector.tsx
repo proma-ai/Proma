@@ -44,7 +44,6 @@ export function buildModelOptions(
   filterChannelId?: string,
   filterChannelIds?: string[],
   useAgentModels?: boolean,
-  agentRuntime?: 'claude' | 'pi',
   excludedProviders?: readonly ProviderType[],
 ): ModelOption[] {
   const options: ModelOption[] = []
@@ -67,10 +66,6 @@ export function buildModelOptions(
 
     for (const model of modelList) {
       if (!model.enabled) continue
-      // 官方 GPT Agent 模型使用 OpenAI Responses，仅能被 Pi runtime 调用。
-      // 其它渠道不受该官方元数据限制。
-      if (useAgentModels && channel.provider === 'proma' && model.agentRuntime === 'pi' && agentRuntime !== 'pi') continue
-
       options.push({
         channelId: channel.id,
         channelName: channel.name,
@@ -110,8 +105,6 @@ interface ModelSelectorProps {
   onModelSelect?: (option: ModelOption) => void
   /** 使用 Agent 专用模型列表（仅 Proma 官方渠道） */
   useAgentModels?: boolean
-  /** 当前 Agent runtime；用于隐藏 Pi-only 的官方模型。 */
-  agentRuntime?: 'claude' | 'pi'
   /** 触发按钮是否显示「渠道 · 模型」（默认只显示模型名） */
   showChannelInTrigger?: boolean
   /** 不在此选择器中显示的供应商（例如 Chat 暂不支持的协议） */
@@ -126,7 +119,6 @@ export function ModelSelector({
   externalSelectedModel,
   onModelSelect,
   useAgentModels,
-  agentRuntime,
   showChannelInTrigger = false,
   excludedProviders,
   useSharedOpenState = false,
@@ -161,10 +153,9 @@ export function ModelSelector({
       filterChannelId,
       filterChannelIds,
       useAgentModels,
-      agentRuntime,
-      excludedProviders,
+          excludedProviders,
     ),
-    [channels, filterChannelId, filterChannelIds, useAgentModels, agentRuntime, excludedProviders],
+    [channels, filterChannelId, filterChannelIds, useAgentModels, excludedProviders],
   )
   const grouped = React.useMemo(() => groupByChannel(modelOptions), [modelOptions])
 

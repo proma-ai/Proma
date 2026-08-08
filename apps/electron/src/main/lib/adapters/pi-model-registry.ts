@@ -10,7 +10,7 @@ import {
   CODEX_GPT_54_MINI_CONTEXT_WINDOW,
   CODEX_GPT_56_CONTEXT_WINDOW,
   extractZhipuCodingTeamApiToken,
-  inferAgentSdkContextWindow,
+  inferContextWindow,
   inferCodexAlignedGPT5ContextWindow,
   resolveReasoningCapability,
   resolveReasoningProfile,
@@ -303,7 +303,7 @@ function resolvePromaOfficialApi(
 ): Api {
   if (explicitProtocol) return explicitProtocol
 
-  const normalized = stripAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
   const leafModelId = normalized?.split('/').pop()
   if (!leafModelId) return 'anthropic-messages'
 
@@ -471,7 +471,7 @@ function positiveInteger(value: number | undefined): number | undefined {
  */
 function isOfficialDeepSeekV4TextOnly(provider: ProviderType, modelId: string | undefined): boolean {
   if (provider !== 'proma') return false
-  const normalized = stripAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
+  const normalized = stripLegacyAgentSdkContextSuffix(modelId)?.trim().toLowerCase()
   const leafModelId = normalized?.split('/').pop()
   return /^deepseek-v4(?:[-.]|$)/.test(leafModelId ?? '')
 }
@@ -496,7 +496,7 @@ export async function resolvePiImageInputCapability(
   provider: ProviderType,
   modelId: string | undefined,
 ): Promise<'supported' | 'unsupported' | 'unknown'> {
-  const resolvedModelId = stripAgentSdkContextSuffix(modelId)
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   if (!resolvedModelId) return 'unknown'
   if (isOfficialDeepSeekV4TextOnly(provider, resolvedModelId)) return 'unsupported'
   const catalogModel = await findPiCatalogModel(provider, resolvedModelId)
@@ -512,7 +512,7 @@ export async function resolvePiReasoningCapability(
   modelId: string | undefined,
   modelApiProtocol?: PiAgentQueryOptions['modelApiProtocol'],
 ): Promise<ReasoningCapability | undefined> {
-  const resolvedModelId = stripAgentSdkContextSuffix(modelId)
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   const profile = resolveReasoningProfile({
     modelId: resolvedModelId,
     transport: provider === 'openai-codex' || provider === 'xai'
@@ -540,7 +540,7 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const isVolcengineGlm52 = (input.provider === 'doubao' || input.provider === 'ark-coding-plan')
     && input.model?.toLowerCase() === 'glm-5.2'
   const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
-  const inferredContextWindow = inferAgentSdkContextWindow(input.model, input.provider) ?? DEFAULT_CONTEXT_WINDOW
+  const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   return {
     reasoning: catalogModel?.reasoning ?? true,
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
@@ -635,7 +635,7 @@ function shouldUseRuntimeApiKey(provider: ProviderType): boolean {
  * 智谱团队版（zhipu-coding-team）的凭据是复合串（形如
  * `apiKey=xxx; bigmodel_organization=yyy; bigmodel_project=zzz`），
  * 必须先提取其中的 apiKey，否则整串会被塞进 `Authorization: Bearer` 头导致 401。
- * 与 Claude runtime 的 applyAgentSdkAuthEnv 保持一致。
+ * 与渠道认证解析保持一致。
  */
 export function resolvePiApiKey(provider: ProviderType, apiKey: string): string {
   return provider === 'zhipu-coding-team' ? extractZhipuCodingTeamApiToken(apiKey) : apiKey
@@ -648,7 +648,7 @@ export function resolvePiApiKey(provider: ProviderType, apiKey: string): string 
  * 端点（智谱等）并不识别，带后缀会被判为「模型不存在」（智谱 1211）。
  * pi 模式统一剥离该后缀，保证注册与请求使用干净的模型 ID。
  */
-export function stripAgentSdkContextSuffix(modelId: string | undefined): string | undefined {
+export function stripLegacyAgentSdkContextSuffix(modelId: string | undefined): string | undefined {
   return modelId?.replace(/\[1m\]$/i, '')
 }
 
@@ -708,7 +708,7 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
     allowModelNetwork: false,
   })
 
-  const resolvedModelId = stripAgentSdkContextSuffix(input.model)
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const codexModels = await getCodexCatalogModels()
   const model = (resolvedModelId ? modelRuntime.getModel('openai-codex', resolvedModelId) : undefined)
     ?? (resolvedModelId ? findCatalogModelById(codexModels, resolvedModelId) : undefined)
@@ -748,7 +748,7 @@ export async function buildXaiModel(sdk: PiSdk, input: XaiModelInput) {
     ),
     allowModelNetwork: false,
   })
-  const resolvedModelId = stripAgentSdkContextSuffix(input.model)
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const xaiModels = await getXaiCatalogModels()
   const model = (resolvedModelId ? modelRuntime.getModel('xai', resolvedModelId) : undefined)
     ?? (resolvedModelId ? findCatalogModelById(xaiModels, resolvedModelId) : undefined)
@@ -773,8 +773,8 @@ export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
   }
   const providerName = `proma-${input.provider}-${input.sessionId}`
   const resolvedApiKey = resolvePiApiKey(input.provider, input.apiKey)
-  // pi runtime 统一剥离 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
-  const resolvedModelId = stripAgentSdkContextSuffix(input.model)
+  // pi runtime 统一剥离历史 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
+  const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
   const api = normalizePiApi(input.provider, resolvedModelId, input.modelApiProtocol)
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })

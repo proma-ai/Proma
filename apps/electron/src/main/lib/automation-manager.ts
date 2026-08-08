@@ -26,7 +26,7 @@ interface AutomationsIndex {
   automations: Automation[]
 }
 
-const INDEX_VERSION = 2
+const INDEX_VERSION = 3
 
 /**
  * 兼容历史字段：
@@ -47,6 +47,18 @@ function migrateLegacyFields(data: AutomationsIndex): boolean {
     const permissionMode = a.permissionMode as string | undefined
     if (permissionMode && permissionMode !== AUTOMATION_DEFAULT_PERMISSION_MODE) {
       a.permissionMode = AUTOMATION_DEFAULT_PERMISSION_MODE
+      changed = true
+    }
+    // 移除已退役 runtime 字段。此前的 Claude/缺失 runtime 不可复用其会话，
+    // 因此清空 lastSessionId，下一次运行必定创建新的 Pi 会话。
+    const raw = a as Automation & { agentRuntime?: unknown }
+    const wasLegacyRuntime = raw.agentRuntime !== 'pi'
+    if ('agentRuntime' in raw) {
+      delete raw.agentRuntime
+      changed = true
+    }
+    if (wasLegacyRuntime && a.lastSessionId) {
+      a.lastSessionId = undefined
       changed = true
     }
   }
@@ -272,8 +284,6 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     dayOfMonth: input.dayOfMonth,
     scheduledAt: input.scheduledAt,
     maxRuns: normalizeMaxRuns(input.maxRuns),
-    // 新建任务未指定 runtime 时默认 Pi；已有历史任务的缺省值由读取/调度路径继续按 Claude 处理。
-    agentRuntime: input.agentRuntime ?? 'pi',
     channelId: input.channelId,
     modelId: input.modelId,
     workspaceId: input.workspaceId,
@@ -303,7 +313,6 @@ export function updateAutomation(input: UpdateAutomationInput): Automation | und
   const now = Date.now()
   if (input.name !== undefined) target.name = input.name
   if (input.prompt !== undefined) target.prompt = input.prompt
-  if (input.agentRuntime !== undefined) target.agentRuntime = input.agentRuntime
   if (input.channelId !== undefined) target.channelId = input.channelId
   if (input.modelId !== undefined) target.modelId = input.modelId
   // workspaceId 允许设为空字符串表示「无工作区」；用 undefined 区分「不修改」

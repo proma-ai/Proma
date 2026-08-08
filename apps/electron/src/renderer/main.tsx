@@ -26,8 +26,6 @@ import {
 import {
   agentChannelIdAtom,
   agentModelIdAtom,
-  agentChannelIdsAtom,
-  agentRuntimeAtom,
   agentWorkspacesAtom,
   agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
@@ -44,24 +42,8 @@ import {
   unviewedCompletedSessionIdsAtom,
 } from './atoms/agent-atoms'
 import { updateStatusAtom, initializeUpdater } from './atoms/updater'
-import { userProfileAtom } from './atoms/user-profile'
 import { automationsAtom } from './atoms/automation-atoms'
 import { calendarEventsAtom, calendarPlanningGroupsAtom, planningTagsAtom, todoPlanningGroupsAtom, todosAtom } from './atoms/planning-atoms'
-import {
-  // Cloud 模式专属
-  cloudUserAtom,
-  cloudAuthLoadingAtom,
-  initializeCloudAuth,
-} from './atoms/cloud-auth'
-import {
-  billingInfoAtom,
-  billingLoadingAtom,
-  quotaExceededDialogAtom,
-  initializeBilling,
-} from './atoms/cloud-billing'
-import { isCloudMode } from './lib/mode'
-import { clearPlanQuotaCache } from './lib/channel-plan-quota'
-// 通知
 import {
   notificationsEnabledAtom,
   notificationSoundEnabledAtom,
@@ -87,21 +69,22 @@ import { chatToolsAtom } from './atoms/chat-tool-atoms'
 import { feishuBotStatesAtom } from './atoms/feishu-atoms'
 import { dingtalkBotStatesAtom } from './atoms/dingtalk-atoms'
 import { currentConversationIdAtom, channelsAtom, channelsLoadedAtom, selectedModelAtom } from './atoms/chat-atoms'
-import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { appModeAtom } from './atoms/app-mode'
 import type { FeishuBotBridgeState, FeishuBridgeState, DingTalkBotBridgeState, DingTalkBridgeState } from '@proma/shared'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 import { ArrowUpRight } from 'lucide-react'
-import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL, calcTotalAvailable } from '@proma/shared'
+import { diffCapabilities, PROMA_OFFICIAL_CHANNEL_ID, PROMA_OFFICIAL_DEFAULT_AGENT_MODEL } from '@proma/shared'
 import type { WorkspaceCapabilities } from '@proma/shared'
 import { showCapabilityChangeToasts } from './lib/capabilities-toast'
 import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { VoiceDictationApp } from './components/voice-dictation/VoiceDictationApp'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
-import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
 import { PromaLogo } from './lib/model-logo'
+import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
+import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
+import { isCloudMode } from './lib/mode'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
@@ -188,8 +171,6 @@ function ThemeInitializer(): null {
 function AgentSettingsInitializer(): null {
   const setAgentChannelId = useSetAtom(agentChannelIdAtom)
   const setAgentModelId = useSetAtom(agentModelIdAtom)
-  const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
-  const setAgentRuntime = useSetAtom(agentRuntimeAtom)
   const setAgentWorkspaces = useSetAtom(agentWorkspacesAtom)
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
@@ -203,8 +184,8 @@ function AgentSettingsInitializer(): null {
   const setAgentSettingsReady = useSetAtom(agentSettingsReadyAtom)
   const setChannels = useSetAtom(channelsAtom)
   const setChannelsLoaded = useSetAtom(channelsLoadedAtom)
-  const cloudUser = useAtomValue(cloudUserAtom)
   const store = useStore()
+  const cloudUser = useAtomValue(cloudUserAtom)
 
   // 读取当前工作区信息（用于能力变化 diff）
   const currentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
@@ -214,22 +195,13 @@ function AgentSettingsInitializer(): null {
   const prevCapabilitiesRef = useRef<WorkspaceCapabilities | null>(null)
   // 初次加载标记 — 应用启动或切换工作区时不显示 toast
   const suppressToastRef = useRef(true)
-  // Cloud 登录会让官方渠道在主进程落盘；忽略此前未登录状态发起的旧读取，
-  // 避免其在网络较慢时反向覆盖刚同步完成的渠道和默认 Agent 设置。
-  const settingsLoadVersionRef = useRef(0)
 
   useEffect(() => {
-    const loadVersion = ++settingsLoadVersionRef.current
-    const isLatestLoad = (): boolean => settingsLoadVersionRef.current === loadVersion
-
-    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性。
-    // cloudUser 变化时必须重新运行：首次登录前的读取没有 Proma 官方渠道。
+    // 并行加载渠道列表和设置，确保两者都就绪后再验证渠道有效性
     Promise.all([
       window.electronAPI.listChannels(),
       window.electronAPI.getSettings(),
     ]).then(([channels, settings]) => {
-      if (!isLatestLoad()) return
-
       // 缓存渠道列表
       setChannels(channels)
       setChannelsLoaded(true)
@@ -243,28 +215,14 @@ function AgentSettingsInitializer(): null {
         store.set(selectedModelAtom, null)
       }
 
-      const defaultAgentRuntime = settings.agentRuntime ?? 'pi'
-      setAgentRuntime(defaultAgentRuntime)
-
-      // 渠道的启用状态是唯一开关：启动时也必须从实际渠道派生 Claude 白名单，
-      // 不能继承旧版独立开关，或把 Pi 专用渠道带入 Claude runtime。
-      const claudeChannelIds = getEnabledClaudeAgentChannelIds(channels)
-      setAgentChannelIds(claudeChannelIds)
-
       const selectedChannel = settings.agentChannelId
         ? channels.find((channel) => channel.id === settings.agentChannelId)
         : undefined
       const selectedChannelIsUsable = selectedChannel?.enabled
-        && (defaultAgentRuntime === 'pi' || claudeChannelIds.includes(selectedChannel.id))
 
       const updates: Parameters<typeof window.electronAPI.updateSettings>[0] = {}
-      const storedClaudeChannelIds = settings.agentChannelIds ?? []
-      const whitelistChanged = claudeChannelIds.length !== storedClaudeChannelIds.length
-        || claudeChannelIds.some((id, index) => id !== storedClaudeChannelIds[index])
-      if (whitelistChanged) updates.agentChannelIds = claudeChannelIds
 
-      // 验证并加载 Agent 默认渠道/模型。Claude runtime 不能恢复到 Pi 专用或已禁用渠道。
-      const hasStoredAgentModel = Boolean(settings.agentModelId)
+      // 验证并加载 Agent 默认渠道/模型。Pi 可使用任意启用渠道。
       if (settings.agentChannelId && selectedChannelIsUsable) {
         setAgentChannelId(settings.agentChannelId)
         if (settings.agentModelId) setAgentModelId(settings.agentModelId)
@@ -276,35 +234,26 @@ function AgentSettingsInitializer(): null {
         updates.agentModelId = undefined
       }
 
-      // 保留有效选择；无效或为空时，优先选择已启用的 Proma 官方渠道。
+      // 未选择或旧选择已失效时，优先默认到已同步的 Proma 官方渠道；其余情况回退第一个启用渠道。
       let resolvedChannelId = selectedChannelIsUsable ? settings.agentChannelId : undefined
       if (!resolvedChannelId) {
-        const officialChannel = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID && channel.enabled)
-        const fallbackChannelId = defaultAgentRuntime === 'pi'
-          ? channels.find((channel) => channel.enabled)?.id
-          : claudeChannelIds[0]
-        resolvedChannelId = officialChannel && (defaultAgentRuntime === 'pi' || claudeChannelIds.includes(officialChannel.id))
-          ? officialChannel.id
-          : fallbackChannelId
-        if (resolvedChannelId) {
-          setAgentChannelId(resolvedChannelId)
-          updates.agentChannelId = resolvedChannelId
+        const fallback = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID && channel.enabled)
+          ?? channels.find((channel) => channel.enabled)
+        if (fallback) {
+          resolvedChannelId = fallback.id
+          setAgentChannelId(fallback.id)
+          updates.agentChannelId = fallback.id
         }
       }
-
-      // 新用户没有持久化模型时，官方渠道优先使用官方声明的默认 Agent 模型；
-      // 若它尚未同步或被禁用，回退到官方 Agent 模型列表中的第一个可用模型。
-      if (!hasStoredAgentModel && resolvedChannelId === PROMA_OFFICIAL_CHANNEL_ID) {
-        const officialChannel = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
-        const modelList = officialChannel?.agentModels ?? officialChannel?.models ?? []
-        const defaultModel = modelList.find((model) => model.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL && model.enabled)
-          ?? modelList.find((model) => model.enabled)
-        if (defaultModel) {
-          setAgentModelId(defaultModel.id)
-          updates.agentModelId = defaultModel.id
+      if (!settings.agentModelId && resolvedChannelId === PROMA_OFFICIAL_CHANNEL_ID) {
+        const official = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
+        const model = (official?.agentModels ?? official?.models ?? []).find((item) => item.enabled && item.id === PROMA_OFFICIAL_DEFAULT_AGENT_MODEL)
+          ?? (official?.agentModels ?? official?.models ?? []).find((item) => item.enabled)
+        if (model) {
+          setAgentModelId(model.id)
+          updates.agentModelId = model.id
         }
       }
-
       if (Object.keys(updates).length > 0) {
         window.electronAPI.updateSettings(updates).catch(console.error)
       }
@@ -327,8 +276,6 @@ function AgentSettingsInitializer(): null {
 
       // 加载工作区列表并恢复上次选中的工作区
       window.electronAPI.listAgentWorkspaces().then((workspaces) => {
-        if (!isLatestLoad()) return
-
         setAgentWorkspaces(workspaces)
         if (settings.agentWorkspaceId) {
           // 验证工作区仍然存在
@@ -339,16 +286,14 @@ function AgentSettingsInitializer(): null {
         }
         setAgentSettingsReady(true)
       }).catch((err) => {
-        if (!isLatestLoad()) return
         console.error(err)
         setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
       })
     }).catch((err) => {
-      if (!isLatestLoad()) return
       console.error(err)
       setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
     })
-  }, [cloudUser?.id, setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentRuntime, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
+  }, [cloudUser?.id, setAgentChannelId, setAgentModelId, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
 
   // 工作区切换时重置能力缓存，预加载基线
   useEffect(() => {
@@ -519,201 +464,6 @@ function UpdaterInitializer(): null {
 }
 
 /**
- * 用户档案初始化组件
- *
- * 统一加载本地档案并订阅变更，避免资料状态依赖某个界面组件的挂载时机。
- */
-function UserProfileInitializer(): null {
-  const setUserProfile = useSetAtom(userProfileAtom)
-
-  useEffect(() => {
-    window.electronAPI.getUserProfile()
-      .then(setUserProfile)
-      .catch((error) => console.error('[用户档案] 初始加载失败:', error))
-
-    return window.electronAPI.onUserProfileChanged(setUserProfile)
-  }, [setUserProfile])
-
-  return null
-}
-
-/**
- * Cloud 认证初始化组件
- *
- * 仅在 Cloud 模式下从主进程恢复认证状态并订阅变化。
- * Local 模式下不执行任何操作。
- */
-function CloudAuthInitializer(): null {
-  const setUser = useSetAtom(cloudUserAtom)
-  const setLoading = useSetAtom(cloudAuthLoadingAtom)
-
-  useEffect(() => {
-    if (!isCloudMode()) {
-      // local 模式直接结束加载
-      setLoading(false)
-      return
-    }
-
-    const cleanup = initializeCloudAuth(setUser, setLoading)
-    return cleanup
-  }, [setUser, setLoading])
-
-  return null
-}
-
-const LOW_BALANCE_THRESHOLD = 50
-const LOW_BALANCE_WARN_INTERVAL_MS = 24 * 60 * 60 * 1000
-const LOW_BALANCE_WARNED_KEY = 'proma-low-balance-warned-at'
-
-function checkLowBalanceWarning(totalAvailable: number): void {
-  if (totalAvailable >= LOW_BALANCE_THRESHOLD) return
-
-  try {
-    const lastWarned = parseInt(localStorage.getItem(LOW_BALANCE_WARNED_KEY) ?? '0', 10)
-    if (Date.now() - lastWarned < LOW_BALANCE_WARN_INTERVAL_MS) return
-    localStorage.setItem(LOW_BALANCE_WARNED_KEY, String(Date.now()))
-  } catch {
-    return
-  }
-
-  toast.warning(
-    `当前可用额度仅剩 ${totalAvailable < 10 ? totalAvailable.toFixed(2) : Math.floor(totalAvailable)} 积分，建议及时充值以避免 Agent 运行中断`,
-    { duration: 8000 },
-  )
-}
-
-/**
- * Cloud 账单初始化组件
- *
- * 仅在 Cloud 模式 + 已认证时：
- * - 获取账单信息
- * - 订阅额度不足事件
- */
-function CloudWelcomeNoticeInitializer(): null {
-  const user = useAtomValue(cloudUserAtom)
-  const setAppMode = useSetAtom(appModeAtom)
-
-  useEffect(() => {
-    if (!isCloudMode() || !user) return
-
-    try {
-      const key = `proma-cloud-welcome-notice:${user.id}`
-      if (localStorage.getItem(key) !== null) return
-
-      // Persist before emitting the toast so StrictMode/remounts cannot duplicate it.
-      localStorage.setItem(key, '1')
-      toast.message('已获赠 5 积分体验额度，使用 Proma Cloud 即可开始体验 Agent。', {
-        duration: 10_000,
-        action: {
-          label: '打开 Agent',
-          onClick: () => setAppMode('agent'),
-        },
-      })
-    } catch {
-      // Storage may be unavailable; skip rather than repeatedly interrupting the user.
-    }
-  }, [user, setAppMode])
-
-  return null
-}
-
-function BillingInitializer(): null {
-  const setBillingInfo = useSetAtom(billingInfoAtom)
-  const setBillingLoading = useSetAtom(billingLoadingAtom)
-  const setQuotaExceededDialog = useSetAtom(quotaExceededDialogAtom)
-  const user = useAtomValue(cloudUserAtom)
-
-  useEffect(() => {
-    if (!isCloudMode() || !user) return
-
-    const cleanup = initializeBilling(setBillingInfo, setBillingLoading, setQuotaExceededDialog)
-    return cleanup
-  }, [user, setBillingInfo, setBillingLoading, setQuotaExceededDialog])
-
-  // 订阅余额变动事件（对话扣费后自动刷新）
-  useEffect(() => {
-    if (!isCloudMode() || !user) return
-
-    const unsubBillingChanged = window.electronAPI.cloudBilling.onBillingChanged(() => {
-      // 账单已变动（对话扣费/充值/订阅变化），失效渠道额度缓存后再拉取最新余额，
-      // 保证上下文窗口/模型选择器里的 Proma 官方余额立即刷新。
-      clearPlanQuotaCache()
-      window.electronAPI.cloudBilling.getBilling().then((result) => {
-        if (result.success && result.data) {
-          setBillingInfo(result.data)
-        }
-      }).catch(() => {
-        // 刷新失败不影响使用
-      })
-    })
-
-    return unsubBillingChanged
-  }, [user, setBillingInfo])
-
-  // 窗口获得焦点时刷新余额（用户切回 App 时拿到最新数据）
-  useEffect(() => {
-    if (!isCloudMode() || !user) return
-
-    const refreshOnFocus = (): void => {
-      window.electronAPI.cloudBilling.getBilling().then((result) => {
-        if (result.success && result.data) {
-          setBillingInfo(result.data)
-        }
-      }).catch(() => {
-        // 刷新失败不影响使用
-      })
-    }
-
-    window.addEventListener('focus', refreshOnFocus)
-    return () => window.removeEventListener('focus', refreshOnFocus)
-  }, [user, setBillingInfo])
-
-  // 低余额预警：billingInfo 变化时检查总可用额度
-  const billing = useAtomValue(billingInfoAtom)
-  useEffect(() => {
-    if (!isCloudMode() || !user || !billing) return
-    checkLowBalanceWarning(calcTotalAvailable(billing))
-  }, [billing, user])
-
-  return null
-}
-
-/**
- * Cloud 官方渠道初始化组件
- *
- * 仅在 Cloud 模式 + 已认证时：
- * - 触发同步官方渠道（拉取模型列表）
- * - 订阅官方渠道更新事件，刷新渠道列表
- */
-function OfficialChannelInitializer(): null {
-  const user = useAtomValue(cloudUserAtom)
-  const setChannels = useSetAtom(channelsAtom)
-
-  useEffect(() => {
-    if (!isCloudMode() || !user) return
-
-    // 登录后同步官方渠道
-    window.electronAPI.cloudBilling.syncOfficialChannel().catch((err) => {
-      console.warn('[官方渠道] 同步失败:', err)
-    })
-
-    // 订阅官方渠道更新事件（主进程初始化完成后会广播）
-    const unsubOfficialChannel = window.electronAPI.cloudBilling.onOfficialChannelUpdated(() => {
-      console.log('[官方渠道] 收到更新通知，刷新渠道列表')
-      window.electronAPI.listChannels()
-        .then((channels) => setChannels(channels))
-        .catch((err) => console.warn('[官方渠道] 刷新渠道列表失败:', err))
-    })
-
-    return () => {
-      unsubOfficialChannel()
-    }
-  }, [user, setChannels])
-
-  return null
-}
-
-/**
  * 定时任务初始化组件
  *
  * 加载全部定时任务，并订阅主进程的变更事件（运行完成/状态变化）刷新列表。
@@ -782,6 +532,39 @@ function PlanningInitializer(): null {
     const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
+
+  return null
+}
+
+function CloudInitializer(): null {
+  const setUser = useSetAtom(cloudUserAtom)
+  const setAuthLoading = useSetAtom(cloudAuthLoadingAtom)
+  const setBilling = useSetAtom(billingInfoAtom)
+  const setBillingLoading = useSetAtom(billingLoadingAtom)
+  const setQuotaExceeded = useSetAtom(quotaExceededDialogAtom)
+  const cloudUser = useAtomValue(cloudUserAtom)
+
+  useEffect(() => {
+    if (!isCloudMode()) return
+    return initializeCloudAuth(setUser, setAuthLoading)
+  }, [setAuthLoading, setUser])
+
+  useEffect(() => {
+    if (!isCloudMode() || !cloudUser) return
+    const stopBilling = initializeBilling(setBilling, setBillingLoading, setQuotaExceeded)
+    const refresh = (): void => {
+      void window.electronAPI.cloudBilling.getBilling().then((result) => {
+        if (result.success && result.data) setBilling(result.data)
+      }).catch(console.error)
+    }
+    const stopChanged = window.electronAPI.cloudBilling.onBillingChanged(refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      stopBilling()
+      stopChanged()
+      window.removeEventListener('focus', refresh)
+    }
+  }, [cloudUser?.id, setBilling, setBillingLoading, setQuotaExceeded])
 
   return null
 }
@@ -1375,12 +1158,7 @@ if (isQuickTaskWindow) {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <ThemeInitializer />
-      <UserProfileInitializer />
-      <CloudAuthInitializer />
-      <CloudWelcomeNoticeInitializer />
-      <BillingInitializer />
-      <OfficialChannelInitializer />
-      <ModelHealthInitializer />
+      <CloudInitializer />
       <AgentSettingsInitializer />
       <NotificationsInitializer />
       <DockBadgeInitializer />
