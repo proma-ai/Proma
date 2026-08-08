@@ -1820,16 +1820,3 @@ export class PiAgentAdapter implements AgentProviderAdapter {
     this.activeSessions.clear()
   }
 }
-
-export function cleanupPiRuntimeResources(): void {
-  // Pi 是 in-process runtime，旧 Claude SDK 时代那个持久化的 native `claude` CLI 子进程已不存在，
-  // Pi 会话在进程内管理，因此无需额外扫描孤儿子进程。
-  //
-  // Pi 的 bash 工具确实会 spawn 子进程，但它以 detached 独立进程组启动，abort()/timeout 时由
-  // pi 内部 killProcessTree（SIGTERM + 5s SIGKILL）级联杀整个进程组；adapter.dispose()/abort()
-  // 会传播 session.abort()/dispose()。故正常路径无需额外兜底。
-  //
-  // 残留风险（低）：某个 exec 长命令或 stdio MCP 子进程若在 dispose/abort 未覆盖时退出，可能残留。
-  // pi 未从公开入口（exports 仅 '.' 与 './rpc-entry'）导出 killTrackedDetachedChildren，
-  // 无法在不深依赖其内部实现的前提下调用，故此处保持空实现；如需兜底应由 pi 侧补公开 API。
-}

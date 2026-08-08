@@ -29,7 +29,7 @@ import type {
   AgentExternalRunSource,
   AgentMessage,
 } from '@proma/shared'
-import { PiAgentAdapter, cleanupPiRuntimeResources } from './adapters/pi-agent-adapter'
+import { PiAgentAdapter } from './adapters/pi-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
@@ -409,10 +409,6 @@ export function stopAllAgents(): void {
   orchestrator.stopAll()
 }
 
-/** 退出前释放 Pi runtime 资源与 MCP 子进程。 */
-export function cleanupAgentRuntimeResources(): void {
-  cleanupPiRuntimeResources()
-}
 
 /**
  * 运行中动态切换会话的权限模式

@@ -22,8 +22,6 @@ import {
 } from '@proma/shared'
 import { fetchChannelPlanQuota } from '@/lib/channel-plan-quota'
 
-/** Claude Agent SDK 的自动压缩阈值比例；Pi 使用共享的 80% 策略。 */
-const CLAUDE_COMPACT_THRESHOLD_RATIO = 0.775
 /** 显示警告的阈值（压缩阈值的 80%） */
 const WARNING_RATIO = 0.80
 /** Popover hover 关闭延迟（ms），与 AgentThinkingPopover 一致 */
@@ -39,8 +37,6 @@ interface ContextUsageBadgeProps {
   contextWindow?: number
   /** 当前上下文 token 是否为 Pi 手动压缩后的预估值 */
   isEstimated: boolean
-  /** Pi runtime 使用 80% 自动压缩阈值；未传时保留 Claude 的既有提示策略。 */
-  isPiRuntime?: boolean
   isCompacting: boolean
   isProcessing: boolean
   onCompact: () => void
@@ -173,7 +169,6 @@ export function ContextUsageBadge({
   cacheCreationTokens,
   contextWindow,
   isEstimated,
-  isPiRuntime = false,
   isCompacting,
   isProcessing,
   onCompact,
@@ -262,11 +257,9 @@ export function ContextUsageBadge({
   // 从未有过 usage 数据 → 不显示
   if (!displayTokens || displayTokens <= 0) return null
 
-  // 警告阈值：Pi 采用窗口 × 80%，Claude 保留既有 SDK 阈值；两者均在阈值的 80% 时预警。
+  // 警告阈值：Pi 在自动压缩阈值的 80% 时预警。
   const compactThreshold = displayWindow
-    ? (isPiRuntime
-        ? calculatePiAutoCompactionThresholdTokens(displayWindow)
-        : Math.floor(displayWindow * CLAUDE_COMPACT_THRESHOLD_RATIO))
+    ? calculatePiAutoCompactionThresholdTokens(displayWindow)
     : undefined
   const isWarning = compactThreshold
     ? displayTokens / compactThreshold >= WARNING_RATIO
