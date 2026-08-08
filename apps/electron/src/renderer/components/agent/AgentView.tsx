@@ -2922,8 +2922,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRetryInNewSession={handleRetryInNewSession}
           onRelinkProjectRoot={handleRelinkProjectRoot}
           onRestoreProjectRoot={() => setRestoreProjectRootDialogOpen(true)}
-          onFork={handleFork}
-          onRewind={handleRewindRequest}
+          onFork={isLegacyTranscript ? undefined : handleFork}
+          onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
         />
