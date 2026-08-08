@@ -119,7 +119,7 @@ mac:
       role: Editor
   # 架构由 CLI 参数控制（CI 矩阵分别传 --arm64 / --x64），
   # 每个 runner 只构建其宿主架构对应的产物，与 bun 按 os/cpu 装好的
-  # @anthropic-ai/claude-agent-sdk-darwin-{arch} native binary 对齐。
+  # 每个 runner 只构建其宿主架构对应的产物。
   target:
     - dmg
     - zip

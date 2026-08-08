@@ -109,108 +109,18 @@ Proma supports Doubao-powered streaming voice input, both inside Proma and acros
 
 ![Proma voice input](./docs/assets/screenshots/proma-typeless-input.png)
 
-## Agent Runtimes and Providers
+## Agent Runtime and Providers
 
-Proma provides two switchable Agent runtimes:
+Proma uses a single **Pi Agent Runtime**, powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. Enabled Proma channels are dynamically registered as Pi providers, supporting OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
 
-- **Claude Agent Runtime (default)**: powered by `@anthropic-ai/claude-agent-sdk` and using the Anthropic Messages API or compatible endpoints.
-- **Pi Agent Runtime**: powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. It dynamically registers enabled Proma channels as Pi providers and supports OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
-
-| Channel type | Chat | Claude Agent | Pi Agent |
-| --- | --- | --- | --- |
-| Anthropic / Anthropic-compatible | Supported | Supported | Supported |
-| Anthropic-protocol channels such as DeepSeek, Kimi API / Coding Plan, Zhipu Coding Plan, MiniMax, and Xiaomi MiMo | Supported | Supported | Supported |
-| OpenAI, OpenAI Responses, Google, Zhipu AI, Doubao, and Qwen | Supported | Not yet | Supported |
-| Custom OpenAI-compatible endpoints | Supported | Not yet | Supported |
-| ChatGPT subscription (Codex OAuth) | — | Supported | Supported |
-
-> Pi Runtime can be switched directly below the input of each Agent session. Switching starts a new underlying SDK session but does not delete Proma's saved messages. Pi bridges workspace Skills, user-configured MCP servers, and Proma's built-in Automation / Collaboration tools. Tool calling, reasoning, and context capabilities still vary by model provider.
-
-> **Kimi Coding Plan users**: Proma is officially whitelisted by Kimi. Using Proma with your Kimi Coding Plan subscription will not trigger any third-party client ban policy.
-
-## Local Data
-
-Proma stores data in local files so it is easy to back up, migrate, and inspect.
-
-```text
-~/.proma/
-├── channels.json
-├── conversations.json
-├── conversations/
-│   └── {conversation-id}.jsonl
-├── agent-sessions.json
-├── agent-sessions/
-│   └── {session-id}.jsonl
-├── agent-workspaces/
-│   └── {workspace-slug}/
-│       ├── workspace-files/ # Proma-managed project root for blank projects only
-│       ├── mcp.json
-│       └── skills/
-├── attachments/
-├── user-profile.json
-├── settings.json
-└── sdk-config/
-```
-
-API keys are encrypted through Electron `safeStorage` before being written to `channels.json`. Proma does not use a local database; core data is represented as JSON configuration and append-only JSONL logs.
-
-## Development
-
-Proma is a Bun workspace monorepo.
-
-```text
-proma-v2/
-├── packages/
-│   ├── shared/     # shared types, IPC constants, config, utilities
-│   ├── core/       # Provider Adapters, SSE, code highlighting
-│   └── ui/         # shared React UI components
-└── apps/
-    └── electron/   # Electron desktop app
-```
-
-Current package versions:
-
-| Package | Version | Responsibility |
+| Channel type | Chat | Pi Agent |
 | --- | --- | --- |
-| `@proma/electron` | `0.15.0` | Electron desktop app |
-| `@proma/shared` | `0.1.42` | shared types, IPC constants, config, utilities |
-| `@proma/core` | `0.2.15` | Provider Adapters, SSE, Shiki highlighting |
-| `@proma/ui` | `0.1.9` | shared React UI components |
-
-Common commands:
-
-```bash
-# Install dependencies
-bun install
-
-# Development mode: Vite + Electron + hot reload
-bun run dev
-
-# Build Electron app
-bun run electron:build
-
-# Build and run
-bun run electron:start
-
-# Typecheck
-bun run typecheck
-
-# Test
-bun test
-```
-
-More granular scripts are available inside the Electron app:
-
-```bash
-cd apps/electron
-
-bun run dev:vite
-bun run dev:electron
-bun run build:main
-bun run build:preload
-bun run build:renderer
-bun run dist:fast
-```
+| Anthropic / Anthropic-compatible | Supported | Supported |
+| Anthropic-protocol channels such as DeepSeek, Kimi API / Coding Plan, Zhipu Coding Plan, MiniMax, and Xiaomi MiMo | Supported | Supported |
+| OpenAI, OpenAI Responses, Google, Zhipu AI, Doubao, and Qwen | Supported | Supported |
+| Custom OpenAI-compatible endpoints | Supported | Supported |
+| ChatGPT subscription (Codex OAuth) | — | Supported |
+| xAI subscription (Grok OAuth) | — | Supported |
 
 ## Tech Stack
 
@@ -226,7 +136,7 @@ bun run dist:fast
 | Code highlighting | Shiki |
 | Build | Vite + esbuild |
 | Distribution | electron-builder |
-| Agent runtimes | Claude: `@anthropic-ai/claude-agent-sdk@0.3.201`; Pi: `@earendil-works/pi-* @0.80.3` |
+| Agent runtime | Pi: `@earendil-works/pi-* @0.80.3` |
 
 ## Architecture
 
@@ -241,8 +151,8 @@ shared types and IPC constants
 
 Main-process services live in `apps/electron/src/main/lib/`:
 
-- `agent-orchestrator.ts`: Agent orchestration, runtime routing, environment variables, SDK calls, event streams, and error handling.
-- `adapters/claude-agent-adapter.ts` / `adapters/pi-agent-adapter.ts`: runtime adapters for Claude and Pi; `runtime-routing-agent-adapter.ts` routes each session to its selected runtime.
+- `agent-orchestrator.ts`: Pi Agent orchestration, environment variables, event streams, and error handling.
+- `adapters/pi-agent-adapter.ts`: Pi runtime adapter and session management.
 - `agent-session-manager.ts`: Agent session index and JSONL message persistence.
 - `agent-workspace-manager.ts`: Proma workspaces, project roots, MCP, and Skills.
 - `chat-service.ts`: Chat streaming, Provider Adapters, tool activity.
@@ -255,9 +165,8 @@ Renderer state is managed with Jotai. Key atoms live in `apps/electron/src/rende
 
 ## Packaging Notes
 
-Both Agent runtimes run as esbuild external dependencies in the main process. Before invoking `electron-builder`, the Electron packaging scripts run `bun run sync:runtime-deps` to copy these runtime dependency closures into the app directory:
+The Pi Agent runtime runs as an esbuild external dependency in the main process. Before invoking `electron-builder`, the Electron packaging scripts run `bun run sync:runtime-deps` to copy these runtime dependency closures into the app directory:
 
-- `@anthropic-ai/claude-agent-sdk` (including the platform-specific Claude native binary)
 - `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`
 - Pi runtime native modules and `pdfjs-dist`
 

@@ -656,8 +656,11 @@ export interface AgentSessionMeta {
   piSessionFile?: string
   /** Proma assistant UI UUID 到 Pi 树状 session entry ID 的持久映射。 */
   piEntryBindings?: Record<string, string>
-  /** 当前会话使用的 Agent runtime；历史会话缺省为 claude */
-  agentRuntime?: import('./agent-provider').AgentRuntime
+  /** 已退役 Claude runtime 的只读 transcript；必须新建 Pi 会话才能继续。 */
+  legacyTranscript?: {
+    sourceRuntime: 'claude'
+    continuationRequired: true
+  }
   /** ChatGPT Codex Fast Mode 开关；仅 Pi + ChatGPT OAuth 的受支持模型实际生效。 */
   codexFastMode?: boolean
   /** 本会话的推理深度；未设置时兼容旧版全局思考设置。 */
@@ -683,10 +686,6 @@ export interface AgentSessionMeta {
   attachedFiles?: string[]
   /** 分叉来源：源会话的 Proma 工作目录（SDK session 文件在此目录的项目空间中，首次 resume 后清除） */
   forkSourceDir?: string
-  /** 分叉来源：源会话的 SDK session ID（用于 rewind 时读取源会话的 file-history-snapshot 和备份文件） */
-  forkSourceSdkSessionId?: string
-  /** 回退后的 resume 截断点：下次发消息时传给 SDK resumeSessionAt（消费后清除） */
-  resumeAtMessageUuid?: string
   /** 历史兼容字段：旧版手动保留状态 */
   manualWorking?: boolean
   /** Agent 执行完成但用户尚未清除完成状态 */
@@ -1045,14 +1044,10 @@ export interface AgentSendInput {
   channelId: string
   /** 模型 ID */
   modelId?: string
-  /** 本轮请求使用的 Agent runtime（用于输入区快速切换后的兜底同步） */
-  agentRuntime?: import('./agent-provider').AgentRuntime
   /** 工作区 ID（用于确定 cwd） */
   workspaceId?: string
   /** 附加的外部目录（绝对路径，传递给 SDK additionalDirectories） */
   additionalDirectories?: string[]
-  /** 动态注入的 MCP 服务器（仅在本次会话中生效，如飞书群聊工具） */
-  customMcpServers?: Record<string, Record<string, unknown>>
   /** 强制覆盖权限模式（飞书等无 UI 交互场景下强制 'bypassPermissions'） */
   permissionModeOverride?: PromaPermissionMode
   /** 用户通过 /skill:xxx 引用的 Skill slug 列表 */
@@ -1735,7 +1730,6 @@ export const AGENT_IPC_CHANNELS = {
   /** 热切换指定会话的权限模式（运行中生效，不广播到其他会话） */
   UPDATE_SESSION_PERMISSION_MODE: 'agent:update-session-permission-mode',
   /** 切换指定会话的 Agent runtime（下一轮生效，跨 runtime 时清空 SDK resume ID） */
-  UPDATE_SESSION_AGENT_RUNTIME: 'agent:update-session-agent-runtime',
   /** 切换指定会话的 ChatGPT Codex Fast Mode（下一轮 Pi 请求生效） */
   UPDATE_SESSION_CODEX_FAST_MODE: 'agent:update-session-codex-fast-mode',
   /** 查询 Pi catalog 或专属 profile 支持的会话级推理档位 */

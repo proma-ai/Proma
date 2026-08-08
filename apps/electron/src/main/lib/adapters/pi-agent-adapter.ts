@@ -2040,7 +2040,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
 
 export function cleanupPiRuntimeResources(): void {
   // Pi 是 in-process runtime，旧 Claude SDK 时代那个持久化的 native `claude` CLI 子进程已不存在，
-  // 因此不再需要旧的 before-quit 孤儿扫描（它当年只按命令行匹配 'claude-agent-sdk'）。
+  // Pi 会话在进程内管理，因此无需额外扫描孤儿子进程。
   //
   // Pi 的 bash 工具确实会 spawn 子进程，但它以 detached 独立进程组启动，abort()/timeout 时由
   // pi 内部 killProcessTree（SIGTERM + 5s SIGKILL）级联杀整个进程组；adapter.dispose()/abort()

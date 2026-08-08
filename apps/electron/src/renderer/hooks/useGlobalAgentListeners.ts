@@ -1370,7 +1370,7 @@ export function useGlobalAgentListeners(): void {
         }
         store.set(agentPendingPromptAtom, {
           sessionId: session.id,
-          message: buildTodoAgentPrompt(todo.id, session.agentRuntime === 'pi'),
+          message: buildTodoAgentPrompt(todo.id, true),
           mentionedTodoIds: [todo.id],
         })
       })

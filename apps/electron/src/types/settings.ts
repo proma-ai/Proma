@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
+import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
@@ -248,9 +248,6 @@ export type InterfaceVariant = 'classic' | 'modern'
 /** 默认界面风格 */
 export const DEFAULT_INTERFACE_VARIANT: InterfaceVariant = 'modern'
 
-/** 新建 Agent 会话与自动任务的默认 runtime。历史持久化记录缺失 runtime 时仍按 Claude 兼容。 */
-export const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'pi'
-
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'
 
@@ -285,12 +282,8 @@ export interface AppSettings {
   agentChannelId?: string
   /** Agent 默认模型 ID */
   agentModelId?: string
-  /** Claude Agent 可用渠道 ID 列表（由渠道启用状态与协议兼容性派生） */
-  agentChannelIds?: string[]
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string
-  /** 新 Agent 会话默认使用的 runtime；历史会话缺省仍按 claude 兼容。 */
-  agentRuntime?: AgentRuntime
   /** Windows 上 Agent Bash 工具的运行环境；默认自动选择 Git Bash，WSL 需用户显式启用。 */
   windowsShellPreference?: WindowsShellPreference
   /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；可拖拽调整） */

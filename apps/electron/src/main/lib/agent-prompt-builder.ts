@@ -9,7 +9,7 @@
  * - 动态 per-message 上下文（buildDynamicContext）：注入到用户消息前，每次实时读取磁盘
  */
 
-import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
+import type { PromaPermissionMode } from '@proma/shared'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
@@ -31,7 +31,6 @@ const TOOL_USAGE_GUIDELINES = `## 工具使用指南
 
 /** buildSystemPrompt 所需的上下文 */
 interface SystemPromptContext {
-  agentRuntime?: AgentRuntime
   workspaceName?: string
   workspaceSlug?: string
   sessionId: string
@@ -57,7 +56,6 @@ function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string, age
     workspaceRoot,
     sessionDir,
     sessionContextDir: join(sessionDir, '.context'),
-    claudeSessionSettingsPath: join(sessionDir, '.claude', 'settings.json'),
     projectRoot,
     workspaceContextDir: join(projectRoot, '.context'),
     agentCwd: effectiveAgentCwd,
@@ -84,8 +82,7 @@ function buildWorkspacePromptPaths(workspaceSlug: string, sessionId: string, age
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const profile = getUserProfile()
   const userName = profile.userName || '用户'
-  const agentRuntime = ctx.agentRuntime ?? 'claude'
-  const runtimeName = agentRuntime === 'pi' ? 'Pi Agent SDK' : 'Claude Agent SDK'
+  const runtimeName = 'Pi Agent SDK'
   const currentModelId = ctx.currentModelId?.trim()
   const piDelegationModelInstruction = currentModelId
     ? `**派生子会话的模型**：当前 Agent 选择的模型 ID 是 \`${currentModelId}\`。调用 collaboration 派生子会话时，如果用户没有明确指定目标模型，必须在工具参数中显式传入 \`modelId: "${currentModelId}"\`，复用当前模型；不要自行从可用模型中挑选。只有用户明确要求其他模型时，才先查询可用模型并传入其指定的 \`modelId\`。`
@@ -103,8 +100,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 
 你是 Proma Agent — 一个集成在 Proma 桌面应用中的通用AI助手，由 ${runtimeName} 驱动。你有极强的自主性和主观能动性，可以完成任何任务，尽最大努力帮助用户。`)
 
-  if (agentRuntime === 'pi') {
-    sections.push(`## Pi Agent Runtime
+  sections.push(`## Pi Agent Runtime
 
 当前会话运行在 Pi Agent SDK 上。你仍然遵循 Proma Agent 的统一行为规范，但底层工具、权限和消息流由 Proma 的 Pi adapter 桥接：
 
@@ -128,7 +124,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - **组织信息按需读取**：仅当创建、筛选或重新分组时读取分组和标签。Todo 与日程分组彼此独立，分别按 \`scope: 'todo'\` / \`scope: 'calendar'\` 查询和复用；标签仍可跨二者复用。只有用户明确给出新分组或对应范围内现有分组明显不适用时才创建。
 - **提醒只服务明确时点**：用户提出“提醒我”且有具体时点时，创建关联提醒；提醒到期后用户可以完成 Todo、推迟或确认关闭。不要用 Automation 替代个人提醒。
 - **透明但不打断**：完成一次重要的创建、更新或完成操作后，在回复中简短说明；不要为了例行读取反复向用户报告。`)
-  }
+
 
   // 工具使用指南（复用常量）
   sections.push(TOOL_USAGE_GUIDELINES)
@@ -171,8 +167,7 @@ Proma 提供内置 \`collaboration\` 工具，用来创建真实可见、可追�
 - Proma 工作区目录: ${workspacePaths?.workspaceRoot}（存放 MCP、Skills、Proma CLAUDE.md 与 Memory 等配置）
 - 项目根目录: ${workspacePaths?.projectRoot}（${workspacePaths?.isLocalProject ? '用户选择的本地原始文件夹' : 'Proma 托管的空白项目目录'}）
 - 会话工作台目录: ${workspacePaths?.sessionDir}（存放当前会话的私有临时文件与会话级 Context）
-${agentRuntime === 'claude' ? `- Claude 会话 sidecar: ${workspacePaths?.claudeSessionSettingsPath}（Proma 托管的运行时配置，不是项目文件或记忆；不要修改）
-` : ''}- 实际工作目录（cwd）: ${workspacePaths?.agentCwd}（${workspacePaths?.isProjectCwd ? '当前会话直接在项目根目录中工作' : '当前会话仍使用私有会话工作台，不等同于项目根目录'}；以每条消息的 \`<working_directory>\` 为准）
+- 实际工作目录（cwd）: ${workspacePaths?.agentCwd}（${workspacePaths?.isProjectCwd ? '当前会话直接在项目根目录中工作' : '当前会话仍使用私有会话工作台，不等同于项目根目录'}；以每条消息的 \`<working_directory>\` 为准）
 - Proma 工作区 CLAUDE.md: ${workspacePaths?.claudeMd}
 - Proma 工作区 Auto Memory 目录: ${workspacePaths?.autoMemoryDir}
 - Proma 工作区 Auto Memory 索引: ${workspacePaths?.autoMemoryIndex}
@@ -238,7 +233,7 @@ ${agentRuntime === 'claude' ? `- Claude 会话 sidecar: ${workspacePaths?.claude
 Claude Agent SDK 可能会维护 Proma 工作区 Auto Memory 文件，目录由 Proma 显式指向 Proma 工作区目录的 \`.claude/memory/\`${workspacePaths ? `（\`${workspacePaths.autoMemoryDir}\`）` : ''}：
 - **用途**：沉淀跨会话学习到的经验、用户偏好、误判纠正、问题状态变化和易错点
 - **入口文件**：${workspacePaths ? `\`${workspacePaths.autoMemoryIndex}\`` : '`.claude/memory/MEMORY.md`'} 只放主题索引和路由；详细内容拆到同目录或子目录下的主题文件
-- **路径边界**：会话工作台目录是 \`${workspacePaths?.sessionDir ?? '当前会话目录'}\`；${agentRuntime === 'claude' ? `Claude runtime 的 \`${workspacePaths?.claudeSessionSettingsPath ?? '.claude/settings.json'}\` 是 Proma 托管的 sidecar 配置，不是项目文件或记忆，绝不要修改。` : ''}项目根与 cwd 不一定相同：新会话通常在项目根目录运行，历史会话可能仍在会话工作台运行，始终以“实际工作目录”和每条消息的 \`<working_directory>\` 为准。本地项目根是用户原始目录，Proma 托管项目根是共享的项目文件根。不要自动读取、创建或修改项目根中的 \`.claude/\`、\`CLAUDE.md\`、MCP 或 Skills 配置。无论哪种情况，\`./.claude/memory/\` 都不是 Proma 工作区 Auto Memory；除非用户明确要求，不要在会话工作台或本地项目根目录下创建或更新 \`.claude/memory/\`
+- **路径边界**：会话工作台目录是 \`${workspacePaths?.sessionDir ?? '当前会话目录'}\`；项目根与 cwd 不一定相同：新会话通常在项目根目录运行，历史会话可能仍在会话工作台运行，始终以“实际工作目录”和每条消息的 \`<working_directory>\` 为准。本地项目根是用户原始目录，Proma 托管项目根是共享的项目文件根。不要自动读取、创建或修改项目根中的 \`.claude/\`、\`CLAUDE.md\`、MCP 或 Skills 配置。无论哪种情况，\`./.claude/memory/\` 都不是 Proma 工作区 Auto Memory；除非用户明确要求，不要在会话工作台或本地项目根目录下创建或更新 \`.claude/memory/\`
 - **使用要求**：不要把它当聊天流水账；只有明确重复出现、用户明确要求记住，或删掉后未来 Agent 明显会犯错的稳定经验才写入
 - **会话内维护**：当用户确认问题已解决、否定先前判断、说明问题仍存在/加重，或明确表达长期偏好时，判断是否应更新 memory；纠正旧记忆时应修订或标注旧结论，而不是只追加冲突新结论
 - **弱信号处理**：一次性偏好、临时过程和证据不足的判断，不要直接写入 auto memory；可在最终回复中建议用户确认后再沉淀

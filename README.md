@@ -115,107 +115,16 @@ Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用�
 
 ## Agent 运行时与模型渠道
 
-Proma 的 Agent 模式提供两套可切换的内核：
+Proma 的 Agent 模式统一使用 **Pi Agent Runtime**，由 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai` 驱动。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。
 
-- **Claude Agent Runtime（默认）**：基于 `@anthropic-ai/claude-agent-sdk`，使用 Anthropic Messages API 或兼容端点。
-- **Pi Agent Runtime**：基于 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai`，将 Proma 的已启用渠道动态注册为 Pi provider；支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。
-
-| 渠道类型 | Chat | Claude Agent | Pi Agent |
-| --- | --- | --- | --- |
-| Anthropic / Anthropic 兼容 | 支持 | 支持 | 支持 |
-| DeepSeek、Kimi API / Coding Plan、智谱 Coding Plan、MiniMax、小米 MiMo 等 Anthropic 协议渠道 | 支持 | 支持 | 支持 |
-| OpenAI、OpenAI Responses、Google、智谱 AI、豆包、通义千问 | 支持 | 暂不支持 | 支持 |
-| OpenAI 兼容自定义端点 | 支持 | 暂不支持 | 支持 |
-| ChatGPT 订阅（Codex OAuth） | — | 支持 | 支持 |
-| xAI 订阅（Grok OAuth） | — | — | 支持 |
-
-> Pi Runtime 可在每个 Agent 会话的输入框下方直接切换；切换会开启新的底层 SDK 会话，但不会删除 Proma 中已保存的消息。Pi 会桥接工作区 Skills、用户 MCP Server，以及 Proma 内置的 Automation / Collaboration 工具；不同模型供应商对工具调用、推理和上下文长度的支持仍可能不同。
-
-> **Kimi Coding Plan 用户须知**：Proma 已获得 Kimi 官方白名单支持，使用 Proma 连接 Kimi Coding Plan 不会触发第三方客户端封号策略，可放心使用。
-
-## 本地数据
-
-Proma 采用本地文件存储，方便备份、迁移和排查问题。
-
-```text
-~/.proma/
-├── channels.json
-├── conversations.json
-├── conversations/
-│   └── {conversation-id}.jsonl
-├── agent-sessions.json
-├── agent-sessions/
-│   └── {session-id}.jsonl
-├── agent-workspaces/
-│   └── {workspace-slug}/
-│       ├── workspace-files/ # 仅空白项目使用的 Proma 托管项目根
-│       ├── mcp.json
-│       └── skills/
-├── attachments/
-├── user-profile.json
-├── settings.json
-└── sdk-config/
-```
-
-API Key 会通过 Electron `safeStorage` 加密后写入 `channels.json`。Proma 不使用本地数据库，核心数据结构以 JSON 配置和 JSONL 追加日志为主。
-
-## 开发
-
-Proma 是 Bun workspace monorepo。
-
-```text
-proma-v2/
-├── packages/
-│   ├── shared/     # 共享类型、IPC 常量、配置、工具函数
-│   ├── core/       # Provider Adapter、SSE、代码高亮
-│   └── ui/         # 共享 React UI 组件
-└── apps/
-    └── electron/   # Electron 桌面应用
-```
-
-当前主要包版本：
-
-| 包 | 版本 | 职责 |
+| 渠道类型 | Chat | Pi Agent |
 | --- | --- | --- |
-| `@proma/electron` | `0.15.0` | Electron 桌面应用 |
-| `@proma/shared` | `0.1.42` | 共享类型、IPC 常量、配置和工具 |
-| `@proma/core` | `0.2.15` | Provider Adapter、SSE、Shiki 高亮 |
-| `@proma/ui` | `0.1.9` | 共享 React UI 组件 |
-
-常用命令：
-
-```bash
-# 安装依赖
-bun install
-
-# 开发模式：自动启动 Vite + Electron + 热重载
-bun run dev
-
-# 构建 Electron 应用
-bun run electron:build
-
-# 构建并运行
-bun run electron:start
-
-# 类型检查
-bun run typecheck
-
-# 测试
-bun test
-```
-
-Electron 子应用内也提供更细的脚本：
-
-```bash
-cd apps/electron
-
-bun run dev:vite
-bun run dev:electron
-bun run build:main
-bun run build:preload
-bun run build:renderer
-bun run dist:fast
-```
+| Anthropic / Anthropic 兼容 | 支持 | 支持 |
+| DeepSeek、Kimi API / Coding Plan、智谱 Coding Plan、MiniMax、小米 MiMo 等 Anthropic 协议渠道 | 支持 | 支持 |
+| OpenAI、OpenAI Responses、Google、智谱 AI、豆包、通义千问 | 支持 | 支持 |
+| OpenAI 兼容自定义端点 | 支持 | 支持 |
+| ChatGPT 订阅（Codex OAuth） | — | 支持 |
+| xAI 订阅（Grok OAuth） | — | 支持 |
 
 ## 技术栈
 
@@ -231,7 +140,7 @@ bun run dist:fast
 | 代码高亮 | Shiki |
 | 构建 | Vite + esbuild |
 | 分发 | electron-builder |
-| Agent Runtime | Claude: `@anthropic-ai/claude-agent-sdk@0.3.201`；Pi: `@earendil-works/pi-* @0.80.3` |
+| Agent Runtime | Pi: `@earendil-works/pi-* @0.80.3` |
 
 ## 架构概览
 
@@ -246,8 +155,8 @@ shared 类型和 IPC 常量
 
 主进程服务集中在 `apps/electron/src/main/lib/`：
 
-- `agent-orchestrator.ts`：Agent 编排、运行时路由、环境变量、SDK 调用、事件流、错误处理。
-- `adapters/claude-agent-adapter.ts` / `adapters/pi-agent-adapter.ts`：Claude 与 Pi 运行时适配；`runtime-routing-agent-adapter.ts` 依据会话内核路由。
+- `agent-orchestrator.ts`：Pi Agent 编排、环境变量、事件流、错误处理。
+- `adapters/pi-agent-adapter.ts`：Pi 运行时适配与会话管理。
 - `agent-session-manager.ts`：Agent 会话索引和 JSONL 消息持久化。
 - `agent-workspace-manager.ts`：Proma 工作区、项目根目录、MCP 与 Skills 管理。
 - `chat-service.ts`：Chat 流式调用、Provider Adapter、工具活动。
@@ -260,9 +169,8 @@ shared 类型和 IPC 常量
 
 ## 打包注意事项
 
-Claude 与 Pi 运行时都在主进程中作为 esbuild external 依赖运行。`apps/electron` 的打包脚本会在 `electron-builder` 前执行 `bun run sync:runtime-deps`，把下列依赖及其运行时闭包复制到应用目录：
+Pi 运行时在主进程中作为 esbuild external 依赖运行。`apps/electron` 的打包脚本会在 `electron-builder` 前执行 `bun run sync:runtime-deps`，把下列依赖及其运行时闭包复制到应用目录：
 
-- `@anthropic-ai/claude-agent-sdk`（包含按平台分发的 Claude native binary）
 - `@earendil-works/pi-coding-agent`、`pi-agent-core`、`pi-ai`
 - Pi 运行时所需的原生模块和 `pdfjs-dist`
 

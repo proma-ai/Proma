@@ -8,12 +8,12 @@
  * 照搬 conversation-manager.ts 的模式。
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
+import { readFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, createReadStream, createWriteStream, type WriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { writeJsonFileAtomic, writeTextFileAtomic, readJsonFileSafe } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { rmSyncWithRetry, renameWithRetry } from './fs-retry'
-import { join, resolve, dirname, isAbsolute, relative, sep } from 'node:path'
+import { join } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
@@ -25,19 +25,10 @@ import {
 import {
   getAgentWorkspace,
   getProjectFilesPath,
-  getWorkspaceAutoMemoryDir,
   listAgentWorkspaces,
 } from './agent-workspace-manager'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { getSettings } from './settings-service'
-import { applyClaudeSdkAttributionSettings, isGitAttributionEnabled } from './agent-git-attribution'
-import { removePromaAutoCompactSettings } from './agent-auto-compact-settings'
-
-// 在模块加载时一次性设置 SDK 配置目录，避免在 forkSession 等异步调用中临时修改/恢复
-// process.env 导致的并发安全问题（异步操作的 await 间隙其他代码可能读到错误值）
-if (!process.env.CLAUDE_CONFIG_DIR) {
-  process.env.CLAUDE_CONFIG_DIR = getSdkConfigDir()
-}
 import type {
   AgentSessionMeta,
   AgentMessage,
@@ -47,7 +38,6 @@ import type {
   AgentMessageSearchResult,
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
-  AgentRuntime,
   AgentCwdMode,
 } from '@proma/shared'
 import { migratePermissionMode } from '@proma/shared'
@@ -70,8 +60,8 @@ interface AgentSessionsIndex {
   openAIThinkingDefaultEnabledMigrationCompleted?: boolean
 }
 
-/** 当前索引版本 */
-const INDEX_VERSION = 1
+/** 当前索引版本：v2 将 Claude runtime 退役为 Pi-only。 */
+const INDEX_VERSION = 2
 
 /**
  * 会话引用最大返回数。
@@ -174,6 +164,40 @@ function migrateLegacyOpenAIThinkingDefault(index: AgentSessionsIndex): boolean 
 }
 
 /**
+ * Claude runtime 已退役。历史 transcript 仍由 Proma JSONL 展示，但 Claude session
+ * artifact 不能交给 Pi SessionManager 恢复，否则会被误识别为 Pi JSONL。
+ */
+function migrateRetiredClaudeRuntime(index: AgentSessionsIndex): boolean {
+  let changed = false
+  const treatMissingRuntimeAsLegacy = index.version < INDEX_VERSION
+  for (const session of index.sessions) {
+    const raw = session as AgentSessionMeta & { agentRuntime?: unknown }
+    const runtime = raw.agentRuntime
+
+    // Pi records written by the previous dual-runtime version keep their artifact.
+    if (runtime === 'pi') {
+      delete raw.agentRuntime
+      changed = true
+      continue
+    }
+    if (session.legacyTranscript?.sourceRuntime === 'claude') continue
+    // New Pi-only records intentionally have no runtime field. Only pre-v2 absence means
+    // legacy Claude, whose artifacts are not interoperable with Pi.
+    if (runtime === undefined && !treatMissingRuntimeAsLegacy) continue
+
+    session.legacyTranscript = { sourceRuntime: 'claude', continuationRequired: true }
+    delete raw.agentRuntime
+    session.sdkSessionId = undefined
+    session.piSessionFile = undefined
+    session.piEntryBindings = undefined
+    delete (raw as { forkSourceSdkSessionId?: unknown }).forkSourceSdkSessionId
+    delete (raw as { resumeAtMessageUuid?: unknown }).resumeAtMessageUuid
+    changed = true
+  }
+  return changed
+}
+
+/**
  * 读取会话索引文件
  */
 function readIndex(): AgentSessionsIndex {
@@ -182,13 +206,18 @@ function readIndex(): AgentSessionsIndex {
   if (data) {
     const permissionModeMigrated = migrateLegacyPermissionMode(data)
     const thinkingDefaultMigrated = migrateLegacyOpenAIThinkingDefault(data)
-    if (permissionModeMigrated || thinkingDefaultMigrated) {
+    const retiredClaudeRuntimeMigrated = migrateRetiredClaudeRuntime(data)
+    if (permissionModeMigrated || thinkingDefaultMigrated || retiredClaudeRuntimeMigrated || data.version < INDEX_VERSION) {
+      data.version = INDEX_VERSION
       writeIndex(data)
       if (permissionModeMigrated) {
         console.log('[Agent 会话] 已迁移历史权限模式 auto → bypassPermissions')
       }
       if (thinkingDefaultMigrated) {
         console.log('[Agent 会话] 已将历史 OpenAI 会话的思考深度默认值升级为高')
+      }
+      if (retiredClaudeRuntimeMigrated) {
+        console.log('[Agent 会话] 已将历史 Claude 会话迁移为 Pi transcript-only 会话')
       }
     }
     return data
@@ -256,64 +285,6 @@ export function resolveAgentWorkbenchDir(
 }
 
 /**
- * 确保 Claude runtime 的 Proma 会话 sidecar 配置存在。
- *
- * Claude 不能依赖 project settings source；此文件会由 adapter 通过 SDK `settings` 选项显式加载。
- * 新会话的计划目录相对于项目根设置，历史会话保留原先相对于私有 workbench 的 `.context` 语义。
- */
-export function ensureClaudeSessionSettings(workspaceId: string, sessionId: string): string | undefined {
-  const workspace = getAgentWorkspace(workspaceId)
-  if (!workspace) return undefined
-
-  const sessionDir = getAgentSessionWorkspacePath(workspace.slug, sessionId)
-  const sessionMeta = getAgentSessionMeta(sessionId)
-  const agentCwdMode = getAgentCwdMode(sessionMeta)
-  const claudeDir = join(sessionDir, '.claude')
-  if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true })
-
-  const settingsPath = join(claudeDir, 'settings.json')
-  let sdkSettings: Record<string, unknown> = {}
-  try {
-    sdkSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-  } catch { /* 文件不存在或解析失败 */ }
-
-  let needsWrite = false
-  const privatePlansDir = join(sessionDir, '.context', 'plan')
-  if (!existsSync(privatePlansDir)) mkdirSync(privatePlansDir, { recursive: true })
-  const agentCwd = resolveAgentCwd(workspace, sessionId, agentCwdMode) ?? sessionDir
-  const plansDirectory = agentCwdMode === 'project'
-    ? relative(agentCwd, privatePlansDir) || '.'
-    : '.context'
-  if (sdkSettings.plansDirectory !== plansDirectory) {
-    sdkSettings.plansDirectory = plansDirectory
-    needsWrite = true
-  }
-  if (sdkSettings.skipWebFetchPreflight !== true) {
-    sdkSettings.skipWebFetchPreflight = true
-    needsWrite = true
-  }
-  const autoMemoryDirectory = getWorkspaceAutoMemoryDir(workspace.slug)
-  if (sdkSettings.autoMemoryDirectory !== autoMemoryDirectory) {
-    sdkSettings.autoMemoryDirectory = autoMemoryDirectory
-    needsWrite = true
-  }
-  if (removePromaAutoCompactSettings(sdkSettings)) {
-    needsWrite = true
-  }
-  if (applyClaudeSdkAttributionSettings(
-    sdkSettings,
-    isGitAttributionEnabled(getSettings().gitAttributionEnabled),
-  )) {
-    needsWrite = true
-  }
-  if (needsWrite) {
-    writeFileSync(settingsPath, JSON.stringify(sdkSettings, null, 2))
-  }
-
-  return settingsPath
-}
-
-/**
  * 创建新会话
  */
 export function createAgentSession(
@@ -321,7 +292,6 @@ export function createAgentSession(
   channelId?: string,
   workspaceId?: string,
   modelId?: string,
-  agentRuntime: AgentRuntime = 'pi',
   agentCwdMode?: AgentCwdMode,
 ): AgentSessionMeta {
   const index = readIndex()
@@ -337,7 +307,6 @@ export function createAgentSession(
     modelId,
     workspaceId,
     agentCwdMode: workspaceId ? agentCwdMode ?? 'project' : undefined,
-    agentRuntime,
     // 新会话继承已持久化的全局思考偏好，之后仍可按会话单独调整。
     reasoningLevel: defaultThinkingLevel,
     createdAt: now,
@@ -355,11 +324,6 @@ export function createAgentSession(
     const ws = getAgentWorkspace(workspaceId)
     if (ws) {
       const sessionDir = getAgentSessionWorkspacePath(ws.slug, meta.id)
-
-      // 仅 Claude runtime 需要此 SDK 配置；本地项目同样放在 Proma sidecar，避免污染用户项目根目录。
-      if (agentRuntime === 'claude') {
-        ensureClaudeSessionSettings(workspaceId, meta.id)
-      }
 
       // .context 是 Proma 的会话工作台，本地项目同样需要。
       const contextDir = join(sessionDir, '.context')
@@ -522,7 +486,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'agentRuntime' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'pinned' | 'starred' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'forkSourceSdkSessionId' | 'resumeAtMessageUuid' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'pinned' | 'starred' | 'archived' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -598,47 +562,6 @@ export function deleteAgentSession(id: string): void {
   // 清理 Nano Banana 生图历史
   clearNanoBananaAgentHistory(id)
 
-  // 清理 SDK 关联数据（file-history 和 projects 下的 session JSONL）
-  const sdkSessionIds = [removed.sdkSessionId, removed.forkSourceSdkSessionId].filter(Boolean) as string[]
-  if (sdkSessionIds.length > 0) {
-    const sdkConfigDir = getSdkConfigDir()
-
-    const fileHistoryDir = join(sdkConfigDir, 'file-history')
-    for (const sid of sdkSessionIds) {
-      const histDir = join(fileHistoryDir, sid)
-      if (existsSync(histDir)) {
-        try {
-          rmSyncWithRetry(histDir, { recursive: true, force: true })
-          console.log(`[Agent 会话] 已清理 file-history: ${sid}`)
-        } catch (e) {
-          console.warn(`[Agent 会话] 清理 file-history 失败 (${sid}):`, e)
-        }
-      }
-    }
-
-    const projectsDir = join(sdkConfigDir, 'projects')
-    if (existsSync(projectsDir)) {
-      try {
-        for (const hashDir of readdirSync(projectsDir)) {
-          const projPath = join(projectsDir, hashDir)
-          for (const sid of sdkSessionIds) {
-            const sessionFile = join(projPath, `${sid}.jsonl`)
-            if (existsSync(sessionFile)) {
-              try {
-                unlinkSync(sessionFile)
-                console.log(`[Agent 会话] 已清理 SDK session 文件: ${sessionFile}`)
-              } catch (e) {
-                console.warn('[Agent 会话] 清理 SDK session 文件失败:', e)
-              }
-            }
-          }
-          try {
-            if (readdirSync(projPath).length === 0) rmSyncWithRetry(projPath, { recursive: true })
-          } catch { /* ignore */ }
-        }
-      } catch { /* ignore */ }
-    }
-  }
 }
 
 /**
@@ -704,7 +627,7 @@ function moveSessionWorkspaceDir(session: AgentSessionMeta, targetWorkspaceSlug:
  * 1. 验证会话和目标工作区存在
  * 2. 收集目标会话及其委派子会话
  * 3. 移动会话工作目录到目标工作区
- * 4. 更新元数据（workspaceId + 清空 sdkSessionId）
+ * 4. 更新元数据，并清空与旧 cwd 绑定的 Pi artifact / entry bindings
  * 5. JSONL 消息文件保持原位（全局目录）
  */
 export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: string): AgentSessionMeta {
@@ -740,7 +663,10 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
     const updated: AgentSessionMeta = {
       ...current,
       workspaceId: targetWorkspaceId,
-      sdkSessionId: undefined, // SDK 上下文与工作区 cwd 绑定，必须清空
+      // Pi artifact 与 entry bindings 都以原 cwd 为根；跨工作区复用会造成错误 resume/fork/rewind。
+      sdkSessionId: undefined,
+      piSessionFile: undefined,
+      piEntryBindings: undefined,
       updatedAt: now,
     }
     index.sessions[i] = updated
@@ -794,182 +720,17 @@ export function migrateChatToAgentSession(conversationId: string, agentSessionId
 }
 
 /**
- * 分叉 Agent 会话（SDK 原生 fork）
+ * 分叉 Pi Agent 会话。
  *
- * 直接调用 SDK 的 forkSession() 独立函数完成 JSONL 复制和 UUID 重映射，
- * 新会话立即获得 sdkSessionId，无需延迟到首次发消息。
- *
- * forkSourceDir 记录源会话的工作目录，仅作为元数据参考保留。
- * SDK session JSONL 已在 fork 创建时复制到新会话的 project-hash 目录下，
- * orchestrator 无需在运行时切换 cwd。
- *
- * process.env.CLAUDE_CONFIG_DIR 已在模块加载时设置，无需在此处临时修改。
- *
- * @returns 新创建的会话元数据
+ * 退役 Claude transcript 仅可阅读，不能映射为 Pi session artifact 后续执行。
  */
 export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSessionMeta> {
-  const { sessionId, upToMessageUuid } = input
-
-  // 1. 获取源会话元数据
-  const sourceMeta = getAgentSessionMeta(sessionId)
-  if (!sourceMeta) {
-    throw new Error(`源 Agent 会话不存在: ${sessionId}`)
+  const sourceMeta = getAgentSessionMeta(input.sessionId)
+  if (!sourceMeta) throw new Error(`源 Agent 会话不存在: ${input.sessionId}`)
+  if (sourceMeta.legacyTranscript) {
+    throw new Error('历史 Claude transcript 为只读，不能分叉；请新建 Pi 会话继续')
   }
-
-  if (!sourceMeta.sdkSessionId) {
-    throw new Error('该会话没有 SDK session，无法分叉')
-  }
-
-  if (sourceMeta.agentRuntime === 'pi') {
-    return forkPiAgentSession(sourceMeta, input)
-  }
-
-  const forkModelId = input.modelId !== undefined
-    ? assertEnabledModelForChannel({
-        channelId: sourceMeta.channelId,
-        modelId: input.modelId,
-        purpose: '分叉 Agent 会话',
-      })
-    : sourceMeta.modelId
-
-  // 2. 确定源会话的 Agent cwd。fork 必须继承源会话的持久化 cwd 语义。
-  // sidecar 工作台单独解析，fork 时仍需复制其中的 .context 等会话临时文件。
-  const workspace = sourceMeta.workspaceId ? getAgentWorkspace(sourceMeta.workspaceId) : undefined
-  const sourceCwdMode = getAgentCwdMode(sourceMeta)
-  const sourceDir = resolveAgentCwd(workspace, sessionId, sourceCwdMode)
-  const sourceWorkbenchDir = resolveAgentWorkbenchDir(workspace, sessionId)
-
-  // 2.5 校验目标消息并确定其所属的 SDK session ID
-  // - 当会话经历过 "session not found" 恢复后，sdkSessionId 会被替换为新的，
-  //   但旧消息仍保留在 Proma JSONL 中，其 session_id 指向旧的 SDK session。
-  // - 若目标消息是 sub-agent 输出（parent_tool_use_id 非空），SDK forkSession
-  //   会过滤掉 sidechain 后再查 upToMessageId，必然报 "not found"，
-  //   这里自动回溯到最近的主线 assistant uuid。
-  let forkSourceSdkSessionId = sourceMeta.sdkSessionId
-  let effectiveUpToMessageUuid = upToMessageUuid
-  if (upToMessageUuid) {
-    const forkTarget = await resolveForkTargetFromStoredMessages(sessionId, upToMessageUuid)
-    effectiveUpToMessageUuid = forkTarget.effectiveUpToMessageUuid
-
-    if (forkTarget.usedSidechainFallback) {
-      console.log(
-        `[Agent 会话] fork 目标消息 ${upToMessageUuid} 属于 sub-agent，自动回溯到主线消息 ${effectiveUpToMessageUuid}`,
-      )
-    }
-
-    if (forkTarget.effectiveSdkSessionId && forkTarget.effectiveSdkSessionId !== sourceMeta.sdkSessionId) {
-      console.log(
-        `[Agent 会话] fork 目标消息属于旧 SDK session ${forkTarget.effectiveSdkSessionId}（当前为 ${sourceMeta.sdkSessionId}），使用消息所属 session 进行 fork`,
-      )
-      forkSourceSdkSessionId = forkTarget.effectiveSdkSessionId
-    }
-  }
-
-  // 3. 调用 SDK 原生 forkSession
-  // process.env.CLAUDE_CONFIG_DIR 已在模块加载时设置，SDK 会自动读取
-  const sdk = await import('@anthropic-ai/claude-agent-sdk')
-  let forkResult: Awaited<ReturnType<typeof sdk.forkSession>>
-  try {
-    forkResult = await sdk.forkSession(forkSourceSdkSessionId, {
-      upToMessageId: effectiveUpToMessageUuid,
-      dir: sourceDir,
-    })
-  } catch (err) {
-    // 指定 dir 失败时，让 SDK 自动搜索所有项目目录
-    if (sourceDir) {
-      console.warn(`[Agent 会话] forkSession 指定 dir 失败，改用全局搜索:`, err)
-      forkResult = await sdk.forkSession(forkSourceSdkSessionId, {
-        upToMessageId: effectiveUpToMessageUuid,
-      })
-    } else {
-      throw err
-    }
-  }
-
-  // 4. 创建 Proma 新会话，立即设置 sdkSessionId
-  const forkTitle = `${sourceMeta.title} (fork)`
-  const newMeta = createAgentSession(
-    forkTitle,
-    sourceMeta.channelId,
-    sourceMeta.workspaceId,
-    forkModelId,
-    'claude',
-    sourceCwdMode,
-  )
-
-  updateAgentSessionMeta(newMeta.id, {
-    sdkSessionId: forkResult.sessionId,
-    forkSourceDir: sourceDir,
-    forkSourceSdkSessionId: forkSourceSdkSessionId,
-  })
-  // 同步返回值（updateAgentSessionMeta 已写入磁盘，这里让调用方拿到最新值）
-  newMeta.sdkSessionId = forkResult.sessionId
-  newMeta.forkSourceDir = sourceDir
-  newMeta.forkSourceSdkSessionId = forkSourceSdkSessionId
-
-  // 4.4 计算 fork 目标的 Agent cwd 与 sidecar 工作台目录。
-  const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode)
-  const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)
-
-  // 4.5 仅在源、目标 cwd 不同的历史会话 fork 场景中复制 SDK session JSONL。
-  // SDK forkSession() 在源 cwd 的 project-hash 下创建 JSONL（如 projects/<hash-of-sourceDir>/<newId>.jsonl），
-  // 但历史会话的 fork cwd 可能不同，resume 时 SDK 会找不到。
-  // 这里直接将 JSONL 复制到 fork 目标 cwd 的 project-hash 下，让后续每轮 resume 都能直接命中。
-  // 同时把 JSONL 内容中所有源目录路径改写为目标目录路径，避免历史中的绝对路径误导 Claude
-  // 继续在源目录下读写文件。
-  // 统一项目根后的新会话两端 cwd 相同，forkSession 已经在正确的共享 project-hash 中创建文件，
-  // 不能再次复制到同一路径，否则会在读源文件前将其截断。
-  if (sourceDir && destDir && sourceDir !== destDir) {
-    const sourceJsonl = findSdkSessionJsonl(forkResult.sessionId)
-    if (sourceJsonl) {
-      // SDK 使用简单的字符替换计算 project-hash：path.replace(/[^a-zA-Z0-9]/g, '-')
-      const destProjectHash = destDir.replace(/[^a-zA-Z0-9]/g, '-')
-      const sdkProjectsDir = join(getSdkConfigDir(), 'projects', destProjectHash)
-      if (!existsSync(sdkProjectsDir)) mkdirSync(sdkProjectsDir, { recursive: true })
-      const destJsonl = join(sdkProjectsDir, `${forkResult.sessionId}.jsonl`)
-      try {
-        const copiedLines = await copyTextFileWithPathRewrite(sourceJsonl, destJsonl, sourceDir, destDir)
-        console.log(`[Agent 会话] 已将 SDK session JSONL 复制到 fork 目标目录并改写路径: ${destJsonl} (${copiedLines} 行)`)
-      } catch (err) {
-        console.warn(`[Agent 会话] 复制 SDK session JSONL 失败，fork 后首轮可能触发上下文回填:`, err)
-      }
-    } else {
-      console.warn(`[Agent 会话] 未找到 SDK session JSONL (${forkResult.sessionId})，fork 后首轮可能触发上下文回填`)
-    }
-  }
-
-  // 5. 复制源会话 sidecar 工作台文件到新会话目录；绝不复制本地项目根。
-  // 保留 .context/，但跳过依赖、构建产物和 Git 元数据，避免 fork 点击时同步复制巨量目录拖垮主进程。
-  // .context/ 必须保留 — Proma 约定 .context/note.md、todo.md、plan/ 等是会话上下文，
-  // 如果不复制，fork 后这些参考资料会丢失或被 Claude 误回源目录读取。
-  if (sourceWorkbenchDir && destWorkbenchDir) {
-    try {
-      const copyResult = copyForkWorkspaceFiles(sourceWorkbenchDir, destWorkbenchDir)
-      console.log(
-        `[Agent 会话] 已复制工作台文件: ${sourceWorkbenchDir} → ${destWorkbenchDir} `
-        + `(${copyResult.copiedCount} 个条目, 跳过 ${copyResult.skippedCount} 个, 失败 ${copyResult.failedCount} 个)`,
-      )
-    } catch (err) {
-      console.warn(`[Agent 会话] 复制工作台文件失败:`, err)
-    }
-  }
-
-  // 6. 复制截断后的 SDKMessages 到新会话的 JSONL（用于 UI 展示历史）
-  // 同时改写消息中所有源目录绝对路径为目标目录路径 — 否则 Claude 在历史里看到的所有
-  // Read/Edit/Bash 工具调用都指向源会话目录，会继续在源目录而非新 cwd 下操作文件。
-  //
-  // 注意：UI 截断点用原始 upToMessageUuid，保留用户实际看到的所有内容（包括 sub-agent
-  // 过程消息），与 SDK forkSession 用 effectiveUpToMessageUuid（主线 uuid）解耦。
-  const copiedMessages = await copyForkStoredSDKMessages({
-    sourceSessionId: sessionId,
-    destSessionId: newMeta.id,
-    upToMessageUuid,
-    sourceDir,
-    destDir,
-  })
-
-  console.log(`[Agent 会话] 分叉会话已创建（SDK 原生 fork）: ${sourceMeta.title} → ${forkTitle} (${copiedMessages} 条消息, sdkSessionId=${forkResult.sessionId})`)
-  return newMeta
+  return forkPiAgentSession(sourceMeta, input)
 }
 
 /**
@@ -992,7 +753,7 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
   const sourceCwdMode = getAgentCwdMode(sourceMeta)
   const sourceDir = resolveAgentCwd(workspace, sourceMeta.id, sourceCwdMode)
   const sourceWorkbenchDir = resolveAgentWorkbenchDir(workspace, sourceMeta.id)
-  const newMeta = createAgentSession(`${sourceMeta.title} (fork)`, sourceMeta.channelId, sourceMeta.workspaceId, forkModelId, 'pi', sourceCwdMode)
+  const newMeta = createAgentSession(`${sourceMeta.title} (fork)`, sourceMeta.channelId, sourceMeta.workspaceId, forkModelId, sourceCwdMode)
   const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode)
   const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)
 
@@ -1034,13 +795,29 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
   }
 }
 
-/** 将当前 Pi 会话切换到指定 assistant turn 的新 branch artifact（持久化回退）。 */
-export async function rewindPiAgentSession(sessionId: string, assistantMessageUuid: string): Promise<void> {
+/**
+ * 将当前 Pi 会话切换到指定 assistant turn 的新 branch artifact（持久化回退）。
+ *
+ * Proma JSONL 和 Pi branch artifact 是两个事实源：先完整校验 JSONL，再创建 branch；
+ * JSONL 写入成功后才提交 metadata。metadata 写入失败时会恢复原 JSONL，避免两边分叉。
+ */
+export async function rewindPiAgentSession(sessionId: string, assistantMessageUuid: string): Promise<number> {
   const meta = getAgentSessionMeta(sessionId)
-  if (!meta || meta.agentRuntime !== 'pi') throw new Error('不是 Pi Agent 会话')
+  if (!meta) throw new Error('Agent 会话不存在')
+  if (meta.legacyTranscript) throw new Error('历史 Claude transcript 为只读，不能回退；请新建 Pi 会话继续')
   const entryId = meta.piEntryBindings?.[assistantMessageUuid]
   if (!entryId) throw new Error('该 Pi 历史消息尚无 entry ID 映射，无法安全回退')
   if (!meta.piSessionFile || !existsSync(meta.piSessionFile)) throw new Error('未找到 Pi session artifact，无法安全回退')
+
+  const filePath = getAgentSessionMessagesPath(sessionId)
+  if (!existsSync(filePath)) throw new Error(`[Agent 会话] 截断失败: 会话消息文件不存在, sessionId=${sessionId}`)
+  const originalContent = readFileSync(filePath, 'utf-8')
+  const originalMessages = parseJsonlStrict<unknown>(originalContent.split('\n').filter((line) => line.trim()), `截断读取 SDKMessage (${sessionId})`).map(normalizePersistedSDKMessage)
+  const cutIndex = originalMessages.findIndex((message) => 'uuid' in message && (message as { uuid?: string }).uuid === assistantMessageUuid)
+  if (cutIndex < 0) throw new Error(`[Agent 会话] 截断失败: 未找到 uuid=${assistantMessageUuid}, sessionId=${sessionId}`)
+  const kept = originalMessages.slice(0, cutIndex + 1)
+  const truncatedContent = kept.map((message) => JSON.stringify(message)).join('\n') + (kept.length > 0 ? '\n' : '')
+
   const workspace = meta.workspaceId ? getAgentWorkspace(meta.workspaceId) : undefined
   const cwd = resolveAgentCwd(workspace, meta.id, meta.agentCwdMode) ?? process.cwd()
   const sdk = await import('@earendil-works/pi-coding-agent')
@@ -1051,83 +828,21 @@ export async function rewindPiAgentSession(sessionId: string, assistantMessageUu
   const retainedBindings = Object.fromEntries(
     Object.entries(meta.piEntryBindings ?? {}).filter(([, mappedEntryId]) => Boolean(rewindManager.getEntry(mappedEntryId))),
   )
-  updateAgentSessionMeta(sessionId, {
-    sdkSessionId: rewindManager.getSessionId(),
-    piSessionFile: branchFile,
-    piEntryBindings: retainedBindings,
-  })
-}
 
-interface ForkStoredMessageRef {
-  uuid: string
-  sessionId?: string
-}
-
-interface ForkTargetResolution {
-  effectiveUpToMessageUuid: string
-  effectiveSdkSessionId?: string
-  usedSidechainFallback: boolean
-}
-
-async function resolveForkTargetFromStoredMessages(
-  sessionId: string,
-  upToMessageUuid: string,
-): Promise<ForkTargetResolution> {
-  const filePath = getAgentSessionMessagesPath(sessionId)
-  if (!existsSync(filePath)) {
-    throw new Error('未在会话历史中找到指定的消息，可能消息已被清理或截断')
+  writeTextFileAtomic(filePath, truncatedContent)
+  try {
+    updateAgentSessionMeta(sessionId, {
+      sdkSessionId: rewindManager.getSessionId(),
+      piSessionFile: branchFile,
+      piEntryBindings: retainedBindings,
+    })
+  } catch (error) {
+    try { writeTextFileAtomic(filePath, originalContent) } catch { /* 保留原始 metadata 错误 */ }
+    throw error
   }
 
-  let lastMainlineAssistant: ForkStoredMessageRef | undefined
-  let target: (ForkStoredMessageRef & {
-    isSidechain: boolean
-    fallbackMainline?: ForkStoredMessageRef
-  }) | undefined
-
-  for await (const msg of readStoredSDKMessages(filePath)) {
-    const uuid = getStoredMessageUuid(msg)
-    const isMainlineAssistant = msg.type === 'assistant'
-      && !!uuid
-      && !((msg as { parent_tool_use_id?: string | null }).parent_tool_use_id)
-
-    if (uuid === upToMessageUuid) {
-      target = {
-        uuid,
-        sessionId: (msg as { session_id?: string }).session_id,
-        isSidechain: msg.type === 'assistant'
-          && Boolean((msg as { parent_tool_use_id?: string | null }).parent_tool_use_id),
-        fallbackMainline: lastMainlineAssistant,
-      }
-    }
-
-    if (isMainlineAssistant) {
-      lastMainlineAssistant = {
-        uuid,
-        sessionId: (msg as { session_id?: string }).session_id,
-      }
-    }
-  }
-
-  if (!target) {
-    throw new Error('未在会话历史中找到指定的消息，可能消息已被清理或截断')
-  }
-
-  if (target.isSidechain) {
-    if (!target.fallbackMainline) {
-      throw new Error('选中的是子代理执行过程中的消息，且向前找不到可分叉的主对话消息')
-    }
-    return {
-      effectiveUpToMessageUuid: target.fallbackMainline.uuid,
-      effectiveSdkSessionId: target.fallbackMainline.sessionId,
-      usedSidechainFallback: true,
-    }
-  }
-
-  return {
-    effectiveUpToMessageUuid: target.uuid,
-    effectiveSdkSessionId: target.sessionId,
-    usedSidechainFallback: false,
-  }
+  console.log(`[Agent 会话] Pi 会话已回退: sessionId=${sessionId}, 保留 ${kept.length}/${originalMessages.length} 条`)
+  return kept.length
 }
 
 interface CopyForkStoredSDKMessagesInput {
@@ -1214,33 +929,6 @@ function serializeSDKMessageForStorage(
     console.warn(`[Agent 会话] 消息截断后仍超限 (${(sanitized.length / 1024).toFixed(0)}K chars)`)
   }
   return sanitized
-}
-
-async function copyTextFileWithPathRewrite(
-  sourcePath: string,
-  destPath: string,
-  sourceDir: string,
-  destDir: string,
-): Promise<number> {
-  const rl = createInterface({
-    input: createReadStream(sourcePath),
-    crlfDelay: Infinity,
-  })
-  const out = createWriteStream(destPath, { flags: 'w', encoding: 'utf-8' })
-  let lineCount = 0
-
-  try {
-    for await (const line of rl) {
-      await writeJsonlLine(out, rewriteSourceToDest(line, sourceDir, destDir))
-      lineCount += 1
-    }
-    await endWriteStream(out)
-  } catch (err) {
-    out.destroy()
-    throw err
-  }
-
-  return lineCount
 }
 
 async function writeJsonlLine(stream: WriteStream, line: string): Promise<void> {
@@ -1340,366 +1028,6 @@ export function removeSDKErrorMessage(id: string, errorUuid: string): boolean {
   writeTextFileAtomic(filePath, content)
   console.log(`[Agent 会话] 已删除重试前错误: sessionId=${id}, uuid=${errorUuid}`)
   return true
-}
-
-/**
- * 从 SDK session JSONL 中查找指定 assistant message 之后最近的 user message UUID
- *
- * SDK session JSONL（~/.proma/sdk-config/projects/...）中的消息都带有 uuid，
- * 但 Proma 自己构造的 user message 没有 uuid。此函数直接读取 SDK 的 JSONL
- * 来解析 rewindFiles 所需的 user message UUID。
- *
- * 对于 fork 会话：Proma JSONL 中的 UUID 来自**源会话**（fork 时直接复制），
- * 而 forked SDK JSONL 中的 UUID 已被重映射。因此 fork 会话需要搜索**源**
- * SDK JSONL 来匹配 assistant UUID。通过 forkSourceSdkSessionId 参数指定。
- *
- * @param sdkSessionId SDK session UUID
- * @param assistantMessageUuid 要回退到的 assistant message UUID
- * @param projectDir SDK 项目目录路径（session 运行时的 cwd）
- * @param forkSourceSdkSessionId 源会话 SDK session ID（fork 会话时传入）
- * @returns user message UUID，找不到时返回 undefined
- */
-export function resolveUserUuidFromSDK(
-  sdkSessionId: string,
-  assistantMessageUuid: string,
-  projectDir?: string,
-  forkSourceSdkSessionId?: string,
-): string | undefined {
-  // 优先搜索当前 session JSONL
-  let sessionFilePath = findSdkSessionJsonl(sdkSessionId, projectDir)
-
-  // 当前 session JSONL 中未找到 assistant UUID（作为消息 .uuid 字段）时，尝试源会话（fork 场景）
-  let usingSourceSession = false
-  if (sessionFilePath && forkSourceSdkSessionId) {
-    try {
-      const lines = readFileSync(sessionFilePath, 'utf-8').split('\n').filter(Boolean)
-      const hasUuidAsField = lines.some((line) => {
-        try {
-          const m = JSON.parse(line)
-          return m.uuid === assistantMessageUuid
-        } catch { return false }
-      })
-      if (!hasUuidAsField) {
-        // Proma JSONL 中的 UUID 来自源会话，forked JSONL 中已重映射
-        const sourceFilePath = findSdkSessionJsonl(forkSourceSdkSessionId, projectDir)
-        if (sourceFilePath) {
-          console.log(`[Agent 会话] resolveUserUuid: fork 会话 UUID 不匹配（非 .uuid 字段），切换到源会话 ${forkSourceSdkSessionId}`)
-          sessionFilePath = sourceFilePath
-          usingSourceSession = true
-        }
-      }
-    } catch { /* fall through to main logic */ }
-  } else if (!sessionFilePath && forkSourceSdkSessionId) {
-    // 当前 session JSONL 完全找不到，直接尝试源会话
-    sessionFilePath = findSdkSessionJsonl(forkSourceSdkSessionId, projectDir)
-    if (sessionFilePath) {
-      usingSourceSession = true
-      console.log(`[Agent 会话] resolveUserUuid: 当前 JSONL 未找到，使用源会话 ${forkSourceSdkSessionId}`)
-    }
-  }
-
-  if (!sessionFilePath) {
-    console.warn(`[Agent 会话] 未找到 SDK session JSONL: sdkSessionId=${sdkSessionId}`)
-    return undefined
-  }
-
-  // 读取并解析 SDK JSONL
-  try {
-    const lines = readFileSync(sessionFilePath, 'utf-8').split('\n').filter(Boolean)
-    const messages = parseJsonlStrict<Record<string, unknown>>(lines, `rewind 解析 SDK JSONL (${usingSourceSession ? '源会话' : '当前会话'})`)
-
-    // 找到 assistant message 的位置
-    const assistantIdx = messages.findIndex((m) => m.uuid === assistantMessageUuid)
-    if (assistantIdx < 0) {
-      console.warn(`[Agent 会话] SDK JSONL 中未找到 assistant uuid=${assistantMessageUuid}${usingSourceSession ? ' (源会话)' : ''}`)
-      return undefined
-    }
-
-    // rewindFiles(userMessageId) 恢复文件到该 user message 发送时的快照状态。
-    // 回退到某个 assistant turn = 恢复到"该 turn 完成后"的文件状态
-    // = 下一轮用户消息发送时的快照（因为快照记录的是 user 消息发出时的文件状态，
-    //   而 assistant turn 完成后到下一条 user 消息之间没有其他文件变化）。
-    //
-    // 策略：向后找第一条非 tool_result 的 user message。
-    // 如果找不到（最后一个 turn），返回 '__LAST_TURN__' 特殊标记 —— 因为当前文件系统
-    // 已经是最后一个 turn 完成后的状态，不需要文件回退。
-
-    const isRealUserMessage = (m: Record<string, unknown>): boolean => {
-      if (m.type !== 'user' || !m.uuid) return false
-      const content = (m.message as { content?: Array<{ type: string }> } | undefined)?.content
-      const hasToolResult = Array.isArray(content) && content.some((b) => b.type === 'tool_result')
-      return !hasToolResult
-    }
-
-    // 向后找下一条真实 user message
-    for (let i = assistantIdx + 1; i < messages.length; i++) {
-      const m = messages[i]!
-      if (isRealUserMessage(m)) {
-        console.log(`[Agent 会话] 解析到下一轮 user uuid=${m.uuid} (assistant uuid=${assistantMessageUuid}${usingSourceSession ? ', 源会话' : ''})`)
-        return m.uuid as string
-      }
-    }
-
-    // 最后一个 turn — 当前文件系统已是该 turn 完成后的状态，无需文件回退
-    console.log(`[Agent 会话] 最后一个 turn，无需文件回退 (assistant uuid=${assistantMessageUuid})`)
-    return '__LAST_TURN__'
-  } catch (err) {
-    console.warn(`[Agent 会话] 读取 SDK session JSONL 失败:`, err)
-    return undefined
-  }
-}
-
-/**
- * 在 SDK 项目目录中查找指定 session 的 JSONL 文件。
- *
- * @param sdkSessionId SDK session ID
- * @param projectDir 项目目录（可选，优先在此目录的哈希下查找）
- * @returns JSONL 文件路径，找不到返回 undefined
- */
-function findSdkSessionJsonl(sdkSessionId: string, _projectDir?: string): string | undefined {
-  const sdkConfigDir = getSdkConfigDir()
-
-  // 遍历所有项目目录查找匹配的 session JSONL
-  // （SDK 的目录命名规则与 Proma 不完全一致，直接遍历最可靠）
-  const projectsDir = join(sdkConfigDir, 'projects')
-  if (existsSync(projectsDir)) {
-    for (const dir of readdirSync(projectsDir)) {
-      const candidate = join(projectsDir, dir, `${sdkSessionId}.jsonl`)
-      if (existsSync(candidate)) return candidate
-    }
-  }
-
-  return undefined
-}
-
-/** Node 20–25 均兼容的最小 path API；测试可注入 Windows 路径语义。 */
-type RewindPathApi = {
-  isAbsolute(path: string): boolean
-  resolve(...pathSegments: string[]): string
-  relative(from: string, to: string): string
-  sep: string
-}
-
-const nativeRewindPathApi: RewindPathApi = { isAbsolute, resolve, relative, sep }
-
-/**
- * 将快照中的路径解析为允许目录内的绝对路径。
- * pathApi 参数让 Windows 路径语义可以在非 Windows 平台上独立测试。
- */
-export function resolveSafeRewindPath(
-  filePath: string,
-  cwd: string,
-  attachedDirectories: string[] = [],
-  pathApi: RewindPathApi = nativeRewindPathApi,
-): string | undefined {
-  const resolvedCwd = pathApi.resolve(cwd)
-  const resolvedPath = pathApi.isAbsolute(filePath)
-    ? pathApi.resolve(filePath)
-    : pathApi.resolve(resolvedCwd, filePath)
-  const allowedDirs = [resolvedCwd, ...attachedDirectories.map((dir) => pathApi.resolve(dir))]
-
-  const isAllowed = allowedDirs.some((dir) => {
-    const relativePath = pathApi.relative(dir, resolvedPath)
-    return relativePath === '' || (
-      relativePath !== '..'
-      && !relativePath.startsWith(`..${pathApi.sep}`)
-      && !pathApi.isAbsolute(relativePath)
-    )
-  })
-
-  return isAllowed ? resolvedPath : undefined
-}
-
-/**
- * 直接从 SDK JSONL 的 file-history-snapshot 恢复文件到指定 user message 时的状态。
- *
- * 绕过 SDK 的 rewindFiles API（避免分支加载问题），直接：
- * 1. 读取 SDK JSONL 中的所有 file-history-snapshot
- * 2. 构建目标 user message 时的文件状态表
- * 3. 从 file-history 备份目录恢复文件
- *
- * 对于 fork 出的会话：resolveUserUuidFromSDK 已从源 SDK JSONL 解析出源空间的 user UUID，
- * 因此 userMessageUuid 可能在源 JSONL 中而非 forked JSONL 中。当在当前 JSONL 中找不到
- * 目标 UUID 时，自动 fallback 到源会话的 JSONL 和 file-history 备份。
- *
- * @param sdkSessionId  SDK session ID
- * @param userMessageUuid  目标 user message UUID（恢复到此时的文件状态）
- * @param cwd  会话工作目录（文件的基准路径）
- * @param projectDir  项目目录（可选，用于定位 SDK JSONL）
- * @param forkSourceSdkSessionId  源会话 SDK session ID（可选，fork 会话回退时使用）
- * @param attachedDirectories  附加的外部目录列表（绝对路径，SDK 会将这些目录下的文件以绝对路径记录在 snapshot 中）
- */
-export function rewindFilesFromSnapshot(
-  sdkSessionId: string,
-  userMessageUuid: string,
-  cwd: string,
-  projectDir?: string,
-  forkSourceSdkSessionId?: string,
-  attachedDirectories?: string[],
-): { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } {
-  const sdkConfigDir = getSdkConfigDir()
-
-  // 1. 查找 SDK session JSONL（优先当前 session，找不到目标 UUID 时 fallback 到源会话）
-  let sessionFilePath = findSdkSessionJsonl(sdkSessionId, projectDir)
-  let effectiveSdkSessionId = sdkSessionId
-  let isForkFallback = false
-
-  // 2. 读取所有消息，构建到目标 user message 为止的文件状态
-  try {
-    let messages: Record<string, unknown>[] = []
-    if (sessionFilePath) {
-      const lines = readFileSync(sessionFilePath, 'utf-8').split('\n').filter(Boolean)
-      messages = parseJsonlStrict<Record<string, unknown>>(lines, 'rewindFilesFromSnapshot 解析当前 JSONL')
-    }
-
-    // 找到目标 user message 的位置
-    let targetIdx = messages.findIndex((m) => m.uuid === userMessageUuid)
-
-    // Fork 场景：userMessageUuid 来自源会话（resolveUserUuidFromSDK 已做过 fallback），
-    // 在 forked JSONL 中找不到 → 直接切换到源会话 JSONL
-    if (targetIdx < 0 && forkSourceSdkSessionId) {
-      console.log(`[Agent 会话] rewindFilesFromSnapshot: 目标 UUID 在当前 JSONL 中未找到，切换到源会话 ${forkSourceSdkSessionId}`)
-      const sourceFilePath = findSdkSessionJsonl(forkSourceSdkSessionId, projectDir)
-      if (!sourceFilePath) {
-        return { canRewind: false, error: '未找到源会话 SDK session JSONL（fork 回退需要源会话数据）' }
-      }
-      const sourceLines = readFileSync(sourceFilePath, 'utf-8').split('\n').filter(Boolean)
-      messages = parseJsonlStrict<Record<string, unknown>>(sourceLines, 'rewindFilesFromSnapshot 解析源会话 JSONL')
-      targetIdx = messages.findIndex((m) => m.uuid === userMessageUuid)
-      effectiveSdkSessionId = forkSourceSdkSessionId
-      isForkFallback = true
-
-      if (targetIdx < 0) {
-        return { canRewind: false, error: `源会话 SDK JSONL 中也未找到 user message uuid=${userMessageUuid}` }
-      }
-      console.log(`[Agent 会话] rewindFilesFromSnapshot: 在源会话中找到目标 UUID (idx=${targetIdx})`)
-    } else if (targetIdx < 0) {
-      return { canRewind: false, error: `SDK JSONL 中未找到 user message uuid=${userMessageUuid}` }
-    }
-
-    // 查找目标 user message 对应的 snapshot（isSnapshotUpdate: false 且 messageId 匹配）
-    // SDK 的 file-history-snapshot 有两种：
-    // - isSnapshotUpdate: false — user message 发出时的完整文件追踪状态
-    // - isSnapshotUpdate: true — assistant 工具修改文件前的增量备份
-    // 只使用 user message snapshot 来构建目标时刻的文件状态。
-    const fileState = new Map<string, string | null>()
-    let targetSnapshotFound = false
-
-    for (const m of messages) {
-      if (m.type !== 'file-history-snapshot') continue
-      if (m.isSnapshotUpdate) continue
-      const snapshot = m.snapshot as {
-        messageId?: string
-        trackedFileBackups?: Record<string, { backupFileName: string | null }>
-      } | undefined
-      if (snapshot?.messageId === userMessageUuid && snapshot.trackedFileBackups) {
-        for (const [filePath, info] of Object.entries(snapshot.trackedFileBackups)) {
-          fileState.set(filePath, info.backupFileName)
-        }
-        targetSnapshotFound = true
-      }
-    }
-
-    // 同时收集 target snapshot 对应的增量更新（isSnapshotUpdate: true 且 snapshot.messageId 匹配）
-    // 这些记录了 target user message 那轮 assistant 操作前的文件备份
-    if (targetSnapshotFound) {
-      for (const m of messages) {
-        if (m.type !== 'file-history-snapshot' || !m.isSnapshotUpdate) continue
-        const snapshot = m.snapshot as {
-          messageId?: string
-          trackedFileBackups?: Record<string, { backupFileName: string | null }>
-        } | undefined
-        if (snapshot?.messageId === userMessageUuid && snapshot.trackedFileBackups) {
-          // 增量更新可能记录了更多被追踪的文件，但不覆盖已有状态
-          for (const [filePath, info] of Object.entries(snapshot.trackedFileBackups)) {
-            if (!fileState.has(filePath)) {
-              fileState.set(filePath, info.backupFileName)
-            }
-          }
-        }
-      }
-    }
-
-    // 处理 target 之后新创建的文件（它们在 target 时不存在，需要删除）
-    for (let i = targetIdx + 1; i < messages.length; i++) {
-      const m = messages[i]!
-      if (m.type !== 'file-history-snapshot') continue
-
-      const snapshot = m.snapshot as {
-        trackedFileBackups?: Record<string, { backupFileName: string | null }>
-      } | undefined
-      if (!snapshot?.trackedFileBackups) continue
-
-      for (const [filePath, info] of Object.entries(snapshot.trackedFileBackups)) {
-        // 如果这个文件在 target 时不存在（没被追踪），且 backupFileName 为 null（新创建的），标记删除
-        if (!fileState.has(filePath) && info.backupFileName === null) {
-          fileState.set(filePath, null) // null = 文件应该不存在
-        }
-      }
-    }
-
-    if (fileState.size === 0) {
-      if (!targetSnapshotFound) {
-        console.log(`[Agent 会话] rewindFilesFromSnapshot: 目标消息无文件快照记录`)
-        return { canRewind: false, error: '目标消息无文件快照记录（会话可能在启用文件检查点前创建）' }
-      }
-      console.log(`[Agent 会话] rewindFilesFromSnapshot: 快照存在但无文件变化`)
-      return { canRewind: true, filesChanged: [] }
-    }
-
-    // 3. 恢复文件（fork 会话使用源会话的 file-history 备份）
-    const fileHistoryDir = join(sdkConfigDir, 'file-history', effectiveSdkSessionId)
-    const filesChanged: string[] = []
-
-    for (const [filePath, backupFileName] of fileState) {
-      // SDK 对 cwd 内文件使用相对路径，对 additionalDirectories 内文件使用绝对路径
-      const fullPath = resolveSafeRewindPath(filePath, cwd, attachedDirectories)
-      if (!fullPath) {
-        console.warn(`[Agent 会话] rewindFiles: 拒绝路径越界 ${filePath}`)
-        continue
-      }
-
-      if (backupFileName === null) {
-        // 文件在 target 时不存在 → 删除
-        if (existsSync(fullPath)) {
-          try {
-            unlinkSync(fullPath)
-            filesChanged.push(filePath)
-            console.log(`[Agent 会话] rewindFiles: 删除 ${filePath}`)
-          } catch (err) {
-            console.warn(`[Agent 会话] rewindFiles: 删除失败 ${filePath}:`, err)
-          }
-        }
-      } else {
-        // 文件在 target 时存在 → 用备份恢复
-        const backupPath = resolveSafeRewindPath(backupFileName, fileHistoryDir)
-        if (!backupPath) {
-          console.warn(`[Agent 会话] rewindFiles: 拒绝备份路径越界 ${backupFileName}`)
-          continue
-        }
-        if (!existsSync(backupPath)) {
-          console.warn(`[Agent 会话] rewindFiles: 备份文件不存在 ${backupPath}`)
-          continue
-        }
-        try {
-          const backupContent = readFileSync(backupPath)
-          // 确保目录存在
-          const dir = dirname(fullPath)
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-          writeFileSync(fullPath, backupContent)
-          filesChanged.push(filePath)
-          console.log(`[Agent 会话] rewindFiles: 恢复 ${filePath} ← ${backupFileName}${isForkFallback ? ' (from source session)' : ''}`)
-        } catch (err) {
-          console.warn(`[Agent 会话] rewindFiles: 恢复失败 ${filePath}:`, err)
-        }
-      }
-    }
-
-    console.log(`[Agent 会话] rewindFilesFromSnapshot 完成: ${filesChanged.length} 个文件已恢复${isForkFallback ? ' (fork fallback)' : ''}`)
-    return { canRewind: true, filesChanged }
-  } catch (err) {
-    return { canRewind: false, error: err instanceof Error ? err.message : String(err) }
-  }
 }
 
 /**

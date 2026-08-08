@@ -93,7 +93,7 @@ import { createTray, destroyTray, getTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
-import { hasActiveAgentSessions, stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
+import { hasActiveAgentSessions, stopAllAgents, cleanupAgentRuntimeResources } from './lib/agent-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
@@ -820,9 +820,8 @@ app.on('before-quit', () => {
   // 中止所有活跃的 Agent 和 Chat 子进程
   stopAllAgents()
   stopAllGenerations()
-  // 最后兜底：扫描并强杀所有孤儿 claude-agent-sdk 子进程（Issue #357）
-  // 针对 pidMap 未覆盖、dispose 漏杀等极端场景，确保不遗留残留进程
-  killOrphanedClaudeSubprocesses()
+  // 释放 Pi runtime 资源与关联 MCP 子进程。
+  cleanupAgentRuntimeResources()
   // 清理更新器定时器
   cleanupUpdater()
   // 停止工作区文件监听

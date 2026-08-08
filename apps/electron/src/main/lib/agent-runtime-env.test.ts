@@ -37,7 +37,6 @@ describe('Agent Windows Shell 运行环境', () => {
       shellPath: gitBash.path,
       env: {
         PROMA_WINDOWS_SHELL: 'git-bash',
-        CLAUDE_CODE_SHELL: gitBash.path,
       },
     })
   })
@@ -58,7 +57,6 @@ describe('Agent Windows Shell 运行环境', () => {
       env: {
         PROMA_WINDOWS_SHELL: 'wsl',
         PROMA_WSL_DISTRO: 'Ubuntu-24.04',
-        CLAUDE_CODE_SHELL: 'wsl.exe',
       },
     })
   })

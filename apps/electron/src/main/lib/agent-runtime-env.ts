@@ -128,7 +128,6 @@ function collectWindowsShellEnv(
   if (shellKind === 'wsl' && shellStatus?.wsl.available) {
     const wslCommand = getWslCommandPath(processEnv, pathExists)
     env.PROMA_WINDOWS_SHELL = 'wsl'
-    env.CLAUDE_CODE_SHELL = wslCommand
     env.SHELL = wslCommand
     if (shellStatus.wsl.defaultDistro) {
       env.PROMA_WSL_DISTRO = shellStatus.wsl.defaultDistro
@@ -144,7 +143,6 @@ function collectWindowsShellEnv(
   if (shellKind === 'git-bash' && shellStatus?.gitBash.path) {
     const shellPath = shellStatus.gitBash.path
     env.PROMA_WINDOWS_SHELL = 'git-bash'
-    env.CLAUDE_CODE_SHELL = shellPath
     env.SHELL = shellPath
     return {
       env,

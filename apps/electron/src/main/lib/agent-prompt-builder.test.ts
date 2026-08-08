@@ -32,7 +32,6 @@ beforeAll(async () => {
 
 function buildPrompt(agentCwd: string): string {
   return buildSystemPrompt({
-    agentRuntime: 'pi',
     workspaceName: '示例项目',
     workspaceSlug: 'sample-project',
     sessionId: 'session-1',

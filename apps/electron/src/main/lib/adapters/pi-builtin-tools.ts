@@ -1,19 +1,18 @@
 /**
  * Pi Runtime 内置 MCP 工具桥接层
  *
- * Claude SDK 用 sdk.createSdkMcpServer() + Zod schema 注册 MCP 工具；
  * Pi SDK 用 sdk.defineTool() + TypeBox schema 注册 customTools。
  *
  * 本模块复用底层 service 函数（automation-manager、collaboration 等），
- * 用 Pi ToolDefinition 格式暴露相同的业务能力，避免 Pi runtime 下这些工具缺失。
+ * 用 Pi ToolDefinition 格式暴露业务能力。
  */
 
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
-import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
 import type {
   CreateAutomationInput,
+  PromaPermissionMode,
   UpdateAutomationInput,
 } from '@proma/shared'
 import {
@@ -30,6 +29,7 @@ import {
 import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
+import { buildPiNanoBananaTools } from '../chat-tools/nano-banana-mcp'
 import { getVisionRelayRouteLabel, inspectImageWithVisionRelay, isVisionRelayConfigured, isVisionRelayEligibleForModel } from '../vision-relay-service'
 import {
   listTodos,
@@ -75,9 +75,10 @@ export interface PiBuiltinToolsContext {
   sessionId: string
   channelId: string
   modelId?: string
-  agentRuntime?: AgentRuntime
   workspaceId?: string
   workspaceSlug?: string
+  /** 当前 Agent 工作目录；生图产物保存于此，参考图相对路径也以此解析。 */
+  agentCwd?: string
   /** 图片外发前必须校验在这些已授权目录内。 */
   allowedRoots?: string[]
   permissionMode?: PromaPermissionMode
@@ -220,7 +221,6 @@ function summarizeAutomation(a: import('@proma/shared').Automation, includeHisto
     scheduledAt: a.scheduledAt,
     maxRuns: a.maxRuns,
     runCount: a.runCount ?? 0,
-    agentRuntime: a.agentRuntime ?? 'claude',
     completedAt: a.completedAt,
     sessionMode: a.sessionMode,
     workspaceId: a.workspaceId,
@@ -276,9 +276,6 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.maxRuns !== undefined && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
     throw new Error(`非法的 maxRuns: ${String(input.maxRuns)}（应为 ≥1 的整数）`)
-  }
-  if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
-    throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)
@@ -340,7 +337,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填' })),
         maxRuns: Type.Optional(Type.Number({ description: '最大运行次数上限；达到后任务自动停用' })),
         active: Type.Optional(Type.Boolean({ description: '创建后是否启用，默认 true' })),
-        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '运行该任务的 Agent runtime；不传则继承当前会话 runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')], { description: '会话模式' })),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -358,7 +354,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           dayOfMonth: args.dayOfMonth as number | undefined,
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
-          agentRuntime: (args.agentRuntime as AgentRuntime | undefined) ?? ctx.agentRuntime,
           channelId: ctx.channelId,
           modelId: ctx.modelId,
           workspaceId: ctx.workspaceId,
@@ -409,7 +404,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '新的一次性触发时间（毫秒时间戳）' })),
         maxRuns: Type.Optional(Type.Number({ description: '新的最大运行次数上限' })),
         active: Type.Optional(Type.Boolean({ description: '启用或暂停任务' })),
-        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '新的 Agent runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')])),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -428,7 +422,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
           active: args.active as boolean | undefined,
-          agentRuntime: args.agentRuntime as AgentRuntime | undefined,
           sessionMode: args.sessionMode as 'daily' | 'reuse' | undefined,
         }
         if (input.name !== undefined) assertNonBlank(input.name, 'name')
@@ -829,7 +822,7 @@ export async function buildPiBuiltinTools(
     }
   }
 
-  // 任务/日程是 Pi native customTools，Claude runtime 不经此入口，因此天然隔离。
+  // 任务/日程是 Pi native customTools。
   try {
     tools.push(...buildPlanningTools(sdk, ctx))
   } catch (error) {
@@ -849,7 +842,6 @@ export async function buildPiBuiltinTools(
         modelId: ctx.modelId,
         workspaceId: ctx.workspaceId,
         permissionMode: ctx.permissionMode,
-        agentRuntime: ctx.agentRuntime,
         triggeredBy: ctx.triggeredBy,
       })
       tools.push(...collaborationTools as ToolDefinition[])
@@ -865,7 +857,17 @@ export async function buildPiBuiltinTools(
     console.error('[Pi 桥接] 注入视觉助手失败:', error)
   }
 
-  // nano-banana 当前走外部 MCP stdio，不需要 in-process 桥接
+  if (isBuiltinMcpUserEnabled('nano-banana')) {
+    try {
+      tools.push(...buildPiNanoBananaTools(sdk, {
+        sessionId: ctx.sessionId,
+        agentCwd: ctx.agentCwd,
+        allowedRoots: ctx.allowedRoots,
+      }))
+    } catch (error) {
+      console.error('[Pi 桥接] 注入 nano-banana 工具失败:', error)
+    }
+  }
 
   const cloudTools = buildPromaCloudTools(sdk, ctx)
   tools.push(...cloudTools)
