@@ -449,9 +449,7 @@ function NonGitFileList({
                   <FileTypeIcon name={name} isDirectory={false} size={16} />
                   <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
                   {parent && <span className="max-w-[40%] truncate text-[11px] text-muted-foreground">{parent}</span>}
-                  {change.kind === 'created' && (
-                    <span className="shrink-0 rounded-sm bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600 dark:text-orange-400">新建</span>
-                  )}
+                  {change.kind === 'created' && <GitStatusMarker status="untracked" className="ml-2" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="left" className="max-w-[400px] break-all">{change.path}</TooltipContent>

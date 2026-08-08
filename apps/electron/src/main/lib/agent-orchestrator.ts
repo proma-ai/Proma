@@ -48,13 +48,15 @@ import { getAuthToken, tryRefreshAuthToken } from './cloud-auth-service'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
-import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir } from './agent-session-manager'
+import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
+import { buildLocalKnowledgeContext } from './local-knowledge-context'
 import { resolveProjectInstructions } from './project-instruction-resolver'
+import { combinePromaInstructionFiles } from './adapters/pi-resource-loader-overrides'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
 import { buildReferencedPlanningPrompt } from './planning-reference-context'
 import { permissionService } from './agent-permission-service'
@@ -251,7 +253,6 @@ export class AgentOrchestrator {
     const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
     for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
       if (!entry.enabled) continue
-      if (name === 'memos-cloud') continue
       const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
       if (type === 'stdio' && entry.command) {
@@ -734,32 +735,10 @@ export class AgentOrchestrator {
       }
     }
 
-    // 1. Windows 平台：检查 Shell 环境可用性
-    if (process.platform === 'win32') {
-      const runtimeStatus = getRuntimeStatus()
-      const shellStatus = runtimeStatus?.shell
+    // Windows 缺少 Git Bash / WSL 时仍允许启动 Pi Agent。
+    // Pi adapter 会移除 Bash 工具并注入基础模式说明；文件工具、对话和本地 Proma 工具不受影响。
 
-      if (shellStatus && !shellStatus.gitBash?.available && !shellStatus.wsl?.available) {
-        reportPreflightError({
-          code: 'windows_shell_missing',
-          title: 'Windows 环境未就绪',
-          message:
-            '需要 Git Bash 或 WSL 才能运行 Agent。建议安装 Git for Windows（自带 Git Bash），安装完成后点「打开环境检测」刷新状态。',
-          details: [
-            `Git Bash: ${shellStatus.gitBash?.error || '未检测到'}`,
-            `WSL: ${shellStatus.wsl?.error || '未检测到'}`,
-          ],
-          actions: [
-            { key: 'e', label: '打开环境检测', action: 'open_environment_check' },
-            { key: 'g', label: '去官方下载 Git', action: 'open_external', payload: 'https://git-scm.com/download/win' },
-          ],
-          canRetry: false,
-        })
-        return
-      }
-    }
-
-    // 2. 获取渠道信息并解密 API Key
+    // 1. 获取渠道信息并解密 API Key
     const channel = getChannelById(channelId)
     if (!channel) {
       reportPreflightError({
@@ -932,7 +911,6 @@ export class AgentOrchestrator {
         workspace = ws
         runtimeEnv.env.PROMA_WORKSPACE_DIR = getAgentWorkspacePath(ws.slug)
         runtimeEnv.env.PROMA_WORKSPACE_SLUG = ws.slug
-        runtimeEnv.env.PROMA_NOWLEDGE_MEM_ENABLED = getWorkspaceMcpConfig(ws.slug).servers['nowledge-mem']?.enabled ? '1' : '0'
         console.log(`[Agent 编排] 使用 ${getAgentCwdMode(sessionMeta)} cwd: ${agentCwd} (${ws.name}/${sessionId})`)
 
 
@@ -980,6 +958,7 @@ export class AgentOrchestrator {
         allowedRoots: allAdditionalDirectories,
         permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
+        windowsShellAvailable: process.platform !== 'win32' || runtimeEnv.shellKind != null,
       })
       piBuiltinTools = builtinMcpResult.tools
       const collaborationAvailable = builtinMcpResult.collaborationAvailable
@@ -1001,6 +980,22 @@ export class AgentOrchestrator {
         workspaceSlug,
         agentCwd,
       })
+      const localRecall = workspaceSlug && workspace && userMessage.trim() !== '/compact'
+        ? buildLocalKnowledgeContext({
+            userMessage,
+            paths: {
+              workspaceRoot: getAgentWorkspacePath(workspaceSlug),
+              autoMemoryDir: getWorkspaceAutoMemoryDir(workspaceSlug),
+              sessionWorkbenchDir: resolveSessionWorkbenchContextDir(
+                workspace,
+                sessionId,
+                getSessionWorkbenchLayout(sessionMeta),
+              ) ?? getAgentSessionWorkspacePath(workspaceSlug, sessionId),
+              projectContextDir: join(getProjectFilesPath(workspaceSlug), '.context'),
+            },
+          })
+        : ''
+      if (localRecall) console.log('[本地记忆] 已注入受预算的本地 recall')
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
@@ -1033,7 +1028,7 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 referenced_planning: ${mentionedTodoIds?.length ?? 0} todos, ${mentionedCalendarEventIds?.length ?? 0} calendar events`)
       }
 
-      const contextualMessage = `${dynamicCtx}\n\n${enrichedMessage}`
+      const contextualMessage = [dynamicCtx, localRecall, enrichedMessage].filter(Boolean).join('\n\n')
 
       const isCompactCommand = userMessage.trim() === '/compact'
       const finalPrompt = isCompactCommand
@@ -1114,7 +1109,7 @@ export class AgentOrchestrator {
       // Plan 模式下允许的只读工具（不包含 Write/Edit/Bash 等写操作）
       const PLAN_MODE_ALLOWED_TOOLS = new Set([
         'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
-        'TodoRead', 'TodoWrite', 'TaskOutput',
+        'TodoRead', 'TaskOutput',
         'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
         'ListMcpResourcesTool', 'ReadMcpResourceTool',
       ])
@@ -1329,11 +1324,29 @@ export class AgentOrchestrator {
             }
           })()
         : undefined
+      const managedWorkspaceInstructionFile = workspaceSlug
+        ? (() => {
+            try {
+              const file = readWorkspaceAgentsMd(workspaceSlug)
+              return file.isText && file.content
+                ? { path: getWorkspaceAgentsMdPath(workspaceSlug), content: file.content }
+                : undefined
+            } catch (error) {
+              console.warn('[工作区指令] 读取 AGENTS.md 失败，已跳过本轮注入:', error)
+              return undefined
+            }
+          })()
+        : undefined
+      const instructionFiles = combinePromaInstructionFiles(
+        managedWorkspaceInstructionFile,
+        projectInstructions?.sources.map(({ path, content }) => ({ path, content })) ?? [],
+      )
       const systemPromptAppend = buildSystemPrompt({
         workspaceName: workspace?.name,
         workspaceSlug,
         sessionId,
         agentCwd,
+        sessionWorkbenchLayout: getSessionWorkbenchLayout(sessionMeta),
         permissionMode: initialPermissionMode,
         collaborationAvailable,
         currentModelId: selectedModelId,
@@ -1416,9 +1429,7 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         canUseTool,
         systemPrompt: systemPromptAppend + buildPiAdditionalDirectoriesPrompt(allAdditionalDirectories),
-        ...(projectInstructions?.sources.length && {
-          projectInstructionFiles: projectInstructions.sources.map(({ path, content }) => ({ path, content })),
-        }),
+        ...(instructionFiles.length > 0 && { projectInstructionFiles: instructionFiles }),
         ...(projectInstructions && {
           projectInstructionScope: {
             projectRoot: projectInstructions.projectRoot,

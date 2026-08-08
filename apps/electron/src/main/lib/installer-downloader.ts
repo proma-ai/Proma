@@ -36,12 +36,12 @@ function getInstallerDir(): string {
  *
  * @param source 安装包元数据
  * @param key 去重键（前端可据此关联进度事件与取消）
- * @param sender 用于推进度事件的窗口（通常是发起下载的 BrowserWindow）
+ * @param sender 可选的进度事件窗口（通常是发起下载的 BrowserWindow）
  */
 export async function downloadInstaller(
   source: InstallerSource,
   key: string,
-  sender: BrowserWindow,
+  sender?: BrowserWindow,
 ): Promise<InstallerDownloadResult> {
   const dir = getInstallerDir()
   await fsp.mkdir(dir, { recursive: true })
@@ -99,7 +99,7 @@ function downloadToFile(
   filePath: string,
   source: InstallerSource,
   key: string,
-  sender: BrowserWindow,
+  sender: BrowserWindow | undefined,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let cancelled = false
@@ -224,8 +224,8 @@ function downloadToFile(
   })
 }
 
-function emitProgress(sender: BrowserWindow, payload: InstallerProgressPayload) {
-  if (sender.isDestroyed()) return
+function emitProgress(sender: BrowserWindow | undefined, payload: InstallerProgressPayload) {
+  if (!sender || sender.isDestroyed()) return
   sender.webContents.send(INSTALLER_IPC_CHANNELS.PROGRESS, payload)
 }
 

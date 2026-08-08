@@ -646,6 +646,9 @@ export type AgentStreamPayload =
  */
 export type AgentCwdMode = 'session' | 'project'
 
+/** 会话私有工作台的文件布局。缺失字段兼容旧版 `.context/` 子目录。 */
+export type SessionWorkbenchLayout = 'legacy-context' | 'root'
+
 /**
  * Agent 会话轻量索引项
  *
@@ -685,6 +688,11 @@ export interface AgentSessionMeta {
    * session workbench cwd。
    */
   agentCwdMode?: AgentCwdMode
+  /**
+   * 会话私有工作台的文件布局。新会话在 workbench 根目录直接存放计划、handoff
+   * 等私有资料；缺失字段的历史会话保留 `.context/` 路径以兼容工具历史。
+   */
+  sessionWorkbenchLayout?: SessionWorkbenchLayout
   /** 是否置顶 */
   pinned?: boolean
   /** 是否已星标（仅用于侧栏快速识别，不影响排序或置顶） */
@@ -1104,9 +1112,14 @@ export interface WorkspaceMemoryFileSummary {
 
 /** 工作区记忆摘要 */
 export interface WorkspaceMemorySummary {
-  /** 工作区级 CLAUDE.md */
-  claudeMd: WorkspaceMemoryFileSummary
-  /** SDK auto memory 目录 */
+  /** 工作区级 AGENTS.md */
+  agentsMd: WorkspaceMemoryFileSummary
+  /** 迁移时发现内容不同的 legacy CLAUDE.md；必须由用户手动合并。 */
+  instructionConflict?: {
+    legacyPath: string
+    agentsPath: string
+  }
+  /** Proma 工作区自动记忆目录 */
   autoMemory: {
     /** 绝对目录路径 */
     directory: string
@@ -1724,10 +1737,10 @@ export const AGENT_IPC_CHANNELS = {
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
   /** 获取工作区记忆摘要 */
   GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
-  /** 读取工作区 CLAUDE.md */
-  READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
-  /** 写入工作区 CLAUDE.md */
-  WRITE_WORKSPACE_CLAUDE_MD: 'agent:write-workspace-claude-md',
+  /** 读取工作区 AGENTS.md */
+  READ_WORKSPACE_AGENTS_MD: 'agent:read-workspace-agents-md',
+  /** 写入工作区 AGENTS.md */
+  WRITE_WORKSPACE_AGENTS_MD: 'agent:write-workspace-agents-md',
   /** 列出工作区 auto memory 文件树 */
   LIST_WORKSPACE_AUTO_MEMORY_FILES: 'agent:list-workspace-auto-memory-files',
   /** 读取工作区 auto memory 文件 */

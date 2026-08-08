@@ -39,6 +39,7 @@ import type {
   AgentSessionReferenceSearchInput,
   AgentSessionReferenceSearchResult,
   AgentCwdMode,
+  SessionWorkbenchLayout,
 } from '@proma/shared'
 import { migratePermissionMode } from '@proma/shared'
 import { getConversationMessages } from './conversation-manager'
@@ -264,6 +265,24 @@ export function getAgentCwdMode(meta?: Pick<AgentSessionMeta, 'agentCwdMode'>): 
   return meta?.agentCwdMode ?? 'session'
 }
 
+/** 缺少标记的历史会话继续使用 `.context/`，避免失效的计划和工具历史路径。 */
+export function getSessionWorkbenchLayout(
+  meta?: Pick<AgentSessionMeta, 'sessionWorkbenchLayout'>,
+): SessionWorkbenchLayout {
+  return meta?.sessionWorkbenchLayout ?? 'legacy-context'
+}
+
+/** 会话私有资料目录；新布局直接使用 workbench 根，旧布局保留 `.context/`。 */
+export function resolveSessionWorkbenchContextDir(
+  workspace: Pick<AgentWorkspace, 'slug'> | undefined,
+  sessionId: string,
+  layout?: SessionWorkbenchLayout,
+): string | undefined {
+  if (!workspace) return undefined
+  const sessionDir = getAgentSessionWorkspacePath(workspace.slug, sessionId)
+  return layout === 'root' ? sessionDir : join(sessionDir, '.context')
+}
+
 /** Agent 运行 cwd 与 Proma 会话 sidecar 工作台目录解析。 */
 export function resolveAgentCwd(
   workspace: Pick<AgentWorkspace, 'slug'> | undefined,
@@ -293,6 +312,7 @@ export function createAgentSession(
   workspaceId?: string,
   modelId?: string,
   agentCwdMode?: AgentCwdMode,
+  sessionWorkbenchLayout?: SessionWorkbenchLayout,
 ): AgentSessionMeta {
   const index = readIndex()
   const now = Date.now()
@@ -307,6 +327,7 @@ export function createAgentSession(
     modelId,
     workspaceId,
     agentCwdMode: workspaceId ? agentCwdMode ?? 'project' : undefined,
+    sessionWorkbenchLayout: workspaceId ? sessionWorkbenchLayout ?? 'root' : undefined,
     // 新会话继承已持久化的全局思考偏好，之后仍可按会话单独调整。
     reasoningLevel: defaultThinkingLevel,
     createdAt: now,
@@ -323,11 +344,9 @@ export function createAgentSession(
   if (workspaceId) {
     const ws = getAgentWorkspace(workspaceId)
     if (ws) {
-      const sessionDir = getAgentSessionWorkspacePath(ws.slug, meta.id)
-
-      // .context 是 Proma 的会话工作台，本地项目同样需要。
-      const contextDir = join(sessionDir, '.context')
-      if (!existsSync(contextDir)) mkdirSync(contextDir, { recursive: true })
+      // sessionDir 已由 getAgentSessionWorkspacePath 创建。新会话将私有资料直接
+      // 放在 workbench 根；计划和附件目录按需创建，避免每个会话都有空 `.context/`。
+      getAgentSessionWorkspacePath(ws.slug, meta.id)
     }
   }
 
@@ -751,9 +770,17 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     : sourceMeta.modelId
   const workspace = sourceMeta.workspaceId ? getAgentWorkspace(sourceMeta.workspaceId) : undefined
   const sourceCwdMode = getAgentCwdMode(sourceMeta)
+  const sourceWorkbenchLayout = getSessionWorkbenchLayout(sourceMeta)
   const sourceDir = resolveAgentCwd(workspace, sourceMeta.id, sourceCwdMode)
   const sourceWorkbenchDir = resolveAgentWorkbenchDir(workspace, sourceMeta.id)
-  const newMeta = createAgentSession(`${sourceMeta.title} (fork)`, sourceMeta.channelId, sourceMeta.workspaceId, forkModelId, sourceCwdMode)
+  const newMeta = createAgentSession(
+    `${sourceMeta.title} (fork)`,
+    sourceMeta.channelId,
+    sourceMeta.workspaceId,
+    forkModelId,
+    sourceCwdMode,
+    sourceWorkbenchLayout,
+  )
   const destDir = resolveAgentCwd(workspace, newMeta.id, newMeta.agentCwdMode)
   const destWorkbenchDir = resolveAgentWorkbenchDir(workspace, newMeta.id)
 

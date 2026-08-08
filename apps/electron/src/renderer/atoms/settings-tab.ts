@@ -8,8 +8,6 @@
  * - tools: Chat 工具配置
  * - appearance: 外观设置
  * - about: 关于
- * - billing: 账单（Cloud 模式）
- * - api: API Key 管理（Cloud 模式）
  */
 
 import { atom } from 'jotai'
@@ -19,7 +17,7 @@ export type SettingsTab =
   | 'general' | 'channels' | 'vision-relay' | 'proxy' | 'appearance' | 'about' | 'onboarding' | 'prompts' | 'tools' | 'bots' | 'tutorial' | 'shortcuts' | 'voice-input' | 'migration' | 'storage'
   // Cloud 模式专属标签页
   | 'billing' | 'api' | 'usage'
-export type ToolSettingsFocus = 'memory' | 'web-search' | 'nano-banana' | 'custom-tools'
+export type ToolSettingsFocus = 'web-search' | 'nano-banana' | 'custom-tools'
 
 /** 当前设置标签页（不持久化，商业版默认显示购买额度） */
 export const settingsTabAtom = atom<SettingsTab>('billing')
