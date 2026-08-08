@@ -31,6 +31,7 @@ import { getAgentSessionMeta, listAgentSessions } from './agent-session-manager'
 import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from './mac-agent-island-native-host'
 import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
+import { getAgentIslandPhasePriority } from './agent-island-priority'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -426,10 +427,7 @@ function isIslandSession(session: InternalSessionSnapshot, now: number): boolean
 }
 
 function attentionScore(session: InternalSessionSnapshot): number {
-  if (session.phase === 'needs-interaction') return 3
-  if (session.phase === 'error') return 2
-  if (session.phase === 'completed') return 1
-  return 0
+  return getAgentIslandPhasePriority(session.phase)
 }
 
 function compareIslandSessions(a: InternalSessionSnapshot, b: InternalSessionSnapshot): number {
