@@ -39,6 +39,7 @@ import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
 import { extractHttpStatusFromErrorText, friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
 import { isSessionNotFoundError } from './error-patterns'
+import { isPromaBillingErrorText } from './proma-billing-error'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
@@ -1558,6 +1559,19 @@ export class AgentOrchestrator {
                 let errorCode = assistantMsg.error.errorType || 'unknown_error'
                 if (isPromptTooLongError(detailedMessage, originalError)) {
                   errorCode = 'prompt_too_long'
+                }
+                // Pi 有时将 Proma 的 402 额度不足错误标为 unknown_error；仅官方渠道以原始错误文本兜底，避免第三方渠道误分类。
+                if (errorCode === 'unknown_error' && channel.provider === 'proma') {
+                  const errorText = [
+                    JSON.stringify(assistantMsg.error),
+                    JSON.stringify(assistantMsg.message?.content ?? []),
+                    detailedMessage,
+                    originalError,
+                  ].join(' ')
+                  if (isPromaBillingErrorText(errorText)) {
+                    errorCode = 'billing_error'
+                    console.log('[Agent 编排] 从 Proma 错误文本识别到额度不足')
+                  }
                 }
                 const typedError = mapAgentErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
 

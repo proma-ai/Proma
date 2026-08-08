@@ -6,12 +6,12 @@
 
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, Shield, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { PROVIDER_LABELS, PROMA_OFFICIAL_CHANNEL_ID } from '@proma/shared'
 import type { Channel } from '@proma/shared'
-import { getChannelLogo } from '@/lib/model-logo'
+import { getChannelLogo, PromaLogo } from '@/lib/model-logo'
 import { agentChannelIdAtom, agentModelIdAtom } from '@/atoms/agent-atoms'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
@@ -26,6 +26,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ChannelForm } from './ChannelForm'
+import { ModelHealthTable } from './ModelHealthTable'
+import { loadModelHealth, modelHealthDataAtom, modelHealthErrorAtom, modelHealthLoadingAtom } from '@/atoms/model-health'
 
 /** 组件视图模式 */
 type ViewMode = 'list' | 'create' | 'edit'
@@ -38,6 +40,9 @@ export function ChannelSettings(): React.ReactElement {
   const [agentChannelId, setAgentChannelId] = useAtom(agentChannelIdAtom)
   const [, setAgentModelId] = useAtom(agentModelIdAtom)
   const setGlobalChannels = useSetAtom(channelsAtom)
+  const setHealthData = useSetAtom(modelHealthDataAtom)
+  const setHealthLoading = useSetAtom(modelHealthLoadingAtom)
+  const setHealthError = useSetAtom(modelHealthErrorAtom)
   const [deleteTarget, setDeleteTarget] = React.useState<Channel | null>(null)
   const agentChannelIdRef = React.useRef(agentChannelId)
 
@@ -63,6 +68,14 @@ export function ChannelSettings(): React.ReactElement {
   React.useEffect(() => {
     loadChannels()
   }, [loadChannels])
+
+  /** 在官方渠道模型同步完成后，同时刷新渠道列表与完整健康度表。 */
+  const refreshOfficialChannelState = React.useCallback(async (): Promise<void> => {
+    await Promise.all([
+      loadChannels(),
+      loadModelHealth(setHealthData, setHealthLoading, setHealthError),
+    ])
+  }, [loadChannels, setHealthData, setHealthError, setHealthLoading])
 
   /** 删除渠道（通过弹窗确认） */
   const handleDeleteRequest = (channel: Channel): void => {
@@ -128,6 +141,9 @@ export function ChannelSettings(): React.ReactElement {
     )
   }
 
+  const officialChannel = channels.find((channel) => channel.id === PROMA_OFFICIAL_CHANNEL_ID)
+  const userChannels = channels.filter((channel) => channel.id !== PROMA_OFFICIAL_CHANNEL_ID)
+
   // 列表视图
   return (
     <div className="space-y-8">
@@ -142,17 +158,30 @@ export function ChannelSettings(): React.ReactElement {
           </Button>
         }
       >
+        {officialChannel && (
+          <>
+            <SettingsCard>
+              <OfficialChannelRow
+                channel={officialChannel}
+                onToggle={() => handleToggle(officialChannel)}
+                onRefresh={refreshOfficialChannelState}
+              />
+            </SettingsCard>
+            {officialChannel.enabled && <ModelHealthTable />}
+          </>
+        )}
+
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
-        ) : channels.length === 0 ? (
+        ) : userChannels.length === 0 && !officialChannel ? (
           <SettingsCard divided={false}>
             <div className="text-sm text-muted-foreground py-12 text-center">
               还没有配置任何模型，点击上方"添加配置"开始
             </div>
           </SettingsCard>
-        ) : (
+        ) : userChannels.length > 0 ? (
           <SettingsCard>
-            {channels.map((channel) => (
+            {userChannels.map((channel) => (
               <ChannelRow
                 key={channel.id}
                 channel={channel}
@@ -165,7 +194,7 @@ export function ChannelSettings(): React.ReactElement {
               />
             ))}
           </SettingsCard>
-        )}
+        ) : null}
       </SettingsSection>
 
       {/* 删除确认弹窗 */}
@@ -209,13 +238,10 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
     <SettingsRow
       label={channel.name}
       icon={<img src={getChannelLogo(channel)} alt="" className="w-8 h-8 rounded" />}
-      description={
-        <span>{description}</span>
-      }
+      description={<span>{description}</span>}
       className="group"
     >
       <div className="flex items-center gap-2">
-        {/* 操作按钮 */}
         <button
           onClick={onEdit}
           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
@@ -223,21 +249,66 @@ function ChannelRow({ channel, onEdit, onDelete, onToggle }: ChannelRowProps): R
         >
           <Pencil size={14} />
         </button>
-        {channel.id !== PROMA_OFFICIAL_CHANNEL_ID && (
-          <button
-            onClick={onDelete}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-            title="删除"
-          >
-            <Trash2 size={14} />
-          </button>
-        )}
+        <button
+          onClick={onDelete}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+          title="删除"
+        >
+          <Trash2 size={14} />
+        </button>
+        <Switch checked={channel.enabled} onCheckedChange={onToggle} />
+      </div>
+    </SettingsRow>
+  )
+}
 
-        {/* 启用/关闭开关 */}
-        <Switch
-          checked={channel.enabled}
-          onCheckedChange={onToggle}
-        />
+interface OfficialChannelRowProps {
+  channel: Channel
+  onToggle: () => void
+  onRefresh: () => Promise<void>
+}
+
+/** 官方渠道有独立的模型同步和健康度诊断，不与用户渠道混为普通可编辑配置。 */
+function OfficialChannelRow({ channel, onToggle, onRefresh }: OfficialChannelRowProps): React.ReactElement {
+  const enabledCount = channel.models.filter((model) => model.enabled).length
+  const [refreshing, setRefreshing] = React.useState(false)
+
+  const handleRefresh = async (): Promise<void> => {
+    setRefreshing(true)
+    try {
+      const result = await window.electronAPI.cloudBilling.syncOfficialChannel()
+      if (!result.success) {
+        throw new Error(result.error ?? '刷新官方渠道失败')
+      }
+      await onRefresh()
+    } catch (error) {
+      console.error('[渠道设置] 刷新官方渠道失败:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Proma Cloud"
+      icon={<img src={PromaLogo} alt="Proma" className="w-8 h-8 rounded" />}
+      description={`部分模型专属优惠 · Agent 专用模型 · 健康状态实时可见 · ${enabledCount} 个模型可用`}
+      className="group"
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+          title="刷新模型列表"
+        >
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+        <span className="p-1.5 text-muted-foreground/40" title="官方渠道不可删除">
+          <Shield size={14} />
+        </span>
+        <Switch checked={channel.enabled} onCheckedChange={onToggle} />
       </div>
     </SettingsRow>
   )
