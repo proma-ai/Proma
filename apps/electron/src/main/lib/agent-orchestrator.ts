@@ -46,12 +46,13 @@ import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode } from './agent-session-manager'
-import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles } from './agent-workspace-manager'
+import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
 import { resolveProjectInstructions } from './project-instruction-resolver'
+import { combinePromaInstructionFiles } from './adapters/pi-resource-loader-overrides'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
 import { buildReferencedPlanningPrompt } from './planning-reference-context'
 import { permissionService } from './agent-permission-service'
@@ -1272,6 +1273,23 @@ export class AgentOrchestrator {
             }
           })()
         : undefined
+      const managedWorkspaceInstructionFile = workspaceSlug
+        ? (() => {
+            try {
+              const file = readWorkspaceAgentsMd(workspaceSlug)
+              return file.isText && file.content
+                ? { path: getWorkspaceAgentsMdPath(workspaceSlug), content: file.content }
+                : undefined
+            } catch (error) {
+              console.warn('[工作区指令] 读取 AGENTS.md 失败，已跳过本轮注入:', error)
+              return undefined
+            }
+          })()
+        : undefined
+      const instructionFiles = combinePromaInstructionFiles(
+        managedWorkspaceInstructionFile,
+        projectInstructions?.sources.map(({ path, content }) => ({ path, content })) ?? [],
+      )
       const systemPromptAppend = buildSystemPrompt({
         workspaceName: workspace?.name,
         workspaceSlug,
@@ -1356,9 +1374,7 @@ export class AgentOrchestrator {
         permissionMode: initialPermissionMode,
         canUseTool,
         systemPrompt: systemPromptAppend + buildPiAdditionalDirectoriesPrompt(allAdditionalDirectories),
-        ...(projectInstructions?.sources.length && {
-          projectInstructionFiles: projectInstructions.sources.map(({ path, content }) => ({ path, content })),
-        }),
+        ...(instructionFiles.length > 0 && { projectInstructionFiles: instructionFiles }),
         ...(projectInstructions && {
           projectInstructionScope: {
             projectRoot: projectInstructions.projectRoot,

@@ -22,11 +22,20 @@ export function createPromaManagedResourceLoaderOptions() {
 }
 
 /**
- * Pi still owns the final <project_context> formatting. Proma supplies this
- * override only after validating the file paths against the selected project
- * root, so no ambient context-file discovery is re-enabled.
+ * Pi still owns the final <project_context> formatting. Proma supplies this override only after validating explicit Proma-managed
+ * workspace paths and user-authorized project paths, so no ambient context-file
+ * discovery is re-enabled.
  */
 export function createPromaProjectInstructionFilesOverride(files: PromaProjectInstructionFile[]) {
   const agentsFiles = files.map(({ path, content }) => ({ path, content }))
   return () => ({ agentsFiles })
+}
+
+
+/** Keep managed workspace rules ahead of user-project rules in Pi project context. */
+export function combinePromaInstructionFiles(
+  workspaceFile: PromaProjectInstructionFile | undefined,
+  projectFiles: PromaProjectInstructionFile[],
+): PromaProjectInstructionFile[] {
+  return workspaceFile ? [workspaceFile, ...projectFiles] : projectFiles
 }

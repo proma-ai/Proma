@@ -6,11 +6,11 @@
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, openSync, readSync, closeSync, realpathSync, accessSync, constants } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, lstatSync, openSync, readSync, closeSync, realpathSync, accessSync, constants } from 'node:fs'
 import { cp as cpAsync, readFile as readFileAsync, writeFile as writeFileAsync } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { rmSyncWithRetry, renameIfDestinationAbsentWithRetry, renameWithRetry } from './fs-retry'
-import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
+import { writeJsonFileAtomic, readJsonFileSafe, writeTextFileAtomic } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
 import {
@@ -465,6 +465,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     console.log('[Agent 工作区] 已创建默认项目')
   }
 
+  migrateWorkspaceInstructionFiles()
   return defaultWs
 }
 
@@ -1156,11 +1157,70 @@ const SKILL_FILE_SIZE_LIMIT = 10 * 1024 * 1024
 /** 文件树递归深度上限，防止异常深嵌套 */
 const SKILL_TREE_MAX_DEPTH = 8
 
-const WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
+const WORKSPACE_AGENTS_MD = 'AGENTS.md'
+const LEGACY_WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
 const AUTO_MEMORY_DIR = '.claude/memory'
 const AUTO_MEMORY_INDEX = 'MEMORY.md'
 
-function fileSummary(absPath: string): WorkspaceMemorySummary['claudeMd'] {
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 将 Proma 受管工作区的旧指令文件安全地迁移到 AGENTS.md。
+ *
+ * 迁移按工作区独立且幂等执行：绝不合并或覆盖内容不同的双文件，
+ * 确保升级过程中每条既有规则始终至少保留一份完整副本。
+ */
+export function migrateWorkspaceInstructionFiles(): void {
+  const index = readIndex()
+
+  for (const workspace of index.workspaces) {
+    const workspaceRoot = getAgentWorkspacePath(workspace.slug)
+    const legacyPath = join(workspaceRoot, LEGACY_WORKSPACE_CLAUDE_MD)
+    const agentsPath = join(workspaceRoot, WORKSPACE_AGENTS_MD)
+    const legacyExists = existsSync(legacyPath)
+    const agentsExists = existsSync(agentsPath)
+
+    if (!legacyExists) continue
+    if (!isRegularFile(legacyPath)) {
+      console.warn(`[Agent 工作区] 跳过非普通 legacy 指令文件: ${legacyPath}`)
+      continue
+    }
+    if (agentsExists && !isRegularFile(agentsPath)) {
+      console.warn(`[Agent 工作区] AGENTS.md 不是普通文件，保留 legacy 指令文件: ${agentsPath}`)
+      continue
+    }
+
+    try {
+      if (!agentsExists) {
+        if (renameIfDestinationAbsentWithRetry(legacyPath, agentsPath)) {
+          console.log(`[Agent 工作区] 已迁移工作区指令: ${workspace.slug}/${LEGACY_WORKSPACE_CLAUDE_MD} → ${WORKSPACE_AGENTS_MD}`)
+        } else {
+          console.warn(`[Agent 工作区] 迁移期间目标已出现，保留 legacy 指令文件下次重试: ${workspace.slug}`)
+        }
+        continue
+      }
+
+      const legacyContent = readFileSync(legacyPath)
+      const agentsContent = readFileSync(agentsPath)
+      if (legacyContent.equals(agentsContent)) {
+        rmSyncWithRetry(legacyPath, { force: true })
+        console.log(`[Agent 工作区] 已清理重复 legacy 指令文件: ${workspace.slug}/${LEGACY_WORKSPACE_CLAUDE_MD}`)
+      } else {
+        console.warn(`[Agent 工作区] 检测到指令文件冲突，已保留两份文件等待用户处理: ${workspace.slug}`)
+      }
+    } catch (error) {
+      console.warn(`[Agent 工作区] 迁移工作区指令失败，已保留原文件 (${workspace.slug}):`, error)
+    }
+  }
+}
+
+function fileSummary(absPath: string): WorkspaceMemorySummary['agentsMd'] {
   if (!existsSync(absPath)) {
     return { exists: false, path: absPath, size: 0 }
   }
@@ -1173,8 +1233,8 @@ function fileSummary(absPath: string): WorkspaceMemorySummary['claudeMd'] {
   }
 }
 
-export function getWorkspaceClaudeMdPath(workspaceSlug: string): string {
-  return join(getAgentWorkspacePath(workspaceSlug), WORKSPACE_CLAUDE_MD)
+export function getWorkspaceAgentsMdPath(workspaceSlug: string): string {
+  return join(getAgentWorkspacePath(workspaceSlug), WORKSPACE_AGENTS_MD)
 }
 
 function getWorkspaceAutoMemoryPath(workspaceSlug: string): string {
@@ -1307,40 +1367,58 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
   return nodes
 }
 
+function getWorkspaceInstructionConflict(workspaceSlug: string): WorkspaceMemorySummary['instructionConflict'] {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
+  const legacyPath = join(workspaceRoot, LEGACY_WORKSPACE_CLAUDE_MD)
+  const agentsPath = join(workspaceRoot, WORKSPACE_AGENTS_MD)
+  if (!isRegularFile(legacyPath) || !isRegularFile(agentsPath)) return undefined
+
+  try {
+    return readFileSync(legacyPath).equals(readFileSync(agentsPath))
+      ? undefined
+      : { legacyPath, agentsPath }
+  } catch (error) {
+    console.warn(`[Agent 工作区] 读取指令迁移冲突状态失败 (${workspaceSlug}):`, error)
+    return undefined
+  }
+}
+
 export function getWorkspaceMemorySummary(workspaceSlug: string): WorkspaceMemorySummary {
   const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  const instructionConflict = getWorkspaceInstructionConflict(workspaceSlug)
   return {
-    claudeMd: fileSummary(getWorkspaceClaudeMdPath(workspaceSlug)),
+    agentsMd: fileSummary(getWorkspaceAgentsMdPath(workspaceSlug)),
+    ...(instructionConflict && { instructionConflict }),
     autoMemory: collectAutoMemorySummary(memoryDir),
   }
 }
 
-export function readWorkspaceClaudeMd(workspaceSlug: string): SkillFileContent {
-  const abs = getWorkspaceClaudeMdPath(workspaceSlug)
+export function readWorkspaceAgentsMd(workspaceSlug: string): SkillFileContent {
+  const abs = getWorkspaceAgentsMdPath(workspaceSlug)
   if (!existsSync(abs)) {
-    return { relativePath: WORKSPACE_CLAUDE_MD, isText: true, size: 0, content: '' }
+    return { relativePath: WORKSPACE_AGENTS_MD, isText: true, size: 0, content: '' }
   }
   const st = statSync(abs)
-  if (!st.isFile()) throw new Error(`${WORKSPACE_CLAUDE_MD} 不是文件`)
+  if (!st.isFile()) throw new Error(`${WORKSPACE_AGENTS_MD} 不是文件`)
   if (st.size > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`文件过大（${(st.size / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
   }
   const binary = isLikelyBinaryFile(abs, st.size)
   return {
-    relativePath: WORKSPACE_CLAUDE_MD,
+    relativePath: WORKSPACE_AGENTS_MD,
     isText: !binary,
     size: st.size,
     content: binary ? undefined : readFileSync(abs, 'utf-8'),
   }
 }
 
-export function writeWorkspaceClaudeMd(workspaceSlug: string, content: string): void {
+export function writeWorkspaceAgentsMd(workspaceSlug: string, content: string): void {
   const byteLen = Buffer.byteLength(content, 'utf-8')
   if (byteLen > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
   }
-  writeFileSync(getWorkspaceClaudeMdPath(workspaceSlug), content, 'utf-8')
-  console.log(`[Agent 工作区] 已更新工作区 CLAUDE.md: ${workspaceSlug}`)
+  writeTextFileAtomic(getWorkspaceAgentsMdPath(workspaceSlug), content)
+  console.log(`[Agent 工作区] 已更新工作区 AGENTS.md: ${workspaceSlug}`)
 }
 
 export function listWorkspaceAutoMemoryFiles(workspaceSlug: string): SkillFileNode[] {

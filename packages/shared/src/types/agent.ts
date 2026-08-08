@@ -1002,9 +1002,14 @@ export interface WorkspaceMemoryFileSummary {
 
 /** 工作区记忆摘要 */
 export interface WorkspaceMemorySummary {
-  /** 工作区级 CLAUDE.md */
-  claudeMd: WorkspaceMemoryFileSummary
-  /** SDK auto memory 目录 */
+  /** 工作区级 AGENTS.md */
+  agentsMd: WorkspaceMemoryFileSummary
+  /** 迁移时发现内容不同的 legacy CLAUDE.md；必须由用户手动合并。 */
+  instructionConflict?: {
+    legacyPath: string
+    agentsPath: string
+  }
+  /** Proma 工作区自动记忆目录 */
   autoMemory: {
     /** 绝对目录路径 */
     directory: string
@@ -1622,10 +1627,10 @@ export const AGENT_IPC_CHANNELS = {
   RENAME_SKILL_ENTRY: 'agent:rename-skill-entry',
   /** 获取工作区记忆摘要 */
   GET_WORKSPACE_MEMORY_SUMMARY: 'agent:get-workspace-memory-summary',
-  /** 读取工作区 CLAUDE.md */
-  READ_WORKSPACE_CLAUDE_MD: 'agent:read-workspace-claude-md',
-  /** 写入工作区 CLAUDE.md */
-  WRITE_WORKSPACE_CLAUDE_MD: 'agent:write-workspace-claude-md',
+  /** 读取工作区 AGENTS.md */
+  READ_WORKSPACE_AGENTS_MD: 'agent:read-workspace-agents-md',
+  /** 写入工作区 AGENTS.md */
+  WRITE_WORKSPACE_AGENTS_MD: 'agent:write-workspace-agents-md',
   /** 列出工作区 auto memory 文件树 */
   LIST_WORKSPACE_AUTO_MEMORY_FILES: 'agent:list-workspace-auto-memory-files',
   /** 读取工作区 auto memory 文件 */

@@ -12,7 +12,7 @@ function makeCaps(
     builtinMcpServers: [],
     skills: skills.map((s) => ({ ...s })),
     memory: {
-      claudeMd: { exists: false, path: '', size: 0 },
+      agentsMd: { exists: false, path: '', size: 0 },
       autoMemory: { directory: '', memoryMdExists: false, fileCount: 0, totalSize: 0 },
     },
   }

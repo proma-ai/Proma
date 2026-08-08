@@ -14,7 +14,7 @@ import { useCreateSession } from '@/hooks/useCreateSession'
 import { cn } from '@/lib/utils'
 
 type SelectedMemoryFile =
-  | { kind: 'claude'; relativePath: 'CLAUDE.md'; title: string; absolutePath: string }
+  | { kind: 'agents'; relativePath: 'AGENTS.md'; title: string; absolutePath: string }
   | { kind: 'auto'; relativePath: string; title: string; absolutePath: string }
 
 interface WorkspaceMemoryTabProps {
@@ -53,21 +53,21 @@ function buildWorkspaceMemoryInitPrompt(historyRange: MemoryHistoryRange): strin
 2. ${rangeGuidance}
 
 路径与职责边界：
-- 系统提示中的“Proma 工作区目录”是 Proma 管理配置与隔离资料的位置，存放 MCP、Skills、Proma 管理的 CLAUDE.md 与 Auto Memory；它不是用户项目根目录。必须按系统提示给出的绝对路径操作，不得猜测或替换路径。
-- “项目根目录”是用户项目资料的边界，并不一定等于实际 cwd：新会话通常从项目根目录运行，历史会话可能仍从会话工作台运行。允许从项目级 Context 及明确关联的长期项目资料读取证据；不要自动读取、创建或修改项目根内的 \`.claude/\`、\`CLAUDE.md\`、MCP 或 Skills 配置，除非用户明确要求。
+- 系统提示中的“Proma 工作区目录”是 Proma 管理配置与隔离资料的位置，存放 MCP、Skills、Proma 管理的 AGENTS.md 与 Auto Memory；它不是用户项目根目录。必须按系统提示给出的绝对路径操作，不得猜测或替换路径。
+- “项目根目录”是用户项目资料的边界，并不一定等于实际 cwd：新会话通常从项目根目录运行，历史会话可能仍从会话工作台运行。允许从项目级 Context 及明确关联的长期项目资料读取证据；不要自动读取、创建或修改项目根内的 \`.claude/\`、\`AGENTS.md\`、MCP 或 Skills 配置，除非用户明确要求。
 - 系统提示中的“会话工作台目录”及其 \`.context/\` 是当前会话的 sidecar/workbench：仅承载本次任务的 todo、plan、临时笔记和中间结论，不应作为项目级长期记忆的写入位置。绝不读取、创建或修改其中的 \`.claude/settings.json\`。
 - 系统提示中的“项目级 Context”与项目级长期资料用于跨会话保留调研、架构分析和项目知识。先区分它们与会话级临时产物，再决定可作为长期记忆证据的内容。
 
 沉淀目标：
 1. 从允许读取的会话和 Context 中提炼稳定的项目知识：项目结构、常用命令、架构边界、可靠决策、踩坑经验、用户偏好，以及未来 Agent 必须注意的事项。不要把聊天流水账、单次调试过程或当前任务的临时产物当作长期知识。
-2. 只更新系统提示明确给出的“Proma 工作区 CLAUDE.md”绝对路径。这里是 Proma 管理的项目指令文件；内容仅限稳定、跨会话有效的项目规则、入口和工作方法，不得混入临时调试、聊天记录或长篇资料。
+2. 只更新系统提示明确给出的“Proma 工作区 AGENTS.md”绝对路径。这里是 Proma 管理的项目指令文件；内容仅限稳定、跨会话有效的项目规则、入口和工作方法，不得混入临时调试、聊天记录或长篇资料。
 3. 只更新系统提示明确给出的“Proma 工作区 Auto Memory 目录”中的 \`MEMORY.md\`、必要的主题文件和 \`user-profile.md\`，不要在其他目录创建记忆文件。\`MEMORY.md\` 保持简短的主题索引与路由，主题细节拆分到主题文件。
 4. \`user-profile.md\` 是持续迭代的用户画像：基于现有内容增量合并，条目化且可追溯地记录有充分证据的角色与技术背景、稳定协作偏好、反复出现的关注点、工具链倾向和明确的“下次请这样做”要求。只出现一次或证据不足的信号标为“待确认”，不要当作稳定结论。
 
 写入规则：
 1. 写入前先读取已有的 \`user-profile.md\`、\`MEMORY.md\` 与相关主题文件，并保留仍然有效的内容；不要整体重写或删除有效信息。发现过时内容时，保守修订或标注。
 2. 只有明确重复出现、用户明确指定，或删除后会导致未来 Agent 明显犯错的知识才能写入。弱信号、临时过程和证据不足的判断不写入长期记忆，留在最终回复的待确认项。
-3. 优先小幅、可审阅的增量更新：CLAUDE.md 保持精炼，MEMORY.md 不承载长正文，跨会话的长资料仍留在项目级长期资料或项目级 Context。
+3. 优先小幅、可审阅的增量更新：AGENTS.md 保持精炼，MEMORY.md 不承载长正文，跨会话的长资料仍留在项目级长期资料或项目级 Context。
 
 完成后必须报告：读取的会话与 Context 范围、更新的文件、关键沉淀主题、用户画像新增或修订，以及仍需用户确认的项目。`
 }
@@ -179,14 +179,14 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
 
   /** 底层写入：把指定内容写回目标文件并刷新摘要，供手动保存与自动保存复用 */
   const persistTarget = React.useCallback(async (target: SelectedMemoryFile, text: string): Promise<void> => {
-    if (target.kind === 'claude') {
-      await window.electronAPI.writeWorkspaceClaudeMd(workspaceSlug, text)
+    if (target.kind === 'agents') {
+      await window.electronAPI.writeWorkspaceAgentsMd(workspaceSlug, text)
     } else {
       await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, target.relativePath, text)
     }
     const nextSummary = await refreshSummaryAndTree()
-    const nextAbsolute = target.kind === 'claude'
-      ? nextSummary.claudeMd.path
+    const nextAbsolute = target.kind === 'agents'
+      ? nextSummary.agentsMd.path
       : autoMemoryPath(nextSummary, target.relativePath)
     // 仅当用户仍停留在同一文件时才回写 absolutePath，避免覆盖已切换到别处的 selected
     setSelected((prev) => (prev && prev.kind === target.kind && prev.relativePath === target.relativePath
@@ -235,23 +235,23 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     }
   }, [persistTarget])
 
-  const openClaude = React.useCallback(async (knownSummary?: WorkspaceMemorySummary): Promise<void> => {
+  const openAgents = React.useCallback(async (knownSummary?: WorkspaceMemorySummary): Promise<void> => {
     await flushPendingSave()
     setLoadingFile(true)
     try {
       const currentSummary = knownSummary ?? summary ?? await window.electronAPI.getWorkspaceMemorySummary(workspaceSlug)
-      const file = await window.electronAPI.readWorkspaceClaudeMd(workspaceSlug)
+      const file = await window.electronAPI.readWorkspaceAgentsMd(workspaceSlug)
       setSelected({
-        kind: 'claude',
-        relativePath: 'CLAUDE.md',
-        title: 'CLAUDE.md',
-        absolutePath: currentSummary.claudeMd.path,
+        kind: 'agents',
+        relativePath: 'AGENTS.md',
+        title: 'AGENTS.md',
+        absolutePath: currentSummary.agentsMd.path,
       })
       setEditText(file.content ?? '')
       setIsDirty(false)
     } catch (err) {
-      console.error('[工作区记忆] 读取 CLAUDE.md 失败:', err)
-      toast.error(err instanceof Error ? err.message : '读取 CLAUDE.md 失败')
+      console.error('[工作区记忆] 读取 AGENTS.md 失败:', err)
+      toast.error(err instanceof Error ? err.message : '读取 AGENTS.md 失败')
     } finally {
       setLoadingFile(false)
     }
@@ -287,7 +287,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       if (selected?.kind === 'auto') {
         await openAutoFile(selected.relativePath, nextSummary)
       } else {
-        await openClaude(nextSummary)
+        await openAgents(nextSummary)
       }
     } catch (err) {
       console.error('[工作区记忆] 刷新失败:', err)
@@ -295,7 +295,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     } finally {
       setLoading(false)
     }
-  }, [openAutoFile, openClaude, refreshSummaryAndTree, selected, flushPendingSave])
+  }, [openAutoFile, openAgents, refreshSummaryAndTree, selected, flushPendingSave])
 
   React.useEffect(() => {
     let cancelled = false
@@ -309,16 +309,16 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         const [nextSummary, files, claudeFile] = await Promise.all([
           window.electronAPI.getWorkspaceMemorySummary(workspaceSlug),
           window.electronAPI.listWorkspaceAutoMemoryFiles(workspaceSlug),
-          window.electronAPI.readWorkspaceClaudeMd(workspaceSlug),
+          window.electronAPI.readWorkspaceAgentsMd(workspaceSlug),
         ])
         if (cancelled) return
         setSummary(nextSummary)
         setAutoFiles(files)
         setSelected({
-          kind: 'claude',
-          relativePath: 'CLAUDE.md',
-          title: 'CLAUDE.md',
-          absolutePath: nextSummary.claudeMd.path,
+          kind: 'agents',
+          relativePath: 'AGENTS.md',
+          title: 'AGENTS.md',
+          absolutePath: nextSummary.agentsMd.path,
         })
         setEditText(claudeFile.content ?? '')
         setIsDirty(false)
@@ -411,11 +411,11 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         <MemoryStatCard
           icon={<BookOpen size={18} />}
           title="项目指令"
-          subtitle="Proma 工作区 CLAUDE.md"
-          value={summary.claudeMd.exists ? formatBytes(summary.claudeMd.size) : '尚未创建'}
-          detail={`更新于 ${formatTime(summary.claudeMd.updatedAt)}`}
-          active={selected?.kind === 'claude'}
-          onClick={() => void openClaude(summary)}
+          subtitle="Proma 工作区 AGENTS.md"
+          value={summary.agentsMd.exists ? formatBytes(summary.agentsMd.size) : '尚未创建'}
+          detail={`更新于 ${formatTime(summary.agentsMd.updatedAt)}`}
+          active={selected?.kind === 'agents'}
+          onClick={() => void openAgents(summary)}
         />
         <MemoryStatCard
           icon={<Brain size={18} />}
@@ -428,12 +428,26 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         />
       </div>
 
+      {summary.instructionConflict && (
+        <SettingsCard divided={false} className="border-amber-500/40 bg-amber-500/5">
+          <div className="p-4 text-sm leading-relaxed text-foreground">
+            <div className="font-medium">工作区指令迁移需要处理</div>
+            <p className="mt-1 text-muted-foreground">
+              检测到内容不同的 legacy CLAUDE.md 与 AGENTS.md。Proma 当前只加载 AGENTS.md，未自动合并或删除旧文件，以避免丢失规则。
+            </p>
+            <p className="mt-2 break-all text-xs text-muted-foreground">
+              请手动合并后删除旧文件：{summary.instructionConflict.legacyPath}
+            </p>
+          </div>
+        </SettingsCard>
+      )}
+
       <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground">从历史会话生成项目记忆</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              新建一个 Agent 会话，读取当前项目{historyRangeLabel}的工作会话，沉淀并更新 Proma 工作区中的 CLAUDE.md 与 auto memory 文件。
+              新建一个 Agent 会话，读取当前项目{historyRangeLabel}的工作会话，沉淀并更新 Proma 工作区中的 AGENTS.md 与 auto memory 文件。
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -477,11 +491,11 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               <FileButton
-                active={selected?.kind === 'claude'}
+                active={selected?.kind === 'agents'}
                 icon={<FileText size={14} />}
-                label="CLAUDE.md"
+                label="AGENTS.md"
                 meta="Proma 工作区项目指令"
-                onClick={() => void openClaude(summary)}
+                onClick={() => void openAgents(summary)}
               />
               <div className="mt-3 px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
                 Auto Memory
@@ -593,7 +607,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                 }}
                 spellCheck={false}
                 className="min-h-0 flex-1 resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
-                placeholder={selected.kind === 'claude'
+                placeholder={selected.kind === 'agents'
                   ? '# 项目指令\n\n写下未来 Agent 必须知道的项目规范、命令和决策。'
                   : '# MEMORY\n\n写下稳定、可复用的自动记忆索引。'}
               />

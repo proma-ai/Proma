@@ -68,3 +68,10 @@ describe('项目与会话工作台提示词', () => {
     expect(context).not.toContain('工作区: 示例项目')
   })
 })
+
+test('Given Proma 工作区 When 构建提示词 Then 指向受管 AGENTS.md 而非旧规则文件', () => {
+  const prompt = buildPrompt('/tmp/sample-project')
+
+  expect(prompt).toContain('Proma 工作区 AGENTS.md:')
+  expect(prompt).not.toContain('Proma 工作区 CLAUDE.md')
+})

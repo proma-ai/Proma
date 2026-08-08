@@ -148,7 +148,7 @@ export function AgentSkillsView(): React.ReactElement {
     () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length + data.builtinMcpServers.length,
     [data.mcpConfig, data.builtinMcpServers],
   )
-  const memoryCount = (data.capabilities?.memory.claudeMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
+  const memoryCount = (data.capabilities?.memory.agentsMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
 
   const selectedSkill = data.skills.find((s) => s.slug === selectedSkillSlug) ?? null
   const selectedIsBuiltin = selectedSkill ? data.defaultSkillSlugs.has(selectedSkill.slug) : false

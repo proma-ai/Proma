@@ -235,3 +235,62 @@ describe('Agent 工作区 Skill 批量导入', () => {
     expect(readdirSync(targetSkillsDir).some((name) => name.startsWith('.malformed.importing-'))).toBe(false)
   })
 })
+
+describe('工作区 AGENTS.md 迁移', () => {
+  test('Given 旧工作区仅有 CLAUDE.md When 迁移 Then 原子改名为 AGENTS.md 且内容完整保留', () => {
+    const workspace = manager.createAgentWorkspace('Legacy Instruction')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyPath = join(workspaceRoot, 'CLAUDE.md')
+    const agentsPath = join(workspaceRoot, 'AGENTS.md')
+    writeFileSync(legacyPath, '# stable rules\n', 'utf-8')
+
+    manager.migrateWorkspaceInstructionFiles()
+
+    expect(existsSync(legacyPath)).toBe(false)
+    expect(readFileSync(agentsPath, 'utf-8')).toBe('# stable rules\n')
+    expect(manager.getWorkspaceMemorySummary(workspace.slug).agentsMd.path).toBe(agentsPath)
+  })
+
+  test('Given 迁移已完成 When 重复执行 Then 不改变 AGENTS.md', () => {
+    const workspace = manager.createAgentWorkspace('Idempotent Instruction')
+    const agentsPath = join(configPaths.getAgentWorkspacePath(workspace.slug), 'AGENTS.md')
+    writeFileSync(agentsPath, '# existing rules\n', 'utf-8')
+
+    manager.migrateWorkspaceInstructionFiles()
+    manager.migrateWorkspaceInstructionFiles()
+
+    expect(readFileSync(agentsPath, 'utf-8')).toBe('# existing rules\n')
+  })
+
+  test('Given 双文件内容相同 When 迁移 Then 仅清理 legacy 副本', () => {
+    const workspace = manager.createAgentWorkspace('Duplicate Instruction')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyPath = join(workspaceRoot, 'CLAUDE.md')
+    const agentsPath = join(workspaceRoot, 'AGENTS.md')
+    writeFileSync(legacyPath, '# shared rules\n', 'utf-8')
+    writeFileSync(agentsPath, '# shared rules\n', 'utf-8')
+
+    manager.migrateWorkspaceInstructionFiles()
+
+    expect(existsSync(legacyPath)).toBe(false)
+    expect(readFileSync(agentsPath, 'utf-8')).toBe('# shared rules\n')
+  })
+
+  test('Given 双文件内容冲突 When 迁移 Then 两份规则均保留', () => {
+    const workspace = manager.createAgentWorkspace('Conflicting Instruction')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyPath = join(workspaceRoot, 'CLAUDE.md')
+    const agentsPath = join(workspaceRoot, 'AGENTS.md')
+    writeFileSync(legacyPath, '# legacy rules\n', 'utf-8')
+    writeFileSync(agentsPath, '# new rules\n', 'utf-8')
+
+    manager.migrateWorkspaceInstructionFiles()
+
+    expect(readFileSync(legacyPath, 'utf-8')).toBe('# legacy rules\n')
+    expect(readFileSync(agentsPath, 'utf-8')).toBe('# new rules\n')
+    expect(manager.getWorkspaceMemorySummary(workspace.slug).instructionConflict).toEqual({
+      legacyPath,
+      agentsPath,
+    })
+  })
+})

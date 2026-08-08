@@ -306,8 +306,8 @@ import {
   deleteSkillEntry,
   renameSkillEntry,
   getWorkspaceMemorySummary,
-  readWorkspaceClaudeMd,
-  writeWorkspaceClaudeMd,
+  readWorkspaceAgentsMd,
+  writeWorkspaceAgentsMd,
   listWorkspaceAutoMemoryFiles,
   readWorkspaceAutoMemoryFile,
   writeWorkspaceAutoMemoryFile,
@@ -2490,16 +2490,16 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD,
+    AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD,
     async (_, workspaceSlug: string): Promise<SkillFileContent> => {
-      return readWorkspaceClaudeMd(workspaceSlug)
+      return readWorkspaceAgentsMd(workspaceSlug)
     }
   )
 
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD,
+    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD,
     async (_, workspaceSlug: string, content: string): Promise<void> => {
-      writeWorkspaceClaudeMd(workspaceSlug, content)
+      writeWorkspaceAgentsMd(workspaceSlug, content)
     }
   )
 

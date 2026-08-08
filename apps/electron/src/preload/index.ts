@@ -659,11 +659,11 @@ export interface ElectronAPI {
   /** 获取工作区记忆摘要 */
   getWorkspaceMemorySummary: (workspaceSlug: string) => Promise<WorkspaceMemorySummary>
 
-  /** 读取工作区 CLAUDE.md */
-  readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
+  /** 读取工作区 AGENTS.md */
+  readWorkspaceAgentsMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
-  /** 写入工作区 CLAUDE.md */
-  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => Promise<void>
+  /** 写入工作区 AGENTS.md */
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => Promise<void>
 
   /** 列出工作区 auto memory 文件树 */
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
@@ -1873,12 +1873,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY, workspaceSlug)
   },
 
-  readWorkspaceClaudeMd: (workspaceSlug: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD, workspaceSlug)
+  readWorkspaceAgentsMd: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD, workspaceSlug)
   },
 
-  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD, workspaceSlug, content)
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content)
   },
 
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => {

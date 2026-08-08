@@ -199,7 +199,7 @@ Hooks 是全局 Claude 配置，**不要在命令中硬编码某个项目或 Pro
 export PATH="$HOME/.local/bin:$PATH"
 nmem status
 PROMA_WORKSPACE_DIR="$PROMA_HOME/agent-workspaces/<Proma工作区名>" python3 "$PROMA_HOME/scripts/read-working-memory.py"
-grep 'nowledge-mem:start' "$PROMA_HOME/agent-workspaces/<Proma工作区名>/CLAUDE.md" && echo "Block 已注入" || echo "Block 缺失"
+grep 'nowledge-mem:start' "$PROMA_HOME/agent-workspaces/<Proma工作区名>/AGENTS.md" && echo "Block 已注入" || echo "Block 缺失"
 
 # 检查 5 个 skill 是否都已安装到目标 Proma 工作区
 for s in read-working-memory search-memory distill-memory save-thread status; do
@@ -213,7 +213,7 @@ done
 预期：
 - `nmem status` 全绿
 - `read-working-memory.py` 返回 `{"status": "updated"}`
-- CLAUDE.md 中存在 nowledge-mem block
+- AGENTS.md 中存在 nowledge-mem block
 - 5 个 skill 全部显示 ✅
 
 如有任何一项失败，回到对应 Step 重新执行。
