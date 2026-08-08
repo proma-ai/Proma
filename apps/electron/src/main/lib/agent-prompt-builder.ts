@@ -3,7 +3,7 @@
  * 静态提示词只保留 Proma 独有、且未由运行时或工具 schema 强制的行为契约。
  */
 
-import type { PromaPermissionMode } from '@proma/shared'
+import type { PromaPermissionMode, SessionWorkbenchLayout } from '@proma/shared'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
@@ -23,36 +23,40 @@ interface SystemPromptContext {
   workspaceSlug?: string
   sessionId: string
   agentCwd?: string
+  /** 会话私有工作台布局；缺失时按历史 `.context/` 兼容。 */
+  sessionWorkbenchLayout?: SessionWorkbenchLayout
   permissionMode: PromaPermissionMode
   collaborationAvailable?: boolean
   currentModelId?: string
   legacyProjectInstructions?: ProjectInstructionSource[]
 }
 
-function buildWorkspacePaths(workspaceSlug: string, sessionId: string, agentCwd?: string) {
+function buildWorkspacePaths(
+  workspaceSlug: string,
+  sessionId: string,
+  agentCwd?: string,
+  sessionWorkbenchLayout: SessionWorkbenchLayout = 'legacy-context',
+) {
   const configDirName = getConfigDirName()
   const workspaceRoot = join(homedir(), configDirName, 'agent-workspaces', workspaceSlug)
   const sessionDir = join(workspaceRoot, sessionId)
   const projectRoot = getProjectFilesPath(workspaceSlug)
   const effectiveAgentCwd = agentCwd ?? projectRoot
-  const isLocalProject = Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath)
-  const autoMemoryDir = join(workspaceRoot, '.claude', 'memory')
 
   return {
     workspaceRoot,
-    sessionDir,
-    sessionContextDir: join(sessionDir, '.context'),
     projectRoot,
+    sessionDir,
+    sessionContextDir: sessionWorkbenchLayout === 'root' ? sessionDir : join(sessionDir, '.context'),
+    sessionWorkbenchLayout,
     workspaceContextDir: join(projectRoot, '.context'),
     agentCwd: effectiveAgentCwd,
     isProjectCwd: resolve(effectiveAgentCwd) === resolve(projectRoot),
-    isLocalProject,
+    isLocalProject: Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath),
+    agentsMd: join(workspaceRoot, 'AGENTS.md'),
+    autoMemoryIndex: join(workspaceRoot, '.claude', 'memory', 'MEMORY.md'),
     mcpConfig: join(workspaceRoot, 'mcp.json'),
     skillsDir: join(workspaceRoot, 'skills'),
-    agentsMd: join(workspaceRoot, 'AGENTS.md'),
-    autoMemoryDir,
-    autoMemoryIndex: join(autoMemoryDir, 'MEMORY.md'),
-    sdkConfigDir: join(homedir(), configDirName, 'sdk-config'),
   }
 }
 
@@ -60,7 +64,7 @@ function buildWorkspacePaths(workspaceSlug: string, sessionId: string, agentCwd?
 export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const userName = getUserProfile().userName || '用户'
   const workspace = ctx.workspaceSlug
-    ? buildWorkspacePaths(ctx.workspaceSlug, ctx.sessionId, ctx.agentCwd)
+    ? buildWorkspacePaths(ctx.workspaceSlug, ctx.sessionId, ctx.agentCwd, ctx.sessionWorkbenchLayout)
     : undefined
   const sessionContextDir = workspace?.sessionContextDir ?? '.context'
   const projectContextDir = workspace?.workspaceContextDir ?? '.context'
@@ -82,7 +86,7 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
     workspace
       ? `## 工作区与 Context
 - 项目根：\`${workspace.projectRoot}\`（${workspace.isLocalProject ? '用户本地原始文件' : 'Proma 托管项目文件'}）；cwd：\`${workspace.agentCwd}\`（${workspace.isProjectCwd ? '当前直接在项目根工作' : '会话工作台，不等同项目根'}）。
-- 会话工作台：\`${workspace.sessionDir}\`；会话级 Context：\`${sessionContextDir}\` 用于本次任务、计划和交接；项目级 Context：\`${projectContextDir}\` 用于跨会话资料。用户指定位置优先；不要随意清理本地项目。
+- 会话工作台：\`${sessionContextDir}\`，用于本次任务、计划和交接；新会话直接使用 workbench 根，历史会话兼容 \`.context/\`。项目级 Context：\`${projectContextDir}\` 用于跨会话资料。用户指定位置优先；不要随意清理本地项目。
 - Proma 工作区规则：\`${workspace.agentsMd}\`；记忆索引：\`${workspace.autoMemoryIndex}\`；MCP：\`${workspace.mcpConfig}\`；Skills：\`${workspace.skillsDir}\`。只使用 Proma 工作区的 MCP/Skills 配置。
 - 新任务按相关性读取两级 Context 的 note/todo、工作区 AGENTS、记忆索引和 Skill 元数据，避免无差别全量读取。`
       : undefined,
@@ -93,7 +97,7 @@ Proma 工作区 AGENTS 记录稳定工作区规则；用户项目 AGENTS 记录�
       ? `## 计划模式
 只调研和规划。计划写入 \`${sessionContextDir}/plan/\`；先展示摘要并等待用户批准，再退出计划模式和执行。`
       : `## 计划模式
-进入计划模式时，计划文件写入 \`${sessionContextDir}/plan/\`，不要写到项目根。`,
+进入计划模式时，计划文件写入 \`${sessionContextDir}/plan/\`（如 \`${sessionContextDir}/plan/my-plan.md\`），不要写到项目根。`,
     buildGitAttributionPromptSection(isGitAttributionEnabled(getSettings().gitAttributionEnabled)),
     '## 回复\n日常回复简洁直接；文本交付物需要完整时再展开。复杂任务中定期核对相关规则、记忆、Skills 与 Context。',
   ]

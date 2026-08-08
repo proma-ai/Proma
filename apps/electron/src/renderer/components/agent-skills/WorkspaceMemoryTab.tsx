@@ -55,7 +55,7 @@ function buildWorkspaceMemoryInitPrompt(historyRange: MemoryHistoryRange): strin
 路径与职责边界：
 - 系统提示中的“Proma 工作区目录”是 Proma 管理配置与隔离资料的位置，存放 MCP、Skills、Proma 管理的 AGENTS.md 与 Auto Memory；它不是用户项目根目录。必须按系统提示给出的绝对路径操作，不得猜测或替换路径。
 - “项目根目录”是用户项目资料的边界，并不一定等于实际 cwd：新会话通常从项目根目录运行，历史会话可能仍从会话工作台运行。允许从项目级 Context 及明确关联的长期项目资料读取证据；不要自动读取、创建或修改项目根内的 \`.claude/\`、\`AGENTS.md\`、MCP 或 Skills 配置，除非用户明确要求。
-- 系统提示中的“会话工作台目录”及其 \`.context/\` 是当前会话的 sidecar/workbench：仅承载本次任务的 todo、plan、临时笔记和中间结论，不应作为项目级长期记忆的写入位置。绝不读取、创建或修改其中的 \`.claude/settings.json\`。
+- 系统提示中的“会话工作台目录”是当前会话的 sidecar/workbench：新会话直接在其根目录存放 todo、plan、临时笔记和中间结论；历史会话可能保留 \`.context/\` 子目录。它不应作为项目级长期记忆的写入位置。绝不读取、创建或修改其中的 \`.claude/settings.json\`。
 - 系统提示中的“项目级 Context”与项目级长期资料用于跨会话保留调研、架构分析和项目知识。先区分它们与会话级临时产物，再决定可作为长期记忆证据的内容。
 
 沉淀目标：

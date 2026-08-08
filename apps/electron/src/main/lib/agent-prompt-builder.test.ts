@@ -136,6 +136,21 @@ test('Given legacy 项目指令 When 构建提示词 Then 注入证据驱动的 
   expect(prompt).toContain('AGENTS.md 最佳实践')
 })
 
+test('Given a root-layout session When building the prompt Then stores plans in the workbench root rather than .context', () => {
+  const prompt = buildSystemPrompt({
+    workspaceName: '示例项目',
+    workspaceSlug: 'sample-project',
+    sessionId: 'session-1',
+    agentCwd: '/tmp/sample-project',
+    sessionWorkbenchLayout: 'root',
+    permissionMode: 'bypassPermissions',
+  })
+
+  expect(prompt).toContain('新会话直接使用 workbench 根')
+  expect(prompt).toContain('/session-1/plan/my-plan.md')
+  expect(prompt).not.toContain('/session-1/.context/plan/my-plan.md')
+})
+
 test('Given Proma 工作区 When 构建提示词 Then 指向受管 AGENTS.md 而非旧规则文件', () => {
   const prompt = buildPrompt()
 

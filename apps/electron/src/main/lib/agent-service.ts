@@ -445,11 +445,12 @@ export async function queueAgentMessage(
  */
 export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedFile[] {
   const sessionDir = getAgentSessionWorkspacePath(input.workspaceSlug, input.sessionId)
+  const attachmentsDir = join(sessionDir, 'attachments')
   const results: AgentSavedFile[] = []
   const usedPaths = new Set<string>()
 
   for (const file of input.files) {
-    let targetPath = join(sessionDir, file.filename)
+    let targetPath = resolveSafeWorkspaceFilePath(attachmentsDir, file.filename)
 
     // 防止同名文件覆盖
     if (usedPaths.has(targetPath) || existsSync(targetPath)) {
@@ -457,10 +458,10 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
       const baseName = dotIdx > 0 ? file.filename.slice(0, dotIdx) : file.filename
       const ext = dotIdx > 0 ? file.filename.slice(dotIdx) : ''
       let counter = 1
-      let candidate = join(sessionDir, `${baseName}-${counter}${ext}`)
+      let candidate = join(attachmentsDir, `${baseName}-${counter}${ext}`)
       while (usedPaths.has(candidate) || existsSync(candidate)) {
         counter++
-        candidate = join(sessionDir, `${baseName}-${counter}${ext}`)
+        candidate = join(attachmentsDir, `${baseName}-${counter}${ext}`)
       }
       targetPath = candidate
     }

@@ -89,8 +89,13 @@ const WORKSPACE_METADATA_DIRS = new Set([
   '.claude',
 ])
 
-const PRESERVED_ORPHAN_SESSION_DIRS = new Set([
+// 历史会话保留 `.context/`；新 workbench 根布局保留私有任务资料，附件仍可清理。
+const PRESERVED_ORPHAN_SESSION_ENTRIES = new Set([
   '.context',
+  'plan',
+  'todo.md',
+  'note.md',
+  'handoff.md',
 ])
 
 function isWorkspaceMetadataDir(entryName: string): boolean {
@@ -176,7 +181,7 @@ async function cleanupOrphanSessionWorkspaceDir(sessionDir: string): Promise<num
   try {
     const entries = await fsPromises.readdir(sessionDir)
     for (const entry of entries) {
-      if (PRESERVED_ORPHAN_SESSION_DIRS.has(entry)) continue
+      if (PRESERVED_ORPHAN_SESSION_ENTRIES.has(entry)) continue
       const entryPath = join(sessionDir, entry)
       try {
         const stat = await fsPromises.lstat(entryPath)
@@ -333,7 +338,7 @@ async function calcWorkspacesCategory(): Promise<StorageCategory> {
               count += sub.count
               // session 目录的 ID 不在活跃列表中 → 孤儿
               if (!activeIds.has(entry) && !activeSlugs.has(entry)) {
-                const cleanable = await getDirSize(entryPath, { skipTopLevelDirs: PRESERVED_ORPHAN_SESSION_DIRS })
+                const cleanable = await getDirSize(entryPath, { skipTopLevelDirs: PRESERVED_ORPHAN_SESSION_ENTRIES })
                 if (cleanable.count > 0) {
                   orphanBytes += cleanable.bytes
                   orphanCount++

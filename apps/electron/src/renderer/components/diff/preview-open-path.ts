@@ -24,7 +24,8 @@ function uniqueTruthyPaths(paths: Array<string | null | undefined>): string[] {
 
 /**
  * 相对路径预览必须携带会话工作目录；历史工具调用通常只持久化了 filePath。
- * 将调用方已有候选目录与其上下文目录合并，以便 .context/plan/*.md 等文件正确解析。
+ * 将调用方已有候选目录与会话 workbench 根合并，以便 plan/*.md、attachments/*
+ * 及历史 .context/plan/*.md 等文件正确解析。
  */
 export function getPreviewCandidateBasePaths(
   basePaths: readonly string[] | undefined,

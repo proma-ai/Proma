@@ -84,12 +84,13 @@ export function saveImageToSession(
   data: Buffer,
 ): string {
   const sessionDir = getAgentSessionWorkspacePath(workspaceSlug, sessionId)
+  const attachmentsDir = join(sessionDir, 'attachments')
   const ext = inferExtension(mediaType)
   const filename = `${sanitizeFileName(fileNameHint)}.${ext}`
-  const targetPath = join(sessionDir, filename)
-  ensurePathWithin(targetPath, sessionDir)
+  const targetPath = join(attachmentsDir, filename)
+  ensurePathWithin(targetPath, attachmentsDir)
 
-  mkdirSync(sessionDir, { recursive: true })
+  mkdirSync(attachmentsDir, { recursive: true })
   writeFileSync(targetPath, data)
   console.log(`[Bridge 附件] 图片已保存: ${targetPath} (${data.length} bytes)`)
 
@@ -108,10 +109,11 @@ export function saveFileToSession(
   data: Buffer,
 ): string {
   const sessionDir = getAgentSessionWorkspacePath(workspaceSlug, sessionId)
-  const targetPath = join(sessionDir, sanitizeFileName(fileName))
-  ensurePathWithin(targetPath, sessionDir)
+  const attachmentsDir = join(sessionDir, 'attachments')
+  const targetPath = join(attachmentsDir, sanitizeFileName(fileName))
+  ensurePathWithin(targetPath, attachmentsDir)
 
-  mkdirSync(sessionDir, { recursive: true })
+  mkdirSync(attachmentsDir, { recursive: true })
   writeFileSync(targetPath, data)
   console.log(`[Bridge 附件] 文件已保存: ${targetPath} (${data.length} bytes)`)
 

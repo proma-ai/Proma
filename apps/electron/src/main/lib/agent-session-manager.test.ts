@@ -136,6 +136,34 @@ afterAll(() => {
   rmSync(tempHome, { recursive: true, force: true })
 })
 
+describe('会话私有 workbench 布局', () => {
+  test('Given a new workspace session When created Then uses the workbench root without an empty .context directory', () => {
+    writeAgentWorkspacesIndex([{
+      id: 'workspace-a',
+      name: '测试项目',
+      slug: 'workspace-a',
+      createdAt: 1,
+      updatedAt: 1,
+    }])
+
+    const session = manager.createAgentSession('新布局会话', undefined, 'workspace-a')
+    const workbenchDir = manager.resolveAgentWorkbenchDir({ slug: 'workspace-a' }, session.id)
+
+    expect(session.sessionWorkbenchLayout).toBe('root')
+    expect(workbenchDir).toBeDefined()
+    expect(existsSync(workbenchDir!)).toBe(true)
+    expect(existsSync(join(workbenchDir!, '.context'))).toBe(false)
+    expect(manager.resolveSessionWorkbenchContextDir({ slug: 'workspace-a' }, session.id, session.sessionWorkbenchLayout)).toBe(workbenchDir)
+  })
+
+  test('Given a historical session without layout metadata When resolving its private files Then preserves the .context path', () => {
+    const workbenchDir = manager.resolveAgentWorkbenchDir({ slug: 'workspace-a' }, 'legacy-session')!
+
+    expect(manager.getSessionWorkbenchLayout({})).toBe('legacy-context')
+    expect(manager.resolveSessionWorkbenchContextDir({ slug: 'workspace-a' }, 'legacy-session')).toBe(join(workbenchDir, '.context'))
+  })
+})
+
 describe('Agent 会话 JSONL 读取', () => {
   test('Given 会话 JSONL 混入损坏行 When 读取 SDKMessage Then 跳过坏行并保留其它消息', () => {
     writeAgentSessionJsonl('session-with-bad-line', [
