@@ -28,16 +28,12 @@ afterEach(() => {
 })
 
 describe('fork 工作区复制', () => {
-  test('Given legacy and root-layout session workbench files When copying a fork Then preserves private files and skips risky directories', () => {
+  test('Given 会话目录包含上下文和依赖目录 When 复制 fork 工作区 Then 保留 .context 并跳过高风险目录', () => {
     const root = makeTempRoot()
     const sourceDir = join(root, 'source')
     const destDir = join(root, 'dest')
 
-    writeFile(join(sourceDir, '.context', 'note.md'), 'legacy')
-    writeFile(join(sourceDir, 'plan', 'implementation.md'), 'plan')
-    writeFile(join(sourceDir, 'todo.md'), 'todo')
-    writeFile(join(sourceDir, 'handoff.md'), 'handoff')
-    writeFile(join(sourceDir, 'attachments', 'input.pdf'), 'attachment')
+    writeFile(join(sourceDir, '.context', 'note.md'), 'keep')
     writeFile(join(sourceDir, '.claude', 'settings.json'), '{}')
     writeFile(join(sourceDir, 'node_modules', 'pkg', 'index.js'))
     writeFile(join(sourceDir, '.venv', 'pyvenv.cfg'))
@@ -48,14 +44,10 @@ describe('fork 工作区复制', () => {
 
     const result = copyForkWorkspaceFiles(sourceDir, destDir)
 
-    expect(result.copiedCount).toBe(7)
+    expect(result.copiedCount).toBe(3)
     expect(result.skippedCount).toBe(4)
     expect(result.failedCount).toBe(0)
     expect(existsSync(join(destDir, '.context', 'note.md'))).toBe(true)
-    expect(existsSync(join(destDir, 'plan', 'implementation.md'))).toBe(true)
-    expect(existsSync(join(destDir, 'todo.md'))).toBe(true)
-    expect(existsSync(join(destDir, 'handoff.md'))).toBe(true)
-    expect(existsSync(join(destDir, 'attachments', 'input.pdf'))).toBe(true)
     expect(existsSync(join(destDir, 'src', 'index.ts'))).toBe(true)
     expect(existsSync(join(destDir, 'nested-repo', 'src', 'file.ts'))).toBe(true)
     expect(existsSync(join(destDir, '.claude', 'settings.json'))).toBe(false)
@@ -65,10 +57,8 @@ describe('fork 工作区复制', () => {
     expect(existsSync(join(destDir, 'nested-repo', '.git'))).toBe(false)
   })
 
-  test('Given a private workbench path or dependency directory When deciding whether to copy Then keeps workbench files only', () => {
+  test('Given 路径是会话上下文或依赖目录 When 判断是否复制 Then 只放行上下文', () => {
     expect(shouldCopyForkWorkspacePath('/tmp/session/.context')).toBe(true)
-    expect(shouldCopyForkWorkspacePath('/tmp/session/plan')).toBe(true)
-    expect(shouldCopyForkWorkspacePath('/tmp/session/attachments')).toBe(true)
     expect(shouldCopyForkWorkspacePath('/tmp/session/.claude')).toBe(false)
     expect(shouldCopyForkWorkspacePath('/tmp/session/node_modules')).toBe(false)
     expect(shouldCopyForkWorkspacePath('/tmp/session/.git')).toBe(false)

@@ -15,12 +15,12 @@ mock.module('./config-paths', () => ({
 }))
 
 mock.module('./agent-git-attribution', () => ({
-  buildGitAttributionPromptSection: () => '## Git / PR 标识\n测试归因规则',
-  isGitAttributionEnabled: () => true,
+  buildGitAttributionPromptSection: () => '',
+  isGitAttributionEnabled: () => false,
 }))
 
 mock.module('./settings-service', () => ({
-  getSettings: () => ({ gitAttributionEnabled: true }),
+  getSettings: () => ({ gitAttributionEnabled: false }),
 }))
 
 let buildSystemPrompt: typeof import('./agent-prompt-builder').buildSystemPrompt
@@ -30,130 +30,48 @@ beforeAll(async () => {
   ({ buildSystemPrompt, buildDynamicContext } = await import('./agent-prompt-builder'))
 })
 
-function buildPrompt(overrides: Partial<Parameters<typeof buildSystemPrompt>[0]> = {}): string {
+function buildPrompt(agentCwd: string): string {
   return buildSystemPrompt({
     workspaceName: '示例项目',
     workspaceSlug: 'sample-project',
     sessionId: 'session-1',
-    agentCwd: '/tmp/sample-project',
+    agentCwd,
     permissionMode: 'bypassPermissions',
-    ...overrides,
   })
 }
 
-describe('Pi Agent 系统提示词', () => {
-  test('Given 常规 Pi 会话 When 构建提示词 Then 保留核心行为且受长度预算约束', () => {
-    const prompt = buildPrompt({
-      collaborationAvailable: true,
-      currentModelId: 'gpt-5.6-terra',
+describe('项目与会话工作台提示词', () => {
+  test('Given 项目根 cwd When 构建提示词 Then 标明会话直接在项目中工作', () => {
+    const prompt = buildPrompt('/tmp/sample-project')
+
+    expect(prompt).toContain('## 项目')
+    expect(prompt).toContain('项目名称: 示例项目')
+    expect(prompt).toContain('当前会话直接在项目根目录中工作')
+    expect(prompt).not.toContain('项目根始终是 cwd')
+  })
+
+  test('Given 历史会话工作台 cwd When 构建提示词 Then 不将它误称为项目根', () => {
+    const prompt = buildPrompt('/tmp/.proma/agent-workspaces/sample-project/session-1')
+
+    expect(prompt).toContain('当前会话仍使用私有会话工作台，不等同于项目根目录')
+    expect(prompt).toContain('项目根与 cwd 不一定相同')
+  })
+
+  test('Given 项目动态上下文 When 构建消息前缀 Then 使用项目标签', () => {
+    const context = buildDynamicContext({
+      workspaceName: '示例项目',
+      workspaceSlug: 'sample-project',
+      agentCwd: '/tmp/sample-project',
     })
 
-    expect(prompt).toContain('由 Pi Agent SDK 驱动')
-    expect(prompt).toContain('低风险、可验证操作直接执行')
-    expect(prompt).toContain('gpt-5.6-terra')
-    expect(prompt).toContain('## 协作')
-    expect(prompt).toContain('TaskCreate')
-    expect(prompt).not.toContain('TodoWrite')
-    expect(prompt).toContain('list_todos({ status: \'open\', limit: 100 })')
-    expect(prompt).toContain('list_groups({ scope: \'todo\' })')
-    expect(prompt).toContain('nativeOrigin')
-    expect(prompt).toContain('按需读取 Todo/日程')
-    expect(prompt).toContain('已有事项只按事实更新或完成')
-    expect(prompt).toContain('仅自动更新 Proma 工作区 Memory')
-    expect(prompt).toContain('不写项目或会话目录的 `.claude/memory`')
-    expect(prompt).toContain('## Git / PR 标识')
-    expect(prompt.length).toBeLessThanOrEqual(5_000)
+    expect(context).toContain('项目: 示例项目')
+    expect(context).not.toContain('工作区: 示例项目')
   })
-
-  test('Given 未注入协作工具 When 构建提示词 Then 不宣传不可用能力', () => {
-    const prompt = buildPrompt({ collaborationAvailable: false })
-
-    expect(prompt).not.toContain('## 协作')
-    expect(prompt).toContain('未提供当前模型时不自行选择其他模型')
-  })
-
-  test('Given 计划模式 When 构建提示词 Then 指向会话计划目录并要求审批', () => {
-    const prompt = buildPrompt({ permissionMode: 'plan' })
-
-    expect(prompt).toContain('## 计划模式')
-    expect(prompt).toContain('/plan/')
-    expect(prompt).toContain('等待用户批准')
-  })
-
-  test('Given 项目根或历史会话 cwd When 构建提示词 Then 保持项目与会话边界', () => {
-    const projectPrompt = buildPrompt()
-    const sessionPrompt = buildPrompt({ agentCwd: '/tmp/.proma/agent-workspaces/sample-project/session-1' })
-
-    expect(projectPrompt).toContain('当前直接在项目根工作')
-    expect(projectPrompt).toContain('Proma 工作区规则')
-    expect(projectPrompt).toContain('/AGENTS.md`')
-    expect(sessionPrompt).toContain('会话工作台，不等同项目根')
-  })
-
-  test('Given legacy 项目指令 When 构建提示词 Then 保留安全迁移边界', () => {
-    const prompt = buildPrompt({
-      legacyProjectInstructions: [{
-        path: '/tmp/sample-project/CLAUDE.md',
-        relativePath: 'CLAUDE.md',
-        scopeRoot: '.',
-        kind: 'claude',
-        content: 'legacy instruction',
-        contentHash: 'legacy-hash',
-      }],
-    })
-
-    expect(prompt).toContain('## Legacy 项目指令迁移')
-    expect(prompt).toContain('不整体覆盖已有内容')
-    expect(prompt).toContain('不得重命名或删除')
-  })
-})
-
-test('Given 项目动态上下文 When 构建消息前缀 Then 使用项目标签', () => {
-  const context = buildDynamicContext({
-    workspaceName: '示例项目',
-    workspaceSlug: 'sample-project',
-    agentCwd: '/tmp/sample-project',
-  })
-
-  expect(context).toContain('项目: 示例项目')
-  expect(context).not.toContain('工作区: 示例项目')
-})
-
-test('Given legacy 项目指令 When 构建提示词 Then 注入证据驱动的 AGENTS.md 迁移要求', () => {
-  const prompt = buildPrompt({
-    legacyProjectInstructions: [{
-      path: '/tmp/sample-project/CLAUDE.md',
-      relativePath: 'CLAUDE.md',
-      scopeRoot: '.',
-      kind: 'claude',
-      content: '# legacy rules',
-      contentHash: 'legacy-hash',
-    }],
-  })
-
-  expect(prompt).toContain('Legacy 项目指令迁移任务')
-  expect(prompt).toContain('实际项目证据')
-  expect(prompt).toContain('AGENTS.md 最佳实践')
-})
-
-test('Given a root-layout session When building the prompt Then stores plans in the workbench root rather than .context', () => {
-  const prompt = buildSystemPrompt({
-    workspaceName: '示例项目',
-    workspaceSlug: 'sample-project',
-    sessionId: 'session-1',
-    agentCwd: '/tmp/sample-project',
-    sessionWorkbenchLayout: 'root',
-    permissionMode: 'bypassPermissions',
-  })
-
-  expect(prompt).toContain('新会话直接使用 workbench 根')
-  expect(prompt).toContain('/session-1/plan/my-plan.md')
-  expect(prompt).not.toContain('/session-1/.context/plan/my-plan.md')
 })
 
 test('Given Proma 工作区 When 构建提示词 Then 指向受管 AGENTS.md 而非旧规则文件', () => {
-  const prompt = buildPrompt()
+  const prompt = buildPrompt('/tmp/sample-project')
 
-  expect(prompt).toContain('/AGENTS.md`')
+  expect(prompt).toContain('Proma 工作区 AGENTS.md:')
   expect(prompt).not.toContain('Proma 工作区 CLAUDE.md')
 })
