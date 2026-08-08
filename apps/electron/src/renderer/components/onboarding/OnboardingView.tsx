@@ -13,16 +13,11 @@
  *  Step 7：记忆功能科普（图：Agent 技能的记忆页面）
  *  Step 8：侧边回答科普（图：历史选区问答）
  *  Step 9：FAQ 汇总页（按主题分组）
- *  Step 10：Windows 环境检测（仅 Windows，其他平台自动跳过）
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAtomValue } from 'jotai'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronLeft, ChevronsRight, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
-import { isShellEnvironmentOkAtom } from '@/atoms/environment'
-import { detectIsWindows } from '@/lib/platform'
 import { CURRENT_ONBOARDING_VERSION } from '../../../types'
 import hopperSeasideWhiteHouse from '@/assets/onboarding/hopper-seaside-white-house.png'
 import guideVisual from '@/assets/onboarding/guide-visual.png'
@@ -39,7 +34,7 @@ import { MemoryGuideExamples } from './MemoryGuideExamples'
 import { SubagentGuideExamples } from './SubagentGuideExamples'
 import { FAQ_GROUPS } from './faq-content'
 
-type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq' | 'environment'
+type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq'
 
 interface OnboardingViewProps {
   onComplete: (openTutorial?: boolean) => void
@@ -590,7 +585,7 @@ function FaqPage({ nextLabel, onNext, onBack, highlight }: { nextLabel: string; 
 }
 
 /** 引导步骤标题（欢迎页独立，不在地图中显示） */
-const STEP_LABELS: Array<{ step: Exclude<OnboardingStep, 'welcome' | 'environment'>; label: string }> = [
+const STEP_LABELS: Array<{ step: Exclude<OnboardingStep, 'welcome'>; label: string }> = [
   { step: 'guide', label: 'Agent / Chat' },
   { step: 'project', label: '项目' },
   { step: 'files', label: '文件' },
@@ -607,7 +602,7 @@ const ADVANCED_STEP_LABELS = STEP_LABELS.slice(3)
 /**
  * 底部进度地图：仅显示当前章节的步骤，并保持章节内的宽松间距。
  */
-function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome' | 'environment'> }) {
+function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome'> }) {
   const isBeginner = BEGINNER_STEP_LABELS.some((step) => step.step === current)
   const visibleSteps = isBeginner ? BEGINNER_STEP_LABELS : ADVANCED_STEP_LABELS
   const activeIdx = visibleSteps.findIndex((step) => step.step === current)
@@ -675,9 +670,6 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
   const [flash, setFlash] = useState(false)
   const [fading, setFading] = useState(false)
   const [faqBackStep, setFaqBackStep] = useState<'subagent' | 'sideanswer'>('sideanswer')
-  const isWindows = useMemo(() => detectIsWindows(), [])
-  const shellOk = useAtomValue(isShellEnvironmentOkAtom)
-
   const handleFinish = async (openTutorial?: boolean) => {
     await window.electronAPI.updateSettings({
       onboardingCompleted: true,
@@ -719,17 +711,11 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
     setFaqBackStep('subagent')
     transitionTo('faq')
   }
-  const handleNextFromFaq = () => {
-    if (isWindows) {
-      transitionTo('environment')
-    } else {
-      handleFinish()
-    }
-  }
+  const handleNextFromFaq = () => handleFinish()
 
   const currentMapIndex = STEP_LABELS.findIndex((item) => item.step === step)
-  const stepIndex = step === 'environment' ? STEP_LABELS.length + 1 : currentMapIndex + 1
-  const totalSteps = STEP_LABELS.length + (isWindows ? 1 : 0)
+  const stepIndex = currentMapIndex + 1
+  const totalSteps = STEP_LABELS.length
 
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden bg-[#fbf9f7] md:flex-row">
@@ -981,57 +967,15 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
         {step === 'faq' && (
           <FaqPage
             highlight="进阶指南 · 第 5 步"
-            nextLabel={isWindows ? '下一个' : '开始使用'}
+            nextLabel="开始使用"
             onNext={handleNextFromFaq}
             onBack={() => transitionTo(faqBackStep)}
           />
         )}
 
-        {step === 'environment' && isWindows && (
-          <div className="w-full max-w-xl px-6 py-10 md:px-10">
-            {/* 状态徽章 */}
-            <div className="mb-6 flex items-center gap-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#26583d] text-white">
-                <Check size={13} strokeWidth={3} />
-              </span>
-              <span className="text-sm font-medium text-neutral-500">环境检测</span>
-            </div>
-
-            <h2 className="text-2xl font-light tracking-tight text-neutral-900 md:text-3xl">
-              先检查一下环境
-            </h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              Proma 在 Windows 上需要 Git Bash 或 WSL 才能执行命令
-            </p>
-
-            <div className="mt-6 rounded-sm border border-neutral-200 bg-white p-5 shadow-[4px_4px_0_rgba(30,58,95,0.08)]">
-              <EnvironmentCheckPanel autoDetectOnMount />
-            </div>
-
-            <div className="mt-6 flex items-center justify-between">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => transitionTo('faq')}
-                className="text-neutral-500"
-              >
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                上一个
-              </Button>
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => handleFinish()}
-                  variant={shellOk ? 'default' : 'outline'}
-                >
-                  {shellOk ? '开始使用' : '稍后处理（进入主界面）'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {step !== 'welcome' && step !== 'environment' && <ProgressMap current={step} />}
+      {step !== 'welcome' && <ProgressMap current={step} />}
 
       {step === 'subagent' && (
         <button

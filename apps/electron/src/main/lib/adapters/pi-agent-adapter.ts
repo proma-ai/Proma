@@ -1099,6 +1099,15 @@ function createPromaBashToolOptions(runtimeEnv: AgentRuntimeEnv | undefined): Ba
   }
 }
 
+export function isPiBashToolAvailable(
+  platform: NodeJS.Platform,
+  runtimeEnv: Pick<AgentRuntimeEnv, 'shellKind'> | undefined,
+): boolean {
+  // Pi 的 Windows Bash 工具只能通过 Proma 配置的 Git Bash 或 WSL 执行。
+  // 没有可用 Shell 时，基础 Agent 仍可使用文件与 Proma 工具，但不能暴露一个必然失败的 Bash 工具。
+  return platform !== 'win32' || runtimeEnv?.shellKind === 'git-bash' || runtimeEnv?.shellKind === 'wsl'
+}
+
 function buildBuiltinToolDefinitions(
   sdk: PiSdk,
   cwd: string,
@@ -1107,7 +1116,9 @@ function buildBuiltinToolDefinitions(
 ): ToolDefinition[] {
   const definitions = [
     sdk.createReadToolDefinition(cwd),
-    sdk.createBashToolDefinition(cwd, createPromaBashToolOptions(runtimeEnv)),
+    ...(isPiBashToolAvailable(process.platform, runtimeEnv)
+      ? [sdk.createBashToolDefinition(cwd, createPromaBashToolOptions(runtimeEnv))]
+      : []),
     sdk.createEditToolDefinition(cwd),
     sdk.createWriteToolDefinition(cwd),
     sdk.createGrepToolDefinition(cwd),
@@ -1117,6 +1128,18 @@ function buildBuiltinToolDefinitions(
 
   return definitions.map((tool) =>
     wrapToolWithPermission(tool as unknown as ToolDefinition<TSchema, unknown, unknown>, { canUseTool }) as ToolDefinition)
+}
+
+function appendWindowsBaseModeInstruction(systemPrompt: string, runtimeEnv: AgentRuntimeEnv | undefined): string {
+  if (process.platform !== 'win32' || isPiBashToolAvailable(process.platform, runtimeEnv)) {
+    return systemPrompt
+  }
+
+  return `${systemPrompt}
+
+<runtime_capabilities>
+当前 Windows 设备未配置 Git Bash 或 WSL，因此 Bash 工具不可用。你仍可使用 Read、Write、Edit、Grep、Find、Ls 及 Proma 提供的其他工具完成任务；不要声称已运行命令、测试或 Git 操作。若任务确实需要命令行，请默认调用 InstallWindowsShell 帮助用户安装 Git Bash；该工具会要求用户确认下载并打开官方安装程序。
+</runtime_capabilities>`
 }
 
 function wrapCustomToolDefinitions(
@@ -1306,7 +1329,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         additionalSkillPaths: input.additionalSkillPaths ?? [],
         skillsOverride: createPromaSkillsOverride(input.additionalSkillPaths),
         ...(extensionFactories.length > 0 && { extensionFactories }),
-        systemPromptOverride: () => input.systemPrompt,
+        systemPromptOverride: () => appendWindowsBaseModeInstruction(input.systemPrompt, input.runtimeEnv),
       })
       await resourceLoader.reload()
       active.resourceLoader = resourceLoader

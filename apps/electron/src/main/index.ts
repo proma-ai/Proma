@@ -616,9 +616,9 @@ async function bootstrap(): Promise<void> {
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
   protocol.handle('proma-file', handlePromaFileRequest)
 
-  // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
-  // 必须在其他初始化之前执行，确保环境变量正确加载
-  await safeAwait('initializeRuntime', () => initializeRuntime())
+  // 初始化运行时环境。Node.js 仅由 npx / npm 型 MCP 在实际连接时使用，
+  // 或由用户从设置手动检测；启动时不应将其作为 Agent 的前置要求。
+  await safeAwait('initializeRuntime', () => initializeRuntime({ skipNodeDetection: true }))
 
   // 同步默认 Skills 模板到 ~/.proma/default-skills/
   safeRun('seedDefaultSkills', seedDefaultSkills)

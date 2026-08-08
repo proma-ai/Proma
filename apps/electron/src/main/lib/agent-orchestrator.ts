@@ -704,32 +704,10 @@ export class AgentOrchestrator {
       }
     }
 
-    // 1. Windows 平台：检查 Shell 环境可用性
-    if (process.platform === 'win32') {
-      const runtimeStatus = getRuntimeStatus()
-      const shellStatus = runtimeStatus?.shell
+    // Windows 缺少 Git Bash / WSL 时仍允许启动 Pi Agent。
+    // Pi adapter 会移除 Bash 工具并注入基础模式说明；文件工具、对话和本地 Proma 工具不受影响。
 
-      if (shellStatus && !shellStatus.gitBash?.available && !shellStatus.wsl?.available) {
-        reportPreflightError({
-          code: 'windows_shell_missing',
-          title: 'Windows 环境未就绪',
-          message:
-            '需要 Git Bash 或 WSL 才能运行 Agent。建议安装 Git for Windows（自带 Git Bash），安装完成后点「打开环境检测」刷新状态。',
-          details: [
-            `Git Bash: ${shellStatus.gitBash?.error || '未检测到'}`,
-            `WSL: ${shellStatus.wsl?.error || '未检测到'}`,
-          ],
-          actions: [
-            { key: 'e', label: '打开环境检测', action: 'open_environment_check' },
-            { key: 'g', label: '去官方下载 Git', action: 'open_external', payload: 'https://git-scm.com/download/win' },
-          ],
-          canRetry: false,
-        })
-        return
-      }
-    }
-
-    // 2. 获取渠道信息并解密 API Key
+    // 1. 获取渠道信息并解密 API Key
     const channel = getChannelById(channelId)
     if (!channel) {
       reportPreflightError({
@@ -924,6 +902,7 @@ export class AgentOrchestrator {
         allowedRoots: allAdditionalDirectories,
         permissionMode: permissionModeOverride ?? sessionMeta?.permissionMode ?? PROMA_DEFAULT_PERMISSION_MODE,
         triggeredBy: input.triggeredBy,
+        windowsShellAvailable: process.platform !== 'win32' || runtimeEnv.shellKind != null,
       })
       piBuiltinTools = builtinMcpResult.tools
       const collaborationAvailable = builtinMcpResult.collaborationAvailable
