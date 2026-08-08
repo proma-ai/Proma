@@ -45,12 +45,13 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir } from './agent-session-manager'
 import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAutoMemoryDir, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
 import { buildSystemPrompt, buildDynamicContext } from './agent-prompt-builder'
+import { buildLocalKnowledgeContext } from './local-knowledge-context'
 import { resolveProjectInstructions } from './project-instruction-resolver'
 import { combinePromaInstructionFiles } from './adapters/pi-resource-loader-overrides'
 import { MAX_CONTEXT_MESSAGES, buildContextPrompt, buildRecoveryPrompt, buildReferencedSessionsPrompt } from './agent-session-context-prompt'
@@ -248,7 +249,6 @@ export class AgentOrchestrator {
     const mcpConfig = getWorkspaceMcpConfig(workspaceSlug)
     for (const [name, entry] of Object.entries(mcpConfig.servers ?? {})) {
       if (!entry.enabled) continue
-      if (name === 'memos-cloud') continue
       const type = normalizeMcpTransportType((entry as { type?: unknown }).type)
 
       if (type === 'stdio' && entry.command) {
@@ -854,7 +854,6 @@ export class AgentOrchestrator {
         workspace = ws
         runtimeEnv.env.PROMA_WORKSPACE_DIR = getAgentWorkspacePath(ws.slug)
         runtimeEnv.env.PROMA_WORKSPACE_SLUG = ws.slug
-        runtimeEnv.env.PROMA_NOWLEDGE_MEM_ENABLED = getWorkspaceMcpConfig(ws.slug).servers['nowledge-mem']?.enabled ? '1' : '0'
         console.log(`[Agent 编排] 使用 ${getAgentCwdMode(sessionMeta)} cwd: ${agentCwd} (${ws.name}/${sessionId})`)
 
 
@@ -924,6 +923,22 @@ export class AgentOrchestrator {
         workspaceSlug,
         agentCwd,
       })
+      const localRecall = workspaceSlug && workspace && userMessage.trim() !== '/compact'
+        ? buildLocalKnowledgeContext({
+            userMessage,
+            paths: {
+              workspaceRoot: getAgentWorkspacePath(workspaceSlug),
+              autoMemoryDir: getWorkspaceAutoMemoryDir(workspaceSlug),
+              sessionWorkbenchDir: resolveSessionWorkbenchContextDir(
+                workspace,
+                sessionId,
+                getSessionWorkbenchLayout(sessionMeta),
+              ) ?? getAgentSessionWorkspacePath(workspaceSlug, sessionId),
+              projectContextDir: join(getProjectFilesPath(workspaceSlug), '.context'),
+            },
+          })
+        : ''
+      if (localRecall) console.log('[本地记忆] 已注入受预算的本地 recall')
 
       // 11.5 注入 mention 引用指令（Skill/MCP/会话）— 仅影响 prompt，不影响持久化
       let enrichedMessage = userMessage
@@ -956,7 +971,7 @@ export class AgentOrchestrator {
         console.log(`[Agent 编排] 注入 referenced_planning: ${mentionedTodoIds?.length ?? 0} todos, ${mentionedCalendarEventIds?.length ?? 0} calendar events`)
       }
 
-      const contextualMessage = `${dynamicCtx}\n\n${enrichedMessage}`
+      const contextualMessage = [dynamicCtx, localRecall, enrichedMessage].filter(Boolean).join('\n\n')
 
       const isCompactCommand = userMessage.trim() === '/compact'
       const finalPrompt = isCompactCommand

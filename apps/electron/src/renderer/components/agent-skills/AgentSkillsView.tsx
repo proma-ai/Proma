@@ -129,7 +129,6 @@ export function AgentSkillsView(): React.ReactElement {
 
   const userMcpEntries = React.useMemo(() => {
     return Object.entries(data.mcpConfig.servers ?? {})
-      .filter(([name]) => name !== 'memos-cloud')
       .filter(([name]) => !q || name.toLowerCase().includes(q))
   }, [data.mcpConfig, q])
 
@@ -145,7 +144,7 @@ export function AgentSkillsView(): React.ReactElement {
 
   // 不含搜索过滤的 MCP 总数（Tab 计数与空态判断用）
   const mcpCount = React.useMemo(
-    () => Object.keys(data.mcpConfig.servers ?? {}).filter((n) => n !== 'memos-cloud').length + data.builtinMcpServers.length,
+    () => Object.keys(data.mcpConfig.servers ?? {}).length + data.builtinMcpServers.length,
     [data.mcpConfig, data.builtinMcpServers],
   )
   const memoryCount = (data.capabilities?.memory.agentsMd.exists ? 1 : 0) + (data.capabilities?.memory.autoMemory.fileCount ?? 0)
@@ -159,7 +158,6 @@ export function AgentSkillsView(): React.ReactElement {
 
   const configureBuiltinMcp = React.useCallback((serverId: string): void => {
     const focusMap: Partial<Record<string, ToolSettingsFocus>> = {
-      mem: 'memory',
       'nano-banana': 'nano-banana',
     }
     const focus = focusMap[serverId]

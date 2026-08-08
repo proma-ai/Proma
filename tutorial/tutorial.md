@@ -117,24 +117,11 @@ Proma 支持全部的供应商渠道和主流格式（OpenAI 兼容格式、Anth
 
 
 
-## 记忆工具 / 联网工具配置
+## 本地记忆 / 联网工具
 
-Proma 支持通过 Nowledge Mem 和 Tavily API 来分别实现记忆能力和联网搜索能力。这两项能力会极大的增强使用体验，强烈推荐完成配置。同样，配置的过程也很简单。
+Proma 的 Agent 会从当前会话工作台、项目 Context 和工作区 Auto Memory 中按需召回已授权的本地资料。长期规则、可复用决策和偏好应由 Agent 以可审阅的小幅更新沉淀到工作区 Auto Memory；项目研究与原始资料应保留在项目 Context 中。
 
-![image-20260308145353048](https://img.erlich.fun/personal-blog/uPic/image-20260308145353048.png)
-
-
-
-### 记忆配置（Nowledge Mem）
-
-Proma 的记忆能力由 Nowledge Mem 提供——这是一套本地优先的记忆方案，记忆完全留在你自己的机器上，并通过 MCP 与 Hooks 与 Agent 集成，跨会话自动注入与回写。
-
-1. 打开 Proma 设置页的「记忆」部分，按引导下载并安装 Nowledge Mem 桌面客户端（配置时无需登录或注册账号）
-2. 启动 Nowledge Mem，确保托盘 / Dock 中能看到运行图标
-3. 切换到 Agent 模式，复制设置页提供的配置提示词并在 Agent 输入框执行，让 Agent 自动完成 nmem CLI 安装、插件下载、MCP 与 Hooks 配置
-4. 执行完成后完全退出并重启 Proma，MCP 与 Hooks 才会生效
-
-重启后可在 Agent 模式中用 `/skill:distill-memory` 让 Agent 记住一段内容，再开新会话用 `/skill:search-memory` 把它搜出来，能搜到即表示记忆系统已完整生效。
+外部 MCP 是可选扩展：你可以在项目的 MCP 配置中连接任何兼容服务。Proma 不依赖或推荐特定记忆服务，也不会自动修改你的外部 MCP 配置。
 
 ### 联网搜索配置
 
