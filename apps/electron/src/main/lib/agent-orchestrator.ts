@@ -20,7 +20,7 @@ import { join, dirname } from 'node:path'
 import { accessSync, constants, existsSync, mkdirSync, realpathSync } from 'node:fs'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { app } from 'electron'
-import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, RetryAttempt, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult } from '@proma/shared'
+import type { AgentSendInput, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter, AgentSessionMeta, CodexOAuthCredentials, XaiOAuthCredentials, TypedError, SDKMessage, SDKAssistantMessage, AgentStreamPayload, RewindSessionResult } from '@proma/shared'
 import {
   PROMA_DEFAULT_PERMISSION_MODE,
   PROMA_PERMISSION_MODE_CONFIG,
@@ -30,15 +30,15 @@ import {
   isPersistableSDKSystemMessage,
   normalizePathForCompare,
   normalizeMcpTransportType,
-  inferAgentSdkContextWindow,
+  inferContextWindow,
   inferReasoningTransport,
   resolveReasoningProfile,
 } from '@proma/shared'
 import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
 import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
-import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapSDKErrorToTypedError, shouldKeepChannelOpen } from './agent-error-utils'
-import { isTransientNetworkError, isMalformedResponseError, isSessionNotFoundError } from './error-patterns'
+import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
+import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import { getAdapter, fetchTitle } from '@proma/core'
@@ -110,124 +110,6 @@ function isMissingActiveQueueChannelError(error: unknown): boolean {
 
 function isPartialSDKMessage(message: SDKMessage): boolean {
   return (message as Record<string, unknown>)._partial === true
-}
-
-/**
- * 从 stderr 中提取 API 错误信息
- *
- * 解析类似这样的错误：
- * "401 {\"error\":{\"message\":\"...\"}}"
- * "API error: 400 Bad Request ..."
- */
-function extractApiError(stderr: string): { statusCode: number; message: string } | null {
-  if (!stderr) return null
-
-  // 模式 1：JSON 错误格式 - "401 {...}"
-  const jsonMatch = stderr.match(/(\d{3})\s+(\{[^}]*"error"[^}]*\})/s)
-  if (jsonMatch) {
-    try {
-      const statusCode = parseInt(jsonMatch[1]!)
-      const errorObj = JSON.parse(jsonMatch[2]!)
-      const message = errorObj.error?.message || errorObj.message || '未知错误'
-      return { statusCode, message }
-    } catch {
-      // JSON 解析失败，继续尝试其他模式
-    }
-  }
-
-  // 模式 2：API error 格式 - "API error (attempt X/Y): 401 401 {...}"
-  const apiErrorMatch = stderr.match(/API error[^:]*:\s+(\d{3})\s+\d{3}\s+(\{.*?\})/s)
-  if (apiErrorMatch) {
-    try {
-      const statusCode = parseInt(apiErrorMatch[1]!)
-      const errorObj = JSON.parse(apiErrorMatch[2]!)
-      const message = errorObj.error?.message || errorObj.message || '未知错误'
-      return { statusCode, message }
-    } catch {
-      // JSON 解析失败
-    }
-  }
-
-  // 模式 3：直接的状态码 + 消息
-  const simpleMatch = stderr.match(/(\d{3})[:\s]+(.+?)(?:\n|$)/i)
-  if (simpleMatch) {
-    const statusCode = parseInt(simpleMatch[1]!)
-    const message = simpleMatch[2]!.trim()
-    if (statusCode >= 400 && statusCode < 600) {
-      return { statusCode, message }
-    }
-  }
-
-  return null
-}
-
-// ===== 自动重试工具函数 =====
-
-/** 可自动重试的 TypedError 错误码 */
-const AUTO_RETRYABLE_ERROR_CODES: ReadonlySet<string> = new Set([
-  'rate_limited',
-  'provider_error',      // overloaded 映射为 provider_error
-  'service_error',
-  'service_unavailable',
-  'network_error',
-])
-
-/** 判断 typed_error 事件是否可自动重试 */
-function isAutoRetryableTypedError(error: TypedError): boolean {
-  return AUTO_RETRYABLE_ERROR_CODES.has(error.code)
-}
-
-/** 判断 catch 块中的 API 错误是否可自动重试（HTTP 429 / 5xx / 已知可恢复错误模式 / 瞬时网络错误） */
-function isAutoRetryableCatchError(
-  apiError: { statusCode: number; message: string } | null,
-  rawErrorMessage?: string,
-  stderr?: string,
-): boolean {
-  if (apiError) {
-    // 529 是 Anthropic 的过载状态码，通常很快恢复；与 429 / 5xx 一并重试。
-    if (apiError.statusCode === 429 || apiError.statusCode >= 500) return true
-  }
-  // 已知的可恢复错误模式（无 HTTP 状态码但可重试）
-  if (rawErrorMessage) {
-    if (rawErrorMessage.includes('context_management')) return true
-  }
-  // 兜底：extractApiError 未识别但 stderr / 错误文本中包含 502 / 529 或 overloaded 关键字时也视为可重试
-  // 502 (Bad Gateway) 通常是上游网关瞬时异常，与 529 一样很快自行恢复
-  const text = `${rawErrorMessage ?? ''}\n${stderr ?? ''}`
-  if (/\b502\b|\b529\b|overloaded/i.test(text)) return true
-  // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）
-  if (isTransientNetworkError(rawErrorMessage, stderr)) return true
-  // 上游响应体解析失败（JSON Parse error 等）：网关瞬时异常返回非 JSON 体，重试通常即可恢复
-  if (isMalformedResponseError(rawErrorMessage, stderr)) return true
-  return false
-}
-
-/** 最大自动重试次数 */
-const MAX_AUTO_RETRIES = 25
-
-/** 重试可见性阈值：前 N 次重试不通知 UI，避免偶发瞬时波动频繁惊扰用户 */
-const RETRY_VISIBILITY_THRESHOLD = 5
-
-/** 自动重试累计等待预算（毫秒） */
-const MAX_AUTO_RETRY_WAIT_MS = 5 * 60_000
-
-/** 重试单次延迟上限（毫秒） */
-const RETRY_MAX_DELAY_MS = 15_000
-
-/**
- * 计算重试延迟（指数退避 + ±20% jitter）
- *
- * 基础序列：1s, 2s, 4s, 8s, 15s, 15s...（cap = 15s）
- * 叠加 ±20% 随机抖动，避免大量 session 同时重试造成惊群。
- * 累计等待会被限制在 5 分钟以内。
- */
-function getRetryDelayMs(attempt: number, elapsedRetryDelayMs: number): number {
-  const remainingMs = MAX_AUTO_RETRY_WAIT_MS - elapsedRetryDelayMs
-  if (remainingMs <= 0) return 0
-
-  const base = Math.min(1000 * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS)
-  const jitter = base * (Math.random() * 0.4 - 0.2)
-  return Math.min(remainingMs, Math.max(0, Math.round(base + jitter)))
 }
 
 /** 默认会话标题（用于判断是否需要自动生成） */
@@ -531,7 +413,6 @@ export class AgentOrchestrator {
    * 因此不清除磁盘 meta：本轮以非 resume 模式恢复，若失败下一轮仍可尝试 resume（#903）。
    * 调用方负责设置本地 existingSdkSessionId = undefined 和流程控制（break/continue）。
    *
-   * @returns lastRetryableError 描述字符串
    */
   private prepareSessionNotFoundRecovery(
     sessionId: string,
@@ -541,8 +422,8 @@ export class AgentOrchestrator {
     workspaceSlug: string | undefined,
     accumulatedMessages: SDKMessage[],
     queryStartedAt: number,
-  ): string {
-    return this.prepareResumeFallbackRecovery(
+  ): void {
+    this.prepareResumeFallbackRecovery(
       sessionId,
       queryOptions,
       contextualMessage,
@@ -551,7 +432,6 @@ export class AgentOrchestrator {
       accumulatedMessages,
       queryStartedAt,
       '检测到 session-not-found（可能为误检），保留 sdkSessionId 并切换到上下文回填模式',
-      'Session 暂不可 resume，切换到上下文回填模式',
     )
   }
 
@@ -576,9 +456,8 @@ export class AgentOrchestrator {
     accumulatedMessages: SDKMessage[],
     queryStartedAt: number,
     logMessage: string,
-    retryReason: string,
     clearPersistedSession = false,
-  ): string {
+  ): void {
     console.log(`[Agent 编排] ${logMessage}`)
     // 先持久化当前已累积的消息，确保 JSONL 文件包含最新内容
     this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
@@ -591,7 +470,6 @@ export class AgentOrchestrator {
     queryOptions.resumeSessionId = undefined
     queryOptions.resumeSessionAt = undefined
     queryOptions.prompt = buildRecoveryPrompt(sessionId, contextualMessage, { agentCwd, workspaceSlug })
-    return retryReason
   }
 
   /**
@@ -705,7 +583,6 @@ export class AgentOrchestrator {
     extensions: { piCustomTools?: ToolDefinition[] } = {},
   ): Promise<void> {
     const { sessionId, userMessage, rawUserMessage, channelId, modelId, workspaceId: requestedWorkspaceId, additionalDirectories, permissionModeOverride, mentionedSkills, mentionedMcpServers, mentionedSessionIds, mentionedTodoIds, mentionedCalendarEventIds, automationContext, retryOfErrorUuid } = input
-    const stderrChunks: string[] = []
     const streamStartedAt = input.startedAt ?? Date.now()
     let userMessagePersisted = false
     let sessionMeta = getAgentSessionMeta(sessionId)
@@ -944,16 +821,6 @@ export class AgentOrchestrator {
     ): void => {
       releaseActiveRun()
       callbacks.onComplete(messages, opts)
-    }
-    // 轻量完成：turn 主体结束但仍有后台任务在飞行。
-    // 关键区别——不调用 releaseActiveRun，保留 activeSessions/activeChannels/sessionPermissionModes，
-    // 以便 ① adapter 保持的通道在任务完成时自动续轮 ② 用户在等待期手动注入消息能复用通道。
-    // UI 侧通过 backgroundTasksPending 进入"空闲可输入"态（spinner 停、输入框启用）。
-    const idleComplete = (
-      messages?: AgentMessage[],
-      opts?: { startedAt?: number; resultSubtype?: string; resultErrors?: string[] },
-    ): void => {
-      callbacks.onComplete(messages, { ...opts, backgroundTasksPending: true })
     }
     const failRun = (
       error: string,
@@ -1409,26 +1276,28 @@ export class AgentOrchestrator {
           .catch((err) => console.error('[Agent 编排] 标题生成未捕获异常:', err))
       }
       const handleSessionId = (sdkSessionId: string, piSessionFile?: string): void => {
-        // 仅在 session_id 真正变化时才持久化。SDK v2 几乎每条消息都会回调 onSessionId，
+        // 仅在 session_id 真正变化时才持久化。Pi 在同一 artifact 的每条消息都可能回调，
         // capturedSdkSessionId 已初始化为 existingSdkSessionId，并在 recovery 时同步重置。
         const isNewSessionId = sdkSessionId !== capturedSdkSessionId
-        const needsPiSessionFile = !!piSessionFile && sessionMeta?.piSessionFile !== piSessionFile
+        const latestSessionMeta = getAgentSessionMeta(sessionId)
+        // recovery 新建 artifact 后，旧 entry bindings 属于另一棵 Pi tree，必须原子替换而非合并。
+        const artifactReplaced = !!piSessionFile && latestSessionMeta?.piSessionFile !== piSessionFile
         capturedSdkSessionId = sdkSessionId
-        if (isNewSessionId || needsPiSessionFile) {
+        if (isNewSessionId || artifactReplaced) {
           try {
             // 用户可在本轮运行中改选下一轮内核；不能让旧 runtime 回填不兼容的 session artifact。
-            const latestSessionMeta = getAgentSessionMeta(sessionId)
             if (latestSessionMeta?.legacyTranscript?.continuationRequired) {
               console.log(`[Agent 编排] 忽略只读历史会话的 session artifact: ${sdkSessionId}`)
             } else {
               updateAgentSessionMeta(sessionId, {
                 sdkSessionId,
                 ...(piSessionFile ? { piSessionFile } : {}),
+                ...(artifactReplaced ? { piEntryBindings: {} } : {}),
               })
-              console.log(`[Agent 编排] 已保存 SDK session_id: ${sdkSessionId}`)
+              console.log(`[Agent 编排] 已保存 Pi session_id: ${sdkSessionId}`)
             }
           } catch (err) {
-            console.error(`[Agent 编排] 保存 SDK session_id 失败:`, err)
+            console.error(`[Agent 编排] 保存 Pi session_id 失败:`, err)
           }
         }
 
@@ -1441,7 +1310,7 @@ export class AgentOrchestrator {
         this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'model_resolved', model: resolvedModel } })
       }
       const handleContextWindow = (cw: number): void => {
-        const inferredWindow = inferAgentSdkContextWindow(modelId, channel.provider)
+        const inferredWindow = inferContextWindow(modelId)
         const contextWindow = Math.max(cw, inferredWindow ?? 0) || cw
         console.log(`[Agent 编排] 缓存 contextWindow: ${contextWindow}`)
         // result 消息里的真实 contextWindow 透传到 renderer，
@@ -1455,7 +1324,7 @@ export class AgentOrchestrator {
       const queryOptions: PiAgentQueryOptions = {
         sessionId,
         prompt: finalPrompt,
-        // pi runtime 不支持 Claude Agent SDK 的 `[1m]` 扩展上下文变体：
+        // 旧持久化模型 ID 可能带 `[1m]` 上下文后缀；Pi runtime 不支持该变体：
         // 智谱等端点不识别 glm-5.2[1m] 这类后缀，会返回 1211「模型不存在」。
         // 因此 pi 分支直接使用用户配置的原始模型 ID，不追加任何 `[1m]`。
         model: selectedModelId,
@@ -1522,83 +1391,13 @@ export class AgentOrchestrator {
 
       console.log(`[Agent 编排] 开始通过 Adapter 遍历事件流...`)
 
-      // 14. 遍历 Adapter 产出的 AgentEvent 流（含自动重试）
-      let lastRetryableError: string | undefined
-      let retryDelayElapsedMs = 0
-      let retryAttemptsScheduled = 0
-      let retrySucceeded = false
-      let skipNextRetryDelay = false
-      let thinkingSignatureRecoveryAttempted = false
-      let promptTooLongRecoveryAttempted = false
-      let invisibleRecoveryAttempts = 0
-      const canAutoRetry = (attempt: number): boolean =>
-        attempt <= MAX_AUTO_RETRIES && retryDelayElapsedMs < MAX_AUTO_RETRY_WAIT_MS
-      // Pi runtime 使用其 session 内的 native retry（agent.continue），能保留已完成的
-      // tool_result；禁止外层以原 prompt 重开 query，但保留 session-not-found 等显式恢复。
-      const canReplayPromptForRetry = (attempt: number): boolean =>
-false && canAutoRetry(attempt)
-
-      const canTryThinkingSignatureRecovery = (attempt: number): boolean =>
-        !thinkingSignatureRecoveryAttempted &&
-        canAutoRetry(attempt) &&
-        !!(existingSdkSessionId || capturedSdkSessionId || queryOptions.resumeSessionId)
-      const canTryPromptTooLongRecovery = (attempt: number): boolean =>
-        !promptTooLongRecoveryAttempted &&
-        canAutoRetry(attempt) &&
-        !!(existingSdkSessionId || capturedSdkSessionId || queryOptions.resumeSessionId)
-
+      // 14. 遍历 Adapter 事件流。Pi adapter 自行处理传输层重试；此处仅允许一次 resume artifact 回退。
+      const MAX_QUERY_ATTEMPTS = 2
       const queryStartedAt = Date.now()
 
-      for (let attempt = 1; attempt <= MAX_AUTO_RETRIES + 1; attempt++) {
-        // 非首次尝试：等待 + 发送重试事件到 UI
-        if (attempt > 1) {
-          if (skipNextRetryDelay) {
-            skipNextRetryDelay = false
-            console.log(`[Agent 编排] 已切换到上下文回填模式，立即重试`)
-          } else {
-            const retryAttempt = Math.max(1, attempt - 1 - invisibleRecoveryAttempts)
-            const delayMs = getRetryDelayMs(retryAttempt, retryDelayElapsedMs)
-            if (delayMs <= 0) {
-              console.log(`[Agent 编排] 自动重试等待预算已耗尽 (${MAX_AUTO_RETRY_WAIT_MS}ms)，停止重试`)
-              break
-            }
-            retryDelayElapsedMs += delayMs
-            retryAttemptsScheduled = retryAttempt
-            const delaySec = delayMs / 1000
-            const attemptData: RetryAttempt = {
-              attempt: retryAttempt,
-              timestamp: Date.now(),
-              reason: lastRetryableError ?? '未知错误',
-              errorMessage: lastRetryableError ?? '',
-              delaySeconds: delaySec,
-            }
-
-            // 前 RETRY_VISIBILITY_THRESHOLD 次重试静默进行，避免偶发瞬时波动频繁惊扰用户
-            if (retryAttempt > RETRY_VISIBILITY_THRESHOLD) {
-              this.eventBus.emit(sessionId, {
-                kind: 'proma_event',
-                event: { type: 'retry', status: 'starting', attempt: retryAttempt, maxAttempts: MAX_AUTO_RETRIES, delaySeconds: delaySec, reason: lastRetryableError ?? '未知错误' },
-              })
-              this.eventBus.emit(sessionId, {
-                kind: 'proma_event',
-                event: { type: 'retry', status: 'attempt', attemptData },
-              })
-            }
-
-            console.log(`[Agent 编排] 第 ${retryAttempt} 次重试${retryAttempt <= RETRY_VISIBILITY_THRESHOLD ? '(静默)' : ''}，等待 ${delaySec}s...`)
-            await new Promise((r) => setTimeout(r, delayMs))
-
-            // 等待期间如果会话被中止，退出
-            if (!this.activeSessions.has(sessionId)) {
-              const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
-              this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-              try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
-              completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
-              return
-            }
-          }
-        }
-
+      for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
+        // 回退会清除 queryOptions.resumeSessionId；新建 Pi artifact 不应再触发 prompt replay。
+        const wasResuming = !!queryOptions.resumeSessionId
         let shouldRetryFromError = false
 
         try {
@@ -1620,9 +1419,6 @@ false && canAutoRetry(attempt)
           // 终止路径失效，需排查。
           let drainTimeoutPromise: Promise<'drain_timeout'> | null = null
           const RESULT_DRAIN_TIMEOUT_MS = 2_000
-          // 后台任务等待态：result 走轻量完成后置 true，下一轮真正开始（收到 assistant/user/task 消息）时
-          // 置回 false 并发 run_resumed，让 UI 从空闲态恢复运行态。
-          let awaitingBackgroundWake = false
           let visibleRunMessageCount = 0
 
           while (true) {
@@ -1660,16 +1456,6 @@ false && canAutoRetry(attempt)
               visibleRunMessageCount += 1
             }
 
-            // 后台任务唤醒：轻量完成后处于等待态，收到新一轮的首条实质消息时
-            // 发 run_resumed，让 UI 从"空闲可输入"恢复到"运行中"。
-            // applyAgentEvent 的流式分支不会重置 running，故必须显式通知。
-            if (awaitingBackgroundWake) {
-              const sub = msg.type === 'system' ? (msg as { subtype?: string }).subtype : undefined
-              if (msg.type === 'assistant' || msg.type === 'user' || sub === 'task_started' || sub === 'task_progress') {
-                awaitingBackgroundWake = false
-                this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'run_resumed', sessionId } })
-              }
-            }
 
             // SDK 权限模式可能在 canUseTool 前直接批准工具（如 bypassPermissions）。
             // 因此计划阶段状态要从实际 tool_use 流里同步，不能只依赖权限回调。
@@ -1695,16 +1481,13 @@ false && canAutoRetry(attempt)
                 if (isPromptTooLongError(detailedMessage, originalError)) {
                   errorCode = 'prompt_too_long'
                 }
-                const typedError = mapSDKErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
+                const typedError = mapAgentErrorToTypedError(errorCode, friendlyErrorMessage(detailedMessage), originalError)
 
                 // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
-                if (isSessionNotFoundError(detailedMessage, originalError) && existingSdkSessionId && canAutoRetry(attempt)) {
-                  invisibleRecoveryAttempts += 1
-                  skipNextRetryDelay = true
+                if (isSessionNotFoundError(detailedMessage, originalError) && wasResuming) {
                   existingSdkSessionId = undefined
                   capturedSdkSessionId = undefined
-                  lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
-                  stderrChunks.length = 0
+                  this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
                   shouldRetryFromError = true
                   break
                 }
@@ -1713,14 +1496,11 @@ false && canAutoRetry(attempt)
                 // 先自动清除 SDK resume 关系，改用 Proma 已持久化上下文重跑一次；再失败才展示用户提示。
                 if (
                   typedError.code === THINKING_SIGNATURE_ERROR_CODE &&
-                  canTryThinkingSignatureRecovery(attempt)
+                  wasResuming
                 ) {
-                  thinkingSignatureRecoveryAttempted = true
-                  invisibleRecoveryAttempts += 1
                   existingSdkSessionId = undefined
                   capturedSdkSessionId = undefined
-                  skipNextRetryDelay = true
-                  lastRetryableError = this.prepareResumeFallbackRecovery(
+                  this.prepareResumeFallbackRecovery(
                     sessionId,
                     queryOptions,
                     contextualMessage,
@@ -1729,10 +1509,8 @@ false && canAutoRetry(attempt)
                     accumulatedMessages,
                     queryStartedAt,
                     '检测到 thinking signature 不兼容，清除 sdkSessionId 并切换到上下文回填模式',
-                    '思考签名不兼容，切换到上下文回填模式',
                     true,  // 跨模型签名不兼容是唯一确定永久无效的场景，清除磁盘 sdkSessionId
                   )
-                  stderrChunks.length = 0
                   shouldRetryFromError = true
                   break
                 }
@@ -1741,14 +1519,11 @@ false && canAutoRetry(attempt)
                 // 自动清除 resume 指针，改用 Proma 最近历史回填重跑一次；用于飞书/自动任务等无人值守入口自恢复。
                 if (
                   typedError.code === 'prompt_too_long' &&
-                  canTryPromptTooLongRecovery(attempt)
+                  wasResuming
                 ) {
-                  promptTooLongRecoveryAttempted = true
-                  invisibleRecoveryAttempts += 1
                   existingSdkSessionId = undefined
                   capturedSdkSessionId = undefined
-                  skipNextRetryDelay = true
-                  lastRetryableError = this.prepareResumeFallbackRecovery(
+                  this.prepareResumeFallbackRecovery(
                     sessionId,
                     queryOptions,
                     contextualMessage,
@@ -1757,25 +1532,8 @@ false && canAutoRetry(attempt)
                     accumulatedMessages,
                     queryStartedAt,
                     '检测到上下文过长，清除 sdkSessionId 并切换到上下文回填模式',
-                    '上下文过长，切换到上下文回填模式',
                     true,
                   )
-                  stderrChunks.length = 0
-                  shouldRetryFromError = true
-                  break
-                }
-
-                // 判断是否可自动重试
-                if (isAutoRetryableTypedError(typedError) && canReplayPromptForRetry(attempt)) {
-                  lastRetryableError = typedError.title
-                    ? `${typedError.title}: ${typedError.message}`
-                    : typedError.message
-                  console.log(`[Agent 编排] 可重试错误 (assistant error): ${typedError.code} - ${lastRetryableError}`)
-                  this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-                  accumulatedMessages.length = 0
-                  // 与 catch 路径（isAutoRetryableCatchError）和思考签名回填路径保持一致：
-                  // 重试前清空已累积的 stderr，避免 25 次重试上限内字符串无限增长
-                  stderrChunks.length = 0
                   shouldRetryFromError = true
                   break
                 }
@@ -1819,14 +1577,6 @@ false && canAutoRetry(attempt)
                 appendSDKMessages(sessionId, [errorSDKMsg])
                 console.log(`[Agent 编排] 已保存 TypedError 消息: ${typedError.code} - ${typedError.title}`)
 
-                // 如果之前有可见重试记录，发送 retry_failed
-                if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD && lastRetryableError) {
-                  this.eventBus.emit(sessionId, {
-                    kind: 'proma_event',
-                    event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled, timestamp: Date.now(), reason: lastRetryableError, errorMessage: typedError.message, delaySeconds: 0 } },
-                  })
-                }
-
                 // 透传归一化后的错误消息到前端，避免 SDK 原始 API Error 直接暴露给用户。
                 this.eventBus.emit(sessionId, { kind: 'sdk_message', message: errorSDKMsg })
                 try { updateAgentSessionMeta(sessionId, {}) } catch { /* 忽略 */ }
@@ -1850,14 +1600,14 @@ false && canAutoRetry(attempt)
                     accumulatedMessages.push(msg)
                   }
                 } else {
-                  // 为结果消息注入渠道信息，确保持久化后能按 Agent SDK 运行窗口计算压缩阈值
+                  // 为结果消息注入渠道信息，确保持久化后能按模型上下文窗口计算压缩阈值
                   if (msg.type === 'result') {
                     if (modelId) {
                       (msg as Record<string, unknown>)._channelModelId = modelId
                     }
                     ;(msg as Record<string, unknown>)._channelProvider = channel.provider
                   }
-                  // 为 assistant 消息注入渠道信息，确保持久化后能正确匹配模型显示名与 Agent SDK 窗口
+                  // 为 assistant 消息注入渠道信息，确保持久化后能正确匹配模型显示名与上下文窗口
                   if (msg.type === 'assistant') {
                     if (modelId) {
                       (msg as Record<string, unknown>)._channelModelId = modelId
@@ -1877,72 +1627,50 @@ false && canAutoRetry(attempt)
             // Turn 结束时：持久化累积消息
             if (msg.type === 'result') {
               capturedResultSubtype = (msg as { subtype?: string }).subtype
-              // SDK 的 SDKResultError 在 errors[] 中携带真实错误原因（error_during_execution 等场景），
-              // 捕获后既用于重试判定，也透传到前端展示具体错误。
+              // Pi result 的 errors[] 携带真实错误原因，透传到前端展示具体错误。
               const rawResultErrors = (msg as { errors?: unknown }).errors
               capturedResultErrors = Array.isArray(rawResultErrors)
                 ? rawResultErrors.filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
                 : undefined
               this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
               accumulatedMessages.length = 0
-              // 软中断 / 延迟工具 / hook 暂停等场景下，adapter 保留 channel
-              // 等待队列或后续消息继续 drive Query，此处跳过 drain 超时以免误关闭事件循环。
-              // 完整白名单见 agent-error-utils.ts 的 CONTINUABLE_TERMINAL_REASONS。
-              const resultTerminalReason = (msg as { terminal_reason?: string }).terminal_reason
-              // adapter 在"本轮结束但仍有后台任务/定时任务在飞行"时打的注解：
-              // 走轻量完成（UI 空闲可输入、host 保留会话），等待 task_notification 自动续轮。
-              const keptOpenForTasks = (msg as Record<string, unknown>)._keepChannelOpenForTasks === true
-              const keepChannelOpen = shouldKeepChannelOpen(resultTerminalReason) || keptOpenForTasks
-              // 分类打点：跟踪线上哪种 terminal_reason 最常见，配合 deferred_tool_use 回填决策
-              const hasDeferredTool = (msg as { deferred_tool_use?: unknown }).deferred_tool_use != null
               console.log(
-                `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}, ` +
-                `terminal_reason=${resultTerminalReason ?? 'undefined'}, keepChannelOpen=${keepChannelOpen}` +
-                (keptOpenForTasks ? ', keptOpenForTasks=true' : '') +
-                (hasDeferredTool ? ', hasDeferredTool=true' : '') +
+                `[Agent 编排] result 到达: sessionId=${sessionId}, subtype=${capturedResultSubtype ?? 'unknown'}` +
                 (capturedResultErrors?.length ? `, errors=${JSON.stringify(capturedResultErrors)}` : ''),
               )
-              // error_during_execution 是 SDK 的兜底错误码，以 result（而非 assistant.error / 抛异常）形式到达，
-              // 默认不会触发上面两条重试路径。这里用 errors[] 文本喂给现有的可重试判定（502/529/overloaded/
-              // 网络瞬断 / 响应体解析失败等），命中则进入重试循环，复用统一的退避逻辑。
-              if (
-                capturedResultSubtype === 'error_during_execution' &&
-                capturedResultErrors?.length &&
-                isSessionNotFoundError(capturedResultErrors.join('\n'), stderrChunks.join('\n')) &&
-                existingSdkSessionId &&
-                canAutoRetry(attempt)
-              ) {
-                invisibleRecoveryAttempts += 1
-                skipNextRetryDelay = true
-                existingSdkSessionId = undefined
-                capturedSdkSessionId = undefined
-                lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
-                stderrChunks.length = 0
-                shouldRetryFromError = true
-                break
+              // Pi 也可能在 result 中报告失效的 resume artifact；仅回退本轮实际 resume 的请求。
+              const resultErrorText = capturedResultErrors?.join('\n')
+              if (resultErrorText && wasResuming) {
+                if (isSessionNotFoundError(resultErrorText)) {
+                  existingSdkSessionId = undefined
+                  capturedSdkSessionId = undefined
+                  this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
+                  shouldRetryFromError = true
+                  break
+                }
+                if (isPromptTooLongError(resultErrorText)) {
+                  existingSdkSessionId = undefined
+                  capturedSdkSessionId = undefined
+                  this.prepareResumeFallbackRecovery(
+                    sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt,
+                    '检测到上下文过长，清除 sdkSessionId 并切换到上下文回填模式', true,
+                  )
+                  shouldRetryFromError = true
+                  break
+                }
+                if (isThinkingSignatureError(resultErrorText)) {
+                  existingSdkSessionId = undefined
+                  capturedSdkSessionId = undefined
+                  this.prepareResumeFallbackRecovery(
+                    sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt,
+                    '检测到 thinking signature 不兼容，清除 sdkSessionId 并切换到上下文回填模式', true,
+                  )
+                  shouldRetryFromError = true
+                  break
+                }
               }
-              if (
-                capturedResultSubtype === 'error_during_execution' &&
-                capturedResultErrors?.length &&
-                isAutoRetryableCatchError(null, capturedResultErrors.join('\n')) &&
-                canReplayPromptForRetry(attempt)
-              ) {
-                lastRetryableError = capturedResultErrors[0]
-                console.log(`[Agent 编排] 可重试错误 (result error_during_execution, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
-                // 与 assistant.error / catch 重试路径保持一致：清空已累积 stderr，避免重试上限内无限增长
-                stderrChunks.length = 0
-                shouldRetryFromError = true
-                break
-              }
-              if (keptOpenForTasks) {
-                // 轻量完成：UI 置空闲可输入，但 host 保持运行态（不 releaseActiveRun、不 break、不启动 drain 超时），
-                // while 循环继续 park 在 queryIterator.next()，等待后台任务完成时 SDK 自动 yield 的新一轮消息。
-                awaitingBackgroundWake = true
-                idleComplete(getAgentSessionMessages(sessionId), { startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
-              } else if (!keepChannelOpen && !drainTimeoutPromise) {
-                // 启动 drain 超时安全网：正常情况下 adapter 收到 terminal result 会主动 break
-                // 触发 iterator.return → 下一次 next() 立即返回 done，此 timeout 不会触发。
-                // 仅在极端情况下（adapter 主动终止失效、SDK 行为再次变化）保护事件循环不无限挂起。
+              if (!drainTimeoutPromise) {
+                // Pi adapter 收到终态 result 后会结束 iterator；超时仅保护异常运行时行为。
                 drainTimeoutPromise = new Promise((resolve) =>
                   setTimeout(() => resolve('drain_timeout'), RESULT_DRAIN_TIMEOUT_MS),
                 )
@@ -1975,13 +1703,6 @@ false && canAutoRetry(attempt)
 
           const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
 
-          // 正常完成 — 如果之前有可见重试，发送 retry_cleared
-          if (!wasStoppedByUser && retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD) {
-            this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'retry', status: 'cleared' } })
-            console.log(`[Agent 编排] 重试成功，已在第 ${attempt} 次尝试后恢复`)
-          }
-          retrySucceeded = true
-
           // 15. 持久化 assistant 消息
           this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
 
@@ -2009,58 +1730,33 @@ false && canAutoRetry(attempt)
           // 发送完成信号
           completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt, resultSubtype: capturedResultSubtype, resultErrors: capturedResultErrors })
 
-          break  // 成功完成，退出重试循环
+          return
 
         } catch (error) {
-          // 打印 stderr
-          const fullStderr = stderrChunks.join('').trim()
-          if (fullStderr) {
-            console.error(`[Agent 编排] 完整 stderr 输出 (${fullStderr.length} 字符):`)
-            console.error(fullStderr)
-          } else {
-            console.error(`[Agent 编排] stderr 为空`)
-          }
-
-          // 用户主动中止
           if (!this.activeSessions.has(sessionId)) {
             const wasStoppedByUser = this.consumeStoppedByUser(sessionId, runGeneration)
-            console.log(`[Agent 编排] 会话 ${sessionId} 已被用户中止`)
             this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-            // 持久化中断状态到会话 meta
             try { updateAgentSessionMeta(sessionId, { stoppedByUser: wasStoppedByUser }) } catch { /* 会话可能已删除 */ }
             completeRun(getAgentSessionMessages(sessionId), { stoppedByUser: wasStoppedByUser, startedAt: streamStartedAt })
             return
           }
 
-          // 从 stderr 提取 API 错误
-          const stderrOutput = stderrChunks.join('').trim()
-          const apiError = extractApiError(stderrOutput)
-          const rawErrorMessage = error instanceof Error ? error.message : ''
-          const catchLooksPromptTooLong = isPromptTooLongError(
-            apiError?.message ?? '',
-            rawErrorMessage,
-            stderrOutput,
-          )
+          const rawErrorMessage = errorMessageOf(error)
+          const catchLooksPromptTooLong = isPromptTooLongError(rawErrorMessage)
 
           // Session 不存在错误：清除 sdkSessionId，切换到上下文回填模式重试
-          if (isSessionNotFoundError(rawErrorMessage, stderrOutput) && existingSdkSessionId && canAutoRetry(attempt)) {
-            invisibleRecoveryAttempts += 1
-            skipNextRetryDelay = true
+          if (isSessionNotFoundError(rawErrorMessage) && wasResuming) {
             existingSdkSessionId = undefined
             capturedSdkSessionId = undefined
-            lastRetryableError = this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
-            stderrChunks.length = 0
+            this.prepareSessionNotFoundRecovery(sessionId, queryOptions, contextualMessage, agentCwd, workspaceSlug, accumulatedMessages, queryStartedAt)
             continue  // 进入下一次 retry 循环
           }
 
           // 上下文过长：清除超限 resume 指针，用 Proma 历史回填自动恢复一次。
-          if (catchLooksPromptTooLong && canTryPromptTooLongRecovery(attempt)) {
-            promptTooLongRecoveryAttempted = true
-            invisibleRecoveryAttempts += 1
+          if (catchLooksPromptTooLong && wasResuming) {
             existingSdkSessionId = undefined
             capturedSdkSessionId = undefined
-            skipNextRetryDelay = true
-            lastRetryableError = this.prepareResumeFallbackRecovery(
+            this.prepareResumeFallbackRecovery(
               sessionId,
               queryOptions,
               contextualMessage,
@@ -2069,24 +1765,19 @@ false && canAutoRetry(attempt)
               accumulatedMessages,
               queryStartedAt,
               '检测到上下文过长，清除 sdkSessionId 并切换到上下文回填模式',
-              '上下文过长，切换到上下文回填模式',
               true,
             )
-            stderrChunks.length = 0
             continue  // 进入下一次 retry 循环
           }
 
           // Thinking signature 不兼容：先自动清除 SDK resume 关系并用上下文回填重跑一次。
           if (
-            isThinkingSignatureError(apiError?.message ?? '', rawErrorMessage, stderrOutput) &&
-            canTryThinkingSignatureRecovery(attempt)
+            isThinkingSignatureError(rawErrorMessage) &&
+            wasResuming
           ) {
-            thinkingSignatureRecoveryAttempted = true
-            invisibleRecoveryAttempts += 1
             existingSdkSessionId = undefined
             capturedSdkSessionId = undefined
-            skipNextRetryDelay = true
-            lastRetryableError = this.prepareResumeFallbackRecovery(
+            this.prepareResumeFallbackRecovery(
               sessionId,
               queryOptions,
               contextualMessage,
@@ -2095,28 +1786,13 @@ false && canAutoRetry(attempt)
               accumulatedMessages,
               queryStartedAt,
               '检测到 thinking signature 不兼容，清除 sdkSessionId 并切换到上下文回填模式',
-              '思考签名不兼容，切换到上下文回填模式',
               true,  // 跨模型签名不兼容是唯一确定永久无效的场景，清除磁盘 sdkSessionId
             )
-            stderrChunks.length = 0
-            continue  // 进入下一次 retry 循环
-          }
-
-          // 判断是否可重试
-          if (isAutoRetryableCatchError(apiError, rawErrorMessage, stderrOutput) && canReplayPromptForRetry(attempt)) {
-            lastRetryableError = apiError
-              ? `API Error ${apiError.statusCode}: ${apiError.message}`
-              : (error instanceof Error ? error.message : '未知错误')
-            console.log(`[Agent 编排] 可重试错误 (catch, attempt ${attempt}/${MAX_AUTO_RETRIES}): ${lastRetryableError}`)
-            // 保存部分内容
-            this.persistSDKMessages(sessionId, accumulatedMessages, Date.now() - queryStartedAt)
-            accumulatedMessages.length = 0
-            stderrChunks.length = 0
             continue  // 进入下一次 retry 循环
           }
 
           // 不可重试 — 走原有终止逻辑
-          const errorMessage = error instanceof Error ? error.message : '未知错误'
+          const errorMessage = rawErrorMessage || '未知错误'
           console.error(`[Agent 编排] 执行失败:`, error)
 
           // 保存已累积的部分内容
@@ -2129,28 +1805,14 @@ false && canAutoRetry(attempt)
             }
           }
 
-          let userFacingError: string
-          if (apiError) {
-            userFacingError = friendlyErrorMessage(`API 错误 (${apiError.statusCode}):\n${apiError.message}`)
-          } else {
-            userFacingError = friendlyErrorMessage(errorMessage)
-          }
+          let userFacingError = friendlyErrorMessage(errorMessage)
 
           // 保存错误消息到 JSONL
           try {
             // 检测是否为 prompt too long 错误
-            const isPromptTooLong = isPromptTooLongError(
-              userFacingError,
-              error instanceof Error ? (error.stack ?? error.message) : String(error),
-              stderrOutput,
-            )
-            const isThinkingSignature = isThinkingSignatureError(
-              apiError?.message ?? '',
-              userFacingError,
-              rawErrorMessage,
-              error instanceof Error ? (error.stack ?? error.message) : String(error),
-              stderrOutput,
-            )
+            const errorStack = error instanceof Error ? (error.stack ?? error.message) : String(error)
+            const isPromptTooLong = isPromptTooLongError(userFacingError, errorStack)
+            const isThinkingSignature = isThinkingSignatureError(userFacingError, rawErrorMessage, errorStack)
             const errorCode = isPromptTooLong
               ? 'prompt_too_long'
               : isThinkingSignature
@@ -2196,14 +1858,6 @@ false && canAutoRetry(attempt)
             console.error('[Agent 编排] 保存错误消息失败:', saveError)
           }
 
-          // 如果之前有可见重试记录，发送 retry_failed
-          if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD && lastRetryableError) {
-            this.eventBus.emit(sessionId, {
-              kind: 'proma_event',
-              event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled, timestamp: Date.now(), reason: lastRetryableError, errorMessage: userFacingError, delaySeconds: 0 } },
-            })
-          }
-
           failRun(userFacingError, getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
 
           // 保留 Pi session ID，确保网络或上游临时失败后的下一轮可继续 resume。
@@ -2215,38 +1869,19 @@ false && canAutoRetry(attempt)
         }
       }
 
-      // 重试循环结束（达到最大次数仍失败）
-      if (!retrySucceeded && lastRetryableError) {
-        const retryFailureMessage = retryDelayElapsedMs >= MAX_AUTO_RETRY_WAIT_MS
-          ? '重试等待已达到 5 分钟后仍然失败'
-          : `重试 ${retryAttemptsScheduled || MAX_AUTO_RETRIES} 次后仍然失败`
-
-        // 仅当重试曾经对用户可见时才发送 retry_failed 事件
-        if (retryAttemptsScheduled > RETRY_VISIBILITY_THRESHOLD) {
-          this.eventBus.emit(sessionId, {
-            kind: 'proma_event',
-            event: { type: 'retry', status: 'failed', attemptData: { attempt: retryAttemptsScheduled || MAX_AUTO_RETRIES, timestamp: Date.now(), reason: lastRetryableError, errorMessage: retryFailureMessage, delaySeconds: 0 } },
-          })
-        }
-
-        // 保存错误消息
-        const retryErrorContent = `${retryFailureMessage}: ${lastRetryableError}`
-        const retryErrorSDKMsg: SDKMessage = {
-          type: 'assistant',
-          message: {
-            content: [{ type: 'text', text: retryErrorContent }],
-          },
-          parent_tool_use_id: null,
-          uuid: randomUUID(),
-          error: { message: retryErrorContent, errorType: 'unknown_error' },
-          _createdAt: Date.now(),
-          _errorCode: 'unknown_error',
-          _errorTitle: '重试失败',
-        } as unknown as SDKMessage
-        appendSDKMessages(sessionId, [retryErrorSDKMsg])
-
-        failRun(`${retryFailureMessage}: ${lastRetryableError}`, getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
-      }
+      const recoveryFailure = '会话恢复失败，请新建会话继续'
+      const recoveryError: SDKMessage = {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: recoveryFailure }] },
+        parent_tool_use_id: null,
+        uuid: randomUUID(),
+        error: { message: recoveryFailure, errorType: 'unknown_error' },
+        _createdAt: Date.now(),
+        _errorCode: 'unknown_error',
+        _errorTitle: '会话恢复失败',
+      } as unknown as SDKMessage
+      appendSDKMessages(sessionId, [recoveryError])
+      failRun(recoveryFailure, getAgentSessionMessages(sessionId), { startedAt: streamStartedAt })
 
     } finally {
       // 只在 generation 匹配时才清理，防止旧流的 finally 误删新流的注册

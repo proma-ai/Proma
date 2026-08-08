@@ -4,9 +4,7 @@
  * 目标：当 Agent 代用户创建 commit / PR 时，附带可搜索、可关闭的 Proma 标识，
  * 用于产品曝光；同时避免 Co-Authored-By 假冒作者、污染 GitHub contributors。
  *
- * v1（最小版）两层保障：
- * 1. System prompt 指令（Claude / Pi 通用）— 引导 Agent 在 git commit / gh pr 时附加标识
- * 2. Claude SDK session `.claude/settings.json` 的 `attribution` 字段 — 覆盖 SDK 默认 Co-Authored-By
+ * System prompt 指令 — 引导 Agent 在 git commit / gh pr 时附加标识。
  *
  * 后续可增强：canUseTool 对 Bash 的确定性 --trailer / body 注入。
  */
@@ -42,43 +40,6 @@ export function isGitAttributionEnabled(config?: GitAttributionConfig | boolean 
     return config.enabled
   }
   return DEFAULT_GIT_ATTRIBUTION_ENABLED
-}
-
-/**
- * Claude Code settings.json 的 attribution 字段。
- * 空字符串会禁用 SDK 内置 Co-Authored-By / Generated with 归因。
- * @see https://code.claude.com/docs/en/settings#attribution-settings
- */
-export function buildClaudeSdkAttribution(enabled: boolean): { commit: string; pr: string } {
-  if (!enabled) {
-    return { commit: '', pr: '' }
-  }
-  return {
-    commit: PROMA_COMMIT_TRAILER,
-    pr: PROMA_PR_ATTRIBUTION,
-  }
-}
-
-/**
- * 将 Proma attribution 合并进 Claude session 的 settings 对象。
- * @returns 是否发生了变更（调用方可据此决定是否写盘）
- */
-export function applyClaudeSdkAttributionSettings(
-  sdkSettings: Record<string, unknown>,
-  enabled: boolean,
-): boolean {
-  const next = buildClaudeSdkAttribution(enabled)
-  const prev = sdkSettings.attribution
-  const prevObj = prev && typeof prev === 'object' && !Array.isArray(prev)
-    ? (prev as Record<string, unknown>)
-    : null
-
-  if (prevObj?.commit === next.commit && prevObj?.pr === next.pr) {
-    return false
-  }
-
-  sdkSettings.attribution = next
-  return true
 }
 
 /** 注入到 buildSystemPrompt 的 Git/PR 标识规范 */

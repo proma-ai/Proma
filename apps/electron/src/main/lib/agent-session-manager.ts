@@ -768,16 +768,21 @@ async function forkPiAgentSession(sourceMeta: AgentSessionMeta, input: ForkSessi
     const forkedManager = sdk.SessionManager.forkFrom(branchFile, destDir ?? sourceDir ?? process.cwd(), sessionDir)
     const piSessionFile = forkedManager.getSessionFile()
     if (!piSessionFile || !existsSync(piSessionFile)) throw new Error('Pi 分叉 artifact 校验失败')
+    // 新 branch 只包含分叉点之前的 entry；不能把源树后续 turn 的映射带入 metadata。
+    const branchBindings = Object.fromEntries(
+      Object.entries(sourceMeta.piEntryBindings ?? {})
+        .filter(([, mappedEntryId]) => Boolean(forkedManager.getEntry(mappedEntryId))),
+    )
 
     updateAgentSessionMeta(newMeta.id, {
       sdkSessionId: forkedManager.getSessionId(),
       piSessionFile,
-      piEntryBindings: { ...(sourceMeta.piEntryBindings ?? {}) },
+      piEntryBindings: branchBindings,
       forkSourceDir: sourceDir,
     })
     newMeta.sdkSessionId = forkedManager.getSessionId()
     newMeta.piSessionFile = piSessionFile
-    newMeta.piEntryBindings = { ...(sourceMeta.piEntryBindings ?? {}) }
+    newMeta.piEntryBindings = branchBindings
 
     if (sourceWorkbenchDir && destWorkbenchDir) copyForkWorkspaceFiles(sourceWorkbenchDir, destWorkbenchDir)
     await copyForkStoredSDKMessages({
@@ -825,8 +830,15 @@ export async function rewindPiAgentSession(sessionId: string, assistantMessageUu
   const branchFile = manager.createBranchedSession(entryId)
   if (!branchFile || !existsSync(branchFile)) throw new Error('Pi 未能生成回退 session artifact')
   const rewindManager = sdk.SessionManager.open(branchFile, join(getSdkConfigDir(), 'sessions'), cwd)
+  const retainedAssistantUuids = new Set(
+    kept.flatMap((message) => {
+      const candidate = message as { uuid?: unknown; type?: unknown }
+      return candidate.type === 'assistant' && typeof candidate.uuid === 'string' ? [candidate.uuid] : []
+    }),
+  )
   const retainedBindings = Object.fromEntries(
-    Object.entries(meta.piEntryBindings ?? {}).filter(([, mappedEntryId]) => Boolean(rewindManager.getEntry(mappedEntryId))),
+    Object.entries(meta.piEntryBindings ?? {}).filter(([messageUuid, mappedEntryId]) =>
+      retainedAssistantUuids.has(messageUuid) && Boolean(rewindManager.getEntry(mappedEntryId))),
   )
 
   writeTextFileAtomic(filePath, truncatedContent)

@@ -16,15 +16,12 @@ import type {
   CodexOAuthCredentials,
   XaiOAuthCredentials,
   AgentQueryInput,
-  ErrorCode,
   JsonSchemaOutputFormat,
   PromaPermissionMode,
   ProviderType,
-  RecoveryAction,
   SendQueuedMessageOptions,
   SDKMessage,
   SDKUserMessageInput,
-  TypedError,
 } from '@proma/shared'
 import {
   calculatePiAutoCompactionReserveTokens,
@@ -32,13 +29,8 @@ import {
   isCodexFastModeSupportedModel,
   resolveReasoningProfile,
 } from '@proma/shared'
-import {
-  THINKING_SIGNATURE_ERROR_MESSAGE,
-  THINKING_SIGNATURE_ERROR_TITLE,
-  isThinkingSignatureError as matchesThinkingSignatureError,
-} from '@proma/shared'
 import type { CanUseToolOptions, PermissionResult } from '../agent-permission-service'
-import { TRANSIENT_NETWORK_PATTERN, isMalformedResponseError } from '../error-patterns'
+import { isPromptTooLongError } from '../agent-error-utils'
 
 import type {
   AgentSession,
@@ -325,33 +317,7 @@ function createAsyncQueue<T>(): AsyncQueue<T> {
   }
 }
 
-const FRIENDLY_ERROR_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
-  {
-    pattern: /api key|unauthorized|invalid.*key|authentication/i,
-    message: '请检查是否选择了正确的 Proma 供应渠道和模型',
-  },
-  {
-    pattern: /validation|schema/i,
-    message: 'API 请求格式校验失败，请重试或开启新会话',
-  },
-]
-
-const MAX_ERROR_MESSAGE_LENGTH = 5000
 const SESSION_READY_TIMEOUT_MS = 60_000
-const PROMPT_TOO_LONG_PATTERNS = [
-  'prompt is too long',
-  'prompt_too_long',
-  'input is too long',
-  'context_length_exceeded',
-  'maximum context length',
-  'context length',
-  'context window',
-  'maximum context',
-  'token limit',
-  'too many tokens',
-  'exceeds the model',
-  'exceed the model',
-] as const
 const SKILL_COMMAND_PATTERN = /\/skill:([A-Za-z0-9][A-Za-z0-9._-]*)/g
 
 function createActivePiSession(): ActivePiSession {
@@ -410,195 +376,6 @@ async function waitForActiveSession(active: ActivePiSession): Promise<AgentSessi
     ])
   } finally {
     if (timer) clearTimeout(timer)
-  }
-}
-
-export function friendlyErrorMessage(raw: string): string {
-  const isLong = raw.length > MAX_ERROR_MESSAGE_LENGTH
-  const sample = isLong ? raw.slice(0, MAX_ERROR_MESSAGE_LENGTH) : raw
-  for (const { pattern, message } of FRIENDLY_ERROR_MESSAGES) {
-    if (pattern.test(sample)) return message
-  }
-  return isLong
-    ? sample + `\n\n[错误详情过长 (${(raw.length / 1024).toFixed(0)}KB)，已截断]`
-    : raw
-}
-
-export function isPromptTooLongError(...messages: Array<string | undefined>): boolean {
-  const text = messages
-    .filter((message): message is string => typeof message === 'string')
-    .join(' ')
-    .toLowerCase()
-  return PROMPT_TOO_LONG_PATTERNS.some((pattern) => text.includes(pattern))
-}
-
-export function isThinkingSignatureError(message: string, originalError?: string): boolean {
-  return matchesThinkingSignatureError(message, originalError)
-}
-
-function stringifyErrorContent(content: unknown): string | undefined {
-  if (typeof content === 'string' && content.trim()) return content
-  if (Array.isArray(content)) {
-    const text = content
-      .map((block) => {
-        if (!block || typeof block !== 'object') return ''
-        const record = block as Record<string, unknown>
-        if (typeof record.text === 'string') return record.text
-        if (typeof record.message === 'string') return record.message
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
-      .trim()
-    return text || undefined
-  }
-  if (content && typeof content === 'object') {
-    const record = content as Record<string, unknown>
-    if (typeof record.message === 'string') return record.message
-    if (typeof record.error === 'string') return record.error
-    return JSON.stringify(record)
-  }
-  return undefined
-}
-
-export function extractErrorDetails(error: {
-  error?: { message?: string; errorType?: string }
-  errorMessage?: string
-  errors?: unknown[]
-  message?: { content?: unknown }
-  content?: unknown
-}): {
-  detailedMessage: string
-  originalError?: string
-} {
-  const direct = error.error?.message ?? error.errorMessage
-  if (direct) return { detailedMessage: direct, originalError: direct }
-  const fromMessage = stringifyErrorContent(error.message?.content ?? error.content)
-  if (fromMessage) return { detailedMessage: fromMessage, originalError: fromMessage }
-  const fromErrors = Array.isArray(error.errors)
-    ? error.errors.map((item) => stringifyErrorContent(item)).filter(Boolean).join('\n')
-    : undefined
-  if (fromErrors) return { detailedMessage: fromErrors, originalError: fromErrors }
-  return { detailedMessage: 'Agent 执行失败', originalError: undefined }
-}
-
-/** 各错误码对应的标题与是否可重试（用于构建差异化 TypedError） */
-const ERROR_CODE_META: Partial<Record<ErrorCode, { title: string; canRetry: boolean }>> = {
-  invalid_api_key: { title: '认证失败', canRetry: true },
-  billing_error: { title: '账单错误', canRetry: false },
-  rate_limited: { title: '请求频率限制', canRetry: true },
-  prompt_too_long: { title: '上下文过长', canRetry: false },
-  invalid_request: { title: '请求无效', canRetry: false },
-  service_unavailable: { title: '服务暂时不可用', canRetry: true },
-  service_error: { title: '服务错误', canRetry: true },
-  provider_error: { title: '服务繁忙', canRetry: true },
-  network_error: { title: '网络异常', canRetry: true },
-  invalid_model: { title: '模型不可用', canRetry: false },
-  agent_runtime_not_found: { title: 'Agent 核心未就绪', canRetry: false },
-}
-
-/**
- * 判断错误文本是否为 pi runtime 模块加载失败（打包遗漏依赖 / 安装损坏）。
- *
- * 只匹配明确的 Node 模块解析失败措辞，且要求同时提及 pi 运行时包名，
- * 避免上游错误正文里偶然出现包名字符串就被误判为「核心未就绪」（那会错误地丢失可重试性）。
- */
-export function isRuntimeNotFoundError(text: string): boolean {
-  const isModuleResolutionFailure = /cannot find module|module not found|err_module_not_found|failed to (?:load|resolve)/i.test(text)
-  if (!isModuleResolutionFailure) return false
-  return /pi-coding-agent|pi-agent-core|@earendil-works/i.test(text)
-}
-
-/** 从错误文本中兜底提取 HTTP 状态码（锚定在明确的状态码上下文，避免误匹配正文数字） */
-function extractHttpStatusFromErrorText(...messages: Array<string | undefined>): number | null {
-  const combined = messages.filter(Boolean).join('\n')
-  const patterns = [
-    /API Error:\s*(\d{3})/i,
-    /API error[^:]*:\s+(\d{3})/i,
-    /\b(?:HTTP|status|statusCode)\s*[:=]?\s*(\d{3})\b/i,
-    /\b(\d{3})\s+\{[^}]*"error"/is,
-  ]
-  for (const pattern of patterns) {
-    const match = combined.match(pattern)
-    const statusCode = match?.[1] ? parseInt(match[1], 10) : NaN
-    if (statusCode >= 400 && statusCode < 600) return statusCode
-  }
-  return null
-}
-
-export function mapSDKErrorToTypedError(errorCode: string, message: string, originalError?: string): TypedError {
-  const diagnosticText = `${errorCode}\n${message}\n${originalError ?? ''}`
-
-  // thinking-signature：中途切换模型导致思考标签不互认，需保留专属文案与「在新对话继续」动作
-  if (isThinkingSignatureError(message, originalError)) {
-    return {
-      code: 'thinking_signature_invalid',
-      title: THINKING_SIGNATURE_ERROR_TITLE,
-      message: THINKING_SIGNATURE_ERROR_MESSAGE,
-      actions: [
-        { key: 'n', label: '在新对话继续', action: 'retry_in_new_session' },
-        { key: 'r', label: '重试', action: 'retry' },
-      ],
-      canRetry: true,
-      retryDelayMs: 1000,
-      originalError,
-    }
-  }
-
-  let code: ErrorCode = 'unknown_error'
-  const httpStatus = extractHttpStatusFromErrorText(message, originalError, errorCode)
-  if (isRuntimeNotFoundError(diagnosticText)) {
-    // pi runtime 动态 import 失败（打包遗漏依赖 / 安装损坏），产出定向的「核心未就绪」错误码，
-    // 让 UI 给出「请重新安装」引导，而非泛化的 unknown_error
-    code = 'agent_runtime_not_found'
-  } else if (/api.*key|unauthorized|authentication|invalid.*credential/i.test(diagnosticText)) {
-    code = 'invalid_api_key'
-  } else if (/billing|quota|insufficient_quota|credit|balance|payment|subscription/i.test(diagnosticText)) {
-    code = 'billing_error'
-  } else if (/rate.?limit/i.test(diagnosticText) || httpStatus === 429) {
-    code = 'rate_limited'
-  } else if (isPromptTooLongError(message, originalError, errorCode)) {
-    code = 'prompt_too_long'
-  } else if (isMalformedResponseError(message, originalError)) {
-    // 上游返回无法解析的响应体（网关 HTML 错误页 / SSE 截断 / 脏数据），瞬时异常，可重试
-    code = 'service_error'
-  } else if (TRANSIENT_NETWORK_PATTERN.test(message) || TRANSIENT_NETWORK_PATTERN.test(originalError ?? '')) {
-    code = 'network_error'
-  } else if (/overloaded/i.test(diagnosticText) || httpStatus === 529) {
-    code = 'provider_error'
-  } else if (/service unavailable/i.test(diagnosticText) || httpStatus === 503) {
-    code = 'service_unavailable'
-  } else if (httpStatus === 500 || httpStatus === 502 || (httpStatus != null && httpStatus >= 500)) {
-    // HTTP 5xx（含 500 内部错误 / 502 网关异常）通常为上游瞬时故障，可重试
-    code = 'service_error'
-  } else if (/invalid request|bad request|400|schema|validation/i.test(diagnosticText)) {
-    code = 'invalid_request'
-  } else if (/network|fetch|socket|terminated|ECONNRESET/i.test(diagnosticText)) {
-    code = 'network_error'
-  } else if (/model/i.test(diagnosticText)) {
-    code = 'invalid_model'
-  }
-
-  const meta = ERROR_CODE_META[code] ?? { title: 'Agent 执行失败', canRetry: false }
-  // 认证/渠道配置类错误友好化后文案固定，引导用户直接重新选择模型，而非跳转设置
-  const isInvalidChannelOrModel = /请检查是否选择了正确的 Proma 供应渠道和模型/.test(message)
-
-  const actions: RecoveryAction[] = [
-    isInvalidChannelOrModel
-      ? { key: 'm', label: '重新选择模型', action: 'select_model' }
-      : { key: 's', label: '设置', action: 'settings' },
-    ...(meta.canRetry ? [{ key: 'r', label: '重试', action: 'retry' }] : []),
-    ...(code === 'prompt_too_long' ? [{ key: 'c', label: '压缩上下文', action: 'compact' }] : []),
-  ]
-
-  return {
-    code,
-    title: meta.title,
-    message,
-    actions,
-    canRetry: meta.canRetry,
-    retryDelayMs: meta.canRetry ? 1000 : undefined,
-    originalError,
   }
 }
 

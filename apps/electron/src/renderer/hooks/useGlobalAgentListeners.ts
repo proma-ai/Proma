@@ -66,7 +66,7 @@ import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta, ProviderType } from '@proma/shared'
-import { inferAgentSdkContextWindow, inferContextWindow } from '@proma/shared'
+import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import {
@@ -261,10 +261,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         // 因为部分端点（如智谱）会在 message.model 里剥掉 [1m] 等规格后缀，
         // 导致 glm-x-preview[1m] 被识别成 glm-x-preview（200K）。
         const modelName = aMsg._channelModelId ?? aMsg.message.model
-        const provider = aMsg._channelProvider
-        const fallbackWindow = provider
-          ? inferAgentSdkContextWindow(modelName, provider)
-          : inferContextWindow(modelName)
+        const fallbackWindow = inferContextWindow(modelName)
         events.push({
           type: 'usage_update',
           usage: {
@@ -319,14 +316,10 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow，
       // 避免子 Agent 的小窗口覆盖主模型的大窗口、导致指示器飘忽。
       let contextWindow: number | undefined
-      const fallbackWindow = rMsg._channelProvider
-        ? inferAgentSdkContextWindow(rMsg._channelModelId, rMsg._channelProvider)
-        : inferContextWindow(rMsg._channelModelId)
+      const fallbackWindow = inferContextWindow(rMsg._channelModelId)
       if (rMsg.modelUsage) {
         for (const [modelId, info] of Object.entries(rMsg.modelUsage)) {
-          const modelFallbackWindow = rMsg._channelProvider
-            ? inferAgentSdkContextWindow(rMsg._channelModelId ?? modelId, rMsg._channelProvider)
-            : inferContextWindow(rMsg._channelModelId ?? modelId)
+          const modelFallbackWindow = inferContextWindow(rMsg._channelModelId ?? modelId)
           const candidate = Math.max(info?.contextWindow ?? 0, modelFallbackWindow ?? 0) || undefined
           if (candidate && (contextWindow === undefined || candidate > contextWindow)) {
             contextWindow = candidate

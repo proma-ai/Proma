@@ -11,7 +11,7 @@ It is not just another chat box. Proma is meant to become a long-lived Agent wor
 ## What Proma Can Do
 
 - **Chat mode**: multi-model conversations, attachments, image input, Markdown / Mermaid / KaTeX / code highlighting, parallel conversations, system prompts, and context controls.
-- **Agent mode**: two built-in runtimes—Claude Agent SDK and Pi Agent SDK—with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions. Claude is the default; switch runtimes below the Agent input.
+- **Agent mode**: a unified Pi Agent Runtime with workspace isolation, permission modes, file operations, streaming output, plan confirmation, and ask-user interactions.
 - **Collaboration and tasks**: complex work can be split into traceable collaboration agents and tasks, with calls and results shown in the message stream.
 - **Skills, MCP, and project roots**: each Proma project manages its own Skills and MCP servers. Project files can use a user-selected local project root or a Proma-managed blank-project directory; local project configuration is not imported automatically.
 - **Remote bots**: Lark / Feishu bot bridging is supported, with DingTalk and WeChat bridge entry points also present in the app.
@@ -51,10 +51,9 @@ If your organization plans to deploy Proma for hundreds or thousands of employee
 1. Open Proma and finish the environment check. Agent mode depends on local tooling, especially Git, Node.js / Bun, and a usable shell.
 2. Go to **Settings > Channels**, add at least one AI provider channel, and fill in Base URL, API Key, and model list.
 3. Chat mode can use OpenAI, Anthropic, Google, or OpenAI-compatible channels.
-4. The default Claude Agent Runtime requires an Anthropic or Anthropic-compatible channel, such as Anthropic, DeepSeek, Kimi API, or Kimi Coding Plan.
-5. Switch Claude / Pi directly below the Agent input. Pi can use any enabled model channel.
-6. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
-7. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
+4. Agent uses the Pi Runtime and can use any enabled model channel.
+5. Go to **Settings > Agent** and choose the default Agent channel, model, and workspace.
+6. Configure memory, web search, or Feishu / DingTalk / WeChat bridges from their corresponding settings tabs if needed.
 
 ## Choosing A Mode
 
@@ -111,7 +110,7 @@ Proma supports Doubao-powered streaming voice input, both inside Proma and acros
 
 ## Agent Runtime and Providers
 
-Proma uses a single **Pi Agent Runtime**, powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. Enabled Proma channels are dynamically registered as Pi providers, supporting OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints.
+Proma uses a single **Pi Agent Runtime**, powered by `@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai`. Enabled Proma channels are dynamically registered as Pi providers, supporting OpenAI Chat Completions / Responses, Google Generative AI, Anthropic Messages, and compatible endpoints. Historical Claude transcripts are retained as read-only records: they can be viewed, but not continued, forked, or rewound.
 
 | Channel type | Chat | Pi Agent |
 | --- | --- | --- |
@@ -136,7 +135,7 @@ Proma uses a single **Pi Agent Runtime**, powered by `@earendil-works/pi-coding-
 | Code highlighting | Shiki |
 | Build | Vite + esbuild |
 | Distribution | electron-builder |
-| Agent runtime | Pi: `@earendil-works/pi-* @0.80.3` |
+| Agent runtime | Pi: `@earendil-works/pi-* @0.82.1` |
 
 ## Architecture
 
@@ -172,10 +171,10 @@ The Pi Agent runtime runs as an esbuild external dependency in the main process.
 
 When changing packaging, verify that:
 
-- `build:main` / `watch:main` keep both Agent SDKs external.
+- `build:main` / `watch:main` keep Pi runtime dependencies external.
 - `scripts/sync-runtime-deps.ts` stays aligned with the external runtime dependency list.
-- `electron-builder.yml` retains the `asarUnpack` rules for the Claude binary and Pi native add-ons.
-- After `bun run dist:fast` on a target platform, both Claude and Pi (when enabled) can start, call tools, and resume sessions.
+- `electron-builder.yml` retains the `asarUnpack` rules required by Pi native add-ons.
+- After `bun run dist:fast` on a target platform, verify that Pi Agent can start, call tools, and resume sessions.
 
 See [AGENTS.md](./AGENTS.md) for the full engineering conventions.
 

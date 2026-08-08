@@ -12,10 +12,10 @@ import {
 } from '@proma/shared'
 import { TRANSIENT_NETWORK_PATTERN, isMalformedResponseError } from './error-patterns'
 
-// SDK 错误消息友好化
+// Agent 错误消息友好化
 // ============================================================================
 
-/** 已知 SDK 错误 → 用户友好提示映射 */
+/** 已知 Agent 错误 → 用户友好提示映射 */
 const FRIENDLY_ERROR_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
   {
     pattern: /not logged in|please run \/login/i,
@@ -30,7 +30,7 @@ const FRIENDLY_ERROR_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
 /** 错误消息最大保留长度（超出部分截断，防止存储膨胀） */
 const MAX_ERROR_MESSAGE_LENGTH = 5000
 
-/** 将 SDK 原始错误消息转换为用户友好的提示（无匹配则返回原文） */
+/** 将 Agent 原始错误消息转换为用户友好的提示（无匹配则返回原文） */
 export function friendlyErrorMessage(raw: string): string {
   const isLong = raw.length > MAX_ERROR_MESSAGE_LENGTH
   const sample = isLong ? raw.slice(0, MAX_ERROR_MESSAGE_LENGTH) : raw
@@ -40,35 +40,6 @@ export function friendlyErrorMessage(raw: string): string {
   return isLong
     ? sample + `\n\n[错误详情过长 (${(raw.length / 1024).toFixed(0)}KB)，已截断]`
     : raw
-}
-
-// ============================================================================
-// Terminal reason 白名单
-// ============================================================================
-
-/**
- * 表示"本轮结束但会话应继续"的 terminal_reason 白名单。
- *
- * SDK 0.2.96+ 在 SDKResultMessage 引入 `terminal_reason` 字段后，某些值并不代表
- * 会话真正结束，而是期望 host 保留 stdin 通道、驱动下一轮：
- * - `aborted_streaming` / `aborted_tools`：query.interrupt() 软中断，等队列续轮
- * - `tool_deferred`：工具被延迟执行（配套 result.deferred_tool_use），等异步回填
- * - `hook_stopped` / `stop_hook_prevented`：hook 层面的暂停，host 可继续注入消息
- *
- * 未列在此集合中的 terminal_reason（含 `undefined` 的旧版行为、`completed`、
- * `max_turns`、`prompt_too_long`、各类 error 等）一律按"本轮结束 + 关闭通道"处理。
- */
-export const CONTINUABLE_TERMINAL_REASONS: ReadonlySet<string> = new Set([
-  'aborted_streaming',
-  'aborted_tools',
-  'tool_deferred',
-  'hook_stopped',
-  'stop_hook_prevented',
-])
-
-/** 判断 result.terminal_reason 是否应保留消息通道以等待下一轮 */
-export function shouldKeepChannelOpen(terminalReason: string | undefined): boolean {
-  return terminalReason != null && CONTINUABLE_TERMINAL_REASONS.has(terminalReason)
 }
 
 // ============================================================================
@@ -82,13 +53,17 @@ const PROMPT_TOO_LONG_PATTERNS = [
   'input is too long',
   'context_length_exceeded',
   'maximum context length',
+  'context length',
+  'context window',
+  'maximum context',
+  'too many tokens',
   'token limit',
   'exceeds the model',
 ] as const
 
 /** 检测错误消息是否为 prompt too long 类型 */
-export function isPromptTooLongError(...messages: string[]): boolean {
-  const combined = messages.join(' ').toLowerCase()
+export function isPromptTooLongError(...messages: Array<string | undefined>): boolean {
+  const combined = messages.filter((message): message is string => typeof message === 'string').join(' ').toLowerCase()
   return PROMPT_TOO_LONG_PATTERNS.some((p) => combined.includes(p))
 }
 
@@ -115,8 +90,8 @@ function extractHttpStatusFromErrorText(...messages: string[]): number | null {
   return null
 }
 
-/** 将 SDK 错误映射为 TypedError */
-export function mapSDKErrorToTypedError(
+/** 将 Agent 错误映射为 TypedError */
+export function mapAgentErrorToTypedError(
   errorCode: string,
   detailedMessage: string,
   originalError: string,
@@ -218,7 +193,7 @@ export function mapSDKErrorToTypedError(
   }
 
   // 瞬时网络错误（terminated / ECONNRESET / socket hang up 等）：
-  // assistant.error 路径下，SDK 常常把这类错误标记为 errorType='unknown'，
+  // assistant.error 路径下，Pi adapter 常把这类错误标记为 errorType='unknown'，
   // 这里从 detailedMessage / originalError 兜底匹配，归类为可重试的 network_error。
   const looksLikeNetwork =
     (!errorMap[errorCode]) &&
@@ -240,7 +215,7 @@ export function mapSDKErrorToTypedError(
 
   // 上游响应体解析失败（JSON Parse error: Unable to parse JSON string 等）：
   // 网关返回 HTML 错误页 / SSE 流截断 / 代理注入脏数据导致 SDK 解析非 JSON 体失败，
-  // SDK 常标记为 errorType='unknown'。归类为可重试的 service_error（已在重试白名单内）。
+  // Pi adapter 常标记为 errorType='unknown'。归类为可重试的 service_error（已在重试白名单内）。
   const looksLikeMalformedResponse =
     (!errorMap[errorCode]) &&
     isMalformedResponseError(detailedMessage, originalError)
@@ -248,7 +223,7 @@ export function mapSDKErrorToTypedError(
     return {
       code: 'service_error',
       title: '响应解析失败',
-      message: '上游返回了无法解析的响应，通常为网关瞬时异常，正在重试',
+      message: '上游返回了无法解析的响应，通常为网关瞬时异常，请重试',
       actions: [
         { key: 's', label: '设置', action: 'settings' },
         { key: 'r', label: '重试', action: 'retry' },
@@ -318,40 +293,3 @@ export function mapSDKErrorToTypedError(
     originalError,
   }
 }
-
-/** 从 assistant 错误消息中提取详细信息 */
-export function extractErrorDetails(msg: { error?: { message: string }; message?: { content?: Array<Record<string, unknown>> } }): { detailedMessage: string; originalError: string } {
-  let detailedMessage = msg.error?.message ?? '未知错误'
-  let originalError = msg.error?.message ?? '未知错误'
-
-  try {
-    const content = msg.message?.content
-    if (Array.isArray(content) && content.length > 0) {
-      const textBlock = content.find((block) => block.type === 'text')
-      if (textBlock && 'text' in textBlock && typeof textBlock.text === 'string') {
-        const fullText = textBlock.text
-        originalError = fullText
-
-        const apiErrorMatch = fullText.match(/API Error:\s*\d+\s*(\{.*\})/s)
-        if (apiErrorMatch?.[1]) {
-          try {
-            const apiErrorObj = JSON.parse(apiErrorMatch[1])
-            if (apiErrorObj.error?.message) {
-              detailedMessage = apiErrorObj.error.message
-            }
-          } catch {
-            detailedMessage = fullText
-          }
-        } else {
-          detailedMessage = fullText
-        }
-      }
-    }
-  } catch {
-    // 提取失败，使用原始 error 字段
-  }
-
-  return { detailedMessage, originalError }
-}
-
-// ============================================================================

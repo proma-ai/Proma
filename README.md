@@ -17,7 +17,7 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 ## 现在能做什么
 
 - **Chat 模式**：多模型对话、附件解析、图片输入、Markdown / Mermaid / KaTeX / 代码高亮、并排对话、系统提示词、上下文管理。
-- **Agent 模式**：内置 Claude Agent SDK 与 Pi Agent SDK 两套运行时；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。Claude 是默认内核，Pi 可在实验性设置中开启。
+- **Agent 模式**：统一使用 Pi Agent Runtime；支持工作区隔离、权限模式、文件操作、长任务流式输出、计划确认和用户追问。
 - **协作与任务**：复杂任务可拆分为可追踪的协作子 Agent / Task，并在消息流中展示调用过程和结果。
 - **Skills、MCP 与项目根目录**：每个 Proma 项目独立配置 Skills 与 MCP Server。项目文件可使用用户选择的本地项目根目录，也可使用 Proma 托管的空白项目目录；本地项目配置不会被自动导入。
 - **远程机器人**：支持飞书 / Lark 机器人桥接，并已提供钉钉、微信桥接入口，用手机或群聊触发本机 Agent 工作流。
@@ -57,10 +57,9 @@ Proma 是一个本地优先的 AI 桌面应用，把多模型 Chat、通用 Agen
 1. 打开 Proma，先完成环境检查。Agent 模式依赖本机基础环境，尤其是 Git、Node.js / Bun 以及可用的 Shell。
 2. 进入 **设置 > 渠道**，添加至少一个 AI 供应商渠道，填写 Base URL、API Key 和模型列表。
 3. Chat 模式可以使用 OpenAI、Anthropic、Google 或 OpenAI 兼容协议的渠道。
-4. 默认的 Claude Agent Runtime 需要 Anthropic 或 Anthropic 兼容协议渠道，例如 Anthropic、DeepSeek、Kimi API、Kimi Coding Plan。
-5. Agent 输入框下方可直接切换 Claude / Pi 内核；Pi 可使用任意已启用的模型渠道。
-6. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
-7. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
+4. Agent 使用 Pi Runtime，可使用任意已启用的模型渠道。
+5. 进入 **设置 > Agent**，选择默认 Agent 渠道、模型和工作区。
+6. 如需记忆、联网搜索、飞书 / 钉钉 / 微信桥接，在设置页对应 Tab 中继续配置。
 
 ## 模式选择
 
@@ -115,7 +114,7 @@ Proma 支持豆包的流式语音输入功能，并且支持在 Proma 内使用�
 
 ## Agent 运行时与模型渠道
 
-Proma 的 Agent 模式统一使用 **Pi Agent Runtime**，由 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai` 驱动。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。
+Proma 的 Agent 模式统一使用 **Pi Agent Runtime**，由 `@earendil-works/pi-coding-agent`、`pi-agent-core` 和 `pi-ai` 驱动。已启用的 Proma 渠道会动态注册为 Pi provider，支持 OpenAI Chat Completions / Responses、Google Generative AI、Anthropic Messages 及其兼容端点。历史 Claude transcript 会保留为只读记录，可查看但不能继续、分叉或回退。
 
 | 渠道类型 | Chat | Pi Agent |
 | --- | --- | --- |
@@ -140,7 +139,7 @@ Proma 的 Agent 模式统一使用 **Pi Agent Runtime**，由 `@earendil-works/p
 | 代码高亮 | Shiki |
 | 构建 | Vite + esbuild |
 | 分发 | electron-builder |
-| Agent Runtime | Pi: `@earendil-works/pi-* @0.80.3` |
+| Agent Runtime | Pi: `@earendil-works/pi-* @0.82.1` |
 
 ## 架构概览
 
@@ -176,10 +175,10 @@ Pi 运行时在主进程中作为 esbuild external 依赖运行。`apps/electron
 
 修改打包配置时，请确认：
 
-- `build:main` / `watch:main` 仍将两套 Agent SDK 标记为 external。
+- `build:main` / `watch:main` 将 Pi runtime 依赖标记为 external。
 - `scripts/sync-runtime-deps.ts` 的 external runtime 清单与实际依赖一致。
-- `electron-builder.yml` 保留 Claude binary 与 Pi native addon 的 `asarUnpack` 规则。
-- 在目标平台测试 `bun run dist:fast` 后，分别验证 Claude 与 Pi（若已启用）可以启动、调用工具和恢复会话。
+- `electron-builder.yml` 保留 Pi native addon 所需的 `asarUnpack` 规则。
+- 在目标平台测试 `bun run dist:fast` 后，验证 Pi Agent 可以启动、调用工具和恢复会话。
 
 更完整的工程约定见 [AGENTS.md](./AGENTS.md)。
 

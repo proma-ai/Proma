@@ -12,6 +12,32 @@ let tempHome: string
 const originalHome = process.env.HOME
 const originalPromaDev = process.env.PROMA_DEV
 
+// agent-session-manager loads Pi lazily for fork/rewind, so this focused fake isolates
+// entry-tree semantics without requiring a real Pi session JSONL fixture.
+mock.module('@earendil-works/pi-coding-agent', () => ({
+  SessionManager: {
+    open: (sessionFile: string) => ({
+      createBranchedSession: (entryId: string) => {
+        const branchFile = join(tempHome, `.pi-branch-${entryId}.jsonl`)
+        writeFileSync(branchFile, '', 'utf-8')
+        return branchFile
+      },
+      getSessionFile: () => sessionFile,
+      getSessionId: () => 'pi-test-session',
+      getEntry: (entryId: string) => entryId === 'entry-keep' ? { id: entryId } : undefined,
+    }),
+    forkFrom: (_branchFile: string) => {
+      const forkFile = join(tempHome, '.pi-fork.jsonl')
+      writeFileSync(forkFile, '', 'utf-8')
+      return {
+        getSessionFile: () => forkFile,
+        getSessionId: () => 'pi-fork-session',
+        getEntry: (entryId: string) => entryId === 'entry-keep' ? { id: entryId } : undefined,
+      }
+    },
+  },
+}))
+
 mock.module('electron', () => ({
   app: {
     isPackaged: true,
@@ -374,6 +400,61 @@ describe('Agent 会话引用搜索', () => {
     const results = await manager.searchAgentSessionReferences({ query: '隐藏关键词' })
 
     expect(results).toEqual([])
+  })
+})
+
+describe('Pi entry binding recovery', () => {
+  test('Given Pi branch excludes later entries When fork Then keeps only bindings in the fork artifact', async () => {
+    const piSessionFile = join(tempHome, '.pi-source-fork.jsonl')
+    writeFileSync(piSessionFile, '', 'utf-8')
+    writeAgentSessionsIndex([{
+      id: 'pi-fork-source', title: 'Pi source', workspaceId: 'workspace-a', createdAt: 1, updatedAt: 1,
+      agentRuntime: 'pi', sdkSessionId: 'pi-source-session', piSessionFile,
+      piEntryBindings: {
+        'assistant-keep': 'entry-keep',
+        'assistant-stale': 'entry-stale',
+        'assistant-missing': 'missing-entry',
+      },
+    }])
+    writeAgentSessionJsonl('pi-fork-source', [
+      JSON.stringify({ type: 'user', uuid: 'user-1', message: { content: [{ type: 'text', text: '开始' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-keep', message: { content: [{ type: 'text', text: '保留' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-stale', message: { content: [{ type: 'text', text: '丢弃' }] } }),
+    ])
+
+    const forked = await manager.forkAgentSession({ sessionId: 'pi-fork-source', upToMessageUuid: 'assistant-keep' })
+
+    expect(forked.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(manager.getAgentSessionMeta(forked.id)?.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(forked.piSessionFile && existsSync(forked.piSessionFile)).toBe(true)
+  })
+
+  test('Given rewind excludes transcript and artifact entries When rewinding Then keeps only valid retained assistant bindings', async () => {
+    const piSessionFile = join(tempHome, '.pi-source-rewind.jsonl')
+    writeFileSync(piSessionFile, '', 'utf-8')
+    writeAgentSessionsIndex([{
+      id: 'pi-rewind-source', title: 'Pi rewind', workspaceId: 'workspace-a', createdAt: 1, updatedAt: 1,
+      agentRuntime: 'pi', sdkSessionId: 'pi-source-session', piSessionFile,
+      piEntryBindings: {
+        'assistant-keep': 'entry-keep',
+        'assistant-stale': 'entry-stale',
+        'assistant-alias': 'entry-keep',
+        'assistant-broken': 'missing-entry',
+      },
+    }])
+    writeAgentSessionJsonl('pi-rewind-source', [
+      JSON.stringify({ type: 'user', uuid: 'user-1', message: { content: [{ type: 'text', text: '开始' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-keep', message: { content: [{ type: 'text', text: '保留' }] } }),
+      JSON.stringify({ type: 'user', uuid: 'user-after', message: { content: [{ type: 'text', text: '后续' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-stale', message: { content: [{ type: 'text', text: '丢弃' }] } }),
+    ])
+
+    const retainedCount = await manager.rewindPiAgentSession('pi-rewind-source', 'assistant-keep')
+
+    expect(retainedCount).toBe(2)
+    expect(manager.getAgentSessionMeta('pi-rewind-source')?.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(manager.getAgentSessionSDKMessages('pi-rewind-source').map((message) => (message as { uuid?: string }).uuid))
+      .toEqual(['user-1', 'assistant-keep'])
   })
 })
 

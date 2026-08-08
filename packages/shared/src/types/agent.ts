@@ -404,7 +404,6 @@ export type ErrorCode =
   | 'agent_provider_not_supported'
   | 'agent_model_unavailable'
   | 'api_key_decrypt_failed'
-  | 'claude_binary_not_found'
   | 'agent_runtime_not_found'
   | 'workspace_not_found'
   | 'local_project_root_unavailable'
