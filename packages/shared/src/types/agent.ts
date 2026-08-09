@@ -615,6 +615,8 @@ export type PromaEvent =
   | { type: 'delegation_blocked'; delegationId: string; blockedEvent: unknown }
   // 自动任务会话被用户接管（毕业）
   | { type: 'automation_graduated' }
+  /** Agent 在一次运行中实际修改了受管 workspace memory/。 */
+  | { type: 'memory_updated'; change: WorkspaceMemoryChange }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
@@ -997,6 +999,25 @@ export interface SkillFileContent {
 }
 
 /** 工作区记忆文件摘要 */
+export interface WorkspaceMemoryChange {
+  /** 所属工作区及本次产生变更的 Agent 运行。 */
+  workspaceSlug: string
+  sessionId: string
+  runStartedAt: number
+  /** `profile` 对应 user-profile.md；两种 instruction 类别对应两层可审阅的 AGENTS.md。 */
+  category: 'profile' | 'index' | 'topic' | 'workspace_instruction' | 'project_instruction'
+  files: Array<{
+    relativePath: string
+    area: 'memory' | 'workspace_instruction' | 'project_instruction'
+    kind: 'created' | 'modified' | 'deleted'
+    addedLines: number
+    removedLines: number
+    /** 只传本地 UI 展示用的受限摘要；不是完整记忆正文。 */
+    preview?: string
+  }>
+}
+
+/** 工作区记忆文件摘要 */
 export interface WorkspaceMemoryFileSummary {
   /** 文件是否存在 */
   exists: boolean
@@ -1017,7 +1038,17 @@ export interface WorkspaceMemorySummary {
     legacyPath: string
     agentsPath: string
   }
-  /** Proma 工作区自动记忆目录 */
+  /** 旧 `.claude/memory/` 迁移未完成时的状态；Proma 不会覆盖或删除旧内容。 */
+  legacyAutoMemory?: {
+    directory: string
+    /** 与新的 memory/ 同名、因此未自动移动的顶层条目。 */
+    conflictingPaths: string[]
+    /** 自动迁移被安全中止的原因；存在时应提示用户处理旧目录。 */
+    migrationIssue?: 'legacy_path_invalid' | 'target_path_invalid' | 'contains_symbolic_link' | 'migration_failed'
+    /** 检测到的旧目录内符号链接相对路径。 */
+    symbolicLinkPath?: string
+  }
+  /** Proma 工作区长期记忆目录。 */
   autoMemory: {
     /** 绝对目录路径 */
     directory: string
@@ -1639,12 +1670,13 @@ export const AGENT_IPC_CHANNELS = {
   READ_WORKSPACE_AGENTS_MD: 'agent:read-workspace-agents-md',
   /** 写入工作区 AGENTS.md */
   WRITE_WORKSPACE_AGENTS_MD: 'agent:write-workspace-agents-md',
-  /** 列出工作区 auto memory 文件树 */
+  /** 列出工作区长期记忆文件树 */
   LIST_WORKSPACE_AUTO_MEMORY_FILES: 'agent:list-workspace-auto-memory-files',
-  /** 读取工作区 auto memory 文件 */
+  /** 读取工作区长期记忆文件 */
   READ_WORKSPACE_AUTO_MEMORY_FILE: 'agent:read-workspace-auto-memory-file',
-  /** 写入工作区 auto memory 文件 */
+  /** 写入工作区长期记忆文件 */
   WRITE_WORKSPACE_AUTO_MEMORY_FILE: 'agent:write-workspace-auto-memory-file',
+  /** 设置当前工作区长期记忆的前台复查周期。 */
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

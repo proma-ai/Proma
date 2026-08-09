@@ -46,7 +46,7 @@ import pkg from '../../../package.json' with { type: 'json' }
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, rewindPiAgentSession, resolveAgentCwd, getAgentCwdMode, getSessionWorkbenchLayout } from './agent-session-manager'
-import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd } from './agent-workspace-manager'
+import { getAgentWorkspace, getLocalProjectRootStatus, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance } from './agent-workspace-manager'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
 import { getRuntimeStatus } from './runtime-init'
 import { getSettings } from './settings-service'
@@ -72,6 +72,7 @@ import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 
 // ===== 类型定义 =====
 
@@ -1266,6 +1267,15 @@ export class AgentOrchestrator {
         managedWorkspaceInstructionFile,
         projectInstructions?.sources.map(({ path, content }) => ({ path, content })) ?? [],
       )
+      // 每次前台对话都基于受管 memory/ 的真实缺口给出渐进引导；自动化、桥接与委派绝不主动追问。
+      const memoryGuidance = workspaceSlug && !automationContext && !input.triggeredBy
+        ? getWorkspaceMemoryGuidance(workspaceSlug)
+        : undefined
+      // Historical sessions are supplementary evidence only. Do not invite a scan
+      // before a collaboration profile has been established through real dialogue.
+      const memoryRefreshOpportunity = workspaceSlug && !automationContext && !input.triggeredBy && !memoryGuidance?.needsCollaborationProfile
+        ? claimWorkspaceMemoryRefreshOpportunity(workspaceSlug)
+        : undefined
       const systemPromptAppend = buildSystemPrompt({
         workspaceName: workspace?.name,
         workspaceSlug,
@@ -1276,6 +1286,8 @@ export class AgentOrchestrator {
         collaborationAvailable,
         currentModelId: selectedModelId,
         legacyProjectInstructions: projectInstructions?.sources,
+        memoryGuidance,
+        memoryRefreshOpportunity,
       }) + (automationContext ? `\n\n## 定时任务执行上下文\n\n${automationContext}` : '')
       const startAutoTitleGeneration = (): void => {
         if (titleGenerationStarted) return

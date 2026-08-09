@@ -2524,6 +2524,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
+
   // 发送 Agent 消息（触发 Agent SDK 流式响应）
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,

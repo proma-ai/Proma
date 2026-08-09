@@ -24,6 +24,7 @@ import { WindowControls } from '@/components/WindowControls'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import { MemoryUpdateNotice } from '@/components/agent-skills/MemoryUpdateNotice'
 
 const MIN_RIGHT_PANEL_WIDTH = 300
 const MAX_RIGHT_PANEL_WIDTH = 560
@@ -233,6 +234,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
               </div>
             )}
         </div>
+        <MemoryUpdateNotice />
         {settingsOpen && (
           <div className="absolute inset-0 z-[60]">
             <SettingsPanel onClose={() => setSettingsOpen(false)} />

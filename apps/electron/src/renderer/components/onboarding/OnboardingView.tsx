@@ -925,11 +925,10 @@ export function OnboardingView({ onComplete, initialStep = 'welcome' }: Onboardi
               arrowMode: 'none',
               imageSrc: guideMemory,
               highlight: '进阶指南 · 第 3 步',
-              title: '生成你的项目记忆',
+              title: '建立项目地图与协作记忆',
               paragraphs: [
                 <>
-                  <b className="font-medium text-neutral-900">记忆</b>会沉淀项目指令、确定偏好、告知 Agent 你工作流的具体形态，
-                  让后续 Agent 不必每次从零理解你的工作方式。
+                  <b className="font-medium text-neutral-900">项目地图</b>放在两层 AGENTS.md，减少重复探索；<b className="font-medium text-neutral-900">协作记忆</b>只保留你的稳定偏好与避免重犯的经验。
                 </>,
               ],
             }}

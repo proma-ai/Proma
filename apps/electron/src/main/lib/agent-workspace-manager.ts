@@ -466,6 +466,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
   }
 
   migrateWorkspaceInstructionFiles()
+  migrateWorkspaceAutoMemoryDirectories()
   return defaultWs
 }
 
@@ -1159,12 +1160,22 @@ const SKILL_TREE_MAX_DEPTH = 8
 
 const WORKSPACE_AGENTS_MD = 'AGENTS.md'
 const LEGACY_WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
-const AUTO_MEMORY_DIR = '.claude/memory'
+const AUTO_MEMORY_DIR = 'memory'
+const LEGACY_AUTO_MEMORY_DIR = '.claude/memory'
 const AUTO_MEMORY_INDEX = 'MEMORY.md'
 
 function isRegularFile(path: string): boolean {
   try {
     return lstatSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+function isRegularDirectory(path: string): boolean {
+  try {
+    const stat = lstatSync(path)
+    return stat.isDirectory() && !stat.isSymbolicLink()
   } catch {
     return false
   }
@@ -1220,6 +1231,116 @@ export function migrateWorkspaceInstructionFiles(): void {
   }
 }
 
+interface WorkspaceAutoMemoryMigrationResult {
+  conflictingPaths: string[]
+  issue?: NonNullable<WorkspaceMemorySummary['legacyAutoMemory']>['migrationIssue']
+  symbolicLinkPath?: string
+}
+
+function findSymbolicLinkInDirectory(rootDir: string, currentDir = rootDir): string | undefined {
+  const entries = readdirSync(currentDir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const entryPath = join(currentDir, entry.name)
+    if (entry.isSymbolicLink()) {
+      return relative(rootDir, entryPath).split(/[\\/]/).join('/')
+    }
+    if (entry.isDirectory()) {
+      const nested = findSymbolicLinkInDirectory(rootDir, entryPath)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+/**
+ * 将旧版 `.claude/memory/` 迁移到工作区根的 `memory/`。
+ *
+ * 目标目录不存在时使用目录 rename，确保同一卷内迁移原子完成。若用户已经
+ * 创建了新目录，则仅移动不冲突的顶层条目；冲突内容继续保留在旧目录，交给
+ * 能力中心提示用户处理，绝不覆盖或悄悄合并长期记忆。检测到符号链接或文件
+ * 系统错误时安全中止，避免将受管根目录扩展到工作区外。
+ */
+function migrateWorkspaceAutoMemoryDirectory(workspaceSlug: string): WorkspaceAutoMemoryMigrationResult | undefined {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
+  const legacyDir = join(workspaceRoot, LEGACY_AUTO_MEMORY_DIR)
+  const memoryDir = join(workspaceRoot, AUTO_MEMORY_DIR)
+
+  if (!existsSync(legacyDir)) return undefined
+  if (!isRegularDirectory(legacyDir)) {
+    console.warn(`[Agent 工作区] 旧记忆路径不是普通目录，已跳过迁移: ${legacyDir}`)
+    return { conflictingPaths: [], issue: 'legacy_path_invalid' }
+  }
+
+  let symbolicLinkPath: string | undefined
+  try {
+    symbolicLinkPath = findSymbolicLinkInDirectory(legacyDir)
+  } catch (error) {
+    console.warn(`[Agent 工作区] 无法安全扫描旧长期记忆目录，已跳过迁移 (${workspaceSlug}):`, error)
+    return { conflictingPaths: [], issue: 'migration_failed' }
+  }
+  if (symbolicLinkPath) {
+    console.warn(`[Agent 工作区] 旧长期记忆包含符号链接，已跳过迁移: ${legacyDir}/${symbolicLinkPath}`)
+    return { conflictingPaths: [], issue: 'contains_symbolic_link', symbolicLinkPath }
+  }
+
+  if (!existsSync(memoryDir)) {
+    try {
+      if (renameIfDestinationAbsentWithRetry(legacyDir, memoryDir)) {
+        console.log(`[Agent 工作区] 已迁移长期记忆目录: ${workspaceSlug}/${LEGACY_AUTO_MEMORY_DIR} → ${AUTO_MEMORY_DIR}`)
+        return undefined
+      }
+    } catch (error) {
+      console.warn(`[Agent 工作区] 迁移长期记忆目录失败，已保留旧目录 (${workspaceSlug}):`, error)
+      return { conflictingPaths: [], issue: 'migration_failed' }
+    }
+  }
+
+  if (!isRegularDirectory(memoryDir)) {
+    console.warn(`[Agent 工作区] 新记忆路径不是普通目录，已保留旧目录: ${memoryDir}`)
+    return { conflictingPaths: [], issue: 'target_path_invalid' }
+  }
+
+  const conflicts: string[] = []
+  try {
+    for (const entry of readdirSync(legacyDir)) {
+      const source = join(legacyDir, entry)
+      const target = join(memoryDir, entry)
+      if (existsSync(target)) {
+        conflicts.push(entry)
+        continue
+      }
+      try {
+        if (!renameIfDestinationAbsentWithRetry(source, target)) {
+          conflicts.push(entry)
+        }
+      } catch (error) {
+        console.warn(`[Agent 工作区] 迁移长期记忆条目失败，已保留旧条目 (${workspaceSlug}/${entry}):`, error)
+        return { conflictingPaths: conflicts.sort(), issue: 'migration_failed' }
+      }
+    }
+
+    if (readdirSync(legacyDir).length === 0) {
+      rmSyncWithRetry(legacyDir, { recursive: true, force: true })
+      console.log(`[Agent 工作区] 已清理空的旧长期记忆目录: ${workspaceSlug}/${LEGACY_AUTO_MEMORY_DIR}`)
+      return undefined
+    }
+  } catch (error) {
+    console.warn(`[Agent 工作区] 扫描旧长期记忆目录失败，已保留旧目录 (${workspaceSlug}):`, error)
+    return { conflictingPaths: conflicts.sort(), issue: 'migration_failed' }
+  }
+
+  return { conflictingPaths: conflicts.sort() }
+}
+
+/** 在应用启动时迁移全部已知工作区；重复调用不会覆盖新目录内容。 */
+export function migrateWorkspaceAutoMemoryDirectories(): void {
+  const index = readIndex()
+  for (const workspace of index.workspaces) {
+    migrateWorkspaceAutoMemoryDirectory(workspace.slug)
+  }
+}
+
 function fileSummary(absPath: string): WorkspaceMemorySummary['agentsMd'] {
   if (!existsSync(absPath)) {
     return { exists: false, path: absPath, size: 0 }
@@ -1238,6 +1359,7 @@ export function getWorkspaceAgentsMdPath(workspaceSlug: string): string {
 }
 
 function getWorkspaceAutoMemoryPath(workspaceSlug: string): string {
+  migrateWorkspaceAutoMemoryDirectory(workspaceSlug)
   return join(getAgentWorkspacePath(workspaceSlug), AUTO_MEMORY_DIR)
 }
 
@@ -1245,6 +1367,8 @@ export function getWorkspaceAutoMemoryDir(workspaceSlug: string): string {
   const dir = getWorkspaceAutoMemoryPath(workspaceSlug)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
+  } else if (!isRegularDirectory(dir)) {
+    throw new Error(`长期记忆路径不是目录: ${dir}`)
   }
   return dir
 }
@@ -1384,11 +1508,22 @@ function getWorkspaceInstructionConflict(workspaceSlug: string): WorkspaceMemory
 }
 
 export function getWorkspaceMemorySummary(workspaceSlug: string): WorkspaceMemorySummary {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
   const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  const legacyDir = join(workspaceRoot, LEGACY_AUTO_MEMORY_DIR)
+  const legacyMigration = existsSync(legacyDir) ? migrateWorkspaceAutoMemoryDirectory(workspaceSlug) : undefined
   const instructionConflict = getWorkspaceInstructionConflict(workspaceSlug)
   return {
     agentsMd: fileSummary(getWorkspaceAgentsMdPath(workspaceSlug)),
     ...(instructionConflict && { instructionConflict }),
+    ...(legacyMigration && {
+      legacyAutoMemory: {
+        directory: legacyDir,
+        conflictingPaths: legacyMigration.conflictingPaths,
+        ...(legacyMigration.issue && { migrationIssue: legacyMigration.issue }),
+        ...(legacyMigration.symbolicLinkPath && { symbolicLinkPath: legacyMigration.symbolicLinkPath }),
+      },
+    }),
     autoMemory: collectAutoMemorySummary(memoryDir),
   }
 }
@@ -1460,8 +1595,8 @@ export function writeWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath
   if (!existsSync(parent)) {
     mkdirSync(parent, { recursive: true })
   }
-  writeFileSync(abs, content, 'utf-8')
-  console.log(`[Agent 工作区] 已更新 auto memory 文件: ${workspaceSlug}/${relativePath}`)
+  writeTextFileAtomic(abs, content)
+  console.log(`[Agent 工作区] 已更新长期记忆文件: ${workspaceSlug}/${relativePath}`)
 }
 
 /** 把相对路径限制在 Skill 根目录内，并拒绝直接覆盖 SKILL.md */
@@ -1680,6 +1815,10 @@ interface WorkspaceConfig {
   attachedDirectories?: string[]
   attachedFiles?: string[]
   worktreeRepos?: import('@proma/shared').WorkspaceWorktreeRepo[]
+  /** Internal scheduling metadata only; Markdown remains the long-term memory source. */
+  memoryReview?: {
+    lastPromptAt?: number
+  }
 }
 
 function getWorkspaceConfigPath(workspaceSlug: string): string {
@@ -1706,6 +1845,16 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
       worktreeRepos: Array.isArray(data.worktreeRepos)
         ? data.worktreeRepos.filter((r) => r && typeof r.name === 'string' && typeof r.repoPath === 'string' && typeof r.worktreesPath === 'string')
         : undefined,
+      // Read the prior public setting only to preserve its cooldown timestamp; its
+      // interval is intentionally ignored after switching to the fixed internal cadence.
+      memoryReview: (() => {
+        const review = data.memoryReview && typeof data.memoryReview === 'object'
+          ? data.memoryReview as { lastPromptAt?: unknown }
+          : (data as { memoryRefresh?: unknown }).memoryRefresh && typeof (data as { memoryRefresh?: unknown }).memoryRefresh === 'object'
+            ? (data as { memoryRefresh: { lastPromptAt?: unknown } }).memoryRefresh
+            : undefined
+        return typeof review?.lastPromptAt === 'number' ? { lastPromptAt: review.lastPromptAt } : undefined
+      })(),
     }
   } catch {
     return {}
@@ -1714,7 +1863,34 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
 
 function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
-  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  writeJsonFileAtomic(configPath, config)
+}
+
+/** Internal-only cooldown state for the fixed workspace memory-review cadence. */
+export function getWorkspaceMemoryReviewLastPromptAt(workspaceSlug: string): number | undefined {
+  return readWorkspaceConfig(workspaceSlug).memoryReview?.lastPromptAt
+}
+
+/** An invitation is recorded immediately so the 3-day cooldown survives restarts. */
+export function recordWorkspaceMemoryReviewInvitation(workspaceSlug: string, at: number): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  writeWorkspaceConfig(workspaceSlug, { ...config, memoryReview: { lastPromptAt: at } })
+}
+
+/**
+ * Runtime-only knowledge gaps for conversational guidance. This intentionally reads
+ * file presence rather than maintaining a second memory database.
+ */
+export interface WorkspaceMemoryGuidance {
+  /** Collaboration profile is a user-facing memory, deliberately separate from the project map. */
+  needsCollaborationProfile: boolean
+}
+
+export function getWorkspaceMemoryGuidance(workspaceSlug: string): WorkspaceMemoryGuidance {
+  const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  return {
+    needsCollaborationProfile: !isRegularFile(join(memoryDir, 'user-profile.md')),
+  }
 }
 
 // ===== 工作区级附加目录管理 =====
