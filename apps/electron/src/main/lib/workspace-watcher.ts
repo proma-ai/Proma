@@ -13,11 +13,12 @@
 
 import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { getAgentWorkspacesDir } from './config-paths'
 import { listAgentSessions } from './agent-session-manager'
+import { invalidateGitDiffCache } from './git-diff-service'
 import { isHighNoisePath, normalizeWatchFilename, shouldNotifyForWatchFilename } from './workspace-watcher-utils'
 
 /** debounce 延迟（ms） */
@@ -204,10 +205,14 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
       if (!filename || win.isDestroyed()) return
 
       // filename 格式: {slug}/mcp.json 或 {slug}/skills/xxx/SKILL.md 或 {slug}/{sessionId}/file.txt
-      const normalizedFilename = filename.replace(/\\/g, '/')
+      const normalizedFilename = normalizeWatchFilename(filename)
+      if (normalizedFilename === null) return
 
-      // 跳过 node_modules / .next 等高频变动目录，防止大规模工作区触发 IPC 事件风暴
-      if (isHighNoisePath(normalizedFilename)) return
+      // 普通文件及有限的 Diff 状态元数据变更均需失效缓存；fetch 的高噪声 Git 元数据仍被忽略。
+      if (shouldNotifyForWatchFilename(normalizedFilename)) {
+        invalidateGitDiffCache(join(watchDir, normalizedFilename))
+      }
+      if (isHighNoisePath(normalizedFilename) && !shouldNotifyForWatchFilename(normalizedFilename)) return
 
       const pathParts = normalizedFilename.split('/').filter(Boolean)
 
@@ -304,7 +309,9 @@ export function watchAttachedDirectory(dirPath: string): void {
 
   try {
     const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
-      if (!shouldNotifyForWatchFilename(filename)) return
+      const normalizedFilename = normalizeWatchFilename(filename)
+      if (normalizedFilename === null || !shouldNotifyForWatchFilename(normalizedFilename)) return
+      invalidateGitDiffCache(join(dirPath, normalizedFilename))
       notifyWorkspaceFilesChanged()
     })
 

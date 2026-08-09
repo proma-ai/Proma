@@ -956,8 +956,12 @@ export function useGlobalAgentListeners(): void {
               const writtenPath = entry.path
               pendingWriteTools.delete(event.toolUseId)
               if (event.isError) continue
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              // 相对路径的 cwd 由 Agent 决定，不能按 Electron cwd 错配到别的仓库；改为保守全量失效。
+              const cacheInvalidationPath = writtenPath && isAbsolutePath(writtenPath) ? writtenPath : undefined
+              void window.electronAPI.invalidateGitDiffCache(cacheInvalidationPath).finally(() => {
+                store.set(agentDiffRefreshVersionAtom, (prev) => {
+                  const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+                })
               })
               if (writtenPath) {
                 buildWrittenFilePreviewInfo(sessionId, writtenPath).then((previewFile) => {
@@ -1007,8 +1011,10 @@ export function useGlobalAgentListeners(): void {
             // Bash git 突变命令完成时，仅刷新 diff 列表（不标记 unseen，避免红点）
             if (pendingGitMutateTools.has(event.toolUseId)) {
               pendingGitMutateTools.delete(event.toolUseId)
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              void window.electronAPI.invalidateGitDiffCache().finally(() => {
+                store.set(agentDiffRefreshVersionAtom, (prev) => {
+                  const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+                })
               })
             }
           } else if (event.type === 'shell_killed') {
@@ -1417,10 +1423,13 @@ export function useGlobalAgentListeners(): void {
     const HASH_MAX = 100
     let focusCheckSeq = 0
     const bumpDiffRefresh = (sessionId: string) => {
-      store.set(agentDiffRefreshVersionAtom, (prev) => {
-        const m = new Map(prev)
-        m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
-        return m
+      // 外部修改的精确路径无法从 focus 事件可靠取得，保守地失效全部缓存。
+      void window.electronAPI.invalidateGitDiffCache().finally(() => {
+        store.set(agentDiffRefreshVersionAtom, (prev) => {
+          const m = new Map(prev)
+          m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
+          return m
+        })
       })
     }
 

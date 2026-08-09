@@ -152,7 +152,7 @@ import type {
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
-import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
+import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
@@ -1008,6 +1008,19 @@ export function registerIpcHandlers(): void {
       const allowedExtraPaths = extraPaths?.filter((p) => isPathAllowed(p, access))
       return getUnstagedChanges(dirPath, allowedSessionPath, allowedWorkspaceFilesPath, allowedExtraPaths)
     }
+  )
+
+  // Agent 写入、Git 变更及窗口重新聚焦前主动失效，避免长寿命缓存显示旧 Diff。
+  ipcMain.handle(
+    IPC_CHANNELS.INVALIDATE_GIT_DIFF_CACHE,
+    async (_, changedPath?: string) => {
+      if (changedPath && typeof changedPath === 'string') {
+        // 仅影响进程内缓存，不读写目标路径；允许刚删除的文件路径参与失效。
+        invalidateGitDiffCache(changedPath)
+        return
+      }
+      invalidateGitDiffCache()
+    },
   )
 
   // 获取单个文件的 diff

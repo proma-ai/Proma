@@ -346,6 +346,8 @@ export const IPC_CHANNELS = {
   GET_GIT_REPO_STATUS: 'git:get-repo-status',
   /** 获取未暂存的变更文件列表 */
   GET_UNSTAGED_CHANGES: 'git:get-unstaged-changes',
+  /** 失效 Git Diff 扫描缓存；可按文件/目录定向失效 */
+  INVALIDATE_GIT_DIFF_CACHE: 'git:invalidate-diff-cache',
   /** 获取单个文件的 diff */
   GET_FILE_DIFF: 'git:get-file-diff',
   /** 获取未追踪文件内容 */
