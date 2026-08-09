@@ -1467,8 +1467,11 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
       })
     } else if (entry.isFile()) {
       let size = 0
+      let modifiedAt: number | undefined
       try {
-        size = statSync(absPath).size
+        const stat = statSync(absPath)
+        size = stat.size
+        modifiedAt = stat.mtimeMs
       } catch {
         // ignore
       }
@@ -1477,6 +1480,7 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
         name: entry.name,
         type: 'file',
         size,
+        modifiedAt,
         isText: !isLikelyBinaryFile(absPath, size),
       })
     }

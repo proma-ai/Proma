@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useAtom, useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { BookOpen, Brain, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
@@ -10,9 +10,9 @@ import { DefaultAppOpenButton } from '@/components/diff/DefaultAppOpenButton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
-import { memoryNavigationRequestAtom } from '@/atoms/memory-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { cn } from '@/lib/utils'
+import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import {
   buildWorkspaceKnowledgeBootstrapPrompt,
   buildWorkspaceSessionEvidencePrompt,
@@ -95,7 +95,6 @@ function filterNodes(nodes: SkillFileNode[], query: string): SkillFileNode[] {
 export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTabProps): React.ReactElement {
   const { createAgent } = useCreateSession()
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
-  const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryNavigationRequestAtom)
   const [summary, setSummary] = React.useState<WorkspaceMemorySummary | null>(null)
   const [autoFiles, setAutoFiles] = React.useState<SkillFileNode[]>([])
   const [selected, setSelected] = React.useState<SelectedMemoryFile | null>(null)
@@ -126,6 +125,9 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     () => MEMORY_HISTORY_RANGE_OPTIONS.find((option) => option.value === historyRange)?.label ?? '近 1 个月',
     [historyRange],
   )
+  const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryFileNavigationAtom)
+  const workspaceMemoryChanges = useAtomValue(workspaceMemoryChangesAtom)
+  const latestMemoryChange = workspaceMemoryChanges.get(workspaceSlug)?.[0]
 
   const refreshSummaryAndTree = React.useCallback(async (): Promise<WorkspaceMemorySummary> => {
     const [nextSummary, files] = await Promise.all([
@@ -239,6 +241,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     }
   }, [summary, workspaceSlug, flushPendingSave])
 
+
   React.useEffect(() => {
     if (!memoryNavigationRequest || memoryNavigationRequest.workspaceSlug !== workspaceSlug) return
     void (async () => {
@@ -247,6 +250,11 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       setMemoryNavigationRequest(null)
     })()
   }, [memoryNavigationRequest, openAutoFile, setMemoryNavigationRequest, workspaceSlug])
+
+  React.useEffect(() => {
+    if (!latestMemoryChange) return
+    void refreshSummaryAndTree().catch((error) => console.error('[工作区记忆] 刷新全局变更失败:', error))
+  }, [latestMemoryChange?.changedAt, refreshSummaryAndTree])
 
   const refresh = React.useCallback(async (): Promise<void> => {
     await flushPendingSave()
@@ -265,6 +273,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       setLoading(false)
     }
   }, [openAutoFile, openAgents, refreshSummaryAndTree, selected, flushPendingSave])
+
 
   React.useEffect(() => {
     let cancelled = false
@@ -396,7 +405,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
           title="长期记忆"
           subtitle="memory/MEMORY.md 与主题文件"
           value={hasMemory ? `${summary.autoMemory.fileCount} 个文件` : '尚未建立'}
-          detail={hasMemory ? `${formatBytes(summary.autoMemory.totalSize)} · 更新于 ${formatTime(summary.autoMemory.updatedAt)}` : '由你确认后，Agent 才会创建'}
+          detail={hasMemory ? `${formatBytes(summary.autoMemory.totalSize)} · 更新于 ${formatTime(summary.autoMemory.updatedAt)}` : 'Agent 会基于明确证据渐进建立'}
           active={selected?.kind === 'auto'}
           onClick={() => void openAutoFile(AUTO_MEMORY_INDEX, summary)}
         />
@@ -481,7 +490,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
             <div className="text-sm font-medium text-foreground">授权会话补证据</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {hasProfile
-                ? `仅在你授权的范围内，分批选择少量高信号工作会话补充证据；不会全量扫描，协作记忆仍须确认后写入。`
+                ? `仅在你授权的范围内，分批选择少量高信号工作会话补充证据；不会全量扫描，明确证据会直接最小写入；仅高风险或不确定内容需要确认。`
                 : '先在真实协作中建立初步协作画像，再决定是否用历史会话补充证据。'}
             </div>
           </div>

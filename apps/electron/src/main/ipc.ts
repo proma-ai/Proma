@@ -324,6 +324,20 @@ import {
   cleanupStaleWorkspaceAttachedPaths,
 } from './lib/agent-workspace-manager'
 import { movePathSafely } from './lib/file-move-service'
+import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
+
+/** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
+const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
+
+function stopWorkspaceMemoryWatch(webContentsId: number, workspaceSlug: string): void {
+  const subscriptions = workspaceMemoryWatchSubscriptions.get(webContentsId)
+  const unsubscribe = subscriptions?.get(workspaceSlug)
+  if (!unsubscribe) return
+  unsubscribe()
+  subscriptions?.delete(workspaceSlug)
+  if (subscriptions?.size === 0) workspaceMemoryWatchSubscriptions.delete(webContentsId)
+}
+
 import { getAllToolInfos } from './lib/chat-tool-registry'
 import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
 import {
@@ -2525,6 +2539,45 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle(AGENT_IPC_CHANNELS.OPEN_WORKSPACE_MEMORY_WINDOW, async (_, workspaceSlug: string, relativePath?: string): Promise<void> => {
+    // 先经既有受限访问层核验 slug；若指定文件，也用受限路径解析器验证。
+    getWorkspaceMemorySummary(workspaceSlug)
+    if (relativePath !== undefined) {
+      if (typeof relativePath !== 'string' || !relativePath) throw new Error('记忆文件路径非法')
+      readWorkspaceAutoMemoryFile(workspaceSlug, relativePath)
+    }
+    const { showWorkspaceMemoryWindow } = await import('./lib/workspace-memory-window')
+    showWorkspaceMemoryWindow(workspaceSlug, relativePath)
+  })
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.START_WORKSPACE_MEMORY_WATCH,
+    async (event, workspaceSlug: string): Promise<void> => {
+      const webContents = event.sender
+      stopWorkspaceMemoryWatch(webContents.id, workspaceSlug)
+      const unsubscribe = subscribeWorkspaceMemoryChanges(workspaceSlug, (change) => {
+        if (!webContents.isDestroyed()) {
+          webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_FILE_CHANGED, { workspaceSlug, change })
+        }
+      })
+      const subscriptions = workspaceMemoryWatchSubscriptions.get(webContents.id) ?? new Map<string, () => void>()
+      subscriptions.set(workspaceSlug, unsubscribe)
+      workspaceMemoryWatchSubscriptions.set(webContents.id, subscriptions)
+      webContents.once('destroyed', () => {
+        const active = workspaceMemoryWatchSubscriptions.get(webContents.id)
+        if (!active) return
+        for (const stop of active.values()) stop()
+        workspaceMemoryWatchSubscriptions.delete(webContents.id)
+      })
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.STOP_WORKSPACE_MEMORY_WATCH,
+    async (event, workspaceSlug: string): Promise<void> => {
+      stopWorkspaceMemoryWatch(event.sender.id, workspaceSlug)
+    },
+  )
 
   // 发送 Agent 消息（触发 Agent SDK 流式响应）
   ipcMain.handle(

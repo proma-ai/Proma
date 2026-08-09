@@ -16,7 +16,6 @@ import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { AGENT_IPC_CHANNELS, MAX_ATTACHMENT_SIZE } from '@proma/shared'
-import { captureWorkspaceMemorySnapshot, diffWorkspaceMemorySnapshot } from './agent-memory-change-tracker'
 import type {
   AgentSendInput,
   AgentGenerateTitleInput,
@@ -163,10 +162,6 @@ export async function runAgent(
 ): Promise<void> {
   // 更新 webContents 映射（允许覆盖 — 由 orchestrator.activeSessions 处理真正的并发保护）
   registerWebContents(input.sessionId, webContents)
-  // 已存在会话的 workspaceId 以持久化 meta 为准；调用方可能只传 sessionId。
-  const memoryWorkspaceSlug = input.workspaceId ?? getAgentSessionMeta(input.sessionId)?.workspaceId
-  const memorySnapshot = captureWorkspaceMemorySnapshot(memoryWorkspaceSlug)
-  const memoryRunStartedAt = input.startedAt ?? Date.now()
   // 开始新一轮执行时清除"完成未确认"标记
   try {
     updateAgentSessionMeta(input.sessionId, { completedButUnconfirmed: false })
@@ -197,15 +192,6 @@ export async function runAgent(
         }
       },
       onComplete: (messages, opts) => {
-        const memoryChange = diffWorkspaceMemorySnapshot(
-          memoryWorkspaceSlug,
-          input.sessionId,
-          opts?.startedAt ?? memoryRunStartedAt,
-          memorySnapshot,
-        )
-        if (memoryChange) {
-          eventBus.emit(input.sessionId, { kind: 'proma_event', event: { type: 'memory_updated', change: memoryChange } })
-        }
         publishRunStopped(input.sessionId, opts?.stoppedByUser, opts?.startedAt)
         if (!webContents.isDestroyed()) {
           sendAgentStreamComplete(webContents, input, {

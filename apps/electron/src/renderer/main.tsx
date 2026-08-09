@@ -91,10 +91,11 @@ const isQuickTaskWindow = new URLSearchParams(window.location.search).get('windo
 const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation-indicator'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow
+const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow
 
 // 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
-if (isMainWindow || isPlanningWindow) {
+if (isMainWindow || isPlanningWindow || isWorkspaceMemoryWindow) {
   document.documentElement.classList.add('proma-main-window')
 }
 
@@ -1092,6 +1093,16 @@ if (isQuickTaskWindow) {
         <AutomationInitializer />
         <PlanningInitializer />
         <PlanningWindowApp />
+        <Toaster position="bottom-right" />
+      </React.StrictMode>
+    )
+  })
+} else if (isWorkspaceMemoryWindow) {
+  import('./components/agent-skills/WorkspaceMemoryWindowApp').then(({ WorkspaceMemoryWindowApp }) => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <ThemeInitializer />
+        <WorkspaceMemoryWindowApp />
         <Toaster position="bottom-right" />
       </React.StrictMode>
     )

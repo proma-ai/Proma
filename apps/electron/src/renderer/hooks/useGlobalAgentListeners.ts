@@ -76,7 +76,6 @@ import {
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { getSessionFileChangeKind, upsertSessionFileChange } from '@/lib/session-file-changes'
-import { workspaceMemoryUpdatesAtom } from '@/atoms/memory-atoms'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -718,22 +717,6 @@ export function useGlobalAgentListeners(): void {
             .catch(console.error)
         }
 
-        // 主进程基于本轮前后快照确认的 memory/ 写入。只保存在渲染期通知状态，
-        // 不复制或持久化长期记忆内容。
-        if (payload.kind === 'proma_event' && payload.event.type === 'memory_updated') {
-          const { change } = payload.event
-          store.set(workspaceMemoryUpdatesAtom, (prev) => {
-            const next = new Map(prev)
-            const existing = next.get(change.workspaceSlug)
-            const files = existing
-              ? [...existing.files, ...change.files].filter((file, index, all) =>
-                  all.findIndex((candidate) => candidate.id === file.id) === index,
-                )
-              : change.files
-            next.set(change.workspaceSlug, { ...(existing ?? change), ...change, files, unread: true })
-            return next
-          })
-        }
 
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)

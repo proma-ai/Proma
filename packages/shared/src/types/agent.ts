@@ -615,8 +615,6 @@ export type PromaEvent =
   | { type: 'delegation_blocked'; delegationId: string; blockedEvent: unknown }
   // 自动任务会话被用户接管（毕业）
   | { type: 'automation_graduated' }
-  /** Agent 在一次运行中实际修改了受管 workspace memory/。 */
-  | { type: 'memory_updated'; change: WorkspaceMemoryChange }
 
 /** 外部入口触发 Agent 运行的来源 */
 export type AgentExternalRunSource = 'feishu' | 'dingtalk' | 'wechat' | 'bridge' | 'delegation'
@@ -981,6 +979,8 @@ export interface SkillFileNode {
   type: 'file' | 'directory'
   /** 文件大小（字节）；目录为 undefined */
   size?: number
+  /** 最近修改时间（Unix milliseconds）；目录为 undefined */
+  modifiedAt?: number
   /** 是否为文本文件（可在内置编辑器中打开）；目录为 undefined */
   isText?: boolean
   /** 子节点（仅 type=directory 有值，已按目录优先 + 名称排序） */
@@ -998,25 +998,20 @@ export interface SkillFileContent {
   size: number
 }
 
-/** 工作区记忆文件摘要 */
-export interface WorkspaceMemoryChange {
-  /** 所属工作区及本次产生变更的 Agent 运行。 */
-  workspaceSlug: string
-  sessionId: string
-  runStartedAt: number
-  /** `profile` 对应 user-profile.md；两种 instruction 类别对应两层可审阅的 AGENTS.md。 */
-  category: 'profile' | 'index' | 'topic' | 'workspace_instruction' | 'project_instruction'
-  files: Array<{
-    /** Stable identity; two AGENTS.md files have different areas. */
-    id: string
-    relativePath: string
-    area: 'memory' | 'workspace_instruction' | 'project_instruction'
-    kind: 'created' | 'modified' | 'deleted'
-    addedLines: number
-    removedLines: number
-    /** 只传本地 UI 展示用的受限摘要；不是完整记忆正文。 */
-    preview?: string
-  }>
+/** 当前 Memory 页面订阅到的单个文件更新；仅携带受限的局部文本 diff。 */
+export interface WorkspaceMemoryFileChange {
+  relativePath: string
+  kind: 'created' | 'modified' | 'deleted'
+  changedAt: number
+  /** 超大或二进制文件仍会通知更新，但不传内容或 diff。 */
+  diffAvailable: boolean
+  preview?: string
+  diff?: {
+    context: string[]
+    removed: string[]
+    added: string[]
+    truncated: boolean
+  }
 }
 
 /** 工作区记忆文件摘要 */
@@ -1678,8 +1673,16 @@ export const AGENT_IPC_CHANNELS = {
   READ_WORKSPACE_AUTO_MEMORY_FILE: 'agent:read-workspace-auto-memory-file',
   /** 写入工作区长期记忆文件 */
   WRITE_WORKSPACE_AUTO_MEMORY_FILE: 'agent:write-workspace-auto-memory-file',
+  /** 打开或聚焦当前 workspace 的独立 Memory 编辑窗口。 */
+  OPEN_WORKSPACE_MEMORY_WINDOW: 'agent:open-workspace-memory-window',
+  /** 主进程要求已打开的独立 Memory 窗口定位到指定文件。 */
+  WORKSPACE_MEMORY_WINDOW_OPEN_FILE: 'agent:workspace-memory-window-open-file',
+  /** 开始/结束当前 renderer 对 workspace memory/ 的本地文件变化订阅。 */
+  START_WORKSPACE_MEMORY_WATCH: 'agent:start-workspace-memory-watch',
+  STOP_WORKSPACE_MEMORY_WATCH: 'agent:stop-workspace-memory-watch',
+  /** 当前 workspace memory/ 文件发生变化。 */
+  WORKSPACE_MEMORY_FILE_CHANGED: 'agent:workspace-memory-file-changed',
   APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE: 'agent:approve-workspace-project-knowledge-maintenance',
-  /** 设置当前工作区长期记忆的前台复查周期。 */
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

@@ -113,7 +113,7 @@ Proma 将项目地图与用户协作记忆分开维护：前者让 Agent 少做�
 | --- | --- | --- | --- |
 | 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | ${agentsMaintenanceMode} | 架构、目录、命令、验证、项目边界与关键文档索引 |
 | Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | ${agentsMaintenanceMode} | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
-| 协作记忆 | \`${workspace?.autoMemoryDir ?? 'memory'}\` | 仅在用户明确确认候选内容后写入 | 用户画像、协作偏好、纠错、经验与会影响未来判断的决策理由；\`MEMORY.md\` 只作主题索引 |
+| 协作记忆 | \`${workspace?.autoMemoryDir ?? 'memory'}\` | 已验证的最小增量可直接写入并在完成后说明；删除/大段覆盖、冲突、不确定推断或敏感信息先确认 | 用户画像、协作偏好、纠错、经验与会影响未来判断的决策理由；\`MEMORY.md\` 只作主题索引 |
 | Skills | \`${workspace?.skillsDir ?? 'skills'}\` | 仅在匹配任务或用户请求时读取/维护 | 可复用流程与 SOP，不存普通事实 |
 | 会话工作台 | \`${sessionContextDir}\` | 当前会话可读写 | todo、plan、handoff、临时笔记和中间产物，不自动升级为长期知识 |
 | 项目 Context | \`${projectContextDir}\` | 按当前任务读取；仅在用户要求或交付跨会话资料时写入 | 长调研、设计、证据与 checklist，不作为个人偏好库 |
@@ -121,7 +121,7 @@ Proma 将项目地图与用户协作记忆分开维护：前者让 Agent 少做�
 ${agentsMaintenanceRequirement}
 - 两份 \`AGENTS.md\` 的职责不得重叠。项目事实写项目根；Proma 特有规则写工作区文件并链接项目根。工作区 \`AGENTS.md\` 不得枚举已安装或可用的 Skills：它们已由系统提示词动态注入。优先维护已有 \`<!-- proma:... -->\` 受管区块；没有时只追加紧凑区块，绝不整体重写或覆盖用户手写规则。
 - 长期记忆根固定为工作区 \`memory/\`，不是项目根或会话工作台的 \`.claude/memory/\`。不要读取、创建或修改后者；旧目录仅由 Proma 的安全迁移处理。
-- 写入协作记忆前，先读取 \`MEMORY.md\`、\`user-profile.md\` 与相关主题文件；只写入用户明确要求记住、重复出现，或缺失后会让未来 Agent 明显犯错的稳定知识。`,
+- 写入协作记忆前，先读取 \`MEMORY.md\`、\`user-profile.md\` 与相关主题文件；对用户直接表达、已验证或重复出现，且会影响未来协作判断的稳定知识做最小写入。普通写入直接完成后告知，不得先追问“要不要记住/是否更新”；不要从单次行为推断。`,
     ctx.memoryGuidance?.needsCollaborationProfile && workspace
       ? `## 协作知识状态
 当前尚未建立 \`memory/user-profile.md\`。这是状态提醒，不要求你立即收集资料；仅在当前任务自然暴露出高价值协作信号时，按项目根 \`AGENTS.md\` 的知识演进约定渐进处理。`
@@ -131,7 +131,7 @@ ${agentsMaintenanceRequirement}
 距离当前工作区长期协作知识上次更新已超过内部复查间隔；期间产生了 ${ctx.memoryRefreshOpportunity.newerSessionCount} 个更新会话（**包括已归档会话**，归档不代表历史无效）。
 
 完成当前用户请求后，使用 \`AskUserQuestion\` 简短询问用户：是否愿意授权你将上次协作记忆更新后的当前工作区会话作为补充证据。用户可选择“本周期跳过”；不要把它当作错误或继续追问。
-若获得会话整理授权，先按元信息选择少量近期、高信号会话并分批读取必要片段；不要全量扫描。协作记忆写入仍须在展示候选后再次取得确认；绝不跨工作区扫描。`
+若获得会话整理授权，先按元信息选择少量近期、高信号会话并分批读取必要片段；不要全量扫描。基于明确证据的协作记忆可直接最小写入并说明结果；仅对删除/大段覆盖、冲突、不确定推断或敏感信息再次请求确认；绝不跨工作区扫描。`
       : undefined,
     ctx.permissionMode === 'plan'
       ? `## 计划模式
