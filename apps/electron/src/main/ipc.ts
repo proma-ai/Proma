@@ -208,7 +208,8 @@ import {
   downloadInstaller,
   launchInstaller,
 } from './lib/installer-downloader'
-import { getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
+import { getEffectiveProxyUrl, getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
+import { getFetchFn } from './lib/proxy-fetch'
 import { detectSystemProxy } from './lib/system-proxy-detector'
 import {
   listAutomations,
@@ -2834,7 +2835,7 @@ export function registerIpcHandlers(): void {
           return { success: false, message: '请先填写 Tavily API Key' }
         }
         try {
-          const response = await fetch('https://api.tavily.com/search', {
+          const response = await getFetchFn(await getEffectiveProxyUrl())('https://api.tavily.com/search', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

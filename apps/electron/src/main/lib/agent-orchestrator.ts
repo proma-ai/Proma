@@ -886,7 +886,7 @@ export class AgentOrchestrator {
       // 10. 构建 MCP 服务器配置 + 记忆工具 + 生图工具 + 自定义工具
       const mcpServers = this.buildMcpServers(workspaceSlug)
       if (isBuiltinMcpUserEnabled('chrome-devtools')) {
-        injectChromeDevtoolsMcpServer(mcpServers)
+        injectChromeDevtoolsMcpServer(mcpServers, runtimeEnv.env)
       }
       let piBuiltinTools: unknown[] = []
       let piMcpTools: unknown[] = []

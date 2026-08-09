@@ -13,7 +13,22 @@ function npxCommand(): string {
   return process.platform === 'win32' ? 'npx.cmd' : 'npx'
 }
 
-export function injectChromeDevtoolsMcpServer(mcpServers: Record<string, Record<string, unknown>>): void {
+const PROXY_ENV_KEYS = new Set([
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+])
+
+function getProxyEnv(runtimeEnv?: Record<string, string>): Record<string, string> {
+  if (!runtimeEnv) return {}
+  return Object.fromEntries(
+    Object.entries(runtimeEnv).filter(([key]) => PROXY_ENV_KEYS.has(key)),
+  )
+}
+
+export function injectChromeDevtoolsMcpServer(
+  mcpServers: Record<string, Record<string, unknown>>,
+  runtimeEnv?: Record<string, string>,
+): void {
   const name = getBuiltinMcpName('chrome-devtools')
   if (mcpServers[name]) return
 
@@ -33,6 +48,7 @@ export function injectChromeDevtoolsMcpServer(mcpServers: Record<string, Record<
       ...(process.env.TMPDIR && { TMPDIR: process.env.TMPDIR }),
       ...(process.env.TEMP && { TEMP: process.env.TEMP }),
       ...(process.env.TMP && { TMP: process.env.TMP }),
+      ...getProxyEnv(runtimeEnv),
     },
     timeout: 60,
   }
