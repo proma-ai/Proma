@@ -130,7 +130,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { ConversationMeta, AgentSessionMeta, AgentWorkspace, WorkspaceCapabilities } from '@proma/shared'
-import { CloudSidebarDownloadButton, CloudSidebarCreditIndicator } from './CloudSidebarExtension'
+import { CloudSidebarCreditIndicator } from './CloudSidebarExtension'
 
 function formatAutomationCount(count: number): string {
   return count > 99 ? '99+' : String(count)
@@ -3147,9 +3147,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
           </div>
         </>
       )}
-
-      {/* Cloud 模式：从云端下载全部对话按钮 */}
-      <CloudSidebarDownloadButton />
 
       {/* 已归档入口 / 返回活跃对话 */}
       <div className="px-3 pb-1">

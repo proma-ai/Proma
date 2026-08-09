@@ -27,10 +27,3 @@ export const hasEverSyncedAtom = atom((get) => {
   const state = get(syncStateAtom)
   return state?.lastFullSyncAt !== null && state?.lastFullSyncAt !== undefined
 })
-
-/** 是否已执行过"下载全部对话"（持久化状态，通过 getSyncState 初始化） */
-export const hasDownloadedAllAtom = atom(false)
-
-/** "下载全部对话"的操作反馈状态 */
-export type DownloadAllStatus = 'idle' | 'success' | 'error'
-export const downloadAllStatusAtom = atom<DownloadAllStatus>('idle')

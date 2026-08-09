@@ -1113,8 +1113,6 @@ export interface ElectronAPI {
     incrementalSync: () => Promise<SyncResult>
     /** 加载更多历史对话（每次 5 个） */
     pullMore: () => Promise<SyncResult>
-    /** 从云端下载全部对话 */
-    downloadAllConversations: () => Promise<SyncResult>
     /** 获取同步状态 */
     getSyncState: () => Promise<SyncState>
     /** 订阅同步进度事件（返回清理函数） */
@@ -2632,9 +2630,6 @@ const electronAPI: ElectronAPI = {
     },
     pullMore: () => {
       return ipcRenderer.invoke(SYNC_IPC_CHANNELS.PULL_MORE)
-    },
-    downloadAllConversations: () => {
-      return ipcRenderer.invoke(SYNC_IPC_CHANNELS.DOWNLOAD_ALL_CONVERSATIONS)
     },
     getSyncState: () => {
       return ipcRenderer.invoke(SYNC_IPC_CHANNELS.GET_SYNC_STATE)
