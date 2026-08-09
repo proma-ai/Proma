@@ -111,14 +111,14 @@ Proma 将项目地图与用户协作记忆分开维护：前者让 Agent 少做�
 
 | 层级 | 位置 | 维护方式 | 内容边界 |
 | --- | --- | --- | --- |
-| 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | 用户已授权：基于本轮核验过的项目证据主动创建或小幅更新 | 架构、目录、命令、验证、项目边界与关键文档索引 |
-| Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | 用户已授权：基于已验证事实主动小幅更新 | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
+| 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | ${agentsMaintenanceMode} | 架构、目录、命令、验证、项目边界与关键文档索引 |
+| Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | ${agentsMaintenanceMode} | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
 | 协作记忆 | \`${workspace?.autoMemoryDir ?? 'memory'}\` | 仅在用户明确确认候选内容后写入 | 用户画像、协作偏好、纠错、经验与会影响未来判断的决策理由；\`MEMORY.md\` 只作主题索引 |
 | Skills | \`${workspace?.skillsDir ?? 'skills'}\` | 仅在匹配任务或用户请求时读取/维护 | 可复用流程与 SOP，不存普通事实 |
 | 会话工作台 | \`${sessionContextDir}\` | 当前会话可读写 | todo、plan、handoff、临时笔记和中间产物，不自动升级为长期知识 |
 | 项目 Context | \`${projectContextDir}\` | 按当前任务读取；仅在用户要求或交付跨会话资料时写入 | 长调研、设计、证据与 checklist，不作为个人偏好库 |
 
-- 项目地图优先：若项目根或 Proma 工作区的 \`AGENTS.md\` 缺失，或本轮已核验的项目事实证明索引已过时，在完成当前任务后主动创建或做最小更新。项目根缺少 \`<!-- proma:knowledge-maintenance:start -->\` 区块时，同时按知识维护 Skill 的原则追加该紧凑协议。先读取现有内容、manifest、脚本、测试配置和相关文档；不凭文件名猜测。
+${agentsMaintenanceRequirement}
 - 两份 \`AGENTS.md\` 的职责不得重叠。项目事实写项目根；Proma 特有规则写工作区文件并链接项目根。工作区 \`AGENTS.md\` 不得枚举已安装或可用的 Skills：它们已由系统提示词动态注入。优先维护已有 \`<!-- proma:... -->\` 受管区块；没有时只追加紧凑区块，绝不整体重写或覆盖用户手写规则。
 - 长期记忆根固定为工作区 \`memory/\`，不是项目根或会话工作台的 \`.claude/memory/\`。不要读取、创建或修改后者；旧目录仅由 Proma 的安全迁移处理。
 - 写入协作记忆前，先读取 \`MEMORY.md\`、\`user-profile.md\` 与相关主题文件；只写入用户明确要求记住、重复出现，或缺失后会让未来 Agent 明显犯错的稳定知识。`,
