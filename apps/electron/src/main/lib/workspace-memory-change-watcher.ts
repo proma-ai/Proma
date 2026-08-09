@@ -71,13 +71,18 @@ class WorkspaceMemoryWatcher {
 
   /** Retains active subscribers when memory/ is externally deleted and later recreated. */
   private watchRootParent(): void {
+    if (this.closed || this.rootParentWatcher) return
     const parent = dirname(this.root)
     const rootName = basename(this.root)
     try {
       this.rootParentWatcher = watch(parent, (_eventType, filename) => {
         if (!filename || filename.toString() === rootName) this.scheduleRescan()
       })
-      this.rootParentWatcher.on('error', () => { this.rootParentWatcher?.close(); this.rootParentWatcher = undefined })
+      this.rootParentWatcher.on('error', () => {
+        this.rootParentWatcher?.close()
+        this.rootParentWatcher = undefined
+        this.scheduleRescan()
+      })
     } catch { /* Workspace root may be unavailable during teardown; existing watchers still clean up normally. */ }
   }
 
@@ -151,6 +156,7 @@ class WorkspaceMemoryWatcher {
     if (this.rescanTimer) clearTimeout(this.rescanTimer)
     this.rescanTimer = setTimeout(() => {
       this.rescanTimer = undefined
+      this.watchRootParent()
       this.reconcileDirectoryWatchers()
       if (isRegularDirectory(this.root)) this.reconcileTree()
     }, CHANGE_DEBOUNCE_MS)
