@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync, watch, type FSWatcher } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { WorkspaceMemoryFileChange } from '@proma/shared'
 import { getWorkspaceAutoMemoryDir } from './agent-workspace-manager'
 
@@ -53,18 +53,32 @@ class WorkspaceMemoryWatcher {
   private readonly snapshots = new Map<string, FileSnapshot>()
   private readonly callbacks = new Set<(change: WorkspaceMemoryFileChange) => void>()
   private readonly directoryWatchers = new Map<string, FSWatcher>()
+  private rootParentWatcher?: FSWatcher
   private readonly pendingPaths = new Map<string, ReturnType<typeof setTimeout>>()
   private rescanTimer?: ReturnType<typeof setTimeout>
   private closed = false
 
   constructor(private readonly root: string) {
     this.captureInitialSnapshots()
+    this.watchRootParent()
     this.reconcileDirectoryWatchers()
   }
 
   subscribe(callback: (change: WorkspaceMemoryFileChange) => void): () => void {
     this.callbacks.add(callback)
     return () => { this.callbacks.delete(callback); if (this.callbacks.size === 0) this.close() }
+  }
+
+  /** Retains active subscribers when memory/ is externally deleted and later recreated. */
+  private watchRootParent(): void {
+    const parent = dirname(this.root)
+    const rootName = basename(this.root)
+    try {
+      this.rootParentWatcher = watch(parent, (_eventType, filename) => {
+        if (!filename || filename.toString() === rootName) this.scheduleRescan()
+      })
+      this.rootParentWatcher.on('error', () => { this.rootParentWatcher?.close(); this.rootParentWatcher = undefined })
+    } catch { /* Workspace root may be unavailable during teardown; existing watchers still clean up normally. */ }
   }
 
   private collectDirectories(): Set<string> {
@@ -103,7 +117,12 @@ class WorkspaceMemoryWatcher {
   }
 
   private reconcileDirectoryWatchers(): void {
-    if (this.closed || !isRegularDirectory(this.root)) return
+    if (this.closed) return
+    if (!isRegularDirectory(this.root)) {
+      for (const watcher of this.directoryWatchers.values()) watcher.close()
+      this.directoryWatchers.clear()
+      return
+    }
     const desired = this.collectDirectories()
     for (const [directory, watcher] of this.directoryWatchers) {
       if (!desired.has(directory)) { watcher.close(); this.directoryWatchers.delete(directory) }
@@ -132,9 +151,8 @@ class WorkspaceMemoryWatcher {
     if (this.rescanTimer) clearTimeout(this.rescanTimer)
     this.rescanTimer = setTimeout(() => {
       this.rescanTimer = undefined
-      if (!isRegularDirectory(this.root)) { this.close(); return }
       this.reconcileDirectoryWatchers()
-      this.reconcileTree()
+      if (isRegularDirectory(this.root)) this.reconcileTree()
     }, CHANGE_DEBOUNCE_MS)
   }
   private schedulePath(relativePath: string): void {
@@ -177,6 +195,8 @@ class WorkspaceMemoryWatcher {
     if (this.rescanTimer) clearTimeout(this.rescanTimer)
     for (const timer of this.pendingPaths.values()) clearTimeout(timer)
     this.pendingPaths.clear()
+    this.rootParentWatcher?.close()
+    this.rootParentWatcher = undefined
     for (const watcher of this.directoryWatchers.values()) watcher.close()
     this.directoryWatchers.clear()
     watchersByRoot.delete(this.root)

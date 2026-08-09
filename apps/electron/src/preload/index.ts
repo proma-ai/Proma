@@ -683,6 +683,8 @@ export interface ElectronAPI {
   onWorkspaceMemoryWindowCloseRequested: (callback: () => void) => () => void
   /** 保存或明确丢弃后确认关闭当前独立记忆窗口。 */
   confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => Promise<void>
+  /** 声明独立记忆窗口已可处理关闭请求。 */
+  markWorkspaceMemoryWindowReady: (workspaceSlug: string) => Promise<void>
 
   /** 仅在当前 Memory 页面存活时订阅当前 workspace 的 memory/ 文件变化。 */
   subscribeWorkspaceMemoryChanges: (
@@ -1931,6 +1933,10 @@ const electronAPI: ElectronAPI = {
 
   confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE, workspaceSlug)
+  },
+
+  markWorkspaceMemoryWindowReady: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_READY, workspaceSlug)
   },
 
   subscribeWorkspaceMemoryChanges: (workspaceSlug: string, callback: (change: import('@proma/shared').WorkspaceMemoryFileChange) => void) => {

@@ -11,6 +11,7 @@ const MEMORY_WINDOW_TITLE = 'Proma · 工作区记忆'
 
 const windowsByWorkspace = new Map<string, BrowserWindow>()
 const approvedCloseWindows = new WeakSet<BrowserWindow>()
+const rendererReadyWindows = new WeakSet<BrowserWindow>()
 
 function getIconPath(): string | undefined {
   const resourcesDir = join(__dirname, 'resources')
@@ -98,10 +99,12 @@ function createWorkspaceMemoryWindow(workspaceSlug: string, relativePath?: strin
   // All platform close paths (traffic lights, Alt+F4, Cmd/Ctrl+W and custom buttons)
   // converge here so dirty renderer state can explicitly save or discard first.
   win.on('close', (event) => {
-    if (approvedCloseWindows.has(win)) return
+    if (approvedCloseWindows.has(win) || !rendererReadyWindows.has(win) || win.webContents.isDestroyed()) return
     event.preventDefault()
-    if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED)
+    win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED)
   })
+  win.webContents.on('did-fail-load', () => approvedCloseWindows.add(win))
+  win.webContents.on('render-process-gone', () => approvedCloseWindows.add(win))
   win.on('closed', () => {
     if (windowsByWorkspace.get(workspaceSlug) === win) windowsByWorkspace.delete(workspaceSlug)
   })
@@ -128,5 +131,14 @@ export function confirmWorkspaceMemoryWindowClose(workspaceSlug: string, webCont
   if (!win || win.isDestroyed() || win.webContents.id !== webContentsId) return false
   approvedCloseWindows.add(win)
   win.close()
+  return true
+}
+
+
+/** Marks the renderer as ready to coordinate dirty-state close confirmation. */
+export function markWorkspaceMemoryWindowReady(workspaceSlug: string, webContentsId: number): boolean {
+  const win = windowsByWorkspace.get(workspaceSlug)
+  if (!win || win.isDestroyed() || win.webContents.id !== webContentsId) return false
+  rendererReadyWindows.add(win)
   return true
 }

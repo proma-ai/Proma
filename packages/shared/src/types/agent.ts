@@ -1681,6 +1681,8 @@ export const AGENT_IPC_CHANNELS = {
   WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED: 'agent:workspace-memory-window-close-requested',
   /** renderer 已确认可丢弃或保存后关闭独立记忆窗口。 */
   CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE: 'agent:confirm-workspace-memory-window-close',
+  /** 独立记忆窗口 renderer 已完成 close 协调初始化。 */
+  WORKSPACE_MEMORY_WINDOW_READY: 'agent:workspace-memory-window-ready',
   /** 开始/结束当前 renderer 对 workspace memory/ 的本地文件变化订阅。 */
   START_WORKSPACE_MEMORY_WATCH: 'agent:start-workspace-memory-watch',
   STOP_WORKSPACE_MEMORY_WATCH: 'agent:stop-workspace-memory-watch',

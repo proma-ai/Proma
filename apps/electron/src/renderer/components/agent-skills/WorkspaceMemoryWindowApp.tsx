@@ -39,14 +39,19 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
   const [pendingAction, setPendingAction] = React.useState<{ kind: 'open'; relativePath: string } | { kind: 'close' } | null>(null)
   const selectedPathRef = React.useRef<string | null>(null)
   const dirtyRef = React.useRef(false)
+  const textRef = React.useRef('')
 
   React.useEffect(() => {
     selectedPathRef.current = selectedPath
     dirtyRef.current = dirty
-  }, [dirty, selectedPath])
+    textRef.current = text
+  }, [dirty, selectedPath, text])
   React.useEffect(() => {
     document.title = 'Proma · 工作区记忆'
   }, [])
+  React.useEffect(() => {
+    void window.electronAPI.markWorkspaceMemoryWindowReady(workspaceSlug).catch(() => {})
+  }, [workspaceSlug])
 
   const refreshFiles = React.useCallback(async (): Promise<SkillFileNode[]> => {
     const tree = await window.electronAPI.listWorkspaceAutoMemoryFiles(workspaceSlug)
@@ -61,6 +66,7 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
       selectedPathRef.current = file.relativePath
       dirtyRef.current = false
       setSelectedPath(file.relativePath)
+      textRef.current = file.content ?? ''
       setText(file.content ?? '')
       setDirty(false)
       setRemoteChanged(false)
@@ -82,9 +88,10 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
 
   const requestOpenFile = React.useCallback((relativePath: string): void => {
     if (relativePath === selectedPathRef.current) return
+    if (saving) { toast.message('保存进行中，请稍候。'); return }
     if (dirtyRef.current) { setPendingAction({ kind: 'open', relativePath }); return }
     void openFile(relativePath)
-  }, [openFile])
+  }, [openFile, saving])
 
   React.useEffect(() => {
     if (!workspaceSlug) {
@@ -105,9 +112,10 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
   React.useEffect(() => window.electronAPI.onWorkspaceMemoryWindowOpenFile(requestOpenFile), [requestOpenFile])
 
   React.useEffect(() => window.electronAPI.onWorkspaceMemoryWindowCloseRequested(() => {
+    if (saving) { toast.message('保存进行中，请稍候。'); return }
     if (dirtyRef.current) setPendingAction({ kind: 'close' })
     else void confirmClose()
-  }), [confirmClose])
+  }), [confirmClose, saving])
 
   React.useEffect(() => {
     if (!workspaceSlug) return
@@ -122,21 +130,26 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
     })
   }, [openFile, refreshFiles, workspaceSlug])
 
-  const save = React.useCallback(async (): Promise<void> => {
-    if (!selectedPath || remoteChanged) return
+  const save = React.useCallback(async (): Promise<boolean> => {
+    if (!selectedPath || remoteChanged || saving) return false
+    const savedPath = selectedPath
+    const savedText = textRef.current
     setSaving(true)
     try {
-      await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, selectedPath, text)
-      dirtyRef.current = false
-      setDirty(false)
+      await window.electronAPI.writeWorkspaceAutoMemoryFile(workspaceSlug, savedPath, savedText)
+      const unchangedSinceSave = selectedPathRef.current === savedPath && textRef.current === savedText
+      dirtyRef.current = !unchangedSinceSave
+      setDirty(!unchangedSinceSave)
       await refreshFiles()
-      toast.success('记忆已保存')
+      toast.success(unchangedSinceSave ? '记忆已保存' : '已保存早先内容；后续输入仍待保存')
+      return unchangedSinceSave
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存记忆文件失败')
+      return false
     } finally {
       setSaving(false)
     }
-  }, [refreshFiles, remoteChanged, selectedPath, text, workspaceSlug])
+  }, [refreshFiles, remoteChanged, saving, selectedPath, workspaceSlug])
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -155,6 +168,9 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
   }, [save])
 
   const createIndex = React.useCallback(() => {
+    selectedPathRef.current = 'MEMORY.md'
+    textRef.current = '# Memory\n'
+    dirtyRef.current = true
     setSelectedPath('MEMORY.md')
     setText('# Memory\n')
     setDirty(true)
@@ -188,8 +204,8 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
             <AlertDialogAction onClick={() => {
               const action = pendingAction
               void (async () => {
-                await save()
-                if (dirtyRef.current) return
+                const saved = await save()
+                if (!saved) return
                 setPendingAction(null)
                 if (action?.kind === 'open') await openFile(action.relativePath)
                 else if (action?.kind === 'close') await confirmClose()
@@ -239,7 +255,7 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
               </div>
             </div>
             {remoteChanged && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200"><span>该文件已在其他位置更新。重新载入后再编辑，以免覆盖新内容。</span><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => selectedPath && void openFile(selectedPath)}>重新载入</Button></div>}
-            {loadingFile ? <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">读取文件中…</div> : selectedPath && viewMode === 'edit' ? <textarea value={text} onChange={(event) => { dirtyRef.current = true; setText(event.target.value); setDirty(true) }} spellCheck={false} className="min-h-0 flex-1 resize-none bg-transparent p-5 font-mono text-[13px] leading-6 text-foreground outline-none" placeholder="# Memory\n\n记录稳定、可复用的协作知识。" /> : selectedPath ? <div className="min-h-0 flex-1 overflow-y-auto p-6">{text.trim() ? <MessageResponse className="text-[14px] prose-headings:scroll-mt-4">{text}</MessageResponse> : <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/70 text-sm text-muted-foreground">当前文件为空，切换到编辑后可以写入 Markdown 内容。</div>}</div> : <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">从左侧选择一个记忆文件</div>}
+            {loadingFile ? <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">读取文件中…</div> : selectedPath && viewMode === 'edit' ? <textarea value={text} onChange={(event) => { dirtyRef.current = true; textRef.current = event.target.value; setText(event.target.value); setDirty(true) }} disabled={saving} spellCheck={false} className="min-h-0 flex-1 resize-none bg-transparent p-5 font-mono text-[13px] leading-6 text-foreground outline-none" placeholder="# Memory\n\n记录稳定、可复用的协作知识。" /> : selectedPath ? <div className="min-h-0 flex-1 overflow-y-auto p-6">{text.trim() ? <MessageResponse className="text-[14px] prose-headings:scroll-mt-4">{text}</MessageResponse> : <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-dashed border-border/70 text-sm text-muted-foreground">当前文件为空，切换到编辑后可以写入 Markdown 内容。</div>}</div> : <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">从左侧选择一个记忆文件</div>}
           </section>
         </main>
       </div>

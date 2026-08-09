@@ -325,7 +325,7 @@ import {
 } from './lib/agent-workspace-manager'
 import { movePathSafely } from './lib/file-move-service'
 import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
-import { confirmWorkspaceMemoryWindowClose } from './lib/workspace-memory-window'
+import { confirmWorkspaceMemoryWindowClose, markWorkspaceMemoryWindowReady } from './lib/workspace-memory-window'
 
 /** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
 const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
@@ -2551,6 +2551,15 @@ export function registerIpcHandlers(): void {
     const { showWorkspaceMemoryWindow } = await import('./lib/workspace-memory-window')
     showWorkspaceMemoryWindow(workspaceSlug, relativePath)
   })
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_READY,
+    async (event, workspaceSlug: string): Promise<void> => {
+      if (!markWorkspaceMemoryWindowReady(workspaceSlug, event.sender.id)) {
+        throw new Error('记忆窗口不存在或不属于当前渲染进程')
+      }
+    },
+  )
 
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE,
