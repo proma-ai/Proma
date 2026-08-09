@@ -75,7 +75,7 @@ export function MemoryUpdateNotice(): React.ReactElement | null {
       </div>
       <div className="mt-3 space-y-1.5 rounded-xl bg-muted/50 p-2.5 text-xs text-muted-foreground">
         {update.files.slice(0, 2).map((file) => (
-          <div key={file.relativePath} className="truncate" title={file.preview ?? file.relativePath}>
+          <div key={file.id} className="truncate" title={file.preview ?? file.relativePath}>
             <span className="font-medium text-foreground/80">{file.area === 'project_instruction' ? '项目根/' : file.area === 'workspace_instruction' ? '工作区/' : ''}{file.relativePath}</span>{file.preview ? ` · ${file.preview}` : ''}
           </div>
         ))}

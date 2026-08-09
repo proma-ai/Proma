@@ -102,6 +102,7 @@ export function diffWorkspaceMemorySnapshot(
       ? 'workspace_instruction'
       : relativePath === PROJECT_AGENTS_KEY ? 'project_instruction' : 'memory'
     files.push({
+      id: `${area}:${area === 'memory' ? relativePath : 'AGENTS.md'}`,
       relativePath: area === 'memory' ? relativePath : 'AGENTS.md',
       area,
       kind: !previous ? 'created' : !current ? 'deleted' : 'modified',

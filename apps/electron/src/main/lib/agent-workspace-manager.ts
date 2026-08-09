@@ -1815,6 +1815,8 @@ interface WorkspaceConfig {
   attachedDirectories?: string[]
   attachedFiles?: string[]
   worktreeRepos?: import('@proma/shared').WorkspaceWorktreeRepo[]
+  /** User consent for Agent-initiated maintenance of the two AGENTS.md files. */
+  projectKnowledgeMaintenanceApproved?: boolean
   /** Internal scheduling metadata only; Markdown remains the long-term memory source. */
   memoryReview?: {
     lastPromptAt?: number
@@ -1845,6 +1847,7 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
       worktreeRepos: Array.isArray(data.worktreeRepos)
         ? data.worktreeRepos.filter((r) => r && typeof r.name === 'string' && typeof r.repoPath === 'string' && typeof r.worktreesPath === 'string')
         : undefined,
+      projectKnowledgeMaintenanceApproved: data.projectKnowledgeMaintenanceApproved === true ? true : undefined,
       // Read the prior public setting only to preserve its cooldown timestamp; its
       // interval is intentionally ignored after switching to the fixed internal cadence.
       memoryReview: (() => {
@@ -1864,6 +1867,17 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
 function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
   writeJsonFileAtomic(configPath, config)
+}
+
+/** Whether the user explicitly enabled Agent-initiated maintenance of both AGENTS.md files. */
+export function isWorkspaceProjectKnowledgeMaintenanceApproved(workspaceSlug: string): boolean {
+  return readWorkspaceConfig(workspaceSlug).projectKnowledgeMaintenanceApproved === true
+}
+
+/** Records the explicit consent obtained from the “同意并开始建立” guided action. */
+export function approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug: string): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  writeWorkspaceConfig(workspaceSlug, { ...config, projectKnowledgeMaintenanceApproved: true })
 }
 
 /** Internal-only cooldown state for the fixed workspace memory-review cadence. */

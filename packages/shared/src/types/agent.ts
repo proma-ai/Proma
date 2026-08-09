@@ -1007,6 +1007,8 @@ export interface WorkspaceMemoryChange {
   /** `profile` 对应 user-profile.md；两种 instruction 类别对应两层可审阅的 AGENTS.md。 */
   category: 'profile' | 'index' | 'topic' | 'workspace_instruction' | 'project_instruction'
   files: Array<{
+    /** Stable identity; two AGENTS.md files have different areas. */
+    id: string
     relativePath: string
     area: 'memory' | 'workspace_instruction' | 'project_instruction'
     kind: 'created' | 'modified' | 'deleted'
@@ -1676,6 +1678,7 @@ export const AGENT_IPC_CHANNELS = {
   READ_WORKSPACE_AUTO_MEMORY_FILE: 'agent:read-workspace-auto-memory-file',
   /** 写入工作区长期记忆文件 */
   WRITE_WORKSPACE_AUTO_MEMORY_FILE: 'agent:write-workspace-auto-memory-file',
+  APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE: 'agent:approve-workspace-project-knowledge-maintenance',
   /** 设置当前工作区长期记忆的前台复查周期。 */
 
   // 流式事件（主进程 → 渲染进程推送）

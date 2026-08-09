@@ -674,6 +674,9 @@ export interface ElectronAPI {
   /** 写入工作区长期记忆文件 */
   writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => Promise<void>
 
+  /** 记录用户对 Agent 主动维护两份 AGENTS.md 的明确授权。 */
+  approveWorkspaceProjectKnowledgeMaintenance: (workspaceSlug: string) => Promise<void>
+
 
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
@@ -1894,6 +1897,10 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content)
   },
 
+
+  approveWorkspaceProjectKnowledgeMaintenance: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE, workspaceSlug)
+  },
 
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {
     const listener = (_: unknown, event: AgentStreamEvent): void => callback(event)

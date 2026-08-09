@@ -364,7 +364,12 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
 
   const handleBootstrapKnowledge = async (): Promise<void> => {
     if (bootstrapping) return
-    await startGuidedSession(buildWorkspaceKnowledgeBootstrapPrompt(), 'bootstrap')
+    try {
+      await window.electronAPI.approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug)
+      await startGuidedSession(buildWorkspaceKnowledgeBootstrapPrompt(), 'bootstrap')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '记录项目知识维护授权失败')
+    }
   }
 
   const handleScanSessionEvidence = async (): Promise<void> => {
@@ -460,12 +465,12 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
           <div className="min-w-0">
             <div className="text-sm font-medium text-foreground">建立项目地图与协作画像</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              先用项目中的可验证证据维护项目根与 Proma 工作区的 AGENTS.md；随后在真实协作中逐步校准你的偏好。不会扫描历史会话。
+              点击即授权 Agent 基于可验证证据维护项目根与 Proma 工作区的 AGENTS.md；随后在真实协作中逐步校准你的偏好。不会扫描历史会话。
             </div>
           </div>
           <Button onClick={handleBootstrapKnowledge} disabled={bootstrapping}>
             <Sparkles size={14} className="mr-1.5" />
-            {bootstrapping ? '创建中...' : '开始建立'}
+            {bootstrapping ? '创建中...' : '同意并开始建立'}
           </Button>
         </div>
       </SettingsCard>

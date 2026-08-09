@@ -727,7 +727,7 @@ export function useGlobalAgentListeners(): void {
             const existing = next.get(change.workspaceSlug)
             const files = existing
               ? [...existing.files, ...change.files].filter((file, index, all) =>
-                  all.findIndex((candidate) => candidate.relativePath === file.relativePath) === index,
+                  all.findIndex((candidate) => candidate.id === file.id) === index,
                 )
               : change.files
             next.set(change.workspaceSlug, { ...(existing ?? change), ...change, files, unread: true })

@@ -311,6 +311,7 @@ import {
   listWorkspaceAutoMemoryFiles,
   readWorkspaceAutoMemoryFile,
   writeWorkspaceAutoMemoryFile,
+  approveWorkspaceProjectKnowledgeMaintenance,
   getWorkspaceAttachedDirectories,
   getWorkspaceAttachedFiles,
   attachWorkspaceDirectory,
@@ -2526,6 +2527,13 @@ export function registerIpcHandlers(): void {
 
 
   // 发送 Agent 消息（触发 Agent SDK 流式响应）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE,
+    async (_, workspaceSlug: string): Promise<void> => {
+      approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug)
+    },
+  )
+
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {

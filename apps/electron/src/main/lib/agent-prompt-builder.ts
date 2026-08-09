@@ -29,6 +29,8 @@ interface SystemPromptContext {
   collaborationAvailable?: boolean
   currentModelId?: string
   legacyProjectInstructions?: ProjectInstructionSource[]
+  /** Only explicit guided consent enables Agent-initiated AGENTS.md maintenance. */
+  projectKnowledgeMaintenanceApproved?: boolean
   /** 每次前台运行按 Markdown 文件实际覆盖度计算；不产生第二套记忆状态。 */
   memoryGuidance?: WorkspaceMemoryGuidance
   /** 惰性周检命中时才提供；它只邀请用户复查，绝不自动读写历史。 */
@@ -77,6 +79,13 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const modelRule = ctx.currentModelId?.trim()
     ? `委派默认复用当前模型 \`${ctx.currentModelId.trim()}\`；用户指定其他模型时，先查询可用模型。`
     : '未提供当前模型时不自行选择其他模型。'
+  const canMaintainProjectKnowledge = ctx.projectKnowledgeMaintenanceApproved === true
+  const agentsMaintenanceMode = canMaintainProjectKnowledge
+    ? '已获明确授权：基于本轮核验过的项目证据主动创建或小幅更新'
+    : '未获授权：只读取、核验并提出候选，不得由 Agent 自动写入'
+  const agentsMaintenanceRequirement = canMaintainProjectKnowledge
+    ? '- 项目地图优先：若项目根或 Proma 工作区的 `AGENTS.md` 缺失，或本轮已核验的项目事实证明索引已过时，在完成当前任务后主动创建或做最小更新。项目根缺少 `<!-- proma:knowledge-maintenance:start -->` 区块时，同时按知识维护 Skill 的原则追加该紧凑协议。先读取现有内容、manifest、脚本、测试配置和相关文档；不凭文件名猜测。'
+    : '- 当前工作区尚未授权 Agent 主动维护两份 `AGENTS.md`。不得创建、修改或追加项目根或 workspace `AGENTS.md`；若发现缺失或过时，只说明证据与最小候选变更，并请求用户启动“同意并开始建立”引导后再写入。'
 
   const sections = [
     `# Proma Agent
