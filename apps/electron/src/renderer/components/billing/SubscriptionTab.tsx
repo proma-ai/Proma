@@ -504,7 +504,7 @@ export function SubscriptionTab({ onSubscriptionComplete }: SubscriptionTabProps
           <h4 className="text-xs font-semibold text-foreground">计费说明</h4>
           <ul className="mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground">
             <li>所有模型均按照官方价格的基础进行折扣计算；Proma Cloud 额度会按所选模型、输入输出长度及任务规模消耗。</li>
-            <li>各额度包按档位独立有效 31 或 90 天，到期后未使用额度清零（团队采用单独计费层）。</li>
+            <li>各额度包按所选档位独立计时，到期后未使用额度清零（团队采用单独计费层）。</li>
             <li>每次购买均为一次性支付，不会自动续费或自动扣款；赠送额度随对应额度包同时到期。</li>
             <li>支持少量多次购买叠加，各额度包独立计时，优先消耗先购买的额度（FIFO）。</li>
           </ul>
