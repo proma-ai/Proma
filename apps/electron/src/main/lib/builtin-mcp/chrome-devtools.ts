@@ -40,7 +40,8 @@ export function injectChromeDevtoolsMcpServer(
     // failures (missing npx, first-run package download failure, no Chrome,
     // etc.) must not block the main Agent session.
     required: false,
-    startup_timeout_sec: 60,
+    // Optional MCP 启动在后台进行；5 秒后放弃本次连接并由后续会话重试，不能阻塞 Agent 首包。
+    startup_timeout_sec: 5,
     env: {
       ...(process.env.PATH && { PATH: process.env.PATH }),
       ...(process.env.HOME && { HOME: process.env.HOME }),
