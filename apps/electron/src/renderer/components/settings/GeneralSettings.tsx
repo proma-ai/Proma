@@ -348,6 +348,58 @@ export function GeneralSettings(): React.ReactElement {
         </SettingsCard>
       </SettingsSection>
 
+      {/* 账户区域 - 仅 Cloud 模式 + 已登录时显示 */}
+      {useCloudProfile && (
+        <SettingsSection
+          title="Proma 账户"
+          description="Proma 账户信息"
+        >
+          <SettingsCard>
+            <SettingsRow
+              label="邮箱"
+              description="当前登录的 Proma 账户"
+            >
+              <span className="text-[13px] text-foreground/60">{cloudUser.email}</span>
+            </SettingsRow>
+            <SettingsRow
+              label="登出"
+              description="退出当前 Proma 账户"
+            >
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px]',
+                      'text-destructive hover:bg-destructive/10 transition-colors'
+                    )}
+                  >
+                    <LogOut className="size-3.5" />
+                    登出
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认登出</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      登出后将返回登录页面，你的本地数据不会被删除。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      className={cn(buttonVariants({ variant: 'destructive' }))}
+                      onClick={handleLogout}
+                    >
+                      确认登出
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsSection>
+      )}
+
       {/* 通用设置 */}
       <SettingsSection
         title="通用设置"
@@ -493,57 +545,6 @@ export function GeneralSettings(): React.ReactElement {
         </SettingsCard>
       </SettingsSection>
 
-      {/* 账户区域 - 仅 Cloud 模式 + 已登录时显示 */}
-      {useCloudProfile && (
-        <SettingsSection
-          title="Proma 账户"
-          description="Proma 账户信息"
-        >
-          <SettingsCard>
-            <SettingsRow
-              label="邮箱"
-              description="当前登录的 Proma 账户"
-            >
-              <span className="text-[13px] text-foreground/60">{cloudUser.email}</span>
-            </SettingsRow>
-            <SettingsRow
-              label="登出"
-              description="退出当前 Proma 账户"
-            >
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <button
-                    className={cn(
-                      'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px]',
-                      'text-destructive hover:bg-destructive/10 transition-colors'
-                    )}
-                  >
-                    <LogOut className="size-3.5" />
-                    登出
-                  </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>确认登出</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      登出后将返回登录页面，你的本地数据不会被删除。
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>取消</AlertDialogCancel>
-                    <AlertDialogAction
-                      className={cn(buttonVariants({ variant: 'destructive' }))}
-                      onClick={handleLogout}
-                    >
-                      确认登出
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </SettingsRow>
-          </SettingsCard>
-        </SettingsSection>
-      )}
     </div>
   )
 }
