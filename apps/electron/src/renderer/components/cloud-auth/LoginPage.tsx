@@ -10,6 +10,8 @@ import { useSetAtom } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { LegalAgreement } from './LegalAgreement'
+import { canSubmitWithLegalAcceptance } from './legal-agreement'
 import {
   cloudAuthViewAtom,
   cloudAuthEmailAtom,
@@ -45,6 +47,7 @@ export function LoginPage(): React.ReactElement {
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [legalAccepted, setLegalAccepted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [googleConfigured, setGoogleConfigured] = useState(false)
@@ -62,6 +65,11 @@ export function LoginPage(): React.ReactElement {
 
     if (!email.trim() || !password.trim()) {
       setLocalError('请填写邮箱和密码')
+      return
+    }
+
+    if (!canSubmitWithLegalAcceptance(legalAccepted)) {
+      setLocalError('请先阅读并同意《用户协议》和《隐私政策》')
       return
     }
 
@@ -93,6 +101,11 @@ export function LoginPage(): React.ReactElement {
   }
 
   const handleGoogleLogin = async (): Promise<void> => {
+    if (!canSubmitWithLegalAcceptance(legalAccepted)) {
+      setLocalError('请先阅读并同意《用户协议》和《隐私政策》')
+      return
+    }
+
     await window.electronAPI.cloudAuth.openGoogleLogin()
   }
 
@@ -139,6 +152,12 @@ export function LoginPage(): React.ReactElement {
           />
         </div>
 
+        <LegalAgreement
+          accepted={legalAccepted}
+          onAcceptedChange={setLegalAccepted}
+          disabled={loading}
+        />
+
         {localError && (
           <p className="text-sm text-destructive">{localError}</p>
         )}
@@ -163,8 +182,8 @@ export function LoginPage(): React.ReactElement {
             type="button"
             variant="outline"
             className="w-full"
-            onClick={handleGoogleLogin}
-            disabled={loading}
+            onClick={() => { void handleGoogleLogin() }}
+            disabled={loading || !canSubmitWithLegalAcceptance(legalAccepted)}
           >
             <GoogleIcon />
             使用 Google 登录
