@@ -679,6 +679,10 @@ export interface ElectronAPI {
 
   /** 独立 Memory 编辑窗口接收主进程转发的文件定位请求。 */
   onWorkspaceMemoryWindowOpenFile: (callback: (relativePath: string) => void) => () => void
+  /** 主进程请求独立窗口确认未保存内容后的关闭。 */
+  onWorkspaceMemoryWindowCloseRequested: (callback: () => void) => () => void
+  /** 保存或明确丢弃后确认关闭当前独立记忆窗口。 */
+  confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => Promise<void>
 
   /** 仅在当前 Memory 页面存活时订阅当前 workspace 的 memory/ 文件变化。 */
   subscribeWorkspaceMemoryChanges: (
@@ -1917,6 +1921,16 @@ const electronAPI: ElectronAPI = {
     const listener = (_: unknown, relativePath: string): void => callback(relativePath)
     ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_OPEN_FILE, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_OPEN_FILE, listener) }
+  },
+
+  onWorkspaceMemoryWindowCloseRequested: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED, listener) }
+  },
+
+  confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE, workspaceSlug)
   },
 
   subscribeWorkspaceMemoryChanges: (workspaceSlug: string, callback: (change: import('@proma/shared').WorkspaceMemoryFileChange) => void) => {

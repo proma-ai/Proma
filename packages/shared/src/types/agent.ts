@@ -1677,6 +1677,10 @@ export const AGENT_IPC_CHANNELS = {
   OPEN_WORKSPACE_MEMORY_WINDOW: 'agent:open-workspace-memory-window',
   /** 主进程要求已打开的独立 Memory 窗口定位到指定文件。 */
   WORKSPACE_MEMORY_WINDOW_OPEN_FILE: 'agent:workspace-memory-window-open-file',
+  /** 独立记忆窗口请求 renderer 决定是否关闭未保存编辑。 */
+  WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED: 'agent:workspace-memory-window-close-requested',
+  /** renderer 已确认可丢弃或保存后关闭独立记忆窗口。 */
+  CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE: 'agent:confirm-workspace-memory-window-close',
   /** 开始/结束当前 renderer 对 workspace memory/ 的本地文件变化订阅。 */
   START_WORKSPACE_MEMORY_WATCH: 'agent:start-workspace-memory-watch',
   STOP_WORKSPACE_MEMORY_WATCH: 'agent:stop-workspace-memory-watch',

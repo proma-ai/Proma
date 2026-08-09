@@ -325,9 +325,11 @@ import {
 } from './lib/agent-workspace-manager'
 import { movePathSafely } from './lib/file-move-service'
 import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
+import { confirmWorkspaceMemoryWindowClose } from './lib/workspace-memory-window'
 
 /** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
 const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
+const workspaceMemoryWatchDestroyedListeners = new Set<number>()
 
 function stopWorkspaceMemoryWatch(webContentsId: number, workspaceSlug: string): void {
   const subscriptions = workspaceMemoryWatchSubscriptions.get(webContentsId)
@@ -2551,6 +2553,15 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(
+    AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE,
+    async (event, workspaceSlug: string): Promise<void> => {
+      if (!confirmWorkspaceMemoryWindowClose(workspaceSlug, event.sender.id)) {
+        throw new Error('记忆窗口不存在或不属于当前渲染进程')
+      }
+    },
+  )
+
+  ipcMain.handle(
     AGENT_IPC_CHANNELS.START_WORKSPACE_MEMORY_WATCH,
     async (event, workspaceSlug: string): Promise<void> => {
       const webContents = event.sender
@@ -2563,12 +2574,17 @@ export function registerIpcHandlers(): void {
       const subscriptions = workspaceMemoryWatchSubscriptions.get(webContents.id) ?? new Map<string, () => void>()
       subscriptions.set(workspaceSlug, unsubscribe)
       workspaceMemoryWatchSubscriptions.set(webContents.id, subscriptions)
-      webContents.once('destroyed', () => {
-        const active = workspaceMemoryWatchSubscriptions.get(webContents.id)
-        if (!active) return
-        for (const stop of active.values()) stop()
-        workspaceMemoryWatchSubscriptions.delete(webContents.id)
-      })
+      if (!workspaceMemoryWatchDestroyedListeners.has(webContents.id)) {
+        workspaceMemoryWatchDestroyedListeners.add(webContents.id)
+        webContents.once('destroyed', () => {
+          const active = workspaceMemoryWatchSubscriptions.get(webContents.id)
+          if (active) {
+            for (const stop of active.values()) stop()
+            workspaceMemoryWatchSubscriptions.delete(webContents.id)
+          }
+          workspaceMemoryWatchDestroyedListeners.delete(webContents.id)
+        })
+      }
     },
   )
 

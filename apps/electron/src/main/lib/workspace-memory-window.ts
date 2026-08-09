@@ -1,5 +1,6 @@
 import { app, BrowserWindow, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
+import { AGENT_IPC_CHANNELS } from '@proma/shared'
 import { join } from 'node:path'
 
 const DEFAULT_WIDTH = 980
@@ -9,6 +10,7 @@ const MIN_HEIGHT = 480
 const MEMORY_WINDOW_TITLE = 'Proma · 工作区记忆'
 
 const windowsByWorkspace = new Map<string, BrowserWindow>()
+const approvedCloseWindows = new WeakSet<BrowserWindow>()
 
 function getIconPath(): string | undefined {
   const resourcesDir = join(__dirname, 'resources')
@@ -93,6 +95,13 @@ function createWorkspaceMemoryWindow(workspaceSlug: string, relativePath?: strin
     if (url.startsWith('http://') || url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  // All platform close paths (traffic lights, Alt+F4, Cmd/Ctrl+W and custom buttons)
+  // converge here so dirty renderer state can explicitly save or discard first.
+  win.on('close', (event) => {
+    if (approvedCloseWindows.has(win)) return
+    event.preventDefault()
+    if (!win.webContents.isDestroyed()) win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED)
+  })
   win.on('closed', () => {
     if (windowsByWorkspace.get(workspaceSlug) === win) windowsByWorkspace.delete(workspaceSlug)
   })
@@ -110,4 +119,14 @@ export function showWorkspaceMemoryWindow(workspaceSlug: string, relativePath?: 
   existing.show()
   existing.focus()
   if (relativePath) existing.webContents.send('agent:workspace-memory-window-open-file', relativePath)
+}
+
+
+/** Completes a renderer-confirmed close, scoped to the owning workspace window. */
+export function confirmWorkspaceMemoryWindowClose(workspaceSlug: string, webContentsId: number): boolean {
+  const win = windowsByWorkspace.get(workspaceSlug)
+  if (!win || win.isDestroyed() || win.webContents.id !== webContentsId) return false
+  approvedCloseWindows.add(win)
+  win.close()
+  return true
 }
