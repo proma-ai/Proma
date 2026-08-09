@@ -453,6 +453,9 @@ function createWindow(): void {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 排队消息的自动投递依赖 renderer 消费 STREAM_COMPLETE；窗口被遮挡、最小化或失焦时
+      // 不能让 Chromium 降速该事件循环，否则下一条消息会等到用户重新激活窗口才发送。
+      backgroundThrottling: false,
     },
     ...titleBarOptions,
   })
