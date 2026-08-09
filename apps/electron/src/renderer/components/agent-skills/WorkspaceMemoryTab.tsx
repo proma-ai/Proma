@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -357,6 +357,14 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     [autoFiles, search],
   )
   const hasProfile = autoFiles.some((node) => node.relativePath === 'user-profile.md')
+  const migrationIssues = [
+    summary?.legacyAutoMemory ? '长期记忆迁移' : null,
+    summary?.instructionConflict ? '工作区规则迁移' : null,
+  ].filter((issue): issue is string => issue !== null)
+  const migrationReminderTitle = [
+    summary?.legacyAutoMemory ? `长期记忆：${summary.legacyAutoMemory.directory}` : null,
+    summary?.instructionConflict ? `工作区规则：${summary.instructionConflict.legacyPath}` : null,
+  ].filter((detail): detail is string => detail !== null).join('\n')
 
   if (loading || !summary) {
     return <div className="py-20 text-center text-sm text-muted-foreground">加载协作知识中...</div>
@@ -420,6 +428,16 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                 <RefreshCw size={14} />
               </button>
             </div>
+            {migrationIssues.length > 0 && (
+              <div
+                role="status"
+                title={migrationReminderTitle}
+                className="mx-2 mt-2 flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-300"
+              >
+                <AlertTriangle size={13} className="shrink-0" />
+                <span>待处理：{migrationIssues.join('、')}，请检查旧文件。</span>
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               <FileButton
                 active={selected?.kind === 'agents'}
