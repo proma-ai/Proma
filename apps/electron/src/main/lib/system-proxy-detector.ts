@@ -4,7 +4,25 @@
  * 支持 macOS、Windows、Linux 三个平台的系统代理自动检测。
  */
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { SystemProxyDetectResult } from '@proma/shared'
+
+const execFileAsync = promisify(execFile)
+const SYSTEM_PROXY_COMMAND_TIMEOUT_MS = 3_000
+
+/**
+ * 在不阻塞 Electron 主进程的前提下执行系统代理查询命令。
+ * `execFile` 不经 shell 解析参数，且 timeout 会终止卡住的系统命令。
+ */
+async function runSystemProxyCommand(command: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(command, args, {
+    encoding: 'utf-8',
+    timeout: SYSTEM_PROXY_COMMAND_TIMEOUT_MS,
+    windowsHide: true,
+  })
+  return stdout
+}
 
 /**
  * 检测系统代理配置
@@ -46,13 +64,10 @@ export async function detectSystemProxy(): Promise<SystemProxyDetectResult> {
  */
 async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
   try {
-    // 获取主网络服务名称（通常是 Wi-Fi 或以太网）
-    const { execSync } = await import('node:child_process')
-
     // 尝试获取当前活动的网络服务
     let networkService = 'Wi-Fi'
     try {
-      const services = execSync('networksetup -listallnetworkservices', { encoding: 'utf-8' })
+      const services = await runSystemProxyCommand('networksetup', ['-listallnetworkservices'])
       const serviceList = services.split('\n').filter((s) => s && !s.startsWith('*'))
 
       // 优先使用 Wi-Fi，其次是以太网
@@ -89,9 +104,7 @@ async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
 
     // 优先检查 HTTPS 代理（Secure Web Proxy）
     try {
-      const httpsOutput = execSync(`networksetup -getsecurewebproxy "${networkService}"`, {
-        encoding: 'utf-8',
-      })
+      const httpsOutput = await runSystemProxyCommand('networksetup', ['-getsecurewebproxy', networkService])
       const httpsProxy = parseProxyOutput(httpsOutput)
       if (httpsProxy.enabled && httpsProxy.server && httpsProxy.port) {
         const proxyUrl = `http://${httpsProxy.server}:${httpsProxy.port}`
@@ -106,9 +119,7 @@ async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
     }
 
     // 回退：检查 HTTP 代理（Web Proxy）
-    const httpOutput = execSync(`networksetup -getwebproxy "${networkService}"`, {
-      encoding: 'utf-8',
-    })
+    const httpOutput = await runSystemProxyCommand('networksetup', ['-getwebproxy', networkService])
     const httpProxy = parseProxyOutput(httpOutput)
     if (httpProxy.enabled && httpProxy.server && httpProxy.port) {
       const proxyUrl = `http://${httpProxy.server}:${httpProxy.port}`
@@ -139,13 +150,13 @@ async function detectMacOSProxy(): Promise<SystemProxyDetectResult> {
  */
 async function detectWindowsProxy(): Promise<SystemProxyDetectResult> {
   try {
-    const { execSync } = await import('node:child_process')
-
     // 读取注册表中的代理设置
-    const regOutput = execSync(
-      'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable',
-      { encoding: 'utf-8' }
-    )
+    const regOutput = await runSystemProxyCommand('reg', [
+      'query',
+      'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v',
+      'ProxyEnable',
+    ])
 
     const proxyEnabled = regOutput.includes('0x1')
 
@@ -157,10 +168,12 @@ async function detectWindowsProxy(): Promise<SystemProxyDetectResult> {
     }
 
     // 读取代理服务器地址
-    const serverOutput = execSync(
-      'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer',
-      { encoding: 'utf-8' }
-    )
+    const serverOutput = await runSystemProxyCommand('reg', [
+      'query',
+      'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings',
+      '/v',
+      'ProxyServer',
+    ])
 
     // 解析代理服务器地址（格式通常是 "http=host:port;https=host:port" 或直接 "host:port"）
     const match = serverOutput.match(/ProxyServer\s+REG_SZ\s+(.+)/)

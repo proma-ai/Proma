@@ -10,6 +10,8 @@
 import { getCloudApiConfig } from '@proma/cloud'
 import { getAuthToken } from './cloud-auth-service'
 import { getToolCredentials, getToolState } from './chat-tool-config'
+import { getFetchFn } from './proxy-fetch'
+import { getEffectiveProxyUrl } from './proxy-settings-service'
 
 const TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
 const TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract'
@@ -140,7 +142,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFA
   }
 
   try {
-    return await fetch(url, { ...init, signal: controller.signal })
+    const fetchFn = getFetchFn(await getEffectiveProxyUrl())
+    return await fetchFn(url, { ...init, signal: controller.signal })
   } finally {
     clearTimeout(timeout)
     upstreamSignal?.removeEventListener('abort', onAbort)
