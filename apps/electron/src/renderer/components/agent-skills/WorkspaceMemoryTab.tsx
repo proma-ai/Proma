@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { BookOpen, Brain, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -29,35 +29,10 @@ interface WorkspaceMemoryTabProps {
   search: string
 }
 
-const AUTO_MEMORY_INDEX = 'MEMORY.md'
-function getLegacyMemoryMigrationIssueMessage(legacy: NonNullable<WorkspaceMemorySummary['legacyAutoMemory']>): string {
-  switch (legacy.migrationIssue) {
-    case 'legacy_path_invalid':
-      return '旧 .claude/memory 路径不是可迁移的普通目录，Proma 未创建替代内容。'
-    case 'target_path_invalid':
-      return '新的 memory/ 路径不是可用的普通目录，Proma 未迁移旧内容。'
-    case 'contains_symbolic_link':
-      return `旧目录包含符号链接${legacy.symbolicLinkPath ? `：${legacy.symbolicLinkPath}` : ''}，为避免访问工作区外内容，Proma 未自动迁移。`
-    case 'migration_failed':
-      return '文件系统操作未完成，Proma 已保留旧目录中的内容，未将失败状态当作冲突处理。'
-    default:
-      return ''
-  }
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-function formatTime(ts?: number): string {
-  if (!ts) return '尚未创建'
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function autoMemoryPath(summary: WorkspaceMemorySummary, relativePath: string): string {
@@ -381,7 +356,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     () => filterNodes(autoFiles, search),
     [autoFiles, search],
   )
-  const hasMemory = summary?.autoMemory.memoryMdExists === true
   const hasProfile = autoFiles.some((node) => node.relativePath === 'user-profile.md')
 
   if (loading || !summary) {
@@ -390,76 +364,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid gap-3 lg:grid-cols-2">
-        <MemoryStatCard
-          icon={<Brain size={18} />}
-          title="长期记忆"
-          subtitle="memory/MEMORY.md 与主题文件"
-          value={hasMemory ? `${summary.autoMemory.fileCount} 个文件` : '尚未建立'}
-          detail={hasMemory ? `${formatBytes(summary.autoMemory.totalSize)} · 更新于 ${formatTime(summary.autoMemory.updatedAt)}` : '由你确认后，Agent 才会创建'}
-          active={selected?.kind === 'auto'}
-          onClick={() => void openAutoFile(AUTO_MEMORY_INDEX, summary)}
-        />
-        <MemoryStatCard
-          icon={<BookOpen size={18} />}
-          title="工作区规则"
-          subtitle="独立的 Proma 工作区 AGENTS.md"
-          value={summary.agentsMd.exists ? formatBytes(summary.agentsMd.size) : '尚未创建'}
-          detail={`更新于 ${formatTime(summary.agentsMd.updatedAt)}`}
-          active={selected?.kind === 'agents'}
-          onClick={() => void openAgents(summary)}
-        />
-      </div>
-
-      {hasProfile && (
-        <SettingsCard divided={false} className="border-primary/20 bg-gradient-to-r from-primary/[0.07] to-transparent">
-          <button type="button" onClick={() => void openAutoFile('user-profile.md', summary)} className="flex w-full items-center justify-between gap-4 p-4 text-left transition-colors hover:bg-primary/[0.04]">
-            <div className="flex min-w-0 items-center gap-3"><div className="rounded-xl bg-primary/10 p-2 text-primary"><Brain size={18} /></div><div><div className="text-sm font-semibold text-foreground">协作画像</div><p className="mt-0.5 text-xs text-muted-foreground">你的稳定偏好、角色与协作方式 · user-profile.md</p></div></div>
-            <span className="shrink-0 text-xs font-medium text-primary">查看并编辑</span>
-          </button>
-        </SettingsCard>
-      )}
-
-      {summary.legacyAutoMemory && (
-        <SettingsCard divided={false} className="border-amber-500/40 bg-amber-500/5">
-          <div className="p-4 text-sm leading-relaxed text-foreground">
-            <div className="font-medium">长期记忆迁移需要处理</div>
-            {summary.legacyAutoMemory.migrationIssue ? (
-              <p className="mt-1 text-muted-foreground">
-                {getLegacyMemoryMigrationIssueMessage(summary.legacyAutoMemory)} 请处理旧目录后重新打开此页面重试。
-              </p>
-            ) : (
-              <>
-                <p className="mt-1 text-muted-foreground">
-                  Proma 已将不冲突的旧 <code>.claude/memory</code> 内容迁移到 <code>memory/</code>，但以下同名条目未被覆盖，仍保留在旧目录中。
-                </p>
-                <p className="mt-1 break-all text-xs text-muted-foreground">
-                  待处理：{summary.legacyAutoMemory.conflictingPaths.join('、')}
-                </p>
-              </>
-            )}
-            <p className="mt-2 break-all text-xs text-muted-foreground">
-              旧目录：{summary.legacyAutoMemory.directory}
-            </p>
-          </div>
-        </SettingsCard>
-      )}
-
-      {summary.instructionConflict && (
-        <SettingsCard divided={false} className="border-amber-500/40 bg-amber-500/5">
-          <div className="p-4 text-sm leading-relaxed text-foreground">
-            <div className="font-medium">工作区指令迁移需要处理</div>
-            <p className="mt-1 text-muted-foreground">
-              检测到内容不同的 legacy CLAUDE.md 与 AGENTS.md。Proma 当前只加载 AGENTS.md，未自动合并或删除旧文件，以避免丢失规则。
-            </p>
-            <p className="mt-2 break-all text-xs text-muted-foreground">
-              请手动合并后删除旧文件：{summary.instructionConflict.legacyPath}
-            </p>
-          </div>
-        </SettingsCard>
-      )}
-
-
       <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -660,47 +564,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         </SettingsCard>
       </div>
     </div>
-  )
-}
-
-function MemoryStatCard({
-  icon,
-  title,
-  subtitle,
-  value,
-  detail,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode
-  title: string
-  subtitle: string
-  value: string
-  detail: string
-  active: boolean
-  onClick: () => void
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-3 rounded-lg border bg-content-area p-4 text-left shadow-sm transition-colors',
-        active ? 'border-primary/50 bg-primary/[0.04]' : 'border-border/60 hover:bg-foreground/[0.03]',
-      )}
-    >
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-sm font-medium text-foreground">{title}</div>
-          <div className="text-xs font-medium tabular-nums text-foreground/65">{value}</div>
-        </div>
-        <div className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</div>
-        <div className="mt-1 text-[11px] text-muted-foreground/80">{detail}</div>
-      </div>
-    </button>
   )
 }
 
