@@ -7,7 +7,7 @@ import type { PromaPermissionMode, SessionWorkbenchLayout } from '@proma/shared'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getUserProfile } from './user-profile-service'
-import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig } from './agent-workspace-manager'
+import { getAgentWorkspaceBySlug, getProjectFilesPath, getWorkspaceMcpConfig, type WorkspaceMemoryGuidance } from './agent-workspace-manager'
 import { getConfigDirName } from './config-paths'
 import { buildGitAttributionPromptSection, isGitAttributionEnabled } from './agent-git-attribution'
 import { getSettings } from './settings-service'
@@ -36,6 +36,12 @@ interface SystemPromptContext {
   collaborationAvailable?: boolean
   currentModelId?: string
   legacyProjectInstructions?: ProjectInstructionSource[]
+  /** Only explicit guided consent enables Agent-initiated AGENTS.md maintenance. */
+  projectKnowledgeMaintenanceApproved?: boolean
+  /** 每次前台运行按 Markdown 文件实际覆盖度计算；不产生第二套记忆状态。 */
+  memoryGuidance?: WorkspaceMemoryGuidance
+  /** 惰性周检命中时才提供；它只邀请用户复查，绝不自动读写历史。 */
+  memoryRefreshOpportunity?: { memoryUpdatedAt?: number; newestSessionAt: number; newerSessionCount: number }
 }
 
 function buildWorkspacePaths(
@@ -60,7 +66,9 @@ function buildWorkspacePaths(
     isProjectCwd: resolve(effectiveAgentCwd) === resolve(projectRoot),
     isLocalProject: Boolean(getAgentWorkspaceBySlug(workspaceSlug)?.projectRootPath),
     agentsMd: join(workspaceRoot, 'AGENTS.md'),
-    autoMemoryIndex: join(workspaceRoot, '.claude', 'memory', 'MEMORY.md'),
+    projectAgentsMd: join(projectRoot, 'AGENTS.md'),
+    autoMemoryDir: join(workspaceRoot, 'memory'),
+    autoMemoryIndex: join(workspaceRoot, 'memory', 'MEMORY.md'),
     mcpConfig: join(workspaceRoot, 'mcp.json'),
     skillsDir: join(workspaceRoot, 'skills'),
   }
@@ -77,6 +85,13 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
   const modelRule = ctx.currentModelId?.trim()
     ? `委派默认复用当前模型 \`${ctx.currentModelId.trim()}\`；用户指定其他模型时，先查询可用模型。`
     : '未提供当前模型时不自行选择其他模型。'
+  const canMaintainProjectKnowledge = ctx.projectKnowledgeMaintenanceApproved === true
+  const agentsMaintenanceMode = canMaintainProjectKnowledge
+    ? '已获明确授权：基于本轮核验过的项目证据主动创建或小幅更新'
+    : '未获授权：只读取、核验并提出候选，不得由 Agent 自动写入'
+  const agentsMaintenanceRequirement = canMaintainProjectKnowledge
+    ? '- 项目地图优先：若项目根或 Proma 工作区的 `AGENTS.md` 缺失，或本轮已核验的项目事实证明索引已过时，在完成当前任务后主动创建或做最小更新。项目根缺少 `<!-- proma:knowledge-maintenance:start -->` 区块时，同时按知识维护 Skill 的原则追加该紧凑协议。先读取现有内容、manifest、脚本、测试配置和相关文档；不凭文件名猜测。'
+    : '- 当前工作区尚未授权 Agent 主动维护两份 `AGENTS.md`。不得创建、修改或追加项目根或 workspace `AGENTS.md`；若发现缺失或过时，只说明证据与最小候选变更，并请求用户启动“同意并开始建立”引导后再写入。'
 
   const sections = [
     `# Proma Agent
@@ -99,8 +114,33 @@ export function buildSystemPrompt(ctx: SystemPromptContext): string {
 - 需要原文或更多细节时，再按当前任务读取两级 Context、记忆索引或 Skill 元数据；禁止无差别全量扫描。`
       : undefined,
     buildLegacyProjectMigrationRequirement({ sources: ctx.legacyProjectInstructions ?? [] }),
-    `## 知识维护
-Proma 工作区 AGENTS 记录稳定工作区规则；用户项目 AGENTS 记录经验证的跨 Agent 项目规则；Memory 保存稳定偏好、决策和经验；Skill 保存重复 SOP；Context 保存任务资料。只做小幅、基于证据的更新；不要把临时过程、未验证推断或长正文写入 AGENTS/Memory。仅自动更新 Proma 工作区 Memory，不写项目或会话目录的 \`.claude/memory\`。`,
+    `## 知识维护与访问边界
+Proma 将项目地图与用户协作记忆分开维护：前者让 Agent 少做重复探索，后者让 Agent 更好地服务用户。不得把它们混为同一个档案。
+
+| 层级 | 位置 | 维护方式 | 内容边界 |
+| --- | --- | --- | --- |
+| 项目地图 | \`${workspace?.projectAgentsMd ?? '项目根/AGENTS.md'}\` | ${agentsMaintenanceMode} | 架构、目录、命令、验证、项目边界与关键文档索引 |
+| Proma 工作区规则 | \`${workspace?.agentsMd ?? 'AGENTS.md'}\` | ${agentsMaintenanceMode} | Proma 执行环境、工作区流程、项目入口指针；不复制项目地图 |
+| 协作记忆 | \`${workspace?.autoMemoryDir ?? 'memory'}\` | 已验证的最小增量可直接写入并在完成后说明；删除/大段覆盖、冲突、不确定推断或敏感信息先确认 | 用户画像、协作偏好、纠错、经验与会影响未来判断的决策理由；\`MEMORY.md\` 只作主题索引 |
+| Skills | \`${workspace?.skillsDir ?? 'skills'}\` | 仅在匹配任务或用户请求时读取/维护 | 可复用流程与 SOP，不存普通事实 |
+| 会话工作台 | \`${sessionContextDir}\` | 当前会话可读写 | todo、plan、handoff、临时笔记和中间产物，不自动升级为长期知识 |
+| 项目 Context | \`${projectContextDir}\` | 按当前任务读取；仅在用户要求或交付跨会话资料时写入 | 长调研、设计、证据与 checklist，不作为个人偏好库 |
+
+${agentsMaintenanceRequirement}
+- 两份 \`AGENTS.md\` 的职责不得重叠。项目事实写项目根；Proma 特有规则写工作区文件并链接项目根。工作区 \`AGENTS.md\` 不得枚举已安装或可用的 Skills：它们已由系统提示词动态注入。优先维护已有 \`<!-- proma:... -->\` 受管区块；没有时只追加紧凑区块，绝不整体重写或覆盖用户手写规则。
+- 长期记忆根固定为工作区 \`memory/\`，不是项目根或会话工作台的 \`.claude/memory/\`。不要读取、创建或修改后者；旧目录仅由 Proma 的安全迁移处理。
+- 写入协作记忆前，先读取 \`MEMORY.md\`、\`user-profile.md\` 与相关主题文件；对用户直接表达、已验证或重复出现，且会影响未来协作判断的稳定知识做最小写入。普通写入直接完成后告知，不得先追问“要不要记住/是否更新”；不要从单次行为推断。`,
+    ctx.memoryGuidance?.needsCollaborationProfile && workspace
+      ? `## 协作知识状态
+当前尚未建立 \`memory/user-profile.md\`。这是状态提醒，不要求你立即收集资料；仅在当前任务自然暴露出高价值协作信号时，按项目根 \`AGENTS.md\` 的知识演进约定渐进处理。`
+      : undefined,
+    ctx.memoryRefreshOpportunity && workspace
+      ? `## 项目记忆复查邀请
+距离当前工作区长期协作知识上次更新已超过内部复查间隔；期间产生了 ${ctx.memoryRefreshOpportunity.newerSessionCount} 个更新会话（**包括已归档会话**，归档不代表历史无效）。
+
+完成当前用户请求后，使用 \`AskUserQuestion\` 简短询问用户：是否愿意授权你将上次协作记忆更新后的当前工作区会话作为补充证据。用户可选择“本周期跳过”；不要把它当作错误或继续追问。
+若获得会话整理授权，先按元信息选择少量近期、高信号会话并分批读取必要片段；不要全量扫描。基于明确证据的协作记忆可直接最小写入并说明结果；仅对删除/大段覆盖、冲突、不确定推断或敏感信息再次请求确认；绝不跨工作区扫描。`
+      : undefined,
     ctx.permissionMode === 'plan'
       ? `## 计划模式
 只调研和规划。计划写入 \`${sessionContextDir}/plan/\`；先展示摘要并等待用户批准，再退出计划模式和执行。`

@@ -50,7 +50,7 @@ export function createApplicationMenu(): Menu {
             } catch {
               // 窗口尚未加载页面时沿用主窗口的安全默认行为。
             }
-            if (windowType === 'planning') {
+            if (windowType === 'planning' || windowType === 'workspace-memory') {
               win.close()
               return
             }

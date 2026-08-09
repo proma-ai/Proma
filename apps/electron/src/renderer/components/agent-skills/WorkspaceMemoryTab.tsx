@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { BookOpen, Brain, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, Code2, Eye, FileText, FolderOpen, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import type { SkillFileNode, WorkspaceMemorySummary } from '@proma/shared'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -10,8 +10,15 @@ import { DefaultAppOpenButton } from '@/components/diff/DefaultAppOpenButton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MessageResponse } from '@/components/ai-elements/message'
 import { agentPendingPromptAtom } from '@/atoms/agent-atoms'
+import { memoryFileNavigationAtom, workspaceMemoryChangesAtom } from '@/atoms/memory-change-atoms'
 import { useCreateSession } from '@/hooks/useCreateSession'
 import { cn } from '@/lib/utils'
+import {
+  buildWorkspaceKnowledgeBootstrapPrompt,
+  buildWorkspaceSessionEvidencePrompt,
+  MEMORY_HISTORY_RANGE_OPTIONS,
+  type MemoryHistoryRange,
+} from './workspaceMemoryInitPrompt'
 
 type SelectedMemoryFile =
   | { kind: 'agents'; relativePath: 'AGENTS.md'; title: string; absolutePath: string }
@@ -22,70 +29,10 @@ interface WorkspaceMemoryTabProps {
   search: string
 }
 
-const AUTO_MEMORY_INDEX = 'MEMORY.md'
-
-type MemoryHistoryRange = '1m' | '2m' | '3m' | 'all'
-
-const MEMORY_HISTORY_RANGE_OPTIONS: Array<{ value: MemoryHistoryRange; label: string; promptLabel: string }> = [
-  { value: '1m', label: '近 1 个月', promptLabel: '最近 1 个月内' },
-  { value: '2m', label: '近 2 个月', promptLabel: '最近 2 个月内' },
-  { value: '3m', label: '近 3 个月', promptLabel: '最近 3 个月内' },
-  { value: 'all', label: '全部', promptLabel: '全部可用历史' },
-]
-
-function getMemoryHistoryRangeLabel(value: MemoryHistoryRange): string {
-  return MEMORY_HISTORY_RANGE_OPTIONS.find((option) => option.value === value)?.promptLabel ?? '最近 1 个月内'
-}
-
-function buildWorkspaceMemoryInitPrompt(historyRange: MemoryHistoryRange): string {
-  const rangeLabel = getMemoryHistoryRangeLabel(historyRange)
-  const rangeGuidance =
-    historyRange === '1m'
-      ? '本次只处理最近 1 个月。若认为必须查看更早会话，不能自行扩大范围；请在最终回复中说明理由并建议用户在界面中扩大范围后再处理。'
-      : historyRange === 'all'
-        ? '用户已在界面中明确选择“全部”历史；历史很多时仍优先最新、最有代表性且实际完成工作的会话，避免把临时过程写入长期记忆。'
-        : `用户已在界面中明确将范围扩大到${rangeLabel}；本次只在该范围内处理。若仍需要更早历史，请在最终回复中说明理由并建议用户进一步扩大范围。`
-
-  return `请为当前项目初始化并沉淀长期记忆。这里的“项目”指系统提示中的“项目根目录”及其关联的 Agent 工作会话；不要把 Proma 工作区笼统当作项目。
-
-处理范围：
-1. 默认读取当前项目最近 1 个月的 Agent 工作会话，优先近期、最有代表性且用户实际完成工作的会话。证据不足时要明确说明，不得编造。只有用户通过界面明确选择更大范围时，才可处理超过 1 个月的会话。
-2. ${rangeGuidance}
-
-路径与职责边界：
-- 系统提示中的“Proma 工作区目录”是 Proma 管理配置与隔离资料的位置，存放 MCP、Skills、Proma 管理的 AGENTS.md 与 Auto Memory；它不是用户项目根目录。必须按系统提示给出的绝对路径操作，不得猜测或替换路径。
-- “项目根目录”是用户项目资料的边界，并不一定等于实际 cwd：新会话通常从项目根目录运行，历史会话可能仍从会话工作台运行。允许从项目级 Context 及明确关联的长期项目资料读取证据；不要自动读取、创建或修改项目根内的 \`.claude/\`、\`AGENTS.md\`、MCP 或 Skills 配置，除非用户明确要求。
-- 系统提示中的“会话工作台目录”是当前会话的 sidecar/workbench：新会话直接在其根目录存放 todo、plan、临时笔记和中间结论；历史会话可能保留 \`.context/\` 子目录。它不应作为项目级长期记忆的写入位置。绝不读取、创建或修改其中的 \`.claude/settings.json\`。
-- 系统提示中的“项目级 Context”与项目级长期资料用于跨会话保留调研、架构分析和项目知识。先区分它们与会话级临时产物，再决定可作为长期记忆证据的内容。
-
-沉淀目标：
-1. 从允许读取的会话和 Context 中提炼稳定的项目知识：项目结构、常用命令、架构边界、可靠决策、踩坑经验、用户偏好，以及未来 Agent 必须注意的事项。不要把聊天流水账、单次调试过程或当前任务的临时产物当作长期知识。
-2. 只更新系统提示明确给出的“Proma 工作区 AGENTS.md”绝对路径。这里是 Proma 管理的项目指令文件；内容仅限稳定、跨会话有效的项目规则、入口和工作方法，不得混入临时调试、聊天记录或长篇资料。
-3. 只更新系统提示明确给出的“Proma 工作区 Auto Memory 目录”中的 \`MEMORY.md\`、必要的主题文件和 \`user-profile.md\`，不要在其他目录创建记忆文件。\`MEMORY.md\` 保持简短的主题索引与路由，主题细节拆分到主题文件。
-4. \`user-profile.md\` 是持续迭代的用户画像：基于现有内容增量合并，条目化且可追溯地记录有充分证据的角色与技术背景、稳定协作偏好、反复出现的关注点、工具链倾向和明确的“下次请这样做”要求。只出现一次或证据不足的信号标为“待确认”，不要当作稳定结论。
-
-写入规则：
-1. 写入前先读取已有的 \`user-profile.md\`、\`MEMORY.md\` 与相关主题文件，并保留仍然有效的内容；不要整体重写或删除有效信息。发现过时内容时，保守修订或标注。
-2. 只有明确重复出现、用户明确指定，或删除后会导致未来 Agent 明显犯错的知识才能写入。弱信号、临时过程和证据不足的判断不写入长期记忆，留在最终回复的待确认项。
-3. 优先小幅、可审阅的增量更新：AGENTS.md 保持精炼，MEMORY.md 不承载长正文，跨会话的长资料仍留在项目级长期资料或项目级 Context。
-
-完成后必须报告：读取的会话与 Context 范围、更新的文件、关键沉淀主题、用户画像新增或修订，以及仍需用户确认的项目。`
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function formatTime(ts?: number): string {
-  if (!ts) return '尚未创建'
-  return new Date(ts).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function autoMemoryPath(summary: WorkspaceMemorySummary, relativePath: string): string {
@@ -120,23 +67,12 @@ function filterNodes(nodes: SkillFileNode[], query: string): SkillFileNode[] {
   return result
 }
 
-function withVirtualMemoryIndex(nodes: SkillFileNode[]): SkillFileNode[] {
-  if (nodes.some((node) => node.relativePath === AUTO_MEMORY_INDEX)) return nodes
-  return [
-    {
-      relativePath: AUTO_MEMORY_INDEX,
-      name: AUTO_MEMORY_INDEX,
-      type: 'file',
-      size: 0,
-      isText: true,
-    },
-    ...nodes,
-  ]
-}
-
 export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTabProps): React.ReactElement {
   const { createAgent } = useCreateSession()
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
+  const [memoryNavigationRequest, setMemoryNavigationRequest] = useAtom(memoryFileNavigationAtom)
+  const workspaceMemoryChanges = useAtomValue(workspaceMemoryChangesAtom)
+  const latestMemoryChange = workspaceMemoryChanges.get(workspaceSlug)?.[0]
   const [summary, setSummary] = React.useState<WorkspaceMemorySummary | null>(null)
   const [autoFiles, setAutoFiles] = React.useState<SkillFileNode[]>([])
   const [selected, setSelected] = React.useState<SelectedMemoryFile | null>(null)
@@ -147,7 +83,8 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
   const [isDirty, setIsDirty] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<'preview' | 'edit'>('preview')
-  const [initializing, setInitializing] = React.useState(false)
+  const [bootstrapping, setBootstrapping] = React.useState(false)
+  const [scanningHistory, setScanningHistory] = React.useState(false)
   const [historyRange, setHistoryRange] = React.useState<MemoryHistoryRange>('1m')
 
   // 自动保存：用 ref 持有最新的编辑状态，供防抖定时器与"切换文件前 flush"复用，
@@ -272,12 +209,26 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       setEditText(file.content ?? '')
       setIsDirty(false)
     } catch (err) {
-      console.error('[工作区记忆] 读取 auto memory 文件失败:', err)
-      toast.error(err instanceof Error ? err.message : '读取 auto memory 文件失败')
+      console.error('[工作区记忆] 读取长期记忆文件失败:', err)
+      toast.error(err instanceof Error ? err.message : '读取长期记忆文件失败')
     } finally {
       setLoadingFile(false)
     }
   }, [summary, workspaceSlug, flushPendingSave])
+
+  React.useEffect(() => {
+    if (!memoryNavigationRequest || memoryNavigationRequest.workspaceSlug !== workspaceSlug) return
+    void (async () => {
+      await openAutoFile(memoryNavigationRequest.relativePath)
+      setViewMode(memoryNavigationRequest.mode)
+      setMemoryNavigationRequest(null)
+    })()
+  }, [memoryNavigationRequest, openAutoFile, setMemoryNavigationRequest, workspaceSlug])
+
+  React.useEffect(() => {
+    if (!latestMemoryChange) return
+    void refreshSummaryAndTree().catch((error) => console.error('[工作区记忆] 刷新全局变更失败:', error))
+  }, [latestMemoryChange?.changedAt, refreshSummaryAndTree])
 
   const refresh = React.useCallback(async (): Promise<void> => {
     await flushPendingSave()
@@ -291,7 +242,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
       }
     } catch (err) {
       console.error('[工作区记忆] 刷新失败:', err)
-      toast.error('刷新项目记忆失败')
+      toast.error('刷新协作知识失败')
     } finally {
       setLoading(false)
     }
@@ -324,7 +275,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         setIsDirty(false)
       } catch (err) {
         console.error('[工作区记忆] 加载失败:', err)
-        toast.error('加载项目记忆失败')
+        toast.error('加载协作知识失败')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -374,102 +325,97 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
     }
   }
 
-  const handleInitializeMemory = async (): Promise<void> => {
-    if (initializing) return
-    setInitializing(true)
+  const startGuidedSession = async (message: string, kind: 'bootstrap' | 'history'): Promise<void> => {
+    const setLoadingState = kind === 'bootstrap' ? setBootstrapping : setScanningHistory
+    setLoadingState(true)
     try {
       const sessionId = await createAgent()
       if (!sessionId) {
         toast.error('创建 Agent 会话失败')
         return
       }
-      setPendingPrompt({
-        sessionId,
-        message: buildWorkspaceMemoryInitPrompt(historyRange),
-      })
-      toast.success('已创建项目记忆初始化会话')
+      setPendingPrompt({ sessionId, message })
+      toast.success(kind === 'bootstrap' ? '已创建项目地图与协作画像引导会话' : '已创建会话补证据任务')
     } catch (err) {
-      console.error('[工作区记忆] 创建初始化会话失败:', err)
-      toast.error(err instanceof Error ? err.message : '创建初始化会话失败')
+      console.error('[工作区记忆] 创建引导会话失败:', err)
+      toast.error(err instanceof Error ? err.message : '创建引导会话失败')
     } finally {
-      setInitializing(false)
+      setLoadingState(false)
     }
   }
 
+  const handleBootstrapKnowledge = async (): Promise<void> => {
+    if (bootstrapping) return
+    try {
+      await window.electronAPI.approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug)
+      await startGuidedSession(buildWorkspaceKnowledgeBootstrapPrompt(), 'bootstrap')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '记录项目知识维护授权失败')
+    }
+  }
+
+  const handleScanSessionEvidence = async (): Promise<void> => {
+    if (scanningHistory || !hasProfile) return
+    await startGuidedSession(buildWorkspaceSessionEvidencePrompt(historyRange), 'history')
+  }
+
   const visibleAutoFiles = React.useMemo(
-    () => filterNodes(withVirtualMemoryIndex(autoFiles), search),
+    () => filterNodes(autoFiles, search),
     [autoFiles, search],
   )
+  const hasProfile = autoFiles.some((node) => node.relativePath === 'user-profile.md')
+  const migrationIssues = [
+    summary?.legacyAutoMemory ? '长期记忆迁移' : null,
+    summary?.instructionConflict ? '工作区规则迁移' : null,
+  ].filter((issue): issue is string => issue !== null)
+  const migrationReminderTitle = [
+    summary?.legacyAutoMemory ? `长期记忆：${summary.legacyAutoMemory.directory}` : null,
+    summary?.instructionConflict ? `工作区规则：${summary.instructionConflict.legacyPath}` : null,
+  ].filter((detail): detail is string => detail !== null).join('\n')
 
   if (loading || !summary) {
-    return <div className="py-20 text-center text-sm text-muted-foreground">加载项目记忆中...</div>
+    return <div className="py-20 text-center text-sm text-muted-foreground">加载协作知识中...</div>
   }
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid gap-3 lg:grid-cols-2">
-        <MemoryStatCard
-          icon={<BookOpen size={18} />}
-          title="项目指令"
-          subtitle="Proma 工作区 AGENTS.md"
-          value={summary.agentsMd.exists ? formatBytes(summary.agentsMd.size) : '尚未创建'}
-          detail={`更新于 ${formatTime(summary.agentsMd.updatedAt)}`}
-          active={selected?.kind === 'agents'}
-          onClick={() => void openAgents(summary)}
-        />
-        <MemoryStatCard
-          icon={<Brain size={18} />}
-          title="自动记忆"
-          subtitle=".claude/memory/MEMORY.md 与主题文件"
-          value={`${summary.autoMemory.fileCount} 个文件`}
-          detail={`${formatBytes(summary.autoMemory.totalSize)} · 更新于 ${formatTime(summary.autoMemory.updatedAt)}`}
-          active={selected?.kind === 'auto'}
-          onClick={() => void openAutoFile(AUTO_MEMORY_INDEX, summary)}
-        />
-      </div>
-
-      {summary.instructionConflict && (
-        <SettingsCard divided={false} className="border-amber-500/40 bg-amber-500/5">
-          <div className="p-4 text-sm leading-relaxed text-foreground">
-            <div className="font-medium">工作区指令迁移需要处理</div>
-            <p className="mt-1 text-muted-foreground">
-              检测到内容不同的 legacy CLAUDE.md 与 AGENTS.md。Proma 当前只加载 AGENTS.md，未自动合并或删除旧文件，以避免丢失规则。
-            </p>
-            <p className="mt-2 break-all text-xs text-muted-foreground">
-              请手动合并后删除旧文件：{summary.instructionConflict.legacyPath}
-            </p>
+      <SettingsCard divided={false}>
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">建立项目地图与协作画像</div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              点击即授权 Agent 基于可验证证据维护项目根与 Proma 工作区的 AGENTS.md；随后在真实协作中逐步校准你的偏好。不会扫描历史会话。
+            </div>
           </div>
-        </SettingsCard>
-      )}
+          <Button onClick={handleBootstrapKnowledge} disabled={bootstrapping}>
+            <Sparkles size={14} className="mr-1.5" />
+            {bootstrapping ? '创建中...' : '同意并开始建立'}
+          </Button>
+        </div>
+      </SettingsCard>
 
       <SettingsCard divided={false}>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-foreground">从历史会话生成项目记忆</div>
+            <div className="text-sm font-medium text-foreground">授权会话补证据</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              新建一个 Agent 会话，读取当前项目{historyRangeLabel}的工作会话，沉淀并更新 Proma 工作区中的 AGENTS.md 与 auto memory 文件。
+              {hasProfile
+                ? `仅在你授权的范围内，分批选择少量高信号工作会话补充证据；不会全量扫描，协作记忆仍须确认后写入。`
+                : '先在真实协作中建立初步协作画像，再决定是否用历史会话补充证据。'}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Select
-              value={historyRange}
-              onValueChange={(value) => setHistoryRange(value as MemoryHistoryRange)}
-              disabled={initializing}
-            >
-              <SelectTrigger className="h-9 w-[116px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
+            <Select value={historyRange} onValueChange={(value) => setHistoryRange(value as MemoryHistoryRange)} disabled={scanningHistory || !hasProfile}>
+              <SelectTrigger className="h-9 w-[116px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {MEMORY_HISTORY_RANGE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={handleInitializeMemory} disabled={initializing}>
+            <Button onClick={handleScanSessionEvidence} disabled={scanningHistory || !hasProfile} title={hasProfile ? undefined : '请先建立协作画像'}>
               <Sparkles size={14} className="mr-1.5" />
-              {initializing ? '创建中...' : '生成项目记忆'}
+              {scanningHistory ? '创建中...' : '授权整理'}
             </Button>
           </div>
         </div>
@@ -489,6 +435,16 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                 <RefreshCw size={14} />
               </button>
             </div>
+            {migrationIssues.length > 0 && (
+              <div
+                role="status"
+                title={migrationReminderTitle}
+                className="mx-2 mt-2 flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-300"
+              >
+                <AlertTriangle size={13} className="shrink-0" />
+                <span>待处理：{migrationIssues.join('、')}，请检查旧文件。</span>
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               <FileButton
                 active={selected?.kind === 'agents'}
@@ -498,7 +454,7 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
                 onClick={() => void openAgents(summary)}
               />
               <div className="mt-3 px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                Auto Memory
+                长期记忆
               </div>
               <div className="space-y-0.5">
                 {visibleAutoFiles.length === 0 ? (
@@ -633,47 +589,6 @@ export function WorkspaceMemoryTab({ workspaceSlug, search }: WorkspaceMemoryTab
         </SettingsCard>
       </div>
     </div>
-  )
-}
-
-function MemoryStatCard({
-  icon,
-  title,
-  subtitle,
-  value,
-  detail,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode
-  title: string
-  subtitle: string
-  value: string
-  detail: string
-  active: boolean
-  onClick: () => void
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-3 rounded-lg border bg-content-area p-4 text-left shadow-sm transition-colors',
-        active ? 'border-primary/50 bg-primary/[0.04]' : 'border-border/60 hover:bg-foreground/[0.03]',
-      )}
-    >
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-sm font-medium text-foreground">{title}</div>
-          <div className="text-xs font-medium tabular-nums text-foreground/65">{value}</div>
-        </div>
-        <div className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</div>
-        <div className="mt-1 text-[11px] text-muted-foreground/80">{detail}</div>
-      </div>
-    </button>
   )
 }
 

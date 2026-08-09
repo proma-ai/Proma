@@ -117,7 +117,7 @@ function MemoryFilesExampleImage() {
   )
 }
 
-/** 项目记忆章节的真实工作流示例；由父页面负责放入章节容器和导航。 */
+/** 项目协作知识章节的真实工作流示例；由父页面负责放入章节容器和导航。 */
 export function MemoryGuideExamples() {
   return (
     <>
@@ -131,14 +131,14 @@ export function MemoryGuideExamples() {
           <figure className="min-w-0 overflow-hidden rounded-lg bg-[#f6f8f3] shadow-[0_14px_30px_rgba(27,63,45,0.12)]">
             <img
               src={memoryGenerateExample}
-              alt="在项目记忆页面为心理学研究项目点击生成项目记忆的示例"
+              alt="在协作知识页面为项目建立项目地图与协作画像的示例"
               className="block h-auto w-full"
             />
           </figure>
           <div className="min-w-0">
-            <h3 className="mt-3 text-2xl font-medium text-neutral-900 md:text-3xl">一键生成项目记忆</h3>
+            <h3 className="mt-3 text-2xl font-medium text-neutral-900 md:text-3xl">先建立项目地图，再沉淀协作记忆</h3>
             <p className="mt-4 text-base leading-[1.7] text-neutral-600 md:text-lg">
-              项目使用一段时间后，在项目记忆处点击“生成项目记忆”。Agent 会开启一个会话整理选定范围内有代表性的工作，提炼项目偏好、规则与已确认结论。
+              在协作知识页先建立项目地图。Agent 会核验项目并维护两层 AGENTS.md，再通过真实对话逐步了解你的协作偏好；历史会话只在你之后明确授权时分批作为补充证据。
             </p>
           </div>
         </article>
@@ -149,7 +149,7 @@ export function MemoryGuideExamples() {
               Agent 整理好的<b className="font-medium text-neutral-900">偏好和记忆可以随时编辑</b>
             </h3>
             <p className="mt-4 text-base leading-[1.7] text-neutral-600 md:text-lg">
-              “记忆”下是 Agent 整理好的偏好和记忆。你可以手动编辑这些 md 文件；需要大规模重新梳理时，再一键生成或更新记忆即可。
+              “记忆”只保存会影响未来协作判断的偏好、纠错和经验。你可以手动编辑这些 md 文件；项目地图则保留在对应的 AGENTS.md，避免每个 Agent 重复探索项目。
             </p>
           </div>
           <div className="lg:order-2">

@@ -320,3 +320,73 @@ describe('工作区 AGENTS.md 迁移', () => {
     })
   })
 })
+
+describe('工作区长期记忆迁移与授权', () => {
+  test('Given 仅有旧 .claude/memory When 启动迁移 Then 原子迁移为受管 memory 并保留内容', () => {
+    const workspace = manager.createAgentWorkspace('Legacy Memory')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyDir = join(workspaceRoot, '.claude', 'memory')
+    const memoryDir = join(workspaceRoot, 'memory')
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(join(legacyDir, 'MEMORY.md'), '# legacy memory\n', 'utf-8')
+    mkdirSync(join(legacyDir, 'topics'), { recursive: true })
+    writeFileSync(join(legacyDir, 'topics', 'profile.md'), '# profile\n', 'utf-8')
+
+    manager.migrateWorkspaceAutoMemoryDirectories()
+
+    expect(existsSync(legacyDir)).toBe(false)
+    expect(readFileSync(join(memoryDir, 'MEMORY.md'), 'utf-8')).toBe('# legacy memory\n')
+    expect(readFileSync(join(memoryDir, 'topics', 'profile.md'), 'utf-8')).toBe('# profile\n')
+  })
+
+  test('Given 新旧 memory 同名内容 When 迁移 Then 不覆盖新内容并报告冲突', () => {
+    const workspace = manager.createAgentWorkspace('Conflicting Memory')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyDir = join(workspaceRoot, '.claude', 'memory')
+    const memoryDir = join(workspaceRoot, 'memory')
+    mkdirSync(legacyDir, { recursive: true })
+    mkdirSync(memoryDir, { recursive: true })
+    writeFileSync(join(legacyDir, 'MEMORY.md'), '# legacy\n', 'utf-8')
+    writeFileSync(join(legacyDir, 'moved.md'), '# moved\n', 'utf-8')
+    writeFileSync(join(memoryDir, 'MEMORY.md'), '# current\n', 'utf-8')
+
+    manager.migrateWorkspaceAutoMemoryDirectories()
+
+    expect(readFileSync(join(memoryDir, 'MEMORY.md'), 'utf-8')).toBe('# current\n')
+    expect(readFileSync(join(memoryDir, 'moved.md'), 'utf-8')).toBe('# moved\n')
+    expect(readFileSync(join(legacyDir, 'MEMORY.md'), 'utf-8')).toBe('# legacy\n')
+    expect(manager.getWorkspaceMemorySummary(workspace.slug).legacyAutoMemory).toEqual({
+      directory: legacyDir,
+      conflictingPaths: ['MEMORY.md'],
+    })
+  })
+
+  test('Given legacy memory contains symlink When 迁移 Then 安全中止且不创建受管 memory', () => {
+    const workspace = manager.createAgentWorkspace('Symlink Memory')
+    const workspaceRoot = configPaths.getAgentWorkspacePath(workspace.slug)
+    const legacyDir = join(workspaceRoot, '.claude', 'memory')
+    const memoryDir = join(workspaceRoot, 'memory')
+    mkdirSync(legacyDir, { recursive: true })
+    symlinkSync(join(tempHome, 'outside-memory.md'), join(legacyDir, 'outside.md'))
+
+    manager.migrateWorkspaceAutoMemoryDirectories()
+
+    expect(existsSync(legacyDir)).toBe(true)
+    expect(existsSync(memoryDir)).toBe(false)
+    expect(manager.getWorkspaceMemorySummary(workspace.slug).legacyAutoMemory).toEqual({
+      directory: legacyDir,
+      conflictingPaths: [],
+      migrationIssue: 'contains_symbolic_link',
+      symbolicLinkPath: 'outside.md',
+    })
+  })
+
+  test('Given no maintenance approval When explicitly approved Then config persists the opt-in', () => {
+    const workspace = manager.createAgentWorkspace('Knowledge Approval')
+
+    expect(manager.isWorkspaceProjectKnowledgeMaintenanceApproved(workspace.slug)).toBe(false)
+    manager.approveWorkspaceProjectKnowledgeMaintenance(workspace.slug)
+
+    expect(manager.isWorkspaceProjectKnowledgeMaintenanceApproved(workspace.slug)).toBe(true)
+  })
+})

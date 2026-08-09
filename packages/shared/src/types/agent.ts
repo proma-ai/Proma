@@ -1081,6 +1081,8 @@ export interface SkillFileNode {
   type: 'file' | 'directory'
   /** 文件大小（字节）；目录为 undefined */
   size?: number
+  /** 最近修改时间（Unix milliseconds）；目录为 undefined */
+  modifiedAt?: number
   /** 是否为文本文件（可在内置编辑器中打开）；目录为 undefined */
   isText?: boolean
   /** 子节点（仅 type=directory 有值，已按目录优先 + 名称排序） */
@@ -1096,6 +1098,22 @@ export interface SkillFileContent {
   isText: boolean
   /** 文件大小（字节） */
   size: number
+}
+
+/** 当前 Memory 页面订阅到的单个文件更新；仅携带受限的局部文本 diff。 */
+export interface WorkspaceMemoryFileChange {
+  relativePath: string
+  kind: 'created' | 'modified' | 'deleted'
+  changedAt: number
+  /** 超大或二进制文件仍会通知更新，但不传内容或 diff。 */
+  diffAvailable: boolean
+  preview?: string
+  diff?: {
+    context: string[]
+    removed: string[]
+    added: string[]
+    truncated: boolean
+  }
 }
 
 /** 工作区记忆文件摘要 */
@@ -1119,7 +1137,17 @@ export interface WorkspaceMemorySummary {
     legacyPath: string
     agentsPath: string
   }
-  /** Proma 工作区自动记忆目录 */
+  /** 旧 `.claude/memory/` 迁移未完成时的状态；Proma 不会覆盖或删除旧内容。 */
+  legacyAutoMemory?: {
+    directory: string
+    /** 与新的 memory/ 同名、因此未自动移动的顶层条目。 */
+    conflictingPaths: string[]
+    /** 自动迁移被安全中止的原因；存在时应提示用户处理旧目录。 */
+    migrationIssue?: 'legacy_path_invalid' | 'target_path_invalid' | 'contains_symbolic_link' | 'migration_failed'
+    /** 检测到的旧目录内符号链接相对路径。 */
+    symbolicLinkPath?: string
+  }
+  /** Proma 工作区长期记忆目录。 */
   autoMemory: {
     /** 绝对目录路径 */
     directory: string
@@ -1741,12 +1769,28 @@ export const AGENT_IPC_CHANNELS = {
   READ_WORKSPACE_AGENTS_MD: 'agent:read-workspace-agents-md',
   /** 写入工作区 AGENTS.md */
   WRITE_WORKSPACE_AGENTS_MD: 'agent:write-workspace-agents-md',
-  /** 列出工作区 auto memory 文件树 */
+  /** 列出工作区长期记忆文件树 */
   LIST_WORKSPACE_AUTO_MEMORY_FILES: 'agent:list-workspace-auto-memory-files',
-  /** 读取工作区 auto memory 文件 */
+  /** 读取工作区长期记忆文件 */
   READ_WORKSPACE_AUTO_MEMORY_FILE: 'agent:read-workspace-auto-memory-file',
-  /** 写入工作区 auto memory 文件 */
+  /** 写入工作区长期记忆文件 */
   WRITE_WORKSPACE_AUTO_MEMORY_FILE: 'agent:write-workspace-auto-memory-file',
+  /** 打开或聚焦当前 workspace 的独立 Memory 编辑窗口。 */
+  OPEN_WORKSPACE_MEMORY_WINDOW: 'agent:open-workspace-memory-window',
+  /** 主进程要求已打开的独立 Memory 窗口定位到指定文件。 */
+  WORKSPACE_MEMORY_WINDOW_OPEN_FILE: 'agent:workspace-memory-window-open-file',
+  /** 独立记忆窗口请求 renderer 决定是否关闭未保存编辑。 */
+  WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED: 'agent:workspace-memory-window-close-requested',
+  /** renderer 已确认可丢弃或保存后关闭独立记忆窗口。 */
+  CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE: 'agent:confirm-workspace-memory-window-close',
+  /** 独立记忆窗口 renderer 已完成 close 协调初始化。 */
+  WORKSPACE_MEMORY_WINDOW_READY: 'agent:workspace-memory-window-ready',
+  /** 开始/结束当前 renderer 对 workspace memory/ 的本地文件变化订阅。 */
+  START_WORKSPACE_MEMORY_WATCH: 'agent:start-workspace-memory-watch',
+  STOP_WORKSPACE_MEMORY_WATCH: 'agent:stop-workspace-memory-watch',
+  /** 当前 workspace memory/ 文件发生变化。 */
+  WORKSPACE_MEMORY_FILE_CHANGED: 'agent:workspace-memory-file-changed',
+  APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE: 'agent:approve-workspace-project-knowledge-maintenance',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

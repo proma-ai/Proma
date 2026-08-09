@@ -717,6 +717,7 @@ export function useGlobalAgentListeners(): void {
             .catch(console.error)
         }
 
+
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
         if (!knownSessions.some((s) => s.id === sessionId)) {
