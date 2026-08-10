@@ -460,7 +460,7 @@ function NonGitFileList({
                 <button
                   type="button"
                   aria-label="在文件夹中显示"
-                  onClick={() => window.electronAPI.showInFolder(change.path, { sessionId }).catch(console.error)}
+                  onClick={() => window.electronAPI.showInFolder(change.path, { sessionId, unrestricted: true }).catch(console.error)}
                   className="mr-1 flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground"
                 >
                   <FolderSearch className="size-3.5" />

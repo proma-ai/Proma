@@ -207,6 +207,11 @@ export interface FileAccessOptions {
   workspaceSlug?: string
   /** 路径解析候选目录；主进程会先过滤到已授权目录内再使用 */
   candidateBasePaths?: string[]
+  /**
+   * 文件面板以 Agent 实际可操作的文件系统为准，不再按会话附件二次收窄。
+   * 启用后，调用方可以操作任意已存在的本地路径。
+   */
+  unrestricted?: boolean
 }
 
 /** 已授权本地文件的 proma-file URL */

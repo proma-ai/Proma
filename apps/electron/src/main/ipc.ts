@@ -450,6 +450,9 @@ function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
   } catch {
     return false
   }
+  // 文件面板应反映 Agent 实际可访问的路径。调用方已明确开启 unrestricted 时，
+  // 保留 realpath 校验以拒绝不存在的目标，但不再按会话附件重复收窄范围。
+  if (options?.unrestricted) return true
   return getAuthorizedRoots(options).some((root) => isUnderRoot(resolved, root))
 }
 
@@ -461,6 +464,7 @@ function normalizeFileAccessOptions(value?: FileAccessOptions | string[]): FileA
     candidateBasePaths: Array.isArray(value.candidateBasePaths)
       ? value.candidateBasePaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
       : undefined,
+    unrestricted: value.unrestricted === true,
   }
 }
 
@@ -3321,11 +3325,11 @@ export function registerIpcHandlers(): void {
   // 使用 macOS 系统 Terminal 在指定工作目录打开会话/工作区文件夹
   ipcMain.handle(
     AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL,
-    async (_, folderPath: string): Promise<void> => {
+    async (_, folderPath: string, access?: FileAccessOptions): Promise<void> => {
       if (process.platform !== 'darwin') {
         throw new Error('当前仅支持在 macOS 终端中打开文件夹')
       }
-      if (!isPathAllowed(folderPath)) {
+      if (!isPathAllowed(folderPath, normalizeFileAccessOptions(access))) {
         throw new Error('访问路径超出当前会话的授权范围')
       }
 

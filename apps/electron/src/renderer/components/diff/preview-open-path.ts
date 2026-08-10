@@ -54,6 +54,8 @@ export function getPreviewFileAccess(
 ): FileAccessOptions {
   return {
     sessionId,
+    // 与右侧文件面板一致：预览 Agent 实际操作过的外部路径不受附件白名单限制。
+    unrestricted: true,
     candidateBasePaths: getPreviewCandidateBasePaths(
       file.basePaths,
       file.gitRoot,
