@@ -1,38 +1,45 @@
 {
-  "name": "@proma/electron",
-  "version": "0.16.38",
-  "description": "Proma next gen ai software with general agents - Electron App",
-  "main": "dist/main.cjs",
-  "author": {
-    "name": "ErlichLiu",
-    "email": "erlichliu@gmail.com"
-  },
-  "private": true,
+  "name": "proma",
+  "version": "0.1.0",
+  "description": "The next gen ai software with general agents",
   "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter='@proma/electron' dev",
+    "electron:dev": "bun run --filter='@proma/electron' dev",
+    "electron:build": "bun run --filter='@proma/electron' build",
+    "electron:start": "bun run --filter='@proma/electron' start",
+    "build": "bun run --filter='*' build",
+    "typecheck": "bun run --filter='*' typecheck",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/dompurify": "^3.2.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "dompurify": "^3.4.2",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.93.0",
+    "jotai": "^2.17.1"
+  },
+  "overrides": {
     "@earendil-works/pi-agent-core": "0.82.1",
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
-    "@fontsource-variable/inter": "5.2.8",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@pierre/diffs": "^1.1.20",
-    "@xmldom/xmldom": "^0.8.11",
-    "adm-zip": "^0.5.17",
-    "dompurify": "^3.4.5",
-    "iconv-lite": "^0.6.3",
-    "mammoth": "^1.12.0",
-    "pdfjs-dist": "^4.10.38",
-    "sharp": "^0.35.3",
-    "typebox": "1.1.38"
+    "@earendil-works/pi-tui": "0.82.1"
   },
-  "optionalDependencies": {},
-  "electronmon": {
-    "patterns": [
-      "dist/main.cjs",
-      "dist/preload.cjs"
-    ],
-    "logLevel": "verbose"
-  },
-  "proma": {}
+  "patchedDependencies": {
+    "@earendil-works/pi-ai@0.82.1": "patches/@earendil-works%2Fpi-ai@0.82.1.patch",
+    "@earendil-works/pi-coding-agent@0.82.1": "patches/@earendil-works%2Fpi-coding-agent@0.82.1.patch"
+  }
 }
