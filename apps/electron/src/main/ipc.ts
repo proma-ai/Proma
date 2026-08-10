@@ -152,7 +152,7 @@ import type {
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
-import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
+import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
@@ -451,6 +451,9 @@ function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
   } catch {
     return false
   }
+  // 文件面板应反映 Agent 实际可访问的路径。调用方已明确开启 unrestricted 时，
+  // 保留 realpath 校验以拒绝不存在的目标，但不再按会话附件重复收窄范围。
+  if (options?.unrestricted) return true
   return getAuthorizedRoots(options).some((root) => isUnderRoot(resolved, root))
 }
 
@@ -462,6 +465,7 @@ function normalizeFileAccessOptions(value?: FileAccessOptions | string[]): FileA
     candidateBasePaths: Array.isArray(value.candidateBasePaths)
       ? value.candidateBasePaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
       : undefined,
+    unrestricted: value.unrestricted === true,
   }
 }
 
@@ -1009,6 +1013,19 @@ export function registerIpcHandlers(): void {
       const allowedExtraPaths = extraPaths?.filter((p) => isPathAllowed(p, access))
       return getUnstagedChanges(dirPath, allowedSessionPath, allowedWorkspaceFilesPath, allowedExtraPaths)
     }
+  )
+
+  // Agent 写入、Git 变更及窗口重新聚焦前主动失效，避免长寿命缓存显示旧 Diff。
+  ipcMain.handle(
+    IPC_CHANNELS.INVALIDATE_GIT_DIFF_CACHE,
+    async (_, changedPath?: string) => {
+      if (changedPath && typeof changedPath === 'string') {
+        // 仅影响进程内缓存，不读写目标路径；允许刚删除的文件路径参与失效。
+        invalidateGitDiffCache(changedPath)
+        return
+      }
+      invalidateGitDiffCache()
+    },
   )
 
   // 获取单个文件的 diff
@@ -3315,11 +3332,11 @@ export function registerIpcHandlers(): void {
   // 使用 macOS 系统 Terminal 在指定工作目录打开会话/工作区文件夹
   ipcMain.handle(
     AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL,
-    async (_, folderPath: string): Promise<void> => {
+    async (_, folderPath: string, access?: FileAccessOptions): Promise<void> => {
       if (process.platform !== 'darwin') {
         throw new Error('当前仅支持在 macOS 终端中打开文件夹')
       }
-      if (!isPathAllowed(folderPath)) {
+      if (!isPathAllowed(folderPath, normalizeFileAccessOptions(access))) {
         throw new Error('访问路径超出当前会话的授权范围')
       }
 

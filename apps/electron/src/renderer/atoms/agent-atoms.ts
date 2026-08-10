@@ -375,6 +375,9 @@ export const workspaceCapabilitiesVersionAtom = atom(0)
 /** 工作区文件版本号 — 文件变化时自增，触发文件浏览器重新加载 */
 export const workspaceFilesVersionAtom = atom(0)
 
+/** Git watcher 触发的全局 Diff 刷新版本，避免按历史会话批量更新 Map。 */
+export const workspaceGitDiffRefreshVersionAtom = atom(0)
+
 // ===== 侧面板 Atoms =====
 
 /** 侧面板是否打开（全局共享，所有会话共用一个状态） */

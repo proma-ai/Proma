@@ -240,6 +240,8 @@ export interface ElectronAPI {
 
   /** 获取未暂存的变更文件列表 */
   getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => Promise<import('@proma/shared').UnstagedChangesResult>
+  /** 失效 Git Diff 扫描缓存；省略路径时失效全部仓库 */
+  invalidateGitDiffCache: (changedPath?: string) => Promise<void>
   /** 获取单个文件的 diff */
   getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => Promise<string>
   /** 获取未追踪文件内容 */
@@ -891,7 +893,7 @@ export interface ElectronAPI {
   showInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 使用系统终端打开文件夹 */
-  openFolderInTerminal: (folderPath: string) => Promise<void>
+  openFolderInTerminal: (folderPath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */
   showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => Promise<boolean>
@@ -1438,6 +1440,10 @@ const electronAPI: ElectronAPI = {
 
   getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_UNSTAGED_CHANGES, dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId)
+  },
+
+  invalidateGitDiffCache: (changedPath?: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INVALIDATE_GIT_DIFF_CACHE, changedPath)
   },
 
   getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => {
@@ -2359,8 +2365,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_IN_FOLDER, filePath, access)
   },
 
-  openFolderInTerminal: (folderPath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL, folderPath)
+  openFolderInTerminal: (folderPath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL, folderPath, access)
   },
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */

@@ -210,6 +210,11 @@ export function isPreviewTab(tab: TabItem): boolean {
   return tab.type === 'preview' || tab.id.startsWith(PREVIEW_TAB_PREFIX)
 }
 
+/** Agent 会话及其归属的文件预览 Tab 都可操作 Agent 侧面板。 */
+export function isAgentContextTab(tab: TabItem | undefined): boolean {
+  return tab?.type === 'agent' || (tab !== undefined && isPreviewTab(tab))
+}
+
 function isSessionTab(tab: TabItem): boolean {
   return tab.type === 'chat' || tab.type === 'agent'
 }

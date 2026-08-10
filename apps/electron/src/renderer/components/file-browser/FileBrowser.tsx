@@ -252,8 +252,8 @@ export function FileBrowser({ rootPath, roots, hideToolbar, embedded, hideEmpty,
 
   /** 在系统终端中打开文件夹 */
   const handleOpenInTerminal = React.useCallback((entry: FileEntry) => {
-    window.electronAPI.openFolderInTerminal(entry.path).catch(console.error)
-  }, [])
+    window.electronAPI.openFolderInTerminal(entry.path, access).catch(console.error)
+  }, [access])
 
   /** 开始重命名 */
   const handleStartRename = React.useCallback((entry: FileEntry) => {

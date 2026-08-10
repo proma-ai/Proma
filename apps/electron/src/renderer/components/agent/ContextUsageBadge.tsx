@@ -3,7 +3,7 @@
  *
  * 输入框工具栏上的一个 36×36 按钮：
  * - 内部为 16px 圆环，按 displayTokens / displayWindow 比例渲染
- * - hover / click 弹出 Popover，内含 token 明细 + 手动压缩按钮
+ * - hover 弹出 Popover，内含 token 明细 + 手动压缩按钮（点击两次确认触发，避免误触）
  * - 压缩中时按钮位置显示 Loader2 旋转图标
  * - 占用接近当前 Agent runtime 的自动压缩阈值时圆环变琥珀色
  * - 无数据时不显示
@@ -26,6 +26,8 @@ import { fetchChannelPlanQuota } from '@/lib/channel-plan-quota'
 const WARNING_RATIO = 0.80
 /** Popover hover 关闭延迟（ms），与 AgentThinkingPopover 一致 */
 const HOVER_CLOSE_DELAY = 150
+/** 手动压缩二次确认后自动重置确认态的超时（ms），与归档按钮一致 */
+const CONFIRM_RESET_DELAY = 3000
 const UNSUPPORTED_PLAN_QUOTA_MESSAGE = '当前渠道不支持订阅 Plan 额度查询'
 
 interface ContextUsageBadgeProps {
@@ -215,6 +217,22 @@ export function ContextUsageBadge({
 
   React.useEffect(() => cancelClose, [cancelClose])
 
+  // 二次确认压缩状态：第一次点击进入确认态，再次点击才触发压缩
+  const [confirming, setConfirming] = React.useState(false)
+
+  // 确认态超时后自动重置，避免按钮长时间停留在确认态
+  React.useEffect(() => {
+    if (!confirming) return
+    const timer = window.setTimeout(() => setConfirming(false), CONFIRM_RESET_DELAY)
+    return () => window.clearTimeout(timer)
+  }, [confirming])
+
+  // Popover 关闭时同步重置确认态
+  const handleOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen) setConfirming(false)
+    setOpen(nextOpen)
+  }
+
   React.useEffect(() => {
     if (!open || !channelId) return
 
@@ -271,12 +289,6 @@ export function ContextUsageBadge({
     ? Math.round((displayTokens / displayWindow) * 100)
     : undefined
 
-  const handleCompactClick = (): void => {
-    if (isProcessing) return
-    onCompact()
-    setOpen(false)
-  }
-
   const shouldShowPlanQuota = quota != null && (
     quota.supported
     || quota.windows.length > 0
@@ -284,7 +296,7 @@ export function ContextUsageBadge({
   )
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -367,17 +379,26 @@ export function ContextUsageBadge({
           <div className="h-px bg-border my-0.5" />
           <Button
             type="button"
-            variant={isWarning ? 'default' : 'outline'}
+            variant={confirming ? 'destructive' : isWarning ? 'default' : 'outline'}
             size="sm"
             className={cn(
-              'h-7 text-xs gap-1.5',
-              isWarning && 'bg-amber-500 hover:bg-amber-600 text-white',
+              'h-7 text-xs gap-1.5 select-none',
+              isWarning && !confirming && 'bg-amber-500 hover:bg-amber-600 text-white',
             )}
-            onClick={handleCompactClick}
+            onClick={() => {
+              if (isProcessing) return
+              if (confirming) {
+                setConfirming(false)
+                onCompact()
+                setOpen(false)
+                return
+              }
+              setConfirming(true)
+            }}
             disabled={isProcessing}
           >
             <Minimize2 className="size-3.5" />
-            {isProcessing ? '对话进行中' : '手动压缩'}
+            {isProcessing ? '对话进行中' : confirming ? '再次点击确认压缩' : '手动压缩'}
           </Button>
         </div>
       </PopoverContent>

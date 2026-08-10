@@ -6,6 +6,7 @@
  */
 
 import { spawn } from 'child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
@@ -116,7 +117,38 @@ function normalizeSafePath(root: string, filePath: string): string | null {
  * @param cwd - 工作目录
  * @returns 命令输出，如果失败返回 null
  */
-function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean }): Promise<string | null> {
+/** 进程级 Git 子进程上限，避免多个 Diff 面板刷新时放大 I/O。 */
+const MAX_CONCURRENT_GIT_COMMANDS = 6
+
+class AsyncSemaphore {
+  private active = 0
+  private readonly waiters: Array<() => void> = []
+
+  private async acquire(): Promise<void> {
+    if (this.active >= MAX_CONCURRENT_GIT_COMMANDS) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve))
+    }
+    this.active += 1
+  }
+
+  private release(): void {
+    this.active -= 1
+    this.waiters.shift()?.()
+  }
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    await this.acquire()
+    try {
+      return await operation()
+    } finally {
+      this.release()
+    }
+  }
+}
+
+const gitCommandSemaphore = new AsyncSemaphore()
+
+function runGitProcess(args: string[], cwd: string, options?: { quiet?: boolean }): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       // -c core.quotePath=false：禁用 git 对非 ASCII 路径的八进制转义（如中文文件名
@@ -137,45 +169,52 @@ function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean 
 
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timeout: ReturnType<typeof setTimeout> | null = null
+      let forceKillTimeout: ReturnType<typeof setTimeout> | null = null
+      const finish = (value: string | null) => {
+        if (settled) return
+        settled = true
+        if (timeout) clearTimeout(timeout)
+        if (forceKillTimeout) clearTimeout(forceKillTimeout)
+        resolve(value)
+      }
 
-      child.stdout?.on('data', (data) => {
-        stdout += data
-      })
+      child.stdout?.on('data', (data) => { stdout += data })
+      child.stderr?.on('data', (data) => { stderr += data })
 
-      child.stderr?.on('data', (data) => {
-        stderr += data
-      })
-
-      // 10 秒超时
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
         child.kill('SIGTERM')
         console.warn('[git-diff-service] git 命令超时:', args.join(' '))
-        resolve(null)
+        // SIGTERM 被忽略时再强制结束，避免永久占据全局 semaphore。
+        forceKillTimeout = setTimeout(() => {
+          if (settled) return
+          child.kill('SIGKILL')
+          finish(null)
+        }, 1000)
       }, 10000)
 
       child.on('close', (code) => {
-        clearTimeout(timeout)
         if (code === 0) {
-          resolve(stdout.trim())
+          finish(stdout.trim())
         } else {
-          if (!options?.quiet) {
-            console.error('[git-diff-service] git 命令失败:', args.join(' '), stderr.trim())
-          }
-          resolve(null)
+          if (!options?.quiet) console.error('[git-diff-service] git 命令失败:', args.join(' '), stderr.trim())
+          finish(null)
         }
       })
 
       child.on('error', (err) => {
-        clearTimeout(timeout)
-        if (!options?.quiet) {
-          console.error('[git-diff-service] git 命令错误:', err)
-        }
-        resolve(null)
+        if (!options?.quiet) console.error('[git-diff-service] git 命令错误:', err)
+        finish(null)
       })
     } catch {
       resolve(null)
     }
   })
+}
+
+function runGitCommand(args: string[], cwd: string, options?: { quiet?: boolean }): Promise<string | null> {
+  return gitCommandSemaphore.run(() => runGitProcess(args, cwd, options))
 }
 
 const WORKTREE_FETCH_TTL_MS = 30_000
@@ -272,8 +311,186 @@ function parseNumstat(numStat: string | null): Map<string, { additions: number; 
   return map
 }
 
+interface CachedRepoScan {
+  files: Array<Omit<ChangedFileEntry, 'source'>>
+  untrackedFiles: UntrackedFileEntry[]
+}
+
+interface CachedRepoScanEntry {
+  revision: number
+  fingerprint: string
+  value: CachedRepoScan
+}
+
+interface InFlightRepoScan {
+  revision: number
+  fingerprint: string | null
+  promise: Promise<CachedRepoScan>
+}
+
+/** 每个仓库独立 revision；定向失效绝不影响无关仓库。 */
+const repoRevisions = new Map<string, number>()
+const repoScanCache = new Map<string, CachedRepoScanEntry>()
+const inFlightRepoScans = new Map<string, InFlightRepoScan>()
+
+function getRepoRevision(gitRoot: string): number {
+  return repoRevisions.get(gitRoot) ?? 0
+}
+
+function isSameOrDescendant(path: string, possibleParent: string): boolean {
+  return path === possibleParent || path.startsWith(possibleParent.endsWith('/') ? possibleParent : `${possibleParent}/`)
+}
+
+function getPathFingerprint(path: string): string {
+  try {
+    // git diff 会刷新 index 的 stat cache；不能用 mtime/ctime，否则每次扫描都会错过缓存。
+    const digest = createHash('sha256').update(readFileSync(path)).digest('hex')
+    return `${path}:${digest}`
+  } catch {
+    return `${path}:missing`
+  }
+}
+
+function getGitCommonDirPath(gitDir: string): string {
+  try {
+    const commonDir = readFileSync(join(gitDir, 'commondir'), 'utf-8').trim()
+    return commonDir ? resolve(gitDir, commonDir) : gitDir
+  } catch {
+    return gitDir
+  }
+}
+
+function getGitDirPath(gitRoot: string): string | null {
+  const dotGitPath = join(gitRoot, '.git')
+  try {
+    if (statSync(dotGitPath).isDirectory()) return dotGitPath
+    const match = readFileSync(dotGitPath, 'utf-8').match(/^gitdir:\s*(.+)\s*$/m)
+    return match ? resolve(gitRoot, match[1]!) : null
+  } catch {
+    return null
+  }
+}
+
+/** linked worktree 的符号 HEAD 的 ref 位于 common git-dir，必须单独校验扫描期间它没有改变。 */
+function getGitHeadFingerprint(gitRoot: string): string | null {
+  const gitDir = getGitDirPath(gitRoot)
+  if (!gitDir) return null
+  try {
+    const headPath = join(gitDir, 'HEAD')
+    const headContent = readFileSync(headPath, 'utf-8')
+    const fingerprints = [getPathFingerprint(headPath)]
+    const symbolicRef = headContent.match(/^ref:\s*(.+)\s*$/m)?.[1]
+    if (symbolicRef) {
+      const commonDir = getGitCommonDirPath(gitDir)
+      const refPath = join(commonDir, symbolicRef)
+      fingerprints.push(getPathFingerprint(refPath))
+      if (!existsSync(refPath)) fingerprints.push(getPathFingerprint(join(commonDir, 'packed-refs')))
+    }
+    return fingerprints.join('|')
+  } catch {
+    return null
+  }
+}
+
+/** 返回会影响 `git diff HEAD` 的轻量状态指纹。 */
+function getGitStateFingerprint(gitRoot: string): string | null {
+  const gitDir = getGitDirPath(gitRoot)
+  const headFingerprint = getGitHeadFingerprint(gitRoot)
+  return gitDir && headFingerprint ? `${headFingerprint}|${getPathFingerprint(join(gitDir, 'index'))}` : null
+}
+
 /**
- * 获取当前工作树相对 HEAD 的文件变更列表（支持多 Git 仓库）
+ * 让指定路径所属的已知仓库缓存失效；未给路径时失效全部。
+ * 扫描会捕获 revision，完成时仅当 revision 未变才允许写回缓存。
+ */
+export function invalidateGitDiffCache(changedPath?: string): void {
+  const roots = new Set([...repoRevisions.keys(), ...repoScanCache.keys(), ...inFlightRepoScans.keys()])
+  const target = changedPath ? normalizeGitRoot(changedPath) : null
+
+  for (const root of roots) {
+    if (target && !isSameOrDescendant(target, root) && !isSameOrDescendant(root, target)) continue
+    repoRevisions.set(root, getRepoRevision(root) + 1)
+    repoScanCache.delete(root)
+  }
+}
+
+async function scanGitRoot(gitRoot: string): Promise<CachedRepoScan | null> {
+  // 三条查询没有数据依赖；在全局 semaphore 约束下并行可缩短单仓库延迟。
+  const [nameStatus, numStat, untrackedOutput] = await Promise.all([
+    runGitCommand(['diff', 'HEAD', '--name-status'], gitRoot),
+    runGitCommand(['diff', 'HEAD', '--numstat'], gitRoot),
+    runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot),
+  ])
+  // Git 暂时不可用/超时不能被缓存为“干净仓库”，否则会长期显示空 Diff。
+  if (nameStatus === null || numStat === null || untrackedOutput === null) return null
+
+  const numStatMap = parseNumstat(numStat)
+  const files: Array<Omit<ChangedFileEntry, 'source'>> = []
+  if (nameStatus) {
+    for (const statusLine of nameStatus.split('\n').filter(Boolean)) {
+      const simpleMatch = statusLine.match(/^([MDAT])\t(.+)$/)
+      const renameMatch = statusLine.match(/^([RC])\d*\t([^\t]+)\t(.+)$/)
+      let status: ChangedFileStatus
+      let filePath: string
+
+      if (simpleMatch) {
+        status = simpleMatch[1] === 'D' ? 'deleted' : 'modified'
+        filePath = simpleMatch[2]!
+      } else if (renameMatch) {
+        status = 'modified'
+        filePath = renameMatch[3]!
+      } else {
+        continue
+      }
+
+      const stats = numStatMap.get(filePath) ?? { additions: 0, deletions: 0 }
+      files.push({ filePath, status, additions: stats.additions, deletions: stats.deletions, gitRoot })
+    }
+  }
+
+  return {
+    files,
+    untrackedFiles: untrackedOutput
+      ? untrackedOutput.split('\n').filter(Boolean).map((filePath) => ({ filePath, gitRoot }))
+      : [],
+  }
+}
+
+async function getCachedRepoScan(gitRoot: string): Promise<CachedRepoScan> {
+  const root = normalizeGitRoot(gitRoot)
+  const revision = getRepoRevision(root)
+  const fingerprint = getGitStateFingerprint(root)
+  const headFingerprint = getGitHeadFingerprint(root)
+  const cached = repoScanCache.get(root)
+  if (fingerprint !== null && cached?.revision === revision && cached.fingerprint === fingerprint) return cached.value
+
+  const inFlight = inFlightRepoScans.get(root)
+  if (inFlight?.revision === revision && inFlight.fingerprint === fingerprint) return inFlight.promise
+
+  const promise = scanGitRoot(root).then((value) => {
+    if (value === null) return { files: [], untrackedFiles: [] }
+    const completedFingerprint = getGitStateFingerprint(root)
+    const completedHeadFingerprint = getGitHeadFingerprint(root)
+    // Git diff 会刷新 index stat cache；但 HEAD/ref 在扫描期间变化会让两个并发查询混用基准，不能缓存。
+    if (
+      completedFingerprint !== null
+      && headFingerprint !== null
+      && headFingerprint === completedHeadFingerprint
+      && getRepoRevision(root) === revision
+      && inFlightRepoScans.get(root)?.promise === promise
+    ) {
+      repoScanCache.set(root, { revision, fingerprint: completedFingerprint, value })
+    }
+    return value
+  }).finally(() => {
+    if (inFlightRepoScans.get(root)?.promise === promise) inFlightRepoScans.delete(root)
+  })
+  inFlightRepoScans.set(root, { revision, fingerprint, promise })
+  return promise
+}
+
+/**
+ * 获取当前工作树相对 HEAD 的文件变更列表（支持多 Git 仓库）。
  *
  * 包含 staged + unstaged 改动；函数名保留为 getUnstagedChanges 以兼容现有 IPC。
  */
@@ -283,100 +500,41 @@ export async function getUnstagedChanges(
   workspaceFilesPath?: string,
   extraPaths?: string[],
 ): Promise<UnstagedChangesResult> {
-  // 收集所有候选目录中的不重复 Git 仓库根
   const rawCandidates = [dirPath, sessionPath, workspaceFilesPath, ...(extraPaths || [])].filter(
-    (p): p is string => typeof p === 'string' && p.length > 0
+    (p): p is string => typeof p === 'string' && p.length > 0,
   )
-  const candidates = rawCandidates
-    .map(toChangeCandidate)
-    .filter((candidate): candidate is ChangeCandidate => candidate !== null)
-
+  const candidates = rawCandidates.map(toChangeCandidate).filter((candidate): candidate is ChangeCandidate => candidate !== null)
   const gitRoots: string[] = []
-  for (const cand of candidates) {
-    const roots = await findAllGitRoots(cand.searchPath)
+
+  const rootsByCandidate = await Promise.all(candidates.map((candidate) => findAllGitRoots(candidate.searchPath)))
+  for (const roots of rootsByCandidate) {
     for (const root of roots) {
       if (!gitRoots.includes(root)) gitRoots.push(root)
     }
   }
+  if (gitRoots.length === 0) return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
 
-  if (gitRoots.length === 0) {
-    return { isGitRepo: false, files: [], untrackedFiles: [], gitRootNames: [] }
+  const isUnderAnyCandidate = (absolutePath: string): boolean => {
+    const normalized = normalizeComparablePath(absolutePath)
+    return candidates.some((candidate) => candidate.fileOnly
+      ? normalized === candidate.matchPath
+      : normalized === candidate.matchPath || normalized.startsWith(`${candidate.matchPath}/`))
   }
 
-  const allFiles: ChangedFileEntry[] = []
-  const allUntracked: UntrackedFileEntry[] = []
-
-  // 候选路径用于过滤：目录匹配子树，附加文件只匹配自身，避免显示同级无关改动。
-  const isUnderAnyCandidate = (absPath: string): boolean => {
-    const normalized = normalizeComparablePath(absPath)
-    return candidates.some((candidate) => {
-      if (candidate.fileOnly) return normalized === candidate.matchPath
-      return normalized === candidate.matchPath || normalized.startsWith(candidate.matchPath + '/')
-    })
-  }
-
-  for (const gitRoot of gitRoots) {
-    // 获取当前工作树相对 HEAD 的变更文件列表，覆盖 staged + unstaged。
-    const nameStatus = await runGitCommand(['diff', 'HEAD', '--name-status'], gitRoot)
-    const numStat = await runGitCommand(['diff', 'HEAD', '--numstat'], gitRoot)
-    const numStatMap = parseNumstat(numStat)
-
-    if (nameStatus) {
-      const statusLines = nameStatus.split('\n').filter(Boolean)
-
-      for (const statusLine of statusLines) {
-        const simpleMatch = statusLine.match(/^([MDAT])\t(.+)$/)
-        const renameMatch = statusLine.match(/^([RC])\d*\t([^\t]+)\t(.+)$/)
-
-        let status: ChangedFileStatus
-        let filePath: string
-
-        if (simpleMatch) {
-          const code = simpleMatch[1]!
-          status = code === 'D' ? 'deleted' : 'modified'
-          filePath = simpleMatch[2]!
-        } else if (renameMatch) {
-          status = 'modified'
-          filePath = renameMatch[3]!
-        } else {
-          continue
-        }
-
-        // 过滤：只保留落在某个 candidate 内的文件
-        const absPath = join(gitRoot, filePath)
-        if (!isUnderAnyCandidate(absPath)) continue
-
-        const stats = numStatMap.get(filePath) ?? { additions: 0, deletions: 0 }
-
-        allFiles.push({
-          filePath,
-          status,
-          additions: stats.additions,
-          deletions: stats.deletions,
-          source: computeSource(filePath, gitRoot, sessionPath, workspaceFilesPath),
-          gitRoot,
-        })
-      }
+  const scans = await Promise.all(gitRoots.map(getCachedRepoScan))
+  const files: ChangedFileEntry[] = []
+  const untrackedFiles: UntrackedFileEntry[] = []
+  for (const scan of scans) {
+    for (const file of scan.files) {
+      if (!isUnderAnyCandidate(join(file.gitRoot, file.filePath))) continue
+      files.push({ ...file, source: computeSource(file.filePath, file.gitRoot, sessionPath, workspaceFilesPath) })
     }
-
-    // 获取未追踪文件
-    const untrackedOutput = await runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
-    if (untrackedOutput) {
-      for (const rel of untrackedOutput.split('\n').filter(Boolean)) {
-        const absPath = join(gitRoot, rel)
-        if (isUnderAnyCandidate(absPath)) {
-          allUntracked.push({ filePath: rel, gitRoot })
-        }
-      }
+    for (const file of scan.untrackedFiles) {
+      if (isUnderAnyCandidate(join(file.gitRoot, file.filePath))) untrackedFiles.push(file)
     }
   }
 
-  return {
-    isGitRepo: true,
-    files: allFiles,
-    untrackedFiles: allUntracked,
-    gitRootNames: gitRoots.map((r) => basename(r)),
-  }
+  return { isGitRepo: true, files, untrackedFiles, gitRootNames: gitRoots.map((root) => basename(root)) }
 }
 
 /**
@@ -575,6 +733,7 @@ export async function revertFile(dirPath: string, filePath: string, gitRoot?: st
   if (result === null) {
     throw new Error(`还原失败: git restore --staged --worktree -- ${safePath}`)
   }
+  invalidateGitDiffCache(join(root, safePath))
 }
 
 async function getGitCommonDir(somePath: string): Promise<string | null> {

@@ -207,6 +207,11 @@ export interface FileAccessOptions {
   workspaceSlug?: string
   /** 路径解析候选目录；主进程会先过滤到已授权目录内再使用 */
   candidateBasePaths?: string[]
+  /**
+   * 文件面板以 Agent 实际可操作的文件系统为准，不再按会话附件二次收窄。
+   * 启用后，调用方可以操作任意已存在的本地路径。
+   */
+  unrestricted?: boolean
 }
 
 /** 已授权本地文件的 proma-file URL */
@@ -346,6 +351,8 @@ export const IPC_CHANNELS = {
   GET_GIT_REPO_STATUS: 'git:get-repo-status',
   /** 获取未暂存的变更文件列表 */
   GET_UNSTAGED_CHANGES: 'git:get-unstaged-changes',
+  /** 失效 Git Diff 扫描缓存；可按文件/目录定向失效 */
+  INVALIDATE_GIT_DIFF_CACHE: 'git:invalidate-diff-cache',
   /** 获取单个文件的 diff */
   GET_FILE_DIFF: 'git:get-file-diff',
   /** 获取未追踪文件内容 */

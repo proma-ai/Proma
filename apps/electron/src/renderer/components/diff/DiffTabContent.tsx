@@ -546,6 +546,8 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
 
   const fileAccess = React.useMemo(() => ({
     sessionId,
+    // 预览必须覆盖 Agent 实际操作的外部文件，与右侧文件面板保持一致。
+    unrestricted: true,
     // 历史工具调用的预览仅有相对 filePath；以当前 dirPath（通常是会话 CWD）补全解析上下文。
     // 绝对路径不追加该回退，避免失效路径按同名文件误命中会话目录。
     candidateBasePaths: getPreviewCandidateBasePaths(basePaths, isAbsoluteFilePath(filePath) ? undefined : dirPath),
