@@ -28,6 +28,8 @@ export interface PlanningNativeSyncTarget {
   title: string
   sourceTitle: string
   sourceType: 'caldav' | 'exchange' | 'local' | 'birthdays' | 'mobileme' | 'subscribed' | 'unknown'
+  /** 当前集合是否允许修改；只读集合仍可由用户显式接入浏览。 */
+  canWrite: boolean
   /** EventKit 仅能识别账户来源，不能承诺其服务端已完成同步。 */
   isCloudBacked: boolean
 }
@@ -45,7 +47,9 @@ export interface PlanningNativeSyncStatus {
   reminder: PlanningNativeSyncPermissionResult
 }
 
-/** 每类实体在 P0 只允许一个显式选择的受管目标。 */
+export type PlanningNativeConnectionRole = 'managed' | 'linked'
+
+/** 每类实体一个 Proma 受管目标。 */
 export interface PlanningSyncProfile {
   id: string
   entity: PlanningNativeSyncEntity
@@ -62,6 +66,45 @@ export interface SavePlanningSyncProfileInput {
   target: Pick<PlanningNativeSyncTarget, 'id' | 'title' | 'sourceTitle'>
   enabled?: boolean
 }
+
+/** 用户显式接入的既有系统集合；未连接的目标绝不读取。 */
+export interface PlanningNativeConnection {
+  id: string
+  entity: PlanningNativeSyncEntity
+  targetId: string
+  targetTitle: string
+  sourceTitle: string
+  sourceType: PlanningNativeSyncTarget['sourceType']
+  canWrite: boolean
+  connectedAt: number
+  updatedAt: number
+}
+
+export interface ConnectPlanningNativeConnectionInput {
+  entity: PlanningNativeSyncEntity
+  target: PlanningNativeSyncTarget
+}
+
+export interface PlanningNativeOrigin {
+  connectionId: string
+  targetTitle: string
+  sourceTitle: string
+  canWrite: boolean
+}
+
+/** 同一已连接系统项被 Proma 与系统并发修改时，必须由用户选择保留哪一侧。 */
+export interface PlanningNativeSyncConflict {
+  id: string
+  /** 已连接集合冲突；受管 Proma Calendar 冲突则为 profileId。 */
+  connectionId?: string
+  profileId?: string
+  entity: PlanningNativeSyncEntity
+  promaEntityId: string
+  title: string
+  kind: 'changed' | 'deleted'
+  detectedAt: number
+}
+export type ResolvePlanningNativeSyncConflictInput = { id: string; resolution: 'keep_proma' | 'keep_system' }
 
 export interface PlanningGroup {
   id: string
@@ -128,6 +171,8 @@ export interface Todo {
   createdAt: number
   updatedAt: number
   completedAt?: number
+  /** 已连接系统提醒事项的来源和写入能力。 */
+  nativeOrigin?: PlanningNativeOrigin
 }
 
 export interface CalendarEvent {
@@ -145,6 +190,8 @@ export interface CalendarEvent {
   todoId?: string
   createdAt: number
   updatedAt: number
+  /** 已连接系统日历项的来源和写入能力。 */
+  nativeOrigin?: PlanningNativeOrigin
 }
 
 /** Todo 列表的可选范围；未传入时保持完整列表的既有行为。 */
@@ -318,6 +365,12 @@ export const PLANNING_IPC_CHANNELS = {
   /** 在授权被拒绝或仅写入时，跳转 macOS Calendar / Reminders 隐私设置。 */
   OPEN_NATIVE_SYNC_PRIVACY_SETTINGS: 'planning:open-native-sync-privacy-settings',
   LIST_NATIVE_SYNC_TARGETS: 'planning:list-native-sync-targets',
+  LIST_NATIVE_CONNECTION_TARGETS: 'planning:list-native-connection-targets',
+  LIST_NATIVE_CONNECTIONS: 'planning:list-native-connections',
+  CONNECT_NATIVE_CONNECTION: 'planning:connect-native-connection',
+  DISCONNECT_NATIVE_CONNECTION: 'planning:disconnect-native-connection',
+  LIST_NATIVE_SYNC_CONFLICTS: 'planning:list-native-sync-conflicts',
+  RESOLVE_NATIVE_SYNC_CONFLICT: 'planning:resolve-native-sync-conflict',
   LIST_SYNC_PROFILES: 'planning:list-sync-profiles',
   SAVE_SYNC_PROFILE: 'planning:save-sync-profile',
 } as const

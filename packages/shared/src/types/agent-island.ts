@@ -65,7 +65,7 @@ export interface AgentIslandState {
   presentation: AgentIslandPresentation
   /** 指针是否位于可交互 surface 内；用于呈现即时 hover 预热反馈。 */
   hovered: boolean
-  /** 是否展开卡片；为现有 Electron fallback 保留的便利字段。 */
+  /** 是否展开卡片；由原生 macOS surface 的交互状态驱动。 */
   expanded: boolean
   pill: AgentIslandPillSnapshot
   /** 正在运行、待接手或未读的 Agent 会话。 */
@@ -129,13 +129,6 @@ export interface AgentIslandCompactPlanQuotaSnapshot extends AgentIslandPlanQuot
   additionalChannelCount: number
 }
 
-/** Electron fallback 窗口的完整投影，和原生 Swift surface 消费同一份状态数据。 */
-export interface AgentIslandWindowSnapshot {
-  state: AgentIslandState
-  planning: AgentIslandPlanningSnapshot
-  planQuotas: AgentIslandPlanQuotaSnapshot[]
-}
-
 /** TypeScript 主进程 → macOS Swift helper 的 JSONL 全量状态。 */
 export interface NativeAgentIslandSnapshot {
   type: 'snapshot'
@@ -160,39 +153,9 @@ export type NativeAgentIslandEvent =
   | { type: 'intent'; name: 'dismiss' }
   | { type: 'fatal'; message: string }
 
-export interface AgentIslandResizeRequest {
-  width: number
-  height: number
-}
-
-export interface AgentIslandMoveRequest {
-  x: number
-  y: number
-}
-
 export const AGENT_ISLAND_IPC_CHANNELS = {
-  /** main → renderer：全量状态推送 */
-  STATE: 'agent-island:state',
-  /** renderer → main：同步展开/收起真值 */
-  SET_EXPANDED: 'agent-island:set-expanded',
-  /** renderer → main：发送 surface 悬浮意图，主进程负责防抖展开/收起。 */
-  SET_HOVERED: 'agent-island:set-hovered',
-  /** renderer → main：按内容调整窗口尺寸 */
-  RESIZE: 'agent-island:resize',
-  /** renderer → main：移动窗口位置（拖拽） */
-  MOVE: 'agent-island:move',
-  /** renderer → main：请求打开/聚焦主窗口 */
-  OPEN_MAIN_WINDOW: 'agent-island:open-main-window',
-  /** renderer → main：请求打开独立 Planning 窗口。 */
-  OPEN_PLANNING: 'agent-island:open-planning',
-  /** renderer → main：请求打开指定 Agent 会话 */
-  OPEN_SESSION: 'agent-island:open-session',
-  /** 主应用已主动查看指定完成会话，清除灵动岛未读状态 */
+  /** 主应用已主动查看指定完成会话，清除灵动岛未读状态。 */
   MARK_SESSION_VIEWED: 'agent-island:mark-session-viewed',
-  /** renderer → main：内联响应权限请求 */
-  RESPOND_PERMISSION: 'agent-island:respond-permission',
-  /** main → renderer：切换展开（快捷键等外部入口） */
-  TOGGLE_EXPANDED: 'agent-island:toggle-expanded',
 } as const
 
 export type AgentIslandIpcChannel = (typeof AGENT_ISLAND_IPC_CHANNELS)[keyof typeof AGENT_ISLAND_IPC_CHANNELS]

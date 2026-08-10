@@ -10,6 +10,8 @@ dist
 apps/electron/resources/bin/
 # Swift 编译的 macOS 原生灵动岛 helper（构建时生成，按宿主架构分发）
 apps/electron/resources/agent-island/
+# Objective-C++ 编译的 macOS EventKit N-API addon（构建时生成，按宿主架构分发）
+apps/electron/resources/eventkit/
 # bun build --compile 的临时中间产物
 *.bun-build
 
@@ -55,5 +57,5 @@ vendor
 pnpm-lock.yaml
 pnpm-workspace.yaml
 
-# Proma 会话/工作区文档（不应入仓，见 CLAUDE.md 红线）
+# Proma 会话/工作区文档（不应入仓，见 AGENTS.md 红线）
 .context/

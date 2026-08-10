@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
-import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom } from '@/atoms/agent-atoms'
+import { agentDiffUnseenFilesAtom, agentDiffDataAtom, agentSelectedWorktreeAtom, workspaceGitDiffRefreshVersionAtom } from '@/atoms/agent-atoms'
 import type { ChangedFileEntry, ChangedFileStatus, ChangeSource, UntrackedFileEntry, WorktreeInfo } from '@proma/shared'
 import { WorktreeSelector } from './WorktreeSelector'
 import { groupSessionFileChanges } from '@/lib/session-file-changes'
@@ -109,6 +109,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
   // Diff 数据缓存：mount 时若已有上次结果，立即用作初值，避免空数组闪 1s "没有代码改动"
   const diffDataMap = useAtomValue(agentDiffDataAtom)
   const setDiffDataMap = useSetAtom(agentDiffDataAtom)
+  const workspaceGitDiffRefreshVersion = useAtomValue(workspaceGitDiffRefreshVersionAtom)
   const cached = diffDataMap.get(diffCacheKey)
   const [files, setFiles] = React.useState<ChangedFileEntry[]>(() => cached?.files ?? [])
   const [untrackedFiles, setUntrackedFiles] = React.useState<UntrackedFileEntry[]>(() => cached?.untrackedFiles ?? [])
@@ -173,7 +174,7 @@ export const DiffChangesList = React.memo(function DiffChangesList({
 
   React.useEffect(() => {
     fetchChanges()
-  }, [fetchChanges, refreshVersion])
+  }, [fetchChanges, refreshVersion, workspaceGitDiffRefreshVersion])
 
   // 窗口聚焦刷新已统一在 useGlobalAgentListeners 中处理（递增 refreshVersion）
 
@@ -449,9 +450,7 @@ function NonGitFileList({
                   <FileTypeIcon name={name} isDirectory={false} size={16} />
                   <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
                   {parent && <span className="max-w-[40%] truncate text-[11px] text-muted-foreground">{parent}</span>}
-                  {change.kind === 'created' && (
-                    <span className="shrink-0 rounded-sm bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-600 dark:text-orange-400">新建</span>
-                  )}
+                  {change.kind === 'created' && <GitStatusMarker status="untracked" className="ml-2" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="left" className="max-w-[400px] break-all">{change.path}</TooltipContent>
@@ -461,7 +460,7 @@ function NonGitFileList({
                 <button
                   type="button"
                   aria-label="在文件夹中显示"
-                  onClick={() => window.electronAPI.showInFolder(change.path, { sessionId }).catch(console.error)}
+                  onClick={() => window.electronAPI.showInFolder(change.path, { sessionId, unrestricted: true }).catch(console.error)}
                   className="mr-1 flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground"
                 >
                   <FolderSearch className="size-3.5" />

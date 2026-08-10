@@ -135,17 +135,23 @@ describe('listAllEnabledAgentModels（跨渠道列表）', () => {
     expect(selection.listAllEnabledAgentModels()).toEqual([])
   })
 
-  test('agentRuntime=claude 时只返回 Anthropic 兼容渠道', () => {
+  test('保留不同协议渠道的 provider 信息', () => {
     writeChannels([anthropicChannel, openaiChannel])
-    const channels = selection.listAllEnabledAgentModels('claude')
-    expect(channels).toHaveLength(1)
-    expect(channels[0].channelId).toBe('channel-anthropic')
+    const channels = selection.listAllEnabledAgentModels()
+    expect(channels.map((channel) => [channel.channelId, channel.provider])).toEqual([
+      ['channel-anthropic', 'anthropic'],
+      ['channel-openai', 'openai'],
+    ])
   })
 
-  test('agentRuntime=pi 时返回全部启用渠道', () => {
-    writeChannels([anthropicChannel, openaiChannel])
-    const channels = selection.listAllEnabledAgentModels('pi')
-    expect(channels.map((c) => c.channelId).sort()).toEqual(['channel-anthropic', 'channel-openai'])
+  test('已启用但没有启用模型的渠道保留为空列表', () => {
+    writeChannels([{
+      ...openaiChannel,
+      models: openaiChannel.models.map((model) => ({ ...model, enabled: false })),
+    }])
+    const channels = selection.listAllEnabledAgentModels()
+    expect(channels).toHaveLength(1)
+    expect(channels[0]?.models).toEqual([])
   })
 })
 
@@ -184,51 +190,47 @@ describe('assertEnabledModelForChannel（跨渠道模型校验）', () => {
   })
 })
 
-describe('assertEnabledModelForChannel 协议兼容校验（agentRuntime）', () => {
-  test('claude runtime + Anthropic 兼容渠道通过', () => {
+describe('assertEnabledModelForChannel（Pi 多协议与输入边界）', () => {
+  test('Anthropic 渠道模型通过', () => {
     writeChannels([anthropicChannel, openaiChannel])
     expect(
       selection.assertEnabledModelForChannel({
         channelId: 'channel-anthropic',
         modelId: 'claude-opus-4',
         purpose: '创建协作子会话',
-        agentRuntime: 'claude',
       }),
     ).toBe('claude-opus-4')
   })
 
-  test('claude runtime + OpenAI 渠道抛错（协议不兼容）', () => {
+  test('OpenAI 渠道模型通过（Pi 支持多协议）', () => {
+    writeChannels([anthropicChannel, openaiChannel])
+    expect(
+      selection.assertEnabledModelForChannel({
+        channelId: 'channel-openai',
+        modelId: 'gpt-5',
+        purpose: '创建协作子会话',
+      }),
+    ).toBe('gpt-5')
+  })
+
+  test('模型 ID 会去除首尾空白', () => {
+    writeChannels([anthropicChannel, openaiChannel])
+    expect(
+      selection.assertEnabledModelForChannel({
+        channelId: 'channel-openai',
+        modelId: '  gpt-5  ',
+        purpose: '创建协作子会话',
+      }),
+    ).toBe('gpt-5')
+  })
+
+  test('缺少 channelId 时明确报错', () => {
     writeChannels([anthropicChannel, openaiChannel])
     expect(() =>
       selection.assertEnabledModelForChannel({
-        channelId: 'channel-openai',
-        modelId: 'gpt-5',
-        purpose: '创建协作子会话',
-        agentRuntime: 'claude',
-      }),
-    ).toThrow('不兼容 Claude Agent Core')
-  })
-
-  test('pi runtime + OpenAI 渠道通过（Pi 支持多协议）', () => {
-    writeChannels([anthropicChannel, openaiChannel])
-    expect(
-      selection.assertEnabledModelForChannel({
-        channelId: 'channel-openai',
-        modelId: 'gpt-5',
-        purpose: '创建协作子会话',
-        agentRuntime: 'pi',
-      }),
-    ).toBe('gpt-5')
-  })
-
-  test('不传 agentRuntime 时不做协议校验（向后兼容）', () => {
-    writeChannels([anthropicChannel, openaiChannel])
-    expect(
-      selection.assertEnabledModelForChannel({
-        channelId: 'channel-openai',
         modelId: 'gpt-5',
         purpose: '创建协作子会话',
       }),
-    ).toBe('gpt-5')
+    ).toThrow('需要可用的 channelId')
   })
 })

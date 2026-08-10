@@ -40,7 +40,6 @@ import type {
   AgentSessionMeta,
   SDKMessage,
   AgentSendInput,
-  AgentRuntime,
   AgentThinkingLevel,
   AgentStreamEvent,
   AgentStreamCompletePayload,
@@ -139,9 +138,12 @@ import type {
   PlanningNativeSyncStatus,
   PlanningNativeSyncPermissionResult,
   PlanningNativeSyncTarget,
+  PlanningNativeConnection,
+  PlanningNativeSyncConflict,
+  ConnectPlanningNativeConnectionInput,
+  ResolvePlanningNativeSyncConflictInput,
   PlanningSyncProfile,
   SavePlanningSyncProfileInput,
-  AgentIslandWindowSnapshot,
 } from '@proma/shared'
 import type {
   UserProfile,
@@ -198,6 +200,8 @@ export interface ElectronAPI {
 
   /** 获取未暂存的变更文件列表 */
   getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => Promise<import('@proma/shared').UnstagedChangesResult>
+  /** 失效 Git Diff 扫描缓存；省略路径时失效全部仓库 */
+  invalidateGitDiffCache: (changedPath?: string) => Promise<void>
   /** 获取单个文件的 diff */
   getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => Promise<string>
   /** 获取未追踪文件内容 */
@@ -492,7 +496,6 @@ export interface ElectronAPI {
   updateAgentSessionTitle: (id: string, title: string) => Promise<AgentSessionMeta>
 
   /** 切换 Agent 会话 runtime */
-  updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => Promise<AgentSessionMeta>
 
   /** 切换当前会话的 ChatGPT Codex Fast Mode */
   updateSessionCodexFastMode: (sessionId: string, enabled: boolean) => Promise<AgentSessionMeta>
@@ -658,20 +661,42 @@ export interface ElectronAPI {
   /** 获取工作区记忆摘要 */
   getWorkspaceMemorySummary: (workspaceSlug: string) => Promise<WorkspaceMemorySummary>
 
-  /** 读取工作区 CLAUDE.md */
-  readWorkspaceClaudeMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
+  /** 读取工作区 AGENTS.md */
+  readWorkspaceAgentsMd: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileContent>
 
-  /** 写入工作区 CLAUDE.md */
-  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => Promise<void>
+  /** 写入工作区 AGENTS.md */
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => Promise<void>
 
-  /** 列出工作区 auto memory 文件树 */
+  /** 列出工作区长期记忆文件树 */
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => Promise<import('@proma/shared').SkillFileNode[]>
 
-  /** 读取工作区 auto memory 文件 */
+  /** 读取工作区长期记忆文件 */
   readWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string) => Promise<import('@proma/shared').SkillFileContent>
 
-  /** 写入工作区 auto memory 文件 */
+  /** 写入工作区长期记忆文件 */
   writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => Promise<void>
+
+  /** 打开或聚焦当前 workspace 的独立 Memory 编辑窗口，可选定位到某个记忆文件。 */
+  openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => Promise<void>
+
+  /** 独立 Memory 编辑窗口接收主进程转发的文件定位请求。 */
+  onWorkspaceMemoryWindowOpenFile: (callback: (relativePath: string) => void) => () => void
+  /** 主进程请求独立窗口确认未保存内容后的关闭。 */
+  onWorkspaceMemoryWindowCloseRequested: (callback: () => void) => () => void
+  /** 保存或明确丢弃后确认关闭当前独立记忆窗口。 */
+  confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => Promise<void>
+  /** 声明独立记忆窗口已可处理关闭请求。 */
+  markWorkspaceMemoryWindowReady: (workspaceSlug: string) => Promise<void>
+
+  /** 仅在当前 Memory 页面存活时订阅当前 workspace 的 memory/ 文件变化。 */
+  subscribeWorkspaceMemoryChanges: (
+    workspaceSlug: string,
+    callback: (change: import('@proma/shared').WorkspaceMemoryFileChange) => void,
+  ) => () => void
+
+  /** 记录用户对 Agent 主动维护两份 AGENTS.md 的明确授权。 */
+  approveWorkspaceProjectKnowledgeMaintenance: (workspaceSlug: string) => Promise<void>
+
 
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
@@ -815,7 +840,7 @@ export interface ElectronAPI {
   showInFolder: (filePath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 使用系统终端打开文件夹 */
-  openFolderInTerminal: (folderPath: string) => Promise<void>
+  openFolderInTerminal: (folderPath: string, access?: import('@proma/shared').FileAccessOptions) => Promise<void>
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */
   showItemInFolder: (filePath: string, candidateBasePaths?: string[]) => Promise<boolean>
@@ -1194,30 +1219,17 @@ export interface ElectronAPI {
   requestPlanningNativeSyncAccess: (entity: PlanningNativeSyncEntity) => Promise<PlanningNativeSyncPermissionResult>
   openPlanningNativeSyncPrivacySettings: (entity: PlanningNativeSyncEntity) => Promise<void>
   listPlanningNativeSyncTargets: (entity: PlanningNativeSyncEntity) => Promise<PlanningNativeSyncTarget[]>
+  listPlanningNativeConnectionTargets: (entity: PlanningNativeSyncEntity) => Promise<PlanningNativeSyncTarget[]>
+  listPlanningNativeConnections: (entity?: PlanningNativeSyncEntity) => Promise<PlanningNativeConnection[]>
+  connectPlanningNativeConnection: (input: ConnectPlanningNativeConnectionInput) => Promise<PlanningNativeConnection>
+  disconnectPlanningNativeConnection: (id: string) => Promise<boolean>
+  listPlanningNativeSyncConflicts: () => Promise<PlanningNativeSyncConflict[]>
+  resolvePlanningNativeSyncConflict: (input: ResolvePlanningNativeSyncConflictInput) => Promise<boolean>
   listPlanningSyncProfiles: () => Promise<PlanningSyncProfile[]>
   savePlanningSyncProfile: (input: SavePlanningSyncProfileInput) => Promise<PlanningSyncProfile>
 
-  /** Agent 灵动岛桥接（主进程状态机 → 灵动岛窗口） */
+  /** 主应用用于确认完成会话已查看；macOS 原生 Island 消费主进程投影。 */
   agentIsland: {
-    /** 订阅灵动岛全量状态 */
-    onState: (callback: (snapshot: AgentIslandWindowSnapshot) => void) => () => void
-    /** 外部触发展开/收起切换 */
-    onToggleExpanded: (callback: () => void) => () => void
-    /** 同步展开/收起状态到主进程（避免下一条 Agent 事件覆盖本地状态） */
-    setExpanded: (expanded: boolean) => Promise<void>
-    /** 发送鼠标进入/离开 island surface 的意图；主进程负责展开防抖。 */
-    setHovered: (hovered: boolean) => Promise<void>
-    /** 按内容调整窗口尺寸（pill ↔ 展开卡） */
-    resize: (width: number, height: number) => Promise<void>
-    /** 拖拽移动窗口位置 */
-    move: (x: number, y: number) => Promise<void>
-    /** 打开/聚焦主窗口 */
-    openMainWindow: () => Promise<void>
-    /** 打开独立 Planning 窗口。 */
-    openPlanning: () => Promise<void>
-    /** 打开指定 Agent 会话（聚焦主窗口） */
-    openSession: (sessionId: string) => Promise<void>
-    /** 用户已在主应用中主动查看完成会话，清除灵动岛未读状态 */
     markSessionViewed: (sessionId: string) => Promise<void>
   }
 }
@@ -1247,6 +1259,10 @@ const electronAPI: ElectronAPI = {
 
   getUnstagedChanges: (dirPath: string, sessionPath?: string, workspaceFilesPath?: string, extraPaths?: string[], sessionId?: string) => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_UNSTAGED_CHANGES, dirPath, sessionPath, workspaceFilesPath, extraPaths, sessionId)
+  },
+
+  invalidateGitDiffCache: (changedPath?: string) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INVALIDATE_GIT_DIFF_CACHE, changedPath)
   },
 
   getFileDiff: (input: import('@proma/shared').GetFileDiffInput) => {
@@ -1649,9 +1665,7 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_TITLE, id, title)
   },
 
-  updateSessionAgentRuntime: (sessionId: string, runtime: AgentRuntime) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME, sessionId, runtime)
-  },
+
 
   updateSessionCodexFastMode: (sessionId: string, enabled: boolean) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.UPDATE_SESSION_CODEX_FAST_MODE, sessionId, enabled)
@@ -1887,12 +1901,12 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_WORKSPACE_MEMORY_SUMMARY, workspaceSlug)
   },
 
-  readWorkspaceClaudeMd: (workspaceSlug: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD, workspaceSlug)
+  readWorkspaceAgentsMd: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD, workspaceSlug)
   },
 
-  writeWorkspaceClaudeMd: (workspaceSlug: string, content: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD, workspaceSlug, content)
+  writeWorkspaceAgentsMd: (workspaceSlug: string, content: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD, workspaceSlug, content)
   },
 
   listWorkspaceAutoMemoryFiles: (workspaceSlug: string) => {
@@ -1905,6 +1919,47 @@ const electronAPI: ElectronAPI = {
 
   writeWorkspaceAutoMemoryFile: (workspaceSlug: string, relativePath: string, content: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AUTO_MEMORY_FILE, workspaceSlug, relativePath, content)
+  },
+
+  openWorkspaceMemoryWindow: (workspaceSlug: string, relativePath?: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_WORKSPACE_MEMORY_WINDOW, workspaceSlug, relativePath)
+  },
+
+  onWorkspaceMemoryWindowOpenFile: (callback: (relativePath: string) => void) => {
+    const listener = (_: unknown, relativePath: string): void => callback(relativePath)
+    ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_OPEN_FILE, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_OPEN_FILE, listener) }
+  },
+
+  onWorkspaceMemoryWindowCloseRequested: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED, listener)
+    return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_CLOSE_REQUESTED, listener) }
+  },
+
+  confirmWorkspaceMemoryWindowClose: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE, workspaceSlug)
+  },
+
+  markWorkspaceMemoryWindowReady: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_READY, workspaceSlug)
+  },
+
+  subscribeWorkspaceMemoryChanges: (workspaceSlug: string, callback: (change: import('@proma/shared').WorkspaceMemoryFileChange) => void) => {
+    const listener = (_: unknown, payload: { workspaceSlug: string; change: import('@proma/shared').WorkspaceMemoryFileChange }): void => {
+      if (payload.workspaceSlug === workspaceSlug) callback(payload.change)
+    }
+    ipcRenderer.on(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_FILE_CHANGED, listener)
+    void ipcRenderer.invoke(AGENT_IPC_CHANNELS.START_WORKSPACE_MEMORY_WATCH, workspaceSlug)
+    return () => {
+      ipcRenderer.removeListener(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_FILE_CHANGED, listener)
+      void ipcRenderer.invoke(AGENT_IPC_CHANNELS.STOP_WORKSPACE_MEMORY_WATCH, workspaceSlug)
+    }
+  },
+
+
+  approveWorkspaceProjectKnowledgeMaintenance: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE, workspaceSlug)
   },
 
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {
@@ -2114,8 +2169,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SHOW_IN_FOLDER, filePath, access)
   },
 
-  openFolderInTerminal: (folderPath: string) => {
-    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL, folderPath)
+  openFolderInTerminal: (folderPath: string, access?: import('@proma/shared').FileAccessOptions) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL, folderPath, access)
   },
 
   /** 在系统文件管理器中显示文件（无工作区限制，支持候选基础目录） */
@@ -2731,35 +2786,17 @@ const electronAPI: ElectronAPI = {
   requestPlanningNativeSyncAccess: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.REQUEST_NATIVE_SYNC_ACCESS, entity),
   openPlanningNativeSyncPrivacySettings: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.OPEN_NATIVE_SYNC_PRIVACY_SETTINGS, entity),
   listPlanningNativeSyncTargets: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_TARGETS, entity),
+  listPlanningNativeConnectionTargets: (entity: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTION_TARGETS, entity),
+  listPlanningNativeConnections: (entity?: PlanningNativeSyncEntity) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTIONS, entity),
+  connectPlanningNativeConnection: (input: ConnectPlanningNativeConnectionInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.CONNECT_NATIVE_CONNECTION, input),
+  disconnectPlanningNativeConnection: (id: string) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.DISCONNECT_NATIVE_CONNECTION, id),
+  listPlanningNativeSyncConflicts: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_CONFLICTS),
+  resolvePlanningNativeSyncConflict: (input: ResolvePlanningNativeSyncConflictInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.RESOLVE_NATIVE_SYNC_CONFLICT, input),
   listPlanningSyncProfiles: () => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.LIST_SYNC_PROFILES),
   savePlanningSyncProfile: (input: SavePlanningSyncProfileInput) => ipcRenderer.invoke(PLANNING_IPC_CHANNELS.SAVE_SYNC_PROFILE, input),
 
-  // ===== Agent 灵动岛 =====
+  // ===== Agent 灵动岛（仅 macOS 原生 surface 使用） =====
   agentIsland: {
-    onState: (callback: (snapshot: AgentIslandWindowSnapshot) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, snapshot: AgentIslandWindowSnapshot): void => callback(snapshot)
-      ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.STATE, listener)
-      return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.STATE, listener) }
-    },
-    onToggleExpanded: (callback: () => void) => {
-      const listener = (): void => callback()
-      ipcRenderer.on(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener)
-      return () => { ipcRenderer.removeListener(AGENT_ISLAND_IPC_CHANNELS.TOGGLE_EXPANDED, listener) }
-    },
-    setExpanded: (expanded: boolean) =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.SET_EXPANDED, expanded),
-    setHovered: (hovered: boolean) =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.SET_HOVERED, hovered),
-    resize: (width: number, height: number) =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.RESIZE, { width, height }),
-    move: (x: number, y: number) =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MOVE, { x, y }),
-    openMainWindow: () =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_MAIN_WINDOW),
-    openPlanning: () =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_PLANNING),
-    openSession: (sessionId: string) =>
-      ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.OPEN_SESSION, sessionId),
     markSessionViewed: (sessionId: string) =>
       ipcRenderer.invoke(AGENT_ISLAND_IPC_CHANNELS.MARK_SESSION_VIEWED, sessionId),
   },

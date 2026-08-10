@@ -20,6 +20,7 @@ import { Type } from 'typebox'
 
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000
 const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 30_000
+const OPTIONAL_MCP_BOOTSTRAP_TIMEOUT_MS = 500
 
 interface PiMcpServerConfig {
   type?: unknown
@@ -30,6 +31,7 @@ interface PiMcpServerConfig {
   headers?: unknown
   startup_timeout_sec?: unknown
   timeout?: unknown
+  required?: unknown
 }
 
 type PiMcpServers = Record<string, Record<string, unknown>>
@@ -42,6 +44,7 @@ interface McpConnection {
   client: Client
   transport: Transport
   tools?: McpToolInfo[]
+  toolsPromise?: Promise<McpToolInfo[]>
 }
 
 interface McpToolBinding {
@@ -202,6 +205,29 @@ function convertMcpResult(result: McpCallToolResult): AgentToolResult<unknown> {
   } as AgentToolResult<unknown>
 }
 
+/**
+ * Optional MCP 服务首次连接在后台继续；首轮消息最多为它等待短暂的 bootstrap 窗口。
+ * 连接完成后，manager 会缓存 tools，后续回合直接复用，不会重复冷启动 stdio 进程。
+ */
+async function listOptionalMcpTools(
+  manager: PiMcpClientManager,
+  serverName: string,
+  config: PiMcpServerConfig,
+): Promise<McpToolInfo[] | undefined> {
+  const toolsPromise = manager.listTools(serverName, config)
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      toolsPromise,
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => resolve(undefined), OPTIONAL_MCP_BOOTSTRAP_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 class PiMcpClientManager {
   private readonly connections = new Map<string, Promise<McpConnection>>()
 
@@ -227,9 +253,18 @@ class PiMcpClientManager {
   async listTools(serverName: string, config: PiMcpServerConfig): Promise<McpToolInfo[]> {
     const connection = await this.getConnection(serverName, config)
     if (connection.tools) return connection.tools
-    const result = await connection.client.listTools(undefined, { timeout: DEFAULT_MCP_REQUEST_TIMEOUT_MS })
-    connection.tools = result.tools
-    return result.tools
+    if (!connection.toolsPromise) {
+      connection.toolsPromise = connection.client.listTools(undefined, { timeout: DEFAULT_MCP_REQUEST_TIMEOUT_MS })
+        .then((result) => {
+          connection.tools = result.tools
+          return result.tools
+        })
+        .catch((error) => {
+          connection.toolsPromise = undefined
+          throw error
+        })
+    }
+    return await connection.toolsPromise
   }
 
   async callTool(serverName: string, config: PiMcpServerConfig, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallToolResult> {
@@ -315,7 +350,13 @@ export async function buildPiMcpTools(mcpServers: PiMcpServers): Promise<ToolDef
   const results = await Promise.allSettled(
     entries.map(async ([serverName, rawConfig]) => {
       const config = rawConfig as PiMcpServerConfig
-      const mcpTools = await manager.listTools(serverName, config)
+      const mcpTools = config.required === false
+        ? await listOptionalMcpTools(manager, serverName, config)
+        : await manager.listTools(serverName, config)
+      if (!mcpTools) {
+        console.info(`[Pi MCP] 可选 MCP 服务器 ${serverName} 尚在后台启动，本回合跳过`)
+        return { serverName, config, mcpTools: [] }
+      }
       return { serverName, config, mcpTools }
     }),
   )

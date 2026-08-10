@@ -176,7 +176,7 @@
 
 ```html
 <div class="rowline">
-  <div class="k">CLAUDE.md</div>
+  <div class="k">AGENTS.md</div>
   <div class="v">你该怎么做事 —— 行为规则 + 工作偏好 + 禁止事项</div>
   <div class="m">EMPLOYEE · HANDBOOK</div>
 </div>
@@ -197,7 +197,7 @@
   <div class="pillar">
     <div class="ic">01</div>
     <div class="t">三层<br>文档体系</div>
-    <div class="d">CLAUDE.md<br>+ 项目知识库<br>+ 护栏文件</div>
+    <div class="d">AGENTS.md<br>+ 项目知识库<br>+ 护栏文件</div>
   </div>
   <!-- ... 更多 pillar ... -->
 </div>

@@ -13,16 +13,11 @@
  *  Step 7：记忆功能科普（图：Agent 技能的记忆页面）
  *  Step 8：侧边回答科普（图：历史选区问答）
  *  Step 9：FAQ 汇总页（按主题分组）
- *  Step 10：Windows 环境检测（仅 Windows，其他平台自动跳过）
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAtomValue } from 'jotai'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronLeft, ChevronsRight, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { EnvironmentCheckPanel } from '@/components/environment/EnvironmentCheckPanel'
-import { isShellEnvironmentOkAtom } from '@/atoms/environment'
-import { detectIsWindows } from '@/lib/platform'
 import { CURRENT_ONBOARDING_VERSION } from '../../../types'
 import hopperSeasideWhiteHouse from '@/assets/onboarding/hopper-seaside-white-house.png'
 import guideVisual from '@/assets/onboarding/guide-visual.png'
@@ -39,10 +34,12 @@ import { MemoryGuideExamples } from './MemoryGuideExamples'
 import { SubagentGuideExamples } from './SubagentGuideExamples'
 import { FAQ_GROUPS } from './faq-content'
 
-type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq' | 'environment'
+type OnboardingStep = 'welcome' | 'guide' | 'files' | 'project' | 'automation' | 'memory' | 'sideanswer' | 'subagent' | 'faq'
 
 interface OnboardingViewProps {
   onComplete: (openTutorial?: boolean) => void
+  /** 从设置重放时可跳过欢迎页。 */
+  initialStep?: OnboardingStep
 }
 
 /** 图片内归一化锚点（0-1） */
@@ -79,6 +76,8 @@ interface GuideFeatureStepProps {
   magnifierScale?: number
   /** 是否在本讲解区显示上一页/下一页导航 */
   showNavigation?: boolean
+  /** 无导航时在正文下方显示的向下滚动提示；点击可滚到示例区 */
+  onScrollHint?: () => void
 }
 
 interface MagnifierProps {
@@ -214,7 +213,7 @@ function GuideNavigation({ nextLabel, onNext, onBack }: { nextLabel: string; onN
 /**
  * 引导科普页：左侧显示界面截图，从锚点画绿色指针指向右侧讲解区。
  */
-function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onNext, onBack, imageSrc = guideVisual, arrowMode = 'none', magnifierOffsetX = 0, magnifierImageOffset = {}, imageRightCrop = 0, magnifierScale = 1, showNavigation = true }: GuideFeatureStepProps) {
+function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onNext, onBack, imageSrc = guideVisual, arrowMode = 'none', magnifierOffsetX = 0, magnifierImageOffset = {}, imageRightCrop = 0, magnifierScale = 1, showNavigation = true, onScrollHint }: GuideFeatureStepProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [imgRect, setImgRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -359,35 +358,62 @@ function GuideFeatureStep({ anchor, title, highlight, paragraphs, nextLabel, onN
             <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
           </div>
         )}
+
+        {/* 无导航的首屏：用一行文字承接阅读动线，说明下方还有内容。 */}
+        {!showNavigation && onScrollHint && (
+          <div className="mt-12 w-full max-w-lg border-t border-[#1b3f2d]/20 pt-5">
+            <button
+              type="button"
+              onClick={onScrollHint}
+              className="text-left text-sm leading-6 text-neutral-500 transition-colors hover:text-[#1b3f2d]"
+            >
+              继续向下滚动，查看这一步的真实示例
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation'>
+type GuideExamplesIntroProps = Omit<GuideFeatureStepProps, 'nextLabel' | 'onNext' | 'onBack' | 'showNavigation' | 'onScrollHint'>
 
-function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children }: {
+function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children, showScrollHint = false }: {
   intro: GuideExamplesIntroProps
   nextLabel: string
   onNext: () => void
   onBack: () => void
   children: React.ReactNode
+  /** 首个讲解页在正文下方提示继续向下滚动，避免底部进度地图被误解为横向翻页。 */
+  showScrollHint?: boolean
 }) {
-  return (
-    <div className="h-full w-full overflow-y-auto">
-      <div className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
-        <GuideFeatureStep
-          {...intro}
-          nextLabel={nextLabel}
-          onNext={onNext}
-          onBack={onBack}
-          showNavigation={false}
-        />
-      </div>
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-      <div className="mx-auto w-full max-w-[calc(58vw+504px)] px-6 pb-28 pt-6 md:px-10">
-        {children}
-        <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
+  /** 点击提示推进约一屏，避免与首屏高度、示例区负 margin 耦合。 */
+  const handleScrollHint = () => {
+    const container = scrollRef.current
+    if (!container) return
+    container.scrollBy({ top: container.clientHeight * 0.82, behavior: 'smooth' })
+  }
+
+  return (
+    <div className="relative h-full w-full">
+      <div ref={scrollRef} className="h-full w-full overflow-y-auto">
+        <div className="h-[1100px] lg:h-[calc(100vh-4rem)] lg:min-h-[660px]">
+          <GuideFeatureStep
+            {...intro}
+            nextLabel={nextLabel}
+            onNext={onNext}
+            onBack={onBack}
+            showNavigation={false}
+            onScrollHint={showScrollHint ? handleScrollHint : undefined}
+          />
+        </div>
+
+        <div className="mx-auto w-full max-w-[calc(58vw+504px)] px-6 pb-28 pt-6 md:px-10">
+          {children}
+          <GuideNavigation nextLabel={nextLabel} onNext={onNext} onBack={onBack} />
+        </div>
       </div>
     </div>
   )
@@ -397,6 +423,7 @@ function GuideExamplesPage({ intro, nextLabel, onNext, onBack, children }: {
 function AgentChatGuidePage({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   return (
     <GuideExamplesPage
+      showScrollHint
       intro={{
         anchor: { x: 0.073, y: 0.049 },
         arrowMode: 'magnifier',
@@ -558,7 +585,7 @@ function FaqPage({ nextLabel, onNext, onBack, highlight }: { nextLabel: string; 
 }
 
 /** 引导步骤标题（欢迎页独立，不在地图中显示） */
-const STEP_LABELS: Array<{ step: Exclude<OnboardingStep, 'welcome' | 'environment'>; label: string }> = [
+const STEP_LABELS: Array<{ step: Exclude<OnboardingStep, 'welcome'>; label: string }> = [
   { step: 'guide', label: 'Agent / Chat' },
   { step: 'project', label: '项目' },
   { step: 'files', label: '文件' },
@@ -575,7 +602,7 @@ const ADVANCED_STEP_LABELS = STEP_LABELS.slice(3)
 /**
  * 底部进度地图：仅显示当前章节的步骤，并保持章节内的宽松间距。
  */
-function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome' | 'environment'> }) {
+function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome'> }) {
   const isBeginner = BEGINNER_STEP_LABELS.some((step) => step.step === current)
   const visibleSteps = isBeginner ? BEGINNER_STEP_LABELS : ADVANCED_STEP_LABELS
   const activeIdx = visibleSteps.findIndex((step) => step.step === current)
@@ -638,14 +665,11 @@ function ProgressMap({ current }: { current: Exclude<OnboardingStep, 'welcome' |
   )
 }
 
-export function OnboardingView({ onComplete }: OnboardingViewProps) {
-  const [step, setStep] = useState<OnboardingStep>('welcome')
+export function OnboardingView({ onComplete, initialStep = 'welcome' }: OnboardingViewProps) {
+  const [step, setStep] = useState<OnboardingStep>(initialStep)
   const [flash, setFlash] = useState(false)
   const [fading, setFading] = useState(false)
   const [faqBackStep, setFaqBackStep] = useState<'subagent' | 'sideanswer'>('sideanswer')
-  const isWindows = useMemo(() => detectIsWindows(), [])
-  const shellOk = useAtomValue(isShellEnvironmentOkAtom)
-
   const handleFinish = async (openTutorial?: boolean) => {
     await window.electronAPI.updateSettings({
       onboardingCompleted: true,
@@ -687,17 +711,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     setFaqBackStep('subagent')
     transitionTo('faq')
   }
-  const handleNextFromFaq = () => {
-    if (isWindows) {
-      transitionTo('environment')
-    } else {
-      handleFinish()
-    }
-  }
+  const handleNextFromFaq = () => handleFinish()
 
   const currentMapIndex = STEP_LABELS.findIndex((item) => item.step === step)
-  const stepIndex = step === 'environment' ? STEP_LABELS.length + 1 : currentMapIndex + 1
-  const totalSteps = STEP_LABELS.length + (isWindows ? 1 : 0)
+  const stepIndex = currentMapIndex + 1
+  const totalSteps = STEP_LABELS.length
 
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden bg-[#fbf9f7] md:flex-row">
@@ -907,11 +925,10 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               arrowMode: 'none',
               imageSrc: guideMemory,
               highlight: '进阶指南 · 第 3 步',
-              title: '生成你的项目记忆',
+              title: '建立项目地图与协作记忆',
               paragraphs: [
                 <>
-                  <b className="font-medium text-neutral-900">记忆</b>会沉淀项目指令、确定偏好、告知 Agent 你工作流的具体形态，
-                  让后续 Agent 不必每次从零理解你的工作方式。
+                  <b className="font-medium text-neutral-900">项目地图</b>放在两层 AGENTS.md，减少重复探索；<b className="font-medium text-neutral-900">协作记忆</b>只保留你的稳定偏好与避免重犯的经验。
                 </>,
               ],
             }}
@@ -949,58 +966,15 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         {step === 'faq' && (
           <FaqPage
             highlight="进阶指南 · 第 5 步"
-            nextLabel={isWindows ? '下一个' : '开始使用'}
+            nextLabel="开始使用"
             onNext={handleNextFromFaq}
             onBack={() => transitionTo(faqBackStep)}
           />
         )}
 
-        {step === 'environment' && isWindows && (
-          <div className="w-full max-w-xl px-6 py-10 md:px-10">
-            {/* 状态徽章 */}
-            <div className="mb-6 flex items-center gap-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#26583d] text-white">
-                <Check size={13} strokeWidth={3} />
-              </span>
-              <span className="text-sm font-medium text-neutral-500">环境检测</span>
-            </div>
-
-            <h2 className="text-2xl font-light tracking-tight text-neutral-900 md:text-3xl">
-              先检查一下环境
-            </h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              Proma 在 Windows 上需要 Git Bash 或 WSL 才能执行命令
-            </p>
-
-            <div className="mt-6 rounded-sm border border-neutral-200 bg-white p-5 shadow-[4px_4px_0_rgba(30,58,95,0.08)]">
-              <EnvironmentCheckPanel autoDetectOnMount />
-            </div>
-
-            <div className="mt-6 flex items-center justify-between">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => transitionTo('faq')}
-                className="text-neutral-500"
-              >
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                上一个
-              </Button>
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => handleFinish()}
-                  variant={shellOk ? 'default' : 'outline'}
-                >
-                  {shellOk ? '开始使用' : '稍后处理（进入主界面）'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* ===== 底部进度地图（欢迎页不显示） ===== */}
-      {step !== 'welcome' && step !== 'environment' && <ProgressMap current={step} />}
+      {step !== 'welcome' && <ProgressMap current={step} />}
 
       {step === 'subagent' && (
         <button

@@ -1,5 +1,4 @@
 import { getChannelById, listChannels } from './channel-manager'
-import { isAgentCompatibleProvider } from '@proma/shared'
 import type { ProviderType } from '@proma/shared'
 
 export interface AvailableAgentModel {
@@ -19,8 +18,6 @@ export function assertEnabledModelForChannel(input: {
   channelId?: string
   modelId?: string
   purpose: string
-  /** 目标 Agent runtime；传入 'claude' 时额外校验渠道协议兼容 Claude Agent Core。 */
-  agentRuntime?: string
 }): string | undefined {
   if (input.modelId == null) return undefined
 
@@ -35,10 +32,6 @@ export function assertEnabledModelForChannel(input: {
   const channel = getChannelById(input.channelId)
   if (!channel || !channel.enabled) {
     throw new Error(`${input.purpose}引用的渠道不存在或未启用: ${input.channelId}`)
-  }
-
-  if (input.agentRuntime === 'claude' && !isAgentCompatibleProvider(channel.provider)) {
-    throw new Error(`${input.purpose}渠道 ${channel.name} (${channel.provider}) 不兼容 Claude Agent Core，请选择 Anthropic 兼容协议渠道或改用 Pi runtime`)
   }
 
   const model = channel.models.find((item) => item.id === modelId && item.enabled)
@@ -81,12 +74,10 @@ export function listEnabledAgentModelsForChannel(
  *
  * 每个渠道独立成一条记录；渠道的 apiKey 保持加密状态，不在此处解密。
  *
- * @param agentRuntime 可选；传入 'claude' 时仅返回兼容 Claude Agent Core 的渠道，避免 Agent 选中后运行前才发现不兼容。
  */
-export function listAllEnabledAgentModels(agentRuntime?: string): AvailableAgentModelsForChannel[] {
+export function listAllEnabledAgentModels(): AvailableAgentModelsForChannel[] {
   return listChannels()
     .filter((channel) => channel.enabled)
-    .filter((channel) => agentRuntime !== 'claude' || isAgentCompatibleProvider(channel.provider))
     .map((channel) => ({
       channelId: channel.id,
       channelName: channel.name,

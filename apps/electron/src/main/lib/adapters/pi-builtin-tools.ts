@@ -1,19 +1,18 @@
 /**
  * Pi Runtime 内置 MCP 工具桥接层
  *
- * Claude SDK 用 sdk.createSdkMcpServer() + Zod schema 注册 MCP 工具；
  * Pi SDK 用 sdk.defineTool() + TypeBox schema 注册 customTools。
  *
  * 本模块复用底层 service 函数（automation-manager、collaboration 等），
- * 用 Pi ToolDefinition 格式暴露相同的业务能力，避免 Pi runtime 下这些工具缺失。
+ * 用 Pi ToolDefinition 格式暴露业务能力。
  */
 
 import { Type } from 'typebox'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
-import type { AgentRuntime, PromaPermissionMode } from '@proma/shared'
 import type {
   CreateAutomationInput,
+  PromaPermissionMode,
   UpdateAutomationInput,
 } from '@proma/shared'
 import {
@@ -29,7 +28,11 @@ import {
 } from '../automation-scheduler'
 import { getAgentSessionMeta } from '../agent-session-manager'
 import { isBuiltinMcpUserEnabled } from '../builtin-mcp/settings'
+import { downloadInstaller, launchInstaller } from '../installer-downloader'
+import { fetchInstallerManifest, findInstallerSource } from '../installer-manifest'
+import { shouldOfferWindowsShellInstaller } from './windows-shell-installer'
 import { buildPiCollaborationTools } from '../agent-collaboration-tools'
+import { buildPiNanoBananaTools } from '../chat-tools/nano-banana-mcp'
 import { getVisionRelayRouteLabel, inspectImageWithVisionRelay, isVisionRelayConfigured, isVisionRelayEligibleForModel } from '../vision-relay-service'
 import {
   listTodos,
@@ -75,13 +78,16 @@ export interface PiBuiltinToolsContext {
   sessionId: string
   channelId: string
   modelId?: string
-  agentRuntime?: AgentRuntime
   workspaceId?: string
   workspaceSlug?: string
+  /** 当前 Agent 工作目录；生图产物保存于此，参考图相对路径也以此解析。 */
+  agentCwd?: string
   /** 图片外发前必须校验在这些已授权目录内。 */
   allowedRoots?: string[]
   permissionMode?: PromaPermissionMode
   triggeredBy?: 'user' | 'automation' | 'delegation'
+  /** Windows 设备是否已有可供 Pi Bash 使用的 Git Bash 或 WSL。 */
+  windowsShellAvailable?: boolean
 }
 
 function jsonToolResult(payload: unknown): AgentToolResult<unknown> {
@@ -119,6 +125,12 @@ function numberOrUndefined(value: unknown): number | undefined {
 function assertPlanningDeleteAllowed(ctx: PiBuiltinToolsContext): void {
   if (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation') {
     throw new Error('定时任务和协作子 Agent 不能删除本地规划数据，请由用户主会话发起并确认。')
+  }
+}
+/** 系统来源项会触发 EventKit 外部副作用；后台来源无法取得实时确认，必须拒绝。 */
+function assertExternalPlanningWriteAllowed(ctx: PiBuiltinToolsContext, isExternal: boolean): void {
+  if (isExternal && (ctx.triggeredBy === 'automation' || ctx.triggeredBy === 'delegation')) {
+    throw new Error('定时任务和协作子 Agent 不能修改已连接的系统项目；请由用户主会话说明变更并确认。')
   }
 }
 
@@ -214,7 +226,6 @@ function summarizeAutomation(a: import('@proma/shared').Automation, includeHisto
     scheduledAt: a.scheduledAt,
     maxRuns: a.maxRuns,
     runCount: a.runCount ?? 0,
-    agentRuntime: a.agentRuntime ?? 'claude',
     completedAt: a.completedAt,
     sessionMode: a.sessionMode,
     workspaceId: a.workspaceId,
@@ -270,9 +281,6 @@ function validateScheduleFields(input: Partial<CreateAutomationInput | UpdateAut
   }
   if (input.maxRuns !== undefined && (!isFiniteInt(input.maxRuns) || input.maxRuns < 1)) {
     throw new Error(`非法的 maxRuns: ${String(input.maxRuns)}（应为 ≥1 的整数）`)
-  }
-  if (input.agentRuntime !== undefined && input.agentRuntime !== 'claude' && input.agentRuntime !== 'pi') {
-    throw new Error(`非法的 agentRuntime: ${String(input.agentRuntime)}`)
   }
   if (input.sessionMode !== undefined && input.sessionMode !== 'daily' && input.sessionMode !== 'reuse') {
     throw new Error(`非法的 sessionMode: ${String(input.sessionMode)}`)
@@ -334,7 +342,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '一次性任务的绝对触发时间（毫秒时间戳）；scheduleType=once 时必填' })),
         maxRuns: Type.Optional(Type.Number({ description: '最大运行次数上限；达到后任务自动停用' })),
         active: Type.Optional(Type.Boolean({ description: '创建后是否启用，默认 true' })),
-        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '运行该任务的 Agent runtime；不传则继承当前会话 runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')], { description: '会话模式' })),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -352,7 +359,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           dayOfMonth: args.dayOfMonth as number | undefined,
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
-          agentRuntime: (args.agentRuntime as AgentRuntime | undefined) ?? ctx.agentRuntime,
           channelId: ctx.channelId,
           modelId: ctx.modelId,
           workspaceId: ctx.workspaceId,
@@ -403,7 +409,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
         scheduledAt: Type.Optional(Type.Number({ description: '新的一次性触发时间（毫秒时间戳）' })),
         maxRuns: Type.Optional(Type.Number({ description: '新的最大运行次数上限' })),
         active: Type.Optional(Type.Boolean({ description: '启用或暂停任务' })),
-        agentRuntime: Type.Optional(Type.Union([Type.Literal('claude'), Type.Literal('pi')], { description: '新的 Agent runtime' })),
         sessionMode: Type.Optional(Type.Union([Type.Literal('daily'), Type.Literal('reuse')])),
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -422,7 +427,6 @@ function buildAutomationTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefin
           scheduledAt: args.scheduledAt as number | undefined,
           maxRuns: args.maxRuns as number | undefined,
           active: args.active as boolean | undefined,
-          agentRuntime: args.agentRuntime as AgentRuntime | undefined,
           sessionMode: args.sessionMode as 'daily' | 'reuse' | undefined,
         }
         if (input.name !== undefined) assertNonBlank(input.name, 'name')
@@ -487,7 +491,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
   return [
     sdk.defineTool({
       name: 'mcp__planning__list_todos', label: '列出 Todo',
-      description: '列出 Proma 本地 Todo。适合在安排工作、检查今天待办、维护任务状态前使用。仅 Pi Agent 可用。',
+      description: '列出 Proma Todo（包含用户明确连接的系统提醒事项投影）。返回项的 nativeOrigin 表示编辑会写回系统；对该类项单项编辑/完成先征得用户确认，批量修改和删除必须明确确认。仅 Pi Agent 可用。',
       parameters: Type.Object({
         status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])),
         dueBefore: Type.Optional(Type.Number({ description: '仅返回此截止时间之前的 Todo，Unix 毫秒时间戳' })),
@@ -526,11 +530,13 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__update_todo', label: '更新 Todo',
-      description: '更新 Todo 的标题、说明、优先级或截止时间。仅 Pi Agent 可用。',
+      description: '更新 Todo 的标题、说明、优先级或截止时间。若 Todo 含 nativeOrigin，此操作会写回用户已连接的系统提醒事项：单项编辑/完成先征得用户确认；批量修改必须明确确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')])), dueAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('completed')])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
-        const updated = updateTodo({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: args.dueAt as number | null | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, status: args.status as 'open' | 'completed' | undefined })
+        const id = assertNonBlank(args.id as string, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getTodo(id)?.nativeOrigin))
+        const updated = updateTodo({ id, title: args.title as string | undefined, notes: args.notes as string | undefined, priority: args.priority as 'low' | 'medium' | 'high' | undefined, dueAt: args.dueAt as number | null | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, status: args.status as 'open' | 'completed' | undefined })
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
@@ -541,10 +547,12 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__complete_todo', label: '完成 Todo',
-      description: '将指定 Todo 标记为已完成。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
+      description: '将指定 Todo 标记为已完成。若含 nativeOrigin 会同时完成用户已连接的系统提醒事项；必须先说明该外部副作用并取得用户确认。仅在任务确实完成或用户明确要求完成时使用。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
-        const updated = updateTodo({ id: assertNonBlank((params as { id: string }).id, 'id'), status: 'completed' })
+        const id = assertNonBlank((params as { id: string }).id, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getTodo(id)?.nativeOrigin))
+        const updated = updateTodo({ id, status: 'completed' })
         if (!updated) throw new Error('Todo 不存在')
         touchTodoSession(updated.id, ctx.sessionId)
         const todo = getTodo(updated.id)!
@@ -555,7 +563,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_todo', label: '删除 Todo',
-      description: '删除 Todo。只在用户明确要求删除时使用；不会删除关联草稿或日程。仅 Pi Agent 可用。',
+      description: '删除 Todo。只在用户明确要求删除时使用；含 nativeOrigin 且来源为可写已连接系统提醒事项列表时，会真实删除对应 macOS Reminder，必须先说明该外部副作用并取得用户确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)
@@ -571,7 +579,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__list_calendar_events', label: '列出日程',
-      description: '列出 Proma 本地日程。用于查看指定时间范围的安排。仅 Pi Agent 可用。',
+      description: '列出 Proma 日程（包含用户明确连接的系统日历投影）。nativeOrigin 表示编辑会写回系统；Agent 修改前必须先取得用户确认。仅 Pi Agent 可用。',
       parameters: Type.Object({
         startAt: Type.Optional(Type.Number({ description: '查询范围起点，Unix 毫秒时间戳' })),
         endAt: Type.Optional(Type.Number({ description: '查询范围终点，Unix 毫秒时间戳' })),
@@ -607,11 +615,13 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__update_calendar_event', label: '更新日程',
-      description: '更新日程时间或内容。仅 Pi Agent 可用。',
+      description: '更新日程时间或内容。若日程含 nativeOrigin，会写回用户已连接的系统日历；单项修改先确认，批量修改必须明确确认，只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), notes: Type.Optional(Type.String()), startAt: Type.Optional(Type.Number()), endAt: Type.Optional(Type.Union([Type.Number(), Type.Null()])), allDay: Type.Optional(Type.Boolean()), groupId: Type.Optional(Type.Union([Type.String(), Type.Null()])), tagIds: Type.Optional(Type.Array(Type.String())), todoId: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),
       async execute(_id: string, params: unknown) {
         const args = params as Record<string, unknown>
-        const event = updateCalendarEvent({ id: assertNonBlank(args.id as string, 'id'), title: args.title as string | undefined, notes: args.notes as string | undefined, startAt: args.startAt as number | undefined, endAt: args.endAt as number | null | undefined, allDay: args.allDay as boolean | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, todoId: args.todoId as string | null | undefined })
+        const id = assertNonBlank(args.id as string, 'id')
+        assertExternalPlanningWriteAllowed(ctx, Boolean(getCalendarEvent(id)?.nativeOrigin))
+        const event = updateCalendarEvent({ id, title: args.title as string | undefined, notes: args.notes as string | undefined, startAt: args.startAt as number | undefined, endAt: args.endAt as number | null | undefined, allDay: args.allDay as boolean | undefined, groupId: args.groupId as string | null | undefined, tagIds: args.tagIds as string[] | undefined, todoId: args.todoId as string | null | undefined })
         if (!event) throw new Error('日程不存在')
         broadcastPlanningChanged(['calendar_events', 'reminders'])
         broadcastPlanningAgentOperation({ sessionId: ctx.sessionId, target: 'calendar_event', action: 'updated', title: event.title })
@@ -620,7 +630,7 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
     }),
     sdk.defineTool({
       name: 'mcp__planning__delete_calendar_event', label: '删除日程',
-      description: '删除 Proma 本地日程。只在用户明确要求删除时使用。仅 Pi Agent 可用。',
+      description: '删除日程。只在用户明确要求删除时使用；含 nativeOrigin 且来源为可写已连接系统日历时，会真实删除对应 macOS Calendar 日程，必须先说明该外部副作用并取得用户确认；只读来源会失败。仅 Pi Agent 可用。',
       parameters: Type.Object({ id: Type.String() }),
       async execute(_id: string, params: unknown) {
         assertPlanningDeleteAllowed(ctx)
@@ -739,6 +749,41 @@ function buildPlanningTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinit
   ] as unknown as ToolDefinition[]
 }
 
+// ===== Windows Shell 安装 =====
+
+function buildWindowsShellInstallerTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
+  if (!shouldOfferWindowsShellInstaller(process.platform, ctx.windowsShellAvailable, ctx.triggeredBy)) {
+    return []
+  }
+
+  return [
+    sdk.defineTool({
+      name: 'InstallWindowsShell',
+      label: '安装 Git Bash',
+      description: 'Use this when the user task truly requires command execution but this Windows device has no Git Bash or WSL. It downloads the official Git for Windows installer, verifies it when a checksum is available, and opens the installer. The user must approve this external installation action and complete the Windows installer before retrying Bash work. Do not use merely to inspect files or answer questions.',
+      promptSnippet: 'InstallWindowsShell: install Git for Windows to provide Git Bash when a task truly needs Bash commands.',
+      parameters: Type.Object({}),
+      async execute() {
+        const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+        const manifest = await fetchInstallerManifest()
+        const source = findInstallerSource(manifest, 'git-for-windows', arch)
+        if (!source) {
+          throw new Error(`未找到当前设备（${arch}）对应的 Git for Windows 安装包`)
+        }
+
+        const result = await downloadInstaller(source, `agent-git-for-windows-${ctx.sessionId}`)
+        await launchInstaller(result.filePath)
+        return jsonToolResult({
+          installer: 'git-for-windows',
+          version: source.version,
+          filePath: result.filePath,
+          message: '已下载并打开 Git for Windows 安装程序。请完成安装后重试原任务；Proma 会在下次运行时自动检测 Git Bash。',
+        })
+      },
+    }),
+  ] as unknown as ToolDefinition[]
+}
+
 // ===== 视觉助手 =====
 
 function buildVisionRelayTools(sdk: PiSdk, ctx: PiBuiltinToolsContext): ToolDefinition[] {
@@ -817,7 +862,7 @@ export async function buildPiBuiltinTools(
     }
   }
 
-  // 任务/日程是 Pi native customTools，Claude runtime 不经此入口，因此天然隔离。
+  // 任务/日程是 Pi native customTools。
   try {
     tools.push(...buildPlanningTools(sdk, ctx))
   } catch (error) {
@@ -837,13 +882,19 @@ export async function buildPiBuiltinTools(
         modelId: ctx.modelId,
         workspaceId: ctx.workspaceId,
         permissionMode: ctx.permissionMode,
-        agentRuntime: ctx.agentRuntime,
         triggeredBy: ctx.triggeredBy,
       })
       tools.push(...collaborationTools as ToolDefinition[])
     } catch (error) {
       console.error('[Pi 桥接] 注入 collaboration 工具失败:', error)
     }
+  }
+
+  // 未配置 Windows Shell 时，按需提供 Git Bash 安装工具；实际下载与拉起安装器仍经过 Agent 权限确认。
+  try {
+    tools.push(...buildWindowsShellInstallerTools(sdk, ctx))
+  } catch (error) {
+    console.error('[Pi 桥接] 注入 Windows Shell 安装工具失败:', error)
   }
 
   // 视觉助手仅在明确不支持视觉的 DeepSeek V4 用户会话中按需出现。
@@ -853,7 +904,17 @@ export async function buildPiBuiltinTools(
     console.error('[Pi 桥接] 注入视觉助手失败:', error)
   }
 
-  // nano-banana 当前走外部 MCP stdio，不需要 in-process 桥接
+  if (isBuiltinMcpUserEnabled('nano-banana')) {
+    try {
+      tools.push(...buildPiNanoBananaTools(sdk, {
+        sessionId: ctx.sessionId,
+        agentCwd: ctx.agentCwd,
+        allowedRoots: ctx.allowedRoots,
+      }))
+    } catch (error) {
+      console.error('[Pi 桥接] 注入 nano-banana 工具失败:', error)
+    }
+  }
 
   const cloudTools = buildPromaCloudTools(sdk, ctx)
   tools.push(...cloudTools)

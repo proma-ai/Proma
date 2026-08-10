@@ -66,7 +66,7 @@ import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import type { NotificationSoundType } from '@/types/settings'
 import { toast } from 'sonner'
 import type { AgentStreamEvent, AgentStreamCompletePayload, AgentEvent, AgentStreamPayload, SDKAssistantMessage, SDKUserMessage, SDKSystemMessage, SDKContentBlock, SDKUserContentBlock, PromaEvent, AgentSessionMeta, ProviderType } from '@proma/shared'
-import { inferAgentSdkContextWindow, inferContextWindow } from '@proma/shared'
+import { inferContextWindow } from '@proma/shared'
 import { buildExternalAgentRunActivation, shouldActivateExternalAgentRun } from '@/lib/external-agent-run'
 import { upsertAgentSession, mergeFetchedAgentSessions } from '@/lib/agent-session-list'
 import {
@@ -261,10 +261,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         // 因为部分端点（如智谱）会在 message.model 里剥掉 [1m] 等规格后缀，
         // 导致 glm-x-preview[1m] 被识别成 glm-x-preview（200K）。
         const modelName = aMsg._channelModelId ?? aMsg.message.model
-        const provider = aMsg._channelProvider
-        const fallbackWindow = provider
-          ? inferAgentSdkContextWindow(modelName, provider)
-          : inferContextWindow(modelName)
+        const fallbackWindow = inferContextWindow(modelName)
         events.push({
           type: 'usage_update',
           usage: {
@@ -319,14 +316,10 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       // 多 entry 场景（Task 子 Agent 等）：取最大 contextWindow，
       // 避免子 Agent 的小窗口覆盖主模型的大窗口、导致指示器飘忽。
       let contextWindow: number | undefined
-      const fallbackWindow = rMsg._channelProvider
-        ? inferAgentSdkContextWindow(rMsg._channelModelId, rMsg._channelProvider)
-        : inferContextWindow(rMsg._channelModelId)
+      const fallbackWindow = inferContextWindow(rMsg._channelModelId)
       if (rMsg.modelUsage) {
         for (const [modelId, info] of Object.entries(rMsg.modelUsage)) {
-          const modelFallbackWindow = rMsg._channelProvider
-            ? inferAgentSdkContextWindow(rMsg._channelModelId ?? modelId, rMsg._channelProvider)
-            : inferContextWindow(rMsg._channelModelId ?? modelId)
+          const modelFallbackWindow = inferContextWindow(rMsg._channelModelId ?? modelId)
           const candidate = Math.max(info?.contextWindow ?? 0, modelFallbackWindow ?? 0) || undefined
           if (candidate && (contextWindow === undefined || candidate > contextWindow)) {
             contextWindow = candidate
@@ -655,31 +648,12 @@ export function useGlobalAgentListeners(): void {
         }
       }
 
-      // 检查文件是否落在当前会话的 diff scope 内（与 getUnstagedChanges 的 candidates 对齐）
-      // 注：未纳入 dirPath，因为 DiffChangesList 调用时 dirPath 始终等于 sessionPath
-      // 路径分隔符统一为正斜杠，避免 Windows 下 client 与服务端（path.sep='\\'）方向不一致导致反向错配
-      const toForwardSlash = (p: string) => p.replace(/\\/g, '/')
-      const sessionScopePaths = uniqueTruthyPaths([
-        sessionPath,
-        workspaceFilesPath,
-        ...sessionAttachedDirs,
-        ...workspaceAttachedDirs,
-      ]).map(toForwardSlash)
-      const absTarget = toForwardSlash(
-        isAbsolutePath(targetPath)
-          ? targetPath
-          : (sessionPath ? `${sessionPath.replace(/[/\\]+$/, '')}/${targetPath}` : targetPath)
-      )
-      const inDiffScope = sessionScopePaths.some((root) => {
-        const r = root.replace(/\/+$/, '') + '/'
-        return absTarget === root || absTarget.startsWith(r)
-      })
-
+      // 右侧改动面板应记录 Agent 实际写入的所有路径；会话附件只约束初始上下文，
+      // 不应让已完成的外部文件操作从用户可见的变更记录中消失。
       return {
         filePath: targetPath,
         dirPath: dirPath || undefined,
         previewOnly,
-        inDiffScope,
         basePaths: basePaths.length > 0 ? basePaths : undefined,
       }
     }
@@ -723,6 +697,7 @@ export function useGlobalAgentListeners(): void {
             .then((sessions) => store.set(agentSessionsAtom, (prev) => mergeFetchedAgentSessions(prev, sessions)))
             .catch(console.error)
         }
+
 
         // 如果收到未知会话的事件（跨工作区场景），立即刷新会话列表
         const knownSessions = store.get(agentSessionsAtom)
@@ -962,12 +937,16 @@ export function useGlobalAgentListeners(): void {
               const writtenPath = entry.path
               pendingWriteTools.delete(event.toolUseId)
               if (event.isError) continue
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              // 相对路径的 cwd 由 Agent 决定，不能按 Electron cwd 错配到别的仓库；改为保守全量失效。
+              const cacheInvalidationPath = writtenPath && isAbsolutePath(writtenPath) ? writtenPath : undefined
+              void window.electronAPI.invalidateGitDiffCache(cacheInvalidationPath).finally(() => {
+                store.set(agentDiffRefreshVersionAtom, (prev) => {
+                  const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+                })
               })
               if (writtenPath) {
                 buildWrittenFilePreviewInfo(sessionId, writtenPath).then((previewFile) => {
-                  if (!previewFile || !previewFile.inDiffScope) return
+                  if (!previewFile) return
 
                   store.set(agentDiffUnseenChangesAtom, (prev) => {
                     const m = new Map(prev); m.set(sessionId, true); return m
@@ -1013,8 +992,10 @@ export function useGlobalAgentListeners(): void {
             // Bash git 突变命令完成时，仅刷新 diff 列表（不标记 unseen，避免红点）
             if (pendingGitMutateTools.has(event.toolUseId)) {
               pendingGitMutateTools.delete(event.toolUseId)
-              store.set(agentDiffRefreshVersionAtom, (prev) => {
-                const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+              void window.electronAPI.invalidateGitDiffCache().finally(() => {
+                store.set(agentDiffRefreshVersionAtom, (prev) => {
+                  const m = new Map(prev); m.set(sessionId, (prev.get(sessionId) ?? 0) + 1); return m
+                })
               })
             }
           } else if (event.type === 'shell_killed') {
@@ -1158,7 +1139,7 @@ export function useGlobalAgentListeners(): void {
         }
 
         // 发送桌面通知（仅真正成功完成时播放提示音，错误/中断/异常完成不伪装成完成）
-        const completionSession = store.get(agentSessionsAtom)
+        const completionSession = data.session ?? store.get(agentSessionsAtom)
           .find((session) => session.id === data.sessionId)
         const enabled = store.get(notificationsEnabledAtom)
         const soundEnabled = store.get(notificationSoundEnabledAtom)
@@ -1217,6 +1198,7 @@ export function useGlobalAgentListeners(): void {
           activeTabId: store.get(activeTabIdAtom),
           currentAgentSessionId: currentSessionId,
           sessionId: data.sessionId,
+          session: completionSession,
           documentHasFocus: document.hasFocus(),
         })
         if (completionMarkers.markUnviewedCompleted && !backgroundTasksPending) {
@@ -1370,7 +1352,7 @@ export function useGlobalAgentListeners(): void {
         }
         store.set(agentPendingPromptAtom, {
           sessionId: session.id,
-          message: buildTodoAgentPrompt(todo.id, session.agentRuntime === 'pi'),
+          message: buildTodoAgentPrompt(todo.id, true),
           mentionedTodoIds: [todo.id],
         })
       })
@@ -1423,10 +1405,13 @@ export function useGlobalAgentListeners(): void {
     const HASH_MAX = 100
     let focusCheckSeq = 0
     const bumpDiffRefresh = (sessionId: string) => {
-      store.set(agentDiffRefreshVersionAtom, (prev) => {
-        const m = new Map(prev)
-        m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
-        return m
+      // 外部修改的精确路径无法从 focus 事件可靠取得，保守地失效全部缓存。
+      void window.electronAPI.invalidateGitDiffCache().finally(() => {
+        store.set(agentDiffRefreshVersionAtom, (prev) => {
+          const m = new Map(prev)
+          m.set(sessionId, (prev.get(sessionId) ?? 0) + 1)
+          return m
+        })
       })
     }
 

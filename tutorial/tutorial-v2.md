@@ -198,7 +198,7 @@ Proma 现在将文件分为三个不同层级。理解它们的边界，能让 A
 
 更进一步地，你还可以把结构化资料放在项目根目录的专用文件夹中，例如用 JSONL 维护面试、简历或项目资料库。随后在新的会话里继续查询、对比并迭代这份资料。
 
-最后，Skills、MCP、Proma 的 CLAUDE.md 与 Memory 仍由 Proma 工作区管理，不会自动导入本地项目目录中的配置。需要把某项能力接入项目时，请在 Proma 的 Skills / MCP 管理界面显式配置。
+最后，Skills、MCP、Proma 的 AGENTS.md 与 Memory 仍由 Proma 工作区管理，不会自动导入本地项目目录中的配置。需要把某项能力接入项目时，请在 Proma 的 Skills / MCP 管理界面显式配置。
 
 
 

@@ -6,11 +6,11 @@
  * - 工作区目录：~/.proma/agent-workspaces/{slug}/（Agent 的 cwd）
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, openSync, readSync, closeSync, realpathSync, accessSync, constants } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, mkdirSync, statSync, lstatSync, openSync, readSync, closeSync, realpathSync, accessSync, constants } from 'node:fs'
 import { cp as cpAsync, readFile as readFileAsync, writeFile as writeFileAsync } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { rmSyncWithRetry, renameIfDestinationAbsentWithRetry, renameWithRetry } from './fs-retry'
-import { writeJsonFileAtomic, readJsonFileSafe } from './safe-file'
+import { writeJsonFileAtomic, readJsonFileSafe, writeTextFileAtomic } from './safe-file'
 import { randomUUID } from 'node:crypto'
 import { join, resolve, relative, isAbsolute, dirname, basename } from 'node:path'
 import {
@@ -295,7 +295,6 @@ export function createAgentWorkspace(input: string | CreateAgentWorkspaceInput):
 
   try {
     getAgentWorkspacePath(slug)
-    ensurePluginManifest(slug, name)
     copyDefaultSkills(slug, { throwOnError: true })
   } catch (error) {
     const workspacesRoot = resolve(getAgentWorkspacesDir())
@@ -458,18 +457,16 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     }
 
     getAgentWorkspacePath('default')
-    ensurePluginManifest('default', '默认项目')
     copyDefaultSkills('default')
 
     index.workspaces.push(defaultWs)
     writeIndex(index)
 
     console.log('[Agent 工作区] 已创建默认项目')
-  } else {
-    // 迁移兼容：确保已有默认工作区包含 plugin manifest
-    ensurePluginManifest(defaultWs.slug, defaultWs.name)
   }
 
+  migrateWorkspaceInstructionFiles()
+  migrateWorkspaceAutoMemoryDirectories()
   return defaultWs
 }
 
@@ -630,29 +627,6 @@ function compareSemver(a: string, b: string): number {
     if (diff !== 0) return diff
   }
   return 0
-}
-
-// ===== Plugin Manifest（SDK 插件发现） =====
-
-/** 确保工作区包含 .claude-plugin/plugin.json，SDK 需要此文件发现 skills */
-export function ensurePluginManifest(workspaceSlug: string, workspaceName: string): void {
-  const wsPath = getAgentWorkspacePath(workspaceSlug)
-  const pluginDir = join(wsPath, '.claude-plugin')
-  const manifestPath = join(pluginDir, 'plugin.json')
-
-  if (existsSync(manifestPath)) return
-
-  if (!existsSync(pluginDir)) {
-    mkdirSync(pluginDir, { recursive: true })
-  }
-
-  const manifest = {
-    name: `proma-workspace-${workspaceSlug}`,
-    version: '1.0.0',
-  }
-
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
-  console.log(`[Agent 工作区] 已创建 plugin manifest: ${workspaceSlug}`)
 }
 
 // ===== MCP 配置管理 =====
@@ -1184,11 +1158,190 @@ const SKILL_FILE_SIZE_LIMIT = 10 * 1024 * 1024
 /** 文件树递归深度上限，防止异常深嵌套 */
 const SKILL_TREE_MAX_DEPTH = 8
 
-const WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
-const AUTO_MEMORY_DIR = '.claude/memory'
+const WORKSPACE_AGENTS_MD = 'AGENTS.md'
+const LEGACY_WORKSPACE_CLAUDE_MD = 'CLAUDE.md'
+const AUTO_MEMORY_DIR = 'memory'
+const LEGACY_AUTO_MEMORY_DIR = '.claude/memory'
 const AUTO_MEMORY_INDEX = 'MEMORY.md'
 
-function fileSummary(absPath: string): WorkspaceMemorySummary['claudeMd'] {
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+function isRegularDirectory(path: string): boolean {
+  try {
+    const stat = lstatSync(path)
+    return stat.isDirectory() && !stat.isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 将 Proma 受管工作区的旧指令文件安全地迁移到 AGENTS.md。
+ *
+ * 迁移按工作区独立且幂等执行：绝不合并或覆盖内容不同的双文件，
+ * 确保升级过程中每条既有规则始终至少保留一份完整副本。
+ */
+export function migrateWorkspaceInstructionFiles(): void {
+  const index = readIndex()
+
+  for (const workspace of index.workspaces) {
+    const workspaceRoot = getAgentWorkspacePath(workspace.slug)
+    const legacyPath = join(workspaceRoot, LEGACY_WORKSPACE_CLAUDE_MD)
+    const agentsPath = join(workspaceRoot, WORKSPACE_AGENTS_MD)
+    const legacyExists = existsSync(legacyPath)
+    const agentsExists = existsSync(agentsPath)
+
+    if (!legacyExists) continue
+    if (!isRegularFile(legacyPath)) {
+      console.warn(`[Agent 工作区] 跳过非普通 legacy 指令文件: ${legacyPath}`)
+      continue
+    }
+    if (agentsExists && !isRegularFile(agentsPath)) {
+      console.warn(`[Agent 工作区] AGENTS.md 不是普通文件，保留 legacy 指令文件: ${agentsPath}`)
+      continue
+    }
+
+    try {
+      if (!agentsExists) {
+        if (renameIfDestinationAbsentWithRetry(legacyPath, agentsPath)) {
+          console.log(`[Agent 工作区] 已迁移工作区指令: ${workspace.slug}/${LEGACY_WORKSPACE_CLAUDE_MD} → ${WORKSPACE_AGENTS_MD}`)
+        } else {
+          console.warn(`[Agent 工作区] 迁移期间目标已出现，保留 legacy 指令文件下次重试: ${workspace.slug}`)
+        }
+        continue
+      }
+
+      const legacyContent = readFileSync(legacyPath)
+      const agentsContent = readFileSync(agentsPath)
+      if (legacyContent.equals(agentsContent)) {
+        rmSyncWithRetry(legacyPath, { force: true })
+        console.log(`[Agent 工作区] 已清理重复 legacy 指令文件: ${workspace.slug}/${LEGACY_WORKSPACE_CLAUDE_MD}`)
+      } else {
+        console.warn(`[Agent 工作区] 检测到指令文件冲突，已保留两份文件等待用户处理: ${workspace.slug}`)
+      }
+    } catch (error) {
+      console.warn(`[Agent 工作区] 迁移工作区指令失败，已保留原文件 (${workspace.slug}):`, error)
+    }
+  }
+}
+
+interface WorkspaceAutoMemoryMigrationResult {
+  conflictingPaths: string[]
+  issue?: NonNullable<WorkspaceMemorySummary['legacyAutoMemory']>['migrationIssue']
+  symbolicLinkPath?: string
+}
+
+function findSymbolicLinkInDirectory(rootDir: string, currentDir = rootDir): string | undefined {
+  const entries = readdirSync(currentDir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const entryPath = join(currentDir, entry.name)
+    if (entry.isSymbolicLink()) {
+      return relative(rootDir, entryPath).split(/[\\/]/).join('/')
+    }
+    if (entry.isDirectory()) {
+      const nested = findSymbolicLinkInDirectory(rootDir, entryPath)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+/**
+ * 将旧版 `.claude/memory/` 迁移到工作区根的 `memory/`。
+ *
+ * 目标目录不存在时使用目录 rename，确保同一卷内迁移原子完成。若用户已经
+ * 创建了新目录，则仅移动不冲突的顶层条目；冲突内容继续保留在旧目录，交给
+ * 能力中心提示用户处理，绝不覆盖或悄悄合并长期记忆。检测到符号链接或文件
+ * 系统错误时安全中止，避免将受管根目录扩展到工作区外。
+ */
+function migrateWorkspaceAutoMemoryDirectory(workspaceSlug: string): WorkspaceAutoMemoryMigrationResult | undefined {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
+  const legacyDir = join(workspaceRoot, LEGACY_AUTO_MEMORY_DIR)
+  const memoryDir = join(workspaceRoot, AUTO_MEMORY_DIR)
+
+  if (!existsSync(legacyDir)) return undefined
+  if (!isRegularDirectory(legacyDir)) {
+    console.warn(`[Agent 工作区] 旧记忆路径不是普通目录，已跳过迁移: ${legacyDir}`)
+    return { conflictingPaths: [], issue: 'legacy_path_invalid' }
+  }
+
+  let symbolicLinkPath: string | undefined
+  try {
+    symbolicLinkPath = findSymbolicLinkInDirectory(legacyDir)
+  } catch (error) {
+    console.warn(`[Agent 工作区] 无法安全扫描旧长期记忆目录，已跳过迁移 (${workspaceSlug}):`, error)
+    return { conflictingPaths: [], issue: 'migration_failed' }
+  }
+  if (symbolicLinkPath) {
+    console.warn(`[Agent 工作区] 旧长期记忆包含符号链接，已跳过迁移: ${legacyDir}/${symbolicLinkPath}`)
+    return { conflictingPaths: [], issue: 'contains_symbolic_link', symbolicLinkPath }
+  }
+
+  if (!existsSync(memoryDir)) {
+    try {
+      if (renameIfDestinationAbsentWithRetry(legacyDir, memoryDir)) {
+        console.log(`[Agent 工作区] 已迁移长期记忆目录: ${workspaceSlug}/${LEGACY_AUTO_MEMORY_DIR} → ${AUTO_MEMORY_DIR}`)
+        return undefined
+      }
+    } catch (error) {
+      console.warn(`[Agent 工作区] 迁移长期记忆目录失败，已保留旧目录 (${workspaceSlug}):`, error)
+      return { conflictingPaths: [], issue: 'migration_failed' }
+    }
+  }
+
+  if (!isRegularDirectory(memoryDir)) {
+    console.warn(`[Agent 工作区] 新记忆路径不是普通目录，已保留旧目录: ${memoryDir}`)
+    return { conflictingPaths: [], issue: 'target_path_invalid' }
+  }
+
+  const conflicts: string[] = []
+  try {
+    for (const entry of readdirSync(legacyDir)) {
+      const source = join(legacyDir, entry)
+      const target = join(memoryDir, entry)
+      if (existsSync(target)) {
+        conflicts.push(entry)
+        continue
+      }
+      try {
+        if (!renameIfDestinationAbsentWithRetry(source, target)) {
+          conflicts.push(entry)
+        }
+      } catch (error) {
+        console.warn(`[Agent 工作区] 迁移长期记忆条目失败，已保留旧条目 (${workspaceSlug}/${entry}):`, error)
+        return { conflictingPaths: conflicts.sort(), issue: 'migration_failed' }
+      }
+    }
+
+    if (readdirSync(legacyDir).length === 0) {
+      rmSyncWithRetry(legacyDir, { recursive: true, force: true })
+      console.log(`[Agent 工作区] 已清理空的旧长期记忆目录: ${workspaceSlug}/${LEGACY_AUTO_MEMORY_DIR}`)
+      return undefined
+    }
+  } catch (error) {
+    console.warn(`[Agent 工作区] 扫描旧长期记忆目录失败，已保留旧目录 (${workspaceSlug}):`, error)
+    return { conflictingPaths: conflicts.sort(), issue: 'migration_failed' }
+  }
+
+  return { conflictingPaths: conflicts.sort() }
+}
+
+/** 在应用启动时迁移全部已知工作区；重复调用不会覆盖新目录内容。 */
+export function migrateWorkspaceAutoMemoryDirectories(): void {
+  const index = readIndex()
+  for (const workspace of index.workspaces) {
+    migrateWorkspaceAutoMemoryDirectory(workspace.slug)
+  }
+}
+
+function fileSummary(absPath: string): WorkspaceMemorySummary['agentsMd'] {
   if (!existsSync(absPath)) {
     return { exists: false, path: absPath, size: 0 }
   }
@@ -1201,11 +1354,12 @@ function fileSummary(absPath: string): WorkspaceMemorySummary['claudeMd'] {
   }
 }
 
-export function getWorkspaceClaudeMdPath(workspaceSlug: string): string {
-  return join(getAgentWorkspacePath(workspaceSlug), WORKSPACE_CLAUDE_MD)
+export function getWorkspaceAgentsMdPath(workspaceSlug: string): string {
+  return join(getAgentWorkspacePath(workspaceSlug), WORKSPACE_AGENTS_MD)
 }
 
 function getWorkspaceAutoMemoryPath(workspaceSlug: string): string {
+  migrateWorkspaceAutoMemoryDirectory(workspaceSlug)
   return join(getAgentWorkspacePath(workspaceSlug), AUTO_MEMORY_DIR)
 }
 
@@ -1213,6 +1367,8 @@ export function getWorkspaceAutoMemoryDir(workspaceSlug: string): string {
   const dir = getWorkspaceAutoMemoryPath(workspaceSlug)
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
+  } else if (!isRegularDirectory(dir)) {
+    throw new Error(`长期记忆路径不是目录: ${dir}`)
   }
   return dir
 }
@@ -1311,8 +1467,11 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
       })
     } else if (entry.isFile()) {
       let size = 0
+      let modifiedAt: number | undefined
       try {
-        size = statSync(absPath).size
+        const stat = statSync(absPath)
+        size = stat.size
+        modifiedAt = stat.mtimeMs
       } catch {
         // ignore
       }
@@ -1321,6 +1480,7 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
         name: entry.name,
         type: 'file',
         size,
+        modifiedAt,
         isText: !isLikelyBinaryFile(absPath, size),
       })
     }
@@ -1335,40 +1495,69 @@ function buildMemoryFileTree(rootDir: string, currentDir: string, depth: number)
   return nodes
 }
 
+function getWorkspaceInstructionConflict(workspaceSlug: string): WorkspaceMemorySummary['instructionConflict'] {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
+  const legacyPath = join(workspaceRoot, LEGACY_WORKSPACE_CLAUDE_MD)
+  const agentsPath = join(workspaceRoot, WORKSPACE_AGENTS_MD)
+  if (!isRegularFile(legacyPath) || !isRegularFile(agentsPath)) return undefined
+
+  try {
+    return readFileSync(legacyPath).equals(readFileSync(agentsPath))
+      ? undefined
+      : { legacyPath, agentsPath }
+  } catch (error) {
+    console.warn(`[Agent 工作区] 读取指令迁移冲突状态失败 (${workspaceSlug}):`, error)
+    return undefined
+  }
+}
+
 export function getWorkspaceMemorySummary(workspaceSlug: string): WorkspaceMemorySummary {
+  const workspaceRoot = getAgentWorkspacePath(workspaceSlug)
   const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  const legacyDir = join(workspaceRoot, LEGACY_AUTO_MEMORY_DIR)
+  const legacyMigration = existsSync(legacyDir) ? migrateWorkspaceAutoMemoryDirectory(workspaceSlug) : undefined
+  const instructionConflict = getWorkspaceInstructionConflict(workspaceSlug)
   return {
-    claudeMd: fileSummary(getWorkspaceClaudeMdPath(workspaceSlug)),
+    agentsMd: fileSummary(getWorkspaceAgentsMdPath(workspaceSlug)),
+    ...(instructionConflict && { instructionConflict }),
+    ...(legacyMigration && {
+      legacyAutoMemory: {
+        directory: legacyDir,
+        conflictingPaths: legacyMigration.conflictingPaths,
+        ...(legacyMigration.issue && { migrationIssue: legacyMigration.issue }),
+        ...(legacyMigration.symbolicLinkPath && { symbolicLinkPath: legacyMigration.symbolicLinkPath }),
+      },
+    }),
     autoMemory: collectAutoMemorySummary(memoryDir),
   }
 }
 
-export function readWorkspaceClaudeMd(workspaceSlug: string): SkillFileContent {
-  const abs = getWorkspaceClaudeMdPath(workspaceSlug)
+export function readWorkspaceAgentsMd(workspaceSlug: string): SkillFileContent {
+  const abs = getWorkspaceAgentsMdPath(workspaceSlug)
   if (!existsSync(abs)) {
-    return { relativePath: WORKSPACE_CLAUDE_MD, isText: true, size: 0, content: '' }
+    return { relativePath: WORKSPACE_AGENTS_MD, isText: true, size: 0, content: '' }
   }
   const st = statSync(abs)
-  if (!st.isFile()) throw new Error(`${WORKSPACE_CLAUDE_MD} 不是文件`)
+  if (!st.isFile()) throw new Error(`${WORKSPACE_AGENTS_MD} 不是文件`)
   if (st.size > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`文件过大（${(st.size / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
   }
   const binary = isLikelyBinaryFile(abs, st.size)
   return {
-    relativePath: WORKSPACE_CLAUDE_MD,
+    relativePath: WORKSPACE_AGENTS_MD,
     isText: !binary,
     size: st.size,
     content: binary ? undefined : readFileSync(abs, 'utf-8'),
   }
 }
 
-export function writeWorkspaceClaudeMd(workspaceSlug: string, content: string): void {
+export function writeWorkspaceAgentsMd(workspaceSlug: string, content: string): void {
   const byteLen = Buffer.byteLength(content, 'utf-8')
   if (byteLen > SKILL_FILE_SIZE_LIMIT) {
     throw new Error(`内容过大（${(byteLen / 1024 / 1024).toFixed(2)} MB），超过 10 MB 限制`)
   }
-  writeFileSync(getWorkspaceClaudeMdPath(workspaceSlug), content, 'utf-8')
-  console.log(`[Agent 工作区] 已更新工作区 CLAUDE.md: ${workspaceSlug}`)
+  writeTextFileAtomic(getWorkspaceAgentsMdPath(workspaceSlug), content)
+  console.log(`[Agent 工作区] 已更新工作区 AGENTS.md: ${workspaceSlug}`)
 }
 
 export function listWorkspaceAutoMemoryFiles(workspaceSlug: string): SkillFileNode[] {
@@ -1410,8 +1599,8 @@ export function writeWorkspaceAutoMemoryFile(workspaceSlug: string, relativePath
   if (!existsSync(parent)) {
     mkdirSync(parent, { recursive: true })
   }
-  writeFileSync(abs, content, 'utf-8')
-  console.log(`[Agent 工作区] 已更新 auto memory 文件: ${workspaceSlug}/${relativePath}`)
+  writeTextFileAtomic(abs, content)
+  console.log(`[Agent 工作区] 已更新长期记忆文件: ${workspaceSlug}/${relativePath}`)
 }
 
 /** 把相对路径限制在 Skill 根目录内，并拒绝直接覆盖 SKILL.md */
@@ -1630,6 +1819,12 @@ interface WorkspaceConfig {
   attachedDirectories?: string[]
   attachedFiles?: string[]
   worktreeRepos?: import('@proma/shared').WorkspaceWorktreeRepo[]
+  /** User consent for Agent-initiated maintenance of the two AGENTS.md files. */
+  projectKnowledgeMaintenanceApproved?: boolean
+  /** Internal scheduling metadata only; Markdown remains the long-term memory source. */
+  memoryReview?: {
+    lastPromptAt?: number
+  }
 }
 
 function getWorkspaceConfigPath(workspaceSlug: string): string {
@@ -1656,6 +1851,17 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
       worktreeRepos: Array.isArray(data.worktreeRepos)
         ? data.worktreeRepos.filter((r) => r && typeof r.name === 'string' && typeof r.repoPath === 'string' && typeof r.worktreesPath === 'string')
         : undefined,
+      projectKnowledgeMaintenanceApproved: data.projectKnowledgeMaintenanceApproved === true ? true : undefined,
+      // Read the prior public setting only to preserve its cooldown timestamp; its
+      // interval is intentionally ignored after switching to the fixed internal cadence.
+      memoryReview: (() => {
+        const review = data.memoryReview && typeof data.memoryReview === 'object'
+          ? data.memoryReview as { lastPromptAt?: unknown }
+          : (data as { memoryRefresh?: unknown }).memoryRefresh && typeof (data as { memoryRefresh?: unknown }).memoryRefresh === 'object'
+            ? (data as { memoryRefresh: { lastPromptAt?: unknown } }).memoryRefresh
+            : undefined
+        return typeof review?.lastPromptAt === 'number' ? { lastPromptAt: review.lastPromptAt } : undefined
+      })(),
     }
   } catch {
     return {}
@@ -1664,7 +1870,45 @@ function readWorkspaceConfig(workspaceSlug: string): WorkspaceConfig {
 
 function writeWorkspaceConfig(workspaceSlug: string, config: WorkspaceConfig): void {
   const configPath = getWorkspaceConfigPath(workspaceSlug)
-  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  writeJsonFileAtomic(configPath, config)
+}
+
+/** Whether the user explicitly enabled Agent-initiated maintenance of both AGENTS.md files. */
+export function isWorkspaceProjectKnowledgeMaintenanceApproved(workspaceSlug: string): boolean {
+  return readWorkspaceConfig(workspaceSlug).projectKnowledgeMaintenanceApproved === true
+}
+
+/** Records the explicit consent obtained from the “同意并开始建立” guided action. */
+export function approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug: string): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  writeWorkspaceConfig(workspaceSlug, { ...config, projectKnowledgeMaintenanceApproved: true })
+}
+
+/** Internal-only cooldown state for the fixed workspace memory-review cadence. */
+export function getWorkspaceMemoryReviewLastPromptAt(workspaceSlug: string): number | undefined {
+  return readWorkspaceConfig(workspaceSlug).memoryReview?.lastPromptAt
+}
+
+/** An invitation is recorded immediately so the 3-day cooldown survives restarts. */
+export function recordWorkspaceMemoryReviewInvitation(workspaceSlug: string, at: number): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  writeWorkspaceConfig(workspaceSlug, { ...config, memoryReview: { lastPromptAt: at } })
+}
+
+/**
+ * Runtime-only knowledge gaps for conversational guidance. This intentionally reads
+ * file presence rather than maintaining a second memory database.
+ */
+export interface WorkspaceMemoryGuidance {
+  /** Collaboration profile is a user-facing memory, deliberately separate from the project map. */
+  needsCollaborationProfile: boolean
+}
+
+export function getWorkspaceMemoryGuidance(workspaceSlug: string): WorkspaceMemoryGuidance {
+  const memoryDir = getWorkspaceAutoMemoryPath(workspaceSlug)
+  return {
+    needsCollaborationProfile: !isRegularFile(join(memoryDir, 'user-profile.md')),
+  }
 }
 
 // ===== 工作区级附加目录管理 =====

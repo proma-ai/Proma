@@ -18,6 +18,8 @@ import { leftSidebarWidthAtom } from '@/atoms/sidebar-atoms'
 import { sidebarCollapsedAtom } from '@/atoms/tab-atoms'
 import { automationFormAtom } from '@/atoms/automation-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
+import { useProjectActions } from '@/hooks/useProjectActions'
+import { WorkspaceMemoryChangeObserver } from '@/components/agent-skills/WorkspaceMemoryChangeObserver'
 import { interfaceVariantAtom } from '@/atoms/theme'
 import { settingsOpenAtom } from '@/atoms/settings-tab'
 import { WindowControls } from '@/components/WindowControls'
@@ -46,6 +48,8 @@ export interface AppShellProps {
 
 export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
   const appMode = useAtomValue(appModeAtom)
+  const { workspaces, currentWorkspaceId } = useProjectActions()
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === currentWorkspaceId)
   const currentSessionId = useAtomValue(currentAgentSessionIdAtom)
   const isPanelOpen = useAtomValue(currentSessionSidePanelOpenAtom)
   const automationForm = useAtomValue(automationFormAtom)
@@ -233,6 +237,7 @@ export function AppShell({ contextValue }: AppShellProps): React.ReactElement {
               </div>
             )}
         </div>
+        {currentWorkspace && <WorkspaceMemoryChangeObserver workspaceSlug={currentWorkspace.slug} />}
         {settingsOpen && (
           <div className="absolute inset-0 z-[60]">
             <SettingsPanel onClose={() => setSettingsOpen(false)} />

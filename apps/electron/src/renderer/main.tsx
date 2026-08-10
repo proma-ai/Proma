@@ -26,14 +26,13 @@ import {
 import {
   agentChannelIdAtom,
   agentModelIdAtom,
-  agentChannelIdsAtom,
-  agentRuntimeAtom,
   agentWorkspacesAtom,
   agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
   currentAgentSessionIdAtom,
   workspaceCapabilitiesVersionAtom,
   workspaceFilesVersionAtom,
+  workspaceGitDiffRefreshVersionAtom,
   agentThinkingAtom,
   agentEffortAtom,
   agentMaxBudgetUsdAtom,
@@ -83,7 +82,6 @@ import { GlobalShortcuts } from './components/shortcuts/GlobalShortcuts'
 import { VoiceDictationApp } from './components/voice-dictation/VoiceDictationApp'
 import { TabSwitcher } from './components/tabs/TabSwitcher'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
-import { getEnabledClaudeAgentChannelIds } from './lib/agent-channel-selection'
 import { PromaLogo } from './lib/model-logo'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
 import './styles/globals.css'
@@ -94,11 +92,11 @@ const isQuickTaskWindow = new URLSearchParams(window.location.search).get('windo
 const isVoiceDictationIndicatorWindow = new URLSearchParams(window.location.search).get('window') === 'voice-dictation-indicator'
 const isDetachedPreviewWindow = new URLSearchParams(window.location.search).get('window') === 'detached-preview'
 const isPlanningWindow = new URLSearchParams(window.location.search).get('window') === 'planning'
-const isAgentIslandWindow = new URLSearchParams(window.location.search).get('window') === 'agent-island'
-const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isAgentIslandWindow
+const isWorkspaceMemoryWindow = new URLSearchParams(window.location.search).get('window') === 'workspace-memory'
+const isMainWindow = !isQuickTaskWindow && !isVoiceDictationIndicatorWindow && !isDetachedPreviewWindow && !isPlanningWindow && !isWorkspaceMemoryWindow
 
 // 主窗口和独立规划窗口均由内部面板管理滚动，避免页面本身出现第二层滚动。
-if (isMainWindow || isPlanningWindow) {
+if (isMainWindow || isPlanningWindow || isWorkspaceMemoryWindow) {
   document.documentElement.classList.add('proma-main-window')
 }
 
@@ -172,12 +170,11 @@ function ThemeInitializer(): null {
 function AgentSettingsInitializer(): null {
   const setAgentChannelId = useSetAtom(agentChannelIdAtom)
   const setAgentModelId = useSetAtom(agentModelIdAtom)
-  const setAgentChannelIds = useSetAtom(agentChannelIdsAtom)
-  const setAgentRuntime = useSetAtom(agentRuntimeAtom)
   const setAgentWorkspaces = useSetAtom(agentWorkspacesAtom)
   const setCurrentWorkspaceId = useSetAtom(currentAgentWorkspaceIdAtom)
   const bumpCapabilities = useSetAtom(workspaceCapabilitiesVersionAtom)
   const bumpFiles = useSetAtom(workspaceFilesVersionAtom)
+  const bumpGitDiffRefresh = useSetAtom(workspaceGitDiffRefreshVersionAtom)
   const setThinking = useSetAtom(agentThinkingAtom)
   const setEffort = useSetAtom(agentEffortAtom)
   const setMaxBudget = useSetAtom(agentMaxBudgetUsdAtom)
@@ -217,27 +214,14 @@ function AgentSettingsInitializer(): null {
         store.set(selectedModelAtom, null)
       }
 
-      const defaultAgentRuntime = settings.agentRuntime ?? 'pi'
-      setAgentRuntime(defaultAgentRuntime)
-
-      // 渠道的启用状态是唯一开关：启动时也必须从实际渠道派生 Claude 白名单，
-      // 不能继承旧版独立开关，或把 Pi 专用渠道带入 Claude runtime。
-      const claudeChannelIds = getEnabledClaudeAgentChannelIds(channels)
-      setAgentChannelIds(claudeChannelIds)
-
       const selectedChannel = settings.agentChannelId
         ? channels.find((channel) => channel.id === settings.agentChannelId)
         : undefined
       const selectedChannelIsUsable = selectedChannel?.enabled
-        && (defaultAgentRuntime === 'pi' || claudeChannelIds.includes(selectedChannel.id))
 
       const updates: Parameters<typeof window.electronAPI.updateSettings>[0] = {}
-      const storedClaudeChannelIds = settings.agentChannelIds ?? []
-      const whitelistChanged = claudeChannelIds.length !== storedClaudeChannelIds.length
-        || claudeChannelIds.some((id, index) => id !== storedClaudeChannelIds[index])
-      if (whitelistChanged) updates.agentChannelIds = claudeChannelIds
 
-      // 验证并加载 Agent 默认渠道/模型。Claude runtime 不能恢复到 Pi 专用或已禁用渠道。
+      // 验证并加载 Agent 默认渠道/模型。Pi 可使用任意启用渠道。
       if (settings.agentChannelId && selectedChannelIsUsable) {
         setAgentChannelId(settings.agentChannelId)
         if (settings.agentModelId) setAgentModelId(settings.agentModelId)
@@ -288,7 +272,7 @@ function AgentSettingsInitializer(): null {
       console.error(err)
       setAgentSettingsReady(true) // 即使出错也标记就绪，避免永远阻塞
     })
-  }, [setAgentChannelId, setAgentModelId, setAgentChannelIds, setAgentRuntime, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
+  }, [setAgentChannelId, setAgentModelId, setAgentWorkspaces, setCurrentWorkspaceId, setThinking, setEffort, setMaxBudget, setMaxTurns, setAutomationGroupOrder, setChannels, setChannelsLoaded, setAgentSettingsReady])
 
   // 工作区切换时重置能力缓存，预加载基线
   useEffect(() => {
@@ -332,6 +316,8 @@ function AgentSettingsInitializer(): null {
     })
     const unsubFiles = window.electronAPI.onWorkspaceFilesChanged(() => {
       bumpFiles((v) => v + 1)
+      // watcher 已在主进程失效命中的 repo cache；所有已挂载 Changes 面板由此重新拉取。
+      bumpGitDiffRefresh((v) => v + 1)
       // 外部本地项目目录变动时，主进程在 LIST_WORKSPACES 中重新计算根目录状态。
       // 这里仅响应 watcher 事件刷新一次，避免在侧栏每次渲染时同步访问文件系统。
       window.electronAPI.listAgentWorkspaces().then(setAgentWorkspaces).catch(console.error)
@@ -341,7 +327,7 @@ function AgentSettingsInitializer(): null {
       unsubCapabilities()
       unsubFiles()
     }
-  }, [bumpCapabilities, bumpFiles, currentWorkspaceId, setAgentWorkspaces, workspaces])
+  }, [bumpCapabilities, bumpFiles, bumpGitDiffRefresh, currentWorkspaceId, setAgentWorkspaces, workspaces])
 
   return null
 }
@@ -1115,12 +1101,13 @@ if (isQuickTaskWindow) {
       </React.StrictMode>
     )
   })
-} else if (isAgentIslandWindow) {
-  import('./components/agent-island/AgentIslandApp').then(({ AgentIslandApp }) => {
+} else if (isWorkspaceMemoryWindow) {
+  import('./components/agent-skills/WorkspaceMemoryWindowApp').then(({ WorkspaceMemoryWindowApp }) => {
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <ThemeInitializer />
-        <AgentIslandApp />
+        <WorkspaceMemoryWindowApp />
+        <Toaster position="bottom-right" />
       </React.StrictMode>
     )
   })

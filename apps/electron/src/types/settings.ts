@@ -4,7 +4,7 @@
  * 主题模式、IPC 通道等设置相关定义。
  */
 
-import type { AgentRuntime, EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
+import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, WindowsShellPreference } from '@proma/shared'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
@@ -248,21 +248,16 @@ export type InterfaceVariant = 'classic' | 'modern'
 /** 默认界面风格 */
 export const DEFAULT_INTERFACE_VARIANT: InterfaceVariant = 'modern'
 
-/** 新建 Agent 会话与自动任务的默认 runtime。历史持久化记录缺失 runtime 时仍按 Claude 兼容。 */
-export const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'pi'
-
 /** Markdown 预览字号档位 */
 export type MarkdownFontSize = 'small' | 'medium' | 'large'
 
 /** 默认 Markdown 字号档位 */
 export const DEFAULT_MARKDOWN_FONT_SIZE: MarkdownFontSize = 'medium'
 
-/** Agent 灵动岛偏好。外接/无刘海屏默认不绘制顶部覆盖层。 */
+/** macOS 原生 Agent 灵动岛偏好。 */
 export interface AgentIslandSettings {
   /** 是否启用 Agent / 近期 Todo 日程的灵动岛提醒，默认 true。 */
   enabled?: boolean
-  /** Windows 浮动灵动岛的位置；启动时会自动校正到可见工作区内。 */
-  windowsPosition?: { x: number; y: number }
 }
 
 /**
@@ -287,12 +282,8 @@ export interface AppSettings {
   agentChannelId?: string
   /** Agent 默认模型 ID */
   agentModelId?: string
-  /** Claude Agent 可用渠道 ID 列表（由渠道启用状态与协议兼容性派生） */
-  agentChannelIds?: string[]
   /** Agent 当前工作区 ID */
   agentWorkspaceId?: string
-  /** 新 Agent 会话默认使用的 runtime；历史会话缺省仍按 claude 兼容。 */
-  agentRuntime?: AgentRuntime
   /** Windows 上 Agent Bash 工具的运行环境；默认自动选择 Git Bash，WSL 需用户显式启用。 */
   windowsShellPreference?: WindowsShellPreference
   /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；可拖拽调整） */
@@ -365,7 +356,7 @@ export interface AppSettings {
    * 关闭后不注入任何 Proma 归因，并覆盖 Claude SDK 默认 Co-Authored-By。
    */
   gitAttributionEnabled?: boolean
-  /** Agent 灵动岛偏好（macOS 刘海屏优先，其他平台使用 Electron 降级体验）。 */
+  /** macOS 原生 Agent 灵动岛偏好。 */
   agentIsland?: AgentIslandSettings
   /** 主窗口状态（大小、位置、是否最大化） */
   mainWindowState?: MainWindowState

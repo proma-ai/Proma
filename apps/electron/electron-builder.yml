@@ -17,10 +17,9 @@ directories:
 compression: normal
 
 # ASAR 打包配置
-# 启用 ASAR 归档，将 SDK native binary / Pi native addon 解压到 app.asar.unpacked/ 避免路径问题
+# 启用 ASAR 归档，将 Pi native addon 与其它 native binary 解压到 app.asar.unpacked/ 避免路径问题
 asar: true
 asarUnpack:
-  - "node_modules/@anthropic-ai/**"
   - "node_modules/@silvia-odwyer/**"
   - "node_modules/@mariozechner/**"
   - "node_modules/@napi-rs/**"
@@ -38,7 +37,7 @@ files:
   # buildResources 从 resources/ 直接使用 icon/plist，避免产物里重复打包一份）
   - "!dist/resources/**"
   - package.json
-  # Claude SDK 与 Pi runtime 均作为主进程 external 运行。打包前 sync:runtime-deps 会
+  # Pi runtime 作为主进程 external 运行。打包前 sync:runtime-deps 会
   # 将 external 依赖闭包同步到 apps/electron/node_modules。
   - node_modules/**/*
   # 排除 workspace 包的 symlink（代码已被 esbuild/Vite 打包到 dist/ 中）
@@ -119,7 +118,7 @@ mac:
       role: Editor
   # 架构由 CLI 参数控制（CI 矩阵分别传 --arm64 / --x64），
   # 每个 runner 只构建其宿主架构对应的产物，与 bun 按 os/cpu 装好的
-  # @anthropic-ai/claude-agent-sdk-darwin-{arch} native binary 对齐。
+  # 每个 runner 只构建其宿主架构对应的产物。
   target:
     - dmg
     - zip

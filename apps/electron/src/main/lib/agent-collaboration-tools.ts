@@ -1,7 +1,7 @@
 /**
  * Agent 内置协作会话工具
  *
- * 通过 SDK MCP Server 暴露 Proma Agent 子会话委派能力。
+ * 通过 Pi custom tools 暴露 Proma Agent 子会话委派能力。
  * Skill 负责判断何时协作；这里负责受控创建真实 Agent 会话、运行、等待和停止。
  */
 
@@ -10,7 +10,6 @@ import type {
   AgentDelegationRole,
   AgentDelegationStatus,
   AgentMessage,
-  AgentRuntime,
   AgentSessionMeta,
   AgentStreamPayload,
   AskUserRequest,
@@ -37,9 +36,12 @@ import {
   createToolCallIdempotencyCache,
   resolveDelegationPermissionMode,
 } from './agent-collaboration-utils'
-import { assertEnabledModelForChannel, listEnabledAgentModelsForChannel, listAllEnabledAgentModels } from './agent-model-selection'
+import {
+  assertEnabledModelForChannel,
+  listAllEnabledAgentModels,
+  listEnabledAgentModelsForChannel,
+} from './agent-model-selection'
 import { getChannelById } from './channel-manager'
-import { isAgentCompatibleProvider } from '@proma/shared'
 
 interface CollaborationToolContext {
   sessionId: string
@@ -47,7 +49,6 @@ interface CollaborationToolContext {
   modelId?: string
   workspaceId?: string
   permissionMode?: PromaPermissionMode
-  agentRuntime?: AgentRuntime
   triggeredBy?: 'user' | 'automation' | 'delegation'
 }
 
@@ -74,7 +75,6 @@ interface DelegationRecord {
   resolveCompletion: () => void
 }
 
-type ZodModule = typeof import('zod')
 
 const MAX_WAIT_SECONDS = 2 * 60 * 60
 const DEFAULT_WAIT_SECONDS = 30 * 60
@@ -210,16 +210,6 @@ function pruneFinishedDelegations(): void {
     .forEach((item) => delegations.delete(item.delegationId))
 }
 
-function jsonResult(payload: unknown): CollaborationToolResult {
-  return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(payload, null, 2),
-      },
-    ],
-  }
-}
 
 function normalizeTitle(input: string | undefined, fallback: string): string {
   const trimmed = input?.trim()
@@ -256,18 +246,18 @@ interface StartDelegationResult {
   record: DelegationRecord
   effectivePermissionMode: PromaPermissionMode
   effectiveModelId?: string
-  /** 是否跨渠道派发（目标渠道 ≠ 父会话渠道），用于结果提示与额度归属说明 */
-  crossChannel?: boolean
-  /** 目标渠道显示名，便于在结果中提示额度归属 */
-  targetChannelName?: string
+  /** 是否跨渠道派发（目标渠道与父会话渠道不同） */
+  crossChannel: boolean
+  /** 目标渠道显示名，用于说明额度归属 */
+  targetChannelName: string
 }
 
 interface PiDelegationToolResult {
   delegationId: string
   effectivePermissionMode: PromaPermissionMode
   effectiveModelId?: string
-  crossChannel?: boolean
-  targetChannelName?: string
+  crossChannel: boolean
+  targetChannelName: string
 }
 
 interface PiBatchDelegationResult {
@@ -624,14 +614,12 @@ function getAvailableAgentModels(ctx: CollaborationToolContext, targetChannelId?
 }
 
 function getAllAvailableAgentModels(ctx: CollaborationToolContext): Record<string, unknown> {
-  const agentRuntime = ctx.agentRuntime
-  const channels = listAllEnabledAgentModels(agentRuntime)
+  const channels = listAllEnabledAgentModels()
   return {
     channels: channels.map((channel) => ({
       channelId: channel.channelId,
       channelName: channel.channelName,
       provider: channel.provider,
-      claudeCompatible: isAgentCompatibleProvider(channel.provider),
       isCurrentChannel: channel.channelId === ctx.channelId,
       modelCount: channel.models.length,
       models: channel.models.map((model) => ({
@@ -641,10 +629,7 @@ function getAllAvailableAgentModels(ctx: CollaborationToolContext): Record<strin
       })),
     })),
     channelCount: channels.length,
-    runtimeFilterApplied: agentRuntime === 'claude',
-    note: agentRuntime === 'claude'
-      ? '当前为 Claude runtime，仅列出兼容 Claude Agent Core 的渠道；跨渠道派发时目标渠道必须为 Anthropic 兼容协议。'
-      : '列出所有已启用渠道的 Agent 模型。跨渠道派发子会话会消耗目标渠道的额度，请确认目标渠道后同时指定 channelId 与 modelId。',
+    note: '列出所有已启用渠道的 Agent 模型。跨渠道派发子会话会消耗目标渠道的额度，请确认目标渠道后同时指定 channelId 与 modelId。',
   }
 }
 
@@ -690,19 +675,17 @@ function startDelegation(
   const permissionMode = resolveDelegationPermissionMode(
     parentPermissionMode,
     args.permissionMode,
-    ctx.agentRuntime ?? parent?.agentRuntime,
   )
 
-  // 跨渠道派发：显式 channelId 优先，否则继承父会话渠道（保持旧行为）
+  // 显式 channelId 优先；未传时继承父会话渠道，保持旧行为。
   const normalizedChannelId = args.channelId?.trim()
   const targetChannelId = normalizedChannelId || ctx.channelId
   const crossChannel = !!normalizedChannelId && normalizedChannelId !== ctx.channelId
-  const agentRuntime = ctx.agentRuntime ?? parent?.agentRuntime
-  let targetChannelName = ctx.channelId
+  let targetChannelName = targetChannelId
   try {
     targetChannelName = getChannelById(targetChannelId)?.name ?? targetChannelId
   } catch {
-    // 渠道名仅用于提示，解析失败不影响派发
+    // 渠道名只用于结果提示；实际校验由下方模型解析完成。
   }
 
   let effectiveModelId: string | undefined
@@ -711,29 +694,22 @@ function startDelegation(
       channelId: targetChannelId,
       modelId: args.modelId,
       purpose: '创建协作子会话',
-      agentRuntime,
     })
   } else if (crossChannel) {
-    // 跨渠道时父会话模型 ID 大概率不适用于目标渠道；仅当目标渠道存在同名启用模型时才继承，否则要求显式指定。
     const parentModelId = ctx.modelId?.trim()
     const targetChannel = listEnabledAgentModelsForChannel(targetChannelId, '创建协作子会话')
+    targetChannelName = targetChannel.channelName
     if (parentModelId && targetChannel.models.some((model) => model.id === parentModelId)) {
       effectiveModelId = assertEnabledModelForChannel({
         channelId: targetChannelId,
         modelId: parentModelId,
         purpose: '创建协作子会话',
-        agentRuntime,
       })
     } else if (parentModelId) {
       const targetModelIds = targetChannel.models.map((model) => model.id)
-      const disabledInTarget = (() => {
-        try {
-          const channel = getChannelById(targetChannelId)
-          return channel?.models?.some((item) => item.id === parentModelId && !item.enabled) ?? false
-        } catch {
-          return false
-        }
-      })()
+      const targetChannelConfig = getChannelById(targetChannelId)
+      const disabledInTarget = targetChannelConfig?.models
+        .some((model) => model.id === parentModelId && !model.enabled) ?? false
       throw new Error(
         `跨渠道派发子会话需要显式指定模型：当前父会话模型 ${parentModelId} 在目标渠道 ${targetChannel.channelName} 中${disabledInTarget ? '存在但未启用' : '不存在'}。可用模型: ${targetModelIds.join(', ') || '(无)'}。请在 delegate_agent 中同时指定 channelId 与 modelId。`,
       )
@@ -748,7 +724,7 @@ function startDelegation(
 
   const { completion, resolveCompletion } = createDelegationCompletion()
 
-  const child = createAgentSession(title, targetChannelId, ctx.workspaceId, effectiveModelId, parent?.agentRuntime ?? 'claude')
+  const child = createAgentSession(title, targetChannelId, ctx.workspaceId, effectiveModelId)
   const rootSessionId = parent?.rootSessionId ?? parent?.id ?? ctx.sessionId
   updateAgentSessionMeta(child.id, {
     parentSessionId: ctx.sessionId,
@@ -820,365 +796,13 @@ function startDelegation(
     })
   })
 
-  return { record, effectivePermissionMode: permissionMode, effectiveModelId, crossChannel, targetChannelName }
-}
-
-function buildCollaborationSchemas(z: ZodModule['z']) {
-  const nonBlankString = z.string().trim().min(1)
-  const role = z.enum(['explore', 'research', 'implement', 'review', 'custom'])
-  const permissionMode = z.enum(['plan', 'bypassPermissions'])
-  const delegateItem = z.object({
-    title: z.string().optional().describe('子会话标题，简短说明子任务'),
-    role: role.optional().describe('子任务角色：explore/research/implement/review/custom'),
-    task: nonBlankString.describe('发送给子 Agent 的完整任务说明，必须自包含必要上下文'),
-    expectedOutput: z.string().optional().describe('希望子 Agent 最终返回的格式或要点'),
-    permissionMode: permissionMode.optional().describe('子会话权限模式；不能高于父会话权限'),
-    modelId: nonBlankString.optional().describe('可选目标模型 ID；必须属于目标渠道且已启用。不传时：同渠道继承父会话当前模型，跨渠道则需目标渠道存在同名模型。'),
-    channelId: nonBlankString.optional().describe('可选目标渠道 ID；不传则继承父会话当前渠道。跨渠道派发时需要同时指定 channelId 与 modelId。'),
-  })
   return {
-    availableModels: {
-      channelId: z.string().optional().describe('可选目标渠道 ID；不传则返回父会话当前渠道的模型。跨渠道派发前可用此工具查看指定渠道可用模型。'),
-    },
-    allAvailableModels: {},
-    delegate: {
-      title: z.string().optional().describe('子会话标题，简短说明子任务'),
-      role: role.optional().describe('子任务角色：explore/research/implement/review/custom'),
-      task: nonBlankString.describe('发送给子 Agent 的完整任务说明，必须自包含必要上下文'),
-      expectedOutput: z.string().optional().describe('希望子 Agent 最终返回的格式或要点'),
-      permissionMode: permissionMode.optional().describe('子会话权限模式；不能高于父会话权限'),
-      modelId: nonBlankString.optional().describe('可选目标模型 ID；必须属于目标渠道且已启用。不传时：同渠道继承父会话当前模型，跨渠道则需目标渠道存在同名模型。'),
-      channelId: nonBlankString.optional().describe('可选目标渠道 ID；不传则继承父会话当前渠道。跨渠道派发时需要同时指定 channelId 与 modelId。'),
-    },
-    delegateBatch: {
-      sharedContext: z.string().optional().describe('批量子任务共用背景，会自动拼接到每个子任务前'),
-      items: z.array(delegateItem).min(1).max(MAX_RUNNING_DELEGATIONS_PER_PARENT).describe('要创建的子会话列表，最多 50 个'),
-    },
-    wait: {
-      delegationIds: z.array(z.string()).optional().describe('要等待的委派 ID；不传则等待当前父会话当前运行中的全部委派'),
-      mode: z.enum(['all', 'any']).optional().describe('等待模式：all 等全部完成，any 等至少 minCompleted 个完成'),
-      minCompleted: z.number().int().min(1).max(MAX_RUNNING_DELEGATIONS_PER_PARENT).optional().describe('mode=any 时至少等待完成的数量，默认 1'),
-      timeoutSeconds: z.number().int().min(1).max(MAX_WAIT_SECONDS).optional().describe('最长等待秒数，默认 1800，最大 7200'),
-    },
-    list: {
-      includeCompleted: z.boolean().optional().describe('是否包含已完成委派，默认 true'),
-    },
-    results: {
-      delegationIds: z.array(z.string()).min(1).max(MAX_RUNNING_DELEGATIONS_PER_PARENT).describe('要读取结果的委派 ID 列表'),
-    },
-    stop: {
-      delegationId: z.string().describe('要停止的委派 ID'),
-    },
-    stopBatch: {
-      delegationIds: z.array(z.string()).min(1).max(MAX_RUNNING_DELEGATIONS_PER_PARENT).describe('要停止的委派 ID 列表'),
-    },
-    answer: {
-      delegationId: nonBlankString.describe('子会话所属的委派 ID'),
-      blockedEventId: nonBlankString.describe('要回答的阻塞事件 ID（从 delegation 的 pendingBlockedEvents 中获取）'),
-      answers: z.record(z.string(), z.string()).optional().describe('AskUserQuestion 的回答（问题文本 → 答案文本）'),
-      permissionBehavior: z.enum(['allow', 'deny']).optional().describe('Permission 请求的回复行为，默认 allow'),
-    },
-    continueD: {
-      delegationId: nonBlankString.describe('要继续操作的委派 ID（必须是已完成/已失败/已取消状态）'),
-      message: nonBlankString.describe('追加给子 Agent 的后续指令'),
-    },
+    record,
+    effectivePermissionMode: permissionMode,
+    effectiveModelId,
+    crossChannel,
+    targetChannelName,
   }
-}
-
-export async function injectAgentCollaborationMcpServer(
-  sdk: typeof import('@anthropic-ai/claude-agent-sdk'),
-  mcpServers: Record<string, Record<string, unknown>>,
-  ctx: CollaborationToolContext,
-): Promise<void> {
-  const { z } = await import('zod')
-  const schemas = buildCollaborationSchemas(z)
-
-  const server = sdk.createSdkMcpServer({
-    name: 'collaboration',
-    version: '1.0.0',
-    tools: [
-      sdk.tool(
-        'list_available_agent_models',
-        '列出已启用、可用于协作子 Agent 的模型。可选传入目标渠道 ID 查看指定渠道；不传则返回父会话当前渠道。跨渠道派发前建议先调用 list_all_agent_models 查看所有渠道。',
-        schemas.availableModels,
-        async (args) => {
-          return jsonResult(getAvailableAgentModels(ctx, args?.channelId))
-        },
-        { annotations: { readOnlyHint: true } },
-      ),
-      sdk.tool(
-        'list_all_agent_models',
-        '列出所有已启用渠道及其可用 Agent 模型，用于跨渠道派发子会话时选择目标渠道与模型。只读工具，不消耗额外额度。',
-        schemas.allAvailableModels,
-        async () => {
-          return jsonResult(getAllAvailableAgentModels(ctx))
-        },
-        { annotations: { readOnlyHint: true } },
-      ),
-      sdk.tool(
-        'delegate_agent',
-        '创建一个真实可见的 Proma 协作子 Agent 会话来并行处理独立子任务。只用于长耗时、可并行、需要追踪的任务；简单搜索由父会话直接使用普通工具完成。',
-        schemas.delegate,
-        async (args) => {
-          const parent = assertCanCreateDelegation(ctx)
-          const result = startDelegation(ctx, parent, args)
-
-          return jsonResult({
-            delegation: getDelegationSummary(result.record),
-            effectivePermissionMode: result.effectivePermissionMode,
-            effectiveModelId: result.effectiveModelId,
-            crossChannel: result.crossChannel ?? false,
-            targetChannelName: result.targetChannelName,
-            note: result.crossChannel
-              ? `子会话已启动（跨渠道，消耗目标渠道 ${result.targetChannelName ?? ''} 的额度）。需要结果时调用 wait_for_delegations。`
-              : '子会话已启动。需要结果时调用 wait_for_delegations。',
-          })
-        },
-      ),
-      sdk.tool(
-        'delegate_agents',
-        '批量创建多个真实可见的 Proma 协作子 Agent 会话。适合把同一大任务拆成多片并行处理，单个父会话运行中子会话最多 50 个。',
-        schemas.delegateBatch,
-        async (args) => {
-          const parent = assertCanCreateDelegation(ctx, args.items.length)
-          // 逐个创建并容错：单个失败不影响其余，避免整体抛错导致已创建的子会话成孤儿
-          const created: StartDelegationResult[] = []
-          const failures: Array<{ index: number; title?: string; error: string }> = []
-          args.items.forEach((item, index) => {
-            try {
-              created.push(startDelegation(ctx, parent, {
-                ...item,
-                task: buildDelegationTaskWithSharedContext({
-                  sharedContext: args.sharedContext,
-                  task: item.task,
-                }),
-              }))
-            } catch (error) {
-              failures.push({
-                index,
-                title: item.title,
-                error: error instanceof Error ? error.message : '未知错误',
-              })
-            }
-          })
-
-          return jsonResult({
-            delegations: created.map((item) => getDelegationSummary(item.record)),
-            effectivePermissionModes: created.map((item) => ({
-              delegationId: item.record.delegationId,
-              permissionMode: item.effectivePermissionMode,
-            })),
-            effectiveModels: created.map((item) => ({
-              delegationId: item.record.delegationId,
-              modelId: item.effectiveModelId,
-            })),
-            failures,
-            createdCount: created.length,
-            failedCount: failures.length,
-            maxRunningDelegations: MAX_RUNNING_DELEGATIONS_PER_PARENT,
-            note: failures.length > 0
-              ? `批量子会话部分创建成功（成功 ${created.length}，失败 ${failures.length}）。失败项可修正后重试；需要结果时调用 wait_for_delegations。`
-              : (created.some((item) => item.crossChannel)
-                  ? `批量子会话已启动（含跨渠道项，注意各子会话分别消耗目标渠道额度）。需要结果时调用 wait_for_delegations，可用 mode=any 先收敛部分结果。`
-                  : '批量子会话已启动。需要结果时调用 wait_for_delegations，可用 mode=any 先收敛部分结果。'),
-          })
-        },
-      ),
-      sdk.tool(
-        'wait_for_delegations',
-        '等待一个或多个 Proma 协作子会话完成，并返回结构化结果摘要。支持 all 等全部完成，或 any 等部分完成。',
-        schemas.wait,
-        async (args) => {
-          const ids = args.delegationIds?.length
-            ? args.delegationIds
-            : Array.from(delegations.values())
-              .filter((item) => item.parentSessionId === ctx.sessionId && item.status === 'running')
-              .map((item) => item.delegationId)
-          const { liveRecords, settled } = resolveWaitTargets(ids, ctx.sessionId)
-          const totalTargets = liveRecords.length + settled.length
-          if (totalTargets === 0) {
-            return jsonResult({ delegations: [], note: '没有找到可等待的协作委派' })
-          }
-
-          const mode = args.mode ?? 'all'
-          const minCompleted = args.minCompleted ?? 1
-          const timeoutSeconds = Math.min(args.timeoutSeconds ?? DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS)
-          // settled 已是终态，先计入完成数；只需让足够多的 liveRecords 完成即可
-          const targetCompleted = mode === 'all'
-            ? totalTargets
-            : Math.max(1, Math.min(minCompleted, totalTargets))
-          const liveTarget = Math.max(0, targetCompleted - settled.length)
-          const waitResult = liveRecords.length > 0
-            ? await waitForLiveRecords(liveRecords, timeoutSeconds, liveTarget)
-            : 'completed'
-
-          const allDelegations = [...liveRecords.map(getDelegationSummary), ...settled]
-          return jsonResult({
-            status: waitResult,
-            mode,
-            completedCount: allDelegations.filter((item) => item.status !== 'running').length,
-            runningCount: allDelegations.filter((item) => item.status === 'running').length,
-            delegations: allDelegations,
-          })
-        },
-        { annotations: { readOnlyHint: true } },
-      ),
-      sdk.tool(
-        'list_delegations',
-        '列出当前父会话创建的 Proma 协作子会话及状态。',
-        schemas.list,
-        async (args) => {
-          const items = listKnownDelegations(ctx.sessionId)
-          const delegationsResult = args.includeCompleted === false
-            ? items.filter((item) => item.status === 'running')
-            : items
-          return jsonResult({
-            maxRunningDelegations: MAX_RUNNING_DELEGATIONS_PER_PARENT,
-            runningCount: delegationsResult.filter((item) => item.status === 'running').length,
-            delegations: delegationsResult,
-          })
-        },
-        { annotations: { readOnlyHint: true } },
-      ),
-      sdk.tool(
-        'get_delegation_results',
-        '按委派 ID 读取一个或多个 Proma 协作子会话的结果摘要。适合先 list 后按需取结果，或父会话恢复后读取已完成子会话。',
-        schemas.results,
-        async (args) => {
-          return jsonResult({
-            delegations: args.delegationIds.map((delegationId) => getDelegationResult(ctx.sessionId, delegationId)),
-          })
-        },
-        { annotations: { readOnlyHint: true } },
-      ),
-      sdk.tool(
-        'stop_delegation',
-        '停止一个正在运行的 Proma 协作子会话。',
-        schemas.stop,
-        async (args) => {
-          return jsonResult(stopDelegation(ctx.sessionId, args.delegationId))
-        },
-      ),
-      sdk.tool(
-        'stop_delegations',
-        '批量停止多个正在运行的 Proma 协作子会话。',
-        schemas.stopBatch,
-        async (args) => {
-          return jsonResult({
-            results: args.delegationIds.map((delegationId) => stopDelegation(ctx.sessionId, delegationId)),
-          })
-        },
-      ),
-      sdk.tool(
-        'answer_delegation_question',
-        '代答协作子会话的阻塞问题（AskUserQuestion）或审批权限请求（Permission）。当子会话被阻塞时，父 Agent 可通过此工具代替用户回答，让子会话继续执行。从 delegation 的 pendingBlockedEvents 获取 blockedEventId。',
-        schemas.answer,
-        async (args) => {
-          const blocked = getBlockedEventById(args.blockedEventId)
-          if (!blocked) throw new Error(`阻塞事件不存在: ${args.blockedEventId}`)
-          if (blocked.resolved) return jsonResult({ answered: false, note: '该阻塞事件已被解决' })
-
-          const record = delegations.get(blocked.delegationId)
-          if (record && record.parentSessionId !== ctx.sessionId) {
-            throw new Error(`委派不属于当前父会话: ${blocked.delegationId}`)
-          }
-
-          if (blocked.type === 'ask_user' && blocked.askUserRequestId) {
-            const { askUserService } = await import('./agent-ask-user-service')
-            const answers = args.answers ?? {}
-            const sessionId = askUserService.respondToAskUser(blocked.askUserRequestId, answers)
-            blocked.resolved = !!sessionId
-            if (blocked.resolved && _eventBusRef) {
-              _eventBusRef.emit(blocked.childSessionId, {
-                kind: 'proma_event',
-                event: { type: 'ask_user_resolved', requestId: blocked.askUserRequestId },
-              })
-            }
-            return jsonResult({ answered: blocked.resolved, type: 'ask_user' })
-          }
-
-          if (blocked.type === 'permission' && blocked.permissionRequestId) {
-            const { permissionService } = await import('./agent-permission-service')
-            const behavior = args.permissionBehavior ?? 'allow'
-            const sessionId = permissionService.respondToPermission(blocked.permissionRequestId, behavior, false)
-            blocked.resolved = !!sessionId
-            if (blocked.resolved && _eventBusRef) {
-              _eventBusRef.emit(blocked.childSessionId, {
-                kind: 'proma_event',
-                event: { type: 'permission_resolved', requestId: blocked.permissionRequestId, behavior },
-              })
-            }
-            return jsonResult({ answered: blocked.resolved, type: 'permission', behavior })
-          }
-
-          return jsonResult({ answered: false, note: '无法匹配阻塞事件类型' })
-        },
-      ),
-      sdk.tool(
-        'continue_delegation',
-        '向已完成、已失败、已取消或已中断的协作子会话追加后续指令。子会话保留完整上下文继续执行。适合多轮协作场景：先让子 Agent 完成第一步，审查结果后继续下一步。',
-        schemas.continueD,
-        async (args) => {
-          const record = getDelegationRecordForContinuation(ctx, args.delegationId)
-          if (!record) throw new Error(`未找到当前会话下的委派: ${args.delegationId}`)
-          if (record.status === 'running') {
-            throw new Error(`委派正在运行中，无法追加指令。请先等待完成或停止后再继续: ${args.delegationId}`)
-          }
-
-          record.status = 'running'
-          record.error = undefined
-          record.resultSummary = undefined
-          record.completedAt = undefined
-          const completionHandle = createDelegationCompletion()
-          record.completion = completionHandle.completion
-          record.resolveCompletion = completionHandle.resolveCompletion
-
-          updateAgentSessionMeta(record.childSessionId, { delegationStatus: 'running' })
-
-          runRegisteredHeadlessAgent(
-            {
-              sessionId: record.childSessionId,
-              userMessage: args.message,
-              channelId: record.channelId,
-              modelId: record.modelId,
-              workspaceId: ctx.workspaceId,
-              permissionModeOverride: record.permissionMode,
-              triggeredBy: 'delegation',
-              startedAt: Date.now(),
-            },
-            {
-              source: 'delegation',
-              originSessionId: ctx.sessionId,
-              onError: (error) => {
-                markDelegationFinished(record, 'failed', { error })
-              },
-              onComplete: (messages) => {
-                if (record.status !== 'running') return
-                const resultSummary = summarizeChildResult(record.childSessionId, messages)
-                markDelegationFinished(record, 'completed', { resultSummary })
-              },
-              onTitleUpdated: () => {},
-            },
-          ).catch((error: unknown) => {
-            markDelegationFinished(record, 'failed', {
-              error: error instanceof Error ? error.message : '未知错误',
-            })
-          })
-
-          const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), DEFAULT_WAIT_SECONDS * 1000))
-          await Promise.race([record.completion, timeout])
-
-          return jsonResult({
-            delegation: getDelegationSummary(record),
-            note: record.status === 'running' ? '子会话仍在运行中（等待超时），可稍后用 wait_for_delegations 等待结果。' : undefined,
-          })
-        },
-      ),
-    ],
-  })
-
-  mcpServers.collaboration = server as unknown as Record<string, unknown>
-  console.log('[Agent 编排] 已注入内置协作会话工具 (collaboration)')
 }
 
 // ===== Pi Runtime 桥接 =====
@@ -1228,7 +852,7 @@ export function buildPiCollaborationTools(
       }),
       async execute(_toolCallId: string, params: unknown) {
         const args = params as { channelId?: string }
-        return piJsonResult(getAvailableAgentModels(ctx, args?.channelId))
+        return piJsonResult(getAvailableAgentModels(ctx, args.channelId))
       },
     }),
     sdk.defineTool({
@@ -1261,7 +885,7 @@ export function buildPiCollaborationTools(
             delegationId: created.record.delegationId,
             effectivePermissionMode: created.effectivePermissionMode,
             effectiveModelId: created.effectiveModelId,
-            crossChannel: created.crossChannel ?? false,
+            crossChannel: created.crossChannel,
             targetChannelName: created.targetChannelName,
           }
         })
@@ -1269,10 +893,10 @@ export function buildPiCollaborationTools(
           delegation: getDelegationResult(ctx.sessionId, result.delegationId),
           effectivePermissionMode: result.effectivePermissionMode,
           effectiveModelId: result.effectiveModelId,
-          crossChannel: result.crossChannel ?? false,
+          crossChannel: result.crossChannel,
           targetChannelName: result.targetChannelName,
           note: result.crossChannel
-            ? `子会话已启动（跨渠道，消耗目标渠道 ${result.targetChannelName ?? ''} 的额度）。需要结果时调用 wait_for_delegations。`
+            ? `子会话已启动（跨渠道，消耗目标渠道 ${result.targetChannelName} 的额度）。需要结果时调用 wait_for_delegations。`
             : '子会话已启动。需要结果时调用 wait_for_delegations。',
         })
       },
@@ -1304,7 +928,7 @@ export function buildPiCollaborationTools(
                 delegationId: started.record.delegationId,
                 effectivePermissionMode: started.effectivePermissionMode,
                 effectiveModelId: started.effectiveModelId,
-                crossChannel: started.crossChannel ?? false,
+                crossChannel: started.crossChannel,
                 targetChannelName: started.targetChannelName,
               })
             } catch (error) {

@@ -281,11 +281,6 @@ export const automationGroupOrderAtom = atom<number>(0)
 export const agentChannelIdAtom = atom<string | null>(null)
 /** 全局默认模型 ID（新会话继承用，从 settings.json 加载） */
 export const agentModelIdAtom = atom<string | null>(null)
-/** Agent 启用的渠道 ID 列表（多选，设置页 Switch 开关控制） */
-export const agentChannelIdsAtom = atom<string[]>([])
-/** 新 Agent 会话默认 runtime */
-export const agentRuntimeAtom = atom<'claude' | 'pi'>('pi')
-
 /** Per-session 渠道 ID Map — sessionId → channelId */
 export const agentSessionChannelMapAtom = atom<Map<string, string>>(new Map())
 /** Per-session 模型 ID Map — sessionId → modelId */
@@ -379,6 +374,9 @@ export const workspaceCapabilitiesVersionAtom = atom(0)
 
 /** 工作区文件版本号 — 文件变化时自增，触发文件浏览器重新加载 */
 export const workspaceFilesVersionAtom = atom(0)
+
+/** Git watcher 触发的全局 Diff 刷新版本，避免按历史会话批量更新 Map。 */
+export const workspaceGitDiffRefreshVersionAtom = atom(0)
 
 // ===== 侧面板 Atoms =====
 
@@ -1183,6 +1181,14 @@ export const currentAgentErrorAtom = atom<string | null>((get) => {
  * 用于在切换会话时保留输入框内容
  */
 export const agentSessionDraftsAtom = atom<Map<string, string>>(new Map())
+
+/** 明确外部草稿写入的版本号；RichTextInput 用它区分本地回写与强制覆盖。 */
+export const agentSessionDraftSyncVersionsAtom = atom<Map<string, number>>(new Map())
+
+/** 单个 session 的外部草稿同步版本派生 atom。 */
+export const agentSessionDraftSyncVersionAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(agentSessionDraftSyncVersionsAtom).get(sessionId) ?? 0),
+)
 
 /** 单个 session 的 markdown 草稿派生 atom — 按 sessionId 切片订阅 */
 export const agentSessionDraftAtomFamily = atomFamily((sessionId: string) =>

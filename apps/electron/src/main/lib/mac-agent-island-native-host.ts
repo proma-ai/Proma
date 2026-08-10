@@ -10,7 +10,7 @@ const READY_TIMEOUT_MS = 4_000
 export interface MacAgentIslandNativeHostOptions {
   onReady: () => void
   onEvent: (event: NativeAgentIslandEvent) => void
-  /** helper 不存在、协议不兼容或运行中退出时，调用方应启用 Electron fallback。 */
+  /** helper 不存在、协议不兼容或运行中退出时，调用方应保持 Island 禁用。 */
   onUnavailable: (reason: string) => void
 }
 

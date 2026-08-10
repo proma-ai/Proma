@@ -48,7 +48,6 @@ import type {
   RecentMessagesResult,
   AgentSessionMeta,
   AgentSendInput,
-  AgentRuntime,
   AgentThinkingLevel,
   AgentWorkspace,
   AgentGenerateTitleInput,
@@ -144,12 +143,16 @@ import type {
   PlanningNativeSyncStatus,
   PlanningNativeSyncPermissionResult,
   PlanningNativeSyncTarget,
+  PlanningNativeConnection,
+  PlanningNativeSyncConflict,
+  ConnectPlanningNativeConnectionInput,
+  ResolvePlanningNativeSyncConflictInput,
   PlanningSyncProfile,
   SavePlanningSyncProfileInput,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
 import { getRuntimeStatus, getGitRepoStatus, reinitializeRuntime } from './lib/runtime-init'
-import { getUnstagedChanges, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
+import { getUnstagedChanges, invalidateGitDiffCache, getFileDiff, getUntrackedContent, revertFile, getDiffContents, listWorktrees, getWorktreeChanges, getMainRepoRoot } from './lib/git-diff-service'
 import { registerPromaFilePath } from './lib/local-file-protocol'
 import { registerUpdaterIpc } from './lib/updater/updater-ipc'
 import {
@@ -205,7 +208,8 @@ import {
   downloadInstaller,
   launchInstaller,
 } from './lib/installer-downloader'
-import { getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
+import { getEffectiveProxyUrl, getProxySettings, saveProxySettings } from './lib/proxy-settings-service'
+import { getFetchFn } from './lib/proxy-fetch'
 import { detectSystemProxy } from './lib/system-proxy-detector'
 import {
   listAutomations,
@@ -234,12 +238,18 @@ import {
   acknowledgePlanningReminder,
   snoozePlanningReminder,
   listPlanningSyncProfiles,
+  listPlanningNativeConnections,
+  connectPlanningNativeConnection,
+  disconnectPlanningNativeConnection,
+  listPlanningNativeSyncConflicts,
+  resolvePlanningNativeSyncConflict,
   savePlanningSyncProfile,
 } from './lib/planning-manager'
 import { broadcastPlanningChanged } from './lib/planning-events'
 import {
   getPlanningNativeSyncStatus,
   listPlanningNativeSyncTargets,
+  listPlanningNativeConnectionTargets,
   requestPlanningNativeSyncAccess,
 } from './lib/planning-native-sync-service'
 import { runPlanningNativeSync } from './lib/planning-native-sync-coordinator'
@@ -297,11 +307,12 @@ import {
   deleteSkillEntry,
   renameSkillEntry,
   getWorkspaceMemorySummary,
-  readWorkspaceClaudeMd,
-  writeWorkspaceClaudeMd,
+  readWorkspaceAgentsMd,
+  writeWorkspaceAgentsMd,
   listWorkspaceAutoMemoryFiles,
   readWorkspaceAutoMemoryFile,
   writeWorkspaceAutoMemoryFile,
+  approveWorkspaceProjectKnowledgeMaintenance,
   getWorkspaceAttachedDirectories,
   getWorkspaceAttachedFiles,
   attachWorkspaceDirectory,
@@ -314,6 +325,22 @@ import {
   cleanupStaleWorkspaceAttachedPaths,
 } from './lib/agent-workspace-manager'
 import { movePathSafely } from './lib/file-move-service'
+import { subscribeWorkspaceMemoryChanges } from './lib/workspace-memory-change-watcher'
+import { confirmWorkspaceMemoryWindowClose, markWorkspaceMemoryWindowReady } from './lib/workspace-memory-window'
+
+/** Renderer-scoped subscriptions; disposed on explicit tab cleanup or renderer destruction. */
+const workspaceMemoryWatchSubscriptions = new Map<number, Map<string, () => void>>()
+const workspaceMemoryWatchDestroyedListeners = new Set<number>()
+
+function stopWorkspaceMemoryWatch(webContentsId: number, workspaceSlug: string): void {
+  const subscriptions = workspaceMemoryWatchSubscriptions.get(webContentsId)
+  const unsubscribe = subscriptions?.get(workspaceSlug)
+  if (!unsubscribe) return
+  unsubscribe()
+  subscriptions?.delete(workspaceSlug)
+  if (subscriptions?.size === 0) workspaceMemoryWatchSubscriptions.delete(webContentsId)
+}
+
 import { getAllToolInfos } from './lib/chat-tool-registry'
 import { updateToolState, updateToolCredentials, getToolCredentials, addCustomTool, deleteCustomTool } from './lib/chat-tool-config'
 import {
@@ -423,6 +450,9 @@ function isPathAllowed(filePath: string, options?: FileAccessOptions): boolean {
   } catch {
     return false
   }
+  // 文件面板应反映 Agent 实际可访问的路径。调用方已明确开启 unrestricted 时，
+  // 保留 realpath 校验以拒绝不存在的目标，但不再按会话附件重复收窄范围。
+  if (options?.unrestricted) return true
   return getAuthorizedRoots(options).some((root) => isUnderRoot(resolved, root))
 }
 
@@ -434,6 +464,7 @@ function normalizeFileAccessOptions(value?: FileAccessOptions | string[]): FileA
     candidateBasePaths: Array.isArray(value.candidateBasePaths)
       ? value.candidateBasePaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
       : undefined,
+    unrestricted: value.unrestricted === true,
   }
 }
 
@@ -898,10 +929,6 @@ function cacheNull(key: string): null {
   return null
 }
 
-function isAgentRuntime(value: unknown): value is AgentRuntime {
-  return value === 'claude' || value === 'pi'
-}
-
 /**
  * 解析应用图标变体的文件路径
  */
@@ -985,6 +1012,19 @@ export function registerIpcHandlers(): void {
       const allowedExtraPaths = extraPaths?.filter((p) => isPathAllowed(p, access))
       return getUnstagedChanges(dirPath, allowedSessionPath, allowedWorkspaceFilesPath, allowedExtraPaths)
     }
+  )
+
+  // Agent 写入、Git 变更及窗口重新聚焦前主动失效，避免长寿命缓存显示旧 Diff。
+  ipcMain.handle(
+    IPC_CHANNELS.INVALIDATE_GIT_DIFF_CACHE,
+    async (_, changedPath?: string) => {
+      if (changedPath && typeof changedPath === 'string') {
+        // 仅影响进程内缓存，不读写目标路径；允许刚删除的文件路径参与失效。
+        invalidateGitDiffCache(changedPath)
+        return
+      }
+      invalidateGitDiffCache()
+    },
   )
 
   // 获取单个文件的 diff
@@ -1968,7 +2008,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.CREATE_SESSION,
     async (_, title?: string, channelId?: string, workspaceId?: string, modelId?: string): Promise<AgentSessionMeta> => {
-      const session = createAgentSession(title, channelId, workspaceId, modelId, getSettings().agentRuntime ?? 'pi')
+      const session = createAgentSession(title, channelId, workspaceId, modelId)
       feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
         console.error('[飞书 Session 镜像] 新会话建群失败:', error)
       })
@@ -2184,7 +2224,7 @@ export function registerIpcHandlers(): void {
       if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
 
       try {
-        const session = createAgentSession(undefined, channelId, workspace.id, modelId, getSettings().agentRuntime ?? 'pi')
+        const session = createAgentSession(undefined, channelId, workspace.id, modelId)
         feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
           console.error('[飞书 Session 镜像] 项目首个会话建群失败:', error)
         })
@@ -2485,16 +2525,16 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.READ_WORKSPACE_CLAUDE_MD,
+    AGENT_IPC_CHANNELS.READ_WORKSPACE_AGENTS_MD,
     async (_, workspaceSlug: string): Promise<SkillFileContent> => {
-      return readWorkspaceClaudeMd(workspaceSlug)
+      return readWorkspaceAgentsMd(workspaceSlug)
     }
   )
 
   ipcMain.handle(
-    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_CLAUDE_MD,
+    AGENT_IPC_CHANNELS.WRITE_WORKSPACE_AGENTS_MD,
     async (_, workspaceSlug: string, content: string): Promise<void> => {
-      writeWorkspaceClaudeMd(workspaceSlug, content)
+      writeWorkspaceAgentsMd(workspaceSlug, content)
     }
   )
 
@@ -2519,7 +2559,77 @@ export function registerIpcHandlers(): void {
     }
   )
 
+  ipcMain.handle(AGENT_IPC_CHANNELS.OPEN_WORKSPACE_MEMORY_WINDOW, async (_, workspaceSlug: string, relativePath?: string): Promise<void> => {
+    // 先经既有受限访问层核验 slug；若指定文件，也用受限路径解析器验证。
+    getWorkspaceMemorySummary(workspaceSlug)
+    if (relativePath !== undefined) {
+      if (typeof relativePath !== 'string' || !relativePath) throw new Error('记忆文件路径非法')
+      readWorkspaceAutoMemoryFile(workspaceSlug, relativePath)
+    }
+    const { showWorkspaceMemoryWindow } = await import('./lib/workspace-memory-window')
+    showWorkspaceMemoryWindow(workspaceSlug, relativePath)
+  })
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_WINDOW_READY,
+    async (event, workspaceSlug: string): Promise<void> => {
+      if (!markWorkspaceMemoryWindowReady(workspaceSlug, event.sender.id)) {
+        throw new Error('记忆窗口不存在或不属于当前渲染进程')
+      }
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.CONFIRM_WORKSPACE_MEMORY_WINDOW_CLOSE,
+    async (event, workspaceSlug: string): Promise<void> => {
+      if (!confirmWorkspaceMemoryWindowClose(workspaceSlug, event.sender.id)) {
+        throw new Error('记忆窗口不存在或不属于当前渲染进程')
+      }
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.START_WORKSPACE_MEMORY_WATCH,
+    async (event, workspaceSlug: string): Promise<void> => {
+      const webContents = event.sender
+      stopWorkspaceMemoryWatch(webContents.id, workspaceSlug)
+      const unsubscribe = subscribeWorkspaceMemoryChanges(workspaceSlug, (change) => {
+        if (!webContents.isDestroyed()) {
+          webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_MEMORY_FILE_CHANGED, { workspaceSlug, change })
+        }
+      })
+      const subscriptions = workspaceMemoryWatchSubscriptions.get(webContents.id) ?? new Map<string, () => void>()
+      subscriptions.set(workspaceSlug, unsubscribe)
+      workspaceMemoryWatchSubscriptions.set(webContents.id, subscriptions)
+      if (!workspaceMemoryWatchDestroyedListeners.has(webContents.id)) {
+        workspaceMemoryWatchDestroyedListeners.add(webContents.id)
+        webContents.once('destroyed', () => {
+          const active = workspaceMemoryWatchSubscriptions.get(webContents.id)
+          if (active) {
+            for (const stop of active.values()) stop()
+            workspaceMemoryWatchSubscriptions.delete(webContents.id)
+          }
+          workspaceMemoryWatchDestroyedListeners.delete(webContents.id)
+        })
+      }
+    },
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.STOP_WORKSPACE_MEMORY_WATCH,
+    async (event, workspaceSlug: string): Promise<void> => {
+      stopWorkspaceMemoryWatch(event.sender.id, workspaceSlug)
+    },
+  )
+
   // 发送 Agent 消息（触发 Agent SDK 流式响应）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.APPROVE_WORKSPACE_PROJECT_KNOWLEDGE_MAINTENANCE,
+    async (_, workspaceSlug: string): Promise<void> => {
+      approveWorkspaceProjectKnowledgeMaintenance(workspaceSlug)
+    },
+  )
+
   ipcMain.handle(
     AGENT_IPC_CHANNELS.SEND_MESSAGE,
     async (event, input: AgentSendInput): Promise<void> => {
@@ -2678,34 +2788,7 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    AGENT_IPC_CHANNELS.UPDATE_SESSION_AGENT_RUNTIME,
-    async (_, sessionId: string, runtime: AgentRuntime): Promise<AgentSessionMeta> => {
-      if (!isAgentRuntime(runtime)) {
-        throw new Error(`无效的 Agent runtime: ${String(runtime)}`)
-      }
-      const current = getAgentSessionMeta(sessionId)
-      if (!current) {
-        throw new Error(`Agent 会话不存在: ${sessionId}`)
-      }
 
-      // 当前运行持有其启动时的 runtime；此处只更新会话的下一轮配置。
-
-      // 历史会话缺失 runtime 时按 Claude 处理，避免将 Claude SDK 会话 ID 交给 Pi 恢复。
-      const previousRuntime: AgentRuntime = isAgentRuntime(current.agentRuntime) ? current.agentRuntime : 'claude'
-      const updates: Partial<Pick<AgentSessionMeta, 'agentRuntime' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings'>> = {
-        agentRuntime: runtime,
-      }
-      if (previousRuntime !== runtime) {
-        // 两套 runtime 的会话 artifact 不可互用；下一轮从 Proma 已持久化的转录恢复。
-        updates.sdkSessionId = undefined
-        updates.piSessionFile = undefined
-        updates.piEntryBindings = undefined
-      }
-
-      return updateAgentSessionMeta(sessionId, updates)
-    }
-  )
 
   // ===== Chat 工具管理 =====
 
@@ -2769,7 +2852,7 @@ export function registerIpcHandlers(): void {
           return { success: false, message: '请先填写 Tavily API Key' }
         }
         try {
-          const response = await fetch('https://api.tavily.com/search', {
+          const response = await getFetchFn(await getEffectiveProxyUrl())('https://api.tavily.com/search', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -3242,11 +3325,11 @@ export function registerIpcHandlers(): void {
   // 使用 macOS 系统 Terminal 在指定工作目录打开会话/工作区文件夹
   ipcMain.handle(
     AGENT_IPC_CHANNELS.OPEN_FOLDER_IN_TERMINAL,
-    async (_, folderPath: string): Promise<void> => {
+    async (_, folderPath: string, access?: FileAccessOptions): Promise<void> => {
       if (process.platform !== 'darwin') {
         throw new Error('当前仅支持在 macOS 终端中打开文件夹')
       }
-      if (!isPathAllowed(folderPath)) {
+      if (!isPathAllowed(folderPath, normalizeFileAccessOptions(access))) {
         throw new Error('访问路径超出当前会话的授权范围')
       }
 
@@ -4783,7 +4866,6 @@ export function registerIpcHandlers(): void {
       input.channelId,
       input.workspaceId,
       input.modelId,
-      getSettings().agentRuntime ?? 'pi',
     )
     // 对齐普通 Agent 会话创建入口；镜像初始化异步执行，不打断上面的原子状态转换。
     feishuBridgeManager.ensureSessionMirror(session).catch((error) => {
@@ -4908,6 +4990,37 @@ export function registerIpcHandlers(): void {
     if (!isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
     return listPlanningNativeSyncTargets(entity)
   })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTION_TARGETS, async (_, entity: unknown): Promise<PlanningNativeSyncTarget[]> => {
+    if (!isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
+    return listPlanningNativeConnectionTargets(entity)
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_CONNECTIONS, async (_, entity?: unknown): Promise<PlanningNativeConnection[]> => {
+    if (entity !== undefined && !isPlanningNativeSyncEntity(entity)) throw new Error('同步实体类型非法')
+    return listPlanningNativeConnections(entity)
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.CONNECT_NATIVE_CONNECTION, async (_, input: ConnectPlanningNativeConnectionInput): Promise<PlanningNativeConnection> => {
+    if (!input || !isPlanningNativeSyncEntity(input.entity) || !input.target || typeof input.target.id !== 'string') throw new Error('连接参数非法')
+    // renderer 不可信：用 EventKit 当前返回的完整目标覆盖传入元数据。
+    const target = (await listPlanningNativeConnectionTargets(input.entity)).find((item) => item.id === input.target.id)
+    if (!target) throw new Error('系统集合不存在或尚未授权')
+    const connection = connectPlanningNativeConnection({ entity: input.entity, target })
+    // 用户刚确认连接时必须立刻回流，不能被全局定期同步 cooldown 延后。
+    void runPlanningNativeSync(true)
+    return connection
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.DISCONNECT_NATIVE_CONNECTION, async (_, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string' || !id) throw new Error('连接 id 非法')
+    const disconnected = disconnectPlanningNativeConnection(id)
+    if (disconnected) broadcastPlanningChanged(['todos', 'calendar_events'])
+    return disconnected
+  })
+  ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_NATIVE_SYNC_CONFLICTS, async (): Promise<PlanningNativeSyncConflict[]> => listPlanningNativeSyncConflicts())
+  ipcMain.handle(PLANNING_IPC_CHANNELS.RESOLVE_NATIVE_SYNC_CONFLICT, async (_, input: ResolvePlanningNativeSyncConflictInput): Promise<boolean> => {
+    if (!input || typeof input.id !== 'string' || !['keep_proma', 'keep_system'].includes(input.resolution)) throw new Error('冲突解决参数非法')
+    const resolved = resolvePlanningNativeSyncConflict(input)
+    if (resolved) { broadcastPlanningChanged(['todos', 'calendar_events']); void runPlanningNativeSync(true) }
+    return resolved
+  })
   ipcMain.handle(PLANNING_IPC_CHANNELS.LIST_SYNC_PROFILES, async (): Promise<PlanningSyncProfile[]> => listPlanningSyncProfiles())
   ipcMain.handle(PLANNING_IPC_CHANNELS.SAVE_SYNC_PROFILE, async (_, input: SavePlanningSyncProfileInput): Promise<PlanningSyncProfile> => {
     if (!input || !isPlanningNativeSyncEntity(input.entity) || !input.target || typeof input.target.id !== 'string' || typeof input.target.title !== 'string' || typeof input.target.sourceTitle !== 'string' || (input.enabled !== undefined && typeof input.enabled !== 'boolean')) throw new Error('同步目标参数非法')
@@ -4915,7 +5028,8 @@ export function registerIpcHandlers(): void {
     const target = (await listPlanningNativeSyncTargets(input.entity)).find((item) => item.id === input.target.id)
     if (!target) throw new Error('同步目标不存在、不可写或尚未授权')
     const profile = savePlanningSyncProfile({ ...input, target })
-    void runPlanningNativeSync()
+    // 受管 Calendar 的系统存量也必须立即回流；不能被 30 秒 reconcile 冷却窗口延后。
+    void runPlanningNativeSync(true)
     return profile
   })
 
@@ -4974,9 +5088,6 @@ export function registerIpcHandlers(): void {
     if (i.maxRuns !== undefined && (!isFiniteInt(i.maxRuns) || i.maxRuns < 1)) {
       throw new Error(`非法的 maxRuns: ${String(i.maxRuns)}`)
     }
-    if (i.agentRuntime !== undefined && !isAgentRuntime(i.agentRuntime)) {
-      throw new Error(`非法的 agentRuntime: ${String(i.agentRuntime)}`)
-    }
     if (i.permissionMode !== undefined && !validPermissionMode(i.permissionMode)) {
       throw new Error(`非法的 permissionMode: ${String(i.permissionMode)}`)
     }
@@ -4986,20 +5097,7 @@ export function registerIpcHandlers(): void {
     validateAutomationNotificationTargets(i.notificationTargets)
   }
 
-  const validateAutomationRuntimePolicy = (
-    input: Partial<CreateAutomationInput | UpdateAutomationInput>,
-    existing?: Automation,
-  ): void => {
-    // 更新历史任务时，缺失的持久化 runtime 仍按 Claude 解释；仅新建任务使用 Pi 默认值。
-    const finalRuntime: AgentRuntime = input.agentRuntime ?? existing?.agentRuntime ?? (existing ? 'claude' : 'pi')
-    const finalChannelId = input.channelId !== undefined ? input.channelId : existing?.channelId
-    if (finalRuntime === 'claude' && finalChannelId) {
-      const agentChannelIds = getSettings().agentChannelIds ?? []
-      if (!agentChannelIds.includes(finalChannelId)) {
-        throw new Error('Claude Agent 内核只能使用已启用的 Agent 兼容渠道')
-      }
-    }
-  }
+
 
   const validateAutomationScheduleComplete = (
     input: Partial<CreateAutomationInput | UpdateAutomationInput>,
@@ -5043,7 +5141,6 @@ export function registerIpcHandlers(): void {
       if (!isNonEmptyString(input.prompt)) throw new Error('prompt 必填')
       // channelId / workspaceId 允许为空（草稿态），但此时任务不能被启用
       validateAutomationFields(input)
-      validateAutomationRuntimePolicy(input)
       validateAutomationScheduleComplete(input)
       const a = createAutomation(input)
       broadcastAutomationsChanged()
@@ -5061,7 +5158,6 @@ export function registerIpcHandlers(): void {
       const existing = getAutomation(input.id)
       if (!existing) return undefined
       validateAutomationFields(input)
-      validateAutomationRuntimePolicy(input, existing)
       validateAutomationScheduleComplete(input, existing)
       const a = updateAutomation(input)
       broadcastAutomationsChanged()

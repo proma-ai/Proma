@@ -79,10 +79,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for i in 1 2 3; do
-            npx electron-builder --mac --arm64 --publish always && break
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
+            if npx electron-builder --mac --arm64 --publish always; then
+              exit 0
+            fi
+
+            if [ "$i" -lt 3 ]; then
+              echo "Attempt $i failed, retrying in 10s..."
+              sleep 10
+            fi
           done
+
+          echo "macOS ARM64 packaging failed after 3 attempts"
+          exit 1
         working-directory: apps/electron
 
   build-mac-x64:
@@ -142,10 +150,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for i in 1 2 3; do
-            npx electron-builder --mac --x64 --publish always && break
-            echo "Attempt $i failed, retrying in 15s..."
-            sleep 15
+            if npx electron-builder --mac --x64 --publish always; then
+              exit 0
+            fi
+
+            if [ "$i" -lt 3 ]; then
+              echo "Attempt $i failed, retrying in 15s..."
+              sleep 15
+            fi
           done
+
+          echo "macOS x64 packaging failed after 3 attempts"
+          exit 1
         working-directory: apps/electron
 
   merge-mac-yml:

@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Bell, Box, Check, ChevronDown, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, Check, Clock, Loader2, Pencil, Play, Settings, X } from 'lucide-react'
 import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
@@ -34,10 +34,9 @@ import {
   automationToDraft,
   type AutomationDraft,
 } from '@/atoms/automation-atoms'
-import { agentWorkspacesAtom, agentSessionsAtom, agentChannelIdsAtom, agentRuntimeAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
+import { agentWorkspacesAtom, agentSessionsAtom, currentAgentWorkspaceIdAtom } from '@/atoms/agent-atoms'
 import { activeSessionIdAtom } from '@/atoms/tab-atoms'
 import { activeViewAtom, agentSkillsTabAtom } from '@/atoms/active-view'
-import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenSession } from '@/hooks/useOpenSession'
 import { MarkdownRichEditor } from '@/components/diff/MarkdownRichEditor'
 import { LocalProjectBadge } from '@/components/agent/LocalProjectBadge'
@@ -48,7 +47,6 @@ import type {
   CreateAutomationInput,
   FeishuChatBinding,
   UpdateAutomationInput,
-  AgentRuntime,
 } from '@proma/shared'
 
 const NO_FEISHU_BINDING = '__none__'
@@ -111,7 +109,6 @@ function getDraftSignature(draft: AutomationDraft): string {
     dayOfMonth: draft.dayOfMonth ?? '',
     scheduledAt: draft.scheduledAt ?? '',
     maxRuns: draft.maxRuns ?? '',
-    agentRuntime: draft.agentRuntime,
     channelId: draft.channelId,
     modelId: draft.modelId ?? '',
     workspaceId: draft.workspaceId ?? '',
@@ -133,7 +130,6 @@ function draftToCreateInput(draft: AutomationDraft): CreateAutomationInput {
     dayOfMonth: draft.dayOfMonth,
     scheduledAt: draft.scheduledAt,
     maxRuns: draft.maxRuns,
-    agentRuntime: draft.agentRuntime,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId,
@@ -157,7 +153,6 @@ function draftToUpdateInput(draft: AutomationDraft): UpdateAutomationInput {
     dayOfMonth: draft.dayOfMonth,
     scheduledAt: draft.scheduledAt,
     maxRuns: draft.maxRuns,
-    agentRuntime: draft.agentRuntime,
     channelId: draft.channelId,
     modelId: draft.modelId,
     workspaceId: draft.workspaceId ?? '',
@@ -191,22 +186,6 @@ function createFeishuTarget(binding: FeishuChatBinding): AutomationFeishuNotific
     botId: binding.botId,
     chatId: binding.chatId,
   }
-}
-
-function coerceAutomationDraftRuntime(
-  draft: AutomationDraft,
-  defaultAgentRuntime: AgentRuntime,
-  agentChannelIds: string[],
-): AutomationDraft {
-  const runtime: AgentRuntime = draft.id
-    ? draft.agentRuntime ?? defaultAgentRuntime
-    : defaultAgentRuntime
-
-  if (runtime === 'claude' && draft.channelId && !agentChannelIds.includes(draft.channelId)) {
-    return { ...draft, agentRuntime: runtime, channelId: '', modelId: undefined, active: false }
-  }
-
-  return draft.agentRuntime === runtime ? draft : { ...draft, agentRuntime: runtime }
 }
 
 function AutomationPromptEmptyGuide(): React.ReactElement {
@@ -280,126 +259,17 @@ function SaveStatusBadge({
   )
 }
 
-// Pi 为默认与推荐内核，Claude Agent SDK 计划于 2026 年 8 月中旬彻底下线
-const AGENT_RUNTIME_OPTIONS: Array<{
-  value: AgentRuntime
-  label: string
-  description: string
-  badge?: string
-  badgeTone?: 'recommended' | 'deprecated'
-  notice?: string
-}> = [
-  {
-    value: 'pi',
-    label: 'Pi',
-    description: 'Pi Agent SDK，Proma 默认内核，新功能仅在 Pi 上提供；可选择任意已启用模型渠道',
-    badge: '推荐',
-    badgeTone: 'recommended',
-  },
-  {
-    value: 'claude',
-    label: 'Claude',
-    description: 'Claude Agent SDK；模型仅限已标记为 Agent 兼容的渠道',
-    badge: '即将下线',
-    badgeTone: 'deprecated',
-    notice: '新功能已不再支持，将于 8 月中旬彻底下线，建议尽快切换到 Pi',
-  },
-]
-
-function AutomationRuntimeSelector({
-  runtime,
-  onChange,
-}: {
-  runtime: AgentRuntime
-  onChange: (runtime: AgentRuntime) => void
-}): React.ReactElement {
-  const [open, setOpen] = React.useState(false)
-  const current = AGENT_RUNTIME_OPTIONS.find((option) => option.value === runtime) ?? AGENT_RUNTIME_OPTIONS[0]!
-
-  const handleSelect = (nextRuntime: AgentRuntime): void => {
-    onChange(nextRuntime)
-    setOpen(false)
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="model-selector-trigger flex h-9 items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors hover:bg-foreground/[0.02] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          aria-label={`Agent 内核：${current.label}`}
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <Box className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">{current.label}</span>
-          </span>
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[260px] p-1.5" align="start" onOpenAutoFocus={(e) => e.preventDefault()}>
-        <div className="flex flex-col gap-1">
-          {AGENT_RUNTIME_OPTIONS.map((option) => {
-            const active = option.value === runtime
-            return (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={active}
-                className={cn(
-                  'flex items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
-                  active && 'bg-accent text-accent-foreground',
-                )}
-                onClick={() => handleSelect(option.value)}
-              >
-                <Box className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-xs font-medium">{option.label}</span>
-                    {option.badge && (
-                      <span
-                        className={cn(
-                          'rounded-sm px-1 py-px text-[10px] font-medium leading-tight',
-                          option.badgeTone === 'deprecated'
-                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-                            : 'bg-primary/10 text-primary',
-                        )}
-                      >
-                        {option.badge}
-                      </span>
-                    )}
-                  </span>
-                  <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{option.description}</span>
-                  {option.notice && (
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                      {option.notice}
-                    </span>
-                  )}
-                </span>
-                {active && <Check className="mt-0.5 size-3.5 shrink-0" />}
-              </button>
-            )
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
 export function AutomationFormView({ standalone = false }: { standalone?: boolean } = {}): React.ReactElement | null {
   const isWindows = React.useMemo(() => detectIsWindows(), [])
   const [formState, setFormState] = useAtom(automationFormAtom)
   const setAutomations = useSetAtom(automationsAtom)
   const workspaces = useAtomValue(agentWorkspacesAtom)
   const automations = useAtomValue(automationsAtom)
-  const agentChannelIds = useAtomValue(agentChannelIdsAtom)
-  const defaultAgentRuntime = useAtomValue(agentRuntimeAtom)
   const [agentSessions, setAgentSessions] = useAtom(agentSessionsAtom)
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const currentAgentWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   const setActiveView = useSetAtom(activeViewAtom)
   const setAgentSkillsTab = useSetAtom(agentSkillsTabAtom)
-  const setSettingsOpen = useSetAtom(settingsOpenAtom)
-  const setSettingsTab = useSetAtom(settingsTabAtom)
   const openSession = useOpenSession()
 
   const [form, setForm] = React.useState<AutomationDraft | null>(null)
@@ -424,11 +294,7 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
 
   React.useEffect(() => {
     if (formState.open && formState.draft) {
-      const draft = coerceAutomationDraftRuntime(
-        formState.draft,
-        defaultAgentRuntime,
-        agentChannelIds,
-      )
+      const draft = formState.draft
       setForm(draft)
       lastSavedSignatureRef.current = draft.id && canPersistDraft(draft)
         ? getDraftSignature(draft)
@@ -697,15 +563,6 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
   const selectedModel = form.channelId && form.modelId
     ? { channelId: form.channelId, modelId: form.modelId }
     : null
-  const modelFilterChannelIds = form.agentRuntime === 'pi' ? undefined : agentChannelIds
-  const handleRuntimeChange = (runtime: AgentRuntime): void => {
-    const patch: Partial<AutomationDraft> = { agentRuntime: runtime }
-    if (runtime === 'claude' && form.channelId && !agentChannelIds.includes(form.channelId)) {
-      patch.channelId = ''
-      patch.modelId = undefined
-    }
-    update(patch)
-  }
   const feishuTarget = getFeishuTarget(form.notificationTargets)
   const selectedFeishuBinding = feishuTarget
     ? feishuBindings.find((binding) => binding.botId === feishuTarget.botId && binding.chatId === feishuTarget.chatId)
@@ -1052,40 +909,14 @@ export function AutomationFormView({ standalone = false }: { standalone?: boolea
             </div>
           )}
 
-          <div className="flex flex-col gap-2">
-            <Label>Agent 内核</Label>
-            <AutomationRuntimeSelector runtime={form.agentRuntime} onChange={handleRuntimeChange} />
-            <span className="pl-2.5 text-xs text-muted-foreground leading-relaxed">
-              Pi 内核支持选择任意已启用模型渠道；Claude 内核仅显示已勾选为 Agent 兼容的渠道。
-            </span>
-          </div>
-
-          {/* 选择模型（Claude 内核仅显示 Agent 兼容渠道；Pi 内核显示所有已启用渠道） */}
+          {/* Pi supports any enabled model channel. */}
           <div className="flex flex-col gap-2">
             <Label>选择模型</Label>
-            {form.agentRuntime === 'claude' && agentChannelIds.length === 0 ? (
-              <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-                <Settings size={14} className="shrink-0" />
-                <span>尚未启用任何 Agent 兼容渠道</span>
-                <button
-                  type="button"
-                  className="ml-auto text-xs underline underline-offset-2 hover:text-foreground transition-colors"
-                  onClick={() => {
-                    setSettingsTab('channels')
-                    setSettingsOpen(true)
-                  }}
-                >
-                  前往渠道设置
-                </button>
-              </div>
-            ) : (
-              <ModelSelector
-                filterChannelIds={modelFilterChannelIds}
-                externalSelectedModel={selectedModel}
-                showChannelInTrigger
-                onModelSelect={(opt) => update({ channelId: opt.channelId, modelId: opt.modelId })}
-              />
-            )}
+            <ModelSelector
+              externalSelectedModel={selectedModel}
+              showChannelInTrigger
+              onModelSelect={(opt) => update({ channelId: opt.channelId, modelId: opt.modelId })}
+            />
           </div>
 
           {/* 项目（必选，默认填入当前会话所在项目） */}

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 
@@ -11,7 +11,32 @@ let contextPrompt: AgentSessionContextPrompt
 let tempHome: string
 const originalHome = process.env.HOME
 const originalPromaDev = process.env.PROMA_DEV
-const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+
+// agent-session-manager loads Pi lazily for fork/rewind, so this focused fake isolates
+// entry-tree semantics without requiring a real Pi session JSONL fixture.
+mock.module('@earendil-works/pi-coding-agent', () => ({
+  SessionManager: {
+    open: (sessionFile: string) => ({
+      createBranchedSession: (entryId: string) => {
+        const branchFile = join(tempHome, `.pi-branch-${entryId}.jsonl`)
+        writeFileSync(branchFile, '', 'utf-8')
+        return branchFile
+      },
+      getSessionFile: () => sessionFile,
+      getSessionId: () => 'pi-test-session',
+      getEntry: (entryId: string) => entryId === 'entry-keep' ? { id: entryId } : undefined,
+    }),
+    forkFrom: (_branchFile: string) => {
+      const forkFile = join(tempHome, '.pi-fork.jsonl')
+      writeFileSync(forkFile, '', 'utf-8')
+      return {
+        getSessionFile: () => forkFile,
+        getSessionId: () => 'pi-fork-session',
+        getEntry: (entryId: string) => entryId === 'entry-keep' ? { id: entryId } : undefined,
+      }
+    },
+  },
+}))
 
 mock.module('electron', () => ({
   app: {
@@ -49,18 +74,18 @@ function writeAgentSessionJsonl(sessionId: string, rows: string[]): void {
   writeFileSync(join(dir, `${sessionId}.jsonl`), jsonl(rows), 'utf-8')
 }
 
-function writeSdkSessionJsonl(sdkSessionId: string, rows: string[]): void {
-  const dir = join(tempHome, '.proma', 'sdk-config', 'projects', 'test-project')
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, `${sdkSessionId}.jsonl`), jsonl(rows), 'utf-8')
-}
-
 function writeAgentSessionsIndex(sessions: Array<{
   id: string
   title: string
   workspaceId: string
   createdAt: number
   updatedAt: number
+  agentRuntime?: string
+  sdkSessionId?: string
+  piSessionFile?: string
+  piEntryBindings?: Record<string, string>
+  forkSourceSdkSessionId?: string
+  resumeAtMessageUuid?: string
 }>): void {
   const dir = join(tempHome, '.proma')
   mkdirSync(dir, { recursive: true })
@@ -93,7 +118,6 @@ beforeAll(async () => {
   tempHome = mkdtempSync(join(os.tmpdir(), 'proma-agent-session-manager-'))
   process.env.HOME = tempHome
   process.env.PROMA_DEV = '0'
-  delete process.env.CLAUDE_CONFIG_DIR
   manager = await import('./agent-session-manager')
   contextPrompt = await import('./agent-session-context-prompt')
 })
@@ -108,11 +132,6 @@ afterAll(() => {
     delete process.env.PROMA_DEV
   } else {
     process.env.PROMA_DEV = originalPromaDev
-  }
-  if (originalClaudeConfigDir === undefined) {
-    delete process.env.CLAUDE_CONFIG_DIR
-  } else {
-    process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
   }
   rmSync(tempHome, { recursive: true, force: true })
 })
@@ -130,30 +149,6 @@ describe('Agent 会话 JSONL 读取', () => {
     expect(messages.map((message) => message.type)).toEqual(['user', 'assistant'])
   })
 
-  test('Given SDK rewind JSONL 存在损坏行 When 从快照恢复文件 Then 严格失败避免误报成功', () => {
-    const cwd = join(tempHome, 'workspace')
-    mkdirSync(cwd, { recursive: true })
-    writeSdkSessionJsonl('sdk-session-with-bad-line', [
-      JSON.stringify({ type: 'user', uuid: 'user-1', message: { content: [{ type: 'text', text: '修改文件' }] } }),
-      '{ 这不是合法 JSON',
-      JSON.stringify({
-        type: 'file-history-snapshot',
-        isSnapshotUpdate: false,
-        snapshot: {
-          messageId: 'user-1',
-          trackedFileBackups: {
-            'a.txt': { backupFileName: null },
-          },
-        },
-      }),
-    ])
-
-    const result = manager.rewindFilesFromSnapshot('sdk-session-with-bad-line', 'user-1', cwd)
-
-    expect(result.canRewind).toBe(false)
-    expect(result.error).toContain('JSONL 第 2 行解析失败')
-  })
-
   test('Given 会话 JSONL 存在损坏行 When 截断 SDKMessage Then 抛错避免重写不完整历史', () => {
     writeAgentSessionJsonl('session-truncate-bad-line', [
       JSON.stringify({ type: 'assistant', uuid: 'assistant-1', message: { content: [{ type: 'text', text: '完成' }] } }),
@@ -166,7 +161,7 @@ describe('Agent 会话 JSONL 读取', () => {
 })
 
 describe('Agent 会话 runtime 元数据', () => {
-  test('Given 已保存 OpenAI medium 默认值 When 新建 Pi 或 Claude 会话 Then 默认并持久化 medium', () => {
+  test('Given 已保存 OpenAI medium 默认值 When 新建会话 Then 始终创建并持久化 Pi 会话', () => {
     const settingsPath = join(tempHome, '.proma', 'settings.json')
     mkdirSync(join(tempHome, '.proma'), { recursive: true })
     writeFileSync(settingsPath, JSON.stringify({
@@ -176,20 +171,77 @@ describe('Agent 会话 runtime 元数据', () => {
     }), 'utf-8')
 
     try {
-      const defaultRuntimeSession = manager.createAgentSession('默认内核会话')
-      const claudeRuntimeSession = manager.createAgentSession('Claude 内核会话', undefined, undefined, undefined, 'claude')
+      const session = manager.createAgentSession('默认内核会话')
 
-      expect(defaultRuntimeSession.agentRuntime).toBe('pi')
-      expect(claudeRuntimeSession.agentRuntime).toBe('claude')
-      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.agentRuntime).toBe('pi')
-      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.agentRuntime).toBe('claude')
-      expect(defaultRuntimeSession.reasoningLevel).toBe('medium')
-      expect(claudeRuntimeSession.reasoningLevel).toBe('medium')
-      expect(manager.getAgentSessionMeta(defaultRuntimeSession.id)?.reasoningLevel).toBe('medium')
-      expect(manager.getAgentSessionMeta(claudeRuntimeSession.id)?.reasoningLevel).toBe('medium')
+      expect(session.reasoningLevel).toBe('medium')
+      expect(manager.getAgentSessionMeta(session.id)?.reasoningLevel).toBe('medium')
     } finally {
       rmSync(settingsPath, { force: true })
     }
+  })
+
+  test('Given 历史 Claude 会话 When 读取并尝试分叉或回退 Then 迁移为只读 transcript 并拒绝续接', async () => {
+    writeAgentSessionsIndex([{
+      id: 'legacy-claude-session',
+      title: '历史 Claude 会话',
+      workspaceId: 'workspace-a',
+      createdAt: 1,
+      updatedAt: 1,
+      agentRuntime: 'claude',
+      sdkSessionId: 'claude-artifact',
+      piSessionFile: '/tmp/not-a-pi-session.jsonl',
+      piEntryBindings: { 'assistant-1': 'entry-1' },
+      forkSourceSdkSessionId: 'claude-source',
+      resumeAtMessageUuid: 'assistant-1',
+    }, {
+      id: 'legacy-implicit-session',
+      title: '缺少 runtime 的历史会话',
+      workspaceId: 'workspace-a',
+      createdAt: 2,
+      updatedAt: 2,
+    }])
+
+    const migrated = manager.getAgentSessionMeta('legacy-claude-session')
+    const implicitlyMigrated = manager.getAgentSessionMeta('legacy-implicit-session')
+
+    expect(migrated).toMatchObject({
+      legacyTranscript: { sourceRuntime: 'claude', continuationRequired: true },
+    })
+    expect(migrated?.sdkSessionId).toBeUndefined()
+    expect(migrated?.piSessionFile).toBeUndefined()
+    expect(migrated?.piEntryBindings).toBeUndefined()
+    expect(implicitlyMigrated?.legacyTranscript).toEqual({ sourceRuntime: 'claude', continuationRequired: true })
+    await expect(manager.forkAgentSession({ sessionId: 'legacy-claude-session', upToMessageUuid: 'assistant-1' }))
+      .rejects.toThrow('历史 Claude transcript 为只读')
+    await expect(manager.rewindPiAgentSession('legacy-claude-session', 'assistant-1'))
+      .rejects.toThrow('历史 Claude transcript 为只读')
+  })
+
+  test('Given Pi session moved to another workspace When metadata is persisted Then clears the cwd-bound artifact and bindings', () => {
+    writeAgentWorkspacesIndex([
+      { id: 'workspace-a', name: '工作区 A', slug: 'workspace-a', createdAt: 1, updatedAt: 1 },
+      { id: 'workspace-b', name: '工作区 B', slug: 'workspace-b', createdAt: 1, updatedAt: 1 },
+    ])
+    writeAgentSessionsIndex([{
+      id: 'pi-session-to-move',
+      title: 'Pi 会话',
+      workspaceId: 'workspace-a',
+      createdAt: 1,
+      updatedAt: 1,
+      agentRuntime: 'pi',
+      sdkSessionId: 'pi-session-id',
+      piSessionFile: '/tmp/pi-session.jsonl',
+      piEntryBindings: { 'assistant-1': 'entry-1' },
+    }])
+    mkdirSync(join(tempHome, '.proma', 'agent-workspaces', 'workspace-a', 'pi-session-to-move'), { recursive: true })
+
+    const moved = manager.moveSessionToWorkspace('pi-session-to-move', 'workspace-b')
+
+    expect(moved.workspaceId).toBe('workspace-b')
+    expect(moved.sdkSessionId).toBeUndefined()
+    expect(moved.piSessionFile).toBeUndefined()
+    expect(moved.piEntryBindings).toBeUndefined()
+    expect(existsSync(join(tempHome, '.proma', 'agent-workspaces', 'workspace-b', 'pi-session-to-move'))).toBe(true)
   })
 
   test('Given 新安装用户保存关闭思考 When 连续新建会话 Then 不被旧版迁移改回 high', () => {
@@ -219,7 +271,7 @@ describe('Agent 会话 runtime 元数据', () => {
   })
 
   test('Given session settings When updating Then persists reasoning depth per session', () => {
-    const session = manager.createAgentSession('Codex 会话', undefined, undefined, undefined, 'pi')
+    const session = manager.createAgentSession('Codex 会话')
 
     const updated = manager.updateAgentSessionMeta(session.id, { reasoningLevel: 'xhigh' })
 
@@ -348,6 +400,61 @@ describe('Agent 会话引用搜索', () => {
     const results = await manager.searchAgentSessionReferences({ query: '隐藏关键词' })
 
     expect(results).toEqual([])
+  })
+})
+
+describe('Pi entry binding recovery', () => {
+  test('Given Pi branch excludes later entries When fork Then keeps only bindings in the fork artifact', async () => {
+    const piSessionFile = join(tempHome, '.pi-source-fork.jsonl')
+    writeFileSync(piSessionFile, '', 'utf-8')
+    writeAgentSessionsIndex([{
+      id: 'pi-fork-source', title: 'Pi source', workspaceId: 'workspace-a', createdAt: 1, updatedAt: 1,
+      agentRuntime: 'pi', sdkSessionId: 'pi-source-session', piSessionFile,
+      piEntryBindings: {
+        'assistant-keep': 'entry-keep',
+        'assistant-stale': 'entry-stale',
+        'assistant-missing': 'missing-entry',
+      },
+    }])
+    writeAgentSessionJsonl('pi-fork-source', [
+      JSON.stringify({ type: 'user', uuid: 'user-1', message: { content: [{ type: 'text', text: '开始' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-keep', message: { content: [{ type: 'text', text: '保留' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-stale', message: { content: [{ type: 'text', text: '丢弃' }] } }),
+    ])
+
+    const forked = await manager.forkAgentSession({ sessionId: 'pi-fork-source', upToMessageUuid: 'assistant-keep' })
+
+    expect(forked.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(manager.getAgentSessionMeta(forked.id)?.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(forked.piSessionFile && existsSync(forked.piSessionFile)).toBe(true)
+  })
+
+  test('Given rewind excludes transcript and artifact entries When rewinding Then keeps only valid retained assistant bindings', async () => {
+    const piSessionFile = join(tempHome, '.pi-source-rewind.jsonl')
+    writeFileSync(piSessionFile, '', 'utf-8')
+    writeAgentSessionsIndex([{
+      id: 'pi-rewind-source', title: 'Pi rewind', workspaceId: 'workspace-a', createdAt: 1, updatedAt: 1,
+      agentRuntime: 'pi', sdkSessionId: 'pi-source-session', piSessionFile,
+      piEntryBindings: {
+        'assistant-keep': 'entry-keep',
+        'assistant-stale': 'entry-stale',
+        'assistant-alias': 'entry-keep',
+        'assistant-broken': 'missing-entry',
+      },
+    }])
+    writeAgentSessionJsonl('pi-rewind-source', [
+      JSON.stringify({ type: 'user', uuid: 'user-1', message: { content: [{ type: 'text', text: '开始' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-keep', message: { content: [{ type: 'text', text: '保留' }] } }),
+      JSON.stringify({ type: 'user', uuid: 'user-after', message: { content: [{ type: 'text', text: '后续' }] } }),
+      JSON.stringify({ type: 'assistant', uuid: 'assistant-stale', message: { content: [{ type: 'text', text: '丢弃' }] } }),
+    ])
+
+    const retainedCount = await manager.rewindPiAgentSession('pi-rewind-source', 'assistant-keep')
+
+    expect(retainedCount).toBe(2)
+    expect(manager.getAgentSessionMeta('pi-rewind-source')?.piEntryBindings).toEqual({ 'assistant-keep': 'entry-keep' })
+    expect(manager.getAgentSessionSDKMessages('pi-rewind-source').map((message) => (message as { uuid?: string }).uuid))
+      .toEqual(['user-1', 'assistant-keep'])
   })
 })
 

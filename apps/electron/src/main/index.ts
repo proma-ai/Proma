@@ -93,7 +93,7 @@ import { createTray, destroyTray, getTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { upgradeDefaultSkillsInWorkspaces } from './lib/agent-workspace-manager'
-import { hasActiveAgentSessions, stopAllAgents, killOrphanedClaudeSubprocesses } from './lib/agent-service'
+import { hasActiveAgentSessions, stopAllAgents } from './lib/agent-service'
 import { disposePiMcpConnections } from './lib/adapters/pi-mcp-tools'
 import { markRunningDelegationsAsInterrupted } from './lib/agent-session-manager'
 import { stopAllGenerations } from './lib/chat-service'
@@ -124,9 +124,8 @@ import { createQuickTaskWindow, toggleQuickTaskWindow, destroyQuickTaskWindow } 
 import { destroyPlanningWindow, showPlanningWindow } from './lib/planning-window'
 import { configurePlanningQuickEntries } from './lib/planning-quick-entry'
 import { hasOpenPlanningArgument } from './lib/planning-quick-entry-model'
-import { createAgentIslandWindow, destroyAgentIslandWindow, showAgentIslandWindow } from './lib/agent-island-window'
 import { handleNativeAgentIslandEvent, initAgentIslandService, disposeAgentIslandService, publishAgentIslandNow } from './lib/agent-island-service'
-import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost } from './lib/mac-agent-island-native-host'
+import { disposeMacAgentIslandNativeHost, startMacAgentIslandNativeHost, isMacAgentIslandNativeHostReady } from './lib/mac-agent-island-native-host'
 import { isAgentIslandSupported } from './lib/macos-version'
 import {
   createVoiceDictationWindow,
@@ -140,22 +139,10 @@ import { TRAY_IPC_CHANNELS } from '../types'
 
 const MIGRATION_IPC_OPEN = 'migration:open-import-file'
 
-let agentIslandElectronFallbackActive = false
-
-/** 非 macOS 或 Swift helper 不可用时的无损降级。 */
-function activateAgentIslandElectronFallback(reason?: string): void {
-  if (agentIslandElectronFallbackActive) return
-  agentIslandElectronFallbackActive = true
-  if (reason) console.warn(`[agent-island] 使用 Electron 降级窗口：${reason}`)
-  createAgentIslandWindow()
-  showAgentIslandWindow()
-  publishAgentIslandNow()
-}
-
-/** macOS 26+ 优先使用真刘海 NSPanel；旧版 macOS 默认不显示灵动岛。 */
+/** macOS 26+ 使用 Swift/AppKit NSPanel；其他平台不创建 Agent Island surface。 */
 function startAgentIslandSurface(): void {
   if (!isAgentIslandSupported()) {
-    console.info('[agent-island] 已在 macOS 26 以下禁用')
+    console.info('[agent-island] 当前平台或 macOS 版本不支持，已禁用')
     return
   }
 
@@ -165,9 +152,13 @@ function startAgentIslandSurface(): void {
       publishAgentIslandNow()
     },
     onEvent: handleNativeAgentIslandEvent,
-    onUnavailable: (reason) => activateAgentIslandElectronFallback(reason),
+    onUnavailable: (reason) => {
+      console.warn(`[agent-island] macOS 原生 helper 不可用，已禁用：${reason}`)
+    },
   })
-  if (!startedNative) activateAgentIslandElectronFallback(process.platform === 'darwin' ? 'native helper unavailable' : 'non-macOS platform')
+  if (!startedNative) {
+    console.warn('[agent-island] macOS 原生 helper 启动失败，已禁用')
+  }
 }
 
 /** 检查文件路径是否为迁移文件，如果是则通知渲染进程打开导入流程 */
@@ -462,6 +453,9 @@ function createWindow(): void {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 排队消息的自动投递依赖 renderer 消费 STREAM_COMPLETE；窗口被遮挡、最小化或失焦时
+      // 不能让 Chromium 降速该事件循环，否则下一条消息会等到用户重新激活窗口才发送。
+      backgroundThrottling: false,
     },
     ...titleBarOptions,
   })
@@ -625,9 +619,9 @@ async function bootstrap(): Promise<void> {
   // 协议只接受主进程签发的 opaque token，不解析 renderer 提供的绝对路径。
   protocol.handle('proma-file', handlePromaFileRequest)
 
-  // 初始化运行时环境（Shell 环境 + Bun + Git 检测）
-  // 必须在其他初始化之前执行，确保环境变量正确加载
-  await safeAwait('initializeRuntime', () => initializeRuntime())
+  // 初始化运行时环境。Node.js 仅由 npx / npm 型 MCP 在实际连接时使用，
+  // 或由用户从设置手动检测；启动时不应将其作为 Agent 的前置要求。
+  await safeAwait('initializeRuntime', () => initializeRuntime({ skipNodeDetection: true }))
 
   // 同步默认 Skills 模板到 ~/.proma/default-skills/
   safeRun('seedDefaultSkills', seedDefaultSkills)
@@ -706,20 +700,20 @@ async function bootstrap(): Promise<void> {
     safeRun('createVoiceDictationWindow', createVoiceDictationWindow)
   }
 
-  // Agent 灵动岛：macOS 优先 Swift/AppKit NSPanel（真刘海），其他平台回退 BrowserWindow。
-  safeRun('initAgentIslandService', () => {
-    initAgentIslandService({
-      showAndFocusMainWindow,
-      openAgentSession: (sessionId, title) => {
-        sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
-      },
-      openPlanning: showPlanningWindow,
-      // The service itself can otherwise create its Electron fallback before
-      // startAgentIslandSurface reaches the platform gate.
-      enabled: () => isAgentIslandSupported() && getSettings().agentIsland?.enabled !== false,
+  // Agent Island 仅在 macOS 26+ 原生 surface 上初始化；Windows/Linux 不注册服务、窗口或事件监听。
+  if (isAgentIslandSupported()) {
+    safeRun('initAgentIslandService', () => {
+      initAgentIslandService({
+        showAndFocusMainWindow,
+        openAgentSession: (sessionId, title) => {
+          sendToMainWindow(TRAY_IPC_CHANNELS.OPEN_AGENT_SESSION, { sessionId, title })
+        },
+        openPlanning: showPlanningWindow,
+        enabled: () => isMacAgentIslandNativeHostReady() && getSettings().agentIsland?.enabled !== false,
+      })
     })
-  })
-  safeRun('startAgentIslandSurface', startAgentIslandSurface)
+    safeRun('startAgentIslandSurface', startAgentIslandSurface)
+  }
 
   // 飞书实时同步开启时，默认阻止系统自动休眠，保证远程群内继续可用。
   safeRun('syncFeishuSyncSleepBlocker', () => syncFeishuSyncSleepBlocker(getSettings()))
@@ -829,9 +823,6 @@ app.on('before-quit', () => {
   // 中止所有活跃的 Agent 和 Chat 子进程
   stopAllAgents()
   stopAllGenerations()
-  // 最后兜底：扫描并强杀所有孤儿 claude-agent-sdk 子进程（Issue #357）
-  // 针对 pidMap 未覆盖、dispose 漏杀等极端场景，确保不遗留残留进程
-  killOrphanedClaudeSubprocesses()
   // 清理更新器定时器
   cleanupUpdater()
   // 停止工作区文件监听
@@ -853,10 +844,9 @@ app.on('before-quit', () => {
   destroyQuickTaskWindow()
   destroyPlanningWindow()
   destroyVoiceDictationWindow()
-  // 销毁灵动岛服务与窗口（先关闭 NSPanel helper，避免开发热重载遗留原生面板）
+  // 销毁原生 macOS 灵动岛服务（其他平台从未创建 surface）
   disposeMacAgentIslandNativeHost()
   disposeAgentIslandService()
-  destroyAgentIslandWindow()
   // 关闭 Pi MCP 桥接连接（释放 stdio 子进程）
   disposePiMcpConnections().catch(() => {})
   // Clean up system tray before quitting

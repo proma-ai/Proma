@@ -44,7 +44,6 @@ export interface SyncRuntimeDepsResult {
 }
 
 export const EXTERNAL_RUNTIME_PACKAGES: readonly string[] = [
-  '@anthropic-ai/claude-agent-sdk',
   '@earendil-works/pi-coding-agent',
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-ai',

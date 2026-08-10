@@ -4,7 +4,7 @@ import type {
   PlanningNativeSyncStatus,
   PlanningNativeSyncTarget,
 } from '@proma/shared'
-import { callMacEventKitNativeAddon } from './mac-eventkit-native-addon'
+import { callMacEventKitNativeAddon, subscribeMacEventKitNativeChanges } from './mac-eventkit-native-addon'
 
 type NativePermissionResponse = {
   entity: PlanningNativeSyncEntity
@@ -85,11 +85,21 @@ export async function listPlanningNativeSyncTargets(entity: PlanningNativeSyncEn
   }
 }
 
+/** 用户可以显式连接只读集合以浏览；写入能力随 EventKit 目标一并返回。 */
+export async function listPlanningNativeConnectionTargets(entity: PlanningNativeSyncEntity): Promise<PlanningNativeSyncTarget[]> {
+  if (!eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  try { return await callMacEventKitNativeAddon<PlanningNativeSyncTarget[]>('listTargets', entity) } catch { return [] }
+}
+
 export interface PlanningNativeSyncItem {
   targetId: string
   /** Proma UUID；仅用于新建项目的 crash-recovery marker，不覆盖用户已有 URL。 */
   identity: string
   calendarItemIdentifier?: string
+  /** 仅用户在冲突中明确选择“保留 Proma”后才允许 locator 缺失时重建。 */
+  allowRecreate?: boolean
   title: string
   notes?: string
   startAt?: number
@@ -102,9 +112,47 @@ export interface PlanningNativeSyncItem {
   completedAt?: number
 }
 
+export interface PlanningNativeExternalItem {
+  calendarItemIdentifier: string
+  calendarItemExternalIdentifier?: string
+  title: string
+  notes?: string
+  startAt?: number
+  endAt?: number
+  allDay?: boolean
+  dueAt?: number
+  priority?: 'low' | 'medium' | 'high'
+  completed?: boolean
+  completedAt?: number
+  dueDateOnly?: boolean
+  isRecurring?: boolean
+  lastModifiedAt: number
+}
+
 export interface PlanningNativeSyncIdentifiers {
   calendarItemIdentifier?: string
   calendarItemExternalIdentifier?: string
+}
+
+export async function listPlanningNativeConnectionItems(entity: PlanningNativeSyncEntity, targetId: string, range?: { from: number; to: number }): Promise<PlanningNativeExternalItem[]> {
+  if (!eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, ...range })
+}
+
+/** 按 Proma 已保存 locator 精确确认删除，不把有界 Calendar 查询误判成完整快照。 */
+export async function listPlanningNativeConnectionItemsByIdentifier(entity: PlanningNativeSyncEntity, targetId: string, calendarItemIdentifiers: string[]): Promise<PlanningNativeExternalItem[]> {
+  if (calendarItemIdentifiers.length === 0 || !eventKitSupported()) return []
+  const permission = await getPermission(entity)
+  if (permission.status !== 'full-access') return []
+  return callMacEventKitNativeAddon<PlanningNativeExternalItem[]>('listItems', entity, { targetId, calendarItemIdentifiers })
+}
+
+/** EventKit 全局变更只触发协调器重新读取已连接目标，绝不借此扫描其它系统集合。 */
+export function subscribePlanningNativeSyncChanges(listener: () => void): boolean {
+  if (!eventKitSupported()) return false
+  try { return subscribeMacEventKitNativeChanges(listener) } catch { return false }
 }
 
 export async function upsertPlanningNativeSyncItem(entity: PlanningNativeSyncEntity, item: PlanningNativeSyncItem): Promise<PlanningNativeSyncIdentifiers> {

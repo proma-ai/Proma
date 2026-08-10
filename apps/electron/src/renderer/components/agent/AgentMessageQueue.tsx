@@ -12,6 +12,8 @@ import {
 interface AgentMessageQueueProps {
   items: AgentQueuedMessage[]
   canSendNow: boolean
+  /** 立即发送是否会打断当前正在执行的 turn（true=会终止正在运行的命令/输出） */
+  interruptsCurrentTurn: boolean
   onSendNow: (messageId: string) => void
   onRecall: (messageId: string) => void
   onRemove: (messageId: string) => void
@@ -21,6 +23,7 @@ interface AgentMessageQueueProps {
 export function AgentMessageQueue({
   items,
   canSendNow,
+  interruptsCurrentTurn,
   onSendNow,
   onRecall,
   onRemove,
@@ -132,7 +135,7 @@ export function AgentMessageQueue({
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <QueueIconButton
-                  label="立即发送"
+                  label={interruptsCurrentTurn ? '立即发送（打断当前执行）' : '立即发送'}
                   disabled={!canSendNow}
                   onClick={() => onSendNow(item.id)}
                 >
