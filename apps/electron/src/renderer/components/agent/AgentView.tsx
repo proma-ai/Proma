@@ -121,6 +121,7 @@ import { inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedMo
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
 import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
+import { resolveAgentSessionModelSelection } from '@/lib/agent-session-model-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import {
@@ -386,8 +387,8 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const sessionModelMap = useAtomValue(agentSessionModelMapAtom)
   const setSessionChannelMap = useSetAtom(agentSessionChannelMapAtom)
   const setSessionModelMap = useSetAtom(agentSessionModelMapAtom)
-  const [defaultChannelId, setDefaultChannelId] = useAtom(agentChannelIdAtom)
-  const [defaultModelId, setDefaultModelId] = useAtom(agentModelIdAtom)
+  const defaultChannelId = useAtomValue(agentChannelIdAtom)
+  const defaultModelId = useAtomValue(agentModelIdAtom)
   const sessions = useAtomValue(agentSessionsAtom)
   const planningGroups = useAtomValue(todoPlanningGroupsAtom)
   const [todoDialogOpen, setTodoDialogOpen] = React.useState(false)
@@ -409,8 +410,17 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const sessionMetaModelId = sessionMeta?.modelId
   const hasSessionMeta = Boolean(sessionMeta)
   const isLegacyTranscript = sessionMeta?.legacyTranscript?.continuationRequired === true
-  const agentChannelId = sessionMetaChannelId ?? sessionChannelMap.get(sessionId) ?? defaultChannelId
-  const agentModelId = sessionMetaModelId ?? sessionModelMap.get(sessionId) ?? defaultModelId
+  const sessionModelSelection = resolveAgentSessionModelSelection({
+    hasSessionMeta,
+    sessionChannelId: sessionMetaChannelId,
+    sessionModelId: sessionMetaModelId,
+    cachedChannelId: sessionChannelMap.get(sessionId),
+    cachedModelId: sessionModelMap.get(sessionId),
+    defaultChannelId,
+    defaultModelId,
+  })
+  const agentChannelId = sessionModelSelection.channelId
+  const agentModelId = sessionModelSelection.modelId
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const agentEffort = useAtomValue(agentEffortAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
@@ -704,23 +714,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const firstModel = channel.models.find((m) => m.enabled)
     if (!firstModel) return
 
-    // 更新 per-session map（带幂等守卫，避免无意义写入导致 effect 自循环）
+    // 只更新当前 session 的本地选择；打开会话不能反向改写全局默认渠道/模型。
     setSessionModelMap((prev) => {
       if (prev.get(sessionId) === firstModel.id) return prev
       const map = new Map(prev)
       map.set(sessionId, firstModel.id)
       return map
     })
-    // 全局默认值 + 持久化 IPC 也加幂等：firstModel 与当前 defaultModelId 相同时跳过，
-    // 避免每次 agentChannelId / globalChannels 变化都重复写盘和触发 agentModelIdAtom 更新。
-    if (defaultModelId !== firstModel.id) {
-      setDefaultModelId(firstModel.id)
-      window.electronAPI.updateSettings({
-        agentChannelId,
-        agentModelId: firstModel.id,
-      }).catch(console.error)
-    }
-  }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap, setDefaultModelId])
+  }, [agentChannelId, agentModelId, globalChannels, sessionId, setSessionModelMap])
 
   // 获取当前 session 的工作路径（文件浏览器需要）
   React.useEffect(() => {
@@ -1925,16 +1926,6 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       })
     }
 
-    // 同时更新全局默认值（新会话继承）
-    setDefaultChannelId(option.channelId)
-    setDefaultModelId(option.modelId)
-
-    // 持久化到设置
-    window.electronAPI.updateSettings({
-      agentChannelId: option.channelId,
-      agentModelId: option.modelId,
-    }).catch(console.error)
-
     window.electronAPI.updateAgentSessionModel(sessionId, option.channelId, option.modelId)
       .then((updated) => {
         setAgentSessions((prev) => prev.map((session) => (
@@ -1946,7 +1937,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     if (modelSwitchDeferred) {
       toast.info('模型已切换，本轮结束后生效')
     }
-  }, [sessionId, streaming, backgroundWaiting, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, setAgentSessions])
+  }, [sessionId, streaming, backgroundWaiting, setSessionChannelMap, setSessionModelMap, setAgentSessions])
 
   const handleCodexFastModeChange = React.useCallback(async (): Promise<void> => {
     if (!isCodexFastModeAvailable || streaming || backgroundWaiting || !sessionMeta) return

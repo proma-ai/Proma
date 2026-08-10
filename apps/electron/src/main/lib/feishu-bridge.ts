@@ -41,7 +41,7 @@ import {
   getWorkspaceCapabilities,
 } from './agent-workspace-manager'
 import { getFeishuBotBindingsPath, getFeishuBotMetadataPath } from './config-paths'
-import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { readJsonFileSafe, writeJsonFileAtomic } from './safe-file'
 import {
   inferImageMediaType as inferImageMediaTypeShared,
@@ -84,6 +84,11 @@ import {
 } from './feishu/card-run-state'
 import { renderCard as renderRunCard } from './feishu/card-renderer-v2'
 import { buildSessionMirrorGroupName, normalizeSessionMirrorUserOpenId } from './feishu/session-mirror'
+import {
+  initializeBindingModelSelection,
+  resolveFeishuRunTarget,
+  resolveSessionMirrorModelSelection,
+} from './feishu/model-binding'
 import { resolveGroupMessageAccess } from './feishu/group-message-policy'
 import { ScopedQueue } from './feishu/scoped-queue'
 import { RunCoordinator } from './feishu/run-coordinator'
@@ -378,13 +383,20 @@ class FeishuBridge {
             b.archived = true
             b.archivedAt ??= session.updatedAt
           }
-          // 同步最新的渠道和模型设置（用户可能已更改）
-          if (appSettings.agentChannelId) {
-            b.channelId = appSettings.agentChannelId
-          }
-          if (appSettings.agentModelId) {
-            b.modelId = appSettings.agentModelId
-          }
+          // 已有 binding 是当前聊天的显式选择；全局设置只补空值，不覆盖。
+          const selection = initializeBindingModelSelection(
+            b,
+            {
+              channelId: this.botConfig.defaultChannelId,
+              modelId: this.botConfig.defaultModelId,
+            },
+            {
+              channelId: appSettings.agentChannelId,
+              modelId: appSettings.agentModelId,
+            },
+          )
+          b.channelId = selection.channelId
+          b.modelId = selection.modelId
           this.chatBindings.set(b.chatId, b)
           if (!b.archived) {
             this.sessionToChat.set(b.sessionId, b.chatId)
@@ -405,7 +417,7 @@ class FeishuBridge {
     try {
       const bindings = Array.from(this.chatBindings.values())
       const bindingsPath = getFeishuBotBindingsPath(this.botConfig.id)
-      writeFileSync(bindingsPath, JSON.stringify(bindings, null, 2), 'utf-8')
+      writeJsonFileAtomic(bindingsPath, bindings)
     } catch (error) {
       console.error('[飞书 Bridge] 保存绑定失败:', redactSensitiveLogValue(error))
     }
@@ -545,7 +557,8 @@ class FeishuBridge {
 
     const appSettings = getSettings()
     const workspaceId = session.workspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
-    const channelId = session.channelId ?? this.botConfig.defaultChannelId ?? appSettings.agentChannelId
+    const sessionSelection = resolveSessionMirrorModelSelection(session)
+    const channelId = sessionSelection.channelId
     if (!workspaceId || !channelId) {
       console.warn('[飞书 Session 镜像] 缺少 workspaceId 或 channelId，跳过镜像群创建', {
         sessionId: session.id,
@@ -566,7 +579,7 @@ class FeishuBridge {
       sessionId: session.id,
       workspaceId,
       channelId,
-      modelId: this.botConfig.defaultModelId ?? appSettings.agentModelId ?? undefined,
+      modelId: sessionSelection.modelId,
       source: 'session-mirror',
       chatType: 'group',
       groupName,
@@ -1401,12 +1414,15 @@ class FeishuBridge {
       const session = getAgentSessionMeta(binding.sessionId)
       lines.push(`**会话**: ${session?.title ?? '未知'} (\`${binding.sessionId.slice(0, 8)}\`)`)
 
-      // 模型信息（与发送路径同序解析：binding > Bot 配置 > 应用设置）
-      const nowSettings = getSettings()
-      const effChannelId = binding.channelId || this.botConfig.defaultChannelId || nowSettings.agentChannelId
-      const effModelId = binding.modelId || this.botConfig.defaultModelId || nowSettings.agentModelId
-      const modelInfo = describeBindingModel(effChannelId, effModelId)
-      lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}${modelInfo.valid ? '' : '（已失效）'}`)
+      // 与实际发送使用同一解析器，避免 /now 展示失效 binding 而发送时已回落。
+      try {
+        const target = this.resolveRunTarget(binding)
+        const modelInfo = describeBindingModel(target.channelId, target.modelId)
+        lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}`)
+      } catch {
+        const modelInfo = describeBindingModel(binding.channelId, binding.modelId)
+        lines.push(`**模型**: ${modelInfo.channelName} / ${modelInfo.modelName}（已失效）`)
+      }
     } else {
       lines.push('**会话**: 未绑定（发送消息将自动创建）')
     }
@@ -1576,6 +1592,22 @@ class FeishuBridge {
 
   // ===== 用户消息处理 =====
 
+  private resolveRunTarget(binding: FeishuChatBinding): ReturnType<typeof resolveFeishuRunTarget> {
+    const settings = getSettings()
+    return resolveFeishuRunTarget({
+      binding,
+      botDefaults: {
+        channelId: this.botConfig.defaultChannelId,
+        modelId: this.botConfig.defaultModelId,
+      },
+      globalDefaults: {
+        channelId: settings.agentChannelId,
+        modelId: settings.agentModelId,
+      },
+      channels: listSwitchableChannels(),
+    })
+  }
+
   private async handleUserMessage(
     msgCtx: FeishuMessageContext,
     text: string,
@@ -1591,6 +1623,31 @@ class FeishuBridge {
       await this.createNewSession(msgCtx)
       binding = this.chatBindings.get(chatId)
       if (!binding) return
+    }
+
+    let runTarget: ReturnType<typeof resolveFeishuRunTarget>
+    try {
+      runTarget = this.resolveRunTarget(binding)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '无法解析飞书 Agent 使用的渠道和模型。'
+      await this.sendCardMessage(chatId, buildErrorCard(message))
+      return
+    }
+
+    // 记录本次实际运行目标；失效 binding 回落后，下次不再重复使用旧快照。
+    if (binding.channelId !== runTarget.channelId || binding.modelId !== runTarget.modelId) {
+      console.warn(
+        `[飞书 Bridge] 模型绑定已回落并更新: source=${runTarget.source}, `
+        + `channel=${runTarget.channelId}, model=${runTarget.modelId}`,
+      )
+      binding.channelId = runTarget.channelId
+      binding.modelId = runTarget.modelId
+      this.saveBindings()
+    } else {
+      console.log(
+        `[飞书 Bridge] Agent 运行目标: source=${runTarget.source}, `
+        + `channel=${runTarget.channelId}, model=${runTarget.modelId}`,
+      )
     }
 
     // 注：之前在此处有 isAgentSessionActive silent skip 兜底，会在
@@ -1730,16 +1787,11 @@ class FeishuBridge {
       ? [this.buildPiFeishuChatHistoryTool(chatId)]
       : undefined
 
-    // 渠道/模型解析：binding（per-chat 用户在 IM 里切过的）优先，其次 Bot 配置、应用设置
-    const latestSettings = getSettings()
-    const channelId = binding.channelId || this.botConfig.defaultChannelId || latestSettings.agentChannelId || ''
-    const modelId = binding.modelId || this.botConfig.defaultModelId || latestSettings.agentModelId
-
     const input: AgentSendInput = {
       sessionId: binding.sessionId,
       userMessage: agentMessage,
-      channelId,
-      modelId,
+      channelId: runTarget.channelId,
+      modelId: runTarget.modelId,
       workspaceId: binding.workspaceId,
       permissionModeOverride: 'bypassPermissions',
     }
