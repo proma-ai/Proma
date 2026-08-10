@@ -15,6 +15,7 @@ import {
   tabsAtom,
   activeTabIdAtom,
   tabIndicatorMapAtom,
+  isAgentContextTab,
 } from '@/atoms/tab-atoms'
 import type { TabItem } from '@/atoms/tab-atoms'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
@@ -228,7 +229,8 @@ function TabBarInner({
   const fadeTimerRef = React.useRef<ReturnType<typeof setTimeout>>()
   const isWindows = React.useMemo(() => detectIsWindows(), [])
 
-  // 文件面板切换（全局共享）：活动 Tab 是 Agent 且面板关闭时，在 TabBar 右上角展示"打开"按钮。
+  // 文件面板切换（全局共享）：Agent 会话及其归属的预览 Tab 都可切换面板；
+  // 仅 Agent 会话 Tab 在面板关闭时展示右上角"打开"按钮。
   // 该按钮的 absolute 定位与 DiffPanelTabBar.PanelRightClose 的 mr-1 mb-[3px] 坐标耦合，
   // 若右侧关闭按钮样式变化，这里需同步调整。
   const [isPanelOpen, setSidePanelOpen] = useAtom(agentSidePanelOpenAtom)
@@ -238,7 +240,7 @@ function TabBarInner({
   const showOpenPanelButton = !isPanelOpen && activeTab?.type === 'agent'
 
   const togglePanel = React.useCallback(() => {
-    if (activeTab?.type !== 'agent') return
+    if (!isAgentContextTab(activeTab)) return
     setSidePanelOpen((v) => !v)
   }, [setSidePanelOpen, activeTab])
 
