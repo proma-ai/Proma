@@ -32,6 +32,7 @@ import { isMacAgentIslandNativeHostReady, publishMacAgentIslandSnapshot } from '
 import { getAgentIslandTodoAttentionKeys, selectAgentIslandTodos } from './agent-island-planning'
 import { selectAgentIslandCompactPlanQuota } from './agent-island-plan-quota'
 import { getAgentIslandPhasePriority } from './agent-island-priority'
+import { buildVisibilityKey } from './agent-island-visibility'
 import { listCalendarEvents, listTodos } from './planning-manager'
 import { onPlanningChanged } from './planning-events'
 import { getChannelPlanQuota, listChannels } from './channel-manager'
@@ -580,16 +581,6 @@ function getImminentPlanningKeys(now: number): string[] {
       .filter((event) => isImminent(event.startAt, now))
       .map((event) => `e:${event.id}:${event.startAt}`),
   ]
-}
-
-function buildVisibilityKey(state: AgentIslandState, planningKeys: string[]): string {
-  const agentKey = state.sessions
-    .map((session) => `${session.sessionId}:${session.phase}:${session.lastActivityAt}:${session.detail}`)
-    .join('|')
-  const recentKey = state.recentSessions
-    .map((session) => `${session.sessionId}:${session.lastActivityAt}`)
-    .join('|')
-  return `${agentKey}/${recentKey}#${planningKeys.join('|')}`
 }
 
 function isIslandVisible(state: AgentIslandState, planningKeys: string[]): boolean {

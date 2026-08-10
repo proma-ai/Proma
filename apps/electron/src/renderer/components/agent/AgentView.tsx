@@ -2044,6 +2044,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             }
           : undefined),
       ])
+      // 入队对用户是隐性的：不提示的话，用户会以为消息已发出但 Agent 没反应。
+      // 固定 toast id 避免多条排队消息反复弹出；提示里同时给出打断入口。
+      toast.info('消息已加入队列，将在当前执行结束后自动发送', {
+        id: 'agent-view-queued-message-hint',
+        description: '如需立即处理，点击队列消息右侧的「立即发送」可打断当前执行（会终止正在运行的命令）。',
+      })
       if (overrideText === undefined) {
         setInputContent('')
         setInputHtmlContent('')
@@ -3005,6 +3011,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
             <AgentMessageQueue
               items={queuedMessages}
               canSendNow={canSendQueuedNow}
+              interruptsCurrentTurn={streaming}
               onSendNow={handleSendQueuedNow}
               onRecall={handleRecallQueuedMessage}
               onRemove={handleRemoveQueuedMessage}
