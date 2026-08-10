@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { WindowControls } from '@/components/WindowControls'
 import { MessageResponse } from '@/components/ai-elements/message'
-import { WINDOW_CONTROLS_PADDING_RIGHT, detectIsMac, detectIsWindows } from '@/lib/platform'
+import { WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT, detectIsMac, detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 
 function flattenFiles(nodes: SkillFileNode[]): SkillFileNode[] {
@@ -217,9 +217,13 @@ export function WorkspaceMemoryWindowApp(): React.ReactElement {
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-content-area antialiased">
         <WindowControls />
         <header className={cn(
-          'flex h-12 shrink-0 items-center border-b border-border/70 [-webkit-app-region:drag]',
+          'relative flex h-12 shrink-0 items-center border-b border-border/70',
           isMac ? 'pl-[88px] pr-5' : isWindows ? `pl-5 ${WINDOW_CONTROLS_PADDING_RIGHT}` : 'px-5',
         )}>
+          {/* 拖拽层：容器本身不再直接 app-region: drag。
+              Windows 上用 WINDOW_CONTROLS_INSET_RIGHT 让出右上角按钮区域，
+              避免 drag hitmask 与 WindowControls 按钮重叠导致最小化/最大化/关闭不生效。 */}
+          <div aria-hidden="true" className={cn('titlebar-drag-region pointer-events-none absolute inset-y-0 left-0', isWindows ? WINDOW_CONTROLS_INSET_RIGHT : 'right-0')} />
           <div>
             <h1 className="text-sm font-semibold text-foreground">工作区记忆</h1>
             <p className="text-[11px] text-muted-foreground">{workspaceSlug} · memory/</p>
