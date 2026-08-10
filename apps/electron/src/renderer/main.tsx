@@ -85,6 +85,7 @@ import { ModelHealthInitializer } from './components/ModelHealthInitializer'
 import { htmlToMarkdown, markdownToHtml } from './lib/markdown-rich-text'
 import { PromaLogo } from './lib/model-logo'
 import { cloudUserAtom, cloudAuthLoadingAtom, initializeCloudAuth } from './atoms/cloud-auth'
+import { userProfileAtom } from './atoms/user-profile'
 import { billingInfoAtom, billingLoadingAtom, quotaExceededDialogAtom, initializeBilling } from './atoms/cloud-billing'
 import { isCloudMode } from './lib/mode'
 import { initShortcutRegistry, updateShortcutOverrides } from './lib/shortcut-registry'
@@ -538,6 +539,40 @@ function PlanningInitializer(): null {
     const unsubscribe = window.electronAPI.onPlanningChanged((change) => load(change.resources))
     return () => { disposed = true; unsubscribe() }
   }, [setCalendarEvents, setCalendarGroups, setTags, setTodoGroups, setTodos])
+
+  return null
+}
+
+/**
+ * 用户档案初始化组件
+ *
+ * 负责把主进程持久化的档案与变更事件同步到 renderer Atom，避免 Cloud 登录后
+ * 写入的头像仅落盘、却仍由 UI 持续显示默认值。
+ */
+function UserProfileInitializer(): null {
+  const setUserProfile = useSetAtom(userProfileAtom)
+
+  useEffect(() => {
+    let disposed = false
+    let receivedChange = false
+
+    // 先订阅再读取快照：若读取期间档案已更新，忽略可能过期的快照。
+    const unsubscribe = window.electronAPI.onUserProfileChanged((profile) => {
+      receivedChange = true
+      if (!disposed) setUserProfile(profile)
+    })
+
+    void window.electronAPI.getUserProfile()
+      .then((profile) => {
+        if (!disposed && !receivedChange) setUserProfile(profile)
+      })
+      .catch((error: unknown) => console.error('[用户档案] 加载失败:', error))
+
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [setUserProfile])
 
   return null
 }
@@ -1174,6 +1209,7 @@ if (isQuickTaskWindow) {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <ThemeInitializer />
+      <UserProfileInitializer />
       <CloudInitializer />
       <ModelHealthInitializer />
       <AgentSettingsInitializer />
