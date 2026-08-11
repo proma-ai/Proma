@@ -23,6 +23,7 @@ export * from './chat'
 
 // Agent 相关类型
 export * from './agent'
+export * from './browser'
 export * from './reasoning-profile'
 
 // Cloud 模式相关类型

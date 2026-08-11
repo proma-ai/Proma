@@ -117,7 +117,9 @@ function createMentionSuggestion<T>(
 
       return {
         onStart(props) {
-          if (!requestGuard.isLatest(props.items)) {
+          // TipTap 3.29 会在 items() 异步读取前以未登记的空数组调用 onStart。
+          // 仅拒绝已知的旧请求，不能用 isLatest() 拒绝该初始生命周期，否则弹窗永远不会创建。
+          if (requestGuard.isStale(props.items)) {
             return
           }
           if (popup || renderer) {

@@ -82,6 +82,8 @@ type CacheEntry = {
   docxHtml?: string
   officeHtml?: string
   officeText?: string
+  /** 二进制或其他不可安全内联渲染的文件提示 */
+  unsupportedPreviewReason?: string
 }
 
 interface DeepSelection {
@@ -273,6 +275,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
   const [viewMode, setViewMode] = useAtom(agentDiffViewModeAtom)
   const [oldContent, setOldContent] = React.useState('')
   const [newContent, setNewContent] = React.useState('')
+  const [unsupportedPreviewReason, setUnsupportedPreviewReason] = React.useState('')
   const [markdownEditing, setMarkdownEditing] = React.useState(
     () => Boolean(initialMarkdownEditorState?.editing),
   )
@@ -771,6 +774,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
       setDocxHtml(cached.docxHtml ?? '')
       setOfficeHtml(cached.officeHtml ?? '')
       setOfficeText(cached.officeText ?? '')
+      setUnsupportedPreviewReason(cached.unsupportedPreviewReason ?? '')
       setPdfSrc(cached.pdfSrc ?? '')
       setPdfZoom(100)
       setImagePath(cached.imagePath ?? '')
@@ -791,6 +795,7 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
         setDocxHtml('')
         setOfficeHtml('')
         setOfficeText('')
+        setUnsupportedPreviewReason('')
         setPdfSrc('')
         setPdfZoom(100)
         setImagePath('')
@@ -859,6 +864,14 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
             }
             const result = await window.electronAPI.resolveAndReadFile(filePath, fileAccess)
             if (cancelled) return
+            if (result?.isBinary || result?.isTooLarge) {
+              const reason = result.isTooLarge
+                ? '此文本文件超过 5 MB，无法安全进行内联预览，请使用默认应用打开。'
+                : '此二进制或编码异常文件暂不支持内联预览，请使用默认应用打开。'
+              setUnsupportedPreviewReason(reason)
+              cacheSet(cacheKey, { oldContent: '', newContent: '', unsupportedPreviewReason: reason })
+              return
+            }
             content = result?.content ?? ''
           } else {
             const result = await window.electronAPI.getDiffContents({ dirPath, filePath, gitRoot, sessionId, baseRef })
@@ -1617,7 +1630,11 @@ export function DiffTabContent({ filePath, dirPath, sessionId, gitRoot, previewO
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground text-[12px]">加载中...</div>
           ) : previewOnly ? (
-            isPdf ? (
+            unsupportedPreviewReason ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
+                {unsupportedPreviewReason}
+              </div>
+            ) : isPdf ? (
               pdfSrc ? (
                 <div className="relative h-full">
                 <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg bg-background/80 backdrop-filter backdrop-blur-sm border border-border/30 shadow-sm">
