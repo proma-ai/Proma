@@ -13,6 +13,7 @@
 
 import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
@@ -68,11 +69,14 @@ function notifyWorkspaceFilesChanged(changedPath?: string): void {
   if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
   if (changedPath) attachedChangedPaths.add(changedPath)
   attachedFilesTimer = setTimeout(() => {
-    if (mainWin && !mainWin.isDestroyed()) {
-      mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, [...attachedChangedPaths])
-    }
+    const changedPaths = [...attachedChangedPaths]
     attachedChangedPaths.clear()
     attachedFilesTimer = null
+    void filterExistingFiles(changedPaths).then((filePaths) => {
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, filePaths)
+      }
+    })
   }, DEBOUNCE_MS)
 }
 
@@ -85,13 +89,16 @@ function isExistingDirectory(dirPath: string): boolean {
   }
 }
 
-/** 文件删除后路径不可 stat，仍需发出刷新；存在时跳过纯目录事件。 */
-function isFileOrMissing(filePath: string): boolean {
-  try {
-    return !statSync(filePath).isDirectory()
-  } catch {
-    return true
-  }
+/** debounce 后异步筛选存在的普通文件，目录和已删除路径仍会触发空刷新事件。 */
+async function filterExistingFiles(paths: readonly string[]): Promise<string[]> {
+  const results = await Promise.all(paths.map(async (filePath) => {
+    try {
+      return (await stat(filePath)).isFile() ? filePath : null
+    } catch {
+      return null
+    }
+  }))
+  return results.filter((filePath): filePath is string => filePath !== null)
 }
 
 function findNearestExistingDirectory(dirPath: string): string | null {
@@ -249,16 +256,19 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
           capabilitiesTimer = null
         }, DEBOUNCE_MS)
       } else {
-        if (!isFileOrMissing(join(watchDir, normalizedFilename))) return
-        // 其他文件变化 → 通知文件浏览器刷新
+        // 其他文件变化 → 通知文件浏览器刷新。删除或目录事件会发送空路径列表，
+        // 仍让 Git Diff 刷新，但不会把非文件路径记录到会话改动中。
         if (filesTimer) clearTimeout(filesTimer)
         changedFilePaths.add(join(watchDir, normalizedFilename))
         filesTimer = setTimeout(() => {
-          if (!win.isDestroyed()) {
-            win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, [...changedFilePaths])
-          }
+          const paths = [...changedFilePaths]
           changedFilePaths.clear()
           filesTimer = null
+          void filterExistingFiles(paths).then((filePaths) => {
+            if (!win.isDestroyed()) {
+              win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, filePaths)
+            }
+          })
         }, DEBOUNCE_MS)
       }
     })
@@ -330,7 +340,6 @@ export function watchAttachedDirectory(dirPath: string): void {
       const normalizedFilename = normalizeWatchFilename(filename)
       if (normalizedFilename === null || !shouldNotifyForWatchFilename(normalizedFilename)) return
       const changedPath = join(dirPath, normalizedFilename)
-      if (!isFileOrMissing(changedPath)) return
       invalidateGitDiffCache(changedPath)
       notifyWorkspaceFilesChanged(changedPath)
     })

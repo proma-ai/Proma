@@ -76,7 +76,7 @@ import {
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
 import { detectIsWindows } from '@/lib/platform'
-import { getSessionFileChangeKind, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { getSessionFileChangeKind, arePathsEqual, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -668,18 +668,35 @@ export function useGlobalAgentListeners(): void {
       void (async () => {
         const streamingStates = store.get(agentStreamingStatesAtom)
         const sessionPaths = store.get(agentSessionPathMapAtom)
-        const currentSessionId = store.get(currentAgentSessionIdAtom)
         const candidateIds = [...streamingStates.entries()]
           .filter(([, state]) => state.running)
           .map(([sessionId]) => sessionId)
-          .sort((a, b) => Number(b === currentSessionId) - Number(a === currentSessionId))
 
         for (const sessionId of candidateIds) {
           const sessionPath = sessionPaths.get(sessionId)
+          const workspaceId = getWorkspaceIdForSession(sessionId)
           const workspaceFilesPath = await getWorkspaceFilesPathForSession(sessionId)
+          const sessionAttachedDirs = store.get(agentAttachedDirectoriesMapAtom).get(sessionId) ?? []
+          const sessionAttachedFiles = store.get(agentAttachedFilesMapAtom).get(sessionId) ?? []
+          const workspaceAttachedDirs = workspaceId
+            ? (store.get(workspaceAttachedDirectoriesMapAtom).get(workspaceId) ?? [])
+            : []
+          const workspaceAttachedFiles = workspaceId
+            ? (store.get(workspaceAttachedFilesMapAtom).get(workspaceId) ?? [])
+            : []
+          const directoryRoots = uniqueTruthyPaths([
+            sessionPath,
+            workspaceFilesPath,
+            ...sessionAttachedDirs,
+            ...workspaceAttachedDirs,
+          ])
+          const attachedFiles = uniqueTruthyPaths([
+            ...sessionAttachedFiles,
+            ...workspaceAttachedFiles,
+          ])
           const matchingPaths = filePaths.filter((changedPath) => (
-            (sessionPath && isPathWithinRoot(sessionPath, changedPath, isWindows))
-            || (workspaceFilesPath && isPathWithinRoot(workspaceFilesPath, changedPath, isWindows))
+            directoryRoots.some((rootPath) => isPathWithinRoot(rootPath, changedPath, isWindows))
+            || attachedFiles.some((filePath) => arePathsEqual(filePath, changedPath, isWindows))
           ))
           if (matchingPaths.length === 0) continue
 
@@ -696,7 +713,7 @@ export function useGlobalAgentListeners(): void {
                 kind: 'edited',
                 runId,
                 updatedAt: Date.now(),
-              }))
+              }, isWindows))
               return map
             })
             if (
@@ -712,7 +729,6 @@ export function useGlobalAgentListeners(): void {
               })
             }
           }
-          return
         }
       })().catch(() => { /* 文件监听不应影响会话流 */ })
     })
@@ -1027,7 +1043,7 @@ export function useGlobalAgentListeners(): void {
                         kind: getSessionFileChangeKind(entry.toolName, entry.existedBefore),
                         runId: entry.runId,
                         updatedAt: Date.now(),
-                      }))
+                      }, isWindows))
                       return m
                     })
 
