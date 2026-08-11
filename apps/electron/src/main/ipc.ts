@@ -955,6 +955,12 @@ function releaseDirectoryWatcherIfUnreferenced(dirPath: string): void {
   if (!isStillReferenced) unwatchAttachedDirectory(dirPath)
 }
 
+function releaseAttachedFileWatchers(filePaths: readonly string[] | undefined): void {
+  for (const dirPath of new Set((filePaths ?? []).map((filePath) => dirname(filePath)))) {
+    releaseDirectoryWatcherIfUnreferenced(dirPath)
+  }
+}
+
 async function withOAuthDeviceCodeQr<T extends CodexOAuthDeviceCode | XaiOAuthDeviceCode>(deviceCode: T): Promise<T> {
   try {
     const QRCode = (await import('qrcode')).default
@@ -2094,6 +2100,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DELETE_SESSION,
     async (_, id: string): Promise<void> => {
+      const attachedFiles = getAgentSessionMeta(id)?.attachedFiles
       // 清理权限服务中该会话的白名单
       permissionService.clearSessionWhitelist(id)
       permissionService.clearSessionPending(id)
@@ -2101,7 +2108,8 @@ export function registerIpcHandlers(): void {
       askUserService.clearSessionPending(id)
       // 清理 ExitPlanMode 服务中的待处理请求
       exitPlanService.clearSessionPending(id)
-      return deleteAgentSession(id)
+      deleteAgentSession(id)
+      releaseAttachedFileWatchers(attachedFiles)
     }
   )
 
@@ -2334,9 +2342,13 @@ export function registerIpcHandlers(): void {
         throw new Error('至少需要保留一个项目')
       }
 
-      const affectedSessionIds = listAgentSessions()
+      const affectedSessions = listAgentSessions()
         .filter((session) => session.workspaceId === id)
-        .map((session) => session.id)
+      const affectedSessionIds = affectedSessions.map((session) => session.id)
+      const deletedAttachedFiles = [
+        ...affectedSessions.flatMap((session) => session.attachedFiles ?? []),
+        ...getWorkspaceAttachedFiles(deletingWorkspace.slug),
+      ]
       const affectedAutomationIds = listAutomations()
         .filter((automation) => automation.workspaceId === id)
         .map((automation) => automation.id)
@@ -2369,6 +2381,7 @@ export function registerIpcHandlers(): void {
       }
       deleteAgentWorkspace(id)
 
+      releaseAttachedFileWatchers(deletedAttachedFiles)
       if (deletedProjectRoot) releaseDirectoryWatcherIfUnreferenced(deletedProjectRoot)
     }
   )
