@@ -763,53 +763,60 @@ export async function getMainRepoRoot(somePath: string): Promise<string | null> 
 }
 
 /**
- * 列出指定仓库的所有 Git Worktree
+ * 列出指定路径下所有 Git 仓库的 Worktree。
+ *
+ * 会话目录可能是包含多个仓库的父目录。不能只使用第一个发现的仓库，否则前面的
+ * 普通仓库会遮蔽后面真正拥有 linked worktree 的仓库。
  */
 export async function listWorktrees(repoPath: string): Promise<import('@proma/shared').WorktreeInfo[]> {
-  const root = await findGitRoot(repoPath)
-  if (!root) return []
-  const output = await runGitCommand(['worktree', 'list', '--porcelain'], root, { quiet: true })
-  if (!output) return []
-  const mainRepoRoot = await getMainRepoRoot(root)
-  const normalizedMainRoot = mainRepoRoot ? normalizeGitRoot(mainRepoRoot) : normalizeGitRoot(root)
+  const roots = await findAllGitRoots(repoPath)
+  const worktreesByPath = new Map<string, import('@proma/shared').WorktreeInfo>()
 
-  const worktrees: import('@proma/shared').WorktreeInfo[] = []
-  const blocks = output.split('\n\n').filter(Boolean)
+  for (const root of roots) {
+    const output = await runGitCommand(['worktree', 'list', '--porcelain'], root, { quiet: true })
+    if (!output) continue
 
-  for (const block of blocks) {
-    const lines = block.split('\n')
-    let path = ''
-    let head = ''
-    let branch = ''
-    let prunable = false
+    const mainRepoRoot = await getMainRepoRoot(root)
+    const normalizedMainRoot = mainRepoRoot ? normalizeGitRoot(mainRepoRoot) : normalizeGitRoot(root)
+    const blocks = output.split('\n\n').filter(Boolean)
 
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        path = line.slice('worktree '.length)
-      } else if (line.startsWith('HEAD ')) {
-        head = line.slice('HEAD '.length).slice(0, 7)
-      } else if (line.startsWith('branch refs/heads/')) {
-        branch = line.slice('branch refs/heads/'.length)
-      } else if (line === 'detached') {
-        branch = '(detached)'
-      } else if (line.startsWith('prunable')) {
-        prunable = true
+    for (const block of blocks) {
+      const lines = block.split('\n')
+      let path = ''
+      let head = ''
+      let branch = ''
+      let prunable = false
+
+      for (const line of lines) {
+        if (line.startsWith('worktree ')) {
+          path = line.slice('worktree '.length)
+        } else if (line.startsWith('HEAD ')) {
+          head = line.slice('HEAD '.length).slice(0, 7)
+        } else if (line.startsWith('branch refs/heads/')) {
+          branch = line.slice('branch refs/heads/'.length)
+        } else if (line === 'detached') {
+          branch = '(detached)'
+        } else if (line.startsWith('prunable')) {
+          prunable = true
+        }
       }
-    }
 
-    if (path && !prunable && existsSync(path)) {
-      const isMain = normalizeGitRoot(path) === normalizedMainRoot
-      worktrees.push({
-        path,
-        branch: branch || 'unknown',
-        head,
-        isMain,
-        name: basename(path),
-      })
+      if (!path || prunable || !existsSync(path)) continue
+
+      const key = normalizeGitRoot(path)
+      if (!worktreesByPath.has(key)) {
+        worktreesByPath.set(key, {
+          path,
+          branch: branch || 'unknown',
+          head,
+          isMain: key === normalizedMainRoot,
+          name: basename(path),
+        })
+      }
     }
   }
 
-  return worktrees
+  return Array.from(worktreesByPath.values())
 }
 
 /**
