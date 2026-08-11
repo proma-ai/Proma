@@ -132,6 +132,9 @@ function restoreAgentSessionAttachedDirectoryWatchers(): void {
     for (const dirPath of session.attachedDirectories ?? []) {
       watchAttachedDirectory(dirPath)
     }
+    for (const filePath of session.attachedFiles ?? []) {
+      watchAttachedDirectory(dirname(filePath))
+    }
   }
 }
 

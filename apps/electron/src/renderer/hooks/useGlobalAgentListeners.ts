@@ -672,7 +672,7 @@ export function useGlobalAgentListeners(): void {
           .filter(([, state]) => state.running)
           .map(([sessionId]) => sessionId)
 
-        for (const sessionId of candidateIds) {
+        const candidates = await Promise.all(candidateIds.map(async (sessionId) => {
           const sessionPath = sessionPaths.get(sessionId)
           const workspaceId = getWorkspaceIdForSession(sessionId)
           const workspaceFilesPath = await getWorkspaceFilesPathForSession(sessionId)
@@ -698,11 +698,20 @@ export function useGlobalAgentListeners(): void {
             directoryRoots.some((rootPath) => isPathWithinRoot(rootPath, changedPath, isWindows))
             || attachedFiles.some((filePath) => arePathsEqual(filePath, changedPath, isWindows))
           ))
-          if (matchingPaths.length === 0) continue
+          return { sessionId, matchingPaths }
+        }))
+
+        for (const { sessionId, matchingPaths } of candidates) {
+          // watcher 事件没有来源 session。路径被多个运行中会话覆盖时不能可靠归属，
+          // 因此仅记录唯一匹配的路径，避免把后台会话的写入显示在错误会话中。
+          const uniquelyMatchingPaths = matchingPaths.filter((changedPath) => (
+            candidates.filter((candidate) => candidate.matchingPaths.includes(changedPath)).length === 1
+          ))
+          if (uniquelyMatchingPaths.length === 0) continue
 
           const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
             ?? String(streamingStates.get(sessionId)?.startedAt ?? Date.now())
-          for (const changedPath of matchingPaths) {
+          for (const changedPath of uniquelyMatchingPaths) {
             const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
             if (!previewFile.previewOnly) continue
             store.set(agentNonGitFileChangesAtom, (prev) => {

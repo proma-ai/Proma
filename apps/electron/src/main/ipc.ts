@@ -945,9 +945,11 @@ export function resolveAppIconPath(variantId: string): string | null {
 function releaseDirectoryWatcherIfUnreferenced(dirPath: string): void {
   const isStillReferenced = listAgentWorkspaces().some((workspace) =>
     workspace.projectRootPath === dirPath
-    || getWorkspaceAttachedDirectories(workspace.slug).includes(dirPath),
+    || getWorkspaceAttachedDirectories(workspace.slug).includes(dirPath)
+    || getWorkspaceAttachedFiles(workspace.slug).some((filePath) => dirname(filePath) === dirPath),
   ) || listAgentSessions().some((session) =>
-    session.attachedDirectories?.includes(dirPath),
+    session.attachedDirectories?.includes(dirPath)
+    || session.attachedFiles?.some((filePath) => dirname(filePath) === dirPath),
   )
 
   if (!isStillReferenced) unwatchAttachedDirectory(dirPath)
@@ -2240,6 +2242,9 @@ export function registerIpcHandlers(): void {
       const workspaces = listAgentWorkspaces()
       for (const workspace of workspaces) {
         if (workspace.projectRootPath) watchAttachedDirectory(workspace.projectRootPath)
+        for (const filePath of getWorkspaceAttachedFiles(workspace.slug)) {
+          watchAttachedDirectory(dirname(filePath))
+        }
       }
       return workspaces
     }
@@ -3121,6 +3126,7 @@ export function registerIpcHandlers(): void {
 
       const updated = [...existing, safePath]
       updateAgentSessionMeta(input.sessionId, { attachedFiles: updated })
+      watchAttachedDirectory(dirname(safePath))
       return updated
     }
   )
@@ -3135,6 +3141,7 @@ export function registerIpcHandlers(): void {
       const existing = meta.attachedFiles ?? []
       const updated = existing.filter((f) => f !== input.filePath)
       updateAgentSessionMeta(input.sessionId, { attachedFiles: updated })
+      releaseDirectoryWatcherIfUnreferenced(dirname(input.filePath))
       return updated
     }
   )
@@ -3169,7 +3176,9 @@ export function registerIpcHandlers(): void {
       const stats = statSync(safePath)
       if (!stats.isFile()) throw new Error('只能附加文件')
 
-      return attachWorkspaceFile(input.workspaceSlug, safePath)
+      const updated = attachWorkspaceFile(input.workspaceSlug, safePath)
+      watchAttachedDirectory(dirname(safePath))
+      return updated
     }
   )
 
@@ -3177,7 +3186,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.DETACH_WORKSPACE_FILE,
     async (_, input: WorkspaceAttachFileInput): Promise<string[]> => {
-      return detachWorkspaceFile(input.workspaceSlug, input.filePath)
+      const updated = detachWorkspaceFile(input.workspaceSlug, input.filePath)
+      releaseDirectoryWatcherIfUnreferenced(dirname(input.filePath))
+      return updated
     }
   )
 
