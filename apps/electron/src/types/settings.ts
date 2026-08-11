@@ -270,6 +270,9 @@ export interface VisionRelaySettings {
   modelId?: string
 }
 
+/** 提升此版本可要求用户重新确认更新后的受管浏览器风险告知。 */
+export const BROWSER_RISK_DISCLAIMER_VERSION = 1
+
 /** 应用设置 */
 export interface AppSettings {
   /** 主题模式 */
@@ -342,6 +345,8 @@ export interface AppSettings {
   feishuSessionMirror?: FeishuSessionMirrorSettings
   /** 无视觉输入能力 Agent 的视觉助手路由 */
   visionRelay?: VisionRelaySettings
+  /** 已确认的受管浏览器风险告知版本；低于当前版本时首次使用会再次要求确认。 */
+  browserRiskDisclaimerVersion?: number
   /** 用户手动关闭的 Proma 内置 MCP ID 列表（针对默认开启的内置 MCP） */
   builtinMcpDisabledIds?: string[]
   /** 用户手动开启的 Proma 内置 MCP ID 列表（针对默认关闭的内置 MCP，如 nano-banana、mem） */

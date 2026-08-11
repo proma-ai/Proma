@@ -20,8 +20,11 @@ import {
   FolderSearch,
   GitBranch,
   Globe,
+  Code2,
   ImagePlus,
+  MousePointer2,
   Layers,
+  LoaderCircle,
   List,
   ListChecks,
   LogIn,
@@ -81,6 +84,20 @@ export const TOOL_ICONS: Record<string, LucideIcon> = {
   ReadMcpResourceTool: Database,
   ListMcpResourcesTool: Server,
   SendMessage: Send,
+  BrowserObserve: Globe,
+  BrowserNavigate: Globe,
+  BrowserWaitFor: LoaderCircle,
+  BrowserClick: Globe,
+  BrowserFill: Globe,
+  BrowserPress: Globe,
+  BrowserScreenshot: Globe,
+  BrowserListTabs: Globe,
+  BrowserNewTab: Globe,
+  BrowserSelectTab: Globe,
+  BrowserCloseTab: Globe,
+  BrowserPreviewOpen: Globe,
+  BrowserDomAction: MousePointer2,
+  BrowserExecuteJavaScript: Code2,
 }
 
 /**
@@ -134,6 +151,20 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   ReadMcpResourceTool: '读取 MCP 资源',
   ListMcpResourcesTool: '列出 MCP 资源',
   SendMessage: '发送消息',
+  BrowserObserve: '查看受管浏览器',
+  BrowserNavigate: '打开网页',
+  BrowserWaitFor: '等待网页状态',
+  BrowserClick: '点击网页元素',
+  BrowserFill: '填写网页字段',
+  BrowserPress: '按下浏览器按键',
+  BrowserScreenshot: '截取网页',
+  BrowserListTabs: '列出浏览器标签',
+  BrowserNewTab: '新建浏览器标签',
+  BrowserSelectTab: '切换浏览器标签',
+  BrowserCloseTab: '关闭浏览器标签',
+  BrowserPreviewOpen: '打开本地网页预览',
+  BrowserDomAction: '操作网页 DOM',
+  BrowserExecuteJavaScript: '执行网页 JavaScript',
 }
 
 /**
@@ -198,6 +229,21 @@ export function getInputSummary(
         return query.length > 60 ? query.slice(0, 60) + '…' : query
       }
       return null
+    }
+
+    case 'BrowserNavigate': {
+      const url = input.url
+      if (typeof url !== 'string') return null
+      try { return new URL(url).host } catch { return url.slice(0, 60) }
+    }
+
+    case 'BrowserClick':
+    case 'BrowserFill': {
+      return typeof input.ref === 'string' ? input.ref : null
+    }
+
+    case 'BrowserPress': {
+      return typeof input.key === 'string' ? input.key : null
     }
 
     case 'Skill': {

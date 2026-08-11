@@ -28,6 +28,7 @@ import { getActiveAccelerator, getAcceleratorDisplay } from '@/lib/shortcut-regi
 import { detectIsWindows } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { DiffTabContent } from './DiffTabContent'
+import { PreviewContentErrorBoundary } from './PreviewContentErrorBoundary'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
@@ -177,18 +178,20 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
       {/* 内容区 */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {currentFile ? (
-          <DiffTabContent
-            key={`${sessionId}:${currentFile.filePath}`}
-            filePath={currentFile.filePath}
-            dirPath={currentFile.dirPath || sessionPath}
-            sessionId={sessionId}
-            gitRoot={currentFile.gitRoot}
-            previewOnly={currentFile.previewOnly}
-            readOnly={currentFile.readOnly}
-            basePaths={currentFile.basePaths}
-            baseRef={currentFile.baseRef}
-            onEmptyDiff={handleClosePanel}
-          />
+          <PreviewContentErrorBoundary resetKey={`${sessionId}:${currentFile.filePath}`}>
+            <DiffTabContent
+              key={`${sessionId}:${currentFile.filePath}`}
+              filePath={currentFile.filePath}
+              dirPath={currentFile.dirPath || sessionPath}
+              sessionId={sessionId}
+              gitRoot={currentFile.gitRoot}
+              previewOnly={currentFile.previewOnly}
+              readOnly={currentFile.readOnly}
+              basePaths={currentFile.basePaths}
+              baseRef={currentFile.baseRef}
+              onEmptyDiff={handleClosePanel}
+            />
+          </PreviewContentErrorBoundary>
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
             点击文件查看预览

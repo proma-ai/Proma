@@ -13,6 +13,7 @@
 
 import { watch, existsSync, statSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
@@ -57,18 +58,25 @@ const unavailableDirectoryParents = new Map<string, string>()
 
 /** 附加目录防抖定时器 */
 let attachedFilesTimer: ReturnType<typeof setTimeout> | null = null
+/** 附加目录最近一次变化路径，随 debounce 事件一起发送。 */
+const attachedChangedPaths = new Set<string>()
 /** 主窗口引用（供附加目录监听器使用） */
 let mainWin: BrowserWindow | null = null
 
-function notifyWorkspaceFilesChanged(): void {
+function notifyWorkspaceFilesChanged(changedPath?: string): void {
   if (!mainWin || mainWin.isDestroyed()) return
 
   if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
+  if (changedPath) attachedChangedPaths.add(changedPath)
   attachedFilesTimer = setTimeout(() => {
-    if (mainWin && !mainWin.isDestroyed()) {
-      mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
-    }
+    const changedPaths = [...attachedChangedPaths]
+    attachedChangedPaths.clear()
     attachedFilesTimer = null
+    void filterExistingFiles(changedPaths).then((filePaths) => {
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, filePaths)
+      }
+    })
   }, DEBOUNCE_MS)
 }
 
@@ -79,6 +87,18 @@ function isExistingDirectory(dirPath: string): boolean {
   } catch {
     return false
   }
+}
+
+/** debounce 后异步筛选存在的普通文件，目录和已删除路径仍会触发空刷新事件。 */
+async function filterExistingFiles(paths: readonly string[]): Promise<string[]> {
+  const results = await Promise.all(paths.map(async (filePath) => {
+    try {
+      return (await stat(filePath)).isFile() ? filePath : null
+    } catch {
+      return null
+    }
+  }))
+  return results.filter((filePath): filePath is string => filePath !== null)
 }
 
 function findNearestExistingDirectory(dirPath: string): string | null {
@@ -111,6 +131,9 @@ function restoreAgentSessionAttachedDirectoryWatchers(): void {
   for (const session of listAgentSessions()) {
     for (const dirPath of session.attachedDirectories ?? []) {
       watchAttachedDirectory(dirPath)
+    }
+    for (const filePath of session.attachedFiles ?? []) {
+      watchAttachedDirectory(dirname(filePath))
     }
   }
 }
@@ -199,6 +222,7 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
   // 防抖定时器：按事件类型分别 debounce
   let capabilitiesTimer: ReturnType<typeof setTimeout> | null = null
   let filesTimer: ReturnType<typeof setTimeout> | null = null
+  const changedFilePaths = new Set<string>
 
   try {
     watcher = watch(watchDir, { recursive: true }, (_eventType, filename) => {
@@ -235,13 +259,19 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
           capabilitiesTimer = null
         }, DEBOUNCE_MS)
       } else {
-        // 其他文件变化 → 通知文件浏览器刷新
+        // 其他文件变化 → 通知文件浏览器刷新。删除或目录事件会发送空路径列表，
+        // 仍让 Git Diff 刷新，但不会把非文件路径记录到会话改动中。
         if (filesTimer) clearTimeout(filesTimer)
+        changedFilePaths.add(join(watchDir, normalizedFilename))
         filesTimer = setTimeout(() => {
-          if (!win.isDestroyed()) {
-            win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED)
-          }
+          const paths = [...changedFilePaths]
+          changedFilePaths.clear()
           filesTimer = null
+          void filterExistingFiles(paths).then((filePaths) => {
+            if (!win.isDestroyed()) {
+              win.webContents.send(AGENT_IPC_CHANNELS.WORKSPACE_FILES_CHANGED, filePaths)
+            }
+          })
         }, DEBOUNCE_MS)
       }
     })
@@ -289,6 +319,7 @@ export function stopWorkspaceWatcher(): void {
   unavailableDirectoryParents.clear()
   if (attachedFilesTimer) clearTimeout(attachedFilesTimer)
   attachedFilesTimer = null
+  attachedChangedPaths.clear()
   mainWin = null
 }
 
@@ -311,8 +342,9 @@ export function watchAttachedDirectory(dirPath: string): void {
     const w = watch(dirPath, { recursive: true }, (_eventType, filename) => {
       const normalizedFilename = normalizeWatchFilename(filename)
       if (normalizedFilename === null || !shouldNotifyForWatchFilename(normalizedFilename)) return
-      invalidateGitDiffCache(join(dirPath, normalizedFilename))
-      notifyWorkspaceFilesChanged()
+      const changedPath = join(dirPath, normalizedFilename)
+      invalidateGitDiffCache(changedPath)
+      notifyWorkspaceFilesChanged(changedPath)
     })
 
     // 同主 watcher：监听 'error' 防止运行时异常拖死主进程。

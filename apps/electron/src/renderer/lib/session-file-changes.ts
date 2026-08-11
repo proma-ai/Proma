@@ -1,3 +1,18 @@
+function normalizePath(path: string, caseInsensitive: boolean): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/, '')
+  return caseInsensitive ? normalized.toLowerCase() : normalized
+}
+
+export function arePathsEqual(leftPath: string, rightPath: string, caseInsensitive = false): boolean {
+  return normalizePath(leftPath, caseInsensitive) === normalizePath(rightPath, caseInsensitive)
+}
+
+export function isPathWithinRoot(rootPath: string, targetPath: string, caseInsensitive = false): boolean {
+  const root = normalizePath(rootPath, caseInsensitive)
+  const target = normalizePath(targetPath, caseInsensitive)
+  return target === root || target.startsWith(`${root}/`)
+}
+
 export type SessionFileChangeKind = "created" | "edited";
 
 export interface SessionFileChange {
@@ -18,8 +33,9 @@ export function getSessionFileChangeKind(
 export function upsertSessionFileChange(
   changes: readonly SessionFileChange[],
   next: SessionFileChange,
+  caseInsensitive = false,
 ): SessionFileChange[] {
-  const index = changes.findIndex((change) => change.path === next.path);
+  const index = changes.findIndex((change) => arePathsEqual(change.path, next.path, caseInsensitive));
   if (index < 0) return [next, ...changes];
 
   const current = changes[index]!;

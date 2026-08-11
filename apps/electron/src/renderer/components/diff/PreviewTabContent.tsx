@@ -21,6 +21,7 @@ import { previewFileMapAtom } from '@/atoms/preview-atoms'
 import { tearOffPreviewToSplit } from './preview-opener'
 import { DefaultAppOpenButton } from './DefaultAppOpenButton'
 import { DiffTabContent } from './DiffTabContent'
+import { PreviewContentErrorBoundary } from './PreviewContentErrorBoundary'
 import { getDefaultAppTargetPath, getPreviewFileAccess } from './preview-open-path'
 
 /** 切换为侧边分屏的小按钮 — 与拖拽 Tab 出 TabBar 触发的 tear-off 等价 */
@@ -111,18 +112,20 @@ export function PreviewTabContent({ sessionId }: PreviewTabContentProps): React.
   return (
     <div className="flex h-full flex-col overflow-hidden bg-content-area">
       <div className="min-h-0 flex-1 overflow-hidden">
-        <DiffTabContent
-          key={`${sessionId}:${currentFile.filePath}`}
-          filePath={currentFile.filePath}
-          dirPath={dirPath}
-          sessionId={sessionId}
-          gitRoot={currentFile.gitRoot}
-          previewOnly={currentFile.previewOnly}
-          readOnly={currentFile.readOnly}
-          basePaths={currentFile.basePaths}
-          baseRef={currentFile.baseRef}
-          toolbarActions={toolbarActions}
-        />
+        <PreviewContentErrorBoundary resetKey={`${sessionId}:${currentFile.filePath}`}>
+          <DiffTabContent
+            key={`${sessionId}:${currentFile.filePath}`}
+            filePath={currentFile.filePath}
+            dirPath={dirPath}
+            sessionId={sessionId}
+            gitRoot={currentFile.gitRoot}
+            previewOnly={currentFile.previewOnly}
+            readOnly={currentFile.readOnly}
+            basePaths={currentFile.basePaths}
+            baseRef={currentFile.baseRef}
+            toolbarActions={toolbarActions}
+          />
+        </PreviewContentErrorBoundary>
       </div>
     </div>
   )

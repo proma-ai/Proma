@@ -75,7 +75,8 @@ import {
 } from '@/lib/agent-completion-presence'
 import { getPlanModeChangeFromToolName, updatePlanModeSessionSet } from '@/lib/agent-plan-mode'
 import { buildTodoAgentPrompt } from '@/lib/todo-agent-prompt'
-import { getSessionFileChangeKind, upsertSessionFileChange } from '@/lib/session-file-changes'
+import { detectIsWindows } from '@/lib/platform'
+import { getSessionFileChangeKind, arePathsEqual, isPathWithinRoot, upsertSessionFileChange } from '@/lib/session-file-changes'
 
 /** 触发右侧文件浏览器自动定位的写入类工具集合 */
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update'])
@@ -614,6 +615,24 @@ export function useGlobalAgentListeners(): void {
       }
     }
 
+    const getWorkspaceAttachmentsForSession = async (sid: string): Promise<{
+      directories: string[]
+      files: string[]
+      complete: boolean
+    }> => {
+      const slug = getWorkspaceSlugForSession(sid)
+      if (!slug) return { directories: [], files: [], complete: true }
+      try {
+        const [directories, files] = await Promise.all([
+          window.electronAPI.getWorkspaceDirectories(slug),
+          window.electronAPI.getWorkspaceAttachedFiles(slug),
+        ])
+        return { directories, files, complete: true }
+      } catch {
+        return { directories: [], files: [], complete: false }
+      }
+    }
+
     const buildWrittenFilePreviewInfo = async (sid: string, targetPath: string) => {
       const sessionPath = store.get(agentSessionPathMapAtom).get(sid) ?? ''
       const parentDir = getParentDir(targetPath)
@@ -657,6 +676,86 @@ export function useGlobalAgentListeners(): void {
         basePaths: basePaths.length > 0 ? basePaths : undefined,
       }
     }
+
+    const isWindows = detectIsWindows()
+
+    const cleanupWatchedFileChanges = window.electronAPI.onWorkspaceFilesChanged((changedPaths) => {
+      const filePaths = (changedPaths ?? []).filter(isAbsolutePath)
+      if (filePaths.length === 0) return
+
+      void (async () => {
+        const streamingStates = store.get(agentStreamingStatesAtom)
+        const sessionPaths = store.get(agentSessionPathMapAtom)
+        const candidateIds = [...streamingStates.entries()]
+          .filter(([, state]) => state.running)
+          .map(([sessionId]) => sessionId)
+
+        const candidates = await Promise.all(candidateIds.map(async (sessionId) => {
+          const session = store.get(agentSessionsAtom).find((item) => item.id === sessionId)
+          const sessionPath = sessionPaths.get(sessionId)
+          const workspaceFilesPath = await getWorkspaceFilesPathForSession(sessionId)
+          const workspaceAttachments = await getWorkspaceAttachmentsForSession(sessionId)
+          if (!session || !workspaceAttachments.complete) {
+            // 缺少运行会话的权威附件配置时，任何路径都不能安全归属给其他会话。
+            return { sessionId, matchingPaths: [...filePaths] }
+          }
+          const directoryRoots = uniqueTruthyPaths([
+            sessionPath,
+            workspaceFilesPath,
+            ...(session.attachedDirectories ?? []),
+            ...workspaceAttachments.directories,
+          ])
+          const attachedFiles = uniqueTruthyPaths([
+            ...(session.attachedFiles ?? []),
+            ...workspaceAttachments.files,
+          ])
+          const matchingPaths = filePaths.filter((changedPath) => (
+            directoryRoots.some((rootPath) => isPathWithinRoot(rootPath, changedPath, isWindows))
+            || attachedFiles.some((filePath) => arePathsEqual(filePath, changedPath, isWindows))
+          ))
+          return { sessionId, matchingPaths }
+        }))
+
+        for (const { sessionId, matchingPaths } of candidates) {
+          // watcher 事件没有来源 session。路径被多个运行中会话覆盖时不能可靠归属，
+          // 因此仅记录唯一匹配的路径，避免把后台会话的写入显示在错误会话中。
+          const uniquelyMatchingPaths = matchingPaths.filter((changedPath) => (
+            candidates.filter((candidate) => candidate.matchingPaths.includes(changedPath)).length === 1
+          ))
+          if (uniquelyMatchingPaths.length === 0) continue
+
+          const runId = store.get(agentFileChangesCurrentRunAtom).get(sessionId)
+            ?? String(streamingStates.get(sessionId)?.startedAt ?? Date.now())
+          for (const changedPath of uniquelyMatchingPaths) {
+            const previewFile = await buildWrittenFilePreviewInfo(sessionId, changedPath)
+            if (!previewFile.previewOnly) continue
+            store.set(agentNonGitFileChangesAtom, (prev) => {
+              const map = new Map(prev)
+              const current = map.get(sessionId) ?? []
+              map.set(sessionId, upsertSessionFileChange(current, {
+                path: changedPath,
+                kind: 'edited',
+                runId,
+                updatedAt: Date.now(),
+              }, isWindows))
+              return map
+            })
+            if (
+              store.get(currentAgentSessionIdAtom) === sessionId
+              && autoActivatedChangeTurns.get(sessionId) !== runId
+            ) {
+              autoActivatedChangeTurns.set(sessionId, runId)
+              store.set(agentSidePanelOpenAtom, true)
+              store.set(agentDiffPanelTabAtom, (prev) => {
+                const map = new Map(prev)
+                map.set(sessionId, 'changes')
+                return map
+              })
+            }
+          }
+        }
+      })().catch(() => { /* 文件监听不应影响会话流 */ })
+    })
 
     // ===== 0. 初始化：从持久化 meta 恢复 stoppedByUser 状态 =====
     window.electronAPI.listAgentSessions().then((sessions) => {
@@ -968,7 +1067,7 @@ export function useGlobalAgentListeners(): void {
                         kind: getSessionFileChangeKind(entry.toolName, entry.existedBefore),
                         runId: entry.runId,
                         updatedAt: Date.now(),
-                      }))
+                      }, isWindows))
                       return m
                     })
 
@@ -1474,6 +1573,7 @@ export function useGlobalAgentListeners(): void {
       cleanupError()
       cleanupTodoAgentSessionReady()
       cleanupTitleUpdated()
+      cleanupWatchedFileChanges()
       clearInterval(pruneTimer)
       window.removeEventListener('focus', onWindowFocus)
     }
