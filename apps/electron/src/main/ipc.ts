@@ -371,12 +371,10 @@ import { feishuBridgeManager } from './lib/feishu-bridge-manager'
 import { syncFeishuSyncSleepBlocker } from './lib/feishu-sleep-blocker'
 import { presenceService } from './lib/feishu-presence'
 import { getDingTalkConfig, saveDingTalkConfig, getDecryptedClientSecret, getDingTalkMultiBotConfig, saveDingTalkBotConfig, removeDingTalkBot, getDecryptedBotClientSecret } from './lib/dingtalk-config'
+import { listShallowDirectory } from './lib/directory-listing'
 import { dingtalkBridgeManager } from './lib/dingtalk-bridge-manager'
 import { getWeChatConfig } from './lib/wechat-config'
 import { wechatBridge } from './lib/wechat-bridge'
-
-/** 文件浏览器中需要隐藏的系统文件 */
-const HIDDEN_FS_ENTRIES = new Set(['.DS_Store', 'Thumbs.db'])
 
 /** 已知编辑器应用名称白名单（macOS） */
 const KNOWN_EDITORS = [
@@ -3238,44 +3236,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_DIRECTORY,
     async (_, dirPath: string, access?: FileAccessOptions): Promise<FileEntry[]> => {
-      const { existsSync, readdirSync, statSync } = await import('node:fs')
-      const { resolve } = await import('node:path')
-
       const safePath = resolve(dirPath)
-      // 目录可能已被删除（如删除 Agent 会话后面板仍持有旧路径），优雅返回空列表
-      if (!existsSync(safePath)) {
-        return []
-      }
+      // 目录可能已被删除（如删除 Agent 会话后面板仍持有旧路径），优雅返回空列表。
+      if (!existsSync(safePath)) return []
       if (!isPathAllowed(safePath, normalizeFileAccessOptions(access))) {
+        // 路径可能刚好在 existsSync 与 realpath 校验之间被删除。
+        if (!existsSync(safePath)) return []
         throw new Error('访问路径超出当前会话的授权范围')
       }
 
-      const entries: FileEntry[] = []
-      const items = readdirSync(safePath, { withFileTypes: true })
-
-      for (const item of items) {
-        if (HIDDEN_FS_ENTRIES.has(item.name)) continue
-        const fullPath = resolve(safePath, item.name)
-        const isDirectory = item.isDirectory()
-        const size = isDirectory ? undefined : statSync(fullPath).size
-        entries.push({
-          name: item.name,
-          path: fullPath,
-          isDirectory,
-          size,
-        })
-      }
-
-      // 目录在前，文件在后；隐藏文件（.开头）排在同类末尾，各自按名称排序
-      entries.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-        const aHidden = a.name.startsWith('.')
-        const bHidden = b.name.startsWith('.')
-        if (aHidden !== bHidden) return aHidden ? 1 : -1
-        return a.name.localeCompare(b.name)
-      })
-
-      return entries
+      return listShallowDirectory(safePath)
     }
   )
 
@@ -3565,40 +3535,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.LIST_ATTACHED_DIRECTORY,
     async (_, dirPath: string, access?: FileAccessOptions | string[]): Promise<FileEntry[]> => {
-      const { readdirSync, statSync } = await import('node:fs')
-      const { resolve } = await import('node:path')
-
       const safePath = resolve(dirPath)
       const options = normalizeFileAccessOptions(access)
       if (!isPathAllowed(safePath, options)) {
+        // 已解绑或被删除的附加目录不应让文件面板持续报错。
+        if (!existsSync(safePath)) return []
         throw new Error('访问路径不在允许范围内')
       }
-      const entries: FileEntry[] = []
-      const items = readdirSync(safePath, { withFileTypes: true })
 
-      for (const item of items) {
-        if (HIDDEN_FS_ENTRIES.has(item.name)) continue
-        const fullPath = resolve(safePath, item.name)
-        const isDirectory = item.isDirectory()
-        const size = isDirectory ? undefined : statSync(fullPath).size
-        entries.push({
-          name: item.name,
-          path: fullPath,
-          isDirectory,
-          size,
-        })
-      }
-
-      // 目录在前，文件在后；隐藏文件（.开头）排在同类末尾
-      entries.sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-        const aHidden = a.name.startsWith('.')
-        const bHidden = b.name.startsWith('.')
-        if (aHidden !== bHidden) return aHidden ? 1 : -1
-        return a.name.localeCompare(b.name)
-      })
-
-      return entries
+      return listShallowDirectory(safePath)
     }
   )
 
