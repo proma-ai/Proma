@@ -6,7 +6,7 @@
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app, clipboard, nativeImage } from 'electron'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { existsSync, realpathSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, INSTALLER_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, CHAT_TOOL_IPC_CHANNELS, FEISHU_IPC_CHANNELS, DINGTALK_IPC_CHANNELS, WECHAT_IPC_CHANNELS, AUTOMATION_IPC_CHANNELS, PLANNING_IPC_CHANNELS, PLANNING_CONFLICT_ERROR, MAX_ATTACHMENT_SIZE, isPromaPermissionMode, normalizePathForCompare } from '@proma/shared'
@@ -280,7 +280,7 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, saveF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { exitPlanService } from './lib/agent-exit-plan-service'
-import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
+import { getAgentSessionWorkspacePath, getAgentWorkspacesDir, getConfigDir, getWorkspaceSkillsDir, getScratchPadPath } from './lib/config-paths'
 import { getCachedDefaultAppInfo, saveCachedDefaultAppInfo } from './lib/default-app-cache'
 import { calculateStorageStats, cleanupStorage, cleanupTempFiles } from './lib/storage-service'
 import type { CleanupOptions } from './lib/storage-service'
@@ -4588,14 +4588,6 @@ export function registerIpcHandlers(): void {
     return cleanupTempFiles()
   })
 
-  // 迁移取消时清理临时解压目录
-  ipcMain.handle('migration:cancelImport', async (_, tempDir: string) => {
-    if (tempDir && existsSync(tempDir) && tempDir.includes('proma-import-')) {
-      rmSync(tempDir, { recursive: true, force: true })
-      console.log(`[迁移] 已清理临时目录: ${tempDir}`)
-    }
-  })
-
   // 启动时自动清理临时文件
   const runStartupCleanup = async (): Promise<void> => {
     try {
@@ -4841,61 +4833,10 @@ export function registerIpcHandlers(): void {
 
   // ===== 数据迁移 =====
 
-  ipcMain.handle('migration:getExportPreview', async (_, workspaceId: string) => {
-    const { getExportPreview } = await import('./lib/migration-service')
-    return getExportPreview(workspaceId)
-  })
-
-  ipcMain.handle('migration:getShareExportPreview', async () => {
-    const { getShareExportPreview } = await import('./lib/migration-service')
-    return getShareExportPreview()
-  })
-
-  ipcMain.handle('migration:export', async (_, options) => {
-    const { exportData } = await import('./lib/migration-service')
-    return exportData(options)
-  })
-
-  ipcMain.handle('migration:exportV2', async (_, options) => {
-    const { exportDataV2 } = await import('./lib/migration-service')
-    return exportDataV2(options)
-  })
-
-  ipcMain.handle('migration:parseImportFile', async (_, filePath: string) => {
-    const { parseImportFile } = await import('./lib/migration-service')
-    return parseImportFile(filePath)
-  })
-
-  ipcMain.handle('migration:confirmImport', async (_, options) => {
-    const { confirmImport } = await import('./lib/migration-service')
-    return confirmImport(options)
-  })
-
-  ipcMain.handle('migration:openFileDialog', async () => {
-    const { dialog } = await import('electron')
-    const result = await dialog.showOpenDialog({
-      title: '选择迁移文件',
-      filters: [
-        { name: 'Proma 迁移文件', extensions: ['proma-backup', 'proma-share'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-      properties: ['openFile'],
-    })
-    return result.canceled ? null : result.filePaths[0]
-  })
-
-  ipcMain.handle('migration:saveFileDialog', async (_, mode: string) => {
-    const { dialog } = await import('electron')
-    const ext = mode === 'personal' ? 'proma-backup' : 'proma-share'
-    const defaultName = `proma-migration-${new Date().toISOString().slice(0, 10)}.${ext}`
-    const result = await dialog.showSaveDialog({
-      title: '保存迁移文件',
-      defaultPath: defaultName,
-      filters: [
-        { name: mode === 'personal' ? 'Proma 个人备份' : 'Proma 分享包', extensions: [ext] },
-      ],
-    })
-    return result.canceled ? null : result.filePath
+  ipcMain.handle('migration:open-data-folder', async (): Promise<void> => {
+    const dataDir = getConfigDir()
+    const error = await shell.openPath(dataDir)
+    if (error) throw new Error(`无法打开 Proma 数据文件夹：${error}`)
   })
 
   // ===== 窗口控制（Windows 自定义标题栏按钮）=====
