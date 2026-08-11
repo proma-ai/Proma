@@ -8,13 +8,14 @@ import * as React from 'react'
 import { toast } from 'sonner'
 import { Users, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 const WECHAT_ID = 'geekthings'
 
 export function TeamPromoBanner(): React.ReactElement {
   const handleClick = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(WECHAT_ID)
+      await copyTextToClipboard(WECHAT_ID)
       toast.success(`已复制微信号 ${WECHAT_ID}`, {
         description: '添加后即可开通团队额度与企业 Skills 共享协作',
       })

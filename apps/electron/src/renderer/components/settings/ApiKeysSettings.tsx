@@ -22,6 +22,8 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react'
+import { toast } from 'sonner'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -165,11 +167,12 @@ function CreateApiKeyDialog({ onCreated }: { onCreated: () => void }): React.Rea
   const handleCopy = async (): Promise<void> => {
     if (!createdKey) return
     try {
-      await navigator.clipboard.writeText(createdKey)
+      await copyTextToClipboard(createdKey)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // 复制失败静默处理
+    } catch (error) {
+      console.error('[API Key] 复制失败:', error)
+      toast.error('复制失败，请检查剪贴板权限')
     }
   }
 
@@ -565,11 +568,12 @@ function ApiKeyRow({
 
   const handleCopy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(apiKey.key)
+      await copyTextToClipboard(apiKey.key)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // 复制失败静默处理
+    } catch (error) {
+      console.error('[API Key] 复制失败:', error)
+      toast.error('复制失败，请检查剪贴板权限')
     }
   }
 
