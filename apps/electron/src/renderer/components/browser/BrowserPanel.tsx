@@ -119,7 +119,7 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked || !state?.canGoForward} onClick={() => void window.electronAPI.goForwardAgentBrowser?.(sessionId)}><ArrowRight className="size-3.5" /></Button></TooltipTrigger><TooltipContent>前进</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-7" disabled={riskBlocked} onClick={() => void window.electronAPI.reloadAgentBrowser?.(sessionId)}><RefreshCw className="size-3.5" /></Button></TooltipTrigger><TooltipContent>刷新</TooltipContent></Tooltip>
         <form className="flex-1 min-w-0" onSubmit={(event) => { event.preventDefault(); if (!riskBlocked) void navigate() }}>
-          <Input disabled={riskBlocked} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入 URL（仅公共 HTTP/HTTPS）" className="h-7 text-xs bg-background/70" aria-label="浏览器地址" />
+          <Input disabled={riskBlocked} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="输入域名或 URL（默认 HTTPS，仅公共网站）" className="h-7 text-xs bg-background/70" aria-label="浏览器地址" />
         </form>
         {state?.loading && <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />}
         {isBackgroundRun && (
@@ -135,11 +135,11 @@ export function BrowserPanel({ sessionId, state, onClose }: BrowserPanelProps): 
             disabled={riskBlocked}
             onClick={() => void selectTab(tab.tabId)}
             className={`group flex items-center gap-1.5 h-6 min-w-[120px] max-w-[220px] px-2 rounded text-[11px] disabled:cursor-not-allowed disabled:opacity-50 ${tab.tabId === activeTabId ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}
-            aria-label={`切换到 ${tab.title || '新建标签页'}`}
+            aria-label={`切换到 ${tab.title || '新建标签页'}${tab.openedByAgent ? '（由 Agent 创建）' : ''}`}
           >
             <Globe2 className="size-3 shrink-0" />
             <span className="truncate flex-1 text-left">{tab.title || '新建标签页'}</span>
-            {tab.tabId === agentTabId && <span className="shrink-0 rounded bg-primary/10 px-1 py-px text-[9px] font-medium text-primary">Agent</span>}
+            {tab.openedByAgent && <span className="shrink-0 rounded bg-primary/10 px-1 py-px text-[9px] font-medium text-primary">Agent</span>}
             <span
               role="button"
               tabIndex={0}

@@ -16,6 +16,7 @@ import {
   selectedModelAtom,
 } from '@/atoms/chat-atoms'
 import { quotedSelectionMapAtom } from '@/atoms/preview-atoms'
+import type { QuotedSelection } from '@/atoms/preview-atoms'
 import { agentDiffPanelTabAtom, agentSidePanelOpenAtom } from '@/atoms/agent-atoms'
 import { SelectionActionPopover } from '@/components/selection/SelectionActionPopover'
 import { useFocusAgentSessionInput } from '@/hooks/useFocusAgentSessionInput'
@@ -30,11 +31,16 @@ interface AgentHistorySelection {
   sourceLabel: string
   messageId?: string
   messageRole?: 'user' | 'assistant' | 'system'
+  selectionStart?: number
+  selectionEnd?: number
+  turn?: number
 }
 
 interface AgentHistorySelectionLayerProps {
   sessionId: string
   rootRef: React.RefObject<HTMLDivElement>
+  /** 同一消息内的历史选区优先插入当前 Agent 富文本输入框。 */
+  onAddToAgent?: (quote: QuotedSelection) => boolean
 }
 
 function getElementFromNode(node: Node | null): Element | null {
@@ -53,9 +59,30 @@ function getRoleLabel(role?: string): string {
   return 'Agent 历史'
 }
 
+function getTextOffsetWithin(messageElement: Element, container: Node, offset: number): number | undefined {
+  try {
+    const range = document.createRange()
+    range.selectNodeContents(messageElement)
+    range.setEnd(container, offset)
+    return range.toString().length
+  } catch {
+    return undefined
+  }
+}
+
+function getMessageTurn(root: HTMLElement, messageElement: Element): number {
+  let turn = 0
+  for (const element of root.querySelectorAll<HTMLElement>('[data-message-id][data-message-role]')) {
+    if (element.dataset.messageRole === 'user') turn += 1
+    if (element === messageElement) return Math.max(turn, 1)
+  }
+  return 1
+}
+
 export function AgentHistorySelectionLayer({
   sessionId,
   rootRef,
+  onAddToAgent,
 }: AgentHistorySelectionLayerProps): React.ReactElement {
   const setQuotedSelectionMap = useSetAtom(quotedSelectionMapAtom)
   const selectedChatModel = useAtomValue(selectedModelAtom)
@@ -119,6 +146,16 @@ export function AgentHistorySelectionLayer({
       ? (startMessageEl.getAttribute('data-message-role') as AgentHistorySelection['messageRole'] | null)
       : null
     const messageId = sameMessage ? startMessageEl.getAttribute('data-message-id') ?? undefined : undefined
+    const selectionStart = sameMessage
+      ? getTextOffsetWithin(startMessageEl, range.startContainer, range.startOffset)
+      : undefined
+    const unboundedSelectionEnd = sameMessage
+      ? getTextOffsetWithin(endMessageEl, range.endContainer, range.endOffset)
+      : undefined
+    const selectionEnd = truncated && selectionStart !== undefined && unboundedSelectionEnd !== undefined
+      ? Math.min(unboundedSelectionEnd, selectionStart + text.length)
+      : unboundedSelectionEnd
+    const turn = sameMessage ? getMessageTurn(root, startMessageEl) : undefined
 
     setSelection({
       text,
@@ -127,6 +164,9 @@ export function AgentHistorySelectionLayer({
       sourceLabel: sameMessage ? getRoleLabel(role ?? undefined) : 'Agent 历史 · 多条消息',
       messageId,
       messageRole: role ?? undefined,
+      selectionStart,
+      selectionEnd,
+      turn,
     })
 
     if (truncated) {
@@ -196,24 +236,31 @@ export function AgentHistorySelectionLayer({
 
   const handleAddToAgent = React.useCallback((): void => {
     if (!selection) return
-    setQuotedSelectionMap((prev) => {
-      const next = new Map(prev)
-      next.set(sessionId, {
-        text: selection.text,
-        filePath: selection.sourceLabel,
-        sourceType: 'agent-history',
-        sourceLabel: selection.sourceLabel,
-        messageId: selection.messageId,
-        messageRole: selection.messageRole,
-        capturedAt: Date.now(),
+    const quotedSelection: QuotedSelection = {
+      text: selection.text,
+      filePath: selection.sourceLabel,
+      sourceType: 'agent-history',
+      sourceLabel: selection.sourceLabel,
+      messageId: selection.messageId,
+      messageRole: selection.messageRole,
+      selectionStart: selection.selectionStart,
+      selectionEnd: selection.selectionEnd,
+      turn: selection.turn,
+      capturedAt: Date.now(),
+    }
+    const insertedInline = onAddToAgent?.(quotedSelection) ?? false
+    if (!insertedInline) {
+      setQuotedSelectionMap((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, quotedSelection)
+        return next
       })
-      return next
-    })
+    }
     window.getSelection()?.removeAllRanges()
     clearSelection()
     focusAgentSessionInput(sessionId)
     toast.success('已添加到 Agent 引用')
-  }, [clearSelection, focusAgentSessionInput, selection, sessionId, setQuotedSelectionMap])
+  }, [clearSelection, focusAgentSessionInput, onAddToAgent, selection, sessionId, setQuotedSelectionMap])
 
   const handleOpenChatTab = React.useCallback(async (): Promise<void> => {
     if (!selection) return
@@ -243,6 +290,9 @@ export function AgentHistorySelectionLayer({
           sourceLabel: selection.sourceLabel,
           messageId: selection.messageId,
           messageRole: selection.messageRole,
+          selectionStart: selection.selectionStart,
+          selectionEnd: selection.selectionEnd,
+          turn: selection.turn,
           capturedAt: Date.now(),
         })
         return next

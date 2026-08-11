@@ -168,6 +168,7 @@ const QUEUED_REFERENCE_STYLES = {
   skill: { icon: Sparkles, className: 'bg-[hsl(270_60%_60%/0.15)] text-[hsl(270_60%_50%)]' },
   mcp: { icon: Server, className: 'bg-[hsl(160_60%_45%/0.15)] text-[hsl(160_60%_35%)]' },
   session: { icon: MessageSquareText, className: 'bg-[hsl(200_80%_50%/0.14)] text-[hsl(200_80%_40%)]' },
+  quote: { icon: Quote, className: 'bg-primary/10 text-primary' },
   todo: { icon: ListTodo, className: 'bg-amber-500/15 text-amber-800 dark:text-amber-200' },
   calendar_event: { icon: CalendarDays, className: 'bg-cyan-500/15 text-cyan-800 dark:text-cyan-200' },
 } as const

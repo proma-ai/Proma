@@ -184,6 +184,10 @@ export interface DetachedPreviewWindowInput {
   readOnly?: boolean
   /** 候选基础目录（previewOnly 模式下用于路径解析） */
   basePaths?: string[]
+  /** Managed Skill workspace slug for a relocatable relative path. */
+  workspaceSkillSlug?: string
+  /** Original absolute Skill entry path used as a legacy fallback. */
+  legacySkillFilePath?: string
   /** 窗口标题 */
   title?: string
 }
@@ -209,6 +213,10 @@ export interface FileAccessOptions {
   sessionId?: string
   /** 工作区 slug；通常可由 sessionId 推导，少数无 session 调用可显式传入 */
   workspaceSlug?: string
+  /** Stable managed-Skill workspace slug used to resolve a relocatable skill path. */
+  workspaceSkillSlug?: string
+  /** Original absolute Skill entry path retained as a fallback for legacy sessions. */
+  legacySkillFilePath?: string
   /** 路径解析候选目录；主进程会先过滤到已授权目录内再使用 */
   candidateBasePaths?: string[]
   /**

@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { ImageLightbox, type LightboxImage } from '@/components/ui/image-lightbox'
 import { ContentBlock } from './ContentBlock'
 import { TurnFileChangesSummary, buildTurnFileNameMap } from './TurnFileChangesSummary'
+import { TurnSkillUsageSummary } from './TurnSkillUsageSummary'
 import { ProcessBlockGroup, buildAssistantTurnRenderItems, buildCompletedToolResultIds } from './ProcessBlockGroup'
 import { extractToolResultText, TASK_TOOL_NAMES } from './task-progress'
 import { normalizeThinkTagsInContentBlocks } from './thinking-tag-parser'
@@ -63,7 +64,8 @@ import { environmentCheckDialogOpenAtom } from '@/atoms/environment'
 import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { useOpenPreview } from '@/components/diff/preview-opener'
 import { getFileParentPath } from '@/lib/file-utils'
-import { parseQuotedSelectionRefs } from '@/lib/quoted-selection'
+import { parseQuotedSelectionRefs, replaceAgentHistoryQuoteMentionsWithLabels } from '@/lib/quoted-selection'
+import type { QuotedSelection } from '@/atoms/preview-atoms'
 import type { ParsedQuotedSelectionRef } from '@/lib/quoted-selection'
 import type {
   SDKMessage,
@@ -574,9 +576,15 @@ export function AssistantTurnRenderer({ turn, allMessages, basePath, onFork, onR
         )}
         </TurnFileMapProvider>
       </MessageContent>
-      {/* 文件改动汇总：流式结束后展示本轮所有 Edit/Write/MultiEdit/NotebookEdit 文件 */}
+      {/* 完成态汇总：Skill 使用记录与文件改动 chip */}
       {!isStreaming && (
-        <TurnFileChangesSummary turnMessages={turn.turnMessages} basePath={basePath} />
+        <>
+          <TurnSkillUsageSummary
+            inputMessage={turn.inputMessage}
+            turnMessages={turn.turnMessages}
+          />
+          <TurnFileChangesSummary turnMessages={turn.turnMessages} basePath={basePath} />
+        </>
       )}
       {/* 操作栏：流式输出完成后显示操作按钮 */}
       {!isStreaming && (() => {
@@ -746,8 +754,11 @@ export interface AttachedFileRef {
 export type QuotedFileRef = ParsedQuotedSelectionRef
 
 /** 解析消息中的 <attached_files>、<quoted_file> 和 <quoted_context> 块，返回文件列表、引用列表和剩余文本 */
-export function parseAttachedFiles(content: string): { files: AttachedFileRef[]; quotes: QuotedFileRef[]; text: string } {
-  const parsedQuotes = parseQuotedSelectionRefs(content)
+export function parseAttachedFiles(
+  content: string,
+  options: { inlineAgentHistoryQuotes?: boolean } = {},
+): { files: AttachedFileRef[]; quotes: QuotedFileRef[]; text: string } {
+  const parsedQuotes = parseQuotedSelectionRefs(content, options)
   const quotes: QuotedFileRef[] = parsedQuotes.quotes
 
   const regex = /<attached_files>\n?([\s\S]*?)\n?<\/attached_files>\n*/
@@ -867,6 +878,7 @@ function AttachedFileChip({ file }: { file: AttachedFileRef }): React.ReactEleme
   )
 }
 
+
 /** 引用文件 Chip（显示在用户消息中，表示该消息引用了某个文件的选中内容） */
 function QuoteChip({ quote }: { quote: QuotedFileRef }): React.ReactElement {
   const label = quote.label ?? quote.filename
@@ -921,11 +933,17 @@ function ScheduledRunBadge(): React.ReactElement {
   )
 }
 
-function UserInputMessage({ message }: { message: SDKUserMessage }): React.ReactElement {
+function UserInputMessage({ message, onAgentHistoryQuoteClick }: {
+  message: SDKUserMessage
+  onAgentHistoryQuoteClick?: (quote: QuotedSelection) => void
+}): React.ReactElement {
   const userProfile = useAtomValue(userProfileAtom)
   const rawText = extractUserText(message) ?? ''
   const isScheduledRun = rawText.includes(SCHEDULED_RUN_MARKER)
-  const { files: attachedFiles, quotes, text } = parseAttachedFiles(stripScheduledRunMarker(rawText))
+  const { files: attachedFiles, quotes, text } = parseAttachedFiles(
+    stripScheduledRunMarker(rawText),
+    { inlineAgentHistoryQuotes: true },
+  )
   const imageFiles = attachedFiles.filter((f) => isImageFile(f.filename))
   const activeSessionId = useAtomValue(activeSessionIdAtom)
   const setSessionPendingFiles = useSetAtom(agentSessionPendingFilesAtom)
@@ -1004,11 +1022,13 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
       </div>
       <MessageContent>
         {/* 引用文件 Chip */}
-        {quotes.length > 0 && (
+        {quotes.filter((quote) => quote.sourceType !== 'agent-history').length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {quotes.map((q, i) => (
-              <QuoteChip key={`${q.path}:${i}`} quote={q} />
-            ))}
+            {quotes
+              .filter((quote) => quote.sourceType !== 'agent-history')
+              .map((q, i) => (
+                <QuoteChip key={`${q.path}:${i}`} quote={q} />
+              ))}
           </div>
         )}
         {/* 图片缩略图 */}
@@ -1033,7 +1053,11 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
             ))}
           </div>
         )}
-        {text && <UserMessageContent>{text}</UserMessageContent>}
+        {text && (
+          <UserMessageContent onAgentHistoryQuoteClick={onAgentHistoryQuoteClick}>
+            {text}
+          </UserMessageContent>
+        )}
       </MessageContent>
       {/* 共享大图预览 — 单图时无翻页，行为同以前 */}
       {imageFiles.length > 0 && (
@@ -1047,7 +1071,7 @@ function UserInputMessage({ message }: { message: SDKUserMessage }): React.React
       )}
       {text && (
         <MessageActions className="pl-[46px] mt-0.5">
-          <CopyButton content={text} />
+          <CopyButton content={replaceAgentHistoryQuoteMentionsWithLabels(text)} />
         </MessageActions>
       )}
     </Message>
@@ -1398,6 +1422,8 @@ export interface MessageGroupRendererProps {
   basePath?: string
   onFork?: (upToMessageUuid: string) => void
   onRewind?: (assistantMessageUuid: string) => void
+  /** 已发送的 Agent 历史引用 chip 请求定位时的精确范围。 */
+  onAgentHistoryQuoteClick?: (quote: QuotedSelection) => void
   /** 将 assistant 回复标记为 Todo */
   onCreateTodo?: (text: string) => void
   /** 错误重试回调（传入本轮开始前应删除的错误 UUID） */
@@ -1464,13 +1490,13 @@ export function getGroupId(group: MessageGroup): string {
 
 // getGroupPreview 已迁移至 @proma/session-core（本文件从该包 import 并 re-export）
 
-export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
+export function MessageGroupRenderer({ group, allMessages, basePath, onFork, onRewind, onAgentHistoryQuoteClick, onCreateTodo, onRetry, onRetryInNewSession, onCompact, onSwitchToPromaCloud, onRelinkProjectRoot, onRestoreProjectRoot, isStreaming, stoppedByUser, sessionModelId }: MessageGroupRendererProps): React.ReactElement | null {
   const groupId = getGroupId(group)
 
   if (group.type === 'user') {
     return (
       <div data-message-id={groupId} data-message-role="user">
-        <UserInputMessage message={group.message} />
+        <UserInputMessage message={group.message} onAgentHistoryQuoteClick={onAgentHistoryQuoteClick} />
       </div>
     )
   }

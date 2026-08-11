@@ -122,6 +122,8 @@ export function PreviewTabContent({ sessionId }: PreviewTabContentProps): React.
             previewOnly={currentFile.previewOnly}
             readOnly={currentFile.readOnly}
             basePaths={currentFile.basePaths}
+            workspaceSkillSlug={currentFile.workspaceSkillSlug}
+            legacySkillFilePath={currentFile.legacySkillFilePath}
             baseRef={currentFile.baseRef}
             toolbarActions={toolbarActions}
           />

@@ -1,4 +1,9 @@
 import type { QuotedSelection } from '@/atoms/preview-atoms'
+import {
+  buildAgentHistoryQuoteLabel,
+  expandAgentHistoryQuoteMentions,
+  parseAgentHistoryQuoteMention,
+} from './quoted-selection'
 
 export type QueueDropPlacement = 'before' | 'after'
 
@@ -96,7 +101,7 @@ export interface QueuedMessageSendPayload {
 }
 
 /** 队列预览专用片段：保留原始消息用于发送，同时把引用协议渲染为可读芯片。 */
-export type QueuedMessageReferenceType = 'file' | 'skill' | 'mcp' | 'session' | 'todo' | 'calendar_event'
+export type QueuedMessageReferenceType = 'file' | 'skill' | 'mcp' | 'session' | 'todo' | 'calendar_event' | 'quote'
 
 export type QueuedMessageDisplayPart =
   | { type: 'text'; value: string }
@@ -114,6 +119,39 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
 }
 
+function escapeHtmlAttribute(text: string): string {
+  return escapeHtml(text)
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderQueuedParagraphHtml(text: string): string {
+  const quoteMarkerPattern = /&quote:[A-Za-z0-9%_.!~*'()-]+/g
+  let html = ''
+  let lastIndex = 0
+
+  for (const match of text.matchAll(quoteMarkerPattern)) {
+    if (match.index > lastIndex) {
+      html += escapeHtml(text.slice(lastIndex, match.index))
+    }
+
+    const marker = match[0]
+    const quote = parseAgentHistoryQuoteMention(marker)
+    if (!quote) {
+      html += escapeHtml(marker)
+    } else {
+      const payload = marker.slice('&quote:'.length)
+      const id = `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`
+      const label = buildAgentHistoryQuoteLabel(quote)
+      html += `<span data-type="mention" data-id="${escapeHtmlAttribute(id)}" data-label="${escapeHtmlAttribute(label)}" data-mention-suggestion-char="&" data-mention-quote="${escapeHtmlAttribute(payload)}">${escapeHtml(label)}</span>`
+    }
+    lastIndex = match.index + marker.length
+  }
+
+  html += escapeHtml(text.slice(lastIndex))
+  return html.replace(/\n/g, '<br>')
+}
+
 /**
  * 把纯文本队列消息转成与 RichTextInput 段落渲染一致的 HTML：
  * 双换行分段落，单换行转 <br>，并转义 HTML 特殊字符避免破坏结构。
@@ -124,13 +162,12 @@ export function queuedTextToParagraphHtml(text: string): string {
   if (!normalized) return ''
   return normalized
     .split(/\n\n+/)
-    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br>')}</p>`)
+    .map((para) => `<p>${renderQueuedParagraphHtml(para)}</p>`)
     .join('')
 }
 
-
 const REF_PATTERN = /\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)\S+)?/g
-const DISPLAY_REFERENCE_PATTERN = /@file:(?<file>\S+)|\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)(?<sessionLabel>\S+))?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)(?<todoLabel>\S+))?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)(?<calendarEventLabel>\S+))?/g
+const DISPLAY_REFERENCE_PATTERN = /&quote:(?<quote>[A-Za-z0-9%_.!~*'()-]+)|@file:(?<file>\S+)|\/skill:(?<skill>\S+)|#mcp:(?<mcp>\S+)|&session:(?<session>[A-Za-z0-9-]+)(?:(?:~|::)(?<sessionLabel>\S+))?|&todo:(?<todo>[A-Za-z0-9-]+)(?:(?:~|::)(?<todoLabel>\S+))?|&calendar_event:(?<calendarEvent>[A-Za-z0-9-]+)(?:(?:~|::)(?<calendarEventLabel>\S+))?/g
 
 function decodeReferenceLabel(value: string): string {
   try {
@@ -141,7 +178,7 @@ function decodeReferenceLabel(value: string): string {
 }
 
 /**
- * 将排队消息中的文件、Skill、MCP、会话和规划协议转换为展示片段。
+ * 将排队消息中的文件、Skill、MCP、会话、历史引用和规划协议转换为展示片段。
  * `item.text` 仍完整保留，发送时继续通过 parseQueuedMessageMentions 提取原始 ID。
  */
 export function getQueuedMessageDisplayParts(text: string): QueuedMessageDisplayPart[] {
@@ -154,6 +191,22 @@ export function getQueuedMessageDisplayParts(text: string): QueuedMessageDisplay
     }
 
     const groups = match.groups ?? {}
+    if (groups.quote) {
+      const quote = parseAgentHistoryQuoteMention(`&quote:${groups.quote}`)
+      if (quote) {
+        parts.push({
+          type: 'reference',
+          referenceType: 'quote',
+          id: `${quote.messageId ?? ''}:${quote.selectionStart ?? ''}:${quote.selectionEnd ?? ''}`,
+          label: buildAgentHistoryQuoteLabel(quote),
+        })
+      } else {
+        parts.push({ type: 'text', value: match[0] })
+      }
+      lastIndex = match.index + match[0].length
+      continue
+    }
+
     let referenceType: QueuedMessageReferenceType
     let id: string
     let rawLabel: string | undefined
@@ -258,8 +311,8 @@ export function buildQueuedMessageSendPayload(
     : ''
 
   return {
-    rawText: `${prefix}${text}`.trim(),
-    sdkText: `${prefix}${mentions.cleanedText}`.trim(),
+    rawText: `${prefix}${expandAgentHistoryQuoteMentions(text)}`.trim(),
+    sdkText: `${prefix}${expandAgentHistoryQuoteMentions(mentions.cleanedText)}`.trim(),
     mentions,
   }
 }

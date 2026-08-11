@@ -66,6 +66,8 @@ export interface AssistantTurn {
   assistantMessages: SDKAssistantMessage[]
   /** 当前 turn 内所有消息（含 tool_result user 消息，供工具结果查找） */
   turnMessages: SDKMessage[]
+  /** The human input that started this assistant turn, when one exists. */
+  inputMessage?: SDKUserMessage
   /** 模型名称（取首条 assistant 消息的 model） */
   model?: string
   /** 渠道 ID（取首条 assistant 消息的 _channelId，多渠道同名模型时用于精确匹配显示名） */
@@ -103,6 +105,7 @@ export type MessageGroup =
 export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string): MessageGroup[] {
   const groups: MessageGroup[] = []
   let currentTurn: AssistantTurn | null = null
+  let pendingInputMessage: SDKUserMessage | undefined
   // 收到后台任务完成通知（task_notification）后，若没有用户输入就直接出现新的 assistant 输出，
   // 说明这是自动唤醒的新一轮，应另起独立消息块，而不是续接上一轮。
   // 注意：不能用 result 做信号——正常对话每轮也以 result 结束，会误伤普通回复。
@@ -122,6 +125,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
         // 真正的用户输入 → 结束当前 turn，开始新段落
         flushTurn()
         groups.push({ type: 'user', message: userMsg })
+        pendingInputMessage = userMsg
         pendingWakeBoundary = false
       } else {
         // tool_result 消息 → 归入当前 turn
@@ -141,6 +145,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           type: 'assistant-turn',
           assistantMessages: [aMsg],
           turnMessages: [msg],
+          inputMessage: pendingInputMessage,
           model: aMsg._channelModelId || aMsg.message?.model || sessionModelId,
           channelId: aMsg._channelId,
           createdAt: meta.createdAt,
@@ -186,6 +191,7 @@ export function groupIntoTurns(messages: SDKMessage[], sessionModelId?: string):
           currentTurn.turnMessages.push(msg)
         } else {
           pendingWakeBoundary = true
+          pendingInputMessage = undefined
         }
       } else if (currentTurn) {
         currentTurn.turnMessages.push(msg)
@@ -249,6 +255,7 @@ function mergeAdjacentSameModelTurns(groups: MessageGroup[]): MessageGroup[] {
       const target = result[mergeTargetIdx] as AssistantTurn
       target.assistantMessages.push(...group.assistantMessages)
       target.turnMessages.push(...group.turnMessages)
+      target.inputMessage ??= group.inputMessage
     } else {
       result.push(group)
     }

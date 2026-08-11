@@ -22,7 +22,7 @@ import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sparkles, Server, Download, MessageSquareText } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Paperclip, FileText, ListTodo, Sparkles, Server, Download, MessageSquareText, Quote } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { shouldInspectMermaidCodeBlock, shouldRenderMermaidCodeBlock } from '@/lib/mermaid-detection'
 import { normalizeLatexDelimiters } from '@/lib/normalize-latex'
@@ -39,8 +39,10 @@ import { LoadingIndicator } from '@/components/ui/loading-indicator'
 import { CodeBlock, MermaidBlock } from '@proma/ui'
 import { detectLanguage } from '@proma/core'
 import { FilePathChip, isAbsoluteFilePath, isImageFilePath, isRelativeFilePath } from './file-path-chip'
+import { buildAgentHistoryQuoteLabel, parseAgentHistoryQuoteMention } from '@/lib/quoted-selection'
 import type { HTMLAttributes, ComponentProps, ReactNode } from 'react'
 import type { FileAttachment } from '@proma/shared'
+import type { QuotedSelection } from '@/atoms/preview-atoms'
 
 // ===== Message 根容器 =====
 
@@ -255,7 +257,7 @@ function walkMdastText(
 
 // ----- MentionChip 组件 -----
 
-type MentionType = 'file' | 'skill' | 'mcp' | 'session' | 'todo' | 'calendar_event'
+type MentionType = 'file' | 'skill' | 'mcp' | 'session' | 'todo' | 'calendar_event' | 'quote'
 
 const MENTION_STYLES: Record<MentionType, { icon: typeof FileText; className: string }> = {
   file: { icon: FileText, className: 'bg-primary/10 text-primary' },
@@ -264,6 +266,7 @@ const MENTION_STYLES: Record<MentionType, { icon: typeof FileText; className: st
   session: { icon: MessageSquareText, className: 'bg-[hsl(200_80%_50%/0.14)] text-[hsl(200_80%_40%)]' },
   todo: { icon: ListTodo, className: 'bg-amber-500/15 text-amber-800 dark:text-amber-200' },
   calendar_event: { icon: CalendarDays, className: 'bg-cyan-500/15 text-cyan-800 dark:text-cyan-200' },
+  quote: { icon: Quote, className: 'bg-primary/10 text-primary' },
 }
 
 function safeDecode(raw: string): string {
@@ -278,6 +281,7 @@ function safeDecode(raw: string): string {
  * 附加 basePaths 上下文 — 用于把会话目录与附加目录穿透到各类文件 chip。
  */
 const BasePathsContext = React.createContext<string[] | undefined>(undefined)
+const AgentHistoryQuoteClickContext = React.createContext<((quote: QuotedSelection) => void) | undefined>(undefined)
 
 /** 提供附加目录候选给所有内嵌的 MessageResponse。 */
 export function BasePathsProvider({ basePaths, children }: { basePaths?: string[]; children: React.ReactNode }): React.ReactElement {
@@ -335,10 +339,40 @@ export function normalizeNamedReferenceDelimiters(markdown: string): string {
 function MentionChip({ type, value }: { type: MentionType; value: string }): React.ReactElement {
   const style = MENTION_STYLES[type]
   const Icon = style.icon
-  const decoded = safeDecode(value)
   const contextBasePaths = React.useContext(BasePathsContext)
+  const onAgentHistoryQuoteClick = React.useContext(AgentHistoryQuoteClickContext)
 
-  // 图片引用原先会以内联图片显示。改为 chip 后仍沿用同一文件预览入口，
+  if (type === 'quote') {
+    const quote = parseAgentHistoryQuoteMention(`&quote:${value}`)
+    if (!quote) {
+      return <span>{`&quote:${value}`}</span>
+    }
+    const canNavigate = Boolean(
+      onAgentHistoryQuoteClick
+        && quote.messageId
+        && quote.selectionStart != null
+        && quote.selectionEnd != null
+        && quote.selectionEnd > quote.selectionStart,
+    )
+    return (
+      <button
+        type="button"
+        disabled={!canNavigate}
+        onClick={canNavigate ? () => onAgentHistoryQuoteClick?.(quote) : undefined}
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[13px] font-medium whitespace-nowrap align-baseline',
+          style.className,
+          canNavigate ? 'cursor-pointer hover:bg-primary/[0.16]' : 'cursor-default',
+        )}
+        title={canNavigate ? '点击跳转到原消息并高亮引用内容' : buildAgentHistoryQuoteLabel(quote)}
+      >
+        <Icon className="size-3 inline shrink-0" />
+        {buildAgentHistoryQuoteLabel(quote)}
+      </button>
+    )
+  }
+
+  const decoded = safeDecode(value)
   // 避免用户只能看到文件名而无法查看内容。
   if (type === 'file' && isImageFilePath(decoded)) {
     return <FilePathChip filePath={decoded} basePaths={contextBasePaths} />
@@ -377,7 +411,7 @@ export function remarkMentions() {
     walkMdastText(tree, (node, index, parent) => {
       const text = node.value
       // 每次调用创建独立正则实例，避免 /g 状态在并发 remark pipeline 间互相干扰
-      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)|&session:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&todo:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&calendar_event:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?/g
+      const mentionPattern = /@file:(\S+)|\/skill:(\S+)|#mcp:(\S+)|&session:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&todo:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&calendar_event:([A-Za-z0-9-]+)(?:(?:~|::)(\S+))?|&quote:([A-Za-z0-9%_.!~*'()-]+)/g
       if (!mentionPattern.test(text)) return
       mentionPattern.lastIndex = 0
 
@@ -399,8 +433,10 @@ export function remarkMentions() {
                 ? 'session'
                 : m[6]
                   ? 'todo'
-                  : 'calendar_event'
-        const referenceId = m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[6] ?? m[8] ?? ''
+                  : m[8]
+                    ? 'calendar_event'
+                    : 'quote'
+        const referenceId = m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[6] ?? m[8] ?? m[10] ?? ''
         const encodedLabel = m[5] ?? m[7] ?? m[9]
         const rawValue = encodedLabel ? `${referenceId}::${safeDecode(encodedLabel)}` : referenceId
         // 文件/Skill/MCP 旧消息可能已经编码；带标题的 named reference 始终重新编码整个值。
@@ -487,7 +523,7 @@ function mentionUrlTransform(url: string): string {
 // ===== Memo'd Markdown 子组件（稳定引用，避免 react-markdown 每帧重建组件映射） =====
 
 /** mention:// URL 匹配 */
-const MENTION_URL_RE = /^mention:\/\/(file|skill|mcp|session|todo|calendar_event)\/(.+)$/
+const MENTION_URL_RE = /^mention:\/\/(file|skill|mcp|session|todo|calendar_event|quote)\/(.+)$/
 
 /** 外部链接 / mention chip 渲染器 */
 const MarkdownLink = React.memo(function MarkdownLink({
@@ -704,6 +740,7 @@ const USER_REMARK_PLUGINS: RemarkPluginFn[] = [remarkMentions, remarkPreserveBre
 
 interface UserMessageContentProps extends HTMLAttributes<HTMLDivElement> {
   children: string
+  onAgentHistoryQuoteClick?: (quote: QuotedSelection) => void
 }
 
 /**
@@ -712,7 +749,7 @@ interface UserMessageContentProps extends HTMLAttributes<HTMLDivElement> {
  * - 点击展开/收起，底部使用低对比度文字提示
  */
 export const UserMessageContent = React.memo(
-  function UserMessageContent({ children, className, ...props }: UserMessageContentProps): React.ReactElement {
+  function UserMessageContent({ children, onAgentHistoryQuoteClick, className, ...props }: UserMessageContentProps): React.ReactElement {
     const [isExpanded, setIsExpanded] = React.useState(false)
     const [shouldCollapse, setShouldCollapse] = React.useState(false)
     const contentRef = React.useRef<HTMLDivElement>(null)
@@ -743,7 +780,9 @@ export const UserMessageContent = React.memo(
             shouldCollapse && !isExpanded && 'max-h-[6.5em]'
           )}
         >
-          <MessageResponse className="prose-p:my-0.5 prose-headings:my-1.5" remarkPlugins={USER_REMARK_PLUGINS}>{children}</MessageResponse>
+          <AgentHistoryQuoteClickContext.Provider value={onAgentHistoryQuoteClick}>
+            <MessageResponse className="prose-p:my-0.5 prose-headings:my-1.5" remarkPlugins={USER_REMARK_PLUGINS}>{children}</MessageResponse>
+          </AgentHistoryQuoteClickContext.Provider>
         </div>
         {shouldCollapse && (
           <button
@@ -770,7 +809,9 @@ export const UserMessageContent = React.memo(
       </div>
     )
   },
-  (prevProps, nextProps) => prevProps.children === nextProps.children
+  (prevProps, nextProps) =>
+    prevProps.children === nextProps.children
+      && prevProps.onAgentHistoryQuoteClick === nextProps.onAgentHistoryQuoteClick
 )
 
 // ===== MessageLoading 加载动画 =====

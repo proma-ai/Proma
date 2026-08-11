@@ -21,6 +21,10 @@ export interface PreviewFile {
   readOnly?: boolean
   /** 候选基础目录（用于相对路径解析） */
   basePaths?: string[]
+  /** Workspace slug for a relocatable managed Skill path. */
+  workspaceSkillSlug?: string
+  /** Original absolute Skill entry path used only when the managed locator cannot resolve. */
+  legacySkillFilePath?: string
   /** 文件是否落在当前会话的 diff scope 内（与 getUnstagedChanges 的 candidates 对齐） */
   inDiffScope?: boolean
   /** 基准 ref（如 "origin/main"），用于 worktree vs main 模式的 diff 对比 */
@@ -91,6 +95,12 @@ export interface QuotedSelection {
   startLine?: number
   /** 结束行号（1-based） */
   endLine?: number
+  /** Agent 历史消息内选区的起始字符偏移（0-based） */
+  selectionStart?: number
+  /** Agent 历史消息内选区的结束字符偏移（0-based、exclusive） */
+  selectionEnd?: number
+  /** Agent 历史中的所属轮次（1-based；用户消息和对应回复共用同一轮） */
+  turn?: number
   /** 捕获时间戳 */
   capturedAt: number
 }

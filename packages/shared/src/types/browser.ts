@@ -51,6 +51,8 @@ export interface BrowserTabSummary {
   url: string
   title: string
   loading: boolean
+  /** 此标签由 Agent 创建（与当前默认工作标签无关）。 */
+  openedByAgent: boolean
 }
 
 export interface BrowserViewState {

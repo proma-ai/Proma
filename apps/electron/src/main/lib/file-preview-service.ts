@@ -97,8 +97,12 @@ function searchFileInDir(dir: string, targetName: string, maxDepth = 8): string 
  * - 绝对路径：直接 resolve，不存在时 fallback 搜索
  * - 相对路径：依次尝试 basePaths，返回第一个存在的；都不存在则 fallback 搜索
  */
+export function isAbsolutePreviewPath(filePath: string): boolean {
+  return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath)
+}
+
 export function resolveTargetPath(filePath: string, basePaths?: string[]): string {
-  if (filePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(filePath)) {
+  if (isAbsolutePreviewPath(filePath)) {
     const direct = resolve(filePath)
     if (existsSync(direct)) return direct
     const name = basename(direct)

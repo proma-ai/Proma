@@ -255,6 +255,26 @@ export interface SDKUserMessage {
   isReplay?: boolean
   /** SDK 合成的消息（如 Skill 展开 prompt），非人类用户输入 */
   isSynthetic?: boolean
+  /** Skills successfully loaded for this specific user input. */
+  skill_activations?: SkillActivation[]
+}
+
+/** Skill successfully loaded during an Agent turn. */
+export type SkillActivationSource = 'explicit' | 'read'
+
+export interface SkillActivation {
+  /** Skill directory slug, stable across display-name changes. */
+  slug: string
+  /** Frontmatter name when available; otherwise the slug. */
+  name: string
+  /** `SKILL.md` path used to load the Skill; retained as a compatibility fallback. */
+  filePath?: string
+  /** Stable Proma workspace locator for a managed Skill. */
+  workspaceSlug?: string
+  /** Path relative to the managed workspace Skills directory, such as `my-skill/SKILL.md`. */
+  workspaceSkillPath?: string
+  /** Ways this turn loaded the Skill. */
+  sources: SkillActivationSource[]
 }
 
 /** SDK result 消息（查询结束时返回） */
@@ -276,6 +296,8 @@ export interface SDKResultMessage {
   background_tasks?: SDKBackgroundTaskSummary[]
   session_crons?: SDKSessionCronSummary[]
   session_id?: string
+  /** Skills successfully loaded during this result's turn. */
+  skill_activations?: SkillActivation[]
   /** 渠道配置的模型 ID，用于缺失 modelUsage.contextWindow 时按 Agent SDK 运行窗口兜底 */
   _channelModelId?: string
   /** 渠道 provider，用于按 Agent SDK 实际运行窗口计算压缩阈值 */

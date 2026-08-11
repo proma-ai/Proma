@@ -529,7 +529,9 @@ export function htmlToMarkdown(
         const dataLabel = el.getAttribute('data-label')
         const suggestionChar = el.getAttribute('data-mention-suggestion-char') || '@'
         const referenceType = el.getAttribute('data-mention-reference-type')
+        const agentHistoryQuote = el.getAttribute('data-mention-quote')
         if (dataType === 'mention') {
+          if (agentHistoryQuote) return `&quote:${agentHistoryQuote}`
           if (referenceType === 'todo') return serializeNamedMention('&todo', dataId, dataLabel)
           if (referenceType === 'calendar_event') return serializeNamedMention('&calendar_event', dataId, dataLabel)
           if (suggestionChar === '/') return `/skill:${dataId}`

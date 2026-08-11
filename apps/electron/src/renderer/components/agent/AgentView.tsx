@@ -18,7 +18,7 @@ import { unstable_batchedUpdates } from 'react-dom'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
 import { CornerDownLeft, Square, Settings, X, Copy, Check, Brain, Sparkles, ListTodo, Paperclip } from 'lucide-react'
-import { AgentMessages } from './AgentMessages'
+import { AgentMessages, type AgentHistoryQuoteNavigationRequest } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { AgentMessageQueue } from './AgentMessageQueue'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -107,7 +107,7 @@ import {
   finalizeStreamingActivities,
 } from '@/atoms/agent-atoms'
 import type { AgentContextStatus } from '@/atoms/agent-atoms'
-import { settingsOpenAtom } from '@/atoms/settings-tab'
+import { settingsOpenAtom, settingsTabAtom } from '@/atoms/settings-tab'
 import { longTextPasteAsAttachmentEnabledAtom } from '@/atoms/ui-preferences'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { todoPlanningGroupsAtom } from '@/atoms/planning-atoms'
@@ -120,7 +120,7 @@ import type { AgentSendInput, AgentPendingFile, AgentThinkingLevel, FileDialogLa
 import { inferContextWindow, inferReasoningTransport, isCodexFastModeSupportedModel, MAX_ATTACHMENT_SIZE, normalizeReasoningCapabilityLevel, normalizeReasoningLevel, resolveReasoningCapability, resolveReasoningProfile } from '@proma/shared'
 import { fileToBase64, formatFileNames, getFileParentPath } from '@/lib/file-utils'
 import { getFilePanelDragData, INSERT_FILE_MENTION_EVENT, type FilePanelDragItem } from '@/lib/file-panel-drag'
-import { buildQuotedSelectionBlock } from '@/lib/quoted-selection'
+import { buildQuotedSelectionBlock, expandAgentHistoryQuoteMentions } from '@/lib/quoted-selection'
 import { createClipboardPendingFile, createClipboardTextDraft, makeUniqueAttachmentName } from '@/lib/clipboard-text-attachment'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import {
@@ -374,6 +374,9 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   // 此时服务端 activeSessions 仍保留，新消息须走注入通道而非新建 run。
   const backgroundWaiting = streamState?.backgroundWaiting ?? false
   const stoppedByUserSessions = useAtomValue(stoppedByUserSessionsAtom)
+  // 点击停止后，底层 Pi query 仍需一个很短的收尾窗口。该窗口内不可发起/排队新消息，
+  // 否则旧 run 与新 run 会交错，导致同一用户消息被重复展示或持久化。
+  const [isStopping, setIsStopping] = React.useState(false)
   const sendWithCmdEnter = useAtomValue(sendWithCmdEnterAtom)
   const longTextPasteAsAttachmentEnabled = useAtomValue(longTextPasteAsAttachmentEnabledAtom)
   const stoppedByUser = stoppedByUserSessions.has(sessionId)
@@ -414,6 +417,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const [agentThinking, setAgentThinking] = useAtom(agentThinkingAtom)
   const agentEffort = useAtomValue(agentEffortAtom)
   const setSettingsOpen = useSetAtom(settingsOpenAtom)
+  const setSettingsTab = useSetAtom(settingsTabAtom)
   const setDraftSessionIds = useSetAtom(draftSessionIdsAtom)
   const globalWorkspaceId = useAtomValue(currentAgentWorkspaceIdAtom)
   // 从会话元数据派生 workspaceId：会话数据已加载时以自身为准，未加载时回退全局 atom
@@ -621,6 +625,31 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   const pendingFilesRef = React.useRef(pendingFiles)
   // RichTextInput 命令接口 ref（右侧文件面板拖入时插入 @file 引用）
   const richTextInputRef = React.useRef<RichTextInputHandle>(null)
+  const historyQuoteNavigationRequestIdRef = React.useRef(0)
+  const [historyQuoteNavigation, setHistoryQuoteNavigation] = React.useState<AgentHistoryQuoteNavigationRequest | null>(null)
+  const handleAddHistoryQuote = React.useCallback((quote: QuotedSelection): boolean => {
+    return richTextInputRef.current?.insertAgentHistoryQuoteMention(quote) ?? false
+  }, [])
+  const handleAgentHistoryQuoteClick = React.useCallback((quote: QuotedSelection): void => {
+    if (
+      quote.sourceType !== 'agent-history'
+      || !quote.messageId
+      || quote.selectionStart == null
+      || quote.selectionEnd == null
+      || quote.selectionEnd <= quote.selectionStart
+    ) {
+      return
+    }
+    historyQuoteNavigationRequestIdRef.current += 1
+    setHistoryQuoteNavigation({
+      sessionId,
+      quote,
+      requestId: historyQuoteNavigationRequestIdRef.current,
+    })
+  }, [sessionId])
+  React.useEffect(() => {
+    setHistoryQuoteNavigation(null)
+  }, [sessionId])
   // 父组件同步生成的 ID，同时提供给 RichTextInput 与 SpeechButton，避免工具栏 memo 捕获空值。
   const agentVoiceInputId = React.useId()
   React.useEffect(() => {
@@ -697,6 +726,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     () => globalChannels.some((channel) => channel.enabled && modelsForAgent(channel).some((model) => model.enabled)),
     [globalChannels],
   )
+  // 只有官方渠道本身和至少一个 Agent 模型都可用时，才展示第三方渠道的切换恢复入口。
+  const officialAgentFallback = React.useMemo(() => {
+    const channel = globalChannels.find((candidate) => candidate.provider === 'proma' && candidate.enabled)
+    const model = channel ? modelsForAgent(channel).find((candidate) => candidate.enabled) : undefined
+    return channel && model ? { channel, model } : null
+  }, [globalChannels])
   React.useEffect(() => {
     if (!agentChannelId || agentModelId) return
 
@@ -1949,6 +1984,20 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
   }, [sessionId, streaming, backgroundWaiting, setSessionChannelMap, setSessionModelMap, setDefaultChannelId, setDefaultModelId, setAgentSessions])
 
+  /** 第三方渠道失败时，切换到已验证可用的 Proma 官方 Agent 模型；用户可随后直接重试。 */
+  const handleSwitchToPromaCloud = React.useCallback((): void => {
+    if (!officialAgentFallback) return
+    const { channel, model } = officialAgentFallback
+    handleModelSelect({
+      channelId: channel.id,
+      channelName: channel.name,
+      modelId: model.id,
+      modelName: model.name,
+      provider: channel.provider,
+    })
+    toast.success('已切换到 Proma Cloud，请点击重试继续。')
+  }, [handleModelSelect, officialAgentFallback])
+
   const handleCodexFastModeChange = React.useCallback(async (): Promise<void> => {
     if (!isCodexFastModeAvailable || streaming || backgroundWaiting || !sessionMeta) return
 
@@ -2015,6 +2064,10 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     const effectiveText = text || suggestion || ''
     const pendingFilesSnapshot = pendingFilesRef.current
     if (!messagesLoaded || (!effectiveText && pendingFilesSnapshot.length === 0) || !agentChannelId || !hasAvailableModel) return
+    if (isStopping) {
+      toast.info('正在停止上一轮 Agent', { description: '请等待停止完成后再发送消息。' })
+      return
+    }
     if (isLegacyTranscript) {
       toast.info('这是只读历史会话，请新建 Pi 会话继续')
       return
@@ -2148,11 +2201,11 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     }
 
     // 2. 构建最终消息
-    const finalMessage = fileReferences + effectiveText
+    const finalMessage = fileReferences + expandAgentHistoryQuoteMentions(effectiveText)
     const mentions = parseQueuedMessageMentions(effectiveText)
     // Agent 侧使用解码后的 SDK 文本（@file 路径还原为真实路径，Agent 可读取）；
-    // 气泡展示/持久化使用编码原文（remarkMentions 解码显示），与排队路径 rawText/sdkText 分离语义一致。
-    const sdkMessage = fileReferences + mentions.cleanedText
+    // 历史 quote marker 仅在此刻展开为精确上下文，草稿本身始终保持可编辑 chip。
+    const sdkMessage = fileReferences + expandAgentHistoryQuoteMentions(mentions.cleanedText)
 
     // 清除打断状态（上一轮的打断标记不再显示）
     store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
@@ -2233,30 +2286,29 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         return map
       })
     })
-  }, [inputContent, createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript])
+  }, [inputContent, createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
+    if (isStopping) return
+    setIsStopping(true)
     store.set(stoppedByUserSessionsAtom, (prev: Set<string>) => {
       const next = new Set(prev)
       next.add(sessionId)
       return next
     })
 
-    setStreamingStates((prev) => {
-      const current = prev.get(sessionId)
-      if (!current || !current.running) return prev
-      const map = new Map(prev)
-      map.set(sessionId, {
-        ...current,
-        running: false,
-        ...finalizeStreamingActivities(current.toolActivities),
-      })
-      return map
+    // 保持 running 到 STREAM_COMPLETE 到达。提前把它切成 false 会让输入框误以为
+    // 已经可以开启新 run，而底层 query 尚未退出，形成重复保存的竞态。
+    window.electronAPI.stopAgent(sessionId).catch((error) => {
+      console.error(error)
+      setIsStopping(false)
     })
+  }, [isStopping, sessionId, store])
 
-    window.electronAPI.stopAgent(sessionId).catch(console.error)
-  }, [sessionId, setStreamingStates, store])
+  React.useEffect(() => {
+    if (!streaming) setIsStopping(false)
+  }, [streaming])
 
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
@@ -2607,7 +2659,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
     (allAskUserRequests.get(sessionId)?.length ?? 0) > 0 ||
     (allExitPlanRequests.get(sessionId)?.length ?? 0) > 0
   const hasBlockingRequests = hasBannerOverlay || (allPermissionRequests.get(sessionId)?.length ?? 0) > 0
-  const canSendQueuedNow = messagesLoaded && (streaming || !messagesRefreshing) && !!agentChannelId && hasAvailableModel && !hasBlockingRequests
+  const canSendQueuedNow = messagesLoaded && (streaming || !messagesRefreshing) && !!agentChannelId && hasAvailableModel && !hasBlockingRequests && !isStopping
   const autoSendingQueuedRef = React.useRef(false)
   const queuedSendInFlightRef = React.useRef(false)
   const sendingQueuedMessageIdsRef = React.useRef<Set<string>>(new Set())
@@ -2724,7 +2776,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
   }, [togglePreviewPanel])
 
   const hasTextInput = inputContent.trim().length > 0
-  const canSend = messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
+  const canSend = !isStopping && messagesLoaded && (streaming || !messagesRefreshing) && (hasTextInput || pendingFiles.length > 0 || !!suggestion) && agentChannelId !== null && hasAvailableModel && (!streaming || hasTextInput)
 
   const inputToolbarItems = React.useMemo<ToolbarItem[]>(() => [
     ...(isCodexFastModeAvailable ? [{
@@ -2845,6 +2897,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           size="icon"
           className={inputToolbarDangerButtonClass}
           onClick={handleStop}
+          disabled={isStopping}
         >
           <Square className="size-[16px]" fill="currentColor" strokeWidth={0} />
         </Button>
@@ -2917,6 +2970,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
         <AgentMessages
           sessionId={sessionId}
           sessionModelId={agentModelId || undefined}
+          sessionChannelId={agentChannelId || undefined}
           messagesLoaded={messagesLoaded}
           persistedSDKMessages={persistedSDKMessages}
           streaming={streaming}
@@ -2933,6 +2987,12 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
           onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
+          onSwitchToPromaCloud={agentChannelProvider && agentChannelProvider !== 'proma' && officialAgentFallback
+            ? handleSwitchToPromaCloud
+            : undefined}
+          onAddHistoryQuote={handleAddHistoryQuote}
+          onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
+          historyQuoteNavigation={historyQuoteNavigation}
         />
 
         {/* 权限请求横幅 */}
@@ -3078,6 +3138,7 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
               htmlValue={inputHtmlContent}
               onHtmlChange={setInputHtmlContent}
               sendWithCmdEnter={sendWithCmdEnter}
+              onAgentHistoryQuoteClick={handleAgentHistoryQuoteClick}
             />
 
             {/* Footer 工具栏 — 容器变窄时尾部按钮自动折叠进「更多」Popover */}

@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
+import { Pin, PinOff, Star, Settings, Plus, Trash2, Pencil, PanelLeftClose, PanelLeftOpen, ArrowRightLeft, Search, Archive, ArchiveRestore, ArrowLeft, Bot, MessageSquare, MoreHorizontal, FolderOpen, FolderInput, FolderPlus, GripVertical, Clock, AlarmClock, ChevronRight, ChevronDown, ChevronUp, Blocks, GitBranch, Download, Loader2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ModeSwitcher } from './ModeSwitcher'
@@ -2534,13 +2534,20 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
                 type="button"
                 aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
                 onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-                className="size-10 flex items-center justify-center rounded-[12px] text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
+                className="size-10 flex items-center justify-center rounded-xl text-foreground/70 sidebar-control-surface hover:text-foreground transition-colors titlebar-no-drag"
               >
                 <Plus size={16} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              {mode === 'agent' ? '新会话' : '新对话'}
+              <span className="flex items-center gap-2">
+                <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+                <ShortcutKeycaps
+                  shortcutId="new-session"
+                  keycapClassName="h-5 min-w-5 px-1 text-[11px]"
+                  separatorClassName="text-[10px]"
+                />
+              </span>
             </TooltipContent>
           </Tooltip>
 
@@ -2701,7 +2708,7 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
       <div className={cn('w-full flex-shrink-0 titlebar-drag-region', isMac ? 'h-[30px]' : 'h-1')} />
 
       {/* 模式切换器 + 折叠按钮 */}
-      <div className="titlebar-drag-region flex items-start gap-1.5 px-3">
+      <div className={cn('titlebar-drag-region flex items-start gap-1.5 px-3', isMac && 'pt-[5px]')}>
         <div className="flex-1 min-w-0">
           <ModeSwitcher />
         </div>
@@ -2722,20 +2729,36 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
       {/* 新对话/新会话按钮 + 搜索按钮 */}
       <div className="px-3 pt-2 flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
-          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-[10px] text-[13px] font-medium text-foreground/70 bg-primary/5 hover:bg-primary/10 transition-colors duration-100 titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
-        >
-          <Plus size={14} />
-          <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={mode === 'agent' ? '新建 Agent 会话' : '新建 Chat 对话'}
+              onClick={() => { void (mode === 'agent' ? createAgentSessionInWorkspace() : createChat()) }}
+              className="flex-1 h-10 flex items-center gap-2 px-2.5 rounded-xl text-[13px] font-medium text-foreground/70 sidebar-control-surface hover:text-foreground transition-colors duration-100 titlebar-no-drag border border-transparent"
+            >
+              <Plus size={14} />
+              <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <span className="flex items-center gap-2">
+              <span>{mode === 'agent' ? '新会话' : '新对话'}</span>
+              <ShortcutKeycaps
+                shortcutId="new-session"
+                keycapClassName="h-5 min-w-5 px-1 text-[11px]"
+                separatorClassName="text-[10px]"
+              />
+            </span>
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
               onClick={() => setSearchDialogOpen(true)}
-              className="flex-shrink-0 size-[36px] flex items-center justify-center rounded-[10px] text-foreground/40 bg-primary/5 hover:bg-primary/10 hover:text-foreground/60 transition-colors duration-100 titlebar-no-drag border border-dashed border-[hsl(var(--dashed-border))] hover:border-[hsl(var(--dashed-border-hover))]"
+              aria-label="搜索"
+              className="flex-shrink-0 size-10 flex items-center justify-center rounded-xl text-foreground/40 sidebar-control-surface hover:text-foreground/70 transition-colors duration-100 titlebar-no-drag"
             >
               <Search size={14} />
             </button>
@@ -2799,14 +2822,6 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
 
           <div className="group/chat-section relative flex items-center px-2 pt-2 pb-1 flex-shrink-0">
             <span className="ml-[4px] px-1.5 text-[13px] font-medium leading-[18px] text-foreground/40 select-none">对话</span>
-            {newChatShortcutLabel && (
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-medium text-foreground/35 transition-opacity group-hover/chat-section:opacity-0"
-              >
-                {newChatShortcutLabel} 新建对话
-              </span>
-            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -3231,14 +3246,12 @@ export function LeftSidebar({ width, noTransition }: LeftSidebarProps): React.Re
   )
 }
 
-// ===== 列表项操作按钮（时间/置顶/归档/三点菜单） =====
+// ===== 列表项操作按钮（时间 / 归档 / 更多菜单） =====
 
 interface SessionItemActionsProps {
   updatedAt: number
   relativeTimeNow: number
-  pinned: boolean
   archived: boolean
-  onTogglePin: () => void
   onToggleArchive: () => void
   menuItems: (
     MenuItem: typeof DropdownMenuItem,
@@ -3322,23 +3335,22 @@ function SafeTooltip({ children, content, side = 'top' }: SafeTooltipProps): Rea
 }
 
 /**
- * 列表项右侧操作区：默认显示相对更新时间，hover 时切换为「置顶 / 归档 / 三点菜单」按钮组。
- * 归档需要二次确认；进入确认态后强制保持按钮可见，避免鼠标移开后用户失去反馈。
+ * 列表项右侧默认显示相对更新时间，hover 时显示归档和更多菜单。
+ * 将不常用的置顶、重命名和删除收进菜单，同时保留归档的直接入口。
  */
 function SessionItemActions({
   updatedAt,
   relativeTimeNow,
-  pinned,
   archived,
-  onTogglePin,
   onToggleArchive,
   menuItems,
   onMenuOpenChange,
 }: SessionItemActionsProps): React.ReactElement {
   const [archiveConfirming, setArchiveConfirming] = React.useState(false)
-  // 菜单打开时强制保持按钮组可见：按钮始终保留布局，只切换透明度和 pointer-events。
+  // 菜单打开时强制保持按钮可见：按钮始终保留布局，只切换透明度和 pointer-events。
   // 这样 Radix Popper 不会在 hover 切换瞬间读到 display:none 的 0 尺寸 trigger。
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   React.useEffect(() => {
     if (!archiveConfirming) return
@@ -3358,8 +3370,6 @@ function SessionItemActions({
     }
     setArchiveConfirming(true)
   }
-
-  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMenuOpenChange = (open: boolean): void => {
     if (open) {
@@ -3384,55 +3394,44 @@ function SessionItemActions({
     }
   }, [])
 
-  const forceVisible = archiveConfirming || menuOpen
+  const actionsVisible = archiveConfirming || menuOpen
 
   return (
     <div
-      className="session-item-actions relative flex-shrink-0 h-[18px] w-[58px]"
+      className="session-item-actions relative flex-shrink-0 h-[22px] w-[50px]"
       onClick={(e) => e.stopPropagation()}
     >
       <span
         title={`最后更新：${new Date(updatedAt).toLocaleString('zh-CN')}`}
         className={cn(
-          'absolute inset-y-0 right-0 block w-full overflow-hidden whitespace-nowrap text-right text-[11px] leading-[18px] tabular-nums text-foreground/35 transition-opacity duration-100',
-          forceVisible ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
+          'absolute inset-y-0 right-0 block w-full overflow-hidden whitespace-nowrap text-right text-[11px] leading-[22px] tabular-nums text-foreground/35 transition-opacity duration-100',
+          actionsVisible ? 'opacity-0' : 'opacity-100 group-hover:opacity-0',
         )}
       >
         {formatRelativeUpdatedAt(updatedAt, relativeTimeNow)}
       </span>
       <div
         className={cn(
-          'absolute right-1 top-0 flex items-center gap-0.5 transition-opacity duration-100',
-          forceVisible
+          'absolute right-0 top-0 flex items-center gap-1 transition-opacity duration-100',
+          actionsVisible
             ? 'opacity-100 pointer-events-auto'
             : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
         )}
       >
-        <SafeTooltip content={pinned ? '取消置顶' : '置顶'} side="top">
-          <button
-            className={cn(
-              'p-0.5 rounded transition-colors',
-              pinned
-                ? 'text-primary/60 hover:bg-foreground/[0.08] hover:text-primary'
-                : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
-            )}
-            onClick={onTogglePin}
-          >
-            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-        </SafeTooltip>
         <SafeTooltip
           content={archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
           side="top"
         >
           <button
+            type="button"
+            aria-label={archiveConfirming ? '再次点击确认归档' : archived ? '取消归档' : '归档'}
             className={cn(
-              'p-0.5 rounded transition-colors',
+              'flex size-[22px] items-center justify-center rounded-md transition-colors',
               archiveConfirming
-                ? 'text-destructive bg-destructive/10'
+                ? 'bg-destructive/10 text-destructive'
                 : archived
                   ? 'text-foreground/60 hover:bg-foreground/[0.08]'
-                  : 'text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60',
+                  : 'text-foreground/35 hover:bg-foreground/[0.08] hover:text-foreground/70',
             )}
             onClick={handleArchiveClick}
           >
@@ -3442,9 +3441,12 @@ function SessionItemActions({
         <DropdownMenu onOpenChange={handleMenuOpenChange}>
           <DropdownMenuTrigger asChild>
             <button
+              type="button"
+              aria-label="更多会话操作"
+              title="更多会话操作"
               className={cn(
-                'p-0.5 rounded text-foreground/30 hover:bg-foreground/[0.08] hover:text-foreground/60 transition-colors',
-                'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/60',
+                'flex size-[22px] items-center justify-center rounded-md text-foreground/35 transition-colors hover:bg-foreground/[0.08] hover:text-foreground/70',
+                'data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground/70',
               )}
             >
               <MoreHorizontal size={14} />
@@ -3579,7 +3581,7 @@ const ConversationItem = React.memo(function ConversationItem({
             startEdit()
           }}
           className={cn(
-            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'session-item-selected',
             streaming
               ? 'text-foreground font-medium hover:bg-foreground/[0.03]'
@@ -3627,9 +3629,7 @@ const ConversationItem = React.memo(function ConversationItem({
             <SessionItemActions
               updatedAt={conversation.updatedAt}
               relativeTimeNow={relativeTimeNow}
-              pinned={isPinned}
               archived={!!conversation.archived}
-              onTogglePin={() => onTogglePin(conversation.id)}
               onToggleArchive={() => onToggleArchive(conversation.id)}
               onMenuOpenChange={setMenuOpen}
               menuItems={menuItems}
@@ -3844,7 +3844,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
           onMouseEnter={() => { setRowHovered(true); preview.handleMouseEnter() }}
           onMouseLeave={() => { setRowHovered(false); preview.handleMouseLeave() }}
           className={cn(
-            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
+            'session-quick-switch-row group relative w-full flex items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-1.5 transition-colors duration-100 titlebar-no-drag text-left',
             active && 'agent-session-item-active',
             leftAccent
               ? SESSION_ACCENT_ROW_CLASS[leftAccent]
@@ -3979,9 +3979,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
               <SessionItemActions
                 updatedAt={session.updatedAt}
                 relativeTimeNow={relativeTimeNow}
-                pinned={!!session.pinned}
                 archived={!!session.archived}
-                onTogglePin={() => onTogglePin(session.id, true)}
                 onToggleArchive={() => onToggleArchive(session.id)}
                 onMenuOpenChange={setMenuOpen}
                 menuItems={menuItems}
@@ -4158,7 +4156,6 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
   )
 
   const [renamingWorkspace, setRenamingWorkspace] = React.useState(false)
-  const [projectMenuOpen, setProjectMenuOpen] = React.useState(false)
   const [workspaceEditName, setWorkspaceEditName] = React.useState('')
   const workspaceEditRef = React.useRef<HTMLInputElement>(null)
   const justStartedRenamingRef = React.useRef(false)
@@ -4346,14 +4343,6 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
           </button>
         )}
 
-        {isCurrent && !isAutomationGroup && !projectMenuOpen && (
-          <ShortcutKeycaps
-            shortcutId="new-session"
-            className="pointer-events-none mr-6 !flex-nowrap flex-shrink-0 opacity-65 transition-opacity group-hover/project:opacity-0"
-            keycapClassName="h-4 min-w-4 rounded-[3px] border-border/60 px-0.5 text-[9px] shadow-none"
-            separatorClassName="text-[8px]"
-          />
-        )}
 
         {!isAutomationGroup && (
         <Tooltip>
@@ -4377,7 +4366,7 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
         )}
 
         {!isAutomationGroup && (
-        <DropdownMenu onOpenChange={setProjectMenuOpen}>
+        <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -4512,24 +4501,40 @@ const AgentProjectGroupItem = React.memo(function AgentProjectGroupItem({
                 )
               })}
 
-              {hiddenCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onShowMore(group.workspace.id)}
-                  className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
-                >
-                  显示更多
-                </button>
-              )}
+              {(hiddenCount > 0 || expanded) && (
+                <div className="flex items-center gap-0.5 pt-0.5">
+                  {hiddenCount > 0 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`显示更多会话，还有 ${hiddenCount} 个`}
+                          onClick={() => onShowMore(group.workspace.id)}
+                          className="flex size-7 items-center justify-center rounded-md text-foreground/35 hover:bg-foreground/[0.04] hover:text-foreground/65 transition-colors titlebar-no-drag"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{`显示更多会话（还有 ${hiddenCount} 个）`}</TooltipContent>
+                    </Tooltip>
+                  )}
 
-              {expanded && (
-                <button
-                  type="button"
-                  onClick={() => onCollapseExtra(group.workspace.id)}
-                  className="w-full text-left px-1.5 py-1 rounded-md text-[12px] text-foreground/35 hover:bg-foreground/[0.03] hover:text-foreground/60 transition-colors titlebar-no-drag"
-                >
-                  收起
-                </button>
+                  {expanded && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="收起额外会话"
+                          onClick={() => onCollapseExtra(group.workspace.id)}
+                          className="flex size-7 items-center justify-center rounded-md text-foreground/35 hover:bg-foreground/[0.04] hover:text-foreground/65 transition-colors titlebar-no-drag"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">收起额外会话</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
               )}
             </div>
           ) : (

@@ -52,3 +52,10 @@ export {
   isPersistableSDKSystemMessage,
   type SDKCompactStatus,
 } from './agent-system-message'
+export {
+  getSkillSlugFromEntryPath,
+  createSkillActivationFromPath,
+  mergeSkillActivations,
+  collectSuccessfulSkillReadActivations,
+  collectSkillActivations,
+} from './skill-usage'

@@ -95,6 +95,7 @@ export function mapAgentErrorToTypedError(
   errorCode: string,
   detailedMessage: string,
   originalError: string,
+  options: { isPromaChannel?: boolean } = {},
 ): TypedError {
   if (isThinkingSignatureError(detailedMessage, originalError)) {
     return {
@@ -236,11 +237,14 @@ export function mapAgentErrorToTypedError(
 
   const httpStatus = extractHttpStatusFromErrorText(detailedMessage, originalError)
   if (httpStatus === 402) {
+    const isPromaChannel = options.isPromaChannel === true
     return {
       code: 'billing_error',
-      title: '额度不足',
-      message: 'Proma Cloud 账户可用额度不足，请充值或升级套餐后重试。',
-      actions: [{ key: 's', label: '查看使用额度', action: 'settings' }],
+      title: isPromaChannel ? '额度不足' : '渠道账单错误',
+      message: isPromaChannel
+        ? 'Proma Cloud 账户可用额度不足，请充值或升级套餐后重试。'
+        : '当前第三方渠道返回 402 账单错误，请检查该渠道的额度或计费状态，也可切换到 Proma Cloud 重试。',
+      actions: [{ key: 's', label: isPromaChannel ? '查看使用额度' : '打开渠道设置', action: isPromaChannel ? 'settings' : 'open_channel_settings' }],
       canRetry: false,
       originalError,
     }

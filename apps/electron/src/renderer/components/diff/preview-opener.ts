@@ -18,6 +18,7 @@ import {
   previewPanelOpenMapAtom,
   previewModePreferenceAtom,
   type PreviewFile,
+  type PreviewModePreference,
 } from '@/atoms/preview-atoms'
 import {
   activeTabIdAtom,
@@ -32,11 +33,23 @@ import {
 /** Jotai store 类型（从 useStore 推导，避免直接 import 内部 Store 类型） */
 type JotaiStore = ReturnType<typeof useStore>
 
+export interface OpenPreviewOptions {
+  /** Override the user's default preview target for this one open action. */
+  mode?: PreviewModePreference
+}
+
+export function resolvePreviewMode(
+  options: OpenPreviewOptions | undefined,
+  userPreference: PreviewModePreference,
+): PreviewModePreference {
+  return options?.mode ?? userPreference
+}
+
 export function useOpenPreview() {
   const store = useStore()
 
   return React.useCallback(
-    (sessionId: string, file: PreviewFile) => {
+    (sessionId: string, file: PreviewFile, options?: OpenPreviewOptions) => {
       // 1. 文件状态两种模式都需要，先写入
       store.set(previewFileMapAtom, (prev) => {
         const m = new Map(prev)
@@ -44,7 +57,7 @@ export function useOpenPreview() {
         return m
       })
 
-      const preferSplit = store.get(previewModePreferenceAtom) === 'split'
+      const preferSplit = resolvePreviewMode(options, store.get(previewModePreferenceAtom)) === 'split'
 
       if (preferSplit) {
         // 分屏：开启预览面板，不创建 Tab

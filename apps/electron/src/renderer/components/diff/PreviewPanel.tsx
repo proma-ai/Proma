@@ -188,6 +188,8 @@ export function PreviewPanel({ sessionId }: PreviewPanelProps): React.ReactEleme
               previewOnly={currentFile.previewOnly}
               readOnly={currentFile.readOnly}
               basePaths={currentFile.basePaths}
+              workspaceSkillSlug={currentFile.workspaceSkillSlug}
+              legacySkillFilePath={currentFile.legacySkillFilePath}
               baseRef={currentFile.baseRef}
               onEmptyDiff={handleClosePanel}
             />
