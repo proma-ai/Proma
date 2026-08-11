@@ -85,10 +85,10 @@ type BashOperations = import('@earendil-works/pi-coding-agent').BashOperations
 type BashToolOptions = import('@earendil-works/pi-coding-agent').BashToolOptions
 type SkillLoadResult = ReturnType<ResourceLoader['getSkills']>
 
-const PI_NATIVE_MAX_RETRIES = 8
-const PI_NATIVE_MAX_TOTAL_RETRIES = 8
+const PI_NATIVE_MAX_RETRIES = 20
+const PI_NATIVE_MAX_TOTAL_RETRIES = 20
 const PI_NATIVE_RETRY_BASE_DELAY_MS = 1_000
-const PI_NATIVE_MAX_TOTAL_DELAY_MS = 5 * 60_000
+const PI_NATIVE_MAX_TOTAL_DELAY_MS = 10 * 60_000
 const PI_NATIVE_RETRY_JITTER_RATIO = 0.2
 const MAX_AUTOMATIC_COMPACTION_CONTINUATIONS = 20
 
@@ -1277,7 +1277,7 @@ export class PiAgentAdapter implements AgentProviderAdapter {
         compaction: { enabled: true, reserveTokens: autoCompactionReserveTokens },
         // Pi 原生 retry 通过 agent.continue() 在同一 transcript 中恢复，能保留已完成的
         // tool_result；不能用外层重投原始 prompt 替代，否则会重复执行副作用工具。
-        // 单段和整轮均最多 8 次；累计 backoff 最多 5 分钟。±20% jitter 避免多个
+        // 单段和整轮均最多 20 次；累计 backoff 最多 10 分钟。±20% jitter 避免多个
         // 客户端在固定指数退避边界同时重试。provider retry 保持默认 0，避免嵌套计数。
         retry: {
           enabled: true,
