@@ -7,7 +7,8 @@
 
 import { spawn } from 'child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
+import { constants, existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
+import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { ChangedFileEntry, UnstagedChangesResult, UntrackedFileEntry } from '@proma/shared'
 import { normalizePathForCompare } from '@proma/shared'
@@ -74,7 +75,7 @@ function toChangeCandidate(input: string): ChangeCandidate | null {
 /**
  * 校验并规范化 filePath，确保其位于 root 目录内。
  * 支持相对路径和绝对路径。绝对路径会被自动转为相对路径。
- * 拒绝 `..` 穿越和 root 外的路径。
+ * 拒绝越过 root 的路径；合法文件名中的 `..` 子串应被保留。
  * 返回安全的相对路径，或 null 表示不安全。
  */
 function normalizeSafePath(root: string, filePath: string): string | null {
@@ -98,7 +99,6 @@ function normalizeSafePath(root: string, filePath: string): string | null {
     return resolvedFile.slice(rootWithSep.length)
   }
 
-  if (filePath.includes('..')) return null
   const resolvedTarget = resolve(resolvedRoot, filePath)
   let realTarget: string
   try {
@@ -119,13 +119,17 @@ function normalizeSafePath(root: string, filePath: string): string | null {
  */
 /** 进程级 Git 子进程上限，避免多个 Diff 面板刷新时放大 I/O。 */
 const MAX_CONCURRENT_GIT_COMMANDS = 6
+/** 未追踪文件并发读取上限，避免大量新文件占满文件系统线程池。 */
+const MAX_CONCURRENT_UNTRACKED_FILE_READS = 6
 
 class AsyncSemaphore {
   private active = 0
   private readonly waiters: Array<() => void> = []
 
+  constructor(private readonly limit: number) {}
+
   private async acquire(): Promise<void> {
-    if (this.active >= MAX_CONCURRENT_GIT_COMMANDS) {
+    if (this.active >= this.limit) {
       await new Promise<void>((resolve) => this.waiters.push(resolve))
     }
     this.active += 1
@@ -146,7 +150,8 @@ class AsyncSemaphore {
   }
 }
 
-const gitCommandSemaphore = new AsyncSemaphore()
+const gitCommandSemaphore = new AsyncSemaphore(MAX_CONCURRENT_GIT_COMMANDS)
+const untrackedFileReadSemaphore = new AsyncSemaphore(MAX_CONCURRENT_UNTRACKED_FILE_READS)
 
 function runGitProcess(args: string[], cwd: string, options?: { quiet?: boolean }): Promise<string | null> {
   return new Promise((resolve) => {
@@ -311,6 +316,106 @@ function parseNumstat(numStat: string | null): Map<string, { additions: number; 
   return map
 }
 
+/** 仅接受位于仓库根目录内的相对路径；允许合法文件名中的 `..` 子串。 */
+function resolveUntrackedFilePath(gitRoot: string, filePath: string): string | null {
+  if (!filePath || isAbsolute(filePath)) return null
+  const resolvedRoot = resolve(gitRoot)
+  const resolvedPath = resolve(resolvedRoot, filePath)
+  const rootWithSep = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep
+  return resolvedPath.startsWith(rootWithSep) ? resolvedPath : null
+}
+
+function isPathInsideRoot(root: string, target: string): boolean {
+  const rootWithSep = root.endsWith(sep) ? root : root + sep
+  return target.startsWith(rootWithSep)
+}
+
+/**
+ * 统计未追踪文本文件的新增行数。
+ *
+ * Git 不会为 untracked 文件提供 numstat，因此仅读取受大小限制的普通文本文件。
+ * 路径校验与 I/O 均在受限队列内异步执行；使用 LF 字节计数以匹配 Git 对 CRLF
+ * 文本的统计，没有末尾 LF 的非空内容仍算一行。
+ */
+async function countUntrackedFileAdditions(realGitRoot: string, filePath: string): Promise<number> {
+  return untrackedFileReadSemaphore.run(async () => {
+    const fullPath = resolveUntrackedFilePath(realGitRoot, filePath)
+    if (!fullPath) return 0
+
+    try {
+      const linkStat = await lstat(fullPath)
+      if (!linkStat.isFile() || linkStat.size > MAX_FILE_SIZE_BYTES) return 0
+
+      const realPath = await realpath(fullPath)
+      if (!isPathInsideRoot(realGitRoot, realPath)) return 0
+
+      // O_NOFOLLOW 在支持的平台拒绝末级符号链接；随后校验打开的对象仍是 lstat 时的文件。
+      const fileHandle = await open(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const fileStat = await fileHandle.stat()
+        if (
+          !fileStat.isFile()
+          || fileStat.size > MAX_FILE_SIZE_BYTES
+          || fileStat.dev !== linkStat.dev
+          || fileStat.ino !== linkStat.ino
+        ) return 0
+
+        // 重新确认当前路径仍指向仓库内、且与已打开对象相同的普通文件。
+        const [currentLinkStat, currentRealPath] = await Promise.all([lstat(fullPath), realpath(fullPath)])
+        if (
+          !currentLinkStat.isFile()
+          || currentLinkStat.dev !== fileStat.dev
+          || currentLinkStat.ino !== fileStat.ino
+          || !isPathInsideRoot(realGitRoot, currentRealPath)
+        ) return 0
+
+        const content = Buffer.alloc(fileStat.size)
+        const { bytesRead } = await fileHandle.read(content, 0, content.length, 0)
+        if (bytesRead === 0 || content.subarray(0, bytesRead).includes(0)) return 0
+
+        let lines = 0
+        for (let index = 0; index < bytesRead; index += 1) {
+          if (content[index] === 0x0a) lines += 1
+        }
+        return lines + (content[bytesRead - 1] === 0x0a ? 0 : 1)
+      } finally {
+        await fileHandle.close()
+      }
+    } catch {
+      return 0
+    }
+  })
+}
+
+/** 受限 worker 队列：避免为全部未追踪文件同时创建 Promise。 */
+async function buildUntrackedFileEntries(gitRoot: string, filePaths: string[]): Promise<UntrackedFileEntry[]> {
+  const entries: UntrackedFileEntry[] = filePaths.map((filePath) => ({
+    filePath,
+    additions: 0,
+    deletions: 0,
+    gitRoot,
+  }))
+  if (entries.length === 0) return entries
+
+  let realGitRoot: string
+  try {
+    realGitRoot = await realpath(gitRoot)
+  } catch {
+    return entries
+  }
+
+  let nextIndex = 0
+  const worker = async (): Promise<void> => {
+    while (nextIndex < entries.length) {
+      const index = nextIndex
+      nextIndex += 1
+      entries[index]!.additions = await countUntrackedFileAdditions(realGitRoot, entries[index]!.filePath)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_UNTRACKED_FILE_READS, entries.length) }, worker))
+  return entries
+}
+
 interface CachedRepoScan {
   files: Array<Omit<ChangedFileEntry, 'source'>>
   untrackedFiles: UntrackedFileEntry[]
@@ -448,12 +553,12 @@ async function scanGitRoot(gitRoot: string): Promise<CachedRepoScan | null> {
     }
   }
 
-  return {
-    files,
-    untrackedFiles: untrackedOutput
-      ? untrackedOutput.split('\n').filter(Boolean).map((filePath) => ({ filePath, gitRoot }))
-      : [],
-  }
+  const untrackedFiles = await buildUntrackedFileEntries(
+    gitRoot,
+    untrackedOutput ? untrackedOutput.split('\n').filter(Boolean) : [],
+  )
+
+  return { files, untrackedFiles }
 }
 
 async function getCachedRepoScan(gitRoot: string): Promise<CachedRepoScan> {
@@ -919,15 +1024,11 @@ export async function getWorktreeChanges(
   allFiles.push(...fileMap.values())
 
   // 3. 新文件（未追踪）
-  const untrackedFiles: import('@proma/shared').UntrackedFileEntry[] = []
   const untrackedOutput = await runGitCommand(['ls-files', '--others', '--exclude-standard'], gitRoot)
-  if (untrackedOutput) {
-    for (const rel of untrackedOutput.split('\n').filter(Boolean)) {
-      if (!fileMap.has(rel)) {
-        untrackedFiles.push({ filePath: rel, gitRoot })
-      }
-    }
-  }
+  const untrackedFiles = await buildUntrackedFileEntries(
+    gitRoot,
+    untrackedOutput ? untrackedOutput.split('\n').filter((filePath) => !fileMap.has(filePath)) : [],
+  )
 
   return {
     isGitRepo: true,

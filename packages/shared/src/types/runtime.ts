@@ -122,6 +122,10 @@ export interface ChangedFileEntry {
 export interface UntrackedFileEntry {
   /** 文件路径（相对于仓库根） */
   filePath: string
+  /** 新增行数；二进制或无法安全读取的文件为 0 */
+  additions: number
+  /** 删除行数；未追踪文件始终为 0 */
+  deletions: number
   /** 所属 Git 仓库根目录 */
   gitRoot: string
 }

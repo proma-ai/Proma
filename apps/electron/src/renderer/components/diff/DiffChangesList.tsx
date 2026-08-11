@@ -234,8 +234,6 @@ export const DiffChangesList = React.memo(function DiffChangesList({
       ...untrackedFiles.map((file) => ({
         ...file,
         status: 'untracked' as const,
-        additions: 0,
-        deletions: 0,
       })),
     ]
     const filteredFiles = q
