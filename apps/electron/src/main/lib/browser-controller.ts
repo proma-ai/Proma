@@ -39,6 +39,13 @@ type BrowserTabRecord = {
   highlightTimer?: ReturnType<typeof setTimeout>
   lastBounds?: BrowserViewLayout['bounds']
 }
+export interface BrowserUserContextSnapshot {
+  activeTabId: string
+  url: string
+  title: string
+  openedAt: number
+}
+
 type BrowserSessionRecord = {
   sessionId: string
   partition: string
@@ -54,6 +61,8 @@ type BrowserSessionRecord = {
   executionSource: BrowserExecutionSource
   /** 全会话的脱敏账本，避免仅显示 Agent 当前 tab 的最后 30 条。 */
   ledger: BrowserTraceItem[]
+  /** 用户在面板中主动打开/操作过浏览器；用于下一条消息的实时上下文。 */
+  userOpenedAt: number | null
   lastLayoutRevision: number
 }
 
@@ -219,6 +228,27 @@ export class BrowserController {
     return browserSession
   }
 
+  /**
+   * 用户打开浏览器、切换标签或从地址栏导航都视为明确的页面上下文信号。
+   * 不记录页面正文，下一条消息仅带入当前标签的标题和 URL，Agent 如有必要再主动 Observe。
+   */
+  private markUserBrowserContext(browserSession: BrowserSessionRecord): void {
+    browserSession.userOpenedAt ??= Date.now()
+  }
+
+  getUserContext(sessionId: string): BrowserUserContextSnapshot | null {
+    const browserSession = this.sessions.get(sessionId)
+    if (!browserSession?.userOpenedAt) return null
+    const active = browserSession.tabs.get(browserSession.activeTabId)
+    if (!active?.state.url) return null
+    return {
+      activeTabId: active.tabId,
+      url: active.state.url,
+      title: active.state.title,
+      openedAt: browserSession.userOpenedAt,
+    }
+  }
+
   /** 用户面板的当前标签；仅 renderer 操作及原生 View layout 使用。 */
   private getDisplayTab(browserSession: BrowserSessionRecord, tabId?: string): BrowserTabRecord {
     const resolvedTabId = tabId ?? browserSession.activeTabId
@@ -379,6 +409,7 @@ export class BrowserController {
       allowedRoots: [...new Set((allowedRoots.length > 0 ? allowedRoots : configuration?.allowedRoots ?? []).filter(Boolean))],
       executionSource: configuration?.executionSource ?? 'user',
       ledger: [],
+      userOpenedAt: null,
       lastLayoutRevision: 0,
     }
     this.installSessionGuards(browserSession)
@@ -412,7 +443,12 @@ export class BrowserController {
     }
     this.owner.contentView.addChildView(view)
     view.setVisible(false)
-    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    // WebContentsView 不应放任 target=_blank 创建脱离主窗口的 BrowserWindow；此前直接 deny
+    // 也导致用户和 Agent 点击站外链接没有任何反应。将安全的 HTTP(S) 目标转为当前受管浏览器的新标签。
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      void this.openExternalLinkInDisplayTab(browserSession, tab, url)
+      return { action: 'deny' }
+    })
     view.webContents.on('will-navigate', (event, url) => {
       // 在校验及真正导航前失效，避免 Observe 后在新页面按旧坐标操作。
       this.invalidateTabDocument(tab)
@@ -520,6 +556,7 @@ export class BrowserController {
   open(sessionId: string): BrowserViewState {
     // 用户从界面手动打开浏览器时，初始标签不应伪装成 Agent 标签。
     const browserSession = this.getOrCreateSession(sessionId, [], false)
+    this.markUserBrowserContext(browserSession)
     this.emit(browserSession)
     return structuredClone(this.buildState(browserSession))
   }
@@ -628,6 +665,7 @@ export class BrowserController {
   async createDisplayTab(sessionId: string, url?: string): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId, [], false)
     this.assertRiskDisclaimerAcknowledged()
+    this.markUserBrowserContext(browserSession)
     const tab = this.createTab(browserSession)
     this.activateDisplayTab(browserSession, tab)
     const reclaimed = this.reclaimExcessAgentTabs(browserSession)
@@ -640,6 +678,7 @@ export class BrowserController {
   selectTab(sessionId: string, tabId: string): BrowserViewState {
     const browserSession = this.getSession(sessionId)
     this.assertRiskDisclaimerAcknowledged()
+    this.markUserBrowserContext(browserSession)
     const tab = this.getDisplayTab(browserSession, tabId)
     this.activateDisplayTab(browserSession, tab)
     return structuredClone(this.buildState(browserSession))
@@ -720,10 +759,42 @@ export class BrowserController {
     })
   }
 
+  /**
+   * 将 target=_blank / window.open 的公共站外链接保留在受管浏览器里。
+   * Electron 的 window.open handler 是同步的，因此先拒绝原生弹窗，再异步完成 DNS 安全校验并新建标签。
+   */
+  private async openExternalLinkInDisplayTab(browserSession: BrowserSessionRecord, sourceTab: BrowserTabRecord, url: string): Promise<void> {
+    let safeUrl: string
+    try {
+      safeUrl = await assertSafeBrowserDestination(url)
+    } catch {
+      // about:blank、私网和非 HTTP(S) popup 都不能转为新标签；保留简短账本供排查。
+      this.trace(browserSession, sourceTab, 'navigate', '已阻止不安全或不受支持的新窗口链接', 'failed')
+      return
+    }
+    // 链接点击后标签/会话可能已被用户关闭，不能在已销毁的上下文中创建 view。
+    if (this.sessions.get(browserSession.sessionId) !== browserSession || !browserSession.tabs.has(sourceTab.tabId)) return
+
+    const tab = this.createTab(browserSession)
+    this.activateDisplayTab(browserSession, tab)
+    const host = new URL(safeUrl).host
+    try {
+      await this.runTabOperation(browserSession, tab, undefined, async () => {
+        tab.isLocalPreview = false
+        await this.loadUrl(tab, safeUrl)
+        this.updateNavigationState(browserSession, tab)
+      })
+    } catch {
+      // 载入失败时保留新标签，用户仍可修改地址或返回原标签；不要静默丢失点击结果。
+      this.trace(browserSession, tab, 'navigate', `无法打开新窗口链接 ${host}`, 'failed')
+    }
+  }
+
   /** 用户地址栏导航当前显示 tab，不会改变 Agent 的工作 tab。 */
   async navigateDisplay(sessionId: string, url: string, tabId?: string): Promise<BrowserViewState> {
     const browserSession = this.getOrCreateSession(sessionId, [])
     this.assertRiskDisclaimerAcknowledged()
+    this.markUserBrowserContext(browserSession)
     const tab = this.getDisplayTab(browserSession, tabId)
     const safeUrl = await assertSafeBrowserDestination(url)
     const host = new URL(safeUrl).host

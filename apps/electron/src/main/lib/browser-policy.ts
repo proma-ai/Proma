@@ -15,9 +15,24 @@ function isPrivateAddress(hostname: string): boolean {
   return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0 || a >= 224
 }
 
+/**
+ * 地址栏可直接输入域名或路径（例如 `example.com/docs`）；缺省协议时按 HTTPS 打开。
+ * 显式协议仍按原安全策略校验，绝不把 `javascript:` / `//host` 等输入误当作域名。
+ */
+export function normalizeBrowserUrl(input: string): string {
+  const value = input.trim()
+  if (!value) throw new Error('浏览器地址不能为空。')
+  if (value.startsWith('//')) throw new Error('浏览器地址必须使用 HTTP 或 HTTPS 协议。')
+  // `localhost:3000` 和 `example.com:8080` 是没有协议的常见地址栏输入，不能被误判为 scheme。
+  if (/^[^/?#:\s]+:\d+(?:[/?#]|$)/.test(value)) return `https://${value}`
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) return value
+  return `https://${value}`
+}
+
 export function assertSafeBrowserUrl(input: string): string {
+  const normalized = normalizeBrowserUrl(input)
   let parsed: URL
-  try { parsed = new URL(input) } catch { throw new Error('浏览器只接受完整的 HTTP/HTTPS URL。') }
+  try { parsed = new URL(normalized) } catch { throw new Error('浏览器地址无效。请输入公共域名或完整的 HTTP/HTTPS URL。') }
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('受管浏览器不允许此 URL 协议。')
   if (parsed.username || parsed.password || isPrivateAddress(parsed.hostname)) throw new Error('受管浏览器不允许访问本机、私网或带认证信息的 URL。')
   return parsed.toString()
