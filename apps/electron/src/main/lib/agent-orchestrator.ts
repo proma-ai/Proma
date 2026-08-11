@@ -39,6 +39,7 @@ import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { getMainRepoRoot } from './git-diff-service'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
 import { friendlyErrorMessage, isPromptTooLongError, isThinkingSignatureError, mapAgentErrorToTypedError } from './agent-error-utils'
+import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from './agent-send-message-policy'
 import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
@@ -599,14 +600,14 @@ export class AgentOrchestrator {
     }
 
     // 0. 并发保护
-    if (this.activeSessions.has(sessionId)) {
-      console.warn(`[Agent 编排] 会话 ${sessionId} 正在处理中，拒绝新请求`)
-      try {
-        persistInitialUserMessage()
-      } catch (error) {
-        console.error('[Agent 编排] 持久化被拒绝的用户消息失败:', error)
-      }
-      callbacks.onError('上一条消息仍在处理中，请稍候再试')
+    const hasActiveRun = this.activeSessions.has(sessionId)
+    const shouldPersistUserMessage = shouldPersistInitialUserMessage({ hasActiveRun, retryOfErrorUuid })
+    if (hasActiveRun) {
+      // 并发请求没有真正启动新的 Agent run，绝不能把它当作新用户输入写入 JSONL。
+      // 尤其在用户点击停止后、底层 query 尚未完全退出的短暂窗口内，否则同一条
+      // 后续消息会随每次点击重复落盘。
+      console.warn(`[Agent 编排] 会话 ${sessionId} 正在处理中，拒绝新请求且不保存用户消息`)
+      callbacks.onError(getActiveRunRejectionMessage())
       callbacks.onComplete([], { startedAt: streamStartedAt })
       return
     }
@@ -621,14 +622,16 @@ export class AgentOrchestrator {
       }
     }
 
-    try {
-      persistInitialUserMessage()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('[Agent 编排] 持久化用户消息失败:', error)
-      callbacks.onError(`消息保存失败：${message}`)
-      callbacks.onComplete([], { startedAt: streamStartedAt })
-      return
+    if (shouldPersistUserMessage) {
+      try {
+        persistInitialUserMessage()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('[Agent 编排] 持久化用户消息失败:', error)
+        callbacks.onError(`消息保存失败：${message}`)
+        callbacks.onComplete([], { startedAt: streamStartedAt })
+        return
+      }
     }
 
     // 0.5 清除上一轮中断标记
