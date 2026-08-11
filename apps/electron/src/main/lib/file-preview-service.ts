@@ -533,30 +533,36 @@ function convertPptxToHtml(filePath: string, resolvedPath: string): OfficePrevie
 // ─── 导出：内联预览 API ───
 
 /**
- * 判断文件内容是否像二进制数据。
+ * 读取并验证文件内容是否适合内联文本预览，返回已完成严格校验的文本。
  *
  * 不能只依赖扩展名：Agent 可能引用任意路径，且扩展名可缺失或伪装。
  * 预览文本交给 @pierre/diffs 前，先在主进程验证整个文件都是安全文本；
  * 否则诸如 DMG 的二进制内容会被当作 UTF-8 传入高亮器，可能造成渲染进程崩溃。
  */
-function isLikelyBinaryFile(content: Buffer): boolean {
-  if (content.includes(0)) return true
+function readSafeText(content: Buffer): string | null {
+  if (content.includes(0)) return null
 
   // 只有严格合法的 UTF-8 才能进入基于文本的高亮器。readFile(..., 'utf-8')
   // 会把非法字节替换成 U+FFFD，掩盖二进制内容并把风险留给渲染进程。
+  let text: string
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(content)
+    text = new TextDecoder('utf-8', { fatal: true }).decode(content)
   } catch {
-    return true
+    return null
   }
 
   // 纯 7-bit 二进制可能没有 NUL 且也能通过 UTF-8 校验。正常文本只会使用
-  // tab、换行和回车等控制字符；其他控制字符超过 1% 时按二进制处理。
+  // tab、换行和回车等控制字符；标准 ANSI CSI 转义（ESC [）也允许出现在日志中。
   let unsafeControlCount = 0
-  for (const byte of content) {
-    if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) unsafeControlCount += 1
+  for (let index = 0; index < content.length; index++) {
+    const byte = content[index]!
+    if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) {
+      if (byte === 0x1b && content[index + 1] === 0x5b) continue
+      unsafeControlCount += 1
+    }
   }
-  return unsafeControlCount > Math.max(4, Math.floor(content.length * 0.01))
+  if (unsafeControlCount > Math.max(4, Math.floor(content.length * 0.01))) return null
+  return text
 }
 
 /** 解析文件路径并读取内容（供内联文本/代码预览使用） */
@@ -569,10 +575,10 @@ export function resolveAndReadFile(filePath: string, basePaths?: string[]): { re
       return { resolvedPath: safePath, content: '', isBinary: false, isTooLarge: true }
     }
     const rawContent = readFileSync(safePath)
-    if (isLikelyBinaryFile(rawContent)) {
+    const content = readSafeText(rawContent)
+    if (content === null) {
       return { resolvedPath: safePath, content: '', isBinary: true, isTooLarge: false }
     }
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(rawContent)
     return { resolvedPath: safePath, content, isBinary: false, isTooLarge: false }
   } catch {
     return null

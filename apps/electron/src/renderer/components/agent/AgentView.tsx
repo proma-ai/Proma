@@ -1328,15 +1328,14 @@ export function AgentView({ sessionId }: { sessionId: string }): React.ReactElem
       const sourcePath = f.sourcePath!
       const parentPath = getFileParentPath(sourcePath)
       try {
-        const read = await window.electronAPI.resolveAndReadFile(sourcePath, {
+        const data = await window.electronAPI.readBinaryBase64(sourcePath, {
           sessionId,
           candidateBasePaths: parentPath ? [parentPath] : undefined,
-        })
-        if (!read) {
+        }, MAX_ATTACHMENT_SIZE)
+        if (!data) {
           staleDraftFiles.push(f.filename)
           continue
         }
-        const data = await fileToBase64(new File([read.content], f.filename, { type: f.mediaType }))
         draftFilesToSave.push({ sourceFile: f, filename: f.filename, data })
       } catch (error) {
         console.error('[AgentView] 读取剪贴板草稿失败:', error)
