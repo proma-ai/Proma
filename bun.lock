@@ -36,7 +36,7 @@
     },
     "apps/electron": {
       "name": "@proma/electron",
-      "version": "0.17.0",
+      "version": "0.17.1",
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.82.1",
         "@earendil-works/pi-ai": "0.82.1",

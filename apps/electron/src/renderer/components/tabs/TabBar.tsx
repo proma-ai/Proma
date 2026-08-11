@@ -35,8 +35,9 @@ import { tearOffScratchToSplit } from '@/components/scratch-pad/scratch-pad-open
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TabBarItem } from './TabBarItem'
+import { getTabBarActionLayout } from './tab-bar-action-layout'
 import { useCloseTab } from '@/hooks/useCloseTab'
-import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT, WINDOW_CONTROLS_PADDING_RIGHT } from '@/lib/platform'
+import { detectIsWindows, WINDOW_CONTROLS_INSET_RIGHT } from '@/lib/platform'
 import { registerShortcut } from '@/lib/shortcut-registry'
 import { cn } from '@/lib/utils'
 import { shortcutGuideOpenAtom } from '@/atoms/shortcut-guide'
@@ -238,6 +239,7 @@ function TabBarInner({
   const setFaqDialogOpen = useSetAtom(faqDialogOpenAtom)
   const activeTab = React.useMemo(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId])
   const showOpenPanelButton = !isPanelOpen && activeTab?.type === 'agent'
+  const actionLayout = getTabBarActionLayout(isWindows, showOpenPanelButton)
 
   const togglePanel = React.useCallback(() => {
     if (!isAgentContextTab(activeTab)) return
@@ -398,9 +400,7 @@ function TabBarInner({
         ref={scrollRef}
         className={cn(
           "relative flex items-end flex-1 min-w-0 overflow-x-auto scrollbar-none",
-          // Windows 始终避开 WindowControls（~126px）；非 Windows 为快捷键地图和文件面板按钮预留空间。
-          isWindows && WINDOW_CONTROLS_PADDING_RIGHT,
-          !isWindows && (showOpenPanelButton ? "pr-20" : "pr-10"),
+          actionLayout.scrollPaddingClassName,
         )}
       >
         {tabs.map((tab) => (
@@ -430,8 +430,7 @@ function TabBarInner({
       </div>
 
       <ShortcutGuideButton
-        isWindows={isWindows}
-        hasPanelButton={showOpenPanelButton}
+        positionClassName={actionLayout.shortcutPositionClassName}
         onOpen={openShortcutGuide}
         onOpenFaq={openFaqDialog}
       />
@@ -439,20 +438,18 @@ function TabBarInner({
       {/* 打开文件面板按钮：与文件面板打开时的 PanelRightClose 同坐标，避免开/关之间按钮位置跳变。
           Windows 上需让出右上角 WindowControls 区域（126px）。 */}
       {showOpenPanelButton && (
-        <AgentPanelOpenButton isWindows={isWindows} onToggle={togglePanel} />
+        <AgentPanelOpenButton positionClassName={actionLayout.panelPositionClassName} onToggle={togglePanel} />
       )}
     </div>
   )
 }
 
 function ShortcutGuideButton({
-  isWindows,
-  hasPanelButton,
+  positionClassName,
   onOpen,
   onOpenFaq,
 }: {
-  isWindows: boolean
-  hasPanelButton: boolean
+  positionClassName: string
   onOpen: () => void
   onOpenFaq: () => void
 }): React.ReactElement {
@@ -460,9 +457,7 @@ function ShortcutGuideButton({
     <div
       className={cn(
         "absolute flex items-center gap-1 titlebar-no-drag",
-        isWindows
-          ? cn("top-[37px] h-7 z-[52]", hasPanelButton ? "right-9" : "right-1")
-          : cn("inset-y-0 items-end pb-[3px] z-10", hasPanelButton ? "right-9" : "right-1"),
+        positionClassName,
       )}
     >
       {/* FAQ 快捷按钮（在快捷键地图左边） */}
@@ -505,23 +500,19 @@ function ShortcutGuideButton({
   )
 }
 
-/** 打开 Agent 文件面板按钮。
- *  非 Windows：inset-y-0 撑满 TabBar，贴右边缘 right-1。
- *  Windows：溢出到 TabBar 下方（top-[37px]），避开 WindowControls，贴右边缘与关闭按钮对齐。 */
+/** 打开 Agent 文件面板按钮。 */
 function AgentPanelOpenButton({
-  isWindows,
+  positionClassName,
   onToggle,
 }: {
-  isWindows: boolean
+  positionClassName: string
   onToggle: () => void
 }): React.ReactElement {
   return (
     <div
       className={cn(
         "absolute flex titlebar-no-drag",
-        isWindows
-          ? "top-[37px] right-1 h-7 z-[52]"
-          : "inset-y-0 right-1 items-end pb-[3px] z-10",
+        positionClassName,
       )}
     >
       <Tooltip>
